@@ -176,7 +176,7 @@ digestControlFile(ControlFileData *ControlFile, char *src, size_t size)
     /* Additional checks on control file */
     if (dssMode) {
         tmpDssSrc = oldSrc;
-        tmpDssSrc += (MAX_INSTANCEID + 1) * PG_CONTROL_SIZE;
+        tmpDssSrc += (REFORMER_CTL_INSTANCEID) * PG_CONTROL_SIZE;
         checkSSControlFile(ControlFile, tmpDssSrc, PG_CONTROL_SIZE);
         /* Calculate the control file CRC */
         pg_crc32c   crc;
