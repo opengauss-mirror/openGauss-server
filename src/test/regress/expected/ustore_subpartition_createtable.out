@@ -34,11 +34,11 @@ insert into list_list values('201903', '1', '1', 1);
 select * from list_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 2         | 1       |         1
- 201903     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
 (5 rows)
 
 drop table list_list;
@@ -69,10 +69,10 @@ insert into list_hash values('201903', '5', '1', 1);
 select * from list_hash;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 4         | 1       |         1
- 201903     | 5         | 1       |         1
  201902     | 2         | 1       |         1
  201902     | 1         | 1       |         1
+ 201903     | 4         | 1       |         1
+ 201903     | 5         | 1       |         1
 (4 rows)
 
 drop table list_hash;
@@ -105,10 +105,10 @@ ERROR:  inserted partition key does not map to any table partition
 select * from list_range;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 4         | 1       |         1
- 201903     | 5         | 1       |         1
  201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
+ 201903     | 4         | 1       |         1
+ 201903     | 5         | 1       |         1
 (4 rows)
 
 drop table list_range;
@@ -140,11 +140,11 @@ insert into hash_list values('201903', '1', '1', 1);
 select * from hash_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201901     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
- 201901     | 1         | 1       |         1
- 201901     | 1         | 1       |         1
 (5 rows)
 
 drop table hash_list;
@@ -866,16 +866,16 @@ insert into list_list values('201903', '1', '1', 1);
 select  * from list_list partition (p_201901);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
 (3 rows)
 
 select  * from list_list partition (p_201902);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
 (2 rows)
 
 drop table list_list;

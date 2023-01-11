@@ -414,18 +414,18 @@ insert into t_pri_key_update_partition values (1, 1), (10, 10), (100, 100);
 select * from t_pri_key_update_partition;
  c1  | c2  
 -----+-----
- 100 | 100
-  10 |  10
    1 |   1
+  10 |  10
+ 100 | 100
 (3 rows)
 
 update /*+ ignore_error */ t_pri_key_update_partition set c2 = 500 where c1 = 10;
 select * from t_pri_key_update_partition;
  c1  | c2  
 -----+-----
-  10 | 500
- 100 | 100
    1 |   1
+ 100 | 100
+  10 | 500
 (3 rows)
 
 -- test for column orientation table: not supported

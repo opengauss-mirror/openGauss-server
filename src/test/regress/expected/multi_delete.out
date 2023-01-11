@@ -620,18 +620,18 @@ delete from t_p_mutil_t1 a partition(p_201901_a, p_201901_b),t_p_mutil_t2 b part
 select * from t_p_mutil_t1;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (3 rows)
 
 select * from t_p_mutil_t2;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 1         | 1       |         1
  201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (4 rows)
 
 rollback;

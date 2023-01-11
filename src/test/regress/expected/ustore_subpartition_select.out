@@ -346,12 +346,12 @@ create view view_temp  as select * from range_list;
 select * from view_temp;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 --error
@@ -1166,12 +1166,12 @@ INSERT INTO list_range_02 VALUES (GENERATE_SERIES(0, 19),GENERATE_SERIES(0, 1000
          ->  Partitioned Bitmap Heap Scan on ustore_subpartition_select.list_range_02
                Output: col_1, col_2, col_3, col_4
                Recheck Cond: ((list_range_02.col_2 > 500) AND (list_range_02.col_2 < 8000))
-               Selected Partitions:  1,3,5..6
-               Selected Subpartitions:  1:1, 3:1, 5:1, 6:1
+               Selected Partitions:  2..3,5,7
+               Selected Subpartitions:  2:1, 3:1, 5:1, 7:1
                ->  Partitioned Bitmap Index Scan on index_01
                      Index Cond: ((list_range_02.col_2 > 500) AND (list_range_02.col_2 < 8000))
-                     Selected Partitions:  1,3,5..6
-                     Selected Subpartitions:  1:1, 3:1, 5:1, 6:1
+                     Selected Partitions:  2..3,5,7
+                     Selected Subpartitions:  2:1, 3:1, 5:1, 7:1
 (15 rows)
 
 drop index index_01;
