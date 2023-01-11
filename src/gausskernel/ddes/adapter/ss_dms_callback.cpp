@@ -288,7 +288,7 @@ static int CBSwitchoverDemote(void *db_handle)
                     " waiting for reformer setting new role.", DemoteModeDesc(demote_mode))));
             return DMS_SUCCESS;
         } else {
-            if (ntries >= WAIT_DEMOTE) {
+            if (ntries >= WAIT_DEMOTE || dms_reform_failed()) {
                 ereport(WARNING,
                     (errmodule(MOD_DMS), errmsg("[SS switchover] Failure in %s primary demote, need reform recovery.",
                         DemoteModeDesc(demote_mode))));
@@ -341,9 +341,10 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
                 errmsg("[SS switchover] Standby promote: success, set new primary:%d.", SS_MY_INST_ID)));
             return DMS_SUCCESS;
         } else {
-            if (ntries >= WAIT_PROMOTE) {
+            if (ntries >= WAIT_PROMOTE || dms_reform_failed()) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[SS switchover] Standby promote timeout, please try again later.")));
+                return DMS_ERROR;
             }
             ntries = 0;
         }

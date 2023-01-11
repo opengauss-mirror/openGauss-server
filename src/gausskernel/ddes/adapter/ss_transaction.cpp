@@ -36,7 +36,7 @@ Snapshot SSGetSnapshotData(Snapshot snapshot)
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
     if (SS_IN_REFORM) {
-        ereport(WARNING, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
+        ereport(DEBUG1, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
         return NULL;
     }
 
@@ -47,7 +47,7 @@ Snapshot SSGetSnapshotData(Snapshot snapshot)
         }
 
         if (SS_IN_REFORM) {
-            ereport(WARNING, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
+            ereport(DEBUG1, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
             return NULL;
         }
         pg_usleep(USECS_PER_SEC);
