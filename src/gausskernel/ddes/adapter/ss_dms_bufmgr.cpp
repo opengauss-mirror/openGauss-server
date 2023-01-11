@@ -63,11 +63,11 @@ void InitDmsContext(dms_context_t *dmsContext)
     dmsContext->sess_id = (unsigned int)(t_thrd.proc ? t_thrd.proc->logictid : t_thrd.myLogicTid + TotalProcs);
     dmsContext->db_handle = t_thrd.proc;
     if (AmDmsReformProcProcess()) {
-        dmsContext->sess_rcy = DMS_SESSION_IN_REFORM;
+        dmsContext->sess_type = DMS_SESSION_REFORM;
     } else if (AmPageRedoProcess() || AmStartupProcess()) {
-        dmsContext->sess_rcy = DMS_SESSION_IN_RECOVERY;
+        dmsContext->sess_type = DMS_SESSION_RECOVER;
     } else {
-        dmsContext->sess_rcy = DMS_SESSION_NORMAL;
+        dmsContext->sess_type = DMS_SESSION_NORMAL;
     }
     dmsContext->is_try = 0;
 }

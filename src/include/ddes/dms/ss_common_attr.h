@@ -156,8 +156,5 @@ typedef enum SSReformType {
     DMS_REFORM_TYPE_FOR_MAINTAIN
 } SSReformType;
 
-#define DMS_SESSION_NORMAL 0
-#define DMS_SESSION_IN_REFORM 1
-#define DMS_SESSION_IN_RECOVERY 2
 
 #endif
