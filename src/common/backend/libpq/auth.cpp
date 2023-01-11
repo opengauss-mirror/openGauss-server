@@ -2368,7 +2368,7 @@ int GssClientAuth(int socket, char* server_host)
         return -1;
     }
 
-    if (server_host == NULL || strlen(server_host) <= 0) {
+    if (server_host == NULL || strlen(server_host) == 0) {
         errno = EINVAL;
         return -1;
     }
@@ -2507,7 +2507,7 @@ int GssServerAuth(int socket, const char* krb_keyfile)
         return -1;
     }
 
-    if (krb_keyfile == NULL || strlen(krb_keyfile) <= 0) {
+    if (krb_keyfile == NULL || strlen(krb_keyfile) == 0) {
         errno = EINVAL;
         return -1;
     }
@@ -3653,7 +3653,7 @@ static
     Assert(port->ssl);
 
     /* Make sure we have received a username in the certificate */
-    if (port->peer_cn == NULL || strlen(port->peer_cn) <= 0) {
+    if (port->peer_cn == NULL || strlen(port->peer_cn) == 0) {
         ereport(LOG,
             (errmsg("certificate authentication failed for user \"%s\": client certificate contains no user name",
                 port->user_name)));

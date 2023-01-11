@@ -4759,7 +4759,7 @@ Datum pg_stat_get_mem_mbytes_reserved(PG_FUNCTION_ARGS)
 
     StringInfoData buf;
 
-    if (pid <= 0)
+    if (pid == 0)
         PG_RETURN_TEXT_P(cstring_to_text(result));
 
     initStringInfo(&buf);
