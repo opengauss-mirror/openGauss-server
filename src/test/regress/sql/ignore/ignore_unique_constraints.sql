@@ -177,11 +177,21 @@ insert into t_ignore values(2);
 update /*+ ignore_error */ t_ignore set num = 1 where num = 2;
 select * from t_ignore;
 
+-- test for insert table with primary key
+drop table if exists t_pri_key_insert;
+create table t_pri_key_insert(id int primary key);
+insert /*+ ignore_error */ into t_pri_key_insert values(null);
+insert /*+ ignore_error */ into t_pri_key_insert values(1);
+insert /*+ ignore_error */ into t_pri_key_insert values(1);
+select * from t_pri_key_insert;
+drop table t_pri_key_insert;
+
 -- test for update table with primary key
 drop table if exists t_pri_key_update;
 create table t_pri_key_update(c1 int primary key, c2 int);
 insert into t_pri_key_update values(1, 101), (2, 201);
 update /*+ ignore_error */ t_pri_key_update set c2 = 999 where c1 = 2;
+update /*+ ignore_error */ t_pri_key_update set c1 = null where c1 = 2;
 select * from t_pri_key_update;
 drop table t_pri_key_update;
 

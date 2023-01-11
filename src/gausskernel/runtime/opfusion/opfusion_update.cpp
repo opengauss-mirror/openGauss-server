@@ -356,7 +356,7 @@ lreplace:
         if (rel->rd_att->constr) {
             if (!ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate)) {
                 if (u_sess->utils_cxt.sql_ignore_strategy_val != SQL_OVERWRITE_NULL) {
-                    return 0;
+                    break;
                 }
                 tup = ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot);
                 /* Double check constraints in case that new val in column with not null constraints

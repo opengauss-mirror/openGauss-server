@@ -365,6 +365,24 @@ select * from t_ignore;
    2
 (2 rows)
 
+-- test for insert table with primary key
+drop table if exists t_pri_key_insert;
+NOTICE:  table "t_pri_key_insert" does not exist, skipping
+create table t_pri_key_insert(id int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_pri_key_insert_pkey" for table "t_pri_key_insert"
+insert /*+ ignore_error */ into t_pri_key_insert values(null);
+WARNING:  null value in column "id" violates not-null constraint
+DETAIL:  Failing row contains (null).
+insert /*+ ignore_error */ into t_pri_key_insert values(1);
+insert /*+ ignore_error */ into t_pri_key_insert values(1);
+WARNING:  duplicate key value violates unique constraint in table "t_pri_key_insert"
+select * from t_pri_key_insert;
+ id 
+----
+  1
+(1 row)
+
+drop table t_pri_key_insert;
 -- test for update table with primary key
 drop table if exists t_pri_key_update;
 NOTICE:  table "t_pri_key_update" does not exist, skipping
@@ -372,6 +390,9 @@ create table t_pri_key_update(c1 int primary key, c2 int);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_pri_key_update_pkey" for table "t_pri_key_update"
 insert into t_pri_key_update values(1, 101), (2, 201);
 update /*+ ignore_error */ t_pri_key_update set c2 = 999 where c1 = 2;
+update /*+ ignore_error */ t_pri_key_update set c1 = null where c1 = 2;
+WARNING:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (null, 999).
 select * from t_pri_key_update;
  c1 | c2  
 ----+-----
