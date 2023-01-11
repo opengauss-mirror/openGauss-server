@@ -29,6 +29,9 @@
 #include "storage/smgr/segment_internal.h"
 #include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
+#include "storage/sinvaladt.h"
+
+void SSStandbyGlobalInvalidSharedInvalidMessages(const SharedInvalidationMessage* msg, Oid tsid);
 
 Snapshot SSGetSnapshotData(Snapshot snapshot)
 {
@@ -372,6 +375,8 @@ void SSSendSharedInvalidMessages(const SharedInvalidationMessage *msgs, int n)
     for (int i = 0; i < n; i++) {
         SharedInvalidationMessage *msg = (SharedInvalidationMessage *)(msgs + i);
         SSBroadcastSI ssmsg;
+        ssmsg.tablespaceid = u_sess->proc_cxt.MyDatabaseTableSpace;
+        Assert(ssmsg.tablespaceid != InvalidOid);
         ssmsg.type = BCAST_SI;
         if (msg->id >= SHAREDINVALFUNC_ID) {
             errno_t rc =
@@ -383,8 +388,8 @@ void SSSendSharedInvalidMessages(const SharedInvalidationMessage *msgs, int n)
         }
         int backup_output = t_thrd.postgres_cxt.whereToSendOutput;
         t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-        int ret = dms_broadcast_msg(&dms_ctx, (char *)&ssmsg, sizeof(SSBroadcastSI), (unsigned char)false,
-            SS_BROADCAST_WAIT_FIVE_SECONDS);
+        int ret = dms_broadcast_opengauss_ddllock(&dms_ctx, (char *)&ssmsg, sizeof(SSBroadcastSI),
+            (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS, (unsigned char)SHARED_INVAL_MSG);
         if (ret != DMS_SUCCESS) {
             ereport(DEBUG1, (errmsg("SS broadcast SI msg failed!")));
         }
@@ -411,8 +416,8 @@ void SSBCastDropRelAllBuffer(RelFileNode *rnodes, int rnode_len)
 
     int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-    int ret = dms_broadcast_msg(&dms_ctx, (char *)msg, sizeof(SSBroadcastDropRelAllBuffer) + bytes,
-        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS);
+    int ret = dms_broadcast_opengauss_ddllock(&dms_ctx, (char *)msg, sizeof(SSBroadcastDropRelAllBuffer) + bytes,
+        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS, (unsigned char)DROP_BUF_MSG);
     if (ret != DMS_SUCCESS) {
         ereport(DEBUG1, (errmsg("SS broadcast drop rel all buffer msg failed, rnode=[%d/%d/%d/%d]",
             rnodes->spcNode, rnodes->dbNode, rnodes->relNode, rnodes->bucketNode)));
@@ -434,8 +439,8 @@ void SSBCastDropRelRangeBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber
 
     int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-    int ret = dms_broadcast_msg(&dms_ctx, (char *)msg, sizeof(SSBroadcastDropRelRangeBuffer),
-        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS);
+    int ret = dms_broadcast_opengauss_ddllock(&dms_ctx, (char *)msg, sizeof(SSBroadcastDropRelRangeBuffer),
+        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS, (unsigned char)DROP_BUF_MSG);
     if (ret != DMS_SUCCESS) {
         ereport(DEBUG1, (errmsg("SS broadcast drop rel range buffer msg failed, rnode=[%d/%d/%d/%d],"
             "firstDelBlock=%u", node.spcNode, node.dbNode, node.relNode, node.bucketNode, firstDelBlock)));
@@ -455,8 +460,8 @@ void SSBCastDropDBAllBuffer(Oid dbid)
 
     int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-    int ret = dms_broadcast_msg(&dms_ctx, (char *)msg, sizeof(SSBroadcastDropDBAllBuffer),
-        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS);
+    int ret = dms_broadcast_opengauss_ddllock(&dms_ctx, (char *)msg, sizeof(SSBroadcastDropDBAllBuffer),
+        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS, (unsigned char)DROP_BUF_MSG);
     if (ret != DMS_SUCCESS) {
         ereport(DEBUG1, (errmsg("SS broadcast drop db all buffer msg failed, db=%d", dbid)));
     }
@@ -476,8 +481,8 @@ void SSBCastDropSegSpace(Oid spcNode, Oid dbNode)
 
     int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-    int ret = dms_broadcast_msg(&dms_ctx, (char *)msg, sizeof(SSBroadcastDropSegSpace),
-        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS);
+    int ret = dms_broadcast_opengauss_ddllock(&dms_ctx, (char *)msg, sizeof(SSBroadcastDropSegSpace),
+        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS, (unsigned char)DROP_BUF_MSG);
     if (ret != DMS_SUCCESS) {
         ereport(DEBUG1, (errmsg("SS broadcast drop seg space msg failed, spc=%d, db=%d", spcNode, dbNode)));
     }
@@ -493,7 +498,13 @@ int SSProcessSharedInvalMsg(char *data, uint32 len)
 
     SSBroadcastSI* ssmsg = (SSBroadcastSI *)data;
     /* process msg one by one */
-    SendSharedInvalidMessages(&(ssmsg->msg), 1);
+    if (EnableGlobalSysCache()) {
+        SSStandbyGlobalInvalidSharedInvalidMessages(&(ssmsg->msg), ssmsg->tablespaceid);
+    }
+    SIInsertDataEntries(&(ssmsg->msg), 1);
+    if (ENABLE_GPC && g_instance.plan_cache != NULL) {
+        g_instance.plan_cache->InvalMsg(&(ssmsg->msg), 1);
+    }
     return DMS_SUCCESS;
 }
 
@@ -590,3 +601,122 @@ int SSProcessDropSegSpace(char *data, uint32 len)
     return DMS_SUCCESS;
 }
 
+static void SSFlushGlobalByInvalidMsg(int8 id, Oid db_id, uint32 hash_value, bool reset)
+{
+    if (db_id == InvalidOid) {
+        GlobalSysTabCache *global_systab = g_instance.global_sysdbcache.GetSharedGSCEntry()->m_systabCache;
+        global_systab->InvalidTuples(id, hash_value, reset);
+    } else {
+        GlobalSysDBCacheEntry *entry = g_instance.global_sysdbcache.FindTempGSCEntry(db_id);
+        if (entry == NULL) {
+            return;
+        }
+        entry->m_systabCache->InvalidTuples(id, hash_value, reset);
+        g_instance.global_sysdbcache.ReleaseTempGSCEntry(entry);
+    }
+}
+
+static void SSInvalidateGlobalCatalog(const SharedInvalidationMessage* msg)
+{
+    for (int8 cache_id = 0; cache_id < SysCacheSize; cache_id++) {
+        if (cacheinfo[cache_id].reloid == msg->cat.catId) {
+            SSFlushGlobalByInvalidMsg(cache_id, msg->cat.dbId, 0, true);
+        }
+    }
+}
+
+static void SSInvalidateRelCache(const SharedInvalidationMessage* msg)
+{
+    if (msg->rc.dbId == InvalidOid) {
+        GlobalTabDefCache *global_systab = g_instance.global_sysdbcache.GetSharedGSCEntry()->m_tabdefCache;
+        global_systab->Invalidate(msg->rc.dbId, msg->rc.relId);
+    } else {
+        GlobalSysDBCacheEntry *entry = g_instance.global_sysdbcache.FindTempGSCEntry(msg->rc.dbId);
+        if (entry == NULL) {
+            return;
+        }
+        entry->m_tabdefCache->Invalidate(msg->rc.dbId, msg->rc.relId);
+        g_instance.global_sysdbcache.ReleaseTempGSCEntry(entry);
+    }
+}
+
+static void SSInvalidateRelmap(const SharedInvalidationMessage* msg, Oid tsid)
+{
+    /*First reload relmap file, then invalidate global relmap cache */
+    char* database_path = GetDatabasePath(msg->rm.dbId, tsid);
+    bool shared = (msg->rm.dbId == InvalidOid) ? true : false;
+    LWLockAcquire(RelationMappingLock, LW_EXCLUSIVE);
+    char *unaligned_buf = (char*)palloc0(sizeof(RelMapFile) + ALIGNOF_BUFFER);
+    RelMapFile* new_relmap = (RelMapFile*)BUFFERALIGN(unaligned_buf);
+    if (u_sess->proc_cxt.DatabasePath == NULL || strcmp(u_sess->proc_cxt.DatabasePath, database_path)) {
+        u_sess->proc_cxt.DatabasePath = database_path;
+    }
+    load_relmap_file(shared, new_relmap);
+    if (shared) {
+        GlobalSysDBCacheEntry *global_db = g_instance.global_sysdbcache.GetSharedGSCEntry();
+        global_db->m_relmapCache->UpdateBy(new_relmap);
+    } else {
+        GlobalSysDBCacheEntry *entry = g_instance.global_sysdbcache.FindTempGSCEntry(msg->rm.dbId);
+        if (entry == NULL) {
+            LWLockRelease(RelationMappingLock);
+            pfree(unaligned_buf);
+            pfree(database_path);
+            return;
+        }
+        entry->m_relmapCache->UpdateBy(new_relmap);
+        g_instance.global_sysdbcache.ReleaseTempGSCEntry(entry);
+    }
+    LWLockRelease(RelationMappingLock);
+    pfree(unaligned_buf);
+    pfree(database_path);
+}
+
+static void SSInvalidatePartCache(const SharedInvalidationMessage* msg)
+{
+    GlobalSysDBCacheEntry *entry = g_instance.global_sysdbcache.FindTempGSCEntry(msg->pc.dbId);
+    if (entry == NULL) {
+        return;
+    }
+    entry->m_partdefCache->Invalidate(msg->pc.dbId, msg->pc.partId);
+    g_instance.global_sysdbcache.ReleaseTempGSCEntry(entry);
+}
+
+static void SSInvalidateCatCache(const SharedInvalidationMessage* msg)
+{
+    SSFlushGlobalByInvalidMsg(msg->cc.id, msg->cc.dbId, msg->cc.hashValue, false);
+}
+
+void SSStandbyGlobalInvalidSharedInvalidMessages(const SharedInvalidationMessage* msg, Oid tsid)
+{
+    Assert(EnableGlobalSysCache());
+    switch (msg->id) {
+        case SHAREDINVALCATALOG_ID: { /* reset system table */
+            SSInvalidateGlobalCatalog(msg);
+            break;
+        }
+        case SHAREDINVALRELCACHE_ID: { /* invalid table and call callbackfunc registered on the table */
+            SSInvalidateRelCache(msg);
+            break;
+        }
+        case SHAREDINVALRELMAP_ID: { /* invalid relmap cxt */
+            SSInvalidateRelmap(msg, tsid);
+            break;
+        }
+        case SHAREDINVALPARTCACHE_ID: { /* invalid partcache and call callbackfunc registered on the part */
+            SSInvalidatePartCache(msg);
+            break;
+        }
+        case SHAREDINVALSMGR_ID:
+        case SHAREDINVALHBKTSMGR_ID:
+        case SHAREDINVALFUNC_ID: {
+            break;
+        }
+        default:{
+            if (msg->id >= 0) { /* invalid catcache, most cases are ddls on rel */
+                SSInvalidateCatCache(msg);
+            } else {
+                ereport(FATAL, (errmsg("unrecognized SI message ID: %d", msg->id)));
+            }
+        }
+    }
+}

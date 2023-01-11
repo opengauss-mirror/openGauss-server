@@ -87,12 +87,12 @@ void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag)
         locktag.locktag_field3, locktag.locktag_field4, locktag.locktag_field5);
 }
 
-static void CalcSegDmsPhysicalLoc(BufferDesc* buf_desc, Buffer buffer)
+static void CalcSegDmsPhysicalLoc(BufferDesc* buf_desc, Buffer buffer, bool check_standby)
 {
     if (IsSegmentFileNode(buf_desc->tag.rnode)) {
         SegmentCheck(!IsSegmentPhysicalRelNode(buf_desc->tag.rnode));
         SegPageLocation loc = seg_get_physical_location(buf_desc->tag.rnode, buf_desc->tag.forkNum,
-            buf_desc->tag.blockNum);
+            buf_desc->tag.blockNum, check_standby);
         SegmentCheck(loc.blocknum != InvalidBlockNumber);
 
         ereport(DEBUG1, (errmsg("buffer:%d is segdata page, bufdesc seginfo is empty, calc segfileno:%d, segblkno:%u",
@@ -185,7 +185,38 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
 }
 
 #ifdef USE_ASSERT_CHECKING
-static void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
+static SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, ForkNumber forkNum,
+    BlockNumber blockNo, char *blockbuf)
+{
+    SMGR_READ_STATUS rdStatus;
+    SegSpace* spc = spc_open(spcNode, dbNode, false);
+    int count = 3;
+    SegmentCheck(spc);
+    RelFileNode fakenode = {
+        .spcNode = spc->spcNode,
+        .dbNode = spc->dbNode,
+        .relNode = relNode,
+        .bucketNode = SegmentBktId,
+        .opt = 0
+    };
+
+RETRY:
+    seg_physical_read(spc, fakenode, forkNum, blockNo, (char *)blockbuf);
+    if (PageIsVerified((Page)blockbuf, blockNo)) {
+        rdStatus = SMGR_RD_OK;
+    } else {
+        rdStatus = SMGR_RD_CRC_ERROR;
+    }
+
+    if (rdStatus == SMGR_RD_CRC_ERROR && count > 0) {
+        count--;
+        goto RETRY;
+    }
+
+    return rdStatus;
+}
+
+void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
 {
     /*
      * prerequisite is that the page that initialized to zero in memory should be flush to disk
@@ -194,13 +225,34 @@ static void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mo
         IsSegmentBufferID(buf_desc->buf_id)) && (read_mode == RBM_NORMAL)) {
         char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
         char *temp_buf = (char *)BUFFERALIGN(origin_buf);
-        ReadBuffer_common_for_check(read_mode, buf_desc, pblk, temp_buf);
+        SMgrRelation smgr = smgropen(buf_desc->tag.rnode, InvalidBackendId);
+        SMGR_READ_STATUS rdStatus;
+        if (pblk != NULL) {
+            rdStatus = SmgrNetPageCheckRead(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, pblk->relNode,
+                            buf_desc->tag.forkNum, pblk->block, (char *)temp_buf);
+        } else if (buf_desc->seg_fileno != EXTENT_INVALID) {
+            rdStatus = SmgrNetPageCheckRead(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
+                            buf_desc->seg_fileno, buf_desc->tag.forkNum, buf_desc->seg_blockno, (char *)temp_buf);
+        } else {
+            rdStatus = smgrread(smgr, buf_desc->tag.forkNum, buf_desc->tag.blockNum, (char *)temp_buf);
+        }
+
+        if (rdStatus == SMGR_RD_CRC_ERROR) {
+            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] read from disk error, maybe buffer in flush",
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
+                buf_desc->tag.blockNum)));
+        }
         XLogRecPtr lsn_on_disk = PageGetLSN(temp_buf);
         XLogRecPtr lsn_on_mem = PageGetLSN(BufHdrGetBlock(buf_desc));
         /* maybe some pages are not protected by WAL-Logged */
         if ((lsn_on_mem != InvalidXLogRecPtr) && (lsn_on_disk > lsn_on_mem)) {
             RelFileNode rnode = buf_desc->tag.rnode;
-            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
+            int elevel = WARNING;
+            if (!RecoveryInProgress()) {
+                elevel = PANIC;
+            }
+            ereport(elevel, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
                 rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
                 buf_desc->tag.forkNum, buf_desc->tag.blockNum,
                 (unsigned long long)lsn_on_mem, (unsigned long long)lsn_on_disk)));
@@ -237,8 +289,8 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
         TerminateBufferIO(buf_desc, false, BM_VALID);
         buffer = BufferDescriptorGetBuffer(buf_desc);
-        if (!RecoveryInProgress()) {
-            CalcSegDmsPhysicalLoc(buf_desc, buffer);
+        if (!RecoveryInProgress() || g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
+            CalcSegDmsPhysicalLoc(buf_desc, buffer, !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy);
         }
     }
 
@@ -304,7 +356,7 @@ static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
 }
 
 #ifdef USE_ASSERT_CHECKING
-static void SegNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc)
+void SegNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc)
 {
     /*
      * prequisite is that the page that initialized to zero in memory should be flushed to disk,

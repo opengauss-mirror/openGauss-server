@@ -652,8 +652,21 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
     PG_CATCH();
     {
         t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+        /* Save error info */
+        ErrorData* edata = CopyErrorData();
+        FlushErrorState();
+        FreeErrorData(edata);
+        ereport(WARNING, (errmsg("[CBInvalidatePage] Error happend, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum,
+            tag->blockNum)));
         ReleaseResource();
+        ret = DMS_ERROR;
     }
+
+    if (ret == DMS_SUCCESS) {
+        Assert(buf_ctrl->lock_mode == DMS_LOCK_NULL);
+    }
+
     PG_END_TRY();
     return ret;
 }
@@ -1213,7 +1226,6 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
         g_instance.dms_cxt.SSReformerControl.primaryInstId == -1);
     g_instance.dms_cxt.SSRecoveryInfo.skip_redo_replay = false;
     g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
-    t_thrd.xlog_cxt.LocalRecoveryInProgress = true;
     ereport(LOG, (errmsg("[SS reform] Recovery as primary, will replay xlog from inst:%d",
                          g_instance.dms_cxt.SSReformerControl.primaryInstId)));
 
@@ -1229,16 +1241,18 @@ static int CBFlushCopy(void *db_handle, char *pageid)
 {
     if (SS_REFORM_REFORMER && !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
         g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = true;
+        smgrcloseall();
     }
 
     BufferTag* tag = (BufferTag*)pageid;
     Buffer buffer;
+    SegSpace *spc = NULL;
 
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
         if (IsSegmentPhysicalRelNode(tag->rnode)) {
-            SegSpace *spc = spc_open(tag->rnode.spcNode, tag->rnode.dbNode, true, false);
+            spc = spc_open(tag->rnode.spcNode, tag->rnode.dbNode, false, false);
             buffer = ReadBufferFast(spc, tag->rnode, tag->forkNum, tag->blockNum, RBM_NORMAL);
         } else {
             buffer = ReadBufferWithoutRelcache(tag->rnode, tag->forkNum, tag->blockNum, RBM_NORMAL, NULL, NULL);
@@ -1270,8 +1284,17 @@ static int CBFlushCopy(void *db_handle, char *pageid)
     }
 
     Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
+    LockBuffer(buffer, BUFFER_LOCK_SHARE);
     BufferDesc* buf_desc = GetBufferDescriptor(buffer - 1);
     XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
+#ifdef USE_ASSERT_CHECKING
+    if (IsSegmentPhysicalRelNode(buf_desc->tag.rnode)) {
+        SegNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, spc);
+    } else {
+        SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
+    }
+#endif
+
     if (XLByteLT(g_instance.dms_cxt.ckptRedo, pagelsn)) {
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
         buf_ctrl->state |= BUF_DIRTY_NEED_FLUSH;
@@ -1283,7 +1306,7 @@ static int CBFlushCopy(void *db_handle, char *pageid)
                         tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                         tag->forkNum, tag->blockNum, (unsigned long long)pagelsn)));
     }
-
+    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
     ReleaseBuffer(buffer);
     return GS_SUCCESS;
 }
@@ -1320,7 +1343,6 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
     g_instance.dms_cxt.resetSyscache = true;
-    t_thrd.xlog_cxt.LocalRecoveryInProgress = false;
     if (ss_reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
     }
