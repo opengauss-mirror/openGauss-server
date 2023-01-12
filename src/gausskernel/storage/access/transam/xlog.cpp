@@ -9732,9 +9732,6 @@ void StartupXLOG(void)
 
     /* init dirty page queue rec lsn to checkpoint.redo */
     update_dirty_page_queue_rec_lsn(checkPoint.redo, true);
-    if (ENABLE_DMS) {
-        g_instance.dms_cxt.SSRecoveryInfo.reclsn_updated = true;
-    }
 
     /*
      * for gtm environment, we need to set the local csn to next xid to increase.
@@ -10825,11 +10822,10 @@ void StartupXLOG(void)
     if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
         if (SSFAILOVER_TRIGGER) {
             g_instance.dms_cxt.SSRecoveryInfo.failover_triggered = false;
-            g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
             pg_memory_barrier();
         }
         ereport(LOG, (errmodule(MOD_DMS),
-            errmsg("[SS switchover/failover] standby promoting: start full checkpoint.")));
+            errmsg("[SS switchover/SS failover] standby promoting: start full checkpoint.")));
 
         RequestCheckpoint(CHECKPOINT_FORCE | CHECKPOINT_IMMEDIATE | CHECKPOINT_WAIT);
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
@@ -10839,7 +10835,8 @@ void StartupXLOG(void)
         LWLockRelease(ControlFileLock);
         SSRecheckBufferPool();
         ereport(LOG, (errmodule(MOD_DMS),
-            errmsg("[SS switchover/failover] standby promoting: finished start checkpoint.")));
+            errmsg("[SS switchover/SS failover] standby promoting: finished full checkpoint"
+                "and update control file")));
     }
 
     NextXidAfterReovery = t_thrd.xact_cxt.ShmemVariableCache->nextXid;

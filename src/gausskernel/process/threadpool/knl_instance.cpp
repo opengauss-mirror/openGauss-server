@@ -184,7 +184,6 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.failover_triggered = false;
     dms_cxt->SSRecoveryInfo.new_primary_reset_walbuf_flag = false;
     dms_cxt->SSRecoveryInfo.skip_redo_replay = false;
-    dms_cxt->SSRecoveryInfo.reclsn_updated = false;
     dms_cxt->SSRecoveryInfo.ready_to_startup = false;
     dms_cxt->SSRecoveryInfo.startup_reform = true;
     dms_cxt->SSRecoveryInfo.restart_failover_flag = false;

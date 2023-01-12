@@ -72,28 +72,30 @@ void SSWakeupRecovery(void)
 bool SSRecoveryNodes()
 {
     bool result = false;
-
-    if (t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone &&
-        t_thrd.shemem_ptr_cxt.ControlFile->state == DB_IN_PRODUCTION) {
-        result = true;
-    } else {
-        /* Release my own lock before recovery */
-        SSLockReleaseAll();
-        SSWakeupRecovery();
-        while (true) {
-            if (dms_reform_failed()) {
-                result = false;
-                break;
-            }
-            if (t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone &&
-                t_thrd.shemem_ptr_cxt.ControlFile->state == DB_IN_PRODUCTION) {
-                result = true;
-                break;
-            }
-            pg_usleep(REFORM_WAIT_TIME);
+    /* Release my own lock before recovery */
+    SSLockReleaseAll();
+    SSWakeupRecovery();
+    while (true) {
+        if (dms_reform_failed()) {
+            result = false;
+            break;
         }
+        /** why use lock:
+         * time1 startup thread: update IsRecoveryDone, not finish UpdateControlFile
+         * time2 reform_proc: finish reform, think ControlFile is ok
+         * time3 DB crash
+         * time4 read the checkpoint which created before failover. oops, it is wrong
+         */
+        LWLockAcquire(ControlFileLock, LW_SHARED);
+        if (t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone &&
+            t_thrd.shemem_ptr_cxt.ControlFile->state == DB_IN_PRODUCTION) {
+            LWLockRelease(ControlFileLock);
+            result = true;
+            break;
+        }
+        LWLockRelease(ControlFileLock);
+        pg_usleep(REFORM_WAIT_TIME);
     }
-
     return result;
 }
 
@@ -276,15 +278,6 @@ void SSTriggerFailover()
 
 void SShandle_promote_signal()
 {
-    volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
-    SpinLockAcquire(&xlogctl->info_lck);
-    xlogctl->IsRecoveryDone = false;
-    xlogctl->SharedRecoveryInProgress = true;
-    SpinLockRelease(&xlogctl->info_lck);
-
-    t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
-    pg_memory_barrier();
-
     if (pmState == PM_WAIT_BACKENDS) {
         g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
         Assert(g_instance.pid_cxt.StartupPID != 0);

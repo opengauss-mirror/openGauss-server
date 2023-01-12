@@ -29,8 +29,7 @@
 #define REFORM_CTRL_PAGE  DMS_MAX_INSTANCE
 
 #define RECOVERY_WAIT_TIME 10000
-#define SSFAILOVER_TRIGGER (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.failover_triggered == true && \
-                            g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING)
+#define SSFAILOVER_TRIGGER (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.failover_triggered == true)
 #define SSSKIP_REDO_REPLAY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.skip_redo_replay == true)
 #define SS_BEFORE_RECOVERY (ENABLE_DMS && g_instance.dms_cxt.SSReformInfo.in_reform == true \
                             && g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag == true)
@@ -54,7 +53,6 @@ typedef struct ss_recovery_info {
     bool skip_redo_replay;
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;
-    bool reclsn_updated;
     bool ready_to_startup;              // when DB start (except failover), the flag will set true
     bool startup_reform;                // used to judge DB first start, when first reform finshed set false
     bool restart_failover_flag;         // used to indicate do failover when DB start

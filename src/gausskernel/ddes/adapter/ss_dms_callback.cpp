@@ -1313,11 +1313,6 @@ static int CBFlushCopy(void *db_handle, char *pageid)
 
 static int CBFailoverPromote(void *db_handle)
 {
-    Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_NORMAL);
-    g_instance.dms_cxt.SSRecoveryInfo.failover_triggered = true;
-    g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_FAILOVER_PROMOTING;
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] failover trigger.")));
-
     SSTriggerFailover();
     while (true) {
         if (SSFAILOVER_TRIGGER && g_instance.pid_cxt.StartupPID != 0) {
@@ -1338,23 +1333,33 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
 {
     SSReformType ss_reform_type = (SSReformType)reform_type;
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
-    reform_info->dms_role = role;
-    reform_info->in_reform = true;
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
     g_instance.dms_cxt.resetSyscache = true;
     if (ss_reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
+        if (role == DMS_ROLE_REFORMER) {
+            // variable set order: SharedRecoveryInProgress -> failover_triggered -> dms_role
+            volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
+            SpinLockAcquire(&xlogctl->info_lck);
+            xlogctl->IsRecoveryDone = false;
+            xlogctl->SharedRecoveryInProgress = true;
+            SpinLockRelease(&xlogctl->info_lck);
+            t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
+            pg_memory_barrier();
+            g_instance.dms_cxt.SSRecoveryInfo.failover_triggered = true;
+            g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_FAILOVER_PROMOTING;
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] failover trigger.")));
+        }
     }
+    reform_info->dms_role = role;
+    reform_info->in_reform = true;
+
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform] dms reform start, role:%d, reform type:%d", role, (int)ss_reform_type)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
         if (dss_set_server_status_wrapper(true) != GS_SUCCESS) {
             ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS reform] Could not set dssserver flag=read_write")));
-        }
-        if (!SS_MY_INST_IS_MASTER) {
-            // means failover
-            g_instance.dms_cxt.SSRecoveryInfo.reclsn_updated = false;
         }
     } else {
         if (dss_set_server_status_wrapper(false) != GS_SUCCESS) {
@@ -1382,12 +1387,16 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
 
 static int CBReformDoneNotify(void *db_handle)
 {
+    if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
+        g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
+        if (SS_REFORM_REFORMER) {
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] failover success, instance:%d become primary.",
+                g_instance.attr.attr_storage.dms_attr.instance_id)));
+        }
+    }
     /* SSClusterState and in_reform must be set atomically */
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSReformInfo.in_reform = false;
-    if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
-        g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
-    }
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
     ereport(LOG,
