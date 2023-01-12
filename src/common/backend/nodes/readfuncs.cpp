@@ -6396,7 +6396,7 @@ static Datum readDatum(bool typbyval)
             token = pg_strtok(&tokenLength);
             s[i] = (char)atoi(token);
         }
-    } else if (length <= 0) {
+    } else if (length == 0) {
         res = (Datum)NULL;
     } else {
         s = (char*)palloc(length);
