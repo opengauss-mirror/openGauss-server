@@ -306,9 +306,9 @@ int dms_switchover(unsigned int sess_id)
     return g_ss_dms_func.dms_switchover(sess_id);
 }
 
-int dms_drc_accessible(void)
+int dms_drc_accessible(unsigned char res_type)
 {
-    return g_ss_dms_func.dms_drc_accessible();
+    return g_ss_dms_func.dms_drc_accessible(res_type);
 }
 
 int dms_reform_last_failed(void)

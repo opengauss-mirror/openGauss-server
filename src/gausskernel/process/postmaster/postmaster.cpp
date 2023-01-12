@@ -7724,6 +7724,12 @@ static void PostmasterStateMachine(void)
         }
     }
 
+    if (pmState == PM_WAIT_BACKENDS && SS_STANDBY_FAILOVER) {
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
+            g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
+        }
+    }
+
     if (pmState == PM_SHUTDOWN_2) {
         /*
          * PM_SHUTDOWN_2 state ends when there's no other children than
@@ -9490,8 +9496,15 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER)) {
         PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
+        t_thrd.dms_cxt.CloseAllSessionsFailed = false;
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] kill backends begin.")));
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->CloseAllSessions();
+            if (t_thrd.dms_cxt.CloseAllSessionsFailed) {
+                ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS failover] failover failed,"
+                                                             "threadpool sessions closed failed.")));
+                _exit(0);
+            }
             /*
             * before pmState set to wait backends,
             * threadpool cannot launch new thread by scheduler during demote.
@@ -9523,7 +9536,9 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
         }
+    }
 
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_FAILOVER_STARTUP)) {
         SShandle_promote_signal();
     }
 
@@ -14048,6 +14063,7 @@ bool SSIsServerModeReadOnly()
 
 void SSRestartFailoverPromote()
 {
+    PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
     /* shut down all backends and autovac workers */
     (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 

@@ -71,6 +71,7 @@ ThreadPoolControler* g_threadPoolControler = NULL;
     ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM), errmsg("Invalid attribute for thread pool."), detail))
 
 static const long one_hundred_micro_sec = 100;
+static const long max_dms_wait_time = 30000000L; //30s
 
 ThreadPoolControler::ThreadPoolControler()
 {
@@ -744,10 +745,18 @@ void ThreadPoolControler::CloseAllSessions()
         }
 
         allclose = true;
+        int waitTime = 0;
         for (int i = 0; i < m_groupNum; i++) {
             allclose = (m_groups[i]->AllSessionClosed() && allclose);
         }
         pg_usleep(one_hundred_micro_sec);
+        if (SS_STANDBY_FAILOVER) {
+            waitTime += one_hundred_micro_sec;
+            if (waitTime > max_dms_wait_time) {
+                t_thrd.dms_cxt.CloseAllSessionsFailed = true;
+                break;
+            }
+        }
     }
 
     ereport(LOG, (errmodule(MOD_THREAD_POOL),

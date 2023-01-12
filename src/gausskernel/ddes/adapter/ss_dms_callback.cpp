@@ -1313,7 +1313,33 @@ static int CBFlushCopy(void *db_handle, char *pageid)
 
 static int CBFailoverPromote(void *db_handle)
 {
+    g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = false;
     SSTriggerFailover();
+    /**
+     * for alive failover: wait for backend threads to exit, at most 30s
+     * why wait code write this
+     *      step 1, sned PMSIGNAL_DMS_TRIGGERFAILOVER to tell thread to exit
+     *      step 2, PM detected backend exit
+     *      step 3, reform proc wait
+     */
+    if (!g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+        long max_wait_time = 30000000L;
+        long wait_time = 0;
+        while (true) {
+            if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left) {
+                ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] backends exit successfully")));
+                break;
+            }
+            if (wait_time > max_wait_time) {
+                ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS failover] failover failed, backends can not exit")));
+                _exit(0);
+            }
+            pg_usleep(REFORM_WAIT_TIME);
+            wait_time += REFORM_WAIT_TIME;
+        }
+        SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_STARTUP);
+    }
+
     while (true) {
         if (SSFAILOVER_TRIGGER && g_instance.pid_cxt.StartupPID != 0) {
             ereport(LOG, (errmodule(MOD_DMS), errmsg("startup thread success.")));
