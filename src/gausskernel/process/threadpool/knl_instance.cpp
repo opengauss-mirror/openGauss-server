@@ -197,6 +197,7 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->ckptRedo = InvalidXLogRecPtr;
     dms_cxt->resetSyscache = false;
     dms_cxt->finishedRecoverOldPrimaryDWFile = false;
+    dms_cxt->dw_init = false;
 }
 
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)

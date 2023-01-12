@@ -329,4 +329,5 @@ void ss_failover_dw_init()
     ckpt_shutdown_pagewriter();
     g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
     ss_failover_dw_init_internal();
+    g_instance.dms_cxt.dw_init = true;
 }
