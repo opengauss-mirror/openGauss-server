@@ -61,14 +61,14 @@ INSERT INTO clstr_tst (b, c, d) VALUES (6, 'seis', repeat('xyzzy', 100000));
 
 CLUSTER clstr_tst_c ON clstr_tst;
 
-SELECT a,b,c,substring(d for 30), length(d) from clstr_tst ORDER BY a, b, c;
+SELECT a,b,c,substring(d for 30), length(d) from clstr_tst;
 SELECT a,b,c,substring(d for 30), length(d) from clstr_tst ORDER BY a;
 SELECT a,b,c,substring(d for 30), length(d) from clstr_tst ORDER BY b;
 SELECT a,b,c,substring(d for 30), length(d) from clstr_tst ORDER BY c;
 
 -- Verify that inheritance link still works
 -- INSERT INTO clstr_tst_inh VALUES (0, 100, 'in child table');
-SELECT a,b,c,substring(d for 30), length(d) from clstr_tst ORDER BY a, b, c;
+SELECT a,b,c,substring(d for 30), length(d) from clstr_tst;
 
 -- Verify that foreign key link still works
 INSERT INTO clstr_tst (b, c) VALUES (1111, 'this should fail');
@@ -126,8 +126,7 @@ CLUSTER clstr_1_pkey ON clstr_1;
 CLUSTER clstr_2 USING clstr_2_pkey;
 SELECT * FROM clstr_1 UNION ALL
   SELECT * FROM clstr_2 UNION ALL
-  SELECT * FROM clstr_3
-  ORDER BY 1;
+  SELECT * FROM clstr_3;
 
 -- revert to the original state
 DELETE FROM clstr_1;
@@ -146,16 +145,14 @@ SET SESSION AUTHORIZATION clstr_user PASSWORD 'ttest@123';
 CLUSTER;
 SELECT * FROM clstr_1 UNION ALL
   SELECT * FROM clstr_2 UNION ALL
-  SELECT * FROM clstr_3
-  ORDER BY 1;
+  SELECT * FROM clstr_3;
 
 -- cluster a single table using the indisclustered bit previously set
 DELETE FROM clstr_1;
 INSERT INTO clstr_1 VALUES (2);
 INSERT INTO clstr_1 VALUES (1);
 CLUSTER clstr_1;
-SELECT * FROM clstr_1
-ORDER BY 1;
+SELECT * FROM clstr_1;
 
 -- Test MVCC-safety of cluster. There isn't much we can do to verify the
 -- results with a single backend...
@@ -182,13 +179,13 @@ UPDATE clustertest SET key = 60 WHERE key = 50;
 UPDATE clustertest SET key = 70 WHERE key = 60;
 UPDATE clustertest SET key = 80 WHERE key = 70;
 
-SELECT * FROM clustertest ORDER BY 1;
+SELECT * FROM clustertest;
 CLUSTER clustertest_pkey ON clustertest;
-SELECT * FROM clustertest ORDER BY 1;
+SELECT * FROM clustertest;
 
 COMMIT;
 
-SELECT * FROM clustertest ORDER BY 1;
+SELECT * FROM clustertest;
 
 -- check that temp tables can be clustered
 -- Enforce use of COMMIT instead of 2PC for temporary objects
@@ -198,7 +195,7 @@ SET SESSION AUTHORIZATION clstr_user PASSWORD 'ttest@123';
 create temp table clstr_temp (col1 int primary key, col2 text);
 insert into clstr_temp values (2, 'two'), (1, 'one');
 cluster clstr_temp using clstr_temp_pkey;
-select * from clstr_temp order by 1;
+select * from clstr_temp;
 drop table clstr_temp;
 
 -- clean up
