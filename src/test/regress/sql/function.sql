@@ -924,6 +924,11 @@ end;
 $$language plpgsql;
 select fun_test_2(1);
 
+CREATE FUNCTION w_testfun3 (c_int INOUT int DEFAULT  1)  RETURNS int  AS $$
+        BEGIN
+            RETURN (c_int);
+        END;
+$$ LANGUAGE plpgsql;
 DROP FUNCTION func_increment_sql_1;
 DROP FUNCTION func_increment_sql_2;
 DROP FUNCTION fun_test_1;

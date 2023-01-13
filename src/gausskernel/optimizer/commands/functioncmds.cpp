@@ -449,12 +449,12 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         if (fp->defexpr) {
 #ifndef ENABLE_MULTIPLE_NODES
             if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT 
-                && (fp->mode == FUNC_PARAM_OUT || fp->mode == FUNC_PARAM_INOUT)) {
+                && fp->mode == FUNC_PARAM_OUT && enable_out_param_override()) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                     errmsg("The out/inout Parameter can't have default value.")));
             }
-#endif		
+#endif
             Node* def = NULL;
 
             if (!isinput)
