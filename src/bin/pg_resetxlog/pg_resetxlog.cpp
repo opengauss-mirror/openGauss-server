@@ -72,6 +72,8 @@ static int  ReadNonDssControlFile(int *fd, char * buffer);
 static int  ReadDssControlFile(int *fd, char *buffer);
 static bool ReadControlFile(void);
 static void GuessControlValues(void);
+static bool GetGucValue(const char *key, char *value);
+static bool CheckConfigFileStatus(void);
 static void PrintControlValues(bool guessed);
 static void RewriteControlFile(void);
 static void FindEndOfXLOG(void);
@@ -81,6 +83,7 @@ static void WriteEmptyXLOG(void);
 static void usage(void);
 
 #define XLOG_NAME_LENGTH 24
+#define MAX_STRING_LENGTH 1024
 const uint64 FREEZE_MAX_AGE = 2000000000;
 
 typedef struct DssOptions
@@ -112,6 +115,7 @@ int main(int argc, char* argv[])
     int fd = -1;
     uint64 tmpValue;
     int option_index;
+    bool setMinXlogSegNo = false;
 
     static struct option long_options[] = {{"enable-dss", no_argument, NULL, 1},
         {"socketpath", required_argument, NULL, 2},
@@ -222,7 +226,7 @@ int main(int argc, char* argv[])
                     fprintf(stderr, _("%s: invalid segment file"), progname);
                     exit(1);
                 }
-                minXlogSegNo = (uint64)log_temp * XLogSegmentsPerXLogId + seg_temp;
+                setMinXlogSegNo = true;
                 break;
 
 #ifndef ENABLE_LITE_MODE
@@ -294,7 +298,7 @@ int main(int argc, char* argv[])
 
     if (chdir(DataDir) < 0) {
         fprintf(stderr, _("%s: could not change directory to \"%s\": %s\n"), 
-                progname, DataDir, strerror(errno));
+            progname, DataDir, strerror(errno));
         exit(1);
     }
 
@@ -341,6 +345,34 @@ int main(int argc, char* argv[])
         GuessControlValues();
     }
 
+    if (dss.enable_dss) {
+        char guc_value[MAX_STRING_LENGTH] = {0};
+        int curr_inst_id;
+
+        if (!GetGucValue("ss_instance_id", guc_value)) {
+            fprintf(stderr,
+                _("%s: get the guc value of \"ss_instance_id\" failed, "
+                "please check the file \"postgresql.conf\".\n"), progname);
+            exit(1);
+        }
+        curr_inst_id = atoi(guc_value);
+
+        if (curr_inst_id < MIN_INSTANCEID || curr_inst_id > MAX_INSTANCEID) {
+            fprintf(stderr, _("%s: unexpected node id specified, valid range is %d - %d\n"),
+                progname, MIN_INSTANCEID, MAX_INSTANCEID);
+            exit(1);
+        }
+
+        if (curr_inst_id != dss.primaryInstId) {
+            fprintf(stderr,
+                _("%s: you must execute this command in primary node: %d, "
+                "current node id is %d.\n"),
+                progname, dss.primaryInstId, curr_inst_id);
+            exit(1);
+        }
+    }
+
+
     /*
      * Also look at existing segment files to set up newXlogSegNo
      */
@@ -380,6 +412,9 @@ int main(int argc, char* argv[])
 
     if (minXlogTli > ControlFile.checkPointCopy.ThisTimeLineID)
         ControlFile.checkPointCopy.ThisTimeLineID = minXlogTli;
+
+    if (setMinXlogSegNo)
+        minXlogSegNo = (uint64)log_temp * XLogSegmentsPerXLogId + seg_temp;
 
     if (minXlogSegNo > newXlogSegNo) {
         newXlogSegNo = minXlogSegNo;
@@ -427,13 +462,13 @@ static void DssInit(void)
     dss.socketpath = NULL;
     dss.vgname = NULL;
     dss.primaryInstId = INVALID_INSTANCEID;
-    XLogSegmentSize = DSS_XLOG_SEG_SIZE;
 }
 
 static void SetGlobalDssParam(void)
 {
     errno_t rc = strcpy_s(g_datadir.dss_data, strlen(dss.vgname) + 1, dss.vgname);
     securec_check_c(rc, "\0", "\0");
+    XLogSegmentSize = DSS_XLOG_SEG_SIZE;
 }
 
 /*
@@ -500,7 +535,7 @@ static int ReadDssControlFile(int *fd, char *buffer)
     dss.primaryInstId = reformerCtrl->primaryInstId;
     if (dss.primaryInstId < MIN_INSTANCEID || dss.primaryInstId > MAX_INSTANCEID) {
         fprintf(stderr, _("%s: unexpected primary node id: %d, valid range is %d - %d.\n"),
-                progname, dss.primaryInstId, MIN_INSTANCEID, MAX_INSTANCEID);
+            progname, dss.primaryInstId, MIN_INSTANCEID, MAX_INSTANCEID);
         free(tmpBuffer);
         tmpBuffer = NULL;
         close(*fd);
@@ -677,6 +712,68 @@ static void GuessControlValues(void)
      * eventually, should try to grovel through old XLOG to develop more
      * accurate values for TimeLineID, nextXID, etc.
      */
+}
+
+/*
+ * Get guc the value of key from postgresql.conf.
+ * e.g.
+ * 1. get the last guc value line
+ *    result: "port   =  ' 5432  '  #  database port"
+ * 2. ensure that the last guc value is valid
+ *      key = value     key = value #...
+ *      key = 'value'   key = 'value' #... 
+ *    result: "port   =  ' 5432  '  #  database port"
+ * 3. get the string between the first '=' and the first '#'
+ *    result: "  ' 5432  '  "
+ * 4. cut the head and tail spaces
+ *    result: "' 5432  '"
+ * 5. cut the head and tail char "'"
+ *    result: " 5432  "
+ * 6. cut the head and tail spaces
+ *    result: "5432"
+ */
+static bool GetGucValue(const char *key, char *value)
+{
+    char cmd[MAX_STRING_LENGTH];
+    FILE* fp = NULL;
+
+    if (!CheckConfigFileStatus()) {
+        fprintf(stderr, _("%s: postgresql.conf does not exist!\n"), progname);
+        exit(1);
+    }
+
+    /* generate the command for get guc value */
+    int sret = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1,
+        "grep \"^[[:space:]]*%s[[:space:]]*=\" postgresql.conf | tail -1 | "
+        "grep \"^[[:space:]]*%s[[:space:]*=[[:space:]]*[^']*$\\|"
+        "^[[:space:]]*%s[[:space:]]*=[[:space:]]*[^'#]*#\\|"
+        "^[[:space:]]*%s[[:space:]]*=[[:space:]]*'[^']*'[[:space:]]*$\\|"
+        "^[[:space:]]*%s[[:space:]]*=[[:space:]]*'[^']*'[[:space:]]*#\" | "
+        "sed 's/=/\\n/' | sed 's/#/\\n/' | sed -n 2p | sed 's/^[ \\t]*//g' | "
+        "sed 's/[ \\t]$//g' | sed $'s/^\\'//g' | sed $'s/\\'$//g' | "
+        "sed 's/^[ \\t]*//g' | sed 's/[ \\t]*$//g'", key, key, key, key, key);
+    securec_check_ss_c(sret, "", "");
+
+    if ((fp = popen(cmd, "r")) != NULL) {
+        if (fgets(value, MAX_STRING_LENGTH - 1, fp) != NULL) {
+            uint value_len = strlen(value);
+            value[value_len - 1] = '\0';
+            pclose(fp);
+            return true;
+        }
+    }
+    pclose(fp);
+    return false;
+}
+
+/* check the status of postgresql.conf */
+bool CheckConfigFileStatus()
+{
+    struct stat statbuf;
+
+    if (lstat("postgresql.conf", &statbuf) != 0)
+        return false;
+    return true;
 }
 
 /*
