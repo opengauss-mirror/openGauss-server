@@ -1004,7 +1004,7 @@ test: cost_model
 test: base_update
 test: seqscan_fusion
 
-test: union_null_01
+test: union_null_01 fulljoin_rewrite
 
 # var selectivity
 test: var_eq_const_selectivity
@@ -1022,7 +1022,6 @@ test: rename_table
 
 # debug instrument
 test: test_debug5
-test: fulljoin_rewrite
 
 # fix echo infos
 test: gstrace_options

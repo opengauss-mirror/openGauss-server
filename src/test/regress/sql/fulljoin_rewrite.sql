@@ -26,6 +26,14 @@ WHERE
     alias9.alias8 = 2
     OR alias9.alias7 = 2;
 
+with alias11 as(select 1 alias1 from fulljoin_test),
+alias25 as(select * from (with alias19 as (select rownum from fulljoin_test2)select * from alias19)alias18)
+select * from alias11,alias25 full join fulljoin_test3 on 1=1 full join fulljoin_test4 on 1=1 where 1=1;
+
+explain (costs off) with alias11 as(select 1 alias1 from fulljoin_test),
+alias25 as(select * from (with alias19 as (select rownum from fulljoin_test2)select * from alias19)alias18)
+select * from alias11,alias25 full join fulljoin_test3 on 1=1 full join fulljoin_test4 on 1=1 where 1=1;
+
 drop table fulljoin_test;
 
 drop table fulljoin_test2;
