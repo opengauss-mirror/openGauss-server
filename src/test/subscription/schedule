@@ -7,3 +7,6 @@ diff_schema
 generated
 rewrite
 sync
+encoding
+ddl
+matviews

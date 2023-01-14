@@ -11,10 +11,13 @@ function test_1() {
 	exec_sql $db $sub_node1_port "CREATE DATABASE $case_db"
 
     exec_sql $case_db $pub_node1_port "CREATE TABLE tab1 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 2) STORED)"
+	exec_sql $case_db $pub_node1_port "CREATE TABLE tab2 (a int PRIMARY KEY, b int default 5)"
 	exec_sql $case_db $sub_node1_port "CREATE TABLE tab1 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 22) STORED)"
+	exec_sql $case_db $sub_node1_port "CREATE TABLE tab2 (a int PRIMARY KEY, b int default 10)"
 
     # data for initial sync
     exec_sql $case_db $pub_node1_port "INSERT INTO tab1 (a) VALUES (1), (2), (3)"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab2 (a) VALUES (1), (2), (3)"
 
     echo "create publication and subscription."
     publisher_connstr="port=$pub_node1_port host=$g_local_ip dbname=$case_db user=$username password=$passwd"
@@ -37,9 +40,19 @@ function test_1() {
 		exit 1
 	fi
 
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b FROM tab2")" = "1|5
+2|5
+3|5" ]; then
+		echo "check default columns initial sync success"
+	else
+		echo "$failed_keyword when default columns initial sync"
+		exit 1
+	fi
+
     # data to replicate
     exec_sql $case_db $pub_node1_port "INSERT INTO tab1 VALUES (4), (5)"
     exec_sql $case_db $pub_node1_port "UPDATE tab1 SET a = 6 WHERE a = 5"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab2 VALUES (4), (5)"
 
     wait_for_catchup $case_db $pub_node1_port "sub1"
 
@@ -51,6 +64,17 @@ function test_1() {
 		echo "check generated columns replicated success"
 	else
 		echo "$failed_keyword when generated columns replicated"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b FROM tab2")" = "1|5
+2|5
+3|5
+4|5
+5|5" ]; then
+		echo "check default columns replicated success"
+	else
+		echo "$failed_keyword when default columns replicated"
 		exit 1
 	fi
 }
