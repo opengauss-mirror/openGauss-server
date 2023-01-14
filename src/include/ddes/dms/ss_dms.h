@@ -65,7 +65,7 @@ typedef struct st_ss_dms_func {
     int (*dms_recovery_page_need_skip)(char pageid[DMS_PAGEID_SIZE], unsigned char *skip);
     int (*dms_reform_failed)(void);
     int (*dms_switchover)(unsigned int sess_id);
-    int (*dms_drc_accessible)(void);
+    int (*dms_drc_accessible)(unsigned char res_type);
     int (*dms_broadcast_opengauss_ddllock)(dms_context_t *dms_ctx, char *data, unsigned int len,
         unsigned char handle_recv_msg, unsigned int timeout, unsigned char resend_after_reform);
     int (*dms_reform_last_failed)(void);
@@ -108,7 +108,7 @@ int dms_get_ssl_param(const char *param_name, char *param_value, unsigned int si
 int dms_recovery_page_need_skip(char pageid[DMS_PAGEID_SIZE], unsigned char *skip);
 int dms_reform_failed(void);
 int dms_switchover(unsigned int sess_id);
-int dms_drc_accessible(void);
+int dms_drc_accessible(unsigned char res_type);
 int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned int len, unsigned char handle_recv_msg,
     unsigned int timeout, unsigned char resend_after_reform);
 int dms_reform_last_failed(void);

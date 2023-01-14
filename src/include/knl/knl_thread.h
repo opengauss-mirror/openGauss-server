@@ -3331,6 +3331,7 @@ typedef struct knl_t_dms_context {
     MemoryContext msgContext;
     bool buf_in_aio;
     bool is_reform_proc;
+    bool CloseAllSessionsFailed;
 } knl_t_dms_context;
 
 /* thread context. */

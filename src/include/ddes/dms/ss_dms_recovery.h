@@ -60,6 +60,7 @@ typedef struct ss_recovery_info {
     bool in_failover;      // used to judge this is failover, this tag will combine with failover_triggered later
     // in failover Scenario,before failover_triggered become true, this node knows itself will become new primary
     bool in_flushcopy;
+    bool no_backend_left;
 } ss_recovery_info_t;
 
 extern bool SSRecoveryNodes();

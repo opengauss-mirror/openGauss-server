@@ -652,3 +652,13 @@ void CheckPageNeedSkipInRecovery(Buffer buf)
     }
     Assert(!skip);
 }
+
+unsigned int DMSGetProcType4RequestPage()
+{
+    // proc type used in DMS request page
+    if (AmDmsReformProcProcess() || AmPageRedoProcess() || AmStartupProcess()) {
+        return DMS_SESSION_RECOVER;
+    } else {
+        return DMS_SESSION_NORMAL;
+    }
+}

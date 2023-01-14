@@ -190,6 +190,7 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.reform_ready = false;
     dms_cxt->SSRecoveryInfo.in_failover = false;
     dms_cxt->SSRecoveryInfo.in_flushcopy = false;
+    dms_cxt->SSRecoveryInfo.no_backend_left = false;
     dms_cxt->log_timezone = NULL;
     pg_atomic_init_u32(&dms_cxt->inDmsThreShmemInitCnt, 0);
     pg_atomic_init_u32(&dms_cxt->inProcExitCnt, 0);
