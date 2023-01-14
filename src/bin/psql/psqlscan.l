@@ -93,6 +93,7 @@ typedef enum
     IDEN_DETERMINISTIC,
 	IDEN_PACKAGE,
     IDEN_BUTT,
+    IDEN_SELECT
 }GramIdentify;
 
 /*
@@ -2257,6 +2258,8 @@ keywordRead(const char* text)
 		return IDEN_CURSOR;
 	else if (!upperstrcmp(text, "deterministic"))
 		return IDEN_DETERMINISTIC;
+	else if (!upperstrcmp(text, "select"))
+		return IDEN_SELECT;
 	else 
 		return IDEN_BUTT;
 }
@@ -2272,6 +2275,9 @@ analyze_state(const char* text,PsqlScanStateData* state)
 	GramIdentify keyValue = IDEN_BUTT;
 	/*don't need to read identify*/
 	if (0 == state->count_to_read)
+		return;
+	/*if we set delimiter to other word, don`t let Begin(xp) work*/
+	if (state->is_b_format && strcmp(state->delimiter_name, ";") != 0)
 		return;
 	state->count_to_read--;  
 	keyValue = keywordRead(text);
@@ -2337,6 +2343,7 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			}
 			state->gram_state[IDEN_AS] = true;
 			state->gram_state[IDEN_IS] = true;
+			state->gram_state[IDEN_SELECT] = true;
 			state->include_ora_comment = true;
 			state->count_to_read = -1;
 			break;
@@ -2361,7 +2368,8 @@ analyze_state(const char* text,PsqlScanStateData* state)
                         /* for example:RETURN INTEGER DETERMINISTIC RETURNS NULL ON NULL INPUT  */
 			state->gram_state[IDEN_AS] = true;
 			state->gram_state[IDEN_IS] = true;
-			state->count_to_read = 6;
+			/* change into -1 ,to avoid goto Begin(xp) without as or is*/
+			state->count_to_read = -1;
 			break;
 		case IDEN_RETURNS:
 			break;
@@ -2371,6 +2379,12 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->include_ora_comment = true;
 			state->count_to_read = -1;
 			break;
+		case IDEN_SELECT:
+			/*close door of as and is when create procedure select,to ensure not goto Begin(xp)*/
+			state->gram_state[IDEN_AS] = false;
+                        state->gram_state[IDEN_IS] = false;
+			state->count_to_read = -1;
+                        break;
 		case IDEN_AS:
 		case IDEN_IS:
 			state->count_to_read = 0;
