@@ -176,6 +176,9 @@
 #define MAX_PATH_LEN 1024
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
 #define ENABLE_INCRE_CKPT g_instance.attr.attr_storage.enableIncrementalCheckpoint
+#define SS_STANDBY_INST_SKIP_SHARED_FILE (ENABLE_DSS && IsInitdb &&                               \
+                                         g_instance.attr.attr_storage.dms_attr.instance_id !=     \
+                                         g_instance.dms_cxt.SSReformerControl.primaryInstId)
 
 #define RecoveryFromDummyStandby() (t_thrd.postmaster_cxt.ReplConnArray[2] != NULL && IS_DN_DUMMY_STANDYS_MODE())
 
@@ -7224,9 +7227,11 @@ void BootStrapXLOG(void)
     (void)MemoryContextSwitchTo(old_mem_cxt);
 
     /* Bootstrap the commit log, too */
-    BootStrapCLOG();
-    BootStrapCSNLOG();
-    BootStrapMultiXact();
+    if (!SS_STANDBY_INST_SKIP_SHARED_FILE) {
+        BootStrapCLOG();
+        BootStrapCSNLOG();
+        BootStrapMultiXact();
+    }
 
     pfree_ext(buffer);
 }
@@ -11659,7 +11664,13 @@ void ShutdownXLOG(int code, Datum arg)
     g_instance.bgwriter_cxt.rel_hashtbl_lock = NULL;
     g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock = NULL;
 
-    if (!ENABLE_DMS || (!SS_STANDBY_MODE && !SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING)) {
+    if (ENABLE_DSS && IsInitdb && 
+        g_instance.dms_cxt.SSReformerControl.primaryInstId == INVALID_INSTANCEID) {
+        SSReadControlFile(REFORM_CTRL_PAGE);
+    }
+
+    if ((!ENABLE_DMS || (!SS_STANDBY_MODE && !SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING))
+        && !SS_STANDBY_INST_SKIP_SHARED_FILE) {
         ShutdownCLOG();
         ShutdownCSNLOG();
         ShutdownMultiXact();
@@ -12450,6 +12461,15 @@ void CreateCheckPoint(int flags)
  */
 static void CheckPointGuts(XLogRecPtr checkPointRedo, int flags, bool doFullCheckpoint)
 {
+    if (ENABLE_DSS && IsInitdb && 
+        g_instance.dms_cxt.SSReformerControl.primaryInstId == INVALID_INSTANCEID) {
+        SSReadControlFile(REFORM_CTRL_PAGE);
+    }
+
+    if (SS_STANDBY_INST_SKIP_SHARED_FILE) {
+        return;
+    }
+
     gstrace_entry(GS_TRC_ID_CheckPointGuts);
     CheckPointCLOG();
     CheckPointCSNLOG();
