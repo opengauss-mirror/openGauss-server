@@ -1327,17 +1327,27 @@ void SnapshotNameSpace::SleepCheckInterrupt(uint32 minutes)
 static void SleepToNextTS(TimestampTz nextTimeStamp)
 {
     const int ONE_SECOND = 1000000;
-    while (!t_thrd.perf_snap_cxt.request_snapshot && (GetCurrentTimestamp() < nextTimeStamp)) {
-        if (t_thrd.perf_snap_cxt.need_exit) {
+
+    /* exit,request,got_SIGHUP early exit from sleep */
+    while (GetCurrentTimestamp() < nextTimeStamp) {
+        if (t_thrd.perf_snap_cxt.need_exit ||
+            t_thrd.perf_snap_cxt.request_snapshot ||
+            t_thrd.perf_snap_cxt.got_SIGHUP) {
             break;
         }
         pg_usleep(ONE_SECOND);
     }
 }
 
-static TimestampTz GetNextSnapshotTS(TimestampTz currTS)
+static TimestampTz GetNextSnapshotTS(TimestampTz lastSnapTS)
 {
-    return currTS + u_sess->attr.attr_common.wdr_snapshot_interval * USECS_PER_MINUTE;
+    TimestampTz nextSnapTS = lastSnapTS;
+
+    /* a snapshot has token on nextSnapTS,we need get nextSnapTS */
+    while (GetCurrentTimestamp() >= nextSnapTS) {
+        nextSnapTS += u_sess->attr.attr_common.wdr_snapshot_interval * USECS_PER_MINUTE;
+    }
+    return nextSnapTS;
 }
 
 static void ProcessSignal(void)
@@ -1556,7 +1566,8 @@ void InitSnapshot()
 void SnapshotNameSpace::SubSnapshotMain(void)
 {
     pgstat_report_activity(STATE_RUNNING, NULL);
-    TimestampTz next_timestamp = GetCurrentTimestamp();
+    TimestampTz last_auto_time = GetCurrentTimestamp();
+    TimestampTz next_auto_time = last_auto_time;
     const int SLEEP_GAP_AFTER_ERROR = 1;
     InitSnapshot();
     u_sess->attr.attr_common.ExitOnAnyError = false;
@@ -1569,34 +1580,30 @@ void SnapshotNameSpace::SubSnapshotMain(void)
         check_snapshot_thd_exit();
 
         ReloadInfo();
-        if (!t_thrd.perf_snap_cxt.request_snapshot) {
-            next_timestamp = GetNextSnapshotTS(GetCurrentTimestamp());
-        }
         PG_TRY();
         {
-            pgstat_report_activity(STATE_RUNNING, NULL);
-            ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot start")));
-            start_xact_command();
-            PushActiveSnapshot(GetTransactionSnapshot());
-            SnapshotNameSpace::take_snapshot();
-            PopActiveSnapshot();
-            finish_xact_command();
-            if (OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
-                pgstat_report_stat(true);
+            /* create snapshot if user_request or arriver at next_auto time,
+             * be careful not mess the auto interval snapshot-creating schedule */
+            if (t_thrd.perf_snap_cxt.request_snapshot || GetCurrentTimestamp() >= next_auto_time) {
+                last_auto_time = t_thrd.perf_snap_cxt.request_snapshot ? last_auto_time : GetCurrentTimestamp();
+                pgstat_report_activity(STATE_RUNNING, NULL);
+                ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot start")));
+                start_xact_command();
+                PushActiveSnapshot(GetTransactionSnapshot());
+                SnapshotNameSpace::take_snapshot();
+                PopActiveSnapshot();
+                finish_xact_command();
+                if (OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
+                    pgstat_report_stat(true);
+                }
+                ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot end")));
+                t_thrd.perf_snap_cxt.request_snapshot = false;
+                pgstat_report_activity(STATE_IDLE, NULL);
             }
-            ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot end")));
-
-            /*  a snapshot has token on next_timestamp, we need get next_timestamp */
-            while (GetCurrentTimestamp() >= next_timestamp) {
-                next_timestamp = GetNextSnapshotTS(next_timestamp);
-            }
-            t_thrd.perf_snap_cxt.request_snapshot = false;
-            pgstat_report_activity(STATE_IDLE, NULL);
-            if (t_thrd.perf_snap_cxt.got_SIGHUP) {
-                t_thrd.perf_snap_cxt.got_SIGHUP = false;
-                ProcessConfigFile(PGC_SIGHUP);
-            }
-            SleepToNextTS(next_timestamp);
+            /* next time to create snapshot */
+            next_auto_time = GetNextSnapshotTS(last_auto_time);
+            /* Sleep until next time */
+            SleepToNextTS(next_auto_time);
         }
         PG_CATCH();
         {
