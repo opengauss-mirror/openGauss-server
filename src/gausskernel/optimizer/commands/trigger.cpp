@@ -113,6 +113,8 @@ inline bool IsReplicatedRelationWithoutPK(Relation rel, AttrNumber* indexed_col,
 }
 #endif
 
+extern HeapTuple SearchUserHostName(const char* userName, Oid* oid);
+
 /*
  * Create a trigger.  Returns the OID of the created trigger.
  *
@@ -259,7 +261,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
     if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
         Oid curuser = GetUserId();
         if (stmt->definer) {
-            HeapTuple roletuple = SearchSysCache1(AUTHNAME, PointerGetDatum(stmt->definer));
+            HeapTuple roletuple = SearchUserHostName(stmt->definer, NULL);
             if (!HeapTupleIsValid(roletuple)) {
                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" is not exists", stmt->definer)));
             }

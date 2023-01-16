@@ -5719,6 +5719,7 @@ void select_best_grantor(
     }
 }
 
+extern HeapTuple SearchUserHostName(const char* userName, Oid* oid);
 /*
  * get_role_oid - Given a role name, look up the role's OID.
  *
@@ -5727,11 +5728,14 @@ void select_best_grantor(
  */
 Oid get_role_oid(const char* rolname, bool missing_ok)
 {
-    Oid oid;
+    Oid oid = InvalidOid;
 
     /* Functions which use cache in clientauth need hold interrupts for safe. */
     HOLD_INTERRUPTS();
-    oid = GetSysCacheOid1(AUTHNAME, CStringGetDatum(rolname));
+    HeapTuple tuple = NULL;
+    tuple = SearchUserHostName(rolname, &oid);
+    if (HeapTupleIsValid(tuple))
+        ReleaseSysCache(tuple);
     RESUME_INTERRUPTS();
     CHECK_FOR_INTERRUPTS();
     if (!OidIsValid(oid) && !missing_ok)

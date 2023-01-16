@@ -245,6 +245,17 @@ static HeapTuple GetDatabaseTuple(const char* dbname)
     return tuple;
 }
 
+char* GetDatabaseCompatibility(const char* dbname)
+{
+    if (!dbname)
+        return NULL;
+    HeapTuple tuple = GetDatabaseTuple(dbname);
+    if (!tuple)
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database %s does not exist", dbname)));
+    Form_pg_database dbform = (Form_pg_database)GETSTRUCT(tuple);
+    return dbform->datcompatibility.data;
+}
+
 /*
  * GetDatabaseTupleByOid -- as above, but search by database OID
  */

@@ -947,6 +947,7 @@ void CheckCreateFunctionPrivilege(Oid namespaceId, const char* funcname)
     }
 }
 
+extern HeapTuple SearchUserHostName(const char* userName, Oid* oid);
 /*
  * CreateFunction
  *	 Execute a CREATE FUNCTION utility statement.
@@ -1062,11 +1063,9 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
 
     if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT) {
         if (stmt->definer) {
-            HeapTuple roletuple = SearchSysCache1(AUTHNAME, PointerGetDatum(stmt->definer));
-
+            HeapTuple roletuple = SearchUserHostName(stmt->definer, NULL);
             if (!HeapTupleIsValid(roletuple))
                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", stmt->definer)));
-
             proowner = HeapTupleGetOid(roletuple);
             ReleaseSysCache(roletuple);
         }

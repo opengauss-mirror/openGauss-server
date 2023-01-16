@@ -642,7 +642,7 @@ Oid get_pgxc_logic_groupoid(const char* rolename)
     Oid group_id;
     HeapTuple roleTup;
 
-    roleTup = SearchSysCache1(AUTHNAME, CStringGetDatum(rolename));
+    roleTup = SearchUserHostName(rolename, NULL);
 
     if (!HeapTupleIsValid(roleTup)) {
         return InvalidOid;
@@ -874,7 +874,7 @@ void InitializeSessionUserId(const char* rolename, bool ispoolerreuse, Oid usero
     }
 
     if (rolename != NULL) {
-        roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename));
+        roleTup = SearchUserHostName(rolename, NULL);
     } else {
         roleTup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(useroid));
     }

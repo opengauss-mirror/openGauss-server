@@ -1073,3 +1073,6 @@ test: alter_foreign_schema
 
 # test for slow_sql
 test: slow_sql
+# test user@host
+test: user_host_test
+

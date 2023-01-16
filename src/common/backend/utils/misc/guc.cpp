@@ -1187,6 +1187,17 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"test_user_host",
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("test_user_host"),
+            NULL},
+            &u_sess->attr.attr_common.test_user_host,
+            false,
+            NULL,
+            NULL,
+            NULL},
         /* Not for general use --- used by SET SESSION AUTHORIZATION */
         {{"is_sysadmin",
             PGC_INTERNAL,
@@ -11971,7 +11982,7 @@ bool check_double_parameter(double* newval, void** extra, GucSource source)
  * Check permission for SET ROLE and SET SESSION AUTHORIZATION
  */
 static void check_setrole_permission(const char* rolename, char* passwd, bool IsSetRole) {
-    HeapTuple roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename));
+    HeapTuple roleTup = SearchUserHostName(rolename, NULL);
     if (!HeapTupleIsValid(roleTup)) {
         str_reset(passwd);
         if (IsSetRole) {
@@ -12057,7 +12068,7 @@ static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSet
     /* AccessShareLock is enough for SELECT*/
     pg_authid_rel = heap_open(AuthIdRelationId, AccessShareLock);
     pg_authid_dsc = RelationGetDescr(pg_authid_rel);
-    tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename));
+    tuple = SearchUserHostName(rolename, NULL);
 
     if (!HeapTupleIsValid(tuple)) {
         str_reset(passwd);
