@@ -29,6 +29,8 @@
 #include "executor/node/nodeTrainModel.h"
 #include "db4ai/db4ai_api.h"
 
+static TupleTableSlot* ExecTrainModel(PlanState* state);
+
 static bool ExecFetchTrainModel(void *callback_data, ModelTuple * tuple)
 {
     TrainModelState *pstate = (TrainModelState*)callback_data;
@@ -92,6 +94,7 @@ TrainModelState* ExecInitTrainModel(TrainModel* pnode, EState* estate, int eflag
     pstate->config = pnode;
     pstate->algorithm = palgo;
     pstate->finished = 0;
+    pstate->ss.ps.ExecProcNode = ExecTrainModel;
     
     // Tuple table initialization
     ExecInitScanTupleSlot(estate, &pstate->ss);
@@ -140,8 +143,9 @@ TrainModelState* ExecInitTrainModel(TrainModel* pnode, EState* estate, int eflag
     return pstate;
 }
 
-TupleTableSlot* ExecTrainModel(TrainModelState* pstate)
+static TupleTableSlot* ExecTrainModel(PlanState* state)
 {
+    TrainModelState* pstate = castNode(TrainModelState, state);
     // check if already finished
     if (pstate->finished == pstate->config->configurations)
         return NULL;

@@ -252,16 +252,55 @@ extern void EvalPlanQualBegin(EPQState* epqstate, EState* parentestate, bool isU
 extern void EvalPlanQualEnd(EPQState* epqstate);
 
 /*
- * prototypes from functions in execProcnode.c
+ * functions in execProcnode.c
  */
 extern PlanState* ExecInitNode(Plan* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecProcNode(PlanState* node);
 extern Node* MultiExecProcNode(PlanState* node);
 extern void ExecEndNode(PlanState* node);
 extern bool NeedStubExecution(Plan* plan);
 extern TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos);
 
 extern long ExecGetPlanMemCost(Plan* node);
+
+/* ----------------------------------------------------------------
+ *		ExecProcNode
+ *
+ *		Execute the given node to return a(nother) tuple.
+ * ----------------------------------------------------------------
+ */
+#ifndef FRONTEND
+#ifndef ENABLE_MULTIPLE_NODES
+
+static inline TupleTableSlot *ExecProcNode(PlanState *node)
+{
+    TupleTableSlot* result;
+    Assert(node->ExecProcNode);
+    if (unlikely(node->nodeContext)) {
+        MemoryContext old_context = MemoryContextSwitchTo(node->nodeContext); /* Switch to Node Level Memory Context */
+        if (node->chgParam != NULL) /* something changed? */
+            ExecReScan(node);       /* let ReScan handle this */
+        result = node->ExecProcNode(node);
+        MemoryContextSwitchTo(old_context);
+    } else {
+        if (node->chgParam != NULL) /* something changed? */
+            ExecReScan(node);
+        result = node->ExecProcNode(node);
+    }
+    node->ps_rownum++;
+    return result;
+}
+#else  /*ENABLE_MULTIPLE_NODES*/
+
+static inline TupleTableSlot *ExecProcNode(PlanState *node)
+{
+    //TODO: FIX ENABLE_MULTIPLE_NODES
+    return NULL;
+}
+
+#endif /*ENABLE_MULTIPLE_NODES*/
+
+#endif /*FRONTEND*/
+
 
 /*
  * prototypes from functions in execQual.c

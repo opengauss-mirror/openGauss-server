@@ -40,6 +40,7 @@
 /* Returns true if doing null-fill on inner relation */
 #define HJ_FILL_INNER(hjstate) ((hjstate)->hj_NullOuterTupleSlot != NULL)
 
+static TupleTableSlot* ExecHashJoin(PlanState* state);
 static TupleTableSlot* ExecHashJoinOuterGetTuple(PlanState* outerNode, HashJoinState* hjstate, uint32* hashvalue);
 static TupleTableSlot* ExecHashJoinGetSavedTuple(
     HashJoinState* hjstate, BufFile* file, uint32* hashvalue, TupleTableSlot* tupleSlot);
@@ -55,8 +56,9 @@ static bool ExecHashJoinNewBatch(HashJoinState* hjstate);
  * ----------------------------------------------------------------
  */
 /* return: a tuple or NULL */
-TupleTableSlot* ExecHashJoin(HashJoinState* node)
+static TupleTableSlot* ExecHashJoin(PlanState* state)
 {
+    HashJoinState* node = castNode(HashJoinState, state);
     PlanState* outerNode = NULL;
     HashState* hashNode = NULL;
     List* joinqual = NIL;
@@ -67,7 +69,7 @@ TupleTableSlot* ExecHashJoin(HashJoinState* node)
     TupleTableSlot* outerTupleSlot = NULL;
     uint32 hashvalue;
     int batchno;
-    MemoryContext oldcxt;
+    MemoryContext oldcxt = NULL;
     JoinType jointype;
 
     /*
@@ -107,6 +109,14 @@ TupleTableSlot* ExecHashJoin(HashJoinState* node)
      * run the hash join state machine
      */
     for (;;) {
+        /*
+         * It's possible to iterate this loop many times before returning a
+         * tuple, in some pathological cases such as needing to move much of
+         * the current batch to a later batch.  So let's check for interrupts
+         * each time through.
+         */
+        CHECK_FOR_INTERRUPTS();
+        
         switch (node->hj_JoinState) {
             case HJ_BUILD_HASHTABLE: {
                 /*
@@ -170,10 +180,19 @@ TupleTableSlot* ExecHashJoin(HashJoinState* node)
                 /*
                  * create the hash table, sometimes we should keep nulls
                  */
-                oldcxt = MemoryContextSwitchTo(hashNode->ps.nodeContext);
+                if (hashNode->ps.nodeContext) {
+                    /*enable_memory_limit*/
+                    oldcxt = MemoryContextSwitchTo(hashNode->ps.nodeContext);
+                }
+
                 hashtable = ExecHashTableCreate((Hash*)hashNode->ps.plan, node->hj_HashOperators,
                     HJ_FILL_INNER(node) || node->js.nulleqqual != NIL);
-                MemoryContextSwitchTo(oldcxt);
+                    
+                if (oldcxt) {
+                    /*enable_memory_limit*/
+                    MemoryContextSwitchTo(oldcxt);
+                }
+                
                 node->hj_HashTable = hashtable;
 
                 /*
@@ -528,6 +547,7 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     hjstate->js.ps.state = estate;
     hjstate->hj_streamBothSides = node->streamBothSides;
     hjstate->hj_rebuildHashtable = node->rebuildHashTable;
+    hjstate->js.ps.ExecProcNode = ExecHashJoin;
 
     /*
      * Miscellaneous initialization

@@ -100,6 +100,7 @@ static void RecoredGeneratedExpr(ResultRelInfo *resultRelInfo, EState *estate, C
 #define DatumGetItemPointer(X) ((ItemPointer)DatumGetPointer(X))
 #endif
 
+static TupleTableSlot* ExecModifyTable(PlanState* state);
 extern CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool isInsertSelect);
 extern void deinitCopyFromManager(CopyFromManager mgr);
 extern void FlushInsertSelectBulk(
@@ -3310,8 +3311,9 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
  *		if needed.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecModifyTable(ModifyTableState* node)
+static TupleTableSlot* ExecModifyTable(PlanState* state)
 {
+    ModifyTableState* node = castNode(ModifyTableState, state);
     EState* estate = node->ps.state;
     CmdType operation = node->operation;
     ResultRelInfo* saved_result_rel_info = NULL;
@@ -3341,6 +3343,9 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
     int2 bucketid = InvalidBktId;
     List *partition_list = NIL;
     int resultRelationNum = node->mt_ResultTupleSlots ? list_length(node->mt_ResultTupleSlots) : 1;
+
+    CHECK_FOR_INTERRUPTS();
+    
     /*
      * This should NOT get called during EvalPlanQual; we should have passed a
      * subplan tree to EvalPlanQual, instead.  Use a runtime test not just
@@ -3814,6 +3819,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     mt_state->ps.plan = (Plan*)node;
     mt_state->ps.state = estate;
     mt_state->ps.targetlist = NIL; /* not actually used */
+    mt_state->ps.ExecProcNode = ExecModifyTable;
 
     mt_state->operation = operation;
     mt_state->canSetTag = node->canSetTag;

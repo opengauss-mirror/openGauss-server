@@ -63,6 +63,7 @@
 #include "nodes/makefuncs.h"
 #include "optimizer/pruning.h"
 
+static TupleTableSlot* ExecBitmapHeapScan(PlanState* state);
 static TupleTableSlot* BitmapHbucketTblNext(BitmapHeapScanState* node);
 static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node);
 bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres,
@@ -610,8 +611,9 @@ static bool BitmapHeapRecheck(BitmapHeapScanState* node, TupleTableSlot* slot)
  *		ExecBitmapHeapScan(node)
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecBitmapHeapScan(BitmapHeapScanState* node)
+static TupleTableSlot* ExecBitmapHeapScan(PlanState* state)
 {
+    BitmapHeapScanState* node = castNode(BitmapHeapScanState, state);
     return ExecScan(&node->ss, node->ss.ScanNextMtd, (ExecScanRecheckMtd)BitmapHeapRecheck);
 }
 
@@ -768,6 +770,7 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
     scanstate->ss.isPartTbl = node->scan.isPartTbl;
     scanstate->ss.currentSlot = 0;
     scanstate->ss.partScanDirection = node->scan.partScanDirection;
+    scanstate->ss.ps.ExecProcNode = ExecBitmapHeapScan;
 
     /* initialize Global partition index scan information */
     GPIScanInit(&scanstate->gpi_scan);

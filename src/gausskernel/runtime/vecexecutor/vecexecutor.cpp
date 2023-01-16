@@ -142,7 +142,7 @@ static bool NeedStub(const Plan* node)
 VectorBatch* VectorEngine(PlanState* node)
 {
     VectorBatch* result = NULL;
-    MemoryContext old_context;
+    MemoryContext old_context = NULL;
 
     CHECK_FOR_INTERRUPTS();
 
@@ -156,7 +156,9 @@ VectorBatch* VectorEngine(PlanState* node)
 #endif
     Assert(node->vectorized);
 
-    old_context = MemoryContextSwitchTo(node->nodeContext);
+    if (node->nodeContext) {
+        old_context = MemoryContextSwitchTo(node->nodeContext);
+    }
 
     if (node->chgParam != NULL) /* something changed */
         VecExecReScan(node);    /* let ReScan handle this */
@@ -204,8 +206,9 @@ VectorBatch* VectorEngine(PlanState* node)
             node->instrument->status = true;
     }
 
-    (void)MemoryContextSwitchTo(old_context);
-
+    if (old_context) {
+        (void)MemoryContextSwitchTo(old_context);
+    }
     return result;
 }
 

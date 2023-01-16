@@ -46,6 +46,7 @@ typedef enum StartWithOpExecStatus {
 
 char* get_typename(Oid typid);
 
+static TupleTableSlot* ExecStartWithOp(PlanState* state);
 static void ProcessPseudoReturnColumns(StartWithOpState *state);
 static AttrNumber FetchRUItrTargetEntryResno(StartWithOpState *state);
 
@@ -251,6 +252,8 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
+
+    state->ps.ExecProcNode = ExecStartWithOp;
 
     /*
      * Miscellaneous initialization
@@ -605,8 +608,9 @@ TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot
     return dstSlot;
 }
 
-TupleTableSlot* ExecStartWithOp(StartWithOpState *node)
+static TupleTableSlot* ExecStartWithOp(PlanState* state)
 {
+    StartWithOpState *node = castNode(StartWithOpState, state);
     TupleTableSlot *dstSlot = node->ps.ps_ResultTupleSlot;
     PlanState      *outerNode = outerPlanState(node);
     StartWithOp    *swplan = (StartWithOp *)node->ps.plan;

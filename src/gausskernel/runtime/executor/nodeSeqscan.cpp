@@ -51,6 +51,7 @@
 #include "optimizer/var.h"
 #include "optimizer/tlist.h"
 
+static TupleTableSlot* ExecSeqScan(PlanState* state);
 extern void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, int* quantity, int* trigger);
 /* ----------------------------------------------------------------
  *		prefetch_pages
@@ -374,9 +375,10 @@ static ScanBatchResult *SeqNextBatchMode(SeqScanState *node)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecSeqScan(SeqScanState* node)
+static TupleTableSlot* ExecSeqScan(PlanState* state)
 {
-    if (node->scanBatchMode) {
+    SeqScanState* node = castNode(SeqScanState, state);
+    if (unlikely(node->scanBatchMode)) {
         return (TupleTableSlot *)SeqNextBatchMode(node);
     } else {
         return ExecScan((ScanState *) node, node->ScanNextMtd, (ExecScanRecheckMtd) SeqRecheck);
@@ -948,6 +950,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
     scanstate->currentSlot = 0;
     scanstate->partScanDirection = node->partScanDirection;
     scanstate->rangeScanInRedis = {false,0,0};
+    scanstate->ps.ExecProcNode = ExecSeqScan;
 
     if (!node->tablesample) {
         scanstate->isSampleScan = false;

@@ -55,6 +55,7 @@
 
 THR_LOCAL int global_iteration = 0;
 
+static TupleTableSlot* ExecRecursiveUnion(PlanState* state);
 static SyncController* create_stream_synccontroller(Stream* stream_node);
 static SyncController* create_recursiveunion_synccontroller(RecursiveUnion* ru_node);
 static List* getSpecialSubPlanStateNodes(const PlanState* node);
@@ -165,8 +166,9 @@ static void markIterationStats(RecursiveUnionState* node, bool isSW)
  * 2.6 go back to 2.2
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
+static TupleTableSlot* ExecRecursiveUnion(PlanState* state)
 {
+    RecursiveUnionState* node = castNode(RecursiveUnionState, state);
     PlanState* outer_plan = outerPlanState(node);
     PlanState* inner_plan = innerPlanState(node);
     RecursiveUnion* plan = (RecursiveUnion*)node->ps.plan;
@@ -181,6 +183,8 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
             build_hash_table(node);
         }
     }
+
+    CHECK_FOR_INTERRUPTS();
 
     /* 1. Evaluate non-recursive term */
     if (!node->recursing) {
@@ -504,6 +508,7 @@ RecursiveUnionState* ExecInitRecursiveUnion(RecursiveUnion* node, EState* estate
     rustate->hashtable = NULL;
     rustate->tempContext = NULL;
     rustate->tableContext = NULL;
+    rustate->ps.ExecProcNode = ExecRecursiveUnion;
 
     /* initialize processing state */
     rustate->recursing = false;

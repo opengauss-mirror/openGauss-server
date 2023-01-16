@@ -70,6 +70,7 @@
 #include "optimizer/dataskew.h"
 #include "instruments/instr_unique_sql.h"
 
+static TupleTableSlot* ExecStream(PlanState* state);
 static void CheckStreamMatchInfo(
     StreamFlowCheckInfo checkInfo, int plan_node_id, List* consumerExecNode, int consumerDop, bool isLocalStream);
 static void InitStream(StreamFlowCtl* ctl, StreamTransType type);
@@ -2132,6 +2133,7 @@ StreamState* ExecInitStream(Stream* node, EState* estate, int eflags)
     state->isReady = false;
     state->vector_output = false;
     state->StreamScan = ScanStreamByLibcomm;
+    state->ss.ps.ExecProcNode = ExecStream;
 
     if (STREAM_IS_LOCAL_NODE(node->smpDesc.distriType)) {
         state->StreamScan = ScanMemoryStream;
@@ -2169,8 +2171,9 @@ StreamState* ExecInitStream(Stream* node, EState* estate, int eflags)
     return state;
 }
 
-TupleTableSlot* ExecStream(StreamState* node)
+static TupleTableSlot* ExecStream(PlanState* state)
 {
+    StreamState* node = castNode(StreamState, state);
     if (unlikely(node->isReady == false)) {
         StreamPrepareRequest(node);
 

@@ -19,11 +19,6 @@
  * -------------------------------------------------------------------------
  */
 /*
- *	 INTERFACE ROUTINES
- *		ExecInitNode	-		initialize a plan node and its subplans
- *		ExecProcNode	-		get a tuple by executing the plan node
- *		ExecEndNode		-		shut down a plan node and its subplans
- *
  *	 NOTES
  *		This used to be three files.  It is now all combined into
  *		one file so that it is easier to keep ExecInitNode, ExecProcNode,
@@ -164,6 +159,8 @@
 #include "gstrace/executer_gstrace.h"
 #include "executor/node/nodeTrainModel.h"
 #define NODENAMELEN 64
+static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
+static TupleTableSlot *ExecProcNodeInstr(PlanState *node);
 
 /*
  * Function to determine a plannode should be processed in stub-routine when exec_nodes
@@ -453,6 +450,13 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
         return NULL;
     }
 
+    /*
+     * Make sure there's enough stack available. Need to check here, in
+     * addition to ExecProcNode() (via ExecProcNodeFirst()), to ensure the
+     * stack isn't overrun while initializing the node tree.
+     */
+    check_stack_depth();
+
     gstrace_entry(GS_TRC_ID_ExecInitNode);
 
     if (!StreamTopConsumerAmI())
@@ -503,6 +507,13 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
 
     /* Set the nodeContext */
     result->nodeContext = node_context;
+    
+    /*
+     * Add a wrapper around the ExecProcNode callback that checks stack depth
+     * during the first execution.
+     */
+    result->ExecProcNodeReal = result->ExecProcNode;
+    result->ExecProcNode = ExecProcNodeFirst;
 
     /*
      * Initialize any initPlans present in this node.  The planner put them in
@@ -601,112 +612,12 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
     return result;
 }
 
-TupleTableSlot* ExecProcNodeByType(PlanState* node)
+static TupleTableSlot* ExecProcNodeInstr(PlanState* node)
 {
-    TupleTableSlot* result = NULL;
-    switch (nodeTag(node)) {
-        case T_ResultState:
-            return ExecResult((ResultState*)node);
-        case T_ModifyTableState:
-        case T_DistInsertSelectState:
-            return ExecModifyTable((ModifyTableState*)node);
-        case T_AppendState:
-            return ExecAppend((AppendState*)node);
-        case T_MergeAppendState:
-            return ExecMergeAppend((MergeAppendState*)node);
-        case T_RecursiveUnionState:
-            return ExecRecursiveUnion((RecursiveUnionState*)node);
-        case T_StartWithOpState:
-            return ExecStartWithOp((StartWithOpState*)node);
-        case T_SeqScanState:
-            return ExecSeqScan((SeqScanState*)node);
-        case T_IndexScanState:
-            return ExecIndexScan((IndexScanState*)node);
-        case T_IndexOnlyScanState:
-            return ExecIndexOnlyScan((IndexOnlyScanState*)node);
-        case T_BitmapHeapScanState:
-            return ExecBitmapHeapScan((BitmapHeapScanState*)node);
-        case T_TidScanState:
-            return ExecTidScan((TidScanState*)node);
-        case T_SubqueryScanState:
-            return ExecSubqueryScan((SubqueryScanState*)node);
-        case T_FunctionScanState:
-            return ExecFunctionScan((FunctionScanState*)node);
-        case T_ValuesScanState:
-            return ExecValuesScan((ValuesScanState*)node);
-        case T_CteScanState:
-            return ExecCteScan((CteScanState*)node);
-        case T_WorkTableScanState:
-            return ExecWorkTableScan((WorkTableScanState*)node);
-        case T_ForeignScanState:
-            return ExecForeignScan((ForeignScanState*)node);
-        case T_ExtensiblePlanState:
-            return ExecExtensiblePlan((ExtensiblePlanState*)node);
-            /*
-             * join nodes
-             */
-        case T_NestLoopState:
-            return ExecNestLoop((NestLoopState*)node);
-        case T_MergeJoinState:
-            return ExecMergeJoin((MergeJoinState*)node);
-        case T_HashJoinState:
-            return ExecHashJoin((HashJoinState*)node);
+    TupleTableSlot *result;
+    InstrStartNode(node->instrument);
+    result = node->ExecProcNodeReal(node);
 
-            /*
-             * partition iterator node
-             */
-        case T_PartIteratorState:
-            return ExecPartIterator((PartIteratorState*)node);
-            /*
-             * materialization nodes
-             */
-        case T_MaterialState:
-            return ExecMaterial((MaterialState*)node);
-        case T_SortState:
-            return ExecSort((SortState*)node);
-        case T_GroupState:
-            return ExecGroup((GroupState*)node);
-        case T_AggState:
-            return ExecAgg((AggState*)node);
-        case T_WindowAggState:
-            return ExecWindowAgg((WindowAggState*)node);
-        case T_UniqueState:
-            return ExecUnique((UniqueState*)node);
-        case T_HashState:
-            return ExecHash();
-        case T_SetOpState:
-            return ExecSetOp((SetOpState*)node);
-        case T_LockRowsState:
-            return ExecLockRows((LockRowsState*)node);
-        case T_LimitState:
-            return ExecLimit((LimitState*)node);
-        case T_VecToRowState:
-            return ExecVecToRow((VecToRowState*)node);
-#ifdef PGXC
-        case T_RemoteQueryState:
-            t_thrd.pgxc_cxt.GlobalNetInstr = node->instrument;
-            result = ExecRemoteQuery((RemoteQueryState*)node);
-            t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
-            return result;
-#endif
-        case T_StreamState:
-            t_thrd.pgxc_cxt.GlobalNetInstr = node->instrument;
-            result = ExecStream((StreamState*)node);
-            t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
-            return result;
-        case T_TrainModelState:
-            return ExecTrainModel((TrainModelState*)node);
-        default:
-            ereport(ERROR,
-                (errmodule(MOD_EXECUTOR),
-                    errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmsg("unrecognized node type: %d when executing executor node.", (int)nodeTag(node))));
-            return NULL;
-    }
-}
-
-void ExecProcNodeInstr(PlanState* node, TupleTableSlot* result)
-{
     switch (nodeTag(node)) {
         case T_ModifyTableState:
         case T_DistInsertSelectState:
@@ -751,296 +662,36 @@ void ExecProcNodeInstr(PlanState* node, TupleTableSlot* result)
 
     if (TupIsNull(result))
         node->instrument->status = true;
-}
-
-typedef TupleTableSlot* (*ExecProcFuncType)(PlanState* node);
-
-static inline TupleTableSlot *DefaultExecProc(PlanState *node)
-{
-    ereport(ERROR,
-        (errmodule(MOD_EXECUTOR),
-            errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-            errmsg("unrecognized node type: %d when executing executor node.", (int)nodeTag(node))));
-    return NULL;
-}
-
-static inline TupleTableSlot *ExecResultWrap(PlanState *node)
-{
-    return ExecResult((ResultState*)node);
-};
-
-static inline TupleTableSlot *ExecVecToRowWrap(PlanState *node)
-{
-    return ExecVecToRow((VecToRowState*)node);
-}
-
-static inline TupleTableSlot *ExecModifyTableWrap(PlanState *node)
-{
-    return ExecModifyTable((ModifyTableState*)node);
-};
-
-static inline TupleTableSlot *ExecAppendWrap(PlanState *node)
-{
-    return ExecAppend((AppendState*)node);
-};
-
-static inline TupleTableSlot *ExecPartIteratorWrap(PlanState *node)
-{
-    return ExecPartIterator((PartIteratorState*)node);
-};
-
-static inline TupleTableSlot *ExecMergeAppendWrap(PlanState *node)
-{
-    return ExecMergeAppend((MergeAppendState*)node);
-};
-
-static inline TupleTableSlot *ExecRecursiveUnionWrap(PlanState *node)
-{
-    return ExecRecursiveUnion((RecursiveUnionState*)node);
-};
-
-static inline TupleTableSlot *ExecStartWithOpWrap(PlanState *node)
-{
-    return ExecStartWithOp((StartWithOpState*)node);
-};
-
-static inline TupleTableSlot *ExecSeqScanWrap(PlanState *node)
-{
-    return ExecSeqScan((SeqScanState *)node);
-};
-
-static inline TupleTableSlot *ExecIndexScanWrap(PlanState *node)
-{
-    return ExecIndexScan((IndexScanState *)node);
-};
-
-static inline TupleTableSlot *ExecIndexOnlyScanWrap(PlanState *node)
-{
-    return ExecIndexOnlyScan((IndexOnlyScanState *)node);
-};
-
-static inline TupleTableSlot *ExecBitmapHeapScanWrap(PlanState *node)
-{
-    return ExecBitmapHeapScan((BitmapHeapScanState *)node);
-};
-
-static inline TupleTableSlot *ExecTidScanWrap(PlanState *node)
-{
-    return ExecTidScan((TidScanState *)node);
-};
-
-static inline TupleTableSlot *ExecSubqueryScanWrap(PlanState *node)
-{
-    return ExecSubqueryScan((SubqueryScanState *)node);
-};
-
-static inline TupleTableSlot *ExecFunctionScanWrap(PlanState *node)
-{
-    return ExecFunctionScan((FunctionScanState *)node);
-};
-
-static inline TupleTableSlot *ExecValuesScanWrap(PlanState *node)
-{
-    return ExecValuesScan((ValuesScanState *)node);
-};
-
-static inline TupleTableSlot *ExecCteScanWrap(PlanState *node)
-{
-    return ExecCteScan((CteScanState *)node);
-};
-
-static inline TupleTableSlot *ExecWorkTableScanWrap(PlanState *node)
-{
-    return ExecWorkTableScan((WorkTableScanState *)node);
-};
-
-static inline TupleTableSlot *ExecForeignScanWrap(PlanState *node)
-{
-    return ExecForeignScan((ForeignScanState *)node);
-};
-
-static inline TupleTableSlot *ExecExtensiblePlanWrap(PlanState *node)
-{
-    return ExecExtensiblePlan((ExtensiblePlanState *)node);
-};
-
-static inline TupleTableSlot *ExecNestLoopWrap(PlanState *node)
-{
-    return ExecNestLoop((NestLoopState *)node);
-};
-
-static inline TupleTableSlot *ExecMergeJoinWrap(PlanState *node)
-{
-    return ExecMergeJoin((MergeJoinState *)node);
-};
-
-static inline TupleTableSlot *ExecHashJoinWrap(PlanState *node)
-{
-    return ExecHashJoin((HashJoinState *)node);
-};
-
-static inline TupleTableSlot *ExecMaterialWrap(PlanState *node)
-{
-    return ExecMaterial((MaterialState *)node);
-};
-
-static inline TupleTableSlot *ExecSortWrap(PlanState *node)
-{
-    return ExecSort((SortState *)node);
-};
-
-static inline TupleTableSlot *ExecGroupWrap(PlanState *node)
-{
-    return ExecGroup((GroupState *)node);
-};
-
-static inline TupleTableSlot *ExecAggWrap(PlanState *node)
-{
-    return ExecAgg((AggState *)node);
-};
-
-static inline TupleTableSlot *ExecWindowAggWrap(PlanState *node)
-{
-    return ExecWindowAgg((WindowAggState *)node);
-};
-
-static inline TupleTableSlot *ExecUniqueWrap(PlanState *node)
-{
-    return ExecUnique((UniqueState *)node);
-};
-
-static inline TupleTableSlot *ExecHashWrap(PlanState *node)
-{
-    return ExecHash();
-};
-
-static inline TupleTableSlot *ExecSetOpWrap(PlanState *node)
-{
-    return ExecSetOp((SetOpState *)node);
-};
-
-static TupleTableSlot *ExecLockRowsWrap(PlanState *node)
-{
-    return ExecLockRows((LockRowsState *)node);
-};
-
-static inline TupleTableSlot *ExecLimitWrap(PlanState *node)
-{
-    return ExecLimit((LimitState *)node);
-};
-
-static inline TupleTableSlot *ExecRemoteQueryWrap(PlanState *node)
-{
-    return ExecRemoteQuery((RemoteQueryState *)node);
-};
-
-static inline TupleTableSlot *ExecTrainModelWrap(PlanState *node)
-{
-   return ExecTrainModel((TrainModelState*)node);
-}
-
-static inline TupleTableSlot *ExecStreamWrap(PlanState *node)
-{
-    return ExecStream((StreamState *)node);
-};
-
-ExecProcFuncType g_execProcFuncTable[] = {
-    ExecResultWrap,
-    ExecVecToRowWrap,
-    DefaultExecProc,
-    ExecModifyTableWrap,
-    ExecModifyTableWrap,
-    ExecAppendWrap,
-    ExecPartIteratorWrap,
-    ExecMergeAppendWrap,
-    ExecRecursiveUnionWrap,
-    ExecStartWithOpWrap,
-    DefaultExecProc,
-    DefaultExecProc,
-    DefaultExecProc,
-    ExecSeqScanWrap,
-    ExecIndexScanWrap,
-    ExecIndexOnlyScanWrap,
-    DefaultExecProc,
-    ExecBitmapHeapScanWrap,
-    ExecTidScanWrap,
-    ExecSubqueryScanWrap,
-    ExecFunctionScanWrap,
-    ExecValuesScanWrap,
-    ExecCteScanWrap,
-    ExecWorkTableScanWrap,
-    ExecForeignScanWrap,
-    ExecExtensiblePlanWrap,
-    DefaultExecProc,
-    ExecNestLoopWrap,
-    ExecMergeJoinWrap,
-    ExecHashJoinWrap,
-    ExecMaterialWrap,
-    ExecSortWrap,
-    ExecGroupWrap,
-    ExecAggWrap,
-    ExecWindowAggWrap,
-    ExecUniqueWrap,
-    ExecHashWrap,
-    ExecSetOpWrap,
-    ExecLockRowsWrap,
-    ExecLimitWrap,
-    ExecRemoteQueryWrap,
-    ExecTrainModelWrap,
-    ExecStreamWrap
-};
-
-/* ----------------------------------------------------------------
- *		ExecProcNode
- *
- *		Execute the given node to return a(nother) tuple.
- * ----------------------------------------------------------------
- */
-TupleTableSlot* ExecProcNode(PlanState* node)
-{
-    TupleTableSlot* result = NULL;
-
-    CHECK_FOR_INTERRUPTS();
-    MemoryContext old_context;
-
-    /* Response to stop or cancel signal. */
-#ifdef ENABLE_MULTIPLE_NODES
-    if (unlikely(executorEarlyStop())) {
-        return NULL;
-    }
-#endif
-
-    /* Switch to Node Level Memory Context */
-    old_context = MemoryContextSwitchTo(node->nodeContext);
-
-    if (node->chgParam != NULL) { /* something changed */
-        ExecReScan(node);       /* let ReScan handle this */
-    }
-    
-    if (node->instrument != NULL) {
-        InstrStartNode(node->instrument);
-    }
-
-#ifdef ENABLE_MULTIPLE_NODES
-    if (unlikely(planstate_need_stub(node))) {
-        result = ExecProcNodeStub(node);
-    } else
-#endif
-    {
-        int index = (int)(nodeTag(node))-T_ResultState;
-        Assert(index >= 0 && index <= T_StreamState - T_ResultState);
-        result = g_execProcFuncTable[index](node);
-    }
-
-    if (node->instrument != NULL) {
-        ExecProcNodeInstr(node, result);
-    }
-
-    MemoryContextSwitchTo(old_context);
-
-    node->ps_rownum++;
 
     return result;
+}
+
+/*
+ * ExecProcNode wrapper that performs some one-time checks, before calling
+ * the relevant node method (possibly via an instrumentation wrapper).
+ */
+static TupleTableSlot *ExecProcNodeFirst(PlanState *node)
+{
+    /*
+     * Perform stack depth check during the first execution of the node.  We
+     * only do so the first time round because it turns out to not be cheap on
+     * some common architectures (eg. x86).  This relies on the assumption that
+     * ExecProcNode calls for a given plan node will always be made at roughly
+     * the same stack depth.
+     */
+    check_stack_depth();
+
+    /*
+     * If instrumentation is required, change the wrapper to one that just
+     * does instrumentation.  Otherwise we can dispense with all wrappers and
+     * have ExecProcNode() directly call the relevant function from now on.
+     */
+    if (node->instrument)
+        node->ExecProcNode = ExecProcNodeInstr;
+    else
+        node->ExecProcNode = node->ExecProcNodeReal;
+
+    return node->ExecProcNode(node);
 }
 
 /* ----------------------------------------------------------------
@@ -1059,12 +710,16 @@ TupleTableSlot* ExecProcNode(PlanState* node)
 Node* MultiExecProcNode(PlanState* node)
 {
     Node* result = NULL;
-    MemoryContext old_context;
+    MemoryContext old_context = NULL;
+
+    check_stack_depth();
 
     CHECK_FOR_INTERRUPTS();
 
-    /* Switch to Node Level Memory Context */
-    old_context = MemoryContextSwitchTo(node->nodeContext);
+    if (unlikely(node->nodeContext)) {
+        /* Switch to Node Level Memory Context */
+        old_context = MemoryContextSwitchTo(node->nodeContext);
+    }
 
     if (node->chgParam != NULL) { /* something changed */
         ExecReScan(node);       /* let ReScan handle this */
@@ -1104,7 +759,9 @@ Node* MultiExecProcNode(PlanState* node)
         node->instrument->memoryinfo.operatorMemory = node->plan->operatorMemKB[0];
     }
 
-    MemoryContextSwitchTo(old_context);
+    if (unlikely(old_context)) {
+        MemoryContextSwitchTo(old_context);
+    }
 
     return result;
 }
@@ -1620,6 +1277,7 @@ void ExecEndNode(PlanState* node)
     if (node == NULL) {
         return;
     }
+    check_stack_depth();
     cleanup_sensitive_information();
     if (node->chgParam != NULL) {
         bms_free_ext(node->chgParam);

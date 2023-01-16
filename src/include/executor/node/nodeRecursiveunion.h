@@ -215,7 +215,6 @@ typedef struct RecursiveRefContext {
 extern void set_recursive_cteplan_ref(Plan* node, RecursiveRefContext* context);
 
 extern RecursiveUnionState* ExecInitRecursiveUnion(RecursiveUnion* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node);
 extern void ExecEndRecursiveUnion(RecursiveUnionState* node);
 extern void ExecReScanRecursiveUnion(RecursiveUnionState* node);
 extern bool IsFirstLevelStreamStateNode(StreamState* node);

@@ -21,7 +21,6 @@
 #define BUCKET_OVERHEAD 8
 
 extern HashState* ExecInitHash(Hash* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecHash(void);
 extern Node* MultiExecHash(HashState* node);
 extern void ExecEndHash(HashState* node);
 extern void ExecReScanHash(HashState* node);

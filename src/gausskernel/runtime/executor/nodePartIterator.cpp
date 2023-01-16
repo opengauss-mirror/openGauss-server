@@ -33,6 +33,7 @@
 #include "nodes/plannodes.h"
 #include "vecexecutor/vecnodes.h"
 
+static TupleTableSlot* ExecPartIterator(PlanState* state);
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -47,6 +48,7 @@ PartIteratorState* ExecInitPartIterator(PartIterator* node, EState* estate, int 
     state = makeNode(PartIteratorState);
     state->ps.plan = (Plan*)node;
     state->ps.state = estate;
+     state->ps.ExecProcNode = ExecPartIterator;
 
     /* initiate sub node */
     state->ps.lefttree = ExecInitNode(node->plan.lefttree, estate, eflags);
@@ -150,8 +152,9 @@ static void InitScanPartition(PartIteratorState* node, int partitionScan, PlanSt
  *			: table. it is like a monitor. The real job is done by SeqScan .e.g
  * Notes		:
  */
-TupleTableSlot* ExecPartIterator(PartIteratorState* node)
+static TupleTableSlot* ExecPartIterator(PlanState* planState)
 {
+    PartIteratorState* node = castNode(PartIteratorState, planState);
     TupleTableSlot* slot = NULL;
     EState* state = node->ps.lefttree->state;
     node->ps.lefttree->do_not_reset_rownum = true;
@@ -166,6 +169,8 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
         /* return NULL if no partition is selected */
         return NULL;
     }
+
+    CHECK_FOR_INTERRUPTS();
 
     /* init first scanned partition */
     if (node->currentItr == -1)
@@ -205,6 +210,8 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
 
         /* switch to next partiiton */
         InitScanPartition(node, partitionScan, noden);
+
+        CHECK_FOR_INTERRUPTS();
 
         /* For partition wise join, can not early free left tree's caching memory */
         orig_early_free = state->es_skip_early_free;

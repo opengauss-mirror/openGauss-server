@@ -22,7 +22,6 @@ typedef TupleTableSlot* (*ExecUpdateMtd)(ItemPointer, Oid, Oid, HeapTupleHeader,
                         TupleTableSlot*, EPQState*, ModifyTableState*, bool, bool);
 
 extern ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecModifyTable(ModifyTableState* node);
 extern void ExecEndModifyTable(ModifyTableState* node);
 extern void ExecReScanModifyTable(ModifyTableState* node);
 extern void RecordDeletedTuple(Oid relid, int2 bucketid, const ItemPointer tupleid, const Relation deldelta_rel);

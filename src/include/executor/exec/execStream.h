@@ -118,7 +118,6 @@ typedef struct StreamState {
 } StreamState;
 
 extern StreamState* ExecInitStream(Stream* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecStream(StreamState* node);
 extern void ExecEndStream(StreamState* node);
 extern int HandleStreamResponse(PGXCNodeHandle* conn, StreamState* node);
 extern void StreamPrepareRequest(StreamState* node);

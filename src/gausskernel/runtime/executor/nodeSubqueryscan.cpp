@@ -30,6 +30,7 @@
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeSubqueryscan.h"
 
+static TupleTableSlot* ExecSubqueryScan(PlanState* state);
 static TupleTableSlot* SubqueryNext(SubqueryScanState* node);
 
 /* ----------------------------------------------------------------
@@ -77,8 +78,9 @@ static bool SubqueryRecheck(SubqueryScanState* node, TupleTableSlot* slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecSubqueryScan(SubqueryScanState* node)
+static TupleTableSlot* ExecSubqueryScan(PlanState* state)
 {
+    SubqueryScanState* node = castNode(SubqueryScanState, state);
     return ExecScan(&node->ss, (ExecScanAccessMtd)SubqueryNext, (ExecScanRecheckMtd)SubqueryRecheck);
 }
 
@@ -101,6 +103,8 @@ SubqueryScanState* ExecInitSubqueryScan(SubqueryScan* node, EState* estate, int 
     SubqueryScanState* sub_query_state = makeNode(SubqueryScanState);
     sub_query_state->ss.ps.plan = (Plan*)node;
     sub_query_state->ss.ps.state = estate;
+    sub_query_state->ss.ps.ExecProcNode = ExecSubqueryScan;
+
 
     /*
      * Miscellaneous initialization

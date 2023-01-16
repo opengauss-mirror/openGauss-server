@@ -134,6 +134,7 @@ typedef enum {
 
 #define MarkInnerTuple(inner_tuple_slot, merge_state) ExecCopySlot((merge_state)->mj_MarkedTupleSlot, (inner_tuple_slot))
 
+static TupleTableSlot* ExecMergeJoin(PlanState* state);
 /*
  * MJExamineQuals
  *
@@ -549,14 +550,17 @@ static void ExecMergeTupleDump(MergeJoinState* merge_state)
  *		ExecMergeJoin
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecMergeJoin(MergeJoinState* node)
+static TupleTableSlot* ExecMergeJoin(PlanState* state)
 {
+    MergeJoinState* node = castNode(MergeJoinState, state);
     bool qual_result = false;
     int compare_result;
     TupleTableSlot* inner_tuple_slot = NULL;
     TupleTableSlot* outer_tuple_slot = NULL;
     ExprDoneCond isDone;
 
+    CHECK_FOR_INTERRUPTS();
+    
     /*
      * get information from node
      */
@@ -1406,6 +1410,7 @@ MergeJoinState* ExecInitMergeJoin(MergeJoin* node, EState* estate, int eflags)
     MergeJoinState* merge_state = makeNode(MergeJoinState);
     merge_state->js.ps.plan = (Plan*)node;
     merge_state->js.ps.state = estate;
+    merge_state->js.ps.ExecProcNode = ExecMergeJoin;
 
     /*
      * Miscellaneous initialization

@@ -62,14 +62,17 @@
  *		'nil' if the constant qualification is not satisfied.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecResult(ResultState* node)
+static TupleTableSlot* ExecResult(PlanState* state)
 {
+    ResultState* node = castNode(ResultState, state);
     TupleTableSlot* outer_tuple_slot = NULL;
     TupleTableSlot* result_slot = NULL;
     PlanState* outer_plan = NULL;
     ExprDoneCond is_done;
     ExprContext* econtext = node->ps.ps_ExprContext;
 
+    CHECK_FOR_INTERRUPTS();
+    
     /*
      * check constant qualifications like (2 > 1), if not already done
      */
@@ -223,6 +226,7 @@ ResultState* ExecInitResult(BaseResult* node, EState* estate, int eflags)
     ResultState* resstate = makeNode(ResultState);
     resstate->ps.plan = (Plan*)node;
     resstate->ps.state = estate;
+    resstate->ps.ExecProcNode = ExecResult;
 
     resstate->rs_done = false;
     resstate->rs_checkqual = (node->resconstantqual == NULL) ? false : true;

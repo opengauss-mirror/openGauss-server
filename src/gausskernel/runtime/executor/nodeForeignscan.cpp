@@ -41,6 +41,7 @@
 
 #include "utils/knl_relcache.h"
 
+static TupleTableSlot* ExecForeignScan(PlanState* state);
 static TupleTableSlot* ForeignNext(ForeignScanState* node);
 static bool ForeignRecheck(ForeignScanState* node, TupleTableSlot* slot);
 
@@ -99,8 +100,9 @@ static bool ForeignRecheck(ForeignScanState* node, TupleTableSlot* slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecForeignScan(ForeignScanState* node)
+static TupleTableSlot* ExecForeignScan(PlanState* state)
 {
+    ForeignScanState* node = castNode(ForeignScanState, state);
     return ExecScan((ScanState*)node, (ExecScanAccessMtd)ForeignNext, (ExecScanRecheckMtd)ForeignRecheck);
 }
 
@@ -126,6 +128,7 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
     scanstate = makeNode(ForeignScanState);
     scanstate->ss.ps.plan = (Plan*)node;
     scanstate->ss.ps.state = estate;
+    scanstate->ss.ps.ExecProcNode = ExecForeignScan;
 
     /*
      * Miscellaneous initialization
