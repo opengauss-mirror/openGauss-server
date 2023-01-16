@@ -92,8 +92,8 @@ typedef enum
     IDEN_SCROLL,
     IDEN_DETERMINISTIC,
 	IDEN_PACKAGE,
-    IDEN_BUTT,
-    IDEN_SELECT
+    IDEN_SELECT,
+    IDEN_BUTT
 }GramIdentify;
 
 /*
@@ -2277,7 +2277,7 @@ analyze_state(const char* text,PsqlScanStateData* state)
 	if (0 == state->count_to_read)
 		return;
 	/*if we set delimiter to other word, don`t let Begin(xp) work*/
-	if (state->is_b_format && strcmp(state->delimiter_name, ";") != 0)
+	if (state->is_b_format && state->delimiter_name && strcmp(state->delimiter_name, ";") != 0)
 		return;
 	state->count_to_read--;  
 	keyValue = keywordRead(text);
@@ -2343,7 +2343,9 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			}
 			state->gram_state[IDEN_AS] = true;
 			state->gram_state[IDEN_IS] = true;
-			state->gram_state[IDEN_SELECT] = true;
+			if (state->is_b_format) {
+  				state->gram_state[IDEN_SELECT] = true;
+			}
 			state->include_ora_comment = true;
 			state->count_to_read = -1;
 			break;
