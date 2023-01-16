@@ -441,8 +441,9 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
         (g_instance.attr.attr_storage.dcf_attr.enable_dcf ? \
         g_instance.attr.attr_storage.dcf_attr.dcf_max_workers : 0)
 
-#define NUM_DMS_REFORM_CALLLBACK_PROCS (3)
+#define NUM_DMS_REFORM_CALLLBACK_PROCS (5)
 #define NUM_DMS_LSNR_CALLBACK_PROC (1)
+#define NUM_DMS_SMON_CALLBACK_PROC (1)
 #define NUM_DMS_RDMA_THREAD_CNT (g_instance.attr.attr_storage.dms_attr.work_thread_count * 2)
 #define NUM_DMS_CALLBACK_PROCS \
         (g_instance.attr.attr_storage.dms_attr.enable_dms ? \
@@ -451,6 +452,7 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
         g_instance.attr.attr_storage.dms_attr.work_thread_count :      \
         NUM_DMS_RDMA_THREAD_CNT) + \
         NUM_DMS_LSNR_CALLBACK_PROC + \
+        NUM_DMS_SMON_CALLBACK_PROC + \
         NUM_DMS_REFORM_CALLLBACK_PROCS ) : 0)
 
 #define GLOBAL_ALL_PROCS \
