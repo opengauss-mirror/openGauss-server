@@ -78,11 +78,21 @@ static int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char
 
             return fd;
         }
-        if (FILE_POSSIBLY_DELETED(errno)) { /* unexpected failure? */
+        if (!FILE_POSSIBLY_DELETED(errno)) { 
             ereport(PANIC, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %m", path,
                                                               XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
         }
     }
+
+    /* Couldn't find it.  For simplicity, complain about front timeline */
+    errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", SS_XLOGDIR,
+                         t_thrd.xlog_cxt.recoveryTargetTLI, (uint32)((segno) / XLogSegmentsPerXLogId),
+                         (uint32)((segno) % XLogSegmentsPerXLogId));
+    securec_check_ss(errorno, "", "");
+
+    errno = ENOENT;
+    ereport(emode, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %m", path,
+                                                      XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno)))); 
 
     return -1;
 }

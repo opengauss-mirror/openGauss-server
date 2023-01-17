@@ -5030,7 +5030,7 @@ static void assign_replconninfo1(const char* newval, void* extra)
         /* perceive single --> primary_standby */
         if (t_thrd.postmaster_cxt.HaShmData != NULL &&
             t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE &&
-            !GetReplCurArrayIsNull()) {
+            !GetReplCurArrayIsNull() && !g_instance.attr.attr_storage.dms_attr.enable_dms) {
                 t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;
                 NotifyGscHotStandby();
         }
