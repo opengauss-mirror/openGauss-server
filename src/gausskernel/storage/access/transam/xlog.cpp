@@ -9683,10 +9683,19 @@ void StartupXLOG(void)
      * in SS Switchover, skip dw init since we didn't do ShutdownXLOG
      */
 
-    if (!SS_PERFORMING_SWITCHOVER && !SSFAILOVER_TRIGGER && !ENABLE_DMS) {
+    if ((ENABLE_REFORM && ((SS_REFORM_REFORMER && !SSFAILOVER_TRIGGER && !SS_PRIMARY_DEMOTED) ||
+        (SS_REFORM_PARTNER && SS_STANDBY_PROMOTING))) ||
+        !ENABLE_DMS || !ENABLE_REFORM) {
         /* process assist file of chunk recycling */
         dw_ext_init();
         dw_init();
+        if (ENABLE_DMS) {
+            g_instance.dms_cxt.dw_init = true;
+        }
+    }
+
+    if (SS_IN_FAILOVER && SS_REFORM_REFORMER) {
+        ss_failover_dw_init();
     }
 
     /* Recover meta of undo subsystem. */

@@ -271,8 +271,12 @@ void dw_ext_init();
  */
 inline bool dw_enabled()
 {
-    if (ENABLE_DMS) {
-        return false;
+    if (ENABLE_DMS && ENABLE_REFORM) {
+        if ((SS_STANDBY_PROMOTING && t_thrd.role != STARTUP && !g_instance.dms_cxt.dw_init) ||
+            (SS_STANDBY_MODE && !SS_STANDBY_PROMOTING) || SS_PRIMARY_DEMOTED ||
+            (SS_STANDBY_FAILOVER && t_thrd.role != STARTUP && !g_instance.dms_cxt.dw_init)) {
+            return false;
+        }
     }
     return (ENABLE_INCRE_CKPT && g_instance.attr.attr_storage.enable_double_write);
 }

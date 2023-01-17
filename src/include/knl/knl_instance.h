@@ -1199,6 +1199,7 @@ typedef struct knl_g_dms_context {
     XLogRecPtr ckptRedo;
     bool resetSyscache;
     bool finishedRecoverOldPrimaryDWFile;
+    bool dw_init;
 } knl_g_dms_context;
 
 typedef struct knl_instance_context {
