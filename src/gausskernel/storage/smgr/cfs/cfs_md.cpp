@@ -172,7 +172,7 @@ void CfsWriteBack(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, B
             pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
             if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
                 pca_buf_free_page(ctrl, location, false);
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                ereport(DEBUG1, (errcode(ERRCODE_DATA_CORRUPTED),
                 errmsg("Failed to CfsWriteBack %s, headerNum: %u.", FilePathName(location.fd), location.headerNum)));
             }
             CfsExtentHeader *cfsExtentHeader = ctrl->pca_page;
@@ -262,6 +262,9 @@ size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBloc
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
+        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
+            return 0;
+        }
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
             errmsg("Failed to CfsWritePage %s, headerNum: %u.", FilePathName(location.fd), location.headerNum)));
     }
