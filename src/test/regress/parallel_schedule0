@@ -944,6 +944,8 @@ test: row_compression/twophase
 test: component_view_enhancements 
 test: single_node_user_mapping
 
+test: pldebugger_shutdown
+
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
 test: publication
 test: subscription

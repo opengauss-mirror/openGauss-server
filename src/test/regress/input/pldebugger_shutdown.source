@@ -1,0 +1,74 @@
+-------------------------------------
+-- 测试pldebugger在调试过程中不会阻塞停库
+-------------------------------------
+
+-- initdb
+\! mkdir -p @abs_srcdir@/tmp_check/pldebugger_shutdown
+\! rm -rf @abs_srcdir@/tmp_check/pldebugger_shutdown/*
+-- */
+\! @abs_bindir@/gs_initdb -w test@123 -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode --nodename='datanode_pldebugger_shutdow' > @abs_srcdir@/tmp_check/pldebugger_shutdown/initdb.log 2>&1
+
+-- 设置参数
+\! port=`expr @portstring@ + 5` && (netstat -nlt | grep $port)
+\! port=`expr @portstring@ + 5 + 1` && (netstat -nlt | grep $port)
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode -c "port=$port" 2>&1 | grep Success
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode -c "log_directory='@abs_srcdir@/tmp_check/pldebugger_shutdown/log'" 2>&1 | grep Success
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode -c "enable_thread_pool=off" 2>&1 | grep Success
+
+-- start
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode > @abs_srcdir@/tmp_check/pldebugger_shutdown/start.log 2>&1
+\! sleep 5
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "show log_directory; show enable_thread_pool;"
+
+-- create function
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "create or replace function func_test_pldbg_shutdown(inout id numeric(6,1)) as \$\$ begin id := id + 10; return; end \$\$ language plpgsql;"
+
+
+-- 通过 pg_cancel_backend() 取消调试函数
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "select func_test_pldbg_shutdown(1); select dbe_pldebugger.turn_on(oid) from pg_proc where proname = 'func_test_pldbg_shutdown'; select func_test_pldbg_shutdown(1);" > @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log 2>&1 &
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "select pg_sleep(1); select pg_cancel_backend(pid) from pg_stat_activity where query = 'select func_test_pldbg_shutdown(1);' and state = 'active';"
+
+\! sleep 3
+\! cat @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log
+
+-- 通过 pg_terminate_backend() 取消调试函数
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "select func_test_pldbg_shutdown(1); select dbe_pldebugger.turn_on(oid) from pg_proc where proname = 'func_test_pldbg_shutdown'; select func_test_pldbg_shutdown(1);" > @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log 2>&1 &
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "select pg_sleep(2); select pg_terminate_backend(pid) from pg_stat_activity where query = 'select func_test_pldbg_shutdown(1);' and state = 'active';"
+
+\! sleep 3
+\! cat @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log
+
+-- 测试调试函数过程中，停止数据库
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "select func_test_pldbg_shutdown(1); select dbe_pldebugger.turn_on(oid) from pg_proc where proname = 'func_test_pldbg_shutdown'; select func_test_pldbg_shutdown(1);" > @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log 2>&1 &
+\! sleep 3
+
+\! @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode | grep running
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode > @abs_srcdir@/tmp_check/pldebugger_shutdown/stop.log 2>&1
+\! sleep 5
+\! @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode | grep running
+
+\! cat @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log
+
+
+-------
+-- enable_thread_pool=on
+-------
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode -c "enable_thread_pool=on" 2>&1 | grep Success
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode > @abs_srcdir@/tmp_check/pldebugger_shutdown/start2.log 2>&1
+\! sleep 5
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "show enable_thread_pool;"
+
+-- 测试调试函数过程中，停止数据库
+\! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "select func_test_pldbg_shutdown(1); select dbe_pldebugger.turn_on(oid) from pg_proc where proname = 'func_test_pldbg_shutdown'; select func_test_pldbg_shutdown(1);" > @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log 2>&1 &
+\! sleep 3
+
+\! @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode | grep running
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode > @abs_srcdir@/tmp_check/pldebugger_shutdown/stop2.log 2>&1
+\! sleep 5
+\! @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode | grep running
+
+\! cat @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log
+
+
+-- 清理
+\! @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode || rm -rf @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode
