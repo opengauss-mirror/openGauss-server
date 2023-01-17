@@ -759,10 +759,13 @@ static void execute_sql_string(const char* sql, const char* filename)
 
                 FreeQueryDesc(qdesc);
             } else {
-                ProcessUtility(stmt,
-                    query_string,
-                    NULL,
-                    false, /* not top level */
+                processutility_context proutility_cxt;
+                proutility_cxt.parse_tree = stmt;
+                proutility_cxt.query_string = query_string;
+                proutility_cxt.readOnlyTree = false;
+                proutility_cxt.params = NULL;
+                proutility_cxt.is_top_level = false;  /* not top level */
+                ProcessUtility(&proutility_cxt,
                     dest,
 #ifdef PGXC
                     true, /* this is created at remote node level */

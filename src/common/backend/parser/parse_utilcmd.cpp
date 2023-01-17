@@ -11,10 +11,6 @@
  * Hence these functions are now called at the start of execution of their
  * respective utility commands.
  *
- * NOTE: in general we must avoid scribbling on the passed-in raw parse
- * tree, since it might be in a plan cache.  The simplest solution is
- * a quick copyObject() call before manipulating the query tree.
- *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -242,11 +238,6 @@ Oid *namespaceid, bool isFirstNode)
     Oid existing_relid;
     bool is_ledger_nsp = false;
     bool is_row_table = is_ledger_rowstore(stmt->options);
-    /*
-     * We must not scribble on the passed-in CreateStmt, so copy it.  (This is
-     * overkill, but easy.)
-     */
-    stmt = (CreateStmt*)copyObject(stmt);
     
     if (uuids != NIL) {
         list_free_deep(stmt->uuids);
@@ -4046,12 +4037,6 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
     ListCell* l = NULL;
     int crossbucketopt = -1; /* -1 means the SQL statement doesn't contain crossbucket option */
 
-    /*
-     * We must not scribble on the passed-in IndexStmt, so copy it.  (This is
-     * overkill, but easy.)
-     */
-    stmt = (IndexStmt*)copyObject(stmt);
-
     /* Set up pstate */
     pstate = make_parsestate(NULL);
     pstate->p_sourcetext = queryString;
@@ -4285,9 +4270,6 @@ static bool IsElementExisted(List* indexElements, IndexElem* ielem)
  *
  * actions and whereClause are output parameters that receive the
  * transformed results.
- *
- * Note that we must not scribble on the passed-in RuleStmt, so we do
- * copyObject() on the actions and WHERE clause.
  */
 void transformRuleStmt(RuleStmt* stmt, const char* queryString, List** actions, Node** whereClause)
 {
@@ -4363,7 +4345,7 @@ void transformRuleStmt(RuleStmt* stmt, const char* queryString, List** actions, 
     }
 
     /* take care of the where clause */
-    *whereClause = transformWhereClause(pstate, (Node*)copyObject(stmt->whereClause), "WHERE");
+    *whereClause = transformWhereClause(pstate, stmt->whereClause, "WHERE");
     /* we have to fix its collations too */
     assign_expr_collations(pstate, *whereClause);
 
@@ -4434,7 +4416,7 @@ void transformRuleStmt(RuleStmt* stmt, const char* queryString, List** actions, 
             addRTEtoQuery(sub_pstate, newrte, false, true, false);
 
             /* Transform the rule action statement */
-            top_subqry = transformStmt(sub_pstate, (Node*)copyObject(action));
+            top_subqry = transformStmt(sub_pstate, action);
             /*
              * We cannot support utility-statement actions (eg NOTIFY) with
              * nonempty rule WHERE conditions, because there's no way to make
@@ -4597,11 +4579,6 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
     SplitPartitionState* splitDefState = NULL;
     ListCell* cell = NULL;
 
-    /*
-     * We must not scribble on the passed-in AlterTableStmt, so copy it. (This
-     * is overkill, but easy.)
-     */
-    stmt = (AlterTableStmt*)copyObject(stmt);
     /* Caller is responsible for locking the relation */
     rel = relation_open(relid, NoLock);
     if (IS_FOREIGNTABLE(rel) || IS_STREAM_TABLE(rel)) {

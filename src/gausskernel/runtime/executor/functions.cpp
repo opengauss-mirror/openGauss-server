@@ -828,10 +828,13 @@ static bool postquel_getnext(execution_state* es, SQLFunctionCachePtr fcache)
 
     if (es->qd->utilitystmt) {
         /* ProcessUtility needs the PlannedStmt for DECLARE CURSOR */
-        ProcessUtility((es->qd->plannedstmt ? (Node*)es->qd->plannedstmt : es->qd->utilitystmt),
-            fcache->src,
-            es->qd->params,
-            false, /* not top level */
+        processutility_context proutility_cxt;
+        proutility_cxt.parse_tree = (es->qd->plannedstmt ? (Node*)es->qd->plannedstmt : es->qd->utilitystmt);
+        proutility_cxt.query_string = fcache->src;
+        proutility_cxt.readOnlyTree = false;
+        proutility_cxt.params = es->qd->params;
+        proutility_cxt.is_top_level = false;  /* not top level */
+        ProcessUtility(&proutility_cxt,
             es->qd->dest,
 #ifdef PGXC
             false,

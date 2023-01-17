@@ -329,10 +329,13 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
             rquery->is_send_bucket_map = true;
         }
         /* do this step */
-        ProcessUtility(stmt_tmp,
-            queryString,
-            NULL,
-            false, /* not top level */
+        processutility_context proutility_cxt;
+        proutility_cxt.parse_tree = stmt_tmp;
+        proutility_cxt.query_string = queryString;
+        proutility_cxt.readOnlyTree = false;
+        proutility_cxt.params = NULL;
+        proutility_cxt.is_top_level = false;  /* not top level */
+        ProcessUtility(&proutility_cxt,
             None_Receiver,
 #ifdef PGXC
             true,

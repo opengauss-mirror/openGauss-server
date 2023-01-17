@@ -2369,14 +2369,8 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
         /*
          * Run parse analysis and rewrite.	Note this also acquires sufficient
          * locks on the source table(s).
-         *
-         * Because the parser and planner tend to scribble on their input, we
-         * make a preliminary copy of the source querytree.  This prevents
-         * problems in the case that the COPY is in a portal or plpgsql
-         * function and is executed repeatedly.  (See also the same hack in
-         * DECLARE CURSOR and PREPARE.)
          */
-        rewritten = pg_analyze_and_rewrite((Node*)copyObject(raw_query), queryString, NULL, 0);
+        rewritten = pg_analyze_and_rewrite(raw_query, queryString, NULL, 0);
 
         /* We don't expect more or less than one result query */
         if (list_length(rewritten) != 1)

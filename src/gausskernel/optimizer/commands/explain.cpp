@@ -434,15 +434,9 @@ void ExplainQuery(
      * rewriter.  We do not do AcquireRewriteLocks: we assume the query either
      * came straight from the parser, or suitable locks were acquired by
      * plancache.c.
-     *
-     * Because the rewriter and planner tend to scribble on the input, we make
-     * a preliminary copy of the source querytree.	This prevents problems in
-     * the case that the EXPLAIN is in a portal or plpgsql function and is
-     * executed repeatedly.  (See also the same hack in DECLARE CURSOR and
-     * PREPARE.)
      */
     AssertEreport(IsA(stmt->query, Query), MOD_EXECUTOR, "unexpect query type");
-    rewritten = QueryRewrite((Query*)copyObject(stmt->query));
+    rewritten = QueryRewrite(castNode(Query, stmt->query));
 
     /* emit opening boilerplate */
     ExplainBeginOutput(&es);

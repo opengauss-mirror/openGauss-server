@@ -1189,10 +1189,13 @@ static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid)
         fkcon->initially_valid = true;
 
         /* ... and execute it */
-        ProcessUtility((Node*)atstmt,
-            "(generated ALTER TABLE ADD FOREIGN KEY command)",
-            NULL,
-            false,
+        processutility_context proutility_cxt;
+        proutility_cxt.parse_tree = (Node*)atstmt;
+        proutility_cxt.query_string = "(generated ALTER TABLE ADD FOREIGN KEY command)";
+        proutility_cxt.readOnlyTree = false;
+        proutility_cxt.params = NULL;
+        proutility_cxt.is_top_level = false;
+        ProcessUtility(&proutility_cxt,
             None_Receiver,
 #ifdef PGXC
             false,

@@ -745,7 +745,14 @@ static void InitLobTempToastNamespace(void)
         toastNamespaceName,
         bootstrap_username);
     securec_check_ss(ret, "\0", "\0");
-    ProcessUtility((Node*)create_stmt, str, NULL, false, None_Receiver, false, NULL);
+
+    processutility_context proutility_cxt;
+    proutility_cxt.parse_tree = (Node*)create_stmt;
+    proutility_cxt.query_string = str;
+    proutility_cxt.readOnlyTree = false;
+    proutility_cxt.params = NULL;
+    proutility_cxt.is_top_level = false;
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
 
     /* Advance command counter to make namespace visible */
     CommandCounterIncrement();
