@@ -18958,7 +18958,6 @@ Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval)
     Oid target_oid = InvalidOid;
     int target_mod = -1;
     Node* expr = NULL;
-    Node* target_expr = NULL;
 
     Assert(src);
 
@@ -18973,28 +18972,11 @@ Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval)
         return NULL;
     }
 
-    switch (nodeTag(expr)) {
-        /* do nothing for Const */
-        case T_Const:
-            target_expr = expr;
-            break;
-
-        /* get return value for function expression */
-        case T_FuncExpr: {
-            FuncExpr* funcexpr = (FuncExpr*)expr;
-            expr = (Node*)evaluate_expr(
-                (Expr*)funcexpr, exprType((Node*)funcexpr), exprTypmod((Node*)funcexpr), funcexpr->funccollid);
-            if (T_Const == nodeTag((Node*)expr)) {
-                target_expr = expr;
-            }
-        } break;
-
-        default:
-            target_expr = NULL;
-            break;
+    expr = eval_const_expressions(NULL, expr);
+    if (expr == NULL || nodeTag(expr) != T_Const) {
+        return NULL;
     }
-
-    return target_expr;
+    return expr;
 }
 
 /*

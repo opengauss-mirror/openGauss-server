@@ -328,3 +328,42 @@ end;
 /
 drop schema fvt_other_cmd cascade;
 NOTICE:  drop cascades to table fvt_other_cmd.idex_list_partition_table_001
+reset current_schema;
+create table t_nvarchar_0013_02(
+c_nvarchar nvarchar
+) with (orientation = row) partition by list(c_nvarchar)(
+partition p1 values ('a'),
+partition p2 values ('g'),
+partition p3 values ('t'),
+partition p4 values ('u')
+);
+insert into t_nvarchar_0013_02(c_nvarchar) values ('a'::nvarchar),('g'::nvarchar),('t'::nvarchar),('u'::nvarchar);
+select * from t_nvarchar_0013_02 order by c_nvarchar;
+ c_nvarchar 
+------------
+ a
+ g
+ t
+ u
+(4 rows)
+
+update t_nvarchar_0013_02 set c_nvarchar = 'a' where c_nvarchar='z';
+select * from t_nvarchar_0013_02 order by c_nvarchar;
+ c_nvarchar 
+------------
+ a
+ g
+ t
+ u
+(4 rows)
+
+delete from t_nvarchar_0013_02 where c_nvarchar = 'g';
+select * from t_nvarchar_0013_02 order by c_nvarchar;
+ c_nvarchar 
+------------
+ a
+ t
+ u
+(3 rows)
+
+drop table t_nvarchar_0013_02;

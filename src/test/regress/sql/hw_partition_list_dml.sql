@@ -202,3 +202,20 @@ end;
 /
 
 drop schema fvt_other_cmd cascade;
+
+reset current_schema;
+create table t_nvarchar_0013_02(
+c_nvarchar nvarchar
+) with (orientation = row) partition by list(c_nvarchar)(
+partition p1 values ('a'),
+partition p2 values ('g'),
+partition p3 values ('t'),
+partition p4 values ('u')
+);
+insert into t_nvarchar_0013_02(c_nvarchar) values ('a'::nvarchar),('g'::nvarchar),('t'::nvarchar),('u'::nvarchar);
+select * from t_nvarchar_0013_02 order by c_nvarchar;
+update t_nvarchar_0013_02 set c_nvarchar = 'a' where c_nvarchar='z';
+select * from t_nvarchar_0013_02 order by c_nvarchar;
+delete from t_nvarchar_0013_02 where c_nvarchar = 'g';
+select * from t_nvarchar_0013_02 order by c_nvarchar;
+drop table t_nvarchar_0013_02;
