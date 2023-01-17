@@ -13561,6 +13561,7 @@ ThreadId initialize_util_thread(knl_thread_role role, void* payload)
     securec_check(rc, "", "");
     port.sock = PGINVALID_SOCKET;
     port.SessionVersionNum = pg_atomic_read_u32(&WorkingGrandVersionNum);
+    port.protocol_config = &default_protocol_config;
 
     if (!save_backend_variables((BackendParameters*)(thr_argv->m_thd_arg.save_para), &port)) {
         gs_thread_release_args_slot(thr_argv);
