@@ -1008,7 +1008,7 @@ test: test_astore_multixact
 test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test 
 # test: row_compression/pg_tablespace_size
 test: row_compression/twophase
-test: row_compression/row_compress_feature
+test: row_compression/row_compress_feature pldebugger_shutdown
 test: row_compression/row_compression_basebackup
 test: component_view_enhancements single_node_user_mapping
 # reindex concurrently
