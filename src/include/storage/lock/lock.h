@@ -369,6 +369,7 @@ typedef struct LOCK {
 } LOCK;
 
 #define LOCK_LOCKMETHOD(lock) ((LOCKMETHODID)(lock).tag.locktag_lockmethodid)
+#define SSLOCK_LOCKMETHOD(locallock) ((LOCKMETHODID)(locallock).tag.lock.locktag_lockmethodid)
 
 /*
  * We may have several different backends holding or awaiting locks
