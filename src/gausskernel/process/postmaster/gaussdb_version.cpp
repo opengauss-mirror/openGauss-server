@@ -458,7 +458,7 @@ int base64_decode(const unsigned char* indata, unsigned int inlen, char* outdata
     unsigned char c = 0;
     int g = 3;
 
-    if (indata == NULL || inlen <= 0 || outdata == NULL || outlen == NULL || inlen % 4 != 0) {
+    if (indata == NULL || inlen == 0 || outdata == NULL || outlen == NULL || inlen % 4 != 0) {
         ereport(WARNING, (errmsg("input arguments are error, please check those.")));
         goto error;
     }
