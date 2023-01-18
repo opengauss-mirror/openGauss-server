@@ -72,6 +72,7 @@ extern bool SSRecoveryApplyDelay(const XLogReaderState *record);
 extern void SShandle_promote_signal();
 extern void SSTriggerFailover();
 extern void ss_failover_dw_init();
+extern void ss_switchover_promoting_dw_init();
 
 
 #endif

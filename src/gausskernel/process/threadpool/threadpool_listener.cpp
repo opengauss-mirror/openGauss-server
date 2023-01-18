@@ -318,7 +318,12 @@ void ThreadPoolListener::ReaperAllSession()
                 (errmsg("No thread pool worker left while waiting for session close. "
                         "This is a very rare case when all thread pool workers happen to"
                         " encounter FATAL problems before session close.")));
-            abort();
+            /* During DMS reform, we intentionally ereport FATA for threadpool threads' force exit */
+            if (ENABLE_DMS) {
+                m_group->m_sessionCount = 0;
+            } else {
+                abort();
+            }
         }
         /* m_sessionCount should be sum of the list length of m_idleSessionList and m_readySessionList
            and worker's attached session */
