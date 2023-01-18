@@ -13293,8 +13293,11 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
      * If false, just keep log; otherwise, keep log only if walSize less than config.
      * 3.When standby is not alive in dummy standby mode, just keep log.
      * 4.Notice the users if slot is invalid
+     * 
+     * while dms and dss enable, t_thrd.xlog_cxt.server_mode only is normal_mode, we do additional
+     * check for dms and dss enabling.
      */
-    if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) {
+    if (!ENABLE_DMS && t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) {
         if (WalSndInProgress(SNDROLE_PRIMARY_BUILDSTANDBY) ||
             pg_atomic_read_u32(&g_instance.comm_cxt.current_gsrewind_count) > 0) {
             /* segno = 1 show all file should be keep */
