@@ -4257,7 +4257,7 @@ char* mask_funcs3_parameters(const char* query_string)
     return mask_string;
 }
 
-static void inline ClearYylval(const core_YYSTYPE *yylval)
+static inline void ClearYylval(const core_YYSTYPE *yylval)
 {
     int rc = memset_s(yylval->str, strlen(yylval->str), 0, strlen(yylval->str));
     securec_check(rc, "\0", "\0");
