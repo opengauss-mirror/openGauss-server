@@ -212,10 +212,27 @@ inline static void PROCLOCK_PRINT(const char *where, const PROCLOCK *proclockP)
                              proclockP->tag.myLock, PROCLOCK_LOCKMETHOD(*(proclockP)), proclockP->tag.myProc,
                              (int)proclockP->holdMask)));
 }
+
+inline static void SSLOCK_PRINT(const char *where, const LOCALLOCK *locallock, LOCKMODE type)
+{
+    if (LOCK_DEBUG_ENABLED(&locallock->tag.lock))
+        ereport(LOG,
+                (errmsg("%s: SSlock id(%u,%u,%u,%u,%u,%u,%u) type(%s)",
+                        where,
+                        locallock->tag.lock.locktag_field1,
+                        locallock->tag.lock.locktag_field2,
+                        locallock->tag.lock.locktag_field5,
+                        locallock->tag.lock.locktag_field3,
+                        locallock->tag.lock.locktag_field4,
+                        locallock->tag.lock.locktag_type,
+                        locallock->tag.lock.locktag_lockmethodid,
+                        LockMethods[SSLOCK_LOCKMETHOD(*locallock)]->lockModeNames[type])));
+}
 #else /* not LOCK_DEBUG */
 
 #define LOCK_PRINT(where, lock, type)
 #define PROCLOCK_PRINT(where, proclockP)
+#define SSLOCK_PRINT(where, lock, type)
 #endif /* not LOCK_DEBUG */
 
 static uint32 proclock_hash(const void *key, Size keysize);
@@ -4043,22 +4060,26 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
     int waitMilliSec = 0;
     int needWaitMilliSec = 0;
     TimestampTz startTime;
+    LOCKMODE lockmode;
 
     InitDmsContext(&dms_ctx);
     TransformLockTagToDmsLatch(&dlatch, locallock->tag.lock);
 
     needWaitMilliSec = (waitSec == 0) ? u_sess->attr.attr_storage.LockWaitTimeout : waitSec * SEC2MILLISEC;
     startTime = GetCurrentTimestamp();
+    lockmode = locallock->tag.mode;
 
     PG_TRY();
     {
         do {
-            if (locallock->tag.mode < AccessExclusiveLock && SS_NORMAL_STANDBY) {
+            if (lockmode < AccessExclusiveLock && SS_NORMAL_STANDBY) {
                 ret = dms_latch_timed_s(&dms_ctx, &dlatch, SS_ACQUIRE_LOCK_DO_NOT_WAIT, (unsigned char)false);
-            } else if (locallock->tag.mode >= AccessExclusiveLock && SS_NORMAL_PRIMARY) {
+            } else if (lockmode >= AccessExclusiveLock && SS_NORMAL_PRIMARY) {
                 ret = dms_latch_timed_x(&dms_ctx, &dlatch, SS_ACQUIRE_LOCK_DO_NOT_WAIT);
             } else {
+                // skip if lockmode do not meet ss lock request, or openGauss in reform process
                 skipAcquire = true;
+                break;
             }
 
             // acquire failed, and need wait
@@ -4067,8 +4088,8 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
 
                 // first entry
                 if (waitMilliSec == 0) {
-                    LOCK_PRINT("WaitOnLock: sleeping on ss_lock start", locallock->lock, locallock->tag.mode);
-                    instr_stmt_report_lock(LOCK_WAIT_START, locallock->tag.mode, &locallock->tag.lock);
+                    SSLOCK_PRINT("WaitOnLock: sleeping on ss_lock start", locallock, lockmode);
+                    instr_stmt_report_lock(LOCK_WAIT_START, lockmode, &locallock->tag.lock);
                 }
 
                 waitMilliSec = ComputeTimeStamp(startTime);
@@ -4091,7 +4112,7 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
 
     if (waitMilliSec != 0) {
         instr_stmt_report_lock(LOCK_WAIT_END);
-        LOCK_PRINT("WaitOnLock: sleeping on ss_lock end", locallock->lock, locallock->tag.mode);
+        SSLOCK_PRINT("WaitOnLock: sleeping on ss_lock end", locallock, locallock->tag.mode);
     }
 
     locallock->ssLock = ret && !skipAcquire;
