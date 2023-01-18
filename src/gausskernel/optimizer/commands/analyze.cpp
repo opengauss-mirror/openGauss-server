@@ -1059,7 +1059,7 @@ static BlockNumber estimate_cstore_blocks(
     if (totalTuples > 0 && totalTuples < total_pages)
         total_pages = totalTuples;
 
-    if (totalTuples > 0 && total_pages <= 0)
+    if (totalTuples > 0 && total_pages == 0)
         total_pages = 1;
 
     return total_pages;
