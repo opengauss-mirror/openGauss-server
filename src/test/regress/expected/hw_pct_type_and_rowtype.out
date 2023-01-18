@@ -752,6 +752,7 @@ DROP PACKAGE p_test1;
 NOTICE:  drop cascades to function sql_functionreturn.p1(type)
 DROP TABLE type;
 --test row type default value
+DROP SYNONYM tb_test;
 CREATE TABLE tb_test(a int, b int);
 create or replace package pckg_test as
 procedure proc_test(i_col1 in tb_test);
@@ -958,4 +959,3 @@ drop type if exists ctype1;
 -- clean up --
 drop schema if exists sql_compositetype_test cascade;
 drop schema if exists sql_functionreturn cascade;
-NOTICE:  drop cascades to synonym sql_functionreturn.tb_test
