@@ -7130,7 +7130,6 @@ Node *MakeDefaultSubpartition(PartitionState *partitionState, Node *partitionDef
             MakeRangeDefaultSubpartition(partitionState, partitionName, tablespacename);
         return (Node *)subPartitionDefState;
     }
-    return NULL;
 }
 
 List *addNewSubPartitionTuplesForPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespace,
