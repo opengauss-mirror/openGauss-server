@@ -405,6 +405,7 @@ null;
 end;
 /
 create synonym proc1 for proc1;
+ERROR:  synonym name is already used by an existing object
 call proc1();
  proc1 
 -------
@@ -1481,7 +1482,6 @@ drop package plpgsql_packagetype1.p_test1;
 ERROR:  package plpgsql_packagetype1.p_test1 does not exist
 -- clean up --
 drop schema if exists plpgsql_packagetype2 cascade;
-NOTICE:  drop cascades to synonym plpgsql_packagetype2.proc1
 drop schema if exists plpgsql_packagetype1 cascade;
 NOTICE:  drop cascades to 2 other objects
 --?.*

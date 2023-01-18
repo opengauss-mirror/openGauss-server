@@ -5964,6 +5964,15 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
 
     relform = (Form_pg_class)GETSTRUCT(reltup);
 
+    /* 
+     * Check relation name to ensure that it doesn't conflict with existing synonym.
+     */
+    if (!IsInitdb && GetSynonymOid(newrelname, namespaceId, true) != InvalidOid) {
+        ereport(ERROR,
+                (errmsg("relation name is already used by an existing synonym in schema \"%s\"",
+                    get_namespace_name(namespaceId))));
+    }
+
     if (get_relname_relid(newrelname, namespaceId) != InvalidOid)
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_TABLE), errmsg("relation \"%s\" already exists", newrelname)));
 
@@ -17881,6 +17890,14 @@ void AlterRelationNamespaceInternal(
      * Do nothing when there's nothing to do.
      */
     if (!object_address_present(&thisobj, objsMoved)) {
+        /* 
+         * Check relation name to ensure that it doesn't conflict with existing synonym.
+         */
+        if (!IsInitdb && GetSynonymOid(NameStr(classForm->relname), newNspOid, true) != InvalidOid) {
+            ereport(ERROR,
+                    (errmsg("relation name is already used by an existing synonym in schema \"%s\"",
+                        get_namespace_name(newNspOid))));
+        }
         /* check for duplicate name (more friendly than unique-index failure) */
         if (get_relname_relid(NameStr(classForm->relname), newNspOid) != InvalidOid)
             ereport(ERROR,

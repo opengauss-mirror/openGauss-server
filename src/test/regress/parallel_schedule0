@@ -239,6 +239,7 @@ test: single_node_triggers
 
 # Synonym tests
 #test: single_node_synonym
+test: synonym_conflict_test
 
 # unsupported view tests
 test: single_node_unsupported_view

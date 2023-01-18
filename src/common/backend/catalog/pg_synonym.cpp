@@ -112,6 +112,13 @@ void CreateSynonym(CreateSynonymStmt* stmt)
         objSchema = get_namespace_name(GetOidBySchemaName());
     }
 
+    /* 
+     * Check synonym name to ensure that it doesn't conflict with existing view, table, function, and procedure.
+     */
+    if (get_relname_relid(synName, synNamespace) != InvalidOid || get_func_oid(synName, synNamespace, NULL) != InvalidOid) {
+        ereport(ERROR, (errmsg("synonym name is already used by an existing object")));
+    }
+
     /* Main entry to create a synonym */
     SynonymCreate(synNamespace, synName, GetUserId(), objSchema, objName, stmt->replace);
 }

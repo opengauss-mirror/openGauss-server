@@ -62,6 +62,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_statistic_ext.h"
+#include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
@@ -2539,6 +2540,15 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
     Assert(IsNormalProcessingMode() || IsBootstrapProcessingMode());
 
     CheckAttributeNamesTypes(tupdesc, relkind, allow_system_table_mods);
+
+    /* 
+     * Check relation name to ensure that it doesn't conflict with existing synonym.
+     */
+    if (!IsInitdb && GetSynonymOid(relname, relnamespace, true) != InvalidOid) {
+        ereport(ERROR,
+                (errmsg("relation name is already used by an existing synonym in schema \"%s\"",
+                    get_namespace_name(relnamespace))));
+    }
 
     /*
      * This would fail later on anyway, if the relation already exists.  But
