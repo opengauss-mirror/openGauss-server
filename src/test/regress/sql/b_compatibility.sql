@@ -204,6 +204,7 @@ insert into char_test values('0','0');
 select length(a),length(b) from char_test;
 select lengthb(a),lengthb(b) from char_test;
 select bit_length(a),bit_length(b) from char_test;
+select 'ni啊shaeskeeee'::char(3);
 
 create index a on char_test(a);
 create index b on char_test(b);
