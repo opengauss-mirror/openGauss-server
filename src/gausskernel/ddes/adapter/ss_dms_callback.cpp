@@ -1031,6 +1031,31 @@ static int32 CBDrcBufRebuild(void *db_handle)
     return GS_SUCCESS;
 }
 
+static int32 CBDrcBufValidate(void *db_handle)
+{
+    /* Load Control File */
+    int src_id = SSGetPrimaryInstId();
+    SSReadControlFile(src_id, true);
+    int buf_cnt = 0;
+
+    uint32 buf_state;
+    ereport(LOG, (errmodule(MOD_DMS),
+        errmsg("[SS reform]CBDrcBufValidate starts before reform done.")));
+    for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
+        BufferDesc *buf_desc = GetBufferDescriptor(i);
+        buf_state = LockBufHdr(buf_desc);
+        if ((buf_state & BM_VALID) || (buf_state & BM_TAG_VALID)) {
+            BufValidateDrc(buf_desc);
+            buf_cnt++;
+        }
+        UnlockBufHdr(buf_desc, buf_state);
+    }
+
+    ereport(LOG, (errmodule(MOD_DMS),
+        errmsg("[SS reform]CBDrcBufValidate %d buffers success.", buf_cnt)));
+    return GS_SUCCESS;
+}
+
 // used for find bufferdesc in dms
 static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_desc)
 {
@@ -1552,4 +1577,5 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->db_is_primary = CBDbIsPrimary;
     callback->reform_done_notify = CBReformDoneNotify;
     callback->log_wait_flush = CBXLogWaitFlush;
+    callback->drc_validate = CBDrcBufValidate;
 }

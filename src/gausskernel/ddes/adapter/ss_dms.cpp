@@ -123,6 +123,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_pre_uninit));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_init_logger));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_refresh_logger));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_validate_drc));
     g_ss_dms_func.inited = true;
     return DMS_SUCCESS;
 }
@@ -319,4 +320,10 @@ int dms_reform_last_failed(void)
 void dms_pre_uninit(void)
 {
     return g_ss_dms_func.dms_pre_uninit();
+}
+
+void dms_validate_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
+    unsigned char is_dirty)
+{
+    return g_ss_dms_func.dms_validate_drc(dms_ctx, ctrl, lsn, is_dirty);
 }
