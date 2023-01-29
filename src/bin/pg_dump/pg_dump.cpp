@@ -7569,6 +7569,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
     int i_options = 0;
     int ntups = 0;
     int i_indisreplident = 0;
+    int i_indisvisible = 0;
     ArchiveHandle* AH = (ArchiveHandle*)fout;
 
     for (i = 0; i < numTables; i++) {
@@ -7621,6 +7622,11 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
                 appendPQExpBuffer(query, "i.indisreplident, ");
             } else {
                 appendPQExpBuffer(query, "false AS indisreplident, ");
+            }
+            if (is_column_exists(AH->connection, IndexRelationId, "indisvisible")) {
+                appendPQExpBuffer(query, "i.indisvisible, ");
+            } else {
+                appendPQExpBuffer(query, "true AS indisvisible, ");
             }
             appendPQExpBuffer(query,
                 "c.contype, c.conname, "
@@ -7783,6 +7789,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
         i_indnkeys = PQfnumber(res, "indnkeys");
         i_indkey = PQfnumber(res, "indkey");
         i_indisclustered = PQfnumber(res, "indisclustered");
+        i_indisvisible = PQfnumber(res, "indisvisible");
         i_indisusable = PQfnumber(res, "indisusable");
         i_indisreplident = PQfnumber(res, "indisreplident");
         i_contype = PQfnumber(res, "contype");
@@ -7830,6 +7837,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
             indxinfo[j].indisclustered = (PQgetvalue(res, j, i_indisclustered)[0] == 't');
             indxinfo[j].indisusable = (PQgetvalue(res, j, i_indisusable)[0] == 't');
             indxinfo[j].indisreplident = (PQgetvalue(res, j, i_indisreplident)[0] == 't');
+            indxinfo[j].indisvisible = (PQgetvalue(res, j, i_indisvisible)[0] == 't');
 
             if (contype == 'p' || contype == 'u' || contype == 'x') {
                 /*
@@ -22821,6 +22829,10 @@ static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxI
 
     if ((indxinfo->options != NULL) && strlen(indxinfo->options) > 0)
         appendPQExpBuffer(buf, " WITH (%s)", indxinfo->options);
+
+    if (!indxinfo->indisvisible) {
+        appendPQExpBuffer(buf, " INVISIBLE");
+    }
 
     if (coninfo->condeferrable) {
         appendPQExpBuffer(buf, " DEFERRABLE");

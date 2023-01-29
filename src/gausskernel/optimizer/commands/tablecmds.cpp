@@ -668,6 +668,7 @@ static void ATExecUnusableIndexPartition(Relation rel, const char* partition_nam
 static void ATExecUnusableIndex(Relation rel);
 static void ATUnusableGlobalIndex(Relation rel);
 static void ATExecUnusableAllIndexOnPartition(Relation rel, const char* partition_name);
+static void ATExecVisibleIndex(Relation rel, char* index_name, bool visible);
 static void ATExecModifyRowMovement(Relation rel, bool rowMovement);
 static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd);
 static void ATExecTruncateSubPartition(Relation rel, AlterTableCmd* cmd);
@@ -805,6 +806,8 @@ inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
         case AT_AddIndex:
         case AT_AddIndexConstraint:
 #endif
+        case AT_VisibleIndex:
+        case AT_InvisibleIndex:
             ret = true;
             break;
         default:
@@ -8071,6 +8074,8 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
         case AT_SetRelOptions:     /* SET (...) */
         case AT_ResetRelOptions:   /* RESET (...) */
         case AT_ReplaceRelOptions: /* reset them all, then set just these */
+        case AT_InvisibleIndex:
+        case AT_VisibleIndex:
             ATSimplePermissions(rel, ATT_TABLE | ATT_INDEX | ATT_VIEW);
             /* This command never recurses */
             /* No command-specific prep needed */
@@ -8437,6 +8442,12 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             break;
         case AT_UnusableIndex:
             ATExecUnusableIndex(rel);
+            break;
+        case AT_InvisibleIndex:
+            ATExecVisibleIndex(rel, cmd->name, false);
+            break;
+        case AT_VisibleIndex:
+            ATExecVisibleIndex(rel, cmd->name, true);
             break;
         case AT_AddIndex: /* ADD INDEX */
             ATExecAddIndex(tab, rel, (IndexStmt*)cmd->def, false, lockmode);
@@ -21603,6 +21614,48 @@ void ATExecSetIndexUsableState(Oid objclassOid, Oid objOid, bool newState)
     }
 }
 
+void ATExecSetIndexVisibleState(Oid objOid, bool newState)
+{
+    bool dirty = false;
+    Relation sys_table = NULL;
+    HeapTuple sys_tuple = NULL;
+    bool isNull = false;
+
+    sys_table = relation_open(IndexRelationId, RowExclusiveLock);
+
+    // update the indisvisible field
+    sys_tuple = SearchSysCacheCopy1(INDEXRELID, ObjectIdGetDatum(objOid));
+    if (sys_tuple) {
+        Datum oldState = heap_getattr(sys_tuple, Anum_pg_index_indisvisible, RelationGetDescr(sys_table), &isNull);
+        dirty = (isNull || BoolGetDatum(oldState) != newState);
+
+        /* Keep the system catalog indexes current. */
+        if (dirty) {
+            HeapTuple newitup = NULL;
+            Datum values[Natts_pg_index];
+            bool nulls[Natts_pg_class];
+            bool replaces[Natts_pg_class];
+            errno_t rc;
+            rc = memset_s(values, sizeof(values), 0, sizeof(values));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+            securec_check(rc, "\0", "\0");
+
+            replaces[Anum_pg_index_indisvisible - 1] = true;
+            values[Anum_pg_index_indisvisible - 1] = DatumGetBool(newState);
+
+            newitup = (HeapTuple)tableam_tops_modify_tuple(sys_tuple, RelationGetDescr(sys_table), values, nulls, replaces);
+            simple_heap_update(sys_table, &(sys_tuple->t_self), newitup);
+            CatalogUpdateIndexes(sys_table, newitup);
+            tableam_tops_free_tuple(newitup);
+        }
+        tableam_tops_free_tuple(sys_tuple);
+    }
+    relation_close(sys_table, RowExclusiveLock);
+}
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -21840,6 +21893,39 @@ static void ATExecUnusableIndex(Relation rel)
     UpdatePgObjectChangecsn(heapOid, heapRelation->rd_rel->relkind);
     // close heap relation but maintain the lock.
     relation_close(heapRelation, NoLock);
+}
+
+static void ATExecVisibleIndex(Relation rel, char* index_name, bool visible)
+{
+    ListCell* index = NULL;
+    bool found = false;
+
+    if (!RelationIsRelation(rel))
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("can not set visible for relation %s, as it is not a ordinary table",
+                    RelationGetRelationName(rel))));
+
+    foreach (index, RelationGetIndexList(rel, true)) {
+        Oid indexId = lfirst_oid(index);
+        Relation indexRel = index_open(indexId, AccessShareLock);
+        if (strcmp(index_name, RelationGetRelationName(indexRel)) != 0) {
+            index_close(indexRel, AccessShareLock);
+            continue;
+        }
+        index_close(indexRel, AccessShareLock);
+
+        ATExecSetIndexVisibleState(indexId, visible);
+
+        found = true;
+        break;
+    }
+
+    if (!found) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("index \"%s\" of relation \"%s\" does not exist",
+                index_name, RelationGetRelationName(rel))));
+    }
 }
 
 /*

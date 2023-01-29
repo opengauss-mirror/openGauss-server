@@ -3554,6 +3554,10 @@ static char *pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid *exclud
                     (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", tblspc)));
         }
 
+        if (!GetIndexVisibleStateByTuple(ht_idx)) {
+            appendStringInfo(&buf, " INVISIBLE");
+        }
+
         /*
          * If it's a partial index, decompile and append the predicate
          */
