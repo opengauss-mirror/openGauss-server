@@ -9342,9 +9342,13 @@ static void sigusr1_handler(SIGNAL_ARGS)
         PostmasterStateMachine();
     }
 
-    if (SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && pmState == PM_RUN &&
-        (mode = CheckSwitchoverSignal())) {
-        SSDoSwitchover();
+    if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
+        if (SS_NORMAL_STANDBY && pmState == PM_RUN) {
+            SSDoSwitchover();
+        } else {
+            ereport(LOG, (errmsg("Current mode is not NORMAL STANDBY, SS switchover command ignored.")));
+        }
+        
     }
 
     if ((mode = CheckSwitchoverSignal()) != 0 && WalRcvIsOnline() && DataRcvIsOnline() &&
