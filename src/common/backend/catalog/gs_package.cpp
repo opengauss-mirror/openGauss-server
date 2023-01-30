@@ -1750,10 +1750,9 @@ bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
         } else if (inArgNum1 == inArgNum2 && length1 != length2) {
             char message[MAXSTRLEN], funcname[MAXSTRLEN];
             char *p = NameListToString(stmt1->funcname);
-            errno_t rc = strcpy_s(funcname, MAXSTRLEN, p);
-            securec_check(rc, "\0", "\0");
+            strcpy_s(funcname, MAXSTRLEN, p);
             pfree(p);
-            rc = sprintf_s(message, MAXSTRLEN, "can not override out param:%s", funcname);
+            errno_t rc = sprintf_s(message, MAXSTRLEN, "can not override out param:%s", funcname);
             securec_check_ss(rc, "", "");
             InsertErrorMessage(message, stmt1->startLineNumber);
             ereport(ERROR,
