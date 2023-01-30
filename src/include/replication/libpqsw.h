@@ -191,6 +191,11 @@ public:
     RedirectManager()
     {
         log_trace_msg = makeStringInfo();
+        init();
+    }
+
+    void init()
+    {
         state.transaction = false;
         state.enable_remote_excute = false;
         state.redirect = false;
