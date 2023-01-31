@@ -410,10 +410,12 @@ static void libpqsw_inner_excute_pbe(bool waitResult, bool updateFlag)
         RedirectMessage* redirect_msg = (RedirectMessage*)lfirst(message);
         const StringInfo pbe_send_message = message_manager->get_merge_message(redirect_msg);
         redirect_msg->cur_pos = 0;
+        const char* db_name = u_sess->proc_cxt.MyProcPort->database_name;
+        const char* username = u_sess->proc_cxt.MyProcPort->user_name;
         (void)libpqsw_remote_excute_sql(0, pbe_send_message->data,
             pbe_send_message->len,
-            t_thrd.proc_cxt.PostInit->m_indbname,
-            t_thrd.proc_cxt.PostInit->m_username,
+            db_name,
+            username,
             redirect_msg->commandTag,
             waitResult,
             redirect_msg->type == RT_NORMAL);
@@ -663,6 +665,7 @@ void libpqsw_disconnect(void)
 {
     PQfinish(t_thrd.libsw_cxt.streamConn);
     t_thrd.libsw_cxt.streamConn = NULL;
+    get_redirect_manager()->init();
 }
 
 // parse primary results.
