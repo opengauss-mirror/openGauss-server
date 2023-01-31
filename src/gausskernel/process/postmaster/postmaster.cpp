@@ -2432,21 +2432,13 @@ int PostmasterMain(int argc, char* argv[])
     }
 
     if (SS_PRIMARY_MODE) {
-        if (dss_set_server_status_wrapper(true) != GS_SUCCESS) {
+        if (dss_set_server_status_wrapper() != GS_SUCCESS) {
             ereport(FATAL, (errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
                 g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
                 g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
                 errhint("Check vgname and socketpath and restart later.")));
         }
         ereport(LOG, (errmsg("set dss server status as primary")));
-    } else if (SS_STANDBY_MODE) {
-        if (dss_set_server_status_wrapper(false) != GS_SUCCESS) {
-            ereport(FATAL, (errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
-                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                errhint("Check vgname and socketpath and restart later.")));
-        }
-        ereport(LOG, (errmsg("set dss server status as standby")));
     }
 
     /*
