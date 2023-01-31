@@ -9,6 +9,7 @@ begin
 commit;
 end;
 /
+DROP SYNONYM proc_test;
 create or replace procedure proc_test
 IMMUTABLE
 is

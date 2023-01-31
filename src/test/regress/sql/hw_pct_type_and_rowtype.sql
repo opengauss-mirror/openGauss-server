@@ -604,6 +604,7 @@ DROP PACKAGE p_test1;
 DROP TABLE type;
 
 --test row type default value
+DROP SYNONYM tb_test;
 CREATE TABLE tb_test(a int, b int);
 create or replace package pckg_test as
 procedure proc_test(i_col1 in tb_test);
