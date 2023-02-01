@@ -676,3 +676,21 @@ unsigned int DMSGetProcType4RequestPage()
         return DMS_SESSION_NORMAL;
     }
 }
+
+bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc)
+{
+    if (!ENABLE_DMS) {
+        return true;
+    }
+    /** this page produced in flush_copy phase, should not eliminate and mark dirty now
+     *  when mark dirty: replay xlog
+     *  why not use SS_IN_FLUSHCOPY to judge
+     *      in recovery phase, when need to eliminate page, this page with BUF_DIRTY_NEED_FLUSH flag still can be found
+     */
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+        return false;
+    }
+    return true;
+
+}
