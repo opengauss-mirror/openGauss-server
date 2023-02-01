@@ -42,27 +42,25 @@ FROM test_area
 START WITH name = '中国'
 CONNECT BY prior id = fatherid
 ORDER SIBLINGS BY id;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id
+                       ->  Seq Scan on test_area
+                             Filter: (name = '中国'::text)
+                 ->  Sort
+                       Sort Key: swtest.test_area.id
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
                              ->  Seq Scan on test_area
-                                   Filter: (name = '中国'::text)
-                       ->  Sort
-                             Sort Key: swtest.test_area.id
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
 FROM test_area
@@ -104,27 +102,25 @@ FROM test_area
 START WITH name = '中国'
 CONNECT BY prior id = fatherid
 ORDER SIBLINGS BY id desc;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC
+                       ->  Seq Scan on test_area
+                             Filter: (name = '中国'::text)
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
                              ->  Seq Scan on test_area
-                                   Filter: (name = '中国'::text)
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
 FROM test_area
@@ -166,27 +162,25 @@ FROM test_area
 START WITH name = '衡阳市' or name = '深圳市'
 CONNECT BY prior id = fatherid
 ORDER SIBLINGS BY id;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id
+                       ->  Seq Scan on test_area
+                             Filter: ((name = '衡阳市'::text) OR (name = '深圳市'::text))
+                 ->  Sort
+                       Sort Key: swtest.test_area.id
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
                              ->  Seq Scan on test_area
-                                   Filter: ((name = '衡阳市'::text) OR (name = '深圳市'::text))
-                       ->  Sort
-                             Sort Key: swtest.test_area.id
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
 FROM test_area
@@ -219,27 +213,25 @@ FROM test_area
 START WITH name = '衡阳市' or name = '深圳市'
 CONNECT BY prior id = fatherid
 ORDER SIBLINGS BY id desc;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC
+                       ->  Seq Scan on test_area
+                             Filter: ((name = '衡阳市'::text) OR (name = '深圳市'::text))
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
                              ->  Seq Scan on test_area
-                                   Filter: ((name = '衡阳市'::text) OR (name = '深圳市'::text))
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
 FROM test_area
@@ -272,27 +264,25 @@ FROM test_area
 START WITH name = '常宁市'
 CONNECT BY id = prior fatherid
 ORDER SIBLINGS BY id;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_3, array_col_2, array_col_4, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id
+                       ->  Seq Scan on test_area
+                             Filter: (name = '常宁市'::text)
+                 ->  Sort
+                       Sort Key: swtest.test_area.id
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.id = tmp_reuslt."test_area@fatherid")
                              ->  Seq Scan on test_area
-                                   Filter: (name = '常宁市'::text)
-                       ->  Sort
-                             Sort Key: swtest.test_area.id
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.id = tmp_reuslt."test_area@fatherid")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
 FROM test_area
@@ -316,27 +306,25 @@ FROM test_area
 START WITH name = '常宁市'
 CONNECT BY id = prior fatherid
 ORDER SIBLINGS BY id desc;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_3, array_col_2, array_col_4, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC
+                       ->  Seq Scan on test_area
+                             Filter: (name = '常宁市'::text)
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.id = tmp_reuslt."test_area@fatherid")
                              ->  Seq Scan on test_area
-                                   Filter: (name = '常宁市'::text)
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.id = tmp_reuslt."test_area@fatherid")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
 FROM test_area
@@ -361,27 +349,25 @@ FROM test_area
 START WITH name = '中国'
 CONNECT BY prior id = fatherid
 ORDER SIBLINGS BY 1;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id
+                       ->  Seq Scan on test_area
+                             Filter: (name = '中国'::text)
+                 ->  Sort
+                       Sort Key: swtest.test_area.id
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
                              ->  Seq Scan on test_area
-                                   Filter: (name = '中国'::text)
-                       ->  Sort
-                             Sort Key: swtest.test_area.id
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
 FROM test_area
@@ -420,81 +406,75 @@ SELECT * FROM test_area
 START WITH name = '中国'
 CONNECT BY prior id = fatherid
 ORDER SIBLINGS BY id, name, name_desc;
-                                                  QUERY PLAN                                                  
---------------------------------------------------------------------------------------------------------------
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id, swtest.test_area.name, swtest.test_area.name_desc
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id, swtest.test_area.name, swtest.test_area.name_desc
+                       ->  Seq Scan on test_area
+                             Filter: (name = '中国'::text)
+                 ->  Sort
+                       Sort Key: swtest.test_area.id, swtest.test_area.name, swtest.test_area.name_desc
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
                              ->  Seq Scan on test_area
-                                   Filter: (name = '中国'::text)
-                       ->  Sort
-                             Sort Key: swtest.test_area.id, swtest.test_area.name, swtest.test_area.name_desc
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 EXPLAIN (costs off)
 SELECT * FROM test_area
 START WITH name = '中国'
 CONNECT BY prior id = fatherid
 ORDER SIBLINGS BY id desc, name desc , name_desc desc;
-                                                         QUERY PLAN                                                          
------------------------------------------------------------------------------------------------------------------------------
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC, swtest.test_area.name DESC, swtest.test_area.name_desc DESC
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC, swtest.test_area.name DESC, swtest.test_area.name_desc DESC
+                       ->  Seq Scan on test_area
+                             Filter: (name = '中国'::text)
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC, swtest.test_area.name DESC, swtest.test_area.name_desc DESC
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
                              ->  Seq Scan on test_area
-                                   Filter: (name = '中国'::text)
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC, swtest.test_area.name DESC, swtest.test_area.name_desc DESC
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 EXPLAIN (costs off)
 SELECT * FROM test_area
 START WITH name = '中国'
 CONNECT BY prior id = fatherid
 ORDER SIBLINGS BY id desc, name, name_desc desc;
-                                                       QUERY PLAN                                                       
-------------------------------------------------------------------------------------------------------------------------
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1, array_siblings
-           ->  Sort
-                 Sort Key: array_siblings
-                 ->  Recursive Union
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC, swtest.test_area.name, swtest.test_area.name_desc DESC
+           ->  Recursive Union
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC, swtest.test_area.name, swtest.test_area.name_desc DESC
+                       ->  Seq Scan on test_area
+                             Filter: (name = '中国'::text)
+                 ->  Sort
+                       Sort Key: swtest.test_area.id DESC, swtest.test_area.name, swtest.test_area.name_desc DESC
+                       ->  Hash Join
+                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
                              ->  Seq Scan on test_area
-                                   Filter: (name = '中国'::text)
-                       ->  Sort
-                             Sort Key: swtest.test_area.id DESC, swtest.test_area.name, swtest.test_area.name_desc DESC
-                             ->  Hash Join
-                                   Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                                   ->  Seq Scan on test_area
-                                   ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
-(18 rows)
+                             ->  Hash
+                                   ->  WorkTable Scan on tmp_reuslt
+(16 rows)
 
 -- test siblings by + limit
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath

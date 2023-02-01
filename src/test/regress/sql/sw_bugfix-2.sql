@@ -644,10 +644,10 @@ SELECT * FROM RLTEST CONNECT BY PRIOR B=A AND (LEVEL=1 OR B<10) AND (ROWNUM<3 OR
 SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (MOD(ROWNUM+1,2) = 0);
 DROP TABLE RLTEST;
 create table nocycle_tbl(id int, lid int, name text);
-insert into nocycle_tbl values (1,3,'A'),(2,1,'B'),(3,2,'C'),(4,2,'D');
-select * from nocycle_tbl connect by nocycle prior id=lid start with id=1;
-select * from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id;
-select * from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id desc;
+insert into nocycle_tbl values (1,3,'A'),(2,1,'B'),(3,2,'C'),(4,2,'D'),(5,3,'E');
+select *,connect_by_iscycle from nocycle_tbl connect by nocycle prior id=lid start with id=1;
+select *,connect_by_iscycle from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id;
+select *,connect_by_iscycle from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id desc;
 drop table nocycle_tbl;
 
 CREATE TABLE swcb_employees ( employee_id VARCHAR, manager_id NUMBER(6));

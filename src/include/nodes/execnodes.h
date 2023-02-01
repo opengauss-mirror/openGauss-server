@@ -1675,12 +1675,6 @@ typedef struct StartWithOpState
     int                 sw_level;
     int                 sw_numtuples;       /* number of tuples in current level */
 
-    /*
-     * nocycle stop flag, normally is used to handle nocycle stop on order siblings
-     * case, as order-siblings add a sort operator on top of RU
-     */
-    bool                sw_nocycleStopOrderSiblings;
-
     MemoryContext       sw_context;
     List*               sw_cycle_rowmarks;
 } StartWithOpState;
