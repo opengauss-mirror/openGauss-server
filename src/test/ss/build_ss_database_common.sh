@@ -59,7 +59,6 @@ assign_hatest_parameter()
         echo -e "\nss_enable_reform = on" >> ${node}/postgresql.conf
         echo -e "\nlog_min_messages = log" >> ${node}/postgresql.conf
         echo -e "\nlogging_module = 'on(ALL)'" >> ${node}/postgresql.conf
-        echo -e "\nss_enable_log_level = 'on'" >> ${node}/postgresql.conf
         echo "${node}:"
         cat ${node}/postgresql.conf | grep ss_enable_dms
     done

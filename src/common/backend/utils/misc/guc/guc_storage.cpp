@@ -1086,18 +1086,6 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 
-        {{"ss_enable_log_level",
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            SHARED_STORAGE_OPTIONS,
-            gettext_noop("Set dms and dss log level to LOG"),
-            NULL},
-            &g_instance.attr.attr_storage.dms_attr.enable_log_level,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
         {{"ss_enable_scrlock",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
