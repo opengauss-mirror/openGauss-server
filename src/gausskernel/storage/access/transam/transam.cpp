@@ -393,8 +393,19 @@ Datum pgxc_get_csn(PG_FUNCTION_ARGS)
  */
 bool TransactionIdDidCommit(TransactionId transactionId) /* true if given transaction committed */
 {
-    if (SS_STANDBY_MODE) {
-        return SSTransactionIdDidCommit(transactionId);
+    while (ENABLE_DMS) {
+        if (SS_IN_REFORM && !SS_PRIMARY_DEMOTING) {
+            pg_usleep(USECS_PER_SEC);
+            continue;
+        } else if (SS_NORMAL_STANDBY) {
+            bool ret_did_commit = true;
+            if (SSTransactionIdDidCommit(transactionId, &ret_did_commit)) {
+                return ret_did_commit;
+            }
+            continue;
+        } else {
+            break;
+        }
     }
 
     CLogXidStatus xidstatus;
