@@ -704,6 +704,11 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
 
         SegPinBufferLocked(buf, &new_tag);
 
+        if (!SSPageCheckIfCanEliminate(buf)) {
+            SegUnpinBuffer(buf);
+            continue;
+        }
+
         if (old_flags & BM_DIRTY) {
             /* backend should not flush dirty pages if working version less than DW_SUPPORT_NEW_SINGLE_FLUSH */
             if (!backend_can_flush_dirty_page()) {
