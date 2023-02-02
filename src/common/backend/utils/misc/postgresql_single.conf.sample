@@ -835,3 +835,6 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #ss_scrlock_worker_count = 2
 #ss_scrlock_worker_bind_core = ''
 #ss_scrlock_server_bind_core = ''
+#ss_log_level = 7
+#ss_log_backup_file_count = 10
+#ss_log_max_file_size = 10MB
