@@ -3333,7 +3333,6 @@ Plan* create_paritial_push_plan(PlannerInfo* root, RelOptInfo* rel)
             }
         }
         rel->subplan = remote_query;
-        return rel->subplan;
     } else {
         /*
          * If a query contains dummy subquery, for example, select 1, and the query
@@ -3343,7 +3342,6 @@ Plan* create_paritial_push_plan(PlannerInfo* root, RelOptInfo* rel)
          * a non-stream plan.
          */
         rel->subplan->exec_type = EXEC_ON_COORDS;
-        return rel->subplan;
     }
 
     return rel->subplan;
