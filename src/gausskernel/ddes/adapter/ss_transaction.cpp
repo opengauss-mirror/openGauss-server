@@ -167,7 +167,7 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
  * xid -> clog status
  * true if given transaction committed
  */
-bool SSTransactionIdDidCommit(TransactionId transactionId)
+bool SSTransactionIdDidCommit(TransactionId transactionId, bool* ret_did_commit)
 {
     bool did_commit = false;
     bool remote_get = false;
@@ -191,11 +191,10 @@ bool SSTransactionIdDidCommit(TransactionId transactionId)
     if (!did_commit) {
         dms_context_t dms_ctx;
         InitDmsContext(&dms_ctx);
-
         dms_ctx.xid_ctx.xid = *(uint64 *)(&transactionId);
-        dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
 
         do {
+            dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
             if (dms_request_opengauss_txn_status(&dms_ctx, (uint8)XID_COMMITTED, (uint8 *)&did_commit)
                 == DMS_SUCCESS) {
                 remote_get = true;
@@ -206,7 +205,10 @@ bool SSTransactionIdDidCommit(TransactionId transactionId)
             } else {
                 if (SS_IN_REFORM && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
                     ereport(FATAL, (errmsg("SSTransactionIdDidCommit failed during reform, xid=%lu.", transactionId)));
+                } else if (SS_IN_REFORM) {
+                    return false;
                 }
+
                 pg_usleep(USECS_PER_SEC);
                 continue;
             }
@@ -219,35 +221,35 @@ bool SSTransactionIdDidCommit(TransactionId transactionId)
         t_thrd.xact_cxt.latestFetchXid = transactionId;
         t_thrd.xact_cxt.latestFetchXidStatus = CLOG_XID_STATUS_COMMITTED;
     }
-
-    return did_commit;
+    *ret_did_commit = did_commit;
+    return true;
 }
 
 /* xid -> clog status */
 /* true if given transaction in progress */
-bool SSTransactionIdIsInProgress(TransactionId transactionId)
+bool SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress)
 {
-    bool in_progress = true;
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
-
-    dms_ctx.xid_ctx.xid = *(uint64 *)(&transactionId);
-    dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
+    dms_ctx.xid_ctx.xid = *(uint64 *)(&transactionId);   
 
     do {
-        if (dms_request_opengauss_txn_status(&dms_ctx, (uint8)XID_INPROGRESS, (uint8 *)&in_progress) == DMS_SUCCESS) {
+        dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
+        if (dms_request_opengauss_txn_status(&dms_ctx, (uint8)XID_INPROGRESS, (uint8 *)in_progress) == DMS_SUCCESS) {
             ereport(DEBUG1, (errmsg("SS get txn in_progress success, xid=%lu, in_progress=%d.",
-                transactionId, in_progress)));
+                transactionId, *in_progress)));
             break;
         } else {
             if (SS_IN_REFORM && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
                 ereport(FATAL, (errmsg("SSTransactionIdIsInProgress failed during reform, xid=%lu.", transactionId)));
+            } else if (SS_IN_REFORM) {
+                return false;
             }
             pg_usleep(USECS_PER_SEC);
             continue;
         }
     } while (true);
-    return in_progress;
+    return true;
 }
 
 TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2)

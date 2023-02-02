@@ -1295,8 +1295,19 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
         return false;
     }
 
-    if (SS_STANDBY_MODE) {
-        return SSTransactionIdIsInProgress(xid);
+    while (ENABLE_DMS) {
+        if (SS_IN_REFORM && !SS_PRIMARY_DEMOTING) {
+            pg_usleep(USECS_PER_SEC);
+            continue;
+        } else if (SS_NORMAL_STANDBY) {
+            bool in_progress = true;
+            if (SSTransactionIdIsInProgress(xid, &in_progress)) {
+                return in_progress;
+            }
+            continue;
+        } else {
+            break;
+        }
     }
 
     /*
