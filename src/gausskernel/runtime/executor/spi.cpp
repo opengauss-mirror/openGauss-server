@@ -3808,8 +3808,9 @@ TransactionId SPI_get_top_transaction_id()
     } else {
         return InvalidTransactionId;
     }    
-#endif
+#else
     return t_thrd.proc->lxid;
+#endif
 }
 
 List* _SPI_get_querylist(SPIPlanPtr plan)
