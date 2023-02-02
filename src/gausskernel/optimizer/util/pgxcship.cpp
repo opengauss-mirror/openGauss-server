@@ -4117,8 +4117,6 @@ static int has_shippable_col_for_insert(Query* query, TargetEntry* tar, RangeTbl
     bool no_quals = true;
     if (find_distcol_expr_recurse(query, query->jointree, tvar, &no_quals, false) || no_quals) {
         return INSEL_SHIPPABLE_DCOL;
-    } else {
-        return INSEL_UNSHIPPABLE_COL;
     }
 
     /* Default */
