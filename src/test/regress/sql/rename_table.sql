@@ -38,6 +38,12 @@ rename table tang01 to tang02;
 
 rename table b1 to b1;
 
+drop table if exists test1,test2;
+create table test1(a int,b int);
+create table test2(a int,b int);
+rename table test1 to test2;
+rename table test1 to test1;
+
 \c regression
 drop database mysql;
 create schema test; create schema tbinfo;
