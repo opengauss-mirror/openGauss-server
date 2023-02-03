@@ -96,6 +96,7 @@ void TpoolListenerMain(ThreadPoolListener* listener)
     listener->CreateEpoll();
     listener->NotifyReady();
 
+    pgstat_report_activity(STATE_IDLE, NULL);
     TpoolListenerLoop(listener);
     proc_exit(0);
 }

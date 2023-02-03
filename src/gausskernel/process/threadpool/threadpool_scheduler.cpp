@@ -86,6 +86,8 @@ void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
                                                         ALLOCSET_DEFAULT_MAXSIZE);
     }
 
+    pgstat_report_appname("ThreadPoolScheduler");
+    pgstat_report_activity(STATE_IDLE, NULL);
     while (true) {
         if (unlikely(scheduler->m_getKilled)) {
             scheduler->m_getKilled = false;

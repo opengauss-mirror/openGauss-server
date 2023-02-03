@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include "postgres.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "utils/memutils.h"
 #include "knl/knl_variable.h"
 #include "storage/ipc.h"
@@ -485,6 +486,7 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
     (void)gs_signal_unblock_sigusr2();
 
     SetProcessingMode(NormalProcessing);
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     pg_usleep_retry(1000000L, 0);
     

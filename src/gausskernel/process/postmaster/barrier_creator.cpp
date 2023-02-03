@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include "postgres.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "utils/memutils.h"
 #include "knl/knl_variable.h"
 #include "storage/ipc.h"
@@ -367,6 +368,8 @@ void barrier_creator_main(void)
     t_thrd.log_cxt.PG_exception_stack = &local_sigjmp_buf;
 
     SetProcessingMode(NormalProcessing);
+    pgstat_report_activity(STATE_IDLE, NULL);
+
     exec_init_poolhandles();
 
 #ifdef ENABLE_MULTIPLE_NODES

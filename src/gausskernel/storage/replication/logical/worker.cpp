@@ -1508,6 +1508,8 @@ void ApplyWorkerMain()
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(NULL, t_thrd.applyworker_cxt.curWorker->dbid, NULL,
         t_thrd.applyworker_cxt.curWorker->userid);
     t_thrd.proc_cxt.PostInit->InitApplyWorker();
+    pgstat_report_appname("ApplyWorker");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     /* Load the subscription into persistent memory context. */
     t_thrd.applyworker_cxt.applyContext =

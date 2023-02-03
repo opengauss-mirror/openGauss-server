@@ -312,6 +312,8 @@ NON_EXEC_STATIC void UndoWorkerMain()
     databaseExists = t_thrd.proc_cxt.PostInit->InitUndoWorker();
 
     SetProcessingMode(NormalProcessing);
+    pgstat_report_appname("UndoWorker");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     if (databaseExists) {
         /* Perform the actual rollback */
