@@ -7298,7 +7298,6 @@ static bool is_stmt_allowed_in_locked_mode(Node* parse_tree, const char* query_s
         default:
             return DISALLOW;
     }
-    return DISALLOW;
 }
 
 /*
