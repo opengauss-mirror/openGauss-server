@@ -6314,6 +6314,8 @@ static void RenameTableFeature(RenameStmt* stmt)
             ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("relation \"%s.%s\" already exists", get_namespace_name(modfyNameSpace), modfytable)));
         } else if (pg_class_aclcheck(relid, GetUserId(), ACL_ALTER) == ACLCHECK_NO_PRIV) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("permission denied for relation %s.%s", get_namespace_name(orgiNameSpace), orgitable)));
+        } else if (OidIsValid(get_relname_relid(modfytable, modfyNameSpace))) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("relation \"%s.%s\" already exists", get_namespace_name(modfyNameSpace), modfytable)));
         }
 
         /* Rename regular table */

@@ -41,7 +41,6 @@
 #include "replication/walsender_private.h"
 #include "replication/walreceiver.h"
 #include "ddes/dms/ss_switchover.h"
-#include "ddes/dms/ss_dms_log_output.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/file/fio_device.h"

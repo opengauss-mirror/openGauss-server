@@ -2446,6 +2446,9 @@ int PostmasterMain(int argc, char* argv[])
      * the saved backend variables will be restored in
      * DCF call back thread share memory init function.
      */
+    if (ENABLE_DSS) {
+        DSSInitLogger();
+    }
     if (g_instance.attr.attr_storage.dcf_attr.enable_dcf || g_instance.attr.attr_storage.dms_attr.enable_dms) {
         int ss_rc = memset_s(&port, sizeof(port), 0, sizeof(port));
         securec_check(ss_rc, "\0", "\0");
@@ -2459,9 +2462,7 @@ int PostmasterMain(int argc, char* argv[])
         }
     }
 
-    if (ENABLE_DSS) {
-        DSSInitLogger();
-    }
+    
 
     /*
      * We're ready to rock and roll...

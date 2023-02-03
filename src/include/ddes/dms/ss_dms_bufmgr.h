@@ -74,5 +74,6 @@ void SmgrNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, con
 void SegNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, SegSpace *spc);
 unsigned int DMSGetProcType4RequestPage();
 void BufValidateDrc(BufferDesc *buf_desc);
+bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc);
 
 #endif

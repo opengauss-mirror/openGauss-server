@@ -620,6 +620,11 @@ static volatile BufferDesc *PageListBufferAlloc(SMgrRelation smgr, char relpersi
         /* Pin the buffer and then release the buffer spinlock */
         PinBuffer_Locked(buf);
 
+        if (!SSPageCheckIfCanEliminate(buf)) {
+            UnpinBuffer(buf, true);
+            return NULL;
+        }
+
         /*
          * At this point, the victim buffer is pinned
          * but no locks are held.
@@ -2583,19 +2588,17 @@ void SimpleMarkBufDirty(BufferDesc *buf)
 
 void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLock)
 {
-    if (SS_REFORM_REFORMER) {
-        Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
+    if (ENABLE_DMS) {
+        return;
     }
 
     Block tmpBlock = BufHdrGetBlock(buf);
 
-    if ((*oldFlags & BM_TAG_VALID) &&
-        !(XLByteEQ(buf->lsn_on_disk, PageGetLSN(tmpBlock)) ||
-        (SS_REFORM_REFORMER && XLByteLT(PageGetLSN(tmpBlock), g_instance.dms_cxt.ckptRedo))) &&
-        !(*oldFlags & BM_DIRTY) && RecoveryInProgress()) {
+    if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->lsn_on_disk, PageGetLSN(tmpBlock)) && !(*oldFlags & BM_DIRTY) &&
+        RecoveryInProgress()) {
         int mode = DEBUG1;
 #ifdef USE_ASSERT_CHECKING
-        mode = ENABLE_DMS ? WARNING : PANIC;
+        mode = PANIC;
 #endif
         const uint32 shiftSize = 32;
         ereport(mode, (errmodule(MOD_INCRE_BG),
@@ -2744,6 +2747,12 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
 
         /* Pin the buffer and then release the buffer spinlock */
         PinBuffer_Locked(buf);
+
+        if (!SSPageCheckIfCanEliminate(buf)) {
+            // for dms this page cannot eliminate, get another one 
+            UnpinBuffer(buf, true);
+            continue;
+        }
 
         PageCheckIfCanEliminate(buf, &old_flags, &needGetLock);
         /*

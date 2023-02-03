@@ -47,7 +47,6 @@
 #include "access/xlog_internal.h"
 
 #include "ddes/dms/ss_dms_callback.h"
-#include "ddes/dms/ss_dms_log_output.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_reform_common.h"
