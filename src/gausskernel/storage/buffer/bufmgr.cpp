@@ -620,6 +620,11 @@ static volatile BufferDesc *PageListBufferAlloc(SMgrRelation smgr, char relpersi
         /* Pin the buffer and then release the buffer spinlock */
         PinBuffer_Locked(buf);
 
+        if (!SSPageCheckIfCanEliminate(buf)) {
+            UnpinBuffer(buf, true);
+            return NULL;
+        }
+
         /*
          * At this point, the victim buffer is pinned
          * but no locks are held.
