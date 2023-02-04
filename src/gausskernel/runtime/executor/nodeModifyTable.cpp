@@ -468,7 +468,7 @@ static void RecoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdT
  * Compute stored updated columns for a tuple
  */
 bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, TupleTableSlot *slot, Tuple tuple,
-    CmdType cmdtype, ModifyTableState* node, ItemPointer otid, Oid oldPartitionOid, int2 bucketid)
+    CmdType cmdtype, ItemPointer otid, Oid oldPartitionOid, int2 bucketid)
 {
     Relation rel = resultRelInfo->ri_RelationDesc;
     TupleDesc tupdesc = RelationGetDescr(rel);
@@ -485,7 +485,7 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     int temp_id = -1;
     int attnum;
     uint32 updated_colnum_resno;
-    Bitmapset* updatedCols = GetUpdatedColumns(node->resultRelInfo, node->ps.state);
+    Bitmapset* updatedCols = GetUpdatedColumns(resultRelInfo, estate);
 
     HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
     RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
@@ -2174,7 +2174,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
 
         /* acquire Form_pg_attrdef ad_on_update */
         if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
-            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, node, tupleid, oldPartitionOid, bucketid);
+            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, tupleid, oldPartitionOid, bucketid);
             if (!update_fix_result) {
                 tuple = slot->tts_tuple;
             }
