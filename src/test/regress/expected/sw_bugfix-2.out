@@ -1927,3 +1927,23 @@ select * from nocycle_tbl connect by nocycle prior id=lid start with id=1 order 
 (4 rows)
 
 drop table nocycle_tbl;
+CREATE TABLE swcb_employees ( employee_id VARCHAR, manager_id NUMBER(6));
+insert into swcb_employees values (100, 24000.00);
+insert into swcb_employees values (101, 24000.00);
+SELECT t.manager_id,
+MAX (SUBSTR (SYS_CONNECT_BY_PATH (t.employee_id, ','), 2)) str
+FROM (SELECT manager_id,
+employee_id,
+ROW_NUMBER ()
+OVER (PARTITION BY manager_id ORDER BY employee_id) rn
+FROM swcb_employees emp) t
+START WITH rn = 1
+CONNECT BY rn = PRIOR rn + 1 AND manager_id = PRIOR manager_id
+GROUP BY t.manager_id
+ORDER BY t.manager_id;
+ manager_id |   str   
+------------+---------
+      24000 | 100,101
+(1 row)
+
+drop table swcb_employees;
