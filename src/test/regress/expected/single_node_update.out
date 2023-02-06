@@ -567,9 +567,7 @@ upt_time timestamp ON UPDATE CURRENT_TIMESTAMP);
 NOTICE:  CREATE TABLE will create implicit sequence "t_dmpportal_common_intent_id_seq" for serial column "t_dmpportal_common_intent.id"
 ALTER TABLE t_dmpportal_common_intent ADD CONSTRAINT pk_t_dmpportal_common_intent_1675307617_0 PRIMARY KEY USING btree (id);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "pk_t_dmpportal_common_intent_1675307617_0" for table "t_dmpportal_common_intent"
-insert into t_dmpportal_common_intent values(1,'1', current_timestamp);
-insert into t_dmpportal_common_intent values(2,'2', current_timestamp);
-insert into t_dmpportal_common_intent values(3,'3', current_timestamp);
+insert into t_dmpportal_common_intent values(1,'1',current_timestamp), (2,'2',current_timestamp), (3,'3',current_timestamp);
 select * from t_dmpportal_common_intent;
 --?.*
 --?.*
@@ -578,17 +576,30 @@ select * from t_dmpportal_common_intent;
 --?.*
 (3 rows)
 
+select count(upt_time) from t_dmpportal_common_intent group by upt_time order by upt_time;
+ count 
+-------
+     3
+(1 row)
+
 set enable_opfusion to on;
-explain update t_dmpportal_common_intent set intent_name='update_2' where id=2;
-                                                            QUERY PLAN                                                            
-----------------------------------------------------------------------------------------------------------------------------------
+explain (costs off) update t_dmpportal_common_intent set intent_name='update_2' where id=2;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
  [Bypass]
- Update on t_dmpportal_common_intent  (cost=0.00..8.27 rows=1 width=22)
-   ->  Index Scan using pk_t_dmpportal_common_intent_1675307617_0 on t_dmpportal_common_intent  (cost=0.00..8.27 rows=1 width=22)
+ Update on t_dmpportal_common_intent
+   ->  Index Scan using pk_t_dmpportal_common_intent_1675307617_0 on t_dmpportal_common_intent
          Index Cond: (id = 2)
 (4 rows)
 
 update t_dmpportal_common_intent set intent_name='update_2' where id=2;
+select count(upt_time) from t_dmpportal_common_intent group by upt_time order by upt_time;
+ count 
+-------
+     2
+     1
+(2 rows)
+
 select * from t_dmpportal_common_intent;
 --?.*
 --?.*
@@ -599,6 +610,13 @@ select * from t_dmpportal_common_intent;
 
 set enable_opfusion to off;
 update t_dmpportal_common_intent set intent_name='update_2' where id=2;
+select count(upt_time) from t_dmpportal_common_intent group by upt_time order by upt_time;
+ count 
+-------
+     2
+     1
+(2 rows)
+
 select * from t_dmpportal_common_intent;
 --?.*
 --?.*
@@ -608,6 +626,13 @@ select * from t_dmpportal_common_intent;
 (3 rows)
 
 update t_dmpportal_common_intent set intent_name='2' where id=2;
+select count(upt_time) from t_dmpportal_common_intent group by upt_time order by upt_time;
+ count 
+-------
+     2
+     1
+(2 rows)
+
 select * from t_dmpportal_common_intent;
 --?.*
 --?.*

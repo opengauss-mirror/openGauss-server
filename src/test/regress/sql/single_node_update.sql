@@ -238,19 +238,20 @@ id bigserial NOT NULL,
 intent_name character varying(120) NOT NULL,
 upt_time timestamp ON UPDATE CURRENT_TIMESTAMP);
 ALTER TABLE t_dmpportal_common_intent ADD CONSTRAINT pk_t_dmpportal_common_intent_1675307617_0 PRIMARY KEY USING btree (id);
-insert into t_dmpportal_common_intent values(1,'1', current_timestamp);
-insert into t_dmpportal_common_intent values(2,'2', current_timestamp);
-insert into t_dmpportal_common_intent values(3,'3', current_timestamp);
+insert into t_dmpportal_common_intent values(1,'1',current_timestamp), (2,'2',current_timestamp), (3,'3',current_timestamp);
 select * from t_dmpportal_common_intent;
+select count(upt_time) from t_dmpportal_common_intent group by upt_time order by upt_time;
 set enable_opfusion to on;
-explain update t_dmpportal_common_intent set intent_name='update_2' where id=2;
+explain (costs off) update t_dmpportal_common_intent set intent_name='update_2' where id=2;
 update t_dmpportal_common_intent set intent_name='update_2' where id=2;
+select count(upt_time) from t_dmpportal_common_intent group by upt_time order by upt_time;
 select * from t_dmpportal_common_intent;
 set enable_opfusion to off;
 update t_dmpportal_common_intent set intent_name='update_2' where id=2;
+select count(upt_time) from t_dmpportal_common_intent group by upt_time order by upt_time;
 select * from t_dmpportal_common_intent;
-
 update t_dmpportal_common_intent set intent_name='2' where id=2;
+select count(upt_time) from t_dmpportal_common_intent group by upt_time order by upt_time;
 select * from t_dmpportal_common_intent;
 
 \c regression
