@@ -689,13 +689,9 @@ int dss_pwrite_file_by_zero(int handle, off_t offset, off_t len)
     return GS_SUCCESS;
 }
 
-int dss_set_server_status_wrapper(bool is_master)
+int dss_set_server_status_wrapper()
 {
-    if (is_master) {
-        return g_dss_device_op.dss_set_server_status(DSS_STATUS_READWRITE);
-    } else {
-        return g_dss_device_op.dss_set_server_status(DSS_STATUS_READONLY);
-    }
+    return g_dss_device_op.dss_set_main_inst();
 }
 
 int dss_remove_dev(const char *name)

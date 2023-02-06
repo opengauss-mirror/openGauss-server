@@ -273,15 +273,6 @@ static int CBSwitchoverDemote(void *db_handle)
             SpinLockAcquire(&t_thrd.walsender_cxt.WalSndCtl->mutex);
             t_thrd.walsender_cxt.WalSndCtl->demotion = NoDemote;
             SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
-
-            if (dss_set_server_status_wrapper(false) != GS_SUCCESS) {
-                ereport(PANIC,
-                    (errmodule(MOD_DMS),
-                        errmsg("[SS switchover] set dssserver standby failed, vgname: \"%s\", socketpath: \"%s\"",
-                            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                            g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                        errhint("Check vgname and socketpath and restart later.")));
-            }
             ereport(LOG,
                 (errmodule(MOD_DMS), errmsg("[SS switchover] Success in %s primary demote, running as standby,"
                     " waiting for reformer setting new role.", DemoteModeDesc(demote_mode))));
@@ -319,7 +310,7 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover] Starting to promote standby.")));
 
     /* since original primary must have demoted, it is safe to allow promting standby write */
-    if (dss_set_server_status_wrapper(true) != GS_SUCCESS) {
+    if (dss_set_server_status_wrapper() != GS_SUCCESS) {
         ereport(PANIC, (errmodule(MOD_DMS), errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
             g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
             g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
@@ -1411,12 +1402,8 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform] dms reform start, role:%d, reform type:%d", role, (int)ss_reform_type)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
-        if (dss_set_server_status_wrapper(true) != GS_SUCCESS) {
+        if (dss_set_server_status_wrapper() != GS_SUCCESS) {
             ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS reform] Could not set dssserver flag=read_write")));
-        }
-    } else {
-        if (dss_set_server_status_wrapper(false) != GS_SUCCESS) {
-            ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS reform] Could not set dssserver flag=read_only")));
         }
     }
 
