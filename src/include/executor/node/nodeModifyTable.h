@@ -66,4 +66,7 @@ extern void ExecCheckPlanOutput(Relation resultRel, List* targetList);
 extern void ExecComputeStoredGenerated(ResultRelInfo *resultRelInfo, EState *estate, TupleTableSlot *slot,
     Tuple oldtuple, CmdType cmdtype);
 
+extern bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, TupleTableSlot *slot, Tuple tuple,
+    CmdType cmdtype, ItemPointer otid, Oid oldPartitionOid, int2 bucketid);
+
 #endif /* NODEMODIFYTABLE_H */

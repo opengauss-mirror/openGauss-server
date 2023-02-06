@@ -468,7 +468,7 @@ static void RecoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdT
  * Compute stored updated columns for a tuple
  */
 bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, TupleTableSlot *slot, Tuple tuple,
-    CmdType cmdtype, ModifyTableState* node, ItemPointer otid, Oid oldPartitionOid, int2 bucketid)
+    CmdType cmdtype, ItemPointer otid, Oid oldPartitionOid, int2 bucketid)
 {
     Relation rel = resultRelInfo->ri_RelationDesc;
     TupleDesc tupdesc = RelationGetDescr(rel);
@@ -485,7 +485,7 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     int temp_id = -1;
     int attnum;
     uint32 updated_colnum_resno;
-    Bitmapset* updatedCols = GetUpdatedColumns(node->resultRelInfo, node->ps.state);
+    Bitmapset* updatedCols = GetUpdatedColumns(resultRelInfo, estate);
 
     HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
     RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
@@ -517,9 +517,22 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
             } else {
                 Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
                 opfuncoid = OpernameGetOprid(list_make1(makeString("=")), attr->atttypid, attr->atttypid);
-                RegProcedure oprcode = get_opcode(opfuncoid);
-                fmgr_info(oprcode, &eqproc);
-                match = DatumGetBool(FunctionCall2Coll(&eqproc, DEFAULT_COLLATION_OID, slot->tts_values[i], oldvalues[i]));
+                if (OidIsValid(opfuncoid)) {
+                    RegProcedure oprcode = get_opcode(opfuncoid);
+                    fmgr_info(oprcode, &eqproc);
+                    match = DatumGetBool(FunctionCall2Coll(&eqproc, DEFAULT_COLLATION_OID, slot->tts_values[i], oldvalues[i]));
+                } else {
+                    Oid typoutput = 0;
+                    bool typisvarlena = false;
+                    getTypeOutputInfo(attr->atttypid, &typoutput, &typisvarlena);
+                    char *value_old = DatumGetCString(OidOutputFunctionCall(typoutput, oldvalues[i]));
+                    char *value_new = DatumGetCString(OidOutputFunctionCall(typoutput, slot->tts_values[i]));
+                    if (pg_strcasecmp(value_old, value_new) == 0) {
+                        match = true;
+                    } else {
+                        match = false;
+                    }
+                }
             }
             update_fix_result = update_fix_result && match;
             attnum = bms_next_member(updatedCols, temp_id);
@@ -2161,7 +2174,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
 
         /* acquire Form_pg_attrdef ad_on_update */
         if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
-            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, node, tupleid, oldPartitionOid, bucketid);
+            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, tupleid, oldPartitionOid, bucketid);
             if (!update_fix_result) {
                 tuple = slot->tts_tuple;
             }
