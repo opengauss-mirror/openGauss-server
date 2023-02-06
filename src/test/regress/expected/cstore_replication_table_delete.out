@@ -85,7 +85,7 @@ explain (ANALYSE on,costs off, timing off) delete from col_rep_tb2 using hash_tb
                      Hash Cond: (hash_tb1.b = col_rep_tb2.a)
                      ->  Seq Scan on hash_tb1 (actual rows=5 loops=1)
                      ->  Hash (actual rows=9 loops=1)
-                            Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
                            ->  Row Adapter (actual rows=9 loops=1)
                                  ->  CStore Scan on col_rep_tb2 (actual rows=9 loops=1)
                                        Filter: (c > 2)
@@ -596,7 +596,7 @@ explain (ANALYSE on,costs off, timing off) delete from row_rep_tb using hash_tb3
          Hash Cond: (hash_tb3.b = row_rep_tb.a)
          ->  Seq Scan on hash_tb3 (actual rows=5 loops=1)
          ->  Hash (actual rows=9 loops=1)
-                Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?                Buckets: 32768  Batches: 1  Memory Usage: .*kB
                ->  Seq Scan on row_rep_tb (actual rows=9 loops=1)
                      Filter: (c > 2)
                      Rows Removed by Filter: 3
