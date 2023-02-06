@@ -201,6 +201,10 @@ Node* transformExpr(ParseState* pstate, Node* expr)
                     AddDefaultExprNode(pstate);
                 }
             }
+
+            if (pstate->shouldCheckOrderbyCol) {
+                pstate->orderbyCols = lappend(pstate->orderbyCols, expr);
+            }
             break;
 
         case T_ParamRef:
