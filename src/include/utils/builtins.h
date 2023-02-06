@@ -26,34 +26,6 @@
 #include "utils/sortsupport.h"
 
 /*
- * Array giving the position of the left-most set bit for each possible
- * byte value.  We count the right-most position as the 0th bit, and the
- * left-most the 7th bit.  The 0th entry of the array should not be used.
- *
- * Note: this is not used by the functions in pg_bitutils.h when
- * HAVE__BUILTIN_CLZ is defined, but we provide it anyway, so that
- * extensions possibly compiled with a different compiler can use it.
- */
-const uint8 pg_leftmost_one_pos[256] = {
-	0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
-	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
-};
-
-/*
  *		Defined in adt/
  */
 
@@ -1836,59 +1808,8 @@ extern Datum compress_statistic_info(PG_FUNCTION_ARGS);
 extern Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS);
 
 #else
-/*
- * Array giving the position of the left-most set bit for each possible
- * byte value.  We count the right-most position as the 0th bit, and the
- * left-most the 7th bit.  The 0th entry of the array should not be used.
- *
- * Note: this is not used by the functions in pg_bitutils.h when
- * HAVE__BUILTIN_CLZ is defined, but we provide it anyway, so that
- * extensions possibly compiled with a different compiler can use it.
- */
-PGDLLIMPORT const uint8 pg_leftmost_one_pos[256] = {
-	0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
-	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
-};
 #endif
 extern char *pg_ultostr(char *str, uint32 value);
 extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
-
-
-/*
- * pg_leftmost_one_pos32
- *		Returns the position of the most significant set bit in "word",
- *		measured from the least significant bit.  word must not be 0.
- */
-static inline int pg_leftmost_one_pos32(uint32 word)
-{
-#ifdef HAVE__BUILTIN_CLZ
-    Assert(word != 0);
-
-    return 31 - __builtin_clz(word);
-#else
-    int shift = 32 - 8;
-
-    Assert(word != 0);
-
-    while ((word >> shift) == 0)
-        shift -= 8;
-
-    return shift + pg_leftmost_one_pos[(word >> shift) & 255];
-#endif /* HAVE__BUILTIN_CLZ */
-}
 
 #endif /* BUILTINS_H */

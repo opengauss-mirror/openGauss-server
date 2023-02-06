@@ -69,11 +69,11 @@ WHERE p1.typtype not in ('c','d','p') AND p1.typname NOT LIKE E'\\_%'
            p2.typelem = p1.oid and p1.typarray = p2.oid) AND p1.typname not in ('desc_tab', 'date_table', 'number_table', 'varchar2_table');
  oid  |     typname      
 ------+------------------
- 3272 | anyset
    32 | oidvector_extend
   210 | smgr
-  194 | pg_node_tree
   705 | unknown
+ 3272 | anyset
+  194 | pg_node_tree
 (5 rows)
 
 -- Make sure typarray points to a varlena array type of our own base

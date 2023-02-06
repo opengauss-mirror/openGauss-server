@@ -44,6 +44,7 @@
 #include "utils/memutils.h"
 #include "utils/selfuncs.h"
 #include "utils/syscache.h"
+#include "utils/hashutils.h"
 #include "vecexecutor/vechashtable.h"
 #include "vectorsonic/vsonicarray.h"
 #include "vectorsonic/vsonichash.h"
@@ -1289,8 +1290,7 @@ bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* 
     }
 
     MemoryContextSwitchTo(oldContext);
-    hashkey = DatumGetUInt32(hash_uint32(hashkey));
-    *hashvalue = hashkey;
+    *hashvalue = murmurhash32(hashkey);
     return true;
 }
 
