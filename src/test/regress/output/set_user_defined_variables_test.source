@@ -1,19 +1,43 @@
 -- error
 set @v1 := 1;
-ERROR:  syntax error at or near "set @"
+ERROR:  syntax error at or near "@"
 LINE 1: set @v1 := 1;
-        ^
+            ^
 select @v1;
 ERROR:  column "v1" does not exist
 LINE 1: select @v1;
                 ^
+-- error
+create or replace function tri_func1() returns trigger as
+$$
+declare
+begin
+set @num = @num + NEW.a;
+return NEW;
+end
+$$ LANGUAGE PLPGSQL;
+ERROR:  syntax error at or near "@"
+LINE 5: set @num = @num + NEW.a;
+            ^
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
 \! sleep 1
 -- error
+create or replace function tri_func1() returns trigger as
+$$
+declare
+begin
+set @num = @num + NEW.a;
+return NEW;
+end
+$$ LANGUAGE PLPGSQL;
+ERROR:  syntax error at or near "@"
+LINE 5: set @num = @num + NEW.a;
+            ^
+-- error
 set @v1 := 1;
-ERROR:  syntax error at or near "set @"
+ERROR:  syntax error at or near "@"
 LINE 1: set @v1 := 1;
-        ^
+            ^
 select @v1;
 ERROR:  column "v1" does not exist
 LINE 1: select @v1;
@@ -1185,9 +1209,9 @@ show enable_set_variable_b_format;
 
 set enable_set_variable_b_format = off;
 set @v1 := 1, @v2 := 2, @v3 := @v4 := 3;
-ERROR:  syntax error at or near "set @"
+ERROR:  syntax error at or near "@"
 LINE 1: set @v1 := 1, @v2 := 2, @v3 := @v4 := 3;
-        ^
+            ^
 \c test_set
 show enable_set_variable_b_format;
  enable_set_variable_b_format 
