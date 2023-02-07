@@ -86,6 +86,14 @@
             return false;                              \
     } while (0)
 
+/* Check whether a field is null */
+#define CHECK_ANY_NULL(fildname)                              \
+    do {                                                        \
+        if (a->fildname == nullptr || b->fildname == nullptr) { \
+            return false;                                       \
+        }                                                       \
+    } while (0)
+
 /* Compare a parse location field (this is a no-op, per note above) */
 #define COMPARE_LOCATION_FIELD(fldname) ((void)0)
 
@@ -842,6 +850,54 @@ static bool _equalPlaceHolderInfo(const PlaceHolderInfo* a, const PlaceHolderInf
     return true;
 }
 
+static bool _equalRightRefState(const RightRefState* a, const RightRefState* b)
+{
+    if (a == b) {
+        return true;
+    }
+    if (a == nullptr || b == nullptr) {
+        return false;
+    }
+    
+    COMPARE_SCALAR_FIELD(isSupported);
+    COMPARE_SCALAR_FIELD(isInsertHasRightRef);
+    COMPARE_SCALAR_FIELD(explicitAttrLen);
+    COMPARE_SCALAR_FIELD(colCnt);
+    COMPARE_SCALAR_FIELD(isUpsert);
+    COMPARE_SCALAR_FIELD(isUpsertHasRightRef);
+    COMPARE_SCALAR_FIELD(usExplicitAttrLen);
+
+    /* ignore values, hasExecs, isNulls fields */
+
+    if (a->explicitAttrNos != b->explicitAttrNos) {
+        CHECK_ANY_NULL(explicitAttrNos);
+        if (a->explicitAttrLen > 0) {
+            COMPARE_POINTER_FIELD(explicitAttrNos, a->explicitAttrLen);
+        }
+    }
+
+    if (a->usExplicitAttrNos != b->usExplicitAttrNos) {
+        CHECK_ANY_NULL(usExplicitAttrNos);
+        if (a->usExplicitAttrLen > 0) {
+            COMPARE_POINTER_FIELD(usExplicitAttrNos, a->usExplicitAttrLen);
+        }
+    }
+
+    if (a->constValues != b->constValues) {
+        CHECK_ANY_NULL(constValues);
+        if (a->colCnt > 0) {
+            for (int i = 0; i < a->colCnt; ++i) {
+                if (a->constValues[i] != b->constValues[i]) {
+                    CHECK_ANY_NULL(constValues[i]);
+                    COMPARE_NODE_FIELD(constValues[i]);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
 /*
  * Stuff from parsenodes.h
  */
@@ -904,6 +960,10 @@ static bool _equalQuery(const Query* a, const Query* b)
         COMPARE_SCALAR_FIELD(isReplace);
     }
 
+    if (!_equalRightRefState(a->rightRefState, b->rightRefState)) {
+        return false;
+    }
+    
     return true;
 }
 
