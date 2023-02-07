@@ -17,6 +17,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "catalog/pg_enum.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
@@ -105,6 +106,74 @@ static inline bool IsAutoIncrementColumn(TupleDesc rdAtt, int attrNo)
     return rdAtt->constr && rdAtt->constr->cons_autoinc && rdAtt->constr->cons_autoinc->attnum == attrNo;
 }
 
+static bool IsBaseRightRefSupportType(Oid oid)
+{
+    switch(oid) {
+        case BOOLOID:
+        case BYTEAOID:
+        case CHAROID:
+        case NAMEOID:
+        case INT8OID:
+        case INT2OID:
+        case INT1OID:
+        case INT4OID:
+        case TEXTOID:
+        case INT16OID:
+        case RAWOID:
+        case BLOBOID:
+        case CLOBOID:
+        case JSONOID:
+        case XMLOID:
+        case POINTOID:
+        case LSEGOID:
+        case PATHOID:
+        case BOXOID:
+        case POLYGONOID:
+        case FLOAT4OID:
+        case FLOAT8OID:
+        case ABSTIMEOID:
+        case RELTIMEOID:
+        case TINTERVALOID:
+        case CIRCLEOID:
+        case CASHOID:
+        case MACADDROID:
+        case INETOID:
+        case CIDROID:
+        case BPCHAROID:
+        case VARCHAROID:
+        case NVARCHAR2OID:
+        case DATEOID:
+        case TIMEOID:
+        case TIMESTAMPOID:
+        case TIMESTAMPTZOID:
+        case INTERVALOID:
+        case TIMETZOID:
+        case BITOID:
+        case VARBITOID:
+        case NUMERICOID:
+        case UUIDOID:
+        case TSVECTOROID:
+        case TSQUERYOID:
+        case JSONBOID:
+        case INT4RANGEOID:
+        case NUMRANGEOID:
+        case TSRANGEOID:
+        case TSTZRANGEOID:
+        case DATERANGEOID:
+        case INT8RANGEOID:
+        case CSTRINGOID:
+        case INTERNALOID:
+        case SMALLDATETIMEOID:
+        case HLL_OID:
+        case HASH16OID:
+        case HASH32OID:
+            return true;
+        default: {
+            return false;
+        }
+    }
+}
+
 static void AddDefaultExprNode(ParseState* pstate)
 {
     RightRefState* refState = pstate->rightRefState;
@@ -150,6 +219,37 @@ static void AddDefaultExprNode(ParseState* pstate)
                 }
             } else {
                 refState->constValues[i] = nullptr;
+            }
+        }
+
+        /* support not null constraint */
+        if (refState->constValues[i] == nullptr && attTup && attTup->attnotnull) {
+            Datum datum;
+            if (IsBaseRightRefSupportType(attTup->atttypid)) {
+                datum = GetTypeZeroValue(attTup);
+                refState->constValues[i] = makeConst(attTup->atttypid, attTup->atttypmod, attTup->attcollation,
+                                                        attTup->attlen, datum, false, attTup->attbyval);
+            } else if (type_is_enum(attTup->atttypid)) {
+                Relation enumRel = heap_open(EnumRelationId, AccessShareLock);
+                CatCList* items = SearchSysCacheList1(ENUMTYPOIDNAME, ObjectIdGetDatum(attTup->atttypid));
+                int itemCnt = items->n_members;
+                
+                for (int eindex = 0; eindex < itemCnt; ++eindex) {
+                    HeapTuple enumTup = t_thrd.lsc_cxt.FetchTupleFromCatCList(items, eindex);
+                    Form_pg_enum item = (Form_pg_enum)GETSTRUCT(enumTup);
+                    if (item && item->enumsortorder == 1) {
+                        datum = DirectFunctionCall2(enum_in, CStringGetDatum(pstrdup(NameStr(item->enumlabel))), attTup->atttypid);
+                        refState->constValues[i] = makeConst(attTup->atttypid, attTup->atttypmod, attTup->attcollation,
+                                                            attTup->attlen, datum, false, attTup->attbyval);
+                        break;
+                    }
+                }
+                ReleaseSysCacheList(items);
+                heap_close(enumRel, AccessShareLock);
+            } else if (type_is_set(attTup->atttypid)) {
+                datum = CStringGetTextDatum("");
+                refState->constValues[i] = makeConst(attTup->atttypid, attTup->atttypmod, attTup->attcollation,
+                                                    attTup->attlen, datum, false, attTup->attbyval);
             }
         }
     }
