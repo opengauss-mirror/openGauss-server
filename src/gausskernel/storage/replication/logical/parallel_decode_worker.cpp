@@ -36,6 +36,7 @@
 #include "access/xact.h"
 
 #include "miscadmin.h"
+#include "pgstat.h"
 
 #include "replication/logical.h"
 #include "replication/reorderbuffer.h"
@@ -66,7 +67,6 @@
 #include "catalog/catalog.h"
 #include "catalog/pg_namespace.h"
 #include "lib/binaryheap.h"
-
 
 static const uint32 OUTPUT_WAIT_COUNT = 0xF;
 static const uint32 PRINT_ALL_WAIT_COUNT = 0x7FF;
@@ -1104,6 +1104,8 @@ void ParallelDecodeWorkerMain(void* point)
         InvalidOid, worker->dbUser);
     t_thrd.proc_cxt.PostInit->InitParallelDecode();
     SetProcessingMode(NormalProcessing);
+    pgstat_report_appname("LogicalDecodeWorker");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "parallel decoder resource owner",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
@@ -1221,6 +1223,8 @@ void LogicalReadWorkerMain(void* point)
         InvalidOid, reader->dbUser);
     t_thrd.proc_cxt.PostInit->InitParallelDecode();
     SetProcessingMode(NormalProcessing);
+    pgstat_report_appname("LogicalReadWorker");
+    pgstat_report_activity(STATE_IDLE, NULL);
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "logical reader resource owner",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
