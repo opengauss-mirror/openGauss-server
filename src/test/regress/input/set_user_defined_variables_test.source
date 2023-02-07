@@ -2,8 +2,28 @@
 set @v1 := 1;
 select @v1;
 
+-- error
+create or replace function tri_func1() returns trigger as
+$$
+declare
+begin
+set @num = @num + NEW.a;
+return NEW;
+end
+$$ LANGUAGE PLPGSQL;
+
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
 \! sleep 1
+
+-- error
+create or replace function tri_func1() returns trigger as
+$$
+declare
+begin
+set @num = @num + NEW.a;
+return NEW;
+end
+$$ LANGUAGE PLPGSQL;
 
 -- error
 set @v1 := 1;
