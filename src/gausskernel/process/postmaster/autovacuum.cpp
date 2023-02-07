@@ -395,6 +395,14 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
 
     t_thrd.autovacuum_cxt.AutoVacuumShmem->av_launcherpid = t_thrd.proc_cxt.MyProcPid;
 
+    if (likely(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL)) {
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery = t_thrd.utils_cxt.trackedMemChunks;
+    }
+    t_thrd.utils_cxt.peakedBytesInQueryLifeCycle = 0;
+    t_thrd.utils_cxt.basedBytesInQueryLifeCycle = 0;
+
     /*
      * Create the initial database list.  The invariant we want this list to
      * keep is that it's ordered by decreasing next_time.  As soon as an entry
