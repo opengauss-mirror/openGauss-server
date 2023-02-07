@@ -1122,6 +1122,7 @@ static void ExecHashIncreaseNumBatches(HashJoinTable hashtable)
 static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
 {
     HashMemoryChunk chunk;
+    errno_t rc;
 
     /* do nothing if not an increase (it's called increase for a reason) */
     if (hashtable->nbuckets >= hashtable->nbuckets_optimal)
@@ -1150,12 +1151,12 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
      */
     hashtable->buckets = (HashJoinTuple *)repalloc(hashtable->buckets, hashtable->nbuckets * sizeof(HashJoinTuple));
 
-    memset_s(hashtable->buckets, 
+    rc = memset_s(hashtable->buckets, 
         sizeof(void *) * hashtable->nbuckets, 
         0, 
         sizeof(void *) * hashtable->nbuckets);
     securec_check(rc, "\0", "\0");
-    
+
     /* scan through all tuples in all chunks to rebuild the hash table */
     for (chunk = hashtable->chunks; chunk != NULL; chunk = chunk->next) {
         /* process all tuples stored in this chunk */
