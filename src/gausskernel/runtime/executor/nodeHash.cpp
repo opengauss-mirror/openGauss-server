@@ -1154,7 +1154,8 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
         sizeof(void *) * hashtable->nbuckets, 
         0, 
         sizeof(void *) * hashtable->nbuckets);
-
+    securec_check(rc, "\0", "\0");
+    
     /* scan through all tuples in all chunks to rebuild the hash table */
     for (chunk = hashtable->chunks; chunk != NULL; chunk = chunk->next) {
         /* process all tuples stored in this chunk */
