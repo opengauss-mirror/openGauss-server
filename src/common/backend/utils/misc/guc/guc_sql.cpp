@@ -3899,10 +3899,10 @@ static void AssignUStoreAttr(const char* newval, void* extra)
         if (!IS_NULL_STR(ptoken)) {
             if (strcasecmp(ptoken, "enable_ustore_partial_seqscan") == 0) {
                 ParseUStoreBool(&u_sess->attr.attr_storage.enable_ustore_partial_seqscan, ptoken, pdelimiter, psave);
-                status[ENABLE_USTORE_PARTIAL_SEQSCAN_IDX] = true;
+                status[ENABLE_USTORE_PARTIAL_SEQSCAN_IDX] = false;
             } else if (strcasecmp(ptoken, "enable_candidate_buf_usage_count") == 0) {
                 ParseUStoreBool(&u_sess->attr.attr_storage.enable_candidate_buf_usage_count, ptoken, pdelimiter, psave);
-                status[ENABLE_CANDIATATE_BUF_USAGE_IDX] = true;
+                status[ENABLE_CANDIATATE_BUF_USAGE_IDX] = false;
             } else if (strcasecmp(ptoken, "ustats_tracker_naptime") == 0) {
                 ParseUStoreInt(&u_sess->attr.attr_storage.ustats_tracker_naptime, ptoken, pdelimiter, psave,
                     MIN_USTATS_TRACKER_NAPTIME, MAX_USTATS_TRACKER_NAPTIME);
