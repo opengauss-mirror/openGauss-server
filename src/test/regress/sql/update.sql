@@ -344,3 +344,11 @@ drop table test;
 create table t_t_mutil_t1(col1 int,col2 int);
 create table t_t_mutil_t2(col1 int,col2 int);
 update t_t_mutil_t1 a,t_t_mutil_t2 b set b.col2=5,a.col2=4 where a.col1=b.col1;
+
+--ustore update
+set ustore_attr to 'enable_candidate_buf_usage_count=true;enable_ustore_partial_seqscan=true';
+drop table if exists ustore_t1;
+create table ustore_t1(id int, name varchar(10)) with (storage_type = ustore);
+insert into ustore_t1 values(1, 'a');
+update ustore_t1 set ustore_t1.name = 'b' where ustore_t1.id = 1;
+drop table ustore_t1;
