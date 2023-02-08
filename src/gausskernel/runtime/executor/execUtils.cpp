@@ -70,7 +70,6 @@
 #include "utils/json.h"
 #include "utils/jsonb.h"
 #include "utils/xml.h"
-#include "utils/rangetypes.h"
 #include "commands/sequence.h"
 
 static bool get_last_attnums(Node* node, ProjectionInfo* projInfo);
@@ -2665,65 +2664,10 @@ Datum GetTypeZeroValue(Form_pg_attribute att_tup)
             result = (Datum)DirectFunctionCall3(bit_in, CStringGetDatum(""), ObjectIdGetDatum(0), Int32GetDatum(-1));
             break;
         }
-        case VARBITOID: {
-            result = (Datum)DirectFunctionCall3(varbit_in, CStringGetDatum(""), ObjectIdGetDatum(0), Int32GetDatum(-1));
-            break;
-        }
         case NUMERICOID: {
             result =
                 (Datum)DirectFunctionCall3(numeric_in, CStringGetDatum("0"), ObjectIdGetDatum(0), Int32GetDatum(0));
             break;
-        }
-        case CIDROID: {
-            result = DirectFunctionCall1(cidr_in, CStringGetDatum("0.0.0.0"));
-            break;
-        }
-        case INETOID: {
-            result = DirectFunctionCall1(inet_in, CStringGetDatum("0.0.0.0"));
-            break;
-        }
-        case MACADDROID: {
-            result = (Datum)DirectFunctionCall1(macaddr_in, CStringGetDatum("00:00:00:00:00:00"));
-            break;
-        }
-        case NUMRANGEOID:
-        case INT8RANGEOID:
-        case INT4RANGEOID: {
-            Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "(0,0)", att_tup->atttypmod, true);
-            ReleaseSysCache(targetType);
-            break;
-        }
-        case TSRANGEOID:
-        case TSTZRANGEOID: {
-            Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "(1970-01-01 00:00:00,1970-01-01 00:00:00)", att_tup->atttypmod, true);
-            ReleaseSysCache(targetType);
-            break;
-        }
-        case DATERANGEOID: {
-            Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "(1970-01-01,1970-01-01)", att_tup->atttypmod, true);
-            ReleaseSysCache(targetType);
-            break;
-        }
-        case HASH16OID: {
-            Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "0", att_tup->atttypmod, true);
-            ReleaseSysCache(targetType);
-            break;
-        }
-        case HASH32OID: {
-            Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "00000000000000000000000000000000", att_tup->atttypmod, true);
-            ReleaseSysCache(targetType);
-            break;
-        }
-        case TSVECTOROID: {
-            Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "", att_tup->atttypmod, true);
-            ReleaseSysCache(targetType);
-            break;            
         }
         default: {
             bool typeIsVarlena = (!att_tup->attbyval) && (att_tup->attlen == -1);

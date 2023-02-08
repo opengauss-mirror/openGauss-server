@@ -2236,7 +2236,7 @@ void exec_init_poolhandles(void)
 #endif
 }
 
-bool IsRightRefState(List* plantreeList)
+static bool IsRightRefState(List* plantreeList)
 {
     if (!plantreeList || !list_length(plantreeList)) {
         return false;
@@ -4899,7 +4899,8 @@ static void exec_bind_message(StringInfo input_message)
 
     portal->nextval_default_expr_type = psrc->nextval_default_expr_type;
 
-    if (OpFusion::IsSqlBypass(psrc, cplan->stmt_list)) {
+    if (IS_PGXC_DATANODE && psrc->cplan == NULL && !psrc->gpc.status.InShareTable() &&
+        psrc->is_checked_opfusion == false) {
         psrc->opFusionObj = OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL),
                                                     u_sess->cache_mem_cxt, psrc, NULL, params);
         psrc->is_checked_opfusion = true;
@@ -10711,7 +10712,9 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
             portal->stmts = *gpcCopyStmts;
     }
 
-    if (OpFusion::IsSqlBypass(psrc, cplan->stmt_list)) {
+    bool checkSQLBypass  = IS_PGXC_DATANODE && !psrc->gpc.status.InShareTable() &&
+                           (psrc->cplan == NULL) && (psrc->is_checked_opfusion == false);
+    if (checkSQLBypass) {
         psrc->opFusionObj = OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL),
                                                     u_sess->cache_mem_cxt, psrc, NULL, params);
         psrc->is_checked_opfusion = true;
