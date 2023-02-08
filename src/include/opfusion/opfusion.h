@@ -43,7 +43,6 @@ typedef unsigned long (OpFusion::*OpFusionExecfuncType)(Relation rel, ResultRelI
 
 extern void report_qps_type(CmdType commandType);
 extern void ExecCheckXactReadOnly(PlannedStmt* plannedstmt);
-extern bool IsRightRefState(List* plantreeList);
 EState* CreateExecutorStateForOpfusion(MemoryContext saveCxt, MemoryContext tmpCxt);
 void FreeExecutorStateForOpfusion(EState* estate);
 
@@ -153,13 +152,6 @@ public:
     {
         pg_memory_barrier();
         return (m_global && m_global->m_is_global);
-    }
-
-    inline static bool IsSqlBypass(CachedPlanSource* psrc, List* stmtList)
-    {
-        return (IS_PGXC_DATANODE && !psrc->gpc.status.InShareTable() &&
-            psrc->cplan == NULL && psrc->is_checked_opfusion == false &&
-            !IsRightRefState(stmtList));
     }
 
 public:

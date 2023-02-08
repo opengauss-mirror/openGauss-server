@@ -440,8 +440,9 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
         eflags = 0;
         count = FETCH_ALL;
     }
-
-    if (OpFusion::IsSqlBypass(psrc, plan_list)) {
+    bool checkSQLBypass = IS_PGXC_DATANODE && !psrc->gpc.status.InShareTable() &&
+                          (psrc->cplan == NULL) && (psrc->is_checked_opfusion == false);
+    if (checkSQLBypass) {
         psrc->opFusionObj =
             OpFusion::FusionFactory(OpFusion::getFusionType(cplan, paramLI, NULL),
                                     u_sess->cache_mem_cxt, psrc, NULL, paramLI);
