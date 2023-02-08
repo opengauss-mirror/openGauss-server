@@ -736,6 +736,7 @@ typedef struct st_dms_profile {
     unsigned short mfc_max_wait_ticket_time; // max time to wait for ticket while sending a message
     unsigned int page_size;
     unsigned long long recv_msg_buf_size;
+    unsigned int log_level;
 
     dms_conn_mode_t pipe_type;    // Inter-instance communication mode. Currently, only TCP and RDMA are supported.
     unsigned int inst_cnt;        // Number of cluster instances
@@ -783,7 +784,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           46
+#define DMS_LOCAL_VERSION           47
 
 #ifdef __cplusplus
 }
