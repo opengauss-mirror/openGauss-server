@@ -7467,6 +7467,7 @@ void LoadSqlPlugin()
                 if (!u_sess->attr.attr_sql.dolphin) {
                     LoadDolphinIfNeeded();
                 }
+                InitBSqlPluginHookIfNeeded();
             }
             PG_CATCH();
             {

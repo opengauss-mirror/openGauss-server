@@ -1462,7 +1462,6 @@ void CreateExtension(CreateExtensionStmt* stmt)
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     if (pg_strcasecmp(stmt->extname, "dolphin") == 0) {
         u_sess->attr.attr_sql.dolphin = true;
-        InitBSqlPluginHookIfNeeded();
     } else if (pg_strcasecmp(stmt->extname, "whale") == 0) {
         u_sess->attr.attr_sql.whale = true;
     }
