@@ -641,3 +641,32 @@ SELECT * FROM alias5, temptest CONNECT BY nocycle PRIOR temptest.col < temptest.
 ERROR:  Current Start With...Connect by has exceeded max iteration times 200
 HINT:  Please check your connect by clause carefully
 drop table temptest;
+-- sys_connect_by_path with blank value
+create table test_connect_sys(x varchar2(10),y number,z number, a text);
+insert into test_connect_sys values('A',1,null, ' '),('B',2,1, ' '),('C',3,1, ' '),('D',4,2,' '),('E',5,3,' ') ,('F',6,4,' '),('G',7,4,' ');
+select sys_connect_by_path(a, '@') from test_connect_sys start with x = 'A' connect by prior y=z;
+ sys_connect_by_path 
+---------------------
+ @ 
+ @ @ 
+ @ @ 
+ @ @ @ 
+ @ @ @ 
+ @ @ @ @ 
+ @ @ @ @ 
+(7 rows)
+
+-- connect_by_root with blank value
+select connect_by_root a from test_connect_sys start with x = 'A' connect by prior y=z;
+ connect_by_roota 
+------------------
+  
+  
+  
+  
+  
+  
+  
+(7 rows)
+
+drop table test_connect_sys;
