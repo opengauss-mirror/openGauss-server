@@ -350,6 +350,7 @@ function Clean()
     fi
     log "Killing dssserver if running..."
     kill_program dssserver ${DSS_HOME}
+    dsscmd clean -D ${DSS_HOME} >> /dev/null 2>&1
 }
 
 function Reg()
