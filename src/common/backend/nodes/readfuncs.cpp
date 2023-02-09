@@ -175,6 +175,19 @@ THR_LOCAL bool skip_read_extern_fields = false;
         }                                                                   \
     } while (0)
 
+#define READ_INT_ARRAY_CAN_NULL(fldname, size)                              \
+    if (local_node->size > 0) {                                             \
+        READ_INT_ARRAY(fldname, size);                                      \
+    } else {                                                                \
+        token = pg_strtok(&length); /* skip :fldname */                     \
+        token = pg_strtok(&length); /* read <> */                           \
+        if (token == nullptr || token[0] != '<' || token[1] != '>') {       \
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),         \
+                errmsg("did not find '<>' at end of null array")));         \
+        }                                                                   \
+        local_node->fldname = nullptr;                                      \
+    }
+
 #define READ_DOUBLE_ARRAY(fldname, size)                                          \
     do {                                                                          \
         local_node->fldname = (double*)palloc(local_node->size * sizeof(double)); \
@@ -403,6 +416,18 @@ THR_LOCAL bool skip_read_extern_fields = false;
         void* ptr = nodeRead(NULL, 0);                                                         \
         errno_t reterrno = memcpy_s(&local_node->fldname, sizeof(void*), &ptr, sizeof(void*)); \
         securec_check(reterrno, "\0", "\0");                                                   \
+    } while (0)
+
+#define READ_NODE_ARRAY(fldname, size, itemtype)                                    \
+    do {                                                                            \
+        if (size <= 0) {                                                            \
+            READ_NODE_FIELD(fldname); /* must be null */                            \
+        } else {                                                                    \
+            local_node->fldname = (itemtype*)palloc0(sizeof(itemtype) * (size));    \
+            for (int i = 0; i < size; i++) {                                        \
+                READ_NODE_FIELD(fldname[i]);                                        \
+            }                                                                       \
+        }                                                                           \
     } while (0)
 
 /* Read a bitmapset field */
@@ -1409,6 +1434,68 @@ static HintState* _readHintState()
     READ_DONE();
 }
 
+static RightRefState* _readRightRefState(Query* query)
+{
+    check_stack_depth();
+    RightRefState* local_node = (RightRefState*)palloc0(sizeof(RightRefState));
+    char* token = nullptr;
+    int length = 0;
+
+    READ_BOOL_FIELD(isSupported);
+    READ_BOOL_FIELD(isInsertHasRightRef);
+    READ_INT_FIELD(explicitAttrLen);
+    READ_INT_ARRAY_CAN_NULL(explicitAttrNos, explicitAttrLen);
+
+    READ_INT_FIELD(colCnt);
+    READ_NODE_ARRAY(constValues, local_node->colCnt, Const*);
+
+    /* ignore values, hasExecs, isNulls fields */
+
+    READ_BOOL_FIELD(isUpsert);
+    READ_BOOL_FIELD(isUpsertHasRightRef);
+    READ_INT_FIELD(usExplicitAttrLen);
+    READ_INT_ARRAY_CAN_NULL(usExplicitAttrNos, usExplicitAttrLen);
+
+    token = pg_strtok(&length);
+    if (token == nullptr || token[0] != '}') {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+            errmsg("did not find '}' at end of RightRefState node")));
+    }
+
+    READ_DONE();
+}
+
+static RightRefState* _readRightRefStateWrap(Query* query)
+{
+    char* token = nullptr;
+    int length = 0;
+    token = pg_strtok(&length); /* skip :fldname */
+    token = pg_strtok(&length, false);
+    if (length == 0) {
+        if (token && token[0] == '<' && token[1] == '>') {
+            token = pg_strtok(&length); /* skip <> */
+        }
+        return nullptr;
+    }
+
+    token = pg_strtok(&length); /* left brace */
+    if (token == nullptr || token[0] != '{') {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+                    errmsg("did not find '{' at end of RightRefState node")));
+    }
+    token = pg_strtok(&length); /* read node name */
+    if (length != 13 && memcmp(token, "RIGHTREFSTATE", 13) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("_readRightRefStateWrap(): badly formatted node string \"%s\"...", token)));
+    }
+
+    if (token != nullptr) {
+        token = nullptr;
+    }
+
+    return _readRightRefState(query);
+}
+
 /*
  * _readQuery
  */
@@ -1543,6 +1630,10 @@ static Query* _readQuery(void)
 
     IF_EXIST(isReplace) {
         READ_BOOL_FIELD(isReplace);
+    }
+    
+    IF_EXIST(rightRefState) {
+        local_node->rightRefState = _readRightRefStateWrap(local_node);
     }
 	
     READ_DONE();

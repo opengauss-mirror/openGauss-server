@@ -155,6 +155,29 @@
         }                                      \
     } while (0)
 
+#define WRITE_BASE_TYPE_ARRAY(fldname, size, format)                \
+    do {                                                            \
+        appendStringInfo(str, " :" CppAsString(fldname) " ");       \
+        if (size <= 0) {                                            \
+            appendStringInfo(str, "<>");                            \
+        } else {                                                    \
+            for (int i = 0; i < size; i++) {                        \
+                appendStringInfo(str, format, node->fldname[i]);    \
+            }                                                       \
+        }                                                           \
+    } while(0)
+
+#define WRITE_NODE_ARRAY(fldname, size)                             \
+    do {                                                            \
+        if (node->fldname == nullptr || size <= 0) {                \
+            appendStringInfo(str, " :" CppAsString(fldname) " <>"); \
+        } else {                                                    \
+            for (int i = 0; i < size; i++) {                        \
+                WRITE_NODE_FIELD(fldname[i]);                       \
+            }                                                       \
+        }                                                           \
+    } while (0)
+
 /*
  * Write full-text search configuration's name out of its oid
  *
@@ -4386,6 +4409,31 @@ static void _outHintState(StringInfo str, HintState* node)
     }
 }
 
+static void _outRightRefState(StringInfo str, RightRefState* node)
+{
+    if (node == nullptr) {
+        appendStringInfo(str, "<>");
+        return;
+    }
+    appendStringInfoChar(str, '{');
+    WRITE_NODE_TYPE("RIGHTREFSTATE");
+    WRITE_BOOL_FIELD(isSupported);
+    WRITE_BOOL_FIELD(isInsertHasRightRef);
+    WRITE_INT_FIELD(explicitAttrLen);
+    WRITE_BASE_TYPE_ARRAY(explicitAttrNos, node->explicitAttrLen, "%d ");
+
+    WRITE_INT_FIELD(colCnt);
+    WRITE_NODE_ARRAY(constValues, node->colCnt);
+
+    /* ignore values, hasExecs, isNulls fields */
+
+    WRITE_BOOL_FIELD(isUpsert);
+    WRITE_BOOL_FIELD(isUpsertHasRightRef);
+    WRITE_INT_FIELD(usExplicitAttrLen);
+    WRITE_BASE_TYPE_ARRAY(usExplicitAttrNos, node->usExplicitAttrLen, "%d ");
+    appendStringInfoChar(str, '}');
+}
+
 static void _outQuery(StringInfo str, Query* node)
 {
     WRITE_NODE_TYPE("QUERY");
@@ -4498,6 +4546,10 @@ static void _outQuery(StringInfo str, Query* node)
     }
     if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
         WRITE_BOOL_FIELD(isReplace);
+    }
+    if (t_thrd.proc->workingVersionNum >= INSERT_RIGHT_REF_VERSION_NUM) {
+        appendStringInfo(str, " :" CppAsString(rightRefState) " ");
+        _outRightRefState(str, node->rightRefState);
     }
 }
 

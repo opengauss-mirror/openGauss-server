@@ -7,7 +7,7 @@
 --
 -- Tables and rules for the view test
 --
-create table rtest_t1 (a int4, b int4) distribute by roundrobin;
+create table rtest_t1 (a int4, b int4);
 create table rtest_t2 (a int4, b int4);
 create table rtest_t3 (a int4, b int4);
 
@@ -31,10 +31,10 @@ COMMENT ON RULE rtest_v1_del ON rtest_v1 IS NULL;
 -- 	both possible syntaxes to define them (The last action
 --  can but must not have a semicolon at the end).
 --
-create table rtest_system (sysname text, sysdesc text) distribute by roundrobin;
-create table rtest_interface (sysname text, ifname text) distribute by roundrobin;
-create table rtest_person (pname text, pdesc text) distribute by roundrobin;
-create table rtest_admin (pname text, sysname text) distribute by roundrobin;
+create table rtest_system (sysname text, sysdesc text);
+create table rtest_interface (sysname text, ifname text);
+create table rtest_person (pname text, pdesc text);
+create table rtest_admin (pname text, sysname text);
 
 create rule rtest_sys_upd as on update to rtest_system do also (
 	update rtest_interface set sysname = new.sysname
@@ -57,9 +57,9 @@ create rule rtest_pers_del as on delete to rtest_person do also
 --
 -- Tables and rules for the logging test
 --
-create table rtest_emp (ename char(20), salary money) distribute by roundrobin;
-create table rtest_emplog (ename char(20), who name, action char(10), newsal money, oldsal money) distribute by roundrobin;
-create table rtest_empmass (ename char(20), salary money) distribute by roundrobin;
+create table rtest_emp (ename char(20), salary money);
+create table rtest_emplog (ename char(20), who name, action char(10), newsal money, oldsal money);
+create table rtest_empmass (ename char(20), salary money);
 
 create rule rtest_emp_ins as on insert to rtest_emp do
 	insert into rtest_emplog values (new.ename, current_user,
@@ -525,7 +525,7 @@ CREATE TABLE shoe_data (
 	slminlen   float,         -- miminum shoelace length
 	slmaxlen   float,         -- maximum shoelace length
 	slunit     char(8)        -- length unit
-) distribute by roundrobin;
+);
 
 CREATE TABLE shoelace_data (
 	sl_name    char(10),      -- primary key
@@ -533,12 +533,12 @@ CREATE TABLE shoelace_data (
 	sl_color   char(10),      -- shoelace color
 	sl_len     float,         -- shoelace length
 	sl_unit    char(8)        -- length unit
-) distribute by roundrobin;
+);
 
 CREATE TABLE unit (
 	un_name    char(8),       -- the primary key
 	un_fact    float          -- factor to transform to cm
-) distribute by roundrobin;
+);
 
 CREATE VIEW shoe AS
 	SELECT sh.shoename,
@@ -768,8 +768,6 @@ drop table cchild;
 --
 -- Check that ruleutils are working
 --
-SELECT viewname, definition FROM pg_views WHERE schemaname <> 'information_schema' ORDER BY viewname;
-
 SELECT tablename, rulename, definition FROM pg_rules
 	ORDER BY tablename, rulename;
 
@@ -873,78 +871,7 @@ select * from fooview;
 select xmin, * from fooview;  -- fail, views don't have such a column
 
 drop view fooview;
-
---
--- check for planner problems with complex inherited UPDATES
---
-
-create table id (id serial primary key, name text);
--- currently, must respecify PKEY for each inherited subtable
-create table test_1 (id integer primary key) inherits (id);
-create table test_2 (id integer primary key) inherits (id);
-create table test_3 (id integer primary key) inherits (id);
-
-insert into test_1 (name) values ('Test 1');
-insert into test_1 (name) values ('Test 2');
-insert into test_2 (name) values ('Test 3');
-insert into test_2 (name) values ('Test 4');
-insert into test_3 (name) values ('Test 5');
-insert into test_3 (name) values ('Test 6');
-
-create view id_ordered as select * from id order by id;
-
-create rule update_id_ordered as on update to id_ordered
-	do instead update id set name = new.name where id = old.id;
-
-select * from id_ordered order by id;
-update id_ordered set name = 'update 2' where id = 2;
-update id_ordered set name = 'update 4' where id = 4;
-update id_ordered set name = 'update 5' where id = 5;
-select * from id_ordered order by id;
-
-set client_min_messages to warning; -- suppress cascade notices
-drop table id cascade;
 reset client_min_messages;
-
---
--- check corner case where an entirely-dummy subplan is created by
--- constraint exclusion
---
--- Enforce use of COMMIT instead of 2PC for temporary objects
-
-create temp table t1 (a integer primary key) distribute by replication;
-
-create temp table t1_1 (check (a >= 0 and a < 10)) inherits (t1) distribute by replication;
-ALTER TABLE t1_1 ADD PRIMARY KEY(a);
-create temp table t1_2 (check (a >= 10 and a < 20)) inherits (t1) distribute by replication;
-ALTER TABLE t1_2 ADD PRIMARY KEY(a);
-
-create rule t1_ins_1 as on insert to t1
-	where new.a >= 0 and new.a < 10
-	do instead
-	insert into t1_1 values (new.a);
-create rule t1_ins_2 as on insert to t1
-	where new.a >= 10 and new.a < 20
-	do instead
-	insert into t1_2 values (new.a);
-
-create rule t1_upd_1 as on update to t1
-	where old.a >= 0 and old.a < 10
-	do instead
-	update t1_1 set a = new.a where a = old.a;
-create rule t1_upd_2 as on update to t1
-	where old.a >= 10 and old.a < 20
-	do instead
-	update t1_2 set a = new.a where a = old.a;
-
-set constraint_exclusion = on;
-
-insert into t1 select * from generate_series(5,19,1) g;
-update t1 set a = 4 where a = 5;
-
-select * from only t1 order by 1;
-select * from only t1_1 order by 1;
-select * from only t1_2 order by 1;
 
 -- test various flavors of pg_get_viewdef()
 

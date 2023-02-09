@@ -197,6 +197,182 @@ select (c1=c2) as c1c2,
        (c12=c13) as c12c13
 from time_default_t where n = 3;
 
+-- test num type not null
+create table num_notnull_t (
+    n serial not null,
+    c1 int not null,
+    c2 int not null,
+    c3 tinyint not null,
+    c4 tinyint not null,
+    c5 smallint not null,
+    c6 smallint not null,
+    c7 integer not null,
+    c8 integer not null,
+    c9 binary_integer not null,
+    c10 bigint not null,
+    c11 bigint not null,
+    c12 boolean not null,
+    c13 boolean not null,
+    c14 numeric not null,
+    c15 numeric(10, 3) not null,
+    c16 decimal not null,
+    c17 dec(21, 6) not null,
+    c18 double precision not null,
+    c19 float8 not null,
+    c20 float not null,
+    c21 float(10) not null,
+    c22 float(9) not null,
+    c23 float(53) not null,
+    c24 float(1) not null
+);
+
+insert into num_notnull_t values(n,c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,c17,c18,c19,c20,c21,c22,c23,c24);
+insert into num_notnull_t values(n,c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,c17,c18,c19,c20,c21,c22,c23,c24);
+select * from num_notnull_t;
+
+-- test char type not null
+create table char_notnull_t(
+   c1 char(10) not null,
+   c2 char(10),
+   c3 varchar(20) not null,
+   c4 varchar(20),
+   c5 varchar2(20) not null,
+   c6 varchar2(20),
+   c7 nchar(20) not null,
+   c8 nchar(20),
+   c9 nvarchar2(20) not null,
+   c10 nvarchar(20),
+   c11 varchar(20) not null,
+   c12 varchar(20)
+);
+insert into char_notnull_t values(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11, concat(c11, 'display'));
+insert into char_notnull_t values(c1 + 66,
+                                  c2 + 88,
+                                  concat(c3, 'display'),
+                                  concat(c4, 'not display'),
+                                  concat(c5, 'display'),
+                                  concat(c6, 'not display'),
+                                  concat(c7, 'display'),
+                                  concat(c8, 'not display'),
+                                  concat(c5, ' display'), -- ref after
+                                  concat(c10, 'not display'),
+                                  concat(c5, ' display'),
+                                  concat(c2, ' not display')); -- ref before
+select * from char_notnull_t;
+
+-- test time type not null
+create table time_notnull_t(
+   c1 date not null,
+   c2 time(6) without time zone not null,
+   c3 time with time zone not null,
+   c4 time(5) with time zone not null,
+   c5 timestamp not null,
+   c6 timestamp without time zone not null,
+   c7 timestamp(4) without time zone not null,
+   c8 timestamp with time zone not null,
+   c9 timestamp(3) with time zone not null,
+   c10 smalldatetime not null,
+   c11 interval year not null,
+   c12 interval month (6) not null,
+   c13 interval day (5) not null,
+   c14 interval hour (4) not null,
+   c15 interval minute (3) not null,
+   c16 interval second (2) not null,
+   c17 interval day (2) to second (2) not null,
+   c18 interval day to hour not null,
+   c19 interval day to minute not null,
+   c20 interval hour to minute not null,
+   c21 interval hour to second not null,
+   c22 interval minute to second not null,
+   c23 reltime not null,
+   c24 abstime not null
+);
+
+insert into time_notnull_t values(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,
+                                  c16,c17,c18,c19, c20, c21, c22, c23, c24);
+select * from time_notnull_t;
+
+-- test custom types
+create type TestEnum as enum ('ok', 'ook','ruok');
+create type TestEnum2 as enum ('ok2', 'ook2','ruok2');
+create type TestEnum3 as enum ();
+create type TestCom as (c1 int, c2 date[], c3 point);
+create type TestCom2 as (c1 int, c2 date[], c3 point);
+
+create table enum_set_notnull_t(
+    c1 TestEnum  not null,
+    c2 TestEnum2 not null,
+    c3 set('666') not null,
+    c4 set('hello', 'world') not null
+);
+insert into enum_set_notnull_t values(c1, c2, c3, c4);
+select * from enum_set_notnull_t;
+
+-- test empty enu, other custom types should fail
+create table custom_notnull_t(
+    c0 TestEnum3 not null,    
+    c1 TestEnum not null,
+    c2 TestEnum2 not null,
+    c3 TestCom not null,
+    c4 TestCom2 not null,
+    c5 int[] not null,
+    c6 blob[][] not null
+);
+insert into custom_notnull_t values(c0, c1, c2, c3, c4, c5, c6);
+select * from custom_notnull_t;
+
+-- test rest other types not null
+create table other_notnull_t(
+    c1 money not null,
+    c2 int4range not null,
+    c3 BLOB not null,
+    c4 RAW not null,
+    c5 BYTEA not null,
+    c6 point not null,
+    c7 lseg not null,
+    c8 box not null,
+    c9 path not null,
+    c10 polygon not null,
+    c11 circle not null,
+    c12 cidr not null,
+    c13 inet not null,
+    c14 macaddr not null,
+    c15 BIT(3) not null,
+    c16 BIT VARYING(5) not null,
+    c17 UUID not null,
+    c18 json not null,
+    c19 jsonb not null,
+    c20 int8range not null,
+    c21 numrange not null,
+    c22 tsrange not null,
+    c23 tstzrange not null,
+    c24 daterange not null,
+    c25 hll not null,
+    c26 hll(12, 4) not null,
+    c27 SET('beijing','shanghai','nanjing','wuhan') not null,
+    c28 tsvector not null,
+    c29 tsquery not null,
+    c30 HASH16 not null,
+    c31 HASH32 not null,
+    c32 SET('66') not null
+);
+insert into other_notnull_t values(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,
+                                   c16,c17,c18,c19, c20, c21, c22, c23, c24, c25, c26,
+                                   c27, c28, c29, c30, c31, c32);
+insert into other_notnull_t values(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,
+                                   c16,c17,c18,c19, c20, c21, c22, c23, c24, c25, c26,
+                                   concat(c27 ,'beijing'), c28, c29, c30, c31, c32);
+select * from other_notnull_t;
+
+-- jdbc case
+DROP USER IF EXISTS rightref CASCADE;
+CREATE USER rightref WITH PASSWORD 'rightref@123';
+SET ROLE rightref PASSWORD 'rightref@123';
+\! chmod -R 700 @abs_bindir@/../jre
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_test/gsjdbc400.jar:@abs_builddir@/jdbc_test/insert_right_ref/. InsertRightRefTest localhost @portstring@ rightref rightref rightref@123
+RESET ROLE;
+DROP USER IF EXISTS rightref CASCADE;
+
 \c postgres
 
 drop database rightref;
