@@ -805,7 +805,7 @@ test: disable_vector_engine
 test: hybrid_row_column
 test: retry
 test: hw_replication_slots
-test: insert insert_right_ref
+test: insert insert_right_ref rules
 test: copy2 temp
 test: truncate
 #test: temp_table
@@ -1047,3 +1047,5 @@ test: show_warnings
 # partition expression key
 test: partition_expr_key
 test: alter_foreign_schema
+
+
