@@ -1226,6 +1226,12 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
         else if (!PQsendQuery(pset.db, query))
             results = NULL;
 
+        if (pset.timing && is_print) {
+            INSTR_TIME_SET_CURRENT(after);
+            INSTR_TIME_SUBTRACT(after, before);
+            elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
+        }
+
         OK = GetPrintResult(&results, is_explain, is_print, query, print_error);
 #ifndef WIN32
         /* Clear password related memory to avoid leaks when core. */
@@ -1237,11 +1243,6 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
         }
 #endif
 
-        if (pset.timing && is_print) {
-            INSTR_TIME_SET_CURRENT(after);
-            INSTR_TIME_SUBTRACT(after, before);
-            elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
-        }
 
         // For EXPLAIN PERFORMANCE command, the query is sent by PQsendQuery.
         // But PQsendQuery doesn't wait for it to finish and then goes to the do-while
