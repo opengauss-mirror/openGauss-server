@@ -494,12 +494,12 @@ static int DoWALWrite(const char* wal_buf, int len, XLogRecPtr& block_pos, const
             suspendHeartBeatTimer();
             return DO_WAL_DATA_WRITE_ERROR;
         }
-        lastFlushPosition = block_pos;
         /* Write was successful, advance our position */
         bytes_written += bytes_to_write;
         bytes_left -= bytes_to_write;
         XLByteAdvance(block_pos, bytes_to_write);
         xlogoff += bytes_to_write;
+        lastFlushPosition = block_pos;
 
         /* Did we reach the end of a WAL segment? */
         if (block_pos % XLOG_SEG_SIZE == 0) {
