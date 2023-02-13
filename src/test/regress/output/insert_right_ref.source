@@ -527,6 +527,92 @@ select * from other_notnull_t;
  $0.00 | empty |    |    | \x | (0,0) | [(0,0),(0,0)] | (0,0),(0,0) | ((0,0)) | ((0,0)) | <(0,0),0> | 0.0.0.0/32 | 0.0.0.0 | 00:00:00:00:00:00 |     |     | 00000000-0000-0000-0000-000000000000 | null | null | empty | empty | empty | empty | empty | \x  | \x  | beijing |     |     | 0000000000000000 | 00000000000000000000000000000000 | 
 (2 rows)
 
+-- test returning
+CREATE TABLE t_replica_batch (
+     i_id_batch serial NOT NULL,
+     i_id_source bigint NOT NULL,
+     t_binlog_name text,
+     v_log_table character varying DEFAULT 't_log_replica'::character varying NOT NULL,
+     i_binlog_position bigint,
+     t_gtid_set text,
+     b_started boolean DEFAULT false NOT NULL,
+     b_processed boolean DEFAULT false NOT NULL,
+     b_replayed boolean DEFAULT false NOT NULL,
+     ts_created timestamp without time zone DEFAULT clock_timestamp() NOT NULL,
+     ts_processed timestamp without time zone,
+     ts_replayed timestamp without time zone,
+     i_replayed bigint,
+     i_skipped bigint,
+     i_ddl bigint)
+WITH (orientation=row, compression=no);
+NOTICE:  CREATE TABLE will create implicit sequence "t_replica_batch_i_id_batch_seq" for serial column "t_replica_batch.i_id_batch"
+CREATE UNIQUE INDEX idx_t_replica_batch_ts_created ON t_replica_batch USING btree (i_id_source, ts_created) TABLESPACE pg_default;                                
+              CREATE UNIQUE INDEX idx_t_replica_batch_binlog_name_position ON t_replica_batch USING btree (i_id_source, t_binlog_name, i_binlog_position) TABLESPACE pg_default;
+ALTER TABLE t_replica_batch ADD CONSTRAINT pk_t_batch PRIMARY KEY USING btree  (i_id_batch);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "pk_t_batch" for table "t_replica_batch"
+INSERT INTO t_replica_batch
+(
+    i_id_source,
+    t_binlog_name,
+    i_binlog_position,
+    t_gtid_set,
+    v_log_table
+)
+VALUES
+(
+    1,
+    'on.000153',
+    11432,
+    '57e77afd-510a-11ed-b66a-fa163e34abbc:1-101658',
+    't_log_replica_mysql_2'
+) RETURNING i_id_batch;
+ i_id_batch 
+------------
+          1
+(1 row)
+
+INSERT INTO t_replica_batch
+(
+    i_id_source,
+    t_binlog_name,
+    i_binlog_position,
+    t_gtid_set,
+    v_log_table
+)
+VALUES
+(
+    i_id_source,
+    'on.000153',
+    11432,
+    '57e77afd-510a-11ed-b66a-fa163e34abbc:1-101658',
+    't_log_replica_mysql_2'
+) RETURNING i_id_batch;
+ i_id_batch 
+------------
+          2
+(1 row)
+
+INSERT INTO t_replica_batch
+(
+    i_id_source,
+    t_binlog_name,
+    i_binlog_position,
+    t_gtid_set,
+    v_log_table
+)
+VALUES
+(
+    i_id_source + 2,
+    'on.000153',
+    i_binlog_position,
+    '57e77afd-510a-11ed-b66a-fa163e34abbc:1-101658',
+    't_log_replica_mysql_2'
+) RETURNING i_id_batch;
+ i_id_batch 
+------------
+          3
+(1 row)
+
 -- jdbc case
 DROP USER IF EXISTS rightref CASCADE;
 NOTICE:  role "rightref" does not exist, skipping

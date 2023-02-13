@@ -364,6 +364,80 @@ insert into other_notnull_t values(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c1
                                    concat(c27 ,'beijing'), c28, c29, c30, c31, c32);
 select * from other_notnull_t;
 
+-- test returning
+CREATE TABLE t_replica_batch (
+     i_id_batch serial NOT NULL,
+     i_id_source bigint NOT NULL,
+     t_binlog_name text,
+     v_log_table character varying DEFAULT 't_log_replica'::character varying NOT NULL,
+     i_binlog_position bigint,
+     t_gtid_set text,
+     b_started boolean DEFAULT false NOT NULL,
+     b_processed boolean DEFAULT false NOT NULL,
+     b_replayed boolean DEFAULT false NOT NULL,
+     ts_created timestamp without time zone DEFAULT clock_timestamp() NOT NULL,
+     ts_processed timestamp without time zone,
+     ts_replayed timestamp without time zone,
+     i_replayed bigint,
+     i_skipped bigint,
+     i_ddl bigint)
+WITH (orientation=row, compression=no);
+
+CREATE UNIQUE INDEX idx_t_replica_batch_ts_created ON t_replica_batch USING btree (i_id_source, ts_created) TABLESPACE pg_default;                                
+              CREATE UNIQUE INDEX idx_t_replica_batch_binlog_name_position ON t_replica_batch USING btree (i_id_source, t_binlog_name, i_binlog_position) TABLESPACE pg_default;
+ALTER TABLE t_replica_batch ADD CONSTRAINT pk_t_batch PRIMARY KEY USING btree  (i_id_batch);
+
+INSERT INTO t_replica_batch
+(
+    i_id_source,
+    t_binlog_name,
+    i_binlog_position,
+    t_gtid_set,
+    v_log_table
+)
+VALUES
+(
+    1,
+    'on.000153',
+    11432,
+    '57e77afd-510a-11ed-b66a-fa163e34abbc:1-101658',
+    't_log_replica_mysql_2'
+) RETURNING i_id_batch;
+
+INSERT INTO t_replica_batch
+(
+    i_id_source,
+    t_binlog_name,
+    i_binlog_position,
+    t_gtid_set,
+    v_log_table
+)
+VALUES
+(
+    i_id_source,
+    'on.000153',
+    11432,
+    '57e77afd-510a-11ed-b66a-fa163e34abbc:1-101658',
+    't_log_replica_mysql_2'
+) RETURNING i_id_batch;
+
+INSERT INTO t_replica_batch
+(
+    i_id_source,
+    t_binlog_name,
+    i_binlog_position,
+    t_gtid_set,
+    v_log_table
+)
+VALUES
+(
+    i_id_source + 2,
+    'on.000153',
+    i_binlog_position,
+    '57e77afd-510a-11ed-b66a-fa163e34abbc:1-101658',
+    't_log_replica_mysql_2'
+) RETURNING i_id_batch;
+
 -- jdbc case
 DROP USER IF EXISTS rightref CASCADE;
 CREATE USER rightref WITH PASSWORD 'rightref@123';

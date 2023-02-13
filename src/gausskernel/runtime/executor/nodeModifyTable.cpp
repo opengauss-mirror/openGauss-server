@@ -4059,7 +4059,6 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         /* Need an econtext too */
         econtext = CreateExprContext(estate);
         mt_state->ps.ps_ExprContext = econtext;
-        ATTACH_RIGHT_REF_STATE(&(mt_state->ps));
 
         /*
          * Build a projection for each result rel.

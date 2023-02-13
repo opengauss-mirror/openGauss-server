@@ -2136,6 +2136,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     if (stmt->returningList) {
         pstate->p_relnamespace = NIL;
         pstate->p_varnamespace = NIL;
+        pstate->rightRefState = nullptr;
         addRTEtoQuery(pstate, rte, false, true, true);
         qry->returningList = transformReturningList(pstate, stmt->returningList);
         if (qry->returningList != NIL && RelationIsColStore(targetrel)) {
