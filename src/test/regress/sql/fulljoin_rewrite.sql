@@ -41,3 +41,12 @@ drop table fulljoin_test2;
 drop table fulljoin_test3;
 
 drop table fulljoin_test4;
+
+create table fulltest(col int4 primary key ,w_col numeric(6,2));
+create table fulltest2(w_id int4 primary key,w_ytd numeric(6,2),w_zip bpchar(27));
+explain (verbose, costs off) select left(alias8.w_zip ,alias8.w_id) as alias10,true alias11,dense_rank() over(order by 1) alias12 from fulltest alias7 full join fulltest2 as alias8  on alias7.col!=alias8.w_ytd group by alias7.col,alias7.w_col ,alias8.w_id;
+select left(alias8.w_zip ,alias8.w_id) as alias10,true alias11,dense_rank() over(order by 1) alias12 from fulltest alias7 full join fulltest2 as alias8  on alias7.col!=alias8.w_ytd group by alias7.col,alias7.w_col ,alias8.w_id;
+
+drop table fulltest;
+drop table fulltest2;
+

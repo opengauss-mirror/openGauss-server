@@ -3582,6 +3582,7 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
 
             /* Generate subquery rte and add it to the range tables */
             RangeTblEntry* rte = addRangeTableEntryForSubquery(NULL, partial_query, makeAlias("subquery", NIL), false, true);
+            rte->pulled_from_subquery = true;
             root->parse->rtable = lappend(root->parse->rtable, rte);
 
             root->parse->targetList = (List*)replace_node_clause(
