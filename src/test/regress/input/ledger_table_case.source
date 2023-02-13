@@ -567,6 +567,23 @@ drop table if exists ledgernsp.t_col_hash2;
 drop table if exists ledgernsp.t_col_hash3;
 
 ----------------------------------------------------------------------
+-- TEST CASE 017. Ustore table.                                     --
+----------------------------------------------------------------------
+create table ledgernsp.ut1(a int primary key, b int) with (storage_type=ustore); -- error
+\d ledgernsp.ut1
+
+set enable_opfusion = on;
+insert into ledgernsp.ut1 values (1,1);
+
+set enable_opfusion = off;
+insert into ledgernsp.ut1 values (2,2);
+
+select *, hash from ledgernsp.ut1;
+
+reset enable_opfusion;
+drop table if exists ledgernsp.ut1;
+
+----------------------------------------------------------------------
 -- clear enviroment.                                                --
 ----------------------------------------------------------------------
 DROP SCHEMA IF EXISTS ledgernsp CASCADE;
