@@ -329,7 +329,7 @@ static uint64 gen_user_tuple_hash(Relation rel, HeapTuple tuple)
  * Note: if hash_exists is true, we should recompute
  * tuple hash and compare with tuplehash of itself.
  */
-HeapTuple set_user_tuple_hash(HeapTuple tup, Relation rel, bool hash_exists)
+HeapTuple set_user_tuple_hash(HeapTuple tup, Relation rel, TupleTableSlot *slot, bool hash_exists)
 {
     uint64 row_hash = gen_user_tuple_hash(rel, tup);
     int hash_attrno = user_hash_attrno(rel->rd_att);
@@ -352,6 +352,10 @@ HeapTuple set_user_tuple_hash(HeapTuple tup, Relation rel, bool hash_exists)
     values[hash_attrno] = UInt64GetDatum(row_hash);
     replaces[hash_attrno] = true;
     HeapTuple newtup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);
+
+    if (slot) {
+        ExecStoreTuple((Tuple)newtup, slot, InvalidBuffer, false);
+    }
 
     pfree_ext(values);
     pfree_ext(nulls);
