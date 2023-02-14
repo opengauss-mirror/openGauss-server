@@ -2211,8 +2211,6 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
 #ifdef USE_ASSERT_CHECKING
     buf_desc->lsn_dirty = InvalidXLogRecPtr;
 #endif
-    /* Set BM_VALID, terminate IO, and wake up any waiters */
-    TerminateBufferIO(buf_desc, false, BM_VALID);
 
     t_thrd.vacuum_cxt.VacuumPageMiss++;
     if (t_thrd.vacuum_cxt.VacuumCostActive)

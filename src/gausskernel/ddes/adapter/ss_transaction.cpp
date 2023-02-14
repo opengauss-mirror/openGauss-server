@@ -120,7 +120,7 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
         dms_txn_info.snapshotxmin = InvalidTransactionId;
     }
 
-    if (SS_IN_REFORM && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
+    if (SS_IN_REFORM && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
         ereport(FATAL, (errmsg("SSTransactionIdGetCommitSeqNo failed during reform, xid=%lu.", transactionId)));
     }
 
@@ -141,7 +141,8 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
             }
             break;
         } else {
-            if (SS_IN_REFORM && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
+            if (SS_IN_REFORM &&
+                (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                 ereport(FATAL, (errmsg("SSTransactionIdGetCommitSeqNo failed during reform, xid=%lu.", transactionId)));
             }
             pg_usleep(USECS_PER_SEC);
@@ -203,7 +204,8 @@ bool SSTransactionIdDidCommit(TransactionId transactionId, bool* ret_did_commit)
                         transactionId, did_commit)));
                 break;
             } else {
-                if (SS_IN_REFORM && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
+                if (SS_IN_REFORM &&
+                    (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                     ereport(FATAL, (errmsg("SSTransactionIdDidCommit failed during reform, xid=%lu.", transactionId)));
                 } else if (SS_IN_REFORM) {
                     return false;
@@ -240,7 +242,8 @@ bool SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress)
                 transactionId, *in_progress)));
             break;
         } else {
-            if (SS_IN_REFORM && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
+            if (SS_IN_REFORM &&
+                (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                 ereport(FATAL, (errmsg("SSTransactionIdIsInProgress failed during reform, xid=%lu.", transactionId)));
             } else if (SS_IN_REFORM) {
                 return false;
@@ -267,7 +270,8 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
             ereport(DEBUG1, (errmsg("SS get update xid success, multixact xid=%lu, uxid=%lu.", xmax, update_xid)));
             break;
         } else {
-            if (SS_IN_REFORM && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
+            if (SS_IN_REFORM &&
+                (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                 ereport(FATAL, (errmsg("SSMultiXactIdGetUpdateXid failed during reform, xid=%lu.", xmax)));
             }
             pg_usleep(USECS_PER_SEC);

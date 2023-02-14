@@ -284,6 +284,8 @@ typedef struct st_dms_buf_ctrl {
     unsigned int pblk_relno;
     unsigned int pblk_blkno;
     unsigned long long  pblk_lsn;
+    unsigned char seg_fileno;
+    unsigned int seg_blockno;
 #endif
 }dms_buf_ctrl_t;
 
@@ -784,7 +786,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           48
+#define DMS_LOCAL_VERSION           49
 
 #ifdef __cplusplus
 }

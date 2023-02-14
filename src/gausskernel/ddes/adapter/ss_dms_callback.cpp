@@ -535,6 +535,9 @@ static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl
             (void)LWLockAcquire(buf_desc->content_lock, content_mode);
             *buf_ctrl = GetDmsBufCtrl(buf_id);
             Assert(buf_id >= 0);
+            Assert((*buf_ctrl)->lock_mode != DMS_LOCK_NULL);
+            (*buf_ctrl)->seg_fileno = buf_desc->seg_fileno;
+            (*buf_ctrl)->seg_blockno = buf_desc->seg_blockno;
         } while (0);
     }
     PG_CATCH();
@@ -670,6 +673,17 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
     }
 
     BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
+
+    if (buf_desc->seg_fileno == EXTENT_INVALID) {
+        buf_desc->seg_fileno = buf_ctrl->seg_fileno;
+        buf_desc->seg_blockno = buf_ctrl->seg_blockno;
+    } else if (buf_desc->seg_fileno != buf_ctrl->seg_fileno || buf_desc->seg_blockno != buf_ctrl->seg_blockno) {
+        ereport(PANIC, (errmsg("[%u/%u/%u/%d/%d %d-%u] location mismatch, seg_fileno:%d, seg_blockno:%u",
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            buf_desc->tag.rnode.bucketNode, buf_desc->tag.rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+            buf_desc->seg_fileno, buf_desc->seg_blockno)));
+    }
+
     /* page content is not valid */
     if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) == 0) {
         return;
@@ -1305,13 +1319,6 @@ static int CBFlushCopy(void *db_handle, char *pageid)
     LockBuffer(buffer, BUFFER_LOCK_SHARE);
     BufferDesc* buf_desc = GetBufferDescriptor(buffer - 1);
     XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
-#ifdef USE_ASSERT_CHECKING
-    if (IsSegmentPhysicalRelNode(buf_desc->tag.rnode)) {
-        SegNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, spc);
-    } else {
-        SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
-    }
-#endif
 
     if (XLByteLT(g_instance.dms_cxt.ckptRedo, pagelsn)) {
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
