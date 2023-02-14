@@ -2271,9 +2271,11 @@ static bool _equalAlterTSConfigurationStmt(const AlterTSConfigurationStmt* a, co
     COMPARE_NODE_FIELD(cfgname);
     COMPARE_NODE_FIELD(tokentype);
     COMPARE_NODE_FIELD(dicts);
+    COMPARE_NODE_FIELD(cfoptions);
     COMPARE_SCALAR_FIELD(override);
     COMPARE_SCALAR_FIELD(replace);
     COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_SCALAR_FIELD(is_reset);
 
     return true;
 }
