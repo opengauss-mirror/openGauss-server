@@ -279,6 +279,8 @@ static void GsTarUsage(void)
     printf(_("\nOptions controlling the output:\n"));
     printf(_("  -D, --destination=DIRECTORY   untar files into directory\n"));
     printf(_("  -F, --filename=FILENAME       filename to be untar\n"));
+    printf(_("  -V, --version                 output version information, then exit\n"));
+    printf(_("  -?, --help                    show this help, then exit\n"));
 }
 
 static void tablespace_list_create()
@@ -1583,7 +1585,7 @@ static void GsTarHelp(int argc, char** argv) {
             GsTarUsage();
             exit(0);
         } else if (strcmp(argv[1], "-V") == 0 || strcmp(argv[1], "--version") == 0) {
-            puts("gs_basebackup " DEF_GS_VERSION);
+            puts("gs_tar " DEF_GS_VERSION);
             exit(0);
         }
     }
