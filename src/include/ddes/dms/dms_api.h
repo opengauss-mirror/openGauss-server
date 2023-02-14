@@ -757,7 +757,7 @@ typedef struct st_dms_profile {
     //ock scrlock configs
     unsigned char enable_scrlock;
     unsigned int primary_inst_id;
-    unsigned char enable_scrlock_secure_mode;   // enable ssl
+    unsigned char enable_ssl;
     unsigned int scrlock_log_level;
     unsigned char enable_scrlock_worker_bind_core;
     unsigned int scrlock_worker_cnt;
@@ -784,7 +784,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           47
+#define DMS_LOCAL_VERSION           48
 
 #ifdef __cplusplus
 }

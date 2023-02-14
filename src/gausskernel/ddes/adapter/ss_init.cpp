@@ -288,7 +288,7 @@ static void setScrlConfig(dms_profile_t *profile)
     }
 
     profile->primary_inst_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
-    profile->enable_scrlock_secure_mode = dms_attr->enable_ssl;
+    profile->enable_ssl = dms_attr->enable_ssl;
     profile->enable_scrlock_server_sleep_mode = dms_attr->enable_scrlock_sleep_mode;
     profile->scrlock_worker_cnt = dms_attr->scrlock_worker_count;
     profile->scrlock_server_port = dms_attr->scrlock_server_port;
