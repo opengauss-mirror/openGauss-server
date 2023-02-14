@@ -310,6 +310,8 @@ void DataReceiverMain(void)
     datarcv->sendPosition.queueid = datarcv->receivePosition.queueid = datarcv->localWritePosition.queueid = 0;
     datarcv->sendPosition.queueoff = datarcv->receivePosition.queueoff = datarcv->localWritePosition.queueoff = 0;
     SpinLockRelease(&datarcv->mutex);
+    pgstat_report_appname("Data Receiver");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     /* Loop until end-of-streaming or error */
     for (;;) {

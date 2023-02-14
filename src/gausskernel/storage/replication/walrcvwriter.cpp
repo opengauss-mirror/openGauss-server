@@ -814,6 +814,8 @@ void walrcvWriterMain(void)
     setWalRcvWriterLatch();
 
     t_thrd.walrcvwriter_cxt.walStreamWrite = GetXLogReplayRecPtr(NULL);
+    pgstat_report_appname("Wal Receive Writer");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     /*
      * Loop forever
