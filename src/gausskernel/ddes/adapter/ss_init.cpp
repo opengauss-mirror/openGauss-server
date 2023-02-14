@@ -428,8 +428,7 @@ void GetSSLogPath(char *sslog_path)
     }
 
     sslog_path[0] = '\0';
-    ret = snprintf_s(sslog_path, DMS_LOG_PATH_LEN, DMS_LOG_PATH_LEN - 1, "%s/pg_log/%s", realPath,
-                     g_instance.attr.attr_common.PGXCNodeName);
+    ret = snprintf_s(sslog_path, DMS_LOG_PATH_LEN, DMS_LOG_PATH_LEN - 1, "%s/pg_log", realPath);
     securec_check_ss(ret, "", "");
     if (pg_mkdir_p(sslog_path, S_IRWXU) != 0 && errno !=EEXIST) {
         ereport(FATAL, (errmsg("failed to mkdir $GAUSSLOG[DataDir]/pg_log")));
