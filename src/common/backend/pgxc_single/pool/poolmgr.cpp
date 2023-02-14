@@ -1256,8 +1256,8 @@ retry:
         /*
          * Wait 0.5 sec in order to void failure.
          */
-        pg_usleep(500000);
         if (loops < 3) {
+            pg_usleep(500000);
             loops++;
             goto retry;
         } else {
