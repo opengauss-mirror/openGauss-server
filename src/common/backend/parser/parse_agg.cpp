@@ -151,11 +151,14 @@ void transformAggregateCall(ParseState* pstate, Aggref* agg, List* args, List* a
         save_next_resno = pstate->p_next_resno;
         pstate->p_next_resno = attno;
 
+        pstate->shouldCheckOrderbyCol = (agg_distinct && !ALLOW_ORDERBY_UNDISTINCT_COLUMN && !IsInitdb && DB_IS_CMPT(B_FORMAT));
         torder = transformSortClause(pstate,
             aggorder,
             &tlist,
             true,  /* fix unknowns */
             true); /* force SQL99 rules */
+
+        pstate->shouldCheckOrderbyCol = false;
 
         /*
          * If we have DISTINCT, transform that to produce a distinctList.

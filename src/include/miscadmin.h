@@ -151,7 +151,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_CHAR_COERCE_COMPAT 4194304
 #define OPT_PGFORMAT_SUBSTR 8388608
 #define OPT_TRUNC_NUMERIC_TAIL_ZERO 16777216
-#define OPT_MAX 25
+#define OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN 33554432
+#define OPT_MAX 26
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -186,6 +187,7 @@ extern bool contain_backend_version(uint32 version_number);
 #define CHAR_COERCE_COMPAT (u_sess->utils_cxt.behavior_compat_flags & OPT_CHAR_COERCE_COMPAT)
 #define PGFORMAT_SUBSTR (u_sess->utils_cxt.behavior_compat_flags & OPT_PGFORMAT_SUBSTR)
 #define TRUNC_NUMERIC_TAIL_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_TRUNC_NUMERIC_TAIL_ZERO)
+#define ALLOW_ORDERBY_UNDISTINCT_COLUMN (u_sess->utils_cxt.behavior_compat_flags & OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN)
 
 #define PLSQL_COMPILE_FOR_LOOP (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_FOR_LOOP)
 #define PLSQL_COMPILE_OUTPARAM (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_OUTPARAM)
