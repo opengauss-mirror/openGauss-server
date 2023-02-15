@@ -1064,6 +1064,7 @@ LocalSysDBCache::LocalSysDBCache()
 
 void AtEOXact_SysDBCache(bool is_commit)
 {
+    ResourceOwnerReleasePthreadMutex(t_thrd.lsc_cxt.local_sysdb_resowner, is_commit);
     if (!EnableLocalSysCache()) {
         ResourceOwnerReleaseRelationRef(t_thrd.lsc_cxt.local_sysdb_resowner, is_commit);
         return;

@@ -28,6 +28,7 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/syscall_lock.h"
+#include "postmaster/postmaster.h"
 #include "storage/file/fio_device.h"
 
 /* Max size of error message of dlopen   */
@@ -168,6 +169,36 @@ PGFunction lookup_external_function(void* filehandle, const char* funcname)
 }
 
 /*
+ * release all library at proc exit.
+ */
+void internal_delete_library()
+{
+    DynamicFileList* file_scanner = NULL;
+
+    AutoMutexLock libraryLock(&file_list_lock);
+    libraryLock.lock();
+
+    while (file_list != NULL) {
+        file_scanner = file_list;
+        file_list = file_list->next;
+#ifndef ENABLE_MEMORY_CHECK
+        /*
+         * in the senario of ImmediateShutdown, it is not safe to close plugin
+         * as PM thread will not wait for all children threads exist(will send SIGQUIT signal) referring to pmdie
+         */
+        if (g_instance.status != ImmediateShutdown && file_scanner->handle != NULL) {
+            (void)pg_dlclose(file_scanner->handle);
+            file_scanner->handle = NULL;
+        }
+#endif
+        pfree((char*)file_scanner);
+        file_scanner = NULL;
+    }
+    file_list = file_tail = NULL;
+    libraryLock.unLock();
+}
+
+/*
  * Load the specified dynamic-link library file, unless it already is
  * loaded.	Return the pg_dl* handle for the file.
  *
@@ -185,6 +216,9 @@ void* internal_load_library(const char* libname)
     PG_init_t PG_init = NULL;
     char* file = last_dir_separator(libname);
     file = (file == NULL) ? ((char*)libname) : (file + 1);
+
+    AutoMutexLock libraryLock(&file_list_lock);
+    libraryLock.lock();
 
     /*
      * Scan the list of loaded FILES to see if the file has been loaded.
@@ -367,6 +401,8 @@ void* internal_load_library(const char* libname)
         u_sess->fmgr_cxt.file_init_tail = file_init_scanner;
     }
 
+    libraryLock.unLock();
+
     return file_scanner->handle;
 }
 
@@ -490,8 +526,9 @@ static void internal_unload_library(const char* libname)
      * inode, else internal_load_library() will still think it's present.
      */
 
-    AutoMutexLock libraryLock(&dlerror_lock);
-
+    AutoMutexLock dlerrorLock(&dlerror_lock);
+    dlerrorLock.lock();
+    AutoMutexLock libraryLock(&file_list_lock);
     libraryLock.lock();
 
     for (file_scanner = file_list; file_scanner != NULL; file_scanner = nxt) {
@@ -523,6 +560,7 @@ static void internal_unload_library(const char* libname)
     }
 
     libraryLock.unLock();
+    dlerrorLock.unLock();
 
 #endif /* NOT_USED */
 }

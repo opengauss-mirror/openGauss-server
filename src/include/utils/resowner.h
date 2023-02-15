@@ -153,7 +153,7 @@ extern void ResourceOwnerEnlargePthreadMutex(ResourceOwner owner);
 
 extern void PrintPthreadMutexLeakWarning(pthread_mutex_t* pMutex);
 extern void PrintResourceOwnerLeakWarning();
-extern void ResourceOwnerReleasePthreadMutex();
+extern void ResourceOwnerReleaseAllXactPthreadMutex();
 
 extern void ResourceOwnerEnlargePartitionMapRefs(ResourceOwner owner);
 extern void ResourceOwnerRememberPartitionMapRef(ResourceOwner owner, PartitionMap* partmap);
@@ -197,6 +197,7 @@ extern void ResourceOwnerEnlargeGlobalIsExclusive(ResourceOwner owner);
 extern void ResourceOwnerRememberGlobalIsExclusive(ResourceOwner owner, volatile uint32 *isexclusive);
 extern void ResourceOwnerForgetGlobalIsExclusive(ResourceOwner owner, volatile uint32 *isexclusive);
 
+extern void ResourceOwnerReleasePthreadMutex(ResourceOwner owner, bool isCommit);
 extern void ResourceOwnerReleaseRWLock(ResourceOwner owner, bool isCommit);
 extern void ResourceOwnerReleaseLocalCatCTup(ResourceOwner owner, bool isCommit);
 extern void ResourceOwnerReleaseLocalCatCList(ResourceOwner owner, bool isCommit);

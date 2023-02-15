@@ -56,5 +56,6 @@ extern syscalllock env_lock;
 extern syscalllock dlerror_lock;
 extern syscalllock kerberos_conn_lock;
 extern syscalllock read_cipher_lock;
+extern syscalllock file_list_lock;
 
 #endif /* SYSCALL_LOCK_H_ */

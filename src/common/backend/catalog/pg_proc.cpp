@@ -2301,6 +2301,10 @@ void delete_file_handle(const char* library_path)
     DynamicFileList* file_scanner = NULL;
     DynamicFileList* pre_file_scanner = file_list;
 
+    AutoMutexLock libraryLock(&file_list_lock);
+    libraryLock.lock();
+
+
     char* fullname = expand_dynamic_library_name(library_path);
     for (file_scanner = file_list; file_scanner != NULL; file_scanner = file_scanner->next) {
         if (strncmp(fullname, file_scanner->filename, strlen(fullname) + 1) == 0) {
@@ -2323,6 +2327,8 @@ void delete_file_handle(const char* library_path)
             pre_file_scanner = file_scanner;
         }
     }
+
+    libraryLock.unLock();
 }
 
 /*

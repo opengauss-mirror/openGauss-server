@@ -85,4 +85,6 @@ extern pthread_mutex_t gLocaleMutex;
 extern void CreateSharedMemoryAndSemaphores(bool makePrivate, int port);
 
 extern void cancelShmemExit(pg_on_exit_callback function, Datum arg);
+
+extern void internal_delete_library();
 #endif /* IPC_H */

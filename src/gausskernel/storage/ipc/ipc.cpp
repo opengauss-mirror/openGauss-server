@@ -157,8 +157,6 @@ void proc_exit_prepare(int code);
  */
 void proc_exit(int code)
 {
-    DynamicFileList* file_scanner = NULL;
-
     if (ENABLE_DMS && t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
         // add cnt to avoid DmsCallbackThreadShmemInit to use UsedShmemSegAddr
         (void)pg_atomic_add_fetch_u32(&g_instance.dms_cxt.inProcExitCnt, 1);
@@ -167,11 +165,14 @@ void proc_exit(int code)
             pg_usleep(WAIT_DMS_INIT_TIMEOUT);
         }
     }
+
     if (t_thrd.utils_cxt.backend_reserved) {
         ereport(DEBUG2, (errmodule(MOD_MEM),
             errmsg("[BackendReservedExit] current thread role is: %d, used memory is: %d MB\n",
             t_thrd.role, t_thrd.utils_cxt.trackedMemChunks)));
     }
+
+    AtEOXact_SysDBCache(false);
 
     audit_processlogout_unified();
 
@@ -324,22 +325,8 @@ void proc_exit(int code)
         if (t_thrd.postmaster_cxt.redirection_done)
             ereport(LOG, (errmsg("Gaussdb exit(%d)", code)));
 
-        while (file_list != NULL) {
-            file_scanner = file_list;
-            file_list = file_list->next;
-#ifndef ENABLE_MEMORY_CHECK
-            /* 
-             * in the senario of ImmediateShutdown, it is not safe to close plugin 
-             * as PM thread will not wait for all children threads exist(will send SIGQUIT signal) referring to pmdie
-             */
-            if (g_instance.status != ImmediateShutdown) {
-                (void)pg_dlclose(file_scanner->handle);
-            }
-#endif
-            pfree((char*)file_scanner);
-            file_scanner = NULL;
-        }
-        file_list = file_tail = NULL;
+        /* release all library at proc exit. */
+        internal_delete_library();
 
         if (u_sess->attr.attr_resource.use_workload_manager)
             gscgroup_free();
