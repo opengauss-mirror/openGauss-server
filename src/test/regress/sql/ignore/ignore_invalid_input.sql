@@ -253,6 +253,70 @@ select * from t_bit;
 update /*+ ignore_error */ t_bit set c = '12a34';
 select * from t_bit;
 
+-- test net types
+reset sql_ignore_strategy;
+show sql_ignore_strategy;
+create table net(
+    c1 cidr not null,
+    c2 inet  not null,
+    c3 macaddr not null
+);
+insert /*+ ignore_error */ into net values('', '', '');
+insert /*+ ignore_error */ into net values(null, null, null);
+insert /*+ ignore_error */ into net values(1::int, 1.1::float, 'sdfdf'::time);
+set sql_ignore_strategy='overwrite_null';
+insert /*+ ignore_error */ into net values(null, null, null);
+insert /*+ ignore_error */ into net values(1::int, 1.1::float, 'sdfdf'::time);
+select * from net;
+reset sql_ignore_strategy;
+
+-- test range types
+create table ran(
+    c1 numrange not null,
+    c2 int8range not null,
+    c3 int4range not null,
+    c4 tsrange not null,
+    c5 tstzrange not null,
+    c6 daterange not null
+);
+insert /*+ ignore_error */ into ran values('', '', '', '', '', '');
+insert /*+ ignore_error */ into ran values(null, null, null, null, null, null);
+set sql_ignore_strategy='overwrite_null';
+insert /*+ ignore_error */ into ran values(null, null, null, null, null, null);
+select * from ran;
+reset sql_ignore_strategy;
+
+-- test hash & tsvector types
+create table hashvec(
+    c1 hash16 not null,
+    c2 hash32 not null,
+    c3 tsvector not null
+);
+insert /*+ ignore_error */ into hashvec values('', '', '');
+insert /*+ ignore_error */ into hashvec values(null, null, null);
+insert /*+ ignore_error */ into hashvec values(1::int, 1.1::float, 'sdfdf'::time);
+set sql_ignore_strategy='overwrite_null';
+insert /*+ ignore_error */ into hashvec values(null, null, null);
+insert /*+ ignore_error */ into hashvec values(1::int, 1.1::float, 'sdfdf'::time);
+select * from hashvec;
+reset sql_ignore_strategy;
+
+-- test hash & tsvector types
+create table varbit(
+    c1 BIT VARYING(5) not null
+);
+insert /*+ ignore_error */ into varbit values('');
+insert /*+ ignore_error */ into varbit values(null);
+insert /*+ ignore_error */ into varbit values('sdfdf'::time);
+set sql_ignore_strategy='overwrite_null';
+insert /*+ ignore_error */ into varbit values(null);
+insert /*+ ignore_error */ into varbit values(1::int);
+insert /*+ ignore_error */ into varbit values('sdfdf'::time);
+select * from varbit;
+reset sql_ignore_strategy;
+
+drop table net, ran, hashvec, varbit;
+
 -- restore context
 reset timezone;
 show timezone;

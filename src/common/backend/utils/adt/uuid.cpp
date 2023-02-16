@@ -275,13 +275,16 @@ Datum hash16out(PG_FUNCTION_ARGS)
     PG_RETURN_CSTRING(res.data);
 }
 
-static void string_to_hash32(const char* source, hash32_t* hash32)
+static void string_to_hash32(char* source, hash32_t* hash32, bool can_ignore)
 {
-    const char* src = source;
+    char* src = source;
     int len = strlen(src);
+    int level = can_ignore ? WARNING : ERROR;
+
     if (len != HASH32_LEN * 2) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+        ereport(level, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                         errmsg("invalid input syntax for hash32: \"%s\"", source)));
+        src = "00000000000000000000000000000000";
     }
 
     for (int i = 0; i < HASH32_LEN; ++i) {
@@ -295,7 +298,7 @@ Datum hash32in(PG_FUNCTION_ARGS)
     hash32_t *hash32 = NULL;
 
     hash32 = (hash32_t*)palloc(sizeof(hash32_t));
-    string_to_hash32(hash32_str, hash32);
+    string_to_hash32(hash32_str, hash32, fcinfo->can_ignore);
     PG_RETURN_HASH32_P(hash32);
 }
 

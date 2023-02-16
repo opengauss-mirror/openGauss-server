@@ -983,6 +983,211 @@ select * from t_bit;
  0
 (2 rows)
 
+-- test net types
+reset sql_ignore_strategy;
+show sql_ignore_strategy;
+ sql_ignore_strategy 
+---------------------
+ ignore_null
+(1 row)
+
+create table net(
+    c1 cidr not null,
+    c2 inet  not null,
+    c3 macaddr not null
+);
+insert /*+ ignore_error */ into net values('', '', '');
+WARNING:  invalid input syntax for type cidr: ""
+LINE 1: insert /*+ ignore_error */ into net values('', '', '');
+                                                   ^
+CONTEXT:  referenced column: c1
+WARNING:  invalid input syntax for type inet: ""
+LINE 1: insert /*+ ignore_error */ into net values('', '', '');
+                                                       ^
+CONTEXT:  referenced column: c2
+WARNING:  invalid input syntax for type macaddr: ""
+LINE 1: insert /*+ ignore_error */ into net values('', '', '');
+                                                           ^
+CONTEXT:  referenced column: c3
+insert /*+ ignore_error */ into net values(null, null, null);
+WARNING:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (null, null, null).
+insert /*+ ignore_error */ into net values(1::int, 1.1::float, 'sdfdf'::time);
+WARNING:  invalid input syntax for type time: "sdfdf"
+LINE 1: ...nore_error */ into net values(1::int, 1.1::float, 'sdfdf'::t...
+                                                             ^
+WARNING:  column "c1" is of type cidr but expression is of type integer. Data truncated automatically.
+CONTEXT:  referenced column: c1
+WARNING:  column "c2" is of type inet but expression is of type double precision. Data truncated automatically.
+CONTEXT:  referenced column: c2
+WARNING:  column "c3" is of type macaddr but expression is of type time without time zone. Data truncated automatically.
+CONTEXT:  referenced column: c3
+set sql_ignore_strategy='overwrite_null';
+insert /*+ ignore_error */ into net values(null, null, null);
+WARNING:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (null, null, null).
+insert /*+ ignore_error */ into net values(1::int, 1.1::float, 'sdfdf'::time);
+WARNING:  invalid input syntax for type time: "sdfdf"
+LINE 1: ...nore_error */ into net values(1::int, 1.1::float, 'sdfdf'::t...
+                                                             ^
+WARNING:  column "c1" is of type cidr but expression is of type integer. Data truncated automatically.
+CONTEXT:  referenced column: c1
+WARNING:  column "c2" is of type inet but expression is of type double precision. Data truncated automatically.
+CONTEXT:  referenced column: c2
+WARNING:  column "c3" is of type macaddr but expression is of type time without time zone. Data truncated automatically.
+CONTEXT:  referenced column: c3
+select * from net;
+     c1     |   c2    |        c3         
+------------+---------+-------------------
+ 0.0.0.0/32 | 0.0.0.0 | 00:00:00:00:00:00
+ 0.0.0.0/32 | 0.0.0.0 | 00:00:00:00:00:00
+ 0.0.0.0/32 | 0.0.0.0 | 00:00:00:00:00:00
+ 0.0.0.0/32 | 0.0.0.0 | 00:00:00:00:00:00
+(4 rows)
+
+reset sql_ignore_strategy;
+-- test range types
+create table ran(
+    c1 numrange not null,
+    c2 int8range not null,
+    c3 int4range not null,
+    c4 tsrange not null,
+    c5 tstzrange not null,
+    c6 daterange not null
+);
+insert /*+ ignore_error */ into ran values('', '', '', '', '', '');
+WARNING:  malformed range literal: ""
+LINE 1: insert /*+ ignore_error */ into ran values('', '', '', '', '...
+                                                   ^
+DETAIL:  Missing left parenthesis or bracket.
+CONTEXT:  referenced column: c1
+WARNING:  malformed range literal: ""
+LINE 1: insert /*+ ignore_error */ into ran values('', '', '', '', '...
+                                                       ^
+DETAIL:  Missing left parenthesis or bracket.
+CONTEXT:  referenced column: c2
+WARNING:  malformed range literal: ""
+LINE 1: ...nsert /*+ ignore_error */ into ran values('', '', '', '', ''...
+                                                             ^
+DETAIL:  Missing left parenthesis or bracket.
+CONTEXT:  referenced column: c3
+WARNING:  malformed range literal: ""
+LINE 1: ...t /*+ ignore_error */ into ran values('', '', '', '', '', ''...
+                                                             ^
+DETAIL:  Missing left parenthesis or bracket.
+CONTEXT:  referenced column: c4
+WARNING:  malformed range literal: ""
+LINE 1: .../*+ ignore_error */ into ran values('', '', '', '', '', '');
+                                                               ^
+DETAIL:  Missing left parenthesis or bracket.
+CONTEXT:  referenced column: c5
+WARNING:  malformed range literal: ""
+LINE 1: .../*+ ignore_error */ into ran values('', '', '', '', '', '');
+                                                                   ^
+DETAIL:  Missing left parenthesis or bracket.
+CONTEXT:  referenced column: c6
+insert /*+ ignore_error */ into ran values(null, null, null, null, null, null);
+WARNING:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (null, null, null, null, null, null).
+set sql_ignore_strategy='overwrite_null';
+insert /*+ ignore_error */ into ran values(null, null, null, null, null, null);
+WARNING:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (null, null, null, null, null, null).
+select * from ran;
+  c1   |  c2   |  c3   |  c4   |  c5   |  c6   
+-------+-------+-------+-------+-------+-------
+ empty | empty | empty | empty | empty | empty
+ empty | empty | empty | empty | empty | empty
+(2 rows)
+
+reset sql_ignore_strategy;
+-- test hash & tsvector types
+create table hashvec(
+    c1 hash16 not null,
+    c2 hash32 not null,
+    c3 tsvector not null
+);
+insert /*+ ignore_error */ into hashvec values('', '', '');
+WARNING:  invalid input syntax for hash32: ""
+LINE 1: insert /*+ ignore_error */ into hashvec values('', '', '');
+                                                           ^
+CONTEXT:  referenced column: c2
+insert /*+ ignore_error */ into hashvec values(null, null, null);
+WARNING:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (null, null, null).
+insert /*+ ignore_error */ into hashvec values(1::int, 1.1::float, 'sdfdf'::time);
+WARNING:  invalid input syntax for type time: "sdfdf"
+LINE 1: ..._error */ into hashvec values(1::int, 1.1::float, 'sdfdf'::t...
+                                                             ^
+WARNING:  column "c1" is of type hash16 but expression is of type integer. Data truncated automatically.
+CONTEXT:  referenced column: c1
+WARNING:  column "c2" is of type hash32 but expression is of type double precision. Data truncated automatically.
+CONTEXT:  referenced column: c2
+WARNING:  column "c3" is of type tsvector but expression is of type time without time zone. Data truncated automatically.
+CONTEXT:  referenced column: c3
+set sql_ignore_strategy='overwrite_null';
+insert /*+ ignore_error */ into hashvec values(null, null, null);
+WARNING:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (null, null, null).
+insert /*+ ignore_error */ into hashvec values(1::int, 1.1::float, 'sdfdf'::time);
+WARNING:  invalid input syntax for type time: "sdfdf"
+LINE 1: ..._error */ into hashvec values(1::int, 1.1::float, 'sdfdf'::t...
+                                                             ^
+WARNING:  column "c1" is of type hash16 but expression is of type integer. Data truncated automatically.
+CONTEXT:  referenced column: c1
+WARNING:  column "c2" is of type hash32 but expression is of type double precision. Data truncated automatically.
+CONTEXT:  referenced column: c2
+WARNING:  column "c3" is of type tsvector but expression is of type time without time zone. Data truncated automatically.
+CONTEXT:  referenced column: c3
+select * from hashvec;
+        c1        |                c2                | c3 
+------------------+----------------------------------+----
+ 0000000000000000 | 00000000000000000000000000000000 | 
+ 0000000000000000 | 00000000000000000000000000000000 | 
+ 0000000000000000 | 00000000000000000000000000000000 | 
+ 0000000000000000 | 00000000000000000000000000000000 | 
+(4 rows)
+
+reset sql_ignore_strategy;
+-- test hash & tsvector types
+create table varbit(
+    c1 BIT VARYING(5) not null
+);
+insert /*+ ignore_error */ into varbit values('');
+insert /*+ ignore_error */ into varbit values(null);
+WARNING:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (null).
+insert /*+ ignore_error */ into varbit values('sdfdf'::time);
+WARNING:  invalid input syntax for type time: "sdfdf"
+LINE 1: insert /*+ ignore_error */ into varbit values('sdfdf'::time)...
+                                                      ^
+WARNING:  column "c1" is of type bit varying but expression is of type time without time zone. Data truncated automatically.
+CONTEXT:  referenced column: c1
+set sql_ignore_strategy='overwrite_null';
+insert /*+ ignore_error */ into varbit values(null);
+WARNING:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (null).
+insert /*+ ignore_error */ into varbit values(1::int);
+WARNING:  column "c1" is of type bit varying but expression is of type integer. Data truncated automatically.
+CONTEXT:  referenced column: c1
+insert /*+ ignore_error */ into varbit values('sdfdf'::time);
+WARNING:  invalid input syntax for type time: "sdfdf"
+LINE 1: insert /*+ ignore_error */ into varbit values('sdfdf'::time)...
+                                                      ^
+WARNING:  column "c1" is of type bit varying but expression is of type time without time zone. Data truncated automatically.
+CONTEXT:  referenced column: c1
+select * from varbit;
+ c1 
+----
+ 
+ 
+ 
+ 
+ 
+(5 rows)
+
+reset sql_ignore_strategy;
+drop table net, ran, hashvec, varbit;
 -- restore context
 reset timezone;
 show timezone;
