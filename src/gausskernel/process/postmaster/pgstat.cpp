@@ -4598,6 +4598,9 @@ const char* pgstat_get_wait_io(WaitEventIO w)
         case WAIT_EVENT_REPLICATION_ORIGIN_DROP:
             event_name = "ReplicationOriginDrop";
             break;
+        case WAIT_EVENT_REPLICATION_SLOT_DROP:
+            event_name = "ReplicationSlotDrop";
+            break;
         default:
             event_name = "unknown wait event";
             break;

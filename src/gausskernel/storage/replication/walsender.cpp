@@ -1479,7 +1479,7 @@ static void DropReplicationSlot(DropReplicationSlotCmd *cmd)
     if (IsLogicalSlot(cmd->slotname)) {
         MarkPostmasterChildNormal();
         CheckPMstateAndRecoveryInProgress();
-        ReplicationSlotDrop(cmd->slotname);
+        ReplicationSlotDrop(cmd->slotname, false, !cmd->wait);
         log_slot_drop(cmd->slotname);
     } else {
         ReplicationSlotDrop(cmd->slotname);

@@ -299,7 +299,7 @@ restart:
                 LWLockRelease(ReplicationOriginLock);
                 pthread_mutex_lock(&state->originMutex);
                 struct timespec ts;
-                clock_gettime(CLOCK_REALTIME, &ts);
+                clock_gettime(CLOCK_MONOTONIC, &ts);
                 ts.tv_sec += SECS_PER_MINUTE / 2;
                 pgstat_report_waitevent(WAIT_EVENT_REPLICATION_ORIGIN_DROP);
                 (void)pthread_cond_timedwait(&state->orginCV, &state->originMutex, &ts);
