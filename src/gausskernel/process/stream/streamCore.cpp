@@ -904,7 +904,7 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
 
     /* We must relase all pthread mutex by my thread, Or it will dead lock. But it is not a good solution. */
     // lock the same thread mutex can't be conflict in one thread.
-    ResourceOwnerReleasePthreadMutex();
+    ResourceOwnerReleaseAllXactPthreadMutex();
 
     WaitState oldStatus = pgstat_report_waitstatus(STATE_STREAM_WAIT_NODEGROUP_DESTROY);
 
@@ -954,7 +954,7 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
 
     /* We must relase all pthread mutex by my thread, Or it will dead lock. But it is not a good solution. */
     // lock the same thread mutex can't be conflict in one thread.
-    ResourceOwnerReleasePthreadMutex();
+    ResourceOwnerReleaseAllXactPthreadMutex();
 
     WaitState oldStatus = pgstat_report_waitstatus(STATE_STREAM_WAIT_THREAD_SYNC_QUIT);
 
