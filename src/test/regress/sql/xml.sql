@@ -7,6 +7,19 @@ INSERT INTO xmltest VALUES (1, '<value>one</value>');
 INSERT INTO xmltest VALUES (2, '<value>two</value>');
 INSERT INTO xmltest VALUES (3, '<wrong');
 
+CREATE TABLE emp (
+	name varchar(20),
+	age int,
+	salary int
+);
+
+INSERT INTO emp VALUES ('bill', 20, 1000);
+INSERT INTO emp VALUES ('cim', 30, 400);
+INSERT INTO emp VALUES ('jeff', 23, 600);
+INSERT INTO emp VALUES ('linda', 19, 100);
+INSERT INTO emp VALUES ('sam', 30, 2000);
+INSERT INTO emp VALUES ('sharon', 25, 1000);
+
 SELECT * FROM xmltest ORDER BY 1;
 
 
@@ -265,3 +278,5 @@ SELECT XMLPARSE(DOCUMENT '<!DOCTYPE foo [<!ENTITY c SYSTEM "/etc/passwd">]><foo>
 SELECT XMLPARSE(DOCUMENT '<!DOCTYPE foo [<!ENTITY c SYSTEM "/etc/no.such.file">]><foo>&c;</foo>');
 -- This might or might not load the requested DTD, but it mustn't throw error.
 SELECT XMLPARSE(DOCUMENT '<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN" "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd"><chapter>&nbsp;</chapter>');
+DROP VIEW xmlview4;
+DROP TABLE emp;
