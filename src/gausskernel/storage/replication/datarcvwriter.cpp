@@ -19,6 +19,7 @@
 #include "access/xlogutils.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_tablespace.h"
 #include "replication/dataqueue.h"
@@ -245,6 +246,9 @@ void DataRcvWriterMain(void)
      * init a hash table to store the rel file node fd.
      */
     DataWriterHashCreate();
+
+    pgstat_report_appname("Data Receive Writer");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     /*
      * Loop forever

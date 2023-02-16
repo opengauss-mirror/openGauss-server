@@ -682,6 +682,8 @@ void WalReceiverMain(void)
 
     knl_g_set_redo_finish_status(REDO_FINISH_STATUS_LOCAL);
     ereport(LOG, (errmsg("set knl_g_set_redo_finish_status to false when connecting to the primary")));
+    pgstat_report_appname("Wal Receiver");
+    pgstat_report_activity(STATE_IDLE, NULL);
     /*
      * Prevent the effect of the last wallreceiver connection.
      */

@@ -246,6 +246,8 @@ uint32 GetMyPageRedoWorkerId()
 
 void MultiRedoMain()
 {
+    pgstat_report_appname("PageRedo");
+    pgstat_report_activity(STATE_IDLE, NULL);
     if (IsExtremeRedo()) {
         extreme_rto::ParallelRedoThreadMain();
     } else if (IsParallelRedo()) {
