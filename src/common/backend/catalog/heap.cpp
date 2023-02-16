@@ -8134,6 +8134,14 @@ int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple)
     return DatumGetInt16(indkeyDatum);
 }
 
+bool GetIndexVisibleStateByTuple(HeapTuple indexTuple)
+{
+    bool isnull = false;
+    Datum visibleDatum = heap_getattr(indexTuple, Anum_pg_index_indisvisible, GetDefaultPgIndexDesc(), &isnull);
+
+    return isnull || DatumGetBool(visibleDatum);
+}
+
 void AddOrDropUidsAttr(Oid relOid, bool oldRelHasUids, bool newRelHasUids)
 {
     /* reloption uids don't change, do nothing */

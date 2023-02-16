@@ -576,6 +576,25 @@ inline bool get_rel_segment(Relation rel)
     return opt->segment;
 }
 
+static bool parseVisibleStateFromOptions(List* options)
+{
+    ListCell *cell = NULL;
+    bool visible = true;
+    /* Visible state may be indicated more than once, return the last one */
+    foreach (cell, options) {
+        void *pointer = lfirst(cell);
+        if (IsA(pointer, String)) {
+            Value *val = (Value *)pointer;
+            if (strcmp(val->val.str, "visible") == 0) {
+                visible = true;
+            } else if (strcmp(val->val.str, "invisible") == 0) {
+                visible = false;
+            }
+        }
+    }
+    return visible;
+}
+
 /*
  * DefineIndex
  *		Creates a new index.
@@ -1533,7 +1552,8 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         concurrent,
         &extra,
         false,
-        indexsplitMethod);
+        indexsplitMethod,
+        parseVisibleStateFromOptions(stmt->indexOptions));
 
     /*
      * Roll back any GUC changes executed by index functions, and keep

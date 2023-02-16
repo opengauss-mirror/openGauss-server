@@ -480,7 +480,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
              * still needs to insert into "invalid" indexes, if they're marked
              * IndexIsReady.
              */
-            if (!IndexIsValid(index)) {
+            if (!IndexIsValid(index) || !GetIndexVisibleStateByTuple(indexRelation->rd_indextuple)) {
                 index_close(indexRelation, NoLock);
                 continue;
             }

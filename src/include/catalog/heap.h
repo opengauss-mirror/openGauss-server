@@ -252,5 +252,7 @@ extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL =
 
 extern int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple);
 
+extern bool GetIndexVisibleStateByTuple(HeapTuple indexTuple);
+
 extern void AddOrDropUidsAttr(Oid relOid, bool oldRelHasUids, bool newRelHasUids);
 #endif   /* HEAP_H */

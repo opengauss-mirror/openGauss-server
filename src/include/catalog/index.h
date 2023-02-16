@@ -123,7 +123,7 @@ extern Oid index_create(Relation heapRelation, const char *indexRelationName, Oi
                         Datum reloptions, bool isprimary, bool isconstraint, bool deferrable,
                         bool initdeferred, bool allow_system_table_mods, bool skip_build, bool concurrent,
                         IndexCreateExtraArgs *extra, bool useLowLockLevel = false,
-                        int8 relindexsplit = 0);
+                        int8 relindexsplit = 0, bool visible = true);
 
 
 extern Oid index_concurrently_create_copy(Relation heapRelation, Oid oldIndexId, Oid oldIndexPartId, const char *newName);

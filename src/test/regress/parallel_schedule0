@@ -203,7 +203,7 @@ test: single_node_random transactions_test autocommit_test
 #test: single_node_arrays 
 #test: single_node_btree_index single_node_hash_index single_node_update 
 
-test: prefixkey_index
+test: prefixkey_index invisible_index
 test: hash_index_001
 test: hash_index_002
 test: single_node_update 
