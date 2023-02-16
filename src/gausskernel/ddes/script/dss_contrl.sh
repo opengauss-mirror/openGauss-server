@@ -389,12 +389,12 @@ function Unreg()
             log "dssserver is not running."
             exit 1
         fi
-        dsscmd kickh -i ${INSTANCE_ID} -U ${CONN_PATH} >> /dev/null 2>&1
+        dsscmd kickh -i ${INSTANCE_ID} -D ${DSS_HOME} >> /dev/null 2>&1
     fi
 
     if [[ $? != 0 ]]
     then
-        log "dsscmd kickh -i ${INSTANCE_ID} -U ${CONN_PATH} fail, or dsscmd unreghl -i ${LOCAL_INSTANCE_ID} -D ${DSS_HOME} fail."
+        log "dsscmd kickh -i ${INSTANCE_ID} -D ${DSS_HOME} fail, or dsscmd unreghl -i ${LOCAL_INSTANCE_ID} -D ${DSS_HOME} fail."
         exit 1
     fi
     log "unregister ${INSTANCE_ID} success."
