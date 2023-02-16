@@ -4,6 +4,24 @@ SIMULATE_SIZE=50000 # Unit: MB
 LOG_SIZE=30000 # Unit: MB
 declare inst_count=''
 declare last_id=''
+declare mes_cfg=''
+DSS_PORT_BASE=30000
+
+init_nodes_list()
+{
+    inst_count=$1
+    last_id=`expr $inst_count - 1`
+    for i in `seq 0 $last_id`
+    do
+        inst_id=`expr $i + $INST_OFFSET`
+        port=`expr $i + $DSS_PORT_BASE`
+        if [ $i != $last_id ]; then
+            mes_cfg=$mes_cfg$inst_id":127.0.0.1:"$port","
+        else
+            mes_cfg=$mes_cfg$inst_id":127.0.0.1:"$port
+        fi
+    done
+}
 
 init_dss_conf()
 {
@@ -28,6 +46,7 @@ init_dss_conf()
     echo "_LOG_MAX_FILE_SIZE = 100M" >> ${dss_home}/cfg/dss_inst.ini
     echo "LSNR_PATH = ${dss_home}" >> ${dss_home}/cfg/dss_inst.ini
     echo "DISK_LOCK_FILE_PATH = ${lock_path}" >> ${dss_home}/cfg/dss_inst.ini
+    echo "DSS_NODES_LIST = ${mes_cfg}" >> ${dss_home}/cfg/dss_inst.ini
 }
 
 create_vg()
@@ -91,7 +110,7 @@ function main() {
         mkdir -p ${pre_path}
     fi
     simu_path=$3
-
+    init_nodes_list $inst_count
     echo "init & start $inst_count dss node"
     for i in `seq 0 $last_id`
     do
