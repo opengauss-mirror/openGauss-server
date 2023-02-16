@@ -5891,20 +5891,24 @@ retry:
             read_mode = RBM_ZERO_AND_LOCK;
             GetDmsBufCtrl(buffer - 1)->state &= ~BUF_READ_MODE_ZERO_LOCK;
         }
+        bool with_io_in_progress = true;
 
         if (IsSegmentBufferID(buf->buf_id)) {
-            tmp_buffer = DmsReadSegPage(buffer, lock_mode, read_mode);
+            tmp_buffer = DmsReadSegPage(buffer, lock_mode, read_mode, &with_io_in_progress);
         } else {
-            tmp_buffer = DmsReadPage(buffer, lock_mode, read_mode);
+            tmp_buffer = DmsReadPage(buffer, lock_mode, read_mode, &with_io_in_progress);
         }
 
         if (tmp_buffer == 0) {
             /* failed to request newest page, release related locks, and retry */
-            if (IsSegmentBufferID(buf->buf_id)) {
-                SegTerminateBufferIO((BufferDesc *)buf, false, 0);
-            } else {
-                TerminateBufferIO(buf, false, 0);
+            if (with_io_in_progress) {
+                if (IsSegmentBufferID(buf->buf_id)) {
+                    SegTerminateBufferIO((BufferDesc *)buf, false, 0);
+                } else {
+                    TerminateBufferIO(buf, false, 0);
+                }
             }
+            
             LWLockRelease(buf->content_lock);
 
             pg_usleep(5000L);
@@ -5947,18 +5951,21 @@ bool TryLockBuffer(Buffer buffer, int mode, bool must_wait)
     if (ENABLE_DMS && ret) {
         LWLockMode lock_mode = (mode == BUFFER_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
         Buffer tmp_buffer;
+        bool with_io_in_progress = true;
         if (IsSegmentBufferID(buf->buf_id)) {
-            tmp_buffer = DmsReadSegPage(buffer, lock_mode, RBM_NORMAL);
+            tmp_buffer = DmsReadSegPage(buffer, lock_mode, RBM_NORMAL, &with_io_in_progress);
         } else {
-            tmp_buffer = DmsReadPage(buffer, lock_mode, RBM_NORMAL);
+            tmp_buffer = DmsReadPage(buffer, lock_mode, RBM_NORMAL, &with_io_in_progress);
         }
 
         if (tmp_buffer == 0) {
             /* failed to request newest page, release related locks, and retry */
-            if (IsSegmentBufferID(buf->buf_id)) {
-                SegTerminateBufferIO((BufferDesc *)buf, false, 0);
-            } else {
-                TerminateBufferIO(buf, false, 0);
+            if (with_io_in_progress) {
+                if (IsSegmentBufferID(buf->buf_id)) {
+                    SegTerminateBufferIO((BufferDesc *)buf, false, 0);
+                } else {
+                    TerminateBufferIO(buf, false, 0);
+                }
             }
             LWLockRelease(buf->content_lock);
             ret = false;
@@ -5989,18 +5996,21 @@ retry:
 
     if (ENABLE_DMS && ret) {
         Buffer tmp_buffer;
+        bool with_io_in_progress = true;
         if (IsSegmentBufferID(buf->buf_id)) {
-            tmp_buffer = DmsReadSegPage(buffer, LW_EXCLUSIVE, RBM_NORMAL);
+            tmp_buffer = DmsReadSegPage(buffer, LW_EXCLUSIVE, RBM_NORMAL, &with_io_in_progress);
         } else {
-            tmp_buffer = DmsReadPage(buffer, LW_EXCLUSIVE, RBM_NORMAL);
+            tmp_buffer = DmsReadPage(buffer, LW_EXCLUSIVE, RBM_NORMAL, &with_io_in_progress);
         }
 
         /* failed to request newest page, release related locks, and retry */
         if (tmp_buffer == 0) {
-            if (IsSegmentBufferID(buf->buf_id)) {
-                SegTerminateBufferIO((BufferDesc *)buf, false, 0);
-            } else {
-                TerminateBufferIO(buf, false, 0);
+            if (with_io_in_progress) {
+                if (IsSegmentBufferID(buf->buf_id)) {
+                    SegTerminateBufferIO((BufferDesc *)buf, false, 0);
+                } else {
+                    TerminateBufferIO(buf, false, 0);
+                }
             }
             LWLockRelease(buf->content_lock);
 
