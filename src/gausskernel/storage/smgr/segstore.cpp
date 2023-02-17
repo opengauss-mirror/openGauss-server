@@ -1511,6 +1511,10 @@ SMGR_READ_STATUS seg_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blo
 {
     LOG_SMGR_API(reln->smgr_rnode, forknum, blocknum, "seg_read");
 
+    if (ENABLE_DMS && SSSegRead(reln, forknum, buffer)) {
+        return SMGR_RD_OK;
+    }
+
     Buffer seg_buffer = read_head_buffer(reln, forknum, false);
     if (ENABLE_DMS) {
         LockBuffer(seg_buffer, BUFFER_LOCK_SHARE);

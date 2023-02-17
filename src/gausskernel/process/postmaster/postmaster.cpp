@@ -3477,15 +3477,15 @@ static int ServerLoop(void)
         }
         /* if workload manager is off, we still use this thread to build user hash table */
         if ((ENABLE_WORKLOAD_CONTROL || !WLMIsInfoInit()) && g_instance.pid_cxt.WLMCollectPID == 0 &&
-            pmState == PM_RUN && !dummyStandbyMode && !SS_IN_REFORM)
+            pmState == PM_RUN && !dummyStandbyMode && !SS_STANDBY_MODE && !SS_IN_REFORM)
             g_instance.pid_cxt.WLMCollectPID = initialize_util_thread(WLM_WORKER);
 
         if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMMonitorPID == 0) && (pmState == PM_RUN) &&
-            !dummyStandbyMode && !SS_IN_REFORM)
+            !dummyStandbyMode && !SS_STANDBY_MODE && !SS_IN_REFORM)
             g_instance.pid_cxt.WLMMonitorPID = initialize_util_thread(WLM_MONITOR);
 
         if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMArbiterPID == 0) && (pmState == PM_RUN) &&
-            !dummyStandbyMode && !SS_IN_REFORM)
+            !dummyStandbyMode && !SS_STANDBY_MODE && !SS_IN_REFORM)
             g_instance.pid_cxt.WLMArbiterPID = initialize_util_thread(WLM_ARBITER);
 
         if (IS_PGXC_COORDINATOR && g_instance.attr.attr_sql.max_resource_package &&
@@ -6311,17 +6311,19 @@ static void reaper(SIGNAL_ARGS)
 
             /* if workload manager is off, we still use this thread to build user hash table */
             if ((ENABLE_WORKLOAD_CONTROL || !WLMIsInfoInit()) && g_instance.pid_cxt.WLMCollectPID == 0 &&
-                !dummyStandbyMode && !SS_IN_REFORM) {
+                !dummyStandbyMode && !SS_STANDBY_MODE && !SS_IN_REFORM) {
                 /* DN need rebuild hash when upgrade to primary */
                 if (IS_PGXC_DATANODE)
                     g_instance.wlm_cxt->stat_manager.infoinit = 0;
                 g_instance.pid_cxt.WLMCollectPID = initialize_util_thread(WLM_WORKER);
             }
 
-            if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMMonitorPID == 0) && !dummyStandbyMode)
+            if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMMonitorPID == 0) && !dummyStandbyMode &&
+                !SS_STANDBY_MODE && !SS_IN_REFORM)
                 g_instance.pid_cxt.WLMMonitorPID = initialize_util_thread(WLM_MONITOR);
 
-            if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMArbiterPID == 0) && !dummyStandbyMode)
+            if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMArbiterPID == 0) && !dummyStandbyMode &&
+                !SS_STANDBY_MODE && !SS_IN_REFORM)
                 g_instance.pid_cxt.WLMArbiterPID = initialize_util_thread(WLM_ARBITER);
 
             if (IS_PGXC_COORDINATOR && g_instance.attr.attr_sql.max_resource_package &&

@@ -91,13 +91,10 @@ static void CalcSegDmsPhysicalLoc(BufferDesc* buf_desc, Buffer buffer, bool chec
 {
     if (IsSegmentFileNode(buf_desc->tag.rnode)) {
         SegmentCheck(!IsSegmentPhysicalRelNode(buf_desc->tag.rnode));
+        ereport(WARNING, (errmsg("buffer:%d is segdata page, bufdesc seginfo is empty", buffer)));
         SegPageLocation loc = seg_get_physical_location(buf_desc->tag.rnode, buf_desc->tag.forkNum,
             buf_desc->tag.blockNum, check_standby);
         SegmentCheck(loc.blocknum != InvalidBlockNumber);
-
-        ereport(DEBUG1, (errmsg("buffer:%d is segdata page, bufdesc seginfo is empty, calc segfileno:%d, segblkno:%u",
-            buffer, (int32)loc.extent_size, loc.blocknum)));
-
         buf_desc->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE((int)loc.extent_size);
         buf_desc->seg_blockno = loc.blocknum;
     }
@@ -287,9 +284,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
         SmgrNetPageCheckDiskLSN(buf_desc, read_mode, pblk);
 #endif
 
-        TerminateBufferIO(buf_desc, false, BM_VALID);
         buffer = BufferDescriptorGetBuffer(buf_desc);
-        if (!RecoveryInProgress() || g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
+        if ((!RecoveryInProgress() || g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) &&
+            buf_desc->seg_fileno == EXTENT_INVALID) {
             CalcSegDmsPhysicalLoc(buf_desc, buffer, !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy);
         }
     }
@@ -300,6 +297,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
     }
 
     ClearReadHint(buf_desc->buf_id);
+    TerminateBufferIO(buf_desc, false, BM_VALID);
     return buffer;
 }
 
@@ -493,6 +491,14 @@ int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
         return DMS_SUCCESS;
     }
 
+#ifdef USE_ASSERT_CHECKING
+    if (IsSegmentPhysicalRelNode(buf_desc->tag.rnode)) {
+        SegNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
+    } else {
+        SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
+    }
+#endif
+
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
     bool is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;
@@ -651,7 +657,7 @@ void SSRecheckBufferPool()
 void CheckPageNeedSkipInRecovery(Buffer buf)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf - 1);
-    if (buf_ctrl->lock_mode == DMS_LOCK_EXCLUSIVE) {
+    if (buf_ctrl->lock_mode == DMS_LOCK_EXCLUSIVE || !(buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
         return;
     }
 
@@ -682,6 +688,11 @@ bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc)
     if (!ENABLE_DMS) {
         return true;
     }
+
+    if (ENABLE_DSS_AIO && buf_desc->aio_in_progress) {
+        return false;
+    }
+
     /** this page produced in flush_copy phase, should not eliminate and mark dirty now
      *  when mark dirty: replay xlog
      *  why not use SS_IN_FLUSHCOPY to judge
@@ -693,4 +704,44 @@ bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc)
     }
     return true;
 
+}
+
+bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
+{
+    Buffer buf = BlockGetBuffer(buffer);
+    if (BufferIsInvalid(buf)) {
+        return false;
+    }
+
+    BufferDesc *buf_desc = BufferGetBufferDescriptor(buf);
+    bool ret = false;
+
+    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) && buf_desc->seg_fileno != EXTENT_INVALID) {
+        SMGR_READ_STATUS rdStatus;
+        if (reln->seg_space == NULL) {
+            reln->seg_space = spc_open(reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode, false);
+        }
+
+        SegmentCheck(reln->seg_space);
+        RelFileNode fakenode = {
+            .spcNode = reln->smgr_rnode.node.spcNode,
+            .dbNode = reln->smgr_rnode.node.dbNode,
+            .relNode = buf_desc->seg_fileno,
+            .bucketNode = SegmentBktId,
+            .opt = 0
+        };
+
+        seg_physical_read(reln->seg_space, fakenode, forknum, buf_desc->seg_blockno, (char *)buffer);
+        if (PageIsVerified((Page)buffer, buf_desc->seg_blockno)) {
+            rdStatus = SMGR_RD_OK;
+        } else {
+            rdStatus = SMGR_RD_CRC_ERROR;
+        }
+
+        if (rdStatus == SMGR_RD_OK) {
+            ret = true;
+        }
+    }
+
+    return ret;
 }
