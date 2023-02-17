@@ -231,6 +231,9 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                 case ENFORCED:
                     cur_token = NOT_ENFORCED;
                     break;
+                case IN_P:
+                    cur_token = NOT_IN;
+                    break;
                 default:
                     /* save the lookahead token for next time */
                     SET_LOOKAHEAD_TOKEN();

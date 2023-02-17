@@ -206,6 +206,8 @@ SELECT -2::bool;
 
 SELECT 1-2::bool;
 
+select true >= 'ss' not in (md5('ss'));
+
 --
 -- Clean up
 -- Many tables are retained by the regression test, but these do not seem
