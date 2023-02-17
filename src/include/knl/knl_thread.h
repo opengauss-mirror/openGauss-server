@@ -3332,6 +3332,11 @@ typedef struct knl_t_dms_context {
     bool buf_in_aio;
     bool is_reform_proc;
     bool CloseAllSessionsFailed;
+    char *origin_buf; /* origin buffer for unaligned read/write */
+    char *aligned_buf;
+    int size; /* aligned buffer size */
+    int offset; /* current read/write position in aligned_buf */
+    int file_size; /* initialized as pg_internal.init file size, will decrease after read */
 } knl_t_dms_context;
 
 /* thread context. */
