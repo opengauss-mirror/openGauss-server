@@ -45,7 +45,7 @@ test: select_into_user_defined_variables
 
 test: set_system_variables_test
 
-test: gs_dump_package
+test: gs_dump_package trigger_dump
 test: out_param_func
 #test: sqlcode_cursor
 test: gs_dump_tableconstraint

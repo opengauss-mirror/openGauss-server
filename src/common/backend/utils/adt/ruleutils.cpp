@@ -2921,6 +2921,8 @@ static char* pg_get_triggerdef_worker(Oid trigid, bool pretty)
     char* tgname = NULL;
     Datum value;
     bool isnull = false;
+    char* tgfbody = NULL;
+
 
     /*
      * Fetch the pg_trigger tuple by the Oid of the trigger
@@ -2944,8 +2946,21 @@ static char* pg_get_triggerdef_worker(Oid trigid, bool pretty)
     initStringInfo(&buf);
 
     tgname = NameStr(trigrec->tgname);
-    appendStringInfo(
-        &buf, "CREATE %sTRIGGER %s ", OidIsValid(trigrec->tgconstraint) ? "CONSTRAINT " : "", quote_identifier(tgname));
+    value = fastgetattr(ht_trig, Anum_pg_trigger_tgfbody, tgrel->rd_att, &isnull);
+    if (!isnull) {
+        tgfbody = TextDatumGetCString(value);
+        value = fastgetattr(ht_trig, Anum_pg_trigger_tgowner, tgrel->rd_att, &isnull);
+        if (DatumGetObjectId(value) != GetUserId()) {
+            appendStringInfo(
+                &buf, "CREATE DEFINER = %s TRIGGER %s ", GetUserNameFromId(DatumGetObjectId(value)), quote_identifier(tgname));
+        } else {
+            appendStringInfo(
+                &buf, "CREATE TRIGGER %s ", quote_identifier(tgname));
+        }
+    } else {
+        appendStringInfo(
+            &buf, "CREATE %sTRIGGER %s ", OidIsValid(trigrec->tgconstraint) ? "CONSTRAINT " : "", quote_identifier(tgname));
+    }
 
     if (TRIGGER_FOR_BEFORE(trigrec->tgtype))
         appendStringInfo(&buf, "BEFORE");
@@ -3078,6 +3093,21 @@ static char* pg_get_triggerdef_worker(Oid trigid, bool pretty)
         get_rule_expr(qual, &context, false);
 
         appendStringInfo(&buf, ") ");
+    }
+
+    if (tgfbody != NULL) {
+        char* tgordername = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgordername, tgrel->rd_att, &isnull));
+        char* tgorder = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgorder, tgrel->rd_att, &isnull));
+        if (tgorder != NULL)
+            appendStringInfo(&buf, "%s %s ", tgorder, tgordername);
+
+        appendStringInfo(&buf, "%s;", tgfbody);
+        /* Clean up */
+        systable_endscan(tgscan);
+
+        heap_close(tgrel, AccessShareLock);
+
+        return buf.data;
     }
 
     appendStringInfo(&buf, "EXECUTE PROCEDURE %s(", generate_function_name(trigrec->tgfoid, 0, NIL, NULL, false, NULL));

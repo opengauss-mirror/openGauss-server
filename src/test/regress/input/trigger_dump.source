@@ -1,0 +1,64 @@
+--mysql create trigger dump
+create database test_dump dbcompatibility='B';
+\c test_dump
+create user sys_dump with sysadmin password 'Aa@12356';
+create database test1_dump with dbcompatibility='B';
+\c test1_dump
+create user sys1_dump with sysadmin password 'Aa@12356';
+create database test2_dump with dbcompatibility='B';
+\c test2_dump
+create user sys2_dump with sysadmin password 'Aa@12356';
+\c test_dump
+
+create table old_dump(id int,c1 int);
+create table tab_dump(id int,c1 int);
+
+create user use_dump password 'Aa@12356';
+grant insert,update,select,delete on table old_dump to use_dump;
+grant insert,update,select,delete on table tab_dump to use_dump;
+
+create definer=use_dump trigger if not exists tri_dump
+before insert on old_dump
+for each row
+begin
+    insert into tab_dump values(new.id,new.c1);
+end;
+/
+--insert
+insert into old_dump values(1,1);
+select * from old_dump;
+select * from tab_dump;
+
+\! @abs_bindir@/gs_dump test_dump -p @portstring@ -U sys_dump -W Aa@12356 -F p -f @abs_bindir@/trigger_dump.sql >/dev/null 2>&1
+\! @abs_bindir@/gs_dump test_dump -p @portstring@ -U sys_dump -W Aa@12356 -F c -f @abs_bindir@/trigger_dump.dmp >/dev/null 2>&1
+
+\! @abs_bindir@/gs_restore -U sys1_dump -W Aa@12356 -p @portstring@ @abs_bindir@/trigger_dump.dmp -d test1_dump >/dev/null 2>&1
+\! @abs_bindir@/gsql -d test2_dump -p @portstring@ -f @abs_bindir@/trigger_dump.sql >/dev/null 2>&1
+\c test1_dump
+
+--insert
+insert into old_dump values(2,2);
+select * from old_dump;
+select * from tab_dump;
+
+revoke insert on table tab_dump from use_dump;
+insert into old_dump values(2,2);
+
+\c test2_dump
+--insert
+insert into old_dump values(2,2);
+select * from old_dump;
+select * from tab_dump;
+
+revoke insert on table tab_dump from use_dump;
+insert into old_dump values(2,2);
+
+\c regression
+
+drop database test_dump;
+drop database test1_dump;
+drop database test2_dump;
+drop role sys_dump;
+drop role sys1_dump;
+drop role sys2_dump;
+drop role use_dump;

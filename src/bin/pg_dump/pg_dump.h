@@ -360,6 +360,7 @@ typedef struct _triggerInfo {
     bool tgdeferrable;
     bool tginitdeferred;
     char* tgdef;
+    bool tgdb;
 } TriggerInfo;
 
 /*
