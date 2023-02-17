@@ -1536,8 +1536,8 @@ static void set_append_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, R
 
         parent_rows += RELOPTINFO_LOCAL_FIELD(root, childrel, rows);
         parent_global_rows += childrel->rows;
-        parent_tuples += RELOPTINFO_LOCAL_FIELD(root, childrel, tuples);
-        parent_global_tuples += childrel->tuples;
+        parent_tuples += RELOPTINFO_LOCAL_FIELD(root, childrel, rows);
+        parent_global_tuples += childrel->rows;
         parent_size += childrel->reltarget->width * RELOPTINFO_LOCAL_FIELD(root, childrel, rows);
 
         /*

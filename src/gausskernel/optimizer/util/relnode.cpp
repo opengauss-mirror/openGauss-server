@@ -135,8 +135,33 @@ void setup_simple_rel_arrays(PlannerInfo* root)
     rti = 1;
     foreach (lc, root->parse->rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
-
         root->simple_rte_array[rti++] = rte;
+    }
+
+    /* append_rel_array is not needed if there are no AppendRelInfos */
+    if (root->append_rel_list == NIL) {
+        root->append_rel_array = NULL;
+        return;
+    }
+
+    root->append_rel_array = (AppendRelInfo **)
+        palloc0(root->simple_rel_array_size * sizeof(AppendRelInfo *));
+
+    /*
+     * append_rel_array is filled with any already-existing AppendRelInfos,
+     * which currently could only come from UNION ALL flattening.  We might
+     * add more later during inheritance expansion, but it's the
+     * responsibility of the expansion code to update the array properly.
+     */
+    foreach(lc, root->append_rel_list) {
+        AppendRelInfo *appinfo = lfirst_node(AppendRelInfo, lc);
+        int child_relid = appinfo->child_relid;
+
+        /* Sanity check */
+        Assert(child_relid < root->simple_rel_array_size);
+        if (root->append_rel_array[child_relid])
+            elog(ERROR, "child relation already exists");
+        root->append_rel_array[child_relid] = appinfo;
     }
 }
 
@@ -144,7 +169,7 @@ void setup_simple_rel_arrays(PlannerInfo* root)
  * build_simple_rel
  *	  Construct a new RelOptInfo for a base relation or 'other' relation.
  */
-RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind)
+RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind,  Bitmapset *parent)
 {
     RelOptInfo* rel = NULL;
     RangeTblEntry* rte = NULL;
@@ -279,6 +304,22 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
         rel->locator_type = LOCATOR_TYPE_NONE;
 #endif
 
+    /*
+     * Pass assorted information down the inheritance hierarchy.
+     */
+    
+    /*
+     * Each direct or indirect child wants to know the relids of its
+     * topmost parent.
+     */
+     
+    if (parent) {
+        rel->top_parent_relids = bms_copy(parent);
+    } else {
+        rel->top_parent_relids = bms_copy(rel->relids);
+        parent = bms_copy(rel->top_parent_relids);
+    }
+
     /* Check type of rtable entry */
     switch (rte->rtekind) {
         case RTE_RELATION:
@@ -350,7 +391,7 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
             if (appinfo->parent_relid != (unsigned int)relid)
                 continue;
 
-            (void)build_simple_rel(root, appinfo->child_relid, RELOPT_OTHER_MEMBER_REL);
+            (void)build_simple_rel(root, appinfo->child_relid, RELOPT_OTHER_MEMBER_REL, parent);
         }
     }
 

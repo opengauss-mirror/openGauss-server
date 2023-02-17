@@ -1082,6 +1082,9 @@ test: optimizing_index_scan_ustore
 # row_count()
 test: row_count_function
 
+# test for inherit table
+test: inherits01
+
 # show_warnings
 test: show_warnings prevent_table_in_sys_schema create_tbl_init_td_check
 

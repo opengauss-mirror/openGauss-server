@@ -155,16 +155,17 @@ d date not null
 )on commit delete rows;
 -- ERROR
 create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 -- ERROR
 create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent_global_temp) on commit delete rows;
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+ERROR:  relation "tbl_inherits_partition" already exists in schema "gtt_function"
+DETAIL:  creating new table with existing name in the same schema
 select relname ,relkind, relpersistence, reloptions from pg_class where relname like 'p_table0%' or  relname like 'tbl_inherits%' order by relname;
-             relname             | relkind | relpersistence |                         reloptions                          
----------------------------------+---------+----------------+-------------------------------------------------------------
+             relname             | relkind | relpersistence |                          reloptions                          
+---------------------------------+---------+----------------+--------------------------------------------------------------
  tbl_inherits_parent             | r       | p              | {orientation=row,compression=no}
  tbl_inherits_parent_global_temp | r       | g              | {orientation=row,compression=no,on_commit_delete_rows=true}
-(2 rows)
+ tbl_inherits_partition          | r       | g              | {orientation=row,compression=no,on_commit_delete_rows=false}
+(3 rows)
 
 -- ERROR
 create global temp table gtt3(a int primary key, b text) on commit drop;
@@ -565,13 +566,14 @@ ERROR:  duplicate key value violates unique constraint "gtt_test12_c0_c1_key"
 DETAIL:  Key (c0, c1)=(1, t) already exists.
 reset search_path;
 drop schema gtt_function cascade;
-NOTICE:  drop cascades to 37 other objects
+NOTICE:  drop cascades to 38 other objects
 DETAIL:  drop cascades to table gtt_function.gtt1
 drop cascades to table gtt_function.gtt2
 drop cascades to table gtt_function.gtt3
 drop cascades to table gtt_function.gtt6
 drop cascades to table gtt_function.tbl_inherits_parent
 drop cascades to table gtt_function.tbl_inherits_parent_global_temp
+drop cascades to table gtt_function.tbl_inherits_partition
 drop cascades to table gtt_function.gtt10
 drop cascades to table gtt_function.gtt4
 drop cascades to table gtt_function.gtt5

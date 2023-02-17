@@ -2828,6 +2828,8 @@ Query* query_tree_mutator(Query* query, Node* (*mutator)(Node*, void*), void* co
         Query* newquery = NULL;
 
         FLATCOPY(newquery, query, Query, true);
+        if (newquery->resultRelations)
+            newquery->resultRelations = (List*)copyObject(query->resultRelations);
         query = newquery;
     }
 

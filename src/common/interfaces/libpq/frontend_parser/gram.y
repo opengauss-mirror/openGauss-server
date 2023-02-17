@@ -6367,7 +6367,6 @@ key_action:
 
 OptInherit: INHERITS '(' qualified_name_list ')'
 			{
-				feparser_printf("CREATE TABLE ... INHERITS is not yet supported.\n");
 				$$ = $3;
 			}
 			| /*EMPTY*/								{ $$ = NIL; }

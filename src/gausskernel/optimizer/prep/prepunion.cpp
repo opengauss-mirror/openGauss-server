@@ -1769,6 +1769,67 @@ Bitmapset* translate_col_privs(const Bitmapset* parent_privs, List* translated_v
 }
 
 /*
+ * find_appinfos_by_relids
+ * 		Find AppendRelInfo structures for all relations specified by relids.
+ *
+ * The AppendRelInfos are returned in an array, which can be pfree'd by the
+ * caller. *nappinfos is set to the number of entries in the array.
+ */
+AppendRelInfo **find_appinfos_by_relids(PlannerInfo *root, Relids relids, int *nappinfos)
+{
+    AppendRelInfo **appinfos;
+    int cnt = 0;
+    int i;
+
+    *nappinfos = bms_num_members(relids);
+    appinfos = (AppendRelInfo **) palloc(sizeof(AppendRelInfo *) * *nappinfos);
+
+    i = -1;
+    while ((i = bms_next_member(relids, i)) >= 0) {
+        AppendRelInfo *appinfo = root->append_rel_array[i];
+        if (!appinfo)
+            elog(ERROR, "child rel %d not found in append_rel_array", i);
+        appinfos[cnt++] = appinfo;
+    }
+    return appinfos;
+}
+
+/*
+ * adjust_appendrel_attrs_multilevel
+ *	  Apply Var translations from a toplevel appendrel parent down to a child.
+ *
+ * In some cases we need to translate expressions referencing a parent relation
+ * to reference an appendrel child that's multiple levels removed from it.
+ */
+Node *adjust_appendrel_attrs_multilevel(PlannerInfo *root, Node *node, Relids child_relids, Relids top_parent_relids)
+{
+    AppendRelInfo **appinfos;
+    AppendRelInfo *appinfo;
+    Bitmapset *parent_relids = NULL;
+    int nappinfos;
+    int cnt;
+
+    Assert(bms_num_members(child_relids) == bms_num_members(top_parent_relids));
+    appinfos = find_appinfos_by_relids(root, child_relids, &nappinfos);
+
+    /* Construct relids set for the immediate parent of given child. */
+    for (cnt = 0; cnt < nappinfos; cnt++) {
+        appinfo = appinfos[cnt];
+        parent_relids = bms_add_member(parent_relids, appinfo->parent_relid);
+    }
+
+    /* Recurse if immediate parent is not the top parent. */
+    if (!bms_equal(parent_relids, top_parent_relids))
+        node = adjust_appendrel_attrs_multilevel(root, node, parent_relids,
+                                                 top_parent_relids);
+
+    /* Now translate for this child */
+    node = adjust_appendrel_attrs(root, node, appinfo);
+    pfree(appinfos);
+    return node;
+}
+
+/*
  * adjust_appendrel_attrs
  *	  Copy the specified query or expression and translate Vars referring
  *	  to the parent rel of the specified AppendRelInfo to refer to the

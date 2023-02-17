@@ -176,22 +176,23 @@ static void report_iud_time(QueryDesc *query)
     }
 
     PlannedStmt *plannedstmt = query->plannedstmt;
-
-    foreach (lc, (List*)linitial(plannedstmt->resultRelations)) {
-        Index idx = lfirst_int(lc);
-        rid = getrelid(idx, plannedstmt->rtable);
-        if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
-            continue;
-        }
-        Relation rel = NULL;
-        rel = heap_open(rid, AccessShareLock);
-        if (rel->rd_rel->relkind == RELKIND_RELATION) {
-            if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
-                rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
-                pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
+    if (plannedstmt->resultRelations) {
+        foreach (lc, (List*)linitial(plannedstmt->resultRelations)) {
+            Index idx = lfirst_int(lc);
+            rid = getrelid(idx, plannedstmt->rtable);
+            if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
+                continue;
             }
+            Relation rel = NULL;
+            rel = heap_open(rid, AccessShareLock);
+            if (rel->rd_rel->relkind == RELKIND_RELATION) {
+                if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
+                    rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
+                    pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
+                }
+            }
+            heap_close(rel, AccessShareLock);
         }
-        heap_close(rel, AccessShareLock);
     }
 }
 
@@ -3950,11 +3951,11 @@ void EvalPlanQualEnd(EPQState *epqstate)
     epqstate->origslot = NULL;
 }
 
-TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos)
+TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos, bool isinherit)
 {
     int result_rel_index = subPlanState->state->result_rel_index;
 
-    if (result_rel_index > 0) {
+    if (result_rel_index > 0 && !isinherit) {
         return ExecProject(projInfos[result_rel_index], NULL);
     } else {
         return ExecProcNode(subPlanState);

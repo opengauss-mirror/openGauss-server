@@ -293,6 +293,8 @@ typedef struct Plan {
 
     /* flag to indicate if it is controller plan node */
     bool recursive_union_controller;
+	
+    bool isinherit;
 
     /* plan node id of Controller plan node, 0 for not in control */
     int control_plan_nodeid;
