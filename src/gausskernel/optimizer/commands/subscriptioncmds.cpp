@@ -559,6 +559,7 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
         }
 
         if (!CheckPublicationsExistOnPublisher(publications)) {
+            (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
             ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
         }
 
@@ -947,6 +948,7 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
             ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg( "Failed to connect to publisher.")));
         }
         if (!CheckPublicationsExistOnPublisher(publications)) {
+            (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
             ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
         }
         (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
@@ -967,6 +969,7 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
         }
 
         if (!CheckPublicationsExistOnPublisher(publications)) {
+            (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
             ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
         }
 
