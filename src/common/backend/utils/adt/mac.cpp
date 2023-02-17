@@ -34,6 +34,8 @@ Datum macaddr_in(PG_FUNCTION_ARGS)
     char junk[JUNK_LEN];
     int count;
 
+    int level = fcinfo->can_ignore ? WARNING : ERROR;
+
     /* %1s matches iff there is trailing non-whitespace garbage */
 
     count = sscanf_s(str, "%x:%x:%x:%x:%x:%x%1s", &a, &b, &c, &d, &e, &f, junk, JUNK_LEN);
@@ -47,15 +49,23 @@ Datum macaddr_in(PG_FUNCTION_ARGS)
         count = sscanf_s(str, "%2x%2x.%2x%2x.%2x%2x%1s", &a, &b, &c, &d, &e, &f, junk, JUNK_LEN);
     if (count != EXPECT_PARA_NUMS)
         count = sscanf_s(str, "%2x%2x%2x%2x%2x%2x%1s", &a, &b, &c, &d, &e, &f, junk, JUNK_LEN);
-    if (count != EXPECT_PARA_NUMS)
-        ereport(ERROR,
+    if (count != EXPECT_PARA_NUMS) {
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type macaddr: \"%s\"", str)));
+        
+        /* ignore error case: reset to base value */
+        a = b = c = d = e = f = 0;
+    }
 
-    if ((a > 255) || (b > 255) || (c > 255) || (d > 255) || (e > 255) || (f > 255))
-        ereport(ERROR,
+    if ((a > 255) || (b > 255) || (c > 255) || (d > 255) || (e > 255) || (f > 255)) {
+        ereport(level,
             (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                 errmsg("invalid octet value in \"macaddr\" value: \"%s\"", str)));
+        
+        /* ignore error case: reset to base value */
+        a = b = c = d = e = f = 0;
+    }
 
     result = (macaddr*)palloc(sizeof(macaddr));
 

@@ -34,6 +34,7 @@
 #include "access/hash.h"
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
+#include "parser/parse_type.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
 #include "utils/int8.h"
@@ -53,7 +54,8 @@ typedef struct RangeIOData {
 
 static RangeIOData* get_range_io_data(FunctionCallInfo fcinfo, Oid rngtypid, IOFuncSelector func);
 static char range_parse_flags(const char* flags_str);
-static void range_parse(const char* input_str, char* flags, char** lbound_str, char** ubound_str);
+static void range_parse(const char* input_str, bool can_ignore, char* flags, char** lbound_str,
+                        char** ubound_str, bool* should_reset_base);
 static const char* range_parse_bound(const char* string, const char* ptr, char** bound_str, bool* infinite);
 static char* range_deparse(char flags, const char* lbound_str, const char* ubound_str);
 static char* range_bound_escape(const char* value);
@@ -61,6 +63,8 @@ static Size datum_compute_size(Size sz, Datum datum, bool typbyval, char typalig
 static Pointer datum_write(Pointer ptr, Datum datum, bool typbyval, char typalign, int16 typlen, char typstorage);
 
 void CheckRangeTypeMatch(RangeType* r1, RangeType* r2);
+
+static Datum GetRangeTypeBaseValue(Oid rangeoid, Oid typmod, char* string);
 
 /*
  * ----------------------------------------------------------
@@ -80,11 +84,16 @@ Datum range_in(PG_FUNCTION_ARGS)
     char* ubound_str = NULL;
     RangeBound lower;
     RangeBound upper;
+    bool should_reset_base = false;
 
     cache = get_range_io_data(fcinfo, rngtypoid, IOFunc_input);
 
     /* parse */
-    range_parse(input_str, &flags, &lbound_str, &ubound_str);
+    range_parse(input_str, fcinfo->can_ignore, &flags, &lbound_str, &ubound_str, &should_reset_base);
+
+    if (should_reset_base) {
+        return GetRangeTypeBaseValue(rngtypoid, typmod, input_str);
+    }
 
     /* call element type's input function */
     if (RANGE_HAS_LBOUND((unsigned char)flags))
@@ -1740,10 +1749,12 @@ static char range_parse_flags(const char* flags_str)
  *
  * Input parameters:
  *	string: input string to be parsed
+ *	can_ignore: whether ignore errors
  * Output parameters:
  *	*flags: receives flags bitmask
  *	*lbound_str: receives palloc'd lower bound string, or NULL if none
  *	*ubound_str: receives palloc'd upper bound string, or NULL if none
+ *	*should_reset_base: whether have to reset to base value by type
  *
  * This is modeled somewhat after record_in in rowtypes.c.
  * The input syntax is:
@@ -1763,10 +1774,12 @@ static char range_parse_flags(const char* flags_str)
  * brackets) can be enclosed in double-quotes or escaped with backslash. Within
  * double-quotes, a double-quote can be escaped with double-quote or backslash.
  */
-static void range_parse(const char* string, char* flags, char** lbound_str, char** ubound_str)
+static void range_parse(const char* string, bool can_ignore, char* flags, char** lbound_str,
+                        char** ubound_str, bool* should_reset_base)
 {
     const char* ptr = string;
     bool infinite = false;
+    int level = can_ignore ? WARNING : ERROR;
 
     *flags = 0;
 
@@ -1787,11 +1800,14 @@ static void range_parse(const char* string, char* flags, char** lbound_str, char
             ptr++;
 
         /* should have consumed everything */
-        if (*ptr != '\0')
-            ereport(ERROR,
+        if (*ptr != '\0') {
+            ereport(level,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                     errmsg("malformed range literal: \"%s\"", string),
                     errdetail("Junk after \"empty\" keyword.")));
+            *should_reset_base = true;
+            return;
+        }
 
         return;
     }
@@ -1799,25 +1815,33 @@ static void range_parse(const char* string, char* flags, char** lbound_str, char
     if (*ptr == '[') {
         *flags = (unsigned char)(*flags) | RANGE_LB_INC;
         ptr++;
-    } else if (*ptr == '(')
+    } else if (*ptr == '(') {
         ptr++;
-    else
-        ereport(ERROR,
+    } else {
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("malformed range literal: \"%s\"", string),
                 errdetail("Missing left parenthesis or bracket.")));
+        *should_reset_base = true;
+        return;
+    }
+
 
     ptr = range_parse_bound(string, ptr, lbound_str, &infinite);
     if (infinite)
         *flags = (unsigned char)(*flags) | RANGE_LB_INF;
 
-    if (*ptr == ',')
+    if (*ptr == ',') {
         ptr++;
-    else
-        ereport(ERROR,
+    } else {
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("malformed range literal: \"%s\"", string),
                 errdetail("Missing comma after lower bound.")));
+        *should_reset_base = true;
+        return;
+    }
+
 
     ptr = range_parse_bound(string, ptr, ubound_str, &infinite);
     if (infinite)
@@ -1826,23 +1850,66 @@ static void range_parse(const char* string, char* flags, char** lbound_str, char
     if (*ptr == ']') {
         *flags = (unsigned int)*flags | RANGE_UB_INC;
         ptr++;
-    } else if (*ptr == ')')
+    } else if (*ptr == ')') {
         ptr++;
-    else /* must be a comma */
-        ereport(ERROR,
+    } else { /* must be a comma */
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("malformed range literal: \"%s\"", string),
                 errdetail("Too many commas.")));
+        *should_reset_base = true;
+        return;
+    }
 
     /* consume whitespace */
     while (*ptr != '\0' && isspace((unsigned char)*ptr))
         ptr++;
 
-    if (*ptr != '\0')
-        ereport(ERROR,
+    if (*ptr != '\0') {
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("malformed range literal: \"%s\"", string),
                 errdetail("Junk after right parenthesis or bracket.")));
+        *should_reset_base = true;
+        return;
+    }
+}
+
+static Datum GetRangeTypeBaseValue(Oid rangeoid, Oid typmod, char* string)
+{
+    Datum datum;
+    switch (rangeoid) {
+        case NUMRANGEOID:
+        case INT8RANGEOID:
+        case INT4RANGEOID: {
+            Type targetType = typeidType(rangeoid);
+            datum = stringTypeDatum(targetType, "(0,0)", typmod, true);
+            ReleaseSysCache(targetType);
+            break;
+        }
+        case TSRANGEOID:
+        case TSTZRANGEOID: {
+            Type targetType = typeidType(rangeoid);
+            datum = stringTypeDatum(targetType, "(1970-01-01 00:00:00,1970-01-01 00:00:00)", typmod, true);
+            ReleaseSysCache(targetType);
+            break;
+        }
+        case DATERANGEOID: {
+            Type targetType = typeidType(rangeoid);
+            datum = stringTypeDatum(targetType, "(1970-01-01,1970-01-01)", typmod, true);
+            ReleaseSysCache(targetType);
+            break;
+        }
+        default: {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                    errmsg("malformed range literal: \"%s\"", string),
+                    errdetail("the feature \"ignore_error\" not supports \"%u\" type yet.", rangeoid)));
+            break;
+        }
+    }
+
+    return datum;
 }
 
 /*

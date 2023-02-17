@@ -70,12 +70,12 @@ static int ip_addrsize(inet* inetptr)
 /*
  * Common INET/CIDR input routine
  */
-static inet* network_in(char* src, bool is_cidr)
+static inet* network_in(char* src, bool is_cidr, bool can_ignore = false)
 {
     int bits;
-    inet* dst = NULL;
-
-    dst = (inet*)palloc0(sizeof(inet));
+    inet* dst = (inet*)palloc0(sizeof(inet));;
+    bool should_reset_base = false;
+    int level = can_ignore ? WARNING : ERROR;
 
     /*
      * First, check to see if this is an IPv6 or IPv4 address.	IPv6 addresses
@@ -89,21 +89,34 @@ static inet* network_in(char* src, bool is_cidr)
         ip_family(dst) = PGSQL_AF_INET;
 
     bits = inet_net_pton(ip_family(dst), src, ip_addr(dst), is_cidr ? ip_addrsize(dst) : -1);
-    if ((bits < 0) || (bits > ip_maxbits(dst)))
-        ereport(ERROR,
+    if ((bits < 0) || (bits > ip_maxbits(dst))) {
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 /* translator: first %s is inet or cidr */
                 errmsg("invalid input syntax for type %s: \"%s\"", is_cidr ? "cidr" : "inet", src)));
+        
+        should_reset_base = true;
+    }
+
 
     /*
      * Error check: CIDR values must not have any bits set beyond the masklen.
      */
-    if (is_cidr) {
-        if (!addressOK(ip_addr(dst), bits, ip_family(dst)))
-            ereport(ERROR,
+    if (is_cidr && !should_reset_base) {
+        if (!addressOK(ip_addr(dst), bits, ip_family(dst))) {
+            ereport(level,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                     errmsg("invalid cidr value: \"%s\"", src),
                     errdetail("Value has bits set to right of mask.")));
+        
+            should_reset_base = true;
+        }
+    }
+
+    if (should_reset_base) {
+        ip_family(dst) = PGSQL_AF_INET;
+        src = "0.0.0.0";
+        bits = inet_net_pton(ip_family(dst), src, ip_addr(dst), is_cidr ? ip_addrsize(dst) : -1);
     }
 
     ip_bits(dst) = bits;
@@ -116,14 +129,14 @@ Datum inet_in(PG_FUNCTION_ARGS)
 {
     char* src = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_INET_P(network_in(src, false));
+    PG_RETURN_INET_P(network_in(src, false, fcinfo->can_ignore));
 }
 
 Datum cidr_in(PG_FUNCTION_ARGS)
 {
     char* src = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_INET_P(network_in(src, true));
+    PG_RETURN_INET_P(network_in(src, true, fcinfo->can_ignore));
 }
 
 /*
