@@ -55,6 +55,7 @@
                                 status == STATE_STREAM_WAIT_CONNECT_NODES || \
                                 status == STATE_STREAM_WAIT_PRODUCER_READY || \
                                 status == STATE_WAIT_XACTSYNC)
+#define WAIT_READY_MAX_TIMES 10000
 
 ThreadPoolGroup::ThreadPoolGroup(int maxWorkerNum, int expectWorkerNum, int maxStreamNum,
                                  int groupId, int numaId, int cpuNum, int* cpuArr, bool enableBindCpuNuma)
@@ -192,11 +193,15 @@ void ThreadPoolGroup::ReleaseWorkerSlot(int i)
 
 void ThreadPoolGroup::WaitReady()
 {
-    while (true) {
+    int cnt = 0;
+    while (cnt++ < WAIT_READY_MAX_TIMES) {
         if (m_listenerNum == 1) {
             break;
         }
         pg_usleep(500);
+    }
+    if (m_listenerNum != 1) {
+        ereport(ERROR, (errmsg_internal("ThreadPoolGroup::WaitReady() timeout, m_listenerNum= %d", m_listenerNum)));
     }
 }
 
