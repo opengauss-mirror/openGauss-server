@@ -234,6 +234,18 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                 case IN_P:
                     cur_token = NOT_IN;
                     break;
+                case BETWEEN:
+                    cur_token = NOT_BETWEEN;
+                    break;
+                case LIKE:
+                    cur_token = NOT_LIKE;
+                    break;
+                case ILIKE:
+                    cur_token = NOT_ILIKE;
+                    break;
+                case SIMILAR:
+                    cur_token = NOT_SIMILAR;
+                    break;
                 default:
                     /* save the lookahead token for next time */
                     SET_LOOKAHEAD_TOKEN();

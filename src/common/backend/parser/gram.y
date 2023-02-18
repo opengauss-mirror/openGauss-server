@@ -940,7 +940,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 			END_OF_INPUT
 			END_OF_INPUT_COLON
 			END_OF_PROC
-			NOT_IN
+			NOT_IN NOT_BETWEEN NOT_LIKE NOT_ILIKE NOT_SIMILAR
 
 /* Precedence: lowest to highest */
 %nonassoc   COMMENT
@@ -957,10 +957,10 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %right		NOT
 %right		'=' CmpNullOp COLON_EQUALS
 %nonassoc	'<' '>' CmpOp
-%nonassoc	LIKE ILIKE SIMILAR
+%nonassoc	LIKE ILIKE SIMILAR NOT_LIKE NOT_ILIKE NOT_SIMILAR
 %nonassoc	ESCAPE
 %nonassoc	OVERLAPS
-%nonassoc	BETWEEN
+%nonassoc	BETWEEN NOT_BETWEEN
 %nonassoc	IN_P NOT_IN
 %left		POSTFIXOP		/* dummy for postfix Op rules */
 %nonassoc   lower_than_index
@@ -23594,13 +23594,13 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->call_func = false;
 					$$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "~~", $1, (Node *) n, @2);
 				}
-			| a_expr NOT LIKE a_expr
-				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~~", $1, $4, @2); }
-			| a_expr NOT LIKE a_expr ESCAPE a_expr
+			| a_expr NOT_LIKE a_expr	%prec NOT_LIKE
+				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~~", $1, $3, @2); }
+			| a_expr NOT_LIKE a_expr ESCAPE a_expr		%prec NOT_LIKE
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("like_escape");
-					n->args = list_make2($4, $6);
+					n->args = list_make2($3, $5);
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
@@ -23626,13 +23626,13 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->call_func = false;
 					$$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "~~*", $1, (Node *) n, @2);
 				}
-			| a_expr NOT ILIKE a_expr
-				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~~*", $1, $4, @2); }
-			| a_expr NOT ILIKE a_expr ESCAPE a_expr
+			| a_expr NOT_ILIKE a_expr	%prec NOT_ILIKE
+				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~~*", $1, $3, @2); }
+			| a_expr NOT_ILIKE a_expr ESCAPE a_expr		%prec NOT_ILIKE
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("like_escape");
-					n->args = list_make2($4, $6);
+					n->args = list_make2($3, $5);
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
@@ -23671,11 +23671,11 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->call_func = false;
 					$$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "~", $1, (Node *) n, @2);
 				}
-			| a_expr NOT SIMILAR TO a_expr			%prec SIMILAR
+			| a_expr NOT_SIMILAR TO a_expr			%prec NOT_SIMILAR
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("similar_escape");
-					n->args = list_make2($5, makeNullAConst(-1));
+					n->args = list_make2($4, makeNullAConst(-1));
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
@@ -23685,11 +23685,11 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->call_func = false;
 					$$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~", $1, (Node *) n, @2);
 				}
-			| a_expr NOT SIMILAR TO a_expr ESCAPE a_expr
+			| a_expr NOT_SIMILAR TO a_expr ESCAPE a_expr	%prec NOT_SIMILAR
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("similar_escape");
-					n->args = list_make2($5, $7);
+					n->args = list_make2($4, $6);
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
@@ -23843,11 +23843,11 @@ a_expr:		c_expr									{ $$ = $1; }
 						(Node *) makeSimpleA_Expr(AEXPR_OP, "<=", $1, $6, @2),
 											 @2);
 				}
-			| a_expr NOT BETWEEN opt_asymmetric b_expr AND b_expr	%prec BETWEEN
+			| a_expr NOT_BETWEEN opt_asymmetric b_expr AND b_expr	%prec NOT_BETWEEN
 				{
 					$$ = (Node *) makeA_Expr(AEXPR_OR, NIL,
-						(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $5, @2),
-						(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $7, @2),
+						(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $4, @2),
+						(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $6, @2),
 											 @2);
 				}
 			| a_expr BETWEEN SYMMETRIC b_expr AND b_expr			%prec BETWEEN
@@ -23863,16 +23863,16 @@ a_expr:		c_expr									{ $$ = $1; }
 											@2),
 											 @2);
 				}
-			| a_expr NOT BETWEEN SYMMETRIC b_expr AND b_expr		%prec BETWEEN
+			| a_expr NOT_BETWEEN SYMMETRIC b_expr AND b_expr		%prec NOT_BETWEEN
 				{
 					$$ = (Node *) makeA_Expr(AEXPR_AND, NIL,
 						(Node *) makeA_Expr(AEXPR_OR, NIL,
-							(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $5, @2),
-							(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $7, @2),
+							(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $4, @2),
+							(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $6, @2),
 											@2),
 						(Node *) makeA_Expr(AEXPR_OR, NIL,
-							(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $7, @2),
-							(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $5, @2),
+							(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $6, @2),
+							(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $4, @2),
 											@2),
 											 @2);
 				}
@@ -25673,11 +25673,11 @@ subquery_Op:
 					{ $$ = $3; }
 			| LIKE
 					{ $$ = list_make1(makeString("~~")); }
-			| NOT LIKE
+			| NOT_LIKE	%prec NOT_LIKE
 					{ $$ = list_make1(makeString("!~~")); }
 			| ILIKE
 					{ $$ = list_make1(makeString("~~*")); }
-			| NOT ILIKE
+			| NOT_ILIKE	%prec NOT_ILIKE
 					{ $$ = list_make1(makeString("!~~*")); }
 /* cannot put SIMILAR TO here, because SIMILAR TO is a hack.
  * the regular expression is preprocessed by a function (similar_escape),
