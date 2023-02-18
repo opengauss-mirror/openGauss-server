@@ -558,6 +558,52 @@ select * from b_bug_1 partition(p2);
 (1 row)
 
 drop table if exists b_bug_1;
+create table b_bug_2(a int, b int, c int) partition by range(a-b)
+(
+	partition p1 values less than(10),
+	partition p2 values less than(20),
+	partition p3 values less than(30)
+);
+create index on b_bug_2(a) global;
+create index on b_bug_2(b) local;
+insert into b_bug_2 values(19,10,1),(30,20,2),(50,30,3);
+select * from b_bug_2 partition(p1);
+ a  | b  | c 
+----+----+---
+ 19 | 10 | 1
+(1 row)
+
+select * from b_bug_2 partition(p2);
+ a  | b  | c 
+----+----+---
+ 30 | 20 | 2
+(1 row)
+
+select * from b_bug_2 partition(p3);
+ a  | b  | c 
+----+----+---
+ 50 | 30 | 3
+(1 row)
+
+update b_bug_2 set b = 21 where c = 2;
+select * from b_bug_2 partition(p1);
+ a  | b  | c 
+----+----+---
+ 19 | 10 | 1
+ 30 | 21 | 2
+(2 rows)
+
+select * from b_bug_2 partition(p2);
+ a | b | c 
+---+---+---
+(0 rows)
+
+select * from b_bug_2 partition(p3);
+ a  | b  | c 
+----+----+---
+ 50 | 30 | 3
+(1 row)
+
 --test pg_get_tabledef and pg_dump
 create table testnormalsubpart(a int, b int) partition by range(a) subpartition by range(b)
 (
