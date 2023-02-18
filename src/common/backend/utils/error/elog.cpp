@@ -1644,7 +1644,7 @@ void EmitErrorReport(void)
         if (can_skip && need_skip_by_retry) {
             /* skip sending messsage to front, do noting for now */
         } else {
-            if (u_sess->proc_cxt.MyProcPort) {
+            if (u_sess->proc_cxt.MyProcPort && u_sess->proc_cxt.MyProcPort->protocol_config) {
                 u_sess->proc_cxt.MyProcPort->protocol_config->fn_send_message(edata);
             }
         }

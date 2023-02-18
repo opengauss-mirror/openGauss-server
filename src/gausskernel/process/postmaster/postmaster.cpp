@@ -8446,6 +8446,10 @@ void PortInitialize(Port* port, knl_thread_arg* arg)
         /* read variables from arg */
         read_backend_variables(arg->save_para, port);
 
+        if (port->protocol_config == nullptr) {
+            port->protocol_config = &default_protocol_config;
+        }
+
         /* fix thread pool workers and some background threads creation_time
          * in pg_os_threads view not correct issue.
          */
