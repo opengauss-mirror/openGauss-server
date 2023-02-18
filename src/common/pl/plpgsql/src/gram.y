@@ -9244,15 +9244,23 @@ make_execsql_stmt(int firsttoken, int location)
                         char*  name = NULL;
                         errno_t rc = 0;
 
-                        name = (char*)palloc(lb.len-count+1);
-                        rc = strncpy_s(name, lb.len-count+1, lb.data, lb.len-count);
+                        int len = Min(NAMEDATALEN, lb.len - count + 1);
+                        name = (char*)palloc(len);
+                        rc = strncpy_s(name, len, lb.data, len - 1);
                         securec_check_c(rc, "\0", "\0");
+
                         plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(name));
                         pfree(name);
                     }
                     else
-                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(lb.data));
+                    {
+                        if(lb.len >= NAMEDATALEN)
+                        {
+                            lb.data[NAMEDATALEN - 1] = '\0';
+                        }
 
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(lb.data));
+                    }
                     pfree_ext(lb.data);
                     break;
                 }
