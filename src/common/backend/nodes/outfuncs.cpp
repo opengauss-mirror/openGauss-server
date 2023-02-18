@@ -3678,6 +3678,9 @@ static void _outIndexStmt(StringInfo str, IndexStmt* node)
 {
     WRITE_NODE_TYPE("INDEXSTMT");
 
+    if (t_thrd.proc->workingVersionNum >= CREATE_INDEX_IF_NOT_EXISTS_VERSION_NUM) {
+        WRITE_BOOL_FIELD(missing_ok);
+    }
     WRITE_STRING_FIELD(schemaname);
     WRITE_STRING_FIELD(idxname);
     WRITE_NODE_FIELD(relation);

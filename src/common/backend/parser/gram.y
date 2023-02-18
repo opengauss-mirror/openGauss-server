@@ -13429,7 +13429,8 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
 					n->concurrent = $4;
-                    n->schemaname = $5->schemaname;
+					n->missing_ok = false;
+					n->schemaname = $5->schemaname;
 					n->idxname = $5->relname;
 					n->relation = $7;
 					n->accessMethod = $8;
@@ -13460,7 +13461,8 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
 					n->concurrent = $4;
-                    n->schemaname = $5->schemaname;
+					n->missing_ok = false;
+					n->schemaname = $5->schemaname;
 					n->idxname = $5->relname;
 					n->relation = $7;
 					n->accessMethod = $8;
@@ -13491,7 +13493,8 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
 					n->concurrent = $4;
-                    n->schemaname = $5->schemaname;
+					n->missing_ok = false;
+					n->schemaname = $5->schemaname;
 					n->idxname = $5->relname;
 					n->relation = $7;
 					n->accessMethod = $8;
@@ -13513,6 +13516,97 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->initdeferred = false;
 					$$ = (Node *)n;
 
+				}
+				| CREATE opt_unique INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
+					ON qualified_name access_method_clause '(' index_params ')'
+					opt_include opt_reloptions OptPartitionElement opt_index_options where_clause
+				{
+					IndexStmt *n = makeNode(IndexStmt);
+					n->unique = $2;
+					n->concurrent = $4;
+					n->missing_ok = true;
+					n->schemaname = $8->schemaname;
+					n->idxname = $8->relname;
+					n->relation = $10;
+					n->accessMethod = $11;
+					n->indexParams = $13;
+					n->indexIncludingParams = $15;
+					n->options = $16;
+					n->tableSpace = $17;
+					n->indexOptions = $18;
+					n->whereClause = $19;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
+					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->partClause = NULL;
+					n->isPartitioned = false;
+					n->isGlobal = false;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
+					$$ = (Node *)n;
+				}
+				| CREATE opt_unique INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
+					ON qualified_name access_method_clause '(' index_params ')'
+					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace opt_index_options
+				{
+					IndexStmt *n = makeNode(IndexStmt);
+					n->unique = $2;
+					n->concurrent = $4;
+					n->missing_ok = true;
+					n->schemaname = $8->schemaname;
+					n->idxname = $8->relname;
+					n->relation = $10;
+					n->accessMethod = $11;
+					n->indexParams = $13;
+					n->partClause  = $16;
+					n->indexIncludingParams = $17;
+					n->options = $18;
+					n->tableSpace = $19;
+					n->indexOptions = $20;
+					n->isPartitioned = true;
+					n->isGlobal = false;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
+					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
+					$$ = (Node *)n;
+				}
+				| CREATE opt_unique INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
+					ON qualified_name access_method_clause '(' index_params ')'
+					GLOBAL opt_include opt_reloptions OptTableSpace opt_index_options
+				{
+					IndexStmt *n = makeNode(IndexStmt);
+					n->missing_ok = true;
+					n->unique = $2;
+					n->concurrent = $4;
+					n->schemaname = $8->schemaname;
+					n->idxname = $8->relname;
+					n->relation = $10;
+					n->accessMethod = $11;
+					n->indexParams = $13;
+					n->partClause  = NULL;
+					n->indexIncludingParams = $16;
+					n->options = $17;
+					n->tableSpace = $18;
+					n->indexOptions = $19;
+					n->isPartitioned = true;
+					n->isGlobal = true;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
+					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
+					$$ = (Node *)n;
 				}
 		;
 

@@ -1472,6 +1472,7 @@ static bool _equalFetchStmt(const FetchStmt* a, const FetchStmt* b)
 
 static bool _equalIndexStmt(const IndexStmt* a, const IndexStmt* b)
 {
+    COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_STRING_FIELD(schemaname);
     COMPARE_STRING_FIELD(idxname);
     COMPARE_NODE_FIELD(relation);

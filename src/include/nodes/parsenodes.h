@@ -1315,6 +1315,7 @@ typedef struct FetchStmt {
  */
 typedef struct IndexStmt {
     NodeTag type;
+    bool missing_ok;            /* just do nothing if it already exists? */
     char* schemaname;           /* namespace of new index, or NULL for default */
     char* idxname;              /* name of new index, or NULL for default */
     RangeVar* relation;         /* relation to build index on */
