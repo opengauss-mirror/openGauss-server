@@ -290,6 +290,17 @@ select pg_get_tabledef('testrangesubpart');
 select pg_get_tabledef('testlistsubpart');
 select pg_get_tabledef('testhashsubpart');
 select pg_get_tabledef('testnormalsubpart');
+create database part_expr_key_db1 dbcompatibility 'B';
+\c part_expr_key_db1;
+create table t1(c1 int not null, c2 int)
+partition by range(c1 + 100) (
+partition p1 values less than(200),
+partition p2 values less than(300),
+partition p3 values less than(400)
+);
+CREATE INDEX t1_c2_idx ON t1 USING btree (c2) LOCAL(PARTITION p1_c2_idx, PARTITION p2_c2_idx, PARTITION p3_c2_idx);
+ALTER TABLE t1 ADD CONSTRAINT t3_pkey PRIMARY KEY USING btree  (c1) INCLUDE (tableoid);
 \c regression
 
 drop database if exists part_expr_key_db;
+drop database if exists part_expr_key_db1;
