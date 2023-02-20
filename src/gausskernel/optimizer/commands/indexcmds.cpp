@@ -456,6 +456,35 @@ static bool CheckIndexIncludingParams(IndexStmt* stmt)
     return (nparams > 0);
 }
 
+static bool CheckLedgerIndex_walker(Node* node, int* context)
+{
+    if (IsA(node, Var)) {
+        Var *var = (Var*)node;
+        if (var->varattno == *context)
+            return true;
+    }
+    if (IsA(node, IndexElem)) {
+        IndexElem *elem = (IndexElem *)node;
+        if (elem->name && strcmp(elem->name, "hash") == 0)
+            return true;
+        if (elem->expr)
+            return CheckLedgerIndex_walker(elem->expr, context);
+
+        return false;
+    }
+    return expression_tree_walker(node, (bool (*)())CheckLedgerIndex_walker, context);
+}
+
+/* index expression of ledger user table is not support "hash" column */
+static bool CheckLedgerIndex(Relation rel, Node *node)
+{
+    int hash_attrno = user_hash_attrno(rel->rd_att);
+
+    hash_attrno = hash_attrno + 1;  /* in Var, attrno start at 1 */
+
+    return CheckLedgerIndex_walker(node, &hash_attrno);
+}
+
 void SetPartionIndexType(IndexStmt* stmt, Relation rel, bool is_alter_table)
 {
     if (!RELATION_IS_PARTITIONED(rel)) {
@@ -768,6 +797,12 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             (errmodule(MOD_EXECUTOR),
                 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("not supported to create a functional index on this table.")));
+    }
+
+    if (rel->rd_isblockchain && CheckLedgerIndex(rel, (Node*)stmt->indexParams)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("index of ledger user talbe can not contain \"hash\" column.")));
     }
 
     SetPartionIndexType(stmt, rel, is_alter_table);

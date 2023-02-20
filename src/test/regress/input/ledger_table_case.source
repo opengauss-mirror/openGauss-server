@@ -538,6 +538,35 @@ CREATE TABLE ledgernsp.bad_tb(a bc_compress_type);
 DROP TYPE bc_compress_type;
 
 ----------------------------------------------------------------------
+-- TEST CASE 016. index can not contain "hash" column.              --
+----------------------------------------------------------------------
+create table ledgernsp.t_col_hash(id int, "Hash" int, unique (hash)); -- error
+create table ledgernsp.t_col_hash(id int, "Hash" int, unique ((textin(hash16out(HASH))))); -- error
+create table ledgernsp.t_col_hash(id int, "Hash" int, unique ("Hash"));
+create table ledgernsp.t_col_hash2(id int, "Hash" int, unique ((int4_text("Hash"))));
+create table ledgernsp.t_col_hash3(id int, "Hash" int);
+
+create index ledgernsp.i_t_col_hash on ledgernsp.t_col_hash(((HASH))); -- error
+create index ledgernsp.i_t_col_hash on ledgernsp.t_col_hash(textin(hash16out(HASH))); -- error
+create index ledgernsp.i_t_col_hash3 on ledgernsp.t_col_hash3((("HASH"))); -- error
+create index ledgernsp.i_t_col_hash3 on ledgernsp.t_col_hash3((("Hash")));
+create index ledgernsp.i_t_col_hash3_2 on ledgernsp.t_col_hash3(int4_text("Hash"));
+
+\d ledgernsp.t_col_hash
+\d ledgernsp.t_col_hash2
+\d ledgernsp.t_col_hash3
+
+INSERT INTO ledgernsp.t_col_hash3 VALUES (1,1);
+INSERT INTO ledgernsp.t_col_hash3 VALUES (2,2), (3,NULL), (NULL,NULL);
+update ledgernsp.t_col_hash3 set "Hash" = "Hash" + 1;
+delete from ledgernsp.t_col_hash3 where id = 3;
+select *, hash from ledgernsp.t_col_hash3;
+
+drop table if exists ledgernsp.t_col_hash;
+drop table if exists ledgernsp.t_col_hash2;
+drop table if exists ledgernsp.t_col_hash3;
+
+----------------------------------------------------------------------
 -- clear enviroment.                                                --
 ----------------------------------------------------------------------
 DROP SCHEMA IF EXISTS ledgernsp CASCADE;
