@@ -333,7 +333,7 @@ void eg_init_bitmap_page_content(Page bitmap_page, BlockNumber first_page)
     df_map_page->first_page = first_page;
 
     PageHeader bitmap_page_header = (PageHeader)bitmap_page;
-    SegmentCheck(bitmap_page_header->pd_upper = BLCKSZ);
+    SegmentCheck(bitmap_page_header->pd_upper == BLCKSZ);
     bitmap_page_header->pd_lower = bitmap_page_header->pd_upper;
 }
 
