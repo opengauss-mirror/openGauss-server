@@ -254,7 +254,7 @@ static int CBSwitchoverDemote(void *db_handle)
         return DMS_SUCCESS;
     }
     Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_NORMAL);
-    Assert(SS_MY_INST_IS_MASTER);
+    Assert(SS_OFFICIAL_PRIMARY);
 
     t_thrd.walsender_cxt.WalSndCtl->demotion = demote_mode;
     g_instance.dms_cxt.SSClusterState = NODESTATE_PRIMARY_DEMOTING;
@@ -308,14 +308,6 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
     t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
     pg_memory_barrier();
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover] Starting to promote standby.")));
-
-    /* since original primary must have demoted, it is safe to allow promting standby write */
-    if (dss_set_server_status_wrapper() != GS_SUCCESS) {
-        ereport(PANIC, (errmodule(MOD_DMS), errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
-            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-            g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-            errhint("Check vgname and socketpath and restart later.")));
-    }
 
     SSNotifySwitchoverPromote();
 
@@ -1381,6 +1373,26 @@ static int CBGetDBPrimaryId(void *db_handle, unsigned int *primary_id)
     return GS_SUCCESS;
 }
 
+/* Currently only used in SS switchover */
+static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
+{
+    ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+    reform_info->dms_role = reformer_id == (unsigned int)SS_MY_INST_ID ? DMS_ROLE_REFORMER : DMS_ROLE_PARTNER;
+    if (reform_info->dms_role == DMS_ROLE_REFORMER) {
+        /* since original primary must have demoted, it is safe to allow promting standby write */
+        if (dss_set_server_status_wrapper() != GS_SUCCESS) {
+            ereport(PANIC, (errmodule(MOD_DMS),
+                errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
+                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
+                errhint("Check vgname and socketpath and restart later.")));
+        }
+    }
+    ereport(LOG, (errmodule(MOD_DMS),
+        errmsg("[SS switchover]switching, updated inst:%d with role:%d success",
+            SS_MY_INST_ID, reform_info->dms_role)));
+}
+
 static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type)
 {
     SSReformType ss_reform_type = (SSReformType)reform_type;
@@ -1533,6 +1545,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->get_db_primary_id = CBGetDBPrimaryId;
     callback->failover_promote_opengauss = CBFailoverPromote;
     callback->reform_start_notify = CBReformStartNotify;
+    callback->reform_set_dms_role = CBReformSetDmsRole;
 
     callback->get_page_hash_val = CBPageHashCode;
     callback->read_local_page4transfer = CBEnterLocalPage;

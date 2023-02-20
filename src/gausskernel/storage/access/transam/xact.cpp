@@ -2373,7 +2373,7 @@ static void StartTransaction(bool begin_on_gtm)
             ereport(ERROR,
                 (errmsg("Only support read committed transcation isolation level while DMS and DSS enabled.")));
         }
-        if (!SS_MY_INST_IS_MASTER) {
+        if (!SS_OFFICIAL_PRIMARY) {
             u_sess->attr.attr_common.XactReadOnly = true;
         }
     }

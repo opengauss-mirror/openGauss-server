@@ -758,7 +758,7 @@ void TrimCLOG(void)
         return;
     }
 
-    if (SS_STANDBY_MODE && !SS_STANDBY_PROMOTING) {
+    if (SS_STANDBY_MODE) {
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't trim clog status")));
         return;
     }

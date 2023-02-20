@@ -2418,7 +2418,7 @@ int PostmasterMain(int argc, char* argv[])
             g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
         Assert(src_id >= 0 && src_id <= DMS_MAX_INSTANCE - 1);
 
-        if (!SS_MY_INST_IS_MASTER && g_instance.attr.attr_storage.dms_attr.enable_reform) {
+        if (!SS_OFFICIAL_PRIMARY && g_instance.attr.attr_storage.dms_attr.enable_reform) {
             const long SLEEP_ONE_SEC = 1000000L;
             while (g_instance.dms_cxt.SSReformerControl.list_stable == 0) {
                 pg_usleep(SLEEP_ONE_SEC);
@@ -11799,7 +11799,7 @@ const char* wal_get_db_state_string(DbState db_state)
 static ServerMode get_cur_mode(void)
 {
     if (ENABLE_DMS) {
-        return SS_STANDBY_MODE ? STANDBY_MODE : PRIMARY_MODE;
+        return !SS_OFFICIAL_PRIMARY ? STANDBY_MODE : PRIMARY_MODE;
     }
     return t_thrd.postmaster_cxt.HaShmData->current_mode;
 }
@@ -14049,11 +14049,11 @@ void InitShmemForDmsCallBack()
 
 const char *GetSSServerMode()
 {
-    if (SS_STANDBY_MODE) {
+    if (!SS_OFFICIAL_PRIMARY) {
         return "Standby";
     }
  
-    if (SS_PRIMARY_MODE) {
+    if (SS_OFFICIAL_PRIMARY) {
         return "Primary";
     }
  

@@ -214,8 +214,13 @@ bool XidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdSta
 #endif
 
 loop:
-    if (SS_STANDBY_MODE) {
-        csn = SSTransactionIdGetCommitSeqNo(xid, false, true, false, snapshot, sync);
+    if (ENABLE_DMS) {
+        /* fetch TXN info locally if either reformer, original primary, or normal primary */
+        if (SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY) {
+            csn = TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
+        } else {
+            csn = SSTransactionIdGetCommitSeqNo(xid, false, true, false, snapshot, sync);
+        }
     } else {
         csn = TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
     }
@@ -360,8 +365,14 @@ bool CommittedXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, Buffer 
     }
 
 loop:
-    if (SS_STANDBY_MODE) {
-        csn = SSTransactionIdGetCommitSeqNo(xid, true, true, false, snapshot, NULL);
+    if (ENABLE_DMS) {
+        /* fetch TXN info locally if either reformer, original primary, or normal primary */
+        if (SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY) {
+            csn = TransactionIdGetCommitSeqNo(xid, true, true, false, snapshot);
+        } else {
+            csn = SSTransactionIdGetCommitSeqNo(xid, true, true, false, snapshot, NULL);
+        }
+
     } else {
         csn = TransactionIdGetCommitSeqNo(xid, true, true, false, snapshot);
     }

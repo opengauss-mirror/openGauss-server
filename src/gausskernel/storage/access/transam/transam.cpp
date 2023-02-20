@@ -393,18 +393,13 @@ Datum pgxc_get_csn(PG_FUNCTION_ARGS)
  */
 bool TransactionIdDidCommit(TransactionId transactionId) /* true if given transaction committed */
 {
-    while (ENABLE_DMS) {
-        if (SS_IN_REFORM && !SS_PRIMARY_DEMOTING) {
-            pg_usleep(USECS_PER_SEC);
-            continue;
-        } else if (SS_NORMAL_STANDBY) {
-            bool ret_did_commit = true;
-            if (SSTransactionIdDidCommit(transactionId, &ret_did_commit)) {
-                return ret_did_commit;
-            }
-            continue;
-        } else {
-            break;
+    if (ENABLE_DMS) {
+        /* fetch TXN info locally if either reformer, original primary, or normal primary */
+        bool local_fetch = SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY;
+        if (!local_fetch) {
+            bool didCommit;
+            SSTransactionIdDidCommit(transactionId, &didCommit);
+            return didCommit;
         }
     }
 
