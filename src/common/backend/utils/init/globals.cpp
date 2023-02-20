@@ -179,6 +179,7 @@ const uint32 CREATE_INDEX_IF_NOT_EXISTS_VERSION_NUM = 92843;
 const uint32 EVENT_VERSION_NUM = 92844;
 
 const uint32 SLOW_SQL_VERSION_NUM = 92844;
+const uint32 CREATE_TABLE_AS_VERSION_NUM = 92845;
 #ifdef PGXC
 bool useLocalXid = false;
 #endif

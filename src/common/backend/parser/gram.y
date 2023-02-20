@@ -336,6 +336,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	EncryptionType algtype;
 	LockClauseStrength lockstrength;
 	CharsetCollateOptions *charsetcollateopt;
+	OnDuplicateAction onduplicate;
 }
 
 %type <node>	stmt schema_stmt
@@ -549,6 +550,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <boolean>  opt_trusted opt_restart_seqs opt_purge invoker_rights
 %type <ival>	 OptTemp OptKind
 %type <oncommit> OnCommitOption
+%type <onduplicate>	OptDuplicate
 %type <lockstrength> for_locking_strength
 %type <node>	for_locking_item
 %type <list>	for_locking_clause opt_for_locking_clause for_locking_items
@@ -873,7 +875,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P
 
-	IDENTIFIED IDENTITY_P IF_P IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE
+	IDENTIFIED IDENTITY_P IF_P IGNORE IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE
 	INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
 
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER INTERNAL
@@ -9150,6 +9152,12 @@ CreateAsStmt:
 				}
 		;
 
+OptDuplicate:
+			/* empty */	{ $$ = DUPLICATE_ERROR; }
+			| IGNORE	{ $$ = DUPLICATE_IGNORE; }
+			| REPLACE	{ $$ = DUPLICATE_REPLACE; }
+		;
+
 create_as_target:
 			qualified_name opt_column_list OptWith OnCommitOption OptCompress OptTableSpace
 /* PGXC_BEGIN */
@@ -9169,6 +9177,36 @@ create_as_target:
 					$$->subcluster = $8;
 					$$->relkind = INTO_CLAUSE_RELKIND_DEFAULT;
 /* PGXC_END */
+				}
+			| qualified_name '(' OptTableElementList ')' OptInherit OptAutoIncrement optCharsetCollate OptWith OnCommitOption OptCompress OptPartitionElement
+/* PGXC_BEGIN */
+			OptDistributeBy OptSubCluster
+/* PGXC_END */
+			OptDuplicate
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+						ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("define column_definition is supported only in B-format database")));
+					}
+					$$ = makeNode(IntoClause);
+					$$->rel = $1;
+					$$->tableElts = $3;
+					if ($$->tableElts == NIL) {
+						ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("syntax error at or near \"%s\"", ")"), parser_errposition(@4)));
+					}
+					$$->autoIncStart = $6;
+					$$->options = $8;
+					$$->onCommit = $9;
+					$$->row_compress = $10;
+					$$->tableSpaceName = $11;
+					$$->skipData = false;           /* might get changed later */
+/* PGXC_BEGIN */
+					$$->distributeby = $12;
+					$$->subcluster = $13;
+					$$->relkind = INTO_CLAUSE_RELKIND_DEFAULT;
+/* PGXC_END */
+					$$->onduplicate = $14;
 				}
 		;
 

@@ -1982,6 +1982,15 @@ static IntoClause* _readIntoClause(void)
         READ_BOOL_FIELD(is_outfile);
     }
 
+    IF_EXIST(tableElts) {
+        READ_NODE_FIELD(tableElts);
+    }
+    IF_EXIST(autoIncStart) {
+        READ_NODE_FIELD(autoIncStart);
+    }
+    IF_EXIST(onduplicate) {
+        READ_ENUM_FIELD(onduplicate, OnDuplicateAction);
+    }
     READ_DONE();
 }
 
