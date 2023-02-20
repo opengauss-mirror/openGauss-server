@@ -216,7 +216,7 @@ bool in_error_recursion_trouble(void)
 static inline const char* err_gettext(const char* str)
 {
 #ifdef ENABLE_NLS
-    if (in_error_recursion_trouble())
+    if ((!u_sess->attr.attr_common.enable_nls) || in_error_recursion_trouble())
         return str;
     else
         return gettext(str);
@@ -470,7 +470,7 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
     edata->filename = (char*)filename;
     edata->funcname = (char*)funcname;
     /* the default text domain is the backend's */
-    edata->domain = domain ? domain : PG_TEXTDOMAIN("postgres");
+    edata->domain = domain ? domain : PG_TEXTDOMAIN("gaussdb");
     /* Select default errcode based on elevel */
     if (elevel >= ERROR)
         edata->sqlerrcode = ERRCODE_WRONG_OBJECT_TYPE;
@@ -1035,7 +1035,8 @@ int errcode_for_socket_access(void)
         char* fmtbuf = NULL;                                             \
         StringInfoData buf;                                              \
         /* Internationalize the error format string */                   \
-        if (!in_error_recursion_trouble())                               \
+        if (u_sess->attr.attr_common.enable_nls                          \
+            && (!in_error_recursion_trouble()))                          \
             fmt = dngettext(edata->domain, fmt_singular, fmt_plural, n); \
         else                                                             \
             fmt = (n == 1 ? fmt_singular : fmt_plural);                  \
@@ -1084,7 +1085,7 @@ int errmsg(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(message, false, true);
+    EVALUATE_MESSAGE(message, false, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1150,7 +1151,7 @@ int errdetail(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(detail, false, true);
+    EVALUATE_MESSAGE(detail, false, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1194,7 +1195,7 @@ int errdetail_log(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(detail_log, false, true);
+    EVALUATE_MESSAGE(detail_log, false, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1230,7 +1231,7 @@ int errcause(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(cause, false, true);
+    EVALUATE_MESSAGE(cause, false, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1246,7 +1247,7 @@ int erraction(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(action, false, true);
+    EVALUATE_MESSAGE(action, false, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1264,7 +1265,7 @@ int errhint(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(hint, false, true);
+    EVALUATE_MESSAGE(hint, false, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1283,7 +1284,7 @@ int errquery(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(internalquery, false, true);
+    EVALUATE_MESSAGE(internalquery, false, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1306,7 +1307,7 @@ int errcontext(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(context, true, true);
+    EVALUATE_MESSAGE(context, true, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1947,13 +1948,13 @@ char* format_elog_string(const char* fmt, ...)
     errno_t rc = memset_s(edata, sizeof(ErrorData), 0, sizeof(ErrorData));
     securec_check(rc, "", "");
     /* the default text domain is the backend's */
-    edata->domain = t_thrd.log_cxt.save_format_domain ? t_thrd.log_cxt.save_format_domain : PG_TEXTDOMAIN("postgres");
+    edata->domain = t_thrd.log_cxt.save_format_domain ? t_thrd.log_cxt.save_format_domain : PG_TEXTDOMAIN("gaussdb");
     /* set the errno to be used to interpret %m */
     edata->saved_errno = t_thrd.log_cxt.save_format_errnumber;
 
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(message, false, true);
+    EVALUATE_MESSAGE(message, false, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
 
@@ -3666,7 +3667,7 @@ void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
     rc = memset_s(edata, sizeof(ErrorData), 0, sizeof(ErrorData));
     securec_check(rc, "", "");
     /* the default text domain is the backend's */
-    edata->domain = t_thrd.log_cxt.save_format_domain ? t_thrd.log_cxt.save_format_domain : PG_TEXTDOMAIN("postgres");
+    edata->domain = t_thrd.log_cxt.save_format_domain ? t_thrd.log_cxt.save_format_domain : PG_TEXTDOMAIN("gaussdb");
     /* set the errno to be used to interpret %m */
     edata->saved_errno = t_thrd.log_cxt.save_format_errnumber;
 
@@ -3675,7 +3676,7 @@ void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
 
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(message, false, true);
+    EVALUATE_MESSAGE(message, false, u_sess->attr.attr_common.enable_nls);
 
     MemoryContextSwitchTo(oldcontext);
 

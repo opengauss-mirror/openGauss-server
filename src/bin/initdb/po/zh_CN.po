@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: initdb (PostgreSQL 9.0)\n"
 "Report-Msgid-Bugs-To: pgsql-bugs@postgresql.org\n"
-"POT-Creation-Date: 2013-01-29 13:46+0000\n"
+"POT-Creation-Date: 2023-11-16 10:05+0000\n"
 "PO-Revision-Date: 2012-10-19 12:46+0800\n"
 "Last-Translator: Xiong He <iihero@qq.com>\n"
 "Language-Team: Chinese (Simplified)\n"
@@ -16,174 +16,273 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Generator: Poedit 1.5.4\n"
 
-#: ../../port/dirmod.c:79 ../../port/dirmod.c:92 ../../port/dirmod.c:109
+#: ../../common/port/dirmod.cpp:81 ../../common/port/dirmod.cpp:97
+#: ../../common/port/dirmod.cpp:112
 #, c-format
 msgid "out of memory\n"
 msgstr "内存溢出\n"
 
-#: ../../port/dirmod.c:294
-#, c-format
-msgid "could not set junction for \"%s\": %s\n"
-msgstr "无法为 \"%s\"设置连接: %s\n"
-
-#: ../../port/dirmod.c:369
+#: ../../common/port/dirmod.cpp:272
 #, c-format
 msgid "could not get junction for \"%s\": %s\n"
-msgstr "无法为\"%s\"得到连接: %s\n"
+msgstr "无法得到\"%s\"的junction: %s\n"
 
-#: ../../port/dirmod.c:451
+#: ../../common/port/dirmod.cpp:342
 #, c-format
 msgid "could not open directory \"%s\": %s\n"
 msgstr "无法打开目录 \"%s\": %s\n"
 
-#: ../../port/dirmod.c:488
+#: ../../common/port/dirmod.cpp:354
+#, c-format
+msgid "alloc memory failed \"%s\": %s\n"
+msgstr "内存分配失败\"%s\": %s\n"
+
+#: ../../common/port/dirmod.cpp:385
 #, c-format
 msgid "could not read directory \"%s\": %s\n"
 msgstr "无法读取目录 \"%s\": %s\n"
 
-#: ../../port/dirmod.c:571
+#: ../../common/port/dirmod.cpp:451
+#, c-format
+msgid "pathbuf is not enough. path is %s, and file name is %s.\n"
+msgstr "Pathbuf是不够的.路径是%s, 文件名为%s.\n"
+
+#: ../../common/port/dirmod.cpp:470
 #, c-format
 msgid "could not stat file or directory \"%s\": %s\n"
-msgstr "无法获取文件或目录 \"%s\"的状态: %s\n"
+msgstr "无法获取文件或目录\"%s\"的状态: %s\n"
 
-#: ../../port/dirmod.c:598 ../../port/dirmod.c:615
+#: ../../common/port/dirmod.cpp:489 ../../common/port/dirmod.cpp:502
 #, c-format
 msgid "could not remove file or directory \"%s\": %s\n"
-msgstr "无法删除文件或目录 \"%s\": %s\n"
+msgstr "无法删除目录 \"%s\": %s\n"
 
-#: ../../port/exec.c:125 ../../port/exec.c:239 ../../port/exec.c:282
+# startup.c:502
+#: ../../common/port/exec.cpp:64
+#, c-format
+msgid "wrong environment variable \"%s\""
+msgstr "错误的环境变量\"%s\""
+
+#: ../../common/port/exec.cpp:70
+#, c-format
+msgid "Error: environment variable \"%s\" contain invaild symbol\n"
+msgstr "错误:环境变量\"%s\"包含无效符号\n"
+
+#: ../../common/port/exec.cpp:153 ../../common/port/exec.cpp:273
 #, c-format
 msgid "could not identify current directory: %s"
 msgstr "无法确认当前目录: %s"
 
 # command.c:122
-#: ../../port/exec.c:144
+#: ../../common/port/exec.cpp:172
 #, c-format
 msgid "invalid binary \"%s\""
 msgstr "无效的二进制码 \"%s\""
 
 # command.c:1103
-#: ../../port/exec.c:193
+#: ../../common/port/exec.cpp:225
 #, c-format
 msgid "could not read binary \"%s\""
 msgstr "无法读取二进制码 \"%s\""
 
-#: ../../port/exec.c:200
+#: ../../common/port/exec.cpp:233
 #, c-format
 msgid "could not find a \"%s\" to execute"
 msgstr "未能找到一个 \"%s\" 来执行"
 
-#: ../../port/exec.c:255 ../../port/exec.c:291
-#, c-format
-msgid "could not change directory to \"%s\""
-msgstr "无法进入目录 \"%s\""
-
-#: ../../port/exec.c:270
+#: ../../common/port/exec.cpp:289
 #, c-format
 msgid "could not read symbolic link \"%s\""
 msgstr "无法读取符号链结 \"%s\""
 
-#: ../../port/exec.c:526
+#: ../../common/port/exec.cpp:530
 #, c-format
 msgid "child process exited with exit code %d"
 msgstr "子进程已退出, 退出码为 %d"
 
-#: ../../port/exec.c:530
+#: ../../common/port/exec.cpp:533
 #, c-format
 msgid "child process was terminated by exception 0x%X"
 msgstr "子进程被例外(exception) 0x%X 终止"
 
-#: ../../port/exec.c:539
+#: ../../common/port/exec.cpp:546
 #, c-format
 msgid "child process was terminated by signal %s"
 msgstr "子进程被信号 %s 终止"
 
-#: ../../port/exec.c:542
+#: ../../common/port/exec.cpp:549
 #, c-format
 msgid "child process was terminated by signal %d"
 msgstr "子进程被信号 %d 终止"
 
-#: ../../port/exec.c:546
+#: ../../common/port/exec.cpp:553
 #, c-format
 msgid "child process exited with unrecognized status %d"
 msgstr "子进程已退出, 未知状态 %d"
 
-#: initdb.c:294 initdb.c:308
+# command.c:1148
+#: ../../common/port/exec.cpp:644 ../../common/port/exec.cpp:680
+#: ../../common/port/exec.cpp:753
+#, c-format
+msgid "could not allocate %lu bytes of memory"
+msgstr "无法分配%lu内存字节数"
+
+#: ../../common/port/exec.cpp:649 ../../common/port/exec.cpp:766
+#, c-format
+msgid "could not get token information: error code %lu"
+msgstr "无法获取token信息:错误码%lu"
+
+#: ../../common/port/exec.cpp:653 ../../common/port/exec.cpp:757
+#, c-format
+msgid "could not get token information buffer size: error code %lu"
+msgstr "无法获取token信息缓冲区大小:错误码%lu"
+
+#: ../../common/port/exec.cpp:661
+#, c-format
+msgid "could not get ACL information: error code %lu"
+msgstr "无法获取ACL信息:错误码%lu"
+
+#: ../../common/port/exec.cpp:670
+#, c-format
+msgid "could not get user token: error code %lu"
+msgstr "无法获得用户token:错误码%lu"
+
+#: ../../common/port/exec.cpp:685
+#, c-format
+msgid "could not initialize ACL: error code %lu"
+msgstr "无法初始化ACL:错误码%lu"
+
+#: ../../common/port/exec.cpp:692
+#, c-format
+msgid "could not get ACE: error code %lu"
+msgstr "无法获取ACE:错误码%lu"
+
+#: ../../common/port/exec.cpp:697
+#, c-format
+msgid "could not add ACE: error code %lu"
+msgstr "无法添加ACE:错误码%lu"
+
+#: ../../common/port/exec.cpp:704
+#, c-format
+msgid "could not add access allowed ACE: error code %lu"
+msgstr "不能添加访问允许ACE:错误码%lu"
+
+#: ../../common/port/exec.cpp:712
+#, c-format
+msgid "could not set token information: error code %lu"
+msgstr "无法设置token信息:错误码%lu"
+
+#: initdb.cpp:440
+#, c-format
+msgid "Error: variable \"%s\" contains invaild symbol \"%s\".\n"
+msgstr "错误:变量\"%s\"包含无效符号\"%s\".\n"
+
+#: initdb.cpp:497 initdb.cpp:509
 #, c-format
 msgid "%s: out of memory\n"
 msgstr "%s: 内存溢出\n"
 
-#: initdb.c:418 initdb.c:1336
+#: initdb.cpp:642 initdb.cpp:1924
 #, c-format
 msgid "%s: could not open file \"%s\" for reading: %s\n"
-msgstr "%s: 为了读取, 无法打开文件 \"%s\": %s\n"
+msgstr "%s: 无法打开文件进行读取 \"%s\": %s\n"
 
-#: initdb.c:474 initdb.c:840 initdb.c:869
+#: initdb.cpp:701 initdb.cpp:1228 initdb.cpp:1332
 #, c-format
 msgid "%s: could not open file \"%s\" for writing: %s\n"
-msgstr "%s: 为了写, 无法打开文件 \"%s\": %s\n"
+msgstr "%s: 无法打开文件进行修改 \"%s\": %s\n"
 
-#: initdb.c:482 initdb.c:490 initdb.c:847 initdb.c:875
+#: initdb.cpp:710 initdb.cpp:732 initdb.cpp:1238 initdb.cpp:1257
+#: initdb.cpp:1342
 #, c-format
 msgid "%s: could not write file \"%s\": %s\n"
 msgstr "%s: 无法写文件 \"%s\": %s\n"
 
-#: initdb.c:509
+#: initdb.cpp:724 initdb.cpp:891 initdb.cpp:1248
+#, c-format
+msgid "%s: could not fsync file \"%s\": %s\n"
+msgstr "%s: 无法对文件进行同步 \"%s\": %s\n"
+
+#: initdb.cpp:754
+#, c-format
+msgid "%s: could not open directory \"%s\": %s\n"
+msgstr "%s: 无法打开目录 \"%s\": %s\n"
+
+#: initdb.cpp:771
+#, c-format
+msgid "%s: could not stat file \"%s\": %s\n"
+msgstr "%s: 无法统计文件: \"%s\": %s\n"
+
+#: initdb.cpp:792
+#, c-format
+msgid "%s: could not read directory \"%s\": %s\n"
+msgstr "%s: 无法读取目录\"%s\": %s\n"
+
+#: initdb.cpp:827 initdb.cpp:877
+#, c-format
+msgid "%s: could not open file \"%s\": %s\n"
+msgstr "%s: 无法打开文件 \"%s\": %s\n"
+
+#: initdb.cpp:913
 #, c-format
 msgid "%s: could not execute command \"%s\": %s\n"
 msgstr "%s: 无法执行命令 \"%s\": %s\n"
 
-#: initdb.c:525
+#: initdb.cpp:960
 #, c-format
 msgid "%s: removing data directory \"%s\"\n"
 msgstr "%s: 删除数据目录 \"%s\"\n"
 
-#: initdb.c:528
+#: initdb.cpp:962
 #, c-format
 msgid "%s: failed to remove data directory\n"
 msgstr "%s: 删除数据目录失败\n"
 
-#: initdb.c:534
+#: initdb.cpp:964
 #, c-format
 msgid "%s: removing contents of data directory \"%s\"\n"
 msgstr "%s: 删除数据目录 \"%s\" 的内容\n"
 
-#: initdb.c:537
+#: initdb.cpp:966
 #, c-format
 msgid "%s: failed to remove contents of data directory\n"
 msgstr "%s: 删除数据目录内容失败\n"
 
-#: initdb.c:543
+#: initdb.cpp:970
 #, c-format
 msgid "%s: removing transaction log directory \"%s\"\n"
 msgstr "%s: 正在删除事务日志文件目录 \"%s\"\n"
 
-#: initdb.c:546
+#: initdb.cpp:972
 #, c-format
 msgid "%s: failed to remove transaction log directory\n"
 msgstr "%s: 删除数据目录失败\n"
 
-#: initdb.c:552
+#: initdb.cpp:974
 #, c-format
 msgid "%s: removing contents of transaction log directory \"%s\"\n"
 msgstr "%s: 删除事务日志目录 \"%s\" 的内容\n"
 
-#: initdb.c:555
+#: initdb.cpp:976
 #, c-format
 msgid "%s: failed to remove contents of transaction log directory\n"
 msgstr "%s: 删除事务日志目录的内容失败\n"
 
-#: initdb.c:564
+#: initdb.cpp:980
+msgid "%s: removing dss directory \"%s\"\n"
+msgstr "%s: 删除dss目录 \"%s\"\n"
+
+#: initdb.cpp:992
 #, c-format
 msgid "%s: data directory \"%s\" not removed at user's request\n"
 msgstr "%s: 在用户的要求下数据库目录 \"%s\" 不被删除\n"
 
-#: initdb.c:569
+#: initdb.cpp:995
 #, c-format
 msgid "%s: transaction log directory \"%s\" not removed at user's request\n"
 msgstr "%s: 在用户的要求下不删除事务日志目录 \"%s\"\n"
 
-#: initdb.c:591
+#: initdb.cpp:1014
 #, c-format
 msgid ""
 "%s: cannot be run as root\n"
@@ -191,73 +290,72 @@ msgid ""
 "own the server process.\n"
 msgstr ""
 "%s: 无法以 root 用户运行\n"
-"请以服务器进程所有者的用户 (无特权) 身份\n"
-"登陆 (使用, e.g., \"su\").\n"
+"请以服务器进程所有者的用户 (无特权) 身份登录\n"
+"(例如使用 \"su\").\n"
 
-#: initdb.c:603
+#: initdb.cpp:1025
 #, c-format
 msgid "%s: could not obtain information about current user: %s\n"
 msgstr "%s: 无法获得当前用户的信息: %s\n"
 
-#: initdb.c:620
+#: initdb.cpp:1043
 #, c-format
 msgid "%s: could not get current user name: %s\n"
 msgstr "%s: 无法获取当前用户名称: %s\n"
 
-#: initdb.c:651
+#: initdb.cpp:1072
 #, c-format
 msgid "%s: \"%s\" is not a valid server encoding name\n"
 msgstr "%s: \"%s\" 不是一个有效的服务器编码名字\n"
 
-#: initdb.c:760 initdb.c:3194
-#, c-format
-msgid "%s: could not create directory \"%s\": %s\n"
-msgstr "%s: 无法创建目录 \"%s\": %s\n"
-
-#: initdb.c:790
+#: initdb.cpp:1182
 #, c-format
 msgid "%s: file \"%s\" does not exist\n"
 msgstr "%s: 文件 \"%s\" 不存在\n"
 
-#: initdb.c:792 initdb.c:801 initdb.c:811
-#, c-format
+#: initdb.cpp:1183 initdb.cpp:1191 initdb.cpp:1198
 msgid ""
 "This might mean you have a corrupted installation or identified\n"
 "the wrong directory with the invocation option -L.\n"
 msgstr ""
-"这意味着您的安装发生了错误或\n"
-"使用 -L 选项指定了错误的路径.\n"
+"这意味着您的安装发生了错误\n"
+"或者使用 -L 选项指定了错误的路径.\n"
 
-#: initdb.c:798
+#: initdb.cpp:1187 initdb.cpp:5006
 #, c-format
 msgid "%s: could not access file \"%s\": %s\n"
 msgstr "%s: 无法访问文件 \"%s\": %s\n"
 
-#: initdb.c:809
+#: initdb.cpp:1197
 #, c-format
 msgid "%s: file \"%s\" is not a regular file\n"
 msgstr "%s: 文件 \"%s\" 不是常规文件\n"
 
-#: initdb.c:917
+#: initdb.cpp:1280 initdb.cpp:1305
+#, c-format
+msgid "%s: could not mkdir \"%s\": %s\n"
+msgstr "%s: 不能执行mkdir\"%s\": %s\n"
+
+#: initdb.cpp:1377
 #, c-format
 msgid "selecting default max_connections ... "
 msgstr "选择默认最大联接数 (max_connections) ... "
 
-#: initdb.c:946
+#: initdb.cpp:1421
 #, c-format
 msgid "selecting default shared_buffers ... "
 msgstr "选择默认共享缓冲区大小 (shared_buffers) ... "
 
-#: initdb.c:990
+#: initdb.cpp:1487
 msgid "creating configuration files ... "
 msgstr "创建配置文件 ... "
 
-#: initdb.c:1176
+#: initdb.cpp:1751
 #, c-format
 msgid "creating template1 database in %s/base/1 ... "
 msgstr "在 %s/base/1 中创建 template1 数据库 ... "
 
-#: initdb.c:1192
+#: initdb.cpp:1766
 #, c-format
 msgid ""
 "%s: input file \"%s\" does not belong to PostgreSQL %s\n"
@@ -266,138 +364,255 @@ msgstr ""
 "%s: 输入文件 \"%s\" 不属于 PostgreSQL %s\n"
 "检查你的安装或使用 -L 选项指定正确的路径.\n"
 
-#: initdb.c:1277
+#: initdb.cpp:1822
+#, c-format
+msgid "dbcompatibility \"%s\" is invalid\n"
+msgstr "dbcompatibility \"%s\" 无效.\n"
+
+#: initdb.cpp:1880
 msgid "initializing pg_authid ... "
 msgstr "初始化 pg_authid ...  "
 
-#: initdb.c:1311
-msgid "Enter new superuser password: "
-msgstr "输入新的超级用户口令: "
+#: initdb.cpp:1933
+#, c-format
+msgid "%s: could not read password from file \"%s\": %s\n"
+msgstr "%s: 无法从文件 \"%s\" 读取密码: %s\n"
 
-#: initdb.c:1312
+#: initdb.cpp:1938
+#, c-format
+msgid "%s: password file \"%s\" is empty\n"
+msgstr "%s:密码文件\"%s\"是空的\n"
+
+#
+#: initdb.cpp:1953
+msgid "Enter new system admin password: "
+msgstr "输入新的系统管理员密码:"
+
+#: initdb.cpp:1954
 msgid "Enter it again: "
 msgstr "再输入一遍: "
 
-#: initdb.c:1315
-#, c-format
+#: initdb.cpp:1958
 msgid "Passwords didn't match.\n"
-msgstr "口令不匹配.\n"
+msgstr "密码不匹配.\n"
 
-#: initdb.c:1342
-#, c-format
-msgid "%s: could not read password from file \"%s\": %s\n"
-msgstr "%s: 无法从文件 \"%s\" 读取口令: %s\n"
+# command.c:915
+# command.c:939
+# startup.c:187
+# startup.c:205
+#
+#: initdb.cpp:1959
+msgid "Please try new password again.\n"
+msgstr "请重新输入新密码.\n"
 
-#: initdb.c:1355
+#: initdb.cpp:2002
 #, c-format
 msgid "setting password ... "
-msgstr "设置口令 ... "
+msgstr "设置密码 ... "
 
-#: initdb.c:1455
+#: initdb.cpp:2102
 msgid "initializing dependencies ... "
 msgstr "初始化dependencies ... "
 
-#: initdb.c:1483
+#: initdb.cpp:2129
 msgid "creating system views ... "
 msgstr "创建系统视图 ... "
 
-#: initdb.c:1519
+#
+#: initdb.cpp:2165
+msgid "creating performance views ... "
+msgstr "创建性能视图…"
+
+#
+#: initdb.cpp:2202
+msgid "creating private system views ... "
+msgstr "创建私有系统视图…"
+
+#
+#: initdb.cpp:2240
+msgid "creating snapshots catalog ... "
+msgstr "正在创建快照目录…"
+
+#
+#: initdb.cpp:2275
+msgid "update system tables ... "
+msgstr "更新系统表…"
+
+#
+#: initdb.cpp:2313
+msgid "creating cluster information ... "
+msgstr "正在创建集群信息…"
+
+#: initdb.cpp:2377
 msgid "loading system objects' descriptions ... "
 msgstr "正在加载系统对象描述 ..."
 
-#: initdb.c:1625
+#: initdb.cpp:2477
 msgid "creating collations ... "
 msgstr "创建(字符集)校对规则 ... "
 
-#: initdb.c:1658
+#: initdb.cpp:2506
 #, c-format
 msgid "%s: locale name too long, skipped: \"%s\"\n"
 msgstr "%s: 本地化名称太长, 跳过: \"%s\"\n"
 
-#: initdb.c:1683
+#: initdb.cpp:2527
 #, c-format
 msgid "%s: locale name has non-ASCII characters, skipped: \"%s\"\n"
 msgstr "%s: 本地化名称带有非ASCII字符, 跳过: \"%s\"\n"
 
 # describe.c:1542
-#: initdb.c:1746
+#: initdb.cpp:2592
 #, c-format
 msgid "No usable system locales were found.\n"
 msgstr "没有找到可用的系统本地化名称.\n"
 
-#: initdb.c:1747
+#: initdb.cpp:2593
 #, c-format
 msgid "Use the option \"--debug\" to see details.\n"
 msgstr "使用选项 \"--debug\" 获取细节.\n"
 
-#: initdb.c:1750
+#: initdb.cpp:2596
 #, c-format
 msgid "not supported on this platform\n"
 msgstr "在此平台上不支持\n"
 
-#: initdb.c:1765
+#: initdb.cpp:2611
 msgid "creating conversions ... "
 msgstr "创建字符集转换 ... "
 
-#: initdb.c:1800
+#: initdb.cpp:2644
 msgid "creating dictionaries ... "
 msgstr "正在创建字典 ... "
 
-#: initdb.c:1854
+#: initdb.cpp:2718
 msgid "setting privileges on built-in objects ... "
 msgstr "对内建对象设置权限 ... "
 
-#: initdb.c:1912
+#: initdb.cpp:2786
 msgid "creating information schema ... "
 msgstr "创建信息模式 ... "
 
-#: initdb.c:1968
+#: initdb.cpp:2870
+msgid "initialize global configure for bucketmap length ... "
+msgstr "初始化bucketmap长度的全局配置…"
+
+#: initdb.cpp:2899
 msgid "loading PL/pgSQL server-side language ... "
 msgstr "正在装载PL/pgSQL服务器端编程语言..."
 
-#: initdb.c:1993
+#
+#: initdb.cpp:2920
+msgid "loading foreign-data wrapper for distfs access ... "
+msgstr "正在为distfs访问加载外部数据包装器…"
+
+#
+#: initdb.cpp:2952
+msgid "loading foreign-data wrapper for gc access ... "
+msgstr "正在为gc访问加载外部数据包装器…"
+
+#
+#: initdb.cpp:2975
+msgid "loading packages extension ... "
+msgstr "加载包扩展…"
+
+#
+#: initdb.cpp:3004
+msgid "loading gsredistribute extension ... "
+msgstr "加载gsredistribute扩展…"
+
+#
+#: initdb.cpp:3028
+msgid "loading dimsearch extension ... "
+msgstr "加载dimsearch扩展…"
+
+#
+#: initdb.cpp:3049
+msgid "loading tsdb extension ... "
+msgstr "加载TSDB扩展…"
+
+#
+#: initdb.cpp:3070
+msgid "loading streaming extension ... "
+msgstr "正在加载流媒体扩展…"
+
+#
+#: initdb.cpp:3093
+msgid "loading foreign-data wrapper for MOT access ... "
+msgstr "加载外国数据包装MOT访问…"
+
+#
+#: initdb.cpp:3117
+msgid "loading hstore extension ... "
+msgstr "加载hstore扩展…"
+
+#
+#: initdb.cpp:3135
+msgid "loading foreign-data wrapper for log access ... "
+msgstr "正在为日志访问加载外部数据包装器…"
+
+#
+#: initdb.cpp:3151
+msgid "loading security plugin ... "
+msgstr "正在加载安全插件…"
+
+#: initdb.cpp:3243
 msgid "vacuuming database template1 ... "
 msgstr "清理数据库 template1 ... "
 
-#: initdb.c:2049
+#: initdb.cpp:3296
 msgid "copying template1 to template0 ... "
 msgstr "拷贝 template1 到 template0 ... "
 
-#: initdb.c:2081
+#: initdb.cpp:3325
 msgid "copying template1 to postgres ... "
 msgstr "拷贝 template1 到 template0 ... "
 
-#: initdb.c:2138
+#: initdb.cpp:3352
+msgid "syncing data to disk ... "
+msgstr "正在向磁盘同步数据…"
+
+#: initdb.cpp:3422
 #, c-format
 msgid "caught signal\n"
 msgstr "捕获信号\n"
 
-#: initdb.c:2144
+#: initdb.cpp:3427
 #, c-format
 msgid "could not write to child process: %s\n"
 msgstr "无法写到子进程: %s\n"
 
-#: initdb.c:2152
+#: initdb.cpp:3432
 #, c-format
 msgid "ok\n"
 msgstr "成功\n"
 
-#: initdb.c:2284
+#: initdb.cpp:3545
+#, c-format
+msgid "%s: setlocale() failed\n"
+msgstr "%s: setlocale()失败\n"
+
+#: initdb.cpp:3561
 #, c-format
 msgid "%s: failed to restore old locale \"%s\"\n"
 msgstr "%s: 无法恢复旧的本地化文件 \"%s\"\n"
 
-#: initdb.c:2290
+#: initdb.cpp:3569
 #, c-format
 msgid "%s: invalid locale name \"%s\"\n"
-msgstr "%s: 无效的 locale 名字 \"%s\"\n"
+msgstr "%s: 无效的 locale 名称 \"%s\"\n"
 
-#: initdb.c:2317
+#: initdb.cpp:3579
+#, c-format
+msgid "%s: invalid locale settings; check LANG and LC_* environment variables\n"
+msgstr "%s:无效的区域设置;检查LANG和LC_*环境变量\n"
+
+#: initdb.cpp:3603
 #, c-format
 msgid "%s: encoding mismatch\n"
-msgstr "%s: 警告: 编码不匹配\n"
+msgstr "%s: 编码不匹配\n"
 
-#: initdb.c:2319
+#: initdb.cpp:3604
 #, c-format
 msgid ""
 "The encoding you selected (%s) and the encoding that the\n"
@@ -408,55 +623,54 @@ msgid ""
 msgstr ""
 "您选择的编码 (%s) 和所选择的语言环境使用的编码 (%s) 不匹配的.\n"
 "这样将导致处理不同字符串的函数时产生错误.\n"
-"要修复此问题, 重新运行 %s 并且不要明确指定编码, 或者先选择一个匹配\n"
-"组合类型.\n"
+"要修复此问题,  需要不明确指定编码重新运行 %s\n"
+"或者选择一个和当前语言环境匹配的编码.\n"
 "\n"
 
-#: initdb.c:2438
+#: initdb.cpp:3720
 #, c-format
 msgid "%s: WARNING: cannot create restricted tokens on this platform\n"
-msgstr "%s: WARNING: 无法为该平台创建受限制的令牌\n"
+msgstr "%s: WARNING: 无法为该平台创建受限制的tokens\n"
 
-#: initdb.c:2447
+#: initdb.cpp:3728
 #, c-format
 msgid "%s: could not open process token: error code %lu\n"
-msgstr "%s:无法打开进程令牌 (token): 错误码 %lu\n"
+msgstr "%s:无法打开进程token: 错误码 %lu\n"
 
-#: initdb.c:2460
+#: initdb.cpp:3756
 #, c-format
-msgid "%s: could not to allocate SIDs: error code %lu\n"
-msgstr "%s: 无法分配SID: 错误码为 %lu\n"
+msgid "%s: could not allocate SIDs: error code %lu\n"
+msgstr "%s: 无法分配SID: 错误码 %lu\n"
 
-#: initdb.c:2479
+#: initdb.cpp:3776
 #, c-format
 msgid "%s: could not create restricted token: error code %lu\n"
-msgstr "%s: 无法创建受限令牌: 错误码为 %lu\n"
+msgstr "%s: 无法创建受限token: 错误码为 %lu\n"
 
-#: initdb.c:2500
+#: initdb.cpp:3789
 #, c-format
 msgid "%s: could not start process for command \"%s\": error code %lu\n"
 msgstr "%s: 无法为命令 \"%s\"创建进程: 错误码 %lu\n"
 
-#: initdb.c:2514
-#, c-format
+#: initdb.cpp:3802
 msgid ""
-"%s initializes a PostgreSQL database cluster.\n"
+"%s initializes an openGauss database cluster.\n"
 "\n"
 msgstr ""
-"%s 初始化一个 PostgreSQL 数据库簇.\n"
+"%s 初始化一个openGauss数据库集群.\n"
 "\n"
 
-#: initdb.c:2515
+#: initdb.cpp:3803
 #, c-format
 msgid "Usage:\n"
-msgstr "使用方法:\n"
+msgstr "用法:\n"
 
-#: initdb.c:2516
+#: initdb.cpp:3804
 #, c-format
 msgid "  %s [OPTION]... [DATADIR]\n"
-msgstr "  %s [选项]... [DATADIR]\n"
+msgstr "  %s [OPTION]... [DATADIR]\n"
 
-#: initdb.c:2517
+#: initdb.cpp:3805
 #, c-format
 msgid ""
 "\n"
@@ -465,124 +679,184 @@ msgstr ""
 "\n"
 "选项:\n"
 
-#: initdb.c:2518
+#: initdb.cpp:3806
 #, c-format
-msgid ""
-"  -A, --auth=METHOD         default authentication method for local "
-"connections\n"
+msgid "  -A, --auth=METHOD         default authentication method for local connections\n"
 msgstr "  -A, --auth=METHOD         本地连接的默认认证方法\n"
 
-#: initdb.c:2519
+#: initdb.cpp:3807
 #, c-format
-msgid ""
-"      --auth-host=METHOD    default authentication method for local TCP/IP "
-"connections\n"
+msgid "      --auth-host=METHOD    default authentication method for local TCP/IP connections\n"
 msgstr "      --auth-host=METHOD   本地的TCP/IP连接的默认认证方法\n"
 
-#: initdb.c:2520
+#: initdb.cpp:3808
 #, c-format
-msgid ""
-"      --auth-local=METHOD   default authentication method for local-socket "
-"connections\n"
+msgid "      --auth-local=METHOD   default authentication method for local-socket connections\n"
 msgstr "      --auth-local=METHOD   本地socket连接的默认认证方法\n"
 
-#: initdb.c:2521
+#: initdb.cpp:3810
+#, c-format
+msgid "  -c, --enable-dcf          enable DCF mode\n"
+msgstr "  -c, --enable-dcf          DCF启用DCF模式\n"
+
+#: initdb.cpp:3813
+msgid "      --enable-dss          enable shared storage mode\n"
+msgstr "     --enable-dss           启用共享存储模式\n"
+
+#: initdb.cpp:3815
 #, c-format
 msgid " [-D, --pgdata=]DATADIR     location for this database cluster\n"
-msgstr "  -D, --pgdata=DATADIR      当前数据库簇的位置\n"
+msgstr " [-D, --pgdata]=DATADIR      当前数据库集群的位置\n"
 
-#: initdb.c:2522
+#: initdb.cpp:3817
+#, c-format
+msgid "      --nodename=NODENAME   name of openGauss node initialized\n"
+msgstr "      --nodename=NODENAME  初始化的opengaus节点名\n"
+
+#: initdb.cpp:3818
+#, c-format
+msgid "      --bucketlength=LENGTH length of bucketmap\n"
+msgstr "      --bucketlength=LENGTH 桶映射的长度\n"
+
+#: initdb.cpp:3820
+#, c-format
+msgid "      --nodename=NODENAME   name of single node initialized\n"
+msgstr "      --nodename=NODENAME  单个节点初始化的名称\n"
+
+#: initdb.cpp:3823
+msgid "      --vgname=VGNAME       name of dss volume group\n"
+msgstr "       --vgname=VGNAME       dss卷组的名称\n"
+
+#: initdb.cpp:3824
+msgid ""
+"      --socketpath=SOCKETPATH\n"
+"                            dss connect socket file path\n"
+msgstr ""
+"      --socketpath=SOCKETPATH\n"
+"                            dss连接套接字文件路径\n"
+
+#: initdb.cpp:3826
+#, c-format
+msgid "      --dms_url=URL         message communication url between nodes\n"
+msgstr "      --dms_url=URL         节点之间的消息通信url\n"
+
+#: initdb.cpp:3828
 #, c-format
 msgid "  -E, --encoding=ENCODING   set default encoding for new databases\n"
 msgstr "  -E, --encoding=ENCODING   为新数据库设置默认编码\n"
 
-#: initdb.c:2523
+#: initdb.cpp:3829
 #, c-format
 msgid "      --locale=LOCALE       set default locale for new databases\n"
 msgstr "      --locale=LOCALE      为新数据库设置默认语言环境\n"
 
-#: initdb.c:2524
+#: initdb.cpp:3830
+#, c-format
+msgid "      --dbcompatibility=DBCOMPATIBILITY   set default dbcompatibility for new database\n"
+msgstr "      --dbcompatibility=DBCOMPATIBILITY  为新数据库设置默认的dbcompatibility\n"
+
+#: initdb.cpp:3831
 #, c-format
 msgid ""
 "      --lc-collate=, --lc-ctype=, --lc-messages=LOCALE\n"
 "      --lc-monetary=, --lc-numeric=, --lc-time=LOCALE\n"
-"                            set default locale in the respective category "
-"for\n"
+"                            set default locale in the respective category for\n"
 "                            new databases (default taken from environment)\n"
 msgstr ""
-"  --lc-collate, --lc-ctype, --lc-messages=LOCALE\n"
-"  --lc-monetary, --lc-numeric, --lc-time=LOCALE\n"
+"      --lc-collate, --lc-ctype, --lc-messages=LOCALE\n"
+"      --lc-monetary, --lc-numeric, --lc-time=LOCALE\n"
 "                            为新的数据库簇在各自的目录中分别\n"
-"                   设定缺省语言环境（默认使用环境变\n"
-"                   量)\n"
+"                            设定默认语言环境（默认使用环境变量）\n"
 
-#: initdb.c:2528
+#: initdb.cpp:3835
 #, c-format
 msgid "      --no-locale           equivalent to --locale=C\n"
-msgstr "  --no-locale               等同于 --locale=C\n"
+msgstr "      --no-locale          等同于 --locale=C\n"
 
-#: initdb.c:2529
+#: initdb.cpp:3836
 #, c-format
-msgid ""
-"      --pwfile=FILE         read password for the new superuser from file\n"
-msgstr "  --pwfile=文件名           对于新的超级用户从文件读取口令\n"
+msgid "      --pwfile=FILE         read password for the new system admin from file\n"
+msgstr "      --pwfile=FILE        从文件中读取新系统管理员的密码\n"
 
-#: initdb.c:2530
+#: initdb.cpp:3837
 #, c-format
 msgid ""
 "  -T, --text-search-config=CFG\n"
 "                            default text search configuration\n"
 msgstr ""
 "  -T, --text-search-config=CFG\n"
-"                   缺省的文本搜索配置\n"
+"                   默认的文本搜索配置\n"
 
-#: initdb.c:2532
+#: initdb.cpp:3839
 #, c-format
-msgid "  -U, --username=NAME       database superuser name\n"
+msgid "  -U, --username=NAME       database system admin name\n"
 msgstr "  -U, --username=NAME       数据库超级用户名\n"
 
-#: initdb.c:2533
+#: initdb.cpp:3840
 #, c-format
-msgid ""
-"  -W, --pwprompt            prompt for a password for the new superuser\n"
-msgstr "  -W, --pwprompt            对于新的超级用户提示输入口令\n"
+msgid "  -W, --pwprompt            prompt for a password for the new system admin\n"
+msgstr "  -W, --pwprompt            提示输入新系统管理员的密码\n"
 
-#: initdb.c:2534
+#: initdb.cpp:3841
 #, c-format
-msgid ""
-"  -X, --xlogdir=XLOGDIR     location for the transaction log directory\n"
-msgstr "  -X, --xlogdir=XLOGDIR          当前事务日志目录的位置\n"
+msgid "  -w, --pwpasswd=PASSWD     get password from command line for the new system admin\n"
+msgstr "  -w, --pwpasswd=PASSWD     从命令行获取新系统admin的密码\n"
 
-#: initdb.c:2535
+#: initdb.cpp:3842
+#, c-format
+msgid "  -C, --enpwdfiledir=DIR    get encrypted password of AES128 from cipher and rand file\n"
+msgstr "  -C, --enpwdfiledir=DIR     从cipher和rand文件中获取AES128加密密码\n"
+
+#: initdb.cpp:3843
+#, c-format
+msgid "  -X, --xlogdir=XLOGDIR     location for the transaction log directory\n"
+msgstr "  -X, --xlogdir=XLOGDIR      当前事务日志目录的位置\n"
+
+#: initdb.cpp:3844
+#, c-format
+msgid "  -S, --security            remove normal user's privilege on public schema in security mode\n"
+msgstr "  -S, --security             删除普通用户在安全模式下对公共模式的权限\n"
+
+#: initdb.cpp:3845
+#, c-format
+msgid "  -g, --xlogpath=XLOGPATH   xlog file path of shared storage\n"
+msgstr "  -g, --xlogpath=XLOGPATH   共享存储的xlog文件路径\n"
+
+#: initdb.cpp:3846
 #, c-format
 msgid ""
 "\n"
 "Less commonly used options:\n"
 msgstr ""
 "\n"
-"非普通使用选项:\n"
+"非常用选项:\n"
 
-#: initdb.c:2536
+#: initdb.cpp:3847
 #, c-format
 msgid "  -d, --debug               generate lots of debugging output\n"
-msgstr "  -d, --debug               产生大量的除错信息\n"
+msgstr "  -d, --debug               产生大量的调试信息\n"
 
-#: initdb.c:2537
+#: initdb.cpp:3848
 #, c-format
 msgid "  -L DIRECTORY              where to find the input files\n"
 msgstr "  -L DIRECTORY              输入文件的位置\n"
 
-#: initdb.c:2538
+#: initdb.cpp:3849
 #, c-format
 msgid "  -n, --noclean             do not clean up after errors\n"
 msgstr "  -n, --noclean             出错后不清理\n"
 
-#: initdb.c:2539
+#: initdb.cpp:3851
+#, c-format
+msgid "  -N, --nosync              do not wait for changes to be written safely to disk\n"
+msgstr "  -N, --nosync              不等待更改安全写入磁盘\n"
+
+#: initdb.cpp:3853
 #, c-format
 msgid "  -s, --show                show internal settings\n"
 msgstr "  -s, --show                显示内部设置\n"
 
-#: initdb.c:2540
+#: initdb.cpp:3854
 #, c-format
 msgid ""
 "\n"
@@ -591,17 +865,22 @@ msgstr ""
 "\n"
 "其它选项:\n"
 
-#: initdb.c:2541
+#: initdb.cpp:3855
+#, c-format
+msgid "  -H, --host-ip             node_host of openGauss node initialized\n"
+msgstr "  -H, --host-ip             初始化opengaus节点的node_host\n"
+
+#: initdb.cpp:3856
 #, c-format
 msgid "  -V, --version             output version information, then exit\n"
 msgstr "  -V, --version             输出版本信息, 然后退出\n"
 
-#: initdb.c:2542
+#: initdb.cpp:3857
 #, c-format
 msgid "  -?, --help                show this help, then exit\n"
 msgstr "  -?, --help                显示此帮助, 然后退出\n"
 
-#: initdb.c:2543
+#: initdb.cpp:3858
 #, c-format
 msgid ""
 "\n"
@@ -609,66 +888,125 @@ msgid ""
 "is used.\n"
 msgstr ""
 "\n"
-"如果没有指定数据目录, 将使用环境变量 PGDATA\n"
+"如果没有指定数据目录\n"
+"就使用环境变量PGDATA\n"
 
-#: initdb.c:2545
+#: initdb.cpp:3861
 #, c-format
 msgid ""
 "\n"
-"Report bugs to <pgsql-bugs@postgresql.org>.\n"
+"Report bugs to GaussDB support.\n"
 msgstr ""
 "\n"
-"报告错误至 <pgql-bugs@postgresql.org>.\n"
+"报告错误到GaussDB support\n"
 
-#: initdb.c:2553
+#: initdb.cpp:3863
+#, c-format
+msgid ""
+"\n"
+"Report bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"
+msgstr ""
+"\n"
+"报告错误到community@opengauss.org> 或者加入opengauss社区<https://opengauss.org>.\n"
+
+#: initdb.cpp:3870
 msgid ""
 "\n"
 "WARNING: enabling \"trust\" authentication for local connections\n"
 "You can change this by editing pg_hba.conf or using the option -A, or\n"
-"--auth-local and --auth-host, the next time you run initdb.\n"
+"--auth-local and --auth-host, the next time you run gs_initdb.\n"
 msgstr ""
 "\n"
 "警告:为本地连接启动了 \"trust\" 认证.\n"
-"你可以通过编辑 pg_hba.conf 更改或你下次\n"
-"行 initdb 时使用 -A或者--auth-local和--auth-host选项.\n"
+"你可以通过编辑 pg_hba.conf\n"
+"或者在下次gs_initdb时使用 -A或者--auth-local和--auth-host选项来修改它.\n"
 
-#: initdb.c:2575
+#: initdb.cpp:3891
 #, c-format
 msgid "%s: invalid authentication method \"%s\" for \"%s\" connections\n"
 msgstr "%s: 无效认证方法 \"%s\" 用于 \"%s\" 连接\n"
 
-#: initdb.c:2589
+#: initdb.cpp:3902
 #, c-format
-msgid ""
-"%s: must specify a password for the superuser to enable %s authentication\n"
-msgstr "%s: 为了启动 %s 认证, 你需要为超级用户指定一个口令\n"
+msgid "could not stat file \"%s\": %s\n"
+msgstr "无法统计文件\"%s\":%s\n"
 
-#: initdb.c:2720
+#: initdb.cpp:4049
+msgid "%s: Could not identify current directory: %s\n"
+msgstr "%s: 无法确认当前目录: %s\n"
+
+#: initdb.cpp:4134
+#, c-format
+msgid "%s: The parameter of -C is invalid.\n"
+msgstr "%s: -C参数无效.\n"
+
+#: initdb.cpp:4146
+#, c-format
+msgid "Read cipher or random parameter file failed.The password of the initial user is not set.\n"
+msgstr "读取密码或随机参数文件失败.初始用户密码未设置.\n"
+
+#: initdb.cpp:4172
 #, c-format
 msgid "Running in debug mode.\n"
-msgstr "运行在除错模式中. \n"
+msgstr "运行在调试模式中. \n"
 
-#: initdb.c:2724
+#: initdb.cpp:4181
 #, c-format
 msgid "Running in noclean mode.  Mistakes will not be cleaned up.\n"
 msgstr "运行在 noclean 模式中. 错误将不被清理.\n"
 
-#: initdb.c:2767 initdb.c:2788 initdb.c:3017
+#: initdb.cpp:4252
+#, c-format
+msgid "Running in security mode.\n"
+msgstr "以安全模式运行.\n"
+
+#: initdb.cpp:4261
+msgid "unexpected node id specified, valid range is %d - %d.\n"
+msgstr "指定了意外的节点id, 有效范围为%d - %d.\n"
+
+#: initdb.cpp:4281
+#, c-format
+msgid "unexpected buckets length specified, valid range is %d - %d.\n"
+msgstr "指定的桶长度超出预期, 有效范围为%d - %d.\n"
+
+#: initdb.cpp:4309
+msgid "Enable ss dorado replication.\n"
+msgstr "启用ss dorado复制.\n"
+
+#: initdb.cpp:4314 initdb.cpp:4342 initdb.cpp:4354 initdb.cpp:4616
 #, c-format
 msgid "Try \"%s --help\" for more information.\n"
-msgstr "请用 \"%s --help\" 获取更多的信息.\n"
+msgstr "用 \"%s --help\" 获取更多的信息.\n"
 
-#: initdb.c:2786
+#: initdb.cpp:4341
 #, c-format
 msgid "%s: too many command-line arguments (first is \"%s\")\n"
 msgstr "%s: 命令行参数太多 (第一个是 \"%s\")\n"
 
-#: initdb.c:2795
+#: initdb.cpp:4347
 #, c-format
 msgid "%s: password prompt and password file cannot be specified together\n"
-msgstr "%s: 口令提示和口令文件不能同时都指定\n"
+msgstr "%s: 密码提示和密码文件不能同时都指定\n"
 
-#: initdb.c:2818
+#: initdb.cpp:4353
+#, c-format
+msgid "%s: openGauss node name is mandatory\n"
+msgstr "%s: opengaus节点名称必选\n"
+
+#: initdb.cpp:4359
+#, c-format
+msgid ""
+"%s: openGauss node name:%s is invalid.\n"
+"The node name must consist of lowercase letters (a-z), underscores (_), special characters #, digits (0-9), or dollar ($).\n"
+"The node name must start with a lowercase letter (a-z), or an underscore (_).\n"
+"The max length of nodename is %d.\n"
+msgstr ""
+"%s: openGauss节点名称:%s无效.\n"
+"节点名称必须由小写字母（a-z）、下划线（_）、特殊字符#、数字（0-9）或美元（$）组成.\n"
+"节点名称必须以小写字母（a-z）或下划线（_）开头.\n"
+"节点名称的最大长度为%d.\n"
+
+#: initdb.cpp:4383
 #, c-format
 msgid ""
 "%s: no data directory specified\n"
@@ -677,63 +1015,64 @@ msgid ""
 "environment variable PGDATA.\n"
 msgstr ""
 "%s: 没有指定数据目录\n"
-"您必须确认此数据库系统的数据所在目录\n"
-"存在. 使用 -D 选项或者\n"
-"环境变量 PGDATA.\n"
+"您必须标识此数据库系统的数据所在的目录\n"
+"使用调用选项-D或环境变量PGDATA执行此操作.\n"
+"\n"
 
-#: initdb.c:2851
+#: initdb.cpp:4414
 #, c-format
 msgid "%s: could not re-execute with restricted token: error code %lu\n"
-msgstr "%s: 无法使用受限令牌再次执行: 错误码 %lu\n"
+msgstr "%s: 无法使用受限token再次执行: 错误码 %lu\n"
 
-#: initdb.c:2866
+#: initdb.cpp:4428
 #, c-format
 msgid "%s: could not get exit code from subprocess: error code %lu\n"
 msgstr "%s: 无法从子进程得到退出码: 错误码 %lu\n"
 
-#: initdb.c:2894
+#: initdb.cpp:4458
 #, c-format
 msgid ""
-"The program \"postgres\" is needed by %s but was not found in the\n"
+"The program \"gaussdb\" is needed by %s but was not found in the\n"
 "same directory as \"%s\".\n"
 "Check your installation.\n"
 msgstr ""
-"%s 需要程序 \"postgres\", 但是在同一个目录 \"%s\" 中没找到.\n"
+"程序\"gaussdb\" 被%s需要, 但是在同一个目录\"%s\"中没找到.\n"
 "\n"
-"检查您的安装.\n"
+"请检查您的安装.\n"
 
-#: initdb.c:2901
+#: initdb.cpp:4465
 #, c-format
 msgid ""
-"The program \"postgres\" was found by \"%s\"\n"
+"The program \"gaussdb\" was found by \"%s\"\n"
 "but was not the same version as %s.\n"
 "Check your installation.\n"
 msgstr ""
-"%s 找到程序 \"postgres\", 但是和版本 \"%s\" 不一致.\n"
-"\n"
+"程序 \"gaussdb\" 被 \"%s\"找到\n"
+"但是和版本 \"%s\" 不一致.\n"
 "检查您的安装.\n"
 
-#: initdb.c:2920
+#: initdb.cpp:4483
 #, c-format
 msgid "%s: input file location must be an absolute path\n"
-msgstr "%s: 输入文件位置必须为绝对路径\n"
+msgstr "%s:输入文件位置必须为绝对路径\n"
 
-#: initdb.c:2977
+#: initdb.cpp:4583
 #, c-format
 msgid ""
 "The files belonging to this database system will be owned by user \"%s\".\n"
 "This user must also own the server process.\n"
 "\n"
 msgstr ""
-"属于此数据库系统的文件宿主为用户 \"%s\".\n"
-"此用户也必须为服务器进程的宿主.\n"
+"属于此数据库系统的文件所有者为用户 \"%s\".\n"
+"此用户也必须为服务器进程的所有者.\n"
+"\n"
 
-#: initdb.c:2987
+#: initdb.cpp:4590
 #, c-format
 msgid "The database cluster will be initialized with locale \"%s\".\n"
-msgstr "数据库簇将使用本地化语言 \"%s\"进行初始化.\n"
+msgstr "数据库集群将使用本地化语言 \"%s\"进行初始化.\n"
 
-#: initdb.c:2990
+#: initdb.cpp:4592
 #, c-format
 msgid ""
 "The database cluster will be initialized with locales\n"
@@ -744,7 +1083,7 @@ msgid ""
 "  NUMERIC:  %s\n"
 "  TIME:     %s\n"
 msgstr ""
-"数据库簇将带有一下 locales 初始化\n"
+"数据库集群将带有一下 locales 初始化\n"
 "  COLLATE:  %s\n"
 "  CTYPE:    %s\n"
 "  MESSAGES: %s\n"
@@ -752,168 +1091,280 @@ msgstr ""
 "  NUMERIC:  %s\n"
 "  TIME:     %s\n"
 
-#: initdb.c:3014
+#: initdb.cpp:4614
 #, c-format
 msgid "%s: could not find suitable encoding for locale \"%s\"\n"
-msgstr "%s: 无法为locale(本地化语言)\"%s\"找到合适的编码\n"
+msgstr "%s: 无法为locale\"%s\"找到合适的编码\n"
 
-#: initdb.c:3016
+#: initdb.cpp:4615
 #, c-format
 msgid "Rerun %s with the -E option.\n"
 msgstr "带 -E 选项重新运行 %s.\n"
 
-#: initdb.c:3029
+#: initdb.cpp:4625
 #, c-format
 msgid ""
 "Encoding \"%s\" implied by locale is not allowed as a server-side encoding.\n"
 "The default database encoding will be set to \"%s\" instead.\n"
 msgstr ""
-"本地化隐含的编码 \"%s\" 不允许作为服务器端的编码.\n"
+"locale隐含的编码 \"%s\" 不允许作为服务器端的编码.\n"
 "默认的数据库编码将采用 \"%s\" 作为代替.\n"
 
-#: initdb.c:3037
+#: initdb.cpp:4632
 #, c-format
 msgid "%s: locale \"%s\" requires unsupported encoding \"%s\"\n"
-msgstr "%s: 本地化语言环境 \"%s\"要求使用不支持的编码\"%s\"\n"
+msgstr "%s: locale \"%s\"要求使用不支持的编码\"%s\"\n"
 
-#: initdb.c:3040
+#: initdb.cpp:4636
 #, c-format
 msgid ""
 "Encoding \"%s\" is not allowed as a server-side encoding.\n"
 "Rerun %s with a different locale selection.\n"
 msgstr ""
 "不允许将编码\"%s\"作为服务器端编码.\n"
-"使用一个不同的本地化语言环境重新运行%s.\n"
+"使用一个不同的locale设定重新运行%s.\n"
 
-#: initdb.c:3049
+#: initdb.cpp:4644
 #, c-format
 msgid "The default database encoding has accordingly been set to \"%s\".\n"
 msgstr "默认的数据库编码已经相应的设置为 \"%s\".\n"
 
-#: initdb.c:3066
+#: initdb.cpp:4657
 #, c-format
-msgid ""
-"%s: could not find suitable text search configuration for locale \"%s\"\n"
-msgstr "%s: 无法为本地化语言环境\"%s\"找到合适的文本搜索配置\n"
+msgid "%s: could not find suitable text search configuration for locale \"%s\"\n"
+msgstr "%s: 无法为locale\"%s\"找到合适的文本搜索配置\n"
 
-#: initdb.c:3077
+#: initdb.cpp:4664
 #, c-format
-msgid ""
-"%s: warning: suitable text search configuration for locale \"%s\" is "
-"unknown\n"
-msgstr "%s: 警告: 对于本地化语言环境\"%s\"合适的文本搜索配置未知\n"
+msgid "%s: warning: suitable text search configuration for locale \"%s\" is unknown\n"
+msgstr "%s: 警告: 对于locale\"%s\"合适的文本搜索配置未知\n"
 
-#: initdb.c:3082
+#: initdb.cpp:4668
 #, c-format
-msgid ""
-"%s: warning: specified text search configuration \"%s\" might not match "
-"locale \"%s\"\n"
-msgstr "%s: 警告: 所指定的文本搜索配置\"%s\"可能与本地语言环境\"%s\"不匹配\n"
+msgid "%s: warning: specified text search configuration \"%s\" might not match locale \"%s\"\n"
+msgstr "%s: 警告: 所指定的文本搜索配置\"%s\"可能与locale\"%s\"不匹配\n"
 
-#: initdb.c:3087
+#: initdb.cpp:4675
 #, c-format
 msgid "The default text search configuration will be set to \"%s\".\n"
-msgstr "缺省的文本搜索配置将会被设置到\"%s\"\n"
+msgstr "默认的文本搜索配置将会被设置到\"%s\".\n"
 
-#: initdb.c:3121 initdb.c:3188
+#: initdb.cpp:4683
+msgid "failed to init dss device, check logs under $DSS_HOME for more information.\n"
+msgstr "初始化dss设备失败, 有关详细信息, 请查看$DSS_HOME下的日志.\n"
+
+#: initdb.cpp:4716 initdb.cpp:4861
 #, c-format
 msgid "creating directory %s ... "
 msgstr "创建目录 %s ... "
 
-#: initdb.c:3135 initdb.c:3206
+#: initdb.cpp:4722 initdb.cpp:4866 initdb.cpp:4968 initdb.cpp:5284
+#, c-format
+msgid "%s: could not create directory \"%s\": %s\n"
+msgstr "%s: 无法创建目录 \"%s\": %s\n"
+
+#: initdb.cpp:4736 initdb.cpp:4879
 #, c-format
 msgid "fixing permissions on existing directory %s ... "
 msgstr "修复已存在目录 %s 的权限 ... "
 
-#: initdb.c:3141 initdb.c:3212
+#: initdb.cpp:4741 initdb.cpp:4884 initdb.cpp:5298
 #, c-format
 msgid "%s: could not change permissions of directory \"%s\": %s\n"
 msgstr "%s: 无法改变目录 \"%s\" 的权限: %s\n"
 
-#: initdb.c:3154 initdb.c:3225
+#: initdb.cpp:4784 initdb.cpp:4897 initdb.cpp:5336
 #, c-format
 msgid "%s: directory \"%s\" exists but is not empty\n"
-msgstr "%s: 目录\"%s\"已存在，但不是空的\n"
+msgstr "%s: 目录\"%s\"已存在, 但不是空的\n"
 
-#: initdb.c:3157
+#: initdb.cpp:4785
 #, c-format
 msgid ""
 "If you want to create a new database system, either remove or empty\n"
 "the directory \"%s\" or run %s\n"
 "with an argument other than \"%s\".\n"
 msgstr ""
-"如果您想创建一个新的数据库系统, 请删除或清空\n"
-"目录 \"%s\" 或者运行带参数的 %s\n"
+"如果您想创建一个新的数据库系统\n"
+"请删除或清空目录 \"%s\" 或者带参数运行%s\n"
 "而不是 \"%s\".\n"
 
-#: initdb.c:3165 initdb.c:3235
+#: initdb.cpp:4796 initdb.cpp:4907 initdb.cpp:5347
 #, c-format
 msgid "%s: could not access directory \"%s\": %s\n"
 msgstr "%s: 无法访问目录 \"%s\": %s\n"
 
-#: initdb.c:3179
+#: initdb.cpp:4809
+#, c-format
+msgid "ERROR: [*]shared storage files of instance %d in the directory \"%s\" already exists\n"
+msgstr "错误: 目录\"%s\"中实例%d的[*]共享存储文件已存在\n"
+
+#: initdb.cpp:4810
+msgid "If you want to create a new shared storage instance, either remove shared storage files of instance %d in the directory \"%s\" or run %s with other instance id.\n"
+msgstr "如果要创建新的共享存储实例，请删除实例%d的共享存储文件(它位于目录\"%s\"),或使用其他实例id运行%s.\n"
+
+#: initdb.cpp:4819
+#, c-format
+msgid "ERROR: [*]shared storage files of cluster in the directory \"%s\" already exists\n"
+msgstr "错误: 目录 \"%s\" 中群集的[*]共享存储文件已存在\n"
+
+#: initdb.cpp:4820
+#, c-format
+msgid "You need clear all shared storages files in the directory \"%s\" before init instance 0.\n"
+msgstr "在初始化实例0之前, 您需要清除目录 \"%s\" 中的所有共享存储文件.\n"
+
+#: initdb.cpp:4825
+msgid "ERROR: [*]shared storage files of cluster in the directory \"%s\" does not exist\n"
+msgstr "错误：目录\"%s\"中群集的[*]共享存储文件不存在\n"
+
+#: initdb.cpp:4826
+#, c-format
+msgid "You need check storage files in the directory \"%s\" when init instance 0.\n"
+msgstr "初始化实例0时, 您需要检查目录\"%s\"中的存储文件.\n"
+
+#: initdb.cpp:4831
+#, c-format
+msgid "ERROR: [*]shared storage files of cluster in the directory \"%s\" is not completed\n"
+msgstr "错误: 目录\"%s\"中群集的[*]共享存储文件未完成\n"
+
+#: initdb.cpp:4832
+#, c-format
+msgid "You need check if the storage files in the directory \"%s\" is completed.\n"
+msgstr "您需要检查目录 \"%s\" is 中的存储文件是否已完成.\n"
+
+#: initdb.cpp:4845
+msgid "%s: can not specify transaction log directory location in shared storage mode\n"
+msgstr "%s: 无法在共享存储模式下指定事务日志目录位置\n"
+
+#: initdb.cpp:4853
 #, c-format
 msgid "%s: transaction log directory location must be an absolute path\n"
 msgstr "%s: 事务日志目录的位置必须为绝对路径\n"
 
-#: initdb.c:3228
+#: initdb.cpp:4898 initdb.cpp:5337
 #, c-format
 msgid ""
 "If you want to store the transaction log there, either\n"
 "remove or empty the directory \"%s\".\n"
-msgstr "如果您要存储事务日志，需要删除或者清空目录\"%s\".\n"
+msgstr ""
+"如果您要在这里存储事务日志\n"
+"需要删除或者清空目录\"%s\".\n"
 
-#: initdb.c:3247
+#: initdb.cpp:4922
 #, c-format
 msgid "%s: could not create symbolic link \"%s\": %s\n"
 msgstr "%s: 无法创建符号链接 \"%s\": %s\n"
 
-#: initdb.c:3252
+#: initdb.cpp:4929
 #, c-format
 msgid "%s: symlinks are not supported on this platform"
 msgstr "%s: 在这个平台上不支持使用符号链接"
 
-#: initdb.c:3258
-#, c-format
-msgid "creating subdirectories ... "
-msgstr "正在创建子目录 ... "
+#: initdb.cpp:4939
+msgid "creating subdirectories ... in ordinary occasion"
+msgstr "正在创建子目录 ... 在平常的场合"
 
-#: initdb.c:3324
+#: initdb.cpp:5114
 #, c-format
 msgid ""
 "\n"
-"Success. You can now start the database server using:\n"
+"Sync to disk skipped.\n"
+"The data directory might become corrupt if the operating system crashes.\n"
+msgstr ""
 "\n"
-"    %s%s%spostgres%s -D %s%s%s\n"
+"已跳过同步到磁盘\n"
+"如果操作系统崩溃, 数据目录可能会损坏.\n"
+
+#: initdb.cpp:5126
+#, c-format
+msgid ""
+"\n"
+"Success.\n"
+" You can now start the database server of the openGauss coordinator using:\n"
+"\n"
+"    %s%s%sgaussdb%s --coordinator -D %s%s%s\n"
 "or\n"
-"    %s%s%spg_ctl%s -D %s%s%s -l logfile start\n"
+"    %s%s%sgs_ctl%s start -D %s%s%s -Z coordinator -l logfile\n"
+"\n"
+" You can now start the database server of the openGauss datanode using:\n"
+"\n"
+"    %s%s%sgaussdb%s --datanode -D %s%s%s\n"
+"or \n"
+"    %s%s%sgs_ctl%s start -D %s%s%s -Z datanode -l logfile\n"
 "\n"
 msgstr ""
 "\n"
-"成功. 您现在可以用下面的命令运行数据库服务器:\n"
+"成功\n"
+"您现在可以使用以下命令启动openGauss协调器的数据库服务器:\n"
 "\n"
-"    %s%s%s%spostmaster -D %s%s%s\n"
+"    %s%s%sgaussdb%s --coordinator -D %s%s%s\n"
 "或者\n"
-"    %s%s%s%spg_ctl -D %s%s%s -l logfile start\n"
+"    %s%s%sgs_ctl%s start -D %s%s%s -Z coordinator -l logfile\n"
+"\n"
+"您现在可以使用以下命令启动openGauss数据节点的数据库服务器:\n"
+"\n"
+"    %s%s%sgaussdb%s --datanode -D %s%s%s\n"
+"或者\n"
+"    %s%s%sgs_ctl%s start -D %s%s%s -Z datanode -l logfile\n"
 "\n"
 
-#~ msgid "creating directory %s/%s ... "
-#~ msgstr "创建目录 %s/%s ... "
+#: initdb.cpp:5163
+#, c-format
+msgid ""
+"\n"
+"Success. You can now start the database server of single node using:\n"
+"\n"
+"    %s%s%sgaussdb%s -D %s%s%s --single_node\n"
+"or\n"
+"    %s%s%sgs_ctl%s start -D %s%s%s -Z single_node -l logfile\n"
+"\n"
+msgstr ""
+"\n"
+"成功. 您现在可以使用以下命令启动单个节点的数据库服务器:\n"
+"\n"
+"    %s%s%sgaussdb%s -D %s%s%s --single_node\n"
+"或者\n"
+"    %s%s%sgs_ctl%s start -D %s%s%s -Z single_node -l logfile\n"
+"\n"
 
-#~ msgid ""
-#~ "  --locale=LOCALE           initialize database cluster with given "
-#~ "locale\n"
-#~ msgstr "  --locale=LOCALE           初始化数据库簇的 locale\n"
+#: initdb.cpp:5390
+msgid "The parameter username of CheckInitialPasswd is NULL\n"
+msgstr "CheckInitialPasswd的参数username为NULL\n"
 
-#~ msgid "enabling unlimited row size for system tables ... "
-#~ msgstr "启动不限制系统表行大小 ... "
+#: initdb.cpp:5395
+msgid "The parameter passwd of CheckInitialPasswd is NULL\n"
+msgstr "CheckInitialPasswd的参数passwd为NULL\n"
 
-#~ msgid "%s: could not determine valid short version string\n"
-#~ msgstr "%s: 无法确定有效的短版本字符串\n"
+#: initdb.cpp:5403
+msgid "The passwd must be ascii code."
+msgstr "passwd必须是ascii码."
 
-#~ msgid ""
-#~ "%s: The password file was not generated. Please report this problem.\n"
-#~ msgstr "%s: 口令文件没有生成. 请报告这个问题.\n"
+#: initdb.cpp:5412
+msgid "passwd must contain at least eight characters\n"
+msgstr "密码至少包含8个字符\n"
 
-#~ msgid "%s: unrecognized authentication method \"%s\"\n"
-#~ msgstr "%s: 未知认证方法 \"%s\".\n"
+#: initdb.cpp:5418
+msgid "Password should not equal to the rolname.\n"
+msgstr "Password不应该等于rolname.\n"
+
+#: initdb.cpp:5424
+msgid "reverse_string failed, possibility out of memory\n"
+msgstr "Reverse_string失败, 可能内存溢出\n"
+
+#: initdb.cpp:5429
+msgid "Password should not equal to the reverse of rolname.\n"
+msgstr "Password不应该等于rolname的倒写.\n"
+
+#: initdb.cpp:5453
+msgid "Password must contain at least three kinds of characters.\n"
+msgstr "密码至少包含三种字符.\n"
+
+#: initdb.cpp:5501
+#, c-format
+msgid "%s: could not create lock file \"%s\" : %s\n"
+msgstr "%s:无法创建锁文件 \"%s\" :%s\n"
+
+#: initdb.cpp:5512
+#, c-format
+msgid "%s: close lock file \"%s\" failed: %s\n"
+msgstr "%s: 关闭锁文件 \"%s\" 失败:%s\n"

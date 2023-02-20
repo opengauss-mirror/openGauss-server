@@ -3023,6 +3023,8 @@ typedef struct knl_t_locale_context {
 
     char lc_time_envbuf[LC_ENV_BUFSIZE];
 
+    char lc_messages_envbuf[LC_ENV_BUFSIZE];
+
 } knl_t_locale_context;
 
 typedef struct knl_t_stat_context {

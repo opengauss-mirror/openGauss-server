@@ -236,6 +236,14 @@ int main(int argc, char* argv[])
 #endif
 
     /*
+     * LC_MESSAGES will get set later during GUC option processing, but we set
+     * it here to allow startup error messages to be localized.
+     */
+#if defined(ENABLE_NLS) && defined(LC_MESSAGES)
+    pg_perm_setlocale(LC_MESSAGES, "");
+#endif
+
+    /*
      * We keep these set to "C" always, except transiently in pg_locale.c; see
      * that file for explanations.
      */

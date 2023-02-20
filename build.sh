@@ -13,6 +13,7 @@ declare wrap_binaries='NO'
 declare not_optimized=''
 declare config_file=''
 declare product_mode='opengauss'
+declare extra_config_opt=''
 #########################################################################
 ##read command line paramenters
 #######################################################################
@@ -29,6 +30,7 @@ function print_help()
     -f|--config_file                  set postgresql.conf.sample from config_file when packing
     -T|--tassl                        build with tassl
     -pm|--product_mode                this values of paramenter is opengauss or lite or finance, the default value is opengauss.
+    -nls|--enable_nls                 enable Native Language Support
     "
 }
 
@@ -79,6 +81,10 @@ while [ $# -gt 0 ]; do
             build_with_tassl='-T'
             shift 1
             ;;
+        -nls|--enable_nls)
+            extra_config_opt="--config_opt --enable-nls=zh_CN "
+            shift 1
+            ;;
          *)
             echo "Internal Error: option processing error: $1" 1>&2
             echo "please input right paramtenter, the following command may help you"
@@ -92,7 +98,7 @@ ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 echo "ROOT_DIR : $ROOT_DIR"
 cd build/script
 chmod a+x build_opengauss.sh
-./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server ${build_with_tassl} -pm ${product_mode}
+./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server ${build_with_tassl} -pm ${product_mode} ${extra_config_opt}
 if [ "${wrap_binaries}"X = "YES"X ]; then
     chmod a+x package_opengauss.sh
     if [ X$config_file = "X" ];then

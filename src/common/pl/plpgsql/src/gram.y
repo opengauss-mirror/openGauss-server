@@ -13,6 +13,7 @@
  * -------------------------------------------------------------------------
  */
 
+#include "utils/plpgsql_domain.h"
 #include "utils/plpgsql.h"
 
 #include "access/xact.h"

@@ -32,13 +32,6 @@
  * Definitions
  **********************************************************************/
 
-/* define our text domain for translations */
-#undef TEXTDOMAIN
-#define TEXTDOMAIN PG_TEXTDOMAIN("plpgsql")
-
-#undef _
-#define _(x) dgettext(TEXTDOMAIN, x)
-
 #define TABLEOFINDEXBUCKETNUM 128
 
 /*

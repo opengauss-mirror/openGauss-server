@@ -74,6 +74,7 @@ typedef struct knl_session_attr_common {
     bool enable_redistribute;
     bool check_implicit_conversions_for_indexcol;
     bool support_batch_bind;
+    bool enable_nls;
     int XLogArchiveTimeout;
     int Log_file_mode;
     int bbox_dump_count;

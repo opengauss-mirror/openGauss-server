@@ -1,5 +1,5 @@
-# src/backend/nls.mk
-CATALOG_NAME     = postgres
+# src/gausskernel/nls.mk
+CATALOG_NAME     = gaussdb
 AVAIL_LANGUAGES  = de es fr it ja pl pt_BR ru zh_CN zh_TW
 GETTEXT_FILES    = + gettext-files
 GETTEXT_TRIGGERS = $(BACKEND_COMMON_GETTEXT_TRIGGERS) \
@@ -13,7 +13,7 @@ GETTEXT_FLAGS    = $(BACKEND_COMMON_GETTEXT_FLAGS) \
     report_invalid_record:2:c-format
 
 gettext-files: distprep
-	find $(srcdir)/ $(srcdir)/../port/ -name '*.c' -print | LC_ALL=C sort >$@
+	find $(srcdir)/ $(srcdir)/../common/backend/  $(srcdir)/../common/port/ -name '*.cpp' -print | LC_ALL=C sort >$@
 
 my-clean:
 	rm -f gettext-files

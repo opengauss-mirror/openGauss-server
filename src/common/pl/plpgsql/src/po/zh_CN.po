@@ -21,7 +21,7 @@ msgstr ""
 #: gram.y:439
 #, c-format
 msgid "block label must be placed before DECLARE, not after"
-msgstr "代码块标签必须放在DECLARE的前面，而不是后面"
+msgstr "代码块标签必须放在DECLARE的前面, 而不是后面"
 
 #: gram.y:8844
 #, c-format
@@ -81,7 +81,9 @@ msgstr "\"%s\" 不是一个标量变量"
 msgid ""
 "loop variable of loop over rows must be a record or row variable or list of "
 "scalar variables"
-msgstr "在记录集上进行循环的循环变量必须是记录或记录类型变量或标量变量的列表"
+msgstr ""
+"在记录集上进行循环的循环变量必须是记录或记录类型变量或"
+"标量变量的列表"
 
 #: gram.y:1257
 #, c-format
@@ -125,7 +127,7 @@ msgstr "无效的SQLSTATE代码"
 
 #: gram.y:1884
 msgid "syntax error, expected \"FOR\""
-msgstr "语法错误，期望\"FOR\""
+msgstr "语法错误, 期望\"FOR\""
 
 #: gram.y:1946
 #, c-format
@@ -296,7 +298,7 @@ msgstr "无法识别的RAISE语句选项"
 
 #: gram.y:3594
 msgid "syntax error, expected \"=\""
-msgstr "语法错误，期望\"=\""
+msgstr "语法错误, 期望\"=\""
 
 #: pl_comp.c:424 pl_handler.c:266
 #, c-format
@@ -328,7 +330,9 @@ msgstr "触发器函数不能有已声明的参数"
 msgid ""
 "The arguments of the trigger can be accessed through TG_NARGS and TG_ARGV "
 "instead."
-msgstr "触发器的参数可以通过TG_NARGS和TG_ARGV进行访问."
+msgstr ""
+"触发器的参数可以通过TG_NARGS和TG_ARGV进行访问"
+"替代."
 
 #: pl_comp.c:911
 #, c-format
@@ -407,7 +411,7 @@ msgstr "在循环的外部不能使用CONTINUE"
 #: pl_exec.c:346
 #, c-format
 msgid "control reached end of function without RETURN"
-msgstr "控制流程到达函数的结束部分，但是没有看到RETURN"
+msgstr "控制流程到达函数的结束部分, 但是没有看到RETURN"
 
 #: pl_exec.c:353
 msgid "while casting return value to function's return type"
@@ -429,7 +433,7 @@ msgstr "在函数退出期间"
 #: pl_exec.c:714
 #, c-format
 msgid "control reached end of trigger procedure without RETURN"
-msgstr "控制流程到达触发器/存储过程的结束部分，但是没有看到RETURN"
+msgstr "控制流程到达触发器/存储过程的结束部分, 但是没有看到RETURN"
 
 #: pl_exec.c:723
 #, c-format
@@ -439,7 +443,8 @@ msgstr "触发器存储过程无法返回集合"
 #: pl_exec.c:745
 msgid ""
 "returned row structure does not match the structure of the triggering table"
-msgstr "所返回的记录结构与触发表的结构不匹配"
+msgstr ""
+"所返回的记录结构与触发表的结构不匹配"
 
 #: pl_exec.c:808
 #, c-format
@@ -612,7 +617,7 @@ msgstr "RAISE语句选项不能为空"
 #: pl_exec.c:2779 pl_exec.c:2788 pl_exec.c:2796 pl_exec.c:2804
 #, c-format
 msgid "RAISE option already specified: %s"
-msgstr "已经指定了RAISE选项：%s"
+msgstr "已经指定了RAISE选项: %s"
 
 #: pl_exec.c:2840
 #, c-format
@@ -652,12 +657,12 @@ msgstr "查询返回多条记录"
 #: pl_exec.c:3199
 #, c-format
 msgid "query has no destination for result data"
-msgstr "对于结果数据，查询没有目标"
+msgstr "对于结果数据, 查询没有目标"
 
 #: pl_exec.c:3200
 #, c-format
 msgid "If you want to discard the results of a SELECT, use PERFORM instead."
-msgstr "如果您想要放弃SELECT语句的结果，请使用PERFORM."
+msgstr "如果您想要放弃SELECT语句的结果, 请使用PERFORM."
 
 #: pl_exec.c:3233 pl_exec.c:6146
 #, c-format
@@ -674,7 +679,9 @@ msgstr "没有执行EXECUTE of SELECT ... INTO "
 msgid ""
 "You might want to use EXECUTE ... INTO or EXECUTE CREATE TABLE ... AS "
 "instead."
-msgstr "您可以使用EXECUTE ... INTO或者EXECUTE CREATE TABLE ... AS语句来替代"
+msgstr "" 
+"您可以使用EXECUTE ... INTO或者EXECUTE CREATE TABLE ... AS语句来替代"
+""
 
 #: pl_exec.c:3581 pl_exec.c:3673
 #, c-format
@@ -782,7 +789,9 @@ msgstr "在EXECUTE语句上的FOR语句"
 msgid ""
 "Sets handling of conflicts between PL/pgSQL variable names and table column "
 "names."
-msgstr "设置在PL/pgSQL变量名称和表中列名冲突时的处理原则"
+msgstr ""
+"设置在PL/pgSQL变量名称和表中列名冲突时的处理原则"
+""
 
 #. translator: %s is typically the translation of "syntax error"
 #: pl_scanner.c:504
@@ -809,10 +818,10 @@ msgstr "%s 在 \"%s\" 或附近的"
 #~ msgstr "未结束的引用标识符"
 
 #~ msgid "qualified identifier cannot be used here: %s"
-#~ msgstr "在这里不能使用限定标识符：%s"
+#~ msgstr "在这里不能使用限定标识符: %s"
 
 #~ msgid "unterminated \" in identifier: %s"
-#~ msgstr "在标识符中未结束的\"：%s"
+#~ msgstr "在标识符中未结束的\": %s"
 
 #~ msgid "variable \"%s\" does not exist in the current block"
 #~ msgstr "在当前代码块中不存在变量 \"%s\""
@@ -829,7 +838,7 @@ msgstr "%s 在 \"%s\" 或附近的"
 #~ msgid ""
 #~ "Expected record variable, row variable, or list of scalar variables "
 #~ "following INTO."
-#~ msgstr "在INTO后期望记录类型变量，记录变量或标量变量的列表."
+#~ msgstr "在INTO后期望记录类型变量, 记录变量或标量变量的列表."
 
 #~ msgid "cannot assign to tg_argv"
 #~ msgstr "无法分配到tg_argv"
@@ -865,7 +874,7 @@ msgstr "%s 在 \"%s\" 或附近的"
 
 #~ msgid ""
 #~ "Number of returned columns (%d) does not match expected column count (%d)."
-#~ msgstr "所返回列的数量（%d列）与所期望列的数量(%d)不匹配."
+#~ msgstr "所返回列的数量(%d)列与所期望列的数量(%d)不匹配."
 
 #~ msgid "N/A (dropped column)"
 #~ msgstr "N/A (已删除的列)"

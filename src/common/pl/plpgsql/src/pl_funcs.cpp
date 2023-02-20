@@ -15,6 +15,7 @@
  * -------------------------------------------------------------------------
  */
 
+#include "utils/plpgsql_domain.h"
 #include "utils/plpgsql.h"
 #include "optimizer/pgxcship.h"
 #include "utils/lsyscache.h"

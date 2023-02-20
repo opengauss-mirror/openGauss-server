@@ -157,6 +157,10 @@ char* pg_perm_setlocale(int category, const char* locale)
             envvar = "LC_TIME";
             envbuf = t_thrd.lc_cxt.lc_time_envbuf;
             break;
+        case LC_MESSAGES:
+            envvar = "LC_MESSAGES";
+            envbuf = t_thrd.lc_cxt.lc_messages_envbuf;
+            break;
         default:
             ereport(FATAL, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized LC category: %d", category)));
             envvar = NULL; /* keep compiler quiet */
@@ -313,6 +317,9 @@ void assign_locale_messages(const char* newval, void* extra)
      * LC_MESSAGES category does not exist everywhere, but accept it anyway.
      * We ignore failure, as per comment above.
      */
+#if defined(ENABLE_NLS) && defined(LC_MESSAGES)
+    (void) pg_perm_setlocale(LC_MESSAGES, newval);
+#endif
 }
 
 /*

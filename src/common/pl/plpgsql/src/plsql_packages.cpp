@@ -21,6 +21,7 @@
  * -------------------------------------------------------------------------
  */
 
+#include "utils/plpgsql_domain.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "utils/plpgsql.h"

@@ -26,6 +26,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "utils/plpgsql_domain.h"
 #include "access/hash.h"
 #include "nodes/pg_list.h"
 #include "utils/dynahash.h"

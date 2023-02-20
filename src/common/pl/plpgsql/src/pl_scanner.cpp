@@ -13,6 +13,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "utils/plpgsql_domain.h"
 #include "utils/builtins.h"
 #include "utils/plpgsql.h"
 #include "utils/pl_package.h"
