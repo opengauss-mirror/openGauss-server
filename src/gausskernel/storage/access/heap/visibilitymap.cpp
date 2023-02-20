@@ -289,7 +289,7 @@ bool visibilitymap_test(Relation rel, BlockNumber heapBlk, Buffer *buf)
         volatile BufferDesc *bufHdr = NULL;
 
         if (BufferIsLocal(*buf)) {
-            bufHdr = &(u_sess->storage_cxt.LocalBufferDescriptors[-(*buf) - 1]);
+            bufHdr = (BufferDesc *)&(u_sess->storage_cxt.LocalBufferDescriptors[-(*buf) - 1].bufferdesc);
         } else {
             bufHdr = GetBufferDescriptor(*buf - 1);
         }

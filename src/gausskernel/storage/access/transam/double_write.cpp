@@ -2068,14 +2068,14 @@ void dw_init()
 void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag)
 {
     if (XLOG_NEED_PHYSICAL_LOCATION(buf_desc->tag.rnode)) {
-        if (buf_desc->seg_fileno != EXTENT_INVALID) {
+        if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
             // buffer descriptor contains the physical location
-            Assert(buf_desc->seg_fileno <= EXTENT_TYPES && buf_desc->seg_fileno > EXTENT_INVALID);
-            buf_tag->rnode.relNode = buf_desc->seg_fileno;
-            buf_tag->blockNum = buf_desc->seg_blockno;
+            Assert(buf_desc->extra->seg_fileno <= EXTENT_TYPES && buf_desc->extra->seg_fileno > EXTENT_INVALID);
+            buf_tag->rnode.relNode = buf_desc->extra->seg_fileno;
+            buf_tag->blockNum = buf_desc->extra->seg_blockno;
         } else if (ENABLE_REFORM && SS_BEFORE_RECOVERY) {
-            buf_tag->rnode.relNode = buf_desc->seg_fileno;
-            buf_tag->blockNum = buf_desc->seg_blockno;
+            buf_tag->rnode.relNode = buf_desc->extra->seg_fileno;
+            buf_tag->blockNum = buf_desc->extra->seg_blockno;
         } else {
             SegPageLocation loc =
                 seg_get_physical_location(buf_desc->tag.rnode, buf_desc->tag.forkNum, buf_desc->tag.blockNum);
@@ -2169,7 +2169,7 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     UnpinBuffer(buf_desc, true);
 
     page_lsn = PageGetLSN(dest_addr);
-    if (buf_desc->encrypt) {
+    if (buf_desc->extra->encrypt) {
         dw_encrypt_page(buf_desc->tag, dest_addr);
     }
 

@@ -95,8 +95,8 @@ static void CalcSegDmsPhysicalLoc(BufferDesc* buf_desc, Buffer buffer, bool chec
         SegPageLocation loc = seg_get_physical_location(buf_desc->tag.rnode, buf_desc->tag.forkNum,
             buf_desc->tag.blockNum, check_standby);
         SegmentCheck(loc.blocknum != InvalidBlockNumber);
-        buf_desc->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE((int)loc.extent_size);
-        buf_desc->seg_blockno = loc.blocknum;
+        buf_desc->extra->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE((int)loc.extent_size);
+        buf_desc->extra->seg_blockno = loc.blocknum;
     }
 }
 
@@ -218,7 +218,7 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
     /*
      * prerequisite is that the page that initialized to zero in memory should be flush to disk
      */
-    if (ENABLE_VERIFY_PAGE_VERSION && (buf_desc->seg_fileno != EXTENT_INVALID ||
+    if (ENABLE_VERIFY_PAGE_VERSION && (buf_desc->extra->seg_fileno != EXTENT_INVALID ||
         IsSegmentBufferID(buf_desc->buf_id)) && (read_mode == RBM_NORMAL)) {
         char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
         char *temp_buf = (char *)BUFFERALIGN(origin_buf);
@@ -227,9 +227,9 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
         if (pblk != NULL) {
             rdStatus = SmgrNetPageCheckRead(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, pblk->relNode,
                             buf_desc->tag.forkNum, pblk->block, (char *)temp_buf);
-        } else if (buf_desc->seg_fileno != EXTENT_INVALID) {
+        } else if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
             rdStatus = SmgrNetPageCheckRead(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
-                            buf_desc->seg_fileno, buf_desc->tag.forkNum, buf_desc->seg_blockno, (char *)temp_buf);
+                            buf_desc->extra->seg_fileno, buf_desc->tag.forkNum, buf_desc->extra->seg_blockno, (char *)temp_buf);
         } else {
             rdStatus = smgrread(smgr, buf_desc->tag.forkNum, buf_desc->tag.blockNum, (char *)temp_buf);
         }
@@ -286,7 +286,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
         buffer = BufferDescriptorGetBuffer(buf_desc);
         if ((!RecoveryInProgress() || g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) &&
-            buf_desc->seg_fileno == EXTENT_INVALID) {
+            buf_desc->extra->seg_fileno == EXTENT_INVALID) {
             CalcSegDmsPhysicalLoc(buf_desc, buffer, !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy);
         }
     }
@@ -689,7 +689,7 @@ bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc)
         return true;
     }
 
-    if (ENABLE_DSS_AIO && buf_desc->aio_in_progress) {
+    if (ENABLE_DSS_AIO && buf_desc->extra->aio_in_progress) {
         return false;
     }
 
@@ -716,7 +716,7 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
     BufferDesc *buf_desc = BufferGetBufferDescriptor(buf);
     bool ret = false;
 
-    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) && buf_desc->seg_fileno != EXTENT_INVALID) {
+    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) && buf_desc->extra->seg_fileno != EXTENT_INVALID) {
         SMGR_READ_STATUS rdStatus;
         if (reln->seg_space == NULL) {
             reln->seg_space = spc_open(reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode, false);
@@ -726,13 +726,13 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
         RelFileNode fakenode = {
             .spcNode = reln->smgr_rnode.node.spcNode,
             .dbNode = reln->smgr_rnode.node.dbNode,
-            .relNode = buf_desc->seg_fileno,
+            .relNode = buf_desc->extra->seg_fileno,
             .bucketNode = SegmentBktId,
             .opt = 0
         };
 
-        seg_physical_read(reln->seg_space, fakenode, forknum, buf_desc->seg_blockno, (char *)buffer);
-        if (PageIsVerified((Page)buffer, buf_desc->seg_blockno)) {
+        seg_physical_read(reln->seg_space, fakenode, forknum, buf_desc->extra->seg_blockno, (char *)buffer);
+        if (PageIsVerified((Page)buffer, buf_desc->extra->seg_blockno)) {
             rdStatus = SMGR_RD_OK;
         } else {
             rdStatus = SMGR_RD_CRC_ERROR;

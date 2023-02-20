@@ -327,7 +327,7 @@ uint16 seg_dw_single_flush(BufferDesc *buf_desc, bool* flush_old_file)
 
     if (!dw_flush) {
         *flush_old_file = false;
-        pos = second_version_dw_single_flush(buf_desc->tag, block, page_lsn, buf_desc->encrypt, phy_tag);
+        pos = second_version_dw_single_flush(buf_desc->tag, block, page_lsn, buf_desc->extra->encrypt, phy_tag);
     }
     return pos;
 }

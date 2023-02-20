@@ -322,7 +322,7 @@ inline bool dw_buf_valid_aio_finished(BufferDesc *buf_desc, uint32 buf_state)
         return true;
     }
 
-    return ((buf_state & BM_VALID) && ((buf_state & BM_DIRTY) || buf_desc->aio_in_progress));
+    return ((buf_state & BM_VALID) && ((buf_state & BM_DIRTY) || buf_desc->extra->aio_in_progress));
 }
 
 extern bool free_space_enough(int buf_id);

@@ -2782,7 +2782,7 @@ void RepairPageAndRecoveryXLog(BadBlockRecEnt* page_info, const char *page)
 
     MarkBufferDirty(buffer.buf);
     bufDesc = GetBufferDescriptor(buffer.buf - 1);
-    bufDesc->lsn_on_disk = PageGetLSN(buffer.pageinfo.page);
+    bufDesc->extra->lsn_on_disk = PageGetLSN(buffer.pageinfo.page);
     UnlockReleaseBuffer(buffer.buf);
 
     /* recovery the page xlog */
