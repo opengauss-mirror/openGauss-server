@@ -521,10 +521,13 @@ static void CreateMvCommand(ViewStmt* stmt, const char* queryString)
     pfree_ext(members);
 
     /* Recurse for anything else */
-    ProcessUtility((Node *)step,
-            queryStringinfo,
-            NULL,
-            false,
+    processutility_context proutility_cxt;
+    proutility_cxt.parse_tree = (Node*)step;
+    proutility_cxt.query_string = queryStringinfo;
+    proutility_cxt.readOnlyTree = false;
+    proutility_cxt.params = NULL;
+    proutility_cxt.is_top_level = false;
+    ProcessUtility(&proutility_cxt,
             None_Receiver,
             true,
             NULL);
@@ -583,12 +586,9 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
     /*
      * Run parse analysis to convert the raw parse tree to a Query.  Note this
      * also acquires sufficient locks on the source table(s).
-     *
-     * Since parse analysis scribbles on its input, copy the raw parse tree;
-     * this ensures we don't corrupt a prepared statement, for example.
      */
     if (!IsA(stmt->query, Query)) {
-        viewParse = parse_analyze((Node*)copyObject(stmt->query), queryString, NULL, 0);
+        viewParse = parse_analyze(stmt->query, queryString, NULL, 0);
     } else {
         viewParse = (Query *)stmt->query;
     }

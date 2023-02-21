@@ -4547,7 +4547,14 @@ static void InitTempTableNamespace(void)
     ret = snprintf_s(
         str, sizeof(str), sizeof(str) - 1, "CREATE SCHEMA %s AUTHORIZATION \"%s\"", namespaceName, bootstrap_username);
     securec_check_ss(ret, "\0", "\0");
-    ProcessUtility((Node*)create_stmt, str, NULL, false, None_Receiver, false, NULL);
+
+    processutility_context proutility_cxt;
+    proutility_cxt.parse_tree = (Node*)create_stmt;
+    proutility_cxt.query_string = str;
+    proutility_cxt.readOnlyTree = false;
+    proutility_cxt.params = NULL;
+    proutility_cxt.is_top_level = false;
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
 
     if (IS_PGXC_COORDINATOR)
         if (PoolManagerSetCommand(POOL_CMD_TEMP, namespaceName) < 0)
@@ -4600,7 +4607,13 @@ static void InitTempTableNamespace(void)
         toastNamespaceName,
         bootstrap_username);
     securec_check_ss(ret, "\0", "\0");
-    ProcessUtility((Node*)create_stmt, str, NULL, false, None_Receiver, false, NULL);
+
+    proutility_cxt.parse_tree = (Node*)create_stmt;
+    proutility_cxt.query_string = str;
+    proutility_cxt.readOnlyTree = false;
+    proutility_cxt.params = NULL;
+    proutility_cxt.is_top_level = false;
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
 
     /* Advance command counter to make namespace visible */
     CommandCounterIncrement();
@@ -5446,7 +5459,14 @@ dropExistTempNamespace(char *namespaceName)
     ereport(NOTICE, (errmsg("Deleting invalid temp schema %s.", namespaceName)));
     ret = snprintf_s(str, sizeof(str), sizeof(str) - 1, "DROP SCHEMA %s CASCADE", namespaceName);
     securec_check_ss(ret, "\0", "\0");
-    ProcessUtility((Node*)drop_stmt, str, NULL, false, None_Receiver, false, NULL);
+
+    processutility_context proutility_cxt;
+    proutility_cxt.parse_tree = (Node*)drop_stmt;
+    proutility_cxt.query_string = str;
+    proutility_cxt.readOnlyTree = false;
+    proutility_cxt.params = NULL;
+    proutility_cxt.is_top_level = false;
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
     CommandCounterIncrement();
 }
 

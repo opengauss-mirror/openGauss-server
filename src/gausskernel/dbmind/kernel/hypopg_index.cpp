@@ -67,7 +67,7 @@ static explain_get_index_name_hook_type prev_explain_get_index_name_hook = NULL;
 extern Oid GetIndexOpClass(List *opclass, Oid attrType, const char *accessMethodName, Oid accessMethodId);
 extern void CheckPredicate(Expr *predicate);
 extern bool CheckMutability(Expr *expr);
-static void hypo_utility_hook(Node *parsetree, const char *queryString, ParamListInfo params, bool isTopLevel,
+static void hypo_utility_hook(processutility_context* processutility_cxt,
     DestReceiver *dest, bool sentToRemote, char *completionTag, bool isCtas);
 static void hypo_executorEnd_hook(QueryDesc *queryDesc);
 static void hypo_get_relation_info_hook(PlannerInfo *root, Oid relationObjectId, bool inhparent, RelOptInfo *rel);
@@ -156,15 +156,16 @@ static Oid hypo_getNewOid(Oid relid)
 /* This function setup the "isExplain" flag for next hooks.
  * If this flag is setup, we can add hypothetical indexes.
  */
-void hypo_utility_hook(Node *parsetree, const char *queryString, ParamListInfo params, bool isTopLevel,
+void hypo_utility_hook(processutility_context* processutility_cxt,
     DestReceiver *dest, bool sentToRemote, char *completionTag, bool isCtas)
 {
+    Node* parsetree = processutility_cxt->parse_tree;
     isExplain = query_or_expression_tree_walker(parsetree, (bool (*)())hypo_query_walker, NULL, 0);
 
     if (prev_utility_hook) {
-        prev_utility_hook(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag, isCtas);
+        prev_utility_hook(processutility_cxt, dest, sentToRemote, completionTag, isCtas);
     } else {
-        standard_ProcessUtility(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag, isCtas);
+        standard_ProcessUtility(processutility_cxt, dest, sentToRemote, completionTag, isCtas);
     }
 }
 

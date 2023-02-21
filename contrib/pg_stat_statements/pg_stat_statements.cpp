@@ -223,7 +223,7 @@ static void pgss_ExecutorStart(QueryDesc* queryDesc, int eflags);
 static void pgss_ExecutorRun(QueryDesc* queryDesc, ScanDirection direction, long count);
 static void pgss_ExecutorFinish(QueryDesc* queryDesc);
 static void pgss_ExecutorEnd(QueryDesc* queryDesc);
-static void pgss_ProcessUtility(Node* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel,
+static void pgss_ProcessUtility(processutility_context* processutility_cxt,
     DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,
@@ -722,13 +722,15 @@ static void pgss_ExecutorEnd(QueryDesc* queryDesc)
 /*
  * ProcessUtility hook
  */
-static void pgss_ProcessUtility(Node* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel,
+static void pgss_ProcessUtility(processutility_context* processutility_cxt,
     DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
     char* completionTag)
 {
+    Node* parsetree = processutility_cxt->parse_tree;
+    const char* queryString = processutility_cxt->query_string;
     /*
      * If it's an EXECUTE statement, we don't track it and don't increment the
      * nesting level.  This allows the cycles to be charged to the underlying
@@ -754,20 +756,14 @@ static void pgss_ProcessUtility(Node* parsetree, const char* queryString, ParamL
         PG_TRY();
         {
             if (prev_ProcessUtility)
-                prev_ProcessUtility(parsetree,
-                    queryString,
-                    params,
-                    isTopLevel,
+                prev_ProcessUtility(processutility_cxt,
                     dest,
 #ifdef PGXC
                     sentToRemote,
 #endif /* PGXC */
                     completionTag);
             else
-                standard_ProcessUtility(parsetree,
-                    queryString,
-                    params,
-                    isTopLevel,
+                standard_ProcessUtility(processutility_cxt,
                     dest,
 #ifdef PGXC
                     sentToRemote,
@@ -817,20 +813,14 @@ static void pgss_ProcessUtility(Node* parsetree, const char* queryString, ParamL
         pgss_store(queryString, queryId, INSTR_TIME_GET_MILLISEC(duration), rows, &bufusage, NULL);
     } else {
         if (prev_ProcessUtility)
-            prev_ProcessUtility(parsetree,
-                queryString,
-                params,
-                isTopLevel,
+            prev_ProcessUtility(processutility_cxt,
                 dest,
 #ifdef PGXC
                 sentToRemote,
 #endif /* PGXC */
                 completionTag);
         else
-            standard_ProcessUtility(parsetree,
-                queryString,
-                params,
-                isTopLevel,
+            standard_ProcessUtility(processutility_cxt,
                 dest,
 #ifdef PGXC
                 sentToRemote,

@@ -193,12 +193,9 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
      * Analyze the statement using these parameter types (any parameters
      * passed in from above us will not be visible to it), allowing
      * information about unknown parameters to be deduced from context.
-     *
-     * Because parse analysis scribbles on the raw querytree, we must make a
-     * copy to ensure we don't modify the passed-in tree.
      */
 
-    query = parse_analyze_varparams((Node*)copyObject(stmt->query), queryString, &argtypes, &nargs);
+    query = parse_analyze_varparams(stmt->query, queryString, &argtypes, &nargs);
 
 #ifdef ENABLE_MOT
     /* check cross engine queries  */

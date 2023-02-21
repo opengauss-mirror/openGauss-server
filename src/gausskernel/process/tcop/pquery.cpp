@@ -1714,10 +1714,13 @@ static void PortalRunUtility(Portal portal, Node* utilityStmt, bool isTopLevel, 
     if (ENABLE_WORKLOAD_CONTROL)
         WLMSetExecutorStartTime();
 
-    ProcessUtility(utilityStmt,
-        portal->sourceText,
-        portal->portalParams,
-        isTopLevel,
+    processutility_context proutility_cxt;
+    proutility_cxt.parse_tree = utilityStmt;
+    proutility_cxt.query_string = portal->sourceText;
+    proutility_cxt.readOnlyTree = (portal->cplan != NULL);  /* protect tree if in plancache */
+    proutility_cxt.params = portal->portalParams;
+    proutility_cxt.is_top_level = isTopLevel;
+    ProcessUtility(&proutility_cxt,
         dest,
 #ifdef PGXC
         false,

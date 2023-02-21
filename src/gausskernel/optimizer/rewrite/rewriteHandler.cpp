@@ -4867,14 +4867,26 @@ List* QueryRewriteCTAS(Query* parsetree)
 
     /* If MATILIZED VIEW exists, cannot send create table to DNs. */
     if (stmt->relkind != OBJECT_MATVIEW) {
-        ProcessUtility(cparsetree->utilityStmt, create_sql, NULL, true, NULL, false, NULL);
+        processutility_context proutility_cxt;
+        proutility_cxt.parse_tree = cparsetree->utilityStmt;
+        proutility_cxt.query_string = create_sql;
+        proutility_cxt.readOnlyTree = false;
+        proutility_cxt.params = NULL;
+        proutility_cxt.is_top_level = true;
+        ProcessUtility(&proutility_cxt, NULL, false, NULL);
     }
 
     /* CREATE MATILIZED VIEW AS*/
     if (stmt->relkind == OBJECT_MATVIEW) {
         Query *query = (Query *)stmt->query;
 
-        ProcessUtility(zparsetree->utilityStmt, view_sql, NULL, true, NULL, false, NULL);
+        processutility_context proutility_cxt;
+        proutility_cxt.parse_tree = zparsetree->utilityStmt;
+        proutility_cxt.query_string = view_sql;
+        proutility_cxt.readOnlyTree = false;
+        proutility_cxt.params = NULL;
+        proutility_cxt.is_top_level = true;
+        ProcessUtility(&proutility_cxt, NULL, false, NULL);
 
         create_matview_meta(query, stmt->into->rel, stmt->into->ivm);
 

@@ -2824,7 +2824,13 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
                     stmt = (Node *)copyObject(stmt);
                 }
 
-                ProcessUtility(stmt, plansource->query_string, paramLI, false, /* not top level */
+                processutility_context proutility_cxt;
+                proutility_cxt.parse_tree = stmt;
+                proutility_cxt.query_string = plansource->query_string;
+                proutility_cxt.readOnlyTree = true;  /* protect plancache's node tree */
+                proutility_cxt.params = paramLI;
+                proutility_cxt.is_top_level = false;  /* not top level */
+                ProcessUtility(&proutility_cxt,
                     dest,
 #ifdef PGXC
                     false,
