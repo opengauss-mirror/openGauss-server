@@ -1,0 +1,130 @@
+--delimiter bug
+create database delim_fix dbcompatibility 'B';
+\c delim_fix
+create or replace procedure pro_exp_001_1 as
+declare
+count_num int;
+f_count_num int;
+begin
+drop table if exists f_pro_exp_001_1;
+create table f_pro_exp_001_1 (h_c_id int,
+h_c_d_id int,
+h_c_w_id int,
+h_d_id int,
+h_w_id int,
+h_date timestamp,
+h_amount numeric(6,2),
+h_data varchar(24));
+;
+end;
+/
+
+create table pro_exp_001_1(a int);
+create or replace procedure pro_exp_001_2 as
+declare
+count_num int;
+f_count_num int;
+begin
+drop table if exists f_pro_exp_001_1;
+create table f_pro_exp_001_1 (h_c_id int,
+h_c_d_id int,
+h_c_w_id int,
+h_d_id int,
+h_w_id int,
+h_date timestamp,
+h_amount numeric(6,2),
+h_data varchar(24));
+copy f_pro_exp_001_1 from '@abs_srcdir@/data/f_pro_exp_001_1.data' delimiter ',';
+perform count(*) from f_pro_exp_001_1;
+begin
+drop table if exists pro_exp_001_1;
+create table pro_exp_001_1(h_c_id int NOT NULL,
+h_c_d_id int NOT NULL,
+h_c_w_id int NOT NULL,
+h_d_id int NOT NULL,
+h_w_id int NOT NULL,
+h_date timestamp NOT NULL,
+h_amount numeric(6,2) NOT NULL,
+h_data varchar(24) NOT NULL)
+;
+for i in 1..10 loop
+insert into pro_exp_001_1 select * from f_pro_exp_001_1 where h_c_id > 2800;
+end loop;
+end;
+drop table if exists fto_pro_exp_001_1;
+create table fto_pro_exp_001_1 (h_c_id int,
+h_c_d_id int,
+h_c_w_id int,
+h_d_id int,
+h_w_id int,
+h_date timestamp,
+h_amount numeric(6,2),
+h_data varchar(24));
+insert into fto_pro_exp_001_1 select * from pro_exp_001_1;
+delete from pro_exp_001_1;
+exception
+when OTHERS then
+raise 'Error Occurs.';
+end;
+/
+
+call pro_exp_001_2();
+select * from f_pro_exp_001_1 where h_c_id = 1;
+
+create database db_delimiter_a dbcompatibility 'A';
+\c db_delimiter_a;
+create table pro_exp_001_1(a int);
+create or replace procedure pro_exp_001_1 as
+declare
+count_num int;
+f_count_num int;
+begin
+drop table if exists f_pro_exp_001_1;
+create table f_pro_exp_001_1 (h_c_id int,
+h_c_d_id int,
+h_c_w_id int,
+h_d_id int,
+h_w_id int,
+h_date timestamp,
+h_amount numeric(6,2),
+h_data varchar(24));
+copy f_pro_exp_001_1 from '@abs_srcdir@/data/f_pro_exp_001_1.data' delimiter ',';
+perform count(*) from f_pro_exp_001_1;
+begin
+drop table if exists pro_exp_001_1;
+create table pro_exp_001_1(h_c_id int NOT NULL,
+h_c_d_id int NOT NULL,
+h_c_w_id int NOT NULL,
+h_d_id int NOT NULL,
+h_w_id int NOT NULL,
+h_date timestamp NOT NULL,
+h_amount numeric(6,2) NOT NULL,
+h_data varchar(24) NOT NULL)
+;
+for i in 1..10 loop
+insert into pro_exp_001_1 select * from f_pro_exp_001_1 where h_c_id > 2800;
+end loop;
+end;
+drop table if exists fto_pro_exp_001_1;
+create table fto_pro_exp_001_1 (h_c_id int,
+h_c_d_id int,
+h_c_w_id int,
+h_d_id int,
+h_w_id int,
+h_date timestamp,
+h_amount numeric(6,2),
+h_data varchar(24));
+insert into fto_pro_exp_001_1 select * from pro_exp_001_1;
+delete from pro_exp_001_1;
+exception
+when OTHERS then
+raise 'Error Occurs.';
+end;
+/
+
+call pro_exp_001_1();
+select * from f_pro_exp_001_1 where h_c_id = 1;
+
+\c regression
+drop database delim_fix;
+drop database db_delimiter_a;
