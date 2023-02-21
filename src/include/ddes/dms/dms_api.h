@@ -421,6 +421,11 @@ typedef enum en_dms_wait_event {
     DMS_EVT_BROADCAST_BTREE_SPLIT,
     DMS_EVT_BROADCAST_ROOT_PAGE,
     DMS_EVT_QUERY_OWNER_ID,
+    DMS_EVT_LATCH_X,
+    DMS_EVT_LATCH_S,
+    DMS_EVT_LATCH_X_REMOTE,
+    DMS_EVT_LATCH_S_REMOTE,
+
 
     DMS_EVT_COUNT,
 } dms_wait_event_t;
@@ -786,7 +791,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           49
+#define DMS_LOCAL_VERSION           50
 
 #ifdef __cplusplus
 }
