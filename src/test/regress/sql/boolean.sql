@@ -207,6 +207,10 @@ SELECT -2::bool;
 SELECT 1-2::bool;
 
 select true >= 'ss' not in (md5('ss'));
+select false >= 'ss' not between 'ss' and 'ss';
+select false >= 'ss' not like 'ss';
+select false >= 'ss' not ilike 'ss';
+select false >= 'ss' not similar to 'ss';
 
 --
 -- Clean up
