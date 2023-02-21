@@ -463,6 +463,9 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->memory_context_limited_white_list = NULL;
     utils_cxt->enable_memory_context_control = false;
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
+
+    utils_cxt->spi_printtupDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
+    InitSpiPrinttupDR(utils_cxt->spi_printtupDR);
 }
 
 static void knl_u_security_init(knl_u_security_context* sec_cxt) {

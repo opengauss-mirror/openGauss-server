@@ -66,7 +66,8 @@
 #include "utils/palloc.h"
 #include "utils/memgroup.h"
 #include "storage/lock/lock.h"
-
+#include "utils/elog.h"
+#include "tcop/dest.h"
 
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 
@@ -657,6 +658,8 @@ typedef struct knl_u_utils_context {
     bool enable_memory_context_control;
 
     syscalllock deleMemContextMutex;
+
+    DestReceiver* spi_printtupDR;
 } knl_u_utils_context;
 
 typedef struct knl_u_security_context {
