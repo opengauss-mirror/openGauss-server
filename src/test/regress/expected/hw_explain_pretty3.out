@@ -141,7 +141,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -162,7 +162,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -182,7 +182,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -204,7 +204,7 @@ explain analyze select aa_t1.num from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -225,7 +225,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -256,7 +256,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=31.49..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -278,7 +278,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -326,7 +326,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: 1.476 ms
 (7 rows)
@@ -435,7 +435,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -456,7 +456,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -484,7 +484,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -629,7 +629,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)
@@ -654,7 +654,7 @@ explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
    Hash Cond: (aa_t1.id = aa_t2.id)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
 --?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (7 rows)

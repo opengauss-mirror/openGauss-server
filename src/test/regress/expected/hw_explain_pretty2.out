@@ -100,7 +100,7 @@ explain (analyze on, costs off, timing off) select * from row_append_table_01 jo
    Rows Removed by Join Filter: 9
    ->  Seq Scan on row_append_table_01 (actual rows=12 loops=1)
    ->  Hash (actual rows=5 loops=1)
-          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?          Buckets: 32768  Batches: 1  Memory Usage: .*kB
          ->  Seq Scan on row_append_table_02 (actual rows=5 loops=1)
 --? Total runtime: .* ms
 (9 rows)
