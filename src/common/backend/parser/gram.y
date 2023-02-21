@@ -17145,13 +17145,6 @@ TransactionStmt:
 				}
 			| PREPARE TRANSACTION Sconst
 				{   
-					if (ENABLE_DMS) {
-			            const char* message = "PREPARE TRANSACTION is not supported while DMS and DSS enabled";
-			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-				                errmsg("PREPARE TRANSACTION is not supported while DMS and DSS enabled")));
-					}
-
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_PREPARE;
 					n->gid = $3;
@@ -17159,13 +17152,6 @@ TransactionStmt:
 				}
 			| COMMIT PREPARED Sconst
 				{   
-					if (ENABLE_DMS) {
-			            const char* message = "COMMIT TRANSACTION is not supported while DMS and DSS enabled";
-			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-				                errmsg("COMMIT TRANSACTION is not supported while DMS and DSS enabled")));
-					}
-
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT_PREPARED;
 					n->gid = $3;
@@ -17174,13 +17160,6 @@ TransactionStmt:
 				}
 			| COMMIT PREPARED Sconst WITH Sconst
 				{   
-					if (ENABLE_DMS) {
-			            const char* message = "COMMIT TRANSACTION is not supported while DMS and DSS enabled";
-			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-				                errmsg("COMMIT TRANSACTION is not supported while DMS and DSS enabled")));
-					}
-
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT_PREPARED;
 					n->gid = $3;
@@ -17189,13 +17168,6 @@ TransactionStmt:
 				}
 			| ROLLBACK PREPARED Sconst
 				{   
-					if (ENABLE_DMS) {
-			            const char* message = "ROLLBACK TRANSACTION is not supported while DMS and DSS enabled";
-			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-				                errmsg("ROLLBACK TRANSACTION is not supported while DMS and DSS enabled")));
-					}
-
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_ROLLBACK_PREPARED;
 					n->gid = $3;
