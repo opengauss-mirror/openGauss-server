@@ -11,6 +11,18 @@ LINE 1: INSERT INTO xmltest VALUES (3, '<wrong');
 DETAIL:  line 1: Couldn't find end of Start Tag wrong line 1
 <wrong
       ^
+CONTEXT:  referenced column: data
+CREATE TABLE emp (
+	name varchar(20),
+	age int,
+	salary int
+);
+INSERT INTO emp VALUES ('bill', 20, 1000);
+INSERT INTO emp VALUES ('cim', 30, 400);
+INSERT INTO emp VALUES ('jeff', 23, 600);
+INSERT INTO emp VALUES ('linda', 19, 100);
+INSERT INTO emp VALUES ('sam', 30, 2000);
+INSERT INTO emp VALUES ('sharon', 25, 1000);
 SELECT * FROM xmltest ORDER BY 1;
  id |        data        
 ----+--------------------
@@ -32,8 +44,10 @@ SELECT xmlcomment('-test');
 
 SELECT xmlcomment('test-');
 ERROR:  invalid XML comment
+CONTEXT:  referenced column: xmlcomment
 SELECT xmlcomment('--test');
 ERROR:  invalid XML comment
+CONTEXT:  referenced column: xmlcomment
 SELECT xmlcomment('te st');
   xmlcomment  
 --------------
@@ -58,6 +72,7 @@ SELECT xmlconcat(1, 2);
 ERROR:  argument of XMLCONCAT must be type xml, not type integer
 LINE 1: SELECT xmlconcat(1, 2);
                          ^
+CONTEXT:  referenced column: xmlconcat
 SELECT xmlconcat('bad', '<syntax');
 ERROR:  invalid XML content
 LINE 1: SELECT xmlconcat('bad', '<syntax');
@@ -65,6 +80,7 @@ LINE 1: SELECT xmlconcat('bad', '<syntax');
 DETAIL:  line 1: Couldn't find end of Start Tag syntax line 1
 <syntax
        ^
+CONTEXT:  referenced column: xmlconcat
 SELECT xmlconcat('<foo/>', NULL, '<?xml version="1.1" standalone="no"?><bar/>');
   xmlconcat   
 --------------
@@ -102,6 +118,7 @@ SELECT xmlelement(name element,
 ERROR:  unnamed XML attribute value must be a column reference
 LINE 2:                   xmlattributes ('unnamed and wrong'));
                                          ^
+CONTEXT:  referenced column: xmlelement
 SELECT xmlelement(name element, xmlelement(name nested, 'stuff'));
                 xmlelement                 
 -------------------------------------------
@@ -123,6 +140,7 @@ SELECT xmlelement(name duplicate, xmlattributes(1 as a, 2 as b, 3 as a));
 ERROR:  XML attribute name "a" appears more than once
 LINE 1: ...ment(name duplicate, xmlattributes(1 as a, 2 as b, 3 as a));
                                                               ^
+CONTEXT:  referenced column: xmlelement
 SELECT xmlelement(name num, 37);
   xmlelement   
 ---------------
@@ -188,6 +206,7 @@ SELECT xmlelement(name foo, xmlattributes('2009-04-09 00:24:37'::timestamp as ba
 SELECT xmlelement(name foo, xmlattributes('infinity'::timestamp as bar));
 ERROR:  timestamp out of range
 DETAIL:  XML does not support infinite timestamp values.
+CONTEXT:  referenced column: xmlelement
 SELECT xmlelement(name foo, xmlattributes('<>&"''' as funny, xml 'b<a/>r' as funnier));
                          xmlelement                         
 ------------------------------------------------------------
@@ -214,6 +233,7 @@ DETAIL:  line 1: xmlParseEntityRef: no name
 line 1: chunk is not well balanced
 <invalidentity>&</invalidentity>
                                 ^
+CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(content '<undefinedentity>&idontexist;</undefinedentity>');
 ERROR:  invalid XML content
 DETAIL:  line 1: Entity 'idontexist' not defined
@@ -222,6 +242,7 @@ DETAIL:  line 1: Entity 'idontexist' not defined
 line 1: chunk is not well balanced
 <undefinedentity>&idontexist;</undefinedentity>
                                                ^
+CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(content '<invalidns xmlns=''&lt;''/>');
          xmlparse          
 ---------------------------
@@ -245,6 +266,7 @@ line 1: Opening and ending tag mismatch: twoerrors line 1 and unbalanced
 line 1: chunk is not well balanced
 <twoerrors>&idontexist;</unbalanced>
                                     ^
+CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(content '<nosuchprefix:tag/>');
       xmlparse       
 ---------------------
@@ -256,6 +278,7 @@ ERROR:  invalid XML document
 DETAIL:  line 1: Start tag expected, '<' not found
 abc
 ^
+CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(document '<abc>x</abc>');
    xmlparse   
 --------------
@@ -270,6 +293,7 @@ DETAIL:  line 1: xmlParseEntityRef: no name
 line 1: Opening and ending tag mismatch: invalidentity line 1 and abc
 <invalidentity>&</abc>
                       ^
+CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(document '<undefinedentity>&idontexist;</abc>');
 ERROR:  invalid XML document
 DETAIL:  line 1: Entity 'idontexist' not defined
@@ -278,6 +302,7 @@ DETAIL:  line 1: Entity 'idontexist' not defined
 line 1: Opening and ending tag mismatch: undefinedentity line 1 and abc
 <undefinedentity>&idontexist;</abc>
                                    ^
+CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(document '<invalidns xmlns=''&lt;''/>');
          xmlparse          
 ---------------------------
@@ -298,6 +323,7 @@ DETAIL:  line 1: Entity 'idontexist' not defined
 line 1: Opening and ending tag mismatch: twoerrors line 1 and unbalanced
 <twoerrors>&idontexist;</unbalanced>
                                     ^
+CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(document '<nosuchprefix:tag/>');
       xmlparse       
 ---------------------
@@ -313,6 +339,7 @@ SELECT xmlpi(name foo);
 SELECT xmlpi(name xml);
 ERROR:  invalid XML processing instruction
 DETAIL:  XML processing instruction target name cannot be "xml".
+CONTEXT:  referenced column: xmlpi
 SELECT xmlpi(name xmlstuff);
     xmlpi     
 --------------
@@ -328,6 +355,7 @@ SELECT xmlpi(name foo, 'bar');
 SELECT xmlpi(name foo, 'in?>valid');
 ERROR:  invalid XML processing instruction
 DETAIL:  XML processing instruction cannot contain "?>".
+CONTEXT:  referenced column: xmlpi
 SELECT xmlpi(name foo, null);
  xmlpi 
 -------
@@ -337,6 +365,7 @@ SELECT xmlpi(name foo, null);
 SELECT xmlpi(name xml, null);
 ERROR:  invalid XML processing instruction
 DETAIL:  XML processing instruction target name cannot be "xml".
+CONTEXT:  referenced column: xmlpi
 SELECT xmlpi(name xmlstuff, null);
  xmlpi 
 -------
@@ -438,6 +467,7 @@ SELECT xmlserialize(content 'good' as char(10));
 
 SELECT xmlserialize(document 'bad' as text);
 ERROR:  not an XML document
+CONTEXT:  referenced column: xmlserialize
 SELECT xml '<foo>bar</foo>' IS DOCUMENT;
  ?column? 
 ----------
@@ -569,8 +599,11 @@ SELECT xpath(NULL, NULL) IS NULL FROM xmltest;
 (2 rows)
 
 SELECT xpath('', '<!-- error -->');
-ERROR:  empty XPath expression
-CONTEXT:  SQL function "xpath" statement 1
+ xpath 
+-------
+ 
+(1 row)
+
 SELECT xpath('//text()', '<local:data xmlns:local="http://127.0.0.1"><local:piece id="1">number one</local:piece><local:piece id="2" /></local:data>');
      xpath      
 ----------------
@@ -883,14 +916,18 @@ ERROR:  could not parse XML document
 DETAIL:  line 1: Namespace prefix nosuchprefix on tag is not defined
 <nosuchprefix:tag/>
                  ^
-CONTEXT:  SQL function "xpath" statement 1
+CONTEXT:  referenced column: xpath
+SQL function "xpath" statement 1
+referenced column: xpath
 -- XPath deprecates relative namespaces, but they're not supposed to
 -- throw an error, only a warning.
 SELECT xpath('/*', '<relativens xmlns=''relative''/>');
 WARNING:  line 1: xmlns: URI relative is not absolute
 <relativens xmlns='relative'/>
                             ^
-CONTEXT:  SQL function "xpath" statement 1
+CONTEXT:  referenced column: xpath
+SQL function "xpath" statement 1
+referenced column: xpath
                 xpath                 
 --------------------------------------
  {"<relativens xmlns=\"relative\"/>"}
@@ -916,3 +953,5 @@ SELECT XMLPARSE(DOCUMENT '<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML V4
  <!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN" "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd"><chapter>&nbsp;</chapter>
 (1 row)
 
+DROP VIEW xmlview4;
+DROP TABLE emp;
