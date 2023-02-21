@@ -67,6 +67,7 @@
 #include "utils/memgroup.h"
 #include "storage/lock/lock.h"
 #include "utils/elog.h"
+#include "tcop/dest.h"
 
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 
@@ -665,6 +666,7 @@ typedef struct knl_u_utils_context {
     unsigned int sql_ignore_strategy_val;
 	
     HTAB* set_user_params_htab;
+    DestReceiver* spi_printtupDR;
 } knl_u_utils_context;
 
 typedef struct knl_u_security_context {
