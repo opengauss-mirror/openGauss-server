@@ -1105,6 +1105,7 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
             *is_valid = (pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0;
             *ret_buf_desc = buf_desc;
         } else {
+            LWLockRelease(partition_lock);
             *ret_buf_desc = NULL;
         }
     }
