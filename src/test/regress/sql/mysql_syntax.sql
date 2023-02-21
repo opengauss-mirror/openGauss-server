@@ -310,6 +310,34 @@ BEGIN
     RAISE NOTICE 'declare condition successed';
 END;
 /
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE value '22012';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_1();
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE "22012";
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_1();
 
 \c regression
 drop trigger animal_trigger1;
