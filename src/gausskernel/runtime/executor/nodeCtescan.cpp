@@ -20,6 +20,8 @@
 #include "executor/node/nodeCtescan.h"
 #include "miscadmin.h"
 
+static TupleTableSlot* ExecCteScan(PlanState* state);
+
 static TupleTableSlot* CteScanNext(CteScanState* node);
 
 /* ----------------------------------------------------------------
@@ -151,8 +153,9 @@ static bool CteScanRecheck(CteScanState* node, TupleTableSlot* slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecCteScan(CteScanState* node)
+static TupleTableSlot* ExecCteScan(PlanState* state)
 {
+    CteScanState* node = castNode(CteScanState, state);
     return ExecScan(&node->ss, (ExecScanAccessMtd)CteScanNext, (ExecScanRecheckMtd)CteScanRecheck);
 }
 
@@ -197,6 +200,7 @@ CteScanState* ExecInitCteScan(CteScan* node, EState* estate, int eflags)
     scanstate->eflags = eflags;
     scanstate->cte_table = NULL;
     scanstate->eof_cte = false;
+    scanstate->ss.ps.ExecProcNode = ExecCteScan;
 
     /*
      * Find the already-initialized plan for the CTE query.

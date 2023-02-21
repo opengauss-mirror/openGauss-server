@@ -44,6 +44,8 @@ static HTAB* g_extensible_plan_methods = NULL;
 const int HASHTABLE_LENGTH = 100;
 const char* EXTENSIBLE_PLAN_METHODS_LABEL = "Extensible Plan Methods";
 
+static TupleTableSlot* ExecExtensiblePlan(PlanState* state);
+
 typedef struct {
     char extnodename[EXTNODENAME_MAX_LEN];
     void* extnodemethods;
@@ -109,6 +111,7 @@ ExtensiblePlanState* ExecInitExtensiblePlan(ExtensiblePlan* eplan, EState* estat
     /* fill up fields of ScanState */
     extensionPlanState->ss.ps.plan = &eplan->scan.plan;
     extensionPlanState->ss.ps.state = estate;
+    extensionPlanState->ss.ps.ExecProcNode = ExecExtensiblePlan;
 
     /* create expression context for node */
     ExecAssignExprContext(estate, &extensionPlanState->ss.ps);
@@ -168,8 +171,9 @@ ExtensiblePlanState* ExecInitExtensiblePlan(ExtensiblePlan* eplan, EState* estat
     return extensionPlanState;
 }
 
-TupleTableSlot* ExecExtensiblePlan(ExtensiblePlanState* node)
+static TupleTableSlot* ExecExtensiblePlan(PlanState* state)
 {
+    ExtensiblePlanState* node = castNode(ExtensiblePlanState, state);
     Assert(node->methods->ExecExtensiblePlan != NULL);
     return node->methods->ExecExtensiblePlan(node);
 }

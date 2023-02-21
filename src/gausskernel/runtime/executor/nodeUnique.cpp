@@ -41,8 +41,9 @@
  *		ExecUnique
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecUnique(UniqueState* node) /* return: a tuple or NULL */
+static TupleTableSlot* ExecUnique(PlanState* state) /* return: a tuple or NULL */
 {
+    UniqueState* node = castNode(UniqueState, state);
     Unique* plan_node = (Unique*)node->ps.plan;
     TupleTableSlot* slot = NULL;
 
@@ -58,6 +59,7 @@ TupleTableSlot* ExecUnique(UniqueState* node) /* return: a tuple or NULL */
      * first tuple of each group is returned.
      */
     for (;;) {
+        CHECK_FOR_INTERRUPTS();
         /*
          * fetch a tuple from the outer subplan
          */
@@ -112,6 +114,7 @@ UniqueState* ExecInitUnique(Unique* node, EState* estate, int eflags)
 
     unique_state->ps.plan = (Plan*)node;
     unique_state->ps.state = estate;
+    unique_state->ps.ExecProcNode = ExecUnique;
 
     /*
      * Miscellaneous initialization

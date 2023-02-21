@@ -32,6 +32,7 @@
 #include "pgxc/pgxc.h"
 #endif
 
+static TupleTableSlot* ExecSort(PlanState* state);
 /* ----------------------------------------------------------------
  *		ExecSort
  *
@@ -46,9 +47,12 @@
  *		  -- the outer child is prepared to return the first tuple.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecSort(SortState* node)
+static TupleTableSlot* ExecSort(PlanState* state)
 {
+    SortState* node = castNode(SortState, state);
     TupleTableSlot* slot = NULL;
+
+    CHECK_FOR_INTERRUPTS();
 
     /*
      * get state info from node
@@ -226,6 +230,7 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
     SortState* sortstate = makeNode(SortState);
     sortstate->ss.ps.plan = (Plan*)node;
     sortstate->ss.ps.state = estate;
+    sortstate->ss.ps.ExecProcNode = ExecSort;
 
     /*
      * We must have random access to the sort output to do backward scan or

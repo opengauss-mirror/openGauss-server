@@ -17,7 +17,6 @@
 #include "nodes/execnodes.h"
 
 extern IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecIndexOnlyScan(IndexOnlyScanState* node);
 extern void ExecEndIndexOnlyScan(IndexOnlyScanState* node);
 extern void ExecIndexOnlyMarkPos(IndexOnlyScanState* node);
 extern void ExecIndexOnlyRestrPos(IndexOnlyScanState* node);

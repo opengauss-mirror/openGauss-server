@@ -62,7 +62,7 @@ static void* dense_alloc(HashJoinTable hashtable, Size size);
  *		stub for pro forma compliance
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecHash(void)
+static TupleTableSlot* ExecHash(PlanState* state)
 {
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -116,6 +116,8 @@ Node* MultiExecHash(HashState* node)
      */
     WaitState oldStatus = pgstat_report_waitstatus(STATE_EXEC_HASHJOIN_BUILD_HASH);
     for (;;) {
+        /* allow this loop to be cancellable */
+        CHECK_FOR_INTERRUPTS();
         slot = ExecProcNode(outerNode);
         if (TupIsNull(slot))
             break;
@@ -197,6 +199,7 @@ HashState* ExecInitHash(Hash* node, EState* estate, int eflags)
     hashstate->ps.state = estate;
     hashstate->hashtable = NULL;
     hashstate->hashkeys = NIL; /* will be set by parent HashJoin */
+    hashstate->ps.ExecProcNode = ExecHash;
 
     /*
      * Miscellaneous initialization

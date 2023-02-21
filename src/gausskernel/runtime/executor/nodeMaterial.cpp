@@ -29,6 +29,8 @@
 #include "pgstat.h"
 #include "pgxc/pgxc.h"
 
+static TupleTableSlot* ExecMaterial(PlanState* state);
+
 /*
  * Material all the tuples first, and then return the tuple needed.
  */
@@ -261,8 +263,12 @@ static TupleTableSlot* ExecMaterialOne(MaterialState* node) /* result tuple from
  *
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecMaterial(MaterialState* node) /* result tuple from subplan */
+static TupleTableSlot* ExecMaterial(PlanState* state) /* result tuple from subplan */
 {
+    MaterialState* node = castNode(MaterialState, state);
+
+    CHECK_FOR_INTERRUPTS();
+    
     if (node->materalAll)
         return ExecMaterialAll(node);
     else
@@ -283,6 +289,7 @@ MaterialState* ExecInitMaterial(Material* node, EState* estate, int eflags)
     MaterialState* mat_state = makeNode(MaterialState);
     mat_state->ss.ps.plan = (Plan*)node;
     mat_state->ss.ps.state = estate;
+    mat_state->ss.ps.ExecProcNode = ExecMaterial;
 
     int64 operator_mem = SET_NODEMEM(((Plan*)node)->operatorMemKB[0], ((Plan*)node)->dop);
     AllocSetContext* set = (AllocSetContext*)(estate->es_query_cxt);

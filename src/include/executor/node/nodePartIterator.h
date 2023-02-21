@@ -32,7 +32,6 @@
 
 extern void SetPartitionIteratorParamter(PartIteratorState* node, List* subPartLengthList);
 extern PartIteratorState* ExecInitPartIterator(PartIterator* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecPartIterator(PartIteratorState* node);
 extern void ExecEndPartIterator(PartIteratorState* node);
 extern void ExecReScanPartIterator(PartIteratorState* node);
 

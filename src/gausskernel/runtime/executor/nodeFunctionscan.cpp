@@ -27,6 +27,7 @@
 #include "funcapi.h"
 #include "nodes/nodeFuncs.h"
 
+static TupleTableSlot* ExecFunctionScan(PlanState* node);
 static TupleTableSlot* FunctionNext(FunctionScanState* node);
 
 /* ----------------------------------------------------------------
@@ -89,8 +90,9 @@ static bool FunctionRecheck(FunctionScanState* node, TupleTableSlot* slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecFunctionScan(FunctionScanState* node)
+static TupleTableSlot* ExecFunctionScan(PlanState* state)
 {
+    FunctionScanState* node = castNode(FunctionScanState, state);
     return ExecScan(&node->ss, (ExecScanAccessMtd)FunctionNext, (ExecScanRecheckMtd)FunctionRecheck);
 }
 
@@ -121,6 +123,7 @@ FunctionScanState* ExecInitFunctionScan(FunctionScan* node, EState* estate, int 
     scanstate->ss.ps.plan = (Plan*)node;
     scanstate->ss.ps.state = estate;
     scanstate->eflags = eflags;
+    scanstate->ss.ps.ExecProcNode = ExecFunctionScan;
 
     /*
      * Miscellaneous initialization

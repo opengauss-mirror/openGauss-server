@@ -51,6 +51,7 @@
 typedef int SlotNumber;
 typedef int HeapPosition;
 
+static TupleTableSlot* ExecMergeAppend(PlanState* state);
 static void heap_insert_slot(MergeAppendState* node, SlotNumber new_slot);
 static void heap_siftup_slot(MergeAppendState* node);
 static int32 heap_compare_slots(MergeAppendState* node, SlotNumber slot1, SlotNumber slot2);
@@ -86,6 +87,7 @@ MergeAppendState* ExecInitMergeAppend(MergeAppend* node, EState* estate, int efl
     merge_state->ps.state = estate;
     merge_state->mergeplans = merge_plan_states;
     merge_state->ms_nplans = nplans;
+    merge_state->ps.ExecProcNode = ExecMergeAppend;
 
     merge_state->ms_slots = (TupleTableSlot**)palloc0(sizeof(TupleTableSlot*) * nplans);
     merge_state->ms_heap = (int*)palloc0(sizeof(int) * nplans);
@@ -163,10 +165,13 @@ MergeAppendState* ExecInitMergeAppend(MergeAppend* node, EState* estate, int efl
  *		Handles iteration over multiple subplans.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecMergeAppend(MergeAppendState* node)
+static TupleTableSlot* ExecMergeAppend(PlanState* state)
 {
+    MergeAppendState* node = castNode(MergeAppendState, state);
     TupleTableSlot* result = NULL;
     SlotNumber i;
+
+    CHECK_FOR_INTERRUPTS();
 
     if (!node->ms_initialized) {
         /*

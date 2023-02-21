@@ -268,7 +268,6 @@ typedef struct AggHashEntryData {
 } AggHashEntryData;                                       /* VARIABLE LENGTH STRUCT */
 
 extern AggState* ExecInitAgg(Agg* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecAgg(AggState* node);
 extern void ExecEndAgg(AggState* node);
 extern void ExecReScanAgg(AggState* node);
 extern Datum GetAggInitVal(Datum textInitVal, Oid transtype);

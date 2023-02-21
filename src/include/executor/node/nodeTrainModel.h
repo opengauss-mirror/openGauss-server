@@ -27,7 +27,6 @@
 #include "nodes/execnodes.h"
 
 extern TrainModelState* ExecInitTrainModel(TrainModel* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecTrainModel(TrainModelState* state);
 extern void ExecEndTrainModel(TrainModelState* state);
 
 #endif /* NODE_TRAIN_MODEL_H */

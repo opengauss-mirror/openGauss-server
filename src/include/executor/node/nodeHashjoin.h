@@ -19,7 +19,6 @@
 #include "optimizer/planmem_walker.h"
 
 extern HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecHashJoin(HashJoinState* node);
 extern void ExecEndHashJoin(HashJoinState* node);
 extern void ExecReScanHashJoin(HashJoinState* node);
 extern void ExecHashJoinSaveTuple(MinimalTuple tuple, uint32 hashvalue, BufFile** fileptr);
