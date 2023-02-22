@@ -208,7 +208,7 @@ void ExecInitJunkAttr(EState* estate, CmdType operation, List* targetlist, Resul
 
     j = ExecInitJunkFilter(targetlist,
         result_rel_info->ri_RelationDesc->rd_att->tdhasoid,
-        ExecInitExtraTupleSlot(estate, GetTableAmRoutine(result_rel_info->ri_RelationDesc->rd_tam_type)), TableAmHeap);
+        ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_ops), TableAmHeap);
 
     if (operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) {
         /* For UPDATE/DELETE, find the appropriate junk attr now */

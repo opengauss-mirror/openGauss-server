@@ -554,8 +554,8 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &node->ps, GetTableAmRoutine(current_relation->rd_tam_type));
-    ExecInitScanTupleSlot(estate, node, GetTableAmRoutine(current_relation->rd_tam_type));
+    ExecInitResultTupleSlot(estate, &node->ps, current_relation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, node, current_relation->rd_tam_ops);
 
     if (((Scan*)node->ps.plan)->tablesample && node->sampleScanInfo.tsm_state == NULL) {
         if (isUstoreRel) {
@@ -743,7 +743,7 @@ static SeqScanState *ExecInitSeqScanBatchMode(SeqScan *node, SeqScanState* scans
         scanstate->scanBatchState = scanBatchState;
         scanstate->ps.subPlan = NULL;
 
-        if (scanstate->ss_currentRelation->rd_tam_type == TAM_HEAP) {
+        if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap) {
             HeapScanDesc heapDesc = (HeapScanDesc)(scanstate->ss_currentScanDesc);
             heapDesc->rs_ctupBatch = (HeapTupleData*)palloc(sizeof(HeapTupleData) * BatchMaxSize);
         } else {
@@ -755,7 +755,7 @@ static SeqScanState *ExecInitSeqScanBatchMode(SeqScan *node, SeqScanState* scans
             (TupleTableSlot**)palloc(sizeof(TupleTableSlot*) * BatchMaxSize);
         for (i = 0; i < BatchMaxSize; i++) {
             TupleTableSlot* slot = ExecAllocTableSlot(&estate->es_tupleTable,
-                                                      GetTableAmRoutine(scanstate->ss_currentRelation->rd_tam_type));
+                                                      scanstate->ss_currentRelation->rd_tam_ops);
             ExecSetSlotDescriptor(slot, scanstate->ss_ScanTupleSlot->tts_tupleDescriptor);
             scanBatchState->scanBatch.scanTupleSlotInBatch[i] = slot;
         }
@@ -802,12 +802,12 @@ static inline void InitSeqNextMtd(SeqScan* node, SeqScanState* scanstate)
     if (!node->tablesample) {
         scanstate->ScanNextMtd = SeqNext;
         if(RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {
-            if(scanstate->ss_currentRelation->rd_tam_type == TAM_HEAP)
+            if(scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
                 scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, true>;
             else
                 scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, true>;
         } else {
-            if(scanstate->ss_currentRelation->rd_tam_type == TAM_HEAP)
+            if(scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
                 scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, false>;
             else
                 scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, false>;
@@ -1011,7 +1011,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &scanstate->ps,
-            GetTableAmRoutine(scanstate->ss_currentRelation->rd_tam_type));
+            scanstate->ss_currentRelation->rd_tam_ops);
 
     ExecAssignScanProjectionInfo(scanstate);
 
@@ -1236,7 +1236,7 @@ void ExecReScanSeqScan(SeqScanState* node)
         scan_handler_tbl_rescan(scan, NULL, node->ss_currentRelation);
     }
 
-    if ((scan != NULL) && (scan->rs_rd->rd_tam_type == TAM_USTORE)) {
+    if ((scan != NULL) && (scan->rs_rd->rd_tam_ops == TableAmUstore)) {
         scan->lastVar = -1;
         scan->boolArr = NULL;
     }
@@ -1344,7 +1344,7 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node)
     }
 
     if (node->scanBatchMode) {
-        if (node->ss_currentRelation->rd_tam_type == TAM_HEAP) {
+        if (node->ss_currentRelation->rd_tam_ops == TableAmHeap) {
             HeapScanDesc heapDesc = (HeapScanDesc)node->ss_currentScanDesc;
             heapDesc->rs_ctupBatch = (HeapTupleData*)palloc(sizeof(HeapTupleData) * BatchMaxSize);
         } else {

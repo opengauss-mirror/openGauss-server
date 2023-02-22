@@ -223,7 +223,7 @@ TupleTableSlot *IndexOnlyScanFusion::getTupleSlotInternal()
     bool bucket_changed = false;
     TupleTableSlot* tmpreslot = NULL;
     tmpreslot = MakeSingleTupleTableSlot(RelationGetDescr(m_scandesc->heapRelation),
-        false, GetTableAmRoutine(m_scandesc->heapRelation->rd_tam_type));
+        false, m_scandesc->heapRelation->rd_tam_ops);
 
     while ((tid = scan_handler_idx_getnext_tid(m_scandesc, *m_direction, &bucket_changed)) != NULL) {
         HeapTuple tuple = NULL;

@@ -93,7 +93,7 @@ IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamLi
     m_direction = (ScanDirection*)palloc0(sizeof(ScanDirection));
 
     Relation rel = m_rel;
-    m_tupDesc = ExecCleanTypeFromTL(m_targetList, false, GetTableAmRoutine(rel->rd_tam_type));
+    m_tupDesc = ExecCleanTypeFromTL(m_targetList, false, rel->rd_tam_ops);
     m_attrno = (int16*)palloc(m_tupDesc->natts * sizeof(int16));
     m_values = (Datum*)palloc(RelationGetDescr(rel)->natts * sizeof(Datum));
     m_tmpvals = (Datum*)palloc(m_tupDesc->natts * sizeof(Datum));
@@ -168,7 +168,7 @@ void IndexScanFusion::Init(long max_rows)
     }
 
     m_epq_indexqual = m_node->indexqualorig;
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, GetTableAmRoutine(m_rel->rd_tam_type));
+    m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, m_rel->rd_tam_ops);
 }
 
 HeapTuple IndexScanFusion::getTuple()

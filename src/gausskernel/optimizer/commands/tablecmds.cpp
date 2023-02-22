@@ -9096,8 +9096,8 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
          * tuples are the same, the tupDescs might not be (consider ADD COLUMN
          * without a default).
          */
-        oldslot = MakeSingleTupleTableSlot(oldTupDesc, false, GetTableAmRoutine(oldrel->rd_tam_type));
-        newslot = MakeSingleTupleTableSlot(newTupDesc, false, GetTableAmRoutine(oldrel->rd_tam_type));
+        oldslot = MakeSingleTupleTableSlot(oldTupDesc, false, oldrel->rd_tam_ops);
+        newslot = MakeSingleTupleTableSlot(newTupDesc, false, oldrel->rd_tam_ops);
 
         /* Preallocate values/isnull arrays */
         i = Max(newTupDesc->natts, oldTupDesc->natts);
@@ -11709,7 +11709,7 @@ static void ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation r
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("column store unsupport constraint \"%s\"", GetConstraintType(newConstraint->contype))));
 
-    if (rel->rd_tam_type == TAM_USTORE && newConstraint->deferrable == true) {
+    if (rel->rd_tam_ops == TableAmUstore && newConstraint->deferrable == true) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmodule(MOD_COMMAND),
@@ -12879,7 +12879,7 @@ static void validateCheckConstraint(Relation rel, HeapTuple constrtup)
     List* exprstate = (List*)ExecPrepareExpr((Expr*)make_ands_implicit(origexpr), estate);
     ExprContext* econtext = GetPerTupleExprContext(estate);
     TupleDesc tupdesc = RelationGetDescr(rel);
-    TupleTableSlot* slot = MakeSingleTupleTableSlot(tupdesc, false, GetTableAmRoutine(rel->rd_tam_type));
+    TupleTableSlot* slot = MakeSingleTupleTableSlot(tupdesc, false, rel->rd_tam_ops);
 
     econtext->ecxt_scantuple = slot;
 

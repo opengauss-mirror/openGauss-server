@@ -134,6 +134,8 @@ typedef struct RelationData {
     char rd_indexvalid;               /* state of rd_indexlist: 0 = not valid, 1 =
                                        * valid, 2 = temporarily forced */
     bool rd_islocaltemp;              /* rel is a temp rel of this session */
+    bool is_compressed;
+    bool rd_isblockchain; /* relation is in blockchain schema */
 
     /*
      * rd_createSubid is the ID of the highest subtransaction the rel has
@@ -150,8 +152,8 @@ typedef struct RelationData {
 
     Form_pg_class rd_rel; /* RELATION tuple */
     TupleDesc rd_att;     /* tuple descriptor */
+    const TableAmRoutine* rd_tam_ops; /* implementation of table AM */
     Oid rd_id;            /* relation's object id */
-    bool rd_isblockchain; /* relation is in blockchain schema */
     char relreplident;    /* see REPLICA_IDENTITY_xxx constants  */
 
     LockInfoData rd_lockInfo;  /* lock mgr's info for locking relation */
@@ -196,7 +198,6 @@ typedef struct RelationData {
     Form_pg_am rd_am;                    /* pg_am tuple for index's AM */
 
     int rd_indnkeyatts;     /* index relation's indexkey nums */
-    TableAmType rd_tam_type; /*Table accessor method type*/
     int1 rd_indexsplit;  /* determines the page split method to use */
 
     /*
@@ -292,7 +293,6 @@ typedef struct RelationData {
     /* Is under the context of creating crossbucket index? */
     bool newcbi;
 
-    bool is_compressed;
     bool come_from_partrel;
     /* used only for gsc, keep it preserved if you modify the rel, otherwise set it null */
     struct LocalRelationEntry *entry;

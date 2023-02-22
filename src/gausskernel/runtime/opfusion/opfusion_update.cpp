@@ -122,6 +122,7 @@ void UpdateFusion::InitGlobals()
     m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
     m_global->m_natts = RelationGetDescr(rel)->natts;
     m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
+    m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
     hash_col_num = rel->rd_isblockchain ? 1 : 0;
     heap_close(rel, AccessShareLock);
 

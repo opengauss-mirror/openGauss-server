@@ -1434,9 +1434,9 @@ static Relation AllocateRelationDesc(Form_pg_class relp)
     relation->rd_rel = relationForm;
 
     /* and allocate attribute tuple form storage */
-    relation->rd_att = CreateTemplateTupleDesc(relationForm->relnatts, relationForm->relhasoids, NULL);
+    relation->rd_att = CreateTemplateTupleDesc(relationForm->relnatts, relationForm->relhasoids);
     //TODO:this should be TAM_invalid when merge ustore
-    relation->rd_tam_type = TAM_HEAP;
+    relation->rd_tam_ops = TableAmHeap;
     /* which we mark as a reference-counted tupdesc */
     relation->rd_att->tdrefcount = 1;
 
@@ -2013,7 +2013,7 @@ static Relation CatalogRelationBuildDesc(const char* relationName, Oid relationR
     relation->rd_rel->relhasoids = hasoids;
     relation->rd_rel->relnatts = (int16)natts;
     // Catalog tables are heap table type.
-    relation->rd_tam_type = TAM_HEAP;
+    relation->rd_tam_ops = TableAmHeap;
     relation->rd_att = CreateTemplateTupleDesc(natts, hasoids, TableAmHeap);
     relation->rd_att->tdrefcount = 1; /* mark as refcounted */
     relation->rd_att->tdtypeid = relationReltype;
@@ -2242,9 +2242,9 @@ Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
 
     /*  get the table access method type from reloptions
      * and populate them in relation and tuple descriptor */
-    relation->rd_tam_type =
-        get_tableam_from_reloptions(relation->rd_options, relation->rd_rel->relkind, relation->rd_rel->relam);
-    relation->rd_att->td_tam_ops = GetTableAmRoutine(relation->rd_tam_type);
+    relation->rd_tam_ops = GetTableAmRoutine(
+        get_tableam_from_reloptions(relation->rd_options, relation->rd_rel->relkind, relation->rd_rel->relam));
+    relation->rd_att->td_tam_ops = relation->rd_tam_ops;
 
     relation->rd_indexsplit = get_indexsplit_from_reloptions(relation->rd_options, relation->rd_rel->relam);
 
@@ -3035,7 +3035,7 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
        pg_database, pg_authid, pg_auth_members,  pg_class, pg_attribute, pg_proc, and pg_type 
     */
     relation->rd_att = CreateTemplateTupleDesc(natts, hasoids);
-    relation->rd_tam_type = TAM_HEAP;
+    relation->rd_tam_ops = TableAmHeap;
     relation->rd_att->tdrefcount = 1; /* mark as refcounted */
 
     relation->rd_att->tdtypeid = relationReltype;
@@ -3150,7 +3150,7 @@ Relation RelationIdGetRelation(Oid relationId)
     if (EnableLocalSysCache()) {
         Relation rel = t_thrd.lsc_cxt.lsc->tabdefcache.RelationIdGetRelation(relationId);
         if (rel != NULL) {
-            rel->rd_att->td_tam_ops = GetTableAmRoutine(rel->rd_tam_type);
+            rel->rd_att->td_tam_ops = rel->rd_tam_ops;
         }
         return rel;
     }
@@ -3184,7 +3184,7 @@ Relation RelationIdGetRelation(Oid relationId)
         if (rd->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
             (void)checkGroup(relationId, RELATION_IS_OTHER_TEMP(rd));
 
-        rd->rd_att->td_tam_ops = GetTableAmRoutine(rd->rd_tam_type);
+        rd->rd_att->td_tam_ops = rd->rd_tam_ops;
         return rd;
     }
 
@@ -3202,7 +3202,7 @@ Relation RelationIdGetRelation(Oid relationId)
     }
 
     if (rd != NULL) {
-        rd->rd_att->td_tam_ops = GetTableAmRoutine(rd->rd_tam_type);
+        rd->rd_att->td_tam_ops = rd->rd_tam_ops;
     }
     return rd;
 }
@@ -4431,6 +4431,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     int i;
     bool has_not_null = false;
     bool nailit = false;
+    const TableAmRoutine* tam_ops = GetTableAmRoutine(tam_type);
 
     AssertArg(natts >= 0);
 
@@ -4506,9 +4507,9 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
      * catalogs.  We can copy attnotnull constraints here, however.
      */
     rel->rd_att = CreateTupleDescCopy(tupDesc);
-    rel->rd_tam_type = tam_type;
+    rel->rd_tam_ops = tam_ops;
     rel->rd_indexsplit = relindexsplit;
-    rel->rd_att->td_tam_ops = GetTableAmRoutine(tam_type);
+    rel->rd_att->td_tam_ops = tam_ops;
     rel->rd_att->tdrefcount = 1; /* mark as refcounted */
     has_not_null = false;
     for (i = 0; i < natts; i++) {

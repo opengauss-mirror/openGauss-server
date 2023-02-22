@@ -210,13 +210,13 @@ extern TupleTableSlot* ExecCopySlot(TupleTableSlot* dstslot, TupleTableSlot* src
 /* heap table specific slot/tuple operations*/
 /* definitions are found in access/common/heaptuple.c */
 extern void heap_slot_clear(TupleTableSlot* slot);
-extern void heap_slot_materialize(TupleTableSlot* slot);
+extern HeapTuple heap_slot_materialize(TupleTableSlot* slot);
 extern MinimalTuple heap_slot_get_minimal_tuple(TupleTableSlot *slot);
 extern MinimalTuple heap_slot_copy_minimal_tuple(TupleTableSlot *slot);
 extern void heap_slot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree);
 extern HeapTuple heap_slot_get_heap_tuple (TupleTableSlot* slot);
 extern HeapTuple heap_slot_copy_heap_tuple (TupleTableSlot *slot);
-extern void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer buffer, bool shouldFree, bool batchMode);
+extern void heap_slot_store_heap_tuple(Tuple tup, TupleTableSlot* slot, Buffer buffer, bool shouldFree, bool batchMode);
 extern Datum heap_slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull, bool need_transform_anyarray = false);
 extern void heap_slot_getallattrs(TupleTableSlot* slot, bool need_transform_anyarray = false);
 extern void slot_getallattrsfast(TupleTableSlot *slot, int maxIdx);

@@ -673,7 +673,8 @@ Datum ExecFetchSlotTupleDatum(TupleTableSlot* slot)
  *		to scribble on.
  * --------------------------------
  */
-HeapTuple ExecMaterializeSlot(TupleTableSlot* slot)
+static FORCE_INLINE
+HeapTuple ExecMaterializeSlot_impl(TupleTableSlot* slot) 
 {
     /*
      * sanity checks
@@ -682,6 +683,19 @@ HeapTuple ExecMaterializeSlot(TupleTableSlot* slot)
     Assert(!TTS_EMPTY(slot));
 
     return tableam_tslot_materialize(slot);
+}
+
+
+HeapTuple ExecMaterializeSlot(TupleTableSlot* slot)
+{
+    return ExecMaterializeSlot_impl(slot);
+}
+
+Tuple heap_slot_get_tuple_from_slot(TupleTableSlot* slot)
+{
+    HeapTuple tuple = ExecMaterializeSlot_impl(slot);
+    tuple->tupInfo = 0;
+    return (Tuple) tuple;
 }
 
 /* --------------------------------

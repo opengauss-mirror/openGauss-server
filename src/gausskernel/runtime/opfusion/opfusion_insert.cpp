@@ -48,6 +48,7 @@ void InsertFusion::InitGlobals()
     m_global->m_natts = RelationGetDescr(rel)->natts;
     m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
     m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
+    m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
     heap_close(rel, AccessShareLock);
 
     /* init param func const */
@@ -281,7 +282,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
      * step 2: begin insert *
      ************************/
     Tuple tuple = tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values,
-        m_local.m_isnull, GetTableAmRoutine(rel->rd_tam_type));
+        m_local.m_isnull, rel->rd_tam_ops);
     Assert(tuple != NULL);
     if (RELATION_IS_PARTITIONED(rel)) {
         m_c_local.m_estate->esfRelations = NULL;
@@ -368,7 +369,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
         if (rel != NULL && rel->rd_mlogoid != InvalidOid) {
             /* judge whether need to insert into mlog-table */
             HeapTuple htuple = NULL;
-            if (rel->rd_tam_type == TAM_USTORE) {
+            if (rel->rd_tam_ops == TableAmUstore) {
                 htuple = UHeapToHeap(rel->rd_att, (UHeapTuple)tuple);
                 insert_into_mlog_table(rel, rel->rd_mlogoid, htuple, &htuple->t_self,
                     GetCurrentTransactionId(), 'I');

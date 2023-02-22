@@ -1257,7 +1257,7 @@ static void ExecCreateMatInc(QueryDesc*queryDesc, Query *query, Relation matview
         while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             HeapTuple tmpTuple = NULL;
             /* here we want handle every tuple. */
-            if (rel->rd_tam_type == TAM_USTORE) {
+            if (rel->rd_tam_ops == TableAmUstore) {
                 tmpTuple = UHeapToHeap(rel->rd_att, (UHeapTuple)tuple);
                 tmpTuple->t_xid_base = ((UHeapTuple)tuple)->t_xid_base;
                 tmpTuple->t_data->t_choice.t_heap.t_xmin = ((UHeapTuple)tuple)->disk_tuple->xid;

@@ -78,6 +78,7 @@ void DeleteFusion::InitGlobals()
     m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
     m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
     m_global->m_table_type = RelationIsUstoreFormat(rel) ? TAM_USTORE : TAM_HEAP;
+    m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
     m_global->m_exec_func_ptr = (OpFusionExecfuncType)&DeleteFusion::ExecDelete;
     heap_close(rel, AccessShareLock);
 

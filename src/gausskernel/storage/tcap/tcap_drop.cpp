@@ -1320,7 +1320,7 @@ void TrRestoreDrop(const TimeCapsuleStmt *stmt)
     if (desc.relid != 0 && (desc.type == RB_OBJ_TABLE)) {
         stmt->relation->relname = desc.name;
         rel = heap_openrv(stmt->relation, AccessExclusiveLock);
-        if (rel->rd_tam_type == TAM_HEAP) {
+        if (rel->rd_tam_ops == TableAmHeap) {
             heap_close(rel, NoLock);
             elog(ERROR, "timecapsule does not support astore yet");
             return;

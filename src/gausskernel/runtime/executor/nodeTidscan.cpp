@@ -625,8 +625,8 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &tidstate->ss.ps, GetTableAmRoutine(current_relation->rd_tam_type));
-    ExecInitScanTupleSlot(estate, &tidstate->ss, GetTableAmRoutine(current_relation->rd_tam_type));
+    ExecInitResultTupleSlot(estate, &tidstate->ss.ps, current_relation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, &tidstate->ss, current_relation->rd_tam_ops);
 
     /* deal with partitioned table branch */
     if (node->scan.isPartTbl) {

@@ -1399,7 +1399,7 @@ bool SkewInfo::canValuePassQual(List* varList, List* valueList, Expr* expr)
     rte = planner_rt_fetch(rel->relid, m_root);
     heaprel = heap_open(rte->relid, NoLock);
     tupdesc = RelationGetDescr(heaprel);
-    slot = MakeSingleTupleTableSlot(tupdesc, false, GetTableAmRoutine(heaprel->rd_tam_type));
+    slot = MakeSingleTupleTableSlot(tupdesc, false, heaprel->rd_tam_ops);
     slot->tts_nvalid = tupdesc->natts;
     heap_close(heaprel, NoLock);
 

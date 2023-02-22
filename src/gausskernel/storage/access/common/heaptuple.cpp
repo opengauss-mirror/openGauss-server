@@ -255,7 +255,8 @@ void heap_fill_tuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, cha
  *		heap_attisnull	- returns TRUE iff tuple attribute is not present
  * ----------------
  */
-bool heap_attisnull(HeapTuple tup, int attnum, TupleDesc tupDesc)
+static FORCE_INLINE
+bool heap_attisnull_impl(HeapTuple tup, int attnum, TupleDesc tupDesc)
 {
     if (attnum > (int)HeapTupleHeaderGetNatts(tup->t_data, tupDesc)) {
         return true;
@@ -289,6 +290,14 @@ bool heap_attisnull(HeapTuple tup, int attnum, TupleDesc tupDesc)
     }
 
     return false;
+}
+
+bool heap_attisnull(HeapTuple tup, int attnum, TupleDesc tupDesc) {
+    return heap_attisnull_impl(tup, attnum, tupDesc);
+}
+
+bool heapam_attisnull(Tuple tup, int attnum, TupleDesc tuple_desc) {
+    return heap_attisnull_impl((HeapTuple)tup, attnum, tuple_desc);
 }
 
 /* get init default value from tupleDesc.
@@ -543,11 +552,13 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
  * has already determined that the attnum refers to a system attribute.
  * ----------------
  */
-Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull)
+static FORCE_INLINE 
+Datum heap_getsysattr_impl(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull)
 {
     Datum result;
 
     Assert(tup);
+    Assert(TUPLE_IS_HEAP_TUPLE(HeapTuple(tup)));
 
     /* Currently, no sys attribute ever reads as NULL. */
     *isnull = false;
@@ -599,6 +610,14 @@ Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnu
     return result;
 }
 
+Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull) {
+    return heap_getsysattr_impl(tup, attnum, tupleDesc, isnull);
+}
+
+Datum heapam_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool* isnull, Buffer buff) {
+    return heap_getsysattr_impl((HeapTuple)tup, attnum, tuple_desc, isnull);
+}
+
 /* ----------------
  *		heap_copytuple && heapCopyCompressedTuple
  *
@@ -616,7 +635,8 @@ Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnu
  * And macro HEAP_COPY_TUPLE are provided, both wrapper for uncompressed and compressed tuples.
  * ----------------
  */
-HeapTuple heap_copytuple(HeapTuple tuple)
+static FORCE_INLINE
+HeapTuple heap_copytuple_impl(HeapTuple tuple)
 {
     HeapTuple newTuple;
     errno_t rc = EOK;
@@ -684,6 +704,15 @@ void heap_copytuple_with_tuple(HeapTuple src, HeapTuple dest)
     securec_check(rc, "\0", "\0");
 }
 
+HeapTuple heap_copytuple(HeapTuple tuple) {
+    return heap_copytuple_impl(tuple);
+}
+
+Tuple heapam_copytuple(Tuple tuple) {
+    Assert(TUPLE_IS_HEAP_TUPLE(HeapTuple(tuple)));
+    return heap_copytuple((HeapTuple)tuple);
+}
+
 /*
  * heap_form_tuple
  *		construct a tuple from the given values[] and isnull[] arrays,
@@ -691,7 +720,8 @@ void heap_copytuple_with_tuple(HeapTuple src, HeapTuple dest)
  *
  * The result is allocated in the current memory context.
  */
-HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull)
+static FORCE_INLINE
+HeapTuple heap_form_tuple_impl(TupleDesc tupleDescriptor, Datum *values, bool *isnull)
 {
     HeapTuple tuple;    /* return tuple */
     HeapTupleHeader td; /* tuple data */
@@ -797,6 +827,16 @@ HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull
     return tuple;
 }
 
+HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull)
+{
+    return heap_form_tuple_impl(tupleDescriptor, values, isnull);
+}
+
+Tuple heapam_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull)
+{
+    return (Tuple)heap_form_tuple_impl(tupleDescriptor, values, isnull);
+}
+
 /*
  *		heap_formtuple
  *
@@ -838,7 +878,8 @@ HeapTuple heap_formtuple(TupleDesc tupleDescriptor, Datum *values, const char *n
  *
  * The result is allocated in the current memory context.
  */
-HeapTuple heap_modify_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *replValues, const bool *replIsnull,
+static FORCE_INLINE
+HeapTuple heap_modify_tuple_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *replValues, const bool *replIsnull,
                             const bool *doReplace)
 {
     int numberOfAttributes = tupleDesc->natts;
@@ -897,6 +938,18 @@ HeapTuple heap_modify_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *replVal
     return newTuple;
 }
 
+HeapTuple heap_modify_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *replValues, const bool *replIsnull,
+                            const bool *doReplace)
+{
+    return heap_modify_tuple_impl(tuple, tupleDesc, replValues, replIsnull, doReplace);
+}
+
+Tuple heapam_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum* repl_values, const bool* repl_isnull, const bool* do_replace)
+{
+    return (Tuple)heap_modify_tuple_impl((HeapTuple)tuple, tuple_desc, repl_values, repl_isnull, do_replace);
+}
+
+
 /*
  *		heap_modifytuple
  *
@@ -947,7 +1000,8 @@ HeapTuple heap_modifytuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *replValu
  *		heap_getattr; the loop will become O(N^2) as soon as any
  *		noncacheable attribute offsets are involved.
  */
-void heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull)
+static FORCE_INLINE void 
+heap_deform_tuple_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull)
 {
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
@@ -1050,6 +1104,18 @@ void heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool
         values[attnum] = heapGetInitDefVal(attnum + 1, tupleDesc, &isnull[attnum]);
     }
 }
+
+void heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull)
+{
+    heap_deform_tuple_impl(tuple, tupleDesc, values, isnull);
+}
+
+void heapam_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull)
+{
+    Assert(TUPLE_IS_HEAP_TUPLE(HeapTuple(tuple)));
+    return heap_deform_tuple_impl((HeapTuple)tuple, tuple_desc, values, isnull);
+}
+
 
 /*
  *		heap_deformtuple
@@ -2659,7 +2725,8 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
  *		heap_getattr; the loop will become O(N^2) as soon as any
  *		noncacheable attribute offsets are involved.
  */
-void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, char *cmprsInfo)
+static FORCE_INLINE void 
+heap_deform_cmprs_tuple_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, char *cmprsInfo)
 {
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
@@ -2742,7 +2809,21 @@ void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values
     }
 }
 
-void heap_deform_tuple2(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer)
+
+void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, char *cmprsInfo)
+{
+    heap_deform_cmprs_tuple_impl(tuple, tupleDesc, values, isnull, cmprsInfo);
+}
+
+void heapam_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull, char* cmprs_info)
+{
+    Assert(TUPLE_IS_HEAP_TUPLE(HeapTuple(tuple)));
+    heap_deform_cmprs_tuple_impl((HeapTuple)tuple, tuple_desc, values, isnull, cmprs_info);
+}
+
+
+static FORCE_INLINE void 
+heap_deform_tuple2_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer)
 {
     Assert((tuple != NULL) && (tuple->t_data != NULL));
     if (!HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
@@ -2754,6 +2835,17 @@ void heap_deform_tuple2(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, boo
     Page page = BufferGetPage(buffer);
     Assert((page != NULL) && (PageIsCompressed(page)));
     heap_deform_cmprs_tuple(tuple, tupleDesc, values, isnull, (char *)getPageDict(page));
+}
+
+void heap_deform_tuple2(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer)
+{
+    return heap_deform_tuple2_impl(tuple, tupleDesc, values, isnull, buffer);
+}
+
+void heapam_deform_tuple2(Tuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer)
+{
+    Assert(TUPLE_IS_HEAP_TUPLE(HeapTuple(tuple)));
+    return heap_deform_tuple2_impl((HeapTuple)tuple, tupleDesc, values, isnull, buffer);
 }
 
 /* deform the passed heap tuple.
@@ -3022,7 +3114,7 @@ void heap_slot_clear(TupleTableSlot *slot)
  *
  * @pram slot: slot to be materialized.
  */
-void heap_slot_materialize(TupleTableSlot *slot)
+HeapTuple heap_slot_materialize(TupleTableSlot *slot)
 {
     /*
      * sanity checks
@@ -3036,7 +3128,7 @@ void heap_slot_materialize(TupleTableSlot *slot)
      * nothing to do.
      */
     if (slot->tts_tuple && TTS_SHOULDFREE(slot) && !HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)slot->tts_tuple)->t_data))
-        return ;
+        return (HeapTuple)slot->tts_tuple;;
 
     /*
      * Otherwise, copy or build a physical tuple, and store it into the slot.
@@ -3083,6 +3175,7 @@ void heap_slot_materialize(TupleTableSlot *slot)
         slot->tts_dataLen = -1;
     }
 #endif
+    return (HeapTuple)slot->tts_tuple;
 }
 
 /*
@@ -3331,11 +3424,12 @@ HeapTuple heap_slot_copy_heap_tuple(TupleTableSlot *slot)
  * @param slot: slot to store tuple.
  * @param: should_free true if clear the slot's tuple contents by pfree_ext() during  ExecClearTuple.
  */
-void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer buffer, bool should_free, bool batchMode)
+void heap_slot_store_heap_tuple(Tuple tup, TupleTableSlot* slot, Buffer buffer, bool should_free, bool batchMode)
 {
     /*
      * sanity checks
      */
+    HeapTuple tuple = HeapTuple(tup);
     Assert(tuple != NULL);
     Assert(slot != NULL);
     Assert(slot->tts_tupleDescriptor != NULL);

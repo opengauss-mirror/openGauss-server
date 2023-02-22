@@ -693,14 +693,14 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &index_state->ss.ps, GetTableAmRoutine(current_relation->rd_tam_type));
-    ExecInitScanTupleSlot(estate, &index_state->ss, GetTableAmRoutine(current_relation->rd_tam_type));
+    ExecInitResultTupleSlot(estate, &index_state->ss.ps, current_relation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, &index_state->ss, current_relation->rd_tam_ops);
 
     /*
      * get the scan type from the relation descriptor.
      */
     ExecAssignScanType(&index_state->ss, CreateTupleDescCopy(RelationGetDescr(current_relation)));
-    index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops = GetTableAmRoutine(current_relation->rd_tam_type);
+    index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops = current_relation->rd_tam_ops;
 
     /*
      * Initialize result tuple type and projection info.

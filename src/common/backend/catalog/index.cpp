@@ -4210,7 +4210,7 @@ double IndexBuildUHeapScan(Relation heapRelation, Relation indexRelation, IndexI
      */
     estate = CreateExecutorState();
     econtext = GetPerTupleExprContext(estate);
-    slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation), false, GetTableAmRoutine(heapRelation->rd_tam_type));
+    slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation), false, heapRelation->rd_tam_ops);
 
     /* Arrange for econtext's scan tuple to be the tuple under test */
     econtext->ecxt_scantuple = slot;
@@ -6320,7 +6320,7 @@ void ScanHeapInsertCBI(Relation parentRel, Relation heapRel, Relation idxRel, Oi
     tupleDesc = heapRel->rd_att;
     estate = CreateExecutorState();
     econtext = GetPerTupleExprContext(estate);
-    slot = MakeSingleTupleTableSlot(RelationGetDescr(parentRel), false, GetTableAmRoutine(parentRel->rd_tam_type));
+    slot = MakeSingleTupleTableSlot(RelationGetDescr(parentRel), false, parentRel->rd_tam_ops);
     econtext->ecxt_scantuple = slot;
     /* Set up execution state for predicate, if any. */
     predicate = (List*)ExecPrepareExpr((Expr*)idxInfo->ii_Predicate, estate);
@@ -6548,7 +6548,7 @@ void ScanPartitionInsertIndex(Relation partTableRel, Relation partRel, const Lis
 
     if (PointerIsValid(indexRelList)) {
         estate = CreateExecutorState();
-        slot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel), false, GetTableAmRoutine(partTableRel->rd_tam_type));
+        slot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel), false, partTableRel->rd_tam_ops);
     }
 
     scan = scan_handler_tbl_beginscan(partRel, SnapshotNow, 0, NULL);
@@ -6768,7 +6768,7 @@ void ScanPartitionDeleteGPITuples(Relation partTableRel, Relation partRel, const
 
     if (PointerIsValid(indexRelList)) {
         estate = CreateExecutorState();
-        slot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel), false, GetTableAmRoutine(partTableRel->rd_tam_type));
+        slot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel), false, partTableRel->rd_tam_ops);
     }
 
     scan = scan_handler_tbl_beginscan(partRel, SnapshotNow, 0, NULL);

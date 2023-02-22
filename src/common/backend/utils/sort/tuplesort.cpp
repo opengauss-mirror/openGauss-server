@@ -3410,8 +3410,7 @@ static void copytup_heap(Tuplesortstate* state, SortTuple* stup, void* tup)
     /* set up first-column key value */
     htup.t_len = tuple->t_len + MINIMAL_TUPLE_OFFSET;
     htup.t_data = (HeapTupleHeader)((char*)tuple - MINIMAL_TUPLE_OFFSET);
-    original = tableam_tops_tuple_getattr(&htup, state->sortKeys[0].ssup_attno, state->tupDesc, &stup->isnull1);
-
+    original = tableam_tops_tuple_getattr(&htup, state->sortKeys[0].ssup_attno, state->tupDesc, &stup->isnull1);    
     if (!state->sortKeys->abbrev_converter || stup->isnull1) {
         /*
          * Store ordinary Datum representation, or NULL value.  If there is a

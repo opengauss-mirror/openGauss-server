@@ -2382,7 +2382,7 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
 
             if (isNull) {
                 relfrozenxid = OldHeap->rd_rel->relfrozenxid;
-                if (OldHeap->rd_tam_type == TAM_USTORE) {
+                if (OldHeap->rd_tam_ops == TableAmUstore) {
                     elog(ERROR, "cluster not supported in ustore");
                 }
 

@@ -740,7 +740,7 @@ void InsertOneTuple(Oid objectid)
     tupDesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr,
         RelationGetForm(t_thrd.bootstrap_cxt.boot_reldesc)->relhasoids,
         t_thrd.bootstrap_cxt.attrtypes,
-        GetTableAmRoutine(t_thrd.bootstrap_cxt.boot_reldesc->rd_tam_type));
+        t_thrd.bootstrap_cxt.boot_reldesc->rd_tam_ops);
     tuple = (HeapTuple) tableam_tops_form_tuple(tupDesc, values, Nulls);
     if (objectid != (Oid)0)
         HeapTupleSetOid(tuple, objectid);

@@ -1381,7 +1381,7 @@ static void _bt_parallel_scan_and_sort(BTSpool *btspool, BTSpool *btspool2, BTSh
     indexInfo->ii_Concurrent = false;
 
     /* do the heap scan */
-    IndexBuildCallback callback = (btspool->heap->rd_tam_type == TAM_USTORE)? UBTreeBuildCallback : btbuildCallback;
+    IndexBuildCallback callback = (btspool->heap->rd_tam_ops == TableAmUstore)? UBTreeBuildCallback : btbuildCallback;
     if (btshared->isplain) {
         /* plain table or partition */
         scan = tableam_scan_begin_parallel(btspool->heap, &btshared->heapdesc);
@@ -1555,7 +1555,7 @@ static double _bt_spools_heapscan_utility(Relation heap, Relation index,  BTBuil
     /* Fill spool using either serial or parallel heap scan */
     if (!buildstate->btleader) {
 serial_build:
-        IndexBuildCallback callback = (heap->rd_tam_type == TAM_USTORE)? UBTreeBuildCallback : btbuildCallback;
+        IndexBuildCallback callback = (heap->rd_tam_ops == TableAmUstore)? UBTreeBuildCallback : btbuildCallback;
         if (RelationIsGlobalIndex(index)) {
             *allPartTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, callback, (void *)buildstate);
         } else if (RelationIsCrossBucketIndex(index)) {

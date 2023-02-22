@@ -4037,7 +4037,7 @@ uint64 CopyFrom(CopyState cstate)
     estate->es_range_table = cstate->range_table;
 
     /* Set up a tuple slot too */
-    myslot = ExecInitExtraTupleSlot(estate, GetTableAmRoutine(cstate->rel->rd_tam_type));
+    myslot = ExecInitExtraTupleSlot(estate, cstate->rel->rd_tam_ops);
     ExecSetSlotDescriptor(myslot, tupDesc);
     /* Triggers might need a slot as well */
     estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate);
@@ -4563,7 +4563,7 @@ uint64 CopyFrom(CopyState cstate)
 #endif
 
             /* And now we can form the input tuple. */
-            tuple = (Tuple)tableam_tops_form_tuple(tupDesc, values, nulls, GetTableAmRoutine(cstate->rel->rd_tam_type));
+            tuple = (Tuple)tableam_tops_form_tuple(tupDesc, values, nulls, cstate->rel->rd_tam_ops);
 
             if (loaded_oid != InvalidOid)
                 HeapTupleSetOid((HeapTuple)tuple, loaded_oid);
