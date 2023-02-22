@@ -362,7 +362,7 @@ static void setDMSProfile(dms_profile_t* profile)
     profile->channel_cnt = (uint32)dms_attr->channel_count;
     profile->work_thread_cnt = (uint32)dms_attr->work_thread_count;
     profile->max_session_cnt = DMS_MAX_SESSIONS;
-    profile->time_stat_enabled = FALSE;
+    profile->time_stat_enabled = TRUE;
     profile->pipe_type = convertInterconnectType();
     profile->conn_created_during_init = TRUE;
     setRdmaWorkConfig(profile);
