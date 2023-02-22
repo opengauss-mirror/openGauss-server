@@ -62,13 +62,7 @@ void InitDmsContext(dms_context_t *dmsContext)
     dmsContext->inst_id = (unsigned int)SS_MY_INST_ID;
     dmsContext->sess_id = (unsigned int)(t_thrd.proc ? t_thrd.proc->logictid : t_thrd.myLogicTid + TotalProcs);
     dmsContext->db_handle = t_thrd.proc;
-    if (AmDmsReformProcProcess()) {
-        dmsContext->sess_type = DMS_SESSION_REFORM;
-    } else if (AmPageRedoProcess() || AmStartupProcess()) {
-        dmsContext->sess_type = DMS_SESSION_RECOVER;
-    } else {
-        dmsContext->sess_type = DMS_SESSION_NORMAL;
-    }
+    dmsContext->sess_type = DMSGetProcType4RequestPage();
     dmsContext->is_try = 0;
 }
 
@@ -406,7 +400,7 @@ Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
     return buffer;
 }
 
-Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode)
+Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool* with_io)
 {
     BufferDesc *buf_desc = GetBufferDescriptor(buffer - 1);
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -415,7 +409,16 @@ Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode)
         return buffer;
     }
 
+    if (!DmsCheckBufAccessible()) {
+        *with_io = false;
+        return 0;
+    }
+
     if (!DmsStartBufferIO(buf_desc, mode)) {
+        if (!DmsCheckBufAccessible()) {
+            *with_io = false;
+            return 0;
+        }
         return buffer;
     }
 
@@ -425,7 +428,7 @@ Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode)
     return TerminateReadSegPage(buf_desc, read_mode);
 }
 
-Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode)
+Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool* with_io)
 {
     BufferDesc *buf_desc = GetBufferDescriptor(buffer - 1);
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -443,7 +446,16 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode)
         pblk.lsn = buf_ctrl->pblk_lsn;
     }
 
+    if (!DmsCheckBufAccessible()) {
+        *with_io = false;
+        return 0;
+    }
+
     if (!DmsStartBufferIO(buf_desc, mode)) {
+        if (!DmsCheckBufAccessible()) {
+            *with_io = false;
+            return 0;
+        }
         return buffer;
     }
 
@@ -673,7 +685,7 @@ void CheckPageNeedSkipInRecovery(Buffer buf)
     Assert(!skip);
 }
 
-unsigned int DMSGetProcType4RequestPage()
+dms_session_e DMSGetProcType4RequestPage()
 {
     // proc type used in DMS request page
     if (AmDmsReformProcProcess() || AmPageRedoProcess() || AmStartupProcess()) {
@@ -744,4 +756,12 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
     }
 
     return ret;
+}
+
+bool DmsCheckBufAccessible()
+{
+    if (dms_drc_accessible((uint8)DRC_RES_PAGE_TYPE) || DMSGetProcType4RequestPage() == DMS_SESSION_RECOVER) {
+        return true;
+    }
+    return false;
 }
