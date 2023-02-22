@@ -6829,6 +6829,9 @@ static inline void init_array_parse_context(ArrayParseContext *context)
  */
 static inline void push_array_parse_stack(ArrayParseContext *context, int parenlevel, int state)
 {
+    if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+        return;
+    }
     if (likely(parenlevel >= 0)) {
         context->list_left_bracket = lcons_int(parenlevel, context->list_left_bracket);
         context->list_right_bracket = lcons_int(parenlevel, context->list_right_bracket);
