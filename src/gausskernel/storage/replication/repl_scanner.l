@@ -120,6 +120,7 @@ LOGICAL 			{ return K_LOGICAL; }
 SLOT				{ return K_SLOT; }
 USE_SNAPSHOT		{ return K_USE_SNAPSHOT; }
 ADVANCE_CATALOG_XMIN		{ return K_ADVANCE_CATALOG_XMIN; }
+WAIT				{ return K_WAIT; }
 
 ","				{ return ','; }
 ";"				{ return ';'; }

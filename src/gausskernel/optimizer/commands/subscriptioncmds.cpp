@@ -1270,7 +1270,7 @@ void ReplicationSlotDropAtPubNode(char *slotname, bool missing_ok)
         }
     }
 
-    appendStringInfo(&cmd, "DROP_REPLICATION_SLOT %s", quote_identifier(slotname));
+    appendStringInfo(&cmd, "DROP_REPLICATION_SLOT %s WAIT", quote_identifier(slotname));
 
     res = WalReceiverFuncTable[GET_FUNC_IDX].walrcv_exec(cmd.data, 0, NULL);
     if (res->status != WALRCV_OK_COMMAND) {
