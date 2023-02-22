@@ -374,6 +374,7 @@ static void pgstat_collect_thread_status_setup_memcxt(void);
 static void pgstat_collect_thread_status_clear_resource(void);
 
 const char* pgstat_get_wait_io(WaitEventIO w);
+const char* pgstat_get_wait_dms(WaitEventDMS w);
 
 static void pgstat_setheader(PgStat_MsgHdr* hdr, StatMsgType mtype);
 void pgstat_send(void* msg, int len);
@@ -4338,6 +4339,11 @@ const char* pgstat_get_wait_event(uint32 wait_event_info)
             event_name = pgstat_get_wait_io(w);
             break;
         }
+        case PG_WAIT_DMS: {
+            WaitEventDMS w = (WaitEventDMS)wait_event_info;
+            event_name = pgstat_get_wait_dms(w);
+            break;
+        }
         default:
             event_name = "unknown wait event";
             break;
@@ -4598,6 +4604,129 @@ const char* pgstat_get_wait_io(WaitEventIO w)
         case WAIT_EVENT_REPLICATION_ORIGIN_DROP:
             event_name = "ReplicationOriginDrop";
             break;
+        default:
+            event_name = "unknown wait event";
+            break;
+    }
+    return event_name;
+}
+
+/* ----------
+ * pgstat_get_wait_dms() -
+ *
+ * Convert WaitEventDMS to string.
+ * ----------
+ */
+const char* pgstat_get_wait_dms(WaitEventDMS w)
+{
+    const char* event_name = "unknown wait event";
+
+    switch (w) {
+        case WAIT_EVENT_IDLE_WAIT:
+            event_name = "IdleWait";
+            break;
+        case WAIT_EVENT_GC_BUFFER_BUSY:
+            event_name = "GcBufferBusy";
+            break;
+        case WAIT_EVENT_DCS_REQ_MASTER4PAGE_1WAY:
+            event_name = "DcsReqMaster4Page1Way";
+            break;
+        case WAIT_EVENT_DCS_REQ_MASTER4PAGE_2WAY:
+            event_name = "DcsReqMaster4Page2Way";
+            break;
+        case WAIT_EVENT_DCS_REQ_MASTER4PAGE_3WAY:
+            event_name = "DcsReqMaster4Page3Way";
+            break;
+        case WAIT_EVENT_DCS_REQ_MASTER4PAGE_TRY:
+            event_name = "DcsReqMaster4PageTry";
+            break;
+        case WAIT_EVENT_DCS_REQ_OWNER4PAGE:
+            event_name = "DcsReqOwner4Page";
+            break;
+        case WAIT_EVENT_DCS_CLAIM_OWNER:
+            event_name = "DcsCliamOwner";
+            break;
+        case WAIT_EVENT_DCS_RELEASE_OWNER:
+            event_name = "DcsReleaseOwner";
+            break;
+        case WAIT_EVENT_DCS_INVLDT_SHARE_COPY_REQ:
+            event_name = "DcsInvldtShareCopyReq";
+            break;
+        case WAIT_EVENT_DCS_INVLDT_SHARE_COPY_PROCESS:
+            event_name = "DcsInvldtShareCopyProcess";
+            break;
+        case WAIT_EVENT_DCS_TRANSFER_PAGE_LATCH:
+            event_name = "DcsTransferPageLatch";
+            break;
+        case WAIT_EVENT_DCS_TRANSFER_PAGE_READONLY2X:
+            event_name = "DcsTransferPageReadonly2X";
+            break;
+        case WAIT_EVENT_DCS_TRANSFER_PAGE_FLUSHLOG:
+            event_name = "DcsTransferPageFlushlog";
+            break;
+        case WAIT_EVENT_DCS_TRANSFER_PAGE:
+            event_name = "DcsTransferPage";
+            break;
+        case WAIT_EVENT_PCR_REQ_BTREE_PAGE:
+            event_name = "PcrReqBtreePage";
+            break;
+        case WAIT_EVENT_PCR_REQ_HEAP_PAGE:
+            event_name = "PcrReqHeapPage";
+            break;
+        case WAIT_EVENT_PCR_REQ_MASTER:
+            event_name = "PcrReqMaster";
+            break;
+        case WAIT_EVENT_PCR_REQ_OWNER:
+            event_name = "PcrReqOwner";
+            break;
+        case WAIT_EVENT_PCR_CHECK_CURR_VISIBLE:
+            event_name = "PcrCheckCurrVisible";
+            break;
+        case WAIT_EVENT_TXN_REQ_INFO:
+            event_name = "TxnReqInfo";
+            break;
+        case WAIT_EVENT_TXN_REQ_SNAPSHOT:
+            event_name = "TxnReqSnapshot";
+            break;
+        case WAIT_EVENT_DLS_REQ_LOCK:
+            event_name = "DlsReqLock";
+            break;
+        case WAIT_EVENT_DLS_REQ_TABLE:
+            event_name = "DlsReqTable";
+            break;
+        case WAIT_EVENT_DLS_WAIT_TXN:
+            event_name = "DlsWaitTxn";
+            break;
+        case WAIT_EVENT_DEAD_LOCK_TXN:
+            event_name = "DeadLockTxn";
+            break;
+        case WAIT_EVENT_DEAD_LOCK_TABLE:
+            event_name = "DeadLockTable";
+            break;
+        case WAIT_EVENT_DEAD_LOCK_ITL:
+            event_name = "DeadLockItl";
+            break;
+        case WAIT_EVENT_BROADCAST_BTREE_SPLIT:
+            event_name = "BroadcastBtreeSplit";
+            break;
+        case WAIT_EVENT_BROADCAST_ROOT_PAGE:
+            event_name = "BroadcastBootPage";
+            break;
+        case WAIT_EVENT_QUERY_OWNER_ID:
+            event_name = "QueryOwnerId";
+            break;
+        case WAIT_EVENT_LATCH_X:
+            event_name = "LatchX";
+            break;
+        case WAIT_EVENT_LATCH_S:
+            event_name = "LatchS";
+            break;
+        case WAIT_EVENT_LATCH_X_REMOTE:
+            event_name = "LatchXRemote";
+            break;
+        case WAIT_EVENT_LATCH_S_REMOTE:
+            event_name = "LatchSRemote";
+            break;      
         default:
             event_name = "unknown wait event";
             break;

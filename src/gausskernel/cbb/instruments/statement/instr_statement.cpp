@@ -89,6 +89,7 @@
 #define STATEMENT_EVENT_TYPE_LOCK        (2)
 #define STATEMENT_EVENT_TYPE_LWLOCK      (3)
 #define STATEMENT_EVENT_TYPE_STATUS      (4)
+#define STATEMENT_EVENT_TYPE_DMS         (5)
 
 /* stbyStmtHistSlow and stbyStmtHistFast always have the same life cycle. */
 #define STBYSTMTHIST_IS_READY (g_instance.stat_cxt.stbyStmtHistSlow->state != MFCHAIN_STATE_NOT_READY)
@@ -116,7 +117,8 @@ typedef struct {
 } StmtEventRecord;
 
 static const int wait_event_io_event_max_index = IO_EVENT_NUM;
-static const int wait_event_lock_event_max_index = wait_event_io_event_max_index + LOCK_EVENT_NUM;
+static const int wait_event_dms_event_max_index = wait_event_io_event_max_index + DMS_EVENT_NUM;
+static const int wait_event_lock_event_max_index = wait_event_dms_event_max_index + LOCK_EVENT_NUM;
 static const int wait_event_lwlock_event_max_index = wait_event_lock_event_max_index + LWLOCK_EVENT_NUM;
 static const int wait_event_state_wait_max_index = wait_event_lwlock_event_max_index + STATE_WAIT_NUM;
 
@@ -1627,6 +1629,8 @@ static const char *get_stmt_event_type_str(uint8 event_type)
     switch (event_type) {
         case STATEMENT_EVENT_TYPE_IO:
             return "IO_EVENT";
+        case STATEMENT_EVENT_TYPE_DMS:
+            return "DMS_EVENT";
         case STATEMENT_EVENT_TYPE_LOCK:
             return "LOCK_EVENT";
         case STATEMENT_EVENT_TYPE_LWLOCK:
@@ -2299,6 +2303,10 @@ static int32 get_wait_events_idx_in_bms(uint32 class_id, uint32 event_id)
             ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - IO")));
             event_idx = event_id;
             break;
+        case PG_WAIT_DMS:
+            ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - DMS")));
+            event_idx = event_id;
+            break;
         case PG_WAIT_LOCK:
             ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - LOCK")));
             event_idx = event_id + wait_event_io_event_max_index;
@@ -2369,8 +2377,12 @@ static void get_wait_events_full_info(StatementStatContext *statement_stat, Stri
             event_idx = virt_event_idx;
             event_str = pgstat_get_wait_io(WaitEventIO(event_idx + PG_WAIT_IO));
             event_type = STATEMENT_EVENT_TYPE_IO;
-        } else if (virt_event_idx < wait_event_lock_event_max_index) {
+        } else if (virt_event_idx < wait_event_dms_event_max_index) {
             event_idx = virt_event_idx - wait_event_io_event_max_index;
+            event_str = pgstat_get_wait_dms(WaitEventDMS(event_idx + PG_WAIT_DMS));
+            event_type = STATEMENT_EVENT_TYPE_DMS;
+        }else if (virt_event_idx < wait_event_lock_event_max_index) {
+            event_idx = virt_event_idx - wait_event_dms_event_max_index;
             event_str = GetLockNameFromTagType(event_idx);
             event_type = STATEMENT_EVENT_TYPE_LOCK;
         } else if (virt_event_idx < wait_event_lwlock_event_max_index) {
@@ -2452,12 +2464,21 @@ void instr_stmt_copy_wait_events()
             mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
         }
 
-        wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lock_info;
+        wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.dms_info;
         start_idx = wait_event_io_event_max_index;
-        end_idx = wait_event_lock_event_max_index;
+        end_idx = wait_event_dms_event_max_index;
         for (; start_idx < end_idx; start_idx++) {
             u_sess->statement_cxt.wait_events[start_idx].total_duration =
                 wait_event_info[start_idx - wait_event_io_event_max_index].total_duration;
+            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+        }
+
+        wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lock_info;
+        start_idx = wait_event_dms_event_max_index;
+        end_idx = wait_event_lock_event_max_index;
+        for (; start_idx < end_idx; start_idx++) {
+            u_sess->statement_cxt.wait_events[start_idx].total_duration =
+                wait_event_info[start_idx - wait_event_dms_event_max_index].total_duration;
             mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
         }
 
@@ -2546,8 +2567,12 @@ static bool instr_stmt_get_event_data(int32 event_idx, uint8 *event_type, int32 
         *event_real_id = event_idx;
         *total_duration = wait_info->event_info.io_info[*event_real_id].total_duration;
         *event_type = STATEMENT_EVENT_TYPE_IO;
-    } else if (event_idx < wait_event_lock_event_max_index) {
+    } else if (event_idx < wait_event_dms_event_max_index) {
         *event_real_id = event_idx - wait_event_io_event_max_index;
+        *total_duration = wait_info->event_info.lock_info[*event_real_id].total_duration;
+        *event_type = STATEMENT_EVENT_TYPE_DMS;
+    } else if (event_idx < wait_event_lock_event_max_index) {
+        *event_real_id = event_idx - wait_event_dms_event_max_index;
         *total_duration = wait_info->event_info.lock_info[*event_real_id].total_duration;
         *event_type = STATEMENT_EVENT_TYPE_LOCK;
     } else if (event_idx < wait_event_lwlock_event_max_index) {
