@@ -659,7 +659,7 @@ hashFileSource::hashFileSource(VectorBatch* batch, MemoryContext context, int ce
         m_tupleSize = 100;
         m_tuple = (MinimalTuple)palloc(m_tupleSize);
         m_tuple->t_len = m_tupleSize;
-        m_hashTupleSlot = MakeTupleTableSlot(true, tuple_desc->tdTableAmType);
+        m_hashTupleSlot = MakeTupleTableSlot(true, GetTableAmRoutine(tuple_desc->tdTableAmType));
         ExecSetSlotDescriptor(m_hashTupleSlot, tuple_desc);
     }
 
@@ -675,7 +675,7 @@ hashFileSource::hashFileSource(TupleTableSlot* hash_slot, int file_num)
     m_context = NULL;
     if (m_hashTupleSlot->tts_tupleDescriptor == NULL) {
         ExecSetSlotDescriptor(m_hashTupleSlot, hash_slot->tts_tupleDescriptor);
-        m_hashTupleSlot->tts_tupslotTableAm = hash_slot->tts_tupleDescriptor->tdTableAmType;
+        m_hashTupleSlot->tts_tam_ops = GetTableAmRoutine(hash_slot->tts_tupleDescriptor->tdTableAmType);
     }
 
     m_cols = 0;

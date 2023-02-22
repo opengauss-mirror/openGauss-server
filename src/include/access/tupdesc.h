@@ -41,6 +41,14 @@ typedef enum tableAmType
     TAM_USTORE = 1,
 } TableAmType;
 
+/*
+ * Predefined TableAmRoutine for various types of table AM. The
+ * same are used to identify the table AM of a given slot.
+ */
+struct TableAmRoutine;
+extern const TableAmRoutine* TableAmHeap;
+extern const TableAmRoutine* TableAmUstore;
+
 /* index page split methods */
 #define INDEXSPLIT_NO_DEFAULT     0 /* default split method, aimed at equal split */
 #define INDEXSPLIT_NO_INSERTPT    1 /* insertpt */

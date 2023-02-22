@@ -201,7 +201,7 @@ static EState *create_estate_for_relation(LogicalRepRelMapEntry *rel)
 
     /* Triggers might need a slot */
     if (resultRelInfo->ri_TrigDesc)
-        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, GetTableAmRoutine(rel->localrel->rd_tam_type));
 
     /* Prepare to catch AFTER triggers. */
     AfterTriggerBeginQuery();
@@ -598,7 +598,7 @@ static void apply_handle_insert(StringInfo s)
 
     /* Initialize the executor state. */
     estate = create_estate_for_relation(rel);
-    remoteslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    remoteslot = ExecInitExtraTupleSlot(estate, GetTableAmRoutine(rel->localrel->rd_tam_type));
     ExecSetSlotDescriptor(remoteslot, RelationGetDescr(rel->localrel));
 
     /* Input functions may need an active snapshot, so get one */
@@ -724,9 +724,9 @@ static void apply_handle_update(StringInfo s)
 
     /* Initialize the executor state. */
     estate = create_estate_for_relation(rel);
-    remoteslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    remoteslot = ExecInitExtraTupleSlot(estate, GetTableAmRoutine(rel->localrel->rd_tam_type));
     ExecSetSlotDescriptor(remoteslot, RelationGetDescr(rel->localrel));
-    localslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    localslot = ExecInitExtraTupleSlot(estate, GetTableAmRoutine(rel->localrel->rd_tam_type));
     ExecSetSlotDescriptor(localslot, RelationGetDescr(rel->localrel));
     EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1);
 
@@ -842,9 +842,9 @@ static void apply_handle_delete(StringInfo s)
 
     /* Initialize the executor state. */
     estate = create_estate_for_relation(rel);
-    remoteslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    remoteslot = ExecInitExtraTupleSlot(estate, GetTableAmRoutine(rel->localrel->rd_tam_type));
     ExecSetSlotDescriptor(remoteslot, RelationGetDescr(rel->localrel));
-    localslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    localslot = ExecInitExtraTupleSlot(estate, GetTableAmRoutine(rel->localrel->rd_tam_type));
     ExecSetSlotDescriptor(localslot, RelationGetDescr(rel->localrel));
     EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1);
 

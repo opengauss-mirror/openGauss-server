@@ -747,8 +747,8 @@ static void gcBeginForeignScan(ForeignScanState* node, int eflags)
         fsstate->resultSlot->tts_isnull[i] = true;
     }
 
-    fsstate->resultSlot->tts_isempty = false;
-    fsstate->scanSlot->tts_isempty = false;
+    fsstate->resultSlot->tts_flags &= ~TTS_FLAG_EMPTY;
+    fsstate->scanSlot->tts_flags &= ~TTS_FLAG_EMPTY;
 
     fsstate->attinmeta = TupleDescGetAttInMetadata(fsstate->tupdesc);
 
@@ -919,7 +919,7 @@ static void postgresConstructResultSlotWithArray(ForeignScanState* node)
     }
 
     resultSlot->tts_nvalid = resultDesc->natts;
-    resultSlot->tts_isempty = false;
+    resultSlot->tts_flags &= ~TTS_FLAG_EMPTY;
 }
 
 static void postgresMapResultFromScanSlot(ForeignScanState* node)
@@ -958,7 +958,7 @@ static TupleTableSlot* gcIterateNormalForeignScan(ForeignScanState* node)
 
     /* reset tupleslot on the begin */
     (void)ExecClearTuple(fsstate->resultSlot);
-    fsstate->resultSlot->tts_isempty = false;
+    fsstate->resultSlot->tts_flags &= ~TTS_FLAG_EMPTY;
 
     TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
 

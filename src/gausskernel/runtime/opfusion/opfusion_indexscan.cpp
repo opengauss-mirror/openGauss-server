@@ -168,7 +168,7 @@ void IndexScanFusion::Init(long max_rows)
     }
 
     m_epq_indexqual = m_node->indexqualorig;
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, m_rel->rd_tam_type);
+    m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, GetTableAmRoutine(m_rel->rd_tam_type));
 }
 
 HeapTuple IndexScanFusion::getTuple()

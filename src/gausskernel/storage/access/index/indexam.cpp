@@ -767,7 +767,7 @@ bool IndexGetnextSlot(IndexScanDesc scan, ScanDirection direction, TupleTableSlo
     ItemPointer tid;
     TupleTableSlot* tmpslot = NULL;
     tmpslot = MakeSingleTupleTableSlot(RelationGetDescr(scan->heapRelation),
-        false, scan->heapRelation->rd_tam_type);
+        false, GetTableAmRoutine(scan->heapRelation->rd_tam_type));
     for (;;) {
         /* IO collector and IO scheduler */
 #ifdef ENABLE_MULTIPLE_NODES

@@ -54,7 +54,7 @@ void SortFusion::InitLocals(ParamListInfo params)
     if (!IsGlobal())
         m_global->m_tupDesc->tdTableAmType = m_local.m_scan->m_tupDesc->tdTableAmType;
 
-    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc, false, m_local.m_scan->m_tupDesc->tdTableAmType);
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc, false, GetTableAmRoutine(m_local.m_scan->m_tupDesc->tdTableAmType));
     m_local.m_values = (Datum*)palloc0(m_global->m_tupDesc->natts * sizeof(Datum));
     m_local.m_isnull = (bool*)palloc0(m_global->m_tupDesc->natts * sizeof(bool));
 }

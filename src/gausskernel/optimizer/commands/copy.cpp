@@ -4037,7 +4037,7 @@ uint64 CopyFrom(CopyState cstate)
     estate->es_range_table = cstate->range_table;
 
     /* Set up a tuple slot too */
-    myslot = ExecInitExtraTupleSlot(estate, cstate->rel->rd_tam_type);
+    myslot = ExecInitExtraTupleSlot(estate, GetTableAmRoutine(cstate->rel->rd_tam_type));
     ExecSetSlotDescriptor(myslot, tupDesc);
     /* Triggers might need a slot as well */
     estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate);
@@ -4738,7 +4738,7 @@ uint64 CopyFrom(CopyState cstate)
                      * Global Partition Index stores the partition's tableOid with the index
                      * tuple which is extracted from the tuple of the slot. Make sure it is set.
                      */
-                    if (slot->tts_tupslotTableAm != TAM_USTORE) {
+                    if (!TTS_TABLEAM_IS_USTORE(slot)) {
                         ((HeapTuple)slot->tts_tuple)->t_tableOid = RelationGetRelid(targetRel);
                     } else {
                         ((UHeapTuple)slot->tts_tuple)->table_oid = RelationGetRelid(targetRel);
@@ -5230,7 +5230,7 @@ void UHeapCopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int
              * Global Partition Index stores the partition's tableOid with the index
              * tuple which is extracted from the tuple of the slot. Make sure it is set.
              */
-            if (myslot->tts_tupslotTableAm != TAM_USTORE) {
+            if (!TTS_TABLEAM_IS_USTORE(myslot)) {
                 ((HeapTuple)myslot->tts_tuple)->t_tableOid = RelationGetRelid(rel);
             } else {
                 ((UHeapTuple)myslot->tts_tuple)->table_oid = RelationGetRelid(rel);
@@ -10232,7 +10232,7 @@ static void BatchInsertCopyLog(LogInsertState copyLogInfo, int nBufferedTuples, 
     return;
 }
 
-static LogInsertState InitInsertCopyLogInfo(CopyState cstate, TableAmType tam)
+static LogInsertState InitInsertCopyLogInfo(CopyState cstate, const TableAmRoutine* tam_ops)
 {
     LogInsertState copyLogInfo = NULL;
     ResultRelInfo *resultRelInfo = NULL;
@@ -10255,7 +10255,7 @@ static LogInsertState InitInsertCopyLogInfo(CopyState cstate, TableAmType tam)
     estate->es_result_relation_info = resultRelInfo;
     copyLogInfo->estate = estate;
 
-    copyLogInfo->myslot = ExecInitExtraTupleSlot(estate, tam);
+    copyLogInfo->myslot = ExecInitExtraTupleSlot(estate, tam_ops);
     ExecSetSlotDescriptor(copyLogInfo->myslot, RelationGetDescr(copyLogInfo->rel));
 
     copyLogInfo->bistate = GetBulkInsertState();
@@ -10297,7 +10297,7 @@ static void LogCopyErrorLogBulk(CopyState cstate)
     /* Reset the offset of the logger. Read from 0. */
     cstate->logger->Reset();
 
-    copyLogInfo = InitInsertCopyLogInfo(cstate, TAM_HEAP);
+    copyLogInfo = InitInsertCopyLogInfo(cstate, TableAmHeap);
     bufferedTuples = (HeapTuple *)palloc0(MAX_TUPLES * sizeof(HeapTuple));
 
     for (;;) {
@@ -10355,7 +10355,7 @@ static void LogCopyUErrorLogBulk(CopyState cstate)
     /* Reset the offset of the logger. Read from 0. */
     cstate->logger->Reset();
 
-    copyLogInfo = InitInsertCopyLogInfo(cstate, TAM_USTORE);
+    copyLogInfo = InitInsertCopyLogInfo(cstate, TableAmUstore);
     bufferedUTuples = (UHeapTuple *)palloc0(MAX_TUPLES * sizeof(UHeapTuple));
 
     for (;;) {

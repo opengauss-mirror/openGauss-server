@@ -1699,7 +1699,7 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
     values = (Datum *)palloc(natts * sizeof(Datum));
     isnull = (bool *)palloc(natts * sizeof(bool));
 
-    slot = MakeSingleTupleTableSlot(oldTupDesc, false, oldTupDesc->tdTableAmType);
+    slot = MakeSingleTupleTableSlot(oldTupDesc, false, GetTableAmRoutine(oldTupDesc->tdTableAmType));
 
     /* Initialize the rewrite operation */
     rwstate = begin_heap_rewrite(oldHeap, newHeap, oldestXmin, freezeXid, useWal);

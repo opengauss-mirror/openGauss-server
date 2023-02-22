@@ -1015,7 +1015,7 @@ static void prepare_projection_slot(AggState* aggstate, TupleTableSlot* slot, in
 
         aggstate->grouped_cols = grouped_cols;
 
-        if (slot->tts_isempty) {
+        if (TTS_EMPTY(slot)) {
             /*
              * Force all values to be NULL if working on an empty input tuple
              * (i.e. an empty grouping set for which no input rows were

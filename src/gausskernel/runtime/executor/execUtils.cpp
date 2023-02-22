@@ -2138,7 +2138,7 @@ bool check_violation(Relation heap, Relation index, IndexInfo *indexInfo, ItemPo
      * to this slot.  Be sure to save and restore caller's value for
      * scantuple.
      */
-    existing_slot = MakeSingleTupleTableSlot(RelationGetDescr(heap), false, heap->rd_tam_type);
+    existing_slot = MakeSingleTupleTableSlot(RelationGetDescr(heap), false, GetTableAmRoutine(heap->rd_tam_type));
     econtext = GetPerTupleExprContext(estate);
     save_scantuple = econtext->ecxt_scantuple;
     econtext->ecxt_scantuple = existing_slot;

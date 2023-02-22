@@ -2061,13 +2061,13 @@ static void ExecInitRecursiveResultTupleSlot(EState* estate, PlanState* planstat
 {
     TupleTableSlot* slot = makeNode(TupleTableSlot);
 
-    slot->tts_isempty = true;
-    slot->tts_shouldFree = false;
-    slot->tts_shouldFreeMin = false;
+    slot->tts_flags |= TTS_FLAG_EMPTY;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREEMIN;
     slot->tts_tuple = NULL;
     slot->tts_tupleDescriptor = NULL;
 #ifdef PGXC
-    slot->tts_shouldFreeRow = false;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREE_ROW;
     slot->tts_dataRow = NULL;
     slot->tts_dataLen = -1;
     slot->tts_attinmeta = NULL;

@@ -19,6 +19,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "nodes/relation.h"
 #include "access/tuptoaster.h"
 #include "access/ustore/knl_utuptoaster.h"
@@ -56,7 +57,7 @@ Oid UHeapGetNewOidWithIndex(Relation relation, Oid indexId, AttrNumber oidcolumn
     ScanKeyData key;
     bool collides = false;
     Assert(RelationIsUstoreFormat(relation) || RelationIsToast(relation));
-    TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(relation), false, relation->rd_tam_type);
+    TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(relation), false, GetTableAmRoutine(relation->rd_tam_type));
     /* Generate new OIDs until we find one not in the table */
     do {
         CHECK_FOR_INTERRUPTS();
@@ -897,7 +898,7 @@ static void UHeapToastDeleteDatum(Relation rel, Datum value, int options)
     /* The toast table of ustore table should also be of ustore type */
     Assert(RelationIsUstoreFormat(toastrel));
     /* should index must be ustore format ? */
-    TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(toastrel), false, toastrel->rd_tam_type);
+    TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(toastrel), false, GetTableAmRoutine(toastrel->rd_tam_type));
 
     /*
      * Setup a scan key to find chunks with matching va_valueid
@@ -960,7 +961,7 @@ struct varlena *UHeapInternalToastFetchDatum(struct varatt_external toastPointer
         SET_VARSIZE(result, ressize + VARHDRSZ);
 
     toastTupDesc = toastrel->rd_att;
-    TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(toastrel), false, toastrel->rd_tam_type);
+    TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(toastrel), false, GetTableAmRoutine(toastrel->rd_tam_type));
 
     /*
      * Setup a scan key to fetch from the index by va_valueid
@@ -1132,7 +1133,7 @@ struct varlena *UHeapInternalToastFetchDatumSlice(struct varatt_external toastPo
      * Open the toast relation and its index
      */
     toastTupDesc = toastrel->rd_att;
-    TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(toastrel), false, toastrel->rd_tam_type);
+    TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(toastrel), false, GetTableAmRoutine(toastrel->rd_tam_type));
 
     /*
      * Setup a scan key to fetch from the index. This is either two keys or
@@ -1267,7 +1268,7 @@ static bool UHeapToastRelValueidExists(Relation toastrel, Oid valueid)
     SysScanDesc toastscan;
     TupleTableSlot *slot = NULL;
     Assert(RelationIsUstoreFormat(toastrel));
-    slot = MakeSingleTupleTableSlot(RelationGetDescr(toastrel), false, toastrel->rd_tam_type);
+    slot = MakeSingleTupleTableSlot(RelationGetDescr(toastrel), false, GetTableAmRoutine(toastrel->rd_tam_type));
 
     /*
      * Setup a scan key to find chunks with matching va_valueid

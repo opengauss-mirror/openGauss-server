@@ -498,25 +498,93 @@ typedef struct TableAmRoutine {
     void (*tcap_insert_lost)(Relation relation, Snapshot snap);
 } TableAmRoutine;
 
+
 extern const TableAmRoutine * const g_tableam_routines[];
 extern void HeapamScanIndexFetchEnd(IndexFetchTableData *scan);
 extern void heapam_index_fetch_reset(IndexFetchTableData *scan);
 extern IndexFetchTableData *HeapamScanIndexFetchBegin(Relation rel);
 
-extern const TableAmRoutine *GetTableAmRoutine(TableAmType type);
-extern void tableam_tslot_clear(TupleTableSlot *slot);
-extern HeapTuple tableam_tslot_materialize(TupleTableSlot *slot);
-extern MinimalTuple tableam_tslot_get_minimal_tuple(TupleTableSlot *slot);
-extern MinimalTuple tableam_tslot_copy_minimal_tuple(TupleTableSlot *slot);
-extern void tableam_tslot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree);
-extern HeapTuple tableam_tslot_get_heap_tuple(TupleTableSlot *slot);
-extern HeapTuple tableam_tslot_copy_heap_tuple(TupleTableSlot *slot);
-extern void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode);
-extern void tableam_tslot_getsomeattrs(TupleTableSlot *slot, int natts);
-extern Datum tableam_tslot_getattr(TupleTableSlot *slot, int attnum, bool *isnull);
-extern void tableam_tslot_getallattrs(TupleTableSlot *slot);
-extern void tableam_tslot_formbatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows,  int natts);
-extern bool tableam_tslot_attisnull(TupleTableSlot *slot, int attnum);
+static inline const TableAmRoutine* GetTableAmRoutine(TableAmType type)
+{
+    Assert(type == TAM_HEAP || type == TAM_USTORE);
+    return type == TAM_HEAP ? TableAmHeap : TableAmUstore;
+}
+
+static inline TableAmType  GetTableAmType(const TableAmRoutine* ops)
+{
+    Assert(ops == TableAmHeap || ops == TableAmUstore);
+    return ops == TableAmHeap ? TAM_HEAP : TAM_USTORE;
+}
+
+/*
+ * Clears the contents of the table slot that contains heap table tuple data.
+ */
+static inline void tableam_tslot_clear(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_clear(slot);
+}
+
+static inline HeapTuple tableam_tslot_materialize(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_materialize(slot);
+}
+
+static inline MinimalTuple tableam_tslot_get_minimal_tuple(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_get_minimal_tuple(slot);
+}
+
+static inline MinimalTuple tableam_tslot_copy_minimal_tuple(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_copy_minimal_tuple(slot);
+}
+
+static inline void tableam_tslot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree)
+{
+    slot->tts_tam_ops->tslot_store_minimal_tuple(mtup, slot, shouldFree);
+}
+
+static inline HeapTuple tableam_tslot_get_heap_tuple(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_get_heap_tuple(slot);
+}
+
+static inline HeapTuple tableam_tslot_copy_heap_tuple(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_copy_heap_tuple(slot);
+}
+
+static inline void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode)
+{
+    Assert(slot->tts_tam_ops == GetTableAmRoutine(TableAmType(GetTabelAmIndexTuple(tuple))));
+    slot->tts_tam_ops->tslot_store_tuple(tuple, slot, buffer, shouldFree, batchMode);
+}
+
+static inline void tableam_tslot_getsomeattrs(TupleTableSlot *slot, int natts)
+{
+    slot->tts_tam_ops->tslot_getsomeattrs(slot, natts);
+}
+
+static inline void tableam_tslot_formbatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows, int natts)
+{
+    slot->tts_tam_ops->tslot_formbatch(slot, batch, cur_rows, natts);
+}
+
+static inline Datum tableam_tslot_getattr(TupleTableSlot *slot, int attnum, bool *isnull)
+{
+    return slot->tts_tam_ops->tslot_getattr(slot, attnum, isnull);
+}
+
+static inline void tableam_tslot_getallattrs(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_getallattrs(slot);
+}
+
+static inline bool tableam_tslot_attisnull(TupleTableSlot *slot, int attnum)
+{
+    return slot->tts_tam_ops->tslot_attisnull(slot, attnum);
+}
+
 extern Tuple tableam_tslot_get_tuple_from_slot(Relation relation, TupleTableSlot *slot);
 extern Datum tableam_tops_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool *isnull,
     Buffer buf = InvalidBuffer);

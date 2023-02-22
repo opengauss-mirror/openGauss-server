@@ -9096,8 +9096,8 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
          * tuples are the same, the tupDescs might not be (consider ADD COLUMN
          * without a default).
          */
-        oldslot = MakeSingleTupleTableSlot(oldTupDesc, false, oldrel->rd_tam_type);
-        newslot = MakeSingleTupleTableSlot(newTupDesc, false, oldrel->rd_tam_type);
+        oldslot = MakeSingleTupleTableSlot(oldTupDesc, false, GetTableAmRoutine(oldrel->rd_tam_type));
+        newslot = MakeSingleTupleTableSlot(newTupDesc, false, GetTableAmRoutine(oldrel->rd_tam_type));
 
         /* Preallocate values/isnull arrays */
         i = Max(newTupDesc->natts, oldTupDesc->natts);
@@ -9258,7 +9258,7 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
                  * will not try to clear it after we reset the context. Note that we don't explicitly pfree its
                  * tuple since the per-tuple memory context will be reset shortly.
                  */
-                oldslot->tts_shouldFree = false;
+                oldslot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
 
                 UHeapTuple backUpTup = BackUpScanCuTup(((UHeapScanDesc) scan)->rs_cutup);
                 ResetExprContext(econtext);
@@ -12879,7 +12879,7 @@ static void validateCheckConstraint(Relation rel, HeapTuple constrtup)
     List* exprstate = (List*)ExecPrepareExpr((Expr*)make_ands_implicit(origexpr), estate);
     ExprContext* econtext = GetPerTupleExprContext(estate);
     TupleDesc tupdesc = RelationGetDescr(rel);
-    TupleTableSlot* slot = MakeSingleTupleTableSlot(tupdesc, false, rel->rd_tam_type);
+    TupleTableSlot* slot = MakeSingleTupleTableSlot(tupdesc, false, GetTableAmRoutine(rel->rd_tam_type));
 
     econtext->ecxt_scantuple = slot;
 

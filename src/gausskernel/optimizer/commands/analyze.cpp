@@ -2571,7 +2571,7 @@ retry:
             }
 
             /* TO DO: Need to switch this to inplaceheapam_scan_analyze_next_block after we have tableam. */
-            TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(onerel), false, onerel->rd_tam_type);
+            TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(onerel), false, GetTableAmRoutine(onerel->rd_tam_type));
             maxoffset = UHeapPageGetMaxOffsetNumber(targpage);
 
             /* Inner loop over all tuples on the selected page */

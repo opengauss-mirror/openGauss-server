@@ -267,7 +267,7 @@ VecToRowState* ExecInitVecToRow(VecToRow* node, EState* estate, int eflags)
     state->tts = state->ps.ps_ResultTupleSlot;
     (void)ExecClearTuple(state->tts);
     state->tts->tts_nvalid = state->nattrs;
-    state->tts->tts_isempty = false;
+    state->tts->tts_flags &= ~TTS_FLAG_EMPTY;
     state->devectorizeFunRuntime = (DevectorizeFun*)palloc0(state->nattrs * sizeof(DevectorizeFun));
     for (int i = 0; i < state->nattrs; i++) {
         state->tts->tts_isnull[i] = false;

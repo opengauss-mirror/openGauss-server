@@ -1220,7 +1220,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
         } else
 #endif
             if (useHeapMultiInsert) {
-                TupleTableSlot* tmp_slot = MakeSingleTupleTableSlot(slot->tts_tupleDescriptor, false, result_relation_desc->rd_tam_type);
+                TupleTableSlot* tmp_slot = MakeSingleTupleTableSlot(slot->tts_tupleDescriptor, false, GetTableAmRoutine(result_relation_desc->rd_tam_type));
 
                 bool is_partition_rel = result_relation_desc->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION;
                 Oid targetOid = InvalidOid;
@@ -1694,7 +1694,7 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
             return NULL;
         }
 
-        if (slot->tts_isempty) {
+        if (TTS_EMPTY(slot)) {
             (void)ExecStoreAllNullTuple(slot);
         }
     } else {
@@ -1939,9 +1939,9 @@ end:;
                 if (slot->tts_tupleDescriptor != RelationGetDescr(result_relation_desc)) {
                     ExecSetSlotDescriptor(slot, RelationGetDescr(result_relation_desc));
                 }
-                slot->tts_tupslotTableAm =  result_relation_desc->rd_tam_type;
+                slot->tts_tam_ops = GetTableAmRoutine(result_relation_desc->rd_tam_type);
                 if (oldtuple != NULL) {
-                    Assert(slot->tts_tupslotTableAm != TAM_USTORE);
+                    Assert(!TTS_TABLEAM_IS_USTORE(slot));
                     del_tuple.t_data = oldtuple;
                     del_tuple.t_len = HeapTupleHeaderGetDatumLength(oldtuple);
                     ItemPointerSetInvalid(&(del_tuple.t_self));
@@ -4112,7 +4112,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
 
         /* initialize slot for the existing tuple */
         upsertState->us_existing =
-            ExecInitExtraTupleSlot(mt_state->ps.state, result_rel_info->ri_RelationDesc->rd_tam_type);
+            ExecInitExtraTupleSlot(mt_state->ps.state, GetTableAmRoutine(result_rel_info->ri_RelationDesc->rd_tam_type));
         ExecSetSlotDescriptor(upsertState->us_existing, result_rel_info->ri_RelationDesc->rd_att);
 
         upsertState->us_excludedtlist = node->exclRelTlist;
@@ -4120,7 +4120,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         /* create target slot for UPDATE SET projection */
         tupDesc = ExecTypeFromTL((List*)node->updateTlist, result_rel_info->ri_RelationDesc->rd_rel->relhasoids);
         upsertState->us_updateproj =
-            ExecInitExtraTupleSlot(mt_state->ps.state, result_rel_info->ri_RelationDesc->rd_tam_type);
+            ExecInitExtraTupleSlot(mt_state->ps.state, GetTableAmRoutine(result_rel_info->ri_RelationDesc->rd_tam_type));
         ExecSetSlotDescriptor(upsertState->us_updateproj, tupDesc);
 
         /* build UPDATE SET expression and projection state */
@@ -4274,7 +4274,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
      */
     if (estate->es_trig_tuple_slot == NULL) {
         result_rel_info = mt_state->resultRelInfo;
-        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_type);
+        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, GetTableAmRoutine(result_rel_info->ri_RelationDesc->rd_tam_type));
     }
 
     /*

@@ -47,7 +47,7 @@ void SelectForUpdateFusion::InitLocals(ParamListInfo params)
 {
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
     if (m_global->m_table_type == TAM_USTORE) {
-        m_local.m_reslot->tts_tupslotTableAm = TAM_USTORE;
+        m_local.m_reslot->tts_tam_ops = TableAmUstore;
     }
     m_c_local.m_estate = CreateExecutorState();
     m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;

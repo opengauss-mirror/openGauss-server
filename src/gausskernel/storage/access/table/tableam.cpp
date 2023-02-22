@@ -56,81 +56,6 @@
  * ------------------------------------------------------------------------
  */
 
-
-const TableAmRoutine *GetTableAmRoutine(TableAmType type)
-{
-    return g_tableam_routines[type];
-}
-
-/*
- * Clears the contents of the table slot that contains heap table tuple data.
- */
-void tableam_tslot_clear(TupleTableSlot *slot)
-{
-    return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_clear(slot);
-}
-
-HeapTuple tableam_tslot_materialize(TupleTableSlot *slot)
-{
-    return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_materialize(slot);
-}
-
-MinimalTuple tableam_tslot_get_minimal_tuple(TupleTableSlot *slot)
-{
-    return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_get_minimal_tuple(slot);
-}
-
-
-MinimalTuple tableam_tslot_copy_minimal_tuple(TupleTableSlot *slot)
-{
-    return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_copy_minimal_tuple(slot);
-}
-
-void tableam_tslot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree)
-{
-    g_tableam_routines[slot->tts_tupslotTableAm]->tslot_store_minimal_tuple(mtup, slot, shouldFree);
-}
-
-HeapTuple tableam_tslot_get_heap_tuple(TupleTableSlot *slot)
-{
-    return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_get_heap_tuple(slot);
-}
-
-HeapTuple tableam_tslot_copy_heap_tuple(TupleTableSlot *slot)
-{
-    return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_copy_heap_tuple(slot);
-}
-
-void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode)
-{
-    g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tslot_store_tuple(tuple, slot, buffer, shouldFree, batchMode);
-}
-
-void tableam_tslot_getsomeattrs(TupleTableSlot *slot, int natts)
-{
-    g_tableam_routines[slot->tts_tupslotTableAm]->tslot_getsomeattrs(slot, natts);
-}
-
-void tableam_tslot_formbatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows, int natts)
-{
-    g_tableam_routines[slot->tts_tupslotTableAm]->tslot_formbatch(slot, batch, cur_rows, natts);
-}
-
-Datum tableam_tslot_getattr(TupleTableSlot *slot, int attnum, bool *isnull)
-{
-    return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_getattr(slot, attnum, isnull);
-}
-
-void tableam_tslot_getallattrs(TupleTableSlot *slot)
-{
-    return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_getallattrs(slot);
-}
-
-bool tableam_tslot_attisnull(TupleTableSlot *slot, int attnum)
-{
-    return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_attisnull(slot, attnum);
-}
-
 Tuple tableam_tslot_get_tuple_from_slot(Relation relation, TupleTableSlot *slot)
 {
     slot->tts_tupleDescriptor->tdhasuids = RELATION_HAS_UIDS(relation);
@@ -1041,7 +966,7 @@ void HeapamTcapInsertLost(Relation relation, Snapshot snap)
     TvInsertLost(RelationGetRelid(relation), snap);
 }
 
-const TableAmRoutine g_heapam_methods = {
+static const TableAmRoutine g_heapam_methods = {
     /* ------------------------------------------------------------------------
      * TABLE SLOT AM APIs
      * ------------------------------------------------------------------------
@@ -1233,11 +1158,11 @@ bool UHeapamTslotAttisnull(TupleTableSlot *slot, int attnum)
 Tuple uheapam_tslot_get_tuple_from_slot(TupleTableSlot* slot)
 {
     UHeapTuple utuple = NULL;
-    if (slot->tts_tupslotTableAm != TAM_USTORE) {
+    if (!TTS_TABLEAM_IS_USTORE(slot)) {
         tableam_tslot_getallattrs(slot); // here has some main difference.
         utuple = (UHeapTuple)tableam_tops_form_tuple(slot->tts_tupleDescriptor, slot->tts_values, slot->tts_isnull,
             UHEAP_TUPLE);
-        slot->tts_tupslotTableAm = TAM_USTORE;
+        slot->tts_tam_ops = TableAmUstore;
         utuple->tupInfo = 1;
         ExecStoreTuple((Tuple)utuple, slot, InvalidBuffer, true);
     } else {
@@ -1417,7 +1342,7 @@ void UHeapamTopsUpdateTupleWithOid (Relation rel, Tuple tuple, TupleTableSlot *s
     if (RelationGetRelid(rel) != InvalidOid)
         ((UHeapTuple)tuple)->table_oid = RelationGetRelid(rel);
 
-    if (slot->tts_tupslotTableAm != TAM_USTORE) {
+    if (!TTS_TABLEAM_IS_USTORE(slot)) {
         /*
             * Global Partition Index stores the partition's tableOid with the index
             * tuple which is extracted from heap tuple of the slot in this case.
@@ -1742,7 +1667,7 @@ void UheapamTcapInsertLost(Relation relation, Snapshot snap)
 
 /* All the function is pointer to heap function now, need to abstract the logic and replace with ustore function
  * after. */
-const TableAmRoutine g_ustoream_methods = {
+static const TableAmRoutine g_ustoream_methods = {
 
     // XXXTAM: Currently heapam* methods are hacked to deal with uheap table methods.
     // separate them out into uheapam* and assign them below to the right am function pointer.
@@ -1861,3 +1786,6 @@ const TableAmRoutine * const g_tableam_routines[] = {
     &g_heapam_methods,
     &g_ustoream_methods
 };
+
+const TableAmRoutine* TableAmHeap = &g_heapam_methods;
+const TableAmRoutine* TableAmUstore = &g_ustoream_methods;

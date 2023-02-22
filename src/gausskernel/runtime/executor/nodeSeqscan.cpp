@@ -210,7 +210,7 @@ void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDi
     if (tuple != NULL) {
          Assert(slot != NULL);
          Assert(slot->tts_tupleDescriptor != NULL);
-         slot->tts_tupslotTableAm = type;
+         slot->tts_tam_ops = GetTableAmRoutine(type);
          if (type == TAM_USTORE) {
              UHeapSlotStoreUHeapTuple((UHeapTuple)tuple, slot, false, false);
          } else {
@@ -347,7 +347,7 @@ static ScanBatchResult *SeqNextBatchMode(SeqScanState *node)
     scanDesc->rs_maxScanRows = node->scanBatchState->scanTupleSlotMaxNum;
     node->scanBatchState->scanfinished = tableam_scan_gettuplebatchmode(scanDesc, direction);
 
-    if (slot[0]->tts_tupslotTableAm == TAM_USTORE) {
+    if (TTS_TABLEAM_IS_USTORE(slot[0])) {
         ExecStoreTupleBatchMode<TAM_USTORE>(scanDesc, slot);
     } else {
         ExecStoreTupleBatchMode<TAM_HEAP>(scanDesc, slot);
@@ -554,8 +554,8 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &node->ps, current_relation->rd_tam_type);
-    ExecInitScanTupleSlot(estate, node, current_relation->rd_tam_type);
+    ExecInitResultTupleSlot(estate, &node->ps, GetTableAmRoutine(current_relation->rd_tam_type));
+    ExecInitScanTupleSlot(estate, node, GetTableAmRoutine(current_relation->rd_tam_type));
 
     if (((Scan*)node->ps.plan)->tablesample && node->sampleScanInfo.tsm_state == NULL) {
         if (isUstoreRel) {
@@ -755,7 +755,7 @@ static SeqScanState *ExecInitSeqScanBatchMode(SeqScan *node, SeqScanState* scans
             (TupleTableSlot**)palloc(sizeof(TupleTableSlot*) * BatchMaxSize);
         for (i = 0; i < BatchMaxSize; i++) {
             TupleTableSlot* slot = ExecAllocTableSlot(&estate->es_tupleTable,
-                                                      scanstate->ss_currentRelation->rd_tam_type);
+                                                      GetTableAmRoutine(scanstate->ss_currentRelation->rd_tam_type));
             ExecSetSlotDescriptor(slot, scanstate->ss_ScanTupleSlot->tts_tupleDescriptor);
             scanBatchState->scanBatch.scanTupleSlotInBatch[i] = slot;
         }

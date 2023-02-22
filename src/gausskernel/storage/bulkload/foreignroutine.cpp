@@ -1612,7 +1612,7 @@ retry:
         /*
          * Optimize foreign scan by using informational constraint.
          */
-        if (((ForeignScan *)node->ss.ps.plan)->scan.predicate_pushdown_optimized && false == slot->tts_isempty) {
+        if (((ForeignScan *)node->ss.ps.plan)->scan.predicate_pushdown_optimized && !TTS_EMPTY(slot)) {
             /*
              * If we find a suitable tuple, set is_scan_end value is true.
              * It means that we do not find suitable tuple in the next iteration,

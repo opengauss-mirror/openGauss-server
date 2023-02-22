@@ -338,7 +338,7 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
                             false, false, u_sess->attr.attr_memory.work_mem);
 
     /* create the working TupleTableslot */
-    state->sw_workingSlot = ExecAllocTableSlot(&estate->es_tupleTable, TAM_HEAP);
+    state->sw_workingSlot = ExecAllocTableSlot(&estate->es_tupleTable, TableAmHeap);
     ExecSetSlotDescriptor(state->sw_workingSlot, ExecTypeFromTL(targetlist, false));
 
     int natts = list_length(node->plan.targetlist);

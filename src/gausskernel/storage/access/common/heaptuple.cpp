@@ -1157,7 +1157,7 @@ static void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
     } else {
         /* Restore state from previous execution */
         off = slot->tts_off;
-        slow = slot->tts_slow;
+        slow = TTS_SLOW(slot);
     }
 
     /*
@@ -1196,7 +1196,10 @@ static void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
      */
     slot->tts_nvalid = attnum;
     slot->tts_off = off;
-    slot->tts_slow = slow;
+    if (slow)
+        slot->tts_flags |= TTS_FLAG_SLOW;
+    else
+        slot->tts_flags &= ~TTS_FLAG_SLOW;
 }
 
 
@@ -1440,7 +1443,7 @@ Datum heap_slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool nee
     /* sanity checks */
     Assert(slot != NULL);
     Assert(slot->tts_tupleDescriptor != NULL);
-    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+    Assert(TTS_TABLEAM_IS_HEAP(slot));
 
     HeapTuple tuple = (HeapTuple)slot->tts_tuple;
     TupleDesc tupleDesc = slot->tts_tupleDescriptor;
@@ -1560,7 +1563,7 @@ Datum heap_slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool nee
  */
 void heap_slot_getallattrs(TupleTableSlot *slot, bool need_transform_anyarray)
 {
-    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+    Assert(TTS_TABLEAM_IS_HEAP(slot));
 
     int tdesc_natts = slot->tts_tupleDescriptor->natts;
     int attnum;
@@ -1671,7 +1674,7 @@ void heap_slot_formbatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows,
  */
 void heap_slot_getsomeattrs(TupleTableSlot *slot, int attnum)
 {
-    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+    Assert(TTS_TABLEAM_IS_HEAP(slot));
 
     /* Quick out if we have 'em all already */
     if (slot->tts_nvalid >= attnum) {
@@ -1715,7 +1718,7 @@ bool heap_slot_attisnull(TupleTableSlot *slot, int attnum)
     HeapTuple tuple = (HeapTuple)slot->tts_tuple;
     TupleDesc tupleDesc = slot->tts_tupleDescriptor;
 
-    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+    Assert(TTS_TABLEAM_IS_HEAP(slot));
 
     /*
      * system attributes are handled by heap_attisnull
@@ -2984,7 +2987,7 @@ static void slot_deform_cmprs_tuple(TupleTableSlot *slot, uint32 natts)
     slot->tts_nvalid = attnum;
     slot->tts_off = off;
     slot->tts_meta_off = cmprsOff;
-    slot->tts_slow = true;
+    slot->tts_flags |= TTS_FLAG_SLOW;
 }
 
 /*
@@ -2996,20 +2999,20 @@ void heap_slot_clear(TupleTableSlot *slot)
      * sanity checks
      */
     Assert(slot != NULL);
-    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+    Assert(TTS_TABLEAM_IS_HEAP(slot));
 
     /*
      * Free any old physical tuple belonging to the slot.
      */
-    if (slot->tts_shouldFree) {
+    if (TTS_SHOULDFREE(slot)) {
         heap_freetuple((HeapTuple)slot->tts_tuple);
         slot->tts_tuple = NULL;
-        slot->tts_shouldFree = false;
+        slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
     }
 
-    if (slot->tts_shouldFreeMin) {
+    if (TTS_SHOULDFREEMIN(slot)) {
         heap_free_minimal_tuple(slot->tts_mintuple);
-        slot->tts_shouldFreeMin = false;
+        slot->tts_flags &= ~TTS_FLAG_SHOULDFREEMIN;
     }
 }
 
@@ -3025,14 +3028,14 @@ void heap_slot_materialize(TupleTableSlot *slot)
      * sanity checks
      */
     Assert(slot != NULL);
-    Assert(!slot->tts_isempty);
+    Assert(!TTS_EMPTY(slot));
     Assert(slot->tts_tupleDescriptor != NULL);
 
     /*
      * If we have a regular physical tuple, and it's locally palloc'd, we have
      * nothing to do.
      */
-    if (slot->tts_tuple && slot->tts_shouldFree && !HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)slot->tts_tuple)->t_data))
+    if (slot->tts_tuple && TTS_SHOULDFREE(slot) && !HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)slot->tts_tuple)->t_data))
         return ;
 
     /*
@@ -3044,7 +3047,7 @@ void heap_slot_materialize(TupleTableSlot *slot)
      */
     MemoryContext old_context = MemoryContextSwitchTo(slot->tts_mcxt);
     slot->tts_tuple = heap_slot_copy_heap_tuple(slot);
-    slot->tts_shouldFree = true;
+    slot->tts_flags |= TTS_FLAG_SHOULDFREE;
     MemoryContextSwitchTo(old_context);
 
     /*
@@ -3071,11 +3074,11 @@ void heap_slot_materialize(TupleTableSlot *slot)
      * storage, we must not pfree it now, since callers might have already
      * fetched datum pointers referencing it.)
      */
-    if (!slot->tts_shouldFreeMin) {
+    if (!TTS_SHOULDFREEMIN(slot)) {
         slot->tts_mintuple = NULL;
     }
 #ifdef PGXC
-    if (!slot->tts_shouldFreeRow) {
+    if (!TTS_SHOULDFREE_ROW(slot)) {
         slot->tts_dataRow = NULL;
         slot->tts_dataLen = -1;
     }
@@ -3097,8 +3100,8 @@ MinimalTuple heap_slot_get_minimal_tuple(TupleTableSlot *slot) {
      * sanity checks
      */
     Assert(slot != NULL);
-    Assert(!slot->tts_isempty);
-    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+    Assert(!TTS_EMPTY(slot));
+    Assert(TTS_TABLEAM_IS_HEAP(slot));
 
     /*
      * If we have a minimal physical tuple (local or not) then just return it.
@@ -3115,7 +3118,7 @@ MinimalTuple heap_slot_get_minimal_tuple(TupleTableSlot *slot) {
      */
     MemoryContext old_context = MemoryContextSwitchTo(slot->tts_mcxt);
     slot->tts_mintuple = heap_slot_copy_minimal_tuple(slot);
-    slot->tts_shouldFreeMin = true;
+    slot->tts_flags |= TTS_FLAG_SHOULDFREEMIN;
     MemoryContextSwitchTo(old_context);
 
     /*
@@ -3144,9 +3147,9 @@ MinimalTuple heap_slot_copy_minimal_tuple(TupleTableSlot *slot)
      * sanity checks.
      */
     Assert(slot != NULL);
-    Assert(!slot->tts_isempty);
+    Assert(!TTS_EMPTY(slot));
     Assert(slot->tts_tupleDescriptor != NULL);
-    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+    Assert(TTS_TABLEAM_IS_HEAP(slot));
 
     /*
      * If we have a physical tuple then just copy it.  Prefer to copy
@@ -3193,24 +3196,24 @@ void heap_slot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool
     Assert(mtup != NULL);
     Assert(slot != NULL);
     Assert(slot->tts_tupleDescriptor != NULL);
-    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+    Assert(TTS_TABLEAM_IS_HEAP(slot));
 
     /*
      * Free any old physical tuple belonging to the slot.
      */
-    if (slot->tts_shouldFree && (HeapTuple)slot->tts_tuple != NULL) {
+    if (TTS_SHOULDFREE(slot) && (HeapTuple)slot->tts_tuple != NULL) {
         heap_freetuple((HeapTuple)slot->tts_tuple);
         slot->tts_tuple = NULL;
     }
-    if (slot->tts_shouldFreeMin) {
+    if (TTS_SHOULDFREEMIN(slot)) {
         heap_free_minimal_tuple(slot->tts_mintuple);
     }
 
 #ifdef PGXC
-if (slot->tts_shouldFreeRow) {
+if (TTS_SHOULDFREE_ROW(slot)) {
     pfree_ext(slot->tts_dataRow);
 }
-slot->tts_shouldFreeRow = false;
+slot->tts_flags &= ~TTS_FLAG_SHOULDFREE_ROW;
 slot->tts_dataRow = NULL;
 slot->tts_dataLen = -1;
 #endif
@@ -3226,9 +3229,12 @@ slot->tts_buffer = InvalidBuffer;
     /*
      * Store the new tuple into the specified slot.
      */
-    slot->tts_isempty = false;
-    slot->tts_shouldFree = false;
-    slot->tts_shouldFreeMin = shouldFree;
+    slot->tts_flags &= ~TTS_FLAG_EMPTY;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
+    if (shouldFree)
+        slot->tts_flags |= TTS_FLAG_SHOULDFREEMIN;
+    else
+        slot->tts_flags &= ~TTS_FLAG_SHOULDFREEMIN;
     slot->tts_tuple = &slot->tts_minhdr;
     slot->tts_mintuple = mtup;
 
@@ -3255,7 +3261,7 @@ HeapTuple heap_slot_get_heap_tuple(TupleTableSlot* slot)
      * sanity checks
      */
     Assert(slot != NULL);
-    Assert(!slot->tts_isempty);
+    Assert(!TTS_EMPTY(slot));
     Assert(slot->tts_tupleDescriptor != NULL);
 
     /*
@@ -3289,7 +3295,7 @@ HeapTuple heap_slot_copy_heap_tuple(TupleTableSlot *slot)
      * sanity checks
      */
     Assert(slot != NULL);
-    Assert(!slot->tts_isempty);
+    Assert(!TTS_EMPTY(slot));
     Assert(slot->tts_tupleDescriptor != NULL);
 
     /*
@@ -3340,19 +3346,19 @@ void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer bu
     /*
      * Free any old physical tuple belonging to the slot.
      */
-    if (slot->tts_shouldFree && (HeapTuple)slot->tts_tuple != NULL) {
+    if (TTS_SHOULDFREE(slot) && (HeapTuple)slot->tts_tuple != NULL) {
         heap_freetuple((HeapTuple)slot->tts_tuple);
         slot->tts_tuple = NULL;
     }
-    if (slot->tts_shouldFreeMin) {
+    if (TTS_SHOULDFREEMIN(slot)) {
         heap_free_minimal_tuple(slot->tts_mintuple);
     }
 #ifdef ENABLE_MULTIPLE_NODES
 #ifdef PGXC
-    if (slot->tts_shouldFreeRow) {
+    if (TTS_SHOULDFREE_ROW(slot)) {
         pfree_ext(slot->tts_dataRow);
     }
-    slot->tts_shouldFreeRow = false;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREE_ROW;
     slot->tts_dataRow = NULL;
     slot->tts_dataLen = -1;
 
@@ -3371,9 +3377,12 @@ void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer bu
     /*
      * Store the new tuple into the specified slot.
      */
-    slot->tts_isempty = false;
-    slot->tts_shouldFree = should_free;
-    slot->tts_shouldFreeMin = false;
+    slot->tts_flags &= ~TTS_FLAG_EMPTY;
+    if (should_free)
+        slot->tts_flags |= TTS_FLAG_SHOULDFREE;
+    else
+        slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREEMIN;
     slot->tts_tuple = tuple;
     slot->tts_mintuple = NULL;
 

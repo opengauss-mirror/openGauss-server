@@ -3432,7 +3432,7 @@ static bool RecompilePlanIfNeeded(
 
 static void PrintResultSlot(TupleTableSlot* resultSlot)
 {
-    if (resultSlot->tts_isempty) {
+    if (TTS_EMPTY(resultSlot)) {
         MOT_LOG_DEBUG("Query result is empty");
     } else {
         MOT_LOG_BEGIN(MOT::LogLevel::LL_DEBUG, "Query result slot:");
@@ -3861,7 +3861,7 @@ int JitExecSubQuery(int subQueryId, int tcount)
                     if (slot == subQueryExecState->m_resultSlot) {
                         // we need to copy slot if there is a minimal tuple or SPI push was called and the tuple is not
                         // empty
-                        if ((slot->tts_mintuple != nullptr) || (isSpiPushed && !slot->tts_isempty)) {
+                        if ((slot->tts_mintuple != nullptr) || (isSpiPushed && !TTS_EMPTY(slot))) {
                             CopyTupleTableSlot(subQueryExecState, subQueryExecState->m_resultSlot);
                         }
                     }

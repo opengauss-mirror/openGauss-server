@@ -2647,7 +2647,7 @@ typedef struct GroupingIdExprState {
         }                                                       \
     } while (0)
 
-extern TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot* slot, TableAmType tableAm);
+extern TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot* slot, const TableAmRoutine* tam_ops);
 
 /*
  * When the global partition index is used for bitmap scanning,

@@ -808,7 +808,7 @@ static void TvUheapInsertLostImpl(Relation rel, Relation partRel, Partition p,
 
     Relation relRel = (partRel != NULL) ? partRel : rel;
     /* Set up a tuple slot too */
-    myslot = ExecInitExtraTupleSlot(estate, TAM_USTORE);
+    myslot = ExecInitExtraTupleSlot(estate, TableAmUstore);
     ExecSetSlotDescriptor(myslot, RelationGetDescr(relRel));
 
     /* Switch into its memory context */
