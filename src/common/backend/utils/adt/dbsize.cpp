@@ -263,7 +263,7 @@ static double calculate_coltable_compress_ratio(Relation onerel)
     CStoreScanDesc cstoreScanDesc = NULL;
     TupleDesc tupdesc = onerel->rd_att;
     int attrNum = tupdesc->natts;
-    Form_pg_attribute* attrs = tupdesc->attrs;
+    FormData_pg_attribute* attrs = tupdesc->attrs;
     CUDesc cuDesc;
     CU* cuPtr = NULL;
     double total_source_size = 0;
@@ -278,7 +278,7 @@ static double calculate_coltable_compress_ratio(Relation onerel)
     double numericDataSize = 0;
 
     for (int i = 0; i < attrNum; i++) {
-        colIdx[i] = attrs[i]->attnum;
+        colIdx[i] = attrs[i].attnum;
         slotIdList[i] = CACHE_BLOCK_INVALID_IDX;
     }
 
@@ -296,13 +296,13 @@ static double calculate_coltable_compress_ratio(Relation onerel)
     /*sample the first CU of each column, and calculate the compression ratio of this table.*/
     for (int col = 0; col < attrNum; col++) {
         // skip dropped column
-        if (attrs[col]->attisdropped) {
+        if (attrs[col].attisdropped) {
             continue;
         }
 
         bool found = cstore->GetCUDesc(col, targetblock, &cuDesc, SnapshotNow);
         if (found && cuDesc.cu_size != 0) {
-            cuPtr = cstore->GetCUData(&cuDesc, col, attrs[col]->attlen, slotIdList[col]);
+            cuPtr = cstore->GetCUData(&cuDesc, col, attrs[col].attlen, slotIdList[col]);
             if ((cuPtr->m_infoMode & CU_IntLikeCompressed) && ATT_IS_NUMERIC_TYPE(cuPtr->m_atttypid)) {
                 numericExpandRatio = 1.5; /* default expand ratio */
                 numericDataSize = 0;
@@ -810,8 +810,8 @@ int64 CalculateCStoreRelationSize(Relation rel, ForkNumber forknum)
          */
         for (int i = 0; i < RelationGetDescr(rel)->natts; i++) {
             totalsize += calculate_relation_size(
-                &rel->rd_node, rel->rd_backend, ColumnId2ColForkNum(rel->rd_att->attrs[i]->attnum));
-            CFileNode tmpNode(rel->rd_node, rel->rd_att->attrs[i]->attnum, MAIN_FORKNUM);
+                &rel->rd_node, rel->rd_backend, ColumnId2ColForkNum(rel->rd_att->attrs[i].attnum));
+            CFileNode tmpNode(rel->rd_node, rel->rd_att->attrs[i].attnum, MAIN_FORKNUM);
             CUStorage custore(tmpNode);
             for (segcount = 0;; segcount++) {
                 struct stat fst;

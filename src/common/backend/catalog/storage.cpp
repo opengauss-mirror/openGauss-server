@@ -333,11 +333,11 @@ static void CStoreRelDropStorage(Relation rel, RelFileNode* rnode, Oid ownerid)
 
     TupleDesc desc = RelationGetDescr(rel);
     int nattrs = desc->natts;
-    Form_pg_attribute* attrs = desc->attrs;
+    FormData_pg_attribute* attrs = desc->attrs;
 
     /* add all the cu files to the list of stuff to delete at commit */
     for (int i = 0; i < nattrs; ++i) {
-        InsertStorageIntoPendingList(rnode, attrs[i]->attnum, rel->rd_backend, ownerid, true);
+        InsertStorageIntoPendingList(rnode, attrs[i].attnum, rel->rd_backend, ownerid, true);
     }
 }
 

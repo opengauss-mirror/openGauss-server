@@ -106,8 +106,8 @@ static void GetDistribColsTzFlag(DistributeBy *distributeby, TupleDesc desc, boo
         colname = strVal(lfirst(cell));
         isTimestampTz[i] = false;
         for (int j = 0; j < desc->natts; j++) {
-            if (desc->attrs[j]->atttypid == TIMESTAMPTZOID &&
-                strcmp(colname, desc->attrs[j]->attname.data) == 0) {
+            if (desc->attrs[j].atttypid == TIMESTAMPTZOID &&
+                strcmp(colname, desc->attrs[j].attname.data) == 0) {
                 isTimestampTz[i] = true;
                 break;
             }

@@ -489,7 +489,7 @@ Datum pg_pool_validate(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* construct a tuple descriptor for the result row. */
-        tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(2, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "pid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "node_name", TEXTOID, -1, 0);
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);

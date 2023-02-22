@@ -859,7 +859,7 @@ Datum pg_get_keywords(PG_FUNCTION_ARGS)
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(3, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "word", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "catcode", CHAROID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "catdesc", TEXTOID, -1, 0);

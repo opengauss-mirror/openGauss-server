@@ -88,7 +88,7 @@ void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool 
         Datum origval;      /* possibly toasted Datum */
         bool isnull = true; /* column is null? */
 
-        attr = tupdesc->attrs[natt];
+        attr = &tupdesc->attrs[natt];
 
         if (attr->attisdropped || attr->attnum < 0)
             continue;
@@ -293,7 +293,7 @@ static void TupleToJsoninfo(
 
     /* print all columns individually */
     for (int natt = 0; natt < tupdesc->natts; natt++) {
-        Form_pg_attribute attr = tupdesc->attrs[natt]; /* the attribute itself */
+        Form_pg_attribute attr = &tupdesc->attrs[natt]; /* the attribute itself */
         if (attr->attisdropped || attr->attnum < 0) {
             continue;
         }
@@ -489,7 +489,7 @@ static void AppendTuple(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool s
     uint16 attrNum = 0;
     pq_sendint16(s, (uint16)(tupdesc->natts));
     for (int natt = 0; natt < tupdesc->natts; natt++) {
-        Form_pg_attribute attr = tupdesc->attrs[natt];
+        Form_pg_attribute attr = &tupdesc->attrs[natt];
         if (attr->attisdropped || attr->attnum < 0) {
             continue;
         }

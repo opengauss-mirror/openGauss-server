@@ -233,7 +233,7 @@ int user_hash_attrno(const TupleDesc rd_att)
     int hash_natt = -1;
     Form_pg_attribute rel_attr = NULL;
     for (int i = rd_att->natts - 1; i >= 0; i--) {
-        rel_attr = rd_att->attrs[i];
+        rel_attr = &rd_att->attrs[i];
         if (strcmp(rel_attr->attname.data, "hash") == 0) {
             hash_natt = i;
             break;
@@ -263,7 +263,7 @@ static void hash_combine_tuple_data(char *buf, int buf_size, TupleDesc tabledesc
             continue;
         }
 
-        uint64 col_hash = compute_hash(tabledesc->attrs[i]->atttypid, values[i], LOCATOR_TYPE_HASH);
+        uint64 col_hash = compute_hash(tabledesc->attrs[i].atttypid, values[i], LOCATOR_TYPE_HASH);
         rc = snprintf_s(hash_str, UINT64STRSIZE + 1, UINT64STRSIZE, "%lu", col_hash);
         securec_check_ss(rc, "", "");
         rc = snprintf_s(buf + buflen, buf_size - buflen, buf_size - buflen - 1, "%s", hash_str);

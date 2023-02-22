@@ -190,11 +190,11 @@ SonicHash::SonicHash(int size) : m_hash(0), m_atomSize(size), m_rows(0), m_selec
 void SonicHash::initHashFunc(TupleDesc desc, void* hash_fun_in, uint16* key_indx, bool is_atom)
 {
     int i;
-    Form_pg_attribute* attrs = desc->attrs;
+    FormData_pg_attribute* attrs = desc->attrs;
     hashValFun* hashfun = (hashValFun*)hash_fun_in;
 
     for (i = 0; i < m_buildOp.keyNum; i++) {
-        Oid type_oid = attrs[key_indx[i]]->atttypid;
+        Oid type_oid = attrs[key_indx[i]].atttypid;
         if (i == 0) {
             if (!integerType(type_oid)) {
                 switch (type_oid) {
@@ -216,7 +216,7 @@ void SonicHash::initHashFunc(TupleDesc desc, void* hash_fun_in, uint16* key_indx
                         break;
                     default:
                         if (is_atom) {
-                            switch (attrs[key_indx[i]]->attlen) {
+                            switch (attrs[key_indx[i]].attlen) {
                                 case 1:
                                     hashfun[i] = &SonicHash::hashGeneralFunc<false, uint8, uint8>;
                                     break;
@@ -238,7 +238,7 @@ void SonicHash::initHashFunc(TupleDesc desc, void* hash_fun_in, uint16* key_indx
                         break;
                 }
             } else {
-                switch (attrs[key_indx[i]]->attlen) {
+                switch (attrs[key_indx[i]].attlen) {
                     case 1:
                         if (is_atom)
                             hashfun[i] = &SonicHash::hashInteger<false, uint8, uint8>;
@@ -267,12 +267,12 @@ void SonicHash::initHashFunc(TupleDesc desc, void* hash_fun_in, uint16* key_indx
                                 errcode(ERRCODE_WRONG_OBJECT_TYPE),
                                 errmsg("[SonicHash] Unrecognized datetype %u, attrlen %d when init hash functions.",
                                     type_oid,
-                                    attrs[key_indx[i]]->attlen)));
+                                    attrs[key_indx[i]].attlen)));
                         break;
                 }
             }
         } else {
-            if (!integerType(attrs[key_indx[i]]->atttypid)) {
+            if (!integerType(attrs[key_indx[i]].atttypid)) {
                 switch (type_oid) {
                     case BPCHAROID:
                         hashfun[i] = &SonicHash::hashbpchar<true>;
@@ -292,7 +292,7 @@ void SonicHash::initHashFunc(TupleDesc desc, void* hash_fun_in, uint16* key_indx
                         break;
                     default:
                         if (is_atom) {
-                            switch (attrs[key_indx[i]]->attlen) {
+                            switch (attrs[key_indx[i]].attlen) {
                                 case 1:
                                     hashfun[i] = &SonicHash::hashGeneralFunc<true, uint8, uint8>;
                                     break;
@@ -314,7 +314,7 @@ void SonicHash::initHashFunc(TupleDesc desc, void* hash_fun_in, uint16* key_indx
                         break;
                 }
             } else {
-                switch (attrs[key_indx[i]]->attlen) {
+                switch (attrs[key_indx[i]].attlen) {
                     case 1:
                         if (is_atom)
                             hashfun[i] = &SonicHash::hashInteger<true, uint8, uint8>;
@@ -343,7 +343,7 @@ void SonicHash::initHashFunc(TupleDesc desc, void* hash_fun_in, uint16* key_indx
                                 errcode(ERRCODE_WRONG_OBJECT_TYPE),
                                 errmsg("[SonicHash] Unrecognized datetype %u, attrlen %d when init hash functions.",
                                     type_oid,
-                                    attrs[key_indx[i]]->attlen)));
+                                    attrs[key_indx[i]].attlen)));
                         break;
                 }
             }
@@ -679,9 +679,9 @@ bool SonicHash::isHashKey(Oid type_oid, int attr_idx, uint16* key_idx, int key_n
  */
 void SonicHash::replaceEqFunc()
 {
-    Form_pg_attribute* attrs = m_buildOp.tupleDesc->attrs;
+    FormData_pg_attribute* attrs = m_buildOp.tupleDesc->attrs;
     for (int i = 0; i < m_buildOp.keyNum; i++) {
-        switch (attrs[m_buildOp.keyIndx[i]]->atttypid) {
+        switch (attrs[m_buildOp.keyIndx[i]].atttypid) {
             case TIMETZOID:
                 m_eqfunctions[i].fn_addr = timetz_eq_withhead;
                 break;

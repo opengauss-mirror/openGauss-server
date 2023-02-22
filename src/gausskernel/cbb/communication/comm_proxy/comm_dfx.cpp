@@ -519,7 +519,7 @@ Datum gs_comm_proxy_thread_status(PG_FUNCTION_ARGS)
     oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
     /* need a tuple descriptor representing 9 columns */
-    tupdesc = CreateTemplateTupleDesc(7, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(7, false);
 
     TupleDescInitEntry(tupdesc, (AttrNumber) 1, "ProxyThreadId", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) 2, "ProxyCpuAffinity", TEXTOID, -1, 0);

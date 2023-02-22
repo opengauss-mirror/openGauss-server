@@ -50,11 +50,11 @@ void SortFusion::InitLocals(ParamListInfo params)
     m_local.m_isInsideRec = true;
     m_local.m_scan = ScanFusion::getScanFusion((Node*)sortnode->plan.lefttree, m_global->m_planstmt,
                                                m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
-    m_c_local.m_scanDesc->tdTableAmType = m_local.m_scan->m_tupDesc->tdTableAmType;
+    m_c_local.m_scanDesc->td_tam_ops = m_local.m_scan->m_tupDesc->td_tam_ops;
     if (!IsGlobal())
-        m_global->m_tupDesc->tdTableAmType = m_local.m_scan->m_tupDesc->tdTableAmType;
+        m_global->m_tupDesc->td_tam_ops = m_local.m_scan->m_tupDesc->td_tam_ops;
 
-    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc, false, GetTableAmRoutine(m_local.m_scan->m_tupDesc->tdTableAmType));
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc, false, m_local.m_scan->m_tupDesc->td_tam_ops);
     m_local.m_values = (Datum*)palloc0(m_global->m_tupDesc->natts * sizeof(Datum));
     m_local.m_isnull = (bool*)palloc0(m_global->m_tupDesc->natts * sizeof(bool));
 }
@@ -143,7 +143,7 @@ bool SortFusion::execute(long max_rows, char *completionTag)
         }
 
         HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, values, isnull, 
-                                                              TableAMGetTupleType(m_global->m_tupDesc->tdTableAmType));
+                                                              m_global->m_tupDesc->td_tam_ops);
         (void)ExecStoreTuple(tmptup, reslot, InvalidBuffer, false);
         (*m_local.m_receiver->receiveSlot)(reslot, m_local.m_receiver);
         tableam_tops_free_tuple(tmptup);

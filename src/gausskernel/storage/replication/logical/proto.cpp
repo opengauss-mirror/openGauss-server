@@ -360,7 +360,7 @@ static void logicalrep_write_tuple(StringInfo out, Relation rel, HeapTuple tuple
     desc = RelationGetDescr(rel);
 
     for (i = 0; i < desc->natts; i++) {
-        if (desc->attrs[i]->attisdropped || GetGeneratedCol(desc, i))
+        if (desc->attrs[i].attisdropped || GetGeneratedCol(desc, i))
             continue;
         nliveatts++;
     }
@@ -375,7 +375,7 @@ static void logicalrep_write_tuple(StringInfo out, Relation rel, HeapTuple tuple
     for (i = 0; i < desc->natts; i++) {
         HeapTuple typtup;
         Form_pg_type typclass;
-        Form_pg_attribute att = desc->attrs[i];
+        Form_pg_attribute att = &desc->attrs[i];
 
         /* skip dropped columns */
         if (att->attisdropped || GetGeneratedCol(desc, i)) {
@@ -499,7 +499,7 @@ static void logicalrep_write_attrs(StringInfo out, Relation rel)
 
     /* send number of live attributes */
     for (i = 0; i < desc->natts; i++) {
-        if (desc->attrs[i]->attisdropped || GetGeneratedCol(desc, i))
+        if (desc->attrs[i].attisdropped || GetGeneratedCol(desc, i))
             continue;
         nliveatts++;
     }
@@ -512,7 +512,7 @@ static void logicalrep_write_attrs(StringInfo out, Relation rel)
 
     /* send the attributes */
     for (i = 0; i < desc->natts; i++) {
-        Form_pg_attribute att = desc->attrs[i];
+        Form_pg_attribute att = &desc->attrs[i];
         uint8 flags = 0;
 
         if (att->attisdropped || GetGeneratedCol(desc, i))

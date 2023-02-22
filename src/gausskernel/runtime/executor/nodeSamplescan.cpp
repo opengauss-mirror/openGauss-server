@@ -116,7 +116,7 @@ static inline UHeapTuple USampleFetchNextTuple(SeqScanState* node)
 TupleTableSlot* HeapSeqSampleNext(SeqScanState* node)
 {
     TupleTableSlot* slot = node->ss_ScanTupleSlot;
-    node->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = node->ss_currentRelation->rd_tam_type;
+    node->ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops = GetTableAmRoutine(node->ss_currentRelation->rd_tam_type);
     HeapTuple tuple = SampleFetchNextTuple(node);
     return ExecMakeTupleSlot(tuple, 
                             GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation), 
@@ -174,7 +174,7 @@ TupleTableSlot* HbktSeqSampleNext(SeqScanState* node)
         (((RowTableSample*)node->sampleScanInfo.tsm_state)->resetSampleScan)();
     }
 
-    node->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = node->ss_currentRelation->rd_tam_type;
+    node->ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops = GetTableAmRoutine(node->ss_currentRelation->rd_tam_type);
     return ExecMakeTupleSlot(
             (Tuple) tuple, GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation),
             slot,
@@ -968,7 +968,7 @@ void ColumnTableSample::getMaxOffset()
     curBlockMaxoffset = InvalidOffsetNumber;
 
     /* If the first column has dropped, we should change the index of first column. */
-    if (vecsampleScanState->ss_currentRelation->rd_att->attrs[0]->attisdropped) {
+    if (vecsampleScanState->ss_currentRelation->rd_att->attrs[0].attisdropped) {
         fstColIdx = CStoreGetfstColIdx(vecsampleScanState->ss_currentRelation);
     }
 

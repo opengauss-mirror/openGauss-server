@@ -150,7 +150,7 @@ static PyObject* PLy_result_colnames(PyObject* self, PyObject* unused)
 
     list = PyList_New(ob->tupdesc->natts);
     for (i = 0; i < ob->tupdesc->natts; i++) {
-        PyList_SET_ITEM(list, i, PyString_FromString(NameStr(ob->tupdesc->attrs[i]->attname)));
+        PyList_SET_ITEM(list, i, PyString_FromString(NameStr(ob->tupdesc->attrs[i].attname)));
     }
 
     return list;
@@ -169,7 +169,7 @@ static PyObject* PLy_result_coltypes(PyObject* self, PyObject* unused)
 
     list = PyList_New(ob->tupdesc->natts);
     for (i = 0; i < ob->tupdesc->natts; i++) {
-        PyList_SET_ITEM(list, i, PyInt_FromLong(ob->tupdesc->attrs[i]->atttypid));
+        PyList_SET_ITEM(list, i, PyInt_FromLong(ob->tupdesc->attrs[i].atttypid));
     }
 
     return list;
@@ -188,7 +188,7 @@ static PyObject* PLy_result_coltypmods(PyObject* self, PyObject* unused)
 
     list = PyList_New(ob->tupdesc->natts);
     for (i = 0; i < ob->tupdesc->natts; i++) {
-        PyList_SET_ITEM(list, i, PyInt_FromLong(ob->tupdesc->attrs[i]->atttypmod));
+        PyList_SET_ITEM(list, i, PyInt_FromLong(ob->tupdesc->attrs[i].atttypmod));
     }
 
     return list;

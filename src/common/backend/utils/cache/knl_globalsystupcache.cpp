@@ -1483,7 +1483,7 @@ void GlobalSysTupCache::InitRelationInfo()
         Oid keytype;
         RegProcedure eqfunc;
         if (m_relinfo.cc_keyno[i] > 0)
-            keytype = m_relinfo.cc_tupdesc->attrs[m_relinfo.cc_keyno[i] - 1]->atttypid;
+            keytype = m_relinfo.cc_tupdesc->attrs[m_relinfo.cc_keyno[i] - 1].atttypid;
         else {
             if (m_relinfo.cc_keyno[i] != ObjectIdAttributeNumber)
                 ereport(FATAL, (errmsg("only sys attr supported in caches is OID")));

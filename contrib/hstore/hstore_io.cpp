@@ -702,15 +702,15 @@ Datum hstore_from_record(PG_FUNCTION_ARGS)
 
     for (i = 0, j = 0; i < ncolumns; ++i) {
         ColumnIOData* column_info = &my_extra->columns[i];
-        Oid column_type = tupdesc->attrs[i]->atttypid;
+        Oid column_type = tupdesc->attrs[i].atttypid;
         char* value = NULL;
 
         /* Ignore dropped columns in datatype */
-        if (tupdesc->attrs[i]->attisdropped)
+        if (tupdesc->attrs[i].attisdropped)
             continue;
 
-        pairs[j].key = NameStr(tupdesc->attrs[i]->attname);
-        pairs[j].keylen = hstoreCheckKeyLen(strlen(NameStr(tupdesc->attrs[i]->attname)));
+        pairs[j].key = NameStr(tupdesc->attrs[i].attname);
+        pairs[j].keylen = hstoreCheckKeyLen(strlen(NameStr(tupdesc->attrs[i].attname)));
 
         if (nulls == NULL || nulls[i]) {
             pairs[j].val = NULL;
@@ -864,18 +864,18 @@ Datum hstore_populate_record(PG_FUNCTION_ARGS)
 
     for (i = 0; i < ncolumns; ++i) {
         ColumnIOData* column_info = &my_extra->columns[i];
-        Oid column_type = tupdesc->attrs[i]->atttypid;
+        Oid column_type = tupdesc->attrs[i].atttypid;
         char* value = NULL;
         int idx;
         int vallen;
 
         /* Ignore dropped columns in datatype */
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i].attisdropped) {
             nulls[i] = true;
             continue;
         }
 
-        idx = hstoreFindKey(hs, 0, NameStr(tupdesc->attrs[i]->attname), strlen(NameStr(tupdesc->attrs[i]->attname)));
+        idx = hstoreFindKey(hs, 0, NameStr(tupdesc->attrs[i].attname), strlen(NameStr(tupdesc->attrs[i].attname)));
 
         /*
          * we can't just skip here if the key wasn't found since we might have
@@ -903,7 +903,7 @@ Datum hstore_populate_record(PG_FUNCTION_ARGS)
              * checks are done
              */
             values[i] =
-                InputFunctionCall(&column_info->proc, NULL, column_info->typioparam, tupdesc->attrs[i]->atttypmod);
+                InputFunctionCall(&column_info->proc, NULL, column_info->typioparam, tupdesc->attrs[i].atttypmod);
             nulls[i] = true;
         } else {
             vallen = HS_VALLEN(entries, idx);
@@ -913,7 +913,7 @@ Datum hstore_populate_record(PG_FUNCTION_ARGS)
             value[vallen] = 0;
 
             values[i] =
-                InputFunctionCall(&column_info->proc, value, column_info->typioparam, tupdesc->attrs[i]->atttypmod);
+                InputFunctionCall(&column_info->proc, value, column_info->typioparam, tupdesc->attrs[i].atttypmod);
             nulls[i] = false;
         }
     }

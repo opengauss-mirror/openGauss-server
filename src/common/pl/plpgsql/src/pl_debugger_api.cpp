@@ -79,7 +79,7 @@ static Datum get_tuple_lineno_and_query(DebugClientInfo* client)
     MemoryContext oldcontext = MemoryContextSwitchTo(client->context);
 
     int DEBUG_NEXT_ATTR_NUM = 4;
-    tupdesc = CreateTemplateTupleDesc(DEBUG_NEXT_ATTR_NUM, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(DEBUG_NEXT_ATTR_NUM, false);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "func_oid", OIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "funcname", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "lineno", INT4OID, -1, 0);
@@ -267,7 +267,7 @@ static Datum get_info_local_data(const char* var_name, const int frameno, Functi
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 4 columns */
-        tupdesc = CreateTemplateTupleDesc(DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM, false);
         int i = 0;
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "varname", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "vartype", TEXTOID, -1, 0);
@@ -352,7 +352,7 @@ Datum debug_client_info_code(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 4 columns */
-        tupdesc = CreateTemplateTupleDesc(DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM, false);
         int i = 0;
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "lineno", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "code", TEXTOID, -1, 0);
@@ -637,7 +637,7 @@ Datum debug_client_info_breakpoints(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 4 columns */
-        tupdesc = CreateTemplateTupleDesc(DEBUG_INFO_BP_TUPLE_ATTR_NUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(DEBUG_INFO_BP_TUPLE_ATTR_NUM, false);
         int i = 0;
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "breakpointno", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "funcoid", OIDOID, -1, 0);
@@ -766,7 +766,7 @@ Datum debug_client_backtrace(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 4 columns */
-        tupdesc = CreateTemplateTupleDesc(DEBUG_BACKTRACE_ATTR_NUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(DEBUG_BACKTRACE_ATTR_NUM, false);
         int i = 0;
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "frameno", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "funcname", TEXTOID, -1, 0);
@@ -850,7 +850,7 @@ Datum local_debug_server_info(PG_FUNCTION_ARGS)
 
         /* need a tuple descriptor representing 3 columns */
         int i = 0;
-        tupdesc = CreateTemplateTupleDesc(DEBUG_SERVER_INFO_TUPLE_ATTR_NUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(DEBUG_SERVER_INFO_TUPLE_ATTR_NUM, false);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "nodename", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "port", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "funcoid", OIDOID, -1, 0);
@@ -892,7 +892,7 @@ Datum debug_server_turn_on(PG_FUNCTION_ARGS)
     TupleDesc tupdesc;
     const int DEBUG_TURN_ON_ATTR_NUM = 2;
     int i = 0;
-    tupdesc = CreateTemplateTupleDesc(DEBUG_TURN_ON_ATTR_NUM, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(DEBUG_TURN_ON_ATTR_NUM, false);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "nodename", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "port", INT4OID, -1, 0);
     TupleDesc tuple_desc = BlessTupleDesc(tupdesc);

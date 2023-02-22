@@ -301,7 +301,7 @@ void SonicHashJoin::initPartition(SonicHashPartition* partition)
 
     MemoryContext old_cxt = MemoryContextSwitchTo(partition->m_context);
     DatumDesc desc;
-    Form_pg_attribute* attrs = NULL;
+    FormData_pg_attribute* attrs = NULL;
     bool doNotCompress = false;
     SonicHashInputOpAttr* attr_op = NULL;
     if (isInner) {
@@ -314,13 +314,13 @@ void SonicHashJoin::initPartition(SonicHashPartition* partition)
 
     if (m_complicatekey) {
         for (int idx = 0; idx < attr_op->cols; idx++) {
-            getDataDesc(&desc, 0, attrs[idx], doNotCompress);
+            getDataDesc(&desc, 0, &attrs[idx], doNotCompress);
             partition->init(idx, &desc);
         }
     } else {
         for (int idx = 0; idx < attr_op->cols; idx++) {
-            doNotCompress = isHashKey(attrs[idx]->atttypid, idx, attr_op->keyIndx, attr_op->keyNum);
-            getDataDesc(&desc, 0, attrs[idx], doNotCompress);
+            doNotCompress = isHashKey(attrs[idx].atttypid, idx, attr_op->keyIndx, attr_op->keyNum);
+            getDataDesc(&desc, 0, &attrs[idx], doNotCompress);
             partition->init(idx, &desc);
         }
     }
@@ -2513,7 +2513,7 @@ void SonicHashJoin::initMatchFunc(TupleDesc desc, uint16 keyNum)
 void SonicHashJoin::DispatchKeyInnerFunction(int KeyIdx)
 {
     int attrid = m_buildOp.keyIndx[KeyIdx];
-    switch ((m_buildOp.tupleDesc)->attrs[attrid]->atttypid) {
+    switch ((m_buildOp.tupleDesc)->attrs[attrid].atttypid) {
         case INT1OID:
             DispatchKeyOuterFunction<uint8>(KeyIdx);
             break;
@@ -2532,7 +2532,7 @@ void SonicHashJoin::DispatchKeyInnerFunction(int KeyIdx)
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                     errmodule(MOD_VEC_EXECUTOR),
                     errmsg("Unrecognize data type %u when choosing match functions from inner hash keys.",
-                        (m_buildOp.tupleDesc)->attrs[attrid]->atttypid)));
+                        (m_buildOp.tupleDesc)->attrs[attrid].atttypid)));
             break;
     }
 }
@@ -2545,7 +2545,7 @@ template <typename innerType>
 void SonicHashJoin::DispatchKeyOuterFunction(int KeyIdx)
 {
     int attr_id = m_probeOp.keyIndx[KeyIdx];
-    switch ((m_probeOp.tupleDesc)->attrs[attr_id]->atttypid) {
+    switch ((m_probeOp.tupleDesc)->attrs[attr_id].atttypid) {
         case INT1OID:
             if (m_runtime->js.nulleqqual != NIL)
                 m_matchKey[KeyIdx] = &SonicHash::matchCheckColT<innerType, uint8, true, true>;
@@ -2576,7 +2576,7 @@ void SonicHashJoin::DispatchKeyOuterFunction(int KeyIdx)
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                     errmodule(MOD_VEC_EXECUTOR),
                     (errmsg("Unrecognize data type %u when choosing match functions from outer hash keys.",
-                        (m_probeOp.tupleDesc)->attrs[attr_id]->atttypid))));
+                        (m_probeOp.tupleDesc)->attrs[attr_id].atttypid))));
             break;
     }
 }

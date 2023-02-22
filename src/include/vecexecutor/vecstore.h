@@ -133,7 +133,7 @@ public:
          * When faced with NULL, we just skip, in the following produce, we do the same thing.
          */
         for (int col = 0; col < batch->m_cols; ++col) {
-            Form_pg_attribute attr = tupDesc->attrs[col];
+            Form_pg_attribute attr = &tupDesc->attrs[col];
 
             flag = batch->m_arr[col].m_flag[row];
             multiColValue.m_nulls[col] = flag;

@@ -42,11 +42,9 @@
  * Tuple type ID information is initially set for an anonymous record type;
  * caller can overwrite this if needed.
  */
-TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, TableAmType tam)
+TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, const TableAmRoutine* tam_ops)
 {
     TupleDesc desc;
-    char *stg = NULL;
-    int attroffset;
 
     /*
      * sanity checks
@@ -55,36 +53,10 @@ TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, TableAmType tam)
 
     /*
      * Allocate enough memory for the tuple descriptor, including the
-     * attribute rows, and set up the attribute row pointers.
-     *
-     * Note: we assume that sizeof(struct tupleDesc) is a multiple of the
-     * struct pointer alignment requirement, and hence we don't need to insert
-     * alignment padding between the struct and the array of attribute row
-     * pointers.
-     *
-     * Note: Only the fixed part of pg_attribute rows is included in tuple
-     * descriptors, so we only need ATTRIBUTE_FIXED_PART_SIZE space per attr.
-     * That might need alignment padding, however.
+     * attribute rows.
      */
-    attroffset = sizeof(struct tupleDesc) + natts * sizeof(Form_pg_attribute);
-    attroffset = MAXALIGN((uint32)attroffset);
-    stg = (char *)palloc0(attroffset + natts * MAXALIGN(ATTRIBUTE_FIXED_PART_SIZE));
-    desc = (TupleDesc)stg;
-
-    if (natts > 0) {
-        Form_pg_attribute *attrs = NULL;
-        int i;
-
-        attrs = (Form_pg_attribute *)(stg + sizeof(struct tupleDesc));
-        desc->attrs = attrs;
-        stg += attroffset;
-        for (i = 0; i < natts; i++) {
-            attrs[i] = (Form_pg_attribute)stg;
-            stg += MAXALIGN(ATTRIBUTE_FIXED_PART_SIZE);
-        }
-    } else {
-        desc->attrs = NULL;
-    }
+    desc = (TupleDesc) palloc0(offsetof(struct tupleDesc, attrs) +
+                    natts * sizeof(FormData_pg_attribute));
 
     /*
      * Initialize other fields of the tupdesc.
@@ -98,43 +70,28 @@ TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, TableAmType tam)
     desc->initdefvals = NULL; /* initialize the attrinitdefvals */
     desc->tdhasuids = false;
     desc->tdisredistable = false;
-    desc->tdTableAmType = tam;
+    desc->td_tam_ops = tam_ops;
 
     return desc;
 }
 
 /*
  * CreateTupleDesc
- *		This function allocates a new TupleDesc pointing to a given
+ *		This function allocates a new TupleDesc by copying a given
  *		Form_pg_attribute array.
- *
- * Note: if the TupleDesc is ever freed, the Form_pg_attribute array
- * will not be freed thereby.
  *
  * Tuple type ID information is initially set for an anonymous record type;
  * caller can overwrite this if needed.
  */
-TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, TableAmType tam)
+TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, const TableAmRoutine* tam_ops)
 {
     TupleDesc desc;
+    int i;
 
-    /*
-     * sanity checks
-     */
-    AssertArg(natts >= 0);
+    desc = CreateTemplateTupleDesc(natts, hasoid, tam_ops);
 
-    desc = (TupleDesc)palloc(sizeof(struct tupleDesc));
-    desc->attrs = attrs;
-    desc->natts = natts;
-    desc->constr = NULL;
-    desc->tdtypeid = RECORDOID;
-    desc->tdtypmod = -1;
-    desc->tdhasoid = hasoid;
-    desc->tdrefcount = -1;    /* assume not reference-counted */
-    desc->initdefvals = NULL; /* initialize the attrinitdefvals */
-    desc->tdisredistable = false;
-    desc->tdhasuids = false;
-    desc->tdTableAmType = tam;
+    for (i = 0; i < natts; ++i)
+        memcpy(TupleDescAttr(desc, i), attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
 
     return desc;
 }
@@ -172,15 +129,15 @@ TupleDesc CreateTupleDescCopy(TupleDesc tupdesc)
 {
     TupleDesc desc;
     int i;
-    errno_t rc = EOK;
 
-    desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->tdTableAmType);
+    desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->td_tam_ops);
 
     for (i = 0; i < desc->natts; i++) {
-        rc = memcpy_s(desc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
-        securec_check(rc, "\0", "\0");
-        desc->attrs[i]->attnotnull = false;
-        desc->attrs[i]->atthasdef = false;
+        Form_pg_attribute att = TupleDescAttr(desc, i);
+
+        memcpy(att, &tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        att->attnotnull = false;
+        att->atthasdef = false;
     }
 
     desc->tdtypeid = tupdesc->tdtypeid;
@@ -265,10 +222,10 @@ TupleConstr *TupleConstrCopy(const TupleDesc tupdesc)
 TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc)
 {
     errno_t rc = EOK;
-    TupleDesc desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->tdTableAmType);
+    TupleDesc desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->td_tam_ops);
 
     for (int i = 0; i < desc->natts; i++) {
-        rc = memcpy_s(desc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        rc = memcpy_s(&desc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "\0", "\0");
     }
 
@@ -534,13 +491,13 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
         return false;
     }
 
-    if (tupdesc1->tdTableAmType != tupdesc2->tdTableAmType) {
+    if (tupdesc1->td_tam_ops != tupdesc2->td_tam_ops) {
         return false;
     }
 
     for (i = 0; i < tupdesc1->natts; i++) {
-        Form_pg_attribute attr1 = tupdesc1->attrs[i];
-        Form_pg_attribute attr2 = tupdesc2->attrs[i];
+        Form_pg_attribute attr1 = &tupdesc1->attrs[i];
+        Form_pg_attribute attr2 = &tupdesc2->attrs[i];
 
         /*
          * We do not need to check every single field here: we can disregard
@@ -760,8 +717,8 @@ bool equalDeltaTupleDescs(TupleDesc mainTupdesc, TupleDesc deltaTupdesc)
         return false;
 
     for (i = 0; i < mainTupdesc->natts; i++) {
-        Form_pg_attribute attr1 = mainTupdesc->attrs[i];
-        Form_pg_attribute attr2 = deltaTupdesc->attrs[i];
+        Form_pg_attribute attr1 = &mainTupdesc->attrs[i];
+        Form_pg_attribute attr2 = &deltaTupdesc->attrs[i];
 
         if (GetGeneratedCol(mainTupdesc, i) != GetGeneratedCol(deltaTupdesc, i)) {
             return false;
@@ -808,7 +765,7 @@ void TupleDescInitEntry(TupleDesc desc, AttrNumber attributeNumber, const char *
     /*
      * initialize the attribute fields
      */
-    att = desc->attrs[attributeNumber - 1];
+    att = &desc->attrs[attributeNumber - 1];
 
     att->attrelid = 0; /* dummy value */
 
@@ -869,7 +826,7 @@ void TupleDescInitEntryCollation(TupleDesc desc, AttrNumber attributeNumber, Oid
     AssertArg(attributeNumber >= 1);
     AssertArg(attributeNumber <= desc->natts);
 
-    desc->attrs[attributeNumber - 1]->attcollation = collationid;
+    desc->attrs[attributeNumber - 1].attcollation = collationid;
 }
 
 /*
@@ -1005,7 +962,7 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
      * allocate a new tuple descriptor
      */
     natts = list_length(schema);
-    desc = CreateTemplateTupleDesc(natts, false, TAM_HEAP);
+    desc = CreateTemplateTupleDesc(natts, false);
 
     foreach (l, schema) {
         ColumnDef *entry = (ColumnDef *)lfirst(l);
@@ -1019,7 +976,7 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         attnum++;
 
         if (u_sess->attr.attr_sql.enable_cluster_resize && entry->dropped_attr != NULL) {
-            copyDroppedAttribute(desc->attrs[attnum - 1], entry->dropped_attr);
+            copyDroppedAttribute(&desc->attrs[attnum - 1], entry->dropped_attr);
             continue;
         }
         attname = entry->colname;
@@ -1084,18 +1041,18 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         /* Override TupleDescInitEntry's settings as requested */
         TupleDescInitEntryCollation(desc, attnum, attcollation);
         if (entry->storage)
-            desc->attrs[attnum - 1]->attstorage = entry->storage;
+            desc->attrs[attnum - 1].attstorage = entry->storage;
 
         /* Fill in additional stuff not handled by TupleDescInitEntry */
-        desc->attrs[attnum - 1]->attnotnull = entry->is_not_null;
+        desc->attrs[attnum - 1].attnotnull = entry->is_not_null;
         /*
          * PG source code: has_not_null |= entry->is_not_null;
          */
         has_not_null = has_not_null || entry->is_not_null;
-        desc->attrs[attnum - 1]->attislocal = entry->is_local;
-        desc->attrs[attnum - 1]->attinhcount = entry->inhcount;
+        desc->attrs[attnum - 1].attislocal = entry->is_local;
+        desc->attrs[attnum - 1].attinhcount = entry->inhcount;
 
-        Form_pg_attribute thisatt = desc->attrs[attnum - 1];
+        Form_pg_attribute thisatt = &desc->attrs[attnum - 1];
         thisatt->attkvtype = entry->kvtype;
         VerifyAttrCompressMode(entry->cmprs_mode, thisatt->attlen, attname);
         thisatt->attcmprmode = entry->cmprs_mode;
@@ -1150,7 +1107,7 @@ TupleDesc BuildDescFromLists(List *names, List *types, List *typmods, List *coll
     /*
      * allocate a new tuple descriptor
      */
-    desc = CreateTemplateTupleDesc(natts, false, TAM_HEAP);
+    desc = CreateTemplateTupleDesc(natts, false);
 
     attnum = 0;
 

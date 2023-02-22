@@ -72,7 +72,7 @@ THR_LOCAL SQLBindColAPI pSQLBindCol = NULL;
 static StringInfo get_odbc_errmsg(StringInfo all_msg);
 static void unload_libodbc();
 static void load_libodbc(FunctionCallInfo fcinfo);
-static void check_typeoid(Form_pg_attribute* attrs, int natts);
+static void check_typeoid(FormData_pg_attribute* attrs, int natts);
 static Datum odbc_type_2_Datum(Form_pg_attribute attr, void* buf, const char* encoding);
 extern void clean_ec_conn();
 extern void delete_ec_ctrl();
@@ -363,10 +363,10 @@ static StringInfo get_odbc_errmsg(StringInfo all_msg)
  * @IN  value: attrs, the attribute array.
  * @IN  value: natts, the number of the items in attrs.
  */
-static void check_typeoid(Form_pg_attribute* attrs, int natts)
+static void check_typeoid(FormData_pg_attribute* attrs, int natts)
 {
     for (int i = 0; i < natts; i++) {
-        switch (attrs[i]->atttypid) {
+        switch (attrs[i].atttypid) {
             case BOOLOID:
             case INT1OID:
             case INT2OID:
@@ -392,7 +392,7 @@ static void check_typeoid(Form_pg_attribute* attrs, int natts)
                     (errmodule(MOD_EC),
                         errcode(ERRCODE_DATATYPE_MISMATCH),
                         errmsg("unsupport data type: [%s] found in record definition.",
-                            format_type_with_typemod(attrs[i]->atttypid, attrs[i]->atttypmod))));
+                            format_type_with_typemod(attrs[i].atttypid, attrs[i].atttypmod))));
         }
     }
 }
@@ -677,7 +677,7 @@ Datum fetch_odbc(const char* dsn, FuncCallContext* funcctx, bool& isEnd, const c
     Datum* values = (Datum*)palloc0(cols * sizeof(Datum));
 
     for (Size i = 0; i < cols; i++) {
-        oid_types[i] = funcctx->tuple_desc->attrs[i]->atttypid;
+        oid_types[i] = funcctx->tuple_desc->attrs[i].atttypid;
     }
     /* get one row from odbc */
     ODBC_TRY() {
@@ -694,7 +694,7 @@ Datum fetch_odbc(const char* dsn, FuncCallContext* funcctx, bool& isEnd, const c
     /* build a tuple */
     for (Size i = 0; i < cols; i++) {
         if (!nulls[i]) {
-            values[i] = odbc_type_2_Datum(funcctx->tuple_desc->attrs[i], buffer[i], encoding);
+            values[i] = odbc_type_2_Datum(&funcctx->tuple_desc->attrs[i], buffer[i], encoding);
         }
     }
     HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);

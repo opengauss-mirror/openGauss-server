@@ -516,6 +516,17 @@ static inline TableAmType  GetTableAmType(const TableAmRoutine* ops)
     return ops == TableAmHeap ? TAM_HEAP : TAM_USTORE;
 }
 
+/* ------------------------------------------------------------------------
+ * HEAP TABLE SLOT AM APIs
+ * ------------------------------------------------------------------------
+ */
+
+static inline Tuple tableam_tslot_get_tuple_from_slot(Relation relation, TupleTableSlot *slot)
+{
+    slot->tts_tupleDescriptor->tdhasuids = RELATION_HAS_UIDS(relation);
+    return g_tableam_routines[relation->rd_tam_type]->tslot_get_tuple_from_slot(slot);
+}
+
 /*
  * Clears the contents of the table slot that contains heap table tuple data.
  */
@@ -556,8 +567,7 @@ static inline HeapTuple tableam_tslot_copy_heap_tuple(TupleTableSlot *slot)
 
 static inline void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode)
 {
-    Assert(slot->tts_tam_ops == GetTableAmRoutine(TableAmType(GetTabelAmIndexTuple(tuple))));
-    slot->tts_tam_ops->tslot_store_tuple(tuple, slot, buffer, shouldFree, batchMode);
+    g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tslot_store_tuple(tuple, slot, buffer, shouldFree, batchMode);
 }
 
 static inline void tableam_tslot_getsomeattrs(TupleTableSlot *slot, int natts)
@@ -585,25 +595,86 @@ static inline bool tableam_tslot_attisnull(TupleTableSlot *slot, int attnum)
     return slot->tts_tam_ops->tslot_attisnull(slot, attnum);
 }
 
-extern Tuple tableam_tslot_get_tuple_from_slot(Relation relation, TupleTableSlot *slot);
-extern Datum tableam_tops_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool *isnull,
-    Buffer buf = InvalidBuffer);
-extern MinimalTuple tableam_tops_form_minimal_tuple(TupleDesc tuple_descriptor, Datum *values,
-    const bool *isnull, MinimalTuple in_tuple, uint32 tupTableType);
-extern Tuple tableam_tops_form_tuple(TupleDesc tuple_descriptor, Datum *values, bool *isnull,
-    uint32 tupTableType);
-extern Tuple tableam_tops_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData *cmprs_info,
-    uint32 tupTableType);
-extern void tableam_tops_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull);
-extern void tableam_tops_deform_tuple2(Tuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer);
-extern void tableam_tops_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull,
-    char *cmprs_info);
-extern void tableam_tops_fill_tuple(TupleDesc tuple_desc, Datum *values, const bool *isnull, char *data,
-    Size data_size, uint16 *infomask, bits8 *bit);
-extern Tuple tableam_tops_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *repl_values,
-    const bool *repl_isnull, const bool *do_replace);
-extern Tuple tableam_tops_opfusion_modify_tuple(Tuple tuple, TupleDesc tuple_desc,
-    Datum* repl_values, bool* repl_isnull, UpdateFusion* opf);
+/* ------------------------------------------------------------------------
+ * TABLE TUPLE AM APIs
+ * ------------------------------------------------------------------------
+ */
+
+static inline Datum tableam_tops_getsysattr(Tuple tuple, int attnum, TupleDesc tuple_desc, bool *isnull,
+    Buffer buf = InvalidBuffer)
+{
+    AssertValidTuple(tuple);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_getsysattr(tuple, attnum, tuple_desc, isnull, buf);
+}
+
+static inline MinimalTuple tableam_tops_form_minimal_tuple(TupleDesc tuple_descriptor, Datum *values,
+    const bool *isnull, MinimalTuple in_tuple, const TableAmRoutine* tam_ops = TableAmHeap)
+{
+    Assert(tuple_descriptor->td_tam_ops == tam_ops);
+    return tuple_descriptor->td_tam_ops->tops_form_minimal_tuple(tuple_descriptor, values, isnull,
+        in_tuple);
+}
+
+static inline Tuple tableam_tops_form_tuple(TupleDesc tuple_descriptor, Datum *values, bool *isnull,
+    const TableAmRoutine* tam_ops = TableAmHeap)
+{
+    Assert(tuple_descriptor->td_tam_ops == tam_ops);
+    return tuple_descriptor->td_tam_ops->tops_form_tuple(tuple_descriptor, values, isnull);
+}
+
+static inline Tuple tableam_tops_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData *cmprs_info,
+    const TableAmRoutine* tam_ops = TableAmHeap)
+{
+    Assert(tuple_descriptor->td_tam_ops == tam_ops);
+    return tuple_descriptor->td_tam_ops->tops_form_cmprs_tuple(tuple_descriptor, cmprs_info);
+}
+
+static inline void tableam_tops_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull)
+{
+    AssertValidTuple(tuple);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_deform_tuple(tuple, tuple_desc, values, isnull);
+}
+
+static inline void tableam_tops_deform_tuple2(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull, Buffer buffer)
+{
+    AssertValidTuple(tuple);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_deform_tuple2(tuple, tuple_desc, values, isnull, buffer);
+}
+
+static inline void tableam_tops_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull,
+    char *cmprs_info)
+{
+    AssertValidTuple(tuple);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_deform_cmprs_tuple(tuple, tuple_desc, values, isnull,
+        cmprs_info);
+}
+
+static inline void tableam_tops_fill_tuple(TupleDesc tuple_desc, Datum *values, const bool *isnull, char *data,
+    Size data_size, uint16 *infomask, bits8 *bit)
+{
+    return tuple_desc->td_tam_ops->tops_fill_tuple(tuple_desc, values, isnull, data, data_size,
+        infomask, bit);
+}
+
+/*
+ * there is no uheapam_tops_modify_tuple
+ * but this is done for completeness
+ */
+static inline Tuple tableam_tops_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *repl_values,
+    const bool *repl_isnull, const bool *do_replace)
+{
+    AssertValidTuple(tuple);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_modify_tuple(tuple, tuple_desc, repl_values,
+        repl_isnull, do_replace);
+}
+
+static inline Tuple tableam_tops_opfusion_modify_tuple(Tuple tuple, TupleDesc tuple_desc,
+    Datum* repl_values, bool* repl_isnull, UpdateFusion* opf)
+{
+    AssertValidTuple(tuple);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_opfusion_modify_tuple(tuple, tuple_desc,
+        repl_values, repl_isnull, opf);
+}
 
 #define tableam_tops_free_tuple(tup) \
     do {                                    \
@@ -616,9 +687,29 @@ extern Tuple tableam_tops_opfusion_modify_tuple(Tuple tuple, TupleDesc tuple_des
         }                                                          \
     } while (0)
 
-extern Datum tableam_tops_tuple_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null);
-extern Datum tableam_tops_tuple_fast_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null);
-extern bool tableam_tops_tuple_attisnull(Tuple tuple, int attnum, TupleDesc tuple_desc);
+static inline Datum tableam_tops_tuple_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null)
+{
+    AssertValidTuple(tuple);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_tuple_getattr(tuple, att_num,
+        tuple_desc, is_null);
+}
+
+static inline Datum tableam_tops_tuple_fast_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null)
+{
+    AssertValidTuple(tuple);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_tuple_fast_getattr(tuple, att_num,
+        tuple_desc, is_null);
+}
+
+static inline bool tableam_tops_tuple_attisnull(Tuple tuple, int attnum, TupleDesc tuple_desc)
+{
+    /*
+     * We allow a NULL tupledesc for relations not expected to have missing
+     * values, such as catalog relations and indexes.
+     */
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_tuple_attisnull(tuple, attnum, tuple_desc);
+}
+
 extern Tuple tableam_tops_copy_tuple(Tuple tuple);
 extern MinimalTuple tableam_tops_copy_minimal_tuple(MinimalTuple mtup);
 extern void tableam_tops_free_minimal_tuple(MinimalTuple mtup);

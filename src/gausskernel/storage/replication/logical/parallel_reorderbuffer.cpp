@@ -503,7 +503,7 @@ void ToastTupleSplicing(Datum *attrs, TupleDesc desc, bool *isnull, TupleDesc to
     const int toast_index = 3; /* toast index in tuple is 3 */
 
     for (natt = 0; natt < desc->natts; natt++) {
-        Form_pg_attribute attr = desc->attrs[natt];
+        Form_pg_attribute attr = &desc->attrs[natt];
         ReorderBufferToastEnt *ent = NULL;
         struct varlena *varlena = NULL;
 

@@ -280,7 +280,7 @@ bool CheckIndexCompatible(Oid oldId, char* accessMethodName, List* attributeList
     irel = index_open(oldId, AccessShareLock); /* caller probably has a lock */
     for (i = 0; i < old_natts; i++) {
         if (IsPolymorphicType(get_opclass_input_type(classObjectId[i])) &&
-            irel->rd_att->attrs[i]->atttypid != typeObjectId[i]) {
+            irel->rd_att->attrs[i].atttypid != typeObjectId[i]) {
             ret = false;
             break;
         }
@@ -302,7 +302,7 @@ bool CheckIndexCompatible(Oid oldId, char* accessMethodName, List* attributeList
 
                 op_input_types(indexInfo->ii_ExclusionOps[i], &left, &right);
                 if ((IsPolymorphicType(left) || IsPolymorphicType(right)) &&
-                    irel->rd_att->attrs[i]->atttypid != typeObjectId[i]) {
+                    irel->rd_att->attrs[i].atttypid != typeObjectId[i]) {
                     ret = false;
                     break;
                 }
@@ -325,7 +325,7 @@ static void CheckPartitionUniqueKey(Relation rel, int2vector *partKey, IndexStmt
 
     for (j = 0; j < partKey->dim1; j++) {
         int2 attNum = partKey->values[j];
-        Form_pg_attribute att_tup = rel->rd_att->attrs[attNum - 1];
+        Form_pg_attribute att_tup = &rel->rd_att->attrs[attNum - 1];
 
         if (!columnIsExist(rel, att_tup, stmt->indexParams)) {
             ereport(
@@ -5417,7 +5417,7 @@ static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams)
     int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
     for (int i = 0; i < partKey->dim1; i++) {
         int2 attNum = partKey->values[i];
-        Form_pg_attribute attTup = rel->rd_att->attrs[attNum - 1];
+        Form_pg_attribute attTup = &rel->rd_att->attrs[attNum - 1];
         if (!columnIsExist(rel, attTup, indexParams)) {
             return false;
         }

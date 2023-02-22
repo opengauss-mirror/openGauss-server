@@ -562,8 +562,8 @@ static List* FixIndexScanTargetList(CStoreIndexScan* node, CStoreIndexScanState*
     if (node->scan.isPartTbl && indexScanState->ss_currentRelation == NULL)
         return NULL;
 
-    Form_pg_attribute* heapAttrs = heapRel->rd_att->attrs;
-    Form_pg_attribute* IdxRelAttrs = indexRel->rd_att->attrs;
+    FormData_pg_attribute* heapAttrs = heapRel->rd_att->attrs;
+    FormData_pg_attribute* IdxRelAttrs = indexRel->rd_att->attrs;
     indexScanState->m_indexOutBaseTabAttr = (int*)palloc0(sizeof(int) * list_length(idxTargetList));
     int* outKeyId = indexScanState->m_indexOutBaseTabAttr;
 
@@ -582,12 +582,12 @@ static List* FixIndexScanTargetList(CStoreIndexScan* node, CStoreIndexScanState*
             Assert(IsA(tle->expr, Var));
             int pos = ((Var*)tle->expr)->varattno - 1;
             for (int col = 0; col < idxAttNo; ++col) {
-                if (strcmp(NameStr(IdxRelAttrs[col]->attname), NameStr(heapAttrs[pos]->attname)) == 0) {
+                if (strcmp(NameStr(IdxRelAttrs[col].attname), NameStr(heapAttrs[pos].attname)) == 0) {
                     Expr* idxVar = (Expr*)makeVar(((Var*)tle->expr)->varno,
                         col + 1,
-                        IdxRelAttrs[col]->atttypid,
-                        IdxRelAttrs[col]->atttypmod,
-                        IdxRelAttrs[col]->attcollation,
+                        IdxRelAttrs[col].atttypid,
+                        IdxRelAttrs[col].atttypmod,
+                        IdxRelAttrs[col].attcollation,
                         0);
                     newTargetList = lappend(newTargetList, makeTargetEntry(idxVar, num + 1, NULL, false));
                     outKeyId[num] = pos + 1;
@@ -946,7 +946,7 @@ Batchsortstate* InitTidSortState(TupleDesc sortTupDesc, int tidAttNo, int sortMe
     TypeCacheEntry* typeEntry = lookup_type_cache(TIDOID, TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
 
     attNums[0] = tidAttNo;
-    sortCollations[0] = sortTupDesc->attrs[tidAttNo - 1]->attcollation;
+    sortCollations[0] = sortTupDesc->attrs[tidAttNo - 1].attcollation;
     nullsFirstFlags[0] = false;
 
     sortState = batchsort_begin_heap(

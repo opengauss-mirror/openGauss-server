@@ -166,20 +166,20 @@ void PLy_input_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
     for (i = 0; i < desc->natts; i++) {
         HeapTuple typeTup;
 
-        if (desc->attrs[i]->attisdropped) {
+        if (desc->attrs[i].attisdropped) {
             continue;
         }
 
-        if (arg->in.r.atts[i].typoid == desc->attrs[i]->atttypid) {
+        if (arg->in.r.atts[i].typoid == desc->attrs[i].atttypid) {
             continue; /* already set up this entry */
         }
 
-        typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(desc->attrs[i]->atttypid));
+        typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(desc->attrs[i].atttypid));
         if (!HeapTupleIsValid(typeTup)) {
-            elog(ERROR, "cache lookup failed for type %u", desc->attrs[i]->atttypid);
+            elog(ERROR, "cache lookup failed for type %u", desc->attrs[i].atttypid);
         }
 
-        PLy_input_datum_func2(&(arg->in.r.atts[i]), desc->attrs[i]->atttypid, typeTup);
+        PLy_input_datum_func2(&(arg->in.r.atts[i]), desc->attrs[i].atttypid, typeTup);
 
         ReleaseSysCache(typeTup);
     }
@@ -228,17 +228,17 @@ void PLy_output_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
     for (i = 0; i < desc->natts; i++) {
         HeapTuple typeTup;
 
-        if (desc->attrs[i]->attisdropped) {
+        if (desc->attrs[i].attisdropped) {
             continue;
         }
 
-        if (arg->out.r.atts[i].typoid == desc->attrs[i]->atttypid) {
+        if (arg->out.r.atts[i].typoid == desc->attrs[i].atttypid) {
             continue; /* already set up this entry */
         }
 
-        typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(desc->attrs[i]->atttypid));
+        typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(desc->attrs[i].atttypid));
         if (!HeapTupleIsValid(typeTup)) {
-            elog(ERROR, "cache lookup failed for type %u", desc->attrs[i]->atttypid);
+            elog(ERROR, "cache lookup failed for type %u", desc->attrs[i].atttypid);
         }
 
         PLy_output_datum_func2(&(arg->out.r.atts[i]), typeTup);
@@ -303,7 +303,7 @@ PyObject *PLyDict_FromTuple(PLyTypeInfo *info, HeapTuple tuple, TupleDesc desc, 
             bool is_null = false;
             PyObject* value = NULL;
 
-            if (desc->attrs[i]->attisdropped) {
+            if (desc->attrs[i].attisdropped) {
                 continue;
             }
 
@@ -313,7 +313,7 @@ PyObject *PLyDict_FromTuple(PLyTypeInfo *info, HeapTuple tuple, TupleDesc desc, 
                     continue;
             }
 
-            key = NameStr(desc->attrs[i]->attname);
+            key = NameStr(desc->attrs[i].attname);
             vattr = heap_getattr(tuple, (i + 1), desc, &is_null);
 
             if (is_null || info->in.r.atts[i].func == NULL) {
@@ -930,13 +930,13 @@ static Datum PLyMapping_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject*
         PyObject* volatile value = NULL;
         PLyObToDatum* att = NULL;
 
-        if (desc->attrs[i]->attisdropped) {
+        if (desc->attrs[i].attisdropped) {
             values[i] = (Datum)0;
             nulls[i] = true;
             continue;
         }
 
-        key = NameStr(desc->attrs[i]->attname);
+        key = NameStr(desc->attrs[i].attname);
         value = NULL;
         att = &info->out.r.atts[i];
         PG_TRY();
@@ -991,7 +991,7 @@ static Datum PLySequence_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject
      */
     idx = 0;
     for (i = 0; i < desc->natts; i++) {
-        if (!desc->attrs[i]->attisdropped) {
+        if (!desc->attrs[i].attisdropped) {
             idx++;
         }
     }
@@ -1014,7 +1014,7 @@ static Datum PLySequence_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject
         PyObject* volatile value = NULL;
         PLyObToDatum* att = NULL;
 
-        if (desc->attrs[i]->attisdropped) {
+        if (desc->attrs[i].attisdropped) {
             values[i] = (Datum)0;
             nulls[i] = true;
             continue;
@@ -1075,13 +1075,13 @@ static Datum PLyGenericObject_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyO
         PyObject* volatile value = NULL;
         PLyObToDatum* att = NULL;
 
-        if (desc->attrs[i]->attisdropped) {
+        if (desc->attrs[i].attisdropped) {
             values[i] = (Datum)0;
             nulls[i] = true;
             continue;
         }
 
-        key = NameStr(desc->attrs[i]->attname);
+        key = NameStr(desc->attrs[i].attname);
         value = NULL;
         att = &info->out.r.atts[i];
         PG_TRY();

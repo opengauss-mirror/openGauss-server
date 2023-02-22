@@ -2392,7 +2392,7 @@ void AlterDomainNotNull(List* names, bool notNull)
                         ereport(ERROR,
                             (errcode(ERRCODE_NOT_NULL_VIOLATION),
                                 errmsg("column \"%s\" of table \"%s\" contains null values",
-                                    NameStr(tupdesc->attrs[attnum - 1]->attname),
+                                    NameStr(tupdesc->attrs[attnum - 1].attname),
                                     RelationGetRelationName(testrel))));
                 }
             }
@@ -2732,7 +2732,7 @@ static void validateDomainConstraint(Oid domainoid, char* ccbin)
                     ereport(ERROR,
                         (errcode(ERRCODE_CHECK_VIOLATION),
                             errmsg("column \"%s\" of table \"%s\" contains values that violate the new constraint",
-                                NameStr(tupdesc->attrs[attnum - 1]->attname),
+                                NameStr(tupdesc->attrs[attnum - 1].attname),
                                 RelationGetRelationName(testrel))));
             }
 
@@ -2873,7 +2873,7 @@ static List* get_rels_with_domain(Oid domainOid, LOCKMODE lockmode)
          */
         if (pg_depend->objsubid > RelationGetNumberOfAttributes(rtc->rel))
             continue;
-        pg_att = rtc->rel->rd_att->attrs[pg_depend->objsubid - 1];
+        pg_att = &rtc->rel->rd_att->attrs[pg_depend->objsubid - 1];
         if (pg_att->attisdropped || pg_att->atttypid != domainOid)
             continue;
 

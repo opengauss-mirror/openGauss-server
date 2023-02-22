@@ -255,7 +255,7 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
             for (int dropcolno = rel->rd_att->natts - 1; dropcolno >= list_length(attrList); dropcolno--) {
                 atcmd = makeNode(AlterTableCmd);
                 atcmd->subtype = AT_DropColumn;
-                atcmd->name = rel->rd_att->attrs[dropcolno]->attname.data;
+                atcmd->name = rel->rd_att->attrs[dropcolno].attname.data;
                 atcmd->behavior = DROP_RESTRICT;
                 atcmd->missing_ok = true;
                 atcmds = lappend(atcmds, atcmd);
@@ -380,8 +380,8 @@ static void checkViewTupleDesc(TupleDesc newdesc, TupleDesc olddesc)
         ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("cannot drop columns from view")));
     /* we can ignore tdhasoid */
     for (i = 0; i < olddesc->natts; i++) {
-        Form_pg_attribute newattr = newdesc->attrs[i];
-        Form_pg_attribute oldattr = olddesc->attrs[i];
+        Form_pg_attribute newattr = &newdesc->attrs[i];
+        Form_pg_attribute oldattr = &olddesc->attrs[i];
 
         /* XXX msg not right, but we don't support DROP COL on view anyway */
         if (newattr->attisdropped != oldattr->attisdropped)

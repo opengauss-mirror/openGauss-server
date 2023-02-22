@@ -1625,7 +1625,7 @@ Datum get_instr_unique_sql(PG_FUNCTION_ARGS)
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(INSTRUMENTS_UNIQUE_SQL_ATTRNUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(INSTRUMENTS_UNIQUE_SQL_ATTRNUM, false);
         create_tuple_entry(tupdesc);
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);

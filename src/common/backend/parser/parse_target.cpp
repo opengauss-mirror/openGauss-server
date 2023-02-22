@@ -389,8 +389,8 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
                 parser_errposition(pstate, location)));
     }
     attrtype = attnumTypeId(rd, attrno);
-    attrtypmod = rd->rd_att->attrs[attrno - 1]->atttypmod;
-    attrcollation = rd->rd_att->attrs[attrno - 1]->attcollation;
+    attrtypmod = rd->rd_att->attrs[attrno - 1].atttypmod;
+    attrcollation = rd->rd_att->attrs[attrno - 1].attcollation;
 
     /*
      * If the expression is a DEFAULT placeholder, insert the attribute's
@@ -524,9 +524,9 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
                                errhint("You will need to rewrite or cast the expression."),
                                parser_errposition(pstate, exprLocation(orig_expr))));
                 }
-                expr = (Expr*)makeConst(attrtype, attrtypmod, attrcollation, rd->rd_att->attrs[attrno - 1]->attlen,
-                                        GetTypeZeroValue(rd->rd_att->attrs[attrno - 1]), false,
-                                        rd->rd_att->attrs[attrno - 1]->attbyval);
+                expr = (Expr*)makeConst(attrtype, attrtypmod, attrcollation, rd->rd_att->attrs[attrno - 1].attlen,
+                                        GetTypeZeroValue(&rd->rd_att->attrs[attrno - 1]), false,
+                                        rd->rd_att->attrs[attrno - 1].attbyval);
                 ereport(WARNING, (errcode(ERRCODE_DATATYPE_MISMATCH),
                                 errmsg("column \"%s\" is of type %s"
                                        " but expression is of type %s. Data truncated automatically.",
@@ -853,7 +853,7 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
                     errmsg("targetrel is NULL unexpectedly")));
         }
 
-        Form_pg_attribute* attr = targetrel->rd_att->attrs;
+        FormData_pg_attribute* attr = targetrel->rd_att->attrs;
         int numcol = RelationGetNumberOfAttributes(targetrel);
         int i;
         is_blockchain_rel = targetrel->rd_isblockchain;
@@ -861,7 +861,7 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
         for (i = 0; i < numcol; i++) {
             ResTarget* col = NULL;
 
-            if (attr[i]->attisdropped) {
+            if (attr[i].attisdropped) {
                 continue;
             }
             /* If the hidden column in timeseries relation, skip it */
@@ -870,7 +870,7 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
             }
 
             col = makeNode(ResTarget);
-            col->name = pstrdup(NameStr(attr[i]->attname));
+            col->name = pstrdup(NameStr(attr[i].attname));
             if (is_blockchain_rel && strcmp(col->name, "hash") == 0) {
                 continue;
             }
@@ -1259,7 +1259,7 @@ static List* ExpandRowReference(ParseState* pstate, Node* expr, bool targetlist)
     /* Generate a list of references to the individual fields */
     numAttrs = tupleDesc->natts;
     for (i = 0; i < numAttrs; i++) {
-        Form_pg_attribute att = tupleDesc->attrs[i];
+        Form_pg_attribute att = &tupleDesc->attrs[i];
         FieldSelect* fselect = NULL;
 
         if (att->attisdropped) {

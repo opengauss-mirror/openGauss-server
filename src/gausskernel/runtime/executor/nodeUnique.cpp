@@ -142,7 +142,7 @@ UniqueState* ExecInitUnique(Unique* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &unique_state->ps,
-            ExecGetResultType(outerPlanState(unique_state))->tdTableAmType);
+            ExecGetResultType(outerPlanState(unique_state))->td_tam_ops);
 
     unique_state->ps.ps_ProjInfo = NULL;
 

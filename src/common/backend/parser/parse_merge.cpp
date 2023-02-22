@@ -289,7 +289,7 @@ static Node* build_equal_expr(
     RangeSubselect* range_subselect = (RangeSubselect*)stmt->source_relation;
     char* target_aliasname = stmt->relation->alias->aliasname;
     int attrno = index_info->ii_KeyAttrNumbers[index];
-    char* attname = pstrdup(NameStr(target_relation->rd_att->attrs[attrno - 1]->attname));
+    char* attname = pstrdup(NameStr(target_relation->rd_att->attrs[attrno - 1].attname));
     char* source_aliasname = range_subselect->alias->aliasname;
 
     /* build the left expr of the equal expr, which comes from the target relation's index */
@@ -1649,7 +1649,7 @@ static void check_target_table_columns(ParseState* pstate, bool is_insert_update
                            "with column (%s) of unstable default value.",
                         is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO",
                         RelationGetRelationName(target_relation),
-                        NameStr(target_relation->rd_att->attrs[attrno - 1]->attname))));
+                        NameStr(target_relation->rd_att->attrs[attrno - 1].attname))));
         }
     }
     list_free_deep(rel_valid_cols);
@@ -1812,7 +1812,7 @@ static Bitmapset* get_relation_default_attno_bitmap(Relation relation)
     Bitmapset* bitmap = NULL;
     Form_pg_attribute attr = NULL;
     for (int i = 0; i < RelationGetNumberOfAttributes(relation); i++) {
-        attr = relation->rd_att->attrs[i];
+        attr = &relation->rd_att->attrs[i];
 
         if (attr->atthasdef && !attr->attisdropped) {
             bitmap = bms_add_member(bitmap, attr->attnum);

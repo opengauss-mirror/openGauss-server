@@ -415,9 +415,6 @@ typedef struct StdRdOptions {
 #define UHEAP_MAX_TD 128
 #define UHEAP_DEFAULT_TD 4
 
-#define RelationGetTupleType(relation) \
-    ((relation)->rd_tam_type + 1)
-
 /*
  * RelationIsUsedAsCatalogTable
  *     Returns whether the relation should be treated as a catalog table

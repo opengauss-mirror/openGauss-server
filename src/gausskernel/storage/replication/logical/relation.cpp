@@ -271,11 +271,11 @@ LogicalRepRelMapEntry *logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lo
 
         found = 0;
         for (i = 0; i < desc->natts; i++) {
-            if (desc->attrs[i]->attisdropped || GetGeneratedCol(desc, i)) {
+            if (desc->attrs[i].attisdropped || GetGeneratedCol(desc, i)) {
                 entry->attrmap[i] = -1;
                 continue;
             }
-            int attnum = logicalrep_rel_att_by_name(remoterel, NameStr(desc->attrs[i]->attname));
+            int attnum = logicalrep_rel_att_by_name(remoterel, NameStr(desc->attrs[i].attname));
             entry->attrmap[i] = attnum;
             if (attnum >= 0)
                 found++;

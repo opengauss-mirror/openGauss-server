@@ -1284,9 +1284,9 @@ static void build_prepared_xact_tuple_desc(FuncCallContext *funcctx, bool with_n
     TupleDesc tupdesc;
 
     if (!with_node_name) {
-        tupdesc = CreateTemplateTupleDesc(5, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(5, false);
     } else {
-        tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(6, false);
     }
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "transaction", XIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "gid", TEXTOID, -1, 0);
@@ -1589,7 +1589,7 @@ Datum pg_parse_clog(PG_FUNCTION_ARGS)
 
         /* build tupdesc for result tuples */
         /* this had better match pg_prepared_xacts view in system_views.sql */
-        tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(2, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "xid", XIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "status", TEXTOID, -1, 0);
 

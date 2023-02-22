@@ -288,7 +288,7 @@ void CStoreAllocator::BuildColSpaceCacheForRel(_in_ Relation heapRel,
                 maxCUID = maxIdxCUID;
         }
         for (int i = 0; i < attrNum; ++i) {
-            if (!heapRel->rd_att->attrs[i]->attisdropped) {
+            if (!heapRel->rd_att->attrs[i].attisdropped) {
                 offset[i] = CStore::GetMaxCUPointer(attrIds[i], heapRel);
             } else {
                 offset[i] = 0;

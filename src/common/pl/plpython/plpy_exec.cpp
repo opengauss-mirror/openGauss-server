@@ -651,7 +651,7 @@ static HeapTuple PLy_modify_tuple(PLyProcedure* proc, PyObject* pltd, TriggerDat
 
             modattrs[i] = attn;
 
-            if (tupdesc->attrs[atti]->attisdropped) {
+            if (tupdesc->attrs[atti].attisdropped) {
                 modvalues[i] = (Datum)0;
                 modnulls[i] = 'n';
             } else if (plval != Py_None) {

@@ -1581,13 +1581,13 @@ static void CopyTupleTableSlot(TupleTableSlot* tuple)
     TupleDesc tupDesc = tuple->tts_tupleDescriptor;
     for (int i = 0; i < tupDesc->natts; ++i) {
         // skip dropped columns in destination
-        if (tupDesc->attrs[i]->attisdropped) {
+        if (tupDesc->attrs[i].attisdropped) {
             continue;
         }
 
         bool isNull = tuple->tts_isnull[i];
         Datum value = tuple->tts_values[i];
-        Oid type = tuple->tts_tupleDescriptor->attrs[i]->atttypid;
+        Oid type = tuple->tts_tupleDescriptor->attrs[i].atttypid;
 
         // perform proper type conversion as in exec_assign_value() at pl_exec.cpp
         MOT_LOG_DEBUG("CopyTupleTableSlot(): Copying datum %d of type %u", i, type);

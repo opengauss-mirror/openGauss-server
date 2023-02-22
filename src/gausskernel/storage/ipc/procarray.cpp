@@ -2314,7 +2314,7 @@ Datum pg_get_running_xacts(PG_FUNCTION_ARGS)
 
         /* build tupdesc for result tuples */
         /* this had better match pg_prepared_xacts view in system_views.sql */
-        tupdesc = CreateTemplateTupleDesc(10, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(10, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "handle", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "gxid", XIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "state", INT1OID, -1, 0);

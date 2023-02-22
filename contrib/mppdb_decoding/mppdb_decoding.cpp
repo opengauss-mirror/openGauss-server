@@ -241,7 +241,7 @@ static void TupleToJsoninfo(
         Datum origval = 0;      /* possibly toasted Datum */
         bool isnull = false; /* column is null? */
 
-        Form_pg_attribute attr = tupdesc->attrs[natt]; /* the attribute itself */
+        Form_pg_attribute attr = &tupdesc->attrs[natt]; /* the attribute itself */
 
         /*
          * don't print dropped columns, we can't be sure everything is

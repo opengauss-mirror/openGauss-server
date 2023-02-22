@@ -78,7 +78,7 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
                      errmsg("Invalid index column, attribute column index is %d", heapScanAttrNumbers[i])));
         }
-        transferFuncs[i] = GetTransferFuncByTypeOid(heapRel->rd_att->attrs[heapScanAttrNumbers[i] - 1]->atttypid);
+        transferFuncs[i] = GetTransferFuncByTypeOid(heapRel->rd_att->attrs[heapScanAttrNumbers[i] - 1].atttypid);
     }
 
     /* add ctid column for cstore scan */

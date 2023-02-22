@@ -998,7 +998,7 @@ int pgxc_find_primarykey(Oid relid, int16** indexed_col, bool check_is_immediate
                  * 1.  skip expression index( it is an expression index when index attribute is zero )
                  * 2.  skip the idex if the index key is null
                  */
-                if (!idxKey || !rel->rd_att->attrs[idxKey - 1]->attnotnull) {
+                if (!idxKey || !rel->rd_att->attrs[idxKey - 1].attnotnull) {
                     equalPrimaryKey = false;
                     break;
                 }

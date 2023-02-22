@@ -238,7 +238,7 @@ static void slot_fill_defaults(LogicalRepRelMapEntry *rel, EState *estate, Tuple
     for (attnum = 0; attnum < num_phys_attrs; attnum++) {
         Expr *defexpr;
 
-        if (desc->attrs[attnum]->attisdropped || GetGeneratedCol(desc, attnum))
+        if (desc->attrs[attnum].attisdropped || GetGeneratedCol(desc, attnum))
             continue;
 
         if (rel->attrmap[attnum] >= 0)
@@ -304,7 +304,7 @@ static void slot_store_data(TupleTableSlot *slot, LogicalRepRelMapEntry *rel, Lo
 
     /* Call the "in" function for each non-dropped, non-null attribute */
     for (i = 0; i < natts; i++) {
-        Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
+        Form_pg_attribute att = &slot->tts_tupleDescriptor->attrs[i];
         int remoteattnum = rel->attrmap[i];
 
         if (!att->attisdropped && remoteattnum >= 0) {
@@ -411,7 +411,7 @@ static void slot_modify_data(TupleTableSlot *slot, TupleTableSlot *srcslot, Logi
 
     /* Call the "in" function for each replaced attribute */
     for (i = 0; i < natts; i++) {
-        Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
+        Form_pg_attribute att = &slot->tts_tupleDescriptor->attrs[i];
         int remoteattnum = rel->attrmap[i];
 
         if (remoteattnum < 0) {

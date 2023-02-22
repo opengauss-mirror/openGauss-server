@@ -329,8 +329,8 @@ static void opt_orderby(TsStoreScan* node, TsStoreScanState* scanstate)
     att_target = (TargetEntry*)list_nth(target_list, scanstate->sort_by_time_colidx - 1);
 
     for(int i = 0; i < tuple_desc->natts; i++) {
-        if (IsA(att_target->expr, Var) && tuple_desc->attrs[i]->attkvtype == ATT_KV_TIMETAG &&
-            ((Var*)(att_target->expr))->varattno == tuple_desc->attrs[i]->attnum) {
+        if (IsA(att_target->expr, Var) && tuple_desc->attrs[i].attkvtype == ATT_KV_TIMETAG &&
+            ((Var*)(att_target->expr))->varattno == tuple_desc->attrs[i].attnum) {
             scanstate->early_stop = true;
         }
     }

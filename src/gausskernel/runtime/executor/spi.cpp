@@ -1289,7 +1289,7 @@ int SPI_fnumber(TupleDesc tupdesc, const char *fname)
     Form_pg_attribute sys_att;
 
     for (res = 0; res < tupdesc->natts; res++) {
-        if (namestrcmp(&tupdesc->attrs[res]->attname, fname) == 0) {
+        if (namestrcmp(&tupdesc->attrs[res].attname, fname) == 0) {
             return res + 1;
         }
     }
@@ -1314,7 +1314,7 @@ char *SPI_fname(TupleDesc tupdesc, int fnumber)
     }
 
     if (fnumber > 0) {
-        attr = tupdesc->attrs[fnumber - 1];
+        attr = &tupdesc->attrs[fnumber - 1];
     } else {
         attr = SystemAttributeDefinition(fnumber, true, false, false);
     }
@@ -1344,7 +1344,7 @@ char *SPI_getvalue(HeapTuple tuple, TupleDesc tupdesc, int fnumber)
     }
 
     if (fnumber > 0) {
-        typoid = tupdesc->attrs[fnumber - 1]->atttypid;
+        typoid = tupdesc->attrs[fnumber - 1].atttypid;
     } else {
         typoid = (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
     }
@@ -1397,7 +1397,7 @@ char *SPI_gettype(TupleDesc tupdesc, int fnumber)
     }
 
     if (fnumber > 0) {
-        typoid = tupdesc->attrs[fnumber - 1]->atttypid;
+        typoid = tupdesc->attrs[fnumber - 1].atttypid;
     } else {
         typoid = (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
     }
@@ -1423,7 +1423,7 @@ Oid SPI_gettypeid(TupleDesc tupdesc, int fnumber)
     }
 
     if (fnumber > 0) {
-        return tupdesc->attrs[fnumber - 1]->atttypid;
+        return tupdesc->attrs[fnumber - 1].atttypid;
     } else {
         return (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
     }

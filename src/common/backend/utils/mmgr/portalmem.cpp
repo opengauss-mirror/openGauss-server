@@ -1210,7 +1210,7 @@ Datum pg_cursor(PG_FUNCTION_ARGS)
      * build tupdesc for result tuples. This must match the definition of the
      * pg_cursors view in system_views.sql
      */
-    tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(6, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "statement", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "is_holdable", BOOLOID, -1, 0);

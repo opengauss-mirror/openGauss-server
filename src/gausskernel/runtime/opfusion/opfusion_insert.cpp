@@ -281,7 +281,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
      * step 2: begin insert *
      ************************/
     Tuple tuple = tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values,
-        m_local.m_isnull, tableam_tops_get_tuple_type(rel));
+        m_local.m_isnull, GetTableAmRoutine(rel->rd_tam_type));
     Assert(tuple != NULL);
     if (RELATION_IS_PARTITIONED(rel)) {
         m_c_local.m_estate->esfRelations = NULL;

@@ -484,7 +484,7 @@ static void distrib_copy_from(RedistribState* distribState, ExecNodes* exec_node
     while (contains_tuple) {
         char* data = NULL;
         int len;
-        Form_pg_attribute* attr = tupdesc->attrs;
+        FormData_pg_attribute* attr = tupdesc->attrs;
         TupleTableSlot* slot = NULL;
         ExecNodes* local_execnodes = NULL;
 
@@ -505,7 +505,7 @@ static void distrib_copy_from(RedistribState* distribState, ExecNodes* exec_node
 
         /* Find value of distribution column if necessary */
         for (int i = 0; i < tupdesc->natts; i++) {
-            att_type[i] = attr[i]->atttypid;
+            att_type[i] = attr[i].atttypid;
         }
 
         local_execnodes = GetRelationNodes(copyState->rel_loc,

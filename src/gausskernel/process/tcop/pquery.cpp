@@ -813,7 +813,7 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
 
                     pstmt = (PlannedStmt*)PortalGetPrimaryStmt(portal);
                     AssertEreport(IsA(pstmt, PlannedStmt), MOD_EXECUTOR, "pstmt is not a PlannedStmt");
-                    portal->tupDesc = ExecCleanTypeFromTL(pstmt->planTree->targetlist, false, TAM_HEAP);
+                    portal->tupDesc = ExecCleanTypeFromTL(pstmt->planTree->targetlist, false);
                 }
 
                 /*
@@ -839,7 +839,7 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
 
                     if (portal->tupDesc != NULL)
                     {
-                        portal->tupDesc->tdTableAmType = TAM_HEAP;
+                        portal->tupDesc->td_tam_ops = TableAmHeap;
                     }
                 }
 

@@ -468,7 +468,7 @@ void ExecAssignResultType(PlanState* planstate, TupleDesc tupDesc)
  *		ExecAssignResultTypeFromTL
  * ----------------
  */
-void ExecAssignResultTypeFromTL(PlanState* planstate, TableAmType tam)
+void ExecAssignResultTypeFromTL(PlanState* planstate, const TableAmRoutine* tam_ops)
 {
     bool hasoid = false;
     TupleDesc tupDesc;
@@ -485,7 +485,7 @@ void ExecAssignResultTypeFromTL(PlanState* planstate, TableAmType tam)
      * list of ExprStates.	This is good because some plan nodes don't bother
      * to set up planstate->targetlist ...
      */
-    tupDesc = ExecTypeFromTL(planstate->plan->targetlist, hasoid, false, tam);
+    tupDesc = ExecTypeFromTL(planstate->plan->targetlist, hasoid, false, tam_ops);
     ExecAssignResultType(planstate, tupDesc);
 }
 
@@ -675,7 +675,7 @@ ProjectionInfo* ExecBuildVecProjectionInfo(
             else if (variable->varattno <= inputDesc->natts) {
                 Form_pg_attribute attr;
 
-                attr = inputDesc->attrs[variable->varattno - 1];
+                attr = &inputDesc->attrs[variable->varattno - 1];
                 if (!attr->attisdropped && variable->vartype == attr->atttypid)
                     isSimpleVar = true;
             }
@@ -830,7 +830,7 @@ ProjectionInfo* ExecBuildProjectionInfo(
             else if (variable->varattno <= inputDesc->natts) {
                 Form_pg_attribute attr;
 
-                attr = inputDesc->attrs[variable->varattno - 1];
+                attr = &inputDesc->attrs[variable->varattno - 1];
                 if (!attr->attisdropped && variable->vartype == attr->atttypid)
                     isSimpleVar = true;
             }
@@ -1512,7 +1512,7 @@ Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tupl
 
     if (is_null) {
         autoinc = 0;
-        modify_tuple = rel->rd_att->attrs[attnum - 1]->attnotnull;
+        modify_tuple = rel->rd_att->attrs[attnum - 1].attnotnull;
     } else {
         autoinc = datum2autoinc(cons_autoinc, datum);
         modify_tuple = (autoinc == 0);
@@ -2760,8 +2760,8 @@ Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
 
     int attrChk;
     for (attrChk = 1; attrChk <= natts; attrChk++) {
-        if (tupleDesc->attrs[attrChk - 1]->attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
-            values[attrChk - 1] = GetTypeZeroValue(tupleDesc->attrs[attrChk - 1]);
+        if (tupleDesc->attrs[attrChk - 1].attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
+            values[attrChk - 1] = GetTypeZeroValue(&tupleDesc->attrs[attrChk - 1]);
             replaces[attrChk - 1] = true;
         }
     }

@@ -1409,7 +1409,7 @@ bool SkewInfo::canValuePassQual(List* varList, List* valueList, Expr* expr)
             var = (Var*)list_nth(varList, j);
             con = (Const*)list_nth(valueList, j);
 
-            if (tupdesc->attrs[i]->attnum == var->varattno) {
+            if (tupdesc->attrs[i].attnum == var->varattno) {
                 if (con == NULL) {
                     slot->tts_isnull[i] = true;
                 } else {

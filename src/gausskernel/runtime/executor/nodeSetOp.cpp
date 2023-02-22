@@ -647,7 +647,7 @@ SetOpState* ExecInitSetOp(SetOp* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &setopstate->ps,
-            ExecGetResultType(outerPlanState(setopstate))->tdTableAmType);
+            ExecGetResultType(outerPlanState(setopstate))->td_tam_ops);
 
     setopstate->ps.ps_ProjInfo = NULL;
 

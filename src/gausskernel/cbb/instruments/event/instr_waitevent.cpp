@@ -480,7 +480,7 @@ Datum get_instr_wait_event(PG_FUNCTION_ARGS)
 
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(INSTR_WAITEVENT_ATTRUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(INSTR_WAITEVENT_ATTRUM, false);
 
         create_tuple_entry(tupdesc);
 

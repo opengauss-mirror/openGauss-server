@@ -84,7 +84,7 @@ extern Oid searchSeqidFromExpr(Node* cooked_default);
 extern bool is_start_end_def_list(List* def_list);
 extern void get_range_partition_name_prefix(char* namePrefix, char* srcName, bool printNotice, bool isPartition);
 extern List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, List* pos, 
-	Form_pg_attribute* attrs, int32 existPartNum, Const* lowBound, Const* upBound, bool needFree, 
+	FormData_pg_attribute* attrs, int32 existPartNum, Const* lowBound, Const* upBound, bool needFree, 
 	bool isPartition = true);
 extern bool check_contains_tbllike_in_multi_nodegroup(CreateStmt* stmt);
 extern bool is_multi_nodegroup_createtbllike(PGXCSubCluster* subcluster, Oid oid);

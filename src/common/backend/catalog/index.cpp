@@ -305,7 +305,7 @@ static TupleDesc ConstructTupleDescriptor(Relation heapRelation, IndexInfo* inde
     /*
      * allocate the new tuple descriptor
      */
-    indexTupDesc = CreateTemplateTupleDesc(numatts, false, TAM_HEAP);
+    indexTupDesc = CreateTemplateTupleDesc(numatts, false);
 
     /*
      * For simple index columns, we copy the pg_attribute row from the parent
@@ -314,7 +314,7 @@ static TupleDesc ConstructTupleDescriptor(Relation heapRelation, IndexInfo* inde
      */
     for (i = 0; i < numatts; i++) {
         AttrNumber atnum = indexInfo->ii_KeyAttrNumbers[i];
-        Form_pg_attribute to = indexTupDesc->attrs[i];
+        Form_pg_attribute to = &indexTupDesc->attrs[i];
         HeapTuple tuple;
         Form_pg_type typeTup;
         Form_pg_opclass opclassTup;
@@ -337,7 +337,7 @@ static TupleDesc ConstructTupleDescriptor(Relation heapRelation, IndexInfo* inde
                 if (atnum > natts) /* safety check */
                     ereport(
                         ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid column number %d", atnum)));
-                from = heapTupDesc->attrs[AttrNumberGetAttrOffset(atnum)];
+                from = &heapTupDesc->attrs[AttrNumberGetAttrOffset(atnum)];
             }
 
             /*
@@ -500,7 +500,7 @@ static void InitializeAttributeOids(Relation indexRelation, int numatts, Oid ind
     tupleDescriptor = RelationGetDescr(indexRelation);
 
     for (i = 0; i < numatts; i += 1)
-        tupleDescriptor->attrs[i]->attrelid = indexoid;
+        tupleDescriptor->attrs[i].attrelid = indexoid;
 }
 
 /* ----------------------------------------------------------------
@@ -531,10 +531,10 @@ static void AppendAttributeTuples(Relation indexRelation, int numatts)
          * There used to be very grotty code here to set these fields, but I
          * think it's unnecessary.  They should be set already.
          */
-        Assert(indexTupDesc->attrs[i]->attnum == i + 1);
-        Assert(indexTupDesc->attrs[i]->attcacheoff == -1);
+        Assert(indexTupDesc->attrs[i].attnum == i + 1);
+        Assert(indexTupDesc->attrs[i].attcacheoff == -1);
 
-        InsertPgAttributeTuple(pg_attribute, indexTupDesc->attrs[i], indstate);
+        InsertPgAttributeTuple(pg_attribute, &indexTupDesc->attrs[i], indstate);
     }
 
     CatalogCloseIndexes(indstate);
@@ -4210,7 +4210,7 @@ double IndexBuildUHeapScan(Relation heapRelation, Relation indexRelation, IndexI
      */
     estate = CreateExecutorState();
     econtext = GetPerTupleExprContext(estate);
-    slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation), false, TableAmUstore);
+    slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation), false, GetTableAmRoutine(heapRelation->rd_tam_type));
 
     /* Arrange for econtext's scan tuple to be the tuple under test */
     econtext->ecxt_scantuple = slot;
@@ -7061,7 +7061,7 @@ TupleDesc GetPsortTupleDesc(TupleDesc indexTupDesc)
 
     /* Add key columns */
     for (int i = 0; i < numatts - 1; i++) {
-        Form_pg_attribute from = indexTupDesc->attrs[i];
+        Form_pg_attribute from = &indexTupDesc->attrs[i];
 
         AttrNumber attId = i + 1;
         TupleDescInitEntry(psortTupDesc, attId, from->attname.data, from->atttypid, from->atttypmod, from->attndims);

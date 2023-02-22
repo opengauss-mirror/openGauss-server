@@ -519,7 +519,7 @@ VecNestLoopState* ExecInitVecNestLoop(VecNestLoop* node, EState* estate, int efl
     /*
      * initialize tuple type and projection info
      */
-    ExecAssignResultTypeFromTL(&nlstate->js.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&nlstate->js.ps);
     PlanState* planstate = &nlstate->js.ps;
     planstate->ps_ProjInfo = ExecBuildVecProjectionInfo(
         planstate->targetlist, node->join.plan.qual, planstate->ps_ExprContext, planstate->ps_ResultTupleSlot, NULL);
@@ -541,7 +541,7 @@ VecNestLoopRuntime::VecNestLoopRuntime(VecNestLoopState* runtime)
 {
     m_runtime = runtime;
     VecNestLoop* node = (VecNestLoop*)m_runtime->js.ps.plan;
-    Form_pg_attribute* attrs = NULL;
+    FormData_pg_attribute* attrs = NULL;
     int col_num = 0;
     TupleDesc outer_desc = ExecGetResultType(outerPlanState(m_runtime));
     ScalarVector* column = NULL;
@@ -598,7 +598,7 @@ VecNestLoopRuntime::VecNestLoopRuntime(VecNestLoopState* runtime)
     attrs = target_desc->attrs;
     col_num = target_desc->natts;
     for (int i = 0; i < col_num; i++) {
-        if (COL_IS_ENCODE(attrs[i]->atttypid)) {
+        if (COL_IS_ENCODE(attrs[i].atttypid)) {
             m_SimpletargetCol = false;
             break;
         }

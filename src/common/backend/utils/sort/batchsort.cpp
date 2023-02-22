@@ -1853,7 +1853,7 @@ int CompareMultiColumn(const MultiColumns* a, const MultiColumns* b, Batchsortst
 
         Assert(colIdx >= 0);
 
-        Form_pg_attribute attr = state->tupDesc->attrs[colIdx];
+        Form_pg_attribute attr = &state->tupDesc->attrs[colIdx];
         Oid typeOid = attr->atttypid;
 
         datum1Tmp = datum1 = a->m_values[colIdx];
@@ -1969,7 +1969,7 @@ void ReadFromDataNode(Batchsortstate* state, MultiColumns& multiColumn, int tape
         multiColumn.m_nulls[i] = flag;
         if (!IS_NULL(flag)) {
             if (state->NeedDecode(i)) {
-                Form_pg_attribute attr = state->tupDesc->attrs[i];
+                Form_pg_attribute attr = &state->tupDesc->attrs[i];
                 ScalarValue val = vecBatch->m_arr[i].m_vals[cursor];
                 Datum v = ScalarVector::Decode(val);
                 int typlen = 0;

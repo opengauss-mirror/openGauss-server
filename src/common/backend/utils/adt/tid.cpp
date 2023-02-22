@@ -283,8 +283,8 @@ static Datum currtid_for_view(Relation viewrel, ItemPointer tid)
     int i, natts = att->natts, tididx = -1;
 
     for (i = 0; i < natts; i++) {
-        if (strcmp(NameStr(att->attrs[i]->attname), "ctid") == 0) {
-            if (att->attrs[i]->atttypid != TIDOID)
+        if (strcmp(NameStr(att->attrs[i].attname), "ctid") == 0) {
+            if (att->attrs[i].atttypid != TIDOID)
                 ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("ctid isn't of type TID")));
             tididx = i;
             break;

@@ -62,8 +62,8 @@ static List* FixIndexCtidScanTargetList(List* idxTargetList, Oid idxRelId, bool 
         ListCell* cell = NULL;
         Relation indexRel = index_open(idxRelId, AccessShareLock);
         Relation heapRel = relation_open(indexRel->rd_index->indrelid, AccessShareLock);
-        Form_pg_attribute* heapRelAttrs = heapRel->rd_att->attrs;
-        Form_pg_attribute* idxRelAttrs = indexRel->rd_att->attrs;
+        FormData_pg_attribute* heapRelAttrs = heapRel->rd_att->attrs;
+        FormData_pg_attribute* idxRelAttrs = indexRel->rd_att->attrs;
         idxAttNo = indexRel->rd_att->natts;
 
         foreach (cell, idxTargetList) {
@@ -71,12 +71,12 @@ static List* FixIndexCtidScanTargetList(List* idxTargetList, Oid idxRelId, bool 
             Assert(IsA(tle->expr, Var));
             int pos = ((Var*)tle->expr)->varattno - 1;
             for (int col = 0; col < idxAttNo; ++col) {
-                if (strcmp(NameStr(idxRelAttrs[col]->attname), NameStr(heapRelAttrs[pos]->attname)) == 0) {
+                if (strcmp(NameStr(idxRelAttrs[col].attname), NameStr(heapRelAttrs[pos].attname)) == 0) {
                     Expr* idxVar = (Expr*)makeVar(((Var*)tle->expr)->varno,
                         col + 1,
-                        idxRelAttrs[col]->atttypid,
-                        idxRelAttrs[col]->atttypmod,
-                        idxRelAttrs[col]->attcollation,
+                        idxRelAttrs[col].atttypid,
+                        idxRelAttrs[col].atttypmod,
+                        idxRelAttrs[col].attcollation,
                         0);
                     newTargetList = lappend(newTargetList, makeTargetEntry(idxVar, num + 1, NULL, false));
                     ++num;

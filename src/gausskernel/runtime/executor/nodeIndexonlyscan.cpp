@@ -599,7 +599,7 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
      * types of the original datums.  (It's the AM's responsibility to return
      * suitable data anyway.)
      */
-    tupDesc = ExecTypeFromTL(node->indextlist, false, false, TAM_HEAP);
+    tupDesc = ExecTypeFromTL(node->indextlist, false, false);
     ExecAssignScanType(&indexstate->ss, tupDesc);
 
     /*
@@ -607,11 +607,11 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
      */
     ExecAssignResultTypeFromTL(
             &indexstate->ss.ps,
-            indexstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            indexstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     ExecAssignScanProjectionInfo(&indexstate->ss);
 
-    Assert(indexstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(indexstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * If we are just doing EXPLAIN (ie, aren't going to run the plan), stop

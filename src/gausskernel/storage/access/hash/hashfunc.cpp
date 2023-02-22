@@ -1568,7 +1568,7 @@ static Datum getBucketInternal(Datum array, char flag, int bucketcnt, bool *allI
 
     for (i = 0; i < tupdesc->natts; i++) {
         Datum val = heap_getattr(tuple, i + 1, tupdesc, &isnull);
-        Oid colType = tupdesc->attrs[i]->atttypid;
+        Oid colType = tupdesc->attrs[i].atttypid;
         if (!isnull) {
             hashValue = hashValueCombination(hashValue, colType, val, *allIsNull, flag);
             *allIsNull = false;

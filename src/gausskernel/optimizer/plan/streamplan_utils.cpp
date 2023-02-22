@@ -1305,7 +1305,7 @@ static bool judge_lockrows_need_redistribute_keyLen_equal(
         AttrNumber distributeKeyIdx = target_classForm->pcattnum.values[i];
         Node* subKey = (Node*)list_nth(subplan->distributed_keys, i);
         Var* subVar = locate_distribute_var((Expr*)subKey);
-        attTup = rel->rd_att->attrs[distributeKeyIdx - 1];
+        attTup = &rel->rd_att->attrs[distributeKeyIdx - 1];
         /*
          * Call pfree_ext to free the lockrelvar created in this loop and
          * we don't need check null outside as its check inside.

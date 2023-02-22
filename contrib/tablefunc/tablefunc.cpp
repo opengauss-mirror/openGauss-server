@@ -1337,35 +1337,35 @@ static void validateConnectbyTupleDesc(TupleDesc tupdesc, bool show_branch, bool
     }
 
     /* check that the types of the first two columns match */
-    if (tupdesc->attrs[0]->atttypid != tupdesc->attrs[1]->atttypid)
+    if (tupdesc->attrs[0].atttypid != tupdesc->attrs[1].atttypid)
         ereport(ERROR,
             (errcode(ERRCODE_SYNTAX_ERROR),
                 errmsg("invalid return type"),
                 errdetail("First two columns must be the same type.")));
 
     /* check that the type of the third column is INT4 */
-    if (tupdesc->attrs[2]->atttypid != INT4OID)
+    if (tupdesc->attrs[2].atttypid != INT4OID)
         ereport(ERROR,
             (errcode(ERRCODE_SYNTAX_ERROR),
                 errmsg("invalid return type"),
                 errdetail("Third column must be type %s.", format_type_be(INT4OID))));
 
     /* check that the type of the fourth column is TEXT if applicable */
-    if (show_branch && tupdesc->attrs[3]->atttypid != TEXTOID)
+    if (show_branch && tupdesc->attrs[3].atttypid != TEXTOID)
         ereport(ERROR,
             (errcode(ERRCODE_SYNTAX_ERROR),
                 errmsg("invalid return type"),
                 errdetail("Fourth column must be type %s.", format_type_be(TEXTOID))));
 
     /* check that the type of the fifth column is INT4 */
-    if (show_branch && show_serial && tupdesc->attrs[4]->atttypid != INT4OID)
+    if (show_branch && show_serial && tupdesc->attrs[4].atttypid != INT4OID)
         elog(ERROR,
             "query-specified return tuple not valid for Connectby: "
             "fifth column must be type %s",
             format_type_be(INT4OID));
 
     /* check that the type of the fifth column is INT4 */
-    if (!show_branch && show_serial && tupdesc->attrs[3]->atttypid != INT4OID)
+    if (!show_branch && show_serial && tupdesc->attrs[3].atttypid != INT4OID)
         elog(ERROR,
             "query-specified return tuple not valid for Connectby: "
             "fourth column must be type %s",
@@ -1383,8 +1383,8 @@ static bool compatConnectbyTupleDescs(TupleDesc ret_tupdesc, TupleDesc sql_tupde
     Oid sql_atttypid;
 
     /* check the key_fld types match */
-    ret_atttypid = ret_tupdesc->attrs[0]->atttypid;
-    sql_atttypid = sql_tupdesc->attrs[0]->atttypid;
+    ret_atttypid = ret_tupdesc->attrs[0].atttypid;
+    sql_atttypid = sql_tupdesc->attrs[0].atttypid;
     if (ret_atttypid != sql_atttypid)
         ereport(ERROR,
             (errcode(ERRCODE_SYNTAX_ERROR),
@@ -1393,8 +1393,8 @@ static bool compatConnectbyTupleDescs(TupleDesc ret_tupdesc, TupleDesc sql_tupde
                           "not match return key field datatype.")));
 
     /* check the parent_key_fld types match */
-    ret_atttypid = ret_tupdesc->attrs[1]->atttypid;
-    sql_atttypid = sql_tupdesc->attrs[1]->atttypid;
+    ret_atttypid = ret_tupdesc->attrs[1].atttypid;
+    sql_atttypid = sql_tupdesc->attrs[1].atttypid;
     if (ret_atttypid != sql_atttypid)
         ereport(ERROR,
             (errcode(ERRCODE_SYNTAX_ERROR),
@@ -1421,8 +1421,8 @@ static bool compatCrosstabTupleDescs(TupleDesc ret_tupdesc, TupleDesc sql_tupdes
         return false;
 
     /* check the rowid types match */
-    ret_atttypid = ret_tupdesc->attrs[0]->atttypid;
-    sql_atttypid = sql_tupdesc->attrs[0]->atttypid;
+    ret_atttypid = ret_tupdesc->attrs[0].atttypid;
+    sql_atttypid = sql_tupdesc->attrs[0].atttypid;
     if (ret_atttypid != sql_atttypid)
         ereport(ERROR,
             (errcode(ERRCODE_SYNTAX_ERROR),

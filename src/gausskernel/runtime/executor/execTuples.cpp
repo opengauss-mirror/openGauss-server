@@ -100,7 +100,7 @@
 
 #include "access/ustore/knl_utuple.h"
 
-static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool skip_junk, bool mark_dropped = false, TableAmType tam = TAM_HEAP);
+static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool skip_junk, bool mark_dropped, const TableAmRoutine* tam_ops);
 
 /* ----------------------------------------------------------------
  *				  tuple table create/delete functions
@@ -779,9 +779,9 @@ TupleTableSlot* ExecInitNullTupleSlot(EState* estate, TupleDesc tup_type)
  *		be rewritten to call BuildDesc().
  * ----------------------------------------------------------------
  */
-TupleDesc ExecTypeFromTL(List* target_list, bool has_oid, bool mark_dropped, TableAmType tam)
+TupleDesc ExecTypeFromTL(List* target_list, bool has_oid, bool mark_dropped, const TableAmRoutine* tam_ops)
 {
-    return ExecTypeFromTLInternal(target_list, has_oid, false, mark_dropped, tam);
+    return ExecTypeFromTLInternal(target_list, has_oid, false, mark_dropped, tam_ops);
 }
 
 /* ----------------------------------------------------------------
@@ -790,12 +790,12 @@ TupleDesc ExecTypeFromTL(List* target_list, bool has_oid, bool mark_dropped, Tab
  *		Same as above, but resjunk columns are omitted from the result.
  * ----------------------------------------------------------------
  */
-TupleDesc ExecCleanTypeFromTL(List* target_list, bool has_oid, TableAmType tam)
+TupleDesc ExecCleanTypeFromTL(List* target_list, bool has_oid, const TableAmRoutine* tam_ops)
 {
-    return ExecTypeFromTLInternal(target_list, has_oid, true, false, tam);
+    return ExecTypeFromTLInternal(target_list, has_oid, true, false, tam_ops);
 }
 
-static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool skip_junk, bool mark_dropped,  TableAmType tam)
+static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool skip_junk, bool mark_dropped, const TableAmRoutine* tam_ops)
 {
     TupleDesc type_info;
     ListCell* l = NULL;
@@ -806,7 +806,7 @@ static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool sk
         len = ExecCleanTargetListLength(target_list);
     else
         len = ExecTargetListLength(target_list);
-    type_info = CreateTemplateTupleDesc(len, has_oid, tam);
+    type_info = CreateTemplateTupleDesc(len, has_oid, tam_ops);
 
     foreach (l, target_list) {
         TargetEntry* tle = (TargetEntry*)lfirst(l);
@@ -820,7 +820,7 @@ static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool sk
 
         /* mark dropped column, maybe we can find another way some day */
         if (mark_dropped && strstr(tle->resname, "........pg.dropped.")) {
-            type_info->attrs[cur_resno - 1]->attisdropped = true;
+            type_info->attrs[cur_resno - 1].attisdropped = true;
         }
 
         cur_resno++;
@@ -834,7 +834,7 @@ static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool sk
  *
  * Caller must also supply a list of field names (String nodes).
  */
-TupleDesc ExecTypeFromExprList(List* expr_list, List* names_list,  TableAmType tam)
+TupleDesc ExecTypeFromExprList(List* expr_list, List* names_list, const TableAmRoutine* tam_ops)
 {
     TupleDesc type_info;
     ListCell* le = NULL;
@@ -843,7 +843,7 @@ TupleDesc ExecTypeFromExprList(List* expr_list, List* names_list,  TableAmType t
 
     Assert(list_length(expr_list) == list_length(names_list));
 
-    type_info = CreateTemplateTupleDesc(list_length(expr_list), false, tam);
+    type_info = CreateTemplateTupleDesc(list_length(expr_list), false, tam_ops);
 
     forboth(le, expr_list, ln, names_list)
     {
@@ -925,11 +925,11 @@ AttInMetadata* TupleDescGetAttInMetadata(TupleDesc tup_desc)
 
     for (i = 0; i < natts; i++) {
         /* Ignore dropped attributes */
-        if (!tup_desc->attrs[i]->attisdropped) {
-            att_type_id = tup_desc->attrs[i]->atttypid;
+        if (!tup_desc->attrs[i].attisdropped) {
+            att_type_id = tup_desc->attrs[i].atttypid;
             getTypeInputInfo(att_type_id, &att_in_func_id, &att_io_params[i]);
             fmgr_info(att_in_func_id, &att_in_func_info[i]);
-            att_typ_mods[i] = tup_desc->attrs[i]->atttypmod;
+            att_typ_mods[i] = tup_desc->attrs[i].atttypmod;
         }
     }
     att_in_meta->attinfuncs = att_in_func_info;
@@ -958,7 +958,7 @@ HeapTuple BuildTupleFromCStrings(AttInMetadata* att_in_meta, char** values)
 
     /* Call the "in" function for each non-dropped attribute */
     for (i = 0; i < natts; i++) {
-        if (!tup_desc->attrs[i]->attisdropped) {
+        if (!tup_desc->attrs[i].attisdropped) {
             /* Non-dropped attributes */
             d_values[i] = InputFunctionCall(
                 &att_in_meta->attinfuncs[i], values[i], att_in_meta->attioparams[i], att_in_meta->atttypmods[i]);
@@ -974,7 +974,7 @@ HeapTuple BuildTupleFromCStrings(AttInMetadata* att_in_meta, char** values)
     /*
      * Form a tuple
      */
-    tuple = (HeapTuple)tableam_tops_form_tuple(tup_desc, d_values, nulls, HEAP_TUPLE);
+    tuple = (HeapTuple)tableam_tops_form_tuple(tup_desc, d_values, nulls);
 
     /*
      * Release locally palloc'd space.  XXX would probably be good to pfree

@@ -1333,7 +1333,7 @@ Datum get_client_info(PG_FUNCTION_ARGS)
     Tuplestorestate* tupstore = NULL;
     const int COLUMN_NUM = 2;
     MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
-    tupdesc = CreateTemplateTupleDesc(COLUMN_NUM, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(COLUMN_NUM, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "sid", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "client_info", TEXTOID, -1, 0);
  

@@ -61,7 +61,7 @@ int CalTupSize(Relation relation, UHeapDiskTuple diskTuple, TupleDesc scanTupDes
 {
     TupleDesc rowDesc = (scanTupDesc == NULL) ? RelationGetDescr(relation) : scanTupDesc;
     bool hasnulls = UHeapDiskTupHasNulls(diskTuple);
-    Form_pg_attribute *att = rowDesc->attrs;
+    FormData_pg_attribute *att = rowDesc->attrs;
     int natts; /* number of atts to extract */
     int attnum;
     bits8 *bp = diskTuple->data;
@@ -75,7 +75,7 @@ int CalTupSize(Relation relation, UHeapDiskTuple diskTuple, TupleDesc scanTupDes
 
     natts = Min(tupleAttrs, rowDesc->natts);
     for (attnum = 0; attnum < natts; attnum++) {
-        Form_pg_attribute thisatt = att[attnum];
+        Form_pg_attribute thisatt = &att[attnum];
 
         if (hasnulls && att_isnull(attnum, bp)) {
             /* Skip attribute length in case the tuple was stored with

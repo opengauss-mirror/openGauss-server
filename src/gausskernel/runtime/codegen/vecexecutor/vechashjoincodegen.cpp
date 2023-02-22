@@ -96,7 +96,7 @@ Var* VecHashJoinCodeGen::GetSimpHashCondExpr(
                 Oid namespaceOid = get_rel_namespace(relid);
                 if (RelationIsValid(base_relation) && namespaceOid > FirstNormalObjectId) {
                     if (var->varoattno <= base_relation->rd_att->natts) {
-                        attr = base_relation->rd_att->attrs[var->varoattno - 1];
+                        attr = &base_relation->rd_att->attrs[var->varoattno - 1];
                         if (attr == NULL || !attr->attnotnull)
                             *enable_fast_keyMatch = 0;
                     } else

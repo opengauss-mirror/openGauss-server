@@ -155,7 +155,7 @@ void IndexOnlyScanFusion::Init(long max_rows)
         *m_direction = NoMovementScanDirection;
     }
 
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, GetTableAmRoutine(m_tupDesc->tdTableAmType));
+    m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, m_tupDesc->td_tam_ops);
     ScanState* scanstate = makeNode(ScanState); // need release
     scanstate->ps.plan =  (Plan *)m_node;
 

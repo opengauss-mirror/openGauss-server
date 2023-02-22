@@ -205,9 +205,9 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
      * toast :-(.  This is essential for chunk_data because type bytea is
      * toastable; hit the other two just to be sure.
      */
-    tupdesc->attrs[0]->attstorage = 'p';
-    tupdesc->attrs[1]->attstorage = 'p';
-    tupdesc->attrs[2]->attstorage = 'p';
+    tupdesc->attrs[0].attstorage = 'p';
+    tupdesc->attrs[1].attstorage = 'p';
+    tupdesc->attrs[2].attstorage = 'p';
 
     /*
      * Toast tables for regular relations go in pg_toast; those for temp
@@ -525,7 +525,7 @@ static bool needs_toast_table(Relation rel)
     bool maxlength_unknown = false;
     bool has_toastable_attrs = false;
     TupleDesc tupdesc;
-    Form_pg_attribute* att = NULL;
+    FormData_pg_attribute* att = NULL;
     int32 tuple_length;
     int i;
 
@@ -548,19 +548,19 @@ static bool needs_toast_table(Relation rel)
     att = tupdesc->attrs;
 
     for (i = 0; i < tupdesc->natts; i++) {
-        if (att[i]->attisdropped)
+        if (att[i].attisdropped)
             continue;
-        data_length = att_align_nominal(data_length, att[i]->attalign);
-        if (att[i]->attlen > 0) {
+        data_length = att_align_nominal(data_length, att[i].attalign);
+        if (att[i].attlen > 0) {
             /* Fixed-length types are never toastable */
-            data_length += att[i]->attlen;
+            data_length += att[i].attlen;
         } else {
-            int32 maxlen = type_maximum_size(att[i]->atttypid, att[i]->atttypmod);
+            int32 maxlen = type_maximum_size(att[i].atttypid, att[i].atttypmod);
             if (maxlen < 0)
                 maxlength_unknown = true;
             else
                 data_length += maxlen;
-            if (att[i]->attstorage != 'p')
+            if (att[i].attstorage != 'p')
                 has_toastable_attrs = true;
         }
     }
@@ -801,9 +801,9 @@ bool create_toast_by_sid(Oid *toastOid)
      * toast :-(.  This is essential for chunk_data because type bytea is
      * toastable; hit the other two just to be sure.
      */
-    tupdesc->attrs[0]->attstorage = 'p';
-    tupdesc->attrs[1]->attstorage = 'p';
-    tupdesc->attrs[2]->attstorage = 'p';
+    tupdesc->attrs[0].attstorage = 'p';
+    tupdesc->attrs[1].attstorage = 'p';
+    tupdesc->attrs[2].attstorage = 'p';
     if (!OidIsValid(u_sess->catalog_cxt.myLobTempToastNamespace)) {
         InitLobTempToastNamespace();
     }

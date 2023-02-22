@@ -689,7 +689,7 @@ static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isS
                     isSelect ? errmsg("SELECT rule's target list has too many entries")
                              : errmsg("RETURNING list has too many entries")));
 
-        attr = resultDesc->attrs[i - 1];
+        attr = &resultDesc->attrs[i - 1];
         attname = NameStr(attr->attname);
 
         /*

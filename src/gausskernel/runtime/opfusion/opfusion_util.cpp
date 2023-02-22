@@ -963,15 +963,15 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
     Relation rel = heap_open(relid, AccessShareLock);
 
     for (int i = 0; i < rel->rd_att->natts; i++) {
-        if (rel->rd_att->attrs[i]->attisdropped) {
+        if (rel->rd_att->attrs[i].attisdropped) {
             continue;
         }
         /* check whether the attrs of */
-        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(rel->rd_att->attrs[i]->atttypid));
+        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(rel->rd_att->attrs[i].atttypid));
         if (!HeapTupleIsValid(tuple)) {
             /* should not happen */
             ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmsg("cache lookup failed for type %u", rel->rd_att->attrs[i]->atttypid)));
+                errmsg("cache lookup failed for type %u", rel->rd_att->attrs[i].atttypid)));
         }
         Form_pg_type type_form = (Form_pg_type)GETSTRUCT(tuple);
         ReleaseSysCache(tuple);

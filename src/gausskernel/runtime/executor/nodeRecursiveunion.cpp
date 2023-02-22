@@ -584,7 +584,7 @@ RecursiveUnionState* ExecInitRecursiveUnion(RecursiveUnion* node, EState* estate
      * set up the result type before initializing child nodes, because
      * nodeWorktablescan.c expects it to be valid.)
      */
-    ExecAssignResultTypeFromTL(&rustate->ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&rustate->ps);
     rustate->ps.ps_ProjInfo = NULL;
 
     /*

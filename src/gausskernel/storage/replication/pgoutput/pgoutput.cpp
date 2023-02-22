@@ -289,7 +289,7 @@ static void MaybeSendSchema(LogicalDecodingContext *ctx, Relation relation, Rela
      * types.
      */
     for (i = 0; i < desc->natts; i++) {
-        Form_pg_attribute att = desc->attrs[i];
+        Form_pg_attribute att = &desc->attrs[i];
 
         if (att->attisdropped || GetGeneratedCol(desc, i))
             continue;

@@ -243,7 +243,7 @@ List* preprocess_targetlist(PlannerInfo* root, List* tlist)
                     int32 vartypmod = -1;
                     Oid varCollid = InvalidOid;
                     if (is_hdfs_ftbl) {
-                        Form_pg_attribute attr = tupdesc->attrs[varattno];
+                        Form_pg_attribute attr = &tupdesc->attrs[varattno];
                         vartype = attr->atttypid;
                         varCollid = attr->attcollation;
                         vartypmod = attr->atttypmod;
@@ -366,7 +366,7 @@ static List* expand_targetlist(List* tlist, int command_type, List* resultRelati
         numattrs = RelationGetNumberOfAttributes(rel);
 
         for (attrno = 1; attrno <= numattrs; attrno++) {
-            Form_pg_attribute att_tup = rel->rd_att->attrs[attrno - 1];
+            Form_pg_attribute att_tup = &rel->rd_att->attrs[attrno - 1];
             TargetEntry* new_tle = NULL;
 
             if (tlist_item != NULL) {
@@ -559,7 +559,7 @@ static List* add_distribute_column(List* tlist, Index result_relation, List* ran
     for (int i = 0; i < len; i++) {
         if (isExist[i] == false) {
             no = disattrno->values[i];
-            Form_pg_attribute att_tup = rel->rd_att->attrs[no - 1];
+            Form_pg_attribute att_tup = &rel->rd_att->attrs[no - 1];
             Node* new_expr =
                 (Node*)makeVar(result_relation, no, att_tup->atttypid, att_tup->atttypmod, att_tup->attcollation, 0);
             TargetEntry* tle =

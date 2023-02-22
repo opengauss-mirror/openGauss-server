@@ -192,7 +192,7 @@ extern TupleHashEntry FindTupleHashEntry(
 /*
  * prototypes from functions in execJunk.c
  */
-extern JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, TableAmType tam = TAM_HEAP);
+extern JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, const TableAmRoutine* tam_ops);
 extern void ExecInitJunkAttr(EState* estate, CmdType operation, List* targetlist, ResultRelInfo* result_rel_info);
 extern JunkFilter* ExecInitJunkFilterConversion(List* targetList, TupleDesc cleanTupType, TupleTableSlot* slot);
 extern AttrNumber ExecFindJunkAttribute(JunkFilter* junkfilter, const char* attrName);
@@ -334,9 +334,9 @@ extern void ExecInitResultTupleSlot(EState* estate, PlanState* planstate, const 
 extern void ExecInitScanTupleSlot(EState* estate, ScanState* scanstate, const TableAmRoutine* tam_ops = TableAmHeap);
 extern TupleTableSlot* ExecInitExtraTupleSlot(EState* estate, const TableAmRoutine* tam_ops = TableAmHeap);
 extern TupleTableSlot* ExecInitNullTupleSlot(EState* estate, TupleDesc tupType);
-extern TupleDesc ExecTypeFromTL(List* targetList, bool hasoid, bool markdropped = false, TableAmType tam = TAM_HEAP);
-extern TupleDesc ExecCleanTypeFromTL(List* targetList, bool hasoid, TableAmType tam = TAM_HEAP);
-extern TupleDesc ExecTypeFromExprList(List* exprList, List* namesList, TableAmType tam = TAM_HEAP);
+extern TupleDesc ExecTypeFromTL(List* targetList, bool hasoid, bool markdropped = false, const TableAmRoutine* tam_ops = TableAmHeap);
+extern TupleDesc ExecCleanTypeFromTL(List* targetList, bool hasoid, const TableAmRoutine* tam_ops = TableAmHeap);
+extern TupleDesc ExecTypeFromExprList(List* exprList, List* namesList, const TableAmRoutine* tam_ops = TableAmHeap);
 extern void UpdateChangedParamSet(PlanState* node, Bitmapset* newchg);
 extern void InitOutputValues(RightRefState* refState, GenericExprState* targetArr[],
                              Datum* values, bool* isnull, int targetCount, bool* hasExecs);
@@ -421,7 +421,7 @@ extern ExprContext* MakePerTupleExprContext(EState* estate);
 
 extern void ExecAssignExprContext(EState* estate, PlanState* planstate);
 extern void ExecAssignResultType(PlanState* planstate, TupleDesc tupDesc);
-extern void ExecAssignResultTypeFromTL(PlanState* planstate, TableAmType tam = TAM_HEAP);
+extern void ExecAssignResultTypeFromTL(PlanState* planstate, const TableAmRoutine* tam_ops = TableAmHeap);
 extern TupleDesc ExecGetResultType(PlanState* planstate);
 extern void ExecAssignVectorForExprEval(ExprContext* econtext);
 extern ProjectionInfo* ExecBuildProjectionInfo(

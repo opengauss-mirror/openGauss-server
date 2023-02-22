@@ -2704,13 +2704,13 @@ static void set_colinfo_by_relation(Oid relid, int location, SkewColumnInfo* col
 
     relation = heap_open(relid, AccessShareLock);
 
-    Assert((location + 1) == relation->rd_att->attrs[location]->attnum);
+    Assert((location + 1) == relation->rd_att->attrs[location].attnum);
 
     /* Set column info. */
-    column_info->relation_Oid = relation->rd_att->attrs[location]->attrelid;
+    column_info->relation_Oid = relation->rd_att->attrs[location].attrelid;
     column_info->column_name = column_name;
-    column_info->attnum = relation->rd_att->attrs[location]->attnum;
-    column_info->column_typid = relation->rd_att->attrs[location]->atttypid;
+    column_info->attnum = relation->rd_att->attrs[location].attnum;
+    column_info->column_typid = relation->rd_att->attrs[location].atttypid;
     column_info->expr = NULL;
 
     heap_close(relation, AccessShareLock);

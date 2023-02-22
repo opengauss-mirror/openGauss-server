@@ -103,7 +103,7 @@ Size heap_compute_data_size(TupleDesc tupleDesc, Datum *values, const bool *isnu
     Size data_length = 0;
     int i;
     int numberOfAttributes = tupleDesc->natts;
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
 
     for (i = 0; i < numberOfAttributes; i++) {
         Datum val;
@@ -114,15 +114,15 @@ Size heap_compute_data_size(TupleDesc tupleDesc, Datum *values, const bool *isnu
 
         val = values[i];
 
-        if (ATT_IS_PACKABLE(att[i]) && VARATT_CAN_MAKE_SHORT(DatumGetPointer(val))) {
+        if (ATT_IS_PACKABLE(&att[i]) && VARATT_CAN_MAKE_SHORT(DatumGetPointer(val))) {
             /*
              * we're anticipating converting to a short varlena header, so
              * adjust length and don't count any alignment
              */
             data_length += VARATT_CONVERTED_SHORT_SIZE(DatumGetPointer(val));
         } else {
-            data_length = att_align_datum(data_length, att[i]->attalign, att[i]->attlen, val);
-            data_length = att_addlength_datum(data_length, att[i]->attlen, val);
+            data_length = att_align_datum(data_length, att[i].attalign, att[i].attlen, val);
+            data_length = att_addlength_datum(data_length, att[i].attlen, val);
         }
     }
 
@@ -145,7 +145,7 @@ void heap_fill_tuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, cha
     uint32 bitmask;
     int i;
     int numberOfAttributes = tupleDesc->natts;
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     errno_t rc = EOK;
     char *begin = data;
 
@@ -189,12 +189,12 @@ void heap_fill_tuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, cha
          * XXX we use the att_align macros on the pointer value itself, not on
          * an offset.  This is a bit of a hack.
          */
-        if (att[i]->attbyval) {
+        if (att[i].attbyval) {
             /* pass-by-value */
-            data = (char *)att_align_nominal(data, att[i]->attalign);
-            store_att_byval(data, values[i], att[i]->attlen);
-            data_length = att[i]->attlen;
-        } else if (att[i]->attlen == -1) {
+            data = (char *)att_align_nominal(data, att[i].attalign);
+            store_att_byval(data, values[i], att[i].attlen);
+            data_length = att[i].attlen;
+        } else if (att[i].attlen == -1) {
             /* varlena */
             Pointer val = DatumGetPointer(values[i]);
 
@@ -210,7 +210,7 @@ void heap_fill_tuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, cha
                 data_length = VARSIZE_SHORT(val);
                 rc = memcpy_s(data, remain_length, val, data_length);
                 securec_check(rc, "\0", "\0");
-            } else if (VARLENA_ATT_IS_PACKABLE(att[i]) && VARATT_CAN_MAKE_SHORT(val)) {
+            } else if (VARLENA_ATT_IS_PACKABLE(&att[i]) && VARATT_CAN_MAKE_SHORT(val)) {
                 /* convert to short varlena -- no alignment */
                 data_length = VARATT_CONVERTED_SHORT_SIZE(val);
                 SET_VARSIZE_SHORT(data, data_length);
@@ -220,23 +220,23 @@ void heap_fill_tuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, cha
                 }
             } else {
                 /* full 4-byte header varlena */
-                data = (char *)att_align_nominal(data, att[i]->attalign);
+                data = (char *)att_align_nominal(data, att[i].attalign);
                 data_length = VARSIZE(val);
                 rc = memcpy_s(data, remain_length, val, data_length);
                 securec_check(rc, "\0", "\0");
             }
-        } else if (att[i]->attlen == -2) {
+        } else if (att[i].attlen == -2) {
             /* cstring ... never needs alignment */
             *infomask |= HEAP_HASVARWIDTH;
-            Assert(att[i]->attalign == 'c');
+            Assert(att[i].attalign == 'c');
             data_length = strlen(DatumGetCString(values[i])) + 1;
             rc = memcpy_s(data, remain_length, DatumGetPointer(values[i]), data_length);
             securec_check(rc, "\0", "\0");
         } else {
             /* fixed-length pass-by-reference */
-            data = (char *)att_align_nominal(data, att[i]->attalign);
-            Assert(att[i]->attlen > 0);
-            data_length = att[i]->attlen;
+            data = (char *)att_align_nominal(data, att[i].attalign);
+            Assert(att[i].attlen > 0);
+            data_length = att[i].attlen;
             rc = memcpy_s(data, remain_length, DatumGetPointer(values[i]), data_length);
             securec_check(rc, "\0", "\0");
         }
@@ -301,7 +301,7 @@ Datum heapGetInitDefVal(int attNum, TupleDesc tupleDesc, bool *isNull)
     if (tupleDesc->initdefvals != NULL) {
         *isNull = tupleDesc->initdefvals[attNum - 1].isNull;
         if (!(*isNull)) {
-            return fetchatt(tupleDesc->attrs[attNum - 1], tupleDesc->initdefvals[attNum - 1].datum);
+            return fetchatt(&tupleDesc->attrs[attNum - 1], tupleDesc->initdefvals[attNum - 1].datum);
         }
     }
 
@@ -346,12 +346,12 @@ bool relationAttIsNull(HeapTuple tup, int attNum, TupleDesc tupleDesc)
 Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
 {
     HeapTupleHeader tup = tuple->t_data;
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     char *tp = NULL;         /* ptr to data part of tuple */
     bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
     bool slow = false;       /* do we have to walk attrs? */
     int off;                 /* current offset within data */
-    bool heapToUHeap = tupleDesc->tdTableAmType == TAM_USTORE;
+    bool heapToUHeap = tupleDesc->td_tam_ops == TableAmUstore;
 
     /*
      * Ustore has different alignment rules so we force slow = true here.
@@ -414,8 +414,8 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
          * If we get here, there are no nulls up to and including the target
          * attribute.  If we have a cached offset, we can use it.
          */
-        if (att[attnum]->attcacheoff >= 0) {
-            return fetchatt(att[attnum], tp + att[attnum]->attcacheoff);
+        if (att[attnum].attcacheoff >= 0) {
+            return fetchatt(&att[attnum], tp + att[attnum].attcacheoff);
         }
 
         /*
@@ -427,7 +427,7 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
             uint32 j;
 
             for (j = 0; j <= attnum; j++) {
-                if (att[j]->attlen <= 0) {
+                if (att[j].attlen <= 0) {
                     slow = true;
                     break;
                 }
@@ -448,30 +448,30 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
          * fixed-width columns, in hope of avoiding future visits to this
          * routine.
          */
-        att[0]->attcacheoff = 0;
+        att[0].attcacheoff = 0;
 
         /* we might have set some offsets in the slow path previously */
-        while (j < natts && att[j]->attcacheoff > 0) {
+        while (j < natts && att[j].attcacheoff > 0) {
             j++;
         }
 
-        off = att[j - 1]->attcacheoff + att[j - 1]->attlen;
+        off = att[j - 1].attcacheoff + att[j - 1].attlen;
 
         for (; j < natts; j++) {
-            if (att[j]->attlen <= 0) {
+            if (att[j].attlen <= 0) {
                 break;
             }
 
-            off = att_align_nominal((uint32)off, att[j]->attalign);
+            off = att_align_nominal((uint32)off, att[j].attalign);
 
-            att[j]->attcacheoff = off;
+            att[j].attcacheoff = off;
 
-            off += att[j]->attlen;
+            off += att[j].attlen;
         }
 
         Assert(j > attnum);
 
-        off = att[attnum]->attcacheoff;
+        off = att[attnum].attcacheoff;
     } else {
         bool usecache = !heapToUHeap;
         uint32 i;
@@ -495,27 +495,27 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
             }
 
             /* If we know the next offset, we can skip the rest */
-            if (usecache && att[i]->attcacheoff >= 0) {
-                off = att[i]->attcacheoff;
-            } else if (att[i]->attlen == -1) {
+            if (usecache && att[i].attcacheoff >= 0) {
+                off = att[i].attcacheoff;
+            } else if (att[i].attlen == -1) {
                 /*
                  * We can only cache the offset for a varlena attribute if the
                  * offset is already suitably aligned, so that there would be
                  * no pad bytes in any case: then the offset will be valid for
                  * either an aligned or unaligned value.
                  */
-                if (usecache && (uintptr_t)(off) == att_align_nominal((uint32)off, att[i]->attalign)) {
-                    att[i]->attcacheoff = off;
+                if (usecache && (uintptr_t)(off) == att_align_nominal((uint32)off, att[i].attalign)) {
+                    att[i].attcacheoff = off;
                 } else {
-                    off = att_align_pointer((uint32)off, att[i]->attalign, -1, tp + off);
+                    off = att_align_pointer((uint32)off, att[i].attalign, -1, tp + off);
                     usecache = false;
                 }
             } else {
                 /* not varlena, so safe to use att_align_nominal */
-                off = att_align_nominal((uint32)off, att[i]->attalign);
+                off = att_align_nominal((uint32)off, att[i].attalign);
 
                 if (usecache) {
-                    att[i]->attcacheoff = off;
+                    att[i].attcacheoff = off;
                 }
             }
 
@@ -523,15 +523,15 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
                 break;
             }
 
-            off = att_addlength_pointer(off, att[i]->attlen, tp + off);
+            off = att_addlength_pointer(off, att[i].attlen, tp + off);
 
-            if (usecache && att[i]->attlen <= 0) {
+            if (usecache && att[i].attlen <= 0) {
                 usecache = false;
             }
         }
     }
 
-    return fetchatt(att[attnum], tp + off);
+    return fetchatt(&att[attnum], tp + off);
 }
 
 /* ----------------
@@ -698,7 +698,7 @@ HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull
     Size len, data_len;
     int hoff;
     bool hasnull = false;
-    Form_pg_attribute *att = tupleDescriptor->attrs;
+    FormData_pg_attribute *att = tupleDescriptor->attrs;
     int numberOfAttributes = tupleDescriptor->natts;
     int i;
 
@@ -706,7 +706,7 @@ HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull
         ereport(ERROR,
                 (errcode(ERRCODE_TOO_MANY_COLUMNS),
                  errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
-                        MaxTupleAttributeNumber, tupleDescriptor->tdTableAmType, tupleDescriptor->tdtypeid)));
+                        MaxTupleAttributeNumber, GetTableAmType(tupleDescriptor->td_tam_ops), tupleDescriptor->tdtypeid)));
     }
 
     /*
@@ -723,12 +723,12 @@ HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull
     for (i = 0; i < numberOfAttributes; i++) {
         if (isnull[i]) {
             hasnull = true;
-        } else if (att[i]->attlen == -1 && att[i]->attalign == 'd' && att[i]->attndims == 0 &&
+        } else if (att[i].attlen == -1 && att[i].attalign == 'd' && att[i].attndims == 0 &&
                    !VARATT_IS_EXTENDED(DatumGetPointer(values[i]))) {
-            values[i] = toast_flatten_tuple_attribute(values[i], att[i]->atttypid, att[i]->atttypmod);
-        } else if (att[i]->attlen == -1 && att[i]->attalign == 'i' &&
+            values[i] = toast_flatten_tuple_attribute(values[i], att[i].atttypid, att[i].atttypmod);
+        } else if (att[i].attlen == -1 && att[i].attalign == 'i' &&
             VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(values[i])) &&
-            !(att[i]->atttypid == CLOBOID || att[i]->atttypid == BLOBOID)) {
+            !(att[i].atttypid == CLOBOID || att[i].atttypid == BLOBOID)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("only suport type(clob/blob) for more than 1G toast")));
         }
@@ -951,14 +951,14 @@ void heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool
 {
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     uint32 tdesc_natts = tupleDesc->natts;
     uint32 natts; /* number of atts to extract */
     uint32 attnum;
     char *tp = NULL;         /* ptr to tuple data */
     long off;                /* offset in tuple data */
     bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
-    bool heapToUHeap = tupleDesc->tdTableAmType == TAM_USTORE;
+    bool heapToUHeap = tupleDesc->td_tam_ops == TableAmUstore;
 
     /*
      * We need to default to slow if the TupleDesc type is UStore because
@@ -994,7 +994,7 @@ void heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool
     off = 0;
 
     for (attnum = 0; attnum < natts; attnum++) {
-        Form_pg_attribute thisatt = att[attnum];
+        Form_pg_attribute thisatt = &att[attnum];
 
         if (hasnulls && att_isnull(attnum, bp)) {
             values[attnum] = (Datum)0;
@@ -1137,13 +1137,13 @@ static void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
     bool *isnull = slot->tts_isnull;
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     uint32 attnum;
     char *tp = NULL;         /* ptr to tuple data */
     long off;                /* offset in tuple data */
     bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
     bool slow = false;       /* can we use/set attcacheoff? */
-    bool heapToUHeap = tupleDesc->tdTableAmType == TAM_USTORE;
+    bool heapToUHeap = tupleDesc->td_tam_ops == TableAmUstore;
 	
     /*
      * Check whether the first call for this tuple, and initialize or restore
@@ -1169,7 +1169,7 @@ static void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
     tp = (char *)tup + tup->t_hoff;
 
     for (; attnum < natts; attnum++) {
-        Form_pg_attribute thisatt = att[attnum];
+        Form_pg_attribute thisatt = &att[attnum];
 
         if (hasnulls && att_isnull(attnum, bp)) {
             values[attnum] = (Datum)0;
@@ -1210,13 +1210,13 @@ static void slot_deform_batch(TupleTableSlot *slot, VectorBatch* batch, int cur_
     TupleDesc tupleDesc = slot->tts_tupleDescriptor;
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     uint32 attnum;
     char *tp = NULL;         /* ptr to tuple data */
     long off;                /* offset in tuple data */
     bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
     bool slow = false;       /* can we use/set attcacheoff? */
-    bool heapToUHeap = tupleDesc->tdTableAmType == TAM_USTORE;
+    bool heapToUHeap = tupleDesc->td_tam_ops == TableAmUstore;
 
     /*
      * Check whether the first call for this tuple, and initialize or restore
@@ -1235,7 +1235,7 @@ static void slot_deform_batch(TupleTableSlot *slot, VectorBatch* batch, int cur_
     tp = (char *)tup + tup->t_hoff;
 
     for (; attnum < natts; attnum++) {
-        Form_pg_attribute thisatt = att[attnum];
+        Form_pg_attribute thisatt = &att[attnum];
         ScalarVector* pVector = &batch->m_arr[attnum];
 
         if (hasnulls && att_isnull(attnum, bp)) {
@@ -1287,7 +1287,7 @@ static void slot_extract_anyarray_from_buff(TupleTableSlot *slot, int index, con
     Datum array_datum;
     Size data_length;
     errno_t rc = EOK;
-    Form_pg_attribute *att = slot->tts_tupleDescriptor->attrs;
+    FormData_pg_attribute *att = slot->tts_tupleDescriptor->attrs;
     int attnum = slot->tts_tupleDescriptor->natts;
 
     if (index >= attnum) {
@@ -1295,7 +1295,7 @@ static void slot_extract_anyarray_from_buff(TupleTableSlot *slot, int index, con
     }
 
     /* If from remote cn, the datatype in buffer is string, not varattrib, so we should not use it as varattrib */
-    if ((att[index]->attlen == -1) && (!need_transform_anyarray)) {
+    if ((att[index].attlen == -1) && (!need_transform_anyarray)) {
         data_length = VARSIZE_ANY(buffer->data);
         if (data_length <= (Size)((uint32)len + 1)) {
             data_length = len + 1;
@@ -1345,7 +1345,7 @@ static void slot_deform_datarow(TupleTableSlot *slot, bool need_transform_anyarr
         return;
     }
 
-    Form_pg_attribute *att = slot->tts_tupleDescriptor->attrs;
+    FormData_pg_attribute *att = slot->tts_tupleDescriptor->attrs;
     attnum = slot->tts_tupleDescriptor->natts;
 
     /* fastpath: exit if values already extracted */
@@ -1395,7 +1395,7 @@ static void slot_deform_datarow(TupleTableSlot *slot, bool need_transform_anyarr
         } else {
             appendBinaryStringInfo(buffer, cur, len);
             cur += len;
-            if (att[i]->atttypid == ANYARRAYOID) {
+            if (att[i].atttypid == ANYARRAYOID) {
                 /* For anyarray, it need more information to handle it, so leave it, just copy */
                 slot_extract_anyarray_from_buff(slot, i, buffer, len, need_transform_anyarray);
             } else {
@@ -1497,7 +1497,7 @@ Datum heap_slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool nee
      * This case should not happen in normal use, but it could happen if we
      * are executing a plan cached before the column was dropped.
      */
-    if (tupleDesc->attrs[attnum - 1]->attisdropped) {
+    if (tupleDesc->attrs[attnum - 1].attisdropped) {
         *isnull = true;
         return (Datum) 0;
     }
@@ -1816,7 +1816,7 @@ MinimalTuple heap_form_minimal_tuple(TupleDesc tupleDescriptor, Datum *values, c
     Size len, data_len;
     int hoff;
     bool hasnull = false;
-    Form_pg_attribute *att = tupleDescriptor->attrs;
+    FormData_pg_attribute *att = tupleDescriptor->attrs;
     int numberOfAttributes = tupleDescriptor->natts;
     int i;
 
@@ -1835,11 +1835,11 @@ MinimalTuple heap_form_minimal_tuple(TupleDesc tupleDescriptor, Datum *values, c
     for (i = 0; i < numberOfAttributes; i++) {
         if (isnull[i]) {
             hasnull = true;
-        } else if (att[i]->attlen == -1 && att[i]->attalign == 'd' && att[i]->attndims == 0 &&
+        } else if (att[i].attlen == -1 && att[i].attalign == 'd' && att[i].attndims == 0 &&
                    !VARATT_IS_EXTENDED(values[i])) {
-            values[i] = toast_flatten_tuple_attribute(values[i], att[i]->atttypid, att[i]->atttypmod);
-        } else if (att[i]->attlen == -1 && VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(values[i])) &&
-            !(att[i]->atttypid == CLOBOID || att[i]->atttypid == BLOBOID)) {
+            values[i] = toast_flatten_tuple_attribute(values[i], att[i].atttypid, att[i].atttypmod);
+        } else if (att[i].attlen == -1 && VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(values[i])) &&
+            !(att[i].atttypid == CLOBOID || att[i].atttypid == BLOBOID)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("only suport type(clob/blob) for more than 1G toast")));
         }
@@ -1997,12 +1997,12 @@ static Size heap_compute_cmprs_data_size(TupleDesc tupleDesc, FormCmprTupleData 
     Size data_length = 0;
     int i;
     int numberOfAttributes = tupleDesc->natts;
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     if (numberOfAttributes > MaxTupleAttributeNumber) {
         ereport(ERROR,
                 (errcode(ERRCODE_TOO_MANY_COLUMNS),
                  errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
-                        MaxTupleAttributeNumber, tupleDesc->tdTableAmType, tupleDesc->tdtypeid)));
+                        MaxTupleAttributeNumber, GetTableAmType(tupleDesc->td_tam_ops), tupleDesc->tdtypeid)));
     }
 
     /*
@@ -2029,15 +2029,15 @@ static Size heap_compute_cmprs_data_size(TupleDesc tupleDesc, FormCmprTupleData 
         /* the normal field is the last */
         Datum val = cmprsInfo->values[i];
 
-        if (ATT_IS_PACKABLE(att[i]) && VARATT_CAN_MAKE_SHORT(DatumGetPointer(val))) {
+        if (ATT_IS_PACKABLE(&att[i]) && VARATT_CAN_MAKE_SHORT(DatumGetPointer(val))) {
             /*
              * we're anticipating converting to a short varlena header, so
              * adjust length and don't count any alignment
              */
             data_length += VARATT_CONVERTED_SHORT_SIZE(DatumGetPointer(val));
         } else {
-            data_length = att_align_datum(data_length, att[i]->attalign, att[i]->attlen, val);
-            data_length = att_addlength_datum(data_length, att[i]->attlen, val);
+            data_length = att_align_datum(data_length, att[i].attalign, att[i].attlen, val);
+            data_length = att_addlength_datum(data_length, att[i].attlen, val);
         }
     }
 
@@ -2093,7 +2093,7 @@ static void heap_fill_cmprs_tuple(TupleDesc tupleDesc, FormCmprTupleData *cmprsI
     int i;
     int numberOfAttributes = tupleDesc->natts;
     errno_t retno = EOK;
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     char *start = data;
 
     /* compression-bitmap MUST be put firstly.
@@ -2149,8 +2149,8 @@ static void heap_fill_cmprs_tuple(TupleDesc tupleDesc, FormCmprTupleData *cmprsI
             *infomask |= HEAP_COMPRESSED;
 
             /* Important: we must keep setting <infomask> flag */
-            if (att[i]->attlen < 0) {
-                Assert((-1 == att[i]->attlen) || (-2 == att[i]->attlen));
+            if (att[i].attlen < 0) {
+                Assert((-1 == att[i].attlen) || (-2 == att[i].attlen));
                 *infomask |= HEAP_HASVARWIDTH;
             }
 
@@ -2161,12 +2161,12 @@ static void heap_fill_cmprs_tuple(TupleDesc tupleDesc, FormCmprTupleData *cmprsI
          * XXX we use the att_align macros on the pointer value itself, not on
          * an offset.  This is a bit of a hack.
          */
-        if (att[i]->attbyval) {
+        if (att[i].attbyval) {
             /* pass-by-value */
-            data = (char *)att_align_nominal(data, att[i]->attalign);
-            store_att_byval(data, cmprsInfo->values[i], att[i]->attlen);
-            data_length = att[i]->attlen;
-        } else if (att[i]->attlen == -1) {
+            data = (char *)att_align_nominal(data, att[i].attalign);
+            store_att_byval(data, cmprsInfo->values[i], att[i].attlen);
+            data_length = att[i].attlen;
+        } else if (att[i].attlen == -1) {
             /* varlena */
             Pointer val = DatumGetPointer(cmprsInfo->values[i]);
 
@@ -2182,7 +2182,7 @@ static void heap_fill_cmprs_tuple(TupleDesc tupleDesc, FormCmprTupleData *cmprsI
                 data_length = VARSIZE_SHORT(val);
                 retno = memcpy_s(data, remian_length, val, data_length);
                 securec_check(retno, "\0", "\0");
-            } else if (VARLENA_ATT_IS_PACKABLE(att[i]) && VARATT_CAN_MAKE_SHORT(val)) {
+            } else if (VARLENA_ATT_IS_PACKABLE(&att[i]) && VARATT_CAN_MAKE_SHORT(val)) {
                 /* convert to short varlena -- no alignment */
                 data_length = VARATT_CONVERTED_SHORT_SIZE(val);
                 SET_VARSIZE_SHORT(data, data_length);
@@ -2190,23 +2190,23 @@ static void heap_fill_cmprs_tuple(TupleDesc tupleDesc, FormCmprTupleData *cmprsI
                 securec_check(retno, "\0", "\0");
             } else {
                 /* full 4-byte header varlena */
-                data = (char *)att_align_nominal(data, att[i]->attalign);
+                data = (char *)att_align_nominal(data, att[i].attalign);
                 data_length = VARSIZE(val);
                 retno = memcpy_s(data, remian_length, val, data_length);
                 securec_check(retno, "\0", "\0");
             }
-        } else if (att[i]->attlen == -2) {
+        } else if (att[i].attlen == -2) {
             /* cstring ... never needs alignment */
             *infomask |= HEAP_HASVARWIDTH;
-            Assert(att[i]->attalign == 'c');
+            Assert(att[i].attalign == 'c');
             data_length = strlen(DatumGetCString(cmprsInfo->values[i])) + 1;
             retno = memcpy_s(data, remian_length, DatumGetPointer(cmprsInfo->values[i]), data_length);
             securec_check(retno, "\0", "\0");
         } else {
             /* fixed-length pass-by-reference */
-            data = (char *)att_align_nominal(data, att[i]->attalign);
-            Assert(att[i]->attlen > 0);
-            data_length = att[i]->attlen;
+            data = (char *)att_align_nominal(data, att[i].attalign);
+            Assert(att[i].attlen > 0);
+            data_length = att[i].attlen;
             retno = memcpy_s(data, remian_length, DatumGetPointer(cmprsInfo->values[i]), data_length);
             securec_check(retno, "\0", "\0");
         }
@@ -2220,7 +2220,7 @@ static void heap_fill_cmprs_tuple(TupleDesc tupleDesc, FormCmprTupleData *cmprsI
 Datum nocache_cmprs_get_attr(HeapTuple tuple, unsigned int attnum, TupleDesc tupleDesc, char *cmprsInfo)
 {
     HeapTupleHeader tup = tuple->t_data;
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     char *tp = NULL;         /* ptr to data part of tuple */
     bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
     bits8 *cmprsBitmap = NULL;
@@ -2245,7 +2245,7 @@ Datum nocache_cmprs_get_attr(HeapTuple tuple, unsigned int attnum, TupleDesc tup
 
         /* first parse compression metaInfo data of this attr */
         int metaSize = 0;
-        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, att[i]->attlen, &metaSize, &mode);
+        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, att[i].attlen, &metaSize, &mode);
         cmprsOff += metaSize;
 
         if (HeapTupleHasNulls(tuple) && att_isnull(i, bp)) {
@@ -2254,34 +2254,34 @@ Datum nocache_cmprs_get_attr(HeapTuple tuple, unsigned int attnum, TupleDesc tup
 
         if (isAttrCompressed(i, cmprsBitmap)) {
             if (attnum != i) {
-                off += PageCompress::GetAttrCmprValSize(mode, att[i]->attlen, metaInfo, tp + off);
+                off += PageCompress::GetAttrCmprValSize(mode, att[i].attlen, metaInfo, tp + off);
                 continue;
             }
 
             break;
         }
 
-        if (att[i]->attlen == -1) {
-            off = att_align_pointer((uint32)off, att[i]->attalign, -1, tp + off);
+        if (att[i].attlen == -1) {
+            off = att_align_pointer((uint32)off, att[i].attalign, -1, tp + off);
         } else {
-            off = att_align_nominal((uint32)off, att[i]->attalign);
+            off = att_align_nominal((uint32)off, att[i].attalign);
         }
 
         if (i == attnum) {
             break;
         }
 
-        off = att_addlength_pointer(off, att[i]->attlen, tp + off);
+        off = att_addlength_pointer(off, att[i].attlen, tp + off);
     }
 
     Assert(attnum == i);
     if (isAttrCompressed(attnum, cmprsBitmap)) {
         int attsize = 0;
-        Datum attr_val = PageCompress::UncompressOneAttr(mode, metaInfo, att[i]->atttypid, att[i]->attlen, tp + off,
+        Datum attr_val = PageCompress::UncompressOneAttr(mode, metaInfo, att[i].atttypid, att[i].attlen, tp + off,
                                                          &attsize);
         return attr_val;
     }
-    return fetchatt(att[attnum], tp + off);
+    return fetchatt(&att[attnum], tp + off);
 }
 
 /*
@@ -2295,7 +2295,7 @@ static HeapTuple HeapUncompressTup(HeapTuple srcTuple, TupleDesc tupleDesc, char
     Assert(srcTuple && tupleDesc && cmprsInfo);
 
     HeapTupleHeader srcTup = srcTuple->t_data;
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     uint32 tdesc_natts = tupleDesc->natts;
     uint32 natts; /* number of atts to extract */
     uint32 attrIdx;
@@ -2352,7 +2352,7 @@ static HeapTuple HeapUncompressTup(HeapTuple srcTuple, TupleDesc tupleDesc, char
     }
 
     for (attrIdx = 0; attrIdx < natts; ++attrIdx) {
-        Form_pg_attribute thisatt = att[attrIdx];
+        Form_pg_attribute thisatt = &att[attrIdx];
         /* parse compression metaInfo data of this attr */
         int metaSize = 0;
         metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, thisatt->attlen, &metaSize, &mode);
@@ -2536,7 +2536,7 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
 #ifdef USE_ASSERT_CHECKING
     bool hascmpr = false;
 #endif
-    Form_pg_attribute *att = tupleDescriptor->attrs;
+    FormData_pg_attribute *att = tupleDescriptor->attrs;
     int numberOfAttributes = tupleDescriptor->natts;
     int i;
 
@@ -2544,7 +2544,7 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
         ereport(ERROR,
                 (errcode(ERRCODE_TOO_MANY_COLUMNS),
                  errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
-                        MaxTupleAttributeNumber, tupleDescriptor->tdTableAmType, tupleDescriptor->tdtypeid)));
+                        MaxTupleAttributeNumber, GetTableAmType(tupleDescriptor->td_tam_ops), tupleDescriptor->tdtypeid)));
     }
 
     /*
@@ -2568,10 +2568,10 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
 #ifdef USE_ASSERT_CHECKING
             hascmpr = true;
 #endif
-        } else if (att[i]->attlen == -1 && att[i]->attalign == 'd' && att[i]->attndims == 0 &&
+        } else if (att[i].attlen == -1 && att[i].attalign == 'd' && att[i].attndims == 0 &&
                    !VARATT_IS_EXTENDED(DatumGetPointer(cmprsInfo->values[i]))) {
-            cmprsInfo->values[i] = toast_flatten_tuple_attribute(cmprsInfo->values[i], att[i]->atttypid,
-                                                                 att[i]->atttypmod);
+            cmprsInfo->values[i] = toast_flatten_tuple_attribute(cmprsInfo->values[i], att[i].atttypid,
+                                                                 att[i].atttypmod);
         }
     }
     Assert(hascmpr == true);
@@ -2663,7 +2663,7 @@ void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values
 {
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     uint32 tdesc_natts = tupleDesc->natts;
     uint32 natts; /* number of atts to extract */
     uint32 attnum;
@@ -2695,7 +2695,7 @@ void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values
     for (attnum = 0; attnum < natts; attnum++) {
         /* parse compression metaInfo data of this attr */
         int metaSize = 0;
-        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, att[attnum]->attlen, &metaSize, &mode);
+        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, att[attnum].attlen, &metaSize, &mode);
         cmprsOff += metaSize;
 
         /* IMPORTANT: NULLs first, row-compression second, and the normal fields the last; */
@@ -2709,14 +2709,14 @@ void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values
 
         if (isAttrCompressed(attnum, cmprsBitmap)) {
             int attsize = 0;
-            values[attnum] = PageCompress::UncompressOneAttr(mode, metaInfo, att[attnum]->atttypid, att[attnum]->attlen,
+            values[attnum] = PageCompress::UncompressOneAttr(mode, metaInfo, att[attnum].atttypid, att[attnum].attlen,
                                                              tp + off, &attsize);
             off = off + attsize; /* attsize is the size of compressed value. */
 
             continue;
         }
 
-        Form_pg_attribute thisatt = att[attnum];
+        Form_pg_attribute thisatt = &att[attnum];
         if (thisatt->attlen == -1) {
             off = att_align_pointer(off, thisatt->attalign, -1, tp + off);
         } else {
@@ -2901,7 +2901,7 @@ static void slot_deform_cmprs_tuple(TupleTableSlot *slot, uint32 natts)
     bool *isnull = slot->tts_isnull;
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
-    Form_pg_attribute *att = tupleDesc->attrs;
+    FormData_pg_attribute *att = tupleDesc->attrs;
     uint32 attnum;
     char *tp = NULL;         /* ptr to tuple data */
     long off;                /* offset in tuple data */
@@ -2949,7 +2949,7 @@ static void slot_deform_cmprs_tuple(TupleTableSlot *slot, uint32 natts)
     /* parse compression metaInfo data of this attr */
     int metaSize = 0;
     for (; attnum < natts; attnum++) {
-        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, att[attnum]->attlen, &metaSize, &mode);
+        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, att[attnum].attlen, &metaSize, &mode);
         cmprsOff += metaSize;
 
         if (hasnulls && att_isnull(attnum, bp)) {
@@ -2962,14 +2962,14 @@ static void slot_deform_cmprs_tuple(TupleTableSlot *slot, uint32 natts)
 
         if (isAttrCompressed(attnum, cmprsBitmap)) {
             int attsize = 0;
-            values[attnum] = PageCompress::UncompressOneAttr(mode, metaInfo, att[attnum]->atttypid, att[attnum]->attlen,
+            values[attnum] = PageCompress::UncompressOneAttr(mode, metaInfo, att[attnum].atttypid, att[attnum].attlen,
                                                              tp + off, &attsize);
             off = off + attsize; /* attsize is the size of compressed value. */
 
             continue;
         }
 
-        Form_pg_attribute thisatt = att[attnum];
+        Form_pg_attribute thisatt = &att[attnum];
         if (thisatt->attlen == -1) {
             off = att_align_pointer(off, thisatt->attalign, -1, tp + off);
         } else {

@@ -1090,10 +1090,10 @@ extern TransactionId HeapTupleHeaderMultiXactGetUpdateXid(Page page, HeapTupleHe
         AssertMacro((attnum) > 0),                                                               \
         (*(isnull) = false),                                                                     \
         HeapTupleNoNulls(tup)                                                                    \
-            ? ((tuple_desc)->attrs[(attnum)-1]->attcacheoff >= 0                                  \
-                      ? (fetchatt((tuple_desc)->attrs[(attnum)-1],                                \
+            ? (TupleDescAttr((tuple_desc), (attnum)-1)->attcacheoff >= 0                          \
+                      ? (fetchatt(TupleDescAttr((tuple_desc), (attnum)-1),                        \
                             (char*)(tup)->t_data + (tup)->t_data->t_hoff +                       \
-                                (tuple_desc)->attrs[(attnum)-1]->attcacheoff))                    \
+                                TupleDescAttr((tuple_desc), (attnum)-1)->attcacheoff))           \
                       : nocachegetattr((tup), (attnum), (tuple_desc)))                            \
             : (att_isnull((attnum)-1, (tup)->t_data->t_bits) ? ((*(isnull) = true), (Datum)NULL) \
                                                              : (nocachegetattr((tup), (attnum), (tuple_desc)))))

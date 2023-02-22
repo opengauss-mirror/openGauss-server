@@ -339,7 +339,7 @@ void PrintFixedHeader(CopyState cstate)
     FixFormatter* formatter = (FixFormatter*)cstate->formatter;
     FieldDesc* descs = formatter->fieldDesc;
     TupleDesc tupDesc;
-    Form_pg_attribute* attr = NULL;
+    FormData_pg_attribute* attr = NULL;
     char* colname = NULL;
 
     if (cstate->rel)
@@ -352,7 +352,7 @@ void PrintFixedHeader(CopyState cstate)
     for (int i = 0; i < formatter->nfield; i++) {
         int attnum = formatter->fieldDesc[i].attnum;
 
-        colname = pstrdup(NameStr(attr[attnum - 1]->attname));
+        colname = pstrdup(NameStr(attr[attnum - 1].attname));
         AttributeOutFixed<true>(cstate, colname, descs + i);
         pfree_ext(colname);
     }
@@ -370,11 +370,11 @@ void VerifyFixedFormatter(TupleDesc tupDesc, FixFormatter* formatter)
         char* name = NULL;
         bool found = false;
 
-        if (tupDesc->attrs[attnum]->attisdropped)
+        if (tupDesc->attrs[attnum].attisdropped)
             continue;
         for (int i = 0; i < formatter->nfield; i++) {
             name = formatter->fieldDesc[i].fieldname;
-            if (namestrcmp(&(tupDesc->attrs[attnum]->attname), name) == 0) {
+            if (namestrcmp(&(tupDesc->attrs[attnum].attname), name) == 0) {
                 found = true;
                 break;
             }

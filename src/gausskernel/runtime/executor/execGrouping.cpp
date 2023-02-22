@@ -115,7 +115,7 @@ bool execTuplesUnequal(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols
     bool result = false;
     int i;
 
-    Assert(slot1->tts_tupleDescriptor->tdTableAmType == slot2->tts_tupleDescriptor->tdTableAmType);
+    Assert(slot1->tts_tupleDescriptor->td_tam_ops == slot2->tts_tupleDescriptor->td_tam_ops);
 
     /* Reset and switch into the temp context. */
     MemoryContextReset(evalContext);

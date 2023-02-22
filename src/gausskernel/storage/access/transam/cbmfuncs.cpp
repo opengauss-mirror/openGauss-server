@@ -142,7 +142,7 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
 
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(13, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(13, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "merged_start_lsn", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "merged_end_lsn", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "tablespace_oid", OIDOID, -1, 0);

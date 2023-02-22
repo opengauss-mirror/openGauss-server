@@ -1004,7 +1004,7 @@ static int32 get_rel_data_width(Relation rel, int32* attr_widths, bool vectorize
     bool hasencoded = false;
 
     for (i = 1; i <= RelationGetNumberOfAttributes(rel); i++) {
-        Form_pg_attribute att = rel->rd_att->attrs[i - 1];
+        Form_pg_attribute att = &rel->rd_att->attrs[i - 1];
         int32 item_width;
         int4 att_typmod = att->atttypmod;
         Oid att_typid = att->atttypid;
@@ -1105,10 +1105,10 @@ int32 getIdxDataWidth(Relation rel, IndexInfo* info, bool vectorized)
             item_width = get_attavgwidth(RelationGetRelid(rel), attnum, isPartition);
             if (item_width <= 0) {
                 item_width = get_typavgwidth(
-                    REL_GET_ITH_ATT(rel, attnum - 1)->atttypid, REL_GET_ITH_ATT(rel, attnum - 1)->atttypmod);
+                    REL_GET_ITH_ATT(rel, attnum - 1).atttypid, REL_GET_ITH_ATT(rel, attnum - 1).atttypmod);
                 AssertEreport(item_width > 0, MOD_OPT, "");
             }
-            typid = REL_GET_ITH_ATT(rel, attnum - 1)->atttypid;
+            typid = REL_GET_ITH_ATT(rel, attnum - 1).atttypid;
         } else if (expr_i < list_length(info->ii_Expressions)) {
             Node* expr = (Node*)list_nth(info->ii_Expressions, expr_i);
             typid = exprType(expr);
@@ -1210,7 +1210,7 @@ static List* get_relation_constraints(PlannerInfo* root, Oid relationObjectId, R
             int natts = relation->rd_att->natts;
 
             for (i = 1; i <= natts; i++) {
-                Form_pg_attribute att = relation->rd_att->attrs[i - 1];
+                Form_pg_attribute att = &relation->rd_att->attrs[i - 1];
 
                 if (att->attnotnull && !att->attisdropped) {
                     NullTest* ntest = makeNode(NullTest);
@@ -1359,7 +1359,7 @@ List* build_physical_tlist(PlannerInfo* root, RelOptInfo* rel)
 
             numattrs = RelationGetNumberOfAttributes(relation);
             for (attrno = 1; attrno <= numattrs; attrno++) {
-                Form_pg_attribute att_tup = relation->rd_att->attrs[attrno - 1];
+                Form_pg_attribute att_tup = &relation->rd_att->attrs[attrno - 1];
 
                 if (att_tup->attisdropped) {
                     /* found a dropped col, so punt */
@@ -1525,7 +1525,7 @@ List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRel
                 att_tup = SystemAttributeDefinition(indexkey, heapRelation->rd_rel->relhasoids, 
                     RELATION_HAS_BUCKET(heapRelation), RELATION_HAS_UIDS(heapRelation));
             } else {
-                att_tup = heapRelation->rd_att->attrs[indexkey - 1];
+                att_tup = &heapRelation->rd_att->attrs[indexkey - 1];
             }
 
             indexvar = (Expr*)makeVar(varno, indexkey, att_tup->atttypid, att_tup->atttypmod, att_tup->attcollation, 0);

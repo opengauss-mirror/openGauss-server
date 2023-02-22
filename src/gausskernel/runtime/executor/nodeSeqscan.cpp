@@ -1011,7 +1011,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &scanstate->ps,
-            scanstate->ss_currentRelation->rd_tam_type);
+            GetTableAmRoutine(scanstate->ss_currentRelation->rd_tam_type));
 
     ExecAssignScanProjectionInfo(scanstate);
 
@@ -1027,7 +1027,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
 
     /* if partial sequential scan is disabled by GUC, or table is not ustore, or partition table, skip */
     if ((!u_sess->attr.attr_storage.enable_ustore_partial_seqscan) ||
-        (scanstate->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_USTORE) ||
+        (scanstate->ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops != TableAmUstore) ||
         (scanstate->ss_currentScanDesc == NULL) || (scanstate->ss_currentScanDesc->rs_rd == NULL) ||
         (!RelationIsNonpartitioned(scanstate->ss_currentScanDesc->rs_rd)) ||
         (RelationIsPartition(scanstate->ss_currentScanDesc->rs_rd))) {

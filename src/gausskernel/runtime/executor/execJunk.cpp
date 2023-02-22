@@ -60,7 +60,7 @@
  * of whether to include room for an OID or not.
  * An optional resultSlot can be passed as well.
  */
-JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, TableAmType tam)
+JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, const TableAmRoutine* tam_ops)
 {
     JunkFilter* junkfilter = NULL;
     TupleDesc cleanTupType;
@@ -72,7 +72,7 @@ JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* sl
     /*
      * Compute the tuple descriptor for the cleaned tuple.
      */
-    cleanTupType = ExecCleanTypeFromTL(targetList, hasoid, tam);
+    cleanTupType = ExecCleanTypeFromTL(targetList, hasoid, tam_ops);
 
     /*
      * Use the given slot, or make a new slot if we weren't given one.
@@ -162,7 +162,7 @@ JunkFilter* ExecInitJunkFilterConversion(List* targetList, TupleDesc cleanTupTyp
         cleanMap = (AttrNumber*)palloc0(cleanLength * sizeof(AttrNumber));
         t = list_head(targetList);
         for (i = 0; i < cleanLength; i++) {
-            if (cleanTupType->attrs[i]->attisdropped)
+            if (cleanTupType->attrs[i].attisdropped)
                 continue; /* map entry is already zero */
             for (;;) {
                 TargetEntry* tle = (TargetEntry*)lfirst(t);
@@ -208,7 +208,7 @@ void ExecInitJunkAttr(EState* estate, CmdType operation, List* targetlist, Resul
 
     j = ExecInitJunkFilter(targetlist,
         result_rel_info->ri_RelationDesc->rd_att->tdhasoid,
-        ExecInitExtraTupleSlot(estate, GetTableAmRoutine(result_rel_info->ri_RelationDesc->rd_tam_type)));
+        ExecInitExtraTupleSlot(estate, GetTableAmRoutine(result_rel_info->ri_RelationDesc->rd_tam_type)), TableAmHeap);
 
     if (operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) {
         /* For UPDATE/DELETE, find the appropriate junk attr now */
@@ -461,7 +461,7 @@ void ExecSetjunkFilteDescriptor(JunkFilter* junkfilter, TupleDesc tupdesc)
     for (i = 0; i < cleanLength; i++) {
         int j = cleanMap[i];
         if (j > 0)
-            resultslotTupType->attrs[i]->atttypid = tupdesc->attrs[j - 1]->atttypid;
+            resultslotTupType->attrs[i].atttypid = tupdesc->attrs[j - 1].atttypid;
     }
 }
 

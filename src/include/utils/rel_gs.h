@@ -391,8 +391,8 @@ static inline RedisHtlAction RelationGetAppendMode(Relation rel)
         pg_strcasecmp(RelationGetOrientation(relation), ORIENTATION_TIMESERIES) == 0)
 
 #define TsRelWithImplDistColumn(attribute, pos)     \
-    (((attribute)[pos]->attkvtype == ATT_KV_HIDE) &&  \
-        namestrcmp(&((attribute)[pos]->attname), TS_PSEUDO_DIST_COLUMN) == 0)
+    (((attribute)[pos].attkvtype == ATT_KV_HIDE) &&  \
+        namestrcmp(&((attribute)[pos].attname), TS_PSEUDO_DIST_COLUMN) == 0)
 
 // Helper Macro Defination
 //

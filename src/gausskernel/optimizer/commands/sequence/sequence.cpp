@@ -289,7 +289,7 @@ void gen_uuid_for_CreateStmt(CreateStmt* stmt, List* uuids)
                 constr = tupleDesc->constr;
 
                 for (int parent_attno = 1; parent_attno <= tupleDesc->natts; parent_attno++) {
-                    Form_pg_attribute attribute = tupleDesc->attrs[parent_attno - 1];
+                    Form_pg_attribute attribute = &tupleDesc->attrs[parent_attno - 1];
 
                     if (attribute->attisdropped && !u_sess->attr.attr_sql.enable_cluster_resize)
                         continue;
@@ -2468,7 +2468,7 @@ Datum pg_sequence_parameters(PG_FUNCTION_ARGS)
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
 
-    tupdesc = CreateTemplateTupleDesc(5, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(5, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "start_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "minimum_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "maximum_value", INT16OID, -1, 0);
@@ -2527,7 +2527,7 @@ Datum pg_sequence_last_value(PG_FUNCTION_ARGS)
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
 
-    tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "cache_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "last_value", INT16OID, -1, 0);
 

@@ -149,7 +149,7 @@ VecWindowAggState* ExecInitVecWindowAgg(VecWindowAgg* node, EState* estate, int 
      * Initialize result tuple type and projection info.
      * result Tuple Table Slot contains virtual tuple, default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&winstate->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&winstate->ss.ps);
 
     {
         PlanState* planstate = &winstate->ss.ps;

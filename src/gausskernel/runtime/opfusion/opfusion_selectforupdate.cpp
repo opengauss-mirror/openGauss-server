@@ -100,7 +100,7 @@ void SelectForUpdateFusion::InitGlobals()
     Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
     m_global->m_natts = RelationGetDescr(rel)->natts;
     Assert(list_length(targetList) >= 2);
-    m_global->m_tupDesc = ExecCleanTypeFromTL(targetList, false, rel->rd_tam_type);
+    m_global->m_tupDesc = ExecCleanTypeFromTL(targetList, false, GetTableAmRoutine(rel->rd_tam_type));
     m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
     m_global->m_table_type = RelationIsUstoreFormat(rel) ? TAM_USTORE : TAM_HEAP;
     m_global->m_exec_func_ptr = (OpFusionExecfuncType)&SelectForUpdateFusion::ExecSelectForUpdate;
@@ -253,7 +253,7 @@ unsigned long SelectForUpdateFusion::ExecSelectForUpdate(Relation rel, ResultRel
         }
 
         tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_tmpvals, m_local.m_tmpisnull,
-            tableam_tops_get_tuple_type(rel));
+            GetTableAmRoutine(rel->rd_tam_type));
         if (bucket_rel) {
             bucketCloseRelation(bucket_rel);
         }
@@ -378,7 +378,7 @@ unsigned long SelectForUpdateFusion::ExecSelectForUpdate(Relation rel, ResultRel
                     }
 
                     tmptup = tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_tmpvals, m_local.m_tmpisnull,
-                        tableam_tops_get_tuple_type(rel));
+                        GetTableAmRoutine(rel->rd_tam_type));
                     Assert(tmptup != NULL);
 
                     (void)ExecStoreTuple(tmptup, /* tuple to store */

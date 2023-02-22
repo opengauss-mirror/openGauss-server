@@ -2161,7 +2161,7 @@ static bool rowtype_field_matches(
         ReleaseTupleDesc(tupdesc);
         return false;
     }
-    attr = tupdesc->attrs[fieldnum - 1];
+    attr = &tupdesc->attrs[fieldnum - 1];
     if (attr->attisdropped || attr->atttypid != expectedtype || attr->atttypmod != expectedtypmod ||
         attr->attcollation != expectedcollation) {
         ReleaseTupleDesc(tupdesc);

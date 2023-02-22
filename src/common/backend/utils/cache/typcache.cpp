@@ -595,11 +595,11 @@ static void cache_record_field_properties(TypeCacheEntry* typentry)
         for (i = 0; i < tupdesc->natts; i++) {
             TypeCacheEntry* fieldentry = NULL;
 
-            if (tupdesc->attrs[i]->attisdropped) {
+            if (tupdesc->attrs[i].attisdropped) {
                 continue;
             }
 
-            fieldentry = lookup_type_cache(tupdesc->attrs[i]->atttypid, TYPECACHE_EQ_OPR | TYPECACHE_CMP_PROC);
+            fieldentry = lookup_type_cache(tupdesc->attrs[i].atttypid, TYPECACHE_EQ_OPR | TYPECACHE_CMP_PROC);
             if (!OidIsValid(fieldentry->eq_opr)) {
                 newflags &= ~TCFLAGS_HAVE_FIELD_EQUALITY;
             }
@@ -752,7 +752,7 @@ void assign_record_type_typmod(TupleDesc tupDesc)
         if (i >= REC_HASH_KEYS) {
             break;
         }
-        hashkey[i] = tupDesc->attrs[i]->atttypid;
+        hashkey[i] = tupDesc->attrs[i].atttypid;
     }
     recentry = (RecordCacheEntry*)hash_search(u_sess->tycache_cxt.RecordCacheHash, (void*)hashkey, HASH_ENTER, &found);
     if (!found) {

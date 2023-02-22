@@ -41,7 +41,7 @@ UHeapTuple UpdateFusion::uheapModifyTuple(UHeapTuple tuple, Relation rel)
      * create a new tuple from the values and isnull arrays
      */
     newTuple = (UHeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values,
-        m_local.m_isnull, UHEAP_TUPLE);
+        m_local.m_isnull, TableAmUstore);
 
     /*
      * copy the identification info of the old tuple: t_ctid, t_self, and OID
@@ -68,7 +68,7 @@ HeapTuple UpdateFusion::heapModifyTuple(HeapTuple tuple)
     /*
      * create a new tuple from the values and isnull arrays
      */
-    new_tuple = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values, m_local.m_isnull, HEAP_TUPLE);
+    new_tuple = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values, m_local.m_isnull);
 
     /*
      * copy the identification info of the old tuple: t_ctid, t_self, and OID

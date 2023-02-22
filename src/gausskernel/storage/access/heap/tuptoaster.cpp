@@ -416,7 +416,7 @@ int64 calculate_huge_length(text *t)
 void toast_delete(Relation rel, HeapTuple oldtup, int options)
 {
     TupleDesc tuple_desc;
-    Form_pg_attribute *att = NULL;
+    FormData_pg_attribute *att = NULL;
     int num_attrs;
     int i;
     Datum toast_values[MaxHeapAttributeNumber];
@@ -447,7 +447,7 @@ void toast_delete(Relation rel, HeapTuple oldtup, int options)
     if (num_attrs > MaxHeapAttributeNumber)
         ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS),
                         errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", num_attrs,
-                               MaxHeapAttributeNumber, tuple_desc->tdTableAmType, tuple_desc->tdtypeid)));
+                               MaxHeapAttributeNumber, GetTableAmType(tuple_desc->td_tam_ops), tuple_desc->tdtypeid)));
 
     heap_deform_tuple(oldtup, tuple_desc, toast_values, toast_isnull);
 
@@ -456,7 +456,7 @@ void toast_delete(Relation rel, HeapTuple oldtup, int options)
      * relation.
      */
     for (i = 0; i < num_attrs; i++) {
-        if (att[i]->attlen == -1) {
+        if (att[i].attlen == -1) {
             Datum value = toast_values[i];
 
             if (toast_isnull[i])
@@ -558,7 +558,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
 {
     HeapTuple result_tuple;
     TupleDesc tuple_desc;
-    Form_pg_attribute *att = NULL;
+    FormData_pg_attribute *att = NULL;
     int num_attrs;
     int i;
 
@@ -598,7 +598,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
     if (num_attrs > MaxHeapAttributeNumber) {
         ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS),
                         errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", num_attrs,
-                               MaxHeapAttributeNumber, tuple_desc->tdTableAmType, tuple_desc->tdtypeid)));
+                               MaxHeapAttributeNumber, GetTableAmType(tuple_desc->td_tam_ops), tuple_desc->tdtypeid)));
     }
     heap_deform_tuple(newtup, tuple_desc, toast_values, toast_isnull);
     if (oldtup != NULL) {
@@ -642,7 +642,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
              * If the old value is stored on disk, check if it has changed so
              * we have to delete it later.
              */
-            if (att[i]->attlen == -1 && !toast_oldisnull[i] &&
+            if (att[i].attlen == -1 && !toast_oldisnull[i] &&
                 (VARATT_IS_EXTERNAL_ONDISK_B(old_value) || VARATT_IS_HUGE_TOAST_POINTER(old_value))) {
                 if (toast_isnull[i] || (RelationIsLogicallyLogged(rel) && !VARATT_IS_HUGE_TOAST_POINTER(new_value)) ||
                     !(VARATT_IS_EXTERNAL_ONDISK_B(new_value) || VARATT_IS_HUGE_TOAST_POINTER(new_value)) ||
@@ -683,11 +683,11 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
         /*
          * Now look at varlena attributes
          */
-        if (att[i]->attlen == -1) {
+        if (att[i].attlen == -1) {
             /*
              * If the table's attribute says PLAIN always, force it so.
              */
-            if (att[i]->attstorage == 'p') {
+            if (att[i].attstorage == 'p') {
                 toast_action[i] = 'p';
             }
 
@@ -700,7 +700,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
              */
             if (VARATT_IS_EXTERNAL(new_value) && !VARATT_IS_HUGE_TOAST_POINTER(new_value)) {
                 toast_oldexternal[i] = new_value;
-                if (att[i]->attstorage == 'p') {
+                if (att[i].attstorage == 'p') {
                     new_value = heap_tuple_untoast_attr(new_value);
                 } else {
                     new_value = heap_tuple_fetch_attr(new_value);
@@ -776,7 +776,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
             if (VARATT_IS_COMPRESSED(DatumGetPointer(toast_values[i]))) {
                 continue;
             }
-            if (att[i]->attstorage != 'x' && att[i]->attstorage != 'e') {
+            if (att[i].attstorage != 'x' && att[i].attstorage != 'e') {
                 continue;
             }
             if (toast_sizes[i] > biggest_size) {
@@ -793,7 +793,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
          * Attempt to compress it inline, if it has attstorage 'x'
          */
         i = biggest_attno;
-        if (att[i]->attstorage == 'x') {
+        if (att[i].attstorage == 'x') {
             old_value = toast_values[i];
             new_value = toast_compress_datum(old_value);
             if (DatumGetPointer(new_value) != NULL) {
@@ -859,7 +859,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
                 continue; /* can't happen, toast_action would be 'p' */
             }
 
-            if (att[i]->attstorage != 'x' && att[i]->attstorage != 'e') {
+            if (att[i].attstorage != 'x' && att[i].attstorage != 'e') {
                 continue;
             }
             if (toast_sizes[i] > biggest_size) {
@@ -911,7 +911,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
             if (VARATT_IS_COMPRESSED(DatumGetPointer(toast_values[i]))) {
                 continue;
             }
-            if (att[i]->attstorage != 'm') {
+            if (att[i].attstorage != 'm') {
                 continue;
             }
             if (toast_sizes[i] > biggest_size) {
@@ -971,7 +971,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
             if (VARATT_IS_EXTERNAL(DatumGetPointer(toast_values[i]))) {
                 continue; /* can't happen, toast_action would be 'p' */
             }
-            if (att[i]->attstorage != 'm') {
+            if (att[i].attstorage != 'm') {
                 continue;
             }
             if (toast_sizes[i] > biggest_size) {
@@ -1101,7 +1101,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
 HeapTuple toast_flatten_tuple(HeapTuple tup, TupleDesc tuple_desc)
 {
     HeapTuple new_tuple;
-    Form_pg_attribute *att = tuple_desc->attrs;
+    FormData_pg_attribute *att = tuple_desc->attrs;
     int num_attrs = tuple_desc->natts;
     int i;
     Datum toast_values[MaxTupleAttributeNumber];
@@ -1121,7 +1121,7 @@ HeapTuple toast_flatten_tuple(HeapTuple tup, TupleDesc tuple_desc)
         /*
          * Look at non-null varlena attributes
          */
-        if (!toast_isnull[i] && att[i]->attlen == -1) {
+        if (!toast_isnull[i] && att[i].attlen == -1) {
             struct varlena *new_value;
 
             new_value = (struct varlena *)DatumGetPointer(toast_values[i]);
@@ -1190,7 +1190,7 @@ Datum toast_flatten_tuple_attribute(Datum value, Oid typeId, int32 typeMod)
     int32 new_data_len;
     int32 new_tuple_len;
     HeapTupleData tmptup;
-    Form_pg_attribute *att = NULL;
+    FormData_pg_attribute *att = NULL;
     int num_attrs;
     int i;
     bool need_change = false;
@@ -1231,7 +1231,7 @@ Datum toast_flatten_tuple_attribute(Datum value, Oid typeId, int32 typeMod)
         ereport(ERROR,
                 (errcode(ERRCODE_TOO_MANY_COLUMNS),
                  errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", tuple_desc->natts,
-                        MaxTupleAttributeNumber, tuple_desc->tdTableAmType, tuple_desc->tdtypeid)));
+                        MaxTupleAttributeNumber, GetTableAmType(tuple_desc->td_tam_ops), tuple_desc->tdtypeid)));
 
     heap_deform_tuple(&tmptup, tuple_desc, toast_values, toast_isnull);
 
@@ -1243,7 +1243,7 @@ Datum toast_flatten_tuple_attribute(Datum value, Oid typeId, int32 typeMod)
          */
         if (toast_isnull[i])
             has_nulls = true;
-        else if (att[i]->attlen == -1) {
+        else if (att[i].attlen == -1) {
             struct varlena *new_value;
 
             new_value = (struct varlena *)DatumGetPointer(toast_values[i]);

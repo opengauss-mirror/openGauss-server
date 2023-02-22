@@ -233,7 +233,7 @@ GroupState* ExecInitGroup(Group* node, EState* estate, int eflags)
      * Group node result tuple slot always holds virtual tuple, so
      * default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&grpstate->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&grpstate->ss.ps);
 
     ExecAssignProjectionInfo(&grpstate->ss.ps, NULL);
 

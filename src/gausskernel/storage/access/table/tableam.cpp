@@ -51,121 +51,6 @@
 #include "access/ustore/knl_utuple.h"
 #include "access/ustore/knl_uvisibility.h"
 
-/* ------------------------------------------------------------------------
- * HEAP TABLE SLOT AM APIs
- * ------------------------------------------------------------------------
- */
-
-Tuple tableam_tslot_get_tuple_from_slot(Relation relation, TupleTableSlot *slot)
-{
-    slot->tts_tupleDescriptor->tdhasuids = RELATION_HAS_UIDS(relation);
-    return g_tableam_routines[relation->rd_tam_type]->tslot_get_tuple_from_slot(slot);
-}
-
-/* ------------------------------------------------------------------------
- * TABLE TUPLE AM APIs
- * ------------------------------------------------------------------------
- */
-
-Datum tableam_tops_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool *isnull,
-    Buffer buf)
-{
-    AssertValidTuple(tup);
-    return g_tableam_routines[GetTabelAmIndexTuple(tup)]->tops_getsysattr(tup, attnum, tuple_desc, isnull, buf);
-}
-
-MinimalTuple tableam_tops_form_minimal_tuple(TupleDesc tuple_descriptor, Datum *values,
-    const bool *isnull, MinimalTuple in_tuple, uint32 tupTableType)
-{
-    AssertValidTupleType(tupTableType);
-    return g_tableam_routines[GetTableAMIndex(tupTableType)]->tops_form_minimal_tuple(tuple_descriptor, values, isnull,
-        in_tuple);
-}
-
-Tuple tableam_tops_form_tuple(TupleDesc tuple_descriptor, Datum *values, bool *isnull,
-    uint32 tupTableType)
-{
-    AssertValidTupleType(tupTableType);
-    return g_tableam_routines[GetTableAMIndex(tupTableType)]->tops_form_tuple(tuple_descriptor, values, isnull);
-}
-
-Tuple tableam_tops_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData *cmprs_info,
-    uint32 tupTableType)
-{
-    AssertValidTupleType(tupTableType);
-    return g_tableam_routines[GetTableAMIndex(tupTableType)]->tops_form_cmprs_tuple(tuple_descriptor, cmprs_info);
-}
-
-
-void tableam_tops_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull)
-{
-    AssertValidTuple(tuple);
-    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_deform_tuple(tuple, tuple_desc, values, isnull);
-}
-
-void tableam_tops_deform_tuple2(Tuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer)
-{
-    AssertValidTuple(tuple);
-    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_deform_tuple2(tuple, tupleDesc, values, isnull, buffer);
-}
-
-void tableam_tops_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull,
-    char *cmprs_info)
-{
-    AssertValidTuple(tuple);
-    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_deform_cmprs_tuple(tuple, tuple_desc, values, isnull,
-        cmprs_info);
-}
-
-void tableam_tops_fill_tuple(TupleDesc tuple_desc, Datum *values, const bool *isnull, char *data,
-    Size data_size, uint16 *infomask, bits8 *bit)
-{
-    return g_tableam_routines[tuple_desc->tdTableAmType]->tops_fill_tuple(tuple_desc, values, isnull, data, data_size,
-        infomask, bit);
-}
-
-/*
- * there is no uheapam_tops_modify_tuple
- * but this is done for completeness
- */
-Tuple tableam_tops_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *repl_values,
-    const bool *repl_isnull, const bool *do_replace)
-{
-    AssertValidTuple(tuple);
-    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_modify_tuple(tuple, tuple_desc, repl_values,
-        repl_isnull, do_replace);
-}
-
-Tuple tableam_tops_opfusion_modify_tuple(Tuple tuple, TupleDesc tuple_desc,
-    Datum* repl_values, bool* repl_isnull, UpdateFusion* opf)
-{
-    AssertValidTuple(tuple);
-    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_opfusion_modify_tuple(tuple, tuple_desc,
-        repl_values, repl_isnull, opf);
-}
-
-
-
-Datum tableam_tops_tuple_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null)
-{
-    AssertValidTuple(tuple);
-    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_tuple_getattr(tuple, att_num,
-        tuple_desc, is_null);
-}
-
-Datum tableam_tops_tuple_fast_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null)
-{
-    AssertValidTuple(tuple);
-    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_tuple_fast_getattr(tuple, att_num,
-        tuple_desc, is_null);
-}
-
-bool tableam_tops_tuple_attisnull(Tuple tuple, int attnum, TupleDesc tuple_desc)
-{
-    AssertValidTuple(tuple);
-    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_tuple_attisnull(tuple, attnum, tuple_desc);
-}
-
 bool tableam_tops_page_get_item(Relation rel, Tuple tuple, Page page,
     OffsetNumber tupleNo, BlockNumber destBlocks)
 {
@@ -726,7 +611,7 @@ Tuple HeapamTopsOpFusionModifyTuple(Tuple tuple, TupleDesc tuple_desc, Datum* re
     /*
      * create a new tuple from the values and isnull arrays
      */
-    newTuple = tableam_tops_form_tuple(tuple_desc, repl_values, repl_isnull, HEAP_TUPLE);
+    newTuple = tableam_tops_form_tuple(tuple_desc, repl_values, repl_isnull, TableAmHeap);
     /*
      * copy the identification info of the old tuple: t_ctid, t_self, and OID
      * (if any)
@@ -1161,7 +1046,7 @@ Tuple uheapam_tslot_get_tuple_from_slot(TupleTableSlot* slot)
     if (!TTS_TABLEAM_IS_USTORE(slot)) {
         tableam_tslot_getallattrs(slot); // here has some main difference.
         utuple = (UHeapTuple)tableam_tops_form_tuple(slot->tts_tupleDescriptor, slot->tts_values, slot->tts_isnull,
-            UHEAP_TUPLE);
+            TableAmUstore);
         slot->tts_tam_ops = TableAmUstore;
         utuple->tupInfo = 1;
         ExecStoreTuple((Tuple)utuple, slot, InvalidBuffer, true);
@@ -1245,7 +1130,7 @@ Tuple UHeapamTopsOpFusionModifyTuple(Tuple tuple, TupleDesc tuple_desc, Datum* r
     /*
      * create a new tuple from the values and isnull arrays
      */
-    newTuple = tableam_tops_form_tuple(tuple_desc, repl_values, repl_isnull, UHEAP_TUPLE);
+    newTuple = tableam_tops_form_tuple(tuple_desc, repl_values, repl_isnull, TableAmUstore);
     /*
      * copy the identification info of the old tuple: t_ctid, t_self, and OID
      * (if any)

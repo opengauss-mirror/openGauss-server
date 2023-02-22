@@ -154,22 +154,22 @@ FunctionScanState* ExecInitFunctionScan(FunctionScan* node, EState* estate, int 
         Assert(tupdesc);
         /* Must copy it out of typcache for safety */
         tupdesc = CreateTupleDescCopy(tupdesc);
-        if (tupdesc->tdTableAmType != TAM_HEAP) {
+        if (tupdesc->td_tam_ops != TableAmHeap) {
             /* For function scan, we need tupdesc type to be heap,
              * and invalidate attcacheoff, since other storage type
              * uses different offset values than heap.
              */
             int i;
             for (i = 0; i < tupdesc->natts; i++) {
-                tupdesc->attrs[i]->attcacheoff = -1;
+                tupdesc->attrs[i].attcacheoff = -1;
             }
-            tupdesc->tdTableAmType = TAM_HEAP;
+            tupdesc->td_tam_ops = TableAmHeap;
         }
     } else if (functypclass == TYPEFUNC_SCALAR) {
         /* Base data type, i.e. scalar */
         char* attname = strVal(linitial(node->funccolnames));
 
-        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(1, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, attname, funcrettype, -1, 0);
         TupleDescInitEntryCollation(tupdesc, (AttrNumber)1, exprCollation(node->funcexpr));
     } else if (functypclass == TYPEFUNC_RECORD) {
@@ -204,11 +204,11 @@ FunctionScanState* ExecInitFunctionScan(FunctionScan* node, EState* estate, int 
      */
     ExecAssignResultTypeFromTL(
             &scanstate->ss.ps,
-            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     ExecAssignScanProjectionInfo(&scanstate->ss);
 
-    Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     return scanstate;
 }

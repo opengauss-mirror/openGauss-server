@@ -650,7 +650,7 @@ static void HandleCopyDataRow(RemoteQueryState* combiner, char* msg_body, size_t
             bool* nulls = NULL;
             TupleDesc tupdesc = combiner->tuple_desc;
             int i, dropped;
-            Form_pg_attribute* attr = tupdesc->attrs;
+            FormData_pg_attribute* attr = tupdesc->attrs;
             FmgrInfo* in_functions = NULL;
             Oid* typioparams = NULL;
             char** fields = NULL;
@@ -665,10 +665,10 @@ static void HandleCopyDataRow(RemoteQueryState* combiner, char* msg_body, size_t
                 Oid in_func_oid;
 
                 /* Do not need any information for dropped attributes */
-                if (attr[i]->attisdropped)
+                if (attr[i].attisdropped)
                     continue;
 
-                getTypeInputInfo(attr[i]->atttypid, &in_func_oid, &typioparams[i]);
+                getTypeInputInfo(attr[i].atttypid, &in_func_oid, &typioparams[i]);
                 fmgr_info(in_func_oid, &in_functions[i]);
             }
 
@@ -683,14 +683,14 @@ static void HandleCopyDataRow(RemoteQueryState* combiner, char* msg_body, size_t
             for (i = 0; i < tupdesc->natts; i++) {
                 char* string = fields[i - dropped];
                 /* Do not need any information for dropped attributes */
-                if (attr[i]->attisdropped) {
+                if (attr[i].attisdropped) {
                     dropped++;
                     nulls[i] = true; /* Consider dropped parameter as NULL */
                     continue;
                 }
 
                 /* Find value */
-                values[i] = InputFunctionCall(&in_functions[i], string, typioparams[i], attr[i]->atttypmod);
+                values[i] = InputFunctionCall(&in_functions[i], string, typioparams[i], attr[i].atttypmod);
                 /* Setup value with NULL flag if necessary */
                 if (string == NULL)
                     nulls[i] = true;
@@ -7826,10 +7826,10 @@ static void SetDataRowForIntParams(
             tdesc = dataSlot->tts_tupleDescriptor;
             int numatts = tdesc->natts;
             for (attindex = 0; attindex < numatts; attindex++) {
-                rq_state->rqs_param_types[attindex] = tdesc->attrs[attindex]->atttypid;
+                rq_state->rqs_param_types[attindex] = tdesc->attrs[attindex].atttypid;
 
                 /* For unknown param type(maybe a const), we need to convert it to text */
-                if (tdesc->attrs[attindex]->atttypid == UNKNOWNOID) {
+                if (tdesc->attrs[attindex].atttypid == UNKNOWNOID) {
                     rq_state->rqs_param_types[attindex] = TEXTOID;
                 }
             }
@@ -7908,7 +7908,7 @@ static void SetDataRowForIntParams(
                 appendBinaryStringInfo(&buf, (char*)&n32, 4);
             } else
                 /* It should switch memctx to ExprContext for makenode in ExecInitExpr */
-                pgxc_append_param_val(&buf, dataSlot->tts_values[attindex], tdesc->attrs[attindex]->atttypid);
+                pgxc_append_param_val(&buf, dataSlot->tts_values[attindex], tdesc->attrs[attindex].atttypid);
         }
     }
 
@@ -8950,7 +8950,7 @@ static void FetchGlobalStatisticsFromDN(int dn_conn_count, PGXCNodeHandle** pgxc
                                         bool typisvarlena = false;
                                         char *corrs = NULL, *tmp = NULL;
                                         getTypeOutputInfo(
-                                            scanslot->tts_tupleDescriptor->attrs[k]->atttypid, &foutoid, &typisvarlena);
+                                            scanslot->tts_tupleDescriptor->attrs[k].atttypid, &foutoid, &typisvarlena);
                                         corrs = OidOutputFunctionCall(foutoid, scanslot->tts_values[k]);
                                         while (corrs != NULL) {
                                             if (*corrs == '{')
@@ -9214,9 +9214,9 @@ bool PgfdwGetRelAttnum(int2vector* keys, PGFDWTableAnalyze* info)
 
     for (int i = 0; i < tupdesc->natts; i++) {
         for (int j = 0; j < attnum; j++) {
-            tup_attname = tupdesc->attrs[i]->attname.data;
+            tup_attname = tupdesc->attrs[i].attname.data;
             if (tup_attname && strcmp(tup_attname, att_name[j]) == 0) {
-                real_attnum[total] = tupdesc->attrs[i]->attnum;
+                real_attnum[total] = tupdesc->attrs[i].attnum;
                 total++;
                 break;
             }
@@ -9261,9 +9261,9 @@ bool PgfdwGetRelAttnum(TupleTableSlot* slot, PGFDWTableAnalyze* info)
     TupleDesc tupdesc = RelationGetDescr(rel);
 
     for (int i = 0; i < tupdesc->natts; i++) {
-        tup_attname = tupdesc->attrs[i]->attname.data;
+        tup_attname = tupdesc->attrs[i].attname.data;
         if (tup_attname && strcmp(tup_attname, att_name) == 0) {
-            real_attnum = tupdesc->attrs[i]->attnum;
+            real_attnum = tupdesc->attrs[i].attnum;
             break;
         }
     }

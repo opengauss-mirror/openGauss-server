@@ -1530,7 +1530,7 @@ static void fill_pglog_planstate_from_logft_rel(pglogPlanState* pg_log, Relation
 
     Assert(PGLOG_ATTR_MAX == tupdesc->natts);
     for (int i = 0; i < PGLOG_ATTR_MAX; ++i) {
-        Form_pg_attribute att = tupdesc->attrs[i];
+        Form_pg_attribute att = &tupdesc->attrs[i];
         pg_log->allattr_typmod[i] = att->atttypmod;
         getTypeInputInfo(att->atttypid, &in_func_oid, &pg_log->allattr_typioparam[i]);
         fmgr_info(in_func_oid, &pg_log->allattr_fmgrinfo[i]);

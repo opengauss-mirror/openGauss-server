@@ -1462,7 +1462,7 @@ static bool PrepareCallSite(
             }
             for (uint32_t i = 0; i < attrCount; ++i) {
                 PLpgSQL_type* typeDesc = &execState->m_resultTypes[i];
-                Form_pg_attribute attr = execState->m_resultSlot->tts_tupleDescriptor->attrs[i];
+                Form_pg_attribute attr = &execState->m_resultSlot->tts_tupleDescriptor->attrs[i];
                 GetTypeDescriptor(typeDesc, attr);
             }
         }
