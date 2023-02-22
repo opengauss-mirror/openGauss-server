@@ -2738,6 +2738,18 @@ typedef struct knl_u_hook_context {
     void *pluginCCHashEqFuncs;
     void *plpgsqlParserSetHook;
 } knl_u_hook_context;
+
+typedef struct knl_u_libsw_context {
+    /* Current connection to the primary, if any */
+    struct pg_conn* streamConn;
+    /* trace port log file */
+    FILE* conn_trace_file;
+    /* which command in last sql */
+    const char* commandTag;
+    /* the redirect manager */
+    void* redirect_manager;
+} knl_u_libsw_context;
+
 /* PBE message flag */
 typedef enum {
     NO_QUERY,
@@ -2884,6 +2896,9 @@ typedef struct knl_session_context {
     struct pg_tm cache_tm;
     fsec_t cache_fsec;
     int cache_tz;
+
+    /* standby write. */
+    knl_u_libsw_context libsw_cxt;
 } knl_session_context;
 
 enum stp_xact_err_type {

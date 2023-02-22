@@ -507,8 +507,13 @@ bool WorkerThreadCanSeekAnotherMission(ThreadStayReason* reason)
             *reason = TWORKER_UNCONSUMEMESSAGE;
             return false;
         } else {
-            *reason = TWORKER_CANSEEKNEXTSESSION;
-            return true;
+            if (libpqsw_can_seek_next_session()) {
+                *reason = TWORKER_CANSEEKNEXTSESSION;
+                return true;
+            } else {
+                *reason = TWORKER_UNCONSUMEMESSAGE;
+                return false;
+            }
         }
     }
 }
