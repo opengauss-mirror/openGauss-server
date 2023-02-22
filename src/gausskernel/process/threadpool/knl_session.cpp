@@ -1375,6 +1375,14 @@ static void knl_u_clientConnTime_init(knl_u_clientConnTime_context* clientConnTi
     clientConnTime_cxt->checkOnlyInConnProcess = true;
 }
 
+static void knl_u_libsw_init(knl_u_libsw_context* libsw_cxt)
+{
+    libsw_cxt->streamConn = NULL;
+    libsw_cxt->commandTag = NULL;
+    libsw_cxt->conn_trace_file = NULL;
+    libsw_cxt->redirect_manager = New(CurrentMemoryContext) RedirectManager();
+ }
+
 void knl_session_init(knl_session_context* sess_cxt)
 {
     Assert (0 != strncmp(CurrentMemoryContext->name, "ErrorContext", sizeof("ErrorContext")));
@@ -1464,6 +1472,7 @@ void knl_session_init(knl_session_context* sess_cxt)
 #ifdef ENABLE_MOT
     knl_u_mot_init(&sess_cxt->mot_cxt);
 #endif
+    knl_u_libsw_init(&sess_cxt->libsw_cxt);
     KnlURepOriginInit(&sess_cxt->reporigin_cxt);
 
     knl_u_clientConnTime_init(&sess_cxt->clientConnTime_cxt);

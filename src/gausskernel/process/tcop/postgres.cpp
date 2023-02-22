@@ -7449,6 +7449,11 @@ static void InitGlobalNodeDefinition(PlannedStmt* planstmt)
 void InitThreadLocalWhenSessionExit()
 {
     t_thrd.postgres_cxt.xact_started = false;
+    if (u_sess != NULL) {
+        if (u_sess->libsw_cxt.redirect_manager == NULL) {
+            u_sess->libsw_cxt.redirect_manager = New(CurrentMemoryContext) RedirectManager();
+        }
+    }
 }
 
 /*
@@ -9395,7 +9400,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
                 if (libpqsw_redirect() || libpqsw_get_set_command()) {
-                    ((RedirectManager*)t_thrd.libsw_cxt.redirect_manager)->push_message(firstchar,
+                    get_redirect_manager()->push_message(firstchar,
                         &input_message,
                         true,
                         libpqsw_get_set_command() ? RT_SET : RT_NORMAL
@@ -9630,7 +9635,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         break;
                 }
 
-                if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
+                if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote
+                    && !libpqsw_skip_close_command()) {
                     pq_putemptymessage('3'); /* CloseComplete */
                 }
             } break;
