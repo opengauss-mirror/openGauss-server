@@ -22,6 +22,7 @@ CREATE TABLE [ IF NOT EXISTS ] partition_table_name
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]
     [ DISTRIBUTE BY { REPLICATION | { [ HASH ] ( column_name ) } } ]
+    NOTICE: DISTRIBUTE BY is only avaliable in DISTRIBUTED mode!
     [ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
     PARTITION BY { 
         {VALUES (partition_key)} | 
