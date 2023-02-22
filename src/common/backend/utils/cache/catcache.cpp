@@ -1063,7 +1063,11 @@ static void CatalogCacheInitializeCache(CatCache* cache)
             keytype = OIDOID;
         }
 
-        GetCCHashEqFuncs(keytype, &cache->cc_hashfunc[i], &eqfunc, &cache->cc_fastequal[i]);
+        if (u_sess->hook_cxt.pluginCCHashEqFuncs == NULL ||
+            !((pluginCCHashEqFuncs)(u_sess->hook_cxt.pluginCCHashEqFuncs))(keytype, &cache->cc_hashfunc[i], &eqfunc,
+                &cache->cc_fastequal[i], cache->id)) {
+            GetCCHashEqFuncs(keytype, &cache->cc_hashfunc[i], &eqfunc, &cache->cc_fastequal[i]);
+        }
 
         /*
          * Do equality-function lookup (we assume this won't need a catalog
@@ -1580,7 +1584,7 @@ static HeapTuple SearchCatCacheMiss(
 {
     ScanKeyData cur_skey[CATCACHE_MAXKEYS];
     Relation relation;
-    SysScanDesc scandesc;
+    SysScanDesc scandesc = NULL;
     HeapTuple ntp;
     CatCTup* ct = NULL;
     Datum arguments[CATCACHE_MAXKEYS];
@@ -1652,16 +1656,27 @@ static HeapTuple SearchCatCacheMiss(
 
         ereport(DEBUG1, (errmsg("cache->cc_reloid - %d", cache->cc_reloid)));
 
-        scandesc = systable_beginscan(
-            relation, cache->cc_indexoid, IndexScanOK(cache->id), NULL, nkeys, cur_skey);
+        if (u_sess->hook_cxt.pluginSearchCatHook != NULL) {
+            if (HeapTupleIsValid(ntp = ((searchCatFunc)(u_sess->hook_cxt.pluginSearchCatHook))(relation,
+                cache->cc_indexoid, cache->id, nkeys, cur_skey, &scandesc))) {
+                ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
+                /* immediately set the refcount to 1 */
+                ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+                ct->refcount++;
+                ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
+            }
+        } else {
+            scandesc = systable_beginscan(
+                relation, cache->cc_indexoid, IndexScanOK(cache->id), NULL, nkeys, cur_skey);
 
-        while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
-            ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
-            /* immediately set the refcount to 1 */
-            ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
-            ct->refcount++;
-            ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
-            break; /* assume only one match */
+            while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
+                ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
+                /* immediately set the refcount to 1 */
+                ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+                ct->refcount++;
+                ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
+                break; /* assume only one match */
+            }
         }
 
         systable_endscan(scandesc);

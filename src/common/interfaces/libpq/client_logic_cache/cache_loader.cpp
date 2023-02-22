@@ -435,7 +435,7 @@ bool CacheLoader::fill_global_settings_map(PGconn *conn)
 {
     m_global_settings_list.clear();
     const char *global_settings_query =
-        "SELECT gs_client_global_keys.Oid, gs_client_global_keys.global_key_name, pg_namespace.nspname, "
+        "SELECT gs_client_global_keys.oid, gs_client_global_keys.global_key_name, pg_namespace.nspname, "
         "gs_client_global_keys_args.function_name, gs_client_global_keys_args.key, gs_client_global_keys_args.value, "
         "EXTRACT(EPOCH from gs_client_global_keys.create_date) as change_epoch "
         "FROM gs_client_global_keys JOIN pg_namespace ON (pg_namespace.Oid = gs_client_global_keys.key_namespace) "
@@ -729,7 +729,7 @@ bool CacheLoader::fill_cached_columns(PGconn *conn)
 
 const bool CacheLoader::fill_cached_types(PGconn *conn)
 {
-    const char *query = "select pg_type.Oid, current_database(), nspname ,typname from pg_type join pg_namespace on "
+    const char *query = "select pg_type.oid, current_database(), nspname ,typname from pg_type join pg_namespace on "
         "(typnamespace=pg_namespace.Oid) where typrelid in (Select rel_id from gs_encrypted_columns);";
 
     DataFetcher data_fetcher = conn->client_logic->m_data_fetcher_manager->get_data_fetcher();
