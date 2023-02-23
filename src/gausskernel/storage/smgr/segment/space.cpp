@@ -597,8 +597,8 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
 
         if (BufferIsValid(buf)) {
             BufferDesc *bufdesc = GetBufferDescriptor(buf - 1);
-            SegmentCheck(bufdesc->seg_fileno == seg->rnode.relNode);
-            bufdesc->seg_blockno = to_block;
+            SegmentCheck(bufdesc->extra->seg_fileno == seg->rnode.relNode);
+            bufdesc->extra->seg_blockno = to_block;
 
             LockBuffer(buf, BUFFER_LOCK_UNLOCK);
             UnpinBuffer(bufdesc, true);

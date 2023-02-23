@@ -2207,7 +2207,7 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
     pfree_ext(past_image);
 #endif
 
-    buf_desc->lsn_on_disk = PageGetLSN(bufBlock);
+    buf_desc->extra->lsn_on_disk = PageGetLSN(bufBlock);
 #ifdef USE_ASSERT_CHECKING
     buf_desc->lsn_dirty = InvalidXLogRecPtr;
 #endif
@@ -2222,8 +2222,8 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
 static inline void BufferDescSetPBLK(BufferDesc *buf, const XLogPhyBlock *pblk)
 {
     if (pblk != NULL) {
-        buf->seg_fileno = pblk->relNode;
-        buf->seg_blockno = pblk->block;
+        buf->extra->seg_fileno = pblk->relNode;
+        buf->extra->seg_blockno = pblk->block;
     }
 }
 
@@ -2295,7 +2295,7 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
          */
         bufHdr = BufferAlloc(smgr, relpersistence, forkNum, blockNum, strategy, &found, pblk);
         if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
-            bufHdr->encrypt = smgr->encrypt ? true : false; /* set tde flag */
+            bufHdr->extra->encrypt = smgr->encrypt ? true : false; /* set tde flag */
         }
         if (found) {
             u_sess->instr_cxt.pg_buffer_usage->shared_blks_hit++;
@@ -2500,7 +2500,7 @@ found_branch:
         if (ENABLE_INCRE_CKPT) {
             for (;;) {
                 buf_state = old_buf_state | (BM_DIRTY | BM_JUST_DIRTIED);
-                if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&bufHdr->rec_lsn))) {
+                if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&bufHdr->extra->rec_lsn))) {
                     break;
                 }
 
@@ -2536,7 +2536,7 @@ found_branch:
         buf_state |= BM_VALID;
         pg_atomic_write_u32(&bufHdr->state, buf_state);
     } else {
-        bufHdr->lsn_on_disk = PageGetLSN(bufBlock);
+        bufHdr->extra->lsn_on_disk = PageGetLSN(bufBlock);
 #ifdef USE_ASSERT_CHECKING
         bufHdr->lsn_dirty = InvalidXLogRecPtr;
 #endif
@@ -2568,7 +2568,7 @@ void SimpleMarkBufDirty(BufferDesc *buf)
     if (ENABLE_INCRE_CKPT) {
         for (;;) {
             bufState = oldBufState | (BM_DIRTY | BM_JUST_DIRTIED);
-            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->rec_lsn))) {
+            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->extra->rec_lsn))) {
                 break;
             }
 
@@ -2592,7 +2592,7 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLoc
 
     Block tmpBlock = BufHdrGetBlock(buf);
 
-    if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->lsn_on_disk, PageGetLSN(tmpBlock)) && !(*oldFlags & BM_DIRTY) &&
+    if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->extra->lsn_on_disk, PageGetLSN(tmpBlock)) && !(*oldFlags & BM_DIRTY) &&
         RecoveryInProgress()) {
         int mode = DEBUG1;
 #ifdef USE_ASSERT_CHECKING
@@ -2601,7 +2601,7 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLoc
         const uint32 shiftSize = 32;
         ereport(mode, (errmodule(MOD_INCRE_BG),
                 errmsg("check lsn is not matched on disk:%X/%X on page %X/%X, relnode info:%u/%u/%u %u %u",
-                       (uint32)(buf->lsn_on_disk >> shiftSize), (uint32)(buf->lsn_on_disk),
+                       (uint32)(buf->extra->lsn_on_disk >> shiftSize), (uint32)(buf->extra->lsn_on_disk),
                        (uint32)(PageGetLSN(tmpBlock) >> shiftSize), (uint32)(PageGetLSN(tmpBlock)),
                        buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode,
                        buf->tag.blockNum, buf->tag.forkNum)));
@@ -2620,7 +2620,7 @@ void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags)
 
     if ((oldFlags & BM_TAG_VALID) && RecoveryInProgress()) {
         if (!XLByteEQ(buf->lsn_dirty, InvalidXLogRecPtr)) {
-            Assert(XLByteEQ(buf->lsn_on_disk, buf->lsn_dirty));
+            Assert(XLByteEQ(buf->extra->lsn_on_disk, buf->lsn_dirty));
         }
     }
 }
@@ -2714,8 +2714,8 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
         /* set Physical segment file. */
         if (ENABLE_DMS && pblk != NULL) {
             Assert(PhyBlockIsValid(*pblk));
-            buf->seg_fileno = pblk->relNode;
-            buf->seg_blockno = pblk->block;
+            buf->extra->seg_fileno = pblk->relNode;
+            buf->extra->seg_blockno = pblk->block;
             MarkReadPblk(buf->buf_id, pblk);
         }
 
@@ -3009,14 +3009,14 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
     /* set Physical segment file. */
     if (pblk != NULL) {
         Assert(PhyBlockIsValid(*pblk));
-        buf->seg_fileno = pblk->relNode;
-        buf->seg_blockno = pblk->block;
+        buf->extra->seg_fileno = pblk->relNode;
+        buf->extra->seg_blockno = pblk->block;
         if (ENABLE_DMS) {
             MarkReadPblk(buf->buf_id, pblk);
         }
     } else {
-        buf->seg_fileno = EXTENT_INVALID;
-        buf->seg_blockno = InvalidBlockNumber;
+        buf->extra->seg_fileno = EXTENT_INVALID;
+        buf->extra->seg_blockno = InvalidBlockNumber;
     }
     LWLockRelease(new_partition_lock);
 
@@ -3125,7 +3125,7 @@ retry:
 
     /* remove from dirty page list */
     if (ENABLE_INCRE_CKPT && (buf_state & BM_DIRTY)) {
-        if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->rec_lsn))) {
+        if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->extra->rec_lsn))) {
             remove_dirty_page_from_queue(buf);
         } else {
             ereport(PANIC, (errmodule(MOD_INCRE_CKPT), errcode(ERRCODE_INVALID_BUFFER),
@@ -3221,7 +3221,7 @@ void MarkBufferDirty(Buffer buffer)
     if (ENABLE_INCRE_CKPT) {
         for (;;) {
             buf_state = old_buf_state | (BM_DIRTY | BM_JUST_DIRTIED);
-            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->rec_lsn))) {
+            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->extra->rec_lsn))) {
                 break;
             }
 
@@ -3303,7 +3303,7 @@ Buffer ReleaseAndReadBuffer(Buffer buffer, Relation relation, BlockNumber block_
 
     if (BufferIsValid(buffer)) {
         if (BufferIsLocal(buffer)) {
-            buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1];
+            buf_desc = (BufferDesc *)&u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1].bufferdesc;
             if (buf_desc->tag.blockNum == block_num && RelFileNodeEquals(buf_desc->tag.rnode, relation->rd_node) &&
                 buf_desc->tag.forkNum == fork_num)
                 return buffer;
@@ -4144,7 +4144,7 @@ bool SyncFlushOneBuffer(int buf_id, bool get_condition_lock)
         (void)LWLockAcquire(buf_desc->content_lock, LW_SHARED);
     }
 
-    if (ENABLE_DMS && buf_desc->aio_in_progress) {
+    if (ENABLE_DMS && buf_desc->extra->aio_in_progress) {
         LWLockRelease(buf_desc->content_lock);
         UnpinBuffer(buf_desc, true);
         return false;
@@ -4216,12 +4216,12 @@ uint32 SyncOneBuffer(int buf_id, bool skip_recently_used, WritebackContext* wb_c
     }
 
     tag = buf_desc->tag;
-    if (buf_desc->seg_fileno != EXTENT_INVALID) {
+    if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
         SegmentCheck(XLOG_NEED_PHYSICAL_LOCATION(buf_desc->tag.rnode));
-        SegmentCheck(buf_desc->seg_blockno != InvalidBlockNumber);
-        SegmentCheck(ExtentTypeIsValid(buf_desc->seg_fileno));
-        tag.rnode.relNode = buf_desc->seg_fileno;
-        tag.blockNum = buf_desc->seg_blockno;
+        SegmentCheck(buf_desc->extra->seg_blockno != InvalidBlockNumber);
+        SegmentCheck(ExtentTypeIsValid(buf_desc->extra->seg_fileno));
+        tag.rnode.relNode = buf_desc->extra->seg_fileno;
+        tag.blockNum = buf_desc->extra->seg_blockno;
     }
 
     if (!t_thrd.dms_cxt.buf_in_aio) {
@@ -4395,7 +4395,7 @@ void PrintBufferLeakWarning(Buffer buffer)
 
     Assert(BufferIsValid(buffer));
     if (BufferIsLocal(buffer)) {
-        buf = &u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1];
+        buf = (BufferDesc *)&u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1].bufferdesc;
         loccount = u_sess->storage_cxt.LocalRefCount[-buffer - 1];
         backend = BackendIdForTempRelations;
     } else {
@@ -4524,7 +4524,7 @@ BlockNumber BufferGetBlockNumber(Buffer buffer)
     Assert(BufferIsPinned(buffer));
 
     if (BufferIsLocal(buffer)) {
-        buf_desc = &(u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1]);
+        buf_desc = (BufferDesc *)&(u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1].bufferdesc);
     } else {
         buf_desc = GetBufferDescriptor(buffer - 1);
     }
@@ -4540,7 +4540,7 @@ void BufferGetTag(Buffer buffer, RelFileNode *rnode, ForkNumber *forknum, BlockN
     /* Do the same checks as BufferGetBlockNumber. */
     Assert(BufferIsPinned(buffer));
     if (BufferIsLocal(buffer)) {
-        buf_desc = &(u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1]);
+        buf_desc = (BufferDesc *)&(u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1].bufferdesc);
     } else {
         buf_desc = GetBufferDescriptor(buffer - 1);
     }
@@ -4590,7 +4590,7 @@ char* PageDataEncryptForBuffer(Page page, BufferDesc *bufdesc, bool is_segbuf)
     char *bufToWrite = NULL;
     TdeInfo tde_info = {0};
 
-    if (bufdesc->encrypt) {
+    if (bufdesc->extra->encrypt) {
         TDE::TDEBufferCache::get_instance().search_cache(bufdesc->tag.rnode, &tde_info);
         if (strlen(tde_info.dek_cipher) == 0) {
             ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
@@ -4710,17 +4710,17 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
 
     INSTR_TIME_SET_CURRENT(io_start);
 
-    if (bufdesc->seg_fileno != EXTENT_INVALID) {
+    if (bufdesc->extra->seg_fileno != EXTENT_INVALID) {
         /* FlushBuffer only used for data buffer, matedata buffer is flushed by SegFlushBuffer */
         SegmentCheck(!PageIsSegmentVersion(bufBlock) || PageIsNew(bufBlock));
         SegmentCheck(XLOG_NEED_PHYSICAL_LOCATION(bufdesc->tag.rnode));
-        SegmentCheck(bufdesc->seg_blockno != InvalidBlockNumber);
-        SegmentCheck(ExtentTypeIsValid(bufdesc->seg_fileno));
+        SegmentCheck(bufdesc->extra->seg_blockno != InvalidBlockNumber);
+        SegmentCheck(ExtentTypeIsValid(bufdesc->extra->seg_fileno));
 
         if (unlikely(bufToWrite != (char *)bufBlock)) {
-            PageSetChecksumInplace((Page)bufToWrite, bufdesc->seg_blockno);
+            PageSetChecksumInplace((Page)bufToWrite, bufdesc->extra->seg_blockno);
         } else {
-            bufToWrite = PageSetChecksumCopy((Page)bufToWrite, bufdesc->seg_blockno, true);
+            bufToWrite = PageSetChecksumCopy((Page)bufToWrite, bufdesc->extra->seg_blockno, true);
         }
 
         SegSpace* spc = spc_open(reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode, false);
@@ -4728,13 +4728,13 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
         RelFileNode fakenode = {
             .spcNode = spc->spcNode,
             .dbNode = spc->dbNode,
-            .relNode = bufdesc->seg_fileno,
+            .relNode = bufdesc->extra->seg_fileno,
             .bucketNode = SegmentBktId,
             .opt = 0
         };
 
 #ifdef USE_ASSERT_CHECKING
-        SegFlushCheckDiskLSN(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno, bufToWrite);
+        SegFlushCheckDiskLSN(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno, bufToWrite);
 #endif
 
         if (ENABLE_DMS && t_thrd.role == PAGEWRITER_THREAD && ENABLE_DSS_AIO) {
@@ -4748,26 +4748,26 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
 
             struct iocb *iocb_ptr = DSSAioGetIOCB(aio_cxt);
             int32 io_ret = seg_physical_aio_prep_pwrite(spc, fakenode, bufferinfo.blockinfo.forknum,
-                bufdesc->seg_blockno, tempBuf, (void *)iocb_ptr);
+                bufdesc->extra->seg_blockno, tempBuf, (void *)iocb_ptr);
             if (io_ret != DSS_SUCCESS) {
                 ereport(PANIC, (errmsg("dss aio failed, buffer: %d/%d/%d/%d/%d %d-%u",
                     fakenode.spcNode, fakenode.dbNode, fakenode.relNode, (int)fakenode.bucketNode,
-                    (int)fakenode.opt, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno)));
+                    (int)fakenode.opt, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno)));
             }
 
-            if (bufdesc->aio_in_progress) {
+            if (bufdesc->extra->aio_in_progress) {
                 ereport(PANIC, (errmsg("buffer is already in aio progress, buffer: %d/%d/%d/%d/%d %d-%u",
                     fakenode.spcNode, fakenode.dbNode, fakenode.relNode, (int)fakenode.bucketNode,
-                    (int)fakenode.opt, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno)));
+                    (int)fakenode.opt, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno)));
             }
 
             t_thrd.dms_cxt.buf_in_aio = true;
-            bufdesc->aio_in_progress = true;
+            bufdesc->extra->aio_in_progress = true;
             /* should be after io_prep_pwrite, because io_prep_pwrite will memset iocb struct */
             iocb_ptr->data = (void *)bufdesc;
             DSSAioAppendIOCB(aio_cxt, iocb_ptr);
         } else {
-            seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno, bufToWrite, false);
+            seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno, bufToWrite, false);
         }
     } else {
         SegmentCheck(!IsSegmentFileNode(bufdesc->tag.rnode));
@@ -4784,7 +4784,7 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
 
     u_sess->instr_cxt.pg_buffer_usage->shared_blks_written++;
 
-    ((BufferDesc *)buf)->lsn_on_disk = bufferinfo.lsn;
+    ((BufferDesc *)buf)->extra->lsn_on_disk = bufferinfo.lsn;
 
     /*
      * Mark the buffer as clean (unless BM_JUST_DIRTIED has become set) and
@@ -4969,13 +4969,13 @@ void DropSegRelNodeSharedBuffer(RelFileNode node, ForkNumber forkNum)
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         uint32 buf_state;
 
-        if (buf_desc->seg_fileno != node.relNode || buf_desc->tag.rnode.spcNode != node.spcNode ||
+        if (buf_desc->extra->seg_fileno != node.relNode || buf_desc->tag.rnode.spcNode != node.spcNode ||
             buf_desc->tag.rnode.dbNode != node.dbNode) {
             continue;
         }
 
         buf_state = LockBufHdr(buf_desc);
-        if (buf_desc->seg_fileno == node.relNode && buf_desc->tag.rnode.spcNode == node.spcNode &&
+        if (buf_desc->extra->seg_fileno == node.relNode && buf_desc->tag.rnode.spcNode == node.spcNode &&
             buf_desc->tag.rnode.dbNode == node.dbNode && buf_desc->tag.forkNum == forkNum) {
             InvalidateBuffer(buf_desc); /* releases spinlock */
         } else {
@@ -5786,7 +5786,7 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
         if (ENABLE_INCRE_CKPT) {
             for (;;) {
                 buf_state = old_buf_state | (BM_DIRTY | BM_JUST_DIRTIED);
-                if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->rec_lsn))) {
+                if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->extra->rec_lsn))) {
                     break;
                 }
 
@@ -6368,7 +6368,7 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
          */
         (void)LWLockAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE);
 
-        if (buf->aio_in_progress) {
+        if (buf->extra->aio_in_progress) {
             LWLockRelease(buf->io_in_progress_lock);
             pg_usleep(1000L);
             continue;
@@ -6481,7 +6481,7 @@ static void TerminateBufferIO_common(BufferDesc *buf, bool clear_dirty, uint32 s
 
     if (clear_dirty) {
         if (ENABLE_INCRE_CKPT) {
-            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->rec_lsn))) {
+            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->extra->rec_lsn))) {
                 remove_dirty_page_from_queue(buf);
             } else {
                 ereport(PANIC, (errmodule(MOD_INCRE_CKPT), errcode(ERRCODE_INVALID_BUFFER),

@@ -528,8 +528,8 @@ static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl
             *buf_ctrl = GetDmsBufCtrl(buf_id);
             Assert(buf_id >= 0);
             Assert((*buf_ctrl)->lock_mode != DMS_LOCK_NULL);
-            (*buf_ctrl)->seg_fileno = buf_desc->seg_fileno;
-            (*buf_ctrl)->seg_blockno = buf_desc->seg_blockno;
+            (*buf_ctrl)->seg_fileno = buf_desc->extra->seg_fileno;
+            (*buf_ctrl)->seg_blockno = buf_desc->extra->seg_blockno;
         } while (0);
     }
     PG_CATCH();
@@ -666,14 +666,14 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
 
     BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
 
-    if (buf_desc->seg_fileno == EXTENT_INVALID) {
-        buf_desc->seg_fileno = buf_ctrl->seg_fileno;
-        buf_desc->seg_blockno = buf_ctrl->seg_blockno;
-    } else if (buf_desc->seg_fileno != buf_ctrl->seg_fileno || buf_desc->seg_blockno != buf_ctrl->seg_blockno) {
+    if (buf_desc->extra->seg_fileno == EXTENT_INVALID) {
+        buf_desc->extra->seg_fileno = buf_ctrl->seg_fileno;
+        buf_desc->extra->seg_blockno = buf_ctrl->seg_blockno;
+    } else if (buf_desc->extra->seg_fileno != buf_ctrl->seg_fileno || buf_desc->extra->seg_blockno != buf_ctrl->seg_blockno) {
         ereport(PANIC, (errmsg("[%u/%u/%u/%d/%d %d-%u] location mismatch, seg_fileno:%d, seg_blockno:%u",
             buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
             buf_desc->tag.rnode.bucketNode, buf_desc->tag.rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-            buf_desc->seg_fileno, buf_desc->seg_blockno)));
+            buf_desc->extra->seg_fileno, buf_desc->extra->seg_blockno)));
     }
 
     /* page content is not valid */
@@ -682,7 +682,7 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
     }
 
     /* we only verify segment-page version */
-    if (!(buf_desc->seg_fileno != EXTENT_INVALID || IsSegmentBufferID(buf_desc->buf_id))) {
+    if (!(buf_desc->extra->seg_fileno != EXTENT_INVALID || IsSegmentBufferID(buf_desc->buf_id))) {
         return;
     }
 

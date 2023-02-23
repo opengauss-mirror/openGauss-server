@@ -1456,8 +1456,8 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
                     reln->seg_desc[forknum]->head_blocknum, seg_head->nblocks, seg_head->total_blocks, blocknum)));
 
     /* Add physical location for XLog */
-    buf_desc->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE(loc.extent_size);
-    buf_desc->seg_blockno = loc.blocknum;
+    buf_desc->extra->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE(loc.extent_size);
+    buf_desc->extra->seg_blockno = loc.blocknum;
 
     if (seg_head->nblocks <= blocknum) {
         XLogDataSegmentExtend xlog_data;
@@ -1558,8 +1558,8 @@ SMGR_READ_STATUS seg_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blo
     Buffer buf = BlockGetBuffer(buffer);
     if (BufferIsValid(buf)) {
         BufferDesc *buf_desc = BufferGetBufferDescriptor(buf);
-        buf_desc->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE(loc.extent_size);
-        buf_desc->seg_blockno = loc.blocknum;
+        buf_desc->extra->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE(loc.extent_size);
+        buf_desc->extra->seg_blockno = loc.blocknum;
     }
 
     SegReleaseBuffer(seg_buffer);

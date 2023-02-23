@@ -18990,7 +18990,7 @@ XLogRecPtr ckpt_get_min_rec_lsn(void)
             continue;
         }
         buf_desc = GetBufferDescriptor(buffer - 1);
-        page_rec_lsn = pg_atomic_read_u64(&buf_desc->rec_lsn);
+        page_rec_lsn = pg_atomic_read_u64(&buf_desc->extra->rec_lsn);
         if (!BufferIsInvalid(slot->buffer)) {
             min_rec_lsn = page_rec_lsn;
         }

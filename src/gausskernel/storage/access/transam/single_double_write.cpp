@@ -681,7 +681,7 @@ uint16 first_version_dw_single_flush(BufferDesc *buf_desc)
     securec_check(rc, "\0", "\0");
 
     XLogWaitFlush(page_lsn);
-    if (buf_desc->encrypt) {
+    if (buf_desc->extra->encrypt) {
         dw_encrypt_page(buf_desc->tag, buf);
     }
 
