@@ -68,5 +68,6 @@ extern size_t LogicalTapeBackspace(LogicalTapeSet *lts, int tapenum, size_t size
 extern void LogicalTapeSeek(LogicalTapeSet *lts, int tapenum, long blocknum, int offset);
 extern void LogicalTapeTell(LogicalTapeSet *lts, int tapenum, long *blocknum, int *offset);
 extern long LogicalTapeSetBlocks(LogicalTapeSet *lts);
+extern void LogicalTapeAssignReadBufferSize(LogicalTapeSet *lts, int tapenum, size_t bufsize);
 
 #endif /* LOGTAPE_H */
