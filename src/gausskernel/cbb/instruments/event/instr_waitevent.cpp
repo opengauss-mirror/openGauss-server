@@ -403,7 +403,9 @@ static void set_dms_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, 
     values[++i] = CStringGetTextDatum(pgstat_get_wait_dms(WaitEventDMS(eventId + PG_WAIT_DMS)));
     unsigned long long cnt = 0;
     unsigned long long time = 0; 
-    dms_get_event(dms_wait_event_t(eventId), &cnt, &time);
+    if (g_instance.dms_cxt.dmsInited) {
+        dms_get_event(dms_wait_event_t(eventId), &cnt, &time);
+    }
     values[++i] = Int64GetDatum(cnt);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.dms_info[eventId].failed_counter);
     values[++i] = Int64GetDatum(time);
