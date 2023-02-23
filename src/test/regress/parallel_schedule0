@@ -965,3 +965,4 @@ test: slow_sql
 test: alter_ctable_compress
 
 test: fulljoin_rewrite
+test: prevent_table_in_sys_schema
