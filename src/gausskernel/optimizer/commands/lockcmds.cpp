@@ -38,6 +38,10 @@ static void RangeVarCallbackForLockTable(
  */
 void LockTableCommand(LockStmt* lockstmt)
 {
+    if (DB_IS_CMPT(B_FORMAT) && lockstmt->isLockTables) {
+        TransactionState s = GetCurrentTransactionState();
+        s->blockState = TBLOCK_INPROGRESS;
+    }
     ListCell* p = NULL;
 
     /*
