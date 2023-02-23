@@ -9606,7 +9606,7 @@ make_execsql_stmt(int firsttoken, int location)
         } else {
             int nattr = rec_data->tupdesc->natts;
             for (int i = 0; i < nattr; i++) {
-               Form_pg_attribute pg_att_form = rec_data->tupdesc->attrs[i];
+               Form_pg_attribute pg_att_form = TupleDescAttr(rec_data->tupdesc, i);
                appendStringInfo(&ds, "%s.%s", rec_data->refname, NameStr(pg_att_form->attname));
                if (i != (nattr - 1)) {
                    appendStringInfoString(&ds, ",");
@@ -10438,7 +10438,7 @@ static AttrNumber get_assign_attrno(PLpgSQL_datum* target,  char* attrname)
 
 	/* search the matched attribute */
     for (int i = 0; i < elemtupledesc->natts; i++) {
-        if (namestrcmp(&(elemtupledesc->attrs[i]->attname), attrname) == 0) {
+        if (namestrcmp(&(elemtupledesc->attrs[i].attname), attrname) == 0) {
             attrno = i;
             break;
         }
@@ -11594,9 +11594,9 @@ static bool checkDuplicateAttrName(TupleDesc tupleDesc)
 {
     int attrnum = tupleDesc->natts;
     for (int i = 0; i < attrnum; i++) {
-        Form_pg_attribute attr1 = tupleDesc->attrs[i];
+        Form_pg_attribute attr1 = &tupleDesc->attrs[i];
         for (int j = i + 1; j < attrnum; j++) {
-            Form_pg_attribute attr2 = tupleDesc->attrs[j];
+            Form_pg_attribute attr2 = &tupleDesc->attrs[j];
             if (strcmp(NameStr(attr1->attname), NameStr(attr2->attname)) == 0) {
                 return true;
             }
@@ -11609,7 +11609,7 @@ static bool checkAllAttrName(TupleDesc tupleDesc)
 {
     int attrnum = tupleDesc->natts;
     for (int i = 0; i < attrnum; i++) {
-        Form_pg_attribute pg_att_form = tupleDesc->attrs[i];
+        Form_pg_attribute pg_att_form = &tupleDesc->attrs[i];
         char* att_name = NameStr(pg_att_form->attname);
         if (strcmp(att_name, "?column?") != 0) {
             return false;
@@ -11654,7 +11654,7 @@ static Oid createCompositeTypeForCursor(PLpgSQL_var* var, PLpgSQL_expr* expr)
         int attrnum = tupleDesc->natts;
         for (int i = 0; i < attrnum; i++) {
             ColumnDef *n = makeNode(ColumnDef);
-            Form_pg_attribute attr = tupleDesc->attrs[i];
+            Form_pg_attribute attr = &tupleDesc->attrs[i];
             n->colname = pstrdup(NameStr(attr->attname));
             n->typname = makeTypeNameFromOid(attr->atttypid, attr->atttypmod);
             n->inhcount = 0;

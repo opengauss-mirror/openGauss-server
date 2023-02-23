@@ -794,8 +794,8 @@ static ChainActionState ReCreateMFChainSDesc(MemFileChain* mfchain, Oid oid, Rel
                                                                   sizeof(int) + sizeof(Oid) * desc->natts);
     sDesc->natts = desc->natts;
     for (int i = 0; i < desc->natts; i++) {
-        sDesc->attrs[i] = desc->attrs[i]->atttypid;
-        if (desc->attrs[i]->atttypmod != -1) {
+        sDesc->attrs[i] = desc->attrs[i].atttypid;
+        if (desc->attrs[i].atttypmod != -1) {
             res = CHAIN_CREATE_TYPEMOD_ERR;
             break;
         }

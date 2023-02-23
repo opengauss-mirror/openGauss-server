@@ -356,7 +356,7 @@ VecMaterialState* ExecInitVecMaterial(VecMaterial* node, EState* estate, int efl
 
     ExecAssignResultTypeFromTL(
             &matstate->ss.ps,
-            matstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            matstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     matstate->ss.ps.ps_ProjInfo = NULL;
 

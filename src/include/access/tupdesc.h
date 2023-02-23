@@ -41,6 +41,14 @@ typedef enum tableAmType
     TAM_USTORE = 1,
 } TableAmType;
 
+/*
+ * Predefined TableAmRoutine for various types of table AM. The
+ * same are used to identify the table AM of a given slot.
+ */
+struct TableAmRoutine;
+extern const TableAmRoutine* TableAmHeap;
+extern const TableAmRoutine* TableAmUstore;
+
 /* index page split methods */
 #define INDEXSPLIT_NO_DEFAULT     0 /* default split method, aimed at equal split */
 #define INDEXSPLIT_NO_INSERTPT    1 /* insertpt */
@@ -140,28 +148,28 @@ typedef struct InformationalConstraint {
  * always have tdrefcount >= 0.
  */
 typedef struct tupleDesc {
-    TableAmType tdTableAmType;  /*index for accessing the Table Accessor methods on singleton TableAccessorMethods */
+    const TableAmRoutine* td_tam_ops; /* implementation of table AM */
     int natts; /* number of attributes in the tuple */
-    bool tdisredistable; /* temp table created for data redistribution by the redis tool */
-    Form_pg_attribute* attrs;
-    /* attrs[N] is a pointer to the description of Attribute Number N+1 */
-    TupleConstr* constr;        /* constraints, or NULL if none */
-    TupInitDefVal* initdefvals; /* init default value due to ADD COLUMN */
     Oid tdtypeid;               /* composite type ID for tuple type */
     int32 tdtypmod;             /* typmod for tuple type */
-    bool tdhasoid;              /* tuple has oid attribute in its header */
     int tdrefcount;             /* reference count, or -1 if not counting */
+    bool tdisredistable; /* temp table created for data redistribution by the redis tool */
+    bool tdhasoid;              /* tuple has oid attribute in its header */
     bool tdhasuids;             /* tuple has uid attribute in its header */
+    TupleConstr* constr;        /* constraints, or NULL if none */
+    TupInitDefVal* initdefvals; /* init default value due to ADD COLUMN */
+    /* attrs[N] is the description of Attribute Number N+1 */
+    FormData_pg_attribute attrs[FLEXIBLE_ARRAY_MEMBER];
 } * TupleDesc;
 
 /* Accessor for the i'th attribute of tupdesc. */
-#define TupleDescAttr(tupdesc, i) (tupdesc->attrs[(i)])
+#define TupleDescAttr(tupdesc, i) (&(tupdesc)->attrs[(i)])
 #define ISGENERATEDCOL(tupdesc, i) \
     ((tupdesc)->constr != NULL && (tupdesc)->constr->num_defval > 0 && (tupdesc)->constr->generatedCols[(i)])
 
-extern TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, TableAmType tam = TAM_HEAP);
+extern TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, const TableAmRoutine* tam_ops = TableAmHeap);
 
-extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, TableAmType tam = TAM_HEAP);
+extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, const TableAmRoutine* tam_ops = TableAmHeap);
 
 extern TupleDesc CreateTupleDescCopy(TupleDesc tupdesc);
 

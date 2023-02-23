@@ -1312,13 +1312,13 @@ void bulkload_rows::init(TupleDesc tup_desc, int rows_maxnum)
         bulkload_memsize_increase(m_context, cur_size);
 
         bulkload_vector* vector = m_vectors;
-        Form_pg_attribute* attrs = tup_desc->attrs;
+        FormData_pg_attribute* attrs = tup_desc->attrs;
         m_has_dropped_column = false;
         for (int i = 0; i < attr_num; ++i) {
-            if ((*attrs)->attisdropped)
+            if ((*attrs).attisdropped)
                 m_has_dropped_column = true;
             /* initialize each vector */
-            vector->init(*attrs, rows_maxnum);
+            vector->init(attrs, rows_maxnum);
             /* compute the total memory size of all head blocks */
             m_using_blocks_init_rawsize += vector->m_blocks.m_block_size;
             ++vector;
@@ -1406,7 +1406,7 @@ bool bulkload_rows::append_one_tuple(Datum* values, const bool* isnull, TupleDes
     Assert(m_rows_curnum < m_rows_maxnum);
 
     bulkload_vector* vector = m_vectors;
-    Form_pg_attribute* attrs = tup_desc->attrs;
+    FormData_pg_attribute* attrs = tup_desc->attrs;
 
     /* append one tuple */
     for (int attrIdx = 0; attrIdx < m_attr_num; ++attrIdx) {
@@ -1415,7 +1415,7 @@ bool bulkload_rows::append_one_tuple(Datum* values, const bool* isnull, TupleDes
             vector->m_values_nulls.set_null(m_rows_curnum);
         } else {
             /* append this value into vector */
-            Datum v = (vector->*(vector->m_append))(this, values[attrIdx], (*attrs)->attlen);
+            Datum v = (vector->*(vector->m_append))(this, values[attrIdx], (*attrs).attlen);
 
             /* compare for min/max values */
             vector->m_minmax.m_compare(vector->m_minmax.m_min_buf,
@@ -1509,7 +1509,7 @@ void bulkload_rows::append_one_column(Datum* values, const bool* isnull, int row
     if (dest_idx >= 0) {
         Assert(tup_desc);
         bulkload_vector* vector = m_vectors + dest_idx;
-        int attlen = tup_desc->attrs[dest_idx]->attlen;
+        int attlen = tup_desc->attrs[dest_idx].attlen;
 
         /* handle a batch of values for one attribute */
         for (int rowCnt = 0; rowCnt < rows; ++rowCnt) {
@@ -1555,12 +1555,12 @@ Size bulkload_rows::sample_tuple_size(TupleDesc tup_desc, VectorBatch* p_batch, 
 {
     ScalarVector* scalar_vector = p_batch->m_arr;
     bulkload_vector* vector = m_vectors;
-    Form_pg_attribute* attrs = tup_desc->attrs;
+    FormData_pg_attribute* attrs = tup_desc->attrs;
     Size tup_size = 0;
 
     /* compute the sampling tuple' size */
     for (int i = 0; i < tup_desc->natts; ++i) {
-        if (hasDroppedColumn && (*attrs)->attisdropped) {
+        if (hasDroppedColumn && (*attrs).attisdropped) {
             /* advance to the next attribute */
             ++scalar_vector;
             ++vector;
@@ -1568,16 +1568,16 @@ Size bulkload_rows::sample_tuple_size(TupleDesc tup_desc, VectorBatch* p_batch, 
             continue;
         }
 
-        if ((*attrs)->attlen > 0) {
+        if ((*attrs).attlen > 0) {
             /* datum struct: len-B value */
-            tup_size += (*attrs)->attlen;
-        } else if (!scalar_vector->IsNull(idx_sample) && (*attrs)->attlen == -1) {
+            tup_size += (*attrs).attlen;
+        } else if (!scalar_vector->IsNull(idx_sample) && (*attrs).attlen == -1) {
             /* datum struct: 4B var-header + varlen-B value */
-            Assert((*attrs)->attlen == -1);
+            Assert((*attrs).attlen == -1);
             Datum v = (vector->*(vector->m_decode))(scalar_vector, idx_sample);
             tup_size += VARSIZE_ANY(DatumGetPointer(v));
-        } else if (!scalar_vector->IsNull(idx_sample) && (*attrs)->attlen == -2) {
-            Assert((*attrs)->attlen == -2);
+        } else if (!scalar_vector->IsNull(idx_sample) && (*attrs).attlen == -2) {
+            Assert((*attrs).attlen == -2);
             Datum v = (vector->*(vector->m_decode))(scalar_vector, idx_sample);
             tup_size += strlen(DatumGetPointer(v)) + 1;
         }
@@ -1599,26 +1599,26 @@ Size bulkload_rows::sample_tuple_size(TupleDesc tup_desc, VectorBatch* p_batch, 
  */
 Size bulkload_rows::calculate_tuple_size(TupleDesc tup_desc, Datum* tup_values, const bool* tup_nulls) const
 {
-    Form_pg_attribute* attrs = tup_desc->attrs;
+    FormData_pg_attribute* attrs = tup_desc->attrs;
     Size tup_size = 0;
 
     /* compute the sampling tuple' size */
     for (int attrIdx = 0; attrIdx < tup_desc->natts; attrIdx++) {
-        if ((*attrs)->attisdropped) {
+        if ((*attrs).attisdropped) {
             /* advance to the next attribute */
             ++attrs;
             continue;
         }
 
-        if ((*attrs)->attlen > 0) {
+        if ((*attrs).attlen > 0) {
             /* datum struct: len-B value */
-            tup_size += (*attrs)->attlen;
-        } else if (!tup_nulls[attrIdx] && (*attrs)->attlen == -1) {
+            tup_size += (*attrs).attlen;
+        } else if (!tup_nulls[attrIdx] && (*attrs).attlen == -1) {
             /* datum struct: 4B var-header + varlen-B value */
-            Assert((*attrs)->attlen == -1);
+            Assert((*attrs).attlen == -1);
             tup_size += VARSIZE_ANY(DatumGetPointer(tup_values[attrIdx]));
-        } else if (!tup_nulls[attrIdx] && (*attrs)->attlen == -2) {
-            Assert((*attrs)->attlen == -2);
+        } else if (!tup_nulls[attrIdx] && (*attrs).attlen == -2) {
+            Assert((*attrs).attlen == -2);
             tup_size += strlen(DatumGetPointer(tup_values[attrIdx])) + 1;
         }
         /* advance to the next attribute */
@@ -1654,7 +1654,7 @@ bool bulkload_rows::append_in_row_orientation(TupleDesc tup_desc, VectorBatch* p
     while (row_count < maxRows) {
         ScalarVector* scalar_vector = p_batch->m_arr;
         bulkload_vector* vector = m_vectors;
-        Form_pg_attribute* attrs = tup_desc->attrs;
+        FormData_pg_attribute* attrs = tup_desc->attrs;
 
         Size tuple_size = (this->*m_form_sample_tuple_size_func)(tup_desc, p_batch, srcRowIdx);
         if ((BULKLOAD_MAX_MEMSIZE - m_using_blocks_total_rawsize) < tuple_size) {
@@ -1669,7 +1669,7 @@ bool bulkload_rows::append_in_row_orientation(TupleDesc tup_desc, VectorBatch* p
                 Datum vector_value = (vector->*(vector->m_decode))(scalar_vector, srcRowIdx);
 
                 /* append this value into vector */
-                vector_value = (vector->*(vector->m_append))(this, vector_value, (*attrs)->attlen);
+                vector_value = (vector->*(vector->m_append))(this, vector_value, (*attrs).attlen);
 
                 /* compare for min/max values */
                 vector->m_minmax.m_compare(vector->m_minmax.m_min_buf,
@@ -1725,10 +1725,10 @@ bool bulkload_rows::append_in_column_orientation(TupleDesc tup_desc, VectorBatch
 
     ScalarVector* scalar_vector = p_batch->m_arr;
     bulkload_vector* vector = m_vectors;
-    Form_pg_attribute* attrs = tup_desc->attrs;
+    FormData_pg_attribute* attrs = tup_desc->attrs;
 
     for (int attrIdx = 0; attrIdx < nattrs; ++attrIdx) {
-        if (hasDroppedColumn && (*attrs)->attisdropped) {
+        if (hasDroppedColumn && (*attrs).attisdropped) {
             /* advance to the next attribute */
             /* for droped columns, set all null */
             int destRowIdx = m_rows_curnum;
@@ -1753,7 +1753,7 @@ bool bulkload_rows::append_in_column_orientation(TupleDesc tup_desc, VectorBatch
                 Datum value = (vector->*(vector->m_decode))(scalar_vector, srcRowIdx);
 
                 /* append this value into vector */
-                value = (vector->*(vector->m_append))(this, value, (*attrs)->attlen);
+                value = (vector->*(vector->m_append))(this, value, (*attrs).attlen);
 
                 /* compare for min/max values */
                 vector->m_minmax.m_compare(vector->m_minmax.m_min_buf,

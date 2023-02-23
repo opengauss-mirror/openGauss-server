@@ -106,7 +106,7 @@ void VecStore::SetData(char* dataPtr, int dataSize, MultiColumns* multiColumn)
     multiColumn->size = dataSize;
 
     for (int i = 0; i < m_colNum; ++i) {
-        Form_pg_attribute attr = tupDesc->attrs[i];
+        Form_pg_attribute attr = &tupDesc->attrs[i];
         Datum v;
 
         int val_size = 0;

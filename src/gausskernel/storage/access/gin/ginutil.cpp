@@ -50,12 +50,12 @@ void initGinState(GinState *state, Relation index)
         if (state->oneCol)
             state->tupdesc[i] = state->origTupdesc;
         else {
-            state->tupdesc[i] = CreateTemplateTupleDesc(GIN_UTIL_ATTR_NUM, false, TAM_HEAP);
+            state->tupdesc[i] = CreateTemplateTupleDesc(GIN_UTIL_ATTR_NUM, false);
 
             TupleDescInitEntry(state->tupdesc[i], (AttrNumber)1, NULL, INT2OID, -1, 0);
-            TupleDescInitEntry(state->tupdesc[i], (AttrNumber)GIN_UTIL_ATTR_NUM, NULL, origTupdesc->attrs[i]->atttypid,
-                               origTupdesc->attrs[i]->atttypmod, origTupdesc->attrs[i]->attndims);
-            TupleDescInitEntryCollation(state->tupdesc[i], (AttrNumber)2, origTupdesc->attrs[i]->attcollation);
+            TupleDescInitEntry(state->tupdesc[i], (AttrNumber)GIN_UTIL_ATTR_NUM, NULL, origTupdesc->attrs[i].atttypid,
+                               origTupdesc->attrs[i].atttypmod, origTupdesc->attrs[i].attndims);
+            TupleDescInitEntryCollation(state->tupdesc[i], (AttrNumber)2, origTupdesc->attrs[i].attcollation);
         }
 
         fmgr_info_copy(&(state->compareFn[i]), index_getprocinfo(index, i + 1, GIN_COMPARE_PROC), CurrentMemoryContext);

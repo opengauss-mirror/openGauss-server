@@ -168,7 +168,7 @@ static void append_msg_to_batch(VecStreamState* vs_state, VectorBatch* batch)
                 case VALUE_TYPE:
                     /* value stored directly */
                     desc = vs_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor;
-                    data_len = desc->attrs[i]->attlen;
+                    data_len = desc->attrs[i].attlen;
                     column->m_vals[current_row] = fetch_att(data, true, data_len);
                     break;
                 case NUMERIC_TYPE:
@@ -224,7 +224,7 @@ static void append_msg_to_batch(VecStreamState* vs_state, VectorBatch* batch)
                 case FIXED_TYPE:
                     /* fixed length value */
                     desc = vs_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor;
-                    data_len = desc->attrs[i]->attlen;
+                    data_len = desc->attrs[i].attlen;
                     column->AddVar(PointerGetDatum(data), current_row);
                     break;
                 default:
@@ -370,7 +370,7 @@ void redistributeStreamInitType(TupleDesc desc, uint32* cols_type)
     Form_pg_attribute attr;
 
     for (int i = 0; i < desc->natts; i++) {
-        attr = desc->attrs[i];
+        attr = &desc->attrs[i];
 
         /*
          * Mark the data type of each column.
@@ -448,7 +448,7 @@ VecStreamState* ExecInitVecStream(Stream* node, EState* estate, int eflags)
         TupleDesc desc = state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor;
 
         for (int i = 0; i < desc->natts; i++) {
-            if (desc->attrs[i]->atttypid == NUMERICOID)
+            if (desc->attrs[i].atttypid == NUMERICOID)
                 state->bitNumericLen++;
         }
 

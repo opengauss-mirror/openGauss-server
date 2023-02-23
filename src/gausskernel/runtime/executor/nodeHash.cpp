@@ -247,11 +247,11 @@ HashState* ExecInitHash(Hash* node, EState* estate, int eflags)
      * this node doesn't do projections
      */
     TupleDesc resultDesc = ExecGetResultType(outerPlanState(hashstate));
-    ExecAssignResultTypeFromTL(&hashstate->ps, resultDesc->tdTableAmType);
+    ExecAssignResultTypeFromTL(&hashstate->ps, resultDesc->td_tam_ops);
 
     hashstate->ps.ps_ProjInfo = NULL;
 
-    Assert(hashstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(hashstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     return hashstate;
 }

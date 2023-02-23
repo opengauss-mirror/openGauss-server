@@ -1374,9 +1374,9 @@ Datum fastgetattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool* isnull)
 
     *isnull = false;
     if (HeapTupleNoNulls(tup)) {
-        if (tupleDesc->attrs[attnum - 1]->attcacheoff >= 0) {
-            return fetchatt(tupleDesc->attrs[attnum - 1],
-                (char *)tup->t_data + tup->t_data->t_hoff + tupleDesc->attrs[attnum - 1]->attcacheoff);
+        if (tupleDesc->attrs[attnum - 1].attcacheoff >= 0) {
+            return fetchatt(&tupleDesc->attrs[attnum - 1],
+                (char *)tup->t_data + tup->t_data->t_hoff + tupleDesc->attrs[attnum - 1].attcacheoff);
         }
         return nocachegetattr(tup, attnum, tupleDesc);
     } else {
@@ -4129,7 +4129,7 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
             /* try to insert tuple into mlog-table. */
             if (relation != NULL && relation->rd_mlogoid != InvalidOid) {
                 /* judge whether need to insert into mlog-table */
-                if (relation->rd_tam_type == TAM_USTORE) {
+                if (relation->rd_tam_ops == TableAmUstore) {
                     heaptup = UHeapToHeap(relation->rd_att, (UHeapTuple)heaptup);
                 }
                 insert_into_mlog_table(relation, relation->rd_mlogoid,
@@ -5947,7 +5947,7 @@ static bool heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum, HeapTuple tup
         return (DatumGetObjectId(value1) == DatumGetObjectId(value2));
     } else {
         Assert(attrnum <= tupdesc->natts);
-        att = tupdesc->attrs[attrnum - 1];
+        att = &tupdesc->attrs[attrnum - 1];
         return datumIsEqual(value1, value2, att->attbyval, att->attlen);
     }
 }

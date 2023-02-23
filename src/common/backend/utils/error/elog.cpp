@@ -5341,7 +5341,7 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isSh
     TupleDesc tupdesc;
 
     /* need a tuple descriptor representing three TEXT columns */
-    tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);
@@ -5419,7 +5419,7 @@ void gramShowWarningsErrorsCount(DestReceiver *dest, bool isShowErrors)
     bool isnull[1] = {false};
 
     /* need a tuple descriptor representing three TEXT columns */
-    tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(1, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "count", INT4OID, -1, 0);
 
     /* prepare for projection of tuples */

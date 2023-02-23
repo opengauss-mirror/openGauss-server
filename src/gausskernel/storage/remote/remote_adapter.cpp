@@ -428,7 +428,7 @@ Datum gs_read_file_from_remote(PG_FUNCTION_ARGS)
         current_lsn = GetXLogInsertRecPtr();
     }
 
-    tupdesc = CreateTemplateTupleDesc(RES_COL_NUM, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(RES_COL_NUM, false);
     parano = 1;
     TupleDescInitEntry(tupdesc, (AttrNumber)parano++, "file", BYTEAOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)parano++, "lsn", XIDOID, -1, 0);

@@ -929,7 +929,7 @@ static void gcdeparseTargetList(StringInfo buf, PlannerInfo* root, Index rtindex
     have_wholerow = bms_is_member(0 - FirstLowInvalidHeapAttributeNumber, attrs_used);
 
     for (i = 1; i <= tupdesc->natts; i++) {
-        Form_pg_attribute attr = tupdesc->attrs[i - 1];
+        Form_pg_attribute attr = &tupdesc->attrs[i - 1];
 
         /* Ignore dropped attributes. */
         if (attr->attisdropped)

@@ -9548,17 +9548,17 @@ TupleDesc GetPGVariableResultDesc(const char* name)
 
     if (guc_name_compare(name, "all") == 0) {
         /* need a tuple descriptor representing three TEXT columns */
-        tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(3, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "setting", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "description", TEXTOID, -1, 0);
     } else if (guc_name_compare(name, "show_warnings") == 0 || guc_name_compare(name, "show_errors") == 0) {
-        tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);
     } else if (guc_name_compare(name, "show_warnings_count") == 0 || guc_name_compare(name, "show_errors_count") == 0) {
-        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(1, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "count", INT4OID, -1, 0);
     } else {
         const char* varname = NULL;
@@ -9567,7 +9567,7 @@ TupleDesc GetPGVariableResultDesc(const char* name)
         (void)GetConfigOptionByName(name, &varname);
 
         /* need a tuple descriptor representing a single TEXT column */
-        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(1, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, varname, TEXTOID, -1, 0);
     }
 
@@ -9588,7 +9588,7 @@ static void ShowGUCConfigOption(const char* name, DestReceiver* dest)
     value = GetConfigOptionByName(name, &varname);
 
     /* need a tuple descriptor representing a single TEXT column */
-    tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(1, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, varname, TEXTOID, -1, 0);
 
     /* prepare for projection of tuples */
@@ -9613,7 +9613,7 @@ static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
     bool isnull[3] = {false, false, false};
 
     /* need a tuple descriptor representing three TEXT columns */
-    tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(3, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "setting", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "description", TEXTOID, -1, 0);
@@ -10069,7 +10069,7 @@ Datum show_all_settings(PG_FUNCTION_ARGS)
          * need a tuple descriptor representing NUM_PG_SETTINGS_ATTS columns
          * of the appropriate types
          */
-        tupdesc = CreateTemplateTupleDesc(NUM_PG_SETTINGS_ATTS, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(NUM_PG_SETTINGS_ATTS, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "setting", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "unit", TEXTOID, -1, 0);

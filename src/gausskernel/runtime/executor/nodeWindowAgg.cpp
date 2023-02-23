@@ -1231,7 +1231,7 @@ WindowAggState* ExecInitWindowAgg(WindowAgg* node, EState* estate, int eflags)
      * Initialize result tuple type and projection info.
      * result Tuple Table Slot contains virtual tuple, default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&winstate->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&winstate->ss.ps);
 
     ExecAssignProjectionInfo(&winstate->ss.ps, NULL);
 

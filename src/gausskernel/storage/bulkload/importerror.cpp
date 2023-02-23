@@ -92,7 +92,7 @@ void unlink_local_cache_file(const char *prefix, const uint32 smpId)
 
 void BaseError::Serialize(StringInfo buf)
 {
-    Form_pg_attribute *attrs = m_desc->attrs;
+    FormData_pg_attribute *attrs = m_desc->attrs;
     int natts = m_desc->natts;
 
     Assert(m_desc->natts == MaxNumOfValue);
@@ -104,12 +104,12 @@ void BaseError::Serialize(StringInfo buf)
             pq_sendint32(buf, UNSIGNED_MINUS_ONE);
             continue;
         }
-        if (attrs[i]->attlen > 0 && attrs[i]->attlen <= 8) {
-            pq_sendint32(buf, attrs[i]->attlen);
-            pq_sendbytes(buf, (char *)&attr, attrs[i]->attlen);
-        } else if (attrs[i]->attlen > 8) {
-            pq_sendint32(buf, attrs[i]->attlen);
-            pq_sendbytes(buf, DatumGetPointer(attr), attrs[i]->attlen);
+        if (attrs[i].attlen > 0 && attrs[i].attlen <= 8) {
+            pq_sendint32(buf, attrs[i].attlen);
+            pq_sendbytes(buf, (char *)&attr, attrs[i].attlen);
+        } else if (attrs[i].attlen > 8) {
+            pq_sendint32(buf, attrs[i].attlen);
+            pq_sendbytes(buf, DatumGetPointer(attr), attrs[i].attlen);
         } else {
             pq_sendint32(buf, VARSIZE(attr) - VARHDRSZ);
             pq_sendbytes(buf, VARDATA(attr), VARSIZE(attr) - VARHDRSZ);
@@ -120,7 +120,7 @@ void BaseError::Serialize(StringInfo buf)
 void BaseError::Deserialize(StringInfo buf)
 {
     int natts;
-    Form_pg_attribute *attrs = m_desc->attrs;
+    FormData_pg_attribute *attrs = m_desc->attrs;
     natts = pq_getmsgint(buf, 2);
     if (natts != MaxNumOfValue || natts != m_desc->natts) {
         ereport(ERROR, (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED), errmsg("Found invalid error recored")));
@@ -139,15 +139,15 @@ void BaseError::Deserialize(StringInfo buf)
                      errmsg("Found invalid error recored: negative length that is not -1.")));
         }
         m_isNull[i] = false;
-        if (attrs[i]->attlen > 0 && attrs[i]->attlen <= 8) {
-            if (unlikely(len != m_desc->attrs[i]->attlen)) {
+        if (attrs[i].attlen > 0 && attrs[i].attlen <= 8) {
+            if (unlikely(len != m_desc->attrs[i].attlen)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
                          errmsg("Found invalid error recored: length is not the same as the attribute length.")));
             }
             pq_copymsgbytes(buf, (char*)&m_values[i], len);
-        } else if (attrs[i]->attlen > 8) {
-            if (unlikely(len != m_desc->attrs[i]->attlen)) {
+        } else if (attrs[i].attlen > 8) {
+            if (unlikely(len != m_desc->attrs[i].attlen)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
                          errmsg("Found invalid error recored: length is not the same as the attribute length.")));

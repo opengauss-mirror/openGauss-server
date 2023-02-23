@@ -679,7 +679,7 @@ Datum get_instr_rt_percentile(PG_FUNCTION_ARGS)
 
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(NUM_PERCENTILE_COUNT, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(NUM_PERCENTILE_COUNT, false);
         if (!(PercentileSpace::CheckQueryPercentile())) {
             MemoryContextSwitchTo(oldcontext);
             SRF_RETURN_DONE(funcctx);

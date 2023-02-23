@@ -430,7 +430,7 @@ Datum get_instr_workload_info(PG_FUNCTION_ARGS)
 
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
-        tupdesc = CreateTemplateTupleDesc(INSTR_WORKLOAD_ATTRUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(INSTR_WORKLOAD_ATTRUM, false);
 
         create_tuple_entry(tupdesc);
 

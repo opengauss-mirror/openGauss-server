@@ -192,7 +192,7 @@ void VectorBatch::init(MemoryContext cxt, TupleDesc desc)
 {
     ScalarDesc scalar_desc;
 
-    Form_pg_attribute* attrs = desc->attrs;
+    FormData_pg_attribute* attrs = desc->attrs;
 
     m_cols = desc->natts;
 
@@ -206,13 +206,13 @@ void VectorBatch::init(MemoryContext cxt, TupleDesc desc)
 
     m_arr = New(cxt) ScalarVector[m_cols];
     for (int i = 0; i < m_cols; i++) {
-        scalar_desc.encoded = COL_IS_ENCODE(attrs[i]->atttypid);
-        scalar_desc.typeId = attrs[i]->atttypid;
+        scalar_desc.encoded = COL_IS_ENCODE(attrs[i].atttypid);
+        scalar_desc.typeId = attrs[i].atttypid;
         /* for vector result batch, treat tid as int8 */
         if (scalar_desc.typeId == TIDOID) {
             scalar_desc.typeId = INT8OID;
         }
-        scalar_desc.typeMod = attrs[i]->atttypmod;
+        scalar_desc.typeMod = attrs[i].atttypmod;
         m_arr[i].init(cxt, scalar_desc);
     }
 }

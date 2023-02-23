@@ -3032,7 +3032,7 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
         case T_RowExpr: {
             RowExpr* rowexpr = (RowExpr*)node;
             RowExprState* rstate = makeNode(RowExprState);
-            Form_pg_attribute* attrs = NULL;
+            FormData_pg_attribute* attrs = NULL;
             List* outlist = NIL;
             ListCell* l = NULL;
             int i;
@@ -3048,7 +3048,7 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
             /* Build tupdesc to describe result tuples */
             if (rowexpr->row_typeid == RECORDOID) {
                 /* generic record, use runtime type assignment */
-                rstate->tupdesc = ExecTypeFromExprList(rowexpr->args, rowexpr->colnames, TAM_HEAP);
+                rstate->tupdesc = ExecTypeFromExprList(rowexpr->args, rowexpr->colnames);
                 BlessTupleDesc(rstate->tupdesc);
                 /* we won't need to redo this at runtime */
             } else {
@@ -3067,19 +3067,19 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                 Expr* e = (Expr*)lfirst(l);
                 ExprState* estate = NULL;
 
-                if (!attrs[i]->attisdropped) {
+                if (!attrs[i].attisdropped) {
                     /*
                      * Guard against ALTER COLUMN TYPE on rowtype since
                      * the RowExpr was created.  XXX should we check
                      * typmod too?	Not sure we can be sure it'll be the
                      * same.
                      */
-                    if (exprType((Node*)e) != attrs[i]->atttypid)
+                    if (exprType((Node*)e) != attrs[i].atttypid)
                         ereport(ERROR,
                             (errcode(ERRCODE_DATATYPE_MISMATCH),
                                 errmsg("ROW() column has type %s instead of type %s",
                                     format_type_be(exprType((Node*)e)),
-                                    format_type_be(attrs[i]->atttypid))));
+                                    format_type_be(attrs[i].atttypid))));
                 } else {
                     /*
                      * Ignore original expression and insert a NULL. We

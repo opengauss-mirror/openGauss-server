@@ -526,7 +526,7 @@ ForeignScanState *buildRelatedStateInfo(Relation relation, DistFdwFileSegment *s
     ;
 
     /* setup tuple slot */
-    scanTupleSlot = MakeTupleTableSlot(true, tupleDescriptor->tdTableAmType);
+    scanTupleSlot = MakeTupleTableSlot(true, tupleDescriptor->td_tam_ops);
     scanTupleSlot->tts_tupleDescriptor = tupleDescriptor;
     scanTupleSlot->tts_values = columnValues;
     scanTupleSlot->tts_isnull = columnNulls;
@@ -641,7 +641,7 @@ static int distAcquireSampleRows(Relation relation, int logLevel, HeapTuple *sam
             (void)MemoryContextSwitchTo(oldContext);
 
             /* if there are no more records to read, break */
-            if (scanTupleSlot->tts_isempty) {
+            if (TTS_EMPTY(scanTupleSlot)) {
                 break;
             }
 
@@ -653,7 +653,7 @@ static int distAcquireSampleRows(Relation relation, int logLevel, HeapTuple *sam
              * reach the end of the relation.
              */
             if (sampleRowCount < targetRowCount) {
-                sampleRows[sampleRowCount++] = (HeapTuple)tableam_tops_form_tuple(tupleDescriptor, columnValues, columnNulls, HEAP_TUPLE);
+                sampleRows[sampleRowCount++] = (HeapTuple)tableam_tops_form_tuple(tupleDescriptor, columnValues, columnNulls);
             } else {
                 /*
                  * If we need to compute a new S value, we must use the "not yet
@@ -673,7 +673,7 @@ static int distAcquireSampleRows(Relation relation, int logLevel, HeapTuple *sam
                     Assert(rowIndex < targetRowCount);
 
                     heap_freetuple(sampleRows[rowIndex]);
-                    sampleRows[rowIndex] = (HeapTuple)tableam_tops_form_tuple(tupleDescriptor, columnValues, columnNulls, HEAP_TUPLE);
+                    sampleRows[rowIndex] = (HeapTuple)tableam_tops_form_tuple(tupleDescriptor, columnValues, columnNulls);
                 }
                 rowCountToSkip -= 1;
             }
@@ -777,7 +777,7 @@ bool check_selective_binary_conversion(RelOptInfo *baserel, Oid foreigntableid, 
 
         /* Get user attributes. */
         if (attnum > 0) {
-            Form_pg_attribute attr = tupleDesc->attrs[attnum - 1];
+            Form_pg_attribute attr = &tupleDesc->attrs[attnum - 1];
             char *attname = NameStr(attr->attname);
 
             /* Skip dropped attributes (probably shouldn't see any here). */
@@ -790,7 +790,7 @@ bool check_selective_binary_conversion(RelOptInfo *baserel, Oid foreigntableid, 
     /* Count non-dropped user attributes while we have the tupdesc. */
     numattrs = 0;
     for (i = 0; i < tupleDesc->natts; i++) {
-        Form_pg_attribute attr = tupleDesc->attrs[i];
+        Form_pg_attribute attr = &tupleDesc->attrs[i];
 
         if (attr->attisdropped)
             continue;
@@ -1412,7 +1412,7 @@ static void DistBegin(CopyState cstate, bool isImport, Relation rel, Node *raw_q
             if (!list_member_int(cstate->attnumlist, attnum))
                 ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
                                 errmsg("FORCE QUOTE column \"%s\" not referenced by COPY",
-                                       NameStr(tupDesc->attrs[attnum - 1]->attname))));
+                                       NameStr(tupDesc->attrs[attnum - 1].attname))));
             cstate->force_quote_flags[attnum - 1] = true;
         }
     }
@@ -1427,7 +1427,7 @@ static void DistBegin(CopyState cstate, bool isImport, Relation rel, Node *raw_q
             if (!list_member_int(cstate->attnumlist, attnum))
                 ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
                                 errmsg("FORCE NOT NULL column \"%s\" not referenced by COPY",
-                                       NameStr(tupDesc->attrs[attnum - 1]->attname))));
+                                       NameStr(tupDesc->attrs[attnum - 1].attname))));
             cstate->force_notnull_flags[attnum - 1] = true;
         }
     }
@@ -1439,14 +1439,14 @@ static void DistBegin(CopyState cstate, bool isImport, Relation rel, Node *raw_q
         /* find last valid column */
         int i = num_phys_attrs - 1;
         for (; i >= 0; i--) {
-            if (!tupDesc->attrs[i]->attisdropped)
+            if (!tupDesc->attrs[i].attisdropped)
                 break;
         }
 
         if (cstate->force_notnull_flags[i])
             ereport(ERROR,
                     (errcode(ERRCODE_SYNTAX_ERROR), errmsg("fill_missing_fields can't be set while \"%s\" is NOT NULL",
-                                                           NameStr(tupDesc->attrs[i]->attname))));
+                                                           NameStr(tupDesc->attrs[i].attname))));
     }
 
     /* Use client encoding when ENCODING option is not specified. */
@@ -1473,7 +1473,7 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
                     List *options, List *totalTask)
 {
     TupleDesc tupDesc;
-    Form_pg_attribute *attr = NULL;
+    FormData_pg_attribute *attr = NULL;
     AttrNumber num_phys_attrs, num_defaults;
     FmgrInfo *in_functions = NULL;
     Oid *typioparams = NULL;
@@ -1540,15 +1540,15 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
 
     for (attnum = 1; attnum <= num_phys_attrs; attnum++) {
         /* We don't need info for dropped attributes */
-        if (attr[attnum - 1]->attisdropped)
+        if (attr[attnum - 1].attisdropped)
             continue;
 
-        accept_empty_str[attnum - 1] = IsTypeAcceptEmptyStr(attr[attnum - 1]->atttypid);
+        accept_empty_str[attnum - 1] = IsTypeAcceptEmptyStr(attr[attnum - 1].atttypid);
         /* Fetch the input function and typioparam info */
         if (IS_BINARY(importstate))
-            getTypeBinaryInputInfo(attr[attnum - 1]->atttypid, &in_func_oid, &typioparams[attnum - 1]);
+            getTypeBinaryInputInfo(attr[attnum - 1].atttypid, &in_func_oid, &typioparams[attnum - 1]);
         else
-            getTypeInputInfo(attr[attnum - 1]->atttypid, &in_func_oid, &typioparams[attnum - 1]);
+            getTypeInputInfo(attr[attnum - 1].atttypid, &in_func_oid, &typioparams[attnum - 1]);
         fmgr_info(in_func_oid, &in_functions[attnum - 1]);
 
         /* Get default info if needed */
@@ -1579,9 +1579,9 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
                          * values into output form before appending to data row.
                          */
                         if (IS_BINARY(importstate))
-                            getTypeBinaryOutputInfo(attr[attnum - 1]->atttypid, &out_func_oid, &isvarlena);
+                            getTypeBinaryOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
                         else
-                            getTypeOutputInfo(attr[attnum - 1]->atttypid, &out_func_oid, &isvarlena);
+                            getTypeOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
                         fmgr_info(out_func_oid, &importstate->out_functions[attnum - 1]);
                     }
                 } else {

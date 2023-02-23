@@ -4351,7 +4351,7 @@ Datum pg_get_functiondef(PG_FUNCTION_ARGS)
     int headerlines = 0;
     errno_t rc = EOK;
 
-    tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "headerlines", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "definition", TEXTOID, -1, 0);
     (void)BlessTupleDesc(tupdesc);
@@ -6461,7 +6461,7 @@ static void get_target_list(Query* query, List* targetList, deparse_context* con
          * Otherwise, just use what we can find in the TLE.
          */
         if (resultDesc && colno <= resultDesc->natts)
-            colname = NameStr(resultDesc->attrs[colno - 1]->attname);
+            colname = NameStr(resultDesc->attrs[colno - 1].attname);
         else
             colname = tle->resname;
 
@@ -8563,7 +8563,7 @@ static const char* get_name_for_var_field(Var* var, int fieldno, int levelsup, d
         Assert(tupleDesc);
         /* Got the tupdesc, so we can extract the field name */
         Assert(fieldno >= 1 && fieldno <= tupleDesc->natts);
-        return NameStr(tupleDesc->attrs[fieldno - 1]->attname);
+        return NameStr(tupleDesc->attrs[fieldno - 1].attname);
     }
 
     /* Find appropriate nesting depth */
@@ -8865,7 +8865,7 @@ static const char* get_name_for_var_field(Var* var, int fieldno, int levelsup, d
     Assert(tupleDesc);
     /* Got the tupdesc, so we can extract the field name */
     Assert(fieldno >= 1 && fieldno <= tupleDesc->natts);
-    return NameStr(tupleDesc->attrs[fieldno - 1]->attname);
+    return NameStr(tupleDesc->attrs[fieldno - 1].attname);
 }
 
 /*
@@ -9878,7 +9878,7 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             foreach (arg, rowexpr->args) {
                 Node* e = (Node*)lfirst(arg);
 
-                if (tupdesc == NULL || !tupdesc->attrs[i]->attisdropped) {
+                if (tupdesc == NULL || !tupdesc->attrs[i].attisdropped) {
                     appendStringInfoString(buf, sep);
                     get_rule_expr(e, context, true, no_alias);
                     sep = ", ";
@@ -9887,7 +9887,7 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             }
             if (tupdesc != NULL) {
                 while (i < tupdesc->natts) {
-                    if (!tupdesc->attrs[i]->attisdropped) {
+                    if (!tupdesc->attrs[i].attisdropped) {
                         appendStringInfoString(buf, sep);
                         appendStringInfo(buf, "NULL");
                         sep = ", ";

@@ -423,7 +423,7 @@ static bool tuple_equals_slot(TupleDesc desc, const Tuple tup, TupleTableSlot *s
         if (isnull[attrnum])
             continue;
 
-        att = desc->attrs[attrnum];
+        att = &desc->attrs[attrnum];
         typentry = eq[attrnum];
         if (typentry == NULL) {
             typentry = lookup_type_cache(att->atttypid, TYPECACHE_EQ_OPR_FINFO);

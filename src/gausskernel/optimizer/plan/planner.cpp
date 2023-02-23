@@ -13029,8 +13029,8 @@ uint64 adjust_plsize(Oid relid, uint64 plan_width, uint64 pl_size, uint64* width
     TupleDesc desc = rel->rd_att;
 
     for (int i = 0; i < desc->natts; i++) {
-        Oid typoid = desc->attrs[i]->atttypid;
-        int32 typmod = desc->attrs[i]->atttypmod;
+        Oid typoid = desc->attrs[i].atttypid;
+        int32 typmod = desc->attrs[i].atttypmod;
         rel_width += get_typavgwidth(typoid, typmod);
     }
 
@@ -13741,7 +13741,7 @@ static void save_implicit_cast_var(Node* node, void* context)
     new_node->indexcol = false;
 
     new_node->relname = pstrdup(rtable->relname);
-    new_node->attname = pstrdup(rel->rd_att->attrs[var->varattno - 1]->attname.data);
+    new_node->attname = pstrdup(rel->rd_att->attrs[var->varattno - 1].attname.data);
 
     heap_close(rel, AccessShareLock);
 

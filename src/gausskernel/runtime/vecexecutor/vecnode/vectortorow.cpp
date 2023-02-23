@@ -258,7 +258,7 @@ VecToRowState* ExecInitVecToRow(VecToRow* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &state->ps,
-            ExecGetResultType(outerPlanState(state))->tdTableAmType);
+            ExecGetResultType(outerPlanState(state))->td_tam_ops);
 
     state->ps.ps_ProjInfo = NULL;
     state->m_currentRow = 0;
@@ -267,11 +267,11 @@ VecToRowState* ExecInitVecToRow(VecToRow* node, EState* estate, int eflags)
     state->tts = state->ps.ps_ResultTupleSlot;
     (void)ExecClearTuple(state->tts);
     state->tts->tts_nvalid = state->nattrs;
-    state->tts->tts_isempty = false;
+    state->tts->tts_flags &= ~TTS_FLAG_EMPTY;
     state->devectorizeFunRuntime = (DevectorizeFun*)palloc0(state->nattrs * sizeof(DevectorizeFun));
     for (int i = 0; i < state->nattrs; i++) {
         state->tts->tts_isnull[i] = false;
-        int type_id = state->tts->tts_tupleDescriptor->attrs[i]->atttypid;
+        int type_id = state->tts->tts_tupleDescriptor->attrs[i].atttypid;
         if (COL_IS_ENCODE(type_id)) {
             switch (type_id) {
                 case BPCHAROID:

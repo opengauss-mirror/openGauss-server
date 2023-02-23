@@ -1917,13 +1917,13 @@ static char* get_sql_insert(Relation rel, int* pkattnums, int pknumatts, char** 
 
     needComma = false;
     for (i = 0; i < natts; i++) {
-        if (tupdesc->attrs[i]->attisdropped)
+        if (tupdesc->attrs[i].attisdropped)
             continue;
 
         if (needComma)
             appendStringInfo(&buf, ",");
 
-        appendStringInfoString(&buf, quote_ident_cstr(NameStr(tupdesc->attrs[i]->attname)));
+        appendStringInfoString(&buf, quote_ident_cstr(NameStr(tupdesc->attrs[i].attname)));
         needComma = true;
     }
 
@@ -1934,7 +1934,7 @@ static char* get_sql_insert(Relation rel, int* pkattnums, int pknumatts, char** 
      */
     needComma = false;
     for (i = 0; i < natts; i++) {
-        if (tupdesc->attrs[i]->attisdropped)
+        if (tupdesc->attrs[i].attisdropped)
             continue;
 
         if (needComma)
@@ -1980,7 +1980,7 @@ static char* get_sql_delete(Relation rel, int* pkattnums, int pknumatts, char** 
         if (i > 0)
             appendStringInfo(&buf, " AND ");
 
-        appendStringInfoString(&buf, quote_ident_cstr(NameStr(tupdesc->attrs[pkattnum]->attname)));
+        appendStringInfoString(&buf, quote_ident_cstr(NameStr(tupdesc->attrs[pkattnum].attname)));
 
         if (tgt_pkattvals[i] != NULL)
             appendStringInfo(&buf, " = %s", quote_literal_cstr(tgt_pkattvals[i]));
@@ -2022,13 +2022,13 @@ static char* get_sql_update(Relation rel, int* pkattnums, int pknumatts, char** 
      */
     needComma = false;
     for (i = 0; i < natts; i++) {
-        if (tupdesc->attrs[i]->attisdropped)
+        if (tupdesc->attrs[i].attisdropped)
             continue;
 
         if (needComma)
             appendStringInfo(&buf, ", ");
 
-        appendStringInfo(&buf, "%s = ", quote_ident_cstr(NameStr(tupdesc->attrs[i]->attname)));
+        appendStringInfo(&buf, "%s = ", quote_ident_cstr(NameStr(tupdesc->attrs[i].attname)));
 
         key = get_attnum_pk_pos(pkattnums, pknumatts, i);
 
@@ -2053,7 +2053,7 @@ static char* get_sql_update(Relation rel, int* pkattnums, int pknumatts, char** 
         if (i > 0)
             appendStringInfo(&buf, " AND ");
 
-        appendStringInfo(&buf, "%s", quote_ident_cstr(NameStr(tupdesc->attrs[pkattnum]->attname)));
+        appendStringInfo(&buf, "%s", quote_ident_cstr(NameStr(tupdesc->attrs[pkattnum].attname)));
 
         val = tgt_pkattvals[i];
 
@@ -2135,10 +2135,10 @@ static HeapTuple get_tuple_of_interest(Relation rel, int* pkattnums, int pknumat
         if (i > 0)
             appendStringInfoString(&buf, ", ");
 
-        if (tupdesc->attrs[i]->attisdropped)
+        if (tupdesc->attrs[i].attisdropped)
             appendStringInfoString(&buf, "NULL");
         else
-            appendStringInfoString(&buf, quote_ident_cstr(NameStr(tupdesc->attrs[i]->attname)));
+            appendStringInfoString(&buf, quote_ident_cstr(NameStr(tupdesc->attrs[i].attname)));
     }
 
     appendStringInfo(&buf, " FROM %s WHERE ", relname);
@@ -2149,7 +2149,7 @@ static HeapTuple get_tuple_of_interest(Relation rel, int* pkattnums, int pknumat
         if (i > 0)
             appendStringInfo(&buf, " AND ");
 
-        appendStringInfoString(&buf, quote_ident_cstr(NameStr(tupdesc->attrs[pkattnum]->attname)));
+        appendStringInfoString(&buf, quote_ident_cstr(NameStr(tupdesc->attrs[pkattnum].attname)));
 
         if (src_pkattvals[i] != NULL)
             appendStringInfo(&buf, " = %s", quote_literal_cstr(src_pkattvals[i]));
@@ -2523,7 +2523,7 @@ static void validate_pkattnums(
         lnum = 0;
         for (j = 0; j < natts; j++) {
             /* dropped columns don't count */
-            if (tupdesc->attrs[j]->attisdropped)
+            if (tupdesc->attrs[j].attisdropped)
                 continue;
 
             if (++lnum == pkattnum)

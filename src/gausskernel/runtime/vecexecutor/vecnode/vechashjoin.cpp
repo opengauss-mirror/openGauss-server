@@ -121,7 +121,7 @@ VecHashJoinState* ExecInitVecHashJoin(VecHashJoin* node, EState* estate, int efl
      * result tupleSlot only contains virtual tuple, so the default
      * tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&hash_state->js.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&hash_state->js.ps);
 
     /*
      * Check if the following exprs can be codegened or not.

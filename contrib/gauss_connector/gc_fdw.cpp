@@ -702,7 +702,7 @@ static void gcBeginForeignScan(ForeignScanState* node, int eflags)
 
         for (int i = 0; i < list_length(fsstate->retrieved_attrs); i++) {
             int attidx = list_nth_int(fsstate->retrieved_attrs, i);
-            Form_pg_attribute attr = slot->tts_tupleDescriptor->attrs[attidx - 1];
+            Form_pg_attribute attr = &slot->tts_tupleDescriptor->attrs[attidx - 1];
             const char* attname = (const char*)(attr->attname.data);
             TupleDescInitEntry(scan_desc, i + 1, attname, attr->atttypid, attr->atttypmod, 0);
         }
@@ -747,8 +747,8 @@ static void gcBeginForeignScan(ForeignScanState* node, int eflags)
         fsstate->resultSlot->tts_isnull[i] = true;
     }
 
-    fsstate->resultSlot->tts_isempty = false;
-    fsstate->scanSlot->tts_isempty = false;
+    fsstate->resultSlot->tts_flags &= ~TTS_FLAG_EMPTY;
+    fsstate->scanSlot->tts_flags &= ~TTS_FLAG_EMPTY;
 
     fsstate->attinmeta = TupleDescGetAttInMetadata(fsstate->tupdesc);
 
@@ -864,7 +864,7 @@ static void postgresConstructResultSlotWithArray(ForeignScanState* node)
     for (scanAttr = 0, resultAttr = 0; resultAttr < resultDesc->natts; resultAttr++, scanAttr += map) {
         Assert(list_length(colmap) == resultDesc->natts);
 
-        Oid typoid = resultDesc->attrs[resultAttr]->atttypid;
+        Oid typoid = resultDesc->attrs[resultAttr].atttypid;
         Value* val = (Value*)list_nth(colmap, resultAttr);
         map = val->val.ival;
 
@@ -919,7 +919,7 @@ static void postgresConstructResultSlotWithArray(ForeignScanState* node)
     }
 
     resultSlot->tts_nvalid = resultDesc->natts;
-    resultSlot->tts_isempty = false;
+    resultSlot->tts_flags &= ~TTS_FLAG_EMPTY;
 }
 
 static void postgresMapResultFromScanSlot(ForeignScanState* node)
@@ -958,7 +958,7 @@ static TupleTableSlot* gcIterateNormalForeignScan(ForeignScanState* node)
 
     /* reset tupleslot on the begin */
     (void)ExecClearTuple(fsstate->resultSlot);
-    fsstate->resultSlot->tts_isempty = false;
+    fsstate->resultSlot->tts_flags &= ~TTS_FLAG_EMPTY;
 
     TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
 
@@ -1813,17 +1813,17 @@ static void gcfdw_fetch_remote_table_info(
     pq_sendint(&retbuf, tupdesc->natts, 4);
 
     for (int i = 0; i < tupdesc->natts; i++) {
-        att_name_len = strlen(tupdesc->attrs[i]->attname.data);
+        att_name_len = strlen(tupdesc->attrs[i].attname.data);
         pq_sendint(&retbuf, att_name_len, 4);
-        pq_sendbytes(&retbuf, tupdesc->attrs[i]->attname.data, att_name_len);
+        pq_sendbytes(&retbuf, tupdesc->attrs[i].attname.data, att_name_len);
 
-        Assert(InvalidOid != tupdesc->attrs[i]->atttypid);
+        Assert(InvalidOid != tupdesc->attrs[i].atttypid);
 
-        type_name = get_typename(tupdesc->attrs[i]->atttypid);
+        type_name = get_typename(tupdesc->attrs[i].atttypid);
         type_name_len = strlen(type_name);
         pq_sendint(&retbuf, type_name_len, 4);
         pq_sendbytes(&retbuf, type_name, type_name_len);
-        pq_sendint(&retbuf, tupdesc->attrs[i]->atttypmod, 4);
+        pq_sendint(&retbuf, tupdesc->attrs[i].atttypmod, 4);
         pfree(type_name);
     }
 
@@ -2368,7 +2368,7 @@ static void conversion_error_callback(void *arg)
         TupleDesc tupdesc = RelationGetDescr(errpos->rel);
 
         if (errpos->cur_attno > 0 && errpos->cur_attno <= tupdesc->natts) {
-            attname = NameStr(tupdesc->attrs[errpos->cur_attno - 1]->attname);
+            attname = NameStr(tupdesc->attrs[errpos->cur_attno - 1].attname);
         } else if (errpos->cur_attno == SelfItemPointerAttributeNumber) {
             attname = "ctid";
         } else if (errpos->cur_attno == ObjectIdAttributeNumber) {
@@ -2588,7 +2588,7 @@ static void GcFdwCopyRemoteInfo(PgFdwRemoteInfo* new_remote_info, PgFdwRemoteInf
 bool hasSpecialArrayType(TupleDesc desc)
 {
     for (int i = 0; i < desc->natts; i++) {
-        Oid typoid = desc->attrs[i]->atttypid;
+        Oid typoid = desc->attrs[i].atttypid;
 
         if (INT8ARRAYOID == typoid || FLOAT8ARRAYOID == typoid || FLOAT4ARRAYOID == typoid || NUMERICARRAY == typoid) {
             return true;

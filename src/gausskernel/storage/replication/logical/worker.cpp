@@ -201,7 +201,7 @@ static EState *create_estate_for_relation(LogicalRepRelMapEntry *rel)
 
     /* Triggers might need a slot */
     if (resultRelInfo->ri_TrigDesc)
-        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_ops);
 
     /* Prepare to catch AFTER triggers. */
     AfterTriggerBeginQuery();
@@ -238,7 +238,7 @@ static void slot_fill_defaults(LogicalRepRelMapEntry *rel, EState *estate, Tuple
     for (attnum = 0; attnum < num_phys_attrs; attnum++) {
         Expr *defexpr;
 
-        if (desc->attrs[attnum]->attisdropped || GetGeneratedCol(desc, attnum))
+        if (desc->attrs[attnum].attisdropped || GetGeneratedCol(desc, attnum))
             continue;
 
         if (rel->attrmap[attnum] >= 0)
@@ -304,7 +304,7 @@ static void slot_store_data(TupleTableSlot *slot, LogicalRepRelMapEntry *rel, Lo
 
     /* Call the "in" function for each non-dropped, non-null attribute */
     for (i = 0; i < natts; i++) {
-        Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
+        Form_pg_attribute att = &slot->tts_tupleDescriptor->attrs[i];
         int remoteattnum = rel->attrmap[i];
 
         if (!att->attisdropped && remoteattnum >= 0) {
@@ -411,7 +411,7 @@ static void slot_modify_data(TupleTableSlot *slot, TupleTableSlot *srcslot, Logi
 
     /* Call the "in" function for each replaced attribute */
     for (i = 0; i < natts; i++) {
-        Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
+        Form_pg_attribute att = &slot->tts_tupleDescriptor->attrs[i];
         int remoteattnum = rel->attrmap[i];
 
         if (remoteattnum < 0) {
@@ -598,7 +598,7 @@ static void apply_handle_insert(StringInfo s)
 
     /* Initialize the executor state. */
     estate = create_estate_for_relation(rel);
-    remoteslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    remoteslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_ops);
     ExecSetSlotDescriptor(remoteslot, RelationGetDescr(rel->localrel));
 
     /* Input functions may need an active snapshot, so get one */
@@ -724,9 +724,9 @@ static void apply_handle_update(StringInfo s)
 
     /* Initialize the executor state. */
     estate = create_estate_for_relation(rel);
-    remoteslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    remoteslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_ops);
     ExecSetSlotDescriptor(remoteslot, RelationGetDescr(rel->localrel));
-    localslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    localslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_ops);
     ExecSetSlotDescriptor(localslot, RelationGetDescr(rel->localrel));
     EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1);
 
@@ -842,9 +842,9 @@ static void apply_handle_delete(StringInfo s)
 
     /* Initialize the executor state. */
     estate = create_estate_for_relation(rel);
-    remoteslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    remoteslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_ops);
     ExecSetSlotDescriptor(remoteslot, RelationGetDescr(rel->localrel));
-    localslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_type);
+    localslot = ExecInitExtraTupleSlot(estate, rel->localrel->rd_tam_ops);
     ExecSetSlotDescriptor(localslot, RelationGetDescr(rel->localrel));
     EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1);
 

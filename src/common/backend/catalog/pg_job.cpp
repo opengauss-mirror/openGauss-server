@@ -890,8 +890,8 @@ static void get_interval_nextdate_by_spi(int4 job_id, bool ischeck, const char* 
 
     /* The result should be timestamp type or interval type. */
     if (!(SPI_tuptable && SPI_tuptable->tupdesc &&
-            (SPI_tuptable->tupdesc->attrs[0]->atttypid == TIMESTAMPOID ||
-                SPI_tuptable->tupdesc->attrs[0]->atttypid == INTERVALOID))) {
+            (SPI_tuptable->tupdesc->attrs[0].atttypid == TIMESTAMPOID ||
+                SPI_tuptable->tupdesc->attrs[0].atttypid == INTERVALOID))) {
         ereport(ERROR,
             (errcode(ERRCODE_SPI_ERROR), errmsg("Execute job interval for get next_date error, job_id: %d.", job_id)));
     }
@@ -899,12 +899,12 @@ static void get_interval_nextdate_by_spi(int4 job_id, bool ischeck, const char* 
     /* We don't need get value if only check the interval is valid. */
     if (!ischeck) {
         /* If INTERVALOID, start_date+INTERVALOID=next_date */
-        if (INTERVALOID == SPI_tuptable->tupdesc->attrs[0]->atttypid) {
+        if (INTERVALOID == SPI_tuptable->tupdesc->attrs[0].atttypid) {
             Datum new_interval = heap_getattr(SPI_tuptable->vals[0], 1, SPI_tuptable->tupdesc, &isnull);
 
             MemoryContext oldcontext = MemoryContextSwitchTo(current_context);
             new_interval = datumCopy(
-                new_interval, SPI_tuptable->tupdesc->attrs[0]->attbyval, SPI_tuptable->tupdesc->attrs[0]->attlen);
+                new_interval, SPI_tuptable->tupdesc->attrs[0].attbyval, SPI_tuptable->tupdesc->attrs[0].attlen);
             *new_next_date = DirectFunctionCall2(timestamp_pl_interval, start_date, new_interval);
             (void)MemoryContextSwitchTo(oldcontext);
         } else {
@@ -912,7 +912,7 @@ static void get_interval_nextdate_by_spi(int4 job_id, bool ischeck, const char* 
         }
     } else {
         /* The interval should greater than current time if it is timestamp. */
-        if (TIMESTAMPOID == SPI_tuptable->tupdesc->attrs[0]->atttypid) {
+        if (TIMESTAMPOID == SPI_tuptable->tupdesc->attrs[0].atttypid) {
             Datum check_next_date;
 
             check_next_date = heap_getattr(SPI_tuptable->vals[0], 1, SPI_tuptable->tupdesc, &isnull);

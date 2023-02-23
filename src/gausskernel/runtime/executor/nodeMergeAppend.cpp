@@ -121,7 +121,7 @@ MergeAppendState* ExecInitMergeAppend(MergeAppend* node, EState* estate, int efl
      * src/gausskernel/runtime/executor/nodeMergeAppend.cpp
      * set to default value HEAP
      */
-    ExecAssignResultTypeFromTL(&merge_state->ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&merge_state->ps);
     merge_state->ps.ps_ProjInfo = NULL;
 
     /*

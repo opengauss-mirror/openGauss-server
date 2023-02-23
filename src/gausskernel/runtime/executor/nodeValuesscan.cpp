@@ -241,7 +241,7 @@ ValuesScanState* ExecInitValuesScan(ValuesScan* node, EState* estate, int eflags
      * get info about values list
      * value lists scan, no relation is  involved, default tableAm type is set to HEAP.
      */
-    tupdesc = ExecTypeFromExprList((List*)linitial(node->values_lists), rte->eref->colnames, TAM_HEAP);
+    tupdesc = ExecTypeFromExprList((List*)linitial(node->values_lists), rte->eref->colnames);
 
     ExecAssignScanType(&scan_state->ss, tupdesc);
 
@@ -265,7 +265,7 @@ ValuesScanState* ExecInitValuesScan(ValuesScan* node, EState* estate, int eflags
      * Initialize result tuple type and projection info.
      * value lists result tuple is set to default tableAm type HEAP.
      */
-    ExecAssignResultTypeFromTL(&scan_state->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&scan_state->ss.ps);
 
     ExecAssignScanProjectionInfo(&scan_state->ss);
 

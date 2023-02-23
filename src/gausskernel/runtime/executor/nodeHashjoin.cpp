@@ -631,7 +631,7 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
      * result tupleSlot only contains virtual tuple, so the default
      * tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&hjstate->js.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&hjstate->js.ps);
     ExecAssignProjectionInfo(&hjstate->js.ps, NULL);
 
     ExecSetSlotDescriptor(hjstate->hj_OuterTupleSlot, ExecGetResultType(outerPlanState(hjstate)));

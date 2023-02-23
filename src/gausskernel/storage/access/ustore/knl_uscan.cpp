@@ -738,7 +738,7 @@ static void UHeapinitscan(TableScanDesc sscan, ScanKey key, bool isRescan)
     scan->rs_base.rs_cbuf = InvalidBuffer;
     scan->rs_base.rs_cblock = InvalidBlockNumber;
 
-    if (scan->rs_base.rs_rd->rd_tam_type == TAM_USTORE) {
+    if (scan->rs_base.rs_rd->rd_tam_ops == TableAmUstore) {
         scan->rs_base.lastVar = -1;
         scan->rs_base.boolArr = NULL;
     }

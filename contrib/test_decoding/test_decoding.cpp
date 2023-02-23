@@ -224,7 +224,7 @@ static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
         Datum origval;      /* possibly toasted Datum */
         bool isnull = true; /* column is null? */
 
-        attr = tupdesc->attrs[natt];
+        attr = &tupdesc->attrs[natt];
 
         /*
          * don't print dropped columns, we can't be sure everything is

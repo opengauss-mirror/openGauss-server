@@ -41,7 +41,7 @@ UHeapTuple UpdateFusion::uheapModifyTuple(UHeapTuple tuple, Relation rel)
      * create a new tuple from the values and isnull arrays
      */
     newTuple = (UHeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values,
-        m_local.m_isnull, UHEAP_TUPLE);
+        m_local.m_isnull, TableAmUstore);
 
     /*
      * copy the identification info of the old tuple: t_ctid, t_self, and OID
@@ -68,7 +68,7 @@ HeapTuple UpdateFusion::heapModifyTuple(HeapTuple tuple)
     /*
      * create a new tuple from the values and isnull arrays
      */
-    new_tuple = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values, m_local.m_isnull, HEAP_TUPLE);
+    new_tuple = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values, m_local.m_isnull);
 
     /*
      * copy the identification info of the old tuple: t_ctid, t_self, and OID
@@ -122,6 +122,7 @@ void UpdateFusion::InitGlobals()
     m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
     m_global->m_natts = RelationGetDescr(rel)->natts;
     m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
+    m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
     hash_col_num = rel->rd_isblockchain ? 1 : 0;
     heap_close(rel, AccessShareLock);
 
@@ -209,7 +210,7 @@ void UpdateFusion::InitLocals(ParamListInfo params)
 
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
     if (m_global->m_table_type == TAM_USTORE) {
-        m_local.m_reslot->tts_tupslotTableAm = TAM_USTORE;
+        m_local.m_reslot->tts_tam_ops = TableAmUstore;
     }
     m_local.m_values = (Datum*)palloc0(m_global->m_natts * sizeof(Datum));
     m_local.m_isnull = (bool*)palloc0(m_global->m_natts * sizeof(bool));

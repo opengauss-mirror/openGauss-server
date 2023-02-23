@@ -1013,7 +1013,7 @@ static Node* coerce_record_to_complex(
         Oid exprtype;
 
         /* Fill in NULLs for dropped columns in rowtype */
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i].attisdropped) {
             /*
              * can't use atttypid here, but it doesn't really matter what type
              * the Const claims to be.
@@ -1034,8 +1034,8 @@ static Node* coerce_record_to_complex(
         cexpr = coerce_to_target_type(pstate,
             expr,
             exprtype,
-            tupdesc->attrs[i]->atttypid,
-            tupdesc->attrs[i]->atttypmod,
+            tupdesc->attrs[i].atttypid,
+            tupdesc->attrs[i].atttypmod,
             ccontext,
             COERCE_IMPLICIT_CAST,
             -1);
@@ -1045,7 +1045,7 @@ static Node* coerce_record_to_complex(
                     errmsg("cannot cast type %s to %s", format_type_be(RECORDOID), format_type_be(targetTypeId)),
                     errdetail("Cannot cast type %s to %s in column %d.",
                         format_type_be(exprtype),
-                        format_type_be(tupdesc->attrs[i]->atttypid),
+                        format_type_be(tupdesc->attrs[i].atttypid),
                         ucolno),
                     parser_coercion_errposition(pstate, location, expr)));
         }

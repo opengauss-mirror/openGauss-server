@@ -666,7 +666,7 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
                     errmodule(MOD_EXECUTOR),
                     errmsg("attribute number %d exceeds number of columns %d", attnum, slot_tupdesc->natts)));
 
-        attr = slot_tupdesc->attrs[attnum - 1];
+        attr = &slot_tupdesc->attrs[attnum - 1];
 
         /* can't check type if dropped, since atttypid is probably 0 */
         if (!attr->attisdropped) {
@@ -814,7 +814,8 @@ static Datum ExecEvalWholeRowVar(
                 oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
                 wrvstate->wrv_junkFilter = ExecInitJunkFilter(subplan->plan->targetlist,
                     ExecGetResultType(subplan)->tdhasoid,
-                    ExecInitExtraTupleSlot(wrvstate->parent->state));
+                    ExecInitExtraTupleSlot(wrvstate->parent->state),
+                    TableAmHeap);
                 MemoryContextSwitchTo(oldcontext);
             }
         }
@@ -860,8 +861,8 @@ static Datum ExecEvalWholeRowVar(
                         var_tupdesc->natts)));
 
         for (i = 0; i < var_tupdesc->natts; i++) {
-            Form_pg_attribute vattr = var_tupdesc->attrs[i];
-            Form_pg_attribute sattr = slot_tupdesc->attrs[i];
+            Form_pg_attribute vattr = &var_tupdesc->attrs[i];
+            Form_pg_attribute sattr = &slot_tupdesc->attrs[i];
 
             if (vattr->atttypid == sattr->atttypid)
                 continue; /* no worries */
@@ -1034,8 +1035,8 @@ static Datum ExecEvalWholeRowSlow(
 
     /* Check to see if any dropped attributes are non-null */
     for (i = 0; i < var_tupdesc->natts; i++) {
-        Form_pg_attribute vattr = var_tupdesc->attrs[i];
-        Form_pg_attribute sattr = tupleDesc->attrs[i];
+        Form_pg_attribute vattr = &var_tupdesc->attrs[i];
+        Form_pg_attribute sattr = &tupleDesc->attrs[i];
 
         if (!vattr->attisdropped)
             continue; /* already checked non-dropped cols */
@@ -1405,8 +1406,8 @@ Datum GetAttributeByName(HeapTupleHeader tuple, const char* attname, bool* isNul
 
     attrno = InvalidAttrNumber;
     for (i = 0; i < tupDesc->natts; i++) {
-        if (namestrcmp(&(tupDesc->attrs[i]->attname), attname) == 0) {
-            attrno = tupDesc->attrs[i]->attnum;
+        if (namestrcmp(&(tupDesc->attrs[i].attname), attname) == 0) {
+            attrno = tupDesc->attrs[i].attnum;
             break;
         }
     }
@@ -1667,7 +1668,7 @@ static void init_fcache(
                 fcache->funcReturnsTuple = true;
             } else if (functypclass == TYPEFUNC_SCALAR) {
                 /* Base data type, i.e. scalar */
-                tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+                tupdesc = CreateTemplateTupleDesc(1, false, TableAmHeap);
                 TupleDescInitEntry(tupdesc, (AttrNumber)1, NULL, funcrettype, -1, 0);
                 fcache->funcResultDesc = tupdesc;
                 fcache->funcReturnsTuple = false;
@@ -1923,8 +1924,8 @@ static void tupledesc_match(TupleDesc dst_tupdesc, TupleDesc src_tupdesc)
                     dst_tupdesc->natts)));
 
     for (i = 0; i < dst_tupdesc->natts; i++) {
-        Form_pg_attribute dattr = dst_tupdesc->attrs[i];
-        Form_pg_attribute sattr = src_tupdesc->attrs[i];
+        Form_pg_attribute dattr = &dst_tupdesc->attrs[i];
+        Form_pg_attribute sattr = &src_tupdesc->attrs[i];
 
         if (IsBinaryCoercible(sattr->atttypid, dattr->atttypid))
             continue; /* no worries */
@@ -3021,7 +3022,7 @@ Tuplestorestate* ExecMakeTableFunctionResult(
                     /*
                      * Scalar type, so make a single-column descriptor
                      */
-                    tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+                    tupdesc = CreateTemplateTupleDesc(1, false, TableAmHeap);
                     TupleDescInitEntry(tupdesc, (AttrNumber)1, "column", funcrettype, -1, 0);
                 }
                 tupstore = tuplestore_begin_heap(randomAccess, false, u_sess->attr.attr_memory.work_mem);
@@ -4147,7 +4148,7 @@ static Datum ExecEvalRow(RowExprState* rstate, ExprContext* econtext, bool* isNu
         i++;
     }
 
-    tuple = (HeapTuple)tableam_tops_form_tuple(rstate->tupdesc, values, isnull, HEAP_TUPLE);
+    tuple = (HeapTuple)tableam_tops_form_tuple(rstate->tupdesc, values, isnull);
 
     pfree_ext(values);
     pfree_ext(isnull);
@@ -4551,7 +4552,7 @@ static Datum CheckRowTypeIsNull(TupleDesc tupDesc, HeapTupleData tmptup, NullTes
 
     for (att = 1; att <= tupDesc->natts; att++) {
         /* ignore dropped columns */
-        if (tupDesc->attrs[att - 1]->attisdropped)
+        if (tupDesc->attrs[att - 1].attisdropped)
             continue;
         if (tableam_tops_tuple_attisnull(&tmptup, att, tupDesc)) {
             /* null field disproves IS NOT NULL */
@@ -4573,7 +4574,7 @@ static Datum CheckRowTypeIsNullForAFormat(TupleDesc tupDesc, HeapTupleData tmptu
 
     for (att = 1; att <= tupDesc->natts; att++) {
         /* ignore dropped columns */
-        if (tupDesc->attrs[att - 1]->attisdropped)
+        if (tupDesc->attrs[att - 1].attisdropped)
             continue;
         if (!tableam_tops_tuple_attisnull(&tmptup, att, tupDesc)) {
             /* non-null field disproves IS NULL */
@@ -4961,7 +4962,7 @@ static Datum ExecEvalFieldSelect(FieldSelectState* fstate, ExprContext* econtext
             (errcode(ERRCODE_INVALID_ATTRIBUTE),
                 errmodule(MOD_EXECUTOR),
                 errmsg("attribute number %d exceeds number of columns %d", fieldnum, tupDesc->natts)));
-    attr = tupDesc->attrs[fieldnum - 1];
+    attr = &tupDesc->attrs[fieldnum - 1];
 
     /* Check for dropped column, and force a NULL result if so */
     if (attr->attisdropped) {
@@ -5076,7 +5077,7 @@ static Datum ExecEvalFieldStore(FieldStoreState* fstate, ExprContext* econtext, 
     econtext->caseValue_datum = save_datum;
     econtext->caseValue_isNull = save_isNull;
 
-    tuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, values, isnull, HEAP_TUPLE);
+    tuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, values, isnull);
 
     pfree_ext(values);
     pfree_ext(isnull);
@@ -5676,7 +5677,7 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
         case T_RowExpr: {
             RowExpr* rowexpr = (RowExpr*)node;
             RowExprState* rstate = makeNode(RowExprState);
-            Form_pg_attribute* attrs = NULL;
+            FormData_pg_attribute* attrs = NULL;
             List* outlist = NIL;
             ListCell* l = NULL;
             int i;
@@ -5685,7 +5686,7 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
             /* Build tupdesc to describe result tuples */
             if (rowexpr->row_typeid == RECORDOID) {
                 /* generic record, use runtime type assignment */
-                rstate->tupdesc = ExecTypeFromExprList(rowexpr->args, rowexpr->colnames, TAM_HEAP);
+                rstate->tupdesc = ExecTypeFromExprList(rowexpr->args, rowexpr->colnames);
                 BlessTupleDesc(rstate->tupdesc);
                 /* we won't need to redo this at runtime */
             } else {
@@ -5700,19 +5701,19 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
                 Expr* e = (Expr*)lfirst(l);
                 ExprState* estate = NULL;
 
-                if (!attrs[i]->attisdropped) {
+                if (!attrs[i].attisdropped) {
                     /*
                      * Guard against ALTER COLUMN TYPE on rowtype since
                      * the RowExpr was created.  XXX should we check
                      * typmod too?	Not sure we can be sure it'll be the
                      * same.
                      */
-                    if (exprType((Node*)e) != attrs[i]->atttypid)
+                    if (exprType((Node*)e) != attrs[i].atttypid)
                         ereport(ERROR,
                             (errcode(ERRCODE_DATATYPE_MISMATCH),
                                 errmsg("ROW() column has type %s instead of type %s",
                                     format_type_be(exprType((Node*)e)),
-                                    format_type_be(attrs[i]->atttypid))));
+                                    format_type_be(attrs[i].atttypid))));
                 } else {
                     /*
                      * Ignore original expression and insert a NULL. We

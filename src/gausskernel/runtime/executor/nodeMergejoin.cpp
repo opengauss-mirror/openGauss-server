@@ -1529,7 +1529,7 @@ MergeJoinState* ExecInitMergeJoin(MergeJoin* node, EState* estate, int eflags)
      * result table tuple slot for merge join contains virtual tuple, so the
      * default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&merge_state->js.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&merge_state->js.ps, TableAmHeap);
     ExecAssignProjectionInfo(&merge_state->js.ps, NULL);
     /*
      * preprocess the merge clauses

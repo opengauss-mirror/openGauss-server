@@ -131,11 +131,11 @@ Datum record_in(PG_FUNCTION_ARGS)
 
     for (i = 0; i < ncolumns; i++) {
         ColumnIOData* column_info = &my_extra->columns[i];
-        Oid column_type = tupdesc->attrs[i]->atttypid;
+        Oid column_type = tupdesc->attrs[i].atttypid;
         char* column_data = NULL;
 
         /* Ignore dropped columns in datatype, but fill with nulls */
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i].attisdropped) {
             values[i] = (Datum)0;
             nulls[i] = true;
             continue;
@@ -208,7 +208,7 @@ Datum record_in(PG_FUNCTION_ARGS)
         }
 
         values[i] =
-            InputFunctionCall(&column_info->proc, column_data, column_info->typioparam, tupdesc->attrs[i]->atttypmod);
+            InputFunctionCall(&column_info->proc, column_data, column_info->typioparam, tupdesc->attrs[i].atttypmod);
 
         /*
          * Prep for next column
@@ -263,11 +263,11 @@ static void ProcessStr(TupleDesc tupdesc, Datum* values, bool* nulls, char** ptr
     initStringInfo(&buf);
 
     for (i = 0; i < nColumns; i++) {
-        Oid columnType = tupdesc->attrs[i]->atttypid;
+        Oid columnType = tupdesc->attrs[i].atttypid;
         char* columnData = NULL;
     
         /* Ignore dropped columns in datatype, but fill with nulls */
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i].attisdropped) {
             values[i] = (Datum)0;
             nulls[i] = true;
             continue;
@@ -453,14 +453,14 @@ Datum record_out(PG_FUNCTION_ARGS)
 
     for (i = 0; i < ncolumns; i++) {
         ColumnIOData* column_info = &my_extra->columns[i];
-        Oid column_type = tupdesc->attrs[i]->atttypid;
+        Oid column_type = tupdesc->attrs[i].atttypid;
         Datum attr;
         char* value = NULL;
         char* tmp = NULL;
         bool nq = false;
 
         /* Ignore dropped columns in datatype */
-        if (tupdesc->attrs[i]->attisdropped)
+        if (tupdesc->attrs[i].attisdropped)
             continue;
 
         if (needComma)
@@ -595,7 +595,7 @@ Datum record_recv(PG_FUNCTION_ARGS)
     /* Need to scan to count nondeleted columns */
     validcols = 0;
     for (i = 0; i < ncolumns; i++) {
-        if (!tupdesc->attrs[i]->attisdropped)
+        if (!tupdesc->attrs[i].attisdropped)
             validcols++;
     }
     if (usercols != validcols)
@@ -606,7 +606,7 @@ Datum record_recv(PG_FUNCTION_ARGS)
     /* Process each column */
     for (i = 0; i < ncolumns; i++) {
         ColumnIOData* column_info = &my_extra->columns[i];
-        Oid column_type = tupdesc->attrs[i]->atttypid;
+        Oid column_type = tupdesc->attrs[i].atttypid;
         Oid coltypoid;
         int itemlen;
         StringInfoData item_buf;
@@ -614,7 +614,7 @@ Datum record_recv(PG_FUNCTION_ARGS)
         char csave;
 
         /* Ignore dropped columns in datatype, but fill with nulls */
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i].attisdropped) {
             values[i] = (Datum)0;
             nulls[i] = true;
             continue;
@@ -667,7 +667,7 @@ Datum record_recv(PG_FUNCTION_ARGS)
         }
 
         values[i] =
-            ReceiveFunctionCall(&column_info->proc, bufptr, column_info->typioparam, tupdesc->attrs[i]->atttypmod);
+            ReceiveFunctionCall(&column_info->proc, bufptr, column_info->typioparam, tupdesc->attrs[i].atttypmod);
 
         if (bufptr) {
             /* Trouble if it didn't eat the whole buffer */
@@ -752,19 +752,19 @@ Datum record_send(PG_FUNCTION_ARGS)
     /* Need to scan to count nondeleted columns */
     validcols = 0;
     for (i = 0; i < ncolumns; i++) {
-        if (!tupdesc->attrs[i]->attisdropped)
+        if (!tupdesc->attrs[i].attisdropped)
             validcols++;
     }
     pq_sendint32(&buf, validcols);
 
     for (i = 0; i < ncolumns; i++) {
         ColumnIOData* column_info = &my_extra->columns[i];
-        Oid column_type = tupdesc->attrs[i]->atttypid;
+        Oid column_type = tupdesc->attrs[i].atttypid;
         Datum attr;
         bytea* outputbytes = NULL;
 
         /* Ignore dropped columns in datatype */
-        if (tupdesc->attrs[i]->attisdropped)
+        if (tupdesc->attrs[i].attisdropped)
             continue;
 
         pq_sendint32(&buf, column_type);
@@ -930,11 +930,11 @@ static int record_cmp(FunctionCallInfo fcinfo)
         /*
          * Skip dropped columns
          */
-        if (i1 < ncolumns1 && tupdesc1->attrs[i1]->attisdropped) {
+        if (i1 < ncolumns1 && tupdesc1->attrs[i1].attisdropped) {
             i1++;
             continue;
         }
-        if (i2 < ncolumns2 && tupdesc2->attrs[i2]->attisdropped) {
+        if (i2 < ncolumns2 && tupdesc2->attrs[i2].attisdropped) {
             i2++;
             continue;
         }
@@ -944,28 +944,28 @@ static int record_cmp(FunctionCallInfo fcinfo)
         /*
          * Have two matching columns, they must be same type
          */
-        if (tupdesc1->attrs[i1]->atttypid != tupdesc2->attrs[i2]->atttypid)
+        if (tupdesc1->attrs[i1].atttypid != tupdesc2->attrs[i2].atttypid)
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),
                     errmsg("cannot compare dissimilar column types %s and %s at record column %d",
-                        format_type_be(tupdesc1->attrs[i1]->atttypid),
-                        format_type_be(tupdesc2->attrs[i2]->atttypid),
+                        format_type_be(tupdesc1->attrs[i1].atttypid),
+                        format_type_be(tupdesc2->attrs[i2].atttypid),
                         j + 1)));
 
         /*
          * If they're not same collation, we don't complain here, but the
          * comparison function might.
          */
-        collation = tupdesc1->attrs[i1]->attcollation;
-        if (collation != tupdesc2->attrs[i2]->attcollation)
+        collation = tupdesc1->attrs[i1].attcollation;
+        if (collation != tupdesc2->attrs[i2].attcollation)
             collation = InvalidOid;
 
         /*
          * Lookup the comparison function if not done already
          */
         typentry = my_extra->columns[j].typentry;
-        if (typentry == NULL || typentry->type_id != tupdesc1->attrs[i1]->atttypid) {
-            typentry = lookup_type_cache(tupdesc1->attrs[i1]->atttypid, TYPECACHE_CMP_PROC_FINFO);
+        if (typentry == NULL || typentry->type_id != tupdesc1->attrs[i1].atttypid) {
+            typentry = lookup_type_cache(tupdesc1->attrs[i1].atttypid, TYPECACHE_CMP_PROC_FINFO);
             if (!OidIsValid(typentry->cmp_proc_finfo.fn_oid))
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_FUNCTION),
@@ -1154,11 +1154,11 @@ Datum record_eq(PG_FUNCTION_ARGS)
         /*
          * Skip dropped columns
          */
-        if (i1 < ncolumns1 && tupdesc1->attrs[i1]->attisdropped) {
+        if (i1 < ncolumns1 && tupdesc1->attrs[i1].attisdropped) {
             i1++;
             continue;
         }
-        if (i2 < ncolumns2 && tupdesc2->attrs[i2]->attisdropped) {
+        if (i2 < ncolumns2 && tupdesc2->attrs[i2].attisdropped) {
             i2++;
             continue;
         }
@@ -1168,28 +1168,28 @@ Datum record_eq(PG_FUNCTION_ARGS)
         /*
          * Have two matching columns, they must be same type
          */
-        if (tupdesc1->attrs[i1]->atttypid != tupdesc2->attrs[i2]->atttypid)
+        if (tupdesc1->attrs[i1].atttypid != tupdesc2->attrs[i2].atttypid)
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),
                     errmsg("cannot compare dissimilar column types %s and %s at record column %d",
-                        format_type_be(tupdesc1->attrs[i1]->atttypid),
-                        format_type_be(tupdesc2->attrs[i2]->atttypid),
+                        format_type_be(tupdesc1->attrs[i1].atttypid),
+                        format_type_be(tupdesc2->attrs[i2].atttypid),
                         j + 1)));
 
         /*
          * If they're not same collation, we don't complain here, but the
          * equality function might.
          */
-        collation = tupdesc1->attrs[i1]->attcollation;
-        if (collation != tupdesc2->attrs[i2]->attcollation)
+        collation = tupdesc1->attrs[i1].attcollation;
+        if (collation != tupdesc2->attrs[i2].attcollation)
             collation = InvalidOid;
 
         /*
          * Lookup the equality function if not done already
          */
         typentry = my_extra->columns[j].typentry;
-        if (typentry == NULL || typentry->type_id != tupdesc1->attrs[i1]->atttypid) {
-            typentry = lookup_type_cache(tupdesc1->attrs[i1]->atttypid, TYPECACHE_EQ_OPR_FINFO);
+        if (typentry == NULL || typentry->type_id != tupdesc1->attrs[i1].atttypid) {
+            typentry = lookup_type_cache(tupdesc1->attrs[i1].atttypid, TYPECACHE_EQ_OPR_FINFO);
             if (!OidIsValid(typentry->eq_opr_finfo.fn_oid))
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_FUNCTION),

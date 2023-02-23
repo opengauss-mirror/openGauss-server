@@ -549,7 +549,7 @@ void boot_openrel(char* relname)
             t_thrd.bootstrap_cxt.attrtypes[i] = AllocateAttribute();
         rc = memmove_s((char*)t_thrd.bootstrap_cxt.attrtypes[i],
             ATTRIBUTE_FIXED_PART_SIZE,
-            (char*)t_thrd.bootstrap_cxt.boot_reldesc->rd_att->attrs[i],
+            (char*)&t_thrd.bootstrap_cxt.boot_reldesc->rd_att->attrs[i],
             ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "\0", "\0");
 
@@ -740,8 +740,8 @@ void InsertOneTuple(Oid objectid)
     tupDesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr,
         RelationGetForm(t_thrd.bootstrap_cxt.boot_reldesc)->relhasoids,
         t_thrd.bootstrap_cxt.attrtypes,
-        t_thrd.bootstrap_cxt.boot_reldesc->rd_tam_type);
-    tuple = (HeapTuple) tableam_tops_form_tuple(tupDesc, values, Nulls, HEAP_TUPLE);
+        t_thrd.bootstrap_cxt.boot_reldesc->rd_tam_ops);
+    tuple = (HeapTuple) tableam_tops_form_tuple(tupDesc, values, Nulls);
     if (objectid != (Oid)0)
         HeapTupleSetOid(tuple, objectid);
     pfree(tupDesc); /* just free's tupDesc, not the attrtypes */
@@ -777,7 +777,7 @@ void InsertOneValue(char* value, int i)
 
     ereport(DEBUG4, (errmsg("inserting column %d value \"%s\"", i, value)));
 
-    typoid = t_thrd.bootstrap_cxt.boot_reldesc->rd_att->attrs[i]->atttypid;
+    typoid = t_thrd.bootstrap_cxt.boot_reldesc->rd_att->attrs[i].atttypid;
 
     boot_get_type_io_data(typoid, &typlen, &typbyval, &typalign, &typdelim, &typioparam, &typinput, &typoutput);
 

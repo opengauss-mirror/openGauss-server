@@ -1328,7 +1328,7 @@ static List *postgresPlanForeignModify(PlannerInfo *root, ModifyTable *plan, Ind
         int attnum;
 
         for (attnum = 1; attnum <= tupdesc->natts; attnum++) {
-            Form_pg_attribute attr = tupdesc->attrs[attnum - 1];
+            Form_pg_attribute attr = &tupdesc->attrs[attnum - 1];
 
             if (!attr->attisdropped) {
                 targetAttrs = lappend_int(targetAttrs, attnum);
@@ -1502,7 +1502,7 @@ static PgFdwModifyState *createForeignModify(EState *estate, RangeTblEntry *rte,
         /* Set up for remaining transmittable parameters */
         foreach (lc, fmstate->target_attrs) {
             int attnum = lfirst_int(lc);
-            Form_pg_attribute attr = tupdesc->attrs[attnum - 1];
+            Form_pg_attribute attr = &tupdesc->attrs[attnum - 1];
 
             Assert(!attr->attisdropped);
 
@@ -1539,7 +1539,7 @@ static TupleTableSlot *postgresExecForeignInsert(EState *estate, ResultRelInfo *
         initStringInfo(&sql);
         /* We transmit all columns that are defined in the foreign table. */
         for (int attnum = 1; attnum <= tupdesc->natts; attnum++) {
-            Form_pg_attribute attr = tupdesc->attrs[attnum - 1];
+            Form_pg_attribute attr = &tupdesc->attrs[attnum - 1];
 
             if (!attr->attisdropped) {
                 targetAttrs = lappend_int(targetAttrs, attnum);

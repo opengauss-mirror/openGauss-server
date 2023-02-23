@@ -195,7 +195,7 @@ VecGroupState* ExecInitVecGroup(VecGroup* node, EState* estate, int eflags)
      * Group node result tuple slot always holds virtual tuple, so
      * default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&grp_state->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&grp_state->ss.ps);
 
     grp_state->ss.ps.ps_ProjInfo = ExecBuildVecProjectionInfo(grp_state->ss.ps.targetlist,
         node->plan.qual,

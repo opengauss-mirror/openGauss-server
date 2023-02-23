@@ -1555,7 +1555,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
         if (junk_filter_needed) {
             JunkFilter *j = NULL;
 
-            j = ExecInitJunkFilter(planstate->plan->targetlist, tupType->tdhasoid, ExecInitExtraTupleSlot(estate), tupType->tdTableAmType);
+            j = ExecInitJunkFilter(planstate->plan->targetlist, tupType->tdhasoid, ExecInitExtraTupleSlot(estate), tupType->td_tam_ops);
             estate->es_junkFilter = j;
 
             /* Want to return the cleaned tuple type */
@@ -2531,7 +2531,7 @@ bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
         int attrChk;
 
         for (attrChk = 1; attrChk <= natts; attrChk++) {
-            if (tupdesc->attrs[attrChk - 1]->attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
+            if (tupdesc->attrs[attrChk - 1].attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
                  /* Skip auto_increment attribute not null check, ExecAutoIncrement will deal with it. */
                 if (skipAutoInc && constr->cons_autoinc && constr->cons_autoinc->attnum == attrChk) {
                     continue;
@@ -2551,7 +2551,7 @@ bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
                 bool can_ignore = estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore;
                 ereport(can_ignore ? WARNING : ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION),
                     errmsg("null value in column \"%s\" violates not-null constraint",
-                    NameStr(tupdesc->attrs[attrChk - 1]->attname)),
+                    NameStr(tupdesc->attrs[attrChk - 1].attname)),
                     val_desc ? errdetail("Failing row contains %s.", val_desc) : 0));
                 return false;
             }
@@ -2712,7 +2712,7 @@ char *ExecBuildSlotValueDescription(Oid reloid, TupleTableSlot *slot, TupleDesc 
         int vallen;
 
         /* ignore dropped columns */
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i].attisdropped) {
             continue;
         }
 
@@ -2723,8 +2723,8 @@ char *ExecBuildSlotValueDescription(Oid reloid, TupleTableSlot *slot, TupleDesc 
              * data for the column.  If not, omit this column from the error
              * message.
              */
-            aclresult = pg_attribute_aclcheck(reloid, tupdesc->attrs[i]->attnum, GetUserId(), ACL_SELECT);
-            if (bms_is_member(tupdesc->attrs[i]->attnum - FirstLowInvalidHeapAttributeNumber, modifiedCols) ||
+            aclresult = pg_attribute_aclcheck(reloid, tupdesc->attrs[i].attnum, GetUserId(), ACL_SELECT);
+            if (bms_is_member(tupdesc->attrs[i].attnum - FirstLowInvalidHeapAttributeNumber, modifiedCols) ||
                 aclresult == ACLCHECK_OK) {
                 column_perm = any_perm = true;
 
@@ -2734,7 +2734,7 @@ char *ExecBuildSlotValueDescription(Oid reloid, TupleTableSlot *slot, TupleDesc 
                     write_comma_collist = true;
                 }
 
-                appendStringInfoString(&collist, NameStr(tupdesc->attrs[i]->attname));
+                appendStringInfoString(&collist, NameStr(tupdesc->attrs[i].attname));
             }
         }
 
@@ -2745,7 +2745,7 @@ char *ExecBuildSlotValueDescription(Oid reloid, TupleTableSlot *slot, TupleDesc 
                 Oid foutoid;
                 bool typisvarlena = false;
 
-                getTypeOutputInfo(tupdesc->attrs[i]->atttypid, &foutoid, &typisvarlena);
+                getTypeOutputInfo(tupdesc->attrs[i].atttypid, &foutoid, &typisvarlena);
                 val = OidOutputFunctionCall(foutoid, slot->tts_values[i]);
             }
 
@@ -3315,7 +3315,7 @@ TupleTableSlot *EvalPlanQualUSlot(EPQState *epqstate, Relation relation, Index r
     if (*slot == NULL) {
         MemoryContext oldcontext = MemoryContextSwitchTo(epqstate->parentestate->es_query_cxt);
 
-        *slot = ExecAllocTableSlot(&epqstate->estate->es_tupleTable, TAM_USTORE);
+        *slot = ExecAllocTableSlot(&epqstate->estate->es_tupleTable, TableAmUstore);
         if (relation)
             ExecSetSlotDescriptor(*slot, RelationGetDescr(relation));
         else
@@ -3324,7 +3324,7 @@ TupleTableSlot *EvalPlanQualUSlot(EPQState *epqstate, Relation relation, Index r
         MemoryContextSwitchTo(oldcontext);
     }
 
-    (*slot)->tts_tupslotTableAm = TAM_USTORE;
+    (*slot)->tts_tam_ops = TableAmUstore;
 
     return *slot;
 }
@@ -3439,20 +3439,20 @@ void EvalPlanQualFetchRowMarksUHeap(EPQState *epqstate)
                 HeapTupleData tuple;
                 MemoryContext oldcxt;
                 TupleDesc tupdesc;
+                Form_pg_attribute attrs[erm->numAttrs];
 
                 Datum *data = (Datum *)palloc0(sizeof(Datum) * erm->numAttrs);
                 bool *null = (bool *)palloc0(sizeof(bool) * erm->numAttrs);
 
-                oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
-                tupdesc = (TupleDesc)palloc0(sizeof(tupleDesc));
-                MemoryContextSwitchTo(oldcxt);
-
                 for (int i = 0; i < erm->numAttrs; i++) {
                     data[i] = ExecGetJunkAttribute(epqstate->origslot, aerm->wholeAttNo + i, &null[i]);
+                    attrs[i] = &epqstate->origslot->tts_tupleDescriptor->attrs[aerm->wholeAttNo - 1 + i];
                 }
 
+                oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+                tupdesc = CreateTupleDesc(erm->numAttrs, false, attrs);
+                MemoryContextSwitchTo(oldcxt);
                 tupdesc->natts = erm->numAttrs;
-                tupdesc->attrs = &epqstate->origslot->tts_tupleDescriptor->attrs[aerm->wholeAttNo - 1];
                 tupdesc->tdhasoid = false;
                 ExecSetSlotDescriptor(slot, tupdesc);
 
@@ -3619,12 +3619,16 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
                 Assert(erm->markType == ROW_MARK_COPY_DATUM);
                 Datum *data = (Datum *)palloc0(sizeof(Datum) * erm->numAttrs);
                 bool *null = (bool *)palloc0(sizeof(bool) * erm->numAttrs);
+                Form_pg_attribute attrs[erm->numAttrs];
+
                 TupleDesc tupdesc = (TupleDesc)palloc0(sizeof(tupleDesc));
                 for (int i = 0; i < erm->numAttrs; i++) {
                     data[i] = ExecGetJunkAttribute(epqstate->origslot, aerm->wholeAttNo + i, &null[i]);
+                    attrs[i] = &epqstate->origslot->tts_tupleDescriptor->attrs[aerm->wholeAttNo - 1 + i];
                 }
+                
+                tupdesc = CreateTupleDesc(erm->numAttrs, false, attrs);
                 tupdesc->natts = erm->numAttrs;
-                tupdesc->attrs = &epqstate->origslot->tts_tupleDescriptor->attrs[aerm->wholeAttNo - 1];
                 tupdesc->tdhasoid = false;
                 tupdesc->tdisredistable = false;
                 td = (HeapTupleHeader)((char *)heap_form_tuple(tupdesc, data, null) + HEAPTUPLESIZE);

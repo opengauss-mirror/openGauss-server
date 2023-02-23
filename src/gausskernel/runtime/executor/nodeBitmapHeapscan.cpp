@@ -807,8 +807,8 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &scanstate->ss.ps, currentRelation->rd_tam_type);
-    ExecInitScanTupleSlot(estate, &scanstate->ss, currentRelation->rd_tam_type);
+    ExecInitResultTupleSlot(estate, &scanstate->ss.ps, currentRelation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, &scanstate->ss, currentRelation->rd_tam_ops);
 
     InitBitmapHeapScanNextMtd(scanstate);
 
@@ -898,11 +898,11 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
      */
     ExecAssignResultTypeFromTL(
             &scanstate->ss.ps,
-            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     ExecAssignScanProjectionInfo(&scanstate->ss);
 
-    Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * initialize child nodes

@@ -245,7 +245,7 @@ static void AddDefaultExprNode(ParseState* pstate)
     context.estimate = false;
 
     for (int i = 0; i < fieldCnt; ++i) {
-        Form_pg_attribute attTup = rdAtt->attrs[i];
+        FormData_pg_attribute *attTup = &rdAtt->attrs[i];
         if (IsAutoIncrementColumn(rdAtt, i + 1)) {
             refState->constValues[i] = makeConst(attTup->atttypid, -1, attTup->attcollation,
                       attTup->attlen, (Datum)0, false, attTup->attbyval);

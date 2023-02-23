@@ -4085,7 +4085,7 @@ llvm::Value* VecExprCodeGen::VarCodeGen(ExprCodeGenArgs* args)
     if ((args->parent != NULL) && IsA(args->parent, CStoreScanState)) {
         CStoreScanState* scanstate = (CStoreScanState*)args->parent;
         if (!scanstate->isPartTbl && scanstate->ss_currentRelation) {
-            attr = scanstate->ss_currentRelation->rd_att->attrs[var->varattno - 1];
+            attr = &scanstate->ss_currentRelation->rd_att->attrs[var->varattno - 1];
             is_notnull = attr->attnotnull;
         }
     }

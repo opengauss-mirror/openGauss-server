@@ -180,7 +180,7 @@ Datum dynamic_func_control(PG_FUNCTION_ARGS)
         deconstruct_array(param_arr, TEXTOID, -1, false, 'i', &param_datums, NULL, &no_params);
     }
 
-    TupleDesc tupdesc = CreateTemplateTupleDesc(INSTRUMENTS_DYNAMIC_FUNC_CTL_ATTRNUM, false, TAM_HEAP);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(INSTRUMENTS_DYNAMIC_FUNC_CTL_ATTRNUM, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "result", TEXTOID, -1, 0);
 

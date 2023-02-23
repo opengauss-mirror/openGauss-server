@@ -403,7 +403,7 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
      * initialize tuple type and projection info
      * the result in this case would hold only virtual data.
      */
-    ExecAssignResultTypeFromTL(&nlstate->js.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&nlstate->js.ps, TableAmHeap);
     ExecAssignProjectionInfo(&nlstate->js.ps, NULL);
 
     /*

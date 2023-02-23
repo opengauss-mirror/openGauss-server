@@ -134,7 +134,7 @@ static bool TvFeatureSupport(Oid relid, char **errstr, bool isTimecapsuleTable)
         *errstr = "timecapsule feature does not support system table";
     } else if (classForm->relpersistence != RELPERSISTENCE_PERMANENT) {
         *errstr = "timecapsule feature does not support non-permanent table";
-    } else if (rel->rd_tam_type == TAM_HEAP) {
+    } else if (rel->rd_tam_ops == TableAmHeap) {
         *errstr = "timecapsule feature does not support heap table";
     } else if ((RELATION_HAS_BUCKET(rel) || RELATION_OWN_BUCKET(rel))) {
         *errstr = "timecapsule feature does not support hash-bucket table";
@@ -808,7 +808,7 @@ static void TvUheapInsertLostImpl(Relation rel, Relation partRel, Partition p,
 
     Relation relRel = (partRel != NULL) ? partRel : rel;
     /* Set up a tuple slot too */
-    myslot = ExecInitExtraTupleSlot(estate, TAM_USTORE);
+    myslot = ExecInitExtraTupleSlot(estate, TableAmUstore);
     ExecSetSlotDescriptor(myslot, RelationGetDescr(relRel));
 
     /* Switch into its memory context */
@@ -834,7 +834,7 @@ static void TvUheapInsertLostImpl(Relation rel, Relation partRel, Partition p,
         recheckIndexes = ExecInsertIndexTuples(myslot, &tuple->ctid, estate, partRel, p, InvalidBktId, NULL, NULL);
         if (relRel != NULL && relRel->rd_mlogoid != InvalidOid) {
             HeapTuple htup = NULL;
-            Assert(relRel->rd_tam_type == TAM_USTORE);
+            Assert(relRel->rd_tam_ops == TableAmUstore);
             htup = (HeapTuple)UHeapToHeap(relRel->rd_att, (UHeapTuple)tuple);
             insert_into_mlog_table(relRel, relRel->rd_mlogoid, (HeapTuple)tuple,
                 &(((HeapTuple)tuple)->t_self), GetCurrentTransactionId(), 'I');

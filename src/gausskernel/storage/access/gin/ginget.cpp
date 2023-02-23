@@ -144,7 +144,7 @@ static bool collectMatchBitmap(GinBtreeData *btree, GinBtreeStack *stack, GinSca
 
     /* Locate tupdesc entry for key column (for attbyval/attlen data) */
     attnum = scanEntry->attnum;
-    attr = btree->ginstate->origTupdesc->attrs[attnum - 1];
+    attr = &btree->ginstate->origTupdesc->attrs[attnum - 1];
 
     for (;;) {
         Page page;

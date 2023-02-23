@@ -375,7 +375,7 @@ static List* get_file_fdw_attribute_options(Oid relid)
 
     /* Retrieve FDW options for all user-defined attributes. */
     for (attnum = 1; attnum <= natts; attnum++) {
-        Form_pg_attribute attr = tupleDesc->attrs[attnum - 1];
+        Form_pg_attribute attr = &tupleDesc->attrs[attnum - 1];
         List* options = NIL;
         ListCell* lc = NULL;
 

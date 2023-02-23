@@ -76,7 +76,7 @@ VecSetOpState* ExecInitVecSetOp(VecSetOp* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &set_op_state->ps,
-            ExecGetResultType(outerPlanState(set_op_state))->tdTableAmType);
+            ExecGetResultType(outerPlanState(set_op_state))->td_tam_ops);
 
     set_op_state->ps.ps_ProjInfo = NULL;
 
@@ -231,15 +231,15 @@ setOpTbl::setOpTbl(VecSetOpState* runtime) : m_runtime(runtime)
     }
 
     TupleDesc desc = outerPlanState(runtime)->ps_ResultTupleSlot->tts_tupleDescriptor;
-    Form_pg_attribute* attrs = desc->attrs;
+    FormData_pg_attribute* attrs = desc->attrs;
 
     m_scanBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, desc);
 
     /* Initialize m_keyDesc in vechashtable and check if m_keySimple is false */
     m_keyDesc = (ScalarDesc*)palloc(m_outerColNum * sizeof(ScalarDesc));
     for (i = 0; i < m_key; i++) {
-        m_keyDesc[i].typeId = attrs[m_keyIdx[i]]->atttypid;
-        m_keyDesc[i].typeMod = attrs[m_keyIdx[i]]->atttypmod;
+        m_keyDesc[i].typeId = attrs[m_keyIdx[i]].atttypid;
+        m_keyDesc[i].typeMod = attrs[m_keyIdx[i]].atttypmod;
         m_keyDesc[i].encoded = COL_IS_ENCODE(m_keyDesc[i].typeId);
         if (m_keyDesc[i].encoded)
             m_keySimple = false;

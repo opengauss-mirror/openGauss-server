@@ -100,7 +100,7 @@ TupleTableSlot *UHeapTableScanFusion::getTupleSlot()
             m_tmpisnull[i] = m_isnull[m_attrno[i] - 1];
         }
 
-        HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull, HEAP_TUPLE);
+        HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull);
         Assert(tmptup != NULL);
 
         (void)ExecStoreTuple(tmptup, /* tuple to store */

@@ -1424,7 +1424,7 @@ Datum pg_export_snapshot_and_csn(PG_FUNCTION_ARGS)
      * Construct a tuple descriptor for the result row.  This must match this
      * function's pg_proc entry!
      */
-    tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(tupdesc, (AttrNumber) 1, "snapshot_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) 2, "CSN", TEXTOID, -1, 0);
     tupdesc = BlessTupleDesc(tupdesc);

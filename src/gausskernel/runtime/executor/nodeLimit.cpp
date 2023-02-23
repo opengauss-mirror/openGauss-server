@@ -390,7 +390,7 @@ LimitState* ExecInitLimit(Limit* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &limit_state->ps,
-            ExecGetResultType(outerPlanState(limit_state))->tdTableAmType);
+            ExecGetResultType(outerPlanState(limit_state))->td_tam_ops);
 
     limit_state->ps.ps_ProjInfo = NULL;
 

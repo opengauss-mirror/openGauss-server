@@ -70,7 +70,7 @@ static VectorBatch* extract_scan_batch(
     }
 
     for (index = 0; index < tup_desc->natts; index++) {
-        if (tup_desc->attrs[index]->attisdropped == true) {
+        if (tup_desc->attrs[index].attisdropped == true) {
             scan_batch->m_arr[index].SetAllNull();
             continue;
         }
@@ -108,7 +108,7 @@ static JunkFilter* build_dummy_junk_filter(
         }
     }
 
-    junk_filter = ExecInitJunkFilter(new_targetlist, false, ExecInitExtraTupleSlot(estate));
+    junk_filter = ExecInitJunkFilter(new_targetlist, false, ExecInitExtraTupleSlot(estate), TableAmHeap);
 
     junk_filter->jf_junkAttNo = ExecFindJunkAttribute(junk_filter, "ctid");
     if (!AttributeNumberIsValid(junk_filter->jf_junkAttNo)) {

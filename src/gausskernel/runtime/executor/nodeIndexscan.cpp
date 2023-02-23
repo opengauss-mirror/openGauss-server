@@ -693,26 +693,26 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &index_state->ss.ps, current_relation->rd_tam_type);
-    ExecInitScanTupleSlot(estate, &index_state->ss, current_relation->rd_tam_type);
+    ExecInitResultTupleSlot(estate, &index_state->ss.ps, current_relation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, &index_state->ss, current_relation->rd_tam_ops);
 
     /*
      * get the scan type from the relation descriptor.
      */
     ExecAssignScanType(&index_state->ss, CreateTupleDescCopy(RelationGetDescr(current_relation)));
-    index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = current_relation->rd_tam_type;
+    index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops = current_relation->rd_tam_ops;
 
     /*
      * Initialize result tuple type and projection info.
      */
     ExecAssignResultTypeFromTL(&index_state->ss.ps);
 
-    index_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType =
-            index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType;
+    index_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops =
+            index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops;
 
     ExecAssignScanProjectionInfo(&index_state->ss);
 
-    Assert(index_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(index_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * If we are just doing EXPLAIN (ie, aren't going to run the plan), stop

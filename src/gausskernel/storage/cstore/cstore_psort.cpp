@@ -43,7 +43,7 @@ CStorePSort::CStorePSort(Relation rel, AttrNumber* sortKeys, int keyNum, int typ
       m_vecBatchCursor(InvalidBathCursor)
 {
     m_tupDesc = m_rel->rd_att;
-    Form_pg_attribute* attr = m_tupDesc->attrs;
+    FormData_pg_attribute* attr = m_tupDesc->attrs;
     m_psortMemInfo = NULL;
 
     m_fullCUSize = RelationGetMaxBatchRows(m_rel);
@@ -59,9 +59,9 @@ CStorePSort::CStorePSort(Relation rel, AttrNumber* sortKeys, int keyNum, int typ
     m_sortCollations = (Oid*)palloc(sizeof(Oid) * keyNum);
     for (int i = 0; i < keyNum; ++i) {
         int colIdx = m_sortKeys[i] - 1;
-        m_sortCollations[i] = attr[colIdx]->attcollation;
+        m_sortCollations[i] = attr[colIdx].attcollation;
 
-        TypeCacheEntry* typeEntry = lookup_type_cache(attr[colIdx]->atttypid, TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
+        TypeCacheEntry* typeEntry = lookup_type_cache(attr[colIdx].atttypid, TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
         m_sortOperators[i] = typeEntry->lt_opr;
     }
 
@@ -227,7 +227,7 @@ void CStorePSort::PutTuple(Datum* values, bool* nulls)
 
     AutoContextSwitch memContextGuard(m_psortMemContext);
 
-    HeapTuple tuple = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, values, nulls, HEAP_TUPLE);
+    HeapTuple tuple = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, values, nulls);
 
     TupleTableSlot* slot = MakeSingleTupleTableSlot(m_tupDesc);
 

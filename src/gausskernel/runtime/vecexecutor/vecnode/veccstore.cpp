@@ -714,7 +714,7 @@ CStoreScanState* ExecInitCStoreScan(
      */
     ExecAssignResultTypeFromTL(
             &scan_stat->ps,
-            scan_stat->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            scan_stat->ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     if (node->isPartTbl && scan_stat->ss_currentRelation == NULL) {
         // no data ,just return;
@@ -739,7 +739,7 @@ CStoreScanState* ExecInitCStoreScan(
         New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, scan_stat->ss_currentRelation->rd_att);
     for (int vecIndex = 0; vecIndex < scan_stat->m_pScanBatch->m_cols; vecIndex++) {
         FormData_pg_attribute* attr = NULL;
-        attr = scan_stat->ss_currentRelation->rd_att->attrs[vecIndex];
+        attr = &scan_stat->ss_currentRelation->rd_att->attrs[vecIndex];
 
         // Hack!! move me out to update pg_attribute instead
         //

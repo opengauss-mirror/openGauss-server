@@ -1380,7 +1380,7 @@ static void composite_to_json(Datum composite, StringInfo result, bool use_line_
         bool typisvarlena = false;
         Oid castfunc = InvalidOid;
 
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i].attisdropped) {
             continue;
         }
         if (needsep) {
@@ -1388,16 +1388,16 @@ static void composite_to_json(Datum composite, StringInfo result, bool use_line_
         }
         needsep = true;
 
-        attname = NameStr(tupdesc->attrs[i]->attname);
+        attname = NameStr(tupdesc->attrs[i].attname);
         escape_json(result, attname);
         appendStringInfoChar(result, ':');
         val = heap_getattr(tuple, i + 1, tupdesc, &isnull);
-        getTypeOutputInfo(tupdesc->attrs[i]->atttypid, &typoutput, &typisvarlena);
+        getTypeOutputInfo(tupdesc->attrs[i].atttypid, &typoutput, &typisvarlena);
 
-        if (tupdesc->attrs[i]->atttypid > FirstNormalObjectId) {
+        if (tupdesc->attrs[i].atttypid > FirstNormalObjectId) {
             HeapTuple    cast_tuple;
             Form_pg_cast castForm;
-            cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(tupdesc->attrs[i]->atttypid),
+            cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(tupdesc->attrs[i].atttypid),
                                          ObjectIdGetDatum(JSONOID));
             if (HeapTupleIsValid(cast_tuple)) {
                 castForm = (Form_pg_cast) GETSTRUCT(cast_tuple);
@@ -1411,14 +1411,14 @@ static void composite_to_json(Datum composite, StringInfo result, bool use_line_
 
         if (castfunc != InvalidOid) {
             tcategory = TYPCATEGORY_JSON_CAST;
-        } else if (tupdesc->attrs[i]->atttypid == RECORDARRAYOID) {
+        } else if (tupdesc->attrs[i].atttypid == RECORDARRAYOID) {
             tcategory = TYPCATEGORY_ARRAY;
-        } else if (tupdesc->attrs[i]->atttypid == RECORDOID) {
+        } else if (tupdesc->attrs[i].atttypid == RECORDOID) {
             tcategory = TYPCATEGORY_COMPOSITE;
-        } else if (tupdesc->attrs[i]->atttypid == JSONOID || tupdesc->attrs[i]->atttypid == JSONBOID) {
+        } else if (tupdesc->attrs[i].atttypid == JSONOID || tupdesc->attrs[i].atttypid == JSONBOID) {
             tcategory = TYPCATEGORY_JSON;
         } else {
-            tcategory = TypeCategory(tupdesc->attrs[i]->atttypid);
+            tcategory = TypeCategory(tupdesc->attrs[i].atttypid);
         }
         datum_to_json(val, isnull, result, tcategory, typoutput, false);
     }

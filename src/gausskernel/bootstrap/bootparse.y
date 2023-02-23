@@ -196,7 +196,7 @@ Boot_CreateStmt:
 
 					do_start();
 
-					tupdesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr, !($6), t_thrd.bootstrap_cxt.attrtypes, TAM_HEAP);
+					tupdesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr, !($6), t_thrd.bootstrap_cxt.attrtypes);
 
 					shared_relation = $5;
 

@@ -302,7 +302,7 @@ static void TupleToStringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, 
         Oid typoutput = 0;          /* output function */
         Datum origval = 0;          /* possibly toasted Datum */
 
-        Form_pg_attribute attr = tupdesc->attrs[natt]; /* the attribute itself */
+        Form_pg_attribute attr = &tupdesc->attrs[natt]; /* the attribute itself */
 
         if (attr->attisdropped || attr->attnum < 0) {
             continue;
@@ -358,7 +358,7 @@ static void TupleToStringinfoUpd(StringInfo s, TupleDesc tupdesc, HeapTuple tupl
         bool isnull = false;        /* column is null? */
         bool typisvarlena = false;
 
-        Form_pg_attribute attr = tupdesc->attrs[natt]; /* the attribute itself */
+        Form_pg_attribute attr = &tupdesc->attrs[natt]; /* the attribute itself */
 
         if (attr->attisdropped || attr->attnum < 0) {
             continue;

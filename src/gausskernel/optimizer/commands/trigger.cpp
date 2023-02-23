@@ -3024,7 +3024,7 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
     }
 
     if (RelationIsUstoreFormat(relation)) {
-        TupleTableSlot *slot = MakeSingleTupleTableSlot(relation->rd_att, false, TAM_USTORE);
+        TupleTableSlot *slot = MakeSingleTupleTableSlot(relation->rd_att, false, TableAmUstore);
         UHeapTuple utuple;
 
         UHeapTupleData uheaptupdata;

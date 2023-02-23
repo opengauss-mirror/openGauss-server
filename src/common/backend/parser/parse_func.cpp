@@ -1956,7 +1956,7 @@ static Node* ParseComplexProjection(ParseState* pstate, char* funcname, Node* fi
     AssertEreport(tupdesc, MOD_OPT, "");
 
     for (i = 0; i < tupdesc->natts; i++) {
-        Form_pg_attribute att = tupdesc->attrs[i];
+        Form_pg_attribute att = &tupdesc->attrs[i];
 
         if (strcmp(funcname, NameStr(att->attname)) == 0 && !att->attisdropped) {
             /* Success, so generate a FieldSelect expression */

@@ -229,7 +229,7 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
      */
     ExecAssignResultTypeFromTL(
             &scanstate->ss.ps,
-            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
     ExecAssignScanProjectionInfoWithVarno(&scanstate->ss, tlistvarno);
 
     scanstate->fdwroutine = fdwroutine;

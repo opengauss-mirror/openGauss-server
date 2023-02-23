@@ -1653,7 +1653,7 @@ void make_inh_translation_list(Relation oldrelation, Relation newrelation, Index
         Oid attcollation;
         int new_attno;
 
-        att = old_tupdesc->attrs[old_attno];
+        att = &old_tupdesc->attrs[old_attno];
         if (att->attisdropped) {
             /* Just put NULL into this list entry */
             vars = lappend(vars, NULL);
@@ -1685,13 +1685,13 @@ void make_inh_translation_list(Relation oldrelation, Relation newrelation, Index
          * Since the idea of inherited table to achieve DFS table, so ther following
          * logic must be covered.
          */
-        if (old_attno < newnatts && (att = new_tupdesc->attrs[old_attno]) != NULL &&
+        if (old_attno < newnatts && (att = &new_tupdesc->attrs[old_attno]) != NULL &&
             (att->attisdropped && att->attinhcount != 0) &&
             strcmp(attname, NameStr(att->attname)) == 0)
             new_attno = old_attno;
         else {
             for (new_attno = 0; new_attno < newnatts; new_attno++) {
-                att = new_tupdesc->attrs[new_attno];
+                att = &new_tupdesc->attrs[new_attno];
                 if (!att->attisdropped && att->attinhcount != 0 && strcmp(attname, NameStr(att->attname)) == 0)
                     break;
             }

@@ -322,7 +322,7 @@ bool tlist_matches_tupdesc(PlanState* ps, List* tlist, Index var_no, TupleDesc t
 
     /* Check the tlist attributes */
     for (attr_no = 1; attr_no <= num_attrs; attr_no++) {
-        Form_pg_attribute att_tup = tup_desc->attrs[attr_no - 1];
+        Form_pg_attribute att_tup = &tup_desc->attrs[attr_no - 1];
         Var* var = NULL;
 
         if (tlist_item == NULL)

@@ -338,7 +338,7 @@ int SendRouter::CountNodeId(struct RouteMsg* attr)
     int dist_idx = list_nth_int(rel_loc_info->partAttrNum, t) - 1;
     for (i = 0; i < tupdesc->natts; i++) {
         if (dist_idx == i) {
-            col_type[t] = tupdesc->attrs[i]->atttypid;
+            col_type[t] = tupdesc->attrs[i].atttypid;
             Type typ = typeidType(col_type[t]);
             col_typemode[t] = ((Form_pg_type)GETSTRUCT(typ))->typtypmod;
             ReleaseSysCache(typ);

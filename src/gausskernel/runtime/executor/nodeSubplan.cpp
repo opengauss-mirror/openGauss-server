@@ -329,7 +329,7 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
 
             found = true;
             /* stash away current value */
-            Assert(sub_plan->firstColType == tdesc->attrs[0]->atttypid);
+            Assert(sub_plan->firstColType == tdesc->attrs[0].atttypid);
             dvalue = tableam_tslot_getattr(slot, 1, &disnull);
             astate = accumArrayResult(astate, dvalue, disnull, sub_plan->firstColType, oldcontext);
             /* keep scanning subplan to collect all values */
@@ -832,13 +832,13 @@ SubPlanState* ExecInitSubPlan(SubPlan* subplan, PlanState* parent)
          * own innerecontext.
          */
         // slot contains virtual tuple, so set the default tableAm type to HEAP
-        tup_desc = ExecTypeFromTL(leftptlist, false, false, TAM_HEAP);
+        tup_desc = ExecTypeFromTL(leftptlist, false, false, TableAmHeap);
         slot = ExecInitExtraTupleSlot(estate);
         ExecSetSlotDescriptor(slot, tup_desc);
         sstate->projLeft = ExecBuildProjectionInfo(lefttlist, NULL, slot, NULL);
 
         // slot contains virtual tuple, so set the default tableAm type to HEAP
-        tup_desc = ExecTypeFromTL(rightptlist, false, false, TAM_HEAP);
+        tup_desc = ExecTypeFromTL(rightptlist, false, false, TableAmHeap);
         slot = ExecInitExtraTupleSlot(estate);
         ExecSetSlotDescriptor(slot, tup_desc);
         sstate->projRight = ExecBuildProjectionInfo(righttlist, sstate->innerecontext, slot, NULL);
@@ -925,7 +925,7 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
 
             found = true;
             /* stash away current value */
-            Assert(subplan->firstColType == tdesc->attrs[0]->atttypid);
+            Assert(subplan->firstColType == tdesc->attrs[0].atttypid);
             dvalue = tableam_tslot_getattr(slot, 1, &disnull);
             astate = accumArrayResult(astate, dvalue, disnull, subplan->firstColType, oldcontext);
             /* keep scanning subplan to collect all values */

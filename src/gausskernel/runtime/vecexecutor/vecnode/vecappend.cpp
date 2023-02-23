@@ -95,7 +95,7 @@ VecAppendState* ExecInitVecAppend(VecAppend* node, EState* estate, int eflags)
      * Result tuple slot of Append always contains a virtual tuple,
      * Default tableAMtype for this slot is Heap.
      */
-    ExecAssignResultTypeFromTL(&appendstate->ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&appendstate->ps);
     appendstate->ps.ps_ProjInfo = NULL;
 
     /*

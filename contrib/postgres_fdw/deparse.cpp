@@ -2030,7 +2030,7 @@ void deparseAnalyzeSql(StringInfo buf, Relation rel, List **retrieved_attrs)
     appendStringInfoString(buf, "SELECT ");
     for (i = 0; i < tupdesc->natts; i++) {
         /* Ignore dropped columns. */
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i].attisdropped) {
             continue;
         }
 
@@ -2040,7 +2040,7 @@ void deparseAnalyzeSql(StringInfo buf, Relation rel, List **retrieved_attrs)
         first = false;
 
         /* Use attribute name or column_name option. */
-        char *colname = NameStr(tupdesc->attrs[i]->attname);
+        char *colname = NameStr(tupdesc->attrs[i].attname);
         List *options = GetForeignColumnOptions(relid, i + 1);
 
         foreach (lc, options) {

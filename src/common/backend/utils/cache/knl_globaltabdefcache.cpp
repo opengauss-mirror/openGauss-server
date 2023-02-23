@@ -686,7 +686,7 @@ Relation BuildRelationFromPartRel(Relation rel, Partition part, bytea* merge_rel
     relation->rd_am = CopyRelationAm(rel);
 
     relation->rd_indnkeyatts = rel->rd_indnkeyatts;
-    relation->rd_tam_type = rel->rd_tam_type;
+    relation->rd_tam_ops = rel->rd_tam_ops;
 
     if (!OidIsValid(rel->rd_rel->relam)) {
         relation->rd_indexcxt = NULL;

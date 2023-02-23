@@ -435,7 +435,7 @@ static void parse_compress_meta(StringInfo outputBuf, char* page_content, Relati
     int size = PageGetSpecialSize(page_header);
 
     TupleDesc desc = RelationGetDescr(rel);
-    Form_pg_attribute* att = desc->attrs;
+    FormData_pg_attribute* att = desc->attrs;
     int attrno;
     int attrnum = desc->natts;
 
@@ -444,7 +444,7 @@ static void parse_compress_meta(StringInfo outputBuf, char* page_content, Relati
     char mode = 0;
 
     for (attrno = 0; attrno < attrnum && cmprsOff < size; ++attrno) {
-        Form_pg_attribute thisatt = att[attrno];
+        Form_pg_attribute thisatt = &att[attrno];
         int metaSize = 0;
 
         metaInfo = PageCompress::FetchAttrCmprMeta(start + cmprsOff, thisatt->attlen, &metaSize, &mode);

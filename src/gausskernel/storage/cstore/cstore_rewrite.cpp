@@ -440,7 +440,7 @@ void CStoreRewriter::RewriteColsData()
         // each col_id of cudesc
         for (int i = 0; i < nOldAttrs; i++) {
             // skip the droped column
-            if (unlikely(m_OldTupDesc->attrs[i]->attisdropped))
+            if (unlikely(m_OldTupDesc->attrs[i].attisdropped))
                 continue;
 
             // explaination: key[0]  --> col_id = 1 to natts
@@ -537,7 +537,7 @@ void CStoreRewriter::RewriteColsData()
         // and the virtual-delete tuple into cudesc table.
         //
         for (int i = 0; i < nOldAttrs; ++i) {
-            if (m_OldTupDesc->attrs[i]->attisdropped || m_NewTupDesc->attrs[i]->attisdropped)
+            if (m_OldTupDesc->attrs[i].attisdropped || m_NewTupDesc->attrs[i].attisdropped)
                 continue;
 
             if (!m_ColsRewriteFlag[i]) {
@@ -638,7 +638,7 @@ void CStoreRewriter::AddColumnInitPhrase2(_in_ CStoreRewriteColumn* addColInfo, 
     m_AddColsInfo[idx] = addColInfo;
 
     /* Min/Max functions for rough checking. */
-    m_AddColsMinMaxFunc[idx] = GetMinMaxFunc(m_NewTupDesc->attrs[addColInfo->attrno - 1]->atttypid);
+    m_AddColsMinMaxFunc[idx] = GetMinMaxFunc(m_NewTupDesc->attrs[addColInfo->attrno - 1].atttypid);
 
     /* maybe different tablespace and relfilenode will be used,
      * so we create a new temp RelFileNode object.
@@ -728,7 +728,7 @@ void CStoreRewriter::AddColumns(_in_ uint32 cuId, _in_ int rowsCntInCu, _in_ boo
         CStoreRewriteColumn* newColInfo = m_AddColsInfo[i];
         Assert(newColInfo && newColInfo->isAdded && !newColInfo->isDropped);
         int attrIndex = newColInfo->attrno - 1;
-        Form_pg_attribute newColAttr = m_NewTupDesc->attrs[attrIndex];
+        Form_pg_attribute newColAttr = &m_NewTupDesc->attrs[attrIndex];
 
         CUDesc newColCudesc;
         newColCudesc.cu_id = cuId;
@@ -949,7 +949,7 @@ void CStoreRewriter::SetDataTypeInitPhase2(_in_ CStoreRewriteColumn* sdtColInfo,
     m_SDTColsInfo[idx] = sdtColInfo;
 
     /* Min/Max functions for columns of changing data type. */
-    m_SDTColsMinMaxFunc[idx] = GetMinMaxFunc(m_NewTupDesc->attrs[sdtColInfo->attrno - 1]->atttypid);
+    m_SDTColsMinMaxFunc[idx] = GetMinMaxFunc(m_NewTupDesc->attrs[sdtColInfo->attrno - 1].atttypid);
 
     CFileNode cFileNode(m_OldHeapRel->rd_node, (int)sdtColInfo->attrno, MAIN_FORKNUM);
     m_SDTColsReader[idx] = New(CurrentMemoryContext) CUStorage(cFileNode);
@@ -1040,7 +1040,7 @@ void CStoreRewriter::HandleWholeDeletedCu(
 
     for (int i = 0; i < nRewriteCols; ++i) {
         InsertNewCudescTup(
-            &fullNullCudesc, RelationGetDescr(m_NewCudescRel), m_NewTupDesc->attrs[(rewriteColsInfo[i]->attrno - 1)]);
+            &fullNullCudesc, RelationGetDescr(m_NewCudescRel), &m_NewTupDesc->attrs[(rewriteColsInfo[i]->attrno - 1)]);
     }
 }
 
@@ -1069,7 +1069,7 @@ void CStoreRewriter::SetDataType(_in_ uint32 cuId, _in_ HeapTuple* cudescTup, _i
 
         // deform the cudesc tuple and set old CUDesc object.
         CUDesc oldColCudesc;
-        CStore::DeformCudescTuple(cudescTup[attrIndex], cudescTupDesc, m_OldTupDesc->attrs[attrIndex], &oldColCudesc);
+        CStore::DeformCudescTuple(cudescTup[attrIndex], cudescTupDesc, &m_OldTupDesc->attrs[attrIndex], &oldColCudesc);
         Assert(oldColCudesc.cu_id == cuId);
         Assert(oldColCudesc.row_count == rowsCntInCu);
 
@@ -1082,7 +1082,7 @@ void CStoreRewriter::SetDataType(_in_ uint32 cuId, _in_ HeapTuple* cudescTup, _i
             SetDataTypeHandleNormalCu(sdtIndex, delMaskDataPtr, &oldColCudesc, &newColCudesc);
         }
 
-        InsertNewCudescTup(&newColCudesc, RelationGetDescr(m_NewCudescRel), m_NewTupDesc->attrs[attrIndex]);
+        InsertNewCudescTup(&newColCudesc, RelationGetDescr(m_NewCudescRel), &m_NewTupDesc->attrs[attrIndex]);
 
         ResetExprContext(m_econtext);
 
@@ -1122,8 +1122,8 @@ void CStoreRewriter::SetDataTypeHandleSameValCu(
     TupleTableSlot* fakeSlot = MakeSingleTupleTableSlot(m_OldTupDesc);
 
     int attrIndex = setDataTypeColInfo->attrno - 1;
-    Form_pg_attribute pColOldAttr = m_OldTupDesc->attrs[attrIndex];
-    Form_pg_attribute pColNewAttr = m_NewTupDesc->attrs[attrIndex];
+    Form_pg_attribute pColOldAttr = &m_OldTupDesc->attrs[attrIndex];
+    Form_pg_attribute pColNewAttr = &m_NewTupDesc->attrs[attrIndex];
 
     // limit the memory size used in running time.
     MemoryContext oldCxt = MemoryContextSwitchTo(GetPerTupleMemoryContext(m_estate));
@@ -1197,8 +1197,8 @@ void CStoreRewriter::SetDataTypeHandleNormalCu(
     TupleTableSlot* fakeSlot = MakeSingleTupleTableSlot(m_OldTupDesc);
 
     int attrIndex = setDataTypeColInfo->attrno - 1;
-    Form_pg_attribute pColOldAttr = m_OldTupDesc->attrs[attrIndex];
-    Form_pg_attribute pColNewAttr = m_NewTupDesc->attrs[attrIndex];
+    Form_pg_attribute pColOldAttr = &m_OldTupDesc->attrs[attrIndex];
+    Form_pg_attribute pColNewAttr = &m_NewTupDesc->attrs[attrIndex];
 
     /* the other fields will be set later. */
     int rowsCntInCu = oldColCudesc->row_count;
@@ -1730,7 +1730,7 @@ Oid CStoreSetTableSpaceForColumnData(Relation colRel, Oid targetTableSpace)
 
     int nattrs = RelationGetDescr(colRel)->natts;
     for (int i = 0; i < nattrs; ++i) {
-        Form_pg_attribute thisattr = RelationGetDescr(colRel)->attrs[i];
+        Form_pg_attribute thisattr = &RelationGetDescr(colRel)->attrs[i];
         if (!thisattr->attisdropped) {
             /* change tablespace for each column' data */
             CStoreCopyColumnData(CUReplicationRel, colRel, thisattr->attnum);
@@ -2013,7 +2013,7 @@ void ATExecCStoreMergePartition(Relation partTableRel, AlterTableCmd* cmd)
     CStoreInsert* cstoreOpt = NULL;
     CStoreScanDesc scan = NULL;
     int16* colIdx = NULL;
-    Form_pg_attribute* oldAttrs = NULL;
+    FormData_pg_attribute* oldAttrs = NULL;
 
     // Init CStore insertion.
     InsertArg args;
@@ -2046,7 +2046,7 @@ void ATExecCStoreMergePartition(Relation partTableRel, AlterTableCmd* cmd)
         colIdx = (int16*)palloc0(sizeof(int16) * partedTableHeapDesc->natts);
         oldAttrs = partedTableHeapDesc->attrs;
         for (int i = 0; i < partedTableHeapDesc->natts; i++)
-            colIdx[i] = oldAttrs[i]->attnum;
+            colIdx[i] = oldAttrs[i].attnum;
         scan = CStoreBeginScan(srcPartRel, partedTableHeapDesc->natts, colIdx, SnapshotNow, true);
 
         /* scan and insert CU data */

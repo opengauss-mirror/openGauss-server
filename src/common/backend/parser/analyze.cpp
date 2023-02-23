@@ -1541,17 +1541,17 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
     rstate->usExplicitAttrNos = (int*)palloc0(sizeof(int) * len);
 
     Relation relation = (Relation)linitial(pstate->p_target_relation);
-    Form_pg_attribute* attr = relation->rd_att->attrs;
+    FormData_pg_attribute* attr = relation->rd_att->attrs;
     int colNum = RelationGetNumberOfAttributes(relation);
     ListCell* target = list_head(targetList);
     for (int ni = 0; ni < len; ++ni) {
         ResTarget* res = (ResTarget*)lfirst(target);
         const char* name = res->name;
         for (int ci = 0; ci < colNum; ++ci) {
-            if (attr[ci]->attisdropped) {
+            if (attr[ci].attisdropped) {
                 continue;
             }
-            if (strcmp(name, attr[ci]->attname.data) == 0) {
+            if (strcmp(name, attr[ci].attname.data) == 0) {
                 rstate->usExplicitAttrNos[ni] = ci + 1;
                 break;
             }
@@ -2231,7 +2231,7 @@ List* BuildExcludedTargetlist(Relation targetrel, Index exclRelIndex)
      * underlying relation, hence we need entries for dropped columns too.
      */
     for (attno = 0; attno < RelationGetNumberOfAttributes(targetrel); attno++) {
-        Form_pg_attribute attr = targetrel->rd_att->attrs[attno];
+        Form_pg_attribute attr = &targetrel->rd_att->attrs[attno];
         char* name = NULL;
 
         if (attr->attisdropped) {

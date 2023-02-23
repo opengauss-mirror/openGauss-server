@@ -660,7 +660,7 @@ int2vector* getPartitionKeyAttrNo(
     int n_key_column, i, j;
     int2vector* partkey = NULL;
     Oid* oidArr = NULL;
-    Form_pg_attribute* rel_attrs = base_table_tupledsc->attrs;
+    FormData_pg_attribute* rel_attrs = base_table_tupledsc->attrs;
 
     Assert(PointerIsValid(typeOids));
 
@@ -702,8 +702,8 @@ int2vector* getPartitionKeyAttrNo(
         int16 attnum = attnums[i];
         partkey->values[i] = attnum;
         for (j = 0; j < base_table_tupledsc->natts; j++) {
-            if (attnum == rel_attrs[j]->attnum) {
-                oidArr[i] = rel_attrs[j]->atttypid;
+            if (attnum == rel_attrs[j].attnum) {
+                oidArr[i] = rel_attrs[j].atttypid;
                 break;
             }
         }
@@ -1974,7 +1974,7 @@ Const* transformDatum2Const(TupleDesc tupledesc, int16 attnum, Datum datumValue,
     Assert(attnum <= tupledesc->natts);
     Assert(attnum >= 1);
     attindex = attnum - 1;
-    att = tupledesc->attrs[attindex];
+    att = &tupledesc->attrs[attindex];
 
     typid = att->atttypid;
     typmod = att->atttypmod;

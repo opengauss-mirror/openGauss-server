@@ -625,8 +625,8 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &tidstate->ss.ps, current_relation->rd_tam_type);
-    ExecInitScanTupleSlot(estate, &tidstate->ss, current_relation->rd_tam_type);
+    ExecInitResultTupleSlot(estate, &tidstate->ss.ps, current_relation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, &tidstate->ss, current_relation->rd_tam_ops);
 
     /* deal with partitioned table branch */
     if (node->scan.isPartTbl) {
@@ -673,11 +673,11 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &tidstate->ss.ps,
-            tidstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            tidstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     ExecAssignScanProjectionInfo(&tidstate->ss);
 
-    Assert(tidstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(tidstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * all done.

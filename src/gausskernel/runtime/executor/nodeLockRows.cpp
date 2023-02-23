@@ -468,11 +468,11 @@ LockRowsState* ExecInitLockRows(LockRows* node, EState* estate, int eflags)
      * this node appropriately
      */
     TupleDesc resultDesc = ExecGetResultType(outerPlanState(lrstate));
-    ExecAssignResultTypeFromTL(&lrstate->ps, resultDesc->tdTableAmType);
+    ExecAssignResultTypeFromTL(&lrstate->ps, resultDesc->td_tam_ops);
 
     lrstate->ps.ps_ProjInfo = NULL;
 
-    Assert(lrstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(lrstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * Locate the ExecRowMark(s) that this node is responsible for, and

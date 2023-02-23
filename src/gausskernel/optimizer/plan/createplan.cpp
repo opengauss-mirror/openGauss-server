@@ -3581,7 +3581,7 @@ static List* build_one_column_tlist(PlannerInfo* root, RelOptInfo* rel)
                   Var* varnode = NULL;
 
                   for (varattno = 0; varattno < maxattrs; varattno++) {
-                      Form_pg_attribute attr = tupdesc->attrs[varattno];
+                      Form_pg_attribute attr = &tupdesc->attrs[varattno];
 
                       if (attr->attisdropped || !IsTypeDistributable(attr->atttypid)) {
                           continue;

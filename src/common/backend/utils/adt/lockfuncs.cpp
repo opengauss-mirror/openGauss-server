@@ -177,7 +177,7 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
 
         /* build tupdesc for result tuples */
         /* this had better match pg_locks view in system_views.sql */
-        tupdesc = CreateTemplateTupleDesc(NUM_LOCK_STATUS_COLUMNS, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(NUM_LOCK_STATUS_COLUMNS, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "locktype", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "database", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "relation", OIDOID, -1, 0);

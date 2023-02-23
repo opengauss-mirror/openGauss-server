@@ -106,7 +106,7 @@ PlanState* ExecInitNodeStubNorm(Plan* node, EState* estate, int eflags)
 
     /* Result tuple initialization */
     ExecInitResultTupleSlot(estate, ps);
-    ExecAssignResultTypeFromTL(ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(ps);
 
     return ps;
 }

@@ -2693,7 +2693,7 @@ static void ReorderBufferFillAttributes(ReorderBufferTXN *txn, TupleDesc desc, T
     errno_t rc = 0;
     const int toast_index = 3; /* toast index in tuple is 3 */
     for (int natt = 0; natt < desc->natts; natt++) {
-        Form_pg_attribute attr = desc->attrs[natt];
+        Form_pg_attribute attr = &desc->attrs[natt];
         ReorderBufferToastEnt *ent = NULL;
         struct varlena *varlena = NULL;
 

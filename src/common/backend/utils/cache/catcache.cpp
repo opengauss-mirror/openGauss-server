@@ -981,7 +981,7 @@ CatCache* InitCatCache(int id, Oid reloid, Oid indexoid, int nkeys, const int* k
                     i + 1,                                                                                             \
                     cache->cc_nkeys,                                                                                   \
                     cache->cc_keyno[i],                                                                                \
-                    tupdesc->attrs[cache->cc_keyno[i] - 1]->atttypid)));                                               \
+                    tupdesc->attrs[cache->cc_keyno[i] - 1].atttypid)));                                               \
         } else {                                                                                                       \
             ereport(DEBUG2,                                                                                            \
                 (errmsg("CatalogCacheInitializeCache: load %d/%d w/%d", i + 1, cache->cc_nkeys, cache->cc_keyno[i]))); \
@@ -1056,7 +1056,7 @@ static void CatalogCacheInitializeCache(CatCache* cache)
         CatalogCacheInitializeCache_DEBUG2;
 
         if (cache->cc_keyno[i] > 0)
-            keytype = tupdesc->attrs[cache->cc_keyno[i] - 1]->atttypid;
+            keytype = tupdesc->attrs[cache->cc_keyno[i] - 1].atttypid;
         else {
             if (cache->cc_keyno[i] != ObjectIdAttributeNumber)
                 ereport(FATAL, (errmsg("only sys attr supported in caches is OID")));
@@ -2390,7 +2390,7 @@ List* SearchBuiltinProcCacheList(CatCache* cache, int nkey, Datum* arguments, Li
 
 TupleDesc CreateTupDesc4BuiltinFuncWithOid()
 {
-    TupleDesc tupdesc = CreateTemplateTupleDesc(40, false, TAM_HEAP);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(40, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "proname", NAMEOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "pronamespace", OIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "proowner", OIDOID, -1, 0);
@@ -2971,7 +2971,7 @@ void CatCacheFreeKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* ke
             continue;
         Assert(attnum > 0);
 
-        if (!tupdesc->attrs[attnum - 1]->attbyval) {
+        if (!tupdesc->attrs[attnum - 1].attbyval) {
             void *ptr = DatumGetPointer(keys[i]);
             pfree_ext(ptr);
             keys[i] = (Datum)NULL;
@@ -2999,7 +2999,7 @@ void CatCacheCopyKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* sr
         if (attnum == ObjectIdAttributeNumber) {
             dstkeys[i] = srckeys[i];
         } else {
-            Form_pg_attribute att = tupdesc->attrs[(attnum - 1)];
+            Form_pg_attribute att = &tupdesc->attrs[(attnum - 1)];
             Datum src = srckeys[i];
             NameData srcname;
 

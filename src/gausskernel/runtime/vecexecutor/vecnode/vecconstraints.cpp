@@ -94,7 +94,7 @@ void ExecVecConstraints(ResultRelInfo* resultRelInfo, VectorBatch* batch, EState
         int attrChk;
 
         for (attrChk = 1; attrChk <= natts; attrChk++) {
-            if (rel->rd_att->attrs[attrChk - 1]->attnotnull) {
+            if (rel->rd_att->attrs[attrChk - 1].attnotnull) {
                 int nrow = batch->m_rows;
                 ScalarVector* pVector = &(batch->m_arr[attrChk - 1]);
                 for (int i = 0; i < nrow; i++)
@@ -102,7 +102,7 @@ void ExecVecConstraints(ResultRelInfo* resultRelInfo, VectorBatch* batch, EState
                         ereport(ERROR,
                             (errcode(ERRCODE_NOT_NULL_VIOLATION),
                                 errmsg("null value in column \"%s\" violates not-null constraint",
-                                    NameStr(rel->rd_att->attrs[attrChk - 1]->attname)),
+                                    NameStr(rel->rd_att->attrs[attrChk - 1].attname)),
                                 errdetail("Failing row contains %s.", ExecBuildBatchValueDescription(batch, i, 64))));
             }
         }

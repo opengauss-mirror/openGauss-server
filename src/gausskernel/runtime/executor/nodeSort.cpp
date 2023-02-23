@@ -274,11 +274,11 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
 
     ExecAssignResultTypeFromTL(
             &sortstate->ss.ps,
-            sortstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            sortstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     sortstate->ss.ps.ps_ProjInfo = NULL;
 
-    Assert(sortstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(sortstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     SO1_printf("ExecInitSort: %s\n", "sort node initialized");
 

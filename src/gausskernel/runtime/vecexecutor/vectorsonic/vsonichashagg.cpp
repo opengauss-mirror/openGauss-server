@@ -584,8 +584,8 @@ void SonicHashAgg::initBatch()
 
     /* initialize the type information of all the outer targetlist that we needed */
     for (int i = 0; i < m_hashNeed; i++) {
-        type_arr[i].typeId = outDesc->attrs[m_hashInBatchIdx[i]]->atttypid;
-        type_arr[i].typeMod = outDesc->attrs[m_hashInBatchIdx[i]]->atttypmod;
+        type_arr[i].typeId = outDesc->attrs[m_hashInBatchIdx[i]].atttypid;
+        type_arr[i].typeMod = outDesc->attrs[m_hashInBatchIdx[i]].atttypmod;
         type_arr[i].encoded = COL_IS_ENCODE(type_arr[i].typeId);
         if (type_arr[i].encoded) {
             m_keySimple = false;
@@ -628,7 +628,7 @@ void SonicHashAgg::initDataArray()
      * hash type only store the address here.
      */
     for (int i = 0; i < m_hashNeed; i++) {
-        Form_pg_attribute attrs = m_buildOp.tupleDesc->attrs[m_hashInBatchIdx[i]];
+        Form_pg_attribute attrs = &m_buildOp.tupleDesc->attrs[m_hashInBatchIdx[i]];
         getDataDesc(&desc, 0, attrs, true);
 
         if (!COL_IS_ENCODE(attrs->atttypid)) {
@@ -2171,9 +2171,9 @@ void SonicHashAgg::initPartition(SonicHashPartition** partSource)
 
     TupleDesc outDesc = outerPlanState(m_runtime)->ps_ResultTupleSlot->tts_tupleDescriptor;
 
-    Form_pg_attribute* attrs = outDesc->attrs;
+    FormData_pg_attribute* attrs = outDesc->attrs;
     for (int idx = 0; idx < m_sourceBatch->m_cols; idx++) {
-        getDataDesc(&desc, 0, attrs[idx], isHashKey(attrs[idx]->atttypid, idx, m_buildOp.keyIndx, m_buildOp.keyNum));
+        getDataDesc(&desc, 0, &attrs[idx], isHashKey(attrs[idx].atttypid, idx, m_buildOp.keyIndx, m_buildOp.keyNum));
         (*partSource)->init(idx, &desc);
     }
 

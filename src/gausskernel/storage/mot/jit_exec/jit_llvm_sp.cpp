@@ -5105,7 +5105,7 @@ static bool IsSubQueryResultComposite(JitLlvmFunctionCodeGenContext* ctx, int su
     bool result = false;
     if (subQueryId < ctx->m_plan->_query_count) {
         JitCallSitePlan* callSitePlan = &ctx->m_plan->m_callSitePlanList[subQueryId];
-        if ((callSitePlan->m_tupDesc->natts == 1) && (callSitePlan->m_tupDesc->attrs[0]->atttypid == RECORDOID)) {
+        if ((callSitePlan->m_tupDesc->natts == 1) && (callSitePlan->m_tupDesc->attrs[0].atttypid == RECORDOID)) {
             result = true;
         }
     }
@@ -5217,7 +5217,7 @@ static bool ProcessStatementExecSql(JitLlvmFunctionCodeGenContext* ctx, PLpgSQL_
                         break;
                     }
                     JitCallSitePlan* callSitePlan = &ctx->m_plan->m_callSitePlanList[subQueryId];
-                    Oid slotType = callSitePlan->m_tupDesc->attrs[i]->atttypid;
+                    Oid slotType = callSitePlan->m_tupDesc->attrs[i].atttypid;
                     if (!AssignScalarValue(
                             ctx, (PLpgSQL_var*)target, resultVar, resultIsNullVar, slotValue, isNullValue, slotType)) {
                         MOT_LOG_TRACE("Failed to assign scalar value form sub-query");

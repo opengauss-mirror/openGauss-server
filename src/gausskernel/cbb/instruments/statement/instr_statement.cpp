@@ -2815,10 +2815,10 @@ static TupleDesc create_sstmthist_tuple_entry(FunctionCallInfo fcinfo)
         ereport(ERROR, (errmsg("function standby_statement_history does not match relation statement_history.")));
     }
 
-    TupleDesc tmpDesc = CreateTemplateTupleDesc(desc->natts, false, TAM_HEAP);
+    TupleDesc tmpDesc = CreateTemplateTupleDesc(desc->natts, false, TableAmHeap);
     for (int i = 0; i < desc->natts; i++) {
         TupleDescInitEntry(tmpDesc, (AttrNumber)(i + 1), 
-            NameStr(desc->attrs[i]->attname), desc->attrs[i]->atttypid, -1, 0);
+            NameStr(desc->attrs[i].attname), desc->attrs[i].atttypid, -1, 0);
     }
 
     heap_close(rel, AccessShareLock);

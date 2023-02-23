@@ -216,7 +216,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
      * Result tuple slot of Aggregation always contains a virtual tuple,
      * Default tableAMtype for this slot is Heap.
      */
-    ExecAssignResultTypeFromTL(&aggstate->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&aggstate->ss.ps);
 
     aggstate->ss.ps.ps_ProjInfo = ExecBuildVecProjectionInfo(aggstate->ss.ps.targetlist,
         node->plan.qual,
@@ -998,8 +998,8 @@ void BaseAggRunner::build_batch()
     TupleDesc out_desc = outerPlanState(m_runtime)->ps_ResultTupleSlot->tts_tupleDescriptor;
 
     for (i = 0; i < m_cellVarLen; i++) {
-        type_arr[i].typeId = out_desc->attrs[m_cellBatchMap[i]]->atttypid;
-        type_arr[i].typeMod = out_desc->attrs[m_cellBatchMap[i]]->atttypmod;
+        type_arr[i].typeId = out_desc->attrs[m_cellBatchMap[i]].atttypid;
+        type_arr[i].typeMod = out_desc->attrs[m_cellBatchMap[i]].atttypmod;
         type_arr[i].encoded = COL_IS_ENCODE(type_arr[i].typeId);
         if (type_arr[i].encoded) {
             m_keySimple = false;
