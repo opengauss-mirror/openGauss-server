@@ -30,13 +30,96 @@
 #ifndef FRONTEND_PARSER
 #include "postgres.h"
 #include "c.h"
+#include "nodes/nodes.h"
+#include "nodes/pg_list.h"
+
+typedef struct MemoryContextData* MemoryContext;
 
 /*
- * Type MemoryContextData is declared in nodes/memnodes.h.	Most users
- * of memory allocation should just treat it as an abstract type, so we
- * do not provide the struct contents here.
+ * MemoryContext
+ *		A logical context in which memory allocations occur.
+ *
+ * MemoryContext itself is an abstract type that can have multiple
+ * implementations, though for now we have only AllocSetContext.
+ * The function pointers in MemoryContextMethods define one specific
+ * implementation of MemoryContext --- they are a virtual function table
+ * in C++ terms.
+ *
+ * Node types that are actual implementations of memory contexts must
+ * begin with the same fields as MemoryContext.
+ *
+ * Note: for largely historical reasons, typedef MemoryContext is a pointer
+ * to the context struct rather than the struct type itself.
  */
-typedef struct MemoryContextData* MemoryContext;
+typedef struct MemoryContextMethods {
+    void* (*alloc)(MemoryContext context, Size align, Size size, const char* file, int line);
+    /* call this free_p in case someone #define's free() */
+    void (*free_p)(MemoryContext context, void* pointer);
+    void* (*realloc)(MemoryContext context, void* pointer, Size align, Size size, const char* file, int line);
+    void (*init)(MemoryContext context);
+    void (*reset)(MemoryContext context);
+    void (*delete_context)(MemoryContext context);
+    Size (*get_chunk_space)(MemoryContext context, void* pointer);
+    bool (*is_empty)(MemoryContext context);
+    void (*stats)(MemoryContext context, int level);
+#ifdef MEMORY_CONTEXT_CHECKING
+    void (*check)(MemoryContext context);
+#endif
+} MemoryContextMethods;
+
+/*
+ * McxtAllocationMethods
+ *      A virtual function table for memory allocation from memory context.
+ */
+typedef struct McxtAllocationMethods {
+    void *(*alloc_from_context)(MemoryContext context, Size size, const char* file, int line);
+    void *(*alloc_from_context_debug)(MemoryContext context, Size size, const char* file, int line);
+    void *(*alloc_zero_from_context_debug)(MemoryContext context, Size size, const char* file, int line);
+    void *(*alloc_zero_aligned_from_context_debug)(MemoryContext context, Size size, const char* file, int line);
+    void *(*alloc_huge_from_context_debug)(MemoryContext context, Size size, const char* file, int line);
+    void *(*alloc_huge_zero_from_context_debug)(MemoryContext context, Size size, const char* file, int line);
+    void* (*alloc_extend_from_context_debug)(MemoryContext context, Size size, int flags, const char* file, int line);
+    char *(*strdup_from_context_debug)(MemoryContext context, const char* string, const char* file, int line);
+    void *(*alloc_extend)(Size size, int flags);
+    void *(*alloc_noexcept)(Size size);
+} McxtAllocationMethods;
+
+/*
+ * McxtOperationMethods
+ *      A virtual function table for memory-context-type-independent functions.
+ */
+typedef struct McxtOperationMethods {
+    void (*mcxt_reset)(MemoryContext context);
+    void (*mcxt_delete)(MemoryContext context);
+    void (*mcxt_delete_children)(MemoryContext context, List* context_list);
+    void (*mcxt_destroy)(MemoryContext context);
+    void (*mcxt_reset_and_delete_children)(MemoryContext context);
+    void (*mcxt_set_parent)(MemoryContext context, MemoryContext new_parent);
+#ifdef MEMORY_CONTEXT_CHECKING
+    void (*mcxt_check)(MemoryContext context, bool own_by_session);
+#endif
+} McxtOperationMethods;
+
+typedef struct MemoryContextData {
+    NodeTag type;                  /* identifies exact kind of context */
+    bool is_sealed;				   /* sealed context prevent any memory change */
+    bool is_shared;                /* context is shared by threads */
+    bool isReset;                  /* T = no space alloced since last reset */
+    bool allowInCritSection;       /* allow palloc in critical section */
+    MemoryContextMethods* methods; /* virtual function table */
+    McxtAllocationMethods* alloc_methods;
+    McxtOperationMethods* mcxt_methods;
+    MemoryContext parent;          /* NULL if no parent (toplevel context) */
+    MemoryContext firstchild;      /* head of linked list of children */
+    MemoryContext prevchild;       /* previous child of same parent */
+    MemoryContext nextchild;       /* next child of same parent */
+    char* name;                    /* context name (just for debugging) */
+    pthread_rwlock_t lock;         /* lock to protect members if the context is shared */
+    int level;                     /* context level */
+    uint64 session_id;             /* session id of context owner */
+    ThreadId thread_id;            /* thread id of context owner */   
+    ListCell cell;                 /* cell to pointer to this context*/
+} MemoryContextData;
 
 /*
  * CurrentMemoryContext is the default allocation context for palloc().
@@ -53,6 +136,10 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext SelfMemoryContext;
 extern THR_LOCAL PGDLLIMPORT MemoryContext TopMemoryContext;
 #endif /* WIN32 */
 
+#ifdef MEMORY_CONTEXT_CHECKING
+const uint64 BlkMagicNum = 0xDADADADADADADADA;
+const uint32 PremagicNum = 0xBABABABA;
+#endif
 /*
  * Flags for MemoryContextAllocExtended.
  */
@@ -65,65 +152,43 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext TopMemoryContext;
 
 /* Definition for the unchanged interfaces */
 #ifndef MEMORY_CONTEXT_CHECKING
-#define MemoryContextAlloc(context, size) MemoryAllocFromContext(context, size, __FILE__, __LINE__)
+#define MemoryContextAlloc(context, size) \
+    (((MemoryContext)context)->alloc_methods->alloc_from_context(context, size, __FILE__, __LINE__))
 #else
-#define MemoryContextAlloc(context, size) MemoryContextAllocDebug(context, size, __FILE__, __LINE__)
-#endif
-#define MemoryContextAllocZero(context, size) MemoryContextAllocZeroDebug(context, size, __FILE__, __LINE__)
+#define MemoryContextAlloc(context, size) \
+    (((MemoryContext)context)->alloc_methods->alloc_from_context_debug(context, size, __FILE__, __LINE__))
+#endif /* MEMORY_CONTEXT_CHECKING */
+
+#define MemoryContextAllocZero(context, size) \
+    (((MemoryContext)context)->alloc_methods->alloc_zero_from_context_debug(context, size, __FILE__, __LINE__))
 #define MemoryContextAllocZeroAligned(context, size) \
-    MemoryContextAllocZeroAlignedDebug(context, size, __FILE__, __LINE__)
+    (((MemoryContext)context)->alloc_methods->alloc_zero_aligned_from_context_debug(context, size, __FILE__, __LINE__))
 #define MemoryContextAllocExtended(context, size, flags) \
-    MemoryContextAllocExtendedDebug(context, size, flags, __FILE__, __LINE__)
-#define MemoryContextStrdup(context, size) MemoryContextStrdupDebug(context, size, __FILE__, __LINE__)
-#define repalloc(pointer, size) repallocDebug(pointer, size, __FILE__, __LINE__)
-#define repalloc_noexcept(pointer, size) repalloc_noexcept_Debug(pointer, size, __FILE__, __LINE__)
-#define pnstrdup(in, len) pnstrdupDebug(in, len, __FILE__, __LINE__)
+    (((MemoryContext)context)->alloc_methods->alloc_extend_from_context_debug(context, size, flags, __FILE__, __LINE__))
+#define MemoryContextStrdup(context, str) \
+    (((MemoryContext)context)->alloc_methods->strdup_from_context_debug(context, str, __FILE__, __LINE__))
+#define palloc_huge(context, size) \
+    (((MemoryContext)context)->alloc_methods->alloc_huge_from_context_debug(context, size, __FILE__, __LINE__))
+#define palloc0_huge(context, size) \
+    (((MemoryContext)context)->alloc_methods->alloc_huge_zero_from_context_debug(context, size, __FILE__, __LINE__))
 
-#define INSTANCE_GET_MEM_CXT_GROUP  g_instance.mcxt_group->GetMemCxtGroup
-#define THREAD_GET_MEM_CXT_GROUP    t_thrd.mcxt_group->GetMemCxtGroup
-#define SESS_GET_MEM_CXT_GROUP      u_sess->mcxt_group->GetMemCxtGroup
-
-/*
- * Fundamental memory-allocation operations (more are in utils/memutils.h)
- */
-extern void* MemoryAllocFromContext(MemoryContext context, Size size, const char* file, int line);
-extern void* opt_MemoryAllocFromContext(MemoryContext context, Size size);
-extern void* MemoryContextAllocDebug(MemoryContext context, Size size, const char* file, int line);
-extern void* MemoryContextAllocHugeDebug(MemoryContext context, Size size, const char* file, int line);
-extern void* repallocHugeDebug(void* pointer, Size size, const char* file, int line);
-extern void* MemoryContextAllocZeroDebug(MemoryContext context, Size size, const char* file, int line);
-extern void* opt_MemoryContextAllocZeroDebug(MemoryContext context, Size size, const char* file, int line);
-extern void* MemoryContextAllocZeroAlignedDebug(MemoryContext context, Size size, const char* file, int line);
-extern void* MemoryContextAllocExtendedDebug(MemoryContext context, Size size, int flags, const char* file, int line);
-extern void* opt_MemoryContextAllocZeroAlignedDebug(MemoryContext context, Size size, const char* file, int line);
-extern char* MemoryContextStrdupDebug(MemoryContext context, const char* string, const char* file, int line);
-extern void* MemoryContextMemalignAllocDebug(MemoryContext context, Size align, Size size, const char* file, int line);
-extern void MemoryContextMemalignFree(MemoryContext context, void* pointer);
 #ifndef FRONTEND
-extern void* palloc_extended(Size size, int flags);
-extern void* palloc0_noexcept(Size size);
-#define palloc(sz) MemoryContextAlloc(CurrentMemoryContext, (sz))
+#define palloc(sz) \
+    (MemoryContextAlloc(CurrentMemoryContext, (sz)))
+#define palloc_extended(size, flags) \
+    (CurrentMemoryContext->alloc_methods->alloc_extend(size, flags))
 #endif
+
+#define palloc0_noexcept(size) \
+    (CurrentMemoryContext->alloc_methods->alloc_noexcept(size))
+
 #define palloc0(sz) MemoryContextAllocZero(CurrentMemoryContext, (sz))
-
-#define palloc_huge(context, size) MemoryContextAllocHugeDebug(context, size, __FILE__, __LINE__)
-
-#define repalloc_huge(pointer, size) repallocHugeDebug(pointer, size, __FILE__, __LINE__)
-
 #define selfpalloc(sz) MemoryContextAlloc(SelfMemoryContext, (sz))
-
 #define selfpalloc0(sz) MemoryContextAllocZero(SelfMemoryContext, (sz))
-
-#define selfpfree(ptr) pfree((ptr))
-
-#define selfrepalloc(ptr, sz) repalloc((ptr), (sz))
-
 #define selfpstrdup(str) MemoryContextStrdup(SelfMemoryContext, (str))
-
-extern THR_LOCAL MemoryContext AlignMemoryContext;
-#define mem_align_alloc(align, size) \
-    MemoryContextMemalignAllocDebug(AlignMemoryContext, (align), (size), __FILE__, __LINE__)
-#define mem_align_free(ptr) MemoryContextMemalignFree(AlignMemoryContext, (ptr))
+#define pstrdup(str) MemoryContextStrdup(CurrentMemoryContext, (str))
+#define pstrdup_ext(str) \
+    (((str) == NULL) ? NULL : (pstrdup((const char*)(str))))
 
 /*
  * The result of palloc() is always word-aligned, so we can skip testing
@@ -137,8 +202,60 @@ extern THR_LOCAL MemoryContext AlignMemoryContext;
     (MemSetTest(0, sz) ? MemoryContextAllocZeroAligned(CurrentMemoryContext, sz) \
                        : MemoryContextAllocZero(CurrentMemoryContext, sz))
 
+#define repalloc(pointer, size) \
+    repallocDebug(pointer, size, __FILE__, __LINE__)
+#define repalloc_noexcept(pointer, size) \
+    repalloc_noexcept_Debug(pointer, size, __FILE__, __LINE__)
+#define pnstrdup(in, len) \
+    pnstrdupDebug(in, len, __FILE__, __LINE__)
+
+#define INSTANCE_GET_MEM_CXT_GROUP  g_instance.mcxt_group->GetMemCxtGroup
+#define THREAD_GET_MEM_CXT_GROUP    t_thrd.mcxt_group->GetMemCxtGroup
+#define SESS_GET_MEM_CXT_GROUP      u_sess->mcxt_group->GetMemCxtGroup
+
+/*
+ * Fundamental memory-allocation operations (more are in utils/memutils.h)
+ */
+extern void* MemoryAllocFromContext(MemoryContext context, Size size, const char* file, int line);
+extern void* MemoryContextAllocDebug(MemoryContext context, Size size, const char* file, int line);
+extern void* MemoryContextAllocHugeDebug(MemoryContext context, Size size, const char* file, int line);
+extern void* MemoryContextAllocHugeZeroDebug(MemoryContext context, Size size, const char* file, int line);
+extern void* repallocHugeDebug(void* pointer, Size size, const char* file, int line);
+extern void* MemoryContextAllocZeroDebug(MemoryContext context, Size size, const char* file, int line);
+extern void* MemoryContextAllocZeroAlignedDebug(MemoryContext context, Size size, const char* file, int line);
+extern void* MemoryContextAllocExtendedDebug(MemoryContext context, Size size, int flags, const char* file, int line);
+extern char* MemoryContextStrdupDebug(MemoryContext context, const char* string, const char* file, int line);
+extern void* MemoryContextMemalignAllocDebug(MemoryContext context, Size align, Size size, const char* file, int line);
+extern void MemoryContextMemalignFree(MemoryContext context, void* pointer);
+extern void* std_palloc_extended(Size size, int flags);
+extern void* std_palloc0_noexcept(Size size);
+
+extern void* opt_MemoryAllocFromContext(MemoryContext context, Size size, const char* file, int line);
+#define opt_MemoryContextAllocDebug(context, size, file, line) \
+    opt_MemoryAllocFromContext(context, size, file, line)
+#define opt_MemoryContextAllocHugeDebug(context, size, file, line) \
+    opt_MemoryAllocFromContext(context, size, file, line)
+extern void* opt_MemoryContextAllocHugeZeroDebug(MemoryContext context, Size size, const char* file, int line);
+extern void* opt_MemoryContextAllocZeroDebug(MemoryContext context, Size size, const char* file, int line);
+extern void* opt_MemoryContextAllocZeroAlignedDebug(MemoryContext context, Size size, const char* file, int line);
+extern void* opt_MemoryContextAllocExtendedDebug(MemoryContext context, Size size, int flags, const char* file, int line);
+extern char* opt_MemoryContextStrdupDebug(MemoryContext context, const char* string, const char* file, int line);
+extern void* opt_palloc_extended(Size size, int flags);
+extern void* opt_palloc0_noexcept(Size size);
+
+#define repalloc_huge(pointer, size) repallocHugeDebug(pointer, size, __FILE__, __LINE__)
+
+#define selfrepalloc(ptr, sz) repalloc((ptr), (sz))
+
+extern THR_LOCAL MemoryContext AlignMemoryContext;
+#define mem_align_alloc(align, size) \
+    MemoryContextMemalignAllocDebug(AlignMemoryContext, (align), (size), __FILE__, __LINE__)
+#define mem_align_free(ptr) MemoryContextMemalignFree(AlignMemoryContext, (ptr))
+
 extern void pfree(void* pointer);
 extern void opt_pfree(void* pointer);
+
+#define selfpfree(ptr) pfree((ptr))
 
 template <typename T>
 bool isConst(T& x)
@@ -196,11 +313,6 @@ extern MemoryContext MemoryContextSwitchTo(MemoryContext context);
  * allocated in a context, not with malloc().
  */
 extern char* MemoryContextStrdupDebug(MemoryContext context, const char* string, const char* file, int line);
-
-#define pstrdup(str) MemoryContextStrdup(CurrentMemoryContext, (str))
-
-#define pstrdup_ext(str) \
-    (((str) == NULL) ? NULL : (pstrdup((const char*)(str))))
 
 extern char* pnstrdupDebug(const char* in, Size len, const char* file, int line);
 

@@ -128,7 +128,16 @@ EState* CreateExecutorState(MemoryContext saveCxt)
      */
     oldcontext = MemoryContextSwitchTo(qcontext);
 
+    /*
+     * estate->first_autoinc is int128, when compiled with CLAGS=-O2 on some
+     * platforms, using the Movaps directive requires 16-byte alignment.
+     */
+#ifdef __aarch64__
     estate = makeNode(EState);
+#else
+    estate = (EState *) palloc0(sizeof(EState) + 16);
+    estate = (EState *) TYPEALIGN(16, estate);
+#endif  /* __aarch64__ */
 
     /*
      * Initialize all fields of the Executor State structure

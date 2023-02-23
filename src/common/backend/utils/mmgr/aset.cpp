@@ -133,8 +133,6 @@
 #endif
 
 #ifdef MEMORY_CONTEXT_CHECKING
-const uint64 BlkMagicNum = 0xDADADADADADADADA;
-const uint32 PremagicNum = 0xBABABABA;
 const uint32 PosmagicNum = 0xDCDCDCDC;
 typedef struct AllocMagicData {
     void* aset;
@@ -370,13 +368,6 @@ MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* 
     _in_ Size initBlockSize, _in_ Size maxBlockSize, _in_ MemoryContextType contextType, _in_ Size maxSize,
     _in_ bool isSession)
 {
-    /* The following situation is forbidden, parent context is not shared, while current context is shared. */
-    if (parent != NULL && !parent->is_shared && contextType == SHARED_CONTEXT) {
-        ereport(ERROR,
-            (errcode(ERRCODE_OPERATE_FAILED),
-                errmsg("Failed while creating shared memory context \"%s\" from standard context\"%s\".",
-                    name, parent->name)));
-    }
     switch (contextType) {
 #ifndef ENABLE_MEMORY_CHECK
         case STANDARD_CONTEXT: {
@@ -388,6 +379,14 @@ MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* 
             }
         }
         case SHARED_CONTEXT:
+            /* The following situation is forbidden, parent context is not shared, while current context is shared. */
+            if (parent != NULL && !parent->is_shared && contextType == SHARED_CONTEXT) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_OPERATE_FAILED),
+                        errmsg("Failed while creating shared memory context \"%s\" from standard context\"%s\".",
+                            name, parent->name)));
+            }
+
             return GenericMemoryAllocator::AllocSetContextCreate(
                 parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, false);
 #else
@@ -395,6 +394,14 @@ MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* 
             return AsanMemoryAllocator::AllocSetContextCreate(
                 parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
         case SHARED_CONTEXT:
+            /* The following situation is forbidden, parent context is not shared, while current context is shared. */
+            if (parent != NULL && !parent->is_shared && contextType == SHARED_CONTEXT) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_OPERATE_FAILED),
+                        errmsg("Failed while creating shared memory context \"%s\" from standard context\"%s\".",
+                            name, parent->name)));
+            }
+
             return AsanMemoryAllocator::AllocSetContextCreate(
                 parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, false);
 #endif

@@ -125,8 +125,6 @@
  * --------------------
  */
 
-#define ALLOC_MAGICHDRSZ 0
-
 /*
  * AllocPointerIsValid
  *		True iff pointer is valid allocation pointer.
@@ -228,6 +226,9 @@ static void opt_AllocSetDelete(MemoryContext context);
 static Size opt_AllocSetGetChunkSpace(MemoryContext context, void* pointer);
 static bool opt_AllocSetIsEmpty(MemoryContext context);
 static void opt_AllocSetStats(MemoryContext context, int level);
+#ifdef MEMORY_CONTEXT_CHECKING
+static void opt_AllocSetCheck(MemoryContext context);
+#endif
 
 /*
  * Public routines
@@ -242,12 +243,31 @@ static MemoryContextMethods AllocSetMethods = {
     opt_AllocSetGetChunkSpace,
     opt_AllocSetIsEmpty,
     opt_AllocSetStats
+#ifdef MEMORY_CONTEXT_CHECKING
+    ,opt_AllocSetCheck
+#endif
 };
 
-MemoryContextMethods *get_AllocSetMethods()
+#ifdef MEMORY_CONTEXT_CHECKING
+static inline void
+set_sentinel(void *base, Size offset)
 {
-    return &AllocSetMethods;
+    char	   *ptr = (char *) base + offset;
+
+    *ptr = 0x7E;
 }
+
+static inline bool
+sentinel_ok(const void *base, Size offset)
+{
+    const char *ptr = (const char *) base + offset;
+    bool		ret;
+
+    ret = *ptr == 0x7E;
+
+    return ret;
+}
+#endif
 
 /*
  * AllocSetContextCreate
@@ -515,8 +535,7 @@ static void* opt_AllocSetAlloc(MemoryContext context, Size align, Size size, con
 
     AssertArg(AllocSetIsValid(set));
     AssertArg(align == 0);
-
-    size += ALLOC_MAGICHDRSZ;
+    AssertArg(MemoryContextIsValid(context));
 
     /*
      * If requested size exceeds maximum for chunks, allocate an entire block
@@ -535,6 +554,9 @@ static void* opt_AllocSetAlloc(MemoryContext context, Size align, Size size, con
         block->aset = set;
         block->freeptr = block->endptr = ((char*)block) + blksize;
         block->allocSize = blksize;
+#ifdef MEMORY_CONTEXT_CHECKING
+        block->magicNum = BlkMagicNum;
+#endif
 
         /* enlarge total space only. */
         set->totalSpace += blksize;
@@ -542,6 +564,17 @@ static void* opt_AllocSetAlloc(MemoryContext context, Size align, Size size, con
         chunk = (AllocChunk)(((char*)block) + ALLOC_BLOCKHDRSZ);
         chunk->aset = set;
         chunk->size = chunk_size;
+#ifdef MEMORY_CONTEXT_CHECKING
+        chunk->requested_size = size;
+        chunk->prenum = PremagicNum;
+        /* set mark to catch clobber of "unused" space */
+        if (size < chunk_size)
+            set_sentinel(AllocChunkGetPointer(chunk), size);
+#endif
+#ifdef MEMORY_CONTEXT_TRACK
+        chunk->file = file;
+        chunk->line = line;
+#endif
 
         /*
          * Stick the new block underneath the active allocation block, so that
@@ -579,6 +612,17 @@ static void* opt_AllocSetAlloc(MemoryContext context, Size align, Size size, con
         set->freelist[fidx] = (AllocChunk)chunk->aset;
 
         chunk->aset = (void*)set;
+#ifdef MEMORY_CONTEXT_CHECKING
+        chunk->requested_size = size;
+        chunk->prenum = PremagicNum;
+        /* set mark to catch clobber of "unused" space */
+        if (size < chunk->size)
+            set_sentinel(AllocChunkGetPointer(chunk), size);
+#endif
+#ifdef MEMORY_CONTEXT_TRACK
+        chunk->file = file;
+        chunk->line = line;
+#endif
 
         set->freeSpace -= (chunk->size + ALLOC_CHUNKHDRSZ);
 
@@ -632,6 +676,14 @@ static void* opt_AllocSetAlloc(MemoryContext context, Size align, Size size, con
                 availspace -= (availchunk + ALLOC_CHUNKHDRSZ);
 
                 chunk->size = availchunk;
+#ifdef MEMORY_CONTEXT_CHECKING
+                chunk->requested_size = 0;
+                chunk->prenum = 0;
+#endif
+#ifdef MEMORY_CONTEXT_TRACK
+                chunk->file = file;
+                chunk->line = line;
+#endif
                 chunk->aset = (void*)set->freelist[a_fidx];
                 set->freelist[a_fidx] = chunk;
             }
@@ -674,6 +726,9 @@ static void* opt_AllocSetAlloc(MemoryContext context, Size align, Size size, con
         block->freeptr = ((char*)block) + ALLOC_BLOCKHDRSZ;
         block->endptr = ((char*)block) + blksize;
         block->allocSize = blksize;
+#ifdef MEMORY_CONTEXT_CHECKING
+        block->magicNum = BlkMagicNum;
+#endif
 
         set->totalSpace += blksize;
         set->freeSpace += blksize - ALLOC_BLOCKHDRSZ;
@@ -710,6 +765,17 @@ static void* opt_AllocSetAlloc(MemoryContext context, Size align, Size size, con
 
     chunk->aset = (void*)set;
     chunk->size = chunk_size;
+#ifdef MEMORY_CONTEXT_CHECKING
+    chunk->requested_size = size;
+    chunk->prenum = PremagicNum;
+    /* set mark to catch clobber of "unused" space */
+    if (size < chunk_size)
+        set_sentinel(AllocChunkGetPointer(chunk), size);
+#endif
+#ifdef MEMORY_CONTEXT_TRACK
+    chunk->file = file;
+    chunk->line = line;
+#endif
 
     return AllocChunkGetPointer(chunk);
 #endif
@@ -765,8 +831,10 @@ static void opt_AllocSetFree(MemoryContext context, void* pointer)
         int fidx = opt_AllocSetFreeIndex(chunk->size);
 
         chunk->aset = (void*)set->freelist[fidx];
+#ifdef MEMORY_CONTEXT_CHECKING
+        chunk->requested_size = 0;
+#endif
         set->freeSpace += chunk->size + ALLOC_CHUNKHDRSZ;
-
         set->freelist[fidx] = chunk;
         Assert(chunk->aset != set);
     }
@@ -793,8 +861,10 @@ static void* opt_AllocSetRealloc(MemoryContext context, void* pointer, Size alig
      * allocated area already is >= the new size.  (In particular, we always
      * fall out here if the requested size is a decrease.)
      */
-    if (oldsize >= (size + ALLOC_MAGICHDRSZ)) {
-        size += ALLOC_MAGICHDRSZ;
+    if (oldsize >= size) {
+#ifdef MEMORY_CONTEXT_CHECKING
+        chunk->requested_size = size;
+#endif
         return pointer;
     }
 
@@ -811,8 +881,6 @@ static void* opt_AllocSetRealloc(MemoryContext context, void* pointer, Size alig
         AllocBlock oldBlock = NULL;
         Size chksize;
         Size blksize;
-
-        size += ALLOC_MAGICHDRSZ;
 
         /*
          * Try to verify that we have a sane block pointer: it should
@@ -844,7 +912,9 @@ static void* opt_AllocSetRealloc(MemoryContext context, void* pointer, Size alig
         if (block->next)
             block->next->prev = block;
         chunk->size = chksize;
-
+#ifdef MEMORY_CONTEXT_CHECKING
+        chunk->requested_size = size;
+#endif
         return AllocChunkGetPointer(chunk);
     }
 #ifndef ENABLE_MEMORY_CHECK
@@ -952,3 +1022,115 @@ static void opt_AllocSetStats(MemoryContext context, int level)
         totalspace - freespace);
 }
 
+
+#ifdef MEMORY_CONTEXT_CHECKING
+/*
+ * opt_AllocSetCheck
+ *		Walk through chunks and check consistency of memory.
+ *
+ * NOTE: report errors as WARNING, *not* ERROR or FATAL.  Otherwise you'll
+ * find yourself in an infinite loop when trouble occurs, because this
+ * routine will be entered again when elog cleanup tries to release memory!
+ */
+static void
+opt_AllocSetCheck(MemoryContext context)
+{
+    AllocSet	set = (AllocSet) context;
+    const char *name = set->header.name;
+    AllocBlock	prevblock;
+    AllocBlock	block;
+    Size		total_allocated = 0;
+
+    for (prevblock = NULL, block = set->blocks;
+         block != NULL;
+         prevblock = block, block = block->next)
+    {
+        char	   *bpoz = ((char *) block) + ALLOC_BLOCKHDRSZ;
+        long		blk_used = block->freeptr - bpoz;
+        long		blk_data = 0;
+        long		nchunks = 0;
+
+        if (set->keeper == block)
+            total_allocated += block->endptr - ((char *) set);
+        else
+            total_allocated += block->endptr - ((char *) block);
+
+        /*
+         * Empty block - empty can be keeper-block only
+         */
+        if (!blk_used)
+        {
+            if (set->keeper != block)
+                elog(WARNING, "problem in alloc set %s: empty block %p",
+                     name, block);
+        }
+
+        /*
+         * Check block header fields
+         */
+        if (block->aset != set ||
+            block->prev != prevblock ||
+            block->freeptr < bpoz ||
+            block->freeptr > block->endptr)
+            elog(WARNING, "problem in alloc set %s: corrupt header in block %p",
+                 name, block);
+
+        /*
+         * Chunk walker
+         */
+        while (bpoz < block->freeptr)
+        {
+            AllocChunk	chunk = (AllocChunk) bpoz;
+            Size		chsize,
+                        dsize;
+
+            chsize = chunk->size;	/* aligned chunk size */
+            dsize = chunk->requested_size;	/* real data */
+
+            /*
+             * Check chunk size
+             */
+            if (dsize > chsize)
+                elog(WARNING, "problem in alloc set %s: req size > alloc size for chunk %p in block %p",
+                     name, chunk, block);
+            if (chsize < (1 << ALLOC_MINBITS))
+                elog(WARNING, "problem in alloc set %s: bad size %zu for chunk %p in block %p",
+                     name, chsize, chunk, block);
+
+            /* single-chunk block? */
+            if (chsize > set->allocChunkLimit &&
+                chsize + ALLOC_CHUNKHDRSZ != blk_used)
+                elog(WARNING, "problem in alloc set %s: bad single-chunk %p in block %p",
+                     name, chunk, block);
+
+            /*
+             * If chunk is allocated, check for correct aset pointer. (If it's
+             * free, the aset is the freelist pointer, which we can't check as
+             * easily...)  Note this is an incomplete test, since palloc(0)
+             * produces an allocated chunk with requested_size == 0.
+             */
+            if (dsize > 0 && chunk->aset != (void *) set)
+                elog(WARNING, "problem in alloc set %s: bogus aset link in block %p, chunk %p",
+                     name, block, chunk);
+
+            /*
+             * Check for overwrite of padding space in an allocated chunk.
+             */
+            if (chunk->aset == (void *) set && dsize < chsize &&
+                !sentinel_ok(chunk, ALLOC_CHUNKHDRSZ + dsize))
+                elog(WARNING, "problem in alloc set %s: detected write past chunk end in block %p, chunk %p",
+                     name, block, chunk);
+
+            blk_data += chsize;
+            nchunks++;
+
+            bpoz += ALLOC_CHUNKHDRSZ + chsize;
+        }
+
+        if ((blk_data + (nchunks * ALLOC_CHUNKHDRSZ)) != blk_used)
+            elog(WARNING, "problem in alloc set %s: found inconsistent memory block %p",
+                 name, block);
+    }
+}
+
+#endif							/* MEMORY_CONTEXT_CHECKING */

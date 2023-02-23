@@ -93,18 +93,20 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext ErrorContext;
  * Memory-context-type-independent functions in mcxt.c
  */
 extern void MemoryContextInit(void);
-extern void MemoryContextReset(MemoryContext context);
-extern void opt_MemoryContextReset(MemoryContext context);
-extern void MemoryContextDelete(MemoryContext context);
-extern void opt_MemoryContextDeleteInternal(MemoryContext context, List* context_list = NULL);
+#define MemoryContextReset(context) \
+    (((MemoryContext)context)->mcxt_methods->mcxt_reset(context))
+#define MemoryContextDelete(context) \
+    (((MemoryContext)context)->mcxt_methods->mcxt_delete(context))
+#define MemoryContextDeleteChildren(context, list) \
+    (((MemoryContext)context)->mcxt_methods->mcxt_delete_children(context, list))
+#define MemoryContextDestroyAtThreadExit(context) \
+    (((MemoryContext)context)->mcxt_methods->mcxt_destroy(context))
+#define MemoryContextResetAndDeleteChildren(context) \
+    (((MemoryContext)context)->mcxt_methods->mcxt_reset_and_delete_children(context))
+#define MemoryContextSetParent(context, new_parent) \
+    (((MemoryContext)context)->mcxt_methods->mcxt_set_parent(context, new_parent))
+
 extern void MemoryContextResetChildren(MemoryContext context);
-extern void MemoryContextDeleteChildren(MemoryContext context, List* context_list = NULL);
-extern void MemoryContextDestroyAtThreadExit(MemoryContext context);
-extern void MemoryContextResetAndDeleteChildren(MemoryContext context);
-extern void MemoryContextSetParent(MemoryContext context, MemoryContext new_parent);
-extern void opt_MemoryContextSetParent(MemoryContext context, MemoryContext new_parent);
-extern Size GetMemoryChunkSpace(void* pointer);
-extern MemoryContext GetMemoryChunkContext(void* pointer);
 extern MemoryContext MemoryContextGetParent(MemoryContext context);
 extern bool MemoryContextIsEmpty(MemoryContext context);
 extern void MemoryContextStats(MemoryContext context);
@@ -112,15 +114,35 @@ extern void MemoryContextSeal(MemoryContext context);
 extern void MemoryContextUnSeal(MemoryContext context);
 extern void MemoryContextUnSealChildren(MemoryContext context);
 extern void MemoryContextAllowInCriticalSection(MemoryContext context, bool allow);
+extern bool MemoryContextContains(MemoryContext context, void* pointer);
+extern MemoryContext MemoryContextOriginal(const char* node);
+extern Size GetMemoryChunkSpace(void* pointer);
+extern MemoryContext GetMemoryChunkContext(void* pointer);
 
 #ifdef MEMORY_CONTEXT_CHECKING
-extern void MemoryContextCheck(MemoryContext context, bool own_by_session);
+#define MemoryContextCheck(context, own_by_session) \
+    (((MemoryContext)context)->mcxt_methods->mcxt_check(context, own_by_session))
 #define MemoryContextCheck2(mctx)
 #endif
 
-extern bool MemoryContextContains(MemoryContext context, void* pointer);
+extern void std_MemoryContextReset(MemoryContext context);
+extern void std_MemoryContextDelete(MemoryContext context);
+extern void std_MemoryContextDeleteChildren(MemoryContext context, List* context_list = NULL);
+extern void std_MemoryContextDestroyAtThreadExit(MemoryContext context);
+extern void std_MemoryContextResetAndDeleteChildren(MemoryContext context);
+extern void std_MemoryContextSetParent(MemoryContext context, MemoryContext new_parent);
+extern void std_MemoryContextCheck(MemoryContext context, bool own_by_session);
 
-extern MemoryContext MemoryContextOriginal(const char* node);
+extern void opt_MemoryContextReset(MemoryContext context);
+extern void opt_MemoryContextDelete(MemoryContext context);
+extern void opt_MemoryContextDeleteChildren(MemoryContext context, List* context_list = NULL);
+extern void opt_MemoryContextDestroyAtThreadExit(MemoryContext context);
+#define opt_MemoryContextResetAndDeleteChildren(context) \
+    opt_MemoryContextReset(context)
+extern void opt_MemoryContextSetParent(MemoryContext context, MemoryContext new_parent);
+#ifdef MEMORY_CONTEXT_CHECKING
+extern void opt_MemoryContextCheck(MemoryContext context, bool own_by_session);
+#endif
 
 /*
  * This routine handles the context-type-independent part of memory

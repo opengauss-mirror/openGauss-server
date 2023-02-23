@@ -51,9 +51,6 @@
  */
 
 extern void MemoryContextControlSet(AllocSet context, const char* name);
-#ifdef MEMORY_CONTEXT_CHECKING
-const uint64 BlkMagicNum = 0xDADADADADADADADA;
-#endif
 
 /*
  * AllocPointerIsValid

@@ -1611,7 +1611,7 @@ void free_session_context(knl_session_context* session)
         MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
     }
 
-    MemoryContextDeleteChildren(session->top_mem_cxt);
+    MemoryContextDeleteChildren(session->top_mem_cxt, NULL);
     MemoryContextDelete(session->top_mem_cxt);
     (void)syscalllockFree(&session->utils_cxt.deleMemContextMutex);
     pfree_ext(session);
