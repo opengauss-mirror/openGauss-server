@@ -9684,7 +9684,7 @@ void StartupXLOG(void)
      * in SS Switchover, skip dw init since we didn't do ShutdownXLOG
      */
 
-    if ((ENABLE_REFORM && SS_REFORM_REFORMER && !SSFAILOVER_TRIGGER && !SS_PRIMARY_DEMOTED) ||
+    if ((ENABLE_REFORM && SS_REFORM_REFORMER && !SSFAILOVER_TRIGGER && !SS_PERFORMING_SWITCHOVER) ||
         !ENABLE_DMS || !ENABLE_REFORM) {
         /* process assist file of chunk recycling */
         dw_ext_init();
@@ -9694,7 +9694,7 @@ void StartupXLOG(void)
         }
     }
 
-    if (SS_REFORM_PARTNER && SS_STANDBY_PROMOTING) {
+    if (SS_REFORM_REFORMER && SS_STANDBY_PROMOTING) {
         ss_switchover_promoting_dw_init();
     }
 
@@ -11873,7 +11873,7 @@ void CreateCheckPoint(int flags)
     }
 
     /* allow standby do checkpoint only after it has promoted AND has finished recovery. */
-    if (ENABLE_DMS && SS_STANDBY_MODE && !(SS_STANDBY_PROMOTING && !RecoveryInProgress())) {
+    if (ENABLE_DMS && SS_STANDBY_MODE) {
         return;
     } else if (SSFAILOVER_TRIGGER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do not do CreateCheckpoint during failover")));

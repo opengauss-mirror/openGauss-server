@@ -90,8 +90,8 @@ typedef struct SSBroadcasDbBackendsAck {
 Snapshot SSGetSnapshotData(Snapshot snapshot);
 CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest,
     Snapshot snapshot, bool* sync);
-bool SSTransactionIdDidCommit(TransactionId transactionId, bool *ret_did_commit);
-bool SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress);
+void SSTransactionIdDidCommit(TransactionId transactionId, bool *ret_did_commit);
+void SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress);
 TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2);
 bool SSGetOldestXminFromAllStandby();
 int SSGetOldestXmin(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);

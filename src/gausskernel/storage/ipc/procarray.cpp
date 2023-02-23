@@ -1295,18 +1295,13 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
         return false;
     }
 
-    while (ENABLE_DMS) {
-        if (SS_IN_REFORM && !SS_PRIMARY_DEMOTING) {
-            pg_usleep(USECS_PER_SEC);
-            continue;
-        } else if (SS_NORMAL_STANDBY) {
+    if (ENABLE_DMS) {
+        /* fetch TXN info locally if either reformer, original primary, or normal primary */
+        bool local_fetch = SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY;
+        if (!local_fetch) {
             bool in_progress = true;
-            if (SSTransactionIdIsInProgress(xid, &in_progress)) {
-                return in_progress;
-            }
-            continue;
-        } else {
-            break;
+            SSTransactionIdIsInProgress(xid, &in_progress);
+            return in_progress;
         }
     }
 
@@ -1920,15 +1915,21 @@ RETRY:
         }
 
         Snapshot result;
-        if (SS_STANDBY_MODE) {
-            result = SSGetSnapshotData(snapshot);
-        } else {
-            result = GetLocalSnapshotData(snapshot);
-            snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+        if (ENABLE_DMS) {
             if (SS_IN_REFORM) {
                 ereport(ERROR, (errmsg("failed to request snapshot as current node is in reform!")));
                 return NULL;
             }
+            /* fetch TXN info locally if either reformer, original primary, or normal primary */
+            if (SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY) {
+                result = GetLocalSnapshotData(snapshot);
+                snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+            } else {
+                result = SSGetSnapshotData(snapshot);
+            } 
+        } else {
+           result = GetLocalSnapshotData(snapshot);
+                snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo); 
         }
 
         if (result) {

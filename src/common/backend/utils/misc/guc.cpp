@@ -11315,7 +11315,7 @@ static bool check_default_transaction_isolation(int *newval, void **extra, GucSo
 
 static bool check_enable_stmt_track(bool *newval, void **extra, GucSource source)
 {
-    if (ENABLE_DMS && !SS_MY_INST_IS_MASTER) {
+    if (ENABLE_DMS && !SS_OFFICIAL_PRIMARY) {
         *newval = false;
     }
     return true;

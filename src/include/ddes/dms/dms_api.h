@@ -574,6 +574,7 @@ typedef void (*dms_set_switchover_result)(void *db_handle, int result);
 typedef void (*dms_set_db_standby)(void *db_handle);
 typedef int (*dms_mount_to_recovery)(void *db_handle, unsigned int *has_offline);
 typedef int(*dms_get_open_status)(void *db_handle);
+typedef void (*dms_reform_set_dms_role)(void *db_handle, unsigned int reformer_id);
 
 // for openGauss
 typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
@@ -634,6 +635,7 @@ typedef struct st_dms_callback {
     dms_opengauss_recovery_standby opengauss_recovery_standby;
     dms_opengauss_recovery_primary opengauss_recovery_primary;
     dms_reform_start_notify reform_start_notify;
+    dms_reform_set_dms_role reform_set_dms_role;
 
     dms_get_page_hash_val get_page_hash_val;
     dms_get_page_lsn get_page_lsn;
@@ -791,7 +793,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           50
+#define DMS_LOCAL_VERSION           51
 
 #ifdef __cplusplus
 }

@@ -44,7 +44,7 @@ Snapshot SSGetSnapshotData(Snapshot snapshot)
     }
 
     do {
-        dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_MASTER_ID;
+        dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
         if (dms_request_opengauss_txn_snapshot(&dms_ctx, &dms_snapshot) == DMS_SUCCESS) {
             break;
         }
@@ -76,7 +76,7 @@ static int SSTransactionIdGetCSN(dms_opengauss_xid_csn_t *dms_txn_info, dms_open
 {
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
-    dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
+    dms_ctx.xid_ctx.inst_id = (unsigned char)SS_PRIMARY_ID;
 
     return dms_request_opengauss_xid_csn(&dms_ctx, dms_txn_info, xid_csn_result);
 }
@@ -168,7 +168,7 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
  * xid -> clog status
  * true if given transaction committed
  */
-bool SSTransactionIdDidCommit(TransactionId transactionId, bool* ret_did_commit)
+void SSTransactionIdDidCommit(TransactionId transactionId, bool* ret_did_commit)
 {
     bool did_commit = false;
     bool remote_get = false;
@@ -195,7 +195,7 @@ bool SSTransactionIdDidCommit(TransactionId transactionId, bool* ret_did_commit)
         dms_ctx.xid_ctx.xid = *(uint64 *)(&transactionId);
 
         do {
-            dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
+            dms_ctx.xid_ctx.inst_id = (unsigned char)SS_PRIMARY_ID;
             if (dms_request_opengauss_txn_status(&dms_ctx, (uint8)XID_COMMITTED, (uint8 *)&did_commit)
                 == DMS_SUCCESS) {
                 remote_get = true;
@@ -207,10 +207,7 @@ bool SSTransactionIdDidCommit(TransactionId transactionId, bool* ret_did_commit)
                 if (SS_IN_REFORM &&
                     (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                     ereport(FATAL, (errmsg("SSTransactionIdDidCommit failed during reform, xid=%lu.", transactionId)));
-                } else if (SS_IN_REFORM) {
-                    return false;
                 }
-
                 pg_usleep(USECS_PER_SEC);
                 continue;
             }
@@ -224,19 +221,18 @@ bool SSTransactionIdDidCommit(TransactionId transactionId, bool* ret_did_commit)
         t_thrd.xact_cxt.latestFetchXidStatus = CLOG_XID_STATUS_COMMITTED;
     }
     *ret_did_commit = did_commit;
-    return true;
 }
 
 /* xid -> clog status */
 /* true if given transaction in progress */
-bool SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress)
+void SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress)
 {
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
     dms_ctx.xid_ctx.xid = *(uint64 *)(&transactionId);   
 
     do {
-        dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
+        dms_ctx.xid_ctx.inst_id = (unsigned char)SS_PRIMARY_ID;
         if (dms_request_opengauss_txn_status(&dms_ctx, (uint8)XID_INPROGRESS, (uint8 *)in_progress) == DMS_SUCCESS) {
             ereport(DEBUG1, (errmsg("SS get txn in_progress success, xid=%lu, in_progress=%d.",
                 transactionId, *in_progress)));
@@ -245,14 +241,11 @@ bool SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress)
             if (SS_IN_REFORM &&
                 (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                 ereport(FATAL, (errmsg("SSTransactionIdIsInProgress failed during reform, xid=%lu.", transactionId)));
-            } else if (SS_IN_REFORM) {
-                return false;
             }
             pg_usleep(USECS_PER_SEC);
             continue;
         }
     } while (true);
-    return true;
 }
 
 TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2)
@@ -262,7 +255,7 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
     InitDmsContext(&dms_ctx);
 
     dms_ctx.xid_ctx.xid = *(uint64 *)(&xmax);
-    dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
+    dms_ctx.xid_ctx.inst_id = (unsigned char)SS_PRIMARY_ID;
 
     do {
         if (dms_request_opengauss_update_xid(&dms_ctx, t_infomask, t_infomask2, (unsigned long long *)&update_xid)
