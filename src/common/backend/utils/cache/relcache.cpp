@@ -7168,6 +7168,10 @@ static void free_aligned_buffer()
  */
 static bool load_relcache_init_file(bool shared)
 {
+    if (ENABLE_DMS) {
+        return false;
+    }
+
     FILE* fp = NULL;
     char initfilename[MAXPGPATH];
     Relation* rels = NULL;
@@ -7586,7 +7590,7 @@ read_failed:
  */
 static void write_relcache_init_file(bool shared)
 {
-    if (SS_STANDBY_MODE) {
+    if (ENABLE_DSS || SS_STANDBY_MODE) {
         return;
     }
 
