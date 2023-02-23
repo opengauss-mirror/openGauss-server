@@ -67,8 +67,14 @@ static DestReceiver donothingDR = {donothingReceive, donothingStartup, donothing
 
 static DestReceiver debugtupDR = {debugtup, debugStartup, donothingCleanup, donothingCleanup, DestDebug};
 
-static DestReceiver spi_printtupDR = {spi_printtup, spi_dest_startup, donothingCleanup, donothingCleanup, DestSPI};
-
+void InitSpiPrinttupDR(DestReceiver* dr)
+{
+    dr->receiveSlot = spi_printtup;
+    dr->rStartup = spi_dest_startup;
+    dr->rShutdown = donothingCleanup;
+    dr->rDestroy = donothingCleanup;
+    dr->mydest = DestSPI;
+}
 /* Globally available receiver for DestNone */
 DestReceiver* None_Receiver = &donothingDR;
 
@@ -118,7 +124,8 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
             return &debugtupDR;
 
         case DestSPI:
-            return &spi_printtupDR;
+            u_sess->utils_cxt.spi_printtupDR->mydest = DestSPI;
+            return u_sess->utils_cxt.spi_printtupDR;
 
         case DestSPITupleAnalyze:
             return createAnalyzeSPIDestReceiver(dest);

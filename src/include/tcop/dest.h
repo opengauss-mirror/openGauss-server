@@ -169,5 +169,7 @@ extern void NullCommand(CommandDest dest);
 extern void ReadyForQuery(CommandDest dest);
 extern void ReadyForQuery_noblock(CommandDest dest, int timeout);
 
+extern void InitSpiPrinttupDR(DestReceiver* dr);
+
 #endif /* !FRONTEND_PARSER */
 #endif /* DEST_H */

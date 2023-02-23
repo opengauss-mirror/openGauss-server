@@ -276,7 +276,7 @@ test: single_node_produce_commit_rollback
 test: single_node_function_commit_rollback
 
 test: instr_unique_sql
-test: auto_explain
+test: auto_explain plan_table_for_anonymous_block
 test: shutdown
 
 # List/Hash table exchange
@@ -1048,5 +1048,4 @@ test: show_warnings
 # partition expression key
 test: partition_expr_key
 test: alter_foreign_schema
-
 
