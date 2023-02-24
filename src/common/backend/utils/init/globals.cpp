@@ -170,6 +170,8 @@ const uint32 FDW_SUPPORT_JOIN_AGG_VERSION_NUM = 92839;
 
 const uint32 UNION_NULL_VERSION_NUM = 92841;
 
+const uint32 CREATE_INDEX_IF_NOT_EXISTS_VERSION_NUM = 92843;
+
 #ifdef PGXC
 bool useLocalXid = false;
 #endif

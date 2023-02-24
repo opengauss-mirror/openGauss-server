@@ -5544,6 +5544,9 @@ static IndexStmt* _readIndexStmt()
 {
     READ_LOCALS(IndexStmt);
 
+    IF_EXIST(missing_ok) {
+        READ_BOOL_FIELD(missing_ok);
+    }
     READ_STRING_FIELD(schemaname);
     READ_STRING_FIELD(idxname);
     READ_NODE_FIELD(relation);

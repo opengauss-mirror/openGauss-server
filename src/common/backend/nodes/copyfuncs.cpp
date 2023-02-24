@@ -5212,6 +5212,7 @@ static IndexStmt* _copyIndexStmt(const IndexStmt* from)
 {
     IndexStmt* newnode = makeNode(IndexStmt);
 
+    COPY_SCALAR_FIELD(missing_ok);
     COPY_STRING_FIELD(schemaname);
     COPY_STRING_FIELD(idxname);
     COPY_NODE_FIELD(relation);

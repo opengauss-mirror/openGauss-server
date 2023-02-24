@@ -783,6 +783,14 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     relationId = RelationGetRelid(rel);
     namespaceId = RelationGetNamespace(rel);
 
+    if (stmt->missing_ok && OidIsValid(get_relname_relid(stmt->idxname, namespaceId))) {
+        ereport(NOTICE,
+            (errcode(ERRCODE_DUPLICATE_TABLE),
+                errmsg("relation \"%s\" already exists, skipping", stmt->idxname)));
+        heap_close(rel, NoLock);
+        return indexRelationId;
+    }
+
     if (stmt->schemaname != NULL) {
         if (namespaceId != get_namespace_oid(stmt->schemaname, false)) {
             ereport(ERROR,
