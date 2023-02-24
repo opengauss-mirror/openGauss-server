@@ -33,6 +33,7 @@
 #include "commands/dbcommands.h"
 #include "commands/tablespace.h"
 #include "storage/freespace.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "utils/relmapper.h"
 
 #include "access/extreme_rto/batch_redo.h"
@@ -83,9 +84,10 @@ HTAB *PRRedoItemHashInitialize(MemoryContext context)
     ctl.hcxt = context;
     ctl.keysize = sizeof(RedoItemTag);
     ctl.entrysize = sizeof(RedoItemHashEntry);
-    ctl.hash = tag_hash;
+    ctl.hash = RedoItemTagHash;
+    ctl.match = RedoItemTagMatch;
     hTab = hash_create("Redo item hash by relfilenode and blocknum", INITredoItemHashSIZE, &ctl,
-                       HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+                       HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
 
     return hTab;
 }

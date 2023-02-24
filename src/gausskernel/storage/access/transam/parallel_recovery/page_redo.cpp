@@ -45,6 +45,7 @@
 #include "postmaster/pagerepair.h"
 #include "storage/ipc.h"
 #include "storage/standby.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "access/nbtree.h"
 #include "utils/guc.h"
 #include "utils/palloc.h"
@@ -1164,9 +1165,10 @@ HTAB* BadBlockHashTblCreate()
 
     ctl.keysize = sizeof(RepairBlockKey);
     ctl.entrysize = sizeof(BadBlockRecEnt);
-    ctl.hash = tag_hash;
-
-    return hash_create("recovery thread bad block hashtbl", MAX_REMOTE_READ_INFO_NUM, &ctl, HASH_ELEM | HASH_FUNCTION);
+    ctl.hash = RepairBlockKeyHash;
+    ctl.match = RepairBlockKeyMatch;
+    return hash_create("recovery thread bad block hashtbl", MAX_REMOTE_READ_INFO_NUM, &ctl,
+                       HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
 }
 
 /* RecordBadBlockAndPushToRemote

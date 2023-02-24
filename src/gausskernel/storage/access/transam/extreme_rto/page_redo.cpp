@@ -48,6 +48,7 @@
 #include "storage/ipc.h"
 #include "storage/freespace.h"
 #include "storage/smgr/smgr.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "storage/standby.h"
 #include "storage/pmsignal.h"
 #include "utils/guc.h"
@@ -903,7 +904,7 @@ static void WaitNextBarrier(XLogRecParseState *parseState)
     if (needWait) {
         pg_atomic_write_u32(&g_redoWorker->fullSyncFlag, 1);
     }
-    
+
     XLogBlockParseStateRelease(parseState);
     uint32 val = pg_atomic_read_u32(&g_redoWorker->fullSyncFlag);
     while (val != 0) {
@@ -2740,9 +2741,9 @@ bool XactHasSegpageRelFiles(XLogReaderState *record)
     for (int32 idx = 0; idx < nrels; idx++) {
         ColFileNode colFileNode;
         ColFileNodeRel *colFileNodeRel = xnodes + idx;
-    
+
         ColFileNodeCopy(&colFileNode, colFileNodeRel);
-        
+
         if (!IsValidColForkNum(colFileNode.forknum) && IsSegmentFileNode(colFileNode.filenode)) {
             return true;
         }
@@ -2807,9 +2808,10 @@ HTAB* BadBlockHashTblCreate()
 
     ctl.keysize = sizeof(RepairBlockKey);
     ctl.entrysize = sizeof(BadBlockRecEnt);
-    ctl.hash = tag_hash;
-
-    return hash_create("recovery thread bad block hashtbl", MAX_REMOTE_READ_INFO_NUM, &ctl, HASH_ELEM | HASH_FUNCTION);
+    ctl.hash = RepairBlockKeyHash;
+    ctl.match = RepairBlockKeyMatch;
+    return hash_create("recovery thread bad block hashtbl", MAX_REMOTE_READ_INFO_NUM, &ctl,
+                       HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
 }
 
 

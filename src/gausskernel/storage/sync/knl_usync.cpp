@@ -28,6 +28,7 @@
 #include "postmaster/bgwriter.h"
 #include "postmaster/pagewriter.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "storage/ipc.h"
 #include "storage/smgr/segment.h"
 #include "storage/smgr/smgr.h"
@@ -136,9 +137,10 @@ void InitPendingOps(void)
         hashCtl.keysize = sizeof(FileTag);
         hashCtl.entrysize = sizeof(PendingFsyncEntry);
         hashCtl.hcxt = u_sess->storage_cxt.pendingOpsCxt;
-        hashCtl.hash = tag_hash;
+        hashCtl.hash = FileTagHashWithoutOpt;
+        hashCtl.match = FileTagMatchWithoutOpt;
         u_sess->storage_cxt.pendingOps = hash_create("Pending Ops Table",
-            100L, &hashCtl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+            100L, &hashCtl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT | HASH_COMPARE | HASH_FUNCTION);
     }
 }
 

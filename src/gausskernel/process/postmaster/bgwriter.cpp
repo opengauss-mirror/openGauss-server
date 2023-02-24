@@ -52,6 +52,7 @@
 #include "storage/proc.h"
 #include "storage/shmem.h"
 #include "storage/smgr/smgr.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "storage/spin.h"
 #include "storage/standby.h"
 #include "utils/guc.h"
@@ -613,28 +614,6 @@ void invalid_buffer_bgwriter_main()
     }
 }
 
-static int file_node_ignore_opt_match(const void* left, const void* right, Size keysize)
-{
-    const RelFileNode* lnode = (const RelFileNode*)left;
-    const RelFileNode* rnode = (const RelFileNode*)right;
-    Assert(lnode != NULL && rnode != NULL);
-    Assert(keysize == sizeof(RelFileNode));
-
-    /* we just care whether the result is 0 or not */
-    if (RelFileNodeEquals(*lnode, *rnode)) {
-        return 0;
-    }
-
-    return 1;
-}
-
-static uint32 file_node_ignore_opt_hash(const void* key, Size keysize)
-{
-    RelFileNode rnode = *(const RelFileNode*)key;
-    rnode.opt = DefaultFileNodeOpt;
-    return DatumGetUInt32(hash_any((const unsigned char*)&rnode, (int)keysize));
-}
-
 const int HASH_TABLE_ELEMENT_MIN_NUM = 512;
 HTAB *relfilenode_hashtbl_create(const char *name, bool use_heap_mem)
 {
@@ -663,28 +642,6 @@ HTAB *relfilenode_hashtbl_create(const char *name, bool use_heap_mem)
             (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM | HASH_COMPARE));
     }
     return hashtbl;
-}
-
-static int fork_file_node_ignore_opt_match(const void* left, const void* right, Size keysize)
-{
-    const ForkRelFileNode* lnode = (const ForkRelFileNode*)left;
-    const ForkRelFileNode* rnode = (const ForkRelFileNode*)right;
-    Assert(lnode != NULL && rnode != NULL);
-    Assert(keysize == sizeof(ForkRelFileNode));
-
-    /* we just care whether the result is 0 or not */
-    if (RelFileNodeEquals(lnode->rnode, rnode->rnode) && lnode->forkNum == rnode->forkNum) {
-        return 0;
-    }
-
-    return 1;
-}
-
-static uint32 fork_file_node_ignore_opt_hash(const void* key, Size keysize)
-{
-    ForkRelFileNode rnode = *(const ForkRelFileNode*)key;
-    rnode.rnode.opt = DefaultFileNodeOpt;
-    return DatumGetUInt32(hash_any((const unsigned char*)&rnode, (int)keysize));
 }
 
 HTAB *relfilenode_fork_hashtbl_create(const char* name, bool use_heap_mem)
