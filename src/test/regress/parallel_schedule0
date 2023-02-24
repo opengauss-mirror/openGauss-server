@@ -1043,9 +1043,8 @@ test: dolphin_guc_config
 test: row_count_function
 
 # show_warnings
-test: show_warnings
+test: show_warnings prevent_table_in_sys_schema
 
 # partition expression key
 test: partition_expr_key
 test: alter_foreign_schema
-

@@ -1,0 +1,53 @@
+create table t2(a int);
+alter table t2 set schema blockchain;
+ERROR:  cannot move objects into blockchain schema
+create table t2(a int);
+--?.*
+--?.*
+alter table t2 set schema cstore;
+ERROR:  cannot move objects into cstore schema
+create table t2(a int);
+--?.*
+--?.*
+alter table t2 set schema db4ai;
+ERROR:  cannot move objects into db4ai schema
+create table t2(a int);
+--?.*
+--?.*
+alter table t2 set schema dbe_perf;
+ERROR:  cannot move objects into dbe_perf schema
+create table t2(a int);
+--?.*
+--?.*
+alter table t2 set schema dbe_pldebugger;
+ERROR:  cannot move objects into dbe_pldebugger schema
+create table t2(a int);
+--?.*
+--?.*
+alter table t2 set schema dbe_pldeveloper;
+ERROR:  cannot move objects into dbe_pldeveloper schema
+create table t2(a int);
+--?.*
+--?.*
+alter table t2 set schema dbe_sql_util;
+ERROR:  cannot move objects into dbe_sql_util schema
+create table t2(a int);
+--?.*
+--?.*
+alter table t2 set schema pkg_service;
+ERROR:  cannot move objects into pkg_service schema
+create table t2(a int);
+--?.*
+--?.*
+alter table t2 set schema snapshot;
+ERROR:  cannot move objects into snapshot schema
+create table t2(a int);
+--?.*
+--?.*
+alter table t2 set schema sqladvisor;
+ERROR:  cannot move objects into sqladvisor schema
+create table t2(a int);
+--?.*
+--?.*
+create schema user_schema;
+alter table t2 set schema user_schema;
