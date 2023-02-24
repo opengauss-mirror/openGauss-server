@@ -4297,7 +4297,8 @@ static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_o
         if (nbatch_original != nbatch) {
             appendStringInfo(es->planinfo->m_staticInfo->info_str,
                 " Buckets: %d (originally %d) Batches: %d (originally %d)  Memory Usage: %ldkB\n",
-                nbuckets, nbuckets_original,
+                nbuckets, 
+                nbuckets_original,
                 nbatch,
                 nbatch_original,
                 spacePeakKb);
@@ -4312,7 +4313,8 @@ static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_o
         if (nbatch_original != nbatch) {
             appendStringInfo(es->str,
                 " Buckets: %d (originally %d) Batches: %d (originally %d)	Memory Usage: %ldkB\n",
-                nbuckets, nbuckets_original,
+                nbuckets, 
+                nbuckets_original,
                 nbatch,
                 nbatch_original,
                 spacePeakKb);
@@ -4723,6 +4725,7 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
     int nbatch;
     int nbatch_original;
     int nbuckets;
+    int nbuckets_original;
     long spacePeakKb = 0;
     int max_nbatch = -1;
     int min_nbatch = INT_MAX;
@@ -4768,9 +4771,9 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
 
                     es->planinfo->m_staticInfo->set_plan_name<false, true>();
                     appendStringInfo(es->planinfo->m_staticInfo->info_str, "%s ", node_name);
-                    show_datanode_hash_info<false>(es, nbatch, hashtable->nbuckets_original, nbatch_original, nbuckets, spacePeakKb);
+                    show_datanode_hash_info<false>(es, nbatch, nbuckets, nbatch_original, nbuckets, spacePeakKb);
                 }
-                show_datanode_hash_info<true>(es, nbatch, hashtable->nbuckets_original, nbatch_original, nbuckets, spacePeakKb);
+                show_datanode_hash_info<true>(es, nbatch, nbuckets, nbatch_original, nbuckets, spacePeakKb);
                 ExplainCloseGroup("Plan", NULL, true, es);
             }
             ExplainCloseGroup("Hash Detail", "Hash Detail", false, es);
@@ -4884,12 +4887,15 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
         nbatch = hashinfo.nbatch;
         nbatch_original = hashinfo.nbatch_original;
         nbuckets = hashinfo.nbuckets;
-
+        if (es->analyze)
+            nbuckets_original = hashtable ? hashtable->nbuckets_original : nbuckets;
+        else
+            nbuckets_original = nbuckets;
         /* wlm_statistics_plan_max_digit: this variable is used to judge, isn't it a active sql */
         if (es->wlm_statistics_plan_max_digit == NULL) {
             if (es->format == EXPLAIN_FORMAT_TEXT)
                 appendStringInfoSpaces(es->str, es->indent * 2);
-            show_datanode_hash_info<false>(es, nbatch, hashtable->nbuckets_original, nbatch_original, nbuckets, spacePeakKb);
+            show_datanode_hash_info<false>(es, nbatch, nbuckets_original, nbatch_original, nbuckets, spacePeakKb);
         }
     }
 }
