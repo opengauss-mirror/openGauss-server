@@ -1897,11 +1897,9 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
 
         for (;;) {
             UHeapTuple utuple;
-            bool shouldfree = false;
-
             CHECK_FOR_INTERRUPTS();
 
-            utuple = (UHeapTuple)tuplesort_getheaptuple(tuplesort, true, &shouldfree);
+            utuple = (UHeapTuple)tuplesort_getheaptuple(tuplesort, true);
             if (utuple == NULL)
                 break;
 
@@ -1909,9 +1907,6 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
 
             ReformAndRewriteUTuple(utuple, oldTupDesc, newTupDesc, values, isnull, newHeap->rd_rel->relhasoids,
                 rwstate);
-
-            if (shouldfree)
-                UHeapFreeTuple(utuple);
         }
 
         tuplesort_end(tuplesort);
@@ -2226,19 +2221,14 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
 
         for (;;) {
             HeapTuple tuple;
-            bool shouldfree = false;
-
             CHECK_FOR_INTERRUPTS();
 
-            tuple = (HeapTuple)tuplesort_getheaptuple(tuplesort, true, &shouldfree);
+            tuple = (HeapTuple)tuplesort_getheaptuple(tuplesort, true);
             if (tuple == NULL)
                 break;
 
             reform_and_rewrite_tuple(
                 tuple, oldTupDesc, newTupDesc, values, isnull, NewHeap->rd_rel->relhasoids, rwstate);
-
-            if (shouldfree)
-                heap_freetuple(tuple);
         }
 
         tuplesort_end(tuplesort);
