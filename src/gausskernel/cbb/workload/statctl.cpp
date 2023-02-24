@@ -125,9 +125,9 @@ void updateIOFlowData4GroupUserOnCN(UserData* userdata);
 bool IsQidInvalid(const Qid* qid)
 {
 #ifdef ENABLE_MULTIPLE_NODES
-    return (qid == NULL || qid->queryId <= 0 || qid->procId > KBYTES || qid->procId <= 0 || qid->stamp < 0);
+    return (qid == NULL || qid->queryId == 0 || qid->procId > KBYTES || qid->procId == 0 || qid->stamp < 0);
 #else
-    return (qid == NULL || qid->queryId <= 0 || qid->stamp < 0);
+    return (qid == NULL || qid->queryId == 0 || qid->stamp < 0);
 #endif
 }
 
