@@ -3534,7 +3534,7 @@ static void InitStorageConfigureNamesInt()
             &g_instance.attr.attr_storage.dms_attr.sslog_backup_file_count,
             10,
             0,
-            128,
+            1024,
             NULL,
             assign_ss_log_backup_file_count,
             NULL},
