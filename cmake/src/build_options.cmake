@@ -153,14 +153,14 @@ set(CHECK_OPTIONS -Wmissing-format-attribute -Wno-attributes -Wno-unused-but-set
 set(MACRO_OPTIONS -D_GLIBCXX_USE_CXX11_ABI=0 -DENABLE_GSTRACE -D_GNU_SOURCE -DPGXC -D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT -DSTREAMPLAN -D_THREAD_SAFE ${DB_COMMON_DEFINE})
 
 # Set MAX_ALLOC_SEGNUM size in extreme_rto
-if(${WAL_SEGSIZE} LESS 512)
+if(${WAL_SEGSIZE} LESS 256)
     set(MAX_ALLOC_SEGNUM 4)
-elseif(${WAL_SEGSIZE} GREATER_EQUAL 512 AND ${WAL_SEGSIZE} LESS 1024)
+elseif(${WAL_SEGSIZE} GREATER_EQUAL 256 AND ${WAL_SEGSIZE} LESS 512)
     set(MAX_ALLOC_SEGNUM 2)
-elseif(${WAL_SEGSIZE} GREATER_EQUAL 1024)
+elseif(${WAL_SEGSIZE} GREATER_EQUAL 512)
     set(MAX_ALLOC_SEGNUM 1)
 else()
-    message(FATAL_ERROR "error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64,128,256,512,1024.")
+    message(FATAL_ERROR "error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64,128,256,512.")
 endif()
 
 # libraries need secure options during compling

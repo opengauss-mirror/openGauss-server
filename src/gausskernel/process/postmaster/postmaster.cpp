@@ -1629,12 +1629,6 @@ int PostmasterMain(int argc, char* argv[])
         ExitPostmaster(1);
     }
     if (ENABLE_DSS) {
-        if (g_instance.attr.attr_storage.recovery_parse_workers > 1 ||
-            g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker > 1) {
-            write_stderr("Not support extreme RTO while DMS and DSS enabled, please cancel rto parameter\n");
-            ExitPostmaster(1);
-        }
-        
         if (u_sess->attr.attr_common.XLogArchiveMode || strlen(u_sess->attr.attr_storage.XLogArchiveCommand) != 0) {
             write_stderr("Not support archive function while DMS and DSS enabled\n");
             ExitPostmaster(1);
@@ -6203,7 +6197,7 @@ static void reaper(SIGNAL_ARGS)
                 g_instance.pid_cxt.AutoVacPID = initialize_util_thread(AUTOVACUUM_LAUNCHER);
 
             if (SS_REFORM_PARTNER) {
-                write_stderr("%s LOG: I'm still a reform partner waiting for refom finished\n",
+                write_stderr("%s LOG: I'm still a reform partner waiting for reform finished\n",
                     GetReaperLogPrefix(logBuf, ReaperLogBufSize));
                 continue;
             }
