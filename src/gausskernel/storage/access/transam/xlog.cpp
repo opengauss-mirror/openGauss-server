@@ -8542,7 +8542,7 @@ void ResourceManagerStop(void)
     }
 }
 
-#define RecoveryXlogReader(_oldXlogReader, _xlogreader) do { \
+#define RecoveryXlogReader(_oldXlogReader, _xlogreader) do {                                   \
     if (get_real_recovery_parallelism() > 1) {                                                 \
         if (GetRedoWorkerCount() > 0) {                                                        \
             errno_t errorno;                                                                   \
@@ -8561,6 +8561,12 @@ void ResourceManagerStop(void)
             errorno = memcpy_s((_oldXlogReader)->readBuf, XLOG_BLCKSZ, (_xlogreader)->readBuf, \
                                (_oldXlogReader)->readLen);                                     \
             securec_check(errorno, "", "");                                                    \
+            if (ENABLE_DSS && ENABLE_DMS) {                                                    \
+                (_oldXlogReader)->preReadStartPtr = (_xlogreader)->preReadStartPtr;            \
+                errorno = memcpy_s((_oldXlogReader)->preReadBuf, XLogPreReadSize,              \
+                    (_xlogreader)->preReadBuf, XLogPreReadSize);                               \
+                securec_check(errorno, "", "");                                                \
+            }                                                                                  \
             ResetDecoder(_oldXlogReader);                                                      \
             (_xlogreader) = (_oldXlogReader);                                                  \
         }                                                                                      \
