@@ -2388,6 +2388,10 @@ typedef struct AggState {
 #endif             /* PGXC */
     void* aggTempFileControl;
     FmgrInfo* eqfunctions; /* per-grouping-field equality fns */
+    /* support for evaluation of agg inputs */
+    TupleTableSlot *evalslot;	/* slot for agg inputs */
+    ProjectionInfo *evalproj;	/* projection machinery */
+    TupleDesc	evaldesc;      /* descriptor of input tuples */
 } AggState;
 
 /* ----------------
