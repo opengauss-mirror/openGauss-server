@@ -1569,6 +1569,8 @@ void PostgresInitializer::InitApplyWorker()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 
     return;

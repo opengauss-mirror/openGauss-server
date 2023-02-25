@@ -8,6 +8,7 @@ export GAUSSHOME="$prefix"
 export LD_LIBRARY_PATH=$prefix/lib:$prefix/lib/libobs:$LD_LIBRARY_PATH
 export PATH="$prefix/bin":$PATH
 export g_local_ip="127.0.0.1"
+export dbcompatibility=$3
 
 db=postgres
 scripts_dir="$1"
