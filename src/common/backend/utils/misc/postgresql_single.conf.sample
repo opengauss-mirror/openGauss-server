@@ -79,6 +79,7 @@ max_connections = 200			# (change requires restart)
 #unix_socket_group = ''			# (change requires restart)
 #unix_socket_permissions = 0700		# begin with 0 to use octal notation
 					# (change requires restart)
+#light_comm = off			# whether use light commnucation with nonblock mode or latch
 
 # - Security and Authentication -
 

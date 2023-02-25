@@ -482,17 +482,26 @@ static int InteractiveBackend(StringInfo inBuf)
  * interactive_getc -- collect one character from stdin
  *
  * Even though we are not reading from a "client" process, we still want to
- * respond to signals, particularly SIGTERM/SIGQUIT.  Hence we must use
- * prepare_for_client_read and client_read_ended.
+ * respond to signals, particularly SIGTERM/SIGQUIT.
  */
 static int interactive_getc(void)
 {
     int c;
-
-    prepare_for_client_read();
-    c = getc(stdin);
-    client_read_ended();
-    return c;
+    if (u_sess->attr.attr_common.light_comm == FALSE) {
+        prepare_for_client_read();
+        c = getc(stdin);
+        client_read_ended();
+        return c;
+    } else {
+        /*
+         * With light_comm, do not process catchup interrupts or notifications 
+         * while reading.
+         */
+        CHECK_FOR_INTERRUPTS();
+        c = getc(stdin);
+        process_client_read_interrupt(true);
+	return c;
+    }
 }
 
 /* ----------------
@@ -798,6 +807,72 @@ static int ReadCommand(StringInfo inBuf)
     u_sess->proc_cxt.firstChar = (char)result;
     return result;
 }
+
+/*
+ * process_client_read_interrupt- Process interrupts specific to client reads
+ *
+ * interrupted by 2 ways:
+ * 1. read finished
+ * 2. interrupt by user
+ *
+ * Must preserve errno!
+ */
+void process_client_read_interrupt(bool blocked)
+{
+    int save_errno = errno;
+
+    if (t_thrd.postgres_cxt.DoingCommandRead) {
+        /* Check for general interrupts that arrived while reading */
+        CHECK_FOR_INTERRUPTS();
+
+        /* Process sinval catchup interrupts that happened while reading */
+        if(catchupInterruptPending) {
+            ProcessCatchupInterrupt();
+        }
+
+        /* Process sinval catchup interrupts that happened while reading */
+        if(notifyInterruptPending) {
+            ProcessNotifyInterrupt();
+        }
+    } else if (t_thrd.int_cxt.ProcDiePending && blocked) {
+        /*
+         * We're dying It's safe (and sane) to handle that now.
+         */
+        CHECK_FOR_INTERRUPTS();
+    }
+    errno = save_errno;
+}
+
+/*
+ * process_client_write_interrupt - Process interrupts specific to client writes
+ *
+ * interrupted by 2 ways:
+ * 1. write finished
+ * 2. interrupt by user
+ * 'blocked' tells whether the socket is in blocked mode
+ *
+ * Must preserve errno!
+ */
+void process_client_write_interrupt (bool blocked)
+{
+    int save_errno = errno;
+
+    if (t_thrd.int_cxt.ProcDiePending && blocked) {
+        /*
+         * No error message here, since:
+         * a) would possibly block again
+         * b) would possibly lead to sending an error message to the client,
+         *    while we already started to send something else.
+         */
+         if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
+             t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+         }
+         CHECK_FOR_INTERRUPTS();
+    }
+    
+    errno = save_errno;
+}
+
 
 /*
  * prepare_for_client_read -- set up to possibly block on client input
@@ -5963,6 +6038,11 @@ void die(SIGNAL_ARGS)
     if (t_thrd.proc)
         SetLatch(&t_thrd.proc->procLatch);
 
+    if (u_sess->attr.attr_common.light_comm == TRUE &&
+        t_thrd.postgres_cxt.DoingCommandRead &&
+        t_thrd.postgres_cxt.whereToSendOutput != DestRemote) {
+        ProcessInterrupts();
+    }
     errno = save_errno;
 }
 

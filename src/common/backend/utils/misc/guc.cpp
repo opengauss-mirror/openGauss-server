@@ -1946,6 +1946,19 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"light_comm",
+            PGC_BACKEND,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("Enable to use light connection"),
+            NULL,
+            },
+            &u_sess->attr.attr_common.light_comm,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

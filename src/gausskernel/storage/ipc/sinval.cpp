@@ -21,6 +21,7 @@
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
+#include "storage/proc.h"
 #include "storage/sinvaladt.h"
 #include "utils/globalplancache.h"
 #include "utils/inval.h"
@@ -190,6 +191,9 @@ void HandleCatchupInterrupt(void)
      * you do here.
      */
     catchupInterruptPending = true;
+    if (u_sess->attr.attr_common.light_comm == TRUE && t_thrd.proc) {
+        SetLatch(&t_thrd.proc->procLatch);
+    }
 }
 
 /*

@@ -37,6 +37,7 @@ gs_guc set -Z datanode -D $primary_data_dir -c "max_wal_senders = 8"
 gs_guc set -Z datanode -D $primary_data_dir -c "replication_type = 1"
 gs_guc set -Z datanode -D $primary_data_dir -c "enable_data_replicate = off"
 gs_guc set -Z datanode -D $primary_data_dir -c "available_zone = 'az1'"
+gs_guc set -Z datanode -D $primary_data_dir -c "light_comm = on"
 
 echo $node_num
 for((i=1; i<=$node_num; i++))
@@ -59,6 +60,7 @@ do
 	gs_guc set -Z datanode -D $datanode_dir -c "replication_type = 1"
 	gs_guc set -Z datanode -D $datanode_dir -c "enable_data_replicate = off"
 	gs_guc set -Z datanode -D $datanode_dir -c "available_zone = 'az1'"
+	gs_guc set -Z datanode -D $datanode_dir -c "light_comm= on"
 done
 
 #python $scripts_dir/pgxc_multi.py -o

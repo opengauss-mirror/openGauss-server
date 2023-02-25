@@ -79,10 +79,12 @@
  *	  either, but just process the queue directly.
  *
  * 5. Upon receipt of a PROCSIG_NOTIFY_INTERRUPT signal, the signal handler
- *	  can call inbound-notify processing immediately if this backend is idle
- *	  (ie, it is waiting for a frontend command and is not within a transaction
- *	  block).  Otherwise the handler may only set a flag, which will cause the
- *	  processing to occur just before we next go idle.
+ *	  sets the process's latch, which triggers the event to be processed
+ *	  immediately if this backend is idle (i.e., it is waiting for a frontend 
+ *	  command and is not within a transaction block. C.f.
+ *	  ProcessClientReadInterrupt()).  Otherwise the handler may only set a
+ *	  flag, which will cause the processing to occur just before we next go 
+ *	  idle.
  *
  *	  Inbound-notify processing consists of reading all of the notifications
  *	  that have arrived since scanning last time. We read every notification
@@ -126,6 +128,7 @@
 #include "miscadmin.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
+#include "storage/proc.h"
 #include "storage/procsignal.h"
 #include "storage/sinval.h"
 #include "tcop/tcopprot.h"
@@ -1493,6 +1496,11 @@ void HandleNotifyInterrupt(void)
      */
     /* signal that work needs to be done */
     notifyInterruptPending = true;
+
+    /* make sure the event is processed in due course */
+    if (u_sess->attr.attr_common.light_comm== TRUE && t_thrd.proc) {
+        SetLatch(&t_thrd.proc->procLatch);
+    }
 }
 
 /*
