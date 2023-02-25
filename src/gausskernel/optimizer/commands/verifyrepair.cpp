@@ -34,6 +34,7 @@
 #include "access/tableam.h"
 #include "commands/tablespace.h"
 #include "storage/smgr/fd.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "storage/smgr/segment.h"
 
 const int TIMEOUT_MIN = 60;
@@ -60,11 +61,12 @@ void initRepairBadBlockStat()
         securec_check(rc, "", "");
         info.keysize = sizeof(BadBlockKey);
         info.entrysize = sizeof(BadBlockEntry);
-        info.hash = tag_hash;
+        info.hash = BadBlockKeyHash;
+        info.match = BadBlockKeyMatch;
         info.hcxt = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
-        g_instance.repair_cxt.global_repair_bad_block_stat = hash_create("Page Repair Hash Table",
-                                                                         MAX_REPAIR_PAGE_NUM, &info,
-                                                                         HASH_ELEM | HASH_FUNCTION |HASH_CONTEXT);
+        g_instance.repair_cxt.global_repair_bad_block_stat =
+            hash_create("Page Repair Hash Table", MAX_REPAIR_PAGE_NUM, &info,
+                        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
         if (!g_instance.repair_cxt.global_repair_bad_block_stat) {
             ereport(FATAL, (errcode(ERRCODE_INITIALIZE_FAILED),
                     (errmsg("could not initialize page repair Hash table"))));
@@ -641,7 +643,7 @@ Datum gs_repair_page(PG_FUNCTION_ARGS)
     int32 timeout = PG_GETARG_INT32(3);
 
     UnsupportedPageRepair(path);
-    
+
     bool result = repairPage(path, blockNum, is_segment, timeout);
     PG_RETURN_BOOL(result);
 }
@@ -669,7 +671,7 @@ Datum gs_repair_file(PG_FUNCTION_ARGS)
     int32 timeout = PG_GETARG_INT32(2);
 
     UnsupportedPageRepair(path);
-	
+
     if (!CheckRelDataFilePath(path)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             (errmsg("The input path(%s) is an incorrect relation file path input. \n", path))));
@@ -843,7 +845,7 @@ Datum gs_verify_and_tryrepair_page(PG_FUNCTION_ARGS)
     int j = 1;
 
     UnsupportedPageRepair(path);
-    
+
     /* build tupdesc for result tuples */
     tupdesc = CreateTemplateTupleDesc(REPAIR_BLOCK_STAT_NATTS, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)j++, "node_name", TEXTOID, -1, 0);

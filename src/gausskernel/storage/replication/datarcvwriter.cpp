@@ -32,6 +32,7 @@
 #include "storage/proc.h"
 #include "storage/lmgr.h"
 #include "storage/smgr/smgr.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "postmaster/alarmchecker.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
@@ -746,9 +747,10 @@ static void DataWriterHashCreate(void)
         securec_check(rc, "", "");
         ctl.keysize = sizeof(data_writer_rel_key);
         ctl.entrysize = sizeof(data_writer_rel);
-        ctl.hash = tag_hash;
+        ctl.hash = DataWriterRelKeyHash;
+        ctl.match = DataWriterRelKeyMatch;
         t_thrd.datarcvwriter_cxt.data_writer_rel_tab = hash_create("data writer rel table", 100, &ctl,
-                                                                   HASH_ELEM | HASH_FUNCTION);
+                                                                   HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
     } else
         return;
 }
