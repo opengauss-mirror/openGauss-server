@@ -76,7 +76,7 @@ List* raw_parser(const char* str, List** query_string_locationlist)
     resetForbidTruncateFlag();
 
     /* initialize the flex scanner */
-    yyscanner = scanner_init(str, &yyextra.core_yy_extra, ScanKeywords, NumScanKeywords);
+    yyscanner = scanner_init(str, &yyextra.core_yy_extra, &ScanKeywords, ScanKeywordTokens);
 
     /* base_yylex() only needs this much initialization */
     yyextra.lookahead_num = 0;

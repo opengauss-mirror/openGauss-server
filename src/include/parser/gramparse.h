@@ -97,8 +97,8 @@ typedef struct hint_yy_extra_type {
     /*
      * The keyword list to use.
      */
-    const ScanKeyword* keywords;
-    int num_keywords;
+	const ScanKeywordList *keywordlist;
+	const uint16 *keyword_tokens;
 
     /*
      * literalbuf is used to accumulate literal values when multiple rules are

@@ -940,7 +940,7 @@ void UniqueSql::fill_in_constant_lengths(pgssJumbleState* jstate, const char* qu
     locs = jstate->clocations;
 
     /* initialize the flex scanner --- should match raw_parser() */
-    yyscanner = scanner_init(query, &yyextra, ScanKeywords, NumScanKeywords);
+    yyscanner = scanner_init(query, &yyextra, &ScanKeywords, ScanKeywordTokens);
 
     /* Search for each constant, in sequence */
     for (i = 0; i < jstate->clocations_count; i++) {

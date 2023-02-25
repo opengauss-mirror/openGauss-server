@@ -269,6 +269,42 @@ s{PG_VERSION_STR "[^"]+"}{__STRINGIFY(x) #x\n#define __STRINGIFY2(z) __STRINGIFY
 		chdir('..\..\..\..');
 	}
 
+	if (IsNewer(
+			'src/include/parser/kwlist_d.h',
+			'src/include/parser/kwlist.h'))
+	{
+		print "Generating kwlist_d.h...\n";
+		system('perl -I src/tools src/tools/gen_keywordlist.pl --extern -o src/include/parser src/include/parser/kwlist.h');
+	}
+
+	if (IsNewer(
+			'src/pl/plpgsql/src/pl_reserved_kwlist_d.h',
+			'src/pl/plpgsql/src/pl_reserved_kwlist.h')
+		|| IsNewer(
+			'src/pl/plpgsql/src/pl_unreserved_kwlist_d.h',
+			'src/pl/plpgsql/src/pl_unreserved_kwlist.h'))
+	{
+		print "Generating pl_reserved_kwlist_d.h and pl_unreserved_kwlist_d.h...\n";
+		chdir('src/pl/plpgsql/src');
+		system('perl -I ../../../tools ../../../tools/gen_keywordlist.pl --varname ReservedPLKeywords pl_reserved_kwlist.h');
+		system('perl -I ../../../tools ../../../tools/gen_keywordlist.pl --varname UnreservedPLKeywords pl_unreserved_kwlist.h');
+		chdir('../../../..');
+	}
+
+	if (IsNewer(
+			'src/interfaces/ecpg/preproc/c_kwlist_d.h',
+			'src/interfaces/ecpg/preproc/c_kwlist.h')
+		|| IsNewer(
+			'src/interfaces/ecpg/preproc/ecpg_kwlist_d.h',
+			'src/interfaces/ecpg/preproc/ecpg_kwlist.h'))
+	{
+		print "Generating c_kwlist_d.h and ecpg_kwlist_d.h...\n";
+		chdir('src/interfaces/ecpg/preproc');
+		system('perl -I ../../../tools ../../../tools/gen_keywordlist.pl --varname ScanCKeywords --no-case-fold c_kwlist.h');
+		system('perl -I ../../../tools ../../../tools/gen_keywordlist.pl --varname ScanECPGKeywords ecpg_kwlist.h');
+		chdir('../../../..');
+	}
+
 	if (IsNewer('src\include\utils\fmgroids.h', 'src\common\backend\utils\fmgroids.h'))
 	{
 		copyFile('src\common\backend\utils\fmgroids.h',

@@ -21,6 +21,11 @@ execute_process(
     OUTPUT_VARIABLE PARSER_HINT_GRAM
 )
 
+execute_process(
+    COMMAND perl -I ${PROJECT_SRC_DIR}/tools/ ${PROJECT_SRC_DIR}/tools/gen_keywordlist.pl --extern ${PROJECT_SRC_DIR}/include/parser/kwlist.h
+    WORKING_DIRECTORY ${PROJECT_SRC_DIR}/include/parser/
+)
+
 set(parser_cmd_src
 "${PROJECT_SRC_DIR}/common/backend/parser|rm -fr lex.backup||flex -CF -b -p -p -o'scan.inc' scan.l|sed -i 's/YY_NULL/YY_ZERO/g' scan.inc"
 "${PROJECT_SRC_DIR}/common/backend/parser|rm -fr lex.backup||flex -CF -b -p -p -o'hint_scan.inc' hint_scan.l|sed -i 's/YY_NULL/YY_ZERO/g' hint_scan.inc"

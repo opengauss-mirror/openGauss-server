@@ -78,11 +78,11 @@ typedef struct core_yy_extra_type {
     char* scanbuf;
     Size scanbuflen;
 
-    /*
+    /* 
      * The keyword list to use.
      */
-    const ScanKeyword* keywords;
-    int num_keywords;
+	const ScanKeywordList *keywordlist;
+	const uint16 *keyword_tokens;
 
     /*
      * literalbuf is used to accumulate literal values when multiple rules are
@@ -142,13 +142,18 @@ public:
 typedef void* core_yyscan_t;
 typedef void* yyscan_t;
 
+/* Constant data exported from parser/scan.l */
+extern PGDLLIMPORT const uint16 ScanKeywordTokens[];
+
 /* Entry points in parser/scan.l */
-extern core_yyscan_t scanner_init(
-    const char* str, core_yy_extra_type* yyext, const ScanKeyword* keywords, int num_keywords);
+extern core_yyscan_t scanner_init(const char* str, 
+                                  core_yy_extra_type* yyext, 
+                                  const ScanKeywordList *keywordlist,
+	                              const uint16 *keyword_tokens);
 
 #ifdef FRONTEND_PARSER
 extern core_yyscan_t fe_scanner_init(const char *str, fe_core_yy_extra_type *yyext, 
-    const ScanKeyword *keywords, int num_keywords);
+    const ScanKeywordList *keywordlist, const uint16 *keyword_tokens);
 #endif /* FRONTEND_PARSER */
 
 extern void scanner_finish(core_yyscan_t yyscanner);

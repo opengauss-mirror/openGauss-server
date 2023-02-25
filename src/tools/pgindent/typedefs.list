@@ -1519,7 +1519,7 @@ Scan
 ScanDirection
 ScanKey
 ScanKeyData
-ScanKeyword
+ScanKeywordList
 ScanStackEntry
 ScanState
 ScanTypeControl
