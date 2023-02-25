@@ -771,7 +771,6 @@ void InsertOneValue(char* value, int i)
     Oid typioparam;
     Oid typinput;
     Oid typoutput;
-    char* prt = NULL;
 
     AssertArg(i >= 0 && i < MAXATTR);
 
@@ -782,9 +781,7 @@ void InsertOneValue(char* value, int i)
     boot_get_type_io_data(typoid, &typlen, &typbyval, &typalign, &typdelim, &typioparam, &typinput, &typoutput);
 
     values[i] = OidInputFunctionCall(typinput, value, typioparam, -1);
-    prt = OidOutputFunctionCall(typoutput, values[i]);
-    ereport(DEBUG4, (errmsg("inserted -> %s", prt)));
-    pfree(prt);
+    ereport(DEBUG4, (errmsg("inserted -> %s", OidOutputFunctionCall(typoutput, values[i]))));
 }
 
 /* ----------------

@@ -1075,8 +1075,7 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
      */
     for (i = 0; i < natts; ++i) {
         PrinttupAttrInfo *thisState = myState->myinfo + i;
-        Datum origattr = slot->tts_values[i];
-        Datum attr = static_cast<uintptr_t>(0);
+        Datum attr = slot->tts_values[i];
 
         /*
          * skip null value attribute,
@@ -1090,20 +1089,11 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
         if (typeinfo->attrs[i].atttypid == ANYARRAYOID && slot->tts_dataRow != NULL) {
             /*
              * For ANYARRAY type, the not null DataRow-based tuple indicates the value in
-             * origattr had been converted to CSTRING type previously by using anyarray_out.
+             * attr had been converted to CSTRING type previously by using anyarray_out.
              * just send over the DataRow message as we received it.
              */
-            pq_sendcountedtext(buf, (char *)origattr, strlen((char *)origattr), false);
+            pq_sendcountedtext(buf, (char *)attr, strlen((char *)attr), false);
         } else {
-            /*
-             * If we have a toasted datum, forcibly detoast it here to avoid
-             * memory leakage inside the type's output routine.
-             */
-            if (thisState->typisvarlena)
-                attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
-            else
-                attr = origattr;
-
             if (thisState->format == 0) {
                 /* Text output */
                 char *outputstr = NULL;
@@ -1111,6 +1101,7 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                 t_thrd.xact_cxt.callPrint = true;
 #endif
                 outputstr = OutputFunctionCall(&thisState->finfo, attr);
+#ifdef ENABLE_MULTIPLE_NODES
                 if (thisState->typisvarlena && self->forAnalyzeSampleTuple &&
                     (typeinfo->attrs[i].atttypid == BYTEAOID || typeinfo->attrs[i].atttypid == CHAROID ||
                      typeinfo->attrs[i].atttypid == TEXTOID || typeinfo->attrs[i].atttypid == BLOBOID ||
@@ -1141,11 +1132,14 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                     outputstr = TextDatumGetCString(str);
                     pfree(result);
                 }
+#endif
 #ifndef ENABLE_MULTIPLE_NODES
                 t_thrd.xact_cxt.callPrint = false;
 #endif
                 pq_sendcountedtext(buf, outputstr, strlen(outputstr), false);
-                pfree(outputstr);
+                if (outputstr != NULL) {
+                    pfree(outputstr);
+                }
             } else {
                 /* Binary output */
                 bytea *outputbytes = NULL;
@@ -1155,10 +1149,6 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                 pq_sendbytes(buf, VARDATA(outputbytes), VARSIZE(outputbytes) - VARHDRSZ);
                 pfree(outputbytes);
             }
-
-            /* Clean up detoasted copy, if any */
-            if (DatumGetPointer(attr) != DatumGetPointer(origattr))
-                pfree(DatumGetPointer(attr));
         }
     }
 
@@ -1313,38 +1303,24 @@ void debugtup(TupleTableSlot *slot, DestReceiver *self)
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
     int natts = typeinfo->natts;
     int i;
-    Datum origattr, attr;
+    Datum attr = 0;
     char *value = NULL;
     bool isnull = false;
     Oid typoutput;
     bool typisvarlena = false;
 
     for (i = 0; i < natts; ++i) {
-        origattr = tableam_tslot_getattr(slot, i + 1, &isnull);
+        attr = tableam_tslot_getattr(slot, i + 1, &isnull);
         if (isnull) {
             continue;
         }
         getTypeOutputInfo(typeinfo->attrs[i].atttypid, &typoutput, &typisvarlena);
 
-        /*
-         * If we have a toasted datum, forcibly detoast it here to avoid
-         * memory leakage inside the type's output routine.
-         */
-        if (typisvarlena) {
-            attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
-        } else {
-            attr = origattr;
-        }
-
         value = OidOutputFunctionCall(typoutput, attr);
 
         printatt((unsigned)i + 1, &typeinfo->attrs[i], value);
-
-        pfree(value);
-
-        /* Clean up detoasted copy, if any */
-        if (DatumGetPointer(attr) != DatumGetPointer(origattr)) {
-            pfree(DatumGetPointer(attr));
+        if (value != NULL) {
+            pfree(value);
         }
     }
     printf("\t----\n");
@@ -1403,8 +1379,7 @@ static void printtup_internal_20(TupleTableSlot *slot, DestReceiver *self)
      */
     for (i = 0; i < natts; ++i) {
         PrinttupAttrInfo *thisState = myState->myinfo + i;
-        Datum origattr = slot->tts_values[i];
-        Datum attr = static_cast<uintptr_t>(0);
+        Datum attr = slot->tts_values[i];
         bytea *outputbytes = NULL;
 
         if (slot->tts_isnull[i])
@@ -1412,24 +1387,10 @@ static void printtup_internal_20(TupleTableSlot *slot, DestReceiver *self)
 
         Assert(thisState->format == 1);
 
-        /*
-         * If we have a toasted datum, forcibly detoast it here to avoid
-         * memory leakage inside the type's output routine.
-         */
-        if (thisState->typisvarlena)
-            attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
-        else
-            attr = origattr;
-
         outputbytes = SendFunctionCall(&thisState->finfo, attr);
-        /* We assume the result will not have been toasted */
         pq_sendint32(buf, VARSIZE(outputbytes) - VARHDRSZ);
         pq_sendbytes(buf, VARDATA(outputbytes), VARSIZE(outputbytes) - VARHDRSZ);
         pfree(outputbytes);
-
-        /* Clean up detoasted copy, if any */
-        if (DatumGetPointer(attr) != DatumGetPointer(origattr))
-            pfree(DatumGetPointer(attr));
     }
 
     pq_endmessage_reuse(buf);
