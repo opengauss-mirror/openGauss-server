@@ -399,6 +399,7 @@ typedef enum {
     PRED_PUSH_NORMAL = 128,
     PRED_PUSH_FORCE = 256,
     SUBLINK_PULLUP_DISABLE_EXPR = 512, /* disable pull sublink in expr clause */
+    SUBLINK_PULLUP_ENHANCED = 1024
 } rewrite_param;
 
 typedef enum {
@@ -450,6 +451,9 @@ typedef enum {
 
 #define DISABLE_SUBLINK_PULLUP_EXPR() \
     ((SUBLINK_PULLUP_DISABLE_EXPR) & (uint)u_sess->attr.attr_sql.rewrite_rule)
+
+#define ENABLE_SUBLINK_PULLUP_ENHANCED() \
+    ((SUBLINK_PULLUP_ENHANCED) & (uint)u_sess->attr.attr_sql.rewrite_rule)
 
 #define ENABLE_PRED_PUSH_ALL(root) \
     ((ENABLE_PRED_PUSH(root) || ENABLE_PRED_PUSH_NORMAL(root) || ENABLE_PRED_PUSH_FORCE(root)) && permit_predpush(root))
