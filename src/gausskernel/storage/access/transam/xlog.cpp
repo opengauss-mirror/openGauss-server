@@ -9912,6 +9912,12 @@ void StartupXLOG(void)
         }
     }
 
+    if (SSSKIP_REDO_REPLAY && t_thrd.xlog_cxt.InRecovery == true) {
+        /* do not need replay anything in SS standby mode */
+        ereport(LOG, (errmsg("[SS] Skip redo replay in standby mode")));
+        t_thrd.xlog_cxt.InRecovery = false;
+    }
+
     ReadRemainSegsFile();
     /* Determine whether it is currently in the switchover of streaming disaster recovery */
     checkHadrInSwitchover();
@@ -10322,10 +10328,6 @@ void StartupXLOG(void)
                     if (xlogctl->recoveryPause) {
                         recoveryPausesHere();
                     }
-                }
-
-                if (ENABLE_DMS && SSSKIP_REDO_REPLAY) {
-                    break;
                 }
 
                 /*
@@ -11880,6 +11882,15 @@ void CreateCheckPoint(int flags)
 
     /* allow standby do checkpoint only after it has promoted AND has finished recovery. */
     if (ENABLE_DMS && SS_STANDBY_MODE) {
+        if (shutdown) {
+            START_CRIT_SECTION();
+            LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+            t_thrd.shemem_ptr_cxt.ControlFile->state = DB_SHUTDOWNED;
+            t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
+            UpdateControlFile();
+            LWLockRelease(ControlFileLock);
+            END_CRIT_SECTION();
+        }
         return;
     } else if (SSFAILOVER_TRIGGER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do not do CreateCheckpoint during failover")));
@@ -17158,7 +17169,12 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
         if (readSource & XLOG_FROM_STREAM) {
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
-            readLen = ParallelXLogPageReadFile(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
+            if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+                readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
+                    xlogreader->readBuf, readTLI, NULL);
+            } else {
+                readLen = ParallelXLogPageReadFile(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
+            }
         }
 
         if (readLen > 0 || t_thrd.xlog_cxt.recoveryTriggered || !t_thrd.xlog_cxt.StandbyMode || DoEarlyExit()) {
@@ -17885,7 +17901,7 @@ retry:
         if (!ss_ret) {
             ereport(emode_for_corrupt_record(emode, RecPtr),
                 (errcode_for_file_access(),
-                 errmsg("[ss] could not read from log file %s to offset %u: %m",
+                 errmsg("[SS] could not read from log file %s to offset %u: %m",
                         XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
                         t_thrd.xlog_cxt.readOff)));
             goto next_record_is_invalid;
