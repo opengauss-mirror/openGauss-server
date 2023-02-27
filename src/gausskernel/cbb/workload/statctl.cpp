@@ -1089,7 +1089,7 @@ void WLMAdjustCGroup4EachThreadOnDN(WLMDNodeInfo* info)
     }
 
     /* Check the thread id whether is valid, and get the next group. */
-    if (info->tid <= 0 || gscgroup_get_next_group(ng, info->cgroup) <= 0) {
+    if (info->tid == 0 || gscgroup_get_next_group(ng, info->cgroup) <= 0) {
         return;
     }
 
