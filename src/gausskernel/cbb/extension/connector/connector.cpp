@@ -245,34 +245,36 @@ static void read_one_key_value(const char* key, const char* value)
         GetKeyValueByString(NAME_ENCODING, t_thrd.conn_cxt.value_encoding, value, len);
     } else if (0 == strcasecmp(key, NAME_USERNAME)) {
         errno_t errCode;
-        char plainuid[EC_CIPHER_TEXT_LENGTH] = {0};
+        char *plainuid = NULL;
 
         /* If an empty username is given, just return */
         if (len == 0)
             return;
 
         /* Decrypt username */
-        decryptECString(value, plainuid, EC_CIPHER_TEXT_LENGTH, SOURCE_MODE);
+        decryptECString(value, &plainuid, SOURCE_MODE);
         GetKeyValueByString(NAME_USERNAME, t_thrd.conn_cxt.value_username, plainuid, len);
 
         /* Clear buffer */
-        errCode = memset_s(plainuid, EC_CIPHER_TEXT_LENGTH, 0, EC_CIPHER_TEXT_LENGTH);
+        errCode = memset_s(plainuid, strlen(plainuid), 0, strlen(plainuid));
         securec_check(errCode, "\0", "\0");
+        pfree(plainuid);
     } else if (0 == strcasecmp(key, NAME_PASSWORD)) {
         errno_t errCode;
-        char plainpwd[EC_CIPHER_TEXT_LENGTH] = {0};
+        char *plainpwd = NULL;
 
         /* If an empty password is given, just return */
         if (len == 0)
             return;
 
         /* Decrypt password */
-        decryptECString(value, plainpwd, EC_CIPHER_TEXT_LENGTH, SOURCE_MODE);
+        decryptECString(value, &plainpwd, SOURCE_MODE);
         GetKeyValueByString(NAME_PASSWORD, t_thrd.conn_cxt.value_password, plainpwd, len);
 
         /* Clear buffer */
-        errCode = memset_s(plainpwd, EC_CIPHER_TEXT_LENGTH, 0, EC_CIPHER_TEXT_LENGTH);
+        errCode = memset_s(plainpwd, strlen(plainpwd), 0, strlen(plainpwd));
         securec_check(errCode, "\0", "\0");
+        pfree(plainpwd);
     } else
         return; /* just skip unknown keys */
 }

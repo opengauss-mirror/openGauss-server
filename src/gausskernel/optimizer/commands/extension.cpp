@@ -1353,6 +1353,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
             csstmt->schemaname = schemaName;
             csstmt->authid = NULL; /* will be created by current user */
             csstmt->schemaElts = NIL;
+            csstmt->charset = PG_INVALID_ENCODING;
 #ifdef PGXC
             CreateSchemaCommand(csstmt, NULL, true);
 #else

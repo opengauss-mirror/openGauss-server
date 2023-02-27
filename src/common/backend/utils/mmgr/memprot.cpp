@@ -859,7 +859,7 @@ void MemoryProtectFunctions::gs_memprot_free(void* ptr, Size sz)
 template <MemType mem_type>
 void* MemoryProtectFunctions::gs_memprot_realloc(void* ptr, Size sz, Size newsz, bool needProtect)
 {
-    Assert(GS_MP_INITED);  // Must be used when memory protect feature is avaiable
+    Assert(GS_MP_INITED);  // Must be used when memory protect feature is available
 
     void* ret = NULL;
 

@@ -3993,7 +3993,8 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
    OUT lwlock_wait_time bigint,
    OUT details bytea,
    OUT is_slow_sql bool,
-   OUT trace_id text)
+   OUT trace_id text,
+   OUT advise text)
  RETURNS setof record
  AS $$
  DECLARE
@@ -4061,6 +4062,7 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
           details := row_data.details;
           is_slow_sql := row_data.is_slow_sql;
           trace_id := row_data.trace_id;
+          advise := row_data.advise;
           return next;
        END LOOP;
     END LOOP;
@@ -4123,7 +4125,8 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
    OUT lwlock_wait_time bigint,
    OUT details bytea,
    OUT is_slow_sql bool,
-   OUT trace_id text)
+   OUT trace_id text,
+   OUT advise text)
  RETURNS setof record
  AS $$
  DECLARE
@@ -4191,6 +4194,7 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
           details := row_data.details;
           is_slow_sql := row_data.is_slow_sql;
           trace_id := row_data.trace_id;
+          advise := row_data.advise;
           return next;
        END LOOP;
     END LOOP;
@@ -4437,7 +4441,7 @@ DECLARE
   BEGIN
     query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'select * from get_node_stat_reset_time()';
+      query_str := 'select * from pg_catalog.get_node_stat_reset_time()';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         reset_time := row_data.get_node_stat_reset_time;

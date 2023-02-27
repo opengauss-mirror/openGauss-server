@@ -81,9 +81,10 @@ static TupleTableSlot* ExecUnique(PlanState* state) /* return: a tuple or NULL *
          * If so then we loop back and fetch another new tuple from the
          * subplan.
          */
-        if (!execTuplesMatch(
-                slot, result_tuple_slot, plan_node->numCols, plan_node->uniqColIdx, node->eqfunctions, node->tempContext))
+        if (!execTuplesMatch(slot, result_tuple_slot, plan_node->numCols, plan_node->uniqColIdx, node->eqfunctions,
+                             node->tempContext, plan_node->uniq_collations)) {
             break;
+        }
     }
 
     /*

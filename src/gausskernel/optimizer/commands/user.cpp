@@ -159,7 +159,7 @@ static inline void check_iteration_count(int iteration_count)
     }
 }
 /* Check if current user has createrole privileges */
-static bool have_createrole_privilege(void)
+bool have_createrole_privilege(void)
 {
     return has_createrole_privilege(GetUserId());
 }
@@ -543,7 +543,7 @@ static inline void clean_role_password(const DefElem* dpassword)
  * True iff role name starts with the gs_role_ prefix.
  * The prefix gs_role_ is reserverd for the predefined role names.
  */
-static bool IsReservedRoleName(const char* name)
+bool IsReservedRoleName(const char* name)
 {
     if (strncmp(name, "gs_role_", strlen("gs_role_")) == 0) {
         return true;

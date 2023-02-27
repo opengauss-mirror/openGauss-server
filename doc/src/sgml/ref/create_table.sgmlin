@@ -11,11 +11,13 @@
 <refsynopsisdiv>
 <synopsis>
 CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] table_name
-  ( { column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
+  ( { column_name data_type [ CHARACTER SET | CHARSET charset ]
+    [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
     | table_constraint
     | LIKE source_table [ like_option [...] ] }
     [, ... ])
     [ AUTO_INCREMENT [ = ] value ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
     [ COMPRESS | NOCOMPRESS ]
@@ -27,14 +29,15 @@ where column_constraint can be:
   NULL |
   CHECK ( expression ) |
   DEFAULT default_expr |
-  GENERATED ALWAYS AS ( generation_expr ) STORED |
+  GENERATED ALWAYS AS ( generation_expr ) [STORED] |
   AUTO_INCREMENT |
-  UNIQUE index_parameters |
+  UNIQUE [KEY] index_parameters |
   PRIMARY KEY index_parameters |
   ENCRYPTED WITH ( COLUMN_ENCRYPTION_KEY = column_encryption_key, ENCRYPTION_TYPE = encryption_type_value ) |
   REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
     [ ON DELETE action ] [ ON UPDATE action ] }
 [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
 where table_constraint can be:
 [ CONSTRAINT [ constraint_name ] ]
 { CHECK ( expression ) |
@@ -66,11 +69,13 @@ where list_distribution_rules can be:
 ]
 
 NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
-NOTICE: '[ index_name ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ USING method ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ ASC | DESC ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '( expression )' in 'UNIQUE' clause of table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: 'AUTO_INCREMENT' is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '( expression )' in 'UNIQUE' clause of table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
 NOTICE: '[ VISIBLE | INVISIBLE ]' is only avaliable in CENTRALIZED mode and B-format database!
 </synopsis>
 </refsynopsisdiv>

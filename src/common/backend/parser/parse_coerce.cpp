@@ -35,6 +35,7 @@
 #include "utils/numeric.h"
 #include "utils/guc.h"
 #include "utils/guc_tables.h"
+#include "mb/pg_wchar.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -62,6 +63,9 @@ static bool meet_decode_compatibility(List* exprs, const char* context);
 static bool meet_c_format_compatibility(List* exprs, const char* context);
 static bool meet_set_type_compatibility(List* exprs, const char* context, Oid *retOid);
 extern Node* makeAConst(Value* v, int location);
+#define CHECK_PARSE_PHRASE(context, target) \
+    (AssertMacro(sizeof(target) - 1 == strlen(target)), strncmp(context, target, sizeof(target) - 1) == 0)
+
 /*
  * @Description: same as get_element_type() except this reports error
  * when the result is invalid.
@@ -171,6 +175,50 @@ Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid ta
         }
 
     return result;
+}
+
+/*
+ * coerce_to_target_charset()
+ *		Convert an expression to a target character set.
+ *
+ * pstate - parse state (can be NULL, see semtc_coerce_type)
+ * expr - input expression tree (already transformed by semtc_expr)
+ * target_charset - desired result character set
+ * targetTypeId - desired result type
+ */
+Node* coerce_to_target_charset(Node* expr, int target_charset, Oid targetTypeId)
+{
+    FuncExpr* fexpr = NULL;
+    List* args = NIL;
+    Const* cons = NULL;
+    int exprcharset = PG_INVALID_ENCODING;
+
+    if (target_charset == PG_INVALID_ENCODING) {
+        return expr;
+    }
+
+    exprcharset = exprCharset((Node*)expr);
+    if (exprcharset == PG_INVALID_ENCODING) {
+        exprcharset = GetDatabaseEncoding();
+    }
+    if (exprcharset == target_charset) {
+        return expr;
+    }
+
+    const char* expr_charset_name = pg_encoding_to_char(exprcharset);
+    const char* target_charset_name = pg_encoding_to_char(target_charset);
+
+    args = list_make1(expr);
+
+    cons = makeConst(NAMEOID, -1, InvalidOid, sizeof(const char*), NameGetDatum(expr_charset_name), false, true);
+    args = lappend(args, cons);
+
+    cons = makeConst(NAMEOID, -1, InvalidOid, sizeof(const char*),
+                     NameGetDatum(target_charset_name), false, true);
+    args = lappend(args, cons);
+
+    fexpr = makeFuncExpr(CONVERTFUNCOID, targetTypeId, args, InvalidOid, InvalidOid, COERCE_IMPLICIT_CAST);
+    return (Node*)fexpr;
 }
 
 /*
@@ -1684,7 +1732,7 @@ Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Nod
          * using C format coercion.
          */
         ptype = choose_specific_expr_type(pstate, exprs, context);
-    } else if (context != NULL && 0 == strncmp(context, "NVL", sizeof("NVL"))) {
+    } else if (context != NULL && CHECK_PARSE_PHRASE(context, "NVL")) {
         /* Follow A db nvl*/
         ptype = choose_nvl_type(pstate, exprs, context);
     } else {
@@ -1717,7 +1765,8 @@ Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Nod
 static bool meet_decode_compatibility(List* exprs, const char* context)
 {
     bool res = u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE) &&
-        context != NULL && 0 == strncmp(context, "CASE", sizeof("CASE")) && check_all_in_whitelist(exprs);
+        context != NULL && CHECK_PARSE_PHRASE(context, "DECODE") && check_all_in_whitelist(exprs);
+
     return res;
 }
 
@@ -1728,9 +1777,9 @@ static bool meet_decode_compatibility(List* exprs, const char* context)
 static bool meet_c_format_compatibility(List* exprs, const char* context)
 {
     bool res = (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && context != NULL &&
-        (0 == strncmp(context, "CASE", sizeof("CASE")) || 0 == strncmp(context, "COALESCE", sizeof("COALESCE")))) ||
-        (ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE) && context != NULL &&
-        (0 == strncmp(context, "CASE", sizeof("CASE"))));
+                (CHECK_PARSE_PHRASE(context, "CASE") || CHECK_PARSE_PHRASE(context, "COALESCE") ||
+                 CHECK_PARSE_PHRASE(context, "DECODE"))) ||
+               (ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE) && context != NULL && CHECK_PARSE_PHRASE(context, "DECODE"));
     return res;
 }
 

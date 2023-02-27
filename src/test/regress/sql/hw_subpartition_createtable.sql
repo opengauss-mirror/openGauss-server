@@ -815,29 +815,6 @@ drop table list_list;
 
 
 --1.4 subpartition key check
--- 一级分区和二级分区分区键是同一列
-
-CREATE TABLE list_list
-(
-    month_code VARCHAR2 ( 30 ) NOT NULL ,
-    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
-    user_no    VARCHAR2 ( 30 ) NOT NULL ,
-    sales_amt  int
-)
-PARTITION BY LIST (month_code) SUBPARTITION BY LIST (month_code)
-(
-  PARTITION p_201901 VALUES ( '201902' )
-  (
-    SUBPARTITION p_201901_a VALUES ( '1' ),
-    SUBPARTITION p_201901_b VALUES ( '2' )
-  ),
-  PARTITION p_201902 VALUES ( '201903' )
-  (
-    SUBPARTITION p_201902_a VALUES ( '1' ),
-    SUBPARTITION p_201902_b VALUES ( '2' )
-  )
-);
-
 --二级分区的键值一样
 
 CREATE TABLE list_list
@@ -1566,6 +1543,290 @@ PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
 );
 create table t1(like range_list including partition);
 drop table range_list;
+
+-- test the key of partition and subpartition is same column
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (month_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '201902' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+insert into list_list values('2', '2', '1', 1);
+EXPLAIN (costs false)
+SELECT * FROM list_list SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM list_list WHERE month_code = '201902' ORDER BY 1,2;
+drop table list_list;
+
+CREATE TABLE list_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY HASH (month_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+insert into list_hash values('201902', '1', '1', 1);
+insert into list_hash values('201902', '2', '1', 1);
+insert into list_hash values('201903', '5', '1', 1);
+insert into list_hash values('201903', '6', '1', 1);
+SELECT * FROM list_hash SUBPARTITION (p_201901_a) ORDER BY 1,2;
+SELECT * FROM list_hash SUBPARTITION (p_201901_b) ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM list_hash SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM list_hash WHERE month_code = '201903' ORDER BY 1,2;
+drop table list_hash;
+
+CREATE TABLE list_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY RANGE (month_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a values less than ('1'),
+    SUBPARTITION p_201901_b values less than ('2')
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a values less than ('3'),
+    SUBPARTITION p_201902_b values less than ('4')
+  )
+);
+insert into list_range values('201902', '1', '1', 1);
+insert into list_range values('201903', '2', '1', 1);
+SELECT * FROM list_range SUBPARTITION (p_201902_a) ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM list_range SUBPARTITION FOR ('201903','201903') ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM list_range WHERE month_code = '201903' ORDER BY 1,2;
+drop table list_range;
+
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (month_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('201901'),
+    SUBPARTITION p_201901_b values ('201902')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a values ('201903'),
+    SUBPARTITION p_201902_b values ('201904')
+  )
+);
+insert into range_list values('201901', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+insert into range_list values('201903', '1', '1', 1);
+insert into range_list values('201904', '2', '1', 1);
+EXPLAIN (costs false)
+SELECT * FROM range_list SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM range_list WHERE month_code = '201903' ORDER BY 1,2;
+drop table range_list;
+
+CREATE TABLE range_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY RANGE (month_code) SUBPARTITION BY HASH (month_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+insert into range_hash values('201901', '1', '1', 1);
+insert into range_hash values('201902', '2', '1', 1);
+insert into range_hash values('201903', '2', '1', 1);
+insert into range_hash values('20190322', '1', '1', 1);
+SELECT * FROM range_hash SUBPARTITION (p_201901_a) ORDER BY 1,2;
+SELECT * FROM range_hash SUBPARTITION (p_201901_b) ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM range_hash SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM range_hash WHERE month_code = '201903' ORDER BY 1,2;
+drop table range_hash;
+
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (month_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '20190220' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( '20190230' )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '20190320' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '20190330' )
+  )
+);
+insert into range_range values('201902', '1', '1', 1);
+insert into range_range values('20190222', '2', '1', 1);
+insert into range_range values('201903', '2', '1', 1);
+insert into range_range values('20190322', '1', '1', 1);
+insert into range_range values('20190333', '2', '1', 1);
+EXPLAIN (costs false)
+SELECT * FROM range_range SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM range_range WHERE month_code = '201903' ORDER BY 1,2;
+drop table range_range;
+
+CREATE TABLE hash_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY hash (month_code) SUBPARTITION BY LIST (month_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a VALUES ( '201901' ),
+    SUBPARTITION p_201901_b VALUES ( '201902' )
+  ),
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a VALUES ( '201901' ),
+    SUBPARTITION p_201902_b VALUES ( '201902' )
+  )
+);
+insert into hash_list values('201901', '1', '1', 1);
+insert into hash_list values('201901', '2', '1', 1);
+insert into hash_list values('201902', '1', '1', 1);
+insert into hash_list values('201902', '2', '1', 1);
+insert into hash_list values('201903', '2', '1', 1);
+SELECT * FROM hash_list SUBPARTITION (p_201901_a) ORDER BY 1,2;
+SELECT * FROM hash_list SUBPARTITION (p_201901_b) ORDER BY 1,2;
+SELECT * FROM hash_list SUBPARTITION (p_201902_a) ORDER BY 1,2;
+SELECT * FROM hash_list SUBPARTITION (p_201902_b) ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM hash_list SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM hash_list WHERE month_code = '201901' ORDER BY 1,2;
+drop table hash_list;
+
+CREATE TABLE hash_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY hash (month_code) SUBPARTITION BY hash (month_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+insert into hash_hash values('201901', '1', '1', 1);
+insert into hash_hash values('201901', '2', '1', 1);
+insert into hash_hash values('201903', '1', '1', 1);
+insert into hash_hash values('201903', '2', '1', 1);
+EXPLAIN (costs false)
+SELECT * FROM hash_hash SUBPARTITION FOR ('201901','201901') ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM hash_hash WHERE month_code = '201903' ORDER BY 1,2;
+drop table hash_hash;
+
+CREATE TABLE hash_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY hash (month_code) SUBPARTITION BY range (month_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN ( '201902' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN ( '201903' )
+  ),
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN ( '201902' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN ( '201903' )
+  )
+);
+insert into hash_range values('201901', '1', '1', 1);
+insert into hash_range values('201901', '2', '1', 1);
+insert into hash_range values('201902', '1', '1', 1);
+insert into hash_range values('201902', '2', '1', 1);
+insert into hash_range values('201903', '2', '1', 1);
+SELECT * FROM hash_range SUBPARTITION (p_201901_a) ORDER BY 1,2;
+SELECT * FROM hash_range SUBPARTITION (p_201901_b) ORDER BY 1,2;
+SELECT * FROM hash_range SUBPARTITION (p_201902_a) ORDER BY 1,2;
+SELECT * FROM hash_range SUBPARTITION (p_201902_b) ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM hash_range SUBPARTITION FOR ('201901','201901') ORDER BY 1,2;
+EXPLAIN (costs false)
+SELECT * FROM hash_range WHERE month_code = '201902' ORDER BY 1,2;
+drop table hash_range;
 
 --clean
 DROP SCHEMA subpartition_createtable CASCADE;

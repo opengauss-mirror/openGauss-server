@@ -75,6 +75,11 @@ alter table list_list split subpartition p_201902_a values (3) into
 	subpartition p_201902_ab,
 	subpartition p_201902_ac
 );
+alter table list_list split subpartition p_201902_c values ((2,3),(3,4)) into
+(
+	subpartition p_201902_c,
+	subpartition p_201902_d
+);
 
 drop table list_list;
 

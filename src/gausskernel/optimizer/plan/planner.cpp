@@ -88,6 +88,7 @@
 #include "optimizer/stream_remove.h"
 #include "executor/node/nodeModifyTable.h"
 #include "optimizer/gplanmgr.h"
+#include "instruments/instr_statement.h"
 
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
@@ -148,13 +149,14 @@ static bool choose_hashed_distinct(PlannerInfo* root, double tuple_fraction, dou
     int path_width, Cost cheapest_startup_cost, Cost cheapest_total_cost, Distribution* cheapest_distribution,
     Cost sorted_startup_cost, Cost sorted_total_cost, Distribution* sorted_distribution, List* sorted_pathkeys,
     double dNumDistinctRows, Size hashentrysize);
-static List* make_subplanTargetList(PlannerInfo* root, List* tlist, AttrNumber** groupColIdx, bool* need_tlist_eval);
+static List* make_subplanTargetList(PlannerInfo* root, List* tlist, AttrNumber** groupColIdx, bool* need_tlist_eval,
+    Oid** gruopCollations);
 static void locate_grouping_columns(PlannerInfo* root, List* tlist, List* sub_tlist, AttrNumber* groupColIdx);
 static List* postprocess_setop_tlist(List* new_tlist, List* orig_tlist);
 static List* make_windowInputTargetList(PlannerInfo* root, List* tlist, List* activeWindows);
 static void get_column_info_for_window(PlannerInfo* root, WindowClause* wc, List* tlist, int numSortCols,
     AttrNumber* sortColIdx, int* partNumCols, AttrNumber** partColIdx, Oid** partOperators, int* ordNumCols,
-    AttrNumber** ordColIdx, Oid** ordOperators);
+    AttrNumber** ordColIdx, Oid** ordOperators, Oid** partCollations, Oid** ordCollations);
 static List* add_groupingIdExpr_to_tlist(List* tlist);
 static List* get_group_expr(List* sortrefList, List* tlist);
 static void build_grouping_itst_keys(PlannerInfo* root, List* active_windows);
@@ -891,7 +893,11 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     result->noanalyze_rellist = (List*)copyObject(t_thrd.postgres_cxt.g_NoAnalyzeRelNameList);
     result->hasIgnore = parse->hasIgnore;
 
-    if (ENABLE_CACHEDPLAN_MGR) {
+    if (ENABLE_CACHEDPLAN_MGR && u_sess->pcache_cxt.is_plan_exploration) {
+        ereport(DEBUG2,
+                (errmodule(MOD_OPT),
+                 errmsg(" ThreadId: %d: append PlannerInfo to session. PlannerInfo's memorycxt is \"%s\" and parent is \"%s\".",
+                        gettid(),  root->planner_cxt->name, root->planner_cxt->parent->name)));
         u_sess->pcache_cxt.explored_plan_info = root;
     }
 
@@ -909,6 +915,8 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
 
     result->query_string = NULL;
     result->MaxBloomFilterNum = root->glob->bloomfilter.bloomfilter_index + 1;
+    if (instr_stmt_plan_need_report_cause_type())
+        result->cause_type = instr_stmt_plan_get_cause_type();
     /* record which suplan belongs to which thread */
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_STREAM_PLAN) {
@@ -1698,8 +1706,11 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      * Note that both havingQual and parse->jointree->quals are in
      * implicitly-ANDed-list form at this point, even though they are declared
      * as Node *.
+     * Also, HAVING quals should not be transfered into WHERE clauses, since
+     * the rownum is expected to be assigned to tuples before filtered by
+     * other HAVING quals.
      */
-    if (!parse->unique_check)  {
+    if (!parse->unique_check && !expression_contains_rownum((Node*)parse->havingQual))  {
         newHaving = NIL;
         foreach(l, (List *) parse->havingQual)  {
             Node       *havingclause = (Node *)lfirst(l);
@@ -2742,6 +2753,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         List* sub_tlist = NIL;
         double sub_limit_tuples;
         AttrNumber* groupColIdx = NULL;
+        Oid* groupCollation = NULL;
         bool need_try_fdw_plan = false;
         bool need_tlist_eval = true;
         Path* cheapest_path = NULL;
@@ -2892,7 +2904,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
          * Generate appropriate target list for subplan; may be different from
          * tlist if grouping or aggregation is needed.
          */
-        sub_tlist = make_subplanTargetList(root, tlist, &groupColIdx, &need_tlist_eval);
+        sub_tlist = make_subplanTargetList(root, tlist, &groupColIdx, &need_tlist_eval, &groupCollation);
 
         /* Set matching and superset key for planner info of current query level */
         if (IS_STREAM_PLAN) {
@@ -3452,6 +3464,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                     numGroupCols,
                                     groupColIdx,
                                     extract_grouping_ops(parse->groupClause),
+                                    groupCollation,
                                     localNumGroup,
                                     result_plan,
                                     wflists,
@@ -3595,6 +3608,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                 numGroupCols,
                                 groupColIdx,
                                 extract_grouping_ops(parse->groupClause),
+                                extract_grouping_collations(parse->groupClause, tlist),
                                 localNumGroup,
                                 result_plan,
                                 wflists,
@@ -3725,6 +3739,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         numGroupCols,
                         groupColIdx,
                         extract_grouping_ops(parse->groupClause),
+                        extract_grouping_collations(parse->groupClause, tlist),
                         localNumGroup,
                         result_plan,
                         wflists,
@@ -3811,7 +3826,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         groupColIdx,
                         extract_grouping_ops(parse->groupClause),
                         dNumGroups[0],
-                        result_plan);
+                        result_plan,
+                        extract_grouping_collations(parse->groupClause,
+                            needs_stream && need_tlist_eval ? result_plan->targetlist : tlist));
                     next_is_second_level_group = true;
                 }
 
@@ -3962,6 +3979,8 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 int ordNumCols;
                 AttrNumber* ordColIdx = NULL;
                 Oid* ordOperators = NULL;
+                Oid* partCollations = NULL;
+                Oid* ordCollations = NULL;
 
                 window_pathkeys = make_pathkeys_for_window(root, wc, tlist, true);
 
@@ -4001,7 +4020,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         &partOperators,
                         &ordNumCols,
                         &ordColIdx,
-                        &ordOperators);
+                        &ordOperators,
+                        &partCollations,
+                        &ordCollations);
                 } else {
                     /* empty window specification, nothing to sort */
                     current_pathkeys = NIL;
@@ -4035,7 +4056,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     wc->frameOptions,
                     wc->startOffset,
                     wc->endOffset,
-                    result_plan);
+                    result_plan,
+                    partCollations,
+                    ordCollations);
 #ifdef STREAMPLAN
                 if (IS_STREAM_PLAN && is_execute_on_datanodes(result_plan) && !is_replicated_plan(result_plan)) {
                     result_plan = (Plan*)mark_windowagg_stream(root, result_plan, tlist, wc, current_pathkeys, wflists);
@@ -4156,6 +4179,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     list_length(parse->distinctClause),
                     extract_grouping_cols(parse->distinctClause, result_plan->targetlist),
                     extract_grouping_ops(parse->distinctClause),
+                    extract_grouping_collations(parse->distinctClause, result_plan->targetlist),
                     (long)Min(numDistinctRows[0], (double)LONG_MAX),
                     result_plan,
                     NULL,
@@ -4616,6 +4640,7 @@ static Plan* build_grouping_chain(PlannerInfo* root, Query* parse, List** tlist,
             list_length((List*)linitial(gsets)),
             new_grpColIdx,
             extract_grouping_ops(groupClause),
+            extract_grouping_collations(parse->groupClause, *tlist),
             numGroups,
             sort_plan,
             wflists,
@@ -4657,6 +4682,7 @@ static Plan* build_grouping_chain(PlannerInfo* root, Query* parse, List** tlist,
             numGroupCols,
             top_grpColIdx,
             extract_grouping_ops(groupClause),
+            extract_grouping_collations(parse->groupClause, newTlist),
             numGroups,
             result_plan,
             wflists,
@@ -6862,7 +6888,8 @@ static bool choose_hashed_distinct(PlannerInfo* root, double tuple_fraction, dou
  *
  * The result is the targetlist to be passed to query_planner.
  */
-static List* make_subplanTargetList(PlannerInfo* root, List* tlist, AttrNumber** groupColIdx, bool* need_tlist_eval)
+static List* make_subplanTargetList(PlannerInfo* root, List* tlist, AttrNumber** groupColIdx,
+    bool* need_tlist_eval, Oid** gruopCollations)
 {
     Query* parse = root->parse;
     List* sub_tlist = NIL;
@@ -6871,6 +6898,7 @@ static List* make_subplanTargetList(PlannerInfo* root, List* tlist, AttrNumber**
     int numCols;
 
     *groupColIdx = NULL;
+    *gruopCollations = NULL;
 
     /*
      * If we're not grouping or aggregating, there's nothing to do here;
@@ -6912,6 +6940,14 @@ static List* make_subplanTargetList(PlannerInfo* root, List* tlist, AttrNumber**
             grpColIdx = (AttrNumber*)palloc0(sizeof(AttrNumber) * numCols);
         *groupColIdx = grpColIdx;
 
+        Oid* grpCollations = NULL;
+        if (parse->groupingSets) {
+            grpCollations = (Oid *)palloc0(sizeof(Oid) * (numCols + 1));
+        } else {
+            grpCollations = (Oid *)palloc0(sizeof(Oid) * numCols);
+        }
+        *gruopCollations = grpCollations;
+
         foreach (tl, sub_tlist) {
             TargetEntry* tle = (TargetEntry*)lfirst(tl);
             int colno;
@@ -6936,6 +6972,7 @@ static List* make_subplanTargetList(PlannerInfo* root, List* tlist, AttrNumber**
                 "invalid grpColIdx item when adding a grouping column to the result tlist."); /* no dups expected */
             grpColIdx[colno] = newtle->resno;
 
+            grpCollations[colno] = exprCollation((Node *) newtle->expr);
             if (!(newtle->expr && IsA(newtle->expr, Var)))
                 *need_tlist_eval = true; /* tlist contains non Vars */
         }
@@ -7403,7 +7440,7 @@ List* make_pathkeys_for_window(PlannerInfo* root, WindowClause* wc, List* tlist,
  */
 static void get_column_info_for_window(PlannerInfo* root, WindowClause* wc, List* tlist, int numSortCols,
     AttrNumber* sortColIdx, int* partNumCols, AttrNumber** partColIdx, Oid** partOperators, int* ordNumCols,
-    AttrNumber** ordColIdx, Oid** ordOperators)
+    AttrNumber** ordColIdx, Oid** ordOperators, Oid** partCollations, Oid** ordCollations)
 {
     int numPart = list_length(wc->partitionClause);
     int numOrder = list_length(wc->orderClause);
@@ -7416,6 +7453,8 @@ static void get_column_info_for_window(PlannerInfo* root, WindowClause* wc, List
         *ordNumCols = numOrder;
         *ordColIdx = sortColIdx + numPart;
         *ordOperators = extract_grouping_ops(wc->orderClause);
+        *partCollations = extract_grouping_collations(wc->partitionClause, tlist);
+        *ordCollations = extract_grouping_collations(wc->orderClause, tlist);
     } else {
         List* sortclauses = NIL;
         List* pathkeys = NIL;
@@ -7429,12 +7468,15 @@ static void get_column_info_for_window(PlannerInfo* root, WindowClause* wc, List
         *ordNumCols = 0;
         *ordColIdx = (AttrNumber*)palloc(numOrder * sizeof(AttrNumber));
         *ordOperators = (Oid*)palloc(numOrder * sizeof(Oid));
+        *partCollations = (Oid*)palloc(numPart * sizeof(Oid));
+        *ordCollations = (Oid*)palloc(numOrder * sizeof(Oid));
         sortclauses = NIL;
         pathkeys = NIL;
         scidx = 0;
         foreach (lc, wc->partitionClause) {
             SortGroupClause* sgc = (SortGroupClause*)lfirst(lc);
             List* new_pathkeys = NIL;
+            TargetEntry *tle = get_sortgroupclause_tle(sgc, tlist);
 
             sortclauses = lappend(sortclauses, sgc);
             new_pathkeys = make_pathkeys_for_sortclauses(root, sortclauses, tlist, true);
@@ -7442,6 +7484,7 @@ static void get_column_info_for_window(PlannerInfo* root, WindowClause* wc, List
                 /* this sort clause is actually significant */
                 (*partColIdx)[*partNumCols] = sortColIdx[scidx++];
                 (*partOperators)[*partNumCols] = sgc->eqop;
+                (*partCollations)[*partNumCols] = exprCollation((Node*)tle->expr);
                 (*partNumCols)++;
                 pathkeys = new_pathkeys;
             }
@@ -7449,6 +7492,7 @@ static void get_column_info_for_window(PlannerInfo* root, WindowClause* wc, List
         foreach (lc, wc->orderClause) {
             SortGroupClause* sgc = (SortGroupClause*)lfirst(lc);
             List* new_pathkeys = NIL;
+            TargetEntry *tle = get_sortgroupclause_tle(sgc, tlist);
 
             sortclauses = lappend(sortclauses, sgc);
             new_pathkeys = make_pathkeys_for_sortclauses(root, sortclauses, tlist, true);
@@ -7456,6 +7500,7 @@ static void get_column_info_for_window(PlannerInfo* root, WindowClause* wc, List
                 /* this sort clause is actually significant */
                 (*ordColIdx)[*ordNumCols] = sortColIdx[scidx++];
                 (*ordOperators)[*ordNumCols] = sgc->eqop;
+                (*ordCollations)[*ordNumCols] = exprCollation((Node*) tle->expr);
                 (*ordNumCols)++;
                 pathkeys = new_pathkeys;
             }
@@ -11095,6 +11140,7 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
             numGroupCols,
             local_groupColIdx,
             groupColOps,
+            NULL,
             final_groups,
             plan,
             wflists,
@@ -11471,6 +11517,7 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
             numGroupCols,
             local_groupColIdx,
             groupColOps,
+            NULL,
             final_groups,
             plan,
             wflists,
@@ -11511,6 +11558,7 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
             numGroupCols,
             local_groupColIdx,
             groupColOps,
+            NULL,
             (long)Min(local_distinct, (double)LONG_MAX),
             plan,
             wflists,
@@ -11586,6 +11634,7 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
             numGroupCols,
             local_groupColIdx,
             groupColOps,
+            NULL,
             rows,
             plan,
             wflists,
@@ -12000,6 +12049,7 @@ static Plan* get_count_distinct_partial_plan(PlannerInfo* root, Plan* result_pla
             AGG_PLAIN,
             &agg_costs,
             0,
+            NULL,
             NULL,
             NULL,
             (long)Min(numGroups[0], (double)LONG_MAX),
@@ -13219,7 +13269,7 @@ static void init_optimizer_context(PlannerGlobal* glob)
 
 static void deinit_optimizer_context(PlannerGlobal* glob)
 {
-    if (IS_NEED_FREE_MEMORY_CONTEXT(glob->plannerContext->plannerMemContext)) {
+    if (IS_NEED_FREE_MEMORY_CONTEXT(glob->plannerContext->plannerMemContext) && !u_sess->pcache_cxt.is_plan_exploration) {
         MemoryContextDelete(glob->plannerContext->plannerMemContext);
         glob->plannerContext->plannerMemContext = NULL;
         glob->plannerContext->dataSkewMemContext = NULL;

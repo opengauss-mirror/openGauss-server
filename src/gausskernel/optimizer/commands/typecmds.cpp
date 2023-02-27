@@ -2177,6 +2177,7 @@ Oid DefineCompositeType(RangeVar* typevar, List* coldeflist)
     createStmt->oncommit = ONCOMMIT_NOOP;
     createStmt->tablespacename = NULL;
     createStmt->if_not_exists = false;
+    createStmt->charset = PG_INVALID_ENCODING;
 
     /*
      * Check for collision with an existing type name. If there is one and

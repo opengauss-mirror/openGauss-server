@@ -462,7 +462,8 @@ void buildSubPlanHash(SubPlanState* node, ExprContext* econtext)
         sizeof(TupleHashEntryData),
         node->hashtablecxt,
         node->hashtempcxt,
-        u_sess->attr.attr_memory.work_mem);
+        u_sess->attr.attr_memory.work_mem,
+        node->tab_collations);
 
     if (!subplan->unknownEqFalse) {
         if (ncols == 1) {
@@ -481,7 +482,8 @@ void buildSubPlanHash(SubPlanState* node, ExprContext* econtext)
             sizeof(TupleHashEntryData),
             node->hashtablecxt,
             node->hashtempcxt,
-            u_sess->attr.attr_memory.work_mem);
+            u_sess->attr.attr_memory.work_mem,
+            node->tab_collations);
     }
 
     /*
@@ -577,7 +579,8 @@ bool findPartialMatch(TupleHashTable hashtable, TupleTableSlot* slot, FmgrInfo* 
         CHECK_FOR_INTERRUPTS();
         
         ExecStoreMinimalTuple(entry->firstTuple, hashtable->tableslot, false);
-        if (!execTuplesUnequal(slot, hashtable->tableslot, num_cols, key_col_idx, eqfunctions, hashtable->tempcxt)) {
+        if (!execTuplesUnequal(slot, hashtable->tableslot, num_cols, key_col_idx, eqfunctions,
+                hashtable->tempcxt, hashtable->tab_collations)) {
             TermTupleHashIterator(&hashiter);
             return true;
         }

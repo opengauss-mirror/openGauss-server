@@ -118,6 +118,9 @@ typedef struct IntoClause {
     bool ivm;                /* true for WITH IVM */
     char relkind;            /* RELKIND_RELATION or RELKIND_MATVIEW */
     List* userVarList;       /* user define variables list */
+    List* copyOption;        /* copyOption for select...into statement */
+    char* filename;          /* filename for select...into statement */
+    bool is_outfile;         /* true for outfile */
 #ifdef PGXC
     struct DistributeBy* distributeby; /* distribution to use, or NULL */
     struct PGXCSubCluster* subcluster; /* subcluster node members */
@@ -843,6 +846,7 @@ typedef struct CaseExpr {
     List* args;      /* the arguments (list of WHEN clauses) */
     Expr* defresult; /* the default result (ELSE clause) */
     int location;    /* token location, or -1 if unknown */
+    bool fromDecode; /* whether is parsed from decode expr, no need to (de-)serialize */
 } CaseExpr;
 
 /*
@@ -1177,10 +1181,7 @@ typedef struct CurrentOfExpr {
     int cursor_param;  /* refcursor parameter number, or 0 */
 } CurrentOfExpr;
 
-/* 
- * SetVariableExpr used for getting guc variable's value
- * only support while dbcompability is B and enable_set_variable_b_format is on
- */
+/* SetVariableExpr used for getting guc variable's value */
 typedef struct {
     Expr xpr;
     char* name;

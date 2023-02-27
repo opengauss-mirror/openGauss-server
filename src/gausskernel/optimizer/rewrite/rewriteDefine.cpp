@@ -609,6 +609,9 @@ void DefineQueryRewrite(
         replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
         values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(InvalidTransactionId);
 
+        replaces[Anum_pg_class_reloptions - 1] = true;
+        nulls[Anum_pg_class_reloptions - 1] = true;
+
         nctup = (HeapTuple) tableam_tops_modify_tuple(classTup, RelationGetDescr(relationRelation), values, nulls, replaces);
 
         simple_heap_update(relationRelation, &nctup->t_self, nctup);

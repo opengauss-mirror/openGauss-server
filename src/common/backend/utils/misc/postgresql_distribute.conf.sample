@@ -820,6 +820,9 @@ audit_enabled = on
 #audit_set_parameter = 1		# whether audit set parameter operation
 #audit_xid_info = 0 			# whether record xid info in audit log
 #audit_thread_num = 1
+#no_audit_client = ""
+#full_audit_users = ""
+#audit_system_function_exec = 0
 
 #Choose which style to print the explain info, normal,pretty,summary,run
 #explain_perf_mode = normal

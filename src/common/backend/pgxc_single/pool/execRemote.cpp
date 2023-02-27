@@ -9703,7 +9703,7 @@ static void ReceivePartitionPageAndTuple(Oid relid, TupleTableSlot* slot)
     }
 
     rel = relation_open(relid, ShareUpdateExclusiveLock);
-    partitionid = partitionNameGetPartitionOid(
+    partitionid = PartitionNameGetPartitionOid(
         relid, (const char*)partname->data, parttype, part_lock, true, false, NULL, NULL, NoLock);
 
     if (!OidIsValid(partitionid)) {

@@ -284,6 +284,14 @@ raise info 'v2:%', v2;
 end;
 /
 
+-- test b_format_behavior_compat_options param
+\c test_set
+show b_format_behavior_compat_options;
+set b_format_behavior_compat_options = 'enable_set_variables, enable_set_variables';
+show b_format_behavior_compat_options;
+set @v1 = 1;
+select @v1;
+
 \c regression
 drop database if exists test_set;
 

@@ -1783,7 +1783,9 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                     ProcessStatus process_status = ADD_TYPE;
                     ValuesProcessor::deprocess_value(pset.db, (unsigned char *)default_value, strlen(default_value),
                         original_type_id, 0, &plaintext, plainTextSize, process_status);
-                    default_value = (char *)plaintext;
+                    if (plaintext != NULL) {
+                        default_value = (char *)plaintext;
+                    }
                 }
 #endif
                 if (tmpbuf.len > 0) {

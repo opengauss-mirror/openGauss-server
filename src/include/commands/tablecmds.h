@@ -138,6 +138,8 @@ extern void clearAttrInitDefVal(Oid relid);
 extern void ATMatviewGroup(List* stmts, Oid mvid, LOCKMODE lockmode);
 extern void AlterCreateChainTables(Oid relOid, Datum reloptions, CreateStmt *mainTblStmt);
 
+extern void CheckAutoIncrementDatatype(Oid typid, const char* colname);
+
 /**
  * @Description: Whether judge the column is partition column.
  * @in rel, A relation.

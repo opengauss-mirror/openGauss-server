@@ -406,6 +406,30 @@ Oid* extract_grouping_ops(List* groupClause)
 }
 
 /*
+ * extract_grouping_collations - make an array of the grouping column collations
+ * for a SortGroupClause list
+ */
+Oid* extract_grouping_collations(List* group_clause, List* tlist)
+{
+    int num_cols = list_length(group_clause);
+    int colno = 0;
+    Oid* grp_collations;
+    ListCell* glitem;
+
+    grp_collations = (Oid *)palloc(sizeof(Oid) * num_cols);
+
+    foreach(glitem, group_clause)
+    {
+        SortGroupClause* groupcl = (SortGroupClause *)lfirst(glitem);
+        TargetEntry* tle = get_sortgroupclause_tle(groupcl, tlist);
+
+        grp_collations[colno++] = exprCollation((Node *) tle->expr);
+    }
+
+    return grp_collations;
+}
+
+/*
  * get_sortgroupref_clause
  *		Find the SortGroupClause matching the given SortGroupRef index,
  *		and return it.

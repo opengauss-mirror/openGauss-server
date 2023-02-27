@@ -21,6 +21,7 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
+#include "catalog/gs_utf8_collation.h"
 #include "commands/dbcommands.h"
 #include "commands/sequence.h"
 #include "db4ai/predict_by.h"
@@ -91,6 +92,7 @@ static Node* convertStarToCRef(RangeTblEntry* rte, char* catname, char* nspname,
 static bool IsSequenceFuncCall(Node* filed1, Node* filed2, Node* filed3);
 static Node* transformSequenceFuncCall(ParseState* pstate, Node* field1, Node* field2, Node* field3, int location);
 static Node* transformConnectByRootFuncCall(ParseState* pstate, Node* funcNameVal, ColumnRef *cref);
+static bool CheckSwAbortedRTE(ParseState *pstate, char *relname);
 static char *ColumnRefFindRelname(ParseState *pstate, const char *colname);
 static Node *transformStartWithColumnRef(ParseState *pstate, ColumnRef *cref, char **colname);
 static Node* tryTransformFunc(ParseState* pstate, List* fields, int location);
@@ -1941,8 +1943,8 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
     if (OidIsValid(c->casetype)) {
         return (Node*)c;
     }
-    bool saved_is_case_when = pstate->p_is_case_when;
-    pstate->p_is_case_when = true;
+    bool saved_is_decode = pstate->p_is_decode;
+    pstate->p_is_decode = c->fromDecode;
     newc = makeNode(CaseExpr);
 
     /* transform the test expression, if any */
@@ -2040,7 +2042,7 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
         resultexprs = lcons(newc->defresult, resultexprs);
     }
 
-    ptype = select_common_type(pstate, resultexprs, "CASE", NULL);
+    ptype = select_common_type(pstate, resultexprs, c->fromDecode ? "DECODE" : "CASE", NULL);
     AssertEreport(OidIsValid(ptype), MOD_OPT, "");
     newc->casetype = ptype;
     /* casecollid will be set by parse_collate.c */
@@ -2056,7 +2058,7 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
     }
 
     newc->location = c->location;
-    pstate->p_is_case_when = saved_is_case_when;
+    pstate->p_is_decode = saved_is_decode;
     return (Node*)newc;
 }
 
@@ -2916,6 +2918,7 @@ static Node* transformCollateClause(ParseState* pstate, CollateClause* c)
     }
     newc->collOid = LookupCollation(pstate, c->collname, c->location);
     newc->location = c->location;
+    check_binary_collation(newc->collOid, argtype);
 
     return (Node*)newc;
 }
@@ -3367,6 +3370,12 @@ static Node *transformStartWithColumnRef(ParseState *pstate, ColumnRef *cref, ch
                 return NULL;
             }
 
+            if (!CheckSwAbortedRTE(pstate, relname)) {
+                ereport(DEBUG1, (errmodule(MOD_OPT_REWRITE),
+                        errmsg("do not find relname %s in sw-aborted RTE, maybe it's a normal column",  relname)));
+                return NULL;
+            }
+
             *colname = makeStartWithDummayColname(relname, local_column_ref);
             field1 = (Node *)makeString("tmp_reuslt");
             field2 = (Node*)makeString(pstrdup(*colname));
@@ -3428,6 +3437,52 @@ static Node* transformConnectByRootFuncCall(ParseState* pstate, Node* funcNameVa
     FuncCall* fn = makeFuncCall(funcExpr, args, cref->location);
 
     return transformFuncCall(pstate, fn);
+}
+
+/*
+ * Check rel RTE sw type
+ * TRUE is sw-aborted RTE
+ * FALSE is not sw-aborted RTE
+ */
+static bool CheckSwAbortedRTE(ParseState *pstate, char *relname)
+{
+    ListCell *lc = NULL;
+
+    while (pstate != NULL) {
+        foreach(lc, pstate->p_rtable) {
+            char *rtename = NULL;
+            RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
+
+            if (!rte->swAborted) {
+                continue;
+            }
+
+            if (rte->rtekind == RTE_RELATION) {
+                rtename = (rte->alias && rte->alias->aliasname) ?
+                rte->alias->aliasname : rte->relname;
+            } else if (rte->rtekind == RTE_SUBQUERY) {
+                rtename = rte->alias->aliasname;
+            } else if (rte->rtekind == RTE_CTE) {
+                rtename = (rte->alias && rte->alias->aliasname) ?
+                rte->alias->aliasname : rte->ctename;
+            } else if (rte->rtekind == RTE_JOIN) {
+                continue;
+            } else {
+                ereport(ERROR,
+                       (errcode(ERRCODE_AMBIGUOUS_COLUMN),
+                        errmsg("Only support RTE_RELATION/RTE_SUBQUERY/RTE_CTE"
+                        "when transform column in start with.")));
+            }
+
+            if (pg_strcasecmp(relname, rtename) == 0) {
+                return true;
+            }
+        }
+
+        pstate = pstate->parentParseState;
+    }
+
+    return false;
 }
 
 /*
@@ -3495,8 +3550,6 @@ static Node* transformPrefixKey(ParseState* pstate, PrefixKey* pkey)
     Node *argnode = (Node*)pkey->arg;
     int maxlen;
     int location = ((ColumnRef*)argnode)->location;
-
-    Assert(nodeTag(argnode) == T_ColumnRef);
 
     if (pkey->length <= 0 || pkey->length > INDEX_KEY_MAX_PREFIX_LENGTH) {
         ereport(ERROR,

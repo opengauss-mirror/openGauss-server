@@ -5996,6 +5996,33 @@ static void add_targetlist_to_group(Query* query)
     }
 }
 
+
+/**
+ * @Description remove the targetentry in targetlist whose resjunk is true.
+ * 
+ * @in query - query.
+ */
+static void remove_target_not_in_final(Query *query)
+{
+
+    List *old_targetList = NIL;
+    List *new_targetList = NIL;
+
+    old_targetList = query->targetList;
+    query->targetList = NIL;
+    ListCell *lc = NULL;
+
+
+    foreach (lc, old_targetList) {
+        TargetEntry *tg = (TargetEntry *)lfirst(lc);
+        if (tg->resjunk)
+            continue;
+        new_targetList = lappend(new_targetList, tg);
+    }
+    query->targetList = new_targetList;
+}
+
+
 /*
  * @Description: Convert this any sublink to left join.
  * @in root - Per-query information for planning/optimization.
@@ -6047,6 +6074,9 @@ void convert_ORANY_to_join(
 
     /* Judge this quals if only include 'and' and 'equal' oper. */
     if (equal_expr(test_quals)) {
+        /* remove the target entry which will not display in the final target list . */
+        remove_target_not_in_final(sub_select);
+
         /* add all targetlist to query's group clsuse. */
         add_targetlist_to_group(sub_select);
 

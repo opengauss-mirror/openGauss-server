@@ -13370,7 +13370,8 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
         }
         LWLockRelease(XlogRemoveSegLock);
     }
-    if (t_thrd.xlog_cxt.server_mode == STANDBY_MODE && t_thrd.xlog_cxt.is_hadr_main_standby) {
+    if (t_thrd.xlog_cxt.server_mode == STANDBY_MODE && t_thrd.xlog_cxt.is_hadr_main_standby &&
+        !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
         XLogSegNo mainStandbySegNo = CalcRecycleSegNoForHadrMainStandby(recptr, segno, repl_slot_state.min_required);
         if (mainStandbySegNo < segno && mainStandbySegNo > 0) {
             segno = mainStandbySegNo;
@@ -13659,6 +13660,7 @@ void xlog_redo(XLogReaderState *record)
         if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, checkPoint.nextXid)) {
             t_thrd.xact_cxt.ShmemVariableCache->nextXid = checkPoint.nextXid;
         }
+        ExtendCSNLOG(checkPoint.nextXid);
         LWLockRelease(XidGenLock);
         LWLockAcquire(OidGenLock, LW_EXCLUSIVE);
         t_thrd.xact_cxt.ShmemVariableCache->nextOid = checkPoint.nextOid;
@@ -13784,6 +13786,7 @@ void xlog_redo(XLogReaderState *record)
         if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, checkPoint.nextXid)) {
             t_thrd.xact_cxt.ShmemVariableCache->nextXid = checkPoint.nextXid;
         }
+        ExtendCSNLOG(checkPoint.nextXid);
         LWLockRelease(XidGenLock);
         /* ... but still treat OID counter as exact */
         LWLockAcquire(OidGenLock, LW_EXCLUSIVE);

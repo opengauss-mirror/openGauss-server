@@ -158,7 +158,7 @@ extern Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid,  Oid partT
                                 Oid bucketOid, HashPartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
                                 const bool* isTimestamptz, StorageType storage_type, int2vector* subpartition_key = NULL, bool isSubPartition = false,
                                 bool partkeyexprIsNull = true, bool partkeyIsFunc = false);
-extern Node *MakeDefaultSubpartition(PartitionState *partitionState, Node *partitionDefState);
+extern Node *MakeDefaultSubpartition(PartitionState *partitionState, PartitionDefState *partitionDefState);
 extern List *addNewSubPartitionTuplesForPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespace,
     Oid bucketOid, Oid ownerid, Datum reloptions, const bool *isTimestamptz, StorageType storage_type,
     PartitionState *partitionState, Node *partitionDefState, LOCKMODE partLockMode);
@@ -170,7 +170,8 @@ extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc,
     Datum interval, Datum maxValues,  Datum transitionPoint, Datum reloptions, bool partkeyexprIsNull = true, bool partkeyIsFunc = false);
 
 extern void heap_truncate_one_part(Relation rel , Oid partOid);
-extern Oid heapTupleGetPartitionId(Relation rel, void *tuple, bool isDDL = false, bool canIgnore = false);
+extern Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool isDDL = false,
+    bool canIgnore = false);
 extern Oid heapTupleGetSubPartitionId(Relation rel, void *tuple);
 extern void heap_truncate(List *relids);
 extern void heap_truncate_one_rel(Relation rel);
@@ -185,7 +186,8 @@ extern void InsertPgClassTuple(Relation pg_class_desc, Relation new_rel_desc, Oi
 extern List *AddRelationNewConstraints(Relation rel, List *newColDefaults, List *newConstraints, bool allow_merge, bool is_local);
 
 extern List *AddRelClusterConstraints(Relation rel, List *clusterKeys);
-extern void StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol, Node* update_expr);
+extern void StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol, Node* update_expr,
+    bool skip_dep = false);
 extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname,
     char generatedCol);
 extern void DeleteRelationTuple(Oid relid);
@@ -248,7 +250,7 @@ extern char* make_column_map(TupleDesc tuple_desc);
 extern bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubPartition = false);
 extern bool *CheckSubPartkeyHasTimestampwithzone(Relation partTableRel, List *subpartKeyPosList);
 
-extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL = false);
+extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple, int *partitionno, bool isDDL = false);
 
 extern int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple);
 

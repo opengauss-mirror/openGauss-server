@@ -12,12 +12,14 @@
 <synopsis>
 CREATE TABLE [ IF NOT EXISTS ] partition_table_name 
 ( [
-  { column_name data_type [ COLLATE collation ] [ column_constraint [ ... ] ]
+  { column_name data_type [ CHARACTER SET | CHARSET charset ]
+    [ COLLATE collation ] [ column_constraint [ ... ] ]
     | table_constraint 
     | LIKE source_table [ like_option [...] ] }
     [, ... ]
 ] )
     [ AUTO_INCREMENT [ = ] value ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ][ [ DEFAULT ] COLLATE [ = ] collation ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]
@@ -26,11 +28,15 @@ CREATE TABLE [ IF NOT EXISTS ] partition_table_name
     [ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
     PARTITION BY { 
         {VALUES (partition_key)} | 
-        {RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ...] ) ] ] ( partition_less_than_item [, ... ] )} |
-        {RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ...] ) ] ] ( partition_start_end_item [, ... ] )} |
-        {LIST | HASH (partition_key) (PARTITION partition_name [ VALUES (list_values_clause) ] opt_table_space ) }
-        NOTICE: LIST/HASH partition is only avaliable in CENTRALIZED mode!
+        {RANGE [ COLUMNS ] (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ...] ) ] ] [ PARTITIONS integer ] ( partition_less_than_item [, ... ] )} |
+        {RANGE [ COLUMNS ] (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ...] ) ] ] [ PARTITIONS integer ] ( partition_start_end_item [, ... ] )} |
+        {{{LIST [ COLUMNS ]} | HASH | KEY} (partition_key) [ PARTITIONS integer ] (PARTITION partition_name [ VALUES [ IN ] (list_values_clause) ] opt_table_space ) }
     } [ { ENABLE | DISABLE } ROW MOVEMENT ];
+
+NOTICE: [ COLUMNS ] is only available in B-format database!
+NOTICE: [ PARTITIONS integer ] in RANGE/LIST partition is only available in B-format database!
+NOTICE: [ IN ] is only available in B-format database!
+NOTICE: KEY is only available in B-format database!
 
 where column_constraint can be:
 [ CONSTRAINT constraint_name ]
@@ -38,13 +44,14 @@ where column_constraint can be:
   NULL |
   CHECK ( expression ) |
   DEFAULT default_expr |
-  GENERATED ALWAYS AS ( generation_expr ) STORED |
+  GENERATED ALWAYS AS ( generation_expr ) [STORED] |
   AUTO_INCREMENT |
-  UNIQUE index_parameters |
+  UNIQUE [KEY] index_parameters |
   PRIMARY KEY index_parameters |
   REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
     [ ON DELETE action ] [ ON UPDATE action ] }
 [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
 where table_constraint can be:
 [ CONSTRAINT [ constraint_name ] ]
 { CHECK ( expression ) |
@@ -59,7 +66,8 @@ where index_parameters can be:
 where like_option can be:
 { INCLUDING | EXCLUDING } { DEFAULTS | GENERATED | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | RELOPTIONS | DISTRIBUTION | ALL }
 where partition_less_than_item can be:
-PARTITION partition_name VALUES LESS THAN ( { partition_value | MAXVALUE } ) [TABLESPACE tablespace_name]
+PARTITION partition_name VALUES LESS THAN { ( { partition_value | MAXVALUE } [, ... ] ) | MAXVALUE } [TABLESPACE [=] tablespace_name]
+NOTICE: MAXVALUE without parentheses is only available in B-format database!
 where partition_start_end_item can be:
 PARTITION partition_name {
 	{START(partition_value) END (partition_value) EVERY (interval_value)} |
@@ -69,10 +77,12 @@ PARTITION partition_name {
 } [TABLESPACE tablespace_name]
 
 NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
-NOTICE: '[ index_name ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ USING method ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ ASC | DESC ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: 'AUTO_INCREMENT' is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

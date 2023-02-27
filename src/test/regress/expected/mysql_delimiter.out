@@ -45,10 +45,24 @@ select 1//
 
 delimiter ;//
 --Test delimiter length
-delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
-ERROR:  syntax error at or near "";""
-LINE 1: delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ";"
-                                                       ^
+delimiter ""
+ERROR:  zero-length delimited identifier at or near """"
+LINE 1: delimiter "" ";"
+                  ^
+delimiter ''
+ERROR:  DELIMITER must be followed by a 'delimiter' character or string at or near "";""
+LINE 1: delimiter '' ";"
+                     ^
+delimiter aaaaaaaaaaaaaaaa
+ERROR:  'delimiter' length should less than 16 at or near "";""
+LINE 1: delimiter aaaaaaaaaaaaaaaa ";"
+                                   ^
+delimiter "aaaaaaaaaaaaaaaa"
+ERROR:  'delimiter' length should less than 16 at or near "";""
+LINE 1: delimiter "aaaaaaaaaaaaaaaa" ";"
+                                     ^
+delimiter aaaaaaaaaaaaaaa
+delimiter ;
 --Test delimiter %
 delimiter %;
 select 1%

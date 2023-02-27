@@ -1230,6 +1230,8 @@ typedef enum WaitState {
     STATE_WAIT_SYNC_PRODUCER_NEXT_STEP,
     STATE_GTM_SET_CONSISTENCY_POINT,
     STATE_WAIT_SYNC_BGWORKERS,
+    STATE_STANDBY_READ_RECOVERY_CONFLICT,
+    STATE_STANDBY_GET_SNAPSHOT,
     STATE_WAIT_NUM  // MUST be last, DO NOT use this value.
 } WaitState;
 
@@ -3038,6 +3040,8 @@ typedef struct IoWaitStatGlobalInfo {
 } IoWaitStatGlobalInfo;
 
 void pgstat_release_session_memory_entry();
+extern void gs_stat_free_stat_node(PgBackendStatusNode* node);
+extern void gs_stat_free_stat_beentry(PgBackendStatus* beentry);
 
 #define MAX_PATH 256
 

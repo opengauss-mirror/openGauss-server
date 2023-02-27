@@ -230,6 +230,7 @@ static bool unsupported_filter_walker(Node *node, Node *context_node)
  *   - ExecStartWithOp()
  *   - ExecEndStartWithOp()
  *   - ExecReScanStartWithOp()
+ *   - ResetRecursiveInner()
  */
 StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int eflags)
 {
@@ -418,6 +419,30 @@ bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot)
     return incycle;
 }
 
+/*
+ * This function is called during executing recursive part(inner plan) of recursive union,
+ * so it would be enough to rescan(reset) only inner_plan of RecursiveUnionState to refresh
+ * last working state including working table.
+ */
+void ResetRecursiveInner(RecursiveUnionState *node)
+{
+    PlanState *outerPlanState = outerPlanState(node);
+    PlanState *innerPlanState = innerPlanState(node);
+    RecursiveUnion *ruPlan = (RecursiveUnion*)node->ps.plan;
+
+    /*
+     * Set recursive term's chgParam to tell it that we'll modify the working
+     * table and therefore it has to rescan.
+     */
+    innerPlanState->chgParam = bms_add_member(innerPlanState->chgParam, ruPlan->wtParam);
+    if (outerPlanState->chgParam == NULL) {
+        ExecReScan(innerPlanState);
+    }
+
+    node->intermediate_empty = true;
+    tuplestore_clear(node->working_table);
+    tuplestore_clear(node->intermediate_table);
+}
 
 /*
  * Peeking a tuple's connectable descendants for exactly one level.
@@ -435,8 +460,8 @@ static List* peekNextLevel(TupleTableSlot* startSlot, PlanState* outerNode, int 
     List* queue = NULL;
     RecursiveUnionState* rus = (RecursiveUnionState*) outerNode;
     StartWithOpState *swnode = rus->swstate;
-    /* clean up RU's old working table */
-    ExecReScan(outerNode);
+    /* ReSet RU's inner plan, inlcuding re-scan inner and free its working table */
+    ResetRecursiveInner(rus);
     /* pushing the depth-first tuple into RU's working table */
     rus->recursing = true;
     tuplestore_puttupleslot(rus->working_table, startSlot);

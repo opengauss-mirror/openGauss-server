@@ -536,6 +536,7 @@ typedef struct knl_u_utils_context {
 
     int GUCNestLevel; /* 1 when in main transaction */
 
+    unsigned int b_format_behavior_compat_flags;
     unsigned int behavior_compat_flags;
     unsigned int plsql_compile_behavior_compat_flags;
 
@@ -996,6 +997,7 @@ typedef struct knl_u_plancache_context {
      * exploration.
      */
     void *explored_plan_info;
+    bool is_plan_exploration;
     HTAB *generic_roots;
 } knl_u_plancache_context;
 
@@ -1191,10 +1193,14 @@ typedef struct knl_u_proc_context {
     bool clientIsGsroach;         /* gs_roach tool check flag */
     bool clientIsGsRestore;       /* gs_restore tool check flag */
     bool clientIsSubscription;    /* subscription client check flag */
+    bool clientIsCMAgent;         /* CM agent check flag */
     bool IsBinaryUpgrade;
     bool IsWLMWhiteList;          /* this proc will not be controled by WLM */
     bool gsRewindAddCount;
     bool PassConnLimit;
+    bool clientIsGsql;            /* gsql tool check flag */
+    /* We allow gsql to copy snapshot from other threads, but set a limit number */
+    int gsqlRemainCopyNum;
 
     char applicationName[NAMEDATALEN];        /* receive application name in ProcessStartupPacket */
 
@@ -1858,6 +1864,8 @@ typedef struct knl_u_storage_context {
     int num_bufs_in_block;
     int total_bufs_allocated;
     MemoryContext LocalBufferContext;
+    List *partition_dml_oids; /* list of partitioned table's oid which is on dml operations */
+    List *partition_ddl_oids; /* list of partitioned table's oid which is on ddl operations */
 } knl_u_storage_context;
 
 

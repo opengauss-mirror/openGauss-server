@@ -165,7 +165,7 @@ static BitmapOr* make_bitmap_or(List* bitmapplans);
 static NestLoop* make_nestloop(List* tlist, List* joinclauses, List* otherclauses, List* nestParams, Plan* lefttree,
     Plan* righttree, JoinType jointype);
 static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses, Plan* lefttree,
-    Plan* righttree, JoinType jointype);
+    Plan* righttree, JoinType jointype, List *hashcollations);
 static Hash* make_hash(
     Plan* lefttree, Oid skewTable, AttrNumber skewColumn, bool skewInherit, Oid skewColType, int32 skewColTypmod);
 static MergeJoin* make_mergejoin(List* tlist, List* joinclauses, List* otherclauses, List* mergeclauses,
@@ -1507,6 +1507,17 @@ static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path)
     AttrNumber* groupColIdx = NULL;
     int groupColPos;
     ListCell* l = NULL;
+    Oid* groupCollations;
+
+    /* unique plan may push the expr to subplan, if subplan is cstorescan,
+     * and expr in unique plan have some vector engine not support expr, it may cause error.
+     */
+    if (best_path->umethod != UNIQUE_PATH_NOOP && best_path->subpath->pathtype == T_CStoreScan &&
+        vector_engine_unsupport_expression_walker((Node*)best_path->uniq_exprs)) {
+        Path* resPath = (Path*)create_result_path(root, best_path->subpath->parent, NULL, best_path->subpath);
+        ((ResultPath*)resPath)->ispulledupqual = true;
+        best_path->subpath = resPath;
+    }
 
     subplan = create_plan_recurse(root, best_path->subpath);
 
@@ -1643,6 +1654,26 @@ static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path)
             groupOperators[groupColPos++] = eq_oper;
         }
 
+        newtlist = subplan->targetlist;
+        numGroupCols = list_length(uniq_exprs);
+        groupCollations = (Oid*)palloc(numGroupCols * sizeof(Oid));
+ 
+        groupColPos = 0;
+        foreach(l, uniq_exprs)
+        {
+            Node* uniqexpr = (Node*)lfirst(l);
+            TargetEntry *tle = NULL;
+ 
+            tle = tlist_member(uniqexpr, newtlist);
+            if (tle == NULL) /* shouldn't happen */
+                ereport(ERROR, (errmodule(MOD_OPT),
+                        errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                        (errmsg("failed to find unique expression in subplan tlist"))));
+
+            groupCollations[groupColPos] = exprCollation((Node*) tle->expr);
+            groupColPos++;
+        }
+
         /*
          * Since the Agg node is going to project anyway, we can give it the
          * minimum output tlist, without any stuff we might have added to the
@@ -1665,6 +1696,7 @@ static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path)
             numGroupCols,
             groupColIdx,
             groupOperators,
+            groupCollations,
             numGroups[0],
             subplan,
             NULL,
@@ -4599,6 +4631,7 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
     HashJoin* join_plan = NULL;
     Hash* hash_plan = NULL;
     Relids left_relids = NULL;
+    List *hashcollations = NIL;
 
     /* Sort join qual clauses into best execution order */
     joinclauses = order_qual_clauses(root, best_path->jpath.joinrestrictinfo);
@@ -4674,12 +4707,19 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
         }
     }
 
+    ListCell *lc;
+    foreach(lc, hashclauses)
+    {
+        OpExpr *hclause = lfirst_node(OpExpr, lc);
+        hashcollations = lappend_oid(hashcollations, hclause->inputcollid);
+    }
+
     /*
      * Build the hash node and hash join node.
      */
     hash_plan = make_hash(inner_plan, skewTable, skewColumn, skewInherit, skewColType, skewColTypmod);
-    join_plan = make_hashjoin(
-        tlist, joinclauses, otherclauses, hashclauses, outer_plan, (Plan*)hash_plan, best_path->jpath.jointype);
+    join_plan = make_hashjoin(tlist, joinclauses, otherclauses, hashclauses, outer_plan, (Plan*)hash_plan,
+                              best_path->jpath.jointype, hashcollations);
 
     /*
      * @hdfs
@@ -6385,7 +6425,7 @@ HashJoin* create_direct_hashjoin(
     }
 
     hash_plan = (Plan*)make_hash(innerPlan, skewTable, skewColumn, skewInherit, skewColType, skewColTypmod);
-    join_plan = make_hashjoin(tlist, joinClauses, NIL, hashclauses, outerPlan, hash_plan, joinType);
+    join_plan = make_hashjoin(tlist, joinClauses, NIL, hashclauses, outerPlan, hash_plan, joinType, NULL);
 
     /* estimate the mem_info for join_plan,  refered to the function initial_cost_hashjoin */
     estimate_directHashjoin_Cost(root, hashclauses, outerPlan, hash_plan, join_plan);
@@ -6597,7 +6637,7 @@ Plan* create_direct_righttree(
 }
 
 static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses, Plan* lefttree,
-    Plan* righttree, JoinType jointype)
+    Plan* righttree, JoinType jointype, List *hashcollations)
 {
     HashJoin* node = makeNode(HashJoin);
     Plan* plan = &node->join.plan;
@@ -6610,6 +6650,7 @@ static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclause
     node->hashclauses = hashclauses;
     node->join.jointype = jointype;
     node->join.joinqual = joinclauses;
+    node->hash_collations = hashcollations;
 
     return node;
 }
@@ -7308,9 +7349,9 @@ void adjust_all_pathkeys_by_agg_tlist(PlannerInfo* root, List* tlist, WindowList
 }
 
 Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrategy, const AggClauseCosts* aggcosts,
-    int numGroupCols, AttrNumber* grpColIdx, Oid* grpOperators, long numGroups, Plan* lefttree, WindowLists* wflists,
-    bool need_stream, bool trans_agg, List* groupingSets, Size hash_entry_size, bool add_width,
-    AggOrientation agg_orientation, bool unique_check)
+    int numGroupCols, AttrNumber* grpColIdx, Oid* grpOperators, Oid* grpCollations, long numGroups,
+    Plan* lefttree, WindowLists* wflists, bool need_stream, bool trans_agg, List* groupingSets,
+    Size hash_entry_size, bool add_width, AggOrientation agg_orientation, bool unique_check)
 {
     Agg* node = makeNode(Agg);
     Plan* plan = &node->plan;
@@ -7376,6 +7417,7 @@ Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrateg
     node->numGroups = numGroups;
     node->skew_optimize = SKEW_RES_NONE;
     node->unique_check = unique_check && root->parse->unique_check;
+    node->grp_collations = grpCollations;
 
 #ifdef STREAMPLAN
     inherit_plan_locator_info((Plan*)node, lefttree);
@@ -7465,7 +7507,7 @@ Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrateg
 
 WindowAgg* make_windowagg(PlannerInfo* root, List* tlist, List* windowFuncs, Index winref, int partNumCols,
     AttrNumber* partColIdx, Oid* partOperators, int ordNumCols, AttrNumber* ordColIdx, Oid* ordOperators,
-    int frameOptions, Node* startOffset, Node* endOffset, Plan* lefttree)
+    int frameOptions, Node* startOffset, Node* endOffset, Plan* lefttree, Oid *partCollations, Oid *ordCollations)
 {
     WindowAgg* node = makeNode(WindowAgg);
     Plan* plan = &node->plan;
@@ -7481,6 +7523,8 @@ WindowAgg* make_windowagg(PlannerInfo* root, List* tlist, List* windowFuncs, Ind
     node->frameOptions = frameOptions;
     node->startOffset = startOffset;
     node->endOffset = endOffset;
+    node->part_collations = partCollations;
+    node->ord_collations = ordCollations;
 
 #ifdef STREAMPLAN
     inherit_plan_locator_info((Plan*)node, lefttree);
@@ -7517,7 +7561,7 @@ WindowAgg* make_windowagg(PlannerInfo* root, List* tlist, List* windowFuncs, Ind
 }
 
 Group* make_group(PlannerInfo* root, List* tlist, List* qual, int numGroupCols, AttrNumber* grpColIdx,
-    Oid* grpOperators, double numGroups, Plan* lefttree)
+    Oid* grpOperators, double numGroups, Plan* lefttree, Oid* grpCollations)
 {
     Group* node = makeNode(Group);
     Plan* plan = &node->plan;
@@ -7531,6 +7575,7 @@ Group* make_group(PlannerInfo* root, List* tlist, List* qual, int numGroupCols, 
     node->numCols = numGroupCols;
     node->grpColIdx = grpColIdx;
     node->grpOperators = grpOperators;
+    node->grp_collations = grpCollations;
 
 #ifdef STREAMPLAN
     inherit_plan_locator_info((Plan*)node, lefttree);
@@ -7594,6 +7639,7 @@ Unique* make_unique(Plan* lefttree, List* distinctList)
     int keyno = 0;
     AttrNumber* uniqColIdx = NULL;
     Oid* uniqOperators = NULL;
+    Oid* uniqCollations = NULL;
     ListCell* slitem = NULL;
 
 #ifdef STREAMPLAN
@@ -7627,6 +7673,7 @@ Unique* make_unique(Plan* lefttree, List* distinctList)
     Assert(numCols > 0);
     uniqColIdx = (AttrNumber*)palloc(sizeof(AttrNumber) * numCols);
     uniqOperators = (Oid*)palloc(sizeof(Oid) * numCols);
+    uniqCollations = (Oid*)palloc(sizeof(Oid) * numCols);
 
     foreach (slitem, distinctList) {
         SortGroupClause* sortcl = (SortGroupClause*)lfirst(slitem);
@@ -7634,6 +7681,7 @@ Unique* make_unique(Plan* lefttree, List* distinctList)
 
         uniqColIdx[keyno] = tle->resno;
         uniqOperators[keyno] = sortcl->eqop;
+        uniqCollations[keyno] = exprCollation((Node *) tle->expr);
         Assert(OidIsValid(uniqOperators[keyno]));
         keyno++;
     }
@@ -7641,6 +7689,7 @@ Unique* make_unique(Plan* lefttree, List* distinctList)
     node->numCols = numCols;
     node->uniqColIdx = uniqColIdx;
     node->uniqOperators = uniqOperators;
+    node->uniq_collations = uniqCollations;
 
     return node;
 }
@@ -7659,6 +7708,7 @@ SetOp* make_setop(SetOpCmd cmd, SetOpStrategy strategy, Plan* lefttree, List* di
     int keyno = 0;
     AttrNumber* dupColIdx = NULL;
     Oid* dupOperators = NULL;
+    Oid* dupCollations = NULL;
     ListCell* slitem = NULL;
 
 #ifdef STREAMPLAN
@@ -7688,6 +7738,7 @@ SetOp* make_setop(SetOpCmd cmd, SetOpStrategy strategy, Plan* lefttree, List* di
     Assert(numCols > 0);
     dupColIdx = (AttrNumber*)palloc(sizeof(AttrNumber) * numCols);
     dupOperators = (Oid*)palloc(sizeof(Oid) * numCols);
+    dupCollations = (Oid*)palloc(sizeof(Oid) * numCols);
 
     foreach (slitem, distinctList) {
         SortGroupClause* sortcl = (SortGroupClause*)lfirst(slitem);
@@ -7695,6 +7746,7 @@ SetOp* make_setop(SetOpCmd cmd, SetOpStrategy strategy, Plan* lefttree, List* di
 
         dupColIdx[keyno] = tle->resno;
         dupOperators[keyno] = sortcl->eqop;
+        dupCollations[keyno] = exprCollation((Node*) tle->expr);
         Assert(OidIsValid(dupOperators[keyno]));
         keyno++;
     }
@@ -7704,6 +7756,7 @@ SetOp* make_setop(SetOpCmd cmd, SetOpStrategy strategy, Plan* lefttree, List* di
     node->numCols = numCols;
     node->dupColIdx = dupColIdx;
     node->dupOperators = dupOperators;
+    node->dup_collations = dupCollations;
     node->flagColIdx = flagColIdx;
     node->firstFlag = firstFlag;
     node->numGroups = numGroups;

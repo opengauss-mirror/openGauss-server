@@ -72,6 +72,7 @@ extern CoercionPathType find_coercion_pathway(
 extern CoercionPathType find_typmod_coercion_function(Oid typeId, Oid* funcid);
 
 extern void expression_error_callback(void* arg);
+extern Node* coerce_to_target_charset(Node* expr, int target_charset, Oid targetTypeId);
 
 extern Node *transferConstToAconst(Node *node);
 

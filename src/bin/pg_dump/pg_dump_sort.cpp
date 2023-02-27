@@ -120,7 +120,8 @@ static const int newObjectTypePriority[] = {
     33, /* DO_RLSPOLICY */
     34, /* DO_PUBLICATION */
     35, /* DO_PUBLICATION_REL */
-    36  /* DO_SUBSCRIPTION */
+    36, /* DO_SUBSCRIPTION */
+    18  /* DO_EVENT */
 };
 
 static DumpId postDataBoundId;
@@ -1098,6 +1099,11 @@ static void describeDumpableObject(DumpableObject* obj, char* buf, int bufsize)
         case DO_TRIGGER:
             nRet = snprintf_s(
                 buf, bufsize, bufsize - 1, "TRIGGER %s  (ID %d OID %u)", obj->name, obj->dumpId, obj->catId.oid);
+            securec_check_ss_c(nRet, "\0", "\0");
+            return;
+        case DO_EVENT:
+            nRet = snprintf_s(
+                buf, bufsize, bufsize - 1, "EVENT %s  (ID %d OID %u)", obj->name, obj->dumpId, obj->catId.oid);
             securec_check_ss_c(nRet, "\0", "\0");
             return;
         case DO_CONSTRAINT:

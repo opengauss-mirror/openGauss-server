@@ -811,6 +811,7 @@ static void process_ordered_aggregate_multi(
     TupleTableSlot* slot2 = peraggstate->uniqslot;
     int numTransInputs = peraggstate->numTransInputs;
     int numDistinctCols = peraggstate->numDistinctCols;
+    Oid* sortCollations = peraggstate->sortCollations;
     Datum newAbbrevVal = (Datum)0;
     Datum oldAbbrevVal = (Datum)0;
     bool haveOldValue = false;
@@ -830,8 +831,8 @@ static void process_ordered_aggregate_multi(
         tableam_tslot_getsomeattrs(slot1, numTransInputs);
 
         if (numDistinctCols == 0 || !haveOldValue || newAbbrevVal != oldAbbrevVal ||
-            !execTuplesMatch(
-                slot1, slot2, numDistinctCols, peraggstate->sortColIdx, peraggstate->equalfns, workcontext)) {
+            !execTuplesMatch(slot1, slot2, numDistinctCols, peraggstate->sortColIdx,
+                peraggstate->equalfns, workcontext, sortCollations)) {
             /* Init FunctionCallInfoData for transition function before loading argument values. */
             InitFunctionCallInfoData(fcinfo,
                                      &(peraggstate->transfn),
@@ -1176,7 +1177,8 @@ static void build_hash_table(AggState* aggstate)
         entrysize,
         aggstate->aggcontexts[0],
         tmpmem,
-        workMem);
+        workMem,
+        node->grp_collations);
 }
 
 /*
@@ -1637,7 +1639,8 @@ static TupleTableSlot* agg_retrieve_direct(AggState* aggstate)
                                             nextSetSize,
                                             node->grpColIdx,
                                             aggstate->phase->eqfunctions,
-                                            tmpcontext->ecxt_per_tuple_memory))) {
+                                            tmpcontext->ecxt_per_tuple_memory,
+                                            node->grp_collations))) {
             aggstate->projected_set += 1;
 
             Assert(aggstate->projected_set < numGroupingSets);
@@ -1748,7 +1751,7 @@ static TupleTableSlot* agg_retrieve_direct(AggState* aggstate)
                      */
                     if (node->aggstrategy == AGG_SORTED) {
                         if (!execTuplesMatch(firstSlot, outerslot, node->numCols, node->grpColIdx,
-                                            aggstate->phase->eqfunctions, tmpcontext->ecxt_per_tuple_memory)) {
+                            aggstate->phase->eqfunctions, tmpcontext->ecxt_per_tuple_memory, node->grp_collations)) {
                             aggstate->grp_firstTuple = ExecCopySlotTuple(outerslot);
                             break;
                         }

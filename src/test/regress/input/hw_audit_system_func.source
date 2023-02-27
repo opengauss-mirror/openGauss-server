@@ -1,0 +1,134 @@
+CREATE DATABASE db_audit_system_func;
+\c db_audit_system_func
+
+-- set guc parameter
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=134217727" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_function_exec=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_function_exec=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_cbm_tracking=on" > /dev/null 2>&1
+
+-- 系统管理函数 配置设置函数
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+SELECT set_config('log_statement_stats', 'off', false);
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%set_config%';
+
+-- 系统管理函数 服务器信号函数
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+SELECT pg_cancel_backend(139989266462464);
+SELECT pg_cancel_session(139856237819648, 139856237819648);
+SELECT pg_reload_conf();
+SELECT pg_rotate_logfile();
+SELECT pg_terminate_session(139855736600320, 139855736600320);
+SELECT pg_terminate_backend(140298793514752);
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_cancel_backend%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_cancel_session%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_reload_conf%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_rotate_logfile%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_terminate_session%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_terminate_backend%';
+
+-- 系统管理函数 备份恢复控制函数
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "SELECT pg_create_restore_point('restore_audit');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "SELECT pg_start_backup('restore_audit');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "SELECT pg_stop_backup();" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "SELECT pg_switch_xlog();" > /dev/null 2>&1
+
+SELECT pg_cbm_get_merged_file('0/0', '0/0');
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "SELECT gs_roach_switch_xlog();" > /dev/null 2>&1
+
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_create_restore_point%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_start_backup%';
+SELECT type, object_name from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_stop_backup%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_switch_xlog%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_cbm_get_merged_file%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%gs_roach_switch_xlog%';
+
+-- 系统管理函数 恢复控制函数
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+SELECT pg_last_xlog_receive_location();
+SELECT gs_pitr_clean_history_global_barriers('1489739011');
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_last_xlog_receive_location%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%gs_pitr_clean_history_global_barriers%';
+
+-- 系统管理函数 双集群容灾控制函数
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/obsserver.key.cipher
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/obsserver.key.rand
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o obsserver > /dev/null 2>&1
+SELECT * from pg_create_physical_replication_slot_extern('prs_audit', false, 'NAS;/data/nas/media/openGauss_uuid/dn1;0;0', false);
+SELECT gs_set_obs_delete_location('0/54000000');
+SELECT gs_hadr_do_switchover();
+SELECT gs_set_obs_delete_location_with_slotname('0/0', '0/0');
+SELECT gs_streaming_dr_in_switchover();
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_create_physical_replication_slot_extern%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%gs_set_obs_delete_location%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%gs_hadr_do_switchover%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%gs_set_obs_delete_location_with_slotname%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%gs_streaming_dr_in_switchover%';
+
+-- 系统管理函数 双集群容灾查询函数
+
+-- 系统管理函数 咨询锁函数
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+SELECT pg_advisory_lock(123);
+SELECT pg_advisory_lock_shared(123);
+SELECT pg_advisory_unlock(123);
+SELECT pg_advisory_unlock_shared(123);
+SELECT pg_advisory_unlock_all();
+SELECT pg_advisory_xact_lock(123);
+SELECT pg_advisory_xact_lock_shared(123);
+SELECT pg_try_advisory_lock(123);
+SELECT pg_try_advisory_lock_shared(123);
+SELECT pg_try_advisory_xact_lock(123);
+SELECT pg_try_advisory_xact_lock_shared(123);
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_advisory_lock%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_advisory_lock_shared%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_advisory_unlock%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_advisory_unlock_shared%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_advisory_unlock_all%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_advisory_xact_lock%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_advisory_xact_lock_shared%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_try_advisory_lock%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_try_advisory_lock_shared%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_try_advisory_xact_lock%';
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_try_advisory_xact_lock_shared%';
+
+-- 系统管理函数 段页式存储函数
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+CREATE TABLESPACE tsp_audit_sysfunc RELATIVE LOCATION 'audit_tablespace/audit_tablespace_1';
+SELECT local_space_shrink('tsp_audit_sysfunc', (SELECT current_database()));
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%local_space_shrink%';
+
+-- 故障注入系统函数
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+SELECT gs_fault_inject(1,'1','1','1','1','1');
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%gs_fault_inject%';
+
+-- 数据损坏检测修复函数
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+SELECT * from local_clear_bad_block_info();
+SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%local_clear_bad_block_info%';
+
+-- 非白名单系统函数 不审计
+SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
+SELECT current_setting('audit_thread_num');
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "SELECT pg_current_xlog_location();" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "pg_database_size('db_audit_system_func');" > /dev/null 2>&1
+
+SELECT count(*) from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec';
+
+--reset guc parameter
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_function_exec=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_function_exec" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "wal_level" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_cbm_tracking=on" > /dev/null 2>&1
+
+--clean env
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "DROP TABLESPACE IF EXISTS tsp_audit_sysfunc;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "SELECT * from pg_drop_replication_slot('prs_audit');" > /dev/null 2>&1
+
+\c regression
+CLEAN CONNECTION TO ALL FORCE FOR DATABASE db_audit_system_func;
+DROP DATABASE db_audit_system_func;

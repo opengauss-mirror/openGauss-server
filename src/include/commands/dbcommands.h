@@ -55,7 +55,7 @@ extern void RenameDatabase(const char* oldname, const char* newname);
 extern void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel);
 extern void AlterDatabaseSet(AlterDatabaseSetStmt* stmt);
 extern void AlterDatabaseOwner(const char* dbname, Oid newOwnerId);
-
+extern void AlterDatabasePermissionCheck(Oid dboid, const char* dbname);
 extern Oid get_database_oid(const char* dbname, bool missingok);
 extern char* get_database_name(Oid dbid);
 extern char* get_and_check_db_name(Oid dbid, bool is_ereport = false);

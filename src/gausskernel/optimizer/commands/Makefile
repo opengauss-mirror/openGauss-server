@@ -28,7 +28,8 @@ OBJS = aggregatecmds.o alter.o analyze.o async.o cluster.o comment.o  \
 	schemacmds.o seclabel.o sec_rls_cmds.o subscriptioncmds.o tablecmds.o tablespace.o trigger.o \
 	tsearchcmds.o typecmds.o user.o vacuum.o vacuumlazy.o \
 	variable.o verifyrepair.o verify.o view.o gds_stream.o formatter.o datasourcecmds.o \
-	directory.o auto_explain.o shutdown.o
+	directory.o auto_explain.o shutdown.o \
+	eventcmds.o
 
 ifeq ($(enable_lite_mode), no)
 OBJS += obs_stream.o

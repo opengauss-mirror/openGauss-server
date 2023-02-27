@@ -46,6 +46,7 @@
 #include "utils/rel.h"
 #include "access/heapam.h"
 #include "miscadmin.h"
+#include "client_logic/client_logic.h"
 
 static Oid SynonymCreate(
     Oid synNamespace, const char* synName, Oid synOwner, const char* objSchema, const char* objName, bool replace);
@@ -123,8 +124,14 @@ void CreateSynonym(CreateSynonymStmt* stmt)
         ereport(ERROR, (errmsg("synonym name is already used by an existing object")));
     }
 
-    /* Main entry to create a synonym */
-    SynonymCreate(synNamespace, synName, GetUserId(), objSchema, objName, stmt->replace);
+    if (IsFullEncryptedRel(objSchema, objName)) {
+        ereport(ERROR, (errmsg("Unsupport to CREATE SYNONYM for encryption table.")));
+    } else if (IsFuncProcOnEncryptedRel(objSchema, objName)) {
+        ereport(ERROR, (errmsg("Unsupport to CREATE SYNONYM for encryption procedure or function.")));
+    } else {
+        /* Main entry to create a synonym */
+        SynonymCreate(synNamespace, synName, GetUserId(), objSchema, objName, stmt->replace);
+    }
 }
 
 /*

@@ -515,30 +515,6 @@ void set_result_set_function(const PolicyLabelItem &func)
     }
 }
 
-/*
- * check exchange partition list contains masked table.
- * For given AlterTableCmd list, check whether ordinary
- * tables have bound masking policies.
- */
-static bool exchange_partition_with_masked_table(List *cmds)
-{
-    if (cmds == NIL) {
-        return false;
-    }
-    ListCell *lc = NULL;
-    foreach (lc, cmds) {
-        AlterTableCmd *cmd = (AlterTableCmd*)lfirst(lc);
-        if (cmd->subtype == AT_ExchangePartition && cmd->exchange_with_rel != NULL) {
-            Oid relid = RangeVarGetRelid(cmd->exchange_with_rel, NoLock, true);
-            if (is_masked_relation(relid)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
 static void gsaudit_next_PostParseAnalyze_hook(ParseState *pstate, Query *query)
 {
     /* do nothing when enable_security_policy is off */
@@ -652,9 +628,24 @@ static void gsaudit_next_PostParseAnalyze_hook(ParseState *pstate, Query *query)
             /* For ALTER TABLE EXCHANGE, will not allowed if the ordinary table(it's columns) has masking policy.*/
             if (query->utilityStmt != NULL && nodeTag(query->utilityStmt) == T_AlterTableStmt) {
                 AlterTableStmt *alter_table = (AlterTableStmt *)(query->utilityStmt);
-                if (exchange_partition_with_masked_table(alter_table->cmds)) {
-                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("ALTER TABLE EXCHANGE can not execute with masked ordinary table.")));
+                Oid relid = RangeVarGetRelid(alter_table->relation, NoLock, true);
+
+                ListCell *lc = NULL;
+                foreach (lc, alter_table->cmds) {
+                    AlterTableCmd *cmd = (AlterTableCmd *)lfirst(lc);
+                    if (cmd->subtype == AT_ExchangePartition) {
+                        Assert(PointerIsValid(cmd->exchange_with_rel));
+                        if (is_masked_relation(relid)) {
+                            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("ALTER TABLE EXCHANGE can not execute with masked partition table.")));
+                        }
+
+                        Oid ordTableOid = RangeVarGetRelid(cmd->exchange_with_rel, NoLock, true);
+                        if (is_masked_relation(ordTableOid)) {
+                            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("ALTER TABLE EXCHANGE can not execute with masked ordinary table.")));
+                        }
+                    }
                 }
             }
             break;

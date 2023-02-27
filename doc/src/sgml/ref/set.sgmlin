@@ -24,6 +24,8 @@ SET [ SESSION | @@SESSION. | @@]
     { {config_parameter = { expr | DEFAULT }}};
 SET @var_name := expr [, @var_name := expr] ...
 SET @var_name = expr [, @var_name = expr] ...
-NOTICE: '@var_name','{ GLOBAL | @@GLOBAL.}', '[ SESSION | @@SESSION. | @@]' are only avaiable in CENTRALIZED mode and B-format database, and enable_set_variable_b_format = on.
+NOTICE: '@var_name' are only available in CENTRALIZED mode and B-format database.
+NOTICE: '{ GLOBAL | @@GLOBAL.}' are only available in CENTRALIZED mode and B-format database.
+NOTICE: '[ @@SESSION. | @@]' are only available in CENTRALIZED mode and B-format database.
 </synopsis>
 </refsynopsisdiv>

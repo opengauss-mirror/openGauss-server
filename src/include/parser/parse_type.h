@@ -32,7 +32,8 @@ extern char* TypeNameToString(const TypeName* typname);
 extern char* TypeNameListToString(List* typenames);
 
 extern Oid LookupCollation(ParseState* pstate, List* collnames, int location);
-extern Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid);
+extern Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid,
+    Oid rel_coll_oid = InvalidOid);
 
 extern Type typeidType(Oid id);
 

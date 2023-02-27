@@ -320,6 +320,11 @@ bool createStmtProcessor::process_column_defintion(ColumnDef *column, Node *elem
         return false;
     }
 
+    if (column->typname != NULL && column->typname->arrayBounds != NULL) {
+        fprintf(stderr, "ERROR(CLIENT): Creating encrypted columns of type array is not supported\n");
+        return false;
+    }
+
     char column_key_name[NAMEDATALEN * 4];
     errno_t rc = EOK;
     rc = memset_s(column_key_name, NAMEDATALEN * 4, 0, NAMEDATALEN * 4);

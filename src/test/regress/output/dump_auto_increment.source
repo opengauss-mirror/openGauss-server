@@ -30,11 +30,6 @@ NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_unlog_col
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_dump_autoinc_unlog_col1_key" for table "test_dump_autoinc_unlog"
 INSERT INTO test_dump_autoinc_unlog VALUES(0,0);
 INSERT INTO test_dump_autoinc_unlog VALUES(0,0);
-CREATE TABLE test_dump_autoinc_pk_gencol(col1 int auto_increment PRIMARY KEY, col2 int generated always as(2*col1) stored) AUTO_INCREMENT = 1000000;
-NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_pk_gencol_col1_seq" for serial column "test_dump_autoinc_pk_gencol.col1"
-NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_dump_autoinc_pk_gencol_pkey" for table "test_dump_autoinc_pk_gencol"
-INSERT INTO test_dump_autoinc_pk_gencol VALUES(0);
-INSERT INTO test_dump_autoinc_pk_gencol VALUES(0);
 CREATE TABLE test_dump_autoinc_range_list
 (
     col_1 int  auto_increment primary key,
@@ -193,26 +188,6 @@ select col1,col2 from test_dump_autoinc_unlog order by 1,2;
  100000 |    0
  100001 |    0
  100002 |    0
-(3 rows)
-
-\d+ test_dump_autoinc_pk_gencol
-                            Table "public.test_dump_autoinc_pk_gencol"
- Column |  Type   |                Modifiers                | Storage | Stats target | Description 
---------+---------+-----------------------------------------+---------+--------------+-------------
- col1   | integer | not null AUTO_INCREMENT                 | plain   |              | 
- col2   | integer | generated always as ((2 * col1)) stored | plain   |              | 
-Indexes:
-    "test_dump_autoinc_pk_gencol_pkey" PRIMARY KEY, btree (col1) TABLESPACE pg_default
-Has OIDs: no
-Options: orientation=row, compression=no
-
-INSERT INTO test_dump_autoinc_pk_gencol VALUES(0);
-select col1,col2 from test_dump_autoinc_pk_gencol order by 1,2;
-  col1   |  col2   
----------+---------
- 1000000 | 2000000
- 1000001 | 2000002
- 1000002 |       0
 (3 rows)
 
 \d+ test_dump_autoinc_range_list

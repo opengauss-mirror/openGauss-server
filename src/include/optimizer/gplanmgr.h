@@ -63,13 +63,6 @@ typedef struct RelSelec
     double selectivity;
 } RelSelec;
 
-typedef struct IndexSelec
-{
-    uint32 hashkey;
-    Index dimensionId;
-    double selectivity;
-} IndexSelec;
-
 /*
  * BaseRelCI
  *     confidential interval of a plan baserel.
@@ -118,11 +111,12 @@ extern PlanManager *PMGR_CreatePlanManager(MemoryContext parent_cxt, char* stmt_
 void PMGR_ReleasePlanManager(CachedPlanSource *plansource);
 CachedPlan *GetAdaptGenericPlan(CachedPlanSource *plansource,
                                         ParamListInfo boundParams,
-                                        List **qlist);
+                                        List **qlist,
+                                        bool *mode);
 void DropStmtRoot(const char *stmt_name);
 void DropAllStmtRoot(void);
 extern List *eval_const_clauses_params(PlannerInfo *root, List *clauses);
 extern bool selec_gplan_by_hint(const CachedPlanSource* plansource);
-
+extern void ReleaseCustomPlan(CachedPlanSource *plansource);
 
 #endif

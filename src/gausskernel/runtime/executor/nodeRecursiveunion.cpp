@@ -102,7 +102,8 @@ static void build_hash_table(RecursiveUnionState* rustate)
         sizeof(RUHashEntryData),
         rustate->tableContext,
         rustate->tempContext,
-        u_sess->attr.attr_memory.work_mem);
+        u_sess->attr.attr_memory.work_mem,
+        NULL);
 }
 
 /*

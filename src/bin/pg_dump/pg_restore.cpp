@@ -743,7 +743,7 @@ static void restore_getopts(int argc, char** argv, struct option* options, Resto
 
 void usage(const char* pchProgname)
 {
-    printf(_("%s restores a openGauss database from an archive created by gs_dump.\n\n"), pchProgname);
+    printf(_("%s restores an openGauss database from an archive created by gs_dump.\n\n"), pchProgname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... FILE\n"), pchProgname);
 

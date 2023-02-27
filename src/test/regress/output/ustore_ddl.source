@@ -227,10 +227,10 @@ SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'inc
  {"table_name":"public.bmsql_order_line","op_type":"INSERT","columns_name":["ol_w_id","ol_d_id","ol_o_id","ol_number","ol_i_id","ol_delivery_d","ol_amount","ol_supply_w_id","ol_quantity","ol_dist_info"],"columns_type":["integer","integer","integer","integer","integer","timestamp without time zone","numeric","integer","integer","character"],"columns_val":["1","1","1","1","1","null","null","null","null","'123                     '"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
 --?.*
  BEGIN
- {"table_name":"public.bmsql_order_line","op_type":"UPDATE","columns_name":["ol_w_id","ol_d_id","ol_o_id","ol_number","ol_i_id","ol_delivery_d","ol_amount","ol_supply_w_id","ol_quantity","ol_dist_info"],"columns_type":["integer","integer","integer","integer","integer","timestamp without time zone","numeric","integer","integer","character"],"columns_val":["1","1","1","1","1","null","null","null","null","'ss                      '"],"old_keys_name":["ol_w_id","ol_d_id","ol_o_id","ol_number","ol_i_id","ol_dist_info"],"old_keys_type":["integer","integer","integer","integer","integer","character"],"old_keys_val":["1","1","1","1","1","'123                     '"]}
+ {"table_name":"public.bmsql_order_line","op_type":"UPDATE","columns_name":["ol_w_id","ol_d_id","ol_o_id","ol_number","ol_i_id","ol_delivery_d","ol_amount","ol_supply_w_id","ol_quantity","ol_dist_info"],"columns_type":["integer","integer","integer","integer","integer","timestamp without time zone","numeric","integer","integer","character"],"columns_val":["1","1","1","1","1","null","null","null","null","'ss                      '"],"old_keys_name":["ol_w_id","ol_d_id","ol_o_id","ol_number"],"old_keys_type":["integer","integer","integer","integer"],"old_keys_val":["1","1","1","1"]}
 --?.*
  BEGIN
- {"table_name":"public.bmsql_order_line","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["ol_w_id","ol_d_id","ol_o_id","ol_number","ol_i_id","ol_dist_info"],"old_keys_type":["integer","integer","integer","integer","integer","character"],"old_keys_val":["1","1","1","1","1","'ss                      '"]}
+ {"table_name":"public.bmsql_order_line","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["ol_w_id","ol_d_id","ol_o_id","ol_number"],"old_keys_type":["integer","integer","integer","integer"],"old_keys_val":["1","1","1","1"]}
 --?.*
 (25 rows)
 

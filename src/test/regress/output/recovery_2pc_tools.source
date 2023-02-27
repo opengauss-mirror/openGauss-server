@@ -49,7 +49,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  audit_rotation_size                              | integer | kB   | 1024      | 1048576
  audit_set_parameter                              | integer |      | 0         | 1
  audit_space_limit                                | integer | kB   | 1024      | 1073741824
- audit_system_object                              | integer |      | 0         | 134217727
+ audit_system_function_exec                       | integer |      | 0         | 1
+ audit_system_object                              | integer |      | 0         | 268435455
  audit_thread_num                                 | integer |      | 1         | 48
  audit_user_locked                                | integer |      | 0         | 1
  audit_user_violation                             | integer |      | 0         | 1
@@ -81,6 +82,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  bbox_dump_count                                  | integer |      | 1         | 20
  bbox_dump_path                                   | string  |      |           | 
  behavior_compat_options                          | string  |      |           | 
+ b_format_behavior_compat_options                 | string  |      |           | 
  bgwriter_delay                                   | integer | ms   | 10        | 10000
  bgwriter_flush_after                             | integer | 8kB  | 0         | 256
  bgwriter_lru_maxpages                            | integer |      | 0         | 1000
@@ -219,6 +221,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_asp                                       | bool    |      |           | 
  enable_auto_clean_unique_sql                     | bool    |      |           | 
  enable_auto_explain                              | bool    |      |           | 
+ enable_availablezone                             | bool    |      |           | 
  enable_bbox_dump                                 | bool    |      |           | 
  enable_beta_features                             | bool    |      |           | 
  enable_beta_opfusion                             | bool    |      |           | 
@@ -339,6 +342,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  force_promote                                    | integer |      | 0         | 1
  from_collapse_limit                              | integer |      | 1         | 2147483647
  fsync                                            | bool    |      |           | 
+ full_audit_users                                 | string  |      |           | 
  full_page_writes                                 | bool    |      |           | 
  geqo                                             | bool    |      |           | 
  geqo_effort                                      | integer |      | 1         | 10
@@ -482,6 +486,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ngram_grapsymbol_ignore                          | bool    |      |           | 
  ngram_punctuation_ignore                         | bool    |      |           | 
  nls_timestamp_format                             | string  |      |           | 
+ no_audit_client                                  | string  |      |           | 
  numa_distribute_mode                             | string  |      |           | 
  num_internal_lock_partitions                     | string  |      |           | 
  nvm_buffers                                      | integer | 8kB  | 0         | 1073741823

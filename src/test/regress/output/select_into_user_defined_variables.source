@@ -3,21 +3,15 @@ select 10 into @aa;
 ERROR:  syntax error at or near "@"
 LINE 1: select 10 into @aa;
                        ^
-\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options='enable_set_variables'" >/dev/null 2>&1
 \! sleep 1
 -- error
 select 10 into @aa;
 ERROR:  syntax error at or near "@"
 LINE 1: select 10 into @aa;
                        ^
-create database test dbcompatibility 'b';
-\c test
-show enable_set_variable_b_format;
- enable_set_variable_b_format 
-------------------------------
- on
-(1 row)
-
+create database test_select_into_var dbcompatibility 'b';
+\c test_select_into_var
 drop table if exists t;
 NOTICE:  table "t" does not exist, skipping
 create table t(i int, t text, b bool, f float, bi bit(3), vbi bit varying(5));
@@ -136,6 +130,19 @@ select @aa,@bb,@cc,@dd,@ee,@ff;
  @aa | @bb | @cc | @dd | @ee | @ff 
 -----+-----+-----+-----+-----+-----
      |     |     |     |     | 
+(1 row)
+
+create or replace procedure my_pro()
+as
+declare outfile int default 0;
+begin
+select 10 into outfile;
+end;
+/
+call my_pro();
+ my_pro 
+--------
+ 
 (1 row)
 
 --procedure stmt 1
@@ -388,13 +395,79 @@ select @num;
 (1 row)
 
 drop trigger tri_delete_after on t1;
-\c regression
-drop database if exists test;
-\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
-\! sleep 1
-show enable_set_variable_b_format;
- enable_set_variable_b_format 
-------------------------------
- off
+select 10,@v1/2 into @v1,@v2;
+select @v1,@v2;
+ @v1 | @v2 
+-----+-----
+  10 | 
 (1 row)
 
+select 10,@v1/2 into @v1,@v2;
+select @v1,@v2;
+ @v1 | @v2 
+-----+-----
+  10 |   5
+(1 row)
+
+select 10 into @value;
+select @value;
+ @value 
+--------
+     10
+(1 row)
+
+select sha(@value) into @sha_value;
+select @sha_value;
+                @sha_value                
+------------------------------------------
+ b1d5781111d84f7b3fe45a0852e59758cd7a87e5
+(1 row)
+
+select -1,'hello' into @v1, @v2;
+select @v1, @v2;
+ @v1 |  @v2  
+-----+-------
+  -1 | hello
+(1 row)
+
+select @v1 + 1, abs(@v1), concat(@v2, ' world!') into @v3, @abs, @concat;
+select @v3, @abs, @concat;
+ @v3 | @abs |   @concat    
+-----+------+--------------
+   0 |    1 | hello world!
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options=''" >/dev/null 2>&1
+\! sleep 1
+create table t2(a int, b int);
+set b_format_behavior_compat_options="enable_set_variables";
+create or replace procedure test(a int, b int) as
+declare
+    num3 int := a;
+    num4 int := b;
+    pragma autonomous_transaction;
+
+begin
+    set b_format_behavior_compat_options="enable_set_variables";
+    select num3,num4 into @v1,@v2;
+    commit;
+    insert into t2 values(@v1, @v2);
+    rollback;
+    set b_format_behavior_compat_options="enable_set_variables";	
+    insert into t2 values(@v1-1, @v2+1);
+end;
+/
+call test(1,1);
+ test 
+------
+ 
+(1 row)
+
+select * from t2;
+ a | b 
+---+---
+ 0 | 2
+(1 row)
+
+\c regression
+drop database if exists test_select_into_var;

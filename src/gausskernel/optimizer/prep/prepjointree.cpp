@@ -1894,6 +1894,8 @@ static bool is_safe_append_member(Query* subquery)
     }
     if (!IsA(jtnode, RangeTblRef))
         return false;
+    if (subquery->hintState)
+        return false;
 
     return true;
 }

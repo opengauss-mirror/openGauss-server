@@ -1290,6 +1290,7 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                 action->qual = transformWhereClause(pstate, mergeWhenClause->condition, "WHEN");
                 pstate->p_varnamespace = save_varnamespace;
                 pstate->use_level = false;
+                UpdateParseCheck(pstate, (Node*)action);
 
                 fixResTargetListWithTableNameRef(targetrel, stmt->relation, set_clause_list_copy);
                 mergeWhenClause->targetList = set_clause_list_copy;

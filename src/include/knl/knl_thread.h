@@ -2830,6 +2830,8 @@ typedef enum {
 typedef struct knl_t_postmaster_context {
 /* Notice: the value is same sa GUC_MAX_REPLNODE_NUM */
 #define MAX_REPLNODE_NUM 9
+#define MAXLISTEN 64
+#define IP_LEN 64
 
     /* flag when process startup packet for logic conn */
     bool ProcessStartupPacketForLogicConn;
@@ -2852,10 +2854,16 @@ typedef struct knl_t_postmaster_context {
     struct replconninfo* CrossClusterReplConnArray[MAX_REPLNODE_NUM];
     bool CrossClusterReplConnChanged[MAX_REPLNODE_NUM];
     struct hashmemdata* HaShmData;
+    char LocalAddrList[MAXLISTEN][IP_LEN];  /* use for sub thread which is IsUnderPostmaster */
+    int LocalIpNum;  /* use for sub thread which is IsUnderPostmaster */
 
     gs_thread_t CurExitThread;
 
     bool IsRPCWorkerThread;
+    bool can_listen_addresses_reload;
+    bool is_listen_addresses_reload;
+    bool all_listen_addr_can_stop[MAXLISTEN];
+    bool local_listen_addr_can_stop[MAXLISTEN];
 
     /* private variables for reaper backend thread */
     Latch ReaperBackendLatch;
@@ -3175,6 +3183,12 @@ typedef struct knl_t_proxy_context {
     char identifier[IDENTIFIER_LENGTH];
 } knl_t_proxy_context;
 
+#define RC_MAX_NUM 16
+typedef struct knl_t_rc_context {
+    int rcNum;
+    Oid rcData[RC_MAX_NUM];
+} knl_t_rc_context;
+
 #define DCF_MAX_NODES 10
 /* For log ctrl. Willing let standby flush and apply log under RTO seconds */
 typedef struct DCFLogCtrlData {
@@ -3488,6 +3502,7 @@ typedef struct knl_thrd_context {
     knl_t_sql_patch_context sql_patch_cxt;
     knl_t_dms_context dms_cxt;
     knl_t_libsw_context libsw_cxt;
+    knl_t_rc_context rc_cxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT

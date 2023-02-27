@@ -1,0 +1,78 @@
+drop database if exists dump_partition_db;
+drop database if exists restore_partition_db;
+
+create database dump_partition_db with dbcompatibility = 'B';
+create database restore_partition_db with dbcompatibility = 'B';
+
+\c dump_partition_db
+CREATE TABLE t_single_key_list (a int, b int, c int)
+PARTITION BY list(a)
+(
+    PARTITION p1 VALUES (100),
+    PARTITION p2 VALUES (200),
+    PARTITION p3 VALUES (300),
+    PARTITION p4 VALUES (400)
+);
+SELECT pg_get_tabledef('t_single_key_list'::regclass);
+
+CREATE TABLE t_multi_keys_list_null (a int, b int, c int)
+PARTITION BY LIST COLUMNS(a,b)
+(
+    PARTITION p1 VALUES IN ( (0,NULL) ),
+    PARTITION p2 VALUES IN ( (0,1), (0,2), (0,3), (1,1), (1,2) ),
+    PARTITION p3 VALUES IN ( (NULL,0), (2,1) ),
+    PARTITION p4 VALUES IN ( (3,2), (NULL,NULL) )
+);
+SELECT pg_get_tabledef('t_multi_keys_list_null'::regclass);
+
+CREATE TABLE t_multi_keys_list (a varchar(8), b int, c DATE, d int DEFAULT 0)
+PARTITION BY LIST COLUMNS(a,b,c)
+(
+    PARTITION p1 VALUES IN ( ('0',0,'2022-12-31')),
+    PARTITION p2 VALUES IN ( ('{',1,'2022-12-31'), ('''',2,'2022-12-31'), ('0',3,'2022-12-31'), (',',1,'2022-12-31'), (NULL,2,'2022-12-31') ),
+    PARTITION p3 VALUES IN ( ('NULL',0,'2022-12-31'), ('}',1,'2022-12-31') ),
+    PARTITION p4 VALUES IN ( ('{',2,'2022-12-31'), ('3',3,'2022-12-31') ),
+    PARTITION pd VALUES IN (DEFAULT)
+);
+SELECT pg_get_tabledef('t_multi_keys_list'::regclass);
+INSERT INTO t_multi_keys_list VALUES('{',1,'2022-12-31');
+INSERT INTO t_multi_keys_list VALUES(',',1,'2022-12-31');
+SELECT * FROM t_multi_keys_list PARTITION(p2) ORDER BY a,b,c; 
+
+CREATE TABLE t_part_by_key_num (a int, b int, c int)
+PARTITION BY KEY(a) PARTITIONS 5 SUBPARTITION BY KEY(c) SUBPARTITIONS 3;
+
+CREATE TABLE t_multi_keys_list_tmtz (a DATE, b timestamp with time zone, c int, d int DEFAULT 0)
+PARTITION BY LIST (a,b,c)
+(
+    PARTITION p1 VALUES ( ('2022-01-01','2022-01-01 12:00:00 pst',1)),
+    PARTITION p2 VALUES ( ('2022-02-01','2022-02-01 12:00:00 pst',2), ('2022-02-02','2022-02-02 12:00:00 pst',2), ('2022-02-03','2022-02-03 12:00:00 pst',2)),
+    PARTITION p3 VALUES ( ('2022-03-01','2022-03-01 12:00:00 pst',3), ('2022-03-02','2022-03-02 12:00:00 pst',3) ),
+    PARTITION pd VALUES (DEFAULT)
+);
+SELECT pg_get_tabledef('t_multi_keys_list_tmtz'::regclass);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-01-01','2022-01-01 12:00:00 pst',1);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-02-01','2022-02-01 12:00:00 pst',2);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-02-02','2022-02-02 12:00:00 pst',2);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-02-03','2022-02-03 12:00:00 pst',2);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-03-01','2022-03-01 12:00:00 pst',3);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-03-02','2022-03-02 12:00:00 pst',3);
+SELECT * FROM t_multi_keys_list_tmtz PARTITION(p2) ORDER BY a,b,c; 
+
+\! @abs_bindir@/gs_dump dump_partition_db -p @portstring@ -f @abs_bindir@/dump_listpart_test.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d restore_partition_db -p @portstring@ @abs_bindir@/dump_listpart_test.tar >/dev/null 2>&1; echo $?
+
+\c restore_partition_db
+
+\d+ t_multi_keys_list
+SELECT pg_get_tabledef('t_multi_keys_list'::regclass);
+INSERT INTO t_multi_keys_list VALUES('''',2,'2022-12-31'); 
+SELECT * FROM t_multi_keys_list PARTITION(p2) ORDER BY b,a,c;
+
+SELECT pg_get_tabledef('t_part_by_key_num'::regclass);
+
+SELECT pg_get_tabledef('t_multi_keys_list_tmtz'::regclass);
+SELECT * FROM t_multi_keys_list_tmtz PARTITION(p2) ORDER BY a,b,c; 
+\c regression
+drop database if exists restore_partition_db;
+drop database if exists dump_partition_db;

@@ -349,22 +349,23 @@ void OpFusion::executeInit()
 
 void OpFusion::auditRecord()
 {
-    if ((u_sess->attr.attr_security.Audit_DML_SELECT != 0 || u_sess->attr.attr_security.Audit_DML != 0) &&
-        u_sess->attr.attr_security.Audit_enabled && IsPostmasterEnvironment) {
+    bool is_full_audit_user = audit_check_full_audit_user();
+    if ((u_sess->attr.attr_security.Audit_DML_SELECT != 0 || u_sess->attr.attr_security.Audit_DML != 0 ||
+        is_full_audit_user) && u_sess->attr.attr_security.Audit_enabled && IsPostmasterEnvironment) {
         char *object_name = NULL;
 
         switch (m_global->m_planstmt->commandType) {
             case CMD_INSERT:
             case CMD_DELETE:
             case CMD_UPDATE:
-                if (u_sess->attr.attr_security.Audit_DML != 0) {
+                if (u_sess->attr.attr_security.Audit_DML != 0 || is_full_audit_user) {
                     object_name = pgaudit_get_relation_name(m_global->m_planstmt->rtable);
                     pgaudit_dml_table(object_name, m_global->m_is_pbe_query ? m_global->m_psrc->query_string :
                                                                               t_thrd.postgres_cxt.debug_query_string);
                 }
                 break;
             case CMD_SELECT:
-                if (u_sess->attr.attr_security.Audit_DML_SELECT != 0) {
+                if (u_sess->attr.attr_security.Audit_DML_SELECT != 0 || is_full_audit_user) {
                     object_name = pgaudit_get_relation_name(m_global->m_planstmt->rtable);
                     pgaudit_dml_table_select(object_name, m_global->m_is_pbe_query ?
                         m_global->m_psrc->query_string :

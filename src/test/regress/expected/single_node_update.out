@@ -425,11 +425,11 @@ alter table t4 alter b set default now();
 
 alter table t4 modify b timestamp on update current_timestamp;
 \d t4
-                                Table "public.t4"
- Column |            Type             |                 Modifiers                 
---------+-----------------------------+-------------------------------------------
+                         Table "public.t4"
+ Column |            Type             |          Modifiers          
+--------+-----------------------------+-----------------------------
  a      | integer                     | 
- b      | timestamp without time zone | default now() on update pg_systimestamp()
+ b      | timestamp without time zone | on update pg_systimestamp()
 
 alter table t4 alter b drop default;
 \d t4
@@ -482,11 +482,11 @@ alter table t4 alter b drop default;
 alter table t4 modify b not null;
 alter table t4 modify b timestamp on update current_timestamp;
 \d t4
-                              Table "public.t4"
- Column |            Type             |              Modifiers               
---------+-----------------------------+--------------------------------------
+                         Table "public.t4"
+ Column |            Type             |          Modifiers          
+--------+-----------------------------+-----------------------------
  a      | integer                     | 
- b      | timestamp without time zone | not null on update pg_systimestamp()
+ b      | timestamp without time zone | on update pg_systimestamp()
 
 alter table t4 modify b null;
 alter table t4 modify b timestamp;
@@ -512,6 +512,30 @@ alter table t4 modify b timestamp on update localtimestamp;
 --------+-----------------------------+------------------------------------------------------
  a      | integer                     | 
  b      | timestamp without time zone | on update ('now'::text)::timestamp without time zone
+
+alter table t4 alter b set default now();
+\d t4;
+                                             Table "public.t4"
+ Column |            Type             |                             Modifiers                              
+--------+-----------------------------+--------------------------------------------------------------------
+ a      | integer                     | 
+ b      | timestamp without time zone | default now() on update ('now'::text)::timestamp without time zone
+
+alter table t4 change b b1 timestamp on update current_timestamp;
+\d t4
+                         Table "public.t4"
+ Column |            Type             |          Modifiers          
+--------+-----------------------------+-----------------------------
+ a      | integer                     | 
+ b1     | timestamp without time zone | on update pg_systimestamp()
+
+alter table t4 change b1 b2 timestamp not null default now() on update localtimestamp;
+\d t4
+                                                 Table "public.t4"
+ Column |            Type             |                                  Modifiers                                  
+--------+-----------------------------+-----------------------------------------------------------------------------
+ a      | integer                     | 
+ b2     | timestamp without time zone | not null default now() on update ('now'::text)::timestamp without time zone
 
 CREATE TABLE t5(id int, a timestamp default now() on update current_timestamp, b timestamp on update current_timestamp, c timestamp default now());
 \d t5

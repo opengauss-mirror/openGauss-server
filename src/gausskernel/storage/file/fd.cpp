@@ -2026,6 +2026,7 @@ void FileWriteback(File file, off_t offset, off_t nbytes)
 int FilePRead(File file, char* buffer, int amount, off_t offset, uint32 wait_event_info)
 {
     int returnCode;
+    int count = 0;
 
     Assert(FileIsValid(file));
     vfd *vfdcache = GetVfdCache();
@@ -2081,6 +2082,18 @@ retry:
         /* OK to retry if interrupted */
         if (errno == EINTR)
             goto retry;
+        if (errno == EIO) {
+            if (count < EIO_RETRY_TIMES) {
+                count++;
+                ereport(WARNING, (errmsg("FilePRead: %d (%s) " INT64_FORMAT " %d \
+                    failed, then retry: Input/Output ERROR",
+                        file,
+                        vfdcache[file].fileName,
+                        (int64)vfdcache[file].seekPos,
+                        amount)));
+                goto retry;
+            }
+        }
 
         /* Trouble, so assume we don't know the file position anymore */
         vfdcache[file].seekPos = FileUnknownPos;
@@ -2156,6 +2169,7 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastE
 int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 wait_event_info, int fastExtendSize)
 {
     int returnCode;
+    int count = 0;
 
     Assert(FileIsValid(file));
     vfd *vfdcache = GetVfdCache();
@@ -2248,6 +2262,18 @@ retry:
         /* OK to retry if interrupted */
         if (errno == EINTR)
             goto retry;
+        if (errno == EIO) {
+            if (count < EIO_RETRY_TIMES) {
+                count++;
+                ereport(WARNING, (errmsg("FilePWrite: %d (%s) " INT64_FORMAT " %d \
+                    failed, then retry: Input/Output ERROR",
+                        file,
+                        vfdcache[file].fileName,
+                        (int64)vfdcache[file].seekPos,
+                        amount)));
+                goto retry;
+            }
+        }
 
         /* Trouble, so assume we don't know the file position anymore */
         vfdcache[file].seekPos = FileUnknownPos;

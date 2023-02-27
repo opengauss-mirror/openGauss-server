@@ -240,10 +240,12 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
         case CMD_MERGE:
             /* OK */
             break;
-        default:
-	    if (IsA(query->utilityStmt, VariableMultiSetStmt)) {
+        case CMD_UTILITY:
+            if (IsA(query->utilityStmt, VariableMultiSetStmt) ||
+                IsA(query->utilityStmt, CopyStmt)) {
                 break;
             }
+        default:
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PSTATEMENT_DEFINITION), errmsg("utility statements cannot be prepared")));
             break;

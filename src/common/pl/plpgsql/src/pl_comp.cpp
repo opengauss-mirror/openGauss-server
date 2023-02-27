@@ -4439,7 +4439,7 @@ void plpgsql_HashTableInit(void)
     ctl.hash = tag_hash;
     ctl.hcxt = u_sess->cache_mem_cxt;
     u_sess->plsql_cxt.plpgsql_pkg_HashTable =
-        hash_create("PLpgSQL package cache", PKGS_PER_USER, &ctl, HASH_ELEM | HASH_PACKAGE | HASH_CONTEXT);
+        hash_create("PLpgSQL package cache", PKGS_PER_USER, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
 static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key)

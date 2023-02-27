@@ -29,9 +29,14 @@
 
 extern THR_LOCAL bool Audit_delete;
 
-#define AUDIT_EXEC_ENABLED (u_sess->attr.attr_security.Audit_enabled && u_sess->attr.attr_security.Audit_Exec)
-#define AUDIT_COPY_ENABLED (u_sess->attr.attr_security.Audit_enabled && u_sess->attr.attr_security.Audit_Copy)
-#define CHECK_AUDIT_DDL(type) ((unsigned int)u_sess->attr.attr_security.Audit_DDL & (1 << (type)))
+#define AUDIT_EXEC_ENABLED (u_sess->attr.attr_security.Audit_enabled && \
+(u_sess->attr.attr_security.Audit_Exec || audit_check_full_audit_user()))
+#define AUDIT_SYSTEM_EXEC_ENABLED (u_sess->attr.attr_security.Audit_enabled && \
+(u_sess->attr.attr_security.audit_system_function_exec || audit_check_full_audit_user()))
+#define AUDIT_COPY_ENABLED (u_sess->attr.attr_security.Audit_enabled && \
+(u_sess->attr.attr_security.Audit_Copy || audit_check_full_audit_user()))
+#define CHECK_AUDIT_DDL(type) ((((unsigned int)u_sess->attr.attr_security.Audit_DDL & (1 << (type))) > 0) \
+|| audit_check_full_audit_user())
 #define CHECK_AUDIT_LOGIN(type) (unsigned int)u_sess->attr.attr_security.Audit_Session & (1 << (type));
 #define PG_QUERY_AUDIT_ARGS_MAX 3
 
@@ -97,6 +102,7 @@ typedef enum {
     AUDIT_DML_ACTION_SELECT,
     AUDIT_INTERNAL_EVENT,
     AUDIT_FUNCTION_EXEC,
+    AUDIT_SYSTEM_FUNCTION_EXEC,
     AUDIT_COPY_TO,
     AUDIT_COPY_FROM,
     AUDIT_SET_PARAMETER,
@@ -110,7 +116,8 @@ typedef enum {
     AUDIT_DDL_GLOBALCONFIG,
     AUDIT_DDL_PUBLICATION_SUBSCRIPTION,
     AUDIT_DDL_FOREIGN_DATA_WRAPPER,
-    AUDIT_DDL_SQL_PATCH
+    AUDIT_DDL_SQL_PATCH,
+    AUDIT_DDL_EVENT
 } AuditType;
 
 /* keep the same sequence with parameter audit_system_object */
@@ -141,7 +148,8 @@ typedef enum {
     DDL_PUBLICATION_SUBSCRIPTION,
     DDL_GLOBALCONFIG,
     DDL_FOREIGN_DATA_WRAPPER,
-    DDL_SQL_PATCH
+    DDL_SQL_PATCH,
+    DDL_EVENT
 } DDLType;
 
 /*

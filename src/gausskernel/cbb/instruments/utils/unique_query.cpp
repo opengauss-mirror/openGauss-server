@@ -372,6 +372,8 @@ void UniqueSql::JumbleRangeTable(pgssJumbleState* jstate, List* rtable)
                         APP_JUMB(rte->partitionOid);
                     } else if (rte->isContainSubPartition && OidIsValid(rte->subpartitionOid)) {
                         APP_JUMB(rte->subpartitionOid);
+                    } else {
+                        APP_JUMB(rte->relid);
                     }
                 } else {
                     APP_JUMB(rte->relid);

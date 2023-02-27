@@ -54,6 +54,9 @@ typedef struct knl_session_attr_network {
     int PoolerConnectTimeout;
     int PoolerCancelTimeout;
     int comm_max_datanode;
+#ifndef ENABLE_MULTIPLE_NODES
+    char* ListenAddresses;
+#endif
 #ifdef LIBCOMM_SPEED_TEST_ENABLE
     int comm_test_thread_num;
     int comm_test_msg_len;

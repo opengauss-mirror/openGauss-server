@@ -919,7 +919,9 @@ static bool InitPort(Port* port)
 
     PortInitialize(port, NULL);
 
-    CheckClientIp(port);
+    if (!CheckClientIp(port)) {
+        return false;
+    }
 
     PreClientAuthorize();
 

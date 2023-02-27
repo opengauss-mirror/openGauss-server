@@ -1531,6 +1531,28 @@ static void ShutdownSQLFunction(Datum arg)
 }
 
 /*
+ * check_if_exist_client_logic_type()
+ * check if return value of a list exist client encryption type. if exist, report error.
+ */
+void check_if_exist_client_logic_type(List *tlist, Oid ret_type)
+{
+    if (ret_type != RECORDOID) {
+        return;
+    }
+    ListCell* lc = NULL;
+    foreach (lc, tlist) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        Oid tle_type = exprType((Node*)tle->expr);
+        if (IsClientLogicType(tle_type)) {
+            ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Un-support to RETURN RECORD or RETURN SETOF RECORD when return client encryption columns."),
+                errhint("You possibly can use RETURN table(column_name column_type[,...]) instead of RETURN RECORD.")));
+        }
+    }
+    return;
+}
+
+/*
  * check_sql_fn_retval() -- check return value of a list of sql parse trees.
  *
  * The return value of a sql function is the value returned by the last
@@ -1737,6 +1759,7 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
 
         /* Is the rowtype fixed, or determined only at runtime? */
         if (get_func_result_type(func_id, NULL, &tup_desc) != TYPEFUNC_COMPOSITE) {
+            check_if_exist_client_logic_type(tlist, ret_type);
             /*
              * Assume we are returning the whole tuple. Crosschecking against
              * what the caller expects will happen at runtime.

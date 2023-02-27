@@ -3473,7 +3473,8 @@ CREATE unlogged table statement_history(
     lwlock_wait_time bigint,
     details bytea,
     is_slow_sql bool,
-    trace_id text
+    trace_id text,
+    advise text
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);

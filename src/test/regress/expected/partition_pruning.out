@@ -1,0 +1,110 @@
+DROP SCHEMA partition_pruning;
+ERROR:  schema "partition_pruning" does not exist
+CREATE SCHEMA partition_pruning;
+SET CURRENT_SCHEMA TO partition_pruning;
+drop table test_range;
+ERROR:  table "test_range" does not exist
+create table test_range (a int, b int, c int) WITH (STORAGE_TYPE=USTORE)
+partition by range(a)
+(
+	partition p1 values less than (2000),
+	partition p2 values less than (3000),
+	partition p3 values less than (4000),
+	partition p4 values less than (5000),
+	partition p5 values less than (maxvalue)
+)ENABLE ROW MOVEMENT; 
+insert into test_range values(1,1,1);
+insert into test_range values(3001,1,1);
+prepare p1 as select  * from test_range where ctid = '(0,1)' and a = $1;
+explain (costs off)execute p1(1);
+             QUERY PLAN             
+------------------------------------
+ Partitioned Tid Scan on test_range
+   TID Cond: (ctid = '(0,1)'::tid)
+   Filter: (a = $1)
+   Selected Partitions:  PART
+(4 rows)
+
+execute p1(1);
+ a | b | c 
+---+---+---
+ 1 | 1 | 1
+(1 row)
+
+execute p1(3001);
+  a   | b | c 
+------+---+---
+ 3001 | 1 | 1
+(1 row)
+
+drop table test_range;
+drop table test_range_pt;
+ERROR:  table "test_range_pt" does not exist
+create table test_range_pt (a int, b int, c int)
+partition by range(a)
+(
+	partition p1 values less than (2000),
+	partition p2 values less than (3000),
+	partition p3 values less than (4000),
+	partition p4 values less than (5000),
+	partition p5 values less than (maxvalue)
+)ENABLE ROW MOVEMENT;
+insert into test_range_pt values(1,1),(2001,2),(3001,3),(4001,4),(5001,5);
+deallocate p1;
+prepare p1 as select * from test_range_pt  where a = $1 or a is null;
+explain (costs off)execute p1(2001);
+                 QUERY PLAN                  
+---------------------------------------------
+ Partition Iterator
+   Iterations: PART
+   ->  Partitioned Seq Scan on test_range_pt
+         Filter: ((a = $1) OR (a IS NULL))
+         Selected Partitions:  PART
+(5 rows)
+
+execute p1(2001);
+  a   | b | c 
+------+---+---
+ 2001 | 2 |  
+(1 row)
+
+deallocate p1;
+prepare p1 as select * from test_range_pt  where a = $1 or a = $2;
+explain (costs off)execute p1(2001,3001);
+                 QUERY PLAN                  
+---------------------------------------------
+ Partition Iterator
+   Iterations: PART
+   ->  Partitioned Seq Scan on test_range_pt
+         Filter: ((a = $1) OR (a = $2))
+         Selected Partitions:  PART
+(5 rows)
+
+execute p1(2001,3001);
+  a   | b | c 
+------+---+---
+ 2001 | 2 |  
+ 3001 | 3 |  
+(2 rows)
+
+deallocate p1;
+prepare p1 as select * from test_range_pt  where a = $1 and a = $2;
+explain (costs off)execute p1(2001,3001);
+                    QUERY PLAN                     
+---------------------------------------------------
+ Result
+   One-Time Filter: ($1 = $2)
+   ->  Partition Iterator
+         Iterations: PART
+         ->  Partitioned Seq Scan on test_range_pt
+               Filter: (a = $2)
+               Selected Partitions:  PART
+(7 rows)
+
+execute p1(2001,3001);
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop table test_range_pt;
+DROP SCHEMA partition_pruning;

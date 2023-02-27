@@ -52,7 +52,6 @@ typedef struct PruningContext {
     /* used for slice pruning */
     Index varno;
     ParamListInfo boundParams;
-    PartitionMap *partmap;
 } PruningContext;
 
 typedef enum PartKeyColumnRangeMode {
@@ -84,22 +83,23 @@ extern IndexesUsableType eliminate_partition_index_unusable(Oid IndexOid, Prunin
 void destroyPruningResult(PruningResult* pruningResult);
 void partitionPruningFromBoundary(PruningContext *context, PruningResult* pruningResult);
 List* restrictInfoListToExprList(List* restrictInfoList);
-void generateListFromPruningBM(PruningResult* result);
+void generateListFromPruningBM(PruningResult* result, PartitionMap *partmap = NULL);
 PruningResult* partitionPruningWalker(Expr* expr, PruningContext* pruningCtx);
 PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Relation rel, Expr* expr);
 PruningResult* partitionPruningForRestrictInfo(
-    PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList, PartitionMap *partmap);
+    PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList);
 PruningResult* PartitionPruningForPartitionList(RangeTblEntry* rte, Relation rel);
 extern PruningResult* copyPruningResult(PruningResult* srcPruningResult);
-extern Oid getPartitionOidFromSequence(Relation relation, int partSeq, PartitionMap *oldmap = NULL);
+extern Oid getPartitionOidFromSequence(Relation relation, int partSeq, int partitionno = 0);
 extern int varIsInPartitionKey(int attrNo, int2vector* partKeyAttrs, int partKeyNum);
 extern bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* pruning_result);
 
 extern PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation current_relation);
 static inline PartitionMap* GetPartitionMap(PruningContext *context)
 {
-    return PointerIsValid(context->partmap) ? context->partmap : context->GetPartitionMap(context->relation);
+    return context->GetPartitionMap(context->relation);
 }
-extern SubPartitionPruningResult* GetSubPartitionPruningResult(List* selectedSubPartitions, int partSeq);
+extern SubPartitionPruningResult* GetSubPartitionPruningResult(List* selectedSubPartitions, int partSeq,
+    int partitionno);
 void MergePartitionListsForPruning(RangeTblEntry* rte, Relation rel, PruningResult* pruningRes);
 #endif /* PRUNING_H_ */

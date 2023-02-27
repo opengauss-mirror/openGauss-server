@@ -993,8 +993,16 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             {
                                 if (var->dtype == PLPGSQL_DTYPE_VAR)
                                     ((PLpgSQL_var *) var)->default_val = $6;
-                                else {
+                                else if (var->dtype == PLPGSQL_DTYPE_ROW || var->dtype == PLPGSQL_DTYPE_RECORD) {
                                     ((PLpgSQL_row *) var)->default_val = $6;
+                                } 
+                                else {
+                                    const char* message = "default value for rec variable is not supported";
+                                    InsertErrorMessage(message, plpgsql_yylloc);
+                                    ereport(errstate,
+                                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                            errmsg("default value for rec variable is not supported"),
+                                            parser_errposition(@5)));
                                 }
                             }
                             }
@@ -4896,7 +4904,7 @@ stmt_dynexecute : K_EXECUTE
                             if (newp->into)			/* multiple INTO */
                                 yyerror("syntax error");
                             newp->into = true;
-                            read_into_target(&newp->rec, &newp->row, &newp->strict, false);
+                            (void)read_into_target(&newp->rec, &newp->row, &newp->strict, false);
                             endtoken = yylex();
                         }
                         /* If we found "USING", collect the argument */
@@ -5045,7 +5053,7 @@ stmt_fetch		: K_FETCH opt_fetch_direction cursor_variable K_INTO
                         PLpgSQL_row	   *row;
 
                         /* We have already parsed everything through the INTO keyword */
-                        read_into_target(&rec, &row, NULL, false);
+                        (void)read_into_target(&rec, &row, NULL, false);
 
                         if (yylex() != ';')
                             yyerror("syntax error");
@@ -5144,7 +5152,7 @@ fetch_into_target :
                         PLpgSQL_datum *datum = NULL;
                         PLpgSQL_rec *rec;
                         PLpgSQL_row *row;
-                        read_into_target(&rec, &row, NULL, true);
+                        (void)read_into_target(&rec, &row, NULL, true);
 
                         if (rec != NULL) {
                             datum = (PLpgSQL_datum *)rec;
@@ -9225,7 +9233,7 @@ make_execsql_stmt(int firsttoken, int location)
                 into_start_loc = yylloc;
             }
             u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
-	    is_user_var = read_into_target(&rec, &row, &have_strict, have_bulk_collect);
+            is_user_var = read_into_target(&rec, &row, &have_strict, have_bulk_collect);
             if (is_user_var) {
                 u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = save_IdentifierLookup;
                 have_into = false;
@@ -10617,7 +10625,7 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, bool bulk_c
     if (strict)
         *strict = true;
     tok = yylex();
-    if (tok == SET_USER_IDENT) {
+    if (tok == '@' || tok == SET_USER_IDENT) {
         return true;
     }
     if (strict && tok == K_STRICT)

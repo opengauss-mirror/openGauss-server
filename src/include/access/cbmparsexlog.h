@@ -276,6 +276,7 @@ typedef struct cbmbitmapiterator {
 
 extern void InitXlogCbmSys(void);
 extern void CBMTrackInit(bool startupXlog, XLogRecPtr startupCPRedo);
+extern void ResetXlogCbmSys(void);
 extern void CBMFollowXlog(void);
 extern void CBMGetMergedFile(XLogRecPtr startLSN, XLogRecPtr endLSN, char* mergedFileName);
 extern CBMArray* CBMGetMergedArray(XLogRecPtr startLSN, XLogRecPtr endLSN);

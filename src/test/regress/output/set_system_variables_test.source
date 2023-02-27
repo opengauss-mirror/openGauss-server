@@ -592,6 +592,28 @@ raise info 'v1:%', v1;
 raise info 'v2:%', v2;
 end;
 /
+-- test b_format_behavior_compat_options param
+\c test_set
+show b_format_behavior_compat_options;
+ b_format_behavior_compat_options 
+----------------------------------
+ 
+(1 row)
+
+set b_format_behavior_compat_options = 'enable_set_variables, enable_set_variables';
+show b_format_behavior_compat_options;
+      b_format_behavior_compat_options      
+--------------------------------------------
+ enable_set_variables, enable_set_variables
+(1 row)
+
+set @v1 = 1;
+select @v1;
+ @v1 
+-----
+   1
+(1 row)
+
 \c regression
 drop database if exists test_set;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1

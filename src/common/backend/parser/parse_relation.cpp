@@ -1138,10 +1138,14 @@ Relation parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockm
         TryUnlockAllAccounts();
     }
 
-    if (rel->partMap && rel->partMap->type == PART_TYPE_INTERVAL) {
-        /* take AccessShareLock on ADD_PARTITION_ACTION to avoid concurrency with new partition operations. */
-        LockRelationForAccessIntervalPartitionTab(rel);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (RelationIsPartitioned(rel)) {
+        /* take ShareLock to avoid PARTITION DDL COMMIT until we finish the InitPlan. Distribute mode doesn't support
+         * partition DDL/DML parallel work, no need this action */
+        LockPartitionObject(RelationGetRelid(rel), PARTITION_OBJECT_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK);
+        AddPartitionDMLInfo(RelationGetRelid(rel));
     }
+#endif
 
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         if (u_sess->attr.attr_sql.enable_parallel_ddl && !isFirstNode && isCreateView) {

@@ -1822,6 +1822,7 @@ void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
             u_sess->upg_cxt.binary_upgrade_next_etbl_toast_pg_class_oid = 0;
         }
 
+        errorStmt->charset = PG_INVALID_ENCODING;
         errorStmt->relation =
             makeRangeVar(schemaname, pstrdup(error_relation->relname), ((CreateStmt*)stmt)->relation->location);
         col = makeColumnDef("nodeid", "int4");

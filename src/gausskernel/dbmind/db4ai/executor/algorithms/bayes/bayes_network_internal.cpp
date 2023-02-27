@@ -201,7 +201,8 @@ void extract_graph(const char *edges_of_network, int num_of_edge, int num_nodes,
             }
             if (!validateParamEdges(node_pos, edge_size, substr, substr_len)) {
                 ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                errmsg("Incorrect Hyperparameters (edges_of_network unmatch with num_edges), parse failed.")));
+                                errmsg("Incorrect Hyperparameters (edges_of_network unmatch with num_edges), \
+                                        parse failed.")));
             }
             all_edges[node_pos++] = atoi(substr);
             start = end + 1;
@@ -218,7 +219,8 @@ void extract_graph(const char *edges_of_network, int num_of_edge, int num_nodes,
     substr[substr_len] = '\0';
     if (!validateParamEdges(node_pos, edge_size, substr, substr_len) || node_pos != edge_size - 1) {
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("Incorrect Hyperparameters (edges_of_network should match with num_edges), parse failed.")));
+                        errmsg("Incorrect Hyperparameters (edges_of_network should match with num_edges), \
+                                parse failed.")));
     }
     all_edges[node_pos] = atoi(substr);
     if (!validateParamNodes(all_edges, edge_size, num_nodes)) {
@@ -333,8 +335,9 @@ static void bayes_handle_tuple(bayesNodeState *bayes_state, ModelTuple *outer_tu
     int nattrs = bayes_state->tms.tuple.ncolumns;
     for (int i = 1; i < nattrs; ++i) {
         if (IsContinuous(bayes_state->attrtype[i])) {
-            if (outer_tuple_slot->isnull[i])
+            if (outer_tuple_slot->isnull[i]) {
                 continue;
+            }
             cdep[i][tpos].setCard(DatumGetFloat8(outer_tuple_slot->values[i]));
             cdep[i][tpos].setVariance(DatumGetFloat8(outer_tuple_slot->values[i]));
         } else {
@@ -379,8 +382,7 @@ static void bayes_calculate_discrete(bayesState *bayes_net_state, DiscreteProbPa
             double left_possible_distinct = 1.0 / params->coefficients[params->parentids[col_id - 1]][j];
             double right_possible_distinct = 1.0 / params->coefficients[params->node_id][target_index];
             double possible_distinct_for_two_col = Max(1.0, left_possible_distinct *
-                                                            right_possible_distinct *
-                                                            actual_rows / actual_rows_condition);
+                                                            right_possible_distinct);
             double sample_ratio = (double)bayes_net_state->num_total_rows /
                                   bayes_net_state->num_sample_rows;
             double coeff_jk = 1.0 /
@@ -565,13 +567,23 @@ static void copy_datum_list(bayesDatumList *mcv, bayesDatumList *bin, HTAB *valu
  * Overwidth values are assumed to have been distinct.
  * ----------
  */
-static uint64_t estimate_ndistinct_from_sample(uint64_t n, uint64_t N, uint64_t d, uint64_t f1)
+static uint64_t estimate_ndistinct_from_sample(double n, double N, double d, double f1)
 {
-    if (N > 0) {
-        return (uint64_t)((double)n*d / (n - f1 + f1*(double)n/N));
-    } else {
-        return 0;
+    /* if n < 1. It's an empty bucket, the ndistinct becomes usesless.
+ 
+     */
+    if (n < 1) { 
+        return 1;
     }
+    /* if n >= 1, d must be more than/equal to 1.
+     */
+    Assert(n >= 1 && d >= 1);
+    /* if n >= N, we take it as they are equal because of the precision errors.
+     */
+    if (n >= N) { 
+        return (uint64_t)Max(d, 1.0);
+    }    
+    return (uint64_t)(n * d / (n - f1 + f1 * n / N));
 }
 
 
@@ -699,8 +711,9 @@ static void do_data_descretize(TrainModelState *pstate, bayesState *bayes_net_st
             bayes_net_training_vars->coefficients[i] = (double *)palloc0(sizeof(double) *
                                                        (bayes_net_state->num_bins + max_possible_extra));
             for (int j = 0; j < num_statistic_value; j++) {
-                if (entries[j]->value.isnull)
+                if (entries[j]->value.isnull) {
                     break;
+                }
                 pos = current_size / size_bin;
                 Assert(pos <= bayes_net_training_vars->bins[i].size());
                 if (pos == bayes_net_training_vars->bins[i].size()) {
@@ -709,9 +722,10 @@ static void do_data_descretize(TrainModelState *pstate, bayesState *bayes_net_st
                         ndistinct = j - value_idx;
                         bayes_net_training_vars->
                             coefficients[i][bayes_net_training_vars->bins[i].size() + upper_bound_pos_with_null] = 1.0 /
-                            estimate_ndistinct_from_sample(bayes_net_state->num_sample_rows,
-                                                           bayes_net_state->num_total_rows,
-                                                           ndistinct, ndistinct - nmultiple);
+                                estimate_ndistinct_from_sample(
+                                    (double)bayes_net_state->num_sample_rows / bayes_net_state->num_bins,
+                                    (double)bayes_net_state->num_total_rows / bayes_net_state->num_bins,
+                                    ndistinct, ndistinct - nmultiple);
                         value_idx = j;
                     }
                     nmultiple = 0;
@@ -723,9 +737,10 @@ static void do_data_descretize(TrainModelState *pstate, bayesState *bayes_net_st
             }
             ndistinct = num_statistic_value - value_idx;
             bayes_net_training_vars->coefficients[i][bayes_net_training_vars->bins[i].size() - 1] = 1.0 /
-                            estimate_ndistinct_from_sample(bayes_net_state->num_sample_rows,
-                                                           bayes_net_state->num_total_rows,
-                                                           ndistinct, ndistinct - nmultiple);
+                estimate_ndistinct_from_sample(
+                    (double)bayes_net_state->num_sample_rows / bayes_net_state->num_bins,
+                    (double)bayes_net_state->num_total_rows / bayes_net_state->num_bins,
+                    ndistinct, ndistinct - nmultiple);
             const int upper_bound_pos_without_null = -1;
             if (num_null > 0) {
                 // Save the maximal value only once
@@ -752,14 +767,28 @@ static void do_data_descretize(TrainModelState *pstate, bayesState *bayes_net_st
             qsort(entries, num_statistic_value, sizeof(ValueMapEntry *), second_cmp);
             pos = 0;
             bayes_net_training_vars->coefficients[i] = (double *)palloc0(sizeof(double) * (bayes_net_state->num_mcvs + 1));
-            while (pos < (uint32_t)bayes_net_state->num_mcvs) {
-                bayes_net_training_vars->mcvs[i].push_back(entries[pos]->value);
-                bayes_net_training_vars->coefficients[i][pos] = 1.0;
+            unsigned int used_cnt = 0;
+            unsigned int nmultiple = 0;
+            unsigned int ndistinct = 0;
+            while (pos < (uint32_t)num_statistic_value) {
+                if (pos < (uint32_t)bayes_net_state->num_mcvs) {
+                    used_cnt += entries[pos]->cnt;
+                    bayes_net_training_vars->mcvs[i].push_back(entries[pos]->value);
+                    bayes_net_training_vars->coefficients[i][pos] = 1.0;
+                } else if (entries[pos]->cnt > 1) {
+                    nmultiple++;
+                } else {
+                    break;
+                }
                 pos++;
             }
-            bayes_net_training_vars->coefficients[i][bayes_net_state->num_mcvs] = 1.0 /
-                                                                                  (num_statistic_value -
-                                                                                   bayes_net_state->num_mcvs);
+            ndistinct = num_statistic_value - bayes_net_state->num_mcvs;
+            double total_rows_discount =
+                (double)(bayes_net_state->num_sample_rows - used_cnt) / (double)bayes_net_state->num_sample_rows;
+            bayes_net_training_vars->coefficients[i][bayes_net_state->num_mcvs] =
+                1.0 / estimate_ndistinct_from_sample(bayes_net_state->num_sample_rows - used_cnt,
+                                                     ((double)bayes_net_state->num_total_rows * total_rows_discount),
+                                                     ndistinct, ndistinct - nmultiple);
         } else {
             if (num_statistic_value > MAX_DISTINCT_NO_BIN_MCV) {
                 ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_STATUS),
@@ -785,8 +814,9 @@ static void data_descretize(TrainModelState *pstate, bayesState *bayes_net_state
     // Get data for discretizing
     while (true) {
         outer_tuple_slot = pstate->fetch(pstate->callback_data, &pstate->tuple) ? &pstate->tuple : nullptr;
-        if (outer_tuple_slot == nullptr)
+        if (outer_tuple_slot == nullptr) {
             break;
+        }
         bayes_net_training_vars->attrtype = pstate->tuple.typid;
         for (int i = 0; i < nattrs; i++) {
             uint32_t ndistinct = hash_get_num_entries(bayes_net_training_vars->value_stats[i]);
@@ -844,8 +874,9 @@ static void gaussian_fit(TrainModelState *pstate, bayesState *bayes_net_state,
     ModelTuple const *outer_tuple_slot = nullptr;
     while (true) {
         outer_tuple_slot = pstate->fetch(pstate->callback_data, &pstate->tuple) ? &pstate->tuple : nullptr;
-        if (outer_tuple_slot == nullptr)
+        if (outer_tuple_slot == nullptr) {
             break;
+        }
         for (int nodeid = 0; nodeid < bayes_net_state->num_nodes; nodeid++) {
             bayesNodeState *bayes_state = bayes_net_state->bayes_tmss[nodeid];
             bayes_state->tms.tuple = select_tuple(bayes_net_training_vars->num_parents[nodeid],
@@ -906,8 +937,9 @@ static void probability_fit(TrainModelState *pstate, bayesState *bayes_net_state
 
     while (!bayes_net_state->done) {
         outer_tuple_slot = pstate->fetch(pstate->callback_data, &pstate->tuple) ? &pstate->tuple : nullptr;
-        if (outer_tuple_slot == nullptr)
+        if (outer_tuple_slot == nullptr) {
             break;
+        }
         for (int nodeid = 0; nodeid < bayes_net_state->num_nodes; nodeid++) {
             bayesNodeState *bayes_state = bayes_net_state->bayes_tmss[nodeid];
             bayes_state->tms.tuple = select_tuple(bayes_net_training_vars->num_parents[nodeid],
@@ -1460,8 +1492,9 @@ void bayes_net_predict_dfs_direct(SerializedModelBayesNet *bayes_net_model, Datu
                                   int ncolumns, int targetid, uint128 *visited, ProbVector **parent_prob)
 {
     uint128 target = (uint128)1 << targetid;
-    if (((*visited) & target) == target)
+    if (((*visited) & target) == target) {
         return;
+    }
     (*visited) += target;
     int num_parents = 0;
     int selected_ids[bayes_net_model->num_nodes];
@@ -1500,8 +1533,9 @@ Datum bayes_net_predict_direct(AlgorithmAPI *, ModelPredictor model, Datum *valu
                 prob *= cum_prob;
             }
         }
-        while ((visited & ((uint128)1 << targetid)) > 0)
+        while ((visited & ((uint128)1 << targetid)) > 0) {
             targetid += 1;
+        }
     }
     for (int i = 0; i < ncolumns; i++) {
         if (parent_prob[i]->numProb > 0) {
@@ -1545,8 +1579,9 @@ double bayes_predict_prob(SerializedModelBayesNode *bayes_model, TupleData tup,
 
     double prob_x = 1.0;
     for (int i = 1; i < ncolumns; i++) {
-        if (IsContinuous(types[i]))
+        if (IsContinuous(types[i])) {
             continue;
+        }
         ValueInTuple value = create_value(values[i], types[i], isnull[i]);
         f_index[i] = findDiscreteIndex(value, bayes_model->featuresmatrix_fornet[i], data_process[selected_ids[i - 1]]);
 
@@ -1618,8 +1653,9 @@ double bayes_net_predict_dfs(SerializedModelBayesNet *bayes_net_model, Datum *va
                              int ncolumns, int targetid, uint128 *visited)
 {
     uint128 target = ((uint128)1 << targetid);
-    if (((*visited) & target) == target)
+    if (((*visited) & target) == target) {
         return 1.0;
+    }
     (*visited) += target;
     int num_parents = 0;
     int *selected_ids = (int *)palloc0(sizeof(int) * bayes_net_model->num_nodes);
@@ -1648,8 +1684,9 @@ Datum bayes_net_predict(AlgorithmAPI *, ModelPredictor model, Datum *values, boo
     double prob = 1.0;
     while (targetid < ncolumns) {
         prob *= bayes_net_predict_dfs(bayes_net_model, values, isnull, types, ncolumns, targetid, &visited);
-        while ((visited & ((uint128)1 << targetid)) > 0)
+        while ((visited & ((uint128)1 << targetid)) > 0) {
             targetid += 1;
+        }
     }
     clock_gettime(CLOCK_MONOTONIC, &exec_end_time);
     double predicttime = interval_to_sec(time_diff(&exec_end_time, &exec_start_time));

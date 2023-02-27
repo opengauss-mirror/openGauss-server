@@ -59,8 +59,10 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92843;
+const uint32 GRAND_VERSION_NUM = 92844;
 
+const uint32 PARTITION_ENHANCE_VERSION_NUM = 92844;
+const uint32 SELECT_INTO_FILE_VERSION_NUM = 92844;
 const uint32 SELECT_INTO_VAR_VERSION_NUM = 92834;
 const uint32 DOLPHIN_ENABLE_DROP_NUM = 92830;
 const uint32 SQL_PATCH_VERSION_NUM = 92675;
@@ -119,6 +121,7 @@ const uint32 PG_AUTHID_PASSWORDEXT_VERSION_NUM = 92830;
 const uint32 SUPPORT_VIEW_AUTO_UPDATABLE = 92838;
 const uint32 INSERT_RIGHT_REF_VERSION_NUM = 92842;
 const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
+const uint32 CHARACTER_SET_VERSION_NUM = 92844;
 
 /* Version number of the guc parameter backend_version added in V500R001C20 */
 const uint32 V5R1C20_BACKEND_VERSION_NUM = 92305;
@@ -171,7 +174,9 @@ const uint32 FDW_SUPPORT_JOIN_AGG_VERSION_NUM = 92839;
 const uint32 UNION_NULL_VERSION_NUM = 92841;
 
 const uint32 CREATE_INDEX_IF_NOT_EXISTS_VERSION_NUM = 92843;
+const uint32 EVENT_VERSION_NUM = 92844;
 
+const uint32 SLOW_SQL_VERSION_NUM = 92844;
 #ifdef PGXC
 bool useLocalXid = false;
 #endif

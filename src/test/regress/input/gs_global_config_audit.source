@@ -1,12 +1,12 @@
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_enabled=on" > /dev/null 2>&1
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=33554431" > /dev/null 2>&1
-SELECT object_name,detail_info FROM pg_query_audit('2022-02-01 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_globalconfig';
-select * from gs_global_config;
+SELECT * FROM pg_delete_audit('2022-02-01 9:30:00', '2031-12-12 22:00:00');
 ALTER GLOBAL CONFIGURATION with(lockwait_timeout=2000, lockwait_interval=2);
 ALTER GLOBAL CONFIGURATION with(last_catchup_threshold=5000);
-select * from gs_global_config;
+select * from gs_global_config where name like '%lockwait%' or name like '%last_catchup_threshold%';
 DROP GLOBAL CONFIGURATION lockwait_timeout;
 DROP GLOBAL CONFIGURATION last_catchup_threshold, lockwait_interval;
-select * from gs_global_config;
-SELECT object_name,detail_info FROM pg_query_audit('2022-02-01 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_globalconfig';
+select * from gs_global_config where name like '%lockwait%' or name like '%last_catchup_threshold%';
+SELECT object_name,detail_info FROM pg_query_audit('2022-02-01 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_globalconfig' and (detail_info like '%lockwait%' or detail_info like '%last_catchup_threshold%');
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "reset audit_system_object" > /dev/null 2>&1
+

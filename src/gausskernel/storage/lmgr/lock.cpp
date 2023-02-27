@@ -773,8 +773,9 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
      *
      * First we prepare to log, then after lock acquired we issue log record.
      */
-    if (lockmode >= AccessExclusiveLock && locktag->locktag_type == LOCKTAG_RELATION && !RecoveryInProgress() &&
-        XLogStandbyInfoActive()) {
+    if (lockmode >= AccessExclusiveLock && (locktag->locktag_type == LOCKTAG_RELATION ||
+        locktag->locktag_type == LOCKTAG_PARTITION || locktag->locktag_type == LOCKTAG_PARTITION_SEQUENCE) &&
+        !RecoveryInProgress() && XLogStandbyInfoActive()) {
         LogAccessExclusiveLockPrepare();
         log_lock = true;
     }

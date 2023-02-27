@@ -1193,6 +1193,12 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
         /* Check for existing file of same name */
         rpath = relpath(rnode, MAIN_FORKNUM);
         fd = BasicOpenFile(rpath, O_RDONLY | PG_BINARY, 0);
+        if (fd < 0) {
+            char compress_rpath[MAXPGPATH];
+            int ret = snprintf_s(compress_rpath, MAXPGPATH, MAXPGPATH - 1, "%s%s", rpath, COMPRESS_STR);
+            securec_check_ss(ret, "\0", "\0");
+            fd = BasicOpenFile(compress_rpath, O_RDONLY | PG_BINARY, 0);
+        }
         if (fd >= 0) {
             /* definite collision */
             close(fd);

@@ -79,6 +79,8 @@ int64 SearchAllAccounts();
 void InitAccountLockHashTable();
 extern USER_STATUS GetAccountLockedStatusFromHashTable(Oid roleid);
 extern void UpdateAccountInfoFromHashTable();
+extern bool have_createrole_privilege(void);
+extern bool IsReservedRoleName(const char* name);
 
 extern inline void str_reset(char* str)
 {

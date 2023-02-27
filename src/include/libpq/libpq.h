@@ -49,7 +49,7 @@ extern ProtocolExtensionConfig default_protocol_config;
  */
 extern int StreamServerPort(int family, char* hostName, unsigned short portNumber, const char* unixSocketName,
     pgsocket ListenSocket[], int MaxListen, bool add_localaddr_flag,
-    bool is_create_psql_sock, bool is_create_libcomm_sock, 
+    bool is_create_psql_sock, bool is_create_libcomm_sock, ListenChanelType listen_channel,
     ProtocolExtensionConfig* protocol_config = &default_protocol_config);
 extern int StreamConnection(pgsocket server_fd, Port* port);
 extern void StreamClose(pgsocket sock);

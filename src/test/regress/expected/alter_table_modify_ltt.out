@@ -1,0 +1,786 @@
+create database atbdb_ltt WITH ENCODING 'UTF-8' dbcompatibility 'B';
+\c atbdb_ltt
+CREATE SCHEMA atbdb_ltt_schema;
+SET CURRENT_SCHEMA TO atbdb_ltt_schema;
+-- test modify column without data
+CREATE LOCAL TEMPORARY TABLE test_at_modify(
+    a int,
+    b int NOT NULL
+);
+ALTER TABLE test_at_modify MODIFY b varchar(8) NULL;
+ALTER TABLE test_at_modify MODIFY b varchar(8) DEFAULT '0';
+ALTER TABLE test_at_modify MODIFY b int AUTO_INCREMENT PRIMARY KEY INITIALLY DEFERRED;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_modify_pkey" for table "test_at_modify"
+ALTER TABLE test_at_modify MODIFY b varchar(8) UNIQUE DEFERRABLE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_b_key" for table "test_at_modify"
+ALTER TABLE test_at_modify MODIFY b varchar(8) CHECK (b < 'a');
+ALTER TABLE test_at_modify MODIFY b varchar(8) COLLATE "POSIX";
+ALTER TABLE test_at_modify MODIFY b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+ALTER TABLE test_at_modify MODIFY b int NOT NULL;
+INSERT INTO test_at_modify VALUES(1,1);
+DROP TABLE test_at_modify;
+-- test modify column datatype
+CREATE LOCAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_modify_type VALUES(1,1);
+INSERT INTO test_at_modify_type VALUES(2,2);
+INSERT INTO test_at_modify_type VALUES(3,3);
+ALTER TABLE test_at_modify_type MODIFY COLUMN b varchar(8);
+SELECT * FROM test_at_modify_type where b = '3';
+ a | b 
+---+---
+ 3 | 3
+(1 row)
+
+ALTER TABLE test_at_modify_type MODIFY COLUMN b DATE; -- ERROR
+ERROR:  invalid input syntax for type date: "1"
+ALTER TABLE test_at_modify_type MODIFY COLUMN b RAW;
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+ a | b  
+---+----
+ 1 | 01
+ 2 | 02
+ 3 | 03
+(3 rows)
+
+DROP TABLE test_at_modify_type;
+CREATE LOCAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b text
+);
+INSERT INTO test_at_modify_type VALUES(1,'beijing');
+INSERT INTO test_at_modify_type VALUES(2,'shanghai');
+INSERT INTO test_at_modify_type VALUES(3,'guangzhou');
+ALTER TABLE test_at_modify_type MODIFY COLUMN b SET('beijing','shanghai','nanjing','wuhan'); -- ERROR
+NOTICE:  ALTER TABLE will create implicit set "test_at_modify_type_b_set" for column "test_at_modify_type.b"
+ERROR:  invalid input value for set test_at_modify_type_b_set: 'guangzhou'
+ALTER TABLE test_at_modify_type MODIFY COLUMN b SET('beijing','shanghai','nanjing','guangzhou');
+NOTICE:  ALTER TABLE will create implicit set "test_at_modify_type_b_set" for column "test_at_modify_type.b"
+ALTER TABLE test_at_modify_type MODIFY COLUMN b SET('beijing','shanghai','guangzhou','wuhan'); -- ERROR
+ERROR:  can not alter column type to another set
+DROP TABLE test_at_modify_type;
+CREATE LOCAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b varchar(32)
+);
+INSERT INTO test_at_modify_type VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_modify_type VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_modify_type VALUES(3,'2022-11-24 12:00:00');
+ALTER TABLE test_at_modify_type MODIFY COLUMN b varchar(10); -- ERROR
+ERROR:  value too long for type character varying(10)
+ALTER TABLE test_at_modify_type MODIFY COLUMN b DATE;
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+ a |     b      
+---+------------
+ 1 | 11-22-2022
+ 2 | 11-23-2022
+ 3 | 11-24-2022
+(3 rows)
+
+DROP TABLE test_at_modify_type;
+CREATE LOCAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b int[] NOT NULL
+);
+INSERT INTO test_at_modify_type VALUES(1,ARRAY[1,1]);
+INSERT INTO test_at_modify_type VALUES(2,ARRAY[2,2]);
+INSERT INTO test_at_modify_type VALUES(3,ARRAY[3,3]);
+ALTER TABLE test_at_modify_type MODIFY COLUMN b float4[];
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+ a |   b   
+---+-------
+ 1 | {1,1}
+ 2 | {2,2}
+ 3 | {3,3}
+(3 rows)
+
+DROP TABLE test_at_modify_type;
+-- test modify column constraint
+CREATE LOCAL TEMPORARY TABLE test_at_modify_constr(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_modify_constr VALUES(1,1);
+INSERT INTO test_at_modify_constr VALUES(2,2);
+INSERT INTO test_at_modify_constr VALUES(3,3);
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) NOT NULL NULL; -- ERROR
+ERROR:  conflicting NULL/NOT NULL declarations for column "b" of table "test_at_modify_constr"
+LINE 1: ...BLE test_at_modify_constr MODIFY b varchar(8) NOT NULL NULL;
+                                                                  ^
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) UNIQUE KEY NULL;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_constr_b_key" for table "test_at_modify_constr"
+INSERT INTO test_at_modify_constr VALUES(3,3); -- ERROR
+ERROR:  duplicate key value violates unique constraint "test_at_modify_constr_b_key"
+DETAIL:  Key (b)=(3) already exists.
+INSERT INTO test_at_modify_constr VALUES(4,NULL);
+ALTER TABLE test_at_modify_constr MODIFY b int NULL PRIMARY KEY; -- ERROR
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_modify_constr_pkey" for table "test_at_modify_constr"
+ERROR:  column "b" contains null values
+DELETE FROM test_at_modify_constr WHERE b IS NULL;
+ALTER TABLE test_at_modify_constr MODIFY b int NULL PRIMARY KEY;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_modify_constr_pkey" for table "test_at_modify_constr"
+INSERT INTO test_at_modify_constr VALUES(4,NULL); -- ERROR
+ERROR:  null value in column "b" violates not-null constraint
+DETAIL:  Failing row contains (4, null).
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check CHECK (b < 3); -- ERROR
+ERROR:  check constraint "t_at_m_check" is violated by some row
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check CHECK (b < 5);
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check CHECK (b = a); -- ERROR
+ERROR:  constraint "t_at_m_check" for relation "test_at_modify_constr" already exists
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check_1 CHECK (b = a);
+INSERT INTO test_at_modify_constr VALUES(4,4);
+INSERT INTO test_at_modify_constr VALUES(5,5); -- ERROR
+ERROR:  new row for relation "test_at_modify_constr" violates check constraint "t_at_m_check"
+DETAIL:  N/A
+INSERT INTO test_at_modify_constr VALUES(6,'a'); -- ERROR
+ERROR:  new row for relation "test_at_modify_constr" violates check constraint "t_at_m_check_1"
+DETAIL:  N/A
+INSERT INTO test_at_modify_constr VALUES(0,'a');
+ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL PRIMARY KEY; -- ERROR
+ERROR:  multiple primary keys for table "test_at_modify_constr" are not allowed
+ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL;
+INSERT INTO test_at_modify_constr VALUES(5,5); -- ERROR
+ERROR:  new row for relation "test_at_modify_constr" violates check constraint "t_at_m_check"
+DETAIL:  N/A
+SELECT b FROM test_at_modify_constr ORDER BY 1;
+ b 
+---
+ 0
+ 1
+ 2
+ 3
+ 4
+(5 rows)
+
+ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  modify or change column REFERENCES constraint is not supported
+DROP TABLE test_at_modify_constr;
+-- test modify column default
+CREATE LOCAL TEMPORARY TABLE test_at_modify_default(
+    a int,
+    b int DEFAULT NULL
+);
+INSERT INTO test_at_modify_default VALUES(1,1);
+INSERT INTO test_at_modify_default VALUES(2,2);
+INSERT INTO test_at_modify_default VALUES(3,3);
+ALTER TABLE test_at_modify_default MODIFY b bigint DEFAULT (a+1); -- ERROR
+ERROR:  default value cannot reference to a column
+HINT:  Perhaps the default value is enclosed in double quotes
+ALTER TABLE test_at_modify_default MODIFY b bigint DEFAULT NULL;
+ALTER TABLE test_at_modify_default MODIFY b varchar(8) DEFAULT 'a' GENERATED ALWAYS AS (a+1) STORED; -- ERROR
+ERROR:  both default and generation expression specified for column "b" of table "test_at_modify_default"
+LINE 1: ...at_modify_default MODIFY b varchar(8) DEFAULT 'a' GENERATED ...
+                                                             ^
+ALTER TABLE test_at_modify_default MODIFY b varchar(8) DEFAULT 'a';
+INSERT INTO test_at_modify_default VALUES(0,DEFAULT);
+SELECT b FROM test_at_modify_default ORDER BY 1;
+ b 
+---
+ 1
+ 2
+ 3
+ a
+(4 rows)
+
+ALTER TABLE test_at_modify_default MODIFY b int DEFAULT 4 AUTO_INCREMENT; -- ERROR
+ERROR:  multiple default values specified for column "b" of table "test_at_modify_default"
+LINE 1: ...BLE test_at_modify_default MODIFY b int DEFAULT 4 AUTO_INCRE...
+                                                             ^
+ALTER TABLE test_at_modify_default MODIFY b int DEFAULT 4;
+INSERT INTO test_at_modify_default VALUES(4,DEFAULT);
+SELECT b FROM test_at_modify_default ORDER BY 1;
+ b 
+---
+ 0
+ 1
+ 2
+ 3
+ 4
+(5 rows)
+
+ALTER TABLE test_at_modify_default MODIFY b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+SELECT a,b FROM test_at_modify_default ORDER BY 1,2;
+ a | b 
+---+---
+ 0 | 1
+ 1 | 2
+ 2 | 3
+ 3 | 4
+ 4 | 5
+(5 rows)
+
+ALTER TABLE test_at_modify_default MODIFY a varchar(8) DEFAULT 'a';
+INSERT INTO test_at_modify_default VALUES(DEFAULT,DEFAULT);
+SELECT a,b FROM test_at_modify_default ORDER BY 1,2;
+ a | b 
+---+---
+ 0 | 1
+ 1 | 2
+ 2 | 3
+ 3 | 4
+ 4 | 5
+ a | 1
+(6 rows)
+
+DROP TABLE test_at_modify_default;
+-- test modify column depended by generated column
+CREATE LOCAL TEMPORARY TABLE test_at_modify_generated(
+    a int,
+    b varchar(32),
+    c varchar(32) GENERATED ALWAYS AS (b) STORED
+);
+INSERT INTO test_at_modify_generated(a,b) VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_modify_generated(a,b) VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_modify_generated(a,b) VALUES(3,'2022-11-24 12:00:00');
+SELECT * FROM test_at_modify_generated ORDER BY 1,2;
+ a |          b          |          c          
+---+---------------------+---------------------
+ 1 | 2022-11-22 12:00:00 | 2022-11-22 12:00:00
+ 2 | 2022-11-23 12:00:00 | 2022-11-23 12:00:00
+ 3 | 2022-11-24 12:00:00 | 2022-11-24 12:00:00
+(3 rows)
+
+ALTER TABLE test_at_modify_generated MODIFY COLUMN b DATE;
+SELECT * FROM test_at_modify_generated ORDER BY 1,2;
+ a |     b      |     c      
+---+------------+------------
+ 1 | 11-22-2022 | 11-22-2022
+ 2 | 11-23-2022 | 11-23-2022
+ 3 | 11-24-2022 | 11-24-2022
+(3 rows)
+
+ALTER TABLE test_at_modify_generated MODIFY COLUMN b varchar(32);
+SELECT * FROM test_at_modify_generated ORDER BY 1,2;
+ a |     b      |     c      
+---+------------+------------
+ 1 | 11-22-2022 | 11-22-2022
+ 2 | 11-23-2022 | 11-23-2022
+ 3 | 11-24-2022 | 11-24-2022
+(3 rows)
+
+DROP TABLE test_at_modify_generated;
+-- test modify column AUTO_INCREMENT
+CREATE LOCAL TEMPORARY TABLE test_at_modify_autoinc(
+    a int,
+    b int
+);
+INSERT INTO test_at_modify_autoinc VALUES(1,NULL);
+INSERT INTO test_at_modify_autoinc VALUES(2,0);
+ALTER TABLE test_at_modify_autoinc MODIFY b int2 AUTO_INCREMENT; -- ERROR
+ERROR:  auto_increment column must be defined as a unique or primary key
+ALTER TABLE test_at_modify_autoinc MODIFY b DECIMAL(4,2) AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ERROR:  The datatype of column 'b' does not support auto_increment
+ALTER TABLE test_at_modify_autoinc MODIFY b serial AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  cannot modify or change column to type 'serial'
+ALTER TABLE test_at_modify_autoinc MODIFY b int2 AUTO_INCREMENT NULL UNIQUE KEY;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_autoinc_b_key" for table "test_at_modify_autoinc"
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a | b 
+---+---
+ 1 |  
+ 2 | 2
+(2 rows)
+
+INSERT INTO test_at_modify_autoinc VALUES(3,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a | b 
+---+---
+ 1 |  
+ 2 | 2
+ 3 | 3
+(3 rows)
+
+ALTER TABLE test_at_modify_autoinc MODIFY COLUMN b int;
+INSERT INTO test_at_modify_autoinc VALUES(4,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a | b 
+---+---
+ 1 |  
+ 2 | 2
+ 3 | 3
+ 4 | 0
+(4 rows)
+
+ALTER TABLE test_at_modify_autoinc MODIFY b int AUTO_INCREMENT PRIMARY KEY, AUTO_INCREMENT=100;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_modify_autoinc_pkey" for table "test_at_modify_autoinc"
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b  
+---+-----
+ 1 | 100
+ 2 |   2
+ 3 |   3
+ 4 | 101
+(4 rows)
+
+INSERT INTO test_at_modify_autoinc VALUES(5,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b  
+---+-----
+ 1 | 100
+ 2 |   2
+ 3 |   3
+ 4 | 101
+ 5 | 102
+(5 rows)
+
+ALTER TABLE test_at_modify_autoinc AUTO_INCREMENT=1000;
+ALTER TABLE test_at_modify_autoinc MODIFY b int2 AUTO_INCREMENT;
+INSERT INTO test_at_modify_autoinc VALUES(6,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+(6 rows)
+
+ALTER TABLE test_at_modify_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE, MODIFY  b int2 AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ERROR:  Incorrect table definition, there can be only one auto_increment column
+ALTER TABLE test_at_modify_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE; -- ERROR
+ERROR:  Incorrect column definition, there can be only one auto_increment column
+ALTER TABLE test_at_modify_autoinc MODIFY COLUMN b int;
+ALTER TABLE test_at_modify_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_autoinc_c_key" for table "test_at_modify_autoinc"
+INSERT INTO test_at_modify_autoinc VALUES(7,0,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b   | c 
+---+------+---
+ 1 |  100 | 1
+ 2 |    2 | 2
+ 3 |    3 | 3
+ 4 |  101 | 4
+ 5 |  102 | 5
+ 6 | 1000 | 6
+ 7 |    0 | 7
+(7 rows)
+
+ALTER TABLE test_at_modify_autoinc DROP COLUMN c , MODIFY b int2 AUTO_INCREMENT UNIQUE KEY;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_autoinc_b_key1" for table "test_at_modify_autoinc"
+INSERT INTO test_at_modify_autoinc VALUES(8,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+ 7 | 1001
+ 8 | 1002
+(8 rows)
+
+ALTER TABLE test_at_modify_autoinc MODIFY b float4; -- ALTER TYPE ONLY, KEEP AUTO_INCREMENT
+INSERT INTO test_at_modify_autoinc VALUES(9,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+ 7 | 1001
+ 8 | 1002
+ 9 | 1003
+(9 rows)
+
+DROP TABLE test_at_modify_autoinc;
+-- ------------------------------------------------------ test ALTER TABLE CHANGE
+-- test change column without data
+CREATE LOCAL TEMPORARY TABLE test_at_change(
+    a int,
+    b int NOT NULL
+);
+ALTER TABLE test_at_change CHANGE b b1 varchar(8) NULL;
+ALTER TABLE test_at_change CHANGE b1 b varchar(8) DEFAULT '0';
+ALTER TABLE test_at_change CHANGE b b1 int AUTO_INCREMENT PRIMARY KEY;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_change_pkey" for table "test_at_change"
+ALTER TABLE test_at_change CHANGE b1 b varchar(8) UNIQUE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_b_key" for table "test_at_change"
+ALTER TABLE test_at_change CHANGE b b1 varchar(8) CHECK (b1 < 'a');
+ALTER TABLE test_at_change CHANGE b1 b varchar(8) COLLATE "POSIX";
+ALTER TABLE test_at_change CHANGE b b1 varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+ALTER TABLE test_at_change CHANGE b1 b int NOT NULL;
+INSERT INTO test_at_change VALUES(1,1);
+DROP TABLE test_at_change;
+-- test change column datatype
+CREATE LOCAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_change_type VALUES(1,1);
+INSERT INTO test_at_change_type VALUES(2,2);
+INSERT INTO test_at_change_type VALUES(3,3);
+ALTER TABLE test_at_change_type CHANGE b b1 varchar(8);
+SELECT * FROM test_at_change_type where b1 = '3';
+ a | b1 
+---+----
+ 3 | 3
+(1 row)
+
+ALTER TABLE test_at_change_type CHANGE b1 b DATE; -- ERROR
+ERROR:  invalid input syntax for type date: "1"
+ALTER TABLE test_at_change_type CHANGE b1 b RAW;
+SELECT * FROM test_at_change_type ORDER BY 1,2;
+ a | b  
+---+----
+ 1 | 01
+ 2 | 02
+ 3 | 03
+(3 rows)
+
+DROP TABLE test_at_change_type;
+CREATE LOCAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b text
+);
+INSERT INTO test_at_change_type VALUES(1,'beijing');
+INSERT INTO test_at_change_type VALUES(2,'shanghai');
+INSERT INTO test_at_change_type VALUES(3,'guangzhou');
+ALTER TABLE test_at_change_type CHANGE b b1 SET('beijing','shanghai','nanjing','wuhan'); -- ERROR
+NOTICE:  ALTER TABLE will create implicit set "test_at_change_type_b1_set" for column "test_at_change_type.b1"
+ERROR:  invalid input value for set test_at_change_type_b1_set: 'guangzhou'
+ALTER TABLE test_at_change_type CHANGE b b1 SET('beijing','shanghai','nanjing','guangzhou');
+NOTICE:  ALTER TABLE will create implicit set "test_at_change_type_b1_set" for column "test_at_change_type.b1"
+ALTER TABLE test_at_change_type CHANGE b1 b SET('beijing','shanghai','guangzhou','wuhan'); -- ERROR
+ERROR:  can not alter column type to another set
+DROP TABLE test_at_change_type;
+CREATE LOCAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b varchar(32)
+);
+INSERT INTO test_at_change_type VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_change_type VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_change_type VALUES(3,'2022-11-24 12:00:00');
+ALTER TABLE test_at_change_type CHANGE b b1 varchar(10); -- ERROR
+ERROR:  value too long for type character varying(10)
+ALTER TABLE test_at_change_type CHANGE b b1 DATE;
+SELECT * FROM test_at_change_type ORDER BY 1,2;
+ a |     b1     
+---+------------
+ 1 | 11-22-2022
+ 2 | 11-23-2022
+ 3 | 11-24-2022
+(3 rows)
+
+DROP TABLE test_at_change_type;
+-- test change column constraint
+CREATE LOCAL TEMPORARY TABLE test_at_change_constr(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_change_constr VALUES(1,1);
+INSERT INTO test_at_change_constr VALUES(2,2);
+INSERT INTO test_at_change_constr VALUES(3,3);
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) NOT NULL NULL; -- ERROR
+ERROR:  conflicting NULL/NOT NULL declarations for column "b1" of table "test_at_change_constr"
+LINE 1: ... test_at_change_constr CHANGE b b1 varchar(8) NOT NULL NULL;
+                                                                  ^
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) UNIQUE KEY NULL;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_constr_b1_key" for table "test_at_change_constr"
+INSERT INTO test_at_change_constr VALUES(3,3); -- ERROR
+ERROR:  duplicate key value violates unique constraint "test_at_change_constr_b1_key"
+DETAIL:  Key (b1)=(3) already exists.
+INSERT INTO test_at_change_constr VALUES(4,NULL);
+ALTER TABLE test_at_change_constr CHANGE b1 b int NULL PRIMARY KEY; -- ERROR
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_change_constr_pkey" for table "test_at_change_constr"
+ERROR:  column "b" contains null values
+DELETE FROM test_at_change_constr WHERE b1 IS NULL;
+ALTER TABLE test_at_change_constr CHANGE b1 b int NULL PRIMARY KEY;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_change_constr_pkey" for table "test_at_change_constr"
+INSERT INTO test_at_change_constr VALUES(4,NULL); -- ERROR
+ERROR:  null value in column "b" violates not-null constraint
+DETAIL:  Failing row contains (4, null).
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) CONSTRAINT t_at_m_check CHECK (b1 < 3); -- ERROR
+ERROR:  check constraint "t_at_m_check" is violated by some row
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) CONSTRAINT t_at_m_check CHECK (b1 < 5);
+ALTER TABLE test_at_change_constr CHANGE b1 b varchar(8) CONSTRAINT t_at_m_check CHECK (b = a); -- ERROR
+ERROR:  constraint "t_at_m_check" for relation "test_at_change_constr" already exists
+ALTER TABLE test_at_change_constr CHANGE b1 b varchar(8) CONSTRAINT t_at_m_check_1 CHECK (b = a);
+INSERT INTO test_at_change_constr VALUES(4,4);
+INSERT INTO test_at_change_constr VALUES(5,5); -- ERROR
+ERROR:  new row for relation "test_at_change_constr" violates check constraint "t_at_m_check"
+DETAIL:  N/A
+INSERT INTO test_at_change_constr VALUES(6,'a'); -- ERROR
+ERROR:  new row for relation "test_at_change_constr" violates check constraint "t_at_m_check_1"
+DETAIL:  N/A
+INSERT INTO test_at_change_constr VALUES(0,'a');
+ALTER TABLE test_at_change_constr CHANGE b b1 int NOT NULL PRIMARY KEY; -- ERROR
+ERROR:  multiple primary keys for table "test_at_change_constr" are not allowed
+ALTER TABLE test_at_change_constr CHANGE b b1 int NOT NULL;
+INSERT INTO test_at_change_constr VALUES(5,5); -- ERROR
+ERROR:  new row for relation "test_at_change_constr" violates check constraint "t_at_m_check"
+DETAIL:  N/A
+SELECT b1 FROM test_at_change_constr ORDER BY 1;
+ b1 
+----
+  0
+  1
+  2
+  3
+  4
+(5 rows)
+
+ALTER TABLE test_at_change_constr CHANGE b1 b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  modify or change column REFERENCES constraint is not supported
+DROP TABLE test_at_change_constr;
+-- test change column default
+CREATE LOCAL TEMPORARY TABLE test_at_change_default(
+    a int,
+    b int DEFAULT NULL
+);
+INSERT INTO test_at_change_default VALUES(1,1);
+INSERT INTO test_at_change_default VALUES(2,2);
+INSERT INTO test_at_change_default VALUES(3,3);
+ALTER TABLE test_at_change_default CHANGE b b1 bigint DEFAULT (a+1); -- ERROR
+ERROR:  default value cannot reference to a column
+HINT:  Perhaps the default value is enclosed in double quotes
+ALTER TABLE test_at_change_default CHANGE b b1 bigint DEFAULT NULL;
+ALTER TABLE test_at_change_default CHANGE b1 b varchar(8) DEFAULT 'a' GENERATED ALWAYS AS (a+1) STORED; -- ERROR
+ERROR:  both default and generation expression specified for column "b" of table "test_at_change_default"
+LINE 1: ...change_default CHANGE b1 b varchar(8) DEFAULT 'a' GENERATED ...
+                                                             ^
+ALTER TABLE test_at_change_default CHANGE b1 b varchar(8) DEFAULT 'a';
+INSERT INTO test_at_change_default VALUES(0,DEFAULT);
+SELECT b FROM test_at_change_default ORDER BY 1;
+ b 
+---
+ 1
+ 2
+ 3
+ a
+(4 rows)
+
+ALTER TABLE test_at_change_default CHANGE b b1 int DEFAULT 4 AUTO_INCREMENT; -- ERROR
+ERROR:  multiple default values specified for column "b1" of table "test_at_change_default"
+LINE 1: ... test_at_change_default CHANGE b b1 int DEFAULT 4 AUTO_INCRE...
+                                                             ^
+ALTER TABLE test_at_change_default CHANGE b b1 int DEFAULT 4;
+INSERT INTO test_at_change_default VALUES(4,DEFAULT);
+SELECT b1 FROM test_at_change_default ORDER BY 1;
+ b1 
+----
+  0
+  1
+  2
+  3
+  4
+(5 rows)
+
+ALTER TABLE test_at_change_default CHANGE b1 b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+SELECT a,b FROM test_at_change_default ORDER BY 1,2;
+ a | b 
+---+---
+ 0 | 1
+ 1 | 2
+ 2 | 3
+ 3 | 4
+ 4 | 5
+(5 rows)
+
+ALTER TABLE test_at_change_default CHANGE a a1 varchar(8) DEFAULT 'a';
+INSERT INTO test_at_change_default VALUES(DEFAULT,DEFAULT);
+SELECT * FROM test_at_change_default ORDER BY 1,2;
+ a1 | b 
+----+---
+ 0  | 1
+ 1  | 2
+ 2  | 3
+ 3  | 4
+ 4  | 5
+ a  | 1
+(6 rows)
+
+DROP TABLE test_at_change_default;
+-- test change column depended by generated column
+CREATE LOCAL TEMPORARY TABLE test_at_change_generated(
+    a int,
+    b varchar(32),
+    c varchar(32) GENERATED ALWAYS AS (b) STORED
+);
+INSERT INTO test_at_change_generated(a,b) VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_change_generated(a,b) VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_change_generated(a,b) VALUES(3,'2022-11-24 12:00:00');
+SELECT * FROM test_at_change_generated ORDER BY 1,2;
+ a |          b          |          c          
+---+---------------------+---------------------
+ 1 | 2022-11-22 12:00:00 | 2022-11-22 12:00:00
+ 2 | 2022-11-23 12:00:00 | 2022-11-23 12:00:00
+ 3 | 2022-11-24 12:00:00 | 2022-11-24 12:00:00
+(3 rows)
+
+ALTER TABLE test_at_change_generated CHANGE COLUMN b b1 DATE;
+SELECT * FROM test_at_change_generated ORDER BY 1,2;
+ a |     b1     |     c      
+---+------------+------------
+ 1 | 11-22-2022 | 11-22-2022
+ 2 | 11-23-2022 | 11-23-2022
+ 3 | 11-24-2022 | 11-24-2022
+(3 rows)
+
+ALTER TABLE test_at_change_generated CHANGE COLUMN b1 b varchar(32);
+SELECT * FROM test_at_change_generated ORDER BY 1,2;
+ a |     b      |     c      
+---+------------+------------
+ 1 | 11-22-2022 | 11-22-2022
+ 2 | 11-23-2022 | 11-23-2022
+ 3 | 11-24-2022 | 11-24-2022
+(3 rows)
+
+DROP TABLE test_at_change_generated;
+-- test change column AUTO_INCREMENT
+CREATE LOCAL TEMPORARY TABLE test_at_change_autoinc(
+    a int,
+    b int
+);
+INSERT INTO test_at_change_autoinc VALUES(1,NULL);
+INSERT INTO test_at_change_autoinc VALUES(2,0);
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int2 AUTO_INCREMENT; -- ERROR
+ERROR:  auto_increment column must be defined as a unique or primary key
+ALTER TABLE test_at_change_autoinc CHANGE b b1 DECIMAL(4,2) AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ERROR:  The datatype of column 'b1' does not support auto_increment
+ALTER TABLE test_at_change_autoinc CHANGE b b1 serial AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  cannot modify or change column to type 'serial'
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int2 AUTO_INCREMENT NULL UNIQUE KEY;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_autoinc_b1_key" for table "test_at_change_autoinc"
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b1 
+---+----
+ 1 |   
+ 2 |  2
+(2 rows)
+
+INSERT INTO test_at_change_autoinc VALUES(3,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b1 
+---+----
+ 1 |   
+ 2 |  2
+ 3 |  3
+(3 rows)
+
+ALTER TABLE test_at_change_autoinc CHANGE b1 b int;
+INSERT INTO test_at_change_autoinc VALUES(4,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b 
+---+---
+ 1 |  
+ 2 | 2
+ 3 | 3
+ 4 | 0
+(4 rows)
+
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int AUTO_INCREMENT PRIMARY KEY, AUTO_INCREMENT=100;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_change_autoinc_pkey" for table "test_at_change_autoinc"
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b1  
+---+-----
+ 1 | 100
+ 2 |   2
+ 3 |   3
+ 4 | 101
+(4 rows)
+
+INSERT INTO test_at_change_autoinc VALUES(5,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b1  
+---+-----
+ 1 | 100
+ 2 |   2
+ 3 |   3
+ 4 | 101
+ 5 | 102
+(5 rows)
+
+ALTER TABLE test_at_change_autoinc AUTO_INCREMENT=1000;
+ALTER TABLE test_at_change_autoinc CHANGE b1 b int2 AUTO_INCREMENT;
+INSERT INTO test_at_change_autoinc VALUES(6,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+(6 rows)
+
+ALTER TABLE test_at_change_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE, CHANGE b b1 int2 AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ERROR:  Incorrect table definition, there can be only one auto_increment column
+ALTER TABLE test_at_change_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE; -- ERROR
+ERROR:  Incorrect column definition, there can be only one auto_increment column
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int;
+ALTER TABLE test_at_change_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_autoinc_c_key" for table "test_at_change_autoinc"
+INSERT INTO test_at_change_autoinc VALUES(7,0,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a |  b1  | c 
+---+------+---
+ 1 |  100 | 1
+ 2 |    2 | 2
+ 3 |    3 | 3
+ 4 |  101 | 4
+ 5 |  102 | 5
+ 6 | 1000 | 6
+ 7 |    0 | 7
+(7 rows)
+
+ALTER TABLE test_at_change_autoinc DROP COLUMN c , CHANGE b1 b int2 AUTO_INCREMENT UNIQUE KEY;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_autoinc_b_key" for table "test_at_change_autoinc"
+INSERT INTO test_at_change_autoinc VALUES(8,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+ 7 | 1001
+ 8 | 1002
+(8 rows)
+
+DROP TABLE test_at_change_autoinc;
+-- TEMPORARY view
+CREATE LOCAL TEMPORARY TABLE test_at_modify_view_column (f4 int primary key, f3 text, f2 text, f1 int unique);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_at_modify_view_column_pkey" for table "test_at_modify_view_column"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_at_modify_view_column_f1_key" for table "test_at_modify_view_column"
+INSERT INTO test_at_modify_view_column VALUES(1, '1', '1', 1);
+CREATE TEMPORARY VIEW test_modify_view_star AS select * from test_at_modify_view_column;
+ALTER TABLE test_at_modify_view_column  MODIFY column f1 varchar(20); -- ERROR
+ERROR:  cannot change data type of view column "f1" from integer to character varying(20)
+ALTER TABLE test_at_modify_view_column  MODIFY column f1 int;
+SELECT pg_get_viewdef('test_modify_view_star'::regclass);
+               pg_get_viewdef               
+--------------------------------------------
+ SELECT  * FROM test_at_modify_view_column;
+(1 row)
+
+ALTER TABLE test_at_modify_view_column  MODIFY column f1 int FIRST;
+SELECT pg_get_viewdef('test_modify_view_star'::regclass);
+                                                                           pg_get_viewdef                                                                           
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SELECT test_at_modify_view_column.f4, test_at_modify_view_column.f3, test_at_modify_view_column.f2, test_at_modify_view_column.f1 FROM test_at_modify_view_column;
+(1 row)
+
+DROP TABLE test_at_modify_view_column CASCADE;
+NOTICE:  drop cascades to view test_modify_view_star
+-- END
+RESET CURRENT_SCHEMA;
+DROP SCHEMA atbdb_ltt_schema CASCADE;
+\c regression
+clean connection to all force for database atbdb_ltt;
+drop database if exists atbdb_ltt;

@@ -83,15 +83,15 @@ extern Sort* make_sort_from_targetlist(PlannerInfo* root, Plan* lefttree, double
 extern Sort* make_sort(PlannerInfo* root, Plan* lefttree, int numCols, AttrNumber* sortColIdx, Oid* sortOperators,
     Oid* collations, bool* nullsFirst, double limit_tuples);
 extern Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrategy,
-    const AggClauseCosts* aggcosts, int numGroupCols, AttrNumber* grpColIdx, Oid* grpOperators, long numGroups,
-    Plan* lefttree, WindowLists* wflists, bool need_stream, bool trans_agg, List* groupingSets = NIL,
+    const AggClauseCosts* aggcosts, int numGroupCols, AttrNumber* grpColIdx, Oid* grpOperators, Oid* grp_collations,
+    long numGroups, Plan* lefttree, WindowLists* wflists, bool need_stream, bool trans_agg, List* groupingSets = NIL,
     Size hash_entry_size = 0, bool add_width = false, AggOrientation agg_orientation = AGG_LEVEL_1_INTENT,
     bool unique_check = true);
 extern WindowAgg* make_windowagg(PlannerInfo* root, List* tlist, List* windowFuncs, Index winref, int partNumCols,
     AttrNumber* partColIdx, Oid* partOperators, int ordNumCols, AttrNumber* ordColIdx, Oid* ordOperators,
-    int frameOptions, Node* startOffset, Node* endOffset, Plan* lefttree);
+    int frameOptions, Node* startOffset, Node* endOffset, Plan* lefttree, Oid *part_collations, Oid *ord_collations);
 extern Group* make_group(PlannerInfo* root, List* tlist, List* qual, int numGroupCols, AttrNumber* grpColIdx,
-    Oid* grpOperators, double numGroups, Plan* lefttree);
+    Oid* grpOperators, double numGroups, Plan* lefttree, Oid* grp_collations);
 extern Plan* materialize_finished_plan(Plan* subplan, bool materialize_above_stream = false, bool vectorized = false);
 extern Unique* make_unique(Plan* lefttree, List* distinctList);
 extern LockRows* make_lockrows(PlannerInfo* root, Plan* lefttree);

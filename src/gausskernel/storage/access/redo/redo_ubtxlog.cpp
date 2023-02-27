@@ -1286,7 +1286,8 @@ void UBTreeXlogPrunePageOperatorPage(RedoBufferInfo* buffer, void* recorddata)
     Page page = buffer->pageinfo.page;
 
     /* Set up flags and try to repair page  fragmentation */
-    UBTreePagePruneExecute(page, (OffsetNumber *)(((char *)xlrec) + SizeOfUBTreePrunePage), xlrec->count, NULL);
+    UBTreePagePruneExecute(page, (OffsetNumber *)(((char *)xlrec) + SizeOfUBTreePrunePage), xlrec->count, NULL,
+        InvalidTransactionId);
 
     UBTreePageRepairFragmentation(NULL, buffer->blockinfo.blkno, page);
 

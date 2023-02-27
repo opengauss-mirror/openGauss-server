@@ -2045,7 +2045,7 @@ Oid LookupFuncName(List* funcname, int nargs, const Oid* argtypes, bool noError)
     while (clist) {
         /* if argtype is CL type replace it with original type */
         for (int i = 0; i < nargs; i++) {
-            if (IsClientLogicType(clist->args[i])) {
+            if (IsClientLogicType(clist->args[i]) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
                 clist->args[i] = cl_get_input_param_original_type(clist->oid, i);
             }
         }

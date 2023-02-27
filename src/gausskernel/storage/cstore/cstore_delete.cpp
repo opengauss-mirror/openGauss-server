@@ -30,6 +30,7 @@
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
 #include "storage/cucache_mgr.h"
@@ -604,6 +605,7 @@ uint64 CStoreDelete::ExecDeleteForPartition()
                                                  m_estate->es_query_cxt,
                                                  m_relation,
                                                  curPartID,
+                                                 INVALID_PARTITION_NO,
                                                  partFakeRel,
                                                  partition,
                                                  RowExclusiveLock);
@@ -627,6 +629,7 @@ uint64 CStoreDelete::ExecDeleteForPartition()
                                                  m_estate->es_query_cxt,
                                                  m_relation,
                                                  curPartID,
+                                                 INVALID_PARTITION_NO,
                                                  partFakeRel,
                                                  partition,
                                                  RowExclusiveLock);

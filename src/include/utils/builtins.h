@@ -898,6 +898,7 @@ extern Datum pg_get_viewdef_ext(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_wrap(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_name(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_name_ext(PG_FUNCTION_ARGS);
+extern char* pg_get_viewdef_string(Oid viewid);
 extern Datum pg_get_indexdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_indexdef_for_dump(PG_FUNCTION_ARGS);
 extern Datum pg_get_indexdef_ext(PG_FUNCTION_ARGS);
@@ -905,6 +906,7 @@ extern char* pg_get_indexdef_string(Oid indexrelid);
 extern char* pg_get_indexdef_columns(Oid indexrelid, bool pretty);
 extern Datum pg_get_triggerdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_triggerdef_ext(PG_FUNCTION_ARGS);
+extern char* pg_get_triggerdef_string(Oid trigid);
 extern Datum pg_get_constraintdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_constraintdef_ext(PG_FUNCTION_ARGS);
 extern char* pg_get_constraintdef_string(Oid constraintId);
@@ -918,6 +920,12 @@ extern Datum pg_get_function_identity_arguments(PG_FUNCTION_ARGS);
 extern Datum pg_get_function_result(PG_FUNCTION_ARGS);
 extern char* deparse_expression(
     Node* expr, List* dpcontext, bool forceprefix, bool showimplicit, bool no_alias = false);
+extern void get_query_def(Query* query, StringInfo buf, List* parentnamespace, TupleDesc resultDesc, int prettyFlags,
+    int wrapColumn, int startIndent,
+#ifdef PGXC
+    bool finalise_aggregates, bool sortgroup_colno, void* parserArg = NULL,
+#endif /* PGXC */
+    bool qrw_phase = false, bool viewdef = false, bool is_fqs = false);
 extern char* deparse_create_sequence(Node* stmt, bool owned_by_none = false);
 extern char* deparse_alter_sequence(Node* stmt, bool owned_by_none = false);
 
@@ -1679,10 +1687,8 @@ extern Datum text_timestamp(PG_FUNCTION_ARGS);
 extern void encryptOBS(char* srcplaintext, char destciphertext[], uint32 destcipherlength);
 extern void decryptOBS(
     const char* srcciphertext, char destplaintext[], uint32 destplainlength, const char* obskey = NULL);
-extern void encryptECString(char* src_plain_text, char* dest_cipher_text,
-                                 uint32 dest_cipher_length, int mode);
-extern bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
-                                 uint32 dest_plain_length, int mode);
+extern char *encryptECString(char* src_plain_text, int mode);
+extern bool decryptECString(const char* src_cipher_text, char** dest_plain_text, int mode);
 extern bool IsECEncryptedString(const char* src_cipher_text);
 extern void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray,
                                          int arrayLength, int mode);
@@ -1709,6 +1715,7 @@ extern Datum pg_lsn_in(PG_FUNCTION_ARGS);
 
 /* nlssort.cpp */
 extern Datum nlssort(PG_FUNCTION_ARGS);
+extern char *remove_trailing_spaces(const char *src_str);
 
 // template function implementation
 //

@@ -29,6 +29,7 @@
 #include "catalog/indexing.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_snapshot.h"
+#include "client_logic/client_logic.h"
 #include "commands/tablecmds.h"
 #include "commands/matview.h"
 #include "executor/node/nodeModifyTable.h"
@@ -154,6 +155,8 @@ static bool TvFeatureSupport(Oid relid, char **errstr, bool isTimecapsuleTable)
         *errstr = "timecapsule feature does not support in non READ COMMITTED transaction";
     } else if (TvForeignKeyCheck(relid) && isTimecapsuleTable) {
         *errstr = "timecapsule feature does not support the table included foreign key or referenced by foreign key";
+    } else if (is_full_encrypted_rel(rel)) {
+        *errstr = "timecapsule feature does not support full encrypted table";
     } else {
         *errstr = NULL;
     }

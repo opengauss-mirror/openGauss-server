@@ -465,3 +465,7 @@ extern void drop_single_job_internal(PG_FUNCTION_ARGS);
   *     return_date_after       IN TIMESTAMP WITH TIME ZONE
  */
 extern Datum evaluate_calendar_string_internal(PG_FUNCTION_ARGS);
+extern void prepare_set_attribute(Datum attribute, Datum *name, Datum *value, Datum *extra_name, Datum extra_value);
+extern void set_attribute_with_related_rel(const Datum object_name, const Datum attribute_name,
+                                           const Datum attribute_value);
+extern char *CreateEventInlineProgram(Datum job_name, Datum job_type, Datum job_action, Datum job_definer);

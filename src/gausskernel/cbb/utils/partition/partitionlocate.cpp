@@ -33,23 +33,25 @@
 #include "utils/partitionkey.h"
 
 bool isPartKeyValuesInListPartition(
-    const ListPartitionMap *partMap, Const **partKeyValues, const int partkeyColumnNum, const int partSeq)
+    ListPartitionMap *partMap, Const **partKeyValues, const int partkeyColumnNum, const int partSeq)
 {
     Assert(partMap && partKeyValues);
     Assert(partkeyColumnNum == partMap->partitionKey->dim1);
 
-    Const *v1 = *(partKeyValues);
-    Const **boundary = partMap->listElements[partSeq].boundary;
-    int len = partMap->listElements[partSeq].len;
-    for (int i = 0; i < len; i++) {
-        Const *v2 = *((boundary) + i);
-        int compare = 0;
-        constCompare(v1, v2, compare);
-        if (compare == 0) {
-            return true;
-        }
+    int sourcePartSeq = -1;
+    Oid sourceOid = getListPartitionOid(&partMap->type, partKeyValues, partkeyColumnNum, &sourcePartSeq, true);
+    if (sourcePartSeq < 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Can't find list partition oid when checking tuple is in the partition.")));
     }
-    return false;
+
+    Oid targetOid = partMap->listElements[partSeq].partitionOid;
+    if (sourceOid == targetOid) {
+        return true;
+    } else {
+        return false;
+    }
 }
 
 bool isPartKeyValuesInHashPartition(Relation partTableRel, const HashPartitionMap *partMap, Const **partKeyValues,

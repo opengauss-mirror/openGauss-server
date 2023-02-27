@@ -27,7 +27,8 @@ DROP TABLE test_create_autoinc;
 CREATE TABLE test_create_autoinc(
     a int AUTO_INCREMENT UNIQUE KEY,
     b varchar(32)
-); -- ERROR
+);
+DROP TABLE test_create_autoinc;
 
 CREATE TABLE test_create_autoinc(
     a int AUTO_INCREMENT UNIQUE,
@@ -75,6 +76,8 @@ CREATE TABLE test_create_autoinc_err(id int auto_increment primary key CHECK (id
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key, name varchar(200),a int CHECK ((id + a) < 500));
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key DEFAULT 100, name varchar(200),a int);
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key GENERATED ALWAYS AS (a+1) STORED, name varchar(200),a int);
+CREATE TABLE test_create_autoinc_err(id int auto_increment primary key, name varchar(200),a int GENERATED ALWAYS AS (id+1) STORED);
+CREATE TABLE test_create_autoinc_err(id int GENERATED ALWAYS AS (a+1) STORED, name varchar(200),a int auto_increment primary key);
 
 --auto_increment value error
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key, name varchar(200),a int) auto_increment=-1;
@@ -86,13 +89,13 @@ CREATE TEMPORARY TABLE test_create_autoinc_err(id int auto_increment primary key
 CREATE TEMPORARY TABLE test_create_autoinc_err(id int auto_increment primary key, name varchar(200),a int) auto_increment=170141183460469231731687303715884105728;
 CREATE TEMPORARY TABLE test_create_autoinc_err(id int auto_increment primary key, name varchar(200),a int) auto_increment=1.1;
 -- datatype error
-CREATE TABLE test_create_autoinc_err(id SERIAL auto_increment primary key, name varchar(200),a int);
-CREATE TABLE test_create_autoinc_err(id DECIMAL(10,4) auto_increment primary key, name varchar(200),a int);
-CREATE TABLE test_create_autoinc_err(id NUMERIC(10,4) auto_increment primary key, name varchar(200),a int);
-CREATE TABLE test_create_autoinc_err(id text auto_increment primary key, name varchar(200),a int);
-CREATE TABLE test_create_autoinc_err(id oid auto_increment primary key, name varchar(200),a int);
-CREATE TABLE test_create_autoinc_err(id int[] auto_increment primary key, name varchar(200),a int);
-CREATE TABLE test_create_autoinc_err(id int16 auto_increment, name varchar(200),a int, unique(id)) auto_increment=170141183460469231731687303715884105727;
+CREATE TABLE test_create_autoinc_err1(id SERIAL auto_increment primary key, name varchar(200),a int);
+CREATE TABLE test_create_autoinc_err1(id DECIMAL(10,4) auto_increment primary key, name varchar(200),a int);
+CREATE TABLE test_create_autoinc_err1(id NUMERIC(10,4) auto_increment primary key, name varchar(200),a int);
+CREATE TABLE test_create_autoinc_err1(id text auto_increment primary key, name varchar(200),a int);
+CREATE TABLE test_create_autoinc_err1(id oid auto_increment primary key, name varchar(200),a int);
+CREATE TABLE test_create_autoinc_err1(id int[] auto_increment primary key, name varchar(200),a int);
+CREATE TABLE test_create_autoinc_err1(id int16 auto_increment, name varchar(200),a int, unique(id)) auto_increment=170141183460469231731687303715884105727;
 -- table type error
 CREATE TABLE test_create_autoinc_err(id INTEGER auto_increment, name varchar(200),a int, primary key(id)) with (ORIENTATION=column);
 CREATE TABLE test_create_autoinc_err(id INTEGER auto_increment, name varchar(200),a int, primary key(id)) with (ORIENTATION=orc);
@@ -164,6 +167,7 @@ CREATE TABLE test_create_autoinc_like_err(LIKE test_create_autoinc_source INCLUD
 CREATE TABLE test_create_autoinc_like_err(a int auto_increment, LIKE test_create_autoinc_source INCLUDING INDEXES);
 CREATE TABLE test_create_autoinc_like_err(a int auto_increment primary key, LIKE test_create_autoinc_source);
 CREATE TABLE test_create_autoinc_like_err(LIKE test_create_autoinc_source INCLUDING INDEXES) with (ORIENTATION=column);
+CREATE TABLE test_create_autoinc_like_err(LIKE test_create_autoinc_source INCLUDING INDEXES, a int GENERATED ALWAYS AS (id+1) STORED);
 --row table
 CREATE TABLE test_create_autoinc_like(LIKE test_create_autoinc_source INCLUDING INDEXES);
 INSERT INTO test_create_autoinc_like VALUES(DEFAULT);
@@ -215,11 +219,16 @@ CREATE TABLE test_alter_autoinc_col(col int) with (ORIENTATION=column);
 INSERT INTO test_alter_autoinc_col VALUES(1);
 ALTER TABLE test_alter_autoinc_col ADD COLUMN id int AUTO_INCREMENT primary key;
 DROP TABLE test_alter_autoinc_col;
+-- auto_increment and generated column
+CREATE TABLE test_alter_autoinc(col int);
+ALTER TABLE test_alter_autoinc ADD COLUMN a int GENERATED ALWAYS AS (b+1), ADD COLUMN b int auto_increment primary key;
+ALTER TABLE test_alter_autoinc ADD COLUMN a int auto_increment primary key, ADD COLUMN b int GENERATED ALWAYS AS (a+1);
+DROP TABLE test_alter_autoinc;
 --astore with data
 CREATE TABLE test_alter_autoinc(col int);
 INSERT INTO test_alter_autoinc VALUES(1);
 INSERT INTO test_alter_autoinc VALUES(2);
-
+ALTER TABLE test_alter_autoinc ADD COLUMN id int AUTO_INCREMENT; -- ERROR
 ALTER TABLE test_alter_autoinc ADD COLUMN id int AUTO_INCREMENT primary key;
 SELECT id, col FROM test_alter_autoinc ORDER BY 1, 2;
 insert into test_alter_autoinc(col) values (3),(4),(5);
@@ -252,7 +261,6 @@ ALTER TABLE test_alter_autoinc DROP CONSTRAINT test_alter_autoinc_pkey;
 ALTER TABLE test_alter_autoinc auto_increment=-1;
 ALTER TABLE test_alter_autoinc auto_increment=1701411834604692317316873037158841057278;
 ALTER TABLE test_alter_autoinc auto_increment=1.1;
-ALTER TABLE test_alter_autoinc MODIFY id BIGINT;
 ALTER LARGE SEQUENCE test_alter_autoinc_id_seq1 RESTART;
 ALTER LARGE SEQUENCE test_alter_autoinc_id_seq1 maxvalue 90;
 ALTER LARGE SEQUENCE test_alter_autoinc_id_seq1 OWNED BY test_alter_autoinc.col;
@@ -271,14 +279,31 @@ ALTER TABLE test_alter_autoinc DROP COLUMN id, ADD id int AUTO_INCREMENT UNIQUE;
 INSERT INTO test_alter_autoinc VALUES(8,DEFAULT);
 SELECT id, col FROM test_alter_autoinc ORDER BY 1, 2;
 DROP TABLE test_alter_autoinc;
+
 --test alter table add AUTO_INCREMENT NULL UNIQUE
 CREATE TABLE test_alter_autoinc(col int);
 INSERT INTO test_alter_autoinc VALUES(1);
 INSERT INTO test_alter_autoinc VALUES(2);
 ALTER TABLE test_alter_autoinc ADD COLUMN id int AUTO_INCREMENT NULL UNIQUE;
-INSERT INTO test_alter_autoinc VALUES(3,0);
+SELECT id, col FROM test_alter_autoinc ORDER BY 1, 2;
+INSERT INTO test_alter_autoinc VALUES(3,NULL);
+SELECT id, col FROM test_alter_autoinc ORDER BY 1, 2;
+INSERT INTO test_alter_autoinc VALUES(4,0);
 SELECT id, col FROM test_alter_autoinc ORDER BY 1, 2;
 DROP TABLE test_alter_autoinc;
+
+--test alter table add NULL AUTO_INCREMENT UNIQUE
+CREATE TABLE test_alter_autoinc(col int);
+INSERT INTO test_alter_autoinc VALUES(1);
+INSERT INTO test_alter_autoinc VALUES(2);
+ALTER TABLE test_alter_autoinc ADD COLUMN id int NULL AUTO_INCREMENT UNIQUE;
+SELECT id, col FROM test_alter_autoinc ORDER BY 1, 2;
+INSERT INTO test_alter_autoinc VALUES(3,NULL);
+SELECT id, col FROM test_alter_autoinc ORDER BY 1, 2;
+INSERT INTO test_alter_autoinc VALUES(4,0);
+SELECT id, col FROM test_alter_autoinc ORDER BY 1, 2;
+DROP TABLE test_alter_autoinc;
+
 --local temp table with data
 CREATE TEMPORARY TABLE test_alter_autoinc_ltemp(col int);
 INSERT INTO test_alter_autoinc_ltemp VALUES(1);
@@ -333,7 +358,6 @@ ALTER TABLE test_alter_autoinc_ltemp DROP CONSTRAINT test_alter_autoinc_ltemp_u1
 ALTER TABLE test_alter_autoinc_ltemp auto_increment=-1;
 ALTER TABLE test_alter_autoinc_ltemp auto_increment=1701411834604692317316873037158841057278;
 ALTER TABLE test_alter_autoinc_ltemp auto_increment=1.1;
-ALTER TABLE test_alter_autoinc_ltemp MODIFY id BIGINT;
 DROP TABLE test_alter_autoinc_ltemp;
 --global temp table with data
 CREATE GLOBAL TEMPORARY TABLE test_alter_autoinc_gtemp(col int);
@@ -386,7 +410,7 @@ CREATE TABLE test_alter_autoinc(
     a int,
     b varchar(32)
 );
-ALTER TABLE test_alter_autoinc ADD COLUMN seq int AUTO_INCREMENT, ADD CONSTRAINT test_alter_autoinc_uk UNIQUE ((seq + 1), seq); -- ERROR
+ALTER TABLE test_alter_autoinc ADD COLUMN seq int AUTO_INCREMENT, ADD CONSTRAINT test_alter_autoinc_uk UNIQUE (a, seq); -- ERROR
 ALTER TABLE test_alter_autoinc ADD COLUMN seq int AUTO_INCREMENT, ADD CONSTRAINT test_alter_autoinc_uk UNIQUE (seq);
 CREATE INDEX test_alter_autoinc_idx1 ON test_alter_autoinc (seq,a);
 SELECT pg_get_tabledef('test_alter_autoinc'::regclass);
@@ -453,6 +477,38 @@ UPDATE single_autoinc_uk SET col=DEFAULT WHERE col=1000;
 SELECT col FROM single_autoinc_uk ORDER BY 1;
 UPDATE single_autoinc_uk SET col=3000 WHERE col=0;
 INSERT INTO single_autoinc_uk VALUES(0);
+SELECT LAST_INSERT_ID();
+SELECT col FROM single_autoinc_uk ORDER BY 1;
+SELECT pg_catalog.pg_get_tabledef('single_autoinc_uk');
+DROP TABLE single_autoinc_uk;
+
+-- auto_increment in table with single column NULL auto_increment UNIQUE
+CREATE TABLE single_autoinc_uk(col int NULL auto_increment UNIQUE KEY) AUTO_INCREMENT = 10;
+INSERT INTO single_autoinc_uk VALUES(NULL);
+SELECT LAST_INSERT_ID();
+SELECT col FROM single_autoinc_uk ORDER BY 1;
+INSERT INTO single_autoinc_uk VALUES(1 - 1);
+SELECT LAST_INSERT_ID();
+SELECT col FROM single_autoinc_uk ORDER BY 1;
+INSERT INTO single_autoinc_uk VALUES(100);
+SELECT col FROM single_autoinc_uk ORDER BY 1;
+INSERT INTO single_autoinc_uk VALUES(DEFAULT);
+SELECT LAST_INSERT_ID();
+SELECT col FROM single_autoinc_uk ORDER BY 1;
+SELECT pg_catalog.pg_get_tabledef('single_autoinc_uk');
+DROP TABLE single_autoinc_uk;
+
+-- auto_increment in table with single column auto_increment UNIQUE
+CREATE TABLE single_autoinc_uk(col int auto_increment UNIQUE KEY) AUTO_INCREMENT = 10;
+INSERT INTO single_autoinc_uk VALUES(NULL);
+SELECT LAST_INSERT_ID();
+SELECT col FROM single_autoinc_uk ORDER BY 1;
+INSERT INTO single_autoinc_uk VALUES(1 - 1);
+SELECT LAST_INSERT_ID();
+SELECT col FROM single_autoinc_uk ORDER BY 1;
+INSERT INTO single_autoinc_uk VALUES(100);
+SELECT col FROM single_autoinc_uk ORDER BY 1;
+INSERT INTO single_autoinc_uk VALUES(DEFAULT);
 SELECT LAST_INSERT_ID();
 SELECT col FROM single_autoinc_uk ORDER BY 1;
 SELECT pg_catalog.pg_get_tabledef('single_autoinc_uk');
@@ -1513,4 +1569,5 @@ SELECT col1,col2 FROM test_autoinc_batch_copy ORDER BY 1;
 
 drop table test_autoinc_batch_copy;
 \c regression
+clean connection to all force for database autoinc_b_db;
 drop database if exists autoinc_b_db;

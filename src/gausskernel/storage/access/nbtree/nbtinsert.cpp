@@ -2378,8 +2378,12 @@ static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel)
         if (ItemIdIsDead(itemId))
             deletable[ndeletable++] = offnum;
     }
-    if (ndeletable > 0)
+    if (ndeletable > 0) {
+        if (RelationNeedsWAL(rel) && XLogIsNeeded() && TransactionIdIsValid(u_sess->utils_cxt.RecentGlobalXmin)) {
+            (void)log_heap_cleanup_info(&(rel->rd_node), u_sess->utils_cxt.RecentGlobalXmin);
+        }
         _bt_delitems_delete(rel, buffer, deletable, ndeletable, heapRel);
+    }
     /*
      * Note: if we didn't find any LP_DEAD items, then the page's
      * BTP_HAS_GARBAGE hint bit is falsely set.  We do not bother expending a

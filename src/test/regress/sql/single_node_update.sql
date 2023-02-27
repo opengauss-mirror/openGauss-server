@@ -215,6 +215,13 @@ alter table t4 modify b timestamp on update current_timestamp;
 alter table t4 modify b timestamp on update localtimestamp;
 \d t4
 
+alter table t4 alter b set default now();
+\d t4;
+alter table t4 change b b1 timestamp on update current_timestamp;
+\d t4
+alter table t4 change b1 b2 timestamp not null default now() on update localtimestamp;
+\d t4
+
 CREATE TABLE t5(id int, a timestamp default now() on update current_timestamp, b timestamp on update current_timestamp, c timestamp default now());
 \d t5
 create table t6 (like t5 including defaults);
