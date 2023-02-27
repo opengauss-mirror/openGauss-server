@@ -1138,6 +1138,7 @@ static void CopyJoinFields(const Join* from, Join* newnode)
     CopyPlanFields((const Plan*)from, (Plan*)newnode);
 
     COPY_SCALAR_FIELD(jointype);
+    COPY_SCALAR_FIELD(inner_unique);
     COPY_NODE_FIELD(joinqual);
     COPY_SCALAR_FIELD(optimizable);
     COPY_NODE_FIELD(nulleqqual);
@@ -1217,6 +1218,7 @@ static MergeJoin* _copyMergeJoin(const MergeJoin* from)
     /*
      * copy remainder of node
      */
+    COPY_SCALAR_FIELD(skip_mark_restore);
     COPY_NODE_FIELD(mergeclauses);
     numCols = list_length(from->mergeclauses);
     if (numCols > 0) {

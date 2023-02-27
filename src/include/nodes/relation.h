@@ -570,7 +570,7 @@ typedef struct PlannerInfo {
  *		useridiscurrent - we've assumed that userid equals current user
  *		fdwroutine - function hooks for FDW, if foreign table (else NULL)
  *		fdw_private - private state for FDW, if foreign table (else NULL)
- * 
+ *
  * The presence of the remaining fields depends on the restrictions
  * and joins that the relation participates in:
  *
@@ -693,6 +693,10 @@ typedef struct RelOptInfo {
     /* use "struct FdwRoutine" to avoid including fdwapi.h here */
     struct FdwRoutine* fdwroutine; /* if foreign table */
     void* fdw_private;             /* if foreign table */
+
+    /* cache space for remembering if we have proven this relation unique */
+    List *unique_for_rels;	/* known unique for these other relid set(s) */
+    List *non_unique_for_rels;	/* known not unique for these set(s) */
 
     /* used by various scans and joins: */
     List* baserestrictinfo;          /* RestrictInfo structures (if base
@@ -1320,6 +1324,8 @@ typedef struct JoinPath {
     Path path;
 
     JoinType jointype;
+    bool inner_unique; /* each outer tuple provably matches no more
+                               * than one inner tuple */
 
     Path* outerjoinpath; /* path for the outer side of the join */
     Path* innerjoinpath; /* path for the inner side of the join */
@@ -1371,6 +1377,7 @@ typedef struct MergePath {
     List* path_mergeclauses;  /* join clauses to be used for merge */
     List* outersortkeys;      /* keys for explicit sort, if any */
     List* innersortkeys;      /* keys for explicit sort, if any */
+    bool skip_mark_restore;		/* can executor skip mark/restore? */
     bool materialize_inner;   /* add Materialize to inner? */
     OpMemInfo outer_mem_info; /* Mem info for outer explicit sort */
     OpMemInfo inner_mem_info; /* Mem info for inner explicit sort */
@@ -1994,8 +2001,8 @@ typedef struct PlannerParamItem {
 } PlannerParamItem;
 
 /*
- * When making cost estimates for a SEMI or ANTI join, there are some
- * correction factors that are needed in both nestloop and hash joins
+ * When making cost estimates for a SEMI/ANTI/inner_unique join, there are
+ * some correction factors that are needed in both nestloop and hash joins
  * to account for the fact that the executor can stop scanning inner rows
  * as soon as it finds a match to the current outer row.  These numbers
  * depend only on the selected outer and inner join relations, not on the
@@ -2016,6 +2023,13 @@ typedef struct SemiAntiJoinFactors {
     Selectivity outer_match_frac;
     Selectivity match_count;
 } SemiAntiJoinFactors;
+
+typedef struct JoinPathExtraData
+{
+    bool inner_unique;
+    SpecialJoinInfo *sjinfo;
+    SemiAntiJoinFactors semifactors;
+} JoinPathExtraData;
 
 /*
  * For speed reasons, cost estimation for join paths is performed in two

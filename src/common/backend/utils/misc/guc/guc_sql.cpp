@@ -1441,6 +1441,18 @@ static void InitSqlConfigureNamesBool()
             NULL},
 #endif
 
+        {{"enable_inner_unique_opt",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables the inner unique optimization for JOIN."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_inner_unique_opt,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         {{"enable_partition_opfusion",
             PGC_USERSET,
             NODE_ALL,

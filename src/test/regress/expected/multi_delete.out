@@ -313,6 +313,7 @@ explain(format xml) delete from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col2=b.col
            <Total-Cost>355.67</Total-Cost>                         +
            <Plan-Rows>23091</Plan-Rows>                            +
            <Plan-Width>12</Plan-Width>                             +
+           <Inner-Unique>false</Inner-Unique>                      +
            <Hash-Cond>(a.col2 = b.col2)</Hash-Cond>                +
            <Plans>                                                 +
              <Plan>                                                +
@@ -375,6 +376,7 @@ explain(format json) delete from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col2=b.co
            "Total Cost": 355.67,                   +
            "Plan Rows": 23091,                     +
            "Plan Width": 12,                       +
+           "Inner Unique": false,                  +
            "Hash Cond": "(a.col2 = b.col2)",       +
            "Plans": [                              +
              {                                     +
@@ -434,6 +436,7 @@ explain(format yaml) delete from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col2=b.co
          Total Cost: 355.67                   +
          Plan Rows: 23091                     +
          Plan Width: 12                       +
+         Inner Unique: false                  +
          Hash Cond: "(a.col2 = b.col2)"       +
          Plans:                               +
            - Node Type: "Seq Scan"            +

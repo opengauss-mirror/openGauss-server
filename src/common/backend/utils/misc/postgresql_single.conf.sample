@@ -389,6 +389,7 @@ enable_kill_query = off			# optional: [on, off], default: off
 #check_implicit_conversions = off
 #enable_functional_dependency = off
 #enable_indexscan_optimization = off
+#enable_inner_unique_opt = off
 
 #------------------------------------------------------------------------------
 # ERROR REPORTING AND LOGGING

@@ -163,14 +163,14 @@ static WorkTableScan* make_worktablescan(List* qptlist, List* qpqual, Index scan
 static BitmapAnd* make_bitmap_and(List* bitmapplans);
 static BitmapOr* make_bitmap_or(List* bitmapplans);
 static NestLoop* make_nestloop(List* tlist, List* joinclauses, List* otherclauses, List* nestParams, Plan* lefttree,
-    Plan* righttree, JoinType jointype);
+    Plan* righttree, JoinType jointype, bool inner_unique);
 static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses, Plan* lefttree,
-    Plan* righttree, JoinType jointype, List *hashcollations);
+    Plan* righttree, JoinType jointype, List *hashcollations, bool inner_unique);
 static Hash* make_hash(
     Plan* lefttree, Oid skewTable, AttrNumber skewColumn, bool skewInherit, Oid skewColType, int32 skewColTypmod);
 static MergeJoin* make_mergejoin(List* tlist, List* joinclauses, List* otherclauses, List* mergeclauses,
     Oid* mergefamilies, Oid* mergecollations, int* mergestrategies, bool* mergenullsfirst, Plan* lefttree,
-    Plan* righttree, JoinType jointype);
+    Plan* righttree, JoinType jointype, bool inner_unique, bool skip_mark_restore);
 static Plan* prepare_sort_from_pathkeys(PlannerInfo* root, Plan* lefttree, List* pathkeys, Relids relids,
     const AttrNumber* reqColIdx, bool adjust_tlist_in_place, int* p_numsortkeys, AttrNumber** p_sortColIdx,
     Oid** p_sortOperators, Oid** p_collations, bool** p_nullsFirst);
@@ -3965,7 +3965,8 @@ static NestLoop* create_nestloop_plan(PlannerInfo* root, NestPath* best_path, Pl
 #endif
 
     join_plan =
-        make_nestloop(tlist, joinclauses, otherclauses, nestParams, outer_plan, inner_plan, best_path->jointype);
+        make_nestloop(tlist, joinclauses, otherclauses, nestParams,
+                        outer_plan, inner_plan, best_path->jointype, best_path->inner_unique);
 
     /*
      * @hdfs
@@ -4291,7 +4292,9 @@ static MergeJoin* create_mergejoin_plan(PlannerInfo* root, MergePath* best_path,
         mergenullsfirst,
         outer_plan,
         inner_plan,
-        best_path->jpath.jointype);
+        best_path->jpath.jointype,
+        best_path->jpath.inner_unique,
+        best_path->skip_mark_restore);
 
     /*
      * @hdfs
@@ -4719,7 +4722,7 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
      */
     hash_plan = make_hash(inner_plan, skewTable, skewColumn, skewInherit, skewColType, skewColTypmod);
     join_plan = make_hashjoin(tlist, joinclauses, otherclauses, hashclauses, outer_plan, (Plan*)hash_plan,
-                              best_path->jpath.jointype, hashcollations);
+                              best_path->jpath.jointype, hashcollations, best_path->jpath.inner_unique);
 
     /*
      * @hdfs
@@ -6251,7 +6254,7 @@ static CStoreIndexOr* make_cstoreindex_or(List* ctidplans)
 }
 
 static NestLoop* make_nestloop(List* tlist, List* joinclauses, List* otherclauses, List* nestParams, Plan* lefttree,
-    Plan* righttree, JoinType jointype)
+    Plan* righttree, JoinType jointype, bool inner_unique)
 {
     NestLoop* node = makeNode(NestLoop);
     Plan* plan = &node->join.plan;
@@ -6262,6 +6265,7 @@ static NestLoop* make_nestloop(List* tlist, List* joinclauses, List* otherclause
     plan->lefttree = lefttree;
     plan->righttree = righttree;
     node->join.jointype = jointype;
+    node->join.inner_unique = inner_unique;
     node->join.joinqual = joinclauses;
     node->nestParams = nestParams;
 
@@ -6425,7 +6429,7 @@ HashJoin* create_direct_hashjoin(
     }
 
     hash_plan = (Plan*)make_hash(innerPlan, skewTable, skewColumn, skewInherit, skewColType, skewColTypmod);
-    join_plan = make_hashjoin(tlist, joinClauses, NIL, hashclauses, outerPlan, hash_plan, joinType, NULL);
+    join_plan = make_hashjoin(tlist, joinClauses, NIL, hashclauses, outerPlan, hash_plan, joinType, NULL, false);
 
     /* estimate the mem_info for join_plan,  refered to the function initial_cost_hashjoin */
     estimate_directHashjoin_Cost(root, hashclauses, outerPlan, hash_plan, join_plan);
@@ -6637,7 +6641,7 @@ Plan* create_direct_righttree(
 }
 
 static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses, Plan* lefttree,
-    Plan* righttree, JoinType jointype, List *hashcollations)
+    Plan* righttree, JoinType jointype, List *hashcollations, bool inner_unique)
 {
     HashJoin* node = makeNode(HashJoin);
     Plan* plan = &node->join.plan;
@@ -6649,6 +6653,7 @@ static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclause
     plan->righttree = righttree;
     node->hashclauses = hashclauses;
     node->join.jointype = jointype;
+    node->join.inner_unique = inner_unique;
     node->join.joinqual = joinclauses;
     node->hash_collations = hashcollations;
 
@@ -6689,7 +6694,7 @@ static Hash* make_hash(
 
 static MergeJoin* make_mergejoin(List* tlist, List* joinclauses, List* otherclauses, List* mergeclauses,
     Oid* mergefamilies, Oid* mergecollations, int* mergestrategies, bool* mergenullsfirst, Plan* lefttree,
-    Plan* righttree, JoinType jointype)
+    Plan* righttree, JoinType jointype, bool inner_unique, bool skip_mark_restore)
 {
     MergeJoin* node = makeNode(MergeJoin);
     Plan* plan = &node->join.plan;
@@ -6699,12 +6704,14 @@ static MergeJoin* make_mergejoin(List* tlist, List* joinclauses, List* otherclau
     plan->qual = otherclauses;
     plan->lefttree = lefttree;
     plan->righttree = righttree;
+    node->skip_mark_restore = skip_mark_restore;
     node->mergeclauses = mergeclauses;
     node->mergeFamilies = mergefamilies;
     node->mergeCollations = mergecollations;
     node->mergeStrategies = mergestrategies;
     node->mergeNullsFirst = mergenullsfirst;
     node->join.jointype = jointype;
+    node->join.inner_unique = inner_unique;
     node->join.joinqual = joinclauses;
 
     return node;

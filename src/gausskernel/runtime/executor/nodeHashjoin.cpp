@@ -351,10 +351,9 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                             continue;
                         }
 
-                        /* Semi join: we'll consider returning the first match, but after
-                         *	that we're done with this outer tuple */
-                        if (jointype == JOIN_SEMI)
+                        if (node->js.single_match) {
                             node->hj_JoinState = HJ_NEED_NEW_OUTER;
+                        }
                     }
 
                     if (otherqual == NIL || ExecQual(otherqual, econtext, false)) {
@@ -576,6 +575,8 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
      */
     ExecInitResultTupleSlot(estate, &hjstate->js.ps);
     hjstate->hj_OuterTupleSlot = ExecInitExtraTupleSlot(estate);
+
+    hjstate->js.single_match = (node->join.inner_unique || node->join.jointype == JOIN_SEMI);
 
     /* set up null tuples for outer joins, if needed */
     switch (node->join.jointype) {

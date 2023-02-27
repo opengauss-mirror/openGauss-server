@@ -117,6 +117,7 @@ typedef struct knl_session_attr_sql {
 #ifdef DEBUG_BOUNDED_SORT
     bool optimize_bounded_sort;
 #endif
+    bool enable_inner_unique_opt;
     bool escape_string_warning;
     bool standard_conforming_strings;
     bool enable_light_proxy;
