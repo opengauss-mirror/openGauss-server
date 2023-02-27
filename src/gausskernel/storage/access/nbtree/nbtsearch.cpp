@@ -25,6 +25,7 @@
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "utils/fmgroids.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
 #include "catalog/pg_proc.h"
@@ -424,12 +425,22 @@ int32 _bt_compare(Relation rel, int keysz, ScanKey scankey, Page page, OffsetNum
 
         if (likely((!(scankey->sk_flags & SK_ISNULL)) && !isNull)) {
             /* btint4cmp */
-            if (scankey->sk_func.fn_oid == BTINT4CMP_OID) {
-                if ((int32)datum != (int32)scankey->sk_argument) {
-                    result = ((int32)datum > (int32)scankey->sk_argument) ? 1 : -1;
-                } else {
-                    continue;
-                }
+            if (scankey->sk_func.fn_oid == F_BTINT4CMP) {
+                result = (int32)datum == (int32)scankey->sk_argument
+                             ? 0
+                             : ((int32)datum > (int32)scankey->sk_argument ? 1 : -1);
+            } else if (scankey->sk_func.fn_oid == F_BTINT8CMP) {
+                result = (int64)datum == (int64)scankey->sk_argument
+                             ? 0
+                             : ((int64)datum > (int64)scankey->sk_argument ? 1 : -1);
+            } else if (scankey->sk_func.fn_oid == F_BTINT84CMP) {
+                result = (int64)datum == (int64)(int32)scankey->sk_argument
+                             ? 0
+                             : ((int64)datum > (int64)(int32)scankey->sk_argument ? 1 : -1);
+            } else if (scankey->sk_func.fn_oid == F_BTINT48CMP) {
+                result = (int64)(int32)datum == (int64)scankey->sk_argument
+                             ? 0
+                             : ((int64)(int32)datum > (int64)scankey->sk_argument ? 1 : -1);
             } else {
                 result = DatumGetInt32(
                     FunctionCall2Coll(&scankey->sk_func, scankey->sk_collation, datum, scankey->sk_argument));

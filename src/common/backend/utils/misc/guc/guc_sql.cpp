@@ -1393,7 +1393,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-
+        {{"enable_indexscan_optimization",
+            PGC_USERSET,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Enables indexscan optimization."),
+            NULL},
+            &u_sess->attr.attr_common.enable_indexscan_optimization,
+            false,
+            NULL,
+            NULL,
+            NULL},
 #ifndef ENABLE_MULTIPLE_NODES
         {{"enable_beta_opfusion",
             PGC_USERSET,

@@ -215,6 +215,7 @@
 #include "utils/knl_localtabdefcache.h"
 #include "utils/fmgrtab.h"
 #include "parser/parse_coerce.h"
+#include "access/amapi.h"
 
 /*
  *		name of relcache init file(s), used to speed up backend startup
@@ -1315,6 +1316,8 @@ static void IndexSupportInitialize(Relation relation, oidvector* indclass, Strat
 static OpClassCacheEnt* LookupOpclassInfo(Relation relation, Oid operatorClassOid, StrategyNumber numSupport);
 static void RelationCacheInitFileRemoveInDir(const char* tblspcpath);
 static void unlink_initfile(const char* initfilename);
+static void meta_rel_init_index_amroutine(Relation relation);
+
 /*
  *		ScanPgRelation
  *
@@ -1454,6 +1457,21 @@ static Relation AllocateRelationDesc(Form_pg_class relp)
     (void)MemoryContextSwitchTo(oldcxt);
 
     return relation;
+}
+
+static void meta_rel_init_index_amroutine(Relation relation)
+{
+    IndexAmRoutine *tmp, *cached;
+
+    tmp = get_index_amroutine_for_nbtree();
+
+    cached = (IndexAmRoutine*)MemoryContextAlloc(relation->rd_indexcxt, sizeof(IndexAmRoutine));
+
+    errno_t rc = memcpy_s(cached, sizeof(IndexAmRoutine), tmp, sizeof(IndexAmRoutine));
+    securec_check(rc, "", "");
+    relation->rd_amroutine = cached;
+
+    pfree_ext(tmp);
 }
 
 /*
@@ -2719,6 +2737,11 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
     relation->rd_indexcxt = indexcxt;
 
     /*
+     * initialize an amroutine struct for relation.
+     */
+    meta_rel_init_index_amroutine(relation);
+
+    /*
      * Allocate arrays to hold data. Opclasses are not used for included
      * columns, so allocate them for indnkeyatts only.
      */
@@ -3567,6 +3590,7 @@ void RelationDestroyRelation(Relation relation, bool remember_tupdesc)
     pfree_ext(relation->rd_options);
     pfree_ext(relation->rd_indextuple);
     pfree_ext(relation->rd_am);
+    pfree_ext(relation->rd_amroutine);
     RelationDestroyIndex(relation);
     RelationDestroyRule(relation);
     pfree_ext(relation->rd_fdwroutine);
@@ -7507,6 +7531,8 @@ static bool load_relcache_init_file(bool shared)
                 ALLOCSET_SMALL_MAXSIZE);
             rel->rd_indexcxt = indexcxt;
 
+            meta_rel_init_index_amroutine(rel);
+
             /* next, read the vector of opfamily OIDs */
             if (fread_wrap(&len, 1, sizeof(len), fp) != sizeof(len))
                 goto read_failed;
@@ -7580,6 +7606,7 @@ static bool load_relcache_init_file(bool shared)
             Assert(rel->rd_index == NULL);
             Assert(rel->rd_indextuple == NULL);
             Assert(rel->rd_am == NULL);
+            Assert(rel->rd_amroutine == NULL);
             Assert(rel->rd_indexcxt == NULL);
             Assert(rel->rd_aminfo == NULL);
             Assert(rel->rd_opfamily == NULL);

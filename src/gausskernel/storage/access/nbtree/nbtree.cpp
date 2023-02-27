@@ -35,6 +35,7 @@
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "commands/tablespace.h"
+#include "access/amapi.h"
 
 /* Working state needed by btvacuumpage */
 typedef struct {
@@ -55,6 +56,28 @@ static void btvacuumpage(BTVacState *vstate, BlockNumber blkno, BlockNumber orig
 
 static IndexTuple btgetindextuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset);
 
+IndexAmRoutine *get_index_amroutine_for_nbtree()
+{
+    IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
+
+    amroutine->ambuild = btbuild_internal;
+    amroutine->ambuildempty = btbuildempty_internal;
+    amroutine->aminsert = btinsert_internal;
+    amroutine->ambulkdelete = btbulkdelete_internal;
+    amroutine->amvacuumcleanup = btvacuumcleanup_internal;
+    amroutine->amcanreturn = btcanreturn_internal;
+    amroutine->ambeginscan = btbeginscan_internal;
+    amroutine->amrescan = btrescan_internal;
+    amroutine->amgettuple = _bt_gettuple_internal;
+    amroutine->amgetbitmap= btgetbitmap_internal;
+    amroutine->amendscan = btendscan_internal;
+    amroutine->ammarkpos = btmarkpos_internal;
+    amroutine->amrestrpos = btrestrpos_internal;
+    amroutine->ammerge = btmerge_internal;
+
+    return amroutine;
+}
+
 /*
  *	btbuild() -- build a new btree index.
  */
@@ -63,6 +86,12 @@ Datum btbuild(PG_FUNCTION_ARGS)
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
+    IndexBuildResult *result = btbuild_internal(heap, index, indexInfo);
+    PG_RETURN_POINTER(result);
+}
+
+IndexBuildResult *btbuild_internal(Relation heap, Relation index, IndexInfo *indexInfo)
+{
     IndexBuildResult *result = NULL;
     double reltuples = 0;
     BTBuildState buildstate;
@@ -118,7 +147,7 @@ Datum btbuild(PG_FUNCTION_ARGS)
     result->index_tuples = buildstate.indtuples;
     result->all_part_tuples = allPartTuples;
 
-    PG_RETURN_POINTER(result);
+    return result;
 }
 
 /*
@@ -147,6 +176,12 @@ void btbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *
 Datum btbuildempty(PG_FUNCTION_ARGS)
 {
     Relation index = (Relation)PG_GETARG_POINTER(0);
+    btbuildempty_internal(index);
+    PG_RETURN_VOID();
+
+}
+void btbuildempty_internal(Relation index)
+{
     Page metapage;
     char* unaligned_buffer = NULL;
 
@@ -205,8 +240,6 @@ Datum btbuildempty(PG_FUNCTION_ARGS)
         }
     }
     ADIO_END();
-
-    PG_RETURN_VOID();
 }
 
 /*
@@ -223,6 +256,12 @@ Datum btinsert(PG_FUNCTION_ARGS)
     ItemPointer ht_ctid = (ItemPointer)PG_GETARG_POINTER(3);
     Relation heapRel = (Relation)PG_GETARG_POINTER(4);
     IndexUniqueCheck checkUnique = (IndexUniqueCheck)PG_GETARG_INT32(5);
+    bool result = btinsert_internal(rel, values, isnull, ht_ctid, heapRel, checkUnique);
+    PG_RETURN_BOOL(result);
+}
+
+bool btinsert_internal(Relation rel, Datum *values, const bool *isnull, ItemPointer ht_ctid, Relation heapRel, IndexUniqueCheck checkUnique)
+{
     bool result = false;
     IndexTuple itup;
 
@@ -233,7 +272,7 @@ Datum btinsert(PG_FUNCTION_ARGS)
             RelationOpenSmgr(rel);
         }
         if (!smgrexists(rel->rd_smgr, MAIN_FORKNUM)) {
-            PG_RETURN_BOOL(result);
+            return result;
         }
     }
 
@@ -245,7 +284,7 @@ Datum btinsert(PG_FUNCTION_ARGS)
 
     pfree(itup);
 
-    PG_RETURN_BOOL(result);
+    return result;
 }
 
 /*
@@ -272,6 +311,12 @@ Datum btgetbitmap(PG_FUNCTION_ARGS)
 {
     IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
     TIDBitmap *tbm = (TIDBitmap *)PG_GETARG_POINTER(1);
+    int64 ntids = btgetbitmap_internal(scan, tbm);
+    PG_RETURN_INT64(ntids);
+}
+
+int64 btgetbitmap_internal(IndexScanDesc scan, TIDBitmap *tbm)
+{
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
     int64 ntids = 0;
     ItemPointer heapTid;
@@ -282,7 +327,7 @@ Datum btgetbitmap(PG_FUNCTION_ARGS)
     if (so->numArrayKeys) {
         /* punt if we have any unsatisfiable array keys */
         if (so->numArrayKeys < 0) {
-            PG_RETURN_INT64(ntids);
+            return ntids;
         }
 
         _bt_start_array_keys(scan, ForwardScanDirection);
@@ -321,8 +366,8 @@ Datum btgetbitmap(PG_FUNCTION_ARGS)
         }
         /* Now see if we have more array keys to deal with */
     } while (so->numArrayKeys && _bt_advance_array_keys(scan, ForwardScanDirection));
-
-    PG_RETURN_INT64(ntids);
+    
+    return ntids;
 }
 
 Datum cbtreegetbitmap(PG_FUNCTION_ARGS)
@@ -394,6 +439,12 @@ Datum btbeginscan(PG_FUNCTION_ARGS)
     Relation rel = (Relation)PG_GETARG_POINTER(0);
     int nkeys = PG_GETARG_INT32(1);
     int norderbys = PG_GETARG_INT32(2);
+    IndexScanDesc scan = btbeginscan_internal(rel, nkeys, norderbys);
+    PG_RETURN_POINTER(scan);
+}
+
+IndexScanDesc btbeginscan_internal(Relation rel, int nkeys, int norderbys)
+{
     IndexScanDesc scan;
     BTScanOpaque so;
 
@@ -437,7 +488,7 @@ Datum btbeginscan(PG_FUNCTION_ARGS)
     scan->xs_itupdesc = RelationGetDescr(rel);
     scan->opaque = so;
 
-    PG_RETURN_POINTER(scan);
+    return scan;
 }
 
 /*
@@ -447,7 +498,12 @@ Datum btrescan(PG_FUNCTION_ARGS)
 {
     IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
     ScanKey scankey = (ScanKey)PG_GETARG_POINTER(1);
+    btrescan_internal(scan, scankey);
+    PG_RETURN_VOID();
+}
 
+void btrescan_internal(IndexScanDesc scan, ScanKey scankey)
+{
     /* remaining arguments are ignored */
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
 
@@ -501,8 +557,6 @@ Datum btrescan(PG_FUNCTION_ARGS)
 
     /* If any keys are SK_SEARCHARRAY type, set up array-key info */
     _bt_preprocess_array_keys(scan);
-
-    PG_RETURN_VOID();
 }
 
 /*
@@ -511,6 +565,12 @@ Datum btrescan(PG_FUNCTION_ARGS)
 Datum btendscan(PG_FUNCTION_ARGS)
 {
     IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
+    btendscan_internal(scan);
+    PG_RETURN_VOID();
+}
+
+void btendscan_internal(IndexScanDesc scan)
+{
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
 
     /* we aren't holding any read locks, but gotta drop the pins */
@@ -539,9 +599,7 @@ Datum btendscan(PG_FUNCTION_ARGS)
     FREE_POINTER(so->currTuples);
 
     /* so->markTuples should not be pfree'd, see btrescan */
-    pfree(so);
-
-    PG_RETURN_VOID();
+    pfree(so);    
 }
 
 /*
@@ -550,6 +608,12 @@ Datum btendscan(PG_FUNCTION_ARGS)
 Datum btmarkpos(PG_FUNCTION_ARGS)
 {
     IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
+    btmarkpos_internal(scan);
+    PG_RETURN_VOID();
+}
+
+void btmarkpos_internal(IndexScanDesc scan)
+{
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
 
     /* we aren't holding any read locks, but gotta drop the pin */
@@ -573,17 +637,20 @@ Datum btmarkpos(PG_FUNCTION_ARGS)
     /* Also record the current positions of any array keys */
     if (so->numArrayKeys) {
         _bt_mark_array_keys(scan);
-    }
-
-    PG_RETURN_VOID();
+    }    
 }
-
 /*
  *	btrestrpos() -- restore scan to last saved position
  */
 Datum btrestrpos(PG_FUNCTION_ARGS)
 {
     IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
+    btrestrpos_internal(scan);
+    PG_RETURN_VOID();
+}
+
+void btrestrpos_internal(IndexScanDesc scan)
+{
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
 
     /* Restore the marked positions of any array keys */
@@ -623,8 +690,6 @@ Datum btrestrpos(PG_FUNCTION_ARGS)
             }
         }
     }
-
-    PG_RETURN_VOID();
 }
 
 /*
@@ -640,6 +705,12 @@ Datum btbulkdelete(PG_FUNCTION_ARGS)
     IndexBulkDeleteResult *volatile stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
     void *callback_state = (void *)PG_GETARG_POINTER(3);
+    stats = btbulkdelete_internal(info, stats, callback, callback_state);
+    PG_RETURN_POINTER(stats);
+}
+
+IndexBulkDeleteResult *btbulkdelete_internal(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, IndexBulkDeleteCallback callback, const void *callback_state)
+{
     Relation rel = info->index;
     BTCycleId cycleid;
 
@@ -653,12 +724,12 @@ Datum btbulkdelete(PG_FUNCTION_ARGS)
     {
         cycleid = _bt_start_vacuum(rel);
 
-        btvacuumscan(info, stats, callback, callback_state, cycleid);
+        btvacuumscan(info, stats, callback, (void *)callback_state, cycleid);
     }
     PG_END_ENSURE_ERROR_CLEANUP(_bt_end_vacuum_callback, PointerGetDatum(rel));
     _bt_end_vacuum(rel);
 
-    PG_RETURN_POINTER(stats);
+    return stats;
 }
 
 /*
@@ -670,10 +741,15 @@ Datum btvacuumcleanup(PG_FUNCTION_ARGS)
 {
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
+    stats = btvacuumcleanup_internal(info, stats);
+    PG_RETURN_POINTER(stats);
+}
 
-    /* No-op in ANALYZE ONLY mode */
+IndexBulkDeleteResult *btvacuumcleanup_internal(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
+{   
+  /* No-op in ANALYZE ONLY mode */
     if (info->analyze_only) {
-        PG_RETURN_POINTER(stats);
+        return stats;
     }
 
     /*
@@ -703,7 +779,7 @@ Datum btvacuumcleanup(PG_FUNCTION_ARGS)
         stats->num_index_tuples = info->num_heap_tuples;
     }
 
-    PG_RETURN_POINTER(stats);
+    return stats;
 }
 
 /*
@@ -1078,6 +1154,11 @@ Datum btcanreturn(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(true);
 }
 
+bool btcanreturn_internal()
+{
+    return true;
+}
+
 /* btmerge() -- merge 2 or more ordered btree-indexes together */
 Datum btmerge(PG_FUNCTION_ARGS)
 {
@@ -1088,6 +1169,12 @@ Datum btmerge(PG_FUNCTION_ARGS)
     Relation dstIdxRel = (Relation)PG_GETARG_POINTER(0);
     List *srcIdxRelScans = (List *)PG_GETARG_POINTER(1);
     List *srcPartMergeOffsets = (List *)PG_GETARG_POINTER(2);
+    IndexBuildResult *result = btmerge_internal(dstIdxRel, srcIdxRelScans, srcPartMergeOffsets);
+    PG_RETURN_POINTER(result);
+}
+
+IndexBuildResult *btmerge_internal(Relation dstIdxRel, List *srcIdxRelScans, List *srcPartMergeOffsets)
+{
     List *orderedTupleList = NIL;
     ListCell *cell1 = NULL;
     ListCell *cell2 = NULL;
@@ -1198,7 +1285,8 @@ Datum btmerge(PG_FUNCTION_ARGS)
 
     result->heap_tuples = indextuples;
     result->index_tuples = indextuples;
-    PG_RETURN_POINTER(result);
+
+    return result;
 }
 
 static IndexTuple btgetindextuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset)

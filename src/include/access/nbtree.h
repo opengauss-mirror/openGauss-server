@@ -1067,6 +1067,33 @@ extern Datum btbulkdelete(PG_FUNCTION_ARGS);
 extern Datum btvacuumcleanup(PG_FUNCTION_ARGS);
 extern Datum btcanreturn(PG_FUNCTION_ARGS);
 extern Datum btoptions(PG_FUNCTION_ARGS);
+
+extern inline IndexBuildResult *btbuild_internal(Relation heap, Relation index, IndexInfo *index_info);
+
+extern inline void btbuildempty_internal(Relation index);
+
+extern inline bool btinsert_internal(Relation rel, Datum *values, const bool *isnull, ItemPointer ht_ctid, Relation heapRel, IndexUniqueCheck checkUnique);
+
+extern inline IndexBulkDeleteResult *btbulkdelete_internal(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, IndexBulkDeleteCallback callback, const void *callback_state);
+
+extern inline IndexBulkDeleteResult *btvacuumcleanup_internal(IndexVacuumInfo *info, IndexBulkDeleteResult *stats);
+
+extern inline bool btcanreturn_internal();
+
+extern inline IndexScanDesc btbeginscan_internal(Relation rel, int nkeys, int norderbys);
+
+extern inline void btrescan_internal(IndexScanDesc scan, ScanKey scankey);
+
+extern inline int64 btgetbitmap_internal(IndexScanDesc scan, TIDBitmap *tbm);
+
+extern inline void btendscan_internal(IndexScanDesc scan);
+
+extern inline void btmarkpos_internal(IndexScanDesc scan);
+
+extern inline void btrestrpos_internal(IndexScanDesc scan);
+
+extern inline IndexBuildResult *btmerge_internal(Relation dstIdxRel, List *srcIdxRelScans, List *srcPartMergeOffsets);
+
 /*
  * this is the interface of merge 2 or more index for btree index
  * we also have similar interfaces for other kind of indexes, like hash/gist/gin

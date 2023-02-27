@@ -874,8 +874,7 @@ maintainer-clean: distclean
 	      storage/lmgr/lwlocknames.cpp \
 	      storage/lmgr/lwlocknames.h \
 	      ../common/backend/utils/errcodes.h \
-	      ../common/backend/utils/misc/guc-file.cpp \
-	      ../common/backend/utils/sort/qsort_tuple.cpp
+	      ../common/backend/utils/misc/guc-file.cpp
 
 
 ##########################################################################

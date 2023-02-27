@@ -31,6 +31,7 @@
 #include "access/tableam.h"
 #include "access/visibilitymap.h"
 #include "access/xact.h"
+#include "access/amapi.h"
 #include "access/ustore/knl_uscan.h"
 #include "access/ustore/knl_uvisibility.h"
 #include "access/ustore/knl_uheap.h"
@@ -693,7 +694,12 @@ static void index_build_init_fork(Relation heapRelation, Relation indexRelation)
             /* first create INIT_FORKNUM file */
             smgrcreate(indexRelation->rd_smgr, INIT_FORKNUM, false);
             /* then callback will log and sync INIT_FORKNUM file content */
-            OidFunctionCall1(ambuildempty, PointerGetDatum(indexRelation));
+            if (u_sess->attr.attr_common.enable_indexscan_optimization &&
+                indexRelation->rd_rel->relam == BTREE_AM_OID) {
+                indexRelation->rd_amroutine->ambuildempty(indexRelation);                   
+            } else{
+                OidFunctionCall1(ambuildempty, PointerGetDatum(indexRelation));
+            }
         }
     }
 }
@@ -3220,12 +3226,18 @@ static void partition_index_update_stats(
 }
 
 static IndexBuildResult* index_build_storage(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo)
-{
+{   
+    IndexBuildResult* stats;
     RegProcedure procedure = indexRelation->rd_am->ambuild;
     Assert(RegProcedureIsValid(procedure));
 
-    IndexBuildResult* stats = (IndexBuildResult*)DatumGetPointer(OidFunctionCall3(
-        procedure, PointerGetDatum(heapRelation), PointerGetDatum(indexRelation), PointerGetDatum(indexInfo)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && indexRelation->rd_rel->relam == BTREE_AM_OID) {
+        stats = indexRelation->rd_amroutine->ambuild(heapRelation, indexRelation, indexInfo);
+    } else {
+        stats = (IndexBuildResult *)DatumGetPointer(OidFunctionCall3(
+            procedure, PointerGetDatum(heapRelation), PointerGetDatum(indexRelation), PointerGetDatum(indexInfo)));
+    }
+
     Assert(PointerIsValid(stats));
     if (RELPERSISTENCE_UNLOGGED == heapRelation->rd_rel->relpersistence) {
         index_build_init_fork(heapRelation, indexRelation);
@@ -6995,10 +7007,12 @@ void mergeBTreeIndexes(List* mergingBtreeIndexes, List* srcPartMergeOffset, int2
     procedure = targetIndexRelation->rd_am->ammerge;
     Assert(RegProcedureIsValid(procedure));
 
-    DatumGetPointer(OidFunctionCall3(procedure,
-        PointerGetDatum(targetIndexRelation),
-        PointerGetDatum(mergeBTScanList),
-        PointerGetDatum(srcPartMergeOffset)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && targetIndexRelation->rd_rel->relam == BTREE_AM_OID) {
+        targetIndexRelation->rd_amroutine->ammerge(targetIndexRelation, mergeBTScanList, srcPartMergeOffset);
+    } else {
+        DatumGetPointer(OidFunctionCall3(procedure, PointerGetDatum(targetIndexRelation),
+                                         PointerGetDatum(mergeBTScanList), PointerGetDatum(srcPartMergeOffset)));
+    }
 
     // step 3: end the src index relation scan
     foreach (cell, mergeBTScanList) {

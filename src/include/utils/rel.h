@@ -196,6 +196,8 @@ typedef struct RelationData {
     /* use "struct" here to avoid needing to include htup.h: */
     struct HeapTupleData* rd_indextuple; /* all of pg_index tuple */
     Form_pg_am rd_am;                    /* pg_am tuple for index's AM */
+    /* use "struct" here to avoid needing to include amapi.h*/
+    struct IndexAmRoutine* rd_amroutine; /* index AM's API struct */
 
     int rd_indnkeyatts;     /* index relation's indexkey nums */
     int1 rd_indexsplit;  /* determines the page split method to use */

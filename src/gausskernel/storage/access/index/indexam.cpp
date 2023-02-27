@@ -87,6 +87,7 @@
 #include "access/ustore/knl_uscan.h"
 #include "utils/snapmgr.h"
 #include "access/heapam.h"
+#include "access/amapi.h"
 #include "vecexecutor/vecnodes.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
@@ -230,9 +231,13 @@ bool index_insert(Relation index_relation, Datum *values, const bool *isnull, It
     /*
      * have the am's insert proc do all the work.
      */
-    return DatumGetBool(FunctionCall6(procedure, PointerGetDatum(index_relation), PointerGetDatum(values),
-                                      PointerGetDatum(isnull), PointerGetDatum(heap_t_ctid),
-                                      PointerGetDatum(heap_relation), Int32GetDatum((int32)check_unique)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && index_relation->rd_rel->relam == BTREE_AM_OID) {
+        return index_relation->rd_amroutine->aminsert(index_relation, values, isnull, heap_t_ctid, heap_relation, check_unique);
+    } else {
+        return DatumGetBool(FunctionCall6(procedure, PointerGetDatum(index_relation), PointerGetDatum(values),
+                                          PointerGetDatum(isnull), PointerGetDatum(heap_t_ctid),
+                                          PointerGetDatum(heap_relation), Int32GetDatum((int32)check_unique)));
+    }
 }
 
 /*
@@ -307,8 +312,12 @@ static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys
     /*
      * Tell the AM to open a scan.
      */
-    scan = (IndexScanDesc)DatumGetPointer(
-        FunctionCall3(procedure, PointerGetDatum(index_relation), Int32GetDatum(nkeys), Int32GetDatum(norderbys)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && index_relation->rd_rel->relam == BTREE_AM_OID) {
+        scan = index_relation->rd_amroutine->ambeginscan(index_relation, nkeys, norderbys);
+    } else {
+        scan = (IndexScanDesc)DatumGetPointer(
+            FunctionCall3(procedure, PointerGetDatum(index_relation), Int32GetDatum(nkeys), Int32GetDatum(norderbys)));
+    }
 
     return scan;
 }
@@ -349,8 +358,12 @@ void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys,
 
     scan->kill_prior_tuple = false; /* for safety */
 
-    (void)FunctionCall5(procedure, PointerGetDatum(scan), PointerGetDatum(keys), Int32GetDatum(nkeys),
-                        PointerGetDatum(orderbys), Int32GetDatum(norderbys));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && scan->indexRelation->rd_rel->relam == BTREE_AM_OID) {
+        scan->indexRelation->rd_amroutine->amrescan(scan, keys);
+    } else {
+        (void)FunctionCall5(procedure, PointerGetDatum(scan), PointerGetDatum(keys), Int32GetDatum(nkeys),
+                            PointerGetDatum(orderbys), Int32GetDatum(norderbys));
+    }
 }
 
 /* ----------------
@@ -378,7 +391,11 @@ void index_endscan(IndexScanDesc scan)
     }
 
     /* End the AM's scan */
-    (void)FunctionCall1(procedure, PointerGetDatum(scan));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && scan->indexRelation->rd_rel->relam == BTREE_AM_OID) {
+        scan->indexRelation->rd_amroutine->amendscan(scan);
+    } else {
+        (void)FunctionCall1(procedure, PointerGetDatum(scan));
+    }
 
     /* Release index refcount acquired by index_beginscan */
     RelationDecrementReferenceCount(scan->indexRelation);
@@ -406,7 +423,11 @@ void index_markpos(IndexScanDesc scan)
     SCAN_CHECKS;
     GET_SCAN_PROCEDURE(ammarkpos);
 
-    (void)FunctionCall1(procedure, PointerGetDatum(scan));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && scan->indexRelation->rd_rel->relam == BTREE_AM_OID) {
+        scan->indexRelation->rd_amroutine->ammarkpos(scan);
+    } else {
+        (void)FunctionCall1(procedure, PointerGetDatum(scan));
+    }
 }
 
 /* ----------------
@@ -442,7 +463,12 @@ void index_restrpos(IndexScanDesc scan)
 
     scan->kill_prior_tuple = false; /* for safety */
 
-    (void)FunctionCall1(procedure, PointerGetDatum(scan));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && scan->indexRelation->rd_rel->relam == BTREE_AM_OID) {
+        scan->indexRelation->rd_amroutine->amrestrpos(scan);
+    } else {
+        (void)FunctionCall1(procedure, PointerGetDatum(scan));
+    }
+
 }
 
 /* ----------------
@@ -468,7 +494,11 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
      * scan->xs_recheck and possibly scan->xs_itup, though we pay no attention
      * to those fields here.
      */
-    found = DatumGetBool(FunctionCall2(procedure, PointerGetDatum(scan), Int32GetDatum(direction)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && scan->indexRelation->rd_rel->relam == BTREE_AM_OID) {
+        found = scan->indexRelation->rd_amroutine->amgettuple(scan, direction);
+    } else {
+        found = DatumGetBool(FunctionCall2(procedure, PointerGetDatum(scan), Int32GetDatum(direction)));
+    }
 
     /* Reset kill flag immediately for safety */
     scan->kill_prior_tuple = false;
@@ -851,7 +881,11 @@ int64 index_getbitmap(IndexScanDesc scan, TIDBitmap *bitmap)
     /*
      * have the am's getbitmap proc do all the work.
      */
-    d = FunctionCall2(procedure, PointerGetDatum(scan), PointerGetDatum(bitmap));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && scan->indexRelation->rd_rel->relam == BTREE_AM_OID) {
+        d = scan->indexRelation->rd_amroutine->amgetbitmap(scan, bitmap);
+    } else {
+        d = FunctionCall2(procedure, PointerGetDatum(scan), PointerGetDatum(bitmap));
+    }
 
     ntids = DatumGetInt64(d);
 
@@ -913,9 +947,13 @@ IndexBulkDeleteResult *index_bulk_delete(IndexVacuumInfo *info, IndexBulkDeleteR
     RELATION_CHECKS;
     GET_REL_PROCEDURE(ambulkdelete);
 
-    result = (IndexBulkDeleteResult *)DatumGetPointer(
-        FunctionCall4(procedure, PointerGetDatum(info), PointerGetDatum(stats), PointerGetDatum((Pointer)callback),
-                      PointerGetDatum(callback_state)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && index_relation->rd_rel->relam == BTREE_AM_OID) {
+        result = index_relation->rd_amroutine->ambulkdelete(info, stats, callback, callback_state);
+    } else {
+        result = (IndexBulkDeleteResult *)DatumGetPointer(
+            FunctionCall4(procedure, PointerGetDatum(info), PointerGetDatum(stats), PointerGetDatum((Pointer)callback),
+                          PointerGetDatum(callback_state)));
+    }
 
     return result;
 }
@@ -935,8 +973,12 @@ IndexBulkDeleteResult *index_vacuum_cleanup(IndexVacuumInfo *info, IndexBulkDele
     RELATION_CHECKS;
     GET_REL_PROCEDURE(amvacuumcleanup);
 
-    result = (IndexBulkDeleteResult *)DatumGetPointer(
-        FunctionCall2(procedure, PointerGetDatum(info), PointerGetDatum(stats)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && index_relation->rd_rel->relam == BTREE_AM_OID) {
+        result = index_relation->rd_amroutine->amvacuumcleanup(info, stats);
+    } else {
+        result = (IndexBulkDeleteResult *)DatumGetPointer(
+            FunctionCall2(procedure, PointerGetDatum(info), PointerGetDatum(stats)));
+    }
 
     return result;
 }
@@ -948,6 +990,7 @@ IndexBulkDeleteResult *index_vacuum_cleanup(IndexVacuumInfo *info, IndexBulkDele
 bool index_can_return(Relation index_relation)
 {
     FmgrInfo *procedure = NULL;
+    bool result;
 
     RELATION_CHECKS;
 
@@ -957,7 +1000,13 @@ bool index_can_return(Relation index_relation)
 
     GET_REL_PROCEDURE(amcanreturn);
 
-    return DatumGetBool(FunctionCall1(procedure, PointerGetDatum(index_relation)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && index_relation->rd_rel->relam == BTREE_AM_OID) {
+        result = index_relation->rd_amroutine->amcanreturn();
+    } else {
+        result = DatumGetBool(FunctionCall1(procedure, PointerGetDatum(index_relation)));
+    }    
+
+    return result;
 }
 
 /* ----------------

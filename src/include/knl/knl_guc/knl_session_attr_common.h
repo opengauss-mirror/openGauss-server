@@ -237,6 +237,7 @@ typedef struct knl_session_attr_common {
     void** extension_session_vars_array;
     char* threadpool_reset_percent_item;
     int threadpool_reset_percent_list[2];
+    bool enable_indexscan_optimization;
     char* delimiter_name;
     bool light_comm;
 } knl_session_attr_common;
