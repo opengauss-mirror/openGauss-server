@@ -397,6 +397,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  lc_monetary                                      | string  |      |           | 
  lc_numeric                                       | string  |      |           | 
  lc_time                                          | string  |      |           | 
+ light_comm                                       | bool    |      |           | 
  listen_addresses                                 | string  |      |           | 
  local_bind_address                               | string  |      |           | 
  local_preload_libraries                          | string  |      |           | 

@@ -238,6 +238,7 @@ typedef struct knl_session_attr_common {
     char* threadpool_reset_percent_item;
     int threadpool_reset_percent_list[2];
     char* delimiter_name;
+    bool light_comm;
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

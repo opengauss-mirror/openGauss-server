@@ -1,4 +1,4 @@
-/* -------------------------------------------------------------------------
+﻿/* -------------------------------------------------------------------------
  *
  * pqcomm.c
  *	  Communication functions between the Frontend and the Backend
@@ -455,6 +455,20 @@ void pq_init(void)
     pq_disk_reset_tempfile_contextinfo();
 
     on_proc_exit(pq_close, 0);
+
+    /*
+     * For light comm, initially, set the underlying socket in nonblocking mode
+     * and use latches to implement blocking semantics if needed.
+     * (e.g., WAL will assume that the standy node has exited, if no information is received)
+     *
+     * should always use COMMERROR on failure during communication
+     */
+#ifndef WIN32
+    if (u_sess->attr.attr_common.light_comm == TRUE &&
+        u_sess->proc_cxt.MyProcPort->sock != PGINVALID_SOCKET && !pg_set_noblock(u_sess->proc_cxt.MyProcPort->sock)){
+        ereport(COMMERROR, (errmsg("could not set socket to nonblocking mode: %m")));
+    }
+#endif
 }
 
 /* --------------------------------
@@ -1137,29 +1151,37 @@ void TouchSocketFile(void)
  */
 void pq_set_nonblocking(bool nonblocking)
 {
-    if (u_sess->proc_cxt.MyProcPort->noblock == nonblocking) {
-        return;
-    }
+    if (u_sess->attr.attr_common.light_comm == FALSE) {
+        if (u_sess->proc_cxt.MyProcPort->noblock == nonblocking) {
+            return;
+        }
 
 #ifdef WIN32
-    pgwin32_noblock = nonblocking ? 1 : 0;
+        pgwin32_noblock = nonblocking ? 1 : 0;
 #else
 
-    /*
-     * Use COMMERROR on failure, because ERROR would try to send the error to
-     * the client, which might require changing the mode again, leading to
-     * infinite recursion.
-     */
-    if (nonblocking) {
-        if (!pg_set_noblock(u_sess->proc_cxt.MyProcPort->sock)) {
-            ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to non-blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
+        /*
+         * Use COMMERROR on failure, because ERROR would try to send the error to
+         * the client, which might require changing the mode again, leading to
+         * infinite recursion.
+         */
+        if (nonblocking) {
+            if (!pg_set_noblock(u_sess->proc_cxt.MyProcPort->sock)) {
+                ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to non-blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
+            }
+        } else {
+            if (!pg_set_block(u_sess->proc_cxt.MyProcPort->sock)) {
+                ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
+            }
         }
-    } else {
-        if (!pg_set_block(u_sess->proc_cxt.MyProcPort->sock)) {
-            ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
-        }
-    }
 #endif
+    }
+    /*
+     * For light_comm, we set socket to nonblocked mode initially (see pq_init()).
+     * During the whole process of database communication, socket is not set to blocked mode any more.
+     * Here, we just set the global variable to blocked if needed, without actually operating the socket,
+     * For blocked semantics, use latch.
+     */
     u_sess->proc_cxt.MyProcPort->noblock = nonblocking;
 }
 

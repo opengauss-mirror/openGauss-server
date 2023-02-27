@@ -56,6 +56,8 @@ extern void RecoveryConflictInterrupt(ProcSignalReason reason); /* called from S
                                                                  * handler */
 extern void prepare_for_client_read(void);
 extern void client_read_ended(void);
+extern void process_client_read_interrupt(bool blocked);
+extern void process_client_write_interrupt(bool blocked);
 extern void prepare_for_logic_conn_read(void);
 extern void logic_conn_read_check_ended(void);
 extern void process_postgres_switches(int argc, char* argv[], GucContext ctx, const char** dbname);

@@ -196,9 +196,9 @@ int WaitLatch(volatile Latch* latch, int wakeEvents, long timeout)
  * Like WaitLatch, but with an extra socket argument for WL_SOCKET_*
  * conditions.
  *
- * When waiting on a socket, WL_SOCKET_READABLE *must* be included in
- * 'wakeEvents'; WL_SOCKET_WRITEABLE is optional.  The reason for this is
- * that EOF and error conditions are reported only via WL_SOCKET_READABLE.
+ * When waiting on a socket, EOF and error conditions are reported by
+ * returning the socket as readable/writable or both, depending on
+ * WL_SOCKET_READBLE/WL_SOCKET_WRITEABLE being specified.
  */
 int WaitLatchOrSocket(volatile Latch* latch, int wakeEvents, pgsocket sock, long timeout)
 {
@@ -222,8 +222,6 @@ int WaitLatchOrSocket(volatile Latch* latch, int wakeEvents, pgsocket sock, long
         wakeEvents &= ~(WL_SOCKET_READABLE | WL_SOCKET_WRITEABLE);
 
     Assert(wakeEvents != 0); /* must have at least one wake event */
-    /* Cannot specify WL_SOCKET_WRITEABLE without WL_SOCKET_READABLE */
-    Assert((wakeEvents & (WL_SOCKET_READABLE | WL_SOCKET_WRITEABLE)) != WL_SOCKET_WRITEABLE);
 
     if ((wakeEvents & WL_LATCH_SET) && latch->owner_pid != t_thrd.proc_cxt.MyProcPid)
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("cannot wait on a latch owned by another process")));
@@ -320,14 +318,20 @@ int WaitLatchOrSocket(volatile Latch* latch, int wakeEvents, pgsocket sock, long
                 result |= WL_TIMEOUT;
         } else {
             /* at least one event occurred, so check revents values */
-            if ((wakeEvents & WL_SOCKET_READABLE) && (pfds[0].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))) {
+            if ((wakeEvents & WL_SOCKET_READABLE) && (pfds[0].revents & POLLIN)) {
                 /* data available in socket, or EOF/error condition */
                 result |= WL_SOCKET_READABLE;
             }
             if ((wakeEvents & WL_SOCKET_WRITEABLE) && (pfds[0].revents & POLLOUT)) {
                 result |= WL_SOCKET_WRITEABLE;
             }
-
+            if (pfds[0].revents & (POLLHUP | POLLERR | POLLNVAL)) {
+                /* EOF/error condition */
+                if (wakeEvents & WL_SOCKET_READABLE)
+                    result |= WL_SOCKET_READABLE;
+                if (wakeEvents & WL_SOCKET_WRITEABLE)
+                    result |= WL_SOCKET_WRITEABLE;
+            }
             /*
              * We expect a POLLHUP when the remote end is closed, but because
              * we don't expect the pipe to become readable or to have any
@@ -396,6 +400,7 @@ int WaitLatchOrSocket(volatile Latch* latch, int wakeEvents, pgsocket sock, long
                 result |= WL_SOCKET_READABLE;
             }
             if ((wakeEvents & WL_SOCKET_WRITEABLE) && FD_ISSET(sock, &output_mask)) {
+                /* socket is writable, or EOF */
                 result |= WL_SOCKET_WRITEABLE;
             }
             if ((wakeEvents & WL_POSTMASTER_DEATH) &&
