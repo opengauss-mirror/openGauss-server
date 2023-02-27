@@ -140,7 +140,9 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("exceptions", K_EXCEPTIONS, UNRESERVED_KEYWORD) 
     PG_KEYWORD("first", K_FIRST, UNRESERVED_KEYWORD) 
     PG_KEYWORD("forward", K_FORWARD, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("found", K_FOUND, UNRESERVED_KEYWORD) 
     PG_KEYWORD("function", K_FUNCTION, UNRESERVED_KEYWORD)
+    PG_KEYWORD("handler", K_HANDLER, UNRESERVED_KEYWORD) 
     PG_KEYWORD("hint", K_HINT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("immediate", K_IMMEDIATE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("index", K_INDEX, UNRESERVED_KEYWORD) 
@@ -184,7 +186,9 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("savepoint", K_SAVEPOINT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("scroll", K_SCROLL, UNRESERVED_KEYWORD) 
     PG_KEYWORD("slice", K_SLICE, UNRESERVED_KEYWORD)
+    PG_KEYWORD("sqlexception", K_SQLEXCEPTION, UNRESERVED_KEYWORD) 
     PG_KEYWORD("sqlstate", K_SQLSTATE, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("sqlwarning", K_SQLWARNING, UNRESERVED_KEYWORD)
     PG_KEYWORD("stacked", K_STACKED, UNRESERVED_KEYWORD) 
     PG_KEYWORD("sys_refcursor", K_SYS_REFCURSOR, UNRESERVED_KEYWORD)
     PG_KEYWORD("table", K_TABLE, UNRESERVED_KEYWORD)
@@ -641,6 +645,23 @@ void plpgsql_process_stmt_array(StringInfo buf, List* bracket_loc)
 }
 
 /*
+ * Peek one tokens ahead in the input stream. 
+ *
+ * NB: no variable or unreserved keyword lookup is performed here, they will
+ * be returned as IDENT. Reserved keywords are resolved as usual.
+ */
+void plpgsql_peek(int* tok1_p)
+{
+    int tok1;
+    TokenAuxData aux1;
+
+    tok1 = internal_yylex(&aux1);
+    *tok1_p = tok1;
+
+    push_back_token(tok1, &aux1);
+}
+
+/*
  * Peek two tokens ahead in the input stream. The first token and its
  * location the query are returned in *tok1_p and *tok1_loc, second token
  * and its location in *tok2_p and *tok2_loc.
@@ -669,16 +690,6 @@ void plpgsql_peek2(int* tok1_p, int* tok2_p, int* tok1_loc, int* tok2_loc)
     push_back_token(tok1, &aux1);
 }
 
-void plpgsql_peek(int* tok1_p)
-{
-    int tok1;
-    TokenAuxData aux1;
-
-    tok1 = internal_yylex(&aux1);
-
-    *tok1_p = tok1;
-    push_back_token(tok1, &aux1);
-}
 /*
  * plpgsql_scanner_errposition
  *		Report an error cursor position, if possible.
@@ -1159,13 +1170,14 @@ static int plpgsql_parse_declare(int* loc)
         int tok3 = -1;
         tok2 = internal_yylex(&aux2);
         tok3 = internal_yylex(&aux3);
-        if (tok2 != IDENT || tok3 != IDENT) {
+        if (tok3 != IDENT) {
             push_back_token(tok3, &aux3);
             push_back_token(tok2, &aux2);
             push_back_token(tok1, &aux1);
             return token;
         }
         if (strcasecmp(aux3.lval.str, "cursor") == 0) {
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_DECLARE;
             token = T_DECLARE_CURSOR;
             push_back_token(tok3, &aux3);
             push_back_token(tok2, &aux2);
@@ -1173,7 +1185,16 @@ static int plpgsql_parse_declare(int* loc)
             *loc = aux1.lloc;
             plpgsql_yylval = aux1.lval;
         } else if (strcasecmp(aux3.lval.str, "condition") == 0) {
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_DECLARE;
             token = T_DECLARE_CONDITION;
+            push_back_token(tok3, &aux3);
+            push_back_token(tok2, &aux2);
+            /* get the declare attribute location */
+            *loc = aux1.lloc;
+            plpgsql_yylval = aux1.lval;
+        } else if (strcasecmp(aux3.lval.str, "handler") == 0) {
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_DECLARE;
+            token = T_DECLARE_HANDLER;
             push_back_token(tok3, &aux3);
             push_back_token(tok2, &aux2);
             /* get the declare attribute location */

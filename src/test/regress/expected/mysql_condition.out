@@ -1,0 +1,302 @@
+-- declare handler 
+drop database if exists mysql_test;
+NOTICE:  database "mysql_test" does not exist, skipping
+drop database if exists td_test;
+NOTICE:  database "td_test" does not exist, skipping
+create database mysql_test dbcompatibility='B';
+create database td_test dbcompatibility='C';
+\c td_test
+declare
+    a int;
+begin
+    declare exit handler for 22012
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end;
+/
+ERROR:  syntax error at or near "exit"
+LINE 3:     declare exit handler for 22012
+                    ^
+QUERY:  DECLARE  a int;
+begin
+    declare exit handler for 22012
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end
+\c mysql_test
+-- error_code
+declare
+    a int;
+begin
+    declare exit handler for 22012
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 33816706, SQLERRM = division by zero
+declare
+    a int;
+begin
+    declare exit handler for 1
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end;
+/
+ERROR:  division by zero
+CONTEXT:  SQL statement "SELECT 1/0"
+PL/pgSQL function inline_code_block line 7 at assignment
+declare
+    a int;
+begin
+    declare exit handler for 0
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end;
+/
+ERROR:  Incorrect CONDITION value: '0'
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 1
+-- sqlstate [value] sqlstate_value
+declare
+    a int;
+begin
+    declare exit handler for sqlstate '22012'
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 33816706, SQLERRM = division by zero
+declare
+    a int;
+begin
+    declare exit handler for sqlstate value "22012"
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 33816706, SQLERRM = division by zero
+-- condition_name
+declare
+    a int;
+begin
+    declare exit handler for DIVISION_BY_ZERO
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 33816706, SQLERRM = division by zero
+-- SQLWARNING
+declare
+begin
+    declare exit handler for sqlwarning
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    CREATE USER pri_user_independent WITH INDEPENDENT IDENTIFIED BY "1234@abc";
+end;
+/
+WARNING:  Please carefully use independent user as it need more self-management.
+HINT:  Self-management include logical backup, password manage and so on.
+CONTEXT:  SQL statement "CREATE USER pri_user_independent WITH INDEPENDENT IDENTIFIED BY "********""
+PL/pgSQL function inline_code_block line 7 at SQL statement
+declare
+begin
+    declare exit handler for "sqlwarning"
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    CREATE USER pri_user_independent WITH INDEPENDENT IDENTIFIED BY "1234@abc";
+end;
+/
+ERROR:  unrecognized exception condition "sqlwarning"
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 1
+-- NOT FOUND
+declare
+begin
+    declare exit handler for not FOUND
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    create table t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2);
+end;
+/
+NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD algorithm.
+-- sqlexception
+declare
+    a int;
+begin
+    declare exit handler for sqlexception
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 33816706, SQLERRM = division by zero
+--condition_values
+declare
+    a int;
+begin
+    declare exit handler for sqlexception, not FOUND
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+end;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 33816706, SQLERRM = division by zero
+-- declare handlers
+declare
+    a int;
+begin
+    declare exit handler for not FOUND
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    declare exit handler for sqlexception
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    create table t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2);
+    a := 1/0;
+end;
+/
+NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD algorithm.
+declare
+    a int;
+begin
+    declare exit handler for not FOUND
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    declare exit handler for sqlexception
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+    create table t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2);
+end;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 33816706, SQLERRM = division by zero
+-- use declare handler and exception when at the same time
+declare
+    a int;
+begin
+    declare exit handler for sqlexception
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+    a := 1/0;
+    exception when others then
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+end;
+/
+ERROR:  declare handler and exception cannot be used at the same time
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+-- delcare continue handler for condition_value
+create table declare_handler_t_continue (i INT PRIMARY KEY, j INT);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "declare_handler_t_continue_pkey" for table "declare_handler_t_continue"
+create table declare_handler_t_exit (i INT PRIMARY KEY, j INT);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "declare_handler_t_exit_pkey" for table "declare_handler_t_exit"
+CREATE OR REPLACE PROCEDURE proc_continue_sqlexception()  IS
+BEGIN
+    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+        RAISE NOTICE 'SQLEXCEPTION HANDLER: SQLSTATE = %, SQLERRM = %', SQLSTATE, SQLERRM;
+
+    INSERT INTO declare_handler_t_continue VALUES (1, 1);
+    INSERT INTO declare_handler_t_continue VALUES (2, 1);
+    RAISE division_by_zero;
+    INSERT INTO declare_handler_t_continue VALUES (1, 1);
+    INSERT INTO declare_handler_t_continue VALUES (3, 1);
+END;
+/
+call proc_continue_sqlexception();
+NOTICE:  SQLEXCEPTION HANDLER: SQLSTATE = 22012, SQLERRM = division_by_zero
+NOTICE:  SQLEXCEPTION HANDLER: SQLSTATE = 23505, SQLERRM = duplicate key value violates unique constraint "declare_handler_t_continue_pkey"
+ proc_continue_sqlexception 
+----------------------------
+ 
+(1 row)
+
+SELECT * FROM declare_handler_t_continue ORDER BY i;
+ i | j 
+---+---
+ 1 | 1
+ 2 | 1
+ 3 | 1
+(3 rows)
+
+TRUNCATE TABLE declare_handler_t_continue;
+-- declare continue handler
+CREATE OR REPLACE PROCEDURE proc_continue_sqlexception()  IS
+BEGIN
+    DECLARE CONTINUE HANDLER FOR unique_violation
+        RAISE NOTICE 'SQLEXCEPTION HANDLER: SQLSTATE = %, SQLERRM = %', SQLSTATE, SQLERRM;
+
+    INSERT INTO declare_handler_t_continue VALUES (1, 1);
+    INSERT INTO declare_handler_t_continue VALUES (2, 1);
+    INSERT INTO declare_handler_t_continue VALUES (1, 1);
+    INSERT INTO declare_handler_t_continue VALUES (3, 1);
+END;
+/
+call proc_continue_sqlexception();
+NOTICE:  SQLEXCEPTION HANDLER: SQLSTATE = 23505, SQLERRM = duplicate key value violates unique constraint "declare_handler_t_continue_pkey"
+ proc_continue_sqlexception 
+----------------------------
+ 
+(1 row)
+
+SELECT * FROM declare_handler_t_continue ORDER BY i;
+ i | j 
+---+---
+ 1 | 1
+ 2 | 1
+ 3 | 1
+(3 rows)
+
+-- declare exit handler
+CREATE OR REPLACE PROCEDURE proc_ex()  IS
+BEGIN
+    DECLARE EXIT HANDLER FOR unique_violation
+        RAISE NOTICE 'unique_violation HANDLER: SQLSTATE = %, SQLERRM = %', SQLSTATE, SQLERRM;
+
+    INSERT INTO declare_handler_t_exit VALUES (1, 1);
+    INSERT INTO declare_handler_t_exit VALUES (2, 1);
+    INSERT INTO declare_handler_t_exit VALUES (1, 1); /* duplicate key */
+    INSERT INTO declare_handler_t_exit VALUES (3, 1);
+END;
+/
+call proc_ex();
+NOTICE:  unique_violation HANDLER: SQLSTATE = 23505, SQLERRM = duplicate key value violates unique constraint "declare_handler_t_exit_pkey"
+ proc_ex 
+---------
+ 
+(1 row)
+
+SELECT * FROM declare_handler_t_exit ORDER BY i;
+ i | j 
+---+---
+ 1 | 1
+ 2 | 1
+(2 rows)
+
+\c regression
+drop database mysql_test;
+drop database td_test;

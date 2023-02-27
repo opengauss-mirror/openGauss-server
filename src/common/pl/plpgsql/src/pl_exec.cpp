@@ -112,6 +112,7 @@ typedef struct SimpleEcontextStackEntry {
 static void plpgsql_exec_error_callback(void* arg);
 
 static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block);
+static int exec_stmt_block_mysql_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block);
 static int exec_stmts(PLpgSQL_execstate* estate, List* stmts);
 static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt);
 static int exec_stmt_assign(PLpgSQL_execstate* estate, PLpgSQL_stmt_assign* stmt);
@@ -2520,6 +2521,20 @@ static bool exception_matches_conditions(ErrorData* edata, PLpgSQL_condition* co
 	         * and not a custom error code.
 	         */
             return true;
+        } else if (sqlerrstate == 1) {
+            if (ERRCODE_TO_CATEGORY(edata->sqlerrcode) == ERRCODE_TO_CATEGORY(MAKE_SQLSTATE('0', '1', '0', '0', '0'))) {
+                return true;
+            }
+        } else if (sqlerrstate == 2) {
+            if (ERRCODE_TO_CATEGORY(edata->sqlerrcode) == ERRCODE_TO_CATEGORY(MAKE_SQLSTATE('0', '2', '0', '0', '0'))) {
+                return true;
+            }
+        } else if (sqlerrstate == 3) {
+            if (ERRCODE_TO_CATEGORY(edata->sqlerrcode) != ERRCODE_TO_CATEGORY(MAKE_SQLSTATE('0', '0', '0', '0', '0'))
+                    && ERRCODE_TO_CATEGORY(edata->sqlerrcode) != ERRCODE_TO_CATEGORY(MAKE_SQLSTATE('0', '1', '0', '0', '0'))
+                    && ERRCODE_TO_CATEGORY(edata->sqlerrcode) != ERRCODE_TO_CATEGORY(MAKE_SQLSTATE('0', '2', '0', '0', '0'))) {
+                return true;
+            }
         }
     }
     return false;
@@ -2793,6 +2808,8 @@ static int exec_exception_handler(PLpgSQL_execstate* estate, PLpgSQL_stmt_block*
 
             exec_set_sqlcode(estate, edata->sqlerrcode);
 
+            context->handler_type = exception->handler_type;
+
             ExceptionContext* saved_cxt = u_sess->plsql_cxt.cur_exception_cxt;
             u_sess->plsql_cxt.cur_exception_cxt = context;
 #ifndef ENABLE_MULTIPLE_NODES
@@ -2967,93 +2984,96 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     }
 
     if (block->exceptions != NULL) {
-        estate->err_text = gettext_noop("during statement block entry");
+        if (block->isDeclareHandlerStmt == true/* mysql_style_exception */) {
+            rc = exec_stmt_block_mysql_exception(estate, block);
+        } else {
+            estate->err_text = gettext_noop("during statement block entry");
 
-        ExceptionContext excptContext;
-        Cursor_Data* saved_cursor_data = estate->cursor_return_data;
-        int saved_cursor_numbers = estate->cursor_return_numbers;
+            ExceptionContext excptContext;
+            Cursor_Data* saved_cursor_data = estate->cursor_return_data;
+            int saved_cursor_numbers = estate->cursor_return_numbers;
+            exec_exception_begin(estate, &excptContext);
+            PG_TRY();
+            {
+                /*
+                 * We need to run the block's statements with a new eval_econtext
+                 * that belongs to the current subtransaction; if we try to use
+                 * the outer econtext then ExprContext shutdown callbacks will be
+                 * called at the wrong times.
+                 */
+                plpgsql_create_econtext(estate);
 
-        exec_exception_begin(estate, &excptContext);
-        PG_TRY();
-        {
-            /*
-             * We need to run the block's statements with a new eval_econtext
-             * that belongs to the current subtransaction; if we try to use
-             * the outer econtext then ExprContext shutdown callbacks will be
-             * called at the wrong times.
-             */
-            plpgsql_create_econtext(estate);
+                estate->err_text = NULL;
 
-            estate->err_text = NULL;
+                /* Run the block's statements */
+                rc = exec_stmts(estate, block->body);
 
-            /* Run the block's statements */
-            rc = exec_stmts(estate, block->body);
+    #ifdef ENABLE_MOT
+                // throws ereport
+                MOTCheckTransactionAborted();
+    #endif
 
-#ifdef ENABLE_MOT
-            // throws ereport
-            MOTCheckTransactionAborted();
-#endif
+                estate->err_text = gettext_noop("during statement block exit");
 
-            estate->err_text = gettext_noop("during statement block exit");
+                /*
+                 * If the block ended with RETURN, we may need to copy the return
+                 * value out of the subtransaction eval_context.  This is
+                 * currently only needed for scalar result types --- rowtype
+                 * values will always exist in the function's own memory context.
+                 */
+                if (rc == PLPGSQL_RC_RETURN && !estate->retisset && !estate->retisnull && estate->rettupdesc == NULL) {
+                    int16 resTypLen;
+                    bool resTypByVal = false;
 
-            /*
-             * If the block ended with RETURN, we may need to copy the return
-             * value out of the subtransaction eval_context.  This is
-             * currently only needed for scalar result types --- rowtype
-             * values will always exist in the function's own memory context.
-             */
-            if (rc == PLPGSQL_RC_RETURN && !estate->retisset && !estate->retisnull && estate->rettupdesc == NULL) {
-                int16 resTypLen;
-                bool resTypByVal = false;
-
-                get_typlenbyval(estate->rettype, &resTypLen, &resTypByVal);
-                estate->retval = datumCopy(estate->retval, resTypByVal, resTypLen);
-            }
-
-            exec_exception_end(estate, &excptContext);
-            stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
-        }
-        PG_CATCH();
-        {
-            if (estate->func->debug) {
-                PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[estate->func->debug->comm->comm_idx];
-                /* client has error and debug on inner funciton, throw current error */
-                if (debug_comm->hasClientErrorOccured) {
-                    ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
-                            errmsg("Debug client has some error occured.")));
+                    get_typlenbyval(estate->rettype, &resTypLen, &resTypByVal);
+                    estate->retval = datumCopy(estate->retval, resTypByVal, resTypLen);
                 }
+
+                exec_exception_end(estate, &excptContext);
+                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
             }
-            stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
-            u_sess->SPI_cxt.is_stp = savedIsSTP;
-            u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+            PG_CATCH();
+            {
+                if (estate->func->debug) {
+                    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[estate->func->debug->comm->comm_idx];
+                    /* client has error and debug on inner funciton, throw current error */
+                    if (debug_comm->hasClientErrorOccured) {
+                        ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
+                                errmsg("Debug client has some error occured.")));
+                    }
+                }
+                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                u_sess->SPI_cxt.is_stp = savedIsSTP;
+                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
 
-            estate->cursor_return_data = saved_cursor_data;
-            estate->cursor_return_numbers = saved_cursor_numbers;
+                estate->cursor_return_data = saved_cursor_data;
+                estate->cursor_return_numbers = saved_cursor_numbers;
 
-            /* reset stream for-loop flag */
-            u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
+                /* reset stream for-loop flag */
+                u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
 
-            /* gs_signal_handle maybe block sigusr2 when accept SIGINT */
-            gs_signal_unblock_sigusr2();
+                /* gs_signal_handle maybe block sigusr2 when accept SIGINT */
+                gs_signal_unblock_sigusr2();
 
-            estate->err_text = gettext_noop("during exception cleanup");
+                estate->err_text = gettext_noop("during exception cleanup");
 
-            exec_exception_cleanup(estate, &excptContext);
-#ifndef ENABLE_MULTIPLE_NODES
-            AutoDopControl dopControl;
-            dopControl.CloseSmp();
-#endif
-            rc = exec_exception_handler(estate, block, &excptContext);
+                exec_exception_cleanup(estate, &excptContext);
+    #ifndef ENABLE_MULTIPLE_NODES
+                AutoDopControl dopControl;
+                dopControl.CloseSmp();
+    #endif
+                rc = exec_exception_handler(estate, block, &excptContext);
 
-            stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
-            u_sess->SPI_cxt.is_stp = savedIsSTP;
-            u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                u_sess->SPI_cxt.is_stp = savedIsSTP;
+                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+            }
+            PG_END_TRY();
+
+            AssertEreport(excptContext.old_edata == estate->cur_error,
+                MOD_PLSQL,
+                "save current error should be same error  as estate current error.");
         }
-        PG_END_TRY();
-
-        AssertEreport(excptContext.old_edata == estate->cur_error,
-            MOD_PLSQL,
-            "save current error should be same error  as estate current error.");
     } else {
         /*
          * Just execute the statements in the block's body
@@ -3127,7 +3147,124 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     }
     return PLPGSQL_RC_OK;
 }
+/* ----------
+ * exec_stmt_block_mysql_exception			Execute a block of statements like mysql's exception handling style
+ * ----------
+ */
+static int exec_stmt_block_mysql_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
+{
+        estate->err_text = gettext_noop("during statement block entry");
+        bool savedisAllowCommitRollback = u_sess->SPI_cxt.is_allow_commit_rollback;
+        bool savedIsSTP = u_sess->SPI_cxt.is_stp;
+        bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
 
+        ExceptionContext excptContext;
+        Cursor_Data* saved_cursor_data = estate->cursor_return_data;
+        int saved_cursor_numbers = estate->cursor_return_numbers;
+        int rc = -1;
+
+        List* stmts = block->body;
+        int num_stmts = list_length(stmts);
+        int stmtid = 0;
+        bool exception_flag = false;
+        for (;stmtid < num_stmts;) {
+            PLpgSQL_stmt* stmt = (PLpgSQL_stmt*)list_nth(stmts, stmtid);
+            stmtid++;
+            exception_flag = false;
+            exec_exception_begin(estate, &excptContext);
+            PG_TRY();
+            {
+                /*
+                 * We need to run the block's statements with a new eval_econtext
+                 * that belongs to the current subtransaction; if we try to use
+                 * the outer econtext then ExprContext shutdown callbacks will be
+                 * called at the wrong times.
+                 */
+                plpgsql_create_econtext(estate);
+                estate->err_text = NULL;
+                /* check condition value */
+                /* Run the block's statements */
+                rc = exec_stmt(estate, stmt);
+    #ifdef ENABLE_MOT
+                // throws ereport
+                MOTCheckTransactionAborted();
+    #endif
+                estate->err_text = gettext_noop("during statement block exit");
+
+                /*
+                 * If the block ended with RETURN, we may need to copy the return
+                 * value out of the subtransaction eval_context.  This is
+                 * currently only needed for scalar result types --- rowtype
+                 * values will always exist in the function's own memory context.
+                 */
+                if (rc == PLPGSQL_RC_RETURN && !estate->retisset && !estate->retisnull && estate->rettupdesc == NULL) {
+                    int16 resTypLen;
+                    bool resTypByVal = false;
+
+                    get_typlenbyval(estate->rettype, &resTypLen, &resTypByVal);
+                    estate->retval = datumCopy(estate->retval, resTypByVal, resTypLen);
+                }
+
+                exec_exception_end(estate, &excptContext);
+                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+            }
+            PG_CATCH();
+            {
+                exception_flag = true;
+                if (estate->func->debug) {
+                    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[estate->func->debug->comm->comm_idx];
+                    /* client has error and debug on inner funciton, throw current error */
+                    if (debug_comm->hasClientErrorOccured) {
+                        ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
+                                errmsg("Debug client has some error occured.")));
+                    }
+                }
+                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                u_sess->SPI_cxt.is_stp = savedIsSTP;
+                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+
+                estate->cursor_return_data = saved_cursor_data;
+                estate->cursor_return_numbers = saved_cursor_numbers;
+
+                /* reset stream for-loop flag */
+                u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
+
+                if (u_sess->plsql_cxt.b_warning_handler) {
+                    u_sess->plsql_cxt.b_warning_handler = false;
+                }
+
+                /* gs_signal_handle maybe block sigusr2 when accept SIGINT */
+                gs_signal_unblock_sigusr2();
+
+                estate->err_text = gettext_noop("during exception cleanup");
+
+                exec_exception_cleanup(estate, &excptContext);
+    #ifndef ENABLE_MULTIPLE_NODES
+                AutoDopControl dopControl;
+                dopControl.CloseSmp();
+    #endif
+                estate->err_text = gettext_noop("during exec exception handler");
+                rc = exec_exception_handler(estate, block, &excptContext);
+
+                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                u_sess->SPI_cxt.is_stp = savedIsSTP;
+                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+            }
+            PG_END_TRY();
+            AssertEreport(excptContext.old_edata == estate->cur_error,
+                MOD_PLSQL,
+                "save current error should be same error  as estate current error.");
+            // means exception throw from PG_TRY();
+            if (exception_flag) {
+                if (excptContext.handler_type == PLpgSQL_declare_handler::DECLARE_HANDLER_EXIT) {
+                    break;
+                } else if (excptContext.handler_type == PLpgSQL_declare_handler::DECLARE_HANDLER_CONTINUE) {
+                    continue;
+                }
+            }
+        }
+    return rc;
+}
 /* ----------
  * search_goto_target_global			search goto target statement in global
  *				return the searched PLpgSQL statement.

@@ -239,6 +239,12 @@ typedef enum {
  * --------
  */
 typedef enum { PLPGSQL_TRUE, PLPGSQL_FALSE, PLPGSQL_NULL } PLpgSQL_state;
+/* --------
+ * Type of the DECLARE HANDLER.
+ * ref: https://dev.mysql.com/doc/refman/8.0/en/declare-handler.html
+ * --------
+ */
+typedef enum { DECLARE_HANDLER_EXIT, DECLARE_HANDLER_CONTINUE } PLpgSQL_declare_handler;
 
 /**********************************************************************
  * Node and structure definitions
@@ -592,6 +598,7 @@ typedef struct { /* One EXCEPTION ... WHEN clause */
     int lineno;
     PLpgSQL_condition* conditions;
     List* action; /* List of statements */
+    PLpgSQL_declare_handler handler_type;
 } PLpgSQL_exception;
 
 typedef struct PLpgSQL_stmt_block { /* Block of statements			*/
@@ -599,6 +606,7 @@ typedef struct PLpgSQL_stmt_block { /* Block of statements			*/
     int lineno;
     char* label;
     bool isAutonomous;
+    bool isDeclareHandlerStmt;      /* mysql declare handler syntax */
     List* body; /* List of statements */
     int n_initvars;
     int* initvarnos;
@@ -1573,6 +1581,7 @@ extern PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno,
 extern PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace);
 extern int plpgsql_recognize_err_condition(const char* condname, bool allow_sqlstate);
 extern PLpgSQL_condition* plpgsql_parse_err_condition(char* condname);
+extern PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname);
 extern int plpgsql_adddatum(PLpgSQL_datum* newm, bool isChange = true);
 extern int plpgsql_add_initdatums(int** varnos);
 extern void plpgsql_HashTableInit(void);
@@ -1725,6 +1734,7 @@ extern int plpgsql_base_yylex(void);
 extern int plpgsql_yylex(void);
 extern void plpgsql_push_back_token(int token);
 extern void plpgsql_append_source_text(StringInfo buf, int startlocation, int endlocation);
+extern void plpgsql_peek(int* tok1_p);
 extern void plpgsql_peek2(int* tok1_p, int* tok2_p, int* tok1_loc, int* tok2_loc);
 extern void plpgsql_peek(int* tok1_p);
 extern int plpgsql_scanner_errposition(int location);
@@ -1827,6 +1837,8 @@ typedef struct ExceptionContext {
 
     int spi_connected;              /* SPI connected level before exception. */
     int64 stackId;                  /* the start stack Id before entry exception block. */
+
+    PLpgSQL_declare_handler handler_type;
 } ExceptionContext;
 
 /* Quick access array state */

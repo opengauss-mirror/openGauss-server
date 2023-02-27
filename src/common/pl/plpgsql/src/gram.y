@@ -334,6 +334,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
         PLpgSQL_diag_item		*diagitem;
         PLpgSQL_stmt_fetch		*fetch;
         PLpgSQL_case_when		*casewhen;
+        PLpgSQL_declare_handler declare_handler_type;
         PLpgSQL_rec_attr	*recattr;
         Node                            *plnode;
         DefElem             *def;
@@ -378,10 +379,11 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <stmt>	stmt_commit stmt_rollback stmt_savepoint
 %type <stmt>	stmt_case stmt_foreach_a
 
-%type <list>	proc_exceptions
-%type <exception_block> exception_sect
-%type <exception>	proc_exception
-%type <condition>	proc_conditions proc_condition
+%type <list>	proc_exceptions declare_stmts
+%type <exception_block> exception_sect declare_sect
+%type <exception>	proc_exception declare_stmt 
+%type <condition>	proc_conditions proc_condition cond_list cond_element
+%type <declare_handler_type>    handler_type
 
 %type <casewhen>	case_when
 %type <list>	case_when_list opt_case_else
@@ -446,6 +448,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token				T_CURSOR_ROWCOUNT
 %token				T_DECLARE_CURSOR
 %token				T_DECLARE_CONDITION
+%token				T_DECLARE_HANDLER
 
 /*
  * Keyword tokens.  Some of these are reserved and some are not;
@@ -499,10 +502,12 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_FORALL
 %token <keyword>	K_FOREACH
 %token <keyword>	K_FORWARD
+%token <keyword>	K_FOUND
 %token <keyword>	K_FROM
 %token <keyword>	K_FUNCTION
 %token <keyword>	K_GET
 %token <keyword>	K_GOTO
+%token <keyword>	K_HANDLER
 %token <keyword>	K_HINT
 %token <keyword>	K_IF
 %token <keyword>	K_IMMEDIATE
@@ -564,7 +569,9 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_SELECT
 %token <keyword>	K_SCROLL
 %token <keyword>	K_SLICE
+%token <keyword>	K_SQLEXCEPTION
 %token <keyword>	K_SQLSTATE
+%token <keyword>	K_SQLWARNING
 %token <keyword>	K_STACKED
 %token <keyword>	K_STRICT
 %token <keyword>	K_SYS_REFCURSOR
@@ -682,7 +689,21 @@ pl_block		: decl_sect K_BEGIN declare_sect proc_sect exception_sect K_END opt_la
                         newp->n_initvars = $1.n_initvars;
                         newp->initvarnos = $1.initvarnos;
                         newp->body		= $4;
-                        newp->exceptions	= $5;
+                        if ($3 != NULL) {
+                            if ($5 != NULL) {
+                                const char* message = "declare handler and exception cannot be used at the same time";
+                                InsertErrorMessage(message, plpgsql_yylloc);
+                                ereport(errstate,
+                                        (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                        errmsg("declare handler and exception cannot be used at the same time")));
+                            } else {
+                                newp->exceptions	= $3;
+                                newp->isDeclareHandlerStmt  = true;
+                            }
+                        } else {
+                            newp->exceptions	= $5;
+                            newp->isDeclareHandlerStmt  = false;
+                        }
 
                         check_labels($1.label, $7, @7);
                         plpgsql_ns_pop();
@@ -694,23 +715,42 @@ pl_block		: decl_sect K_BEGIN declare_sect proc_sect exception_sect K_END opt_la
                     }
                 ;
 
-declare_sect    : 
-                        {
-                            /* done with decls, so resume identifier lookup */
-                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+declare_sect    :
+                    {
+                        /* done with decls, so resume identifier lookup */
+                        u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                        $$ = NULL; 
+                    }
+                | declare_stmts
+                    {
+                        /* done with decls, so resume identifier lookup */
+                        u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                        if ($1 == NULL) {
+                            $$ = NULL;
+                        } else {
+                            PLpgSQL_exception_block *newp = (PLpgSQL_exception_block *)palloc(sizeof(PLpgSQL_exception_block));
+                            newp->exc_list = $1;
+
+                            $$ = newp;
                         }
-                    | { SetErrorState(); 
-                        u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_DECLARE;
-                    } declare_stmts
-                        {
-                            /* done with decls, so resume identifier lookup */
-                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
-                            u_sess->plsql_cxt.pragma_autonomous = false;
-                        }
-                    ;
+                    }
+                ;
 
 declare_stmts   : declare_stmts declare_stmt
+                    {
+                        if ($2 == NULL)
+                            $$ = $1;
+                        else
+                            $$ = lappend($1, $2);
+                    }
                 | declare_stmt
+                    {
+                        if ($1 == NULL) {
+                            $$ = NULL;
+                        } else {
+                            $$ = list_make1($1);
+                        }
+                    }
                 ;
 
 declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable 
@@ -748,6 +788,7 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                             InvalidOid : createCompositeTypeForCursor(newp, $8);
                         pfree_ext($2->name);
                         pfree($2);
+                        $$ = NULL;
                     }
                 | T_DECLARE_CONDITION decl_varname K_CONDITION K_FOR condition_value ';'
                     {
@@ -767,11 +808,57 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                         var->customCondition = $5;
                         pfree_ext($2->name);
                         pfree($2);
+                        $$ = NULL;
+                    }
+                | T_DECLARE_HANDLER handler_type K_HANDLER K_FOR cond_list proc_stmt
+                    {
+                        int tok = -1;
+                        plpgsql_peek(&tok);
+                        if (tok != K_DECLARE) {
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                        }
+                        PLpgSQL_exception *newp;
+
+                        newp = (PLpgSQL_exception *)palloc0(sizeof(PLpgSQL_exception));
+                        newp->lineno     = plpgsql_location_to_lineno(@1);
+                        newp->handler_type = $2;
+                        newp->conditions = $5;
+                        newp->action	 = list_make1($6);
+
+                        $$ = newp;
                     }
                 ;
 
-condition_value	: K_SQLSTATE
+handler_type	: K_EXIT
+                    { $$ = PLpgSQL_declare_handler::DECLARE_HANDLER_EXIT; }
+                | K_CONTINUE
+                    { $$ = PLpgSQL_declare_handler::DECLARE_HANDLER_CONTINUE; }
+                ;
+cond_list		: cond_list ',' cond_element
                     {
+                        PLpgSQL_condition	*old;
+
+                        for (old = $1; old->next != NULL; old = old->next)
+                                /* skip */ ;
+                        old->next = $3;
+                        $$ = $1;
+                    }
+                | cond_element
+                    {
+                        $$ = $1;
+                    }
+                ;
+
+cond_element	: any_identifier
+                    {
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        $$ = plpgsql_parse_err_condition_b($1);
+                    }
+                | K_SQLSTATE
+                    {
+                        PLpgSQL_condition *newp;
+                        newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
+                        /* next token should be a string literal */
                         char   *sqlstatestr;
                         yylex();
                         if (strcmp(yylval.str, "value") ==0) {
@@ -791,12 +878,76 @@ condition_value	: K_SQLSTATE
                                         errmsg("bad SQLSTATE '%s'",sqlstatestr)));
                         }
 
-                        $$ = MAKE_SQLSTATE(sqlstatestr[0],
-                                          sqlstatestr[1],
-                                          sqlstatestr[2],
-                                          sqlstatestr[3],
-                                          sqlstatestr[4]);
+                        newp->sqlerrstate = MAKE_SQLSTATE(sqlstatestr[0],
+                                                          sqlstatestr[1],
+                                                          sqlstatestr[2],
+                                                          sqlstatestr[3],
+                                                          sqlstatestr[4]);
+                        newp->condname = sqlstatestr;
+                        newp->next = NULL;
+                        $$ = newp;
+                    }
+                | K_SQLWARNING
+                    {
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        $$ = plpgsql_parse_err_condition_b("k_sqlwarning");
+                    }
+                | K_NOT K_FOUND
+                    {
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        $$ = plpgsql_parse_err_condition_b("not_found");
+                    }
+                | K_SQLEXCEPTION
+                    {
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        $$ = plpgsql_parse_err_condition_b("k_sqlexception");
+                    }
+                | ICONST
+                    {
+                        if ($1 == 0){
+                            const char* message = "Incorrect CONDITION value: '0'";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                                        errmsg("Incorrect CONDITION value: '0'")));
+                        }
+                        int num = $1;
+                        char sqlstatestr[5] = {};
+                        for (int i= 4; i >= 0; i--) {
+                            sqlstatestr[i] = num % 10 + '0';
+                            num /= 10;
+                        }
+                        if (num != 0) {
+                            $$ = NULL;
+                        }
+                        PLpgSQL_condition *newp;
+                        newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
+                        if ($1 > 3) {
+                            newp->sqlerrstate = MAKE_SQLSTATE(sqlstatestr[0],
+                                              sqlstatestr[1],
+                                              sqlstatestr[2],
+                                              sqlstatestr[3],
+                                              sqlstatestr[4]);
+                            newp->condname = NULL;
+                            newp->next = NULL;
+                            $$ = newp;
+                        } else {
+                            $$ = NULL;
+                        }
+                    }
+                ;
 
+
+condition_value	: K_SQLSTATE
+                    {
+                        PLpgSQL_condition *newp;
+                        newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
+                        /* next token should be a string literal */
+                        char   *sqlstatestr;
+                        yylex();
+                        if (strcmp(yylval.str, "value") ==0) {
+                            yylex();
+                        }
                         sqlstatestr = yylval.str;
                         
                         if (strlen(sqlstatestr) != 5)
@@ -811,11 +962,11 @@ condition_value	: K_SQLSTATE
                                         errmsg("bad SQLSTATE '%s'",sqlstatestr)));
                         }
 
-                        $$ = MAKE_SQLSTATE(sqlstatestr[0],
-                                          sqlstatestr[1],
-                                          sqlstatestr[2],
-                                          sqlstatestr[3],
-                                          sqlstatestr[4]);
+                        $$ =  MAKE_SQLSTATE(sqlstatestr[0],
+                                            sqlstatestr[1],
+                                            sqlstatestr[2],
+                                            sqlstatestr[3],
+                                            sqlstatestr[4]);
                     }
                 | ICONST
                     {
