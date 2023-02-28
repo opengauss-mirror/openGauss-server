@@ -9951,10 +9951,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* the parent process, return 0 if the fork failed, return the PID if fork succeed. */
         StartPgjobWorker();
     }
-
+    
+    /* if xlog_file_path is not equel to zero and dms is enabled, main standby need to initialize walreceiver
+     * and walrecwrite. Other modes don't need when dms is enabled. */
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER) && g_instance.pid_cxt.WalReceiverPID == 0 &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
-        g_instance.status == NoShutdown && !ENABLE_DMS) {
+        g_instance.status == NoShutdown && (!ENABLE_DMS || SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY)) {
         if (g_instance.pid_cxt.WalRcvWriterPID == 0) {
             g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
             SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
@@ -14728,14 +14730,29 @@ void InitShmemForDmsCallBack()
     InitProcessAndShareMemory();
 }
 
-const char *GetSSServerMode()
+const char *GetSSServerMode(ServerMode mode)
 {
-    if (!SS_OFFICIAL_PRIMARY) {
-        return "Standby";
-    }
- 
-    if (SS_OFFICIAL_PRIMARY) {
-        return "Primary";
+    if (g_instance.attr.attr_storage.xlog_file_path != 0) {
+        if (SS_OFFICIAL_PRIMARY && mode == PRIMARY_MODE) { 
+            return "Primary";
+        }
+        
+        /* main standby in standby cluster */
+        if (SS_OFFICIAL_PRIMARY && mode == STANDBY_MODE) { 
+            return "Standby";
+        }
+        
+        if (!SS_OFFICIAL_PRIMARY) {
+            return "Standby";
+        }
+    } else {
+        if (!SS_OFFICIAL_PRIMARY) {
+            return "Standby";
+        }
+    
+        if (SS_OFFICIAL_PRIMARY) {
+            return "Primary";
+        }
     }
  
     return "Unknown";

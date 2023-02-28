@@ -29,6 +29,7 @@
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/smgr/smgr.h"
+#include "storage/file/fio_device.h"
 #include "utils/guc.h"
 #include "access/xlog.h"
 #include "access/multi_redo_api.h"

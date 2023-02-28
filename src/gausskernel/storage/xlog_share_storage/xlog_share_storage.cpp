@@ -39,6 +39,7 @@
 #include "replication/syncrep_gramparse.h"
 #include "replication/walsender_private.h"
 #include "storage/ipc.h"
+#include "storage/file/fio_device.h"
 #include "storage/dorado_operation/dorado_fd.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
 #include "replication/shared_storage_walreceiver.h"

@@ -89,6 +89,27 @@
     (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_WAITING || \
     g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_REDIRECT))
 
+/* Mode in dorado hyperreplication and dms enabled as follow */
+
+/* main standby which is runing normally, not in intermediate state */
+#define SS_PRIMARY_CLUSTER_NORMAL_PRIMARY                                    \
+    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* main standby which is runing normally, not in intermediate state */
+#define SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY                                    \
+    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* main standby which is runing normally, not in intermediate state */
+#define SS_PRIMARY_STANDBY_CLUSTER_NORMAL                                   \
+    (ENABLE_DMS && ((g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) || \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY)) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
 /* DMS_BUF_NEED_LOAD */
 #define BUF_NEED_LOAD           0x1
 /* DMS_BUF_IS_LOADED */

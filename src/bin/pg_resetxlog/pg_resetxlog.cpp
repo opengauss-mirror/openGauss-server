@@ -86,14 +86,6 @@ static void usage(void);
 #define MAX_STRING_LENGTH 1024
 const uint64 FREEZE_MAX_AGE = 2000000000;
 
-typedef struct DssOptions
-{
-    bool enable_dss;
-    char *vgname;
-    char *socketpath;
-    int  primaryInstId;
-} DssOptions;
-
 /* DSS connect parameters */
 static DssOptions dss;
 
