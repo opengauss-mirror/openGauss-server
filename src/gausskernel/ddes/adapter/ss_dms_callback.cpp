@@ -527,7 +527,12 @@ static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl
             (void)LWLockAcquire(buf_desc->content_lock, content_mode);
             *buf_ctrl = GetDmsBufCtrl(buf_id);
             Assert(buf_id >= 0);
-            Assert((*buf_ctrl)->lock_mode != DMS_LOCK_NULL);
+            if ((*buf_ctrl)->lock_mode == DMS_LOCK_NULL) {
+                ereport(WARNING, (errmodule(MOD_DMS),
+                    errmsg("[%u/%u/%u/%d %d-%u] lock mode is null, still need to transfer page",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum)));
+            }
             (*buf_ctrl)->seg_fileno = buf_desc->extra->seg_fileno;
             (*buf_ctrl)->seg_blockno = buf_desc->extra->seg_blockno;
         } while (0);
