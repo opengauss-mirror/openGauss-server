@@ -83,6 +83,8 @@ extern Node* get_real_rte_varno_attno_or_node(Query* parse, Index* varno, AttrNu
  */
 extern Node* negate_clause(Node* node);
 extern Expr* canonicalize_qual(Expr* qual, bool is_check);
+extern List *pull_ands(List *and_exprs);
+extern List* pull_ors(List* orlist);
 
 /*
  * prototypes for preptlist.c

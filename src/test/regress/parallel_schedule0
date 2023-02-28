@@ -509,6 +509,8 @@ test: vec_prepare_003
 test: sort_optimize_row sort_optimize_column sort_optimize_001
 #test early free
 test: early_free
+#test sublink enhanced, including pullup-non-correlated-sublink and winmagic
+test: sublink_pullup_enhance
 #test for col tpch with vector engine disabled
 test: tpch_disablevec01 tpch_disablevec03 tpch_disablevec04
 test: tpch_disablevec05 tpch_disablevec06 tpch_disablevec07

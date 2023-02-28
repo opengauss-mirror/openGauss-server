@@ -1,0 +1,885 @@
+set rewrite_rule = 'enable_sublink_pullup_enhanced';
+-- tpch Q22, pullup non correlated where sublink
+explain (costs off) 
+select
+	cntrycode,
+	count(*) as numcust,
+	sum(c_acctbal) as totacctbal
+from
+	(
+		select
+			substring(c_phone from 1 for 2) as cntrycode,
+			c_acctbal
+		from
+			customer
+		where
+			substring(c_phone from 1 for 2) in
+				('22', '25', '26', '14', '18', '30', '17')
+			and c_acctbal > (
+				select
+					avg(c_acctbal)
+				from
+					customer
+				where
+					c_acctbal > 0.00
+					and substring(c_phone from 1 for 2) in
+						('22', '25', '26', '14', '18', '30', '17')
+			)
+			and not exists (
+				select
+					*
+				from
+					orders
+				where
+					o_custkey = c_custkey
+			)
+	) as custsale
+group by
+	cntrycode
+order by
+	cntrycode;
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Group By Key: ("substring"((public.customer.c_phone)::text, 1, 2))
+   ->  Sort
+         Sort Key: ("substring"((public.customer.c_phone)::text, 1, 2))
+         ->  Nested Loop
+               Join Filter: (public.customer.c_acctbal > (avg(public.customer.c_acctbal)))
+               ->  Hash Right Anti Join
+                     Hash Cond: (orders.o_custkey = public.customer.c_custkey)
+                     ->  Seq Scan on orders
+                     ->  Hash
+                           ->  Seq Scan on customer
+                                 Filter: ("substring"((c_phone)::text, 1, 2) = ANY ('{22,25,26,14,18,30,17}'::text[]))
+               ->  Aggregate
+                     ->  Seq Scan on customer
+                           Filter: ((c_acctbal > 0.00) AND ("substring"((c_phone)::text, 1, 2) = ANY ('{22,25,26,14,18,30,17}'::text[])))
+(15 rows)
+
+select
+	cntrycode,
+	count(*) as numcust,
+	sum(c_acctbal) as totacctbal
+from
+	(
+		select
+			substring(c_phone from 1 for 2) as cntrycode,
+			c_acctbal
+		from
+			customer
+		where
+			substring(c_phone from 1 for 2) in
+				('22', '25', '26', '14', '18', '30', '17')
+			and c_acctbal > (
+				select
+					avg(c_acctbal)
+				from
+					customer
+				where
+					c_acctbal > 0.00
+					and substring(c_phone from 1 for 2) in
+						('22', '25', '26', '14', '18', '30', '17')
+			)
+			and not exists (
+				select
+					*
+				from
+					orders
+				where
+					o_custkey = c_custkey
+			)
+	) as custsale
+group by
+	cntrycode
+order by
+	cntrycode;
+ cntrycode | numcust | totacctbal 
+-----------+---------+------------
+ 14        |       7 |   51640.71
+ 17        |       8 |   62288.98
+ 18        |      14 |  111072.45
+ 22        |       9 |   65544.55
+ 25        |      15 |  113238.60
+ 26        |       6 |   47747.11
+ 30        |      16 |  117050.33
+(7 rows)
+
+-- tpch Q22, no expand
+explain (costs off) 
+select
+	cntrycode,
+	count(*) as numcust,
+	sum(c_acctbal) as totacctbal
+from
+	(
+		select
+			substring(c_phone from 1 for 2) as cntrycode,
+			c_acctbal
+		from
+			customer
+		where
+			substring(c_phone from 1 for 2) in
+				('22', '25', '26', '14', '18', '30', '17')
+			and c_acctbal > (
+				select
+                /*+ no_expand */ 
+					avg(c_acctbal)
+				from
+					customer
+				where
+					c_acctbal > 0.00
+					and substring(c_phone from 1 for 2) in
+						('22', '25', '26', '14', '18', '30', '17')
+			)
+			and not exists (
+				select
+					*
+				from
+					orders
+				where
+					o_custkey = c_custkey
+			)
+	) as custsale
+group by
+	cntrycode
+order by
+	cntrycode;
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Group By Key: ("substring"((public.customer.c_phone)::text, 1, 2))
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Seq Scan on customer
+                 Filter: ((c_acctbal > 0.00) AND ("substring"((c_phone)::text, 1, 2) = ANY ('{22,25,26,14,18,30,17}'::text[])))
+   ->  Sort
+         Sort Key: ("substring"((public.customer.c_phone)::text, 1, 2))
+         ->  Hash Right Anti Join
+               Hash Cond: (orders.o_custkey = public.customer.c_custkey)
+               ->  Seq Scan on orders
+               ->  Hash
+                     ->  Seq Scan on customer
+                           Filter: ((c_acctbal > $0) AND ("substring"((c_phone)::text, 1, 2) = ANY ('{22,25,26,14,18,30,17}'::text[])))
+(14 rows)
+
+-- tpch Q11, pullup non correlated having sublink
+explain (costs off) 
+select
+	ps_partkey,
+	sum(ps_supplycost * ps_availqty) as value
+from
+	partsupp,
+	supplier,
+	nation
+where
+	ps_suppkey = s_suppkey
+	and s_nationkey = n_nationkey
+	and n_name = 'ROMANIA'
+group by
+	ps_partkey having
+		sum(ps_supplycost * ps_availqty) > (
+			select
+				sum(ps_supplycost * ps_availqty) * 0.0001000000
+			from
+				partsupp,
+				supplier,
+				nation
+			where
+				ps_suppkey = s_suppkey
+				and s_nationkey = n_nationkey
+				and n_name = 'ROMANIA'
+		)
+order by
+	value desc;
+                                                                                                QUERY PLAN                                                                                                
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: (sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::numeric))) DESC
+   ->  Nested Loop
+         Join Filter: ((sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::numeric))) > ((sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::numeric))) * .0001000000))
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+                     ->  Seq Scan on partsupp
+                     ->  Hash
+                           ->  Hash Join
+                                 Hash Cond: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                                 ->  Seq Scan on supplier
+                                 ->  Hash
+                                       ->  Seq Scan on nation
+                                             Filter: (n_name = 'ROMANIA'::bpchar)
+         ->  HashAggregate
+               Group By Key: public.partsupp.ps_partkey
+               ->  Hash Join
+                     Hash Cond: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+                     ->  Seq Scan on partsupp
+                     ->  Hash
+                           ->  Hash Join
+                                 Hash Cond: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                                 ->  Seq Scan on supplier
+                                 ->  Hash
+                                       ->  Seq Scan on nation
+                                             Filter: (n_name = 'ROMANIA'::bpchar)
+(27 rows)
+
+select
+	ps_partkey,
+	sum(ps_supplycost * ps_availqty) as value
+from
+	partsupp,
+	supplier,
+	nation
+where
+	ps_suppkey = s_suppkey
+	and s_nationkey = n_nationkey
+	and n_name = 'ROMANIA'
+group by
+	ps_partkey having
+		sum(ps_supplycost * ps_availqty) > (
+			select
+				sum(ps_supplycost * ps_availqty) * 0.0001000000
+			from
+				partsupp,
+				supplier,
+				nation
+			where
+				ps_suppkey = s_suppkey
+				and s_nationkey = n_nationkey
+				and n_name = 'ROMANIA'
+		)
+order by
+	value desc;
+ ps_partkey |    value    
+------------+-------------
+        917 | 12344895.22
+        685 | 11950940.60
+       1081 | 10580686.59
+       1011 |  9608892.80
+        623 |  9343081.80
+        787 |  8569925.48
+       1185 |  8073895.00
+        367 |  7883443.69
+        109 |  7657641.60
+       1451 |  7613526.60
+       1899 |  7550881.80
+       1842 |  7505106.20
+        213 |  7479470.28
+        161 |  7398630.95
+       1416 |  7287490.02
+       1309 |  7213260.60
+        949 |  7197510.84
+       1323 |  7140115.71
+       1046 |  7046743.50
+         69 |  6970845.15
+       1581 |  6760133.10
+        862 |  6658234.84
+       1283 |  6609824.32
+       1277 |  6599037.12
+        828 |  6565785.62
+       1536 |  6561151.80
+        207 |  6537250.98
+       1085 |  6537104.27
+        751 |  6531660.40
+        360 |  6530297.41
+       1984 |  6495512.50
+        765 |  6460546.80
+       1917 |  6227301.68
+       1716 |  6116013.75
+        730 |  6100067.88
+        994 |  6032702.08
+       1144 |  6012205.92
+       1108 |  5914872.72
+       1950 |  5912352.20
+       1963 |  5873329.44
+         26 |  5867999.40
+        983 |  5846645.17
+       1808 |  5835183.38
+        504 |  5770344.51
+       1016 |  5718859.87
+       1494 |  5687809.60
+       1551 |  5668132.44
+        262 |  5625893.82
+        465 |  5537420.64
+        125 |  5533747.40
+       1972 |  5526059.28
+       1125 |  5514223.46
+        601 |  5513532.30
+        886 |  5450951.91
+        173 |  5409250.08
+       1752 |  5389034.04
+       1644 |  5387317.60
+        526 |  5350481.57
+        895 |  5346555.18
+       1576 |  5301661.68
+        692 |  5269557.57
+        951 |  5264770.02
+        861 |  5214617.22
+       1545 |  5196334.26
+       1356 |  5192649.28
+        789 |  5162645.80
+       1516 |  5107050.00
+       1616 |  5091834.00
+       1116 |  4992110.70
+        551 |  4982558.21
+       1887 |  4934262.24
+        885 |  4876658.57
+        116 |  4852263.60
+        251 |  4747015.56
+        394 |  4624460.10
+       1091 |  4589240.04
+        329 |  4558084.80
+        632 |  4494879.28
+       1485 |  4482428.50
+       1725 |  4340873.16
+        816 |  4326623.61
+        699 |  4310431.00
+        403 |  4283221.60
+       1768 |  4251602.98
+       1158 |  4229896.16
+        591 |  4216726.24
+       1248 |  4157093.60
+       1679 |  4156156.64
+        663 |  4142402.22
+       1719 |  4101486.48
+        395 |  4052997.76
+       1351 |  4045565.12
+        531 |  4042060.39
+       1951 |  4023967.36
+       1294 |  4009307.81
+        616 |  4004057.26
+        316 |  3986943.88
+       1928 |  3964898.76
+       1337 |  3951488.10
+       1851 |  3918641.34
+        521 |  3913058.16
+        883 |  3908087.82
+        961 |  3814756.38
+        366 |  3812257.88
+       1875 |  3800216.84
+        668 |  3772880.16
+        107 |  3756380.24
+       1061 |  3747377.84
+         16 |  3745783.12
+        294 |  3744033.70
+       1561 |  3711744.00
+       1574 |  3702071.64
+       1732 |  3695765.58
+        564 |  3680200.80
+       1371 |  3677874.16
+        516 |  3664770.45
+       1585 |  3641002.20
+        755 |  3635116.80
+        959 |  3620453.76
+        190 |  3559078.95
+       1194 |  3479709.09
+        416 |  3452131.59
+        333 |  3446486.38
+        377 |  3359789.30
+       1455 |  3342304.35
+        289 |  3270429.10
+        689 |  3260147.55
+       1919 |  3239067.00
+       1603 |  3194711.46
+       1438 |  3163393.12
+       1777 |  3107373.72
+         11 |  3035887.92
+       1340 |  3030301.09
+       1287 |  2985392.48
+       1347 |  2983078.12
+       1205 |  2971470.28
+        285 |  2967973.75
+        357 |  2967100.97
+        429 |  2962631.88
+         91 |  2951493.40
+       1161 |  2928475.76
+        914 |  2927894.16
+       1962 |  2925555.12
+       1483 |  2918425.86
+        561 |  2904720.39
+        258 |  2895651.20
+        194 |  2840047.13
+       1671 |  2818290.28
+       1477 |  2777362.76
+       1505 |  2766157.98
+        332 |  2741984.16
+        301 |  2737431.90
+        729 |  2706503.68
+        654 |  2662180.27
+        142 |  2647051.80
+        164 |  2643604.15
+       1662 |  2642551.92
+       1554 |  2639338.38
+        280 |  2631317.56
+       1541 |  2603175.96
+       1610 |  2463001.95
+        407 |  2460304.47
+        199 |  2442107.46
+        534 |  2420752.38
+       1313 |  2408870.75
+       1759 |  2387379.32
+       1115 |  2321227.26
+       1251 |  2311454.53
+       1285 |  2260852.77
+        159 |  2256004.65
+       1973 |  2243745.69
+       1638 |  2232762.96
+       1774 |  2217104.85
+        556 |  2195013.90
+       1694 |  2163305.16
+        819 |  2152055.50
+        992 |  2121582.28
+        785 |  2121133.75
+       1985 |  2069183.28
+        794 |  2059945.54
+        498 |  2055444.32
+       1385 |  2051890.11
+       1916 |  2032768.96
+        361 |  2017055.81
+         76 |  2012711.58
+       1873 |  2000792.40
+         94 |  1986087.48
+       1651 |  1980440.40
+       1059 |  1959087.04
+       1122 |  1942108.90
+        261 |  1928153.10
+       1861 |  1928114.84
+        461 |  1877992.32
+        224 |  1863852.24
+       1242 |  1851493.60
+       1634 |  1743866.22
+        761 |  1741958.65
+       1080 |  1741751.34
+        338 |  1724805.12
+        661 |  1709946.82
+        388 |  1696006.86
+        231 |  1655972.00
+        525 |  1633729.79
+       1906 |  1626282.30
+         85 |  1599847.56
+         60 |  1579401.77
+        926 |  1570368.78
+       1511 |  1569870.02
+       1113 |  1516263.20
+       1089 |  1477486.65
+       1422 |  1435904.00
+        458 |  1433040.45
+       1907 |  1421100.55
+        323 |  1419854.80
+        851 |  1400193.30
+         44 |  1353557.34
+        595 |  1350125.70
+       1822 |  1337990.67
+          1 |  1333528.04
+       1710 |  1331788.48
+         61 |  1322305.60
+        798 |  1313571.96
+        784 |  1309867.02
+        651 |  1307083.56
+       1468 |  1302397.20
+       1149 |  1289607.35
+       1179 |  1242058.40
+        818 |  1225981.68
+       1189 |  1204828.08
+        797 |  1181263.32
+       1375 |  1178128.60
+       1015 |  1164198.48
+       1994 |  1149222.96
+         66 |  1148101.44
+       1929 |  1131697.92
+        240 |  1126682.48
+       1378 |  1121941.05
+        762 |  1109467.26
+        586 |  1108200.58
+        716 |  1107627.42
+        752 |  1102384.63
+       1220 |  1083540.00
+       1675 |  1064600.76
+       1380 |  1020105.06
+        204 |  1014095.32
+       1214 |  1013602.86
+       1186 |  1006354.08
+        927 |  1003227.51
+       1473 |   997508.48
+       1701 |   994231.40
+        168 |   988803.90
+        852 |   977609.14
+        235 |   977200.14
+        501 |   961161.66
+       1620 |   950561.25
+       1709 |   927244.00
+       1565 |   921078.22
+        960 |   913060.80
+        385 |   910892.90
+       1434 |   905713.25
+        658 |   894649.92
+       1865 |   886024.01
+        487 |   883607.88
+       1279 |   877210.28
+       1211 |   875261.76
+        555 |   869246.77
+       1521 |   866284.81
+        427 |   839771.02
+       1628 |   832363.52
+        297 |   832286.88
+       1051 |   824164.90
+        185 |   794405.50
+       1412 |   793718.80
+        432 |   782403.82
+        216 |   776184.13
+       1056 |   772092.44
+        494 |   768524.43
+       1446 |   746482.32
+       1661 |   733795.56
+       1274 |   711073.48
+        451 |   676703.28
+       1685 |   661635.90
+       1143 |   660014.26
+       1318 |   655995.66
+       1531 |   649589.40
+       1514 |   627482.08
+       1612 |   626730.56
+        948 |   622068.66
+        571 |   619871.04
+       1767 |   614422.00
+        351 |   601983.45
+       1499 |   594599.22
+       1941 |   594211.48
+       1153 |   584114.56
+       1257 |   580110.85
+       1461 |   576845.88
+       1361 |   570409.02
+       1250 |   567963.36
+        422 |   530847.10
+       1653 |   525077.35
+       1669 |   513932.46
+       1596 |   505225.82
+        850 |   483358.05
+       1151 |   481433.04
+         86 |   471697.70
+        894 |   465151.80
+         19 |   464872.80
+        474 |   455889.28
+        493 |   455628.44
+        267 |   453340.80
+       1856 |   450086.28
+       1830 |   446553.54
+        456 |   439968.00
+        305 |   421891.68
+       1594 |   417994.09
+       1894 |   414577.35
+       1240 |   413718.76
+         35 |   398837.24
+       1180 |   391898.15
+       1794 |   355474.42
+       1024 |   319659.12
+        594 |   315583.24
+         10 |   314550.82
+       1953 |   314372.14
+       1261 |   312283.65
+       1832 |   308459.25
+       1785 |   300945.33
+        138 |   298832.01
+        753 |   297884.88
+       1790 |   277454.80
+        133 |   262568.64
+         51 |   260089.38
+        620 |   246511.60
+       1961 |   232870.27
+       1224 |   227429.47
+        183 |   225827.28
+       1735 |   219074.20
+       1816 |   218339.50
+       1743 |   217085.97
+        985 |   182239.20
+       1761 |   182100.00
+        464 |   179639.88
+        817 |   170795.52
+        485 |   170664.12
+       1818 |   161250.35
+        630 |   158427.72
+       1571 |   156406.05
+       1094 |   155577.60
+        436 |   147283.92
+        916 |   146788.80
+        310 |   145905.18
+       1751 |   140193.69
+        993 |   136907.25
+       1050 |   136152.30
+       1394 |   120166.11
+       1177 |   115967.72
+        151 |   110222.90
+(357 rows)
+
+-- tpch Q11, no expand
+explain (costs off) 
+select
+	ps_partkey,
+	sum(ps_supplycost * ps_availqty) as value
+from
+	partsupp,
+	supplier,
+	nation
+where
+	ps_suppkey = s_suppkey
+	and s_nationkey = n_nationkey
+	and n_name = 'ROMANIA'
+group by
+	ps_partkey having
+		sum(ps_supplycost * ps_availqty) > (
+			select
+            /*+ no_expand */ 
+				sum(ps_supplycost * ps_availqty) * 0.0001000000
+			from
+				partsupp,
+				supplier,
+				nation
+			where
+				ps_suppkey = s_suppkey
+				and s_nationkey = n_nationkey
+				and n_name = 'ROMANIA'
+		)
+order by
+	value desc;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: inner_subquery.value DESC
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Hash Join
+                 Hash Cond: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+                 ->  Seq Scan on partsupp
+                 ->  Hash
+                       ->  Hash Join
+                             Hash Cond: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                             ->  Seq Scan on supplier
+                             ->  Hash
+                                   ->  Seq Scan on nation
+                                         Filter: (n_name = 'ROMANIA'::bpchar)
+   ->  Subquery Scan on inner_subquery
+         ->  HashAggregate
+               Group By Key: public.partsupp.ps_partkey
+               Filter: (sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::numeric)) > $0)
+               ->  Hash Join
+                     Hash Cond: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+                     ->  Seq Scan on partsupp
+                     ->  Hash
+                           ->  Hash Join
+                                 Hash Cond: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                                 ->  Seq Scan on supplier
+                                 ->  Hash
+                                       ->  Seq Scan on nation
+                                             Filter: (n_name = 'ROMANIA'::bpchar)
+(28 rows)
+
+-- tpch Q2, winmagic
+explain (costs off) 
+select
+	s_acctbal,
+	s_name,
+	n_name,
+	p_partkey,
+	p_mfgr,
+	s_address,
+	s_phone,
+	s_comment
+from
+	part,
+	supplier,
+	partsupp,
+	nation,
+	region
+where
+	p_partkey = ps_partkey
+	and s_suppkey = ps_suppkey
+	and p_size = 41
+	and p_type like '%STEEL'
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'MIDDLE EAST'
+	and ps_supplycost = (
+		select
+			min(ps_supplycost)
+		from
+			partsupp,
+			supplier,
+			nation,
+			region
+		where
+			p_partkey = ps_partkey
+			and s_suppkey = ps_suppkey
+			and s_nationkey = n_nationkey
+			and n_regionkey = r_regionkey
+			and r_name = 'MIDDLE EAST'
+	)
+order by
+	s_acctbal desc,
+	n_name,
+	s_name,
+	p_partkey;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: inner_subquery.s_acctbal DESC, inner_subquery.n_name, inner_subquery.s_name, inner_subquery.p_partkey
+   ->  Subquery Scan on inner_subquery
+         Filter: (inner_subquery.ps_supplycost = inner_subquery.min)
+         ->  WindowAgg
+               ->  Sort
+                     Sort Key: part.p_partkey
+                     ->  Nested Loop
+                           Join Filter: (nation.n_nationkey = supplier.s_nationkey)
+                           ->  Nested Loop
+                                 Join Filter: (nation.n_regionkey = region.r_regionkey)
+                                 ->  Seq Scan on region
+                                       Filter: (r_name = 'MIDDLE EAST'::bpchar)
+                                 ->  Seq Scan on nation
+                           ->  Materialize
+                                 ->  Hash Join
+                                       Hash Cond: (partsupp.ps_suppkey = supplier.s_suppkey)
+                                       ->  Hash Join
+                                             Hash Cond: (partsupp.ps_partkey = part.p_partkey)
+                                             ->  Seq Scan on partsupp
+                                             ->  Hash
+                                                   ->  Seq Scan on part
+                                                         Filter: (((p_type)::text ~~ '%STEEL'::text) AND (p_size = 41))
+                                       ->  Hash
+                                             ->  Seq Scan on supplier
+(25 rows)
+
+select
+	s_acctbal,
+	s_name,
+	n_name,
+	p_partkey,
+	p_mfgr,
+	s_address,
+	s_phone,
+	s_comment
+from
+	part,
+	supplier,
+	partsupp,
+	nation,
+	region
+where
+	p_partkey = ps_partkey
+	and s_suppkey = ps_suppkey
+	and p_size = 41
+	and p_type like '%STEEL'
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'MIDDLE EAST'
+	and ps_supplycost = (
+		select
+			min(ps_supplycost)
+		from
+			partsupp,
+			supplier,
+			nation,
+			region
+		where
+			p_partkey = ps_partkey
+			and s_suppkey = ps_suppkey
+			and s_nationkey = n_nationkey
+			and n_regionkey = r_regionkey
+			and r_name = 'MIDDLE EAST'
+	)
+order by
+	s_acctbal desc,
+	n_name,
+	s_name,
+	p_partkey;
+ s_acctbal |          s_name           |          n_name           | p_partkey |          p_mfgr           |       s_address       |     s_phone     |                   s_comment                    
+-----------+---------------------------+---------------------------+-----------+---------------------------+-----------------------+-----------------+------------------------------------------------
+   2512.41 | Supplier#000000038        | EGYPT                     |        87 | Manufacturer#4            | xEcx45vD0FXHT7c9mvWFY | 14-361-296-6426 | ins. fluffily special accounts haggle slyly af
+(1 row)
+
+-- tpch Q2, no expand
+explain (costs off) 
+select
+	s_acctbal,
+	s_name,
+	n_name,
+	p_partkey,
+	p_mfgr,
+	s_address,
+	s_phone,
+	s_comment
+from
+	part,
+	supplier,
+	partsupp,
+	nation,
+	region
+where
+	p_partkey = ps_partkey
+	and s_suppkey = ps_suppkey
+	and p_size = 41
+	and p_type like '%STEEL'
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'MIDDLE EAST'
+	and ps_supplycost = (
+		select
+        /*+ no_expand */ 
+			min(ps_supplycost)
+		from
+			partsupp,
+			supplier,
+			nation,
+			region
+		where
+			p_partkey = ps_partkey
+			and s_suppkey = ps_suppkey
+			and s_nationkey = n_nationkey
+			and n_regionkey = r_regionkey
+			and r_name = 'MIDDLE EAST'
+	)
+order by
+	s_acctbal desc,
+	n_name,
+	s_name,
+	p_partkey;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: public.supplier.s_acctbal DESC, public.nation.n_name, public.supplier.s_name, part.p_partkey
+   ->  Hash Join
+         Hash Cond: (public.partsupp.ps_partkey = part.p_partkey)
+         Join Filter: (public.partsupp.ps_supplycost = (SubPlan 1))
+         ->  Hash Join
+               Hash Cond: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+               ->  Seq Scan on partsupp
+               ->  Hash
+                     ->  Hash Join
+                           Hash Cond: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                           ->  Seq Scan on supplier
+                           ->  Hash
+                                 ->  Hash Join
+                                       Hash Cond: (public.nation.n_regionkey = public.region.r_regionkey)
+                                       ->  Seq Scan on nation
+                                       ->  Hash
+                                             ->  Seq Scan on region
+                                                   Filter: (r_name = 'MIDDLE EAST'::bpchar)
+         ->  Hash
+               ->  Seq Scan on part
+                     Filter: (((p_type)::text ~~ '%STEEL'::text) AND (p_size = 41))
+         SubPlan 1
+           ->  Aggregate
+                 ->  Nested Loop
+                       Join Filter: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                       ->  Nested Loop
+                             Join Filter: (public.nation.n_regionkey = public.region.r_regionkey)
+                             ->  Seq Scan on region
+                                   Filter: (r_name = 'MIDDLE EAST'::bpchar)
+                             ->  Seq Scan on nation
+                       ->  Materialize
+                             ->  Hash Join
+                                   Hash Cond: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+                                   ->  Seq Scan on partsupp
+                                         Filter: (part.p_partkey = ps_partkey)
+                                   ->  Hash
+                                         ->  Seq Scan on supplier
+(38 rows)
+

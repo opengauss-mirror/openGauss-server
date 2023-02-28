@@ -3516,9 +3516,11 @@ static unsigned int get_rewrite_rule_bits(RewriteHint* hint)
         }
         else if (pg_strcasecmp(param_name, "disable_pullup_expr_sublink") == 0) {
             bits = bits | SUBLINK_PULLUP_DISABLE_EXPR;
+        } else if (pg_strcasecmp(param_name, "enable_sublink_pullup_enhanced") == 0) {
+            bits = bits | SUBLINK_PULLUP_ENHANCED;
         } else {
             elog(WARNING, "invalid rewrite rule. (Supported rules: lazyagg, magicset, partialpush, uniquecheck, "
-                          "disablerep, intargetlist,disable_pullup_expr_sublink)");
+                          "disablerep, intargetlist,disable_pullup_expr_sublink, enable_sublink_pullup_enhanced)");
         }
     }
 
