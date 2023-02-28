@@ -1506,6 +1506,7 @@ Relation partitionGetRelation(Relation rel, Partition part)
     relation->rd_index = rel->rd_index;
     relation->rd_indextuple = rel->rd_indextuple;
     relation->rd_am = rel->rd_am;
+    relation->rd_amroutine = rel->rd_amroutine;
     relation->rd_indnkeyatts = rel->rd_indnkeyatts;
 	relation->rd_tam_ops = rel->rd_tam_ops;
 

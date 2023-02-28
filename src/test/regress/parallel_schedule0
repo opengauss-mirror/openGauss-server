@@ -1061,6 +1061,10 @@ test: ceil_negtive_zero
 # dolphin_guc_config
 test: dolphin_guc_config
 
+# optimizing_index_scan
+test: optimizing_index_scan_cstore
+test: optimizing_index_scan_ustore
+
 # row_count()
 test: row_count_function
 

@@ -138,9 +138,10 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
     isUHeap = RelationIsUstoreFormat(node->ss.ss_currentRelation);
-    tmpslot = MakeSingleTupleTableSlot(RelationGetDescr(scandesc->heapRelation),
+    if (isUHeap) {
+        tmpslot = MakeSingleTupleTableSlot(RelationGetDescr(scandesc->heapRelation),
         false, scandesc->heapRelation->rd_tam_ops);
-
+    }
     /*
      * OK, now that we have what we need, fetch the next tuple.
      */
@@ -262,7 +263,9 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
          */
         if (tuple == NULL)
             PredicateLockPage(indexScan->heapRelation, ItemPointerGetBlockNumber(tid), estate->es_snapshot);
-        ExecDropSingleTupleTableSlot(tmpslot);
+        if (isUHeap) {
+            ExecDropSingleTupleTableSlot(tmpslot);
+        }
         return slot;
     }
 
@@ -270,7 +273,9 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
      * if we get here it means the index scan failed so we are at the end of
      * the scan..
      */
-    ExecDropSingleTupleTableSlot(tmpslot);
+    if (isUHeap) {
+        ExecDropSingleTupleTableSlot(tmpslot);
+    }
     return ExecClearTuple(slot);
 }
 

@@ -946,6 +946,14 @@ static inline void* MemCpy(void* dest, const void* src, Size len)
 #define PG_USED_FOR_ASSERTS_ONLY __attribute__((unused))
 #endif
 
+#if defined(__GNUC__) || defined(__SUNPRO_C) || defined(__IBMC__)
+#define pg_noinline __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define pg_noinline __declspec(noinline)
+#else
+#define pg_noinline
+#endif
+
 // Conditionally disable a feature
 //
 // To reduce the exposure surface of the engine, we disabled some seldom

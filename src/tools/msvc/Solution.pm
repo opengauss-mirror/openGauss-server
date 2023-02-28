@@ -317,16 +317,6 @@ s{PG_VERSION_STR "[^"]+"}{__STRINGIFY(x) #x\n#define __STRINGIFY2(z) __STRINGIFY
 	}
 
 	if (IsNewer(
-			'src\common\backend\utils\sort\qsort_tuple.c',
-			'src\common\backend\utils\sort\gen_qsort_tuple.pl'))
-	{
-		print "Generating qsort_tuple.c...\n";
-		system(
-'perl src\common\backend\utils\sort\gen_qsort_tuple.pl > src\common\backend\utils\sort\qsort_tuple.c'
-		);
-	}
-
-	if (IsNewer(
 			'src\common\interfaces\libpq\libpq.rc',
 			'src\common\interfaces\libpq\libpq.rc.in'))
 	{

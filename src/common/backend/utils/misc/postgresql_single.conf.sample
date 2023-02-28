@@ -388,6 +388,7 @@ enable_kill_query = off			# optional: [on, off], default: off
 #plan_mode_seed = 0         # range -1-0x7fffffff
 #check_implicit_conversions = off
 #enable_functional_dependency = off
+#enable_indexscan_optimization = off
 
 #------------------------------------------------------------------------------
 # ERROR REPORTING AND LOGGING

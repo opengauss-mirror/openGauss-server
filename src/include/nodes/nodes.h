@@ -361,6 +361,10 @@ typedef enum NodeTag {
     T_MemoryTracking,
 
     /*
+     * TAGS FOR AMROUTINE NODES (amapi.h)
+     */
+    T_IndexAmRoutine = 649,
+    /*
      * TAGS FOR VALUE NODES (value.h)
      */
     T_Value = 650,
