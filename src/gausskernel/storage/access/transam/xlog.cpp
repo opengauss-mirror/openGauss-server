@@ -6844,6 +6844,7 @@ void XLOGShmemInit(void)
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->SharedHotStandbyActive = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->WalWriterSleeping = false;
+    t_thrd.shemem_ptr_cxt.XLogCtl->xlogFlushPtrForPerRead = InvalidXLogRecPtr;
     if (!IsInitdb && !dummyStandbyMode) {
         t_thrd.shemem_ptr_cxt.XLogCtl->lastRemovedSegNo = GetOldestXLOGSegNo(t_thrd.proc_cxt.DataDir);
     }
@@ -17913,7 +17914,7 @@ retry:
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
     if (ENABLE_DSS && ENABLE_DMS) {
-        bool ss_ret = SSReadXlogInternal(xlogreader, targetPagePtr, readBuf);
+        bool ss_ret = SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf);
         if (!ss_ret) {
             ereport(emode_for_corrupt_record(emode, RecPtr),
                 (errcode_for_file_access(),
@@ -18589,7 +18590,14 @@ pg_crc32 GetXlogRecordCrc(XLogRecPtr RecPtr, bool &crcvalid, XLogPageReadCB page
     /* Set up XLOG reader facility */
     rc = memset_s(&readprivate, sizeof(XLogPageReadPrivate), 0, sizeof(XLogPageReadPrivate));
     securec_check(rc, "\0", "\0");
-    xlogreader = XLogReaderAllocate(pagereadfunc, &readprivate, bufAlignSize);
+    
+    /* we need to read xlog from dss when dms and dss enabled */
+    if (ENABLE_DMS && ENABLE_DSS) {
+        xlogreader = SSXLogReaderAllocate(pagereadfunc, &readprivate, ALIGNOF_BUFFER);
+    } else {
+        xlogreader = XLogReaderAllocate(pagereadfunc, &readprivate, bufAlignSize);
+    }
+
     if (xlogreader == NULL) {
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory"),
                         errdetail("Failed while allocating an XLog reading processor")));

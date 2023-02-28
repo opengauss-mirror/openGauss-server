@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "replication/replicainternal.h"
+#include "tool_common.h"
 
 #define CONFIGRURE_FILE "postgresql.conf"
 #define CONFIGRURE_FILE_BAK "postgresql.conf.bak"
@@ -43,6 +44,7 @@ extern char conninfo_global[MAX_REPLNODE_NUM][MAX_VALUE_LEN];
 extern int standby_recv_timeout;
 extern int standby_connect_timeout; /* 120 sec = default */
 extern char gaussdb_state_file[MAXPGPATH];
+extern SSInstanceConfig instance_config;
 
 void delete_datadir(const char* dirname);
 

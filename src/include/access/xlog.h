@@ -134,7 +134,7 @@ typedef enum WalLevel {
 /* Do we need to WAL-log information required only for Hot Standby and logical replication? */
 #define XLogStandbyInfoActive()                                         \
     (g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_HOT_STANDBY && \
-        !g_instance.attr.attr_storage.dms_attr.enable_dms)
+        (!g_instance.attr.attr_storage.dms_attr.enable_dms || SS_PRIMARY_STANDBY_CLUSTER_NORMAL))
 /* Do we need to WAL-log information required only for logical replication? */
 #define XLogLogicalInfoActive() (g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_LOGICAL)
 extern const char* DemoteModeDescs[];
@@ -613,6 +613,9 @@ typedef struct XLogCtlData {
     XLogRecPtr remainCommitLsn;
     
     bool walrcv_reply_dueto_commit;
+
+    /* streaming replication during pre-reading for dss */
+    XLogRecPtr xlogFlushPtrForPerRead;
 
     slock_t info_lck; /* locks shared variables shown above */
 } XLogCtlData;

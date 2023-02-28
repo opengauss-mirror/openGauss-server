@@ -35,6 +35,7 @@
 #include "ddes/dms/ss_reform_common.h"
 #include "storage/file/fio_device.h"
 #include "storage/smgr/segment_internal.h"
+#include "replication/walreceiver.h"
 
 /*
  * Add xlog reader private structure for page read.
@@ -111,7 +112,7 @@ static int emode_for_corrupt_record(int emode, XLogRecPtr RecPtr)
 }
 
 static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int expectReadLen,
-    char *buf, TimeLineID *readTLI, char* xlog_path)
+                      XLogRecPtr targetRecPtr, char *buf, TimeLineID *readTLI, char* xlog_path)
 {
     /* Load reader private data */
     XLogPageReadPrivate *readprivate = (XLogPageReadPrivate *)xlogreader->private_data;
@@ -173,7 +174,7 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
     /* Read the requested page */
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
-    bool ret = SSReadXlogInternal(xlogreader, targetPagePtr, buf);
+    bool ret = SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, buf);
     if (!ret) {
         ereport(LOG, (errcode_for_file_access(), errmsg("read xlog(start:%X/%X, pos:%u len:%d) failed : %m",
                                                         static_cast<uint32>(targetPagePtr >> BIT_NUM_INT32),
@@ -211,22 +212,44 @@ next_record_is_invalid:
 int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
     XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path)
 {
-    int read_len = SSReadXLog(xlogreader, targetPagePtr, Max(XLOG_BLCKSZ, reqLen), readBuf,
-        readTLI, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlogDir);
+    int read_len = SSReadXLog(xlogreader, targetPagePtr, Max(XLOG_BLCKSZ, reqLen), targetRecPtr,
+                              readBuf, readTLI, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlogDir);
     return read_len;
 }
 
-bool SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, char *buf)
+bool SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XLogRecPtr targetRecPtr, char *buf)
 {
     uint32 preReadOff;
+    XLogRecPtr xlogFlushPtrForPerRead = xlogreader->xlogFlushPtrForPerRead;
+    bool isReadFile = true;
 
     do {
-        if (XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr)) {
+        /* 
+         * That source is XLOG_FROM_STREAM indicate that walreceiver receive xlog and walrecwriter have wrriten xlog
+         * into pg_xlog segment file in dss. There exists a condition which preReadBuf possibly is zero for some xlog
+         * record just writing into pg_xlog file when source is XLOG_FROM_STREAM and dms and dss are enabled. So we
+         * need to reread xlog from dss to preReadBuf.
+         */
+        if (SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
+            volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
+            if (XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr) && 
+               ((targetRecPtr < xlogFlushPtrForPerRead && t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM) || 
+               (!xlogctl->IsRecoveryDone))) {
+                   isReadFile = false;
+               }
+        }
+
+        if ((XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr) &&
+             !SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) || (!isReadFile)) {
             preReadOff = targetPagePtr % XLogPreReadSize;
             int err = memcpy_s(buf, XLOG_BLCKSZ, xlogreader->preReadBuf + preReadOff, XLOG_BLCKSZ);
             securec_check(err, "\0", "\0");
             break;
         } else {
+            if (SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
+                xlogreader->xlogFlushPtrForPerRead = GetWalRcvWriteRecPtr(NULL);
+                xlogFlushPtrForPerRead = xlogreader->xlogFlushPtrForPerRead;
+            }
             // pre-reading for dss
             uint32 targetPageOff = targetPagePtr % XLogSegSize;
             preReadOff = targetPageOff - targetPageOff % XLogPreReadSize;
@@ -266,6 +289,8 @@ XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private
         } else {
             state->preReadBuf = (char *)TYPEALIGN(alignedSize, state->preReadBufOrigin);
         }
+
+        state->xlogFlushPtrForPerRead = InvalidXLogRecPtr;
     }
 
     return state;

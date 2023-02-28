@@ -220,7 +220,7 @@ extern bool get_addr_from_socket(int sock, struct sockaddr *saddr);
 extern int get_ip_port_from_addr(char* sock_ip, int* port, struct sockaddr saddr);
 #endif
 
-const char *GetSSServerMode();
+const char *GetSSServerMode(ServerMode mode);
 bool SSIsServerModeReadOnly();
 bool IsFromLocalAddr(Port* port);
 extern bool IsMatchSocketAddr(const struct sockaddr* sock_addr, int compare_port);
