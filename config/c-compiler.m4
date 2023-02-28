@@ -121,6 +121,34 @@ fi])# PGAC_C_FUNCNAME_SUPPORT
 
 
 
+# PGAC_CHECK_BUILTIN_FUNC
+# -----------------------
+# This is similar to AC_CHECK_FUNCS(), except that it will work for compiler
+# builtin functions, as that usually fails to.
+# The first argument is the function name, eg [__builtin_clzl], and the
+# second is its argument list, eg [unsigned long x].  The current coding
+# works only for a single argument named x; we might generalize that later.
+# It's assumed that the function's result type is coercible to int.
+# On success, we define "HAVEfuncname" (there's usually more than enough
+# underscores already, so we don't add another one).
+AC_DEFUN([PGAC_CHECK_BUILTIN_FUNC],
+[AC_CACHE_CHECK(for $1, pgac_cv$1,
+[AC_LINK_IFELSE([AC_LANG_PROGRAM([
+int
+call$1($2)
+{
+    return $1(x);
+}], [])],
+[pgac_cv$1=yes],
+[pgac_cv$1=no])])
+if test x"${pgac_cv$1}" = xyes ; then
+AC_DEFINE_UNQUOTED(AS_TR_CPP([HAVE$1]), 1,
+                   [Define to 1 if your compiler understands $1.])
+fi])# PGAC_CHECK_BUILTIN_FUNC
+
+
+
+
 # PGAC_PROG_CC_CFLAGS_OPT
 # -----------------------
 # Given a string, check if the compiler supports the string as a

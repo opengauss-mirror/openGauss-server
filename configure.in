@@ -1186,6 +1186,19 @@ fi
 
 # On PPC, check if assembler supports LWARX instruction's mutex hint bit
 case $host_cpu in
+  x86_64)
+    # On x86_64, check if we can compile a popcntq instruction
+    AC_CACHE_CHECK([whether assembler supports x86_64 popcntq],
+                   [pgac_cv_have_x86_64_popcntq],
+    [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([],
+	[long long x = 1; long long r;
+	 __asm__ __volatile__ (" popcntq %1,%0\n" : "=q"(r) : "rm"(x));])],
+	[pgac_cv_have_x86_64_popcntq=yes],
+	[pgac_cv_have_x86_64_popcntq=no])])
+    if test x"$pgac_cv_have_x86_64_popcntq" = xyes ; then
+	AC_DEFINE(HAVE_X86_64_POPCNTQ, 1, [Define to 1 if the assembler supports X86_64's POPCNTQ instruction.])
+    fi
+  ;;
   ppc*|powerpc*)
     AC_MSG_CHECKING([whether assembler supports lwarx hint bit])
     AC_TRY_COMPILE([],
@@ -1233,6 +1246,9 @@ LIBS_including_readline="$LIBS"
 LIBS=`echo "$LIBS" | sed -e 's/-ledit//g' -e 's/-lreadline//g'`
 
 AC_CHECK_FUNCS([cbrt dlopen fdatasync getifaddrs getpeerucred getrlimit mbstowcs_l memmove poll pstat readlink setproctitle setsid sigprocmask symlink sync_file_range towlower utime utimes waitpid wcstombs wcstombs_l])
+
+# We assume that we needn't test all widths of these explicitly:
+PGAC_CHECK_BUILTIN_FUNC([__builtin_clz], [unsigned int x])
 
 AC_REPLACE_FUNCS(fseeko)
 case $host_os in

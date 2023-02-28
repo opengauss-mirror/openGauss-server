@@ -303,14 +303,6 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
 
                 /* fall through */
             case HJ_SCAN_BUCKET:
-
-                /*
-                 * We check for interrupts here because this corresponds to
-                 * where we'd fetch a row from a child plan node in other join
-                 * types.
-                 */
-                CHECK_FOR_INTERRUPTS();
-
                 /*
                  * Scan the selected hash bucket for matches to current outer
                  */
