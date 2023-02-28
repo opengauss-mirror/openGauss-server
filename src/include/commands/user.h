@@ -81,6 +81,8 @@ extern USER_STATUS GetAccountLockedStatusFromHashTable(Oid roleid);
 extern void UpdateAccountInfoFromHashTable();
 extern bool have_createrole_privilege(void);
 extern bool IsReservedRoleName(const char* name);
+extern char* MatchOtherUserHostName(const char* rolname, char* userHostName);
+extern HeapTuple SearchUserHostName(const char* userName, Oid* oid);
 
 extern inline void str_reset(char* str)
 {

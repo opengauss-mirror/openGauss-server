@@ -2094,7 +2094,7 @@ void AlterRole(AlterRoleStmt* stmt)
      */
     Relation pg_authid_rel = heap_open(AuthIdRelationId, RowExclusiveLock);
 
-    HeapTuple tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(stmt->role));
+    HeapTuple tuple = SearchUserHostName(stmt->role, NULL);
     if (!HeapTupleIsValid(tuple)) {
         str_reset(password);
         str_reset(replPasswd);
@@ -3082,7 +3082,7 @@ void AlterRoleSet(AlterRoleSetStmt* stmt)
     pg_authid_rel = heap_open(AuthIdRelationId, RowExclusiveLock);
     pg_authid_dsc = RelationGetDescr(pg_authid_rel);
 
-    HeapTuple roletuple = SearchSysCache1(AUTHNAME, PointerGetDatum(stmt->role));
+    HeapTuple roletuple = SearchUserHostName(stmt->role, NULL);
 
     if (!HeapTupleIsValid(roletuple)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", stmt->role)));
@@ -3194,7 +3194,7 @@ void DropRole(DropRoleStmt* stmt)
                 errmsg("Permission denied to drop predefined roles.")));
         }
 
-        HeapTuple tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(role));
+        HeapTuple tuple = SearchUserHostName(role, NULL);
         if (!HeapTupleIsValid(tuple)) {
             if (!stmt->missing_ok) {
                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", role)));
@@ -3444,7 +3444,7 @@ void RenameRole(const char* oldname, const char* newname)
     Relation rel = heap_open(AuthIdRelationId, RowExclusiveLock);
     TupleDesc dsc = RelationGetDescr(rel);
 
-    HeapTuple oldtuple = SearchSysCache1(AUTHNAME, CStringGetDatum(oldname));
+    HeapTuple oldtuple = SearchUserHostName(oldname, NULL);
     if (!HeapTupleIsValid(oldtuple))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", oldname)));
 
@@ -5726,7 +5726,7 @@ void DropUserStatus(Oid roleID)
  */
 Oid GetRoleOid(const char* username)
 {
-    HeapTuple tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(username));
+    HeapTuple tuple = SearchUserHostName(username, NULL);
     if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Invalid username/password,login denied.")));
     }
@@ -5744,7 +5744,7 @@ bool IsRoleExist(const char* username)
 {
     bool result = false;
     HOLD_INTERRUPTS();
-    HeapTuple tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(username));
+    HeapTuple tuple = SearchUserHostName(username, NULL);
     RESUME_INTERRUPTS();
     CHECK_FOR_INTERRUPTS();
     if (HeapTupleIsValid(tuple)) {

@@ -844,6 +844,7 @@ typedef struct {
     bool is_superuser;
 } role_auth_extra;
 
+HeapTuple SearchUserHostName(const char* userName, Oid* oid);
 bool check_session_authorization(char** newval, void** extra, GucSource source)
 {
     HeapTuple roleTup;
@@ -865,7 +866,7 @@ bool check_session_authorization(char** newval, void** extra, GucSource source)
     }
 
     /* Look up the username */
-    roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(*newval));
+    roleTup = SearchUserHostName(*newval, NULL);
     if (!HeapTupleIsValid(roleTup)) {
         GUC_check_errmsg("role \"%s\" does not exist", *newval);
         return false;
@@ -942,7 +943,7 @@ bool check_role(char** newval, void** extra, GucSource source)
         }
 
         /* Look up the username */
-        roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(*newval));
+        roleTup = SearchUserHostName(*newval, NULL);
         if (!HeapTupleIsValid(roleTup)) {
             GUC_check_errmsg("role \"%s\" does not exist", *newval);
             return false;

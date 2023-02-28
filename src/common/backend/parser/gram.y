@@ -272,6 +272,8 @@ static int errstate;
 static void CheckPartitionExpr(Node* expr, int* colCount);
 static char* transformIndexOptions(List* list);
 static void setAccessMethod(Constraint *n);
+static void CheckHostId(char* hostId);
+static void CheckUserHostIsValid();
 
 static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStmt*n);
 %}
@@ -497,7 +499,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 				opt_column_list columnList opt_name_list opt_analyze_column_define opt_multi_name_list
 				opt_include opt_c_include index_including_params
 				sort_clause opt_sort_clause sortby_list index_params constraint_params
-				name_list from_clause from_list opt_array_bounds
+				name_list UserIdList from_clause from_list opt_array_bounds
 				qualified_name_list any_name any_name_list collate_name
 				any_operator expr_list attrs callfunc_args
 				target_list insert_column_list set_target_list rename_clause_list rename_clause
@@ -655,7 +657,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 %type <ival>	Iconst SignedIconst opt_partitions_num opt_subpartitions_num
 %type <str>		Sconst comment_text notify_payload
-%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user definer_expression
+%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user definer_expression UserId
 %type <list>	var_list guc_value_extension_list
 %type <str>		ColId ColLabel var_name type_function_name param_name charset_collate_name
 %type <node>	var_value zone_value
@@ -1660,23 +1662,53 @@ CreateOptRoleElem:
  *
  *****************************************************************************/
 
+UserId:
+			SCONST '@' SCONST
+					{
+						CheckUserHostIsValid();
+						CheckHostId($3);
+						StringInfoData buf;
+						initStringInfo(&buf);
+						appendStringInfoString(&buf, $1);
+						appendStringInfoString(&buf, "@");
+						appendStringInfoString(&buf, $3);
+						$$ = buf.data;
+					}
+			| SCONST
+					{
+						CheckUserHostIsValid();
+						if (strchr($1,'@'))
+							CheckHostId(strchr($1,'@') + 1);
+						$$ = $1;
+					}
+			| RoleId
+					{
+						IsValidIdentUsername($1);
+						$$ = $1;
+					}
+		;
+
+UserIdList:	UserId
+					{ $$ = list_make1(makeString($1)); }
+			| UserIdList ',' UserId
+					{ $$ = lappend($1, makeString($3)); }
+		;
+
 CreateUserStmt:
-			CREATE USER RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} OptRoleList
+			CREATE USER UserId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} OptRoleList
 				{
 					CreateRoleStmt *n = makeNode(CreateRoleStmt);
 					n->stmt_type = ROLESTMT_USER;
-					IsValidIdentUsername($3);
 					n->role = $3;
 					n->options = $6;
 					n->missing_ok = false;
 					$$ = (Node *)n;
 					u_sess->parser_cxt.isForbidTruncate = false;
 				}
-			| CREATE USER IF_P NOT EXISTS RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} OptRoleList
+			| CREATE USER IF_P NOT EXISTS UserId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} OptRoleList
 				{
 					CreateRoleStmt *n = makeNode(CreateRoleStmt);
 					n->stmt_type = ROLESTMT_USER;
-					IsValidIdentUsername($6);
 					n->role = $6;
 					n->options = $9;
 					n->missing_ok = true;
@@ -1747,7 +1779,7 @@ AlterRoleSetStmt:
  *****************************************************************************/
 
 AlterUserStmt:
-			ALTER USER RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} AlterOptRoleList
+			ALTER USER UserId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} AlterOptRoleList
 				 {
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->missing_ok = FALSE;
@@ -1758,7 +1790,7 @@ AlterUserStmt:
 					$$ = (Node *)n;
 					u_sess->parser_cxt.isForbidTruncate = false;
 				 }
-			| ALTER USER IF_P EXISTS RoleId opt_with AlterOptRoleList
+			| ALTER USER IF_P EXISTS UserId opt_with AlterOptRoleList
 				 {
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->missing_ok = TRUE;
@@ -1768,7 +1800,7 @@ AlterUserStmt:
 					n->lockstatus = DO_NOTHING;
 					$$ = (Node *)n;
 				 }     
-			| ALTER USER RoleId opt_with ACCOUNT LOCK_P
+			| ALTER USER UserId opt_with ACCOUNT LOCK_P
 				{
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->role = $3;
@@ -1777,7 +1809,7 @@ AlterUserStmt:
 					n->lockstatus = LOCK_ROLE;
 					$$ = (Node *)n;
 				}
-			| ALTER USER RoleId opt_with ACCOUNT UNLOCK
+			| ALTER USER UserId opt_with ACCOUNT UNLOCK
 				{
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->role = $3;
@@ -1790,7 +1822,7 @@ AlterUserStmt:
 
 
 AlterUserSetStmt:
-			ALTER USER RoleId opt_in_database SetResetClause
+			ALTER USER UserId opt_in_database SetResetClause
 				{
 					AlterRoleSetStmt *n = makeNode(AlterRoleSetStmt);
 					n->role = $3;
@@ -1837,7 +1869,7 @@ DropRoleStmt:
  *****************************************************************************/
 
 DropUserStmt:
-			DROP USER name_list opt_drop_behavior
+			DROP USER UserIdList opt_drop_behavior
 				{
 					DropRoleStmt *n = makeNode(DropRoleStmt);
 					n->missing_ok = FALSE;
@@ -1846,7 +1878,7 @@ DropUserStmt:
 					n->behavior = $4;
 					$$ = (Node *)n;
 				}
-			| DROP USER IF_P EXISTS name_list opt_drop_behavior
+			| DROP USER IF_P EXISTS UserIdList opt_drop_behavior
 				{
 					DropRoleStmt *n = makeNode(DropRoleStmt);
 					n->roles = $5;
@@ -4918,7 +4950,7 @@ alter_table_cmd:
 					$$ = (Node *)n;
 				}
 			/* ALTER TABLE <name> OWNER TO RoleId */
-			| OWNER TO RoleId
+			| OWNER TO UserId
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					n->subtype = AT_ChangeOwner;
@@ -13151,7 +13183,7 @@ GrantStmt:	GRANT privileges ON privilege_target TO grantee_list
 					n->grant_option = $7;
 					$$ = (Node*)n;
 				}
-			| GRANT ALL privilege_str TO RoleId
+			| GRANT ALL privilege_str TO UserId
 				{
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->role = $5;
@@ -13190,7 +13222,7 @@ RevokeStmt:
 					n->behavior = $10;
 					$$ = (Node *)n;
 				}
-			| REVOKE ALL privilege_str FROM RoleId
+			| REVOKE ALL privilege_str FROM UserId
 				{
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->role = $5;
@@ -13482,7 +13514,7 @@ grantee_list:
 			| grantee_list ',' grantee				{ $$ = lappend($1, $3); }
 		;
 
-grantee:	RoleId
+grantee:	UserId
 				{
 					PrivGrantee *n = makeNode(PrivGrantee);
 					/* This hack lets us avoid reserving PUBLIC as a keyword*/
@@ -13584,7 +13616,7 @@ opt_grant_admin_option: WITH ADMIN OPTION				{ $$ = TRUE; }
 			| /*EMPTY*/									{ $$ = FALSE; }
 		;
 
-opt_granted_by: GRANTED BY RoleId						{ $$ = $3; }
+opt_granted_by: GRANTED BY UserId						{ $$ = $3; }
 			| /*EMPTY*/									{ $$ = NULL; }
 		;
 
@@ -15592,7 +15624,7 @@ invoker_rights:	 AUTHID DEFINER
 				}
 			;
 
-definer_expression: DEFINER '=' RoleId
+definer_expression: DEFINER '=' UserId
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT) {
 						$$ = $3;
@@ -17422,12 +17454,11 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
-			| ALTER USER RoleId RENAME TO RoleId
+			| ALTER USER UserId RENAME TO UserId
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_USER;
 					n->subname = $3;
-					IsValidIdentUsername($6);
 					n->newname = $6;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -30917,6 +30948,22 @@ static CharsetCollateOptions* MakeCharsetCollateOptions(CharsetCollateOptions *o
 			break;
 	}
 	return options;
+}
+
+static void CheckHostId(char* hostId)
+{
+	char* tmp = hostId;
+	for (; *tmp != '\0'; tmp++) {
+		if (((*tmp < '0') || (*tmp > '9')) && (*tmp != '%') && (*tmp != '.'))
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The hostname %s is not supported, it only support IP.", hostId)));
+	}
+}
+
+static void CheckUserHostIsValid()
+{
+	if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && u_sess->attr.attr_common.test_user_host)
+		return;
+	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("user@host is only supported in b database when the test_user_host is on")));
 }
 
 /*
