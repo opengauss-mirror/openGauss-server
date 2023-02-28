@@ -5034,9 +5034,11 @@ static void preprocess_rowmarks(PlannerInfo* root)
      * need or have FOR [KEY] UPDATE/SHARE marks for.
      */
     rels = get_base_rel_indexes((Node*)parse->jointree);
-    foreach (l, parse->resultRelations) {
-        int resultRelation = lfirst_int(l);
-        rels = bms_del_member(rels, resultRelation);
+    if (list_length(parse->resultRelations) <= 1) {
+        foreach (l, parse->resultRelations) {
+            int resultRelation = lfirst_int(l);
+            rels = bms_del_member(rels, resultRelation);
+        }
     }
 
     /*
@@ -5122,9 +5124,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
         PlanRowMark* newrc = NULL;
 
         i++;
-        if (rte->rtekind == RTE_JOIN || rte->rtekind == RTE_REMOTE_DUMMY || rte->relkind == RELKIND_VIEW)
-            continue;
-        if (!bms_is_member(i, rels) && list_length(parse->resultRelations) <= 1)
+        if (!bms_is_member(i, rels))
             continue;
 
         newrc = makeNode(PlanRowMark);
