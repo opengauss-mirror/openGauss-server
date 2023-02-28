@@ -2524,6 +2524,23 @@ static void ExplainNode(
         show_plan_execnodes(planstate, es);
     }
 
+    /* unique join */
+    switch (nodeTag(plan)) {
+        case T_NestLoop:
+        case T_MergeJoin:
+        case T_HashJoin:
+            if (es->format != EXPLAIN_FORMAT_TEXT || (es->verbose && ((Join *) plan)->inner_unique))
+                ExplainProperty("Inner Unique", ((Join *) plan)->inner_unique?"true":"false", true, es);
+            if (is_pretty && es->verbose && ((Join *)plan)->inner_unique) {
+                es->planinfo->m_detailInfo->set_plan_name<true, true>();
+                appendStringInfo(es->planinfo->m_detailInfo->info_str, "Inner Unique: %s\n",
+                                 ((Join *)plan)->inner_unique ? "true" : "false");
+            }
+            break;
+        default:
+            break;
+    }
+
     /* quals, sort keys, etc */
     switch (nodeTag(plan)) {
         case T_IndexScan:

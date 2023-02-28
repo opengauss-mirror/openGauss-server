@@ -69,9 +69,9 @@
  * @param[IN] required_outer: the set of required outer rels.
  */
 JoinPathGen::JoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, List* joinclauses, List* restrictinfo,
+    JoinPathExtraData* extra, List* joinclauses, List* restrictinfo,
     Path* outer_path, Path* inner_path, Relids required_outer)
-    : JoinPathGenBase(root, joinrel, jointype, save_jointype, sjinfo, semifactors, joinclauses,
+    : JoinPathGenBase(root, joinrel, jointype, save_jointype, extra, joinclauses,
                       restrictinfo, outer_path, inner_path, required_outer)
 {}
 

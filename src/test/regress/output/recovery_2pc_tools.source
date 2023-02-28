@@ -271,6 +271,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_indexonlyscan                             | bool    |      |           | 
  enable_indexscan                                 | bool    |      |           | 
  enable_indexscan_optimization                    | bool    |      |           | 
+ enable_inner_unique_opt                          | bool    |      |           | 
  enable_instance_metric_persistent                | bool    |      |           | 
  enable_instr_cpu_timer                           | bool    |      |           | 
  enable_instr_rt_percentile                       | bool    |      |           | 

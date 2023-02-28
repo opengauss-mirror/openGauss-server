@@ -774,6 +774,9 @@ static void _outJoinPlanInfo(StringInfo str, Join* node)
     _outPlanInfo(str, (Plan*)node);
 
     WRITE_ENUM_FIELD(jointype, JoinType);
+    if (t_thrd.proc->workingVersionNum >= INNER_UNIQUE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(inner_unique);
+    }
     WRITE_NODE_FIELD(joinqual);
     WRITE_BOOL_FIELD(optimizable);
     WRITE_NODE_FIELD(nulleqqual);
@@ -1608,6 +1611,9 @@ static void _outCommonJoinPart(StringInfo str, T* node)
 
     _outJoinPlanInfo(str, (Join*)node);
 
+    if (t_thrd.proc->workingVersionNum >= INNER_UNIQUE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(skip_mark_restore);
+    }
     WRITE_NODE_FIELD(mergeclauses);
 
     numCols = list_length(node->mergeclauses);
@@ -3050,6 +3056,9 @@ static void _outJoinPathInfo(StringInfo str, JoinPath* node)
     _outPathInfo(str, (Path*)node);
 
     WRITE_ENUM_FIELD(jointype, JoinType);
+    if (t_thrd.proc->workingVersionNum >= INNER_UNIQUE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(inner_unique);
+    }
     WRITE_NODE_FIELD(outerjoinpath);
     WRITE_NODE_FIELD(innerjoinpath);
     WRITE_NODE_FIELD(joinrestrictinfo);
@@ -3242,6 +3251,9 @@ static void _outMergePath(StringInfo str, MergePath* node)
     WRITE_NODE_FIELD(path_mergeclauses);
     WRITE_NODE_FIELD(outersortkeys);
     WRITE_NODE_FIELD(innersortkeys);
+    if (t_thrd.proc->workingVersionNum >= INNER_UNIQUE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(skip_mark_restore);
+    }
     WRITE_BOOL_FIELD(materialize_inner);
 }
 

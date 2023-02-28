@@ -49,7 +49,7 @@ protected:
 class JoinPathGenBase : public PathGen {
 public:
     JoinPathGenBase(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-        SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, List* joinclauses, List* restrictinfo,
+        JoinPathExtraData* extra, List* joinclauses, List* restrictinfo,
         Path* outer_path, Path* inner_path, Relids required_outer);
 
     virtual ~JoinPathGenBase();
@@ -136,11 +136,8 @@ protected:
     /* Cost work space for join. */
     JoinCostWorkspace* m_workspace;
 
-    /* Special join info. */
-    SpecialJoinInfo* m_sjinfo;
-
-    /* Join facctors for semi and anti join. */
-    SemiAntiJoinFactors* m_semifactors;
+    /*extra data for join*/
+    JoinPathExtraData* m_extra;
 
     /* Join clauses list. */
     List* m_joinClauses;
@@ -236,7 +233,7 @@ protected:
 class JoinPathGen : public JoinPathGenBase {
 public:
     JoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-        SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, List* joinclauses, List* restrictinfo,
+        JoinPathExtraData* extra, List* joinclauses, List* restrictinfo,
         Path* outer_path, Path* inner_path, Relids required_outer);
 
     virtual ~JoinPathGen();
@@ -301,7 +298,7 @@ protected:
 class HashJoinPathGen : public JoinPathGen {
 public:
     HashJoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-        SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path, Path* inner_path,
+        JoinPathExtraData* extra, Path* outer_path, Path* inner_path,
         List* restrictlist, Relids required_outer, List* hashclauses);
 
     virtual ~HashJoinPathGen();
@@ -330,7 +327,7 @@ private:
 class NestLoopPathGen : public JoinPathGen {
 public:
     NestLoopPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-        SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path, Path* inner_path,
+        JoinPathExtraData* extra, Path* outer_path, Path* inner_path,
         List* restrictlist, List* pathkeys, Relids required_outer);
 
     virtual ~NestLoopPathGen();
@@ -355,7 +352,7 @@ private:
 class MergeJoinPathGen : public JoinPathGen {
 public:
     MergeJoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-        SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path, Path* inner_path,
+        JoinPathExtraData* extra, Path* outer_path, Path* inner_path,
         List* restrict_clauses, List* pathkeys, Relids required_outer, List* mergeclauses, List* outersortkeys,
         List* innersortkeys);
 

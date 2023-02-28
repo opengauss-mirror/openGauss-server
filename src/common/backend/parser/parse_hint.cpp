@@ -3821,7 +3821,7 @@ bool permit_predpush(PlannerInfo *root)
     return !predpushHint->negative;
 }
 
-const unsigned int G_NUM_SET_HINT_WHITE_LIST = 38;
+const unsigned int G_NUM_SET_HINT_WHITE_LIST = 39;
 const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     /* keep in the ascending alphabetical order of frequency */
     (char*)"best_agg_plan",
@@ -3840,6 +3840,7 @@ const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     (char*)"enable_index_nestloop",
     (char*)"enable_indexonlyscan",
     (char*)"enable_indexscan",
+    (char*)"enable_inner_unique_opt",
     (char*)"enable_material",
     (char*)"enable_mergejoin",
     (char*)"enable_nestloop",

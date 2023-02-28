@@ -662,6 +662,7 @@ explain (format yaml, costs off)  select * from list_range_02 where col_2 in
  - Plan:                                                                                                  +
      Node Type: "Nested Loop"                                                                             +
      Join Type: "Semi"                                                                                    +
+     Inner Unique: false                                                                                  +
      Join Filter: "(subpartition_scan.list_range_02.col_2 = subpartition_scan.list_range_02.col_1)"       +
      Plans:                                                                                               +
        - Node Type: "Partition Iterator"                                                                  +
@@ -706,6 +707,7 @@ explain (format json, costs off)  select * from list_range_02 where col_2 in
      "Plan": {                                                                                                 +
        "Node Type": "Nested Loop",                                                                             +
        "Join Type": "Semi",                                                                                    +
+       "Inner Unique": false,                                                                                  +
        "Join Filter": "(subpartition_scan.list_range_02.col_2 = subpartition_scan.list_range_02.col_1)",       +
        "Plans": [                                                                                              +
          {                                                                                                     +

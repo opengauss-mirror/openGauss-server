@@ -1015,11 +1015,13 @@ typedef struct ExtensiblePlan {
  * (But plan.qual is still applied before actually returning a tuple.)
  * For an outer join, only joinquals are allowed to be used as the merge
  * or hash condition of a merge or hash join.
+ * 
  * ----------------
  */
 typedef struct Join {
     Plan plan;
     JoinType jointype;
+    bool inner_unique;
     List* joinqual; /* JOIN quals (in addition to plan.qual) */
     /*
      * @hdfs
@@ -1071,6 +1073,7 @@ typedef struct NestLoopParam {
  */
 typedef struct MergeJoin {
     Join join;
+    bool skip_mark_restore; /* Can we skip mark/restore calls? */
     List* mergeclauses; /* mergeclauses as expression trees */
     /* these are arrays, but have the same length as the mergeclauses list: */
     Oid* mergeFamilies;    /* per-clause OIDs of btree opfamilies */

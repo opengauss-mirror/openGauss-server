@@ -120,18 +120,18 @@ extern void cost_group(Path* path, PlannerInfo* root, int numGroupCols, double n
     Cost input_total_cost, double input_tuples);
 extern void cost_limit(Plan* plan, Plan* lefttree, int64 offset_est, int64 count_est);
 extern void initial_cost_nestloop(PlannerInfo* root, JoinCostWorkspace* workspace, JoinType jointype, Path* outer_path,
-    Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop);
+    Path* inner_path, JoinPathExtraData *extra, int dop);
 extern void final_cost_nestloop(PlannerInfo* root, NestPath* path, JoinCostWorkspace* workspace,
-    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, bool hasalternative, int dop);
+    JoinPathExtraData *extra, bool hasalternative, int dop);
 extern void initial_cost_mergejoin(PlannerInfo* root, JoinCostWorkspace* workspace, JoinType jointype,
     List* mergeclauses, Path* outer_path, Path* inner_path, List* outersortkeys, List* innersortkeys,
-    SpecialJoinInfo* sjinfo);
+    JoinPathExtraData *extra);
 extern void final_cost_mergejoin(
-    PlannerInfo* root, MergePath* path, JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, bool hasalternative);
+    PlannerInfo* root, MergePath* path, JoinCostWorkspace* workspace, JoinPathExtraData *extra, bool hasalternative);
 extern void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, JoinType jointype, List* hashclauses,
-    Path* outer_path, Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop);
+    Path* outer_path, Path* inner_path, JoinPathExtraData *extra, int dop);
 extern void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* workspace,
-    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, bool hasalternative, int dop);
+    JoinPathExtraData *extra, bool hasalternative, int dop);
 extern void cost_rescan(PlannerInfo* root, Path* path, Cost* rescan_startup_cost, /* output parameters */
     Cost* rescan_total_cost, OpMemInfo* mem_info);
 extern Cost cost_rescan_material(double rows, int width, OpMemInfo* mem_info, bool vectorized, int dop);
