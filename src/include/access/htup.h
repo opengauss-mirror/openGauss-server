@@ -470,7 +470,7 @@ static inline uint32 HeapTupleHeaderGetNatts(HeapTupleHeader tup, TupleDesc tup_
      * REDIS_REL_DESTINATION anymore), these column values must be ignored from
      * the tuple.
      */
-    if (HeapTupleHeaderHasRedisColumns(tup) && tup_desc && !tup_desc->tdisredistable) {
+    if (unlikely(tup_desc && !tup_desc->tdisredistable && HeapTupleHeaderHasRedisColumns(tup))) {
         Assert(natts >= REDIS_NUM_INTERNAL_COLUMNS);
         natts -= REDIS_NUM_INTERNAL_COLUMNS;
     }

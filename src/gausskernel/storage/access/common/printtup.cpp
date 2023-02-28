@@ -25,6 +25,7 @@
 #include "libpq/pqformat.h"
 #include "tcop/pquery.h"
 #include "utils/lsyscache.h"
+#include "utils/numeric.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #ifdef PGXC
@@ -67,6 +68,7 @@ static void printHybridBatch(VectorBatch *batch, DestReceiver *self);
 static void finalizeLocalStream(DestReceiver *self);
 
 inline void AddCheckInfo(StringInfo buf);
+
 /* ----------------------------------------------------------------
  *		printtup / debugtup support
  * ----------------------------------------------------------------
@@ -1009,6 +1011,14 @@ void printBatch(VectorBatch *batch, DestReceiver *self)
     pq_endmessage_reuse(buf);
 }
 
+static inline bool check_need_free_varchar_output(const char* str)
+{
+    return ((char*)str == u_sess->utils_cxt.varcharoutput_buffer);
+}
+static inline bool check_need_free_numeric_output(const char* str)
+{
+    return ((char*)str == u_sess->utils_cxt.numericoutput_buffer);
+}
 /* ----------------
  *		printtup --- print a tuple in protocol 3.0
  * ----------------
@@ -1020,11 +1030,11 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
     StringInfo buf = &myState->buf;
     int natts = typeinfo->natts;
     int i;
+    bool need_free = false;
     bool binary = false;
     /* just as we define in backend/commands/analyze.cpp */
 #define WIDTH_THRESHOLD 1024
 
-    StreamTimeSerilizeStart(t_thrd.pgxc_cxt.GlobalNetInstr);
     /* Set or update my derived attribute info, if needed */
     if (myState->attrinfo != typeinfo || myState->nattrs != natts)
         printtup_prepare_info(myState, typeinfo, natts);
@@ -1054,7 +1064,6 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
         appendBinaryStringInfo(buf, slot->tts_dataRow, slot->tts_dataLen);
         AddCheckInfo(buf);
         pq_endmessage_reuse(buf);
-        StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
         return;
     }
 #endif
@@ -1092,7 +1101,7 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
              * attr had been converted to CSTRING type previously by using anyarray_out.
              * just send over the DataRow message as we received it.
              */
-            pq_sendcountedtext(buf, (char *)attr, strlen((char *)attr), false);
+            pq_sendcountedtext_printtup(buf, (char *)attr, strlen((char *)attr));
         } else {
             if (thisState->format == 0) {
                 /* Text output */
@@ -1100,7 +1109,29 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
 #ifndef ENABLE_MULTIPLE_NODES
                 t_thrd.xact_cxt.callPrint = true;
 #endif
+                need_free = false;
                 outputstr = OutputFunctionCall(&thisState->finfo, attr);
+                switch (thisState->typoutput) {
+                    case F_INT4OUT: 
+                        outputstr = output_int32_to_cstring(DatumGetInt32(attr));
+                        break;
+                    case F_INT8OUT:
+                        outputstr = output_int64_to_cstring(DatumGetInt64(attr));
+                        break;
+                    case F_BPCHAROUT: 
+                    case F_VARCHAROUT: 
+                        outputstr = output_text_to_cstring((text*)DatumGetPointer(attr));
+                        need_free = !check_need_free_varchar_output(outputstr);
+                        break;
+                    case F_NUMERIC_OUT: 
+                        outputstr = output_numeric_out(DatumGetNumeric(attr));
+                        need_free = !check_need_free_numeric_output(outputstr);
+                        break;
+                    default:
+                        outputstr = OutputFunctionCall(&thisState->finfo, attr);
+                        need_free = true;
+                        break;
+                }
 #ifdef ENABLE_MULTIPLE_NODES
                 if (thisState->typisvarlena && self->forAnalyzeSampleTuple &&
                     (typeinfo->attrs[i].atttypid == BYTEAOID || typeinfo->attrs[i].atttypid == CHAROID ||
@@ -1121,7 +1152,10 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                     text *result = NULL;
 
                     txt = cstring_to_text(outputstr);
-                    pfree(outputstr);
+                    if (need_free) {
+                        pfree(outputstr);
+                    }
+                    need_free = true;
 
                     str = DirectFunctionCall3(substrb_with_lenth, PointerGetDatum(txt), Int32GetDatum(0),
                                               Int32GetDatum(length));
@@ -1136,8 +1170,8 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
 #ifndef ENABLE_MULTIPLE_NODES
                 t_thrd.xact_cxt.callPrint = false;
 #endif
-                pq_sendcountedtext(buf, outputstr, strlen(outputstr), false);
-                if (outputstr != NULL) {
+                pq_sendcountedtext_printtup(buf, outputstr, strlen(outputstr));
+                if (need_free) {
                     pfree(outputstr);
                 }
             } else {
@@ -1153,7 +1187,6 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
     }
 
     (void)MemoryContextSwitchTo(old_context);
-    StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
 
     AddCheckInfo(buf);
     pq_endmessage_reuse(buf);

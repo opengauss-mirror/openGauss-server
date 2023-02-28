@@ -158,6 +158,7 @@ static void set_var_from_num(Numeric value, NumericVar* dest);
 static void set_var_from_var(const NumericVar* value, NumericVar* dest);
 static void init_var_from_var(const NumericVar *value, NumericVar *dest);
 static char* get_str_from_var(NumericVar* var);
+static char* output_get_str_from_var(NumericVar* var);
 static char* get_str_from_var_sci(NumericVar* var, int rscale);
 
 static void apply_typmod(NumericVar* var, int32 typmod);
@@ -392,6 +393,54 @@ Datum numeric_out(PG_FUNCTION_ARGS)
     }
 
     PG_RETURN_CSTRING(ans);
+}
+
+/*
+ * output_numeric_out() -
+ *
+ *      Output function for numeric data type.
+ *      include bi64 and bi128 type
+ */
+char* output_numeric_out(Numeric num)
+{
+    NumericVar x;
+    char* str = NULL;
+    int scale = 0;
+
+    /*
+     * Handle NaN
+     */
+    if (NUMERIC_IS_NAN(num))
+        return pstrdup("NaN");
+
+    /*
+     * If numeric is big integer, call int64_out/int128_out
+     */
+    uint16 numFlags = NUMERIC_NB_FLAGBITS(num);
+    if (NUMERIC_FLAG_IS_BI64(numFlags)) {
+        int64 val64 = NUMERIC_64VALUE(num);
+        scale = NUMERIC_BI_SCALE(num);
+        Datum numeric_out_bi64 = bi64_out(val64, scale);
+        return DatumGetCString(numeric_out_bi64);
+    } else if (NUMERIC_FLAG_IS_BI128(numFlags)) {
+        int128 val128 = 0;
+        errno_t rc = memcpy_s(&val128, sizeof(int128), (num)->choice.n_bi.n_data, sizeof(int128));
+        securec_check(rc, "\0", "\0");
+        scale = NUMERIC_BI_SCALE(num);
+        Datum numeric_out_bi128 =  bi128_out(val128, scale);
+        return DatumGetCString(numeric_out_bi128);
+    }
+    /*
+     * Get the number in the variable format
+     */
+    init_var_from_num(num, &x);
+    str = output_get_str_from_var(&x);
+    
+    if (TRUNC_NUMERIC_TAIL_ZERO) {
+        remove_tail_zero(str);
+    }
+
+    return str;
 }
 
 /*
@@ -4402,6 +4451,150 @@ static char* get_str_from_var(NumericVar* var)
     }
     return str;
 }
+
+/*
+ * output_get_str_from_var() - 
+ *
+ *      Convert a var to text representation (guts of numeric_out).
+ *      CAUTION: var's contents may be modified by rounding!
+ *      Returns a palloc'd string.
+ */ 
+static char* output_get_str_from_var(NumericVar* var)
+{
+    int dscale;
+    char* str = NULL;     
+    char* cp = NULL;      
+    char* endcp = NULL;   
+    int i;
+    int d;
+    NumericDigit dig;
+    int len;
+
+#if DEC_DIGITS > 1
+    NumericDigit d1;
+#endif  
+    
+    dscale = var->dscale;
+    
+    /*
+     * Allocate space for the result.
+     *      
+     * i is set to the # of decimal digits before decimal point. dscale is the
+     * # of decimal digits we will print after decimal point. We may generate
+     * as many as DEC_DIGITS-1 excess digits at the end, and in addition we
+     * need room for sign, decimal point, null terminator.
+     */ 
+    i = (var->weight + 1) * DEC_DIGITS;
+    if (i <= 0)
+        i = 1;
+
+    len = i + dscale + DEC_DIGITS + 2;
+    if (len >= 64) {
+        str = (char*)palloc(len);
+    } else {
+        u_sess->utils_cxt.numericoutput_buffer[0] = '\0';
+        str = u_sess->utils_cxt.numericoutput_buffer;
+    }
+    cp = str;
+
+    /*
+     * Output a dash for negative values
+     */
+    if (var->sign == NUMERIC_NEG)
+        *cp++ = '-';
+
+    /*
+     * Output all digits before the decimal point
+     */
+    if (var->weight < 0) {
+        d = var->weight + 1;
+        if (DISPLAY_LEADING_ZERO) {
+            *cp++ = '0';
+        }
+    } else {
+        for (d = 0; d <= var->weight; d++) {
+            dig = (d < var->ndigits) ? var->digits[d] : 0;
+            /* In the first digit, suppress extra leading decimal zeroes */
+#if DEC_DIGITS == 4
+            {
+                bool putit = (d > 0);
+
+                d1 = dig / 1000;
+                dig -= d1 * 1000;
+                putit |= (d1 > 0);
+                if (putit)
+                    *cp++ = d1 + '0';
+                d1 = dig / 100;
+                dig -= d1 * 100;
+                putit |= (d1 > 0);
+                if (putit)
+                    *cp++ = d1 + '0';
+                d1 = dig / 10;
+                dig -= d1 * 10;
+                putit |= (uint32)(d1 > 0);
+                if (putit)
+                    *cp++ = d1 + '0';
+                *cp++ = dig + '0';
+            }
+#elif DEC_DIGITS == 2
+            d1 = dig / 10;
+            dig -= d1 * 10;
+            if (d1 > 0 || d > 0)
+                *cp++ = d1 + '0';
+            *cp++ = dig + '0';
+#elif DEC_DIGITS == 1
+            *cp++ = dig + '0';
+#else
+#error unsupported NBASE
+#endif
+        }
+    }
+
+    /*
+     * If requested, output a decimal point and all the digits that follow it.
+     * We initially put out a multiple of DEC_DIGITS digits, then truncate if
+     * needed.
+     */
+    if (dscale > 0) {
+        *cp++ = '.';
+        endcp = cp + dscale;
+        for (i = 0; i < dscale; d++, i += DEC_DIGITS) {
+            dig = (d >= 0 && d < var->ndigits) ? var->digits[d] : 0;
+#if DEC_DIGITS == 4
+            d1 = dig / 1000;
+            dig -= d1 * 1000;
+            *cp++ = d1 + '0';
+            d1 = dig / 100;
+            dig -= d1 * 100;
+            *cp++ = d1 + '0';
+            d1 = dig / 10;
+            dig -= d1 * 10;
+            *cp++ = d1 + '0';
+            *cp++ = dig + '0';
+#elif DEC_DIGITS == 2
+            d1 = dig / 10;
+            dig -= d1 * 10;
+            *cp++ = d1 + '0';
+            *cp++ = dig + '0';
+#elif DEC_DIGITS == 1
+            *cp++ = dig + '0';
+#else
+#error unsupported NBASE
+#endif
+        }
+        cp = endcp;
+    }
+    /*
+     * terminate the string and return it
+     */
+    *cp = '\0';
+    if (HIDE_TAILING_ZERO) {
+        remove_tail_zero(str);
+    }
+
+    return str;
+}
+
 
 /*
  * get_str_from_var_sci() -

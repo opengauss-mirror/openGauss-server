@@ -2167,7 +2167,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
 #endif
 
     /* Mark sync-up step is required */
-    if (NeedSyncUpProducerStep(planstate->plan)) {
+    if (unlikely(NeedSyncUpProducerStep(planstate->plan))) {
         need_sync_step = true;
         /*
          * (G)Distributed With-Recursive Support

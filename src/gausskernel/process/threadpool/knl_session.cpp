@@ -462,6 +462,13 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->memory_context_limited_white_list = NULL;
     utils_cxt->enable_memory_context_control = false;
     utils_cxt->sql_ignore_strategy_val = 0;
+
+    utils_cxt->int4output_buffer = (char*)palloc0(32);
+    utils_cxt->int8output_buffer = (char*)palloc0(64);
+    utils_cxt->int16output_buffer = (char*)palloc0(128);
+    utils_cxt->varcharoutput_buffer = (char*)palloc0(256);
+    utils_cxt->numericoutput_buffer = (char*)palloc0(64);
+
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
 
     utils_cxt->spi_printtupDR = (DestReceiver*)palloc0(sizeof(DestReceiver));

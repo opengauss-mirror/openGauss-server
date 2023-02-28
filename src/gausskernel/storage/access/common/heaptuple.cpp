@@ -1156,7 +1156,7 @@ void heap_deformtuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, char 
 
 static void slot_deform_cmprs_tuple(TupleTableSlot *slot, uint32 natts);
 
-static void deform_next_attribute(bool& slow, long& off, Form_pg_attribute thisatt, char* tp)
+static FORCE_INLINE void deform_next_attribute(bool& slow, long& off, Form_pg_attribute thisatt, char* tp)
 {
     if (!slow && thisatt->attcacheoff >= 0) {
         off = thisatt->attcacheoff;
@@ -1194,7 +1194,7 @@ static void deform_next_attribute(bool& slow, long& off, Form_pg_attribute thisa
  *		re-computing information about previously extracted attributes.
  *		slot->tts_nvalid is the number of attributes already extracted.
  */
-static void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
+static FORCE_INLINE void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
 {
     HeapTuple tuple = (HeapTuple)slot->tts_tuple;
     Assert(tuple->tupTableType == HEAP_TUPLE);
@@ -1654,7 +1654,7 @@ void heap_slot_getallattrs(TupleTableSlot *slot, bool need_transform_anyarray)
      */
     tuple = (HeapTuple)slot->tts_tuple;
     /* internal error */
-    if (tuple == NULL) {
+    if (unlikely(tuple == NULL)) {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
     }
@@ -1665,7 +1665,7 @@ void heap_slot_getallattrs(TupleTableSlot *slot, bool need_transform_anyarray)
     attnum = HeapTupleHeaderGetNatts(tuple->t_data, slot->tts_tupleDescriptor);
     attnum = Min(attnum, tdesc_natts);
 
-    if (HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)slot->tts_tuple)->t_data)) {
+    if (unlikely(HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)slot->tts_tuple)->t_data))) {
         slot_deform_cmprs_tuple(slot, attnum);
     } else {
         slot_deform_tuple(slot, attnum);
@@ -1675,26 +1675,28 @@ void heap_slot_getallattrs(TupleTableSlot *slot, bool need_transform_anyarray)
      * If tuple doesn't have all the atts indicated by tupleDesc, read the
      * rest as null
      */
-    for (; attnum < tdesc_natts; attnum++) {
-        /* get init default value from tupleDesc.
-         * The original Code is:
-         * example code: slot->tts_values[attnum] = (Datum) 0;
-         * example code: slot->tts_isnull[attnum] = true;
-         */
-        slot->tts_values[attnum] = heapGetInitDefVal(attnum + 1, slot->tts_tupleDescriptor, &slot->tts_isnull[attnum]);
+    if (unlikely(slot->tts_nvalid < tdesc_natts)) {
+        for (; attnum < tdesc_natts; attnum++) {
+            /* get init default value from tupleDesc.
+             * The original Code is:
+             * example code: slot->tts_values[attnum] = (Datum) 0;
+             * example code: slot->tts_isnull[attnum] = true;
+             */
+            slot->tts_values[attnum] = heapGetInitDefVal(attnum + 1, slot->tts_tupleDescriptor, &slot->tts_isnull[attnum]);
+        }
+        slot->tts_nvalid = tdesc_natts;
     }
-    slot->tts_nvalid = tdesc_natts;
 }
 
 static inline int GetAttrNumber(TupleTableSlot* slot, int attnum)
 {
     /* Check for caller error */
-    if (attnum <= 0 || attnum > slot->tts_tupleDescriptor->natts) {
+    if (unlikely(attnum <= 0 || attnum > slot->tts_tupleDescriptor->natts)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN), errmsg("invalid attribute number %d", attnum)));
     }
 
     /* internal error */
-    if (slot->tts_tuple == NULL) {
+    if (unlikely(slot->tts_tuple == NULL)) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("cannot extract attribute from empty tuple slot")));
     }
@@ -1760,15 +1762,17 @@ void heap_slot_getsomeattrs(TupleTableSlot *slot, int attnum)
     slot_deform_tuple(slot, attno);
 
     /* If tuple doesn't have all the atts indicated by tupleDesc, read the rest as null */
-    for (; attno < attnum; attno++) {
-        /* get init default value from tupleDesc.
-         * The original Code is:
-         * example code: slot->tts_values[attno] = (Datum) 0;
-         * example code: slot->tts_isnull[attno] = true;
-         */
-        slot->tts_values[attno] = heapGetInitDefVal(attno + 1, slot->tts_tupleDescriptor, &slot->tts_isnull[attno]);
+    if (unlikely(attno < attnum)) {
+        for (; attno < attnum; attno++) {
+            /* get init default value from tupleDesc.
+             * The original Code is:
+             * example code: slot->tts_values[attno] = (Datum) 0;
+             * example code: slot->tts_isnull[attno] = true;
+             */
+            slot->tts_values[attno] = heapGetInitDefVal(attno + 1, slot->tts_tupleDescriptor, &slot->tts_isnull[attno]);
     }
-    slot->tts_nvalid = attnum;
+        slot->tts_nvalid = attnum;
+    }
 }
 
 /*

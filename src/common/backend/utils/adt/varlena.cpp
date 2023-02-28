@@ -236,6 +236,48 @@ char* text_to_cstring(const text* t)
     return result;
 }
 
+char* output_text_to_cstring(const text* t)
+{
+    if (unlikely(t == NULL)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("invalid null pointer input for text_to_cstring()")));
+    }
+    FUNC_CHECK_HUGE_POINTER(false, t, "text_to_cstring()");
+
+    /* must cast away the const, unfortunately */
+    text* tunpacked = pg_detoast_datum_packed((struct varlena*)t);
+    int len = VARSIZE_ANY_EXHDR(tunpacked);
+    char* result = NULL;
+
+    if (len + 1 > 256) {
+        result = (char*)palloc(len + 1);
+    } else {
+        u_sess->utils_cxt.varcharoutput_buffer[0] = '\0';
+        result = u_sess->utils_cxt.varcharoutput_buffer;
+    }
+    MemCpy(result, VARDATA_ANY(tunpacked), len);
+    result[len] = '\0';
+
+    if (tunpacked != t)
+        pfree_ext(tunpacked);
+
+    return result;
+}
+
+char* output_int32_to_cstring(int32 value)
+{
+    u_sess->utils_cxt.int4output_buffer[0] = '\0';
+    pg_ltoa(value, u_sess->utils_cxt.int4output_buffer);
+    return u_sess->utils_cxt.int4output_buffer;
+}
+
+char* output_int64_to_cstring(int64 value)
+{
+    u_sess->utils_cxt.int8output_buffer[0] = '\0';
+    pg_lltoa(value, u_sess->utils_cxt.int8output_buffer);
+    return u_sess->utils_cxt.int8output_buffer;
+}
+
 /*
  * text_to_cstring_buffer
  *

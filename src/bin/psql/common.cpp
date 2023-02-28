@@ -1226,13 +1226,27 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
         else if (!PQsendQuery(pset.db, query))
             results = NULL;
 
-        if (pset.timing && is_print) {
-            INSTR_TIME_SET_CURRENT(after);
-            INSTR_TIME_SUBTRACT(after, before);
-            elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
+        if (is_explain) {
+            OK = GetPrintResult(&results, is_explain, is_print, query, print_error);
+            if (pset.timing && is_print) {
+                INSTR_TIME_SET_CURRENT(after);
+                INSTR_TIME_SUBTRACT(after, before);
+                elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
+            }
+        } else {
+            OK = ProcessResult(&results, is_explain, print_error);
+            if (pset.timing && is_print) {
+                INSTR_TIME_SET_CURRENT(after);
+                INSTR_TIME_SUBTRACT(after, before);
+                elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
+            }
+            /* but printing results isn't: */
+            if (OK && is_print && results) {
+                OK = PrintQueryResults(results);
+                /* record the set stmts when needed. */
+                RecordGucStmt(results, query);
+            }
         }
-
-        OK = GetPrintResult(&results, is_explain, is_print, query, print_error);
 #ifndef WIN32
         /* Clear password related memory to avoid leaks when core. */
         if (pset.cur_cmd_interactive) {

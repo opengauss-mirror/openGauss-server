@@ -222,6 +222,21 @@ void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDi
     }
 }
 
+void seq_scan_getnext(TableScanDesc scan,  TupleTableSlot* slot, ScanDirection direction, 
+        bool* has_cur_xact_write)
+{
+    Tuple tuple;
+    tuple =  (Tuple)heap_getnext(scan, direction, has_cur_xact_write);
+    if (tuple != NULL) {
+         Assert(slot != NULL);
+         Assert(slot->tts_tupleDescriptor != NULL);
+         slot->tts_tam_ops = GetTableAmRoutine(TAM_HEAP);
+         heap_slot_store_heap_tuple((HeapTuple)tuple, slot, scan->rs_cbuf, false, false);
+    } else {
+         ExecClearTuple(slot);
+    }
+}
+
 /* ----------------------------------------------------------------
  *						Scan Support
  * ----------------------------------------------------------------
@@ -817,7 +832,7 @@ static inline void InitSeqNextMtd(SeqScan* node, SeqScanState* scanstate)
                 scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, true>;
         } else {
             if(scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
-                scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, false>;
+                scanstate->fillNextSlotFunc = seq_scan_getnext;
             else
                 scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, false>;
         }
