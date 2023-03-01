@@ -75,6 +75,7 @@
 #include "access/tuptoaster.h"
 #include "parser/parse_expr.h"
 #include "auditfuncs.h"
+#include "rewrite/rewriteHandler.h"
 
 /* static function decls */
 static bool isAssignmentIndirectionExpr(ExprState* exprstate);
@@ -1139,6 +1140,35 @@ static Datum ExecEvalRownum(RownumState* exprstate, ExprContext* econtext, bool*
     }
 }
 
+/* ----------------------------------------------------------------
+ * ExecEvalUserSetElm: set and Returns the user_define variable value
+ * ----------------------------------------------------------------
+ */
+static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+{
+    UserSetElemState* usestate = (UserSetElemState*)exprstate;
+    UserSetElem* elem = usestate->use;
+    Node* node = NULL;
+    UserSetElem elemcopy;
+    elemcopy.xpr = elem->xpr;
+    elemcopy.name = elem->name;
+
+    if (isDone != NULL)
+        *isDone = ExprSingleResult;
+    Assert(isNull);
+    *isNull = false;
+
+    node = eval_const_expression_value(NULL, (Node*)elem->val, NULL);
+    if (nodeTag(node) == T_Const) {
+        elemcopy.val = (Expr*)const_expression_to_const(node);
+    } else {
+        elemcopy.val = (Expr*)const_expression_to_const(QueryRewriteNonConstant(node));
+    }
+
+    check_set_user_message(&elemcopy);
+
+    return ((Const*)elemcopy.val)->constvalue;
+}
 /* ----------------------------------------------------------------
  *		ExecEvalParamExec
  *
@@ -5972,6 +6002,13 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
             }
             gstate->arg = ExecInitExpr(pkey->arg, parent);
             state = (ExprState*)gstate;
+        } break;
+        case T_UserSetElem: {
+            UserSetElem* useexpr = (UserSetElem*)node;
+            UserSetElemState* usestate = (UserSetElemState*)makeNode(UserSetElemState);
+            usestate->use = useexpr;
+            state = (ExprState*)usestate;
+            state->evalfunc = (ExprStateEvalFunc)ExecEvalUserSetElm;
         } break;
         default:
             ereport(ERROR,

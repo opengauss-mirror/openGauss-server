@@ -9517,6 +9517,13 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             appendStringInfo(buf, "%s", ((UserVar*)node)->name);
             break;
 
+        case T_UserSetElem:{
+            UserSetElem* userSet = (UserSetElem*)node;
+            appendStringInfoString(buf, "@var := ");
+            get_rule_expr((Node*)userSet->val, context, true, no_alias);
+            break;
+        }
+
         case T_SetVariableExpr:
             get_const_expr((Const*)(((SetVariableExpr*)node)->value), context, 0);
             break;

@@ -38,6 +38,7 @@
 static bool expression_returns_set_walker(Node* node, void* context);
 static bool expression_rownum_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
+Oid userSetElemTypeCollInfo(const Node* expr, Oid (*exprFunc)(const Node*));
 
 /*
  *	exprType -
@@ -238,10 +239,7 @@ Oid exprType(const Node* expr)
             type = ((const Const*)(((SetVariableExpr*)expr)->value))->consttype;
             break;
         case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
-            type = InvalidOid; /* keep compiler quiet */
+            type = userSetElemTypeCollInfo(expr, exprType);
             break;
         default:
             ereport(ERROR,
@@ -673,6 +671,9 @@ static bool expression_returns_set_walker(Node* node, void* context)
     if (IsA(node, XmlExpr)) {
         return false;
     }
+    if (IsA(node, UserSetElem)) {
+        return false;
+    }
 
     return expression_tree_walker(node, (bool (*)())expression_returns_set_walker, context);
 }
@@ -898,10 +899,7 @@ Oid exprCollation(const Node* expr)
             coll = ((const Const*)(((SetVariableExpr*)expr)->value))->constcollid;
             break;
         case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
-            coll = InvalidOid; /* keep compiler quiet */
+            coll = userSetElemTypeCollInfo(expr, exprCollation); 
             break;
         default:
             ereport(
@@ -1118,9 +1116,6 @@ void exprSetCollation(Node* expr, Oid collation)
             ((Const*)(((SetVariableExpr*)expr)->value))->constcollid = collation;
             break;
         case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
             break;
         default:
             ereport(
@@ -1963,10 +1958,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_PrefixKey:
             return p2walker(((PrefixKey*)node)->arg, context);
         case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
-            break;
+            return true;
         default:
             ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                             errmsg("expression_tree_walker:unrecognized node type: %d", (int)nodeTag(node))));
@@ -2725,11 +2717,12 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             MUTATE(newnode->value, oldnode->value, Expr*);
             return (Node*)newnode;
         } break;
-        case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
-            break;
+        case T_UserSetElem: {
+            UserSetElem* use = (UserSetElem*)node;
+            UserSetElem* newnode = NULL;
+            FLATCOPY(newnode, use, UserSetElem, isCopy);
+            return (Node*)newnode;
+        } break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
@@ -3385,4 +3378,19 @@ void find_nextval_seqoid_walker(Node* node, Oid* seqoid)
         }
     }
     (void)expression_tree_walker(node, (bool (*)())find_nextval_seqoid_walker, (void*)seqoid);
+}
+
+Oid userSetElemTypeCollInfo(const Node* expr, Oid (*exprFunc)(const Node*))
+{
+    Oid coll = InvalidOid;
+    UserSetElem* use_node = (UserSetElem*)expr;
+    UserVar* uv = (UserVar*)linitial(use_node->name);
+    if (uv != NULL) {
+        if (uv->value != NULL) {
+            coll = exprFunc((Node*)uv->value);
+        } else if (use_node->val != NULL) {
+            coll = exprFunc((Node*)use_node->val);
+        }
+    }
+    return coll;
 }

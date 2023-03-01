@@ -2613,6 +2613,10 @@ typedef struct RownumState {
     PlanState* ps;   /* the value of ROWNUM depends on its parent PlanState */
 } RownumState;
 
+typedef struct UserSetElemState {
+    ExprState xprstate;
+    UserSetElem* use;
+} UserSetElemState;
 /* ----------------
  *		GroupingFuncExprState node
  *

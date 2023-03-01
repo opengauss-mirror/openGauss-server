@@ -299,6 +299,7 @@ typedef enum NodeTag {
     T_AddSubPartitionState,
     T_RangePartitionStartEndDefState,
     T_RownumState,
+    T_UserSetElemState,
     T_ListPartitionDefState,
     T_HashPartitionDefState,
 
