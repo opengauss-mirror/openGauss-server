@@ -1026,13 +1026,13 @@ XLogRecPtr LogStandbySnapshot(void)
      * record. Fortunately this routine isn't executed frequently, and it's
      * only a shared lock.
      */
-    if (g_instance.attr.attr_storage.wal_level < WAL_LEVEL_LOGICAL)
+    if (g_instance.attr.attr_storage.wal_level < WAL_LEVEL_LOGICAL || g_instance.streaming_dr_cxt.isInSwitchover)
         LWLockRelease(ProcArrayLock);
 
     recptr = LogCurrentRunningXacts(running);
 
     /* Release lock if we kept it longer ... */
-    if (g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_LOGICAL)
+    if (g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_LOGICAL && !g_instance.streaming_dr_cxt.isInSwitchover)
         LWLockRelease(ProcArrayLock);
 
     /* GetRunningTransactionData() acquired XidGenLock, we must release it */
