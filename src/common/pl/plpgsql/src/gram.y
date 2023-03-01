@@ -380,7 +380,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <stmt>	stmt_case stmt_foreach_a
 
 %type <list>	proc_exceptions declare_stmts
-%type <exception_block> exception_sect declare_sect
+%type <exception_block> exception_sect declare_sect_b
 %type <exception>	proc_exception declare_stmt 
 %type <condition>	proc_conditions proc_condition cond_list cond_element
 %type <declare_handler_type>    handler_type
@@ -675,7 +675,7 @@ opt_semi		:
                 | ';'
                 ;
 
-pl_block		: decl_sect K_BEGIN declare_sect proc_sect exception_sect K_END opt_label
+pl_block		: decl_sect K_BEGIN declare_sect_b proc_sect exception_sect K_END opt_label
                     {
                         PLpgSQL_stmt_block *newp;
 
@@ -715,7 +715,7 @@ pl_block		: decl_sect K_BEGIN declare_sect proc_sect exception_sect K_END opt_la
                     }
                 ;
 
-declare_sect    :
+declare_sect_b  :
                     {
                         /* done with decls, so resume identifier lookup */
                         u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
@@ -920,9 +920,10 @@ cond_element	: any_identifier
                         if (num != 0) {
                             $$ = NULL;
                         }
-                        PLpgSQL_condition *newp;
-                        newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
+
                         if ($1 > 3) {
+                            PLpgSQL_condition *newp;
+                            newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
                             newp->sqlerrstate = MAKE_SQLSTATE(sqlstatestr[0],
                                               sqlstatestr[1],
                                               sqlstatestr[2],
@@ -940,8 +941,6 @@ cond_element	: any_identifier
 
 condition_value	: K_SQLSTATE
                     {
-                        PLpgSQL_condition *newp;
-                        newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
                         /* next token should be a string literal */
                         char   *sqlstatestr;
                         yylex();

@@ -112,7 +112,7 @@ typedef struct SimpleEcontextStackEntry {
 static void plpgsql_exec_error_callback(void* arg);
 
 static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block);
-static int exec_stmt_block_mysql_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block);
+static int exec_stmt_block_b_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block);
 static int exec_stmts(PLpgSQL_execstate* estate, List* stmts);
 static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt);
 static int exec_stmt_assign(PLpgSQL_execstate* estate, PLpgSQL_stmt_assign* stmt);
@@ -2985,7 +2985,7 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
 
     if (block->exceptions != NULL) {
         if (block->isDeclareHandlerStmt == true/* mysql_style_exception */) {
-            rc = exec_stmt_block_mysql_exception(estate, block);
+            rc = exec_stmt_block_b_exception(estate, block);
         } else {
             estate->err_text = gettext_noop("during statement block entry");
 
@@ -3148,10 +3148,10 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     return PLPGSQL_RC_OK;
 }
 /* ----------
- * exec_stmt_block_mysql_exception			Execute a block of statements like mysql's exception handling style
+ * exec_stmt_block_b_exception			Execute a block of statements like mysql's exception handling style
  * ----------
  */
-static int exec_stmt_block_mysql_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
+static int exec_stmt_block_b_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
 {
         estate->err_text = gettext_noop("during statement block entry");
         bool savedisAllowCommitRollback = u_sess->SPI_cxt.is_allow_commit_rollback;
