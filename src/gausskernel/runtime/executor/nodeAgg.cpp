@@ -2889,6 +2889,13 @@ int AggCheckCallContext(FunctionCallInfo fcinfo, MemoryContext* aggcontext)
             *aggcontext = ((WindowAggState*)fcinfo->context)->aggcontext;
         return AGG_CONTEXT_WINDOW;
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (fcinfo->context && IsA(fcinfo->context, VecWindowAggState)) {
+        if (aggcontext != NULL)
+            *aggcontext = ((VecWindowAggState*)fcinfo->context)->aggcontext;
+        return AGG_CONTEXT_WINDOW;
+    }
+#endif
 
     /* this is just to prevent "uninitialized variable" warnings */
     if (aggcontext != NULL)

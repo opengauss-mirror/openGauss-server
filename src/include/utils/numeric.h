@@ -351,4 +351,9 @@ extern void int64_to_numericvar(int64 val, NumericVar *var);
 extern void add_var(NumericVar *var1, NumericVar *var2, NumericVar *result);
 extern char *numeric_normalize(Numeric num);
 
+bool numeric_agg_trans_initvalisnull(Oid transfn_oid, bool initvalisnull);
+void numeric_transfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype);
+void numeric_finalfn_info_change(Oid aggdn_oid, Oid *finalfn_oid);
+void numeric_aggfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype, Oid *finalfn_oid);
+
 #endif /* _PG_NUMERIC_H_ */

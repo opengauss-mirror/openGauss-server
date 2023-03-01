@@ -1372,6 +1372,17 @@ extern Datum int8_avg_accum(PG_FUNCTION_ARGS);
 #ifdef PGXC
 extern Datum numeric_avg_collect(PG_FUNCTION_ARGS);
 #endif
+#ifndef ENABLE_MULTIPLE_NODES
+extern Datum int8_avg_accum_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_sum(PG_FUNCTION_ARGS);
+extern Datum numeric_accum_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_avg_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_avg_accum_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_var_pop_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_var_samp_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_stddev_pop_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_stddev_samp_numeric(PG_FUNCTION_ARGS);
+#endif
 extern Datum numeric_avg(PG_FUNCTION_ARGS);
 extern Datum numeric_var_pop(PG_FUNCTION_ARGS);
 extern Datum numeric_var_samp(PG_FUNCTION_ARGS);
