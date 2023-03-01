@@ -110,7 +110,7 @@ referenced column: jsonb
 SELECT '0.1'::jsonb;				-- OK
  jsonb 
 -------
- .1
+ 0.1
 (1 row)
 
 SELECT '9223372036854775808'::jsonb;	-- OK, even though it's too large for int8

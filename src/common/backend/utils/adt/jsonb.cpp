@@ -18,6 +18,8 @@
 #include "utils/json.h"
 #include "utils/jsonapi.h"
 #include "utils/jsonb.h"
+#include "knl/knl_thread.h"
+#include "miscadmin.h"
 
 typedef struct JsonbInState {
     JsonbParseState *parseState;
@@ -351,78 +353,97 @@ char *JsonbToCString(StringInfo out, JsonbSuperHeader in, int estimated_len)
     JsonbValue  v;
     int         level = 0;
     bool        redo_switch = false;
+    
+    /* 
+     * Number in jsonb is stored by numeric, we should set display_leading_zero to on, 
+     * otherwise, "0.1" will be displayed as ".1", it is not supposed for a JSON data.
+     */
+    unsigned int original_behavior = u_sess->utils_cxt.behavior_compat_flags;
+    u_sess->utils_cxt.behavior_compat_flags = original_behavior | OPT_DISPLAY_LEADING_ZERO;
 
-    if (out == NULL)
-        out = makeStringInfo();
+    PG_TRY();
+    {
+        if (out == NULL)
+            out = makeStringInfo();
 
-    enlargeStringInfo(out, (estimated_len >= 0) ? estimated_len : 64);
-    it = JsonbIteratorInit(in);
+        enlargeStringInfo(out, (estimated_len >= 0) ? estimated_len : 64);
+        it = JsonbIteratorInit(in);
 
-    while (redo_switch || ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)) {
-        redo_switch = false;
-        switch (type) {
-            case WJB_BEGIN_ARRAY:
-                if (!first)
-                    appendBinaryStringInfo(out, ", ", 2);
-                first = true;
+        while (redo_switch || ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)) {
+            redo_switch = false;
+            switch (type) {
+                case WJB_BEGIN_ARRAY:
+                    if (!first)
+                        appendBinaryStringInfo(out, ", ", 2);
+                    first = true;
 
-                if (!v.array.rawScalar)
-                    appendStringInfoChar(out, '[');
-                level++;
-                break;
-            case WJB_BEGIN_OBJECT:
-                if (!first)
-                    appendBinaryStringInfo(out, ", ", 2);
-                first = true;
-                appendStringInfoCharMacro(out, '{');
+                    if (!v.array.rawScalar)
+                        appendStringInfoChar(out, '[');
+                    level++;
+                    break;
+                case WJB_BEGIN_OBJECT:
+                    if (!first)
+                        appendBinaryStringInfo(out, ", ", 2);
+                    first = true;
+                    appendStringInfoCharMacro(out, '{');
 
-                level++;
-                break;
-            case WJB_KEY:
-                if (!first)
-                    appendBinaryStringInfo(out, ", ", 2);
-                first = true;
+                    level++;
+                    break;
+                case WJB_KEY:
+                    if (!first)
+                        appendBinaryStringInfo(out, ", ", 2);
+                    first = true;
 
-                /* json rules guarantee this is a string */
-                jsonb_put_escaped_value(out, &v);
-                appendBinaryStringInfo(out, ": ", 2);
-
-                type = JsonbIteratorNext(&it, &v, false);
-                if (type == WJB_VALUE) {
-                    first = false;
+                    /* json rules guarantee this is a string */
                     jsonb_put_escaped_value(out, &v);
-                } else {
-                    Assert(type == WJB_BEGIN_OBJECT || type == WJB_BEGIN_ARRAY);
-                    /*
-                     * We need to rerun the current switch() since we need to
-                     * output the object which we just got from the iterator
-                     * before calling the iterator again.
-                     */
-                    redo_switch = true;
-                }
-                break;
-            case WJB_ELEM:
-                if (!first)
-                    appendBinaryStringInfo(out, ", ", 2);
-                else
+                    appendBinaryStringInfo(out, ": ", 2);
+
+                    type = JsonbIteratorNext(&it, &v, false);
+                    if (type == WJB_VALUE) {
+                        first = false;
+                        jsonb_put_escaped_value(out, &v);
+                    } else {
+                        Assert(type == WJB_BEGIN_OBJECT || type == WJB_BEGIN_ARRAY);
+                        /*
+                         * We need to rerun the current switch() since we need to
+                         * output the object which we just got from the iterator
+                         * before calling the iterator again.
+                         */
+                        redo_switch = true;
+                    }
+                    break;
+                case WJB_ELEM:
+                    if (!first)
+                        appendBinaryStringInfo(out, ", ", 2);
+                    else
+                        first = false;
+                    jsonb_put_escaped_value(out, &v);
+                    break;
+                case WJB_END_ARRAY:
+                    level--;
+                    if (!v.array.rawScalar)
+                        appendStringInfoChar(out, ']');
                     first = false;
-                jsonb_put_escaped_value(out, &v);
-                break;
-            case WJB_END_ARRAY:
-                level--;
-                if (!v.array.rawScalar)
-                    appendStringInfoChar(out, ']');
-                first = false;
-                break;
-            case WJB_END_OBJECT:
-                level--;
-                appendStringInfoCharMacro(out, '}');
-                first = false;
-                break;
-            default:
-                elog(ERROR, "unknown flag of jsonb iterator");
+                    break;
+                case WJB_END_OBJECT:
+                    level--;
+                    appendStringInfoCharMacro(out, '}');
+                    first = false;
+                    break;
+                default:
+                    elog(ERROR, "unknown flag of jsonb iterator");
+            }
         }
+
+        u_sess->utils_cxt.behavior_compat_flags = original_behavior;
+        Assert(level == 0);
     }
-    Assert(level == 0);
+    PG_CATCH();
+    {
+        u_sess->utils_cxt.behavior_compat_flags = original_behavior;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    
     return out->data;
 }
