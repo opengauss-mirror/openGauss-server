@@ -129,6 +129,7 @@ static bool _equalRangeVar(const RangeVar* a, const RangeVar* b)
     COMPARE_NODE_FIELD(buckets);
     COMPARE_SCALAR_FIELD(withVerExpr);
     COMPARE_NODE_FIELD(partitionNameList);
+    COMPARE_NODE_FIELD(indexhints);
 
     return true;
 }
@@ -968,6 +969,7 @@ static bool _equalQuery(const Query* a, const Query* b)
         return false;
     }
     
+    COMPARE_NODE_FIELD(indexhintList);
     return true;
 }
 
@@ -2128,6 +2130,21 @@ static bool _equalCreateWeakPasswordDictionaryStmt(const CreateWeakPasswordDicti
 
 static bool _equalDropWeakPasswordDictionaryStmt(const DropWeakPasswordDictionaryStmt* a, const DropWeakPasswordDictionaryStmt* b)
 {
+    return true;
+}
+
+static bool _equalIndexHintDefinition (const IndexHintDefinition* a, const IndexHintDefinition* b)
+{
+    COMPARE_NODE_FIELD(indexnames);
+    COMPARE_SCALAR_FIELD(index_type);
+    return true;
+}
+
+static bool _equalIndexHintRelationData (const IndexHintRelationData* a, const IndexHintRelationData* b)
+{
+    COMPARE_SCALAR_FIELD(relationOid);
+    COMPARE_SCALAR_FIELD(indexOid);
+    COMPARE_SCALAR_FIELD(index_type);
     return true;
 }
 
@@ -4377,6 +4394,11 @@ bool equal(const void* a, const void* b)
             break;
         case T_ShowEventStmt:
             retval = node_equal_show_event_info((const ShowEventStmt *)a, (const ShowEventStmt *)b);
+        case T_IndexHintDefinition:
+            retval = _equalIndexHintDefinition((IndexHintDefinition *)a, (IndexHintDefinition *)b);
+            break;
+        case T_IndexHintRelationData:
+            retval = _equalIndexHintRelationData((IndexHintRelationData *)a, (IndexHintRelationData *)b);
             break;
 
         default:

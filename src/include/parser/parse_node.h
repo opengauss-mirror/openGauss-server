@@ -276,6 +276,7 @@ struct ParseState {
      * if shouldCheckOrderbyCol is true else NIL.
      */
     List* orderbyCols; 
+    List* p_indexhintLists; /*Force or use index in index hint list*/
 };
 
 /* An element of p_relnamespace or p_varnamespace */

@@ -59,6 +59,7 @@ ParseState* make_parsestate(ParseState* parentParseState)
     pstate->p_plusjoin_rte_info = NULL;
     pstate->p_rawdefaultlist = NIL;
     pstate->p_has_ignore = false;
+    pstate->p_indexhintLists = NIL;
 
     if (parentParseState != NULL) {
         pstate->p_sourcetext = parentParseState->p_sourcetext;

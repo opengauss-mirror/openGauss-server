@@ -123,6 +123,7 @@ const uint32 SUPPORT_VIEW_AUTO_UPDATABLE = 92838;
 const uint32 INSERT_RIGHT_REF_VERSION_NUM = 92842;
 const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
 const uint32 CHARACTER_SET_VERSION_NUM = 92844;
+const uint32 INDEX_HINT_VERSION_NUM = 92845;
 
 /* Version number of the guc parameter backend_version added in V500R001C20 */
 const uint32 V5R1C20_BACKEND_VERSION_NUM = 92305;
