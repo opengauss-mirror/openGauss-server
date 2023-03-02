@@ -258,6 +258,7 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
     ExprContext* econtext = NULL;
     TableScanDesc scan = NULL;
     TIDBitmap* tbm = NULL;
+    TBMHandler tbm_handler;
     TBMIterator* tbmiterator = NULL;
     TBMIterateResult* tbmres = NULL;
     HBktTblScanDesc hpscan = NULL;
@@ -301,6 +302,7 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
      */
     if (tbm == NULL) {
         tbm = (TIDBitmap*)MultiExecProcNode(outerPlanState(node));
+        tbm_handler = tbm_get_handler(tbm);
 
         if (tbm == NULL || !IsA(tbm, TIDBitmap)) {
             ereport(ERROR,
@@ -310,12 +312,12 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
         }
 
         node->tbm = tbm;
-        node->tbmiterator = tbmiterator = tbm_begin_iterate(tbm);
+        node->tbmiterator = tbmiterator = tbm_handler._begin_iterate(tbm);
         node->tbmres = tbmres = NULL;
 
 #ifdef USE_PREFETCH
         if (u_sess->storage_cxt.target_prefetch_pages > 0) {
-            node->prefetch_iterator = prefetch_iterator = tbm_begin_iterate(tbm);
+            node->prefetch_iterator = prefetch_iterator = tbm_handler._begin_iterate(tbm);
             node->prefetch_pages = 0;
             node->prefetch_target = -1;
         }

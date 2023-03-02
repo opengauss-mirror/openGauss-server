@@ -34,21 +34,6 @@
 #include "nodes/makefuncs.h"
 
 static void ExecInitNextPartitionForBitmapIndexScan(BitmapIndexScanState* node);
-/* If bitmapscan uses global partition index, set tbm to global */
-static inline void GPIUpdateTbmType(BitmapIndexScanState* node, TIDBitmap* tbm)
-{
-    if (RelationIsGlobalIndex(node->biss_RelationDesc)) {
-        tbm_set_global(tbm, true);
-    }
-}
-
-/* if bitmapscan uses crossbucket index, set tbm->crossbucket to true */
-static inline void CBIUpdateTbmType(BitmapIndexScanState* node, TIDBitmap* tbm)
-{
-    if (RelationIsCrossBucketIndex(node->biss_RelationDesc)) {
-        tbm_set_crossbucket(tbm, true);
-    }
-}
 
 /* ----------------------------------------------------------------
  *		MultiExecBitmapIndexScan(node)
@@ -98,13 +83,9 @@ Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
         node->biss_result = NULL; /* reset for next time */
     } else {
         /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
-        tbm = TbmCreate(u_sess->attr.attr_memory.work_mem * 1024L, isUstore);
-
-        /* If bitmapscan uses global partition index, set tbm to global. */
-        GPIUpdateTbmType(node, tbm);
-
-        /* If bitmapscan uses crossbucket index, set tbm->crossbucket to true. */
-        CBIUpdateTbmType(node, tbm);
+        long maxbytes = u_sess->attr.attr_memory.work_mem * 1024L;
+        tbm = tbm_create(maxbytes, RelationIsGlobalIndex(node->biss_RelationDesc),
+                         RelationIsCrossBucketIndex(node->biss_RelationDesc), isUstore);
     }
 
     /* Cross-bucket index scan should not switch the index bucket. */

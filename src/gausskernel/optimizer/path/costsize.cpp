@@ -1424,7 +1424,7 @@ bool has_lossy_pages(RelOptInfo *baserel, const double &pages_fetched, double &l
      */
     double heap_pages = Min(pages_fetched, baserel->pages);
     const long work_mem_size = u_sess->attr.attr_memory.work_mem * 1024L;
-    long maxentries = tbm_calculate_entries(work_mem_size);
+    long maxentries = tbm_calculate_entries(work_mem_size, false);
     if (maxentries >= heap_pages) {
         return false;
     }

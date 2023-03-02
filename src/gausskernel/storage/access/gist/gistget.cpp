@@ -288,11 +288,12 @@ static void gistScanPage(IndexScanDesc scan, const GISTSearchItem *pageItem, con
             continue;
 
         if (tbm && GistPageIsLeaf(page)) {
+            TBMHandler tbm_handler = tbm_get_handler(tbm);
             /*
              * getbitmap scan, so just push heap tuple TIDs into the bitmap
              * without worrying about ordering
              */
-            tbm_add_tuples(tbm, &it->t_tid, 1, recheck, partHeapOid);
+            tbm_handler._add_tuples(tbm, &it->t_tid, 1, recheck, partHeapOid, InvalidBktId);
             (*ntids)++;
         } else if (scan->numberOfOrderBys == 0 && GistPageIsLeaf(page)) {
             /*

@@ -320,6 +320,9 @@ int64 btgetbitmap_internal(IndexScanDesc scan, TIDBitmap *tbm)
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
     int64 ntids = 0;
     ItemPointer heapTid;
+    Oid currPartOid;
+    int2 bucketid;
+    TBMHandler tbm_handler = tbm_get_handler(tbm);
 
     /*
      * If we have any array keys, initialize them.
@@ -339,9 +342,9 @@ int64 btgetbitmap_internal(IndexScanDesc scan, TIDBitmap *tbm)
         if (_bt_first(scan, ForwardScanDirection)) {
             /* Save tuple ID, and continue scanning */
             heapTid = &scan->xs_ctup.t_self;
-            Oid currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
-            int2 bucketid = so->currPos.items[so->currPos.itemIndex].bucketid;
-            tbm_add_tuples(tbm, heapTid, 1, false, currPartOid, bucketid);
+            currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
+            bucketid = so->currPos.items[so->currPos.itemIndex].bucketid;
+            tbm_handler._add_tuples(tbm, heapTid, 1, false, currPartOid, bucketid);
             ntids++;
 
             for (;;) {
@@ -360,7 +363,7 @@ int64 btgetbitmap_internal(IndexScanDesc scan, TIDBitmap *tbm)
                 heapTid = &so->currPos.items[so->currPos.itemIndex].heapTid;
                 currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
                 bucketid = so->currPos.items[so->currPos.itemIndex].bucketid;
-                tbm_add_tuples(tbm, heapTid, 1, false, currPartOid, bucketid);
+                tbm_handler._add_tuples(tbm, heapTid, 1, false, currPartOid, bucketid);
                 ntids++;
             }
         }

@@ -129,6 +129,21 @@ static inline int pg_rightmost_one_pos64(uint64 word)
 #endif /* HAVE__BUILTIN_CTZ */
 }
 
+static inline uint64 pg_nextpower2_64(uint64 num)
+{
+	Assert(num > 0 && num <= PG_UINT64_MAX / 2 + 1);
+
+	/*
+	 * A power 2 number has only 1 bit set.  Subtracting 1 from such a number
+	 * will turn on all previous bits resulting in no common bits being set
+	 * between num and num-1.
+	 */
+	if ((num & (num - 1)) == 0)
+		return num;				/* already power 2 */
+
+	return ((uint64) 1) << (pg_leftmost_one_pos64(num) + 1);
+}
+
 /* Count the number of one-bits in a uint32 or uint64 */
 extern int (*pg_popcount32)(uint32 word);
 extern int (*pg_popcount64)(uint64 word);
