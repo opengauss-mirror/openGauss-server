@@ -244,9 +244,9 @@
             appendStringInfo(str, " :opnamespace ");                                              \
             _outToken(str, nspname);                                                              \
             appendStringInfo(str, " :oprleft ");                                                  \
-            _outToken(str, get_typename(oprleft));                                                \
+            _outToken(str, OidIsValid(oprleft) ? get_typename(oprleft) : "<>");                   \
             appendStringInfo(str, " :oprright ");                                                 \
-            _outToken(str, get_typename(oprright));                                               \
+            _outToken(str, OidIsValid(oprright) ? get_typename(oprright) : "<>");                 \
             pfree_ext(oprname);                                                                   \
             pfree_ext(nspname);                                                                   \
         }                                                                                         \
