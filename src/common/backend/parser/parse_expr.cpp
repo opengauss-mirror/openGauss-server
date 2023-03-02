@@ -1904,7 +1904,7 @@ void CheckOutParamIsConst(PLpgSQL_expr* expr)
     PLpgSQL_execstate *estate = (PLpgSQL_execstate*)palloc(sizeof(PLpgSQL_execstate));
     expr->func = (PLpgSQL_function *) palloc0(sizeof(PLpgSQL_function));
     function = expr->func;
-    function->fn_is_trigger = false;
+    function->fn_is_trigger = PLPGSQL_NOT_TRIGGER;
     function->fn_input_collation = InvalidOid;
     function->out_param_varno = -1;     /* set up for no OUT param */
     function->resolve_option = GetResolveOption();

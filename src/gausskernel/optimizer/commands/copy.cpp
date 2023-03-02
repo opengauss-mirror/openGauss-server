@@ -981,15 +981,16 @@ static void CheckCopyFilePermission(char *filename)
  * Do not allow the copy if user doesn't have proper permission to access
  * the table or the specifically requested columns.
  */
-uint64 DoCopy(CopyStmt* stmt, const char* queryString)
+Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64 *processed)
 {
     CopyState cstate;
     bool is_from = stmt->is_from;
     bool pipe = (stmt->filename == NULL);
     Relation rel;
-    uint64 processed = 0;
     RangeTblEntry* rte = NULL;
     Node* query = NULL;
+    Oid relid;
+
     stmt->hashstate.has_histhash = false;
     /*
      * we can't retry gsql \copy from command and JDBC 'CopyManager.copyIn' operation,
@@ -1046,6 +1047,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
                 (errcode(ERRCODE_INVALID_OPERATION),
                     errmsg("%s is redistributing, please retry later.", rel->rd_rel->relname.data)));
 
+        relid = RelationGetRelid(rel);
         rte = makeNode(RangeTblEntry);
         rte->rtekind = RTE_RELATION;
         rte->relid = RelationGetRelid(rel);
@@ -1113,7 +1115,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         {
             SyncBulkloadStates(cstate);
 
-            processed = CopyFrom(cstate); /* copy from file to database */
+            *processed = CopyFrom(cstate); /* copy from file to database */
 
             /* Record copy from to gchain. */
             if (cstate->hashstate.has_histhash) {
@@ -1136,7 +1138,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         pgstat_set_stmt_tag(STMTTAG_READ);
         cstate = BeginCopyTo(rel, query, queryString, stmt->filename, stmt->attlist, stmt->options, stmt->filetype);
         cstate->range_table = list_make1(rte);
-        processed = DoCopyTo(cstate); /* copy from database to file */
+        *processed = DoCopyTo(cstate); /* copy from database to file */
         EndCopyTo(cstate);
     }
 
@@ -1155,7 +1157,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
             audit_report(AUDIT_COPY_TO, AUDIT_OK, stmt->filename ? stmt->filename : "stdout", queryString);
     }
 
-    return processed;
+    return relid;
 }
 
 static void TransformFormatter(CopyState cstate, List* formatter)

@@ -199,6 +199,7 @@ extern bool get_attmultistatsslot(HeapTuple statstuple, Oid atttype, int32 attty
 extern double get_attstadndistinct(HeapTuple statstuple);
 extern void free_attstatsslot(Oid atttype, Datum* values, int nvalues, float4* numbers, int nnumbers);
 extern char* get_namespace_name(Oid nspid);
+extern char* get_namespace_name_or_temp(Oid nspid);
 extern Oid get_range_subtype(Oid rangeOid);
 extern char* get_cfgnamespace(Oid cfgid);
 extern char* get_typenamespace(Oid typid);

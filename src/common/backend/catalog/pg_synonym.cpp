@@ -310,12 +310,13 @@ static void SynonymDrop(Oid synNamespace, char* synName, DropBehavior behavior, 
 /*
  * ALTER Synonym name OWNER TO newowner
  */
-void AlterSynonymOwner(List* name, Oid newOwnerId)
+ObjectAddress AlterSynonymOwner(List* name, Oid newOwnerId)
 {
     HeapTuple tuple = NULL;
     Relation rel = NULL;
-    Oid synNamespace;
+    Oid synNamespace, synOid;
     char* synName = NULL;
+    ObjectAddress address;
 
     /* Convert list of synonym names to a synName and a synNamespace. */
     synNamespace = QualifiedNameGetCreationNamespace(name, &synName);
@@ -328,6 +329,7 @@ void AlterSynonymOwner(List* name, Oid newOwnerId)
         heap_close(rel, RowExclusiveLock);
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("synonym \"%s\" does not exist", synName)));
     }
+    synOid = HeapTupleGetOid(tuple);
     Form_pg_synonym synForm = (Form_pg_synonym)GETSTRUCT(tuple);
 
     /*
@@ -361,11 +363,13 @@ void AlterSynonymOwner(List* name, Oid newOwnerId)
         CatalogUpdateIndexes(rel, tuple);
 
         /* Update owner dependency reference. */
-        changeDependencyOnOwner(PgSynonymRelationId, HeapTupleGetOid(tuple), newOwnerId);
+        changeDependencyOnOwner(PgSynonymRelationId, synOid, newOwnerId);
     }
 
     heap_freetuple_ext(tuple);
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, PgSynonymRelationId, synOid);
+    return address;
 }
 
 /*

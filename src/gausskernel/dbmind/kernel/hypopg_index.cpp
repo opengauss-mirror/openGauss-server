@@ -68,7 +68,7 @@ extern Oid GetIndexOpClass(List *opclass, Oid attrType, const char *accessMethod
 extern void CheckPredicate(Expr *predicate);
 extern bool CheckMutability(Expr *expr);
 static void hypo_utility_hook(processutility_context* processutility_cxt,
-    DestReceiver *dest, bool sentToRemote, char *completionTag, bool isCtas);
+    DestReceiver *dest, bool sentToRemote, char *completionTag, ProcessUtilityContext context, bool isCtas);
 static void hypo_executorEnd_hook(QueryDesc *queryDesc);
 static void hypo_get_relation_info_hook(PlannerInfo *root, Oid relationObjectId, bool inhparent, RelOptInfo *rel);
 static const char *hypo_explain_get_index_name_hook(Oid indexId);
@@ -157,15 +157,15 @@ static Oid hypo_getNewOid(Oid relid)
  * If this flag is setup, we can add hypothetical indexes.
  */
 void hypo_utility_hook(processutility_context* processutility_cxt,
-    DestReceiver *dest, bool sentToRemote, char *completionTag, bool isCtas)
+    DestReceiver *dest, bool sentToRemote, char *completionTag, ProcessUtilityContext context, bool isCtas)
 {
     Node* parsetree = processutility_cxt->parse_tree;
     isExplain = query_or_expression_tree_walker(parsetree, (bool (*)())hypo_query_walker, NULL, 0);
 
     if (prev_utility_hook) {
-        prev_utility_hook(processutility_cxt, dest, sentToRemote, completionTag, isCtas);
+        prev_utility_hook(processutility_cxt, dest, sentToRemote, completionTag, context, isCtas);
     } else {
-        standard_ProcessUtility(processutility_cxt, dest, sentToRemote, completionTag, isCtas);
+        standard_ProcessUtility(processutility_cxt, dest, sentToRemote, completionTag, context, isCtas);
     }
 }
 

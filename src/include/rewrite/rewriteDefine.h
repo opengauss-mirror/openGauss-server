@@ -14,6 +14,7 @@
 #ifndef REWRITEDEFINE_H
 #define REWRITEDEFINE_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
 #include "utils/relcache.h"
 
@@ -22,12 +23,12 @@
 #define RULE_FIRES_ON_REPLICA 'R'
 #define RULE_DISABLED 'D'
 
-extern void DefineRule(RuleStmt* stmt, const char* queryString);
+extern ObjectAddress DefineRule(RuleStmt* stmt, const char* queryString);
 
-extern void DefineQueryRewrite(
+extern ObjectAddress DefineQueryRewrite(
     char* rulename, Oid event_relid, Node* event_qual, CmdType event_type, bool is_instead, bool replace, List* action);
 
-extern void RenameRewriteRule(Oid owningRel, const char* oldName, const char* newName);
+extern ObjectAddress RenameRewriteRule(Oid owningRel, const char* oldName, const char* newName);
 
 extern void setRuleCheckAsUser(Node* node, Oid userid);
 

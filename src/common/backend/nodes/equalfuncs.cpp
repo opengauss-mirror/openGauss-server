@@ -2273,6 +2273,26 @@ static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* 
     return true;
 }
 
+static bool
+_equalCreateEventTrigStmt(const CreateEventTrigStmt *a, const CreateEventTrigStmt *b)
+{
+    COMPARE_STRING_FIELD(trigname);
+    COMPARE_SCALAR_FIELD(eventname);
+    COMPARE_NODE_FIELD(funcname);
+    COMPARE_NODE_FIELD(whenclause);
+ 
+    return true;
+}
+ 
+static bool
+_equalAlterEventTrigStmt(const AlterEventTrigStmt *a, const AlterEventTrigStmt *b)
+{
+    COMPARE_STRING_FIELD(trigname);
+    COMPARE_SCALAR_FIELD(tgenabled);
+ 
+    return true;
+}
+
 static bool _equalCreatePLangStmt(const CreatePLangStmt* a, const CreatePLangStmt* b)
 {
     COMPARE_SCALAR_FIELD(replace);
@@ -2441,6 +2461,7 @@ static bool _equalAlterTSDictionaryStmt(const AlterTSDictionaryStmt* a, const Al
 
 static bool _equalAlterTSConfigurationStmt(const AlterTSConfigurationStmt* a, const AlterTSConfigurationStmt* b)
 {
+    COMPARE_SCALAR_FIELD(kind);
     COMPARE_NODE_FIELD(cfgname);
     COMPARE_NODE_FIELD(tokentype);
     COMPARE_NODE_FIELD(dicts);
@@ -4076,6 +4097,12 @@ bool equal(const void* a, const void* b)
             break;
         case T_CreateTrigStmt:
             retval = _equalCreateTrigStmt((CreateTrigStmt*)a, (CreateTrigStmt*)b);
+            break;
+        case T_CreateEventTrigStmt:
+            retval = _equalCreateEventTrigStmt((CreateEventTrigStmt*)a, (CreateEventTrigStmt*)b);
+            break;
+        case T_AlterEventTrigStmt:
+            retval = _equalAlterEventTrigStmt((AlterEventTrigStmt*)a, (AlterEventTrigStmt*)b);
             break;
         case T_CreatePLangStmt:
             retval = _equalCreatePLangStmt((CreatePLangStmt*)a, (CreatePLangStmt*)b);

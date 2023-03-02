@@ -217,6 +217,15 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->varratio = NIL;
 #ifdef STREAMPLAN
     if (rel->rtekind == RTE_RELATION) {
+#ifndef ENABLE_MULTIPLE_NODES
+        if (IS_STREAM_PLAN && get_rel_persistence(rte->relid) == RELPERSISTENCE_GLOBAL_TEMP) {
+            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                NOTPLANSHIPPING_LENGTH,
+                "global template table not support stream operator.");
+            securec_check_ss_c(sprintf_rc, "\0", "\0");
+            mark_stream_unsupport();
+        }
+#endif
         rel->locator_type = GetLocatorType(rte->relid);
         rel->distribute_keys = build_baserel_distributekey(rte, relid);
         rel->rangelistOid = (IsLocatorDistributedBySlice(rel->locator_type)) ? rte->relid : InvalidOid;

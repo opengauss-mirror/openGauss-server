@@ -127,7 +127,7 @@ void LargeObjectDrop(Oid loid)
  *
  * Implementation of ALTER LARGE OBJECT statement
  */
-void LargeObjectAlterOwner(Oid loid, Oid newOwnerId)
+ObjectAddress LargeObjectAlterOwner(Oid loid, Oid newOwnerId)
 {
     Form_pg_largeobject_metadata form_lo_meta;
     Relation pg_lo_meta;
@@ -135,6 +135,8 @@ void LargeObjectAlterOwner(Oid loid, Oid newOwnerId)
     SysScanDesc scan;
     HeapTuple oldtup;
     HeapTuple newtup;
+    Oid loID;
+    ObjectAddress address;
 
     pg_lo_meta = heap_open(LargeObjectMetadataRelationId, RowExclusiveLock);
 
@@ -146,6 +148,7 @@ void LargeObjectAlterOwner(Oid loid, Oid newOwnerId)
     if (!HeapTupleIsValid(oldtup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u does not exist", loid)));
 
+    loID = HeapTupleGetOid(oldtup);
     form_lo_meta = (Form_pg_largeobject_metadata)GETSTRUCT(oldtup);
     if (form_lo_meta->lomowner != newOwnerId) {
         Datum values[Natts_pg_largeobject_metadata];
@@ -206,6 +209,8 @@ void LargeObjectAlterOwner(Oid loid, Oid newOwnerId)
     systable_endscan(scan);
 
     heap_close(pg_lo_meta, RowExclusiveLock);
+    ObjectAddressSet(address, LargeObjectRelationId, loID);
+    return address;
 }
 
 /*

@@ -19,6 +19,7 @@
 
 #include "parser/parse_node.h"
 #include "catalog/indexing.h"
+#include "catalog/objectaddress.h"
 #include "utils/partcache.h"
 #include "utils/partitionmap.h"
 
@@ -34,6 +35,7 @@ typedef struct RawColumnDefault {
 
 typedef struct CookedConstraint {
 	ConstrType	contype;         /* CONSTR_DEFAULT or CONSTR_CHECK */
+    Oid         conoid;         /* constr OID if created, otherwise Invalid */    
 	char	   *name;            /* name, or NULL if none */
 	AttrNumber	attnum;          /* which attr (only for DEFAULT) */
 	Node	   *expr;            /* transformed default or check expr */
@@ -131,7 +133,8 @@ extern Oid heap_create_with_catalog(const char *relname,
 						 bool record_dependce = true,
 						 List* ceLst = NULL,
 						 StorageType storage_type = HEAP_DISK,
-						 LOCKMODE partLockMode = AccessExclusiveLock);
+						 LOCKMODE partLockMode = AccessExclusiveLock,
+                         ObjectAddress *typaddress= NULL);
 
 extern void heap_create_init_fork(Relation rel);
 
@@ -186,7 +189,7 @@ extern void InsertPgClassTuple(Relation pg_class_desc, Relation new_rel_desc, Oi
 extern List *AddRelationNewConstraints(Relation rel, List *newColDefaults, List *newConstraints, bool allow_merge, bool is_local);
 
 extern List *AddRelClusterConstraints(Relation rel, List *clusterKeys);
-extern void StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol, Node* update_expr,
+extern Oid StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol, Node* update_expr,
     bool skip_dep = false);
 extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname,
     char generatedCol);

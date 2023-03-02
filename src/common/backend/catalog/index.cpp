@@ -53,6 +53,7 @@
 #include "catalog/pg_description.h"
 #include "catalog/storage.h"
 #include "catalog/storage_gtt.h"
+#include "commands/event_trigger.h"
 #include "commands/tablecmds.h"
 #include "commands/trigger.h"
 #include "commands/vacuum.h"
@@ -204,7 +205,7 @@ static bool relationHasPrimaryKey(Relation rel)
  * Caller had better have at least ShareLock on the table, else the not-null
  * checking isn't trustworthy.
  */
-void index_check_primary_key(Relation heapRel, IndexInfo* indexInfo, bool is_alter_table, bool is_modify_primary)
+void index_check_primary_key(Relation heapRel, IndexInfo* indexInfo, bool is_alter_table, IndexStmt *stmt, bool is_modify_primary)
 {
     List* cmds = NIL;
     int i;
@@ -275,8 +276,11 @@ void index_check_primary_key(Relation heapRel, IndexInfo* indexInfo, bool is_alt
      * as to avoid two scans.  But that seems to complicate DefineIndex's API
      * unduly.
      */
-    if (cmds != NULL)
+    if (cmds != NULL) {
+        EventTriggerAlterTableStart((Node *) stmt);
         AlterTableInternal(RelationGetRelid(heapRel), cmds, false);
+        EventTriggerAlterTableEnd();
+    }    
 }
 
 /*
@@ -2085,7 +2089,8 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
 /*
  * index_constraint_create
  *
- * Set up a constraint associated with an index
+ * Set up a constraint associated with an index.  Return the new constraint's
+ * address.
  *
  * heapRelation: table owning the index (must be suitably locked by caller)
  * indexRelationId: OID of the index
@@ -2101,7 +2106,7 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
  *		on table's columns
  * allow_system_table_mods: allow table to be a system catalog
  */
-void index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo* indexInfo,
+ObjectAddress index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo* indexInfo,
     const char* constraintName, char constraintType, bool deferrable, bool initdeferred, bool mark_as_primary,
     bool update_pgindex, bool remove_old_dependencies, bool allow_system_table_mods)
 {
@@ -2280,6 +2285,7 @@ void index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexIn
         heap_freetuple(indexTuple);
         heap_close(pg_index, RowExclusiveLock);
     }
+    return referenced;
 }
 
 #ifdef ENABLE_MOT

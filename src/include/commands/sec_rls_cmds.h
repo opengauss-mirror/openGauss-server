@@ -31,7 +31,7 @@
 
 extern void CreateRlsPolicy(CreateRlsPolicyStmt* stmt);
 extern void AlterRlsPolicy(AlterRlsPolicyStmt* stmt);
-extern void RenameRlsPolicy(RenameStmt* stmt);
+extern ObjectAddress RenameRlsPolicy(RenameStmt* stmt);
 extern void RemoveRlsPolicyById(Oid rlsPolicyOid);
 extern bool RemoveRoleFromRlsPolicy(Oid roleid, Oid rlsrelid, Oid rlspolicyid);
 extern void RelationBuildRlsPolicies(Relation relation);

@@ -1,0 +1,23 @@
+<refentry id="SQL-ALTEREVENTTRIGGER">
+<refmeta>
+<refentrytitle>ALTER EVENT TRIGGER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER EVENT TRIGGER</refname>
+<refpurpose>change the definition of an event trigger</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<indexterm zone="sql-altereventtrigger">
+<primary>ALTER EVENT TRIGGER</primary>
+</indexterm>
+<refsynopsisdiv>
+<synopsis>
+ALTER EVENT TRIGGER name DISABLE
+ALTER EVENT TRIGGER name ENABLE [ REPLICA | ALWAYS ]
+ALTER EVENT TRIGGER name OWNER TO { new_owner | CURRENT_USER | SESSION_USER }
+ALTER EVENT TRIGGER name RENAME TO new_name
+</synopsis>
+</refsynopsisdiv>
+</refentry>

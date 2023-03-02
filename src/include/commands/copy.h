@@ -388,7 +388,7 @@ CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
     const char* filename, List* attnamelist, List* options, CopyFileType filetype = S_COPYFILE);
 void EndCopyTo(CopyState cstate);
 uint64 DoCopyTo(CopyState cstate);
-extern uint64 DoCopy(CopyStmt* stmt, const char* queryString);
+extern Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64* process);
 template<bool skipEol>
 void CopySendEndOfRow(CopyState cstate);
 void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nulls);

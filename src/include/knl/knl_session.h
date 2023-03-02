@@ -178,6 +178,10 @@ typedef struct knl_u_executor_context {
     bool isExecTrunc;
 
     bool isLockRows;
+    /* add event trigger cache and memconext */
+    HTAB *EventTriggerCache;
+    MemoryContext EventTriggerCacheContext;
+    void *EventTriggerState; 
 
     bool isFlashBack;
 } knl_u_executor_context;

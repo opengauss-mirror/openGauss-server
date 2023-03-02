@@ -47,6 +47,8 @@ typedef enum RoleLockType { DO_NOTHING, LOCK_ROLE, UNLOCK_ROLE } RoleLockType;
  */
 typedef enum ObjectType {
     OBJECT_AGGREGATE,
+    OBJECT_AMOP,
+    OBJECT_AMPROC,
     OBJECT_ATTRIBUTE, /* type's attribute, when distinct from column */
     OBJECT_CAST,
     OBJECT_COLUMN,
@@ -57,7 +59,10 @@ typedef enum ObjectType {
     OBJECT_DATABASE,
     OBJECT_DATA_SOURCE,
     OBJECT_DB4AI_MODEL,  // DB4AI
+    OBJECT_DEFAULT,
     OBJECT_DOMAIN,
+    OBJECT_DOMCONSTRAINT,
+    OBJECT_EVENT_TRIGGER,
     OBJECT_EXTENSION,
     OBJECT_FDW,
     OBJECT_FOREIGN_SERVER,
@@ -85,6 +90,7 @@ typedef enum ObjectType {
     OBJECT_SEQUENCE,
     OBJECT_STREAM,
     OBJECT_SYNONYM,
+    OBJECT_TABCONSTRAINT,
     OBJECT_TABLE,
     OBJECT_TABLE_PARTITION,
     OBJECT_TABLESPACE,
@@ -96,6 +102,7 @@ typedef enum ObjectType {
     OBJECT_TYPE,
     OBJECT_USER,
     OBJECT_VIEW,
+    OBJECT_USER_MAPPING,
     OBJECT_DIRECTORY,
     OBJECT_GLOBAL_SETTING,
     OBJECT_COLUMN_SETTING,
@@ -2372,6 +2379,30 @@ typedef struct PredictByFunction{ // DB4AI
     int model_args_location; // Only for parser
 } PredictByFunction;
 
+/* ----------------------
+ *     Create EVENT TRIGGER Statement
+ * ----------------------
+ */
+typedef struct CreateEventTrigStmt
+{
+    NodeTag     type;
+    char       *trigname;       /* TRIGGER's name */
+    char       *eventname;      /* event's identifier */
+    List       *whenclause;     /* list of DefElems indicating filtering */
+    List       *funcname;       /* qual. name of function to call */
+} CreateEventTrigStmt;
+ 
+/* ----------------------
+ *     Alter EVENT TRIGGER Statement
+ * ----------------------
+ */
+typedef struct AlterEventTrigStmt
+{
+    NodeTag     type;
+    char       *trigname;       /* TRIGGER's name */
+    char        tgenabled;      /* trigger's firing configuration WRT
+                                 * session_replication_role */
+} AlterEventTrigStmt;
 typedef struct CreatePublicationStmt {
     NodeTag type;
     char *pubname;       /* Name of of the publication */

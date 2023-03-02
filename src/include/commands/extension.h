@@ -14,6 +14,7 @@
 #ifndef EXTENSION_H
 #define EXTENSION_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
 
 /*
@@ -24,22 +25,22 @@
  */
 extern THR_LOCAL bool creating_extension;
 
-extern void CreateExtension(CreateExtensionStmt* stmt);
+extern ObjectAddress CreateExtension(CreateExtensionStmt* stmt);
 
 extern void RemoveExtensionById(Oid extId);
 
-extern Oid InsertExtensionTuple(const char* extName, Oid extOwner, Oid schemaOid, bool relocatable,
+extern ObjectAddress InsertExtensionTuple(const char* extName, Oid extOwner, Oid schemaOid, bool relocatable,
     const char* extVersion, Datum extConfig, Datum extCondition, List* requiredExtensions);
 
-extern void ExecAlterExtensionStmt(AlterExtensionStmt* stmt);
+extern ObjectAddress ExecAlterExtensionStmt(AlterExtensionStmt* stmt);
 
-extern void ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt* stmt);
+extern ObjectAddress ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt* stmt, ObjectAddress *objAddr=NULL);
 
 extern Oid get_extension_oid(const char* extname, bool missing_ok);
 extern char* get_extension_name(Oid ext_oid);
 extern Oid get_extension_schema(Oid ext_oid);
 
-extern void AlterExtensionNamespace(List* names, const char* newschema);
+extern ObjectAddress AlterExtensionNamespace(List* names, const char* newschema);
 
 extern void AlterExtensionOwner_oid(Oid extensionOid, Oid newOwnerId);
 

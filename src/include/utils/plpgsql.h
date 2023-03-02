@@ -22,6 +22,7 @@
 #include "access/xact.h"
 #include "catalog/namespace.h"
 #include "commands/trigger.h"
+#include "commands/event_trigger.h"
 #include "executor/spi.h"
 #include "executor/functions.h"
 #include "parser/scanner.h"
@@ -258,6 +259,14 @@ typedef struct PLpgSQL_datum { /* Generic datum array item		*/
     int dno;
     bool ispkg;
 } PLpgSQL_datum;
+
+typedef enum PLpgSQL_trigtype
+{
+    PLPGSQL_DML_TRIGGER,
+    PLPGSQL_EVENT_TRIGGER,
+    PLPGSQL_NOT_TRIGGER
+} PLpgSQL_trigtype;
+
 /*
  * The variants PLpgSQL_var, PLpgSQL_row, and PLpgSQL_rec share these
  * fields
@@ -949,6 +958,7 @@ typedef struct PLpgSQL_func_hashkey { /* Hash lookup key for functions */
     Oid funcOid;
 
     bool isTrigger; /* true if called as a trigger */
+    bool isEventTrigger; /* true if called as an event trigger */
 
     /* be careful that pad bytes in this struct get zeroed! */
 
@@ -996,7 +1006,7 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     TransactionId fn_xmin;
     ItemPointerData fn_tid;
     bool is_private;
-    bool fn_is_trigger;
+    PLpgSQL_trigtype fn_is_trigger;
     Oid fn_input_collation;
     PLpgSQL_func_hashkey* fn_hashkey; /* back-link to hashtable key */
     MemoryContext fn_cxt;
@@ -1038,9 +1048,11 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     int tg_table_schema_varno;
     int tg_nargs_varno;
     int tg_argv_varno;
+    /* for event triggers */
+    int         tg_event_varno;
+    int         tg_tag_varno;
 
     List* invalItems; /* other dependencies, like other pkg's type or variable */
-
     PLpgSQL_resolve_option resolve_option;
 
     int ndatums;
@@ -1748,6 +1760,7 @@ extern void plpgsql_process_stmt_array(StringInfo buf, List* bracket_loc);
 extern void plpgsql_append_object_typename(StringInfo buf, PLpgSQL_type *var_type);
 extern void CheckSaveExceptionsDML(int errstate);
 
+extern void plpgsql_exec_event_trigger(PLpgSQL_function *func, EventTriggerData *trigdata);
 /* ----------
  * Externs in gram.y
  * ----------

@@ -213,6 +213,7 @@ typedef enum ObjectClass {
     OCLASS_PUBLICATION,      /* pg_publication */
     OCLASS_PUBLICATION_REL,  /* pg_publication_rel */
     OCLASS_SUBSCRIPTION,     /* pg_subscription */
+    OCLASS_EVENT_TRIGGER,       /* pg_event_trigger */
 	MAX_OCLASS               /* MUST BE LAST */
 } ObjectClass;
 

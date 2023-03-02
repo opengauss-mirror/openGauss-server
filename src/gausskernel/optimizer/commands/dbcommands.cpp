@@ -142,7 +142,7 @@ bool userbindlc(Oid rolid)
 /*
  * CREATE DATABASE
  */
-void createdb(const CreatedbStmt* stmt)
+Oid createdb(const CreatedbStmt* stmt)
 {
     TableScanDesc scan;
     Relation rel;
@@ -478,7 +478,7 @@ void createdb(const CreatedbStmt* stmt)
     if (OidIsValid(get_database_oid(dbname, true))) {
         if (stmt->missing_ok) {
             ereport(NOTICE, (errmsg("database \"%s\" already exists, skipping", dbname)));
-            return;
+            return InvalidOid;
         } else {
             ereport(ERROR, (errcode(ERRCODE_DUPLICATE_DATABASE), errmsg("database \"%s\" already exists", dbname)));
         }
@@ -641,7 +641,7 @@ void createdb(const CreatedbStmt* stmt)
                 dsttablespace = dst_deftablespace;
             else
                 dsttablespace = srctablespace;
-            
+
             dstpath = GetDatabasePath(dboid, dsttablespace);
 
             /*
@@ -731,6 +731,7 @@ void createdb(const CreatedbStmt* stmt)
      */
     set_dbcleanup_callback(createdb_xact_callback, &fparms.dest_dboid, sizeof(fparms.dest_dboid));
 #endif
+    return dboid;
 }
 
 /*
@@ -1228,13 +1229,14 @@ void AlterDatabasePermissionCheck(Oid dboid, const char* dbname)
 /*
  * Rename database
  */
-void RenameDatabase(const char* oldname, const char* newname)
+ObjectAddress RenameDatabase(const char* oldname, const char* newname)
 {
     Oid db_id;
     HeapTuple newtup;
     Relation rel;
     int notherbackends;
     int npreparedxacts;
+    ObjectAddress address;
     Relation pg_job_tbl = NULL;
     TableScanDesc scan = NULL;
     HeapTuple tuple = NULL;
@@ -1323,6 +1325,9 @@ void RenameDatabase(const char* oldname, const char* newname)
     heap_endscan(scan);
     heap_close(pg_job_tbl, ExclusiveLock);
 
+    ObjectAddressSet(address, DatabaseRelationId, db_id);
+
+    return address;
 }
 
 
@@ -1700,8 +1705,9 @@ static void movedb_failure_callback(int code, Datum arg)
 /*
  * ALTER DATABASE name ...
  */
-void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
+Oid AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
 {
+    Oid dboid;
     Relation rel;
     HeapTuple tuple, newtuple;
     ScanKeyData scankey;
@@ -1749,7 +1755,7 @@ void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
             PreventTransactionChain(isTopLevel, "ALTER DATABASE SET TABLESPACE");
 
         movedb(stmt->dbname, strVal(dtablespace->arg));
-        return;
+        return InvalidOid;
     }
 
     if (dconnlimit != NULL) {
@@ -1771,6 +1777,7 @@ void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
     if (!HeapTupleIsValid(tuple))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", stmt->dbname)));
 
+    dboid = HeapTupleGetOid(tuple);
     /* Permmision Check */
     AlterDatabasePermissionCheck(HeapTupleGetOid(tuple), stmt->dbname);
 
@@ -1811,12 +1818,13 @@ void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
 
     /* Close pg_database, but keep lock till commit */
     heap_close(rel, NoLock);
+    return dboid;
 }
 
 /*
  * ALTER DATABASE name SET ...
  */
-void AlterDatabaseSet(AlterDatabaseSetStmt* stmt)
+Oid AlterDatabaseSet(AlterDatabaseSetStmt* stmt)
 {
     Oid datid = get_database_oid(stmt->dbname, false);
 
@@ -1836,18 +1844,21 @@ void AlterDatabaseSet(AlterDatabaseSetStmt* stmt)
 #endif
 
     UnlockSharedObject(DatabaseRelationId, datid, 0, AccessShareLock);
+    return datid;
 }
 
 /*
  * ALTER DATABASE name OWNER TO newowner
  */
-void AlterDatabaseOwner(const char* dbname, Oid newOwnerId)
+ObjectAddress AlterDatabaseOwner(const char* dbname, Oid newOwnerId)
 {
+    Oid db_id;    
     HeapTuple tuple;
     Relation rel;
     ScanKeyData scankey;
     SysScanDesc scan;
     Form_pg_database datForm;
+    ObjectAddress address;
 
     if (userbindlc(newOwnerId))
         ereport(ERROR,
@@ -1865,6 +1876,7 @@ void AlterDatabaseOwner(const char* dbname, Oid newOwnerId)
     if (!HeapTupleIsValid(tuple))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", dbname)));
 
+    db_id = HeapTupleGetOid(tuple);
     datForm = (Form_pg_database)GETSTRUCT(tuple);
 
     /*
@@ -1930,11 +1942,13 @@ void AlterDatabaseOwner(const char* dbname, Oid newOwnerId)
         /* Update owner dependency reference */
         changeDependencyOnOwner(DatabaseRelationId, HeapTupleGetOid(tuple), newOwnerId);
     }
-
+    
+    ObjectAddressSet(address, DatabaseRelationId, db_id);
     systable_endscan(scan);
 
     /* Close pg_database, but keep lock till commit */
     heap_close(rel, NoLock);
+    return address;
 }
 
 /*

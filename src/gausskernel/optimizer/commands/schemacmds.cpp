@@ -27,6 +27,7 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/gs_package.h"
 #include "commands/dbcommands.h"
+#include "commands/event_trigger.h"
 #include "commands/schemacmds.h"
 #include "miscadmin.h"
 #include "parser/parse_utilcmd.h"
@@ -87,9 +88,9 @@ static bool IsReservedSchemaName(const char* name)
  */
 
 #ifdef PGXC
-void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString, bool sentToRemote)
+Oid CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString, bool sentToRemote)
 #else
-void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
+Oid CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 #endif
 {
     const char* schemaName = stmt->schemaname;
@@ -233,7 +234,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 
             /* OK to skip */
             ereport(NOTICE, (errmsg("schema \"%s\" already exists,skipping", schemaName)));
-            return;
+            return InvalidOid;
 	}
     } 
 
@@ -265,6 +266,16 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     /* XXX should we clear overridePath->useTemp? */
     PushOverrideSearchPath(overridePath);
 
+    /*
+     * Report the new schema to possibly interested event triggers.  Note we
+     * must do this here and not in ProcessUtilitySlow because otherwise the
+     * objects created below are reported before the schema, which would be
+     * wrong.
+     */
+    ObjectAddressSet(address, NamespaceRelationId, namespaceId);
+    EventTriggerCollectSimpleCommand(address, InvalidObjectAddress,
+                                     (Node *) stmt);
+    
     /*
      * Examine the list of commands embedded in the CREATE SCHEMA command, and
      * reorganize them into a sequentially executable order with no forward
@@ -345,7 +356,8 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 #ifdef PGXC
             true,
 #endif /* PGXC */
-            NULL);
+            NULL,
+            PROCESS_UTILITY_SUBCOMMAND);
         /* make sure later steps can see the object created here */
         CommandCounterIncrement();
     }
@@ -357,6 +369,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     SetUserIdAndSecContext(saved_uid, save_sec_context);
 
     list_free(parsetree_list);
+    return namespaceId;
 }
 
 void AlterSchemaCommand(AlterSchemaStmt* stmt)
@@ -507,11 +520,13 @@ void RemoveSchemaById(Oid schemaOid)
 /*
  * Rename schema
  */
-void RenameSchema(const char* oldname, const char* newname)
+ObjectAddress RenameSchema(const char* oldname, const char* newname)
 {
+    Oid       nspOid;    
     HeapTuple tup;
     Relation rel;
     AclResult aclresult;
+    ObjectAddress address;
     bool is_nspblockchain = false;
 
     if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
@@ -526,6 +541,7 @@ void RenameSchema(const char* oldname, const char* newname)
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema \"%s\" does not exist", oldname)));
 
+    nspOid = HeapTupleGetOid(tup);
     /* make sure the new name doesn't exist */
     if (OidIsValid(get_namespace_oid(newname, true)))
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_SCHEMA), errmsg("schema \"%s\" already exists", newname)));
@@ -593,8 +609,10 @@ void RenameSchema(const char* oldname, const char* newname)
     simple_heap_update(rel, &tup->t_self, tup);
     CatalogUpdateIndexes(rel, tup);
 
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
     heap_close(rel, NoLock);
     tableam_tops_free_tuple(tup);
+    return address;
 }
 
 /*
@@ -661,10 +679,12 @@ void AlterSchemaOwner_oid(Oid oid, Oid newOwnerId)
 /*
  * Change schema owner
  */
-void AlterSchemaOwner(const char* name, Oid newOwnerId)
+ObjectAddress AlterSchemaOwner(const char* name, Oid newOwnerId)
 {
+    Oid       nspOid;    
     HeapTuple tup;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(NamespaceRelationId, RowExclusiveLock);
 
@@ -672,11 +692,14 @@ void AlterSchemaOwner(const char* name, Oid newOwnerId)
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema \"%s\" does not exist", name)));
 
+    nspOid = HeapTupleGetOid(tup);
     AlterSchemaOwner_internal(tup, rel, newOwnerId);
-
+    
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
     ReleaseSysCache(tup);
 
     heap_close(rel, RowExclusiveLock);
+    return address;
 }
 
 static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerId)

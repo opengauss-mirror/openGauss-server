@@ -98,7 +98,7 @@ static void setEncryptedColumnRef(ColumnDef *def, TargetEntry *tle)
  * for the view.
  * ---------------------------------------------------------------------
  */
-static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, List* options, ObjectType relkind,
+static ObjectAddress DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, List* options, ObjectType relkind,
                                     ViewStmt* stmt, Query* viewParse)
 {
     Oid viewOid;
@@ -296,7 +296,6 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
 
         /* OK, let's do it. */
         AlterTableInternal(viewOid, atcmds, true);
-
         /*
          * There is very little to do here to update the view's dependencies.
          * Most view-level dependency relationships, such as those on the
@@ -318,9 +317,9 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
          */
         relation_close(rel, NoLock); /* keep the lock! */
 
-        return viewOid;
+        return address;
     } else {
-        Oid relid;
+        ObjectAddress address;   
 
         /*
          * now set the parameters for keys/inheritance etc. All of these are
@@ -351,19 +350,19 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
          * is false).
          */
         if (relkind == OBJECT_CONTQUERY) {
-            relid = DefineRelation(createStmt, RELKIND_CONTQUERY, ownerOid);
+            address = DefineRelation(createStmt, RELKIND_CONTQUERY, ownerOid, NULL);
         } else {
-            relid = DefineRelation(createStmt, RELKIND_VIEW, ownerOid);
+            address = DefineRelation(createStmt, RELKIND_VIEW, ownerOid, NULL);
         }
-        Assert(relid != InvalidOid);
+        Assert(address.objectId != InvalidOid);
 
         /* Make the new view relation visible */
         CommandCounterIncrement();
 
         /* Store the query for the view */
-        StoreViewQuery(relid, viewParse, replace);
+        StoreViewQuery(address.objectId, viewParse, replace);
 
-        return relid;
+        return address;
     }
 }
 
@@ -576,13 +575,13 @@ bool CheckMySQLFdwForWCO(Query* viewquery)
  * DefineView
  *		Execute a CREATE VIEW command.
  */
-Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool isFirstNode)
+ObjectAddress DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool isFirstNode)
 {
     Query* viewParse = NULL;
-    Oid viewOid = InvalidOid;
     RangeVar* view = NULL;
     ListCell* cell = NULL;
     bool check_option;
+    ObjectAddress address;
 
     /*
      * Run parse analysis to convert the raw parse tree to a Query.  Note this
@@ -726,9 +725,10 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
 #endif
 
      if (stmt->relkind == OBJECT_MATVIEW) {
+        Oid viewOid = InvalidOid;
         /* Relation Already Created */
         (void)RangeVarGetAndCheckCreationNamespace(view, NoLock, &viewOid, RELKIND_MATVIEW);
-
+        ObjectAddressSet(address, RelationRelationId, viewOid);
 #ifdef ENABLE_MULTIPLE_NODES
         /* try to send CREATE MATERIALIZED VIEW to DNs, Only consider PGXC now. */
         if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && !send_remote) {
@@ -743,7 +743,7 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
          * NOTE: if it already exists and replace is false, the xact will be
          * aborted.
          */
-        viewOid = DefineVirtualRelation(view, viewParse->targetList, stmt->replace, stmt->options,
+        address = DefineVirtualRelation(view, viewParse->targetList, stmt->replace, stmt->options,
                                         stmt->relkind, stmt, viewParse);
 
         /*
@@ -754,7 +754,7 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
         CommandCounterIncrement();
     }
 
-    return viewOid;
+    return address;
 }
 
 bool IsViewTemp(ViewStmt* stmt, const char* queryString)

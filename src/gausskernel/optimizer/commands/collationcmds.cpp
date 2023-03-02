@@ -42,7 +42,7 @@ static void AlterCollationOwner_internal(Relation rel, Oid collationOid, Oid new
 /*
  * CREATE COLLATION
  */
-void DefineCollation(List* names, List* parameters)
+ObjectAddress DefineCollation(List* names, List* parameters)
 {
     char* collName = NULL;
     Oid collNamespace;
@@ -55,6 +55,7 @@ void DefineCollation(List* names, List* parameters)
     char* collcollate = NULL;
     char* collctype = NULL;
     Oid newoid;
+    ObjectAddress address;
 
     collNamespace = QualifiedNameGetCreationNamespace(names, &collName);
 
@@ -125,10 +126,12 @@ void DefineCollation(List* names, List* parameters)
     check_encoding_locale_matches(GetDatabaseEncoding(), collcollate, collctype);
 
     newoid = CollationCreate(collName, collNamespace, GetUserId(), GetDatabaseEncoding(), collcollate, collctype);
+    ObjectAddressSet(address, CollationRelationId, newoid);
 
     /* check that the locales can be loaded */
     CommandCounterIncrement();
     (void)pg_newlocale_from_collation(newoid);
+    return address;
 }
 
 /*
@@ -194,10 +197,11 @@ void RenameCollation(List* name, const char* newname)
 /*
  * Change collation owner, by name
  */
-void AlterCollationOwner(List* name, Oid newOwnerId)
+ObjectAddress AlterCollationOwner(List* name, Oid newOwnerId)
 {
     Oid collationOid;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(CollationRelationId, RowExclusiveLock);
 
@@ -206,6 +210,8 @@ void AlterCollationOwner(List* name, Oid newOwnerId)
     AlterCollationOwner_internal(rel, collationOid, newOwnerId);
 
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, CollationRelationId, collationOid);
+    return address;
 }
 
 /*
@@ -283,15 +289,18 @@ static void AlterCollationOwner_internal(Relation rel, Oid collationOid, Oid new
 /*
  * Execute ALTER COLLATION SET SCHEMA
  */
-void AlterCollationNamespace(List* name, const char* newschema)
+ObjectAddress AlterCollationNamespace(List* name, const char* newschema)
 {
     Oid collOid, nspOid;
+    ObjectAddress address;
 
     collOid = get_collation_oid(name, false);
 
     nspOid = LookupCreationNamespace(newschema);
 
     AlterCollationNamespace_oid(collOid, nspOid);
+    ObjectAddressSet(address, CollationRelationId, collOid);
+    return address;
 }
 
 /*
@@ -350,3 +359,36 @@ Oid AlterCollationNamespace_oid(Oid collOid, Oid newNspOid)
 
     return oldNspOid;
 }
+
+/*
+ * Subroutine for ALTER COLLATION SET SCHEMA and RENAME
+ *
+ * Is there a collation with the same name of the given collation already in
+ * the given namespace?  If so, raise an appropriate error message.
+ */
+void
+IsThereCollationInNamespace(const char *collname, Oid nspOid)
+{
+    /* make sure the name doesn't already exist in new schema */
+    if (SearchSysCacheExists3(COLLNAMEENCNSP,
+                              CStringGetDatum(collname),
+                              Int32GetDatum(GetDatabaseEncoding()),
+                              ObjectIdGetDatum(nspOid)))
+        ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("collation \"%s\" for encoding \"%s\" already exists in schema \"%s\"",
+                        collname, GetDatabaseEncodingName(),
+                        get_namespace_name(nspOid))));
+
+    /* mustn't match an any-encoding entry, either */
+    if (SearchSysCacheExists3(COLLNAMEENCNSP,
+                              CStringGetDatum(collname),
+                              Int32GetDatum(-1),
+                              ObjectIdGetDatum(nspOid)))
+        ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("collation \"%s\" already exists in schema \"%s\"",
+                        collname, get_namespace_name(nspOid))));
+}
+
+

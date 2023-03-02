@@ -22,7 +22,7 @@ SUBDIRS     = sequence
 OBJS = aggregatecmds.o alter.o analyze.o async.o cluster.o comment.o  \
 	collationcmds.o constraint.o conversioncmds.o copy.o createas.o \
 	dbcommands.o define.o discard.o dropcmds.o explain.o extension.o \
-	foreigncmds.o functioncmds.o \
+	event_trigger.o foreigncmds.o functioncmds.o \
 	indexcmds.o lockcmds.o matview.o operatorcmds.o opclasscmds.o \
 	portalcmds.o prepare.o proclang.o packagecmds.o publicationcmds.o\
 	schemacmds.o seclabel.o sec_rls_cmds.o subscriptioncmds.o tablecmds.o tablespace.o trigger.o \

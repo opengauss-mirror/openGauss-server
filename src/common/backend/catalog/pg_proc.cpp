@@ -1037,7 +1037,7 @@ static bool user_define_func_check(Oid languageId, const char* probin, char** ab
  * not "ArrayType *", to avoid importing array.h into pg_proc_fn.h.
  * ----------------------------------------------------------------
  */
-Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackageid, bool isOraStyle, bool replace, bool returnsSet,
+ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackageid, bool isOraStyle, bool replace, bool returnsSet,
     Oid returnType, Oid proowner, Oid languageObjectId, Oid languageValidator, const char* prosrc, const char* probin,
     bool isAgg, bool isWindowFunc, bool security_definer, bool isLeakProof, bool isStrict, char volatility,
     oidvector* parameterTypes, Datum allParameterTypes, Datum parameterModes, Datum parameterNames,
@@ -1783,7 +1783,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
     }
 
     pfree_ext(final_file_name);
-    return retval;
+    return myself;
 }
 
 /*

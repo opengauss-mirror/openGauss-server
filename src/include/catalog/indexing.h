@@ -37,6 +37,11 @@ extern void CatalogIndexInsert(CatalogIndexState indstate,
 				   HeapTuple heapTuple);
 extern void CatalogUpdateIndexes(Relation heapRel, HeapTuple heapTuple);
 
+extern void CatalogTupleUpdate(Relation heapRel, ItemPointer otid, HeapTuple tup);
+
+extern Oid CatalogTupleInsert(Relation heapRel, HeapTuple tup);
+
+extern void CatalogTupleDelete(Relation heapRel, ItemPointer tid);
 
 /*
  * These macros are just to keep the C compiler from spitting up on the
@@ -670,6 +675,10 @@ DECLARE_INDEX(gs_sql_patch_unique_sql_id_index, 9054, on gs_sql_patch using btre
 
 DECLARE_UNIQUE_INDEX(pg_subscription_rel_srrelid_srsubid_index, 6138, on pg_subscription_rel using btree(srrelid oid_ops, srsubid oid_ops));
 #define SubscriptionRelSrrelidSrsubidIndexId 6138
+DECLARE_UNIQUE_INDEX(pg_event_trigger_evtname_index, 3486, on pg_event_trigger using btree(evtname name_ops));
+#define EventTriggerNameIndexId  3486
+DECLARE_UNIQUE_INDEX(pg_event_trigger_oid_index, 3487, on pg_event_trigger using btree(oid oid_ops));
+#define EventTriggerOidIndexId  3487
 
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES

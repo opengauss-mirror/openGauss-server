@@ -49,7 +49,7 @@
  * is specified by a BASETYPE element in the parameters.  Otherwise,
  * "args" defines the input type(s).
  */
-void DefineAggregate(List* name, List* args, bool oldstyle, List* parameters)
+ObjectAddress DefineAggregate(List* name, List* args, bool oldstyle, List* parameters)
 {
     char* aggName = NULL;
     Oid aggNamespace;
@@ -215,7 +215,7 @@ void DefineAggregate(List* name, List* args, bool oldstyle, List* parameters)
     /*
      * Most of the argument-checking is done inside of AggregateCreate
      */
-    AggregateCreate(aggName, /* aggregate name */
+    return AggregateCreate(aggName, /* aggregate name */
         aggNamespace,        /* namespace */
         aggKind,             /* agg kind */
         aggArgTypes,         /* input data type(s) */
@@ -309,13 +309,16 @@ void RenameAggregate(List* name, List* args, const char* newname)
 /*
  * Change aggregate owner
  */
-void AlterAggregateOwner(List* name, List* args, Oid newOwnerId)
+ObjectAddress AlterAggregateOwner(List* name, List* args, Oid newOwnerId)
 {
     Oid procOid;
+    ObjectAddress address;
 
     /* Look up function and make sure it's an aggregate */
     procOid = LookupAggNameTypeNames(name, args, false);
 
     /* The rest is just like a function */
     AlterFunctionOwner_oid(procOid, newOwnerId);
+    ObjectAddressSet(address, ProcedureRelationId, procOid);
+    return address;
 }

@@ -47,6 +47,10 @@
 #define INTERVAL_PARTITION_NAME_PREFIX_FMT "sys_p%u"
 #define INTERVAL_PARTITION_NAME_SUFFIX_LEN 5  /* max length of partitio num */
 
+/* 系统子分区名格式 */
+#define SUBPARTITION_NAME_PREFIX "sys_subp"
+#define SUBPARTITION_NAME_PREFIX_FMT "sys_subp%u"
+
 /* 
  * In start/end syntax, partition name is of form: 
  *     PARTITION_PREFIX_NUM, 

@@ -404,8 +404,8 @@ Datum hll_hash_anys(PG_FUNCTION_ARGS)
         }
     } else { /* typelen only can be -1/-2 or positive ,so can never reach here */
         ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("invalid type internal size %d", typelen)));
-        return 0; /* keep compiler quiet */
     }
+    return 0; /* keep compiler quiet */
 }
 
 Datum hll_eq(PG_FUNCTION_ARGS)

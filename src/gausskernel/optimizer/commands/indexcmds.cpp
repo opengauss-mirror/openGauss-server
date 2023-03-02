@@ -653,9 +653,9 @@ static bool parseVisibleStateFromOptions(List* options)
  *		it will be filled later.
  * 'quiet': suppress the NOTICE chatter ordinarily provided for constraints.
  *
- * Returns the OID of the created index.
+ * Returns the object address of the created index.
  */
-Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_alter_table, bool check_rights,
+ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_alter_table, bool check_rights,
     bool skip_build, bool quiet, bool is_modify_primary)
 {
     char* indexRelationName = NULL;
@@ -666,9 +666,11 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     Oid accessMethodId = InvalidOid;
     Oid namespaceId = InvalidOid;
     Oid tablespaceId = InvalidOid;
+    //Oid relfilenode = InvalidOid;
     bool dfsTablespace = false;
     List* indexColNames = NIL;
     List* allIndexParams = NIL;
+    //List *filenodeList = NIL;
     Relation rel;
     HeapTuple tuple;
     Form_pg_am accessMethodForm;
@@ -690,6 +692,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     List* partitiontspList = NIL;
     char relPersistence;
     bool concurrent;
+    ObjectAddress address;
     StdRdOptions* index_relopts;
     int8 indexsplitMethod = INDEXSPLIT_NO_DEFAULT;
     int crossbucketopt = -1;
@@ -800,7 +803,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             (errcode(ERRCODE_DUPLICATE_TABLE),
                 errmsg("relation \"%s\" already exists, skipping", stmt->idxname)));
         heap_close(rel, NoLock);
-        return indexRelationId;
+        return address;
     }
 
     if (stmt->schemaname != NULL) {
@@ -1384,7 +1387,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * If be informational constraint, we are not to set not null in pg_attribute.
      */
     if (stmt->primary && !stmt->internal_flag)
-        index_check_primary_key(rel, indexInfo, is_alter_table, is_modify_primary);
+        index_check_primary_key(rel, indexInfo, is_alter_table, stmt, is_modify_primary);
 
     /*
      * Report index creation if appropriate (delay this till after most of the
@@ -1492,16 +1495,18 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                 if (idxNameChanged) {
                     stmt->idxname = NULL;
                 }
-                return indexRelationId;
+                ObjectAddressSet(address, RelationRelationId, indexRelationId);
+                return address;
             }
-
             /* Roll back any GUC changes executed by index functions. */
             AtEOXact_GUC(false, root_save_nestlevel);
 
             /* Restore userid and security context */
             SetUserIdAndSecContext(root_save_userid, root_save_sec_context);
 
-            return buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
+            ObjectAddressSet(address, RelationRelationId, indexRelationId);
+            buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
+            return address;
         }
 #endif
         /* Roll back any GUC changes executed by index functions. */
@@ -1510,7 +1515,9 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         /* Restore userid and security context */
         SetUserIdAndSecContext(root_save_userid, root_save_sec_context);
 
-        return buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
+        buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
+        ObjectAddressSet(address, RelationRelationId, indexRelationId);
+        return address;
     }
 
     /* workload client manager */
@@ -1570,6 +1577,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     if (stmt->idxcomment != NULL)
         CreateComments(indexRelationId, RelationRelationId, 0, stmt->idxcomment);
 
+    ObjectAddressSet(address, RelationRelationId, indexRelationId);
     /* create the LOCAL index partition */
     if (stmt->isPartitioned && !stmt->isGlobal) {
         Relation partitionedIndex = index_open(indexRelationId, AccessExclusiveLock);
@@ -1792,15 +1800,8 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
 
         heap_close(partitionedIndex, NoLock);
         heap_close(rel, NoLock);
-
-        return indexRelationId;
-    }
-
-    if (RELATION_IS_PARTITIONED(rel)) {
-        releasePartitionOidList(&partitionOidList);
-    }
-    if (RelationIsSubPartitioned(rel)) {
-        ReleaseSubPartitionOidList(&subPartitionOidList);
+        ObjectAddressSet(address, RelationRelationId, indexRelationId);
+        return address;
     }
 
     /* Roll back any GUC changes executed by index functions. */
@@ -1812,7 +1813,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     if (!concurrent) {
         /* Close the heap and we're done, in the non-concurrent case */
         heap_close(rel, NoLock);
-        return indexRelationId;
+        return address;
     }
 
     // cstore relation doesn't support concurrent INDEX now.
@@ -1990,7 +1991,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         */
         UnlockRelationIdForSession(&heaprelid, ShareUpdateExclusiveLock);
 
-        return indexRelationId;
+        return address;
     }
 
     /*
@@ -2013,7 +2014,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      */
     UnlockRelationIdForSession(&heaprelid, ShareUpdateExclusiveLock);
 
-    return indexRelationId;
+    return address;
 }
 
 /*
@@ -2918,7 +2919,7 @@ List* ChooseIndexColumnNames(const List* indexElems)
  * ReindexIndex
  *		Recreate a specific index.
  */
-void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem* mem_info, bool concurrent)
+Oid ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem* mem_info, bool concurrent)
 {
     struct ReindexIndexCallbackState state;
     Oid indOid;
@@ -2969,7 +2970,6 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
         ReindexRelationConcurrently(indOid, indPartOid, mem_info, false);
     else {
         reindex_index(indOid, indPartOid, false, mem_info, false);
-#ifndef ENABLE_MULTIPLE_NODES
         Oid relId = IndexGetRelation(indOid, false);
         if (RelationIsCUFormatByOid(relId) && irel->rd_index != NULL && irel->rd_index->indisunique) {
             /*
@@ -2978,8 +2978,8 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
              */
             ReindexDeltaIndex(indOid, indPartOid);
         }
-#endif
     }
+    return indOid;
 }
 
 void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid, const char* partitionName, Oid partId,
@@ -3145,7 +3145,7 @@ static void RangeVarCallbackForReindexIndex(
  * ReindexTable
  *		Recreate all indexes of a table (and of its toast table, if any)
  */
-void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_info, bool concurrent)
+Oid ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_info, bool concurrent)
 {
     Oid heapOid;
     bool result;
@@ -3188,6 +3188,7 @@ void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_
         if (!result)
             ereport(NOTICE, (errmsg("table \"%s\" has no indexes", relation->relname)));
     }
+    return heapOid;
 }
 
 /*
@@ -3197,7 +3198,7 @@ void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_
  * @ in partition_name: the  partition_table is used to execute the operation of 'reindex internal table name partition
  *partition_name'.
  */
-void ReindexInternal(RangeVar* relation, const char* partition_name)
+Oid ReindexInternal(RangeVar* relation, const char* partition_name)
 {
     Oid heapOid;
     Relation rel;
@@ -3290,6 +3291,7 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
     }
 
     heap_close(rel, NoLock);
+    return heapOid;
 }
 
 /*
@@ -3300,7 +3302,7 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
  * separate transaction, so we can release the lock on it right away.
  * That means this must not be called within a user transaction block!
  */
-void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, AdaptMem* mem_info, bool concurrent)
+Oid ReindexDatabase(const char* databaseName, bool do_system, bool do_user, AdaptMem* mem_info, bool concurrent)
 {
     Relation relationRelation;
     TableScanDesc scan;
@@ -3476,6 +3478,7 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
     StartTransactionCommand();
 
     MemoryContextDelete(private_context);
+    return u_sess->proc_cxt.MyDatabaseId;
 }
 
 /*

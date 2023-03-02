@@ -1,0 +1,796 @@
+-- event trigger is only supported in PG compatability, test A、B、C compatability, all case should fail.
+create database test_event_trigger_A dbcompatibility 'A';
+\c test_event_trigger_A
+create event trigger regress_event_trigger
+   on ddl_command_start
+   execute procedure pg_backend_pid();
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger disable;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger enable always;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger rename to test_rename;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger owner to test_user;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+drop event trigger regress_event_trigger;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+comment on event trigger regress_event_trigger is 'comment';
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+create database test_event_trigger_B dbcompatibility 'B';
+\c test_event_trigger_B
+DROP DATABASE test_event_trigger_A;
+create event trigger regress_event_trigger
+   on ddl_command_start
+   execute procedure pg_backend_pid();
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger disable;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger enable always;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger rename to test_rename;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger owner to test_user;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+drop event trigger regress_event_trigger;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+comment on event trigger regress_event_trigger is 'comment';
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+create database test_event_trigger_C dbcompatibility 'C';
+\c test_event_trigger_C
+DROP DATABASE test_event_trigger_B;
+create event trigger regress_event_trigger
+   on ddl_command_start
+   execute procedure pg_backend_pid();
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger disable;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger enable always;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger rename to test_rename;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+alter event trigger regress_event_trigger owner to test_user;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+drop event trigger regress_event_trigger;
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+comment on event trigger regress_event_trigger is 'comment';
+ERROR:  EVENT TRIGGER is only supported in PG compatibility database
+create database test_event_trigger_pg dbcompatibility 'PG';
+\c test_event_trigger_pg
+DROP DATABASE test_event_trigger_C;
+-- test \h for event trigger
+\h create event trigger
+Command:     CREATE EVENT TRIGGER
+Description: define a new event trigger
+Syntax:
+CREATE EVENT TRIGGER name
+    ON event
+    [ WHEN filter_variable IN (filter_value [, ... ]) [ AND ... ] ]
+    EXECUTE PROCEDURE function name()
+
+\h drop event trigger
+Command:     DROP EVENT TRIGGER
+Description: remove an event trigger
+Syntax:
+DROP EVENT TRIGGER [ IF EXISTS ] name [ CASCADE | RESTRICT ]
+
+\h alter event trigger
+Command:     ALTER EVENT TRIGGER
+Description: change the definition of an event trigger
+Syntax:
+ALTER EVENT TRIGGER name DISABLE
+ALTER EVENT TRIGGER name ENABLE [ REPLICA | ALWAYS ]
+ALTER EVENT TRIGGER name OWNER TO { new_owner | CURRENT_USER | SESSION_USER }
+ALTER EVENT TRIGGER name RENAME TO new_name
+
+-- should fail, return type mismatch
+create event trigger regress_event_trigger
+   on ddl_command_start
+   execute procedure pg_backend_pid();
+ERROR:  function "pg_backend_pid" must return type "event_trigger"
+-- OK
+create function test_event_trigger() returns event_trigger as $$
+BEGIN
+    RAISE NOTICE 'test_event_trigger: % %', tg_event, tg_tag;
+END
+$$ language plpgsql;
+-- should fail, can't call it as a plain function
+SELECT test_event_trigger();
+ERROR:  trigger functions can only be called as triggers
+CONTEXT:  compilation of PL/pgSQL function "test_event_trigger" near line 1
+referenced column: test_event_trigger
+-- should fail, event triggers cannot have declared arguments
+create function test_event_trigger_arg(name text)
+returns event_trigger as $$ BEGIN RETURN 1; END $$ language plpgsql;
+ERROR:  event trigger functions cannot have declared arguments
+CONTEXT:  compilation of PL/pgSQL function "test_event_trigger_arg" near line 1
+-- should fail, SQL functions cannot be event triggers
+create function test_event_trigger_sql() returns event_trigger as $$
+SELECT 1 $$ language sql;
+ERROR:  SQL functions cannot return type event_trigger
+-- should fail, no elephant_bootstrap entry point
+create event trigger regress_event_trigger on elephant_bootstrap
+   execute procedure test_event_trigger();
+ERROR:  unrecognized event name "elephant_bootstrap"
+-- test \dy, do not have any event trigger here.
+\dy
+              List of event triggers
+ Name | Event | Owner | Enabled | Function | Tags 
+------+-------+-------+---------+----------+------
+(0 rows)
+
+-- OK
+create event trigger regress_event_trigger on ddl_command_start
+   execute procedure test_event_trigger();
+-- OK
+create event trigger regress_event_trigger_end on ddl_command_end
+   execute procedure test_event_trigger();
+-- test \dy, get all event triggers or a specific event trigger.
+\dy
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(2 rows)
+
+\dy regress_event_trigger
+--?.*
+--?.*
+--?.*
+--?.*
+(1 row)
+
+\dy regress_event_trigger_end
+--?.*
+--?.*
+--?.*
+--?.*
+(1 row)
+
+-- should fail, food is not a valid filter variable
+create event trigger regress_event_trigger2 on ddl_command_start
+   when food in ('sandwich')
+   execute procedure test_event_trigger();
+ERROR:  unrecognized filter variable "food"
+-- should fail, sandwich is not a valid command tag
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('sandwich')
+   execute procedure test_event_trigger();
+ERROR:  filter value "sandwich" not recognized for filter variable "tag"
+-- should fail, create skunkcabbage is not a valid command tag
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('create table', 'create skunkcabbage')
+   execute procedure test_event_trigger();
+ERROR:  filter value "create skunkcabbage" not recognized for filter variable "tag"
+-- should fail, can't have event triggers on event triggers
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('DROP EVENT TRIGGER')
+   execute procedure test_event_trigger();
+ERROR:  event triggers are not supported for DROP EVENT TRIGGER
+-- should fail, can't have event triggers on global objects
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('CREATE ROLE')
+   execute procedure test_event_trigger();
+ERROR:  event triggers are not supported for CREATE ROLE
+-- should fail, can't have event triggers on global objects
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('CREATE DATABASE')
+   execute procedure test_event_trigger();
+ERROR:  event triggers are not supported for CREATE DATABASE
+-- should fail, can't have event triggers on global objects
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('CREATE TABLESPACE')
+   execute procedure test_event_trigger();
+ERROR:  event triggers are not supported for CREATE TABLESPACE
+-- should fail, can't have same filter variable twice
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('create table') and tag in ('CREATE FUNCTION')
+   execute procedure test_event_trigger();
+ERROR:  filter variable "tag" specified more than once
+-- should fail, can't have arguments
+create event trigger regress_event_trigger2 on ddl_command_start
+   execute procedure test_event_trigger('argument not allowed');
+ERROR:  syntax error at or near "'argument not allowed'"
+LINE 2:    execute procedure test_event_trigger('argument not allowe...
+                                                ^
+-- OK
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('create table', 'CREATE FUNCTION')
+   execute procedure test_event_trigger();
+-- OK
+comment on event trigger regress_event_trigger is 'test comment';
+-- drop as non-superuser should fail
+create role regress_evt_user WITH ENCRYPTED PASSWORD 'EvtUser123';
+set role regress_evt_user PASSWORD 'EvtUser123';;
+create event trigger regress_event_trigger_noperms on ddl_command_start
+   execute procedure test_event_trigger();
+ERROR:  permission denied to create event trigger "regress_event_trigger_noperms"
+HINT:  Must be superuser to create an event trigger.
+reset role;
+-- test enabling and disabling
+alter event trigger regress_event_trigger disable;
+-- fires _trigger2 and _trigger_end should fire, but not _trigger
+create table event_trigger_fire1 (a int);
+NOTICE:  test_event_trigger: ddl_command_start CREATE TABLE
+NOTICE:  test_event_trigger: ddl_command_end CREATE TABLE
+alter event trigger regress_event_trigger enable;
+set session_replication_role = replica;
+-- fires nothing
+create table event_trigger_fire2 (a int);
+alter event trigger regress_event_trigger enable replica;
+-- fires only _trigger
+create table event_trigger_fire3 (a int);
+NOTICE:  test_event_trigger: ddl_command_start CREATE TABLE
+alter event trigger regress_event_trigger enable always;
+-- fires only _trigger
+create table event_trigger_fire4 (a int);
+NOTICE:  test_event_trigger: ddl_command_start CREATE TABLE
+reset session_replication_role;
+-- fires all three
+create table event_trigger_fire5 (a int);
+NOTICE:  test_event_trigger: ddl_command_start CREATE TABLE
+NOTICE:  test_event_trigger: ddl_command_start CREATE TABLE
+NOTICE:  test_event_trigger: ddl_command_end CREATE TABLE
+-- clean up
+alter event trigger regress_event_trigger disable;
+drop table event_trigger_fire2, event_trigger_fire3, event_trigger_fire4, event_trigger_fire5;
+NOTICE:  test_event_trigger: ddl_command_end DROP TABLE
+-- regress_event_trigger_end should fire on these commands
+grant all on table event_trigger_fire1 to public;
+NOTICE:  test_event_trigger: ddl_command_end GRANT
+comment on table event_trigger_fire1 is 'here is a comment';
+NOTICE:  test_event_trigger: ddl_command_end COMMENT
+revoke all on table event_trigger_fire1 from public;
+NOTICE:  test_event_trigger: ddl_command_end REVOKE
+drop table event_trigger_fire1;
+NOTICE:  test_event_trigger: ddl_command_end DROP TABLE
+create foreign data wrapper useless;
+NOTICE:  test_event_trigger: ddl_command_end CREATE FOREIGN DATA WRAPPER
+create server useless_server foreign data wrapper useless;
+NOTICE:  test_event_trigger: ddl_command_end CREATE SERVER
+create user mapping for regress_evt_user server useless_server;
+NOTICE:  test_event_trigger: ddl_command_end CREATE USER MAPPING
+alter default privileges for role regress_evt_user
+ revoke delete on tables from regress_evt_user;
+NOTICE:  test_event_trigger: ddl_command_end ALTER DEFAULT PRIVILEGES
+-- alter owner to non-superuser should fail
+alter event trigger regress_event_trigger owner to regress_evt_user;
+ERROR:  permission denied to change owner of event trigger "regress_event_trigger"
+HINT:  The owner of an event trigger must be a superuser.
+-- alter owner to superuser should work
+alter role regress_evt_user SYSadmin;
+alter event trigger regress_event_trigger owner to regress_evt_user;
+-- should fail, name collision
+alter event trigger regress_event_trigger rename to regress_event_trigger2;
+ERROR:  event trigger "regress_event_trigger2" already exists
+-- OK
+alter event trigger regress_event_trigger rename to regress_event_trigger3;
+-- should fail, doesn't exist any more
+drop event trigger regress_event_trigger;
+ERROR:  event trigger "regress_event_trigger" does not exist
+-- should fail, regress_evt_user owns some objects
+drop role regress_evt_user;
+ERROR:  role "regress_evt_user" cannot be dropped because some objects depend on it
+DETAIL:  owner of event trigger regress_event_trigger3
+owner of default privileges on new relations belonging to role regress_evt_user
+owner of user mapping for regress_evt_user
+-- test REASSIGN OWNED event_trigger
+create user reassign_test1 with SYSADMIN password 'Isaaa@123';
+create user reassign_test2 password 'Isaaa@123';
+create event trigger regress_event_trigger_reassign
+ on ddl_command_start execute procedure test_event_trigger();
+alter event trigger regress_event_trigger_reassign owner to reassign_test1;
+-- REASSIGN OWNED with event_trigger, non-superuser should fail
+REASSIGN OWNED BY reassign_test1 to reassign_test2;
+ERROR:  permission denied to change owner of event trigger "regress_event_trigger_reassign"
+HINT:  The owner of an event trigger must be a superuser.
+-- REASSIGN OWNED with event_trigger, superuser should work
+alter role reassign_test2 SYSadmin;
+REASSIGN OWNED BY reassign_test1 to reassign_test2;
+-- clean
+drop user reassign_test1;
+drop event trigger regress_event_trigger_reassign;
+drop schema reassign_test1;
+NOTICE:  test_event_trigger: ddl_command_end DROP SCHEMA
+drop user reassign_test2;
+-- cleanup before next test
+-- these are all OK; the second one should emit a NOTICE
+drop event trigger if exists regress_event_trigger2;
+drop event trigger if exists regress_event_trigger2;
+NOTICE:  event trigger "regress_event_trigger2" does not exist, skipping, skipping
+drop event trigger regress_event_trigger3;
+drop event trigger regress_event_trigger_end;
+-- test support for dropped objects
+CREATE SCHEMA schema_one authorization regress_evt_user;
+CREATE SCHEMA schema_two authorization regress_evt_user;
+CREATE SCHEMA audit_tbls authorization regress_evt_user;
+CREATE TEMP TABLE a_temp_tbl (a int);
+SET SESSION AUTHORIZATION regress_evt_user PASSWORD 'EvtUser123';
+CREATE TABLE schema_one.table_one(a int, b int);
+CREATE TABLE schema_one."table two"(a int);
+CREATE TABLE schema_one.table_three(a int);
+CREATE TABLE audit_tbls.schema_one_table_two(the_value text);
+CREATE TABLE schema_two.table_two(a int);
+CREATE TABLE schema_two.table_three(a int, b text);
+CREATE TABLE audit_tbls.schema_two_table_three(the_value text);
+CREATE OR REPLACE FUNCTION schema_two.add(int, int) RETURNS int LANGUAGE plpgsql
+  CALLED ON NULL INPUT
+  AS $$ BEGIN RETURN coalesce($1,0) + coalesce($2,0); END; $$;
+CREATE AGGREGATE schema_two.newton
+  (BASETYPE = int, SFUNC = schema_two.add, STYPE = int);
+RESET SESSION AUTHORIZATION;
+CREATE TABLE undroppable_objs (
+	object_type text,
+	object_identity text
+);
+INSERT INTO undroppable_objs VALUES
+('table', 'schema_one.table_three'),
+('table', 'audit_tbls.schema_two_table_three');
+CREATE TABLE dropped_objects (
+	type text,
+	schema text,
+	object text
+);
+-- This tests errors raised within event triggers; the one in audit_tbls
+-- uses 2nd-level recursive invocation via test_evtrig_dropped_objects().
+CREATE OR REPLACE FUNCTION undroppable() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+	obj record;
+BEGIN
+	PERFORM 1 FROM pg_tables WHERE tablename = 'undroppable_objs';
+	IF NOT FOUND THEN
+		RAISE NOTICE 'table undroppable_objs not found, skipping';
+		RETURN;
+	END IF;
+	FOR obj IN
+		SELECT * FROM pg_event_trigger_dropped_objects() JOIN
+			undroppable_objs USING (object_type, object_identity)
+	LOOP
+		RAISE EXCEPTION 'object % of type % cannot be dropped',
+			obj.object_identity, obj.object_type;
+	END LOOP;
+END;
+$$;
+CREATE EVENT TRIGGER undroppable ON sql_drop
+	EXECUTE PROCEDURE undroppable();
+CREATE OR REPLACE FUNCTION test_evtrig_dropped_objects() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    obj record;
+BEGIN
+    FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
+    LOOP
+        IF obj.object_type = 'table' THEN
+                EXECUTE format('DROP TABLE IF EXISTS audit_tbls.%I',
+					format('%s_%s', obj.schema_name, obj.object_name));
+        END IF;
+
+	INSERT INTO dropped_objects
+		(type, schema, object) VALUES
+		(obj.object_type, obj.schema_name, obj.object_identity);
+    END LOOP;
+END
+$$;
+CREATE EVENT TRIGGER regress_event_trigger_drop_objects ON sql_drop
+	WHEN TAG IN ('drop table', 'drop function', 'drop view',
+		'drop owned', 'drop schema', 'alter table')
+	EXECUTE PROCEDURE test_evtrig_dropped_objects();
+ALTER TABLE schema_one.table_one DROP COLUMN a;
+DROP SCHEMA schema_one, schema_two CASCADE;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to table schema_two.table_two
+drop cascades to table schema_two.table_three
+drop cascades to function schema_two.add(integer,integer)
+drop cascades to function schema_two.newton(integer)
+drop cascades to table schema_one.table_one
+drop cascades to table schema_one."table two"
+drop cascades to table schema_one.table_three
+NOTICE:  table "schema_two_table_two" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_two_table_two"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+NOTICE:  table "audit_tbls_schema_two_table_three" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.audit_tbls_schema_two_table_three"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_two_table_three"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+ERROR:  object audit_tbls.schema_two_table_three of type table cannot be dropped
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_two_table_three"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+DELETE FROM undroppable_objs WHERE object_identity = 'audit_tbls.schema_two_table_three';
+DROP SCHEMA schema_one, schema_two CASCADE;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to table schema_two.table_two
+drop cascades to table schema_two.table_three
+drop cascades to function schema_two.add(integer,integer)
+drop cascades to function schema_two.newton(integer)
+drop cascades to table schema_one.table_one
+drop cascades to table schema_one."table two"
+drop cascades to table schema_one.table_three
+NOTICE:  table "schema_two_table_two" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_two_table_two"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+NOTICE:  table "audit_tbls_schema_two_table_three" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.audit_tbls_schema_two_table_three"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_two_table_three"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+NOTICE:  table "schema_one_table_one" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_one_table_one"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+NOTICE:  table "schema_one_table two" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls."schema_one_table two""
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+NOTICE:  table "schema_one_table_three" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_one_table_three"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+ERROR:  object schema_one.table_three of type table cannot be dropped
+DELETE FROM undroppable_objs WHERE object_identity = 'schema_one.table_three';
+DROP SCHEMA schema_one, schema_two CASCADE;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to table schema_two.table_two
+drop cascades to table schema_two.table_three
+drop cascades to function schema_two.add(integer,integer)
+drop cascades to function schema_two.newton(integer)
+drop cascades to table schema_one.table_one
+drop cascades to table schema_one."table two"
+drop cascades to table schema_one.table_three
+NOTICE:  table "schema_two_table_two" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_two_table_two"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+NOTICE:  table "audit_tbls_schema_two_table_three" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.audit_tbls_schema_two_table_three"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_two_table_three"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+NOTICE:  table "schema_one_table_one" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_one_table_one"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+NOTICE:  table "schema_one_table two" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls."schema_one_table two""
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+NOTICE:  table "schema_one_table_three" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.schema_one_table_three"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+SELECT * FROM dropped_objects WHERE schema IS NULL OR schema <> 'pg_toast';
+     type     |   schema   |               object                
+--------------+------------+-------------------------------------
+ table column | schema_one | schema_one.table_one.a
+ schema       |            | schema_two
+ table        | schema_two | schema_two.table_two
+ type         | schema_two | schema_two.table_two
+ type         | schema_two | schema_two.table_two[]
+ table        | audit_tbls | audit_tbls.schema_two_table_three
+ type         | audit_tbls | audit_tbls.schema_two_table_three
+ type         | audit_tbls | audit_tbls.schema_two_table_three[]
+ table        | schema_two | schema_two.table_three
+ type         | schema_two | schema_two.table_three
+ type         | schema_two | schema_two.table_three[]
+ function     | schema_two | schema_two.add(integer,integer)
+ function     | schema_two | schema_two.newton(integer)
+ schema       |            | schema_one
+ table        | schema_one | schema_one.table_one
+ type         | schema_one | schema_one.table_one
+ type         | schema_one | schema_one.table_one[]
+ table        | schema_one | schema_one."table two"
+ type         | schema_one | schema_one."table two"
+ type         | schema_one | schema_one."table two"[]
+ table        | schema_one | schema_one.table_three
+ type         | schema_one | schema_one.table_three
+ type         | schema_one | schema_one.table_three[]
+(23 rows)
+
+DROP OWNED BY regress_evt_user;
+ERROR:  schema "audit_tbls" does not exist
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS audit_tbls.audit_tbls_schema_one_table_two"
+PL/pgSQL function test_evtrig_dropped_objects() line 8 at EXECUTE statement
+SELECT * FROM dropped_objects WHERE type = 'schema';
+  type  | schema |   object   
+--------+--------+------------
+ schema |        | schema_two
+ schema |        | schema_one
+(2 rows)
+
+DROP ROLE regress_evt_user;
+ERROR:  role "regress_evt_user" cannot be dropped because some objects depend on it
+DETAIL:  owner of table audit_tbls.schema_one_table_two
+owner of schema audit_tbls
+owner of default privileges on new relations belonging to role regress_evt_user
+owner of user mapping for regress_evt_user
+DROP EVENT TRIGGER regress_event_trigger_drop_objects;
+DROP EVENT TRIGGER undroppable;
+CREATE OR REPLACE FUNCTION event_trigger_report_dropped()
+ RETURNS event_trigger
+ LANGUAGE plpgsql
+AS $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT * from pg_event_trigger_dropped_objects()
+    LOOP
+    IF NOT r.normal AND NOT r.original THEN
+        CONTINUE;
+    END IF;
+    RAISE NOTICE 'NORMAL: orig=% normal=% istemp=% type=% identity=% name=% args=%',
+        r.original, r.normal, r.is_temporary, r.object_type,
+        r.object_identity, r.address_names, r.address_args;
+    END LOOP;
+END; $$;
+CREATE EVENT TRIGGER regress_event_trigger_report_dropped ON sql_drop
+    EXECUTE PROCEDURE event_trigger_report_dropped();
+CREATE SCHEMA evttrig
+	CREATE TABLE one (col_a SERIAL PRIMARY KEY, col_b text DEFAULT 'forty two')
+	CREATE INDEX one_idx ON one (col_b)
+	CREATE TABLE two (col_a int, col_c INTEGER CHECK (col_c > 0) REFERENCES one DEFAULT 42);
+NOTICE:  CREATE TABLE will create implicit sequence "one_col_a_seq" for serial column "one.col_a"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "one_pkey" for table "one"
+-- Partitioned tables with a partitioned index
+CREATE TABLE evttrig.parted (id int PRIMARY KEY)
+PARTITION BY RANGE (id)
+(
+        PARTITION part_1_10 VALUES LESS THAN(10),
+        PARTITION part_10_20 VALUES LESS THAN(20),
+        PARTITION part_10_15 VALUES LESS THAN(30),
+        PARTITION part_15_20 VALUES LESS THAN(40)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "parted_pkey" for table "parted"
+ALTER TABLE evttrig.two DROP COLUMN col_c;
+NOTICE:  NORMAL: orig=t normal=f istemp=f type=table column identity=evttrig.two.col_c name={evttrig,two,col_c} args={}
+NOTICE:  NORMAL: orig=f normal=t istemp=f type=table constraint identity=two_col_c_check on evttrig.two name={evttrig,two,two_col_c_check} args={}
+ALTER TABLE evttrig.one ALTER COLUMN col_b DROP DEFAULT;
+NOTICE:  NORMAL: orig=t normal=f istemp=f type=default value identity=for evttrig.one.col_b name={evttrig,one,col_b} args={}
+ALTER TABLE evttrig.one DROP CONSTRAINT one_pkey;
+NOTICE:  NORMAL: orig=t normal=f istemp=f type=table constraint identity=one_pkey on evttrig.one name={evttrig,one,one_pkey} args={}
+DROP INDEX evttrig.one_idx;
+NOTICE:  NORMAL: orig=t normal=f istemp=f type=index identity=evttrig.one_idx name={evttrig,one_idx} args={}
+DROP SCHEMA evttrig CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table evttrig.one
+drop cascades to table evttrig.two
+drop cascades to table evttrig.parted
+NOTICE:  NORMAL: orig=t normal=f istemp=f type=schema identity=evttrig name={evttrig} args={}
+NOTICE:  NORMAL: orig=f normal=t istemp=f type=table identity=evttrig.one name={evttrig,one} args={}
+NOTICE:  NORMAL: orig=f normal=t istemp=f type=sequence identity=evttrig.one_col_a_seq name={evttrig,one_col_a_seq} args={}
+NOTICE:  NORMAL: orig=f normal=t istemp=f type=default value identity=for evttrig.one.col_a name={evttrig,one,col_a} args={}
+NOTICE:  NORMAL: orig=f normal=t istemp=f type=table identity=evttrig.two name={evttrig,two} args={}
+NOTICE:  NORMAL: orig=f normal=t istemp=f type=table identity=evttrig.parted name={evttrig,parted} args={}
+DROP TABLE a_temp_tbl;
+NOTICE:  NORMAL: orig=t normal=f istemp=t type=table identity=pg_temp.a_temp_tbl name={pg_temp,a_temp_tbl} args={}
+DROP EVENT TRIGGER regress_event_trigger_report_dropped;
+-- only allowed from within an event trigger function, should fail
+select pg_event_trigger_table_rewrite_oid();
+ERROR:  pg_event_trigger_table_rewrite_oid() can only be called in a table_rewrite event trigger function
+CONTEXT:  referenced column: pg_event_trigger_table_rewrite_oid
+-- test Table Rewrite Event Trigger
+CREATE OR REPLACE FUNCTION test_evtrig_no_rewrite() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'rewrites not allowed';
+END;
+$$;
+create event trigger no_rewrite_allowed on table_rewrite
+  execute procedure test_evtrig_no_rewrite();
+create table rewriteme (id serial primary key, foo float);
+NOTICE:  CREATE TABLE will create implicit sequence "rewriteme_id_seq" for serial column "rewriteme.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "rewriteme_pkey" for table "rewriteme"
+insert into rewriteme
+     select x * 1.001 from generate_series(1, 500) as t(x);
+alter table rewriteme alter column foo type numeric;
+ERROR:  rewrites not allowed
+alter table rewriteme add column baz int default 0;
+-- test with more than one reason to rewrite a single table
+CREATE OR REPLACE FUNCTION test_evtrig_no_rewrite() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'Table ''%'' is being rewritten (reason = %)',
+               pg_event_trigger_table_rewrite_oid()::regclass,
+               pg_event_trigger_table_rewrite_reason();
+END;
+$$;
+alter table rewriteme
+ add column onemore int default 0,
+ add column another int default -1,
+ alter column foo type numeric(10,4);
+NOTICE:  Table 'rewriteme' is being rewritten (reason = 5)
+-- shouldn't trigger a table_rewrite event
+alter table rewriteme alter column foo type numeric(12,4);
+-- typed tables are rewritten when their type changes.  Don't emit table
+-- name, because firing order is not stable.
+CREATE OR REPLACE FUNCTION test_evtrig_no_rewrite() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'Table is being rewritten (reason = %)',
+               pg_event_trigger_table_rewrite_reason();
+END;
+$$;
+create type rewritetype as (a int);
+create table rewritemetoo1 of rewritetype;
+create table rewritemetoo2 of rewritetype;
+alter type rewritetype alter attribute a type text cascade;
+NOTICE:  Table is being rewritten (reason = 4)
+NOTICE:  Table is being rewritten (reason = 4)
+-- but this doesn't work
+create table rewritemetoo3 (a rewritetype);
+alter type rewritetype alter attribute a type varchar cascade;
+ERROR:  cannot alter type "rewritetype" because column "rewritemetoo3.a" uses it
+drop table rewriteme;
+drop event trigger no_rewrite_allowed;
+drop function test_evtrig_no_rewrite();
+-- test Row Security Event Trigger
+RESET SESSION AUTHORIZATION;
+CREATE TABLE event_trigger_test (a integer, b text);
+CREATE OR REPLACE FUNCTION start_command()
+RETURNS event_trigger AS $$
+BEGIN
+RAISE NOTICE '% - ddl_command_start', tg_tag;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION end_command()
+RETURNS event_trigger AS $$
+BEGIN
+RAISE NOTICE '% - ddl_command_end', tg_tag;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION drop_sql_command()
+RETURNS event_trigger AS $$
+BEGIN
+RAISE NOTICE '% - sql_drop', tg_tag;
+END;
+$$ LANGUAGE plpgsql;
+CREATE EVENT TRIGGER start_rls_command ON ddl_command_start
+    WHEN TAG IN ('CREATE ROW LEVEL SECURITY POLICY', 'ALTER ROW LEVEL SECURITY POLICY', 'DROP ROW LEVEL SECURITY POLICY') EXECUTE PROCEDURE start_command();
+CREATE EVENT TRIGGER end_rls_command ON ddl_command_end
+    WHEN TAG IN ('CREATE ROW LEVEL SECURITY POLICY', 'ALTER ROW LEVEL SECURITY POLICY', 'DROP ROW LEVEL SECURITY POLICY') EXECUTE PROCEDURE end_command();
+CREATE EVENT TRIGGER sql_drop_command ON sql_drop
+    WHEN TAG IN ('DROP ROW LEVEL SECURITY POLICY') EXECUTE PROCEDURE drop_sql_command();
+CREATE POLICY p1 ON event_trigger_test USING (FALSE);
+NOTICE:  CREATE ROW LEVEL SECURITY POLICY - ddl_command_start
+NOTICE:  CREATE ROW LEVEL SECURITY POLICY - ddl_command_end
+ALTER POLICY p1 ON event_trigger_test USING (TRUE);
+NOTICE:  ALTER ROW LEVEL SECURITY POLICY - ddl_command_start
+NOTICE:  ALTER ROW LEVEL SECURITY POLICY - ddl_command_end
+ALTER POLICY p1 ON event_trigger_test RENAME TO p2;
+NOTICE:  ALTER ROW LEVEL SECURITY POLICY - ddl_command_start
+NOTICE:  ALTER ROW LEVEL SECURITY POLICY - ddl_command_end
+DROP POLICY p2 ON event_trigger_test;
+NOTICE:  DROP ROW LEVEL SECURITY POLICY - ddl_command_start
+NOTICE:  DROP ROW LEVEL SECURITY POLICY - sql_drop
+NOTICE:  DROP ROW LEVEL SECURITY POLICY - ddl_command_end
+DROP EVENT TRIGGER start_rls_command;
+DROP EVENT TRIGGER end_rls_command;
+DROP EVENT TRIGGER sql_drop_command;
+-- test opt_family and opt
+create or replace function test_event_trigger() returns event_trigger as $$
+BEGIN
+    RAISE NOTICE 'test_event_trigger: % %', tg_event, tg_tag;
+END
+$$ language plpgsql;
+create event trigger regress_event_trigger on ddl_command_start
+   execute procedure test_event_trigger();
+-- create the operator class for gin
+CREATE OPERATOR CLASS gin_trgm_ops
+FOR TYPE text USING gin
+AS
+        STORAGE         int4;
+NOTICE:  test_event_trigger: ddl_command_start CREATE OPERATOR CLASS
+ALTER OPERATOR FAMILY gin_trgm_ops USING gin ADD
+        OPERATOR        3       pg_catalog.~~ (text, text),
+        OPERATOR        4       pg_catalog.~~* (text, text);
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR FAMILY
+-- create for operator
+create function add_double(var1 int, var2 int)
+returns integer as $$
+BEGIN 
+   var1 := (var1 + var2) * 2;
+   return var1;
+end;
+$$
+language plpgsql;
+NOTICE:  test_event_trigger: ddl_command_start CREATE FUNCTION
+create operator ++* (
+   leftarg = int,
+   rightarg = int,
+   procedure = add_double,
+   commutator = '++*'
+);
+NOTICE:  test_event_trigger: ddl_command_start CREATE OPERATOR
+-- clean
+drop OPERATOR FAMILY gin_trgm_ops USING gin;
+NOTICE:  test_event_trigger: ddl_command_start DROP OPERATOR FAMILY
+drop operator ++*(int, int);
+NOTICE:  test_event_trigger: ddl_command_start DROP OPERATOR
+drop function add_double;
+NOTICE:  test_event_trigger: ddl_command_start DROP FUNCTION
+drop event trigger regress_event_trigger;
+drop function test_event_trigger;
+-- test pg_event_trigger_ddl_commands
+create sequence event_trigger_ss;
+create domain event_trigger_dm AS pg_catalog.text;
+CREATE TYPE event_trigger_tp AS ENUM ('ok');
+create schema event_trigger_sc;
+create user event_trigger_us password 'Isaaa@123';
+CREATE OR REPLACE FUNCTION ddl_command_test()
+RETURNS event_trigger
+AS $$
+DECLARE
+    obj record;
+BEGIN
+    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands()
+        LOOP
+        RAISE NOTICE 'command: %',
+                 obj.command_tag;
+
+            RAISE NOTICE 'triggered';
+        END LOOP;
+END; $$ LANGUAGE plpgsql;
+CREATE EVENT TRIGGER test_ddl ON ddl_command_end
+   EXECUTE PROCEDURE ddl_command_test();
+create table event_trigger_tt (a int);
+NOTICE:  command: CREATE TABLE
+NOTICE:  triggered
+grant all on table event_trigger_tt to event_trigger_us;
+NOTICE:  command: GRANT
+NOTICE:  triggered
+grant all on sequence event_trigger_ss to event_trigger_us;
+NOTICE:  command: GRANT
+NOTICE:  triggered
+grant all on domain event_trigger_dm to event_trigger_us;
+NOTICE:  command: GRANT
+NOTICE:  triggered
+grant all on LANGUAGE sql to event_trigger_us;
+NOTICE:  command: GRANT
+NOTICE:  triggered
+grant all on TYPE event_trigger_tp to event_trigger_us;
+NOTICE:  command: GRANT
+NOTICE:  triggered
+grant all on schema event_trigger_sc to event_trigger_us;
+NOTICE:  command: GRANT
+NOTICE:  triggered
+grant all on function ddl_command_test() to event_trigger_us;
+NOTICE:  command: GRANT
+NOTICE:  triggered
+revoke all on table event_trigger_tt from event_trigger_us;
+NOTICE:  command: REVOKE
+NOTICE:  triggered
+revoke all on sequence event_trigger_ss from event_trigger_us;
+NOTICE:  command: REVOKE
+NOTICE:  triggered
+revoke all on domain event_trigger_dm from event_trigger_us;
+NOTICE:  command: REVOKE
+NOTICE:  triggered
+revoke all on LANGUAGE sql from event_trigger_us;
+NOTICE:  command: REVOKE
+NOTICE:  triggered
+revoke all on TYPE event_trigger_tp from event_trigger_us;
+NOTICE:  command: REVOKE
+NOTICE:  triggered
+revoke all on schema event_trigger_sc from event_trigger_us;
+NOTICE:  command: REVOKE
+NOTICE:  triggered
+revoke all on function ddl_command_test() from event_trigger_us;
+NOTICE:  command: REVOKE
+NOTICE:  triggered
+-- clean
+drop sequence event_trigger_ss;
+drop domain event_trigger_dm;
+drop TYPE event_trigger_tp;
+drop schema event_trigger_sc;
+drop user event_trigger_us;
+drop event trigger test_ddl;
+drop function ddl_command_test;
+drop table event_trigger_tt;
+-- alter extension add event_trigger
+CREATE OR REPLACE FUNCTION test_evtrig_no_rewrite() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'rewrites not allowed';
+END;
+$$;
+create event trigger no_rewrite_allowed on table_rewrite
+  when tag in ('alter table') execute procedure test_evtrig_no_rewrite();
+alter extension plpgsql add event trigger no_rewrite_allowed;
+alter extension plpgsql drop event trigger no_rewrite_allowed;
+drop event trigger no_rewrite_allowed;
+drop function test_evtrig_no_rewrite;
+\c regression
+DROP DATABASE test_event_trigger_pg;

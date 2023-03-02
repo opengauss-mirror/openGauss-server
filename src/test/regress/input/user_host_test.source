@@ -24,7 +24,7 @@ create user 'test_user_host'@'127.0.0.%' password 'test123@';
 create user 'test_user_host'@'127.0.%' password 'test123@';
 create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
-select usename from pg_user where usename like 'test_user_host%';
+select usename from pg_user where usename like 'test_user_host%' order by usename;
 create table test1(a int);
 alter table test1 owner to 'test_user_host@%';
 GRANT ALL PRIVILEGES TO 'test_user_host@%';

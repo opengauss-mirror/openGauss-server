@@ -15,6 +15,7 @@
 #define SEQUENCE_H
 
 #include "access/xlogreader.h"
+#include "catalog/objectaddress.h"
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
@@ -167,8 +168,8 @@ extern int128 nextval_internal(Oid relid);
 extern void autoinc_setval(Oid relid, int128 next, bool iscalled);
 extern int128 autoinc_get_nextval(Oid relid);
 extern bool CheckSeqOwnedByAutoInc(Oid seqoid);
-extern void DefineSequenceWrapper(CreateSeqStmt* stmt);
-extern void AlterSequenceWrapper(AlterSeqStmt* stmt);
+extern ObjectAddress DefineSequenceWrapper(CreateSeqStmt* stmt);
+extern ObjectAddress AlterSequenceWrapper(AlterSeqStmt* stmt);
 extern void PreventAlterSeqInTransaction(bool isTopLevel, AlterSeqStmt* stmt);
 extern void ResetSequence(Oid seq_relid, bool restart);
 

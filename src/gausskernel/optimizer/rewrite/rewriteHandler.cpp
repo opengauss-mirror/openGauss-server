@@ -4984,7 +4984,7 @@ List* QueryRewriteCTAS(Query* parsetree)
         proutility_cxt.readOnlyTree = false;
         proutility_cxt.params = NULL;
         proutility_cxt.is_top_level = true;
-        ProcessUtility(&proutility_cxt, NULL, false, NULL);
+        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED);
     }
 
     /* CREATE MATILIZED VIEW AS*/
@@ -4997,7 +4997,7 @@ List* QueryRewriteCTAS(Query* parsetree)
         proutility_cxt.readOnlyTree = false;
         proutility_cxt.params = NULL;
         proutility_cxt.is_top_level = true;
-        ProcessUtility(&proutility_cxt, NULL, false, NULL);
+        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED);
 
         create_matview_meta(query, stmt->into->rel, stmt->into->ivm);
 
@@ -5010,6 +5010,12 @@ List* QueryRewriteCTAS(Query* parsetree)
             return NIL;
         }
     }
+
+    /*
+        * Now fold the CTAS statement into an INSERT INTO statement. The
+        * utility is no more required.
+        */
+    parsetree->utilityStmt = NULL;
 
     /*
         * Now fold the CTAS statement into an INSERT INTO statement. The

@@ -52,7 +52,7 @@ typedef struct {
     char* tmpllibrary;   /* path of shared library */
 } PLTemplate;
 
-static void create_proc_lang(
+static ObjectAddress create_proc_lang(
     const char* languageName, bool replace, Oid languageOwner, Oid handlerOid, Oid inlineOid, Oid valOid, bool trusted);
 static PLTemplate* find_language_template(const char* languageName);
 static void AlterLanguageOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerId);
@@ -61,12 +61,13 @@ static void AlterLanguageOwner_internal(HeapTuple tup, Relation rel, Oid newOwne
  * CREATE PROCEDURAL LANGUAGE
  * ---------------------------------------------------------------------
  */
-void CreateProceduralLanguage(CreatePLangStmt* stmt)
+ObjectAddress CreateProceduralLanguage(CreatePLangStmt* stmt)
 {
     PLTemplate* pltemplate = NULL;
     Oid handlerOid, inlineOid, valOid;
     Oid funcrettype;
     Oid funcargtypes[1];
+    ObjectAddress tmpAddr;
 
     /*
      * If we have template information for the language, ignore the supplied
@@ -112,7 +113,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
              * it is null here since that there is no default value.  Fenced mode is not
              * supportted for PROCEDURAL LANGUAGE, so set false for fenced.
              */
-            handlerOid = ProcedureCreate(pltemplate->tmplhandler,
+            tmpAddr = ProcedureCreate(pltemplate->tmplhandler,
                 PG_CATALOG_NAMESPACE,
                 InvalidOid,
                 false, /* not A db compatible */
@@ -144,6 +145,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                 false,
                 false,
                 NULL);
+            handlerOid = tmpAddr.objectId;
         }
 
         /*
@@ -159,7 +161,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                  * add an argument to record the position of agruments with default value,
                  * it is null here since that there is no default value
                  */
-                inlineOid = ProcedureCreate(pltemplate->tmplinline,
+                tmpAddr = ProcedureCreate(pltemplate->tmplinline,
                     PG_CATALOG_NAMESPACE,
                     InvalidOid,
                     false, /* not A db compatible */
@@ -191,6 +193,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                     false,
                     false,
                     NULL);
+                inlineOid = tmpAddr.objectId;
             }
         } else
             inlineOid = InvalidOid;
@@ -208,7 +211,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                  * add an argument to record the position of agruments with default value,
                  * it is null here since that there is no default value
                  */
-                valOid = ProcedureCreate(pltemplate->tmplvalidator,
+                tmpAddr = ProcedureCreate(pltemplate->tmplvalidator,
                     PG_CATALOG_NAMESPACE,
                     InvalidOid,
                     false, /* not A db compatible */
@@ -240,12 +243,13 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                     false,
                     false,
                     NULL);
+                valOid = tmpAddr.objectId;
             }
         } else
             valOid = InvalidOid;
 
         /* ok, create it */
-        create_proc_lang(
+        return create_proc_lang(
             stmt->plname, stmt->replace, GetUserId(), handlerOid, inlineOid, valOid, pltemplate->tmpltrusted);
     } else {
         /*
@@ -309,14 +313,14 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
             valOid = InvalidOid;
 
         /* ok, create it */
-        create_proc_lang(stmt->plname, stmt->replace, GetUserId(), handlerOid, inlineOid, valOid, stmt->pltrusted);
+        return create_proc_lang(stmt->plname, stmt->replace, GetUserId(), handlerOid, inlineOid, valOid, stmt->pltrusted);
     }
 }
 
 /*
  * Guts of language creation.
  */
-static void create_proc_lang(
+static ObjectAddress create_proc_lang(
     const char* languageName, bool replace, Oid languageOwner, Oid handlerOid, Oid inlineOid, Oid valOid, bool trusted)
 {
     Relation rel;
@@ -430,6 +434,7 @@ static void create_proc_lang(
     InvokeObjectAccessHook(OAT_POST_CREATE, LanguageRelationId, myself.objectId, 0, NULL);
 
     heap_close(rel, RowExclusiveLock);
+    return myself;
 }
 
 /*
@@ -518,55 +523,28 @@ void DropProceduralLanguageById(Oid langOid)
 }
 
 /*
- * Rename language
- */
-void RenameLanguage(const char* oldname, const char* newname)
-{
-    HeapTuple tup;
-    Relation rel;
-
-    rel = heap_open(LanguageRelationId, RowExclusiveLock);
-
-    tup = SearchSysCacheCopy1(LANGNAME, CStringGetDatum(oldname));
-    if (!HeapTupleIsValid(tup))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("language \"%s\" does not exist", oldname)));
-
-    /* make sure the new name doesn't exist */
-    if (SearchSysCacheExists1(LANGNAME, CStringGetDatum(newname)))
-        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("language \"%s\" already exists", newname)));
-
-    /* must be owner of PL */
-    if (!pg_language_ownercheck(HeapTupleGetOid(tup), GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_LANGUAGE, oldname);
-
-    /* rename */
-    (void)namestrcpy(&(((Form_pg_language)GETSTRUCT(tup))->lanname), newname);
-    simple_heap_update(rel, &tup->t_self, tup);
-    CatalogUpdateIndexes(rel, tup);
-
-    heap_close(rel, NoLock);
-    tableam_tops_free_tuple(tup);
-}
-
-/*
  * Change language owner
  */
-void AlterLanguageOwner(const char* name, Oid newOwnerId)
+ObjectAddress AlterLanguageOwner(const char* name, Oid newOwnerId)
 {
     HeapTuple tup;
     Relation rel;
-
+    Oid lanId;
+    ObjectAddress address;
     rel = heap_open(LanguageRelationId, RowExclusiveLock);
 
     tup = SearchSysCache1(LANGNAME, CStringGetDatum(name));
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("language \"%s\" does not exist", name)));
 
+    lanId = HeapTupleGetOid(tup);
     AlterLanguageOwner_internal(tup, rel, newOwnerId);
 
     ReleaseSysCache(tup);
 
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, LanguageRelationId, lanId);
+    return address;
 }
 
 /*

@@ -156,6 +156,9 @@ void knl_u_executor_init(knl_u_executor_context* exec_cxt)
     exec_cxt->isExecTrunc = false;
 
     exec_cxt->isLockRows = false;
+    exec_cxt->EventTriggerCache = NULL;
+    exec_cxt->EventTriggerCacheContext = NULL;
+    exec_cxt->EventTriggerState = NULL;
     exec_cxt->isFlashBack = false;
 }
 

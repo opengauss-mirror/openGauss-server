@@ -56,6 +56,7 @@ typedef struct {
     /* These fields are filled by intorel_startup: */
     Relation rel;            /* relation to write to */
     CommandId output_cid;    /* cmin to insert in output tuples */
+    ObjectAddress reladdr;      /* address of rel, for ExecCreateTableAs */
     int hi_options;          /* heap_insert performance options */
     BulkInsertState bistate; /* bulk insert state */
 } DR_intorel;
@@ -120,7 +121,7 @@ SetupForCreateTableAs(Query *query, IntoClause *into, const char *queryString,
 /*
  * ExecCreateTableAs -- execute a CREATE TABLE AS command
  */
-void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamListInfo params, char* completionTag)
+ObjectAddress ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamListInfo params, char* completionTag)
 {
     Query* query = (Query*)stmt->query;
     IntoClause* into = stmt->into;
@@ -128,7 +129,8 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
     PlannedStmt* plan = NULL;
     QueryDesc* queryDesc = NULL;
     ScanDirection dir;
-
+    ObjectAddress address;
+    
     if (stmt->into->ivm) {
         return ExecCreateMatViewInc(stmt, queryString, params);
     }
@@ -148,7 +150,10 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
 
         ExecuteQuery(estmt, into, queryString, params, dest, completionTag);
 
-        return;
+        /* get object address that intorel_startup saved for us */
+        address = ((DR_intorel *) dest)->reladdr;
+
+        return address;
     }
 
     query = SetupForCreateTableAs(query, into, queryString, params, dest);
@@ -230,6 +235,9 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
         securec_check_ss(rc, "\0", "\0");
     }
 
+    /* get object address that intorel_startup saved for us */
+    address = ((DR_intorel *) dest)->reladdr;
+
     /* and clean up */
     ExecutorFinish(queryDesc);
     ExecutorEnd(queryDesc);
@@ -237,6 +245,7 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
     FreeQueryDesc(queryDesc);
 
     PopActiveSnapshot();
+    return address;
 }
 
 /*
@@ -298,6 +307,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
     IntoClause* into = myState->into;
     CreateStmt* create = NULL;
     Oid intoRelationId;
+    ObjectAddress intoRelationAddr;
     Relation intoRelationDesc;
     RangeTblEntry* rte = NULL;
     Datum toast_options;
@@ -413,8 +423,8 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
     /*
      * Actually create the target table
      */
-    intoRelationId = DefineRelation(create, into->relkind, InvalidOid);
-
+    intoRelationAddr = DefineRelation(create, into->relkind, InvalidOid, NULL);
+    intoRelationId = intoRelationAddr.objectId;
     /*
      * If necessary, create a TOAST table for the target table.  Note that
      * AlterTableCreateToastTable ends with CommandCounterIncrement(), so that
@@ -482,7 +492,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
      */
     myState->rel = intoRelationDesc;
     myState->output_cid = GetCurrentCommandId(true);
-
+    myState->reladdr = intoRelationAddr;
     /*
      * We can skip WAL-logging the insertions, unless PITR or streaming
      * replication is in use. We can skip the FSM in any case.

@@ -7049,7 +7049,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         PLpgSQL_execstate *estate = (PLpgSQL_execstate*)palloc(sizeof(PLpgSQL_execstate));
         expr->func = (PLpgSQL_function *) palloc0(sizeof(PLpgSQL_function));
         function = expr->func;
-        function->fn_is_trigger = false;
+        function->fn_is_trigger = PLPGSQL_NOT_TRIGGER;
         function->fn_input_collation = InvalidOid;
         function->out_param_varno = -1;		/* set up for no OUT param */
         function->resolve_option = GetResolveOption();
@@ -12088,6 +12088,8 @@ static Oid plpgsql_build_package_record_type(const char* typname, List* list, bo
 static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid, char arraytype)
 {
     char typtyp;
+    ObjectAddress myself, referenced;
+
     char* casttypename = CastPackageTypeName(typname, u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid, true,
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->is_spec_compiling);
     if (strlen(casttypename) >= NAMEDATALEN ) {
@@ -12135,7 +12137,7 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
         ownerId = GetUserId();
     }
 
-    Oid typoid = TypeCreate(InvalidOid, /* force the type's OID to this */
+    referenced = TypeCreate(InvalidOid, /* force the type's OID to this */
         casttypename,               /* Array type name */
         pkgNamespaceOid,               /* Same namespace as parent */
         InvalidOid,                 /* Not composite, no relationOid */
@@ -12170,13 +12172,9 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
     CommandCounterIncrement();
 
     /* build dependency on created composite type. */
-    ObjectAddress myself, referenced;
     myself.classId = PackageRelationId;
     myself.objectId = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
     myself.objectSubId = 0;
-    referenced.classId = TypeRelationId;
-    referenced.objectId = typoid;
-    referenced.objectSubId = 0;
     recordDependencyOn(&referenced, &myself, DEPENDENCY_AUTO);
     CommandCounterIncrement();
     pfree_ext(casttypename);

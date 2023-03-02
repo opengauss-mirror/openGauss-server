@@ -4692,5 +4692,5 @@ CREATE OR REPLACE VIEW DBE_PERF.local_active_session AS
 		 tlevel, smpid, userid, application_name, client_addr, client_hostname, client_port, query_id, unique_query_id,
 		 user_id, cn_id, unique_query, locktag, lockmode, block_sessionid, final_block_sessionid, wait_status, global_sessionid, xact_start_time, query_start_time, state FROM tt
 	WHERE level = (SELECT pg_catalog.MAX(level) FROM tt t1 WHERE t1.sampleid =  tt.sampleid AND t1.sessionid = tt.sessionid);
-
+  
 grant select on all tables in schema dbe_perf to public;

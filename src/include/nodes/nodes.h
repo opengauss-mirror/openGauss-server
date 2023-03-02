@@ -509,6 +509,8 @@ typedef enum NodeTag {
     T_CreateExtensionStmt,
     T_AlterExtensionStmt,
     T_AlterExtensionContentsStmt,
+    T_CreateEventTrigStmt,
+    T_AlterEventTrigStmt,
     T_CreateDataSourceStmt,
     T_AlterDataSourceStmt,
     T_ReplicaIdentityStmt,
@@ -628,6 +630,7 @@ typedef enum NodeTag {
      * pass multiple object types through the same pointer).
      */
     T_TriggerData = 980, /* in commands/trigger.h */
+    T_EventTriggerData,         /* in commands/event_trigger.h */
     T_ReturnSetInfo,     /* in nodes/execnodes.h */
     T_WindowObjectData,  /* private in nodeWindowAgg.c */
     T_TIDBitmap,         /* in nodes/tidbitmap.h */

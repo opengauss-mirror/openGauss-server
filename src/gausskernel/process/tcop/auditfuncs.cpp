@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
+#include "nodes/makefuncs.h"
 #include "tcop/utility.h"
 #include "pgaudit.h"
 #include "libpq/libpq-be.h"
@@ -73,6 +74,7 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
     bool sentToRemote,
 #endif /* PGXC */
     char* completionTag,
+    ProcessUtilityContext context,
     bool isCTAS);
 static void pgaudit_ddl_database(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_directory(const char* objectname, const char* cmdtext);
@@ -1103,11 +1105,24 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
     DropStmt* stmt = (DropStmt*)node;
     ListCell* arg = NULL;
     char* objectname = NULL;
-
     foreach (arg, stmt->objects) {
-        List* names = (List*)lfirst(arg);
+        List* names = NIL;
         RangeVar* rel = NULL;
-
+        if (stmt->removeType == OBJECT_DOMAIN ||
+             stmt->removeType == OBJECT_TYPE ) {
+        List *objname = (List*)lfirst(arg);
+        Node *ptype = (Node *) linitial(objname);
+        TypeName* typname = NULL;
+        if(ptype->type == T_String)
+            typname = makeTypeNameFromNameList(list_make1(ptype));
+        else if(ptype->type == T_TypeName)
+            typname = (TypeName *) linitial(objname);
+        else
+            ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unkonw type: %d", (int)ptype->type)));
+        names = typname->names;
+        } else {
+            names = (List*)lfirst(arg);
+        }
         switch (stmt->removeType) {
             case OBJECT_TABLE:
             case OBJECT_STREAM:
@@ -1298,12 +1313,13 @@ static void pgaudit_process_rename_object(Node* node, const char* querystring)
         case OBJECT_SCHEMA:
         case OBJECT_TABLESPACE:
         case OBJECT_TRIGGER:
-        case OBJECT_FDW:
-        case OBJECT_FOREIGN_SERVER:
         case OBJECT_RLSPOLICY:
         case OBJECT_DATA_SOURCE:
             objectname = stmt->subname;
             break;
+        case OBJECT_EVENT_TRIGGER:
+        case OBJECT_FDW:
+        case OBJECT_FOREIGN_SERVER:
         case OBJECT_FUNCTION:
         case OBJECT_TYPE:
         case OBJECT_TSDICTIONARY:
@@ -1390,6 +1406,7 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
     bool sentToRemote,
 #endif /* PGXC */
     char* completionTag,
+    ProcessUtilityContext context,
     bool isCTAS)
 {
     char* object_name_pointer = NULL;
@@ -1401,6 +1418,7 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
             sentToRemote,
 #endif /* PGXC */
             completionTag,
+            context,
             isCTAS);
     else
         standard_ProcessUtility(processutility_cxt,
@@ -1409,6 +1427,7 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
             sentToRemote,
 #endif /* PGXC */
             completionTag,
+            context,
             isCTAS);
 
     Node* parsetree = processutility_cxt->parse_tree;

@@ -461,12 +461,15 @@ void AlterRlsPolicy(AlterRlsPolicyStmt* stmt)
  * @param (in) renameStmt: RenameStmt describes the policy name, table name and new rls policy name
  * @return: void
  */
-void RenameRlsPolicy(RenameStmt* renameStmt)
+ObjectAddress RenameRlsPolicy(RenameStmt* renameStmt)
 {
+    Oid rlsp_id;    
+    ObjectAddress address;
+
     Assert(renameStmt != NULL);
     /* Check whether need to rename rls policy on current node */
     if (SupportRlsOnCurrentNode() == false) {
-        return;
+        return InvalidObjectAddress;
     }
     /* Check license whether support this feature */
     LicenseSupportRls();
@@ -532,7 +535,7 @@ void RenameRlsPolicy(RenameStmt* renameStmt)
                     renameStmt->subname,
                     renameStmt->relation->relname)));
     }
-
+    rlsp_id = HeapTupleGetOid(rlsPolicyTuple);
     /* Copy tuple here, because of update index later */
     rlsPolicyTuple = (HeapTuple)tableam_tops_copy_tuple(rlsPolicyTuple);
     /* Update RLS policy name */
@@ -551,7 +554,8 @@ void RenameRlsPolicy(RenameStmt* renameStmt)
     systable_endscan(scanDesc);
     heap_close(pg_rlspolicy, RowExclusiveLock);
     heap_close(targetTable, NoLock);
-    return;
+    ObjectAddressSet(address, RlsPolicyRelationId, rlsp_id);
+    return address;
 }
 
 /*

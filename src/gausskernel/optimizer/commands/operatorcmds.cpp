@@ -83,7 +83,7 @@ void CheckDefineOperatorPrivilege(Oid oprNamespace, const char* oprName)
  *
  * 'parameters' is a list of DefElem
  */
-void DefineOperator(List* names, List* parameters)
+ObjectAddress DefineOperator(List* names, List* parameters)
 {
     char* oprName = NULL;
     Oid oprNamespace;
@@ -341,7 +341,7 @@ void DefineOperator(List* names, List* parameters)
     /*
      * now have OperatorCreate do all the work..
      */
-    OperatorCreate(oprName, /* operator name */
+    return OperatorCreate(oprName, /* operator name */
         oprNamespace,       /* namespace */
         typeId1,            /* left type id */
         typeId2,            /* right type id */
@@ -389,10 +389,11 @@ void AlterOperatorOwner_oid(Oid operOid, Oid newOwnerId)
 /*
  * change operator owner
  */
-void AlterOperatorOwner(List* name, TypeName* typeName1, TypeName* typeName2, Oid newOwnerId)
+ObjectAddress AlterOperatorOwner(List* name, TypeName* typeName1, TypeName* typeName2, Oid newOwnerId)
 {
     Oid operOid;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(OperatorRelationId, RowExclusiveLock);
 
@@ -401,6 +402,8 @@ void AlterOperatorOwner(List* name, TypeName* typeName1, TypeName* typeName2, Oi
     AlterOperatorOwner_internal(rel, operOid, newOwnerId);
 
     heap_close(rel, NoLock);
+    ObjectAddressSet(address, OperatorRelationId, operOid);
+    return address;
 }
 
 static void AlterOperatorOwner_internal(Relation rel, Oid operOid, Oid newOwnerId)
@@ -456,13 +459,14 @@ static void AlterOperatorOwner_internal(Relation rel, Oid operOid, Oid newOwnerI
 /*
  * Execute ALTER OPERATOR SET SCHEMA
  */
-void AlterOperatorNamespace(List* names, List* argtypes, const char* newschema)
+ObjectAddress AlterOperatorNamespace(List* names, List* argtypes, const char* newschema)
 {
     List* operatorName = names;
     TypeName* typeName1 = (TypeName*)linitial(argtypes);
     TypeName* typeName2 = (TypeName*)lsecond(argtypes);
     Oid operOid, nspOid;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(OperatorRelationId, RowExclusiveLock);
 
@@ -490,6 +494,8 @@ void AlterOperatorNamespace(List* names, List* argtypes, const char* newschema)
         ACL_KIND_OPER);
 
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, OperatorRelationId, operOid);
+    return address;
 }
 
 Oid AlterOperatorNamespace_oid(Oid operOid, Oid newNspOid)

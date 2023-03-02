@@ -41,7 +41,7 @@ static const Oid funcargs[] = {INT4OID, INT4OID, CSTRINGOID, INTERNALOID, INT4OI
 /*
  * CREATE CONVERSION
  */
-void CreateConversionCommand(CreateConversionStmt* stmt)
+ObjectAddress CreateConversionCommand(CreateConversionStmt* stmt)
 {
     Oid namespaceId;
     char* conversion_name = NULL;
@@ -107,7 +107,7 @@ void CreateConversionCommand(CreateConversionStmt* stmt)
      * All seem ok, go ahead (possible failure would be a duplicate conversion
      * name)
      */
-    ConversionCreate(conversion_name, namespaceId, GetUserId(), from_encoding, to_encoding, funcoid, stmt->def);
+    return ConversionCreate(conversion_name, namespaceId, GetUserId(), from_encoding, to_encoding, funcoid, stmt->def);
 }
 
 /*
@@ -159,10 +159,11 @@ void RenameConversion(List* name, const char* newname)
 /*
  * Change conversion owner, by name
  */
-void AlterConversionOwner(List* name, Oid newOwnerId)
+ObjectAddress AlterConversionOwner(List* name, Oid newOwnerId)
 {
     Oid conversionOid;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(ConversionRelationId, RowExclusiveLock);
 
@@ -171,6 +172,9 @@ void AlterConversionOwner(List* name, Oid newOwnerId)
     AlterConversionOwner_internal(rel, conversionOid, newOwnerId);
 
     heap_close(rel, NoLock);
+    ObjectAddressSet(address, ConversionRelationId, conversionOid);
+
+    return address;
 }
 
 /*
@@ -246,10 +250,11 @@ static void AlterConversionOwner_internal(Relation rel, Oid conversionOid, Oid n
 /*
  * Execute ALTER CONVERSION SET SCHEMA
  */
-void AlterConversionNamespace(List* name, const char* newschema)
+ObjectAddress AlterConversionNamespace(List* name, const char* newschema)
 {
     Oid convOid, nspOid;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(ConversionRelationId, RowExclusiveLock);
 
@@ -269,6 +274,8 @@ void AlterConversionNamespace(List* name, const char* newschema)
         ACL_KIND_CONVERSION);
 
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, ConversionRelationId, convOid);
+    return address;
 }
 
 /*

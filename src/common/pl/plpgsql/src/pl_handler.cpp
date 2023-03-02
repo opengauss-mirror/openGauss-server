@@ -42,6 +42,7 @@
 #include "utils/timestamp.h"
 #include "executor/spi_priv.h"
 #include "distributelayer/streamMain.h"
+#include "commands/event_trigger.h"
 
 #ifdef STREAMPLAN
 #include "optimizer/streamplan.h"
@@ -836,6 +837,10 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
              */
             if (CALLED_AS_TRIGGER(fcinfo)) {
                 retval = PointerGetDatum(plpgsql_exec_trigger(func, (TriggerData*)fcinfo->context));
+	    } else if (CALLED_AS_EVENT_TRIGGER(fcinfo)) {
+                plpgsql_exec_event_trigger(func,
+                    (EventTriggerData *) fcinfo->context);
+
             } else {
                 if (func->is_private && !u_sess->is_autonomous_session) {
                     if (OidIsValid(secondLevelPkgOid)) {
@@ -1242,7 +1247,9 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     Oid* argtypes = NULL;
     char** argnames;
     char* argmodes = NULL;
-    bool istrigger = false;
+    bool is_dml_trigger = false;
+    bool is_event_trigger = false;
+    
     int i;
     /*
      * 3 means the number of arguments of function plpgsql_validator, while 'is_place' is the third one,
@@ -1275,7 +1282,9 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     if (functyptype == TYPTYPE_PSEUDO) {
         /* we assume OPAQUE with no arguments means a trigger */
         if (proc->prorettype == TRIGGEROID || (proc->prorettype == OPAQUEOID && proc->pronargs == 0)) {
-            istrigger = true;
+            is_dml_trigger = true;                
+        } else if (proc->prorettype == EVTTRIGGEROID) { 
+            is_event_trigger = true;    
         } else if (proc->prorettype != RECORDOID && proc->prorettype != VOIDOID && !IsPolymorphicType(proc->prorettype)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1301,7 +1310,8 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     if (u_sess->attr.attr_sql.check_function_bodies) {
         FunctionCallInfoData fake_fcinfo;
         FmgrInfo flinfo;
-        TriggerData trigdata;
+        TriggerData dml_trigdata;
+        EventTriggerData event_trigdata;
         PLpgSQL_function* func = NULL;
         /*
          * Set up a fake fcinfo with just enough info to satisfy
@@ -1316,11 +1326,15 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
         fake_fcinfo.arg[0] = fcinfo->arg[1];
         flinfo.fn_oid = funcoid;
         flinfo.fn_mcxt = CurrentMemoryContext;
-        if (istrigger) {
-            errorno = memset_s(&trigdata, sizeof(trigdata), 0, sizeof(trigdata));
+        if (is_dml_trigger) {
+            errorno = memset_s(&dml_trigdata, sizeof(dml_trigdata), 0, sizeof(dml_trigdata));
             securec_check(errorno, "", "");
-            trigdata.type = T_TriggerData;
-            fake_fcinfo.context = (Node*)&trigdata;
+            dml_trigdata.type = T_TriggerData;
+            fake_fcinfo.context = (Node*)&dml_trigdata;
+        } else if (is_event_trigger) {
+            MemSet(&event_trigdata, 0, sizeof(event_trigdata));
+            event_trigdata.type = T_EventTriggerData;
+            fake_fcinfo.context = (Node *) &event_trigdata;
         }
         /* save flag for nest plpgsql compile */
         PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;

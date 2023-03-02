@@ -190,7 +190,7 @@ static Oid InsertRule(char* rulname, int evtype, Oid eventrel_oid, AttrNumber ev
  * DefineRule
  *		Execute a CREATE RULE command.
  */
-void DefineRule(RuleStmt* stmt, const char* queryString)
+ObjectAddress DefineRule(RuleStmt* stmt, const char* queryString)
 {
     List* actions = NIL;
     Node* whereClause = NULL;
@@ -211,7 +211,7 @@ void DefineRule(RuleStmt* stmt, const char* queryString)
                 errmsg("not supported to create a rule on this table.")));
     }
     /* ... and execute */
-    DefineQueryRewrite(stmt->rulename, relId, whereClause, stmt->event, stmt->instead, stmt->replace, actions);
+    return DefineQueryRewrite(stmt->rulename, relId, whereClause, stmt->event, stmt->instead, stmt->replace, actions);
 }
 
 /*
@@ -221,7 +221,7 @@ void DefineRule(RuleStmt* stmt, const char* queryString)
  * This is essentially the same as DefineRule() except that the rule's
  * action and qual have already been passed through parse analysis.
  */
-void DefineQueryRewrite(
+ObjectAddress DefineQueryRewrite(
     char* rulename, Oid event_relid, Node* event_qual, CmdType event_type, bool is_instead, bool replace, List* action)
 {
     Relation event_relation;
@@ -233,6 +233,8 @@ void DefineQueryRewrite(
     bool nulls[Natts_pg_class];
     bool replaces[Natts_pg_class];
     errno_t rc;
+    Oid         ruleId = InvalidOid;
+    ObjectAddress address;
 
     /*
      * If we are installing an ON SELECT rule, we had better grab
@@ -499,7 +501,7 @@ void DefineQueryRewrite(
 
     /* discard rule if it's null action and not INSTEAD; it's a no-op */
     if (action != NIL || is_instead) {
-        (void)InsertRule(rulename, event_type, event_relid, event_attno, is_instead, event_qual, action, replace);
+        ruleId = InsertRule(rulename, event_type, event_relid, event_attno, is_instead, event_qual, action, replace);
 
         /*
          * Set pg_class 'relhasrules' field TRUE for event relation. If
@@ -639,8 +641,10 @@ void DefineQueryRewrite(
 #endif
     }
 
+    ObjectAddressSet(address, RewriteRelationId, ruleId);
     /* Close rel, but keep lock till commit... */
     heap_close(event_relation, NoLock);
+    return address;
 }
 
 

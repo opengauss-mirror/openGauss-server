@@ -14,6 +14,7 @@
 #ifndef MATVIEW_H
 #define MATVIEW_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/params.h"
 #include "tcop/dest.h"
 #include "utils/relcache.h"
@@ -50,12 +51,12 @@ extern void MatviewShmemInit(void);
 
 extern void SetRelationIsScannable(Relation relation);
 
-extern void ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
+extern ObjectAddress ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
                                   ParamListInfo params, char *completionTag);
 
-extern void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
+extern ObjectAddress ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
                                   ParamListInfo params, char *completionTag);
-extern void ExecCreateMatViewInc(CreateTableAsStmt* stmt, const char* queryString, ParamListInfo params);
+extern ObjectAddress ExecCreateMatViewInc(CreateTableAsStmt* stmt, const char* queryString, ParamListInfo params);
 extern void ExecRefreshMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
                                     ParamListInfo params, char *completionTag);
 

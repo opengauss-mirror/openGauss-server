@@ -2249,10 +2249,19 @@ typedef struct AlterTSDictionaryStmt {
 /*
  * TS Configuration stmts: DefineStmt, RenameStmt and DropStmt are default
  */
+ typedef enum AlterTSConfigType
+ {
+    ALTER_TSCONFIG_ADD_MAPPING,
+    ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN,
+    ALTER_TSCONFIG_REPLACE_DICT,
+    ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN,
+    ALTER_TSCONFIG_DROP_MAPPING
+ } AlterTSConfigType;
+ 
 typedef struct AlterTSConfigurationStmt {
     NodeTag type;
     List* cfgname; /* qualified name (list of Value strings) */
-
+    AlterTSConfigType kind;   /* ALTER_TSCONFIG_ADD_MAPPING, etc */
     /*
      * dicts will be non-NIL if ADD/ALTER MAPPING was specified. If dicts is
      * NIL, but tokentype isn't, DROP MAPPING was specified.

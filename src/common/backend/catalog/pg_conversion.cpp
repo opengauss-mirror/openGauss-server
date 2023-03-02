@@ -37,7 +37,7 @@
  *
  * Add a new tuple to pg_conversion.
  */
-Oid ConversionCreate(const char* conname, Oid connamespace, Oid conowner, int32 conforencoding, int32 contoencoding,
+ObjectAddress ConversionCreate(const char* conname, Oid connamespace, Oid conowner, int32 conforencoding, int32 contoencoding,
     Oid conproc, bool def)
 {
     int i;
@@ -128,7 +128,7 @@ Oid ConversionCreate(const char* conname, Oid connamespace, Oid conowner, int32 
     heap_freetuple_ext(tup);
     heap_close(rel, RowExclusiveLock);
 
-    return oid;
+    return myself;
 }
 
 /*

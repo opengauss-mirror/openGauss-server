@@ -531,6 +531,9 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
                     success = listExtensions(pattern);
                 }
                 break;
+            case 'y': /* Event Triggers */
+				success = listEventTriggers(pattern, show_verbose);
+				break;
             default:
                 status = PSQL_CMD_UNKNOWN;
         }

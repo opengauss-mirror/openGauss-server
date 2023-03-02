@@ -55,6 +55,7 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_default_acl.h"
+#include "catalog/pg_event_trigger.h"
 #include "catalog/pg_largeobject.h"
 #include "catalog/pg_largeobject_metadata.h"
 #include "catalog/pg_partition.h"
@@ -72,7 +73,7 @@
 #include "dumputils.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
-
+#include "common/fe_memutils.h"
 #include "openssl/rand.h"
 #include "miscadmin.h"
 #include "bin/elog.h"
@@ -243,6 +244,7 @@ const uint32 SUBSCRIPTION_VERSION = 92580;
 const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92656;
 const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
 const uint32 EVENT_VERSION = 92844;
+const uint32 EVENT_TRIGGER_VERSION_NUM = 92845;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -493,6 +495,7 @@ static void DumpHashDistribution(PQExpBuffer resultBuf, const TableInfo* tbinfo)
 static void get_password_pipeline();
 static void get_role_password();
 static void get_encrypt_key();
+static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo);
 static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxInfo* indxinfo, bool isBcompatibility);
 static bool findDBCompatibility(Archive* fout, const char* databasename);
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
@@ -10927,6 +10930,9 @@ static void dumpDumpableObject(Archive* fout, DumpableObject* dobj)
         case DO_TSCONFIG:
             dumpTSConfig(fout, (TSConfigInfo*)dobj);
             break;
+        case DO_EVENT_TRIGGER:
+            dumpEventTrigger(fout, (EventTriggerInfo *) dobj);
+            break;
         case DO_FDW:
             dumpForeignDataWrapper(fout, (FdwInfo*)dobj);
             break;
@@ -17903,7 +17909,6 @@ static void GenerateSubPartitionBy(PQExpBuffer result, Archive *fout, TableInfo 
     } else {
         GetPartkeyexprSrc(result, fout, tbinfo, true);
     }
-
     appendPQExpBuffer(result, ")\n");
 
     PQclear(res);
@@ -22548,6 +22553,7 @@ static void addBoundaryDependencies(DumpableObject** dobjs, int numObjs, Dumpabl
                 break;
             case DO_INDEX:
             case DO_TRIGGER:
+            case DO_EVENT_TRIGGER:                
             case DO_DEFAULT_ACL:
             case DO_RLSPOLICY:
             case DO_PUBLICATION:
@@ -23166,6 +23172,148 @@ static bool IsPackageObject(Archive* fout, Oid classid, Oid objid)
     PQclear(res);
     destroyPQExpBuffer(query);
     return count > 0;
+}
+
+/*
+ * getEventTriggers
+ *   get information about event triggers
+ */
+EventTriggerInfo *
+getEventTriggers(Archive *fout, int *numEventTriggers)
+{
+    /* Before 9.3, there are no event triggers */
+    if (GetVersionNum(fout) < EVENT_TRIGGER_VERSION_NUM) {
+        *numEventTriggers = 0;
+        return NULL;
+    }
+
+    int i;
+    PQExpBuffer query = createPQExpBuffer();
+    PGresult   *res;
+    EventTriggerInfo *evtinfo;
+    int i_tableoid;
+    int i_oid;
+    int i_evtname;
+    int i_evtevent;
+    int i_evtowner;
+    int i_evttags;
+    int i_evtfname;
+    int i_evtenabled;
+    int ntups;
+ 
+    /* Make sure we are in proper schema */
+    selectSourceSchema(fout, "pg_catalog");
+ 
+    appendPQExpBuffer(query,
+                      "SELECT e.tableoid, e.oid, evtname, evtenabled, "
+                      "evtevent, (%s evtowner) AS evtowner, "
+                      "array_to_string(array("
+                      "select quote_literal(x) "
+                      " from unnest(evttags) as t(x)), ', ') as evttags, "
+                      "e.evtfoid::regproc as evtfname "
+                      "FROM pg_event_trigger e "
+                      "ORDER BY e.oid",
+                      username_subquery);
+ 
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    ntups = PQntuples(res);
+    *numEventTriggers = ntups;
+
+    if (ntups == 0) {
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        return NULL;
+    }
+
+    evtinfo = (EventTriggerInfo *) pg_malloc(ntups * sizeof(EventTriggerInfo));
+ 
+    i_tableoid = PQfnumber(res, "tableoid");
+    i_oid = PQfnumber(res, "oid");
+    i_evtname = PQfnumber(res, "evtname");
+    i_evtevent = PQfnumber(res, "evtevent");
+    i_evtowner = PQfnumber(res, "evtowner");
+    i_evttags = PQfnumber(res, "evttags");
+    i_evtfname = PQfnumber(res, "evtfname");
+    i_evtenabled = PQfnumber(res, "evtenabled");
+ 
+    for (i = 0; i < ntups; i++) {
+        evtinfo[i].dobj.objType = DO_EVENT_TRIGGER;
+        evtinfo[i].dobj.catId.tableoid = atooid(PQgetvalue(res, i, i_tableoid));
+        evtinfo[i].dobj.catId.oid = atooid(PQgetvalue(res, i, i_oid));
+        AssignDumpId(&evtinfo[i].dobj);
+        evtinfo[i].dobj.name = gs_strdup(PQgetvalue(res, i, i_evtname));
+        evtinfo[i].evtname = gs_strdup(PQgetvalue(res, i, i_evtname));
+        evtinfo[i].evtevent = gs_strdup(PQgetvalue(res, i, i_evtevent));
+        evtinfo[i].evtowner = gs_strdup(PQgetvalue(res, i, i_evtowner));
+        evtinfo[i].evttags = gs_strdup(PQgetvalue(res, i, i_evttags));
+        evtinfo[i].evtfname = gs_strdup(PQgetvalue(res, i, i_evtfname));
+        evtinfo[i].evtenabled = *(PQgetvalue(res, i, i_evtenabled));
+    }
+ 
+    PQclear(res);
+    destroyPQExpBuffer(query);
+    return evtinfo;
+}
+ 
+static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
+{
+    PQExpBuffer query;
+    PQExpBuffer labelq;
+ 
+    /* Skip if not to be dumped */
+    if (!evtinfo->dobj.dump || dataOnly)
+        return;
+      
+    query = createPQExpBuffer();
+    labelq = createPQExpBuffer();
+ 
+    appendPQExpBuffer(query, "CREATE EVENT TRIGGER ");
+    appendPQExpBufferStr(query, fmtId(evtinfo->dobj.name));
+    appendPQExpBuffer(query, " ON ");
+    appendPQExpBufferStr(query, fmtId(evtinfo->evtevent));
+    appendPQExpBufferStr(query, " ");
+ 
+    if (strcmp("", evtinfo->evttags) != 0) {
+        appendPQExpBufferStr(query, "\n         WHEN TAG IN (");
+        appendPQExpBufferStr(query, evtinfo->evttags);
+        appendPQExpBufferStr(query, ") ");
+    }
+ 
+    appendPQExpBuffer(query, "\n   EXECUTE PROCEDURE ");
+    appendPQExpBufferStr(query, evtinfo->evtfname);
+    appendPQExpBuffer(query, "();\n");
+ 
+    if (evtinfo->evtenabled != 'O') {
+        appendPQExpBuffer(query, "\nALTER EVENT TRIGGER %s ",
+                          fmtId(evtinfo->dobj.name));
+        switch (evtinfo->evtenabled) {
+            case 'D':
+                appendPQExpBuffer(query, "DISABLE");
+                break;
+            case 'A':
+                appendPQExpBuffer(query, "ENABLE ALWAYS");
+                break;
+            case 'R':
+                appendPQExpBuffer(query, "ENABLE REPLICA");
+                break;
+            default:
+                appendPQExpBuffer(query, "ENABLE");
+                break;
+        }
+        appendPQExpBuffer(query, ";\n");
+    }
+    appendPQExpBuffer(labelq, "EVENT TRIGGER %s ",
+                      fmtId(evtinfo->dobj.name));
+ 
+    ArchiveEntry(fout, evtinfo->dobj.catId, evtinfo->dobj.dumpId,
+                 evtinfo->dobj.name, NULL, NULL, evtinfo->evtowner, false,
+                 "EVENT TRIGGER", SECTION_POST_DATA,
+                 query->data, "", NULL, NULL, 0, NULL, NULL);
+ 
+    dumpComment(fout, labelq->data, NULL, NULL,evtinfo->dobj.catId, 0, evtinfo->dobj.dumpId);
+ 
+    destroyPQExpBuffer(query);
+    destroyPQExpBuffer(labelq);
 }
 
 static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxInfo* indxinfo,  bool isBcompatibility)

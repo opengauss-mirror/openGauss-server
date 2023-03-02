@@ -1312,7 +1312,7 @@ Datum generate_series_step_int8(PG_FUNCTION_ARGS)
 
         /* do when there is more left to send */
         SRF_RETURN_NEXT(funcctx, Int64GetDatum(result));
-    } else
+    } 
         /* do when there is no more left */
         SRF_RETURN_DONE(funcctx);
 }
