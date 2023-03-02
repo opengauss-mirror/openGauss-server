@@ -87,6 +87,7 @@ static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength str
 static List* matchLocks(CmdType event, RuleLock* rulelocks, int varno, Query* parsetree);
 static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePushedDown);
 static Bitmapset* adjust_view_column_set(Bitmapset* cols, List* targetlist);
+static bool findAttrByName(const char* attributeName, List* tableElts, int maxlen);
 
 #ifdef PGXC
 typedef struct pull_qual_vars_context {
@@ -4406,6 +4407,25 @@ char* GetCreateViewStmt(Query* parsetree, CreateTableAsStmt* stmt)
     return cquery->data;
 }
 
+static bool findAttrByName(const char* attributeName, List* tableElts, int maxlen)
+{
+    ListCell* lc = NULL;
+    int i = 0;
+    foreach (lc, tableElts) {
+        if (i >= maxlen) {
+            return false;
+        }
+        Node* node = (Node*)lfirst(lc);
+        if (IsA(node, ColumnDef)) {
+            ColumnDef* def = (ColumnDef*)node;
+            if (pg_strcasecmp(attributeName, def->colname) == 0)
+                return true;
+        }
+        ++i;
+    }
+    return false;
+}
+
 char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
 {
     /* Start building a CreateStmt for creating the target table */
@@ -4414,6 +4434,10 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
     create_stmt->charset = PG_INVALID_ENCODING;
     IntoClause* into = stmt->into;
     List* tableElts = NIL;
+
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+        tableElts = stmt->into->tableElts;
+    int initlen = list_length(tableElts);
 
     /* Obtain the target list of new table */
     AssertEreport(IsA(stmt->query, Query), MOD_OPT, "");
@@ -4454,6 +4478,10 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
         /* Ignore junk columns from the targetlist */
         if (tle->resjunk)
             continue;
+
+        if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && findAttrByName(tle->resname, tableElts, initlen)) {
+            continue;
+        }
 
         coldef = makeNode(ColumnDef);
         tpname = makeNode(TypeName);
@@ -4528,6 +4556,9 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
     create_stmt->options = stmt->into->options;
     create_stmt->ivm = stmt->into->ivm;
     create_stmt->relkind = stmt->relkind == OBJECT_MATVIEW ? RELKIND_MATVIEW : RELKIND_RELATION;
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        create_stmt->autoIncStart = stmt->into->autoIncStart;
+    }
     /*
      * Check consistency of arguments
      */
@@ -4561,7 +4592,8 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
 
     StringInfo cquery = makeStringInfo();
 
-    deparse_query(parsetree, cquery, NIL, false, false);
+    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || initlen <= 0)
+        deparse_query(parsetree, cquery, NIL, false, false);
 
     return cquery->data;
 }
@@ -4599,7 +4631,7 @@ static void _copy_top_HintState(HintState *dest, HintState *src)
     dest->no_expand_hint = src->no_expand_hint;
 }
 
-char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
+char* GetInsertIntoStmt(CreateTableAsStmt* stmt, bool hasNewColumn)
 {
     /* Get the SELECT query string */
     /*
@@ -4642,6 +4674,23 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
     else
         appendStringInfo(cquery, " INTO %s", quote_identifier(relation->relname));
 
+    /* if has new column and have data to insert */
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && hasNewColumn && !stmt->into->skipData) {
+        appendStringInfoString(cquery, " (");
+        ListCell* lc = NULL;
+        const char* delimiter = "";
+        foreach (lc, select_query->targetList) {
+            TargetEntry* tle = (TargetEntry*)lfirst(lc);
+            /* ignore junk column*/
+            if (tle->resjunk)
+                continue;
+            appendStringInfoString(cquery, delimiter);
+            delimiter = ", ";
+            appendStringInfo(cquery, "%s", quote_identifier(tle->resname));
+        }
+        appendStringInfoString(cquery, ")");
+    }
+
     /*
      * If the original sql contains "WITH NO DATA", just create
      * the table without inserting any data.
@@ -4651,6 +4700,33 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
     else
         appendStringInfo(cquery, " %s", selectstr);
 
+    /* If there is a new column, there may be a uniqueness conflict */
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && hasNewColumn && !stmt->into->skipData) {
+        switch (stmt->into->onduplicate) {
+            case DUPLICATE_ERROR:
+                break;
+            case DUPLICATE_IGNORE:
+                appendStringInfoString(cquery, " ON DUPLICATE KEY UPDATE NOTHING");
+                break;
+            case DUPLICATE_REPLACE: {
+                appendStringInfoString(cquery, " ON DUPLICATE KEY UPDATE ");
+                ListCell* lc = NULL;
+                const char* delimiter = "";
+                foreach (lc, select_query->targetList) {
+                    TargetEntry* tle = (TargetEntry*)lfirst(lc);
+                    /* ignore junk column*/
+                    if (tle->resjunk)
+                        continue;
+                    appendStringInfoString(cquery, delimiter);
+                    delimiter = ", ";
+                    appendStringInfo(cquery, "%s = VALUES(%s)", quote_identifier(tle->resname), quote_identifier(tle->resname));
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
     return cquery->data;
 }
 
@@ -4886,7 +4962,10 @@ List* QueryRewriteCTAS(Query* parsetree)
 
     /* CREATE TABLE AS */
     Query* cparsetree = (Query*)copyObject(parsetree);
+    bool hasNewColumn = stmt->into->tableElts != NULL;
     char* create_sql = GetCreateTableStmt(cparsetree, stmt);
+    /* move stmt->into->tableElts to create_stmt->tableElts */
+    stmt->into->tableElts = NULL;
 
     if (stmt->relkind == OBJECT_MATVIEW) {
         zparsetree = (Query*)copyObject(cparsetree);
@@ -4938,7 +5017,7 @@ List* QueryRewriteCTAS(Query* parsetree)
         */
     parsetree->utilityStmt = NULL;
 
-    char* insert_into_sqlstr = GetInsertIntoStmt(stmt);
+    char* insert_into_sqlstr = GetInsertIntoStmt(stmt, hasNewColumn);
 
     raw_parsetree_list = pg_parse_query(insert_into_sqlstr);
 

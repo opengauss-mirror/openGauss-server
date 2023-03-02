@@ -2283,7 +2283,8 @@ static void checkUpsertTargetlist(Relation targetTable, List* updateTlist)
             }
         }
 
-        if (bms_overlap(index_attrs, target_attrs)) {
+        /* Allow in B_FORMAT */
+        if (bms_overlap(index_attrs, target_attrs) && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
             ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                          errmsg("INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key."))));
         }
@@ -4500,6 +4501,38 @@ static Query* transformCreateTableAsStmt(ParseState* pstate, CreateTableAsStmt* 
 
     /* transform contained query */
     stmt->query = (Node*)transformStmt(pstate, stmt->query);
+
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        /* CREATE TABLE AS SELECT is not allowed with Foreign Key and Tablelike Clause*/
+        foreach (lc, stmt->into->tableElts) {
+            Node* node = (Node*)lfirst(lc);
+            if (IsA(node, ColumnDef)) {
+                ColumnDef* col = (ColumnDef*) node;
+                ListCell* cell = NULL;
+                foreach(cell, col->constraints){
+                    if (IsA(lfirst(cell), Constraint)) {
+                        Constraint* constraint = (Constraint*) lfirst(cell);
+                        if (constraint->contype == CONSTR_FOREIGN) {
+                            ereport(ERROR,
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("CREATE TABLE AS SELECT is not allowed with Foreign Key")));
+                        }
+                    }
+                }
+            } else if (IsA(node, Constraint)) {
+                Constraint* constraint = (Constraint*) node;
+                if (constraint->contype == CONSTR_FOREIGN) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("CREATE TABLE AS SELECT is not allowed with Foreign Key")));
+                }
+            } else if (IsA(node, TableLikeClause)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("CREATE TABLE AS SELECT is not allowed with Tablelike Clause")));
+            }
+        }
+    }
 
     /* if result type of new relation is unknown-type, then resolve as type TEXT */
     foreach (lc, ((Query*)stmt->query)->targetList) {

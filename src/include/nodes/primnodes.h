@@ -68,6 +68,13 @@ typedef enum OptCompress {
     COMPRESS_HIGH,
 } OptCompress;
 
+/* How to handle rows that duplicate unique key values */
+typedef enum OnDuplicateAction {
+    DUPLICATE_ERROR = 0,
+    DUPLICATE_IGNORE,
+    DUPLICATE_REPLACE
+} OnDuplicate;
+
 /*
  * RangeVar - range variable, used in FROM clauses
  *
@@ -126,6 +133,9 @@ typedef struct IntoClause {
     struct DistributeBy* distributeby; /* distribution to use, or NULL */
     struct PGXCSubCluster* subcluster; /* subcluster node members */
 #endif
+    List* tableElts;         /* column definitions(list of ColumnDef) */
+    Node *autoIncStart; /* DefElem for AUTO_INCREMENT = value*/
+    OnDuplicateAction onduplicate;     /* how to handle rows that duplicate unique key values */
 } IntoClause;
 
 /* ----------------------------------------------------------------

@@ -2362,6 +2362,11 @@ static IntoClause* _copyIntoClause(const IntoClause* from)
     COPY_STRING_FIELD(filename);
     COPY_SCALAR_FIELD(is_outfile);
 
+    if (t_thrd.proc->workingVersionNum >= CREATE_TABLE_AS_VERSION_NUM) {
+        COPY_NODE_FIELD(tableElts);
+        COPY_NODE_FIELD(autoIncStart);
+        COPY_SCALAR_FIELD(onduplicate);
+    }
     return newnode;
 }
 

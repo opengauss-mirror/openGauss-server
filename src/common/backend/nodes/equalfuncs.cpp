@@ -150,6 +150,11 @@ static bool _equalIntoClause(const IntoClause* a, const IntoClause* b)
     COMPARE_STRING_FIELD(filename);
     COMPARE_SCALAR_FIELD(is_outfile);
 
+    if (t_thrd.proc->workingVersionNum >= CREATE_TABLE_AS_VERSION_NUM) {
+        COMPARE_NODE_FIELD(tableElts);
+        COMPARE_NODE_FIELD(autoIncStart);
+        COMPARE_SCALAR_FIELD(onduplicate);
+    }
     return true;
 }
 

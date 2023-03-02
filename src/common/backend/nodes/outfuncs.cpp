@@ -2180,6 +2180,11 @@ static void _outIntoClause(StringInfo str, IntoClause* node)
         WRITE_STRING_FIELD(filename);
         WRITE_BOOL_FIELD(is_outfile);
     }
+    if (t_thrd.proc->workingVersionNum >= CREATE_TABLE_AS_VERSION_NUM) {
+        WRITE_NODE_FIELD(tableElts);
+        WRITE_NODE_FIELD(autoIncStart);
+        WRITE_ENUM_FIELD(onduplicate, OnDuplicateAction);
+    }
 }
 
 static void _outVar(StringInfo str, Var* node)
