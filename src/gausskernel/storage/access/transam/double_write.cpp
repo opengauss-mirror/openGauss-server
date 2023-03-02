@@ -2106,6 +2106,8 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     errno_t rc;
     *is_skipped = true;
 
+    ReservePrivateRefCountEntry();
+
     buf_desc = GetBufferDescriptor(buf_desc_id);
     buf_state = LockBufHdr(buf_desc);
     if (!dw_buf_ckpt_needed(buf_state)) {
