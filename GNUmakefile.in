@@ -83,7 +83,6 @@ install:
 	$(MAKE) install_pldebugger
 	$(MAKE) -C contrib/postgres_fdw $@
 	$(MAKE) -C contrib/hstore $@
-	$(MAKE) -C contrib/dblink $@
 	$(MAKE) -C $(root_builddir)/privategauss/kernel/extension/packages $@
 	+@echo "openGauss installation complete."
 endif
@@ -94,6 +93,7 @@ install:
 	$(MAKE) install_pldebugger
 	$(MAKE) -C contrib/postgres_fdw $@
 	$(MAKE) -C contrib/hstore $@
+	$(MAKE) -C contrib/dblink $@
 	@if test -d contrib/dolphin; then $(MAKE) -C contrib/dolphin $@; fi
 	+@echo "openGauss installation complete."
 endif
