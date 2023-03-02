@@ -54,9 +54,9 @@ DETAIL:  Token "." is invalid.
 CONTEXT:  JSON data, line 1: -1.5e5....
 referenced column: jsonb
 select '-1.5e-5'::jsonb;
-  jsonb   
-----------
- -.000015
+   jsonb   
+-----------
+ -0.000015
 (1 row)
 
 select '-1.5e+5'::jsonb;
@@ -229,7 +229,7 @@ from cmpjsonb order by 1,2,3,4,5,6,7,8,9;
  ""                                          | []                                       |  -1 | f  | t  | t  | t  | f  | f
  "a"                                         | "b"                                      |  -1 | f  | t  | t  | t  | f  | f
  "a"                                         | "cc"                                     |  -1 | f  | t  | t  | t  | f  | f
- "a"                                         | -.586                                    |  -1 | f  | t  | t  | t  | f  | f
+ "a"                                         | -0.586                                   |  -1 | f  | t  | t  | t  | f  | f
  "aa"                                        | "aa"                                     |   0 | t  | f  | f  | t  | f  | t
  "s"                                         | ["s"]                                    |  -1 | f  | t  | t  | t  | f  | f
  "true"                                      | true                                     |  -1 | f  | t  | t  | t  | f  | f
@@ -291,7 +291,7 @@ from cmpjsonb order by 1,2,3,4,5,6,7,8;
  ""                                          | []                                       | f  | t  | t  | t  | f  | f
  "a"                                         | "b"                                      | f  | t  | t  | t  | f  | f
  "a"                                         | "cc"                                     | f  | t  | t  | t  | f  | f
- "a"                                         | -.586                                    | f  | t  | t  | t  | f  | f
+ "a"                                         | -0.586                                   | f  | t  | t  | t  | f  | f
  "aa"                                        | "aa"                                     | t  | f  | f  | t  | f  | t
  "s"                                         | ["s"]                                    | f  | t  | t  | t  | f  | f
  "true"                                      | true                                     | f  | t  | t  | t  | f  | f
