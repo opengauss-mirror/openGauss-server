@@ -5143,8 +5143,10 @@ Numeric make_result(NumericVar* var)
         result->choice.n_long.n_sign_dscale = sign | (var->dscale & NUMERIC_DSCALE_MASK);
         result->choice.n_long.n_weight = weight;
     }
-
-    MemCpy(NUMERIC_DIGITS(result), digits, n * sizeof(NumericDigit));
+    if (n > 0) {
+        errno_t rc = memcpy_s(NUMERIC_DIGITS(result), n * sizeof(NumericDigit), digits, n * sizeof(NumericDigit));
+        securec_check(rc, "\0", "\0");
+    }
     Assert(NUMERIC_NDIGITS(result) == (unsigned int)(n));
 
     /* Check for overflow of int16 fields */
@@ -5693,6 +5695,7 @@ static void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int 
     NumericDigit* var2digits = NULL;
     NumericDigit* res_digits = NULL;
     int i, i1, i2;
+    int tdig[NUMERIC_LOCAL_NDIG];
 
     /*
      * Arrange for var1 to be the shorter of the two numbers.  This improves
@@ -5767,7 +5770,14 @@ static void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int 
      * possible value divided by NBASE-1, ie, at the top of the loop it is
      * known that no dig[] entry exceeds maxdig * (NBASE-1).
      */
-    dig = (int*)palloc0(res_ndigits * sizeof(int));
+    uint32 dig_size = (uint32)(res_ndigits * sizeof(int));
+    if (res_ndigits > NUMERIC_LOCAL_NMAX) {
+        dig = (int *)palloc0(dig_size);
+    } else {
+        errno_t rc = memset_s(tdig, sizeof(tdig), 0, dig_size);
+        securec_check(rc, "\0", "\0");
+        dig = tdig;
+    }
     maxdig = 0;
 
     /*
@@ -5808,10 +5818,22 @@ static void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int 
          * Add the appropriate multiple of var2 into the accumulator.
          *
          * As above, digits of var2 can be ignored if they don't contribute,
-         * so we only include digits for which i1+i2+2 <= res_ndigits - 1.
+         * so we only include digits for which i1+i2+2 < res_ndigits.
+         *
+         * This inner loop is the performance bottleneck for multiplication,
+         * so we want to keep it simple enough so that it can be
+         * auto-vectorized.  Accordingly, process the digits left-to-right
+         * even though schoolbook multiplication would suggest right-to-left.
+         * Since we aren't propagating carries in this loop, the order does
+         * not matter.
          */
-        for (i2 = Min(var2ndigits - 1, res_ndigits - i1 - 3), i = i1 + i2 + 2; i2 >= 0; i2--)
-            dig[i--] += var1digit * var2digits[i2];
+        {
+            int i2limit = Min(var2ndigits, res_ndigits - i1 - 2);
+            int *dig_i1_2 = &dig[i1 + 2];
+
+            for (i2 = 0; i2 < i2limit; i2++)
+                dig_i1_2[i2] += var1digit * var2digits[i2];
+        }
     }
 
     /*
@@ -5833,7 +5855,9 @@ static void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int 
     }
     Assert(carry == 0);
 
-    pfree_ext(dig);
+    if (dig != tdig) {
+        pfree_ext(dig);
+    }
 
     /*
      * Finally, round the result to the requested precision.
