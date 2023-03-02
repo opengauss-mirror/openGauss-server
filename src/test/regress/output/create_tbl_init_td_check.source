@@ -1,0 +1,49 @@
+-- A typical wrong case
+CREATE SCHEMA CREATE_TBL_INIT_TD_CHECK;
+DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_1;
+--?.*
+CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_1
+(
+ID NUMBER(20) NOT NULL,
+VARCHAR2_1 VARCHAR2(40)
+)WITH(INIT_TD=10, STORAGE_TYPE=ASTORE);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "init_td" for relations except for ustore relation
+DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_2;
+--?.*
+CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_2
+(
+ID NUMBER(20) NOT NULL,
+VARCHAR2_1 VARCHAR2(40)
+)WITH(INIT_TD=10, ORIENTATION=COLUMN);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "init_td" for relations except for ustore relation
+DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_3;
+--?.*
+CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_3
+(
+ID NUMBER(20) NOT NULL,
+VARCHAR2_1 VARCHAR2(40)
+)WITH(INIT_TD=10, ORIENTATION=ROW);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "init_td" for relations except for ustore relation
+-- right cases
+DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_4;
+--?.*
+CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_4
+(
+ID NUMBER(20) NOT NULL,
+VARCHAR2_1 VARCHAR2(40)
+)WITH(ORIENTATION=ROW,STORAGE_TYPE=USTORE, INIT_TD=10);
+DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_5;
+--?.*
+CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_5
+(
+ID NUMBER(20) not null,
+VARCHAR2_1 VARCHAR2(40)
+)with(INIT_TD=10,STORAGE_TYPE=USTORE);
+DROP SCHEMA CREATE_TBL_INIT_TD_CHECK;
+ERROR:  cannot drop schema create_tbl_init_td_check because other objects depend on it
+DETAIL:  table create_tbl_init_td_check.t_init_td_4 depends on schema create_tbl_init_td_check
+table create_tbl_init_td_check.t_init_td_5 depends on schema create_tbl_init_td_check
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.

@@ -1833,6 +1833,19 @@ void ForbidToSetOptionsForUstoreTbl(List *options)
 }
 
 /*
+ * @Description: check relation options for not ustore table
+ * @Param[IN] options: input user options
+ */
+void ForbidToSetOptionsForNotUstoreTbl(List *options)
+{
+    static const char *unsupported[] = {
+        "init_td"
+    };
+
+    ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "relations except for ustore relation");
+}
+
+/*
  * @Description: check relation options for timeseries table
  * @Param[IN] options: input user options
  * @See also:

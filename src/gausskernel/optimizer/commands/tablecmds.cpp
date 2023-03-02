@@ -2566,6 +2566,11 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
                 ForbidToSetOptionsForRowTbl(stmt->options);
             }
         }
+
+        if (pg_strcasecmp(storeChar, TABLE_ACCESS_METHOD_USTORE) != 0){
+            /* init_td option is valid only when an Ustore table is created */
+            ForbidToSetOptionsForNotUstoreTbl(stmt->options);
+        }
         pfree_ext(std_opt);
     }
 
