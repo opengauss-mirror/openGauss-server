@@ -30,18 +30,7 @@
 #include "access/tupdesc.h"
 #include "nodes/parsenodes_common.h"
 #include "gram.hpp"
-#include "parser/keywords.h"
-
-#define PG_KEYWORD(a, b, c) { a, b, c },
-
-
-const ScanKeyword ScanKeywords[] = {
-#include "parser/kwlist.h"
-};
-
-const int NumScanKeywords = lengthof(ScanKeywords);
-
-
+#include "parser/kwlookup.h"
 
 /*
  * ScanKeywordLookup - see if a given word is a keyword
@@ -55,52 +44,47 @@ const int NumScanKeywords = lengthof(ScanKeywords);
  * keywords are to be matched in this way even though non-keyword identifiers
  * receive a different case-normalization mapping.
  */
-const ScanKeyword *ScanKeywordLookup(const char *text, const ScanKeyword *keywords, int num_keywords)
+int ScanKeywordLookup(const char *str, const ScanKeywordList *keywords)
 {
-    int len, i;
-    char word[NAMEDATALEN];
-    const ScanKeyword *low = NULL;
-    const ScanKeyword *high = NULL;
+	size_t len;
+	int	h;
+	const char *kw;
 
-    len = strlen(text);
-    /* We assume all keywords are shorter than NAMEDATALEN. */
-    if (len >= NAMEDATALEN) {
-        return NULL;
-    }
+	/*
+	 * Reject immediately if too long to be any keyword.  This saves useless
+	 * hashing and downcasing work on long strings.
+	 */
+	len = strlen(str);
+	if (len > (size_t)keywords->max_kw_len)
+		return -1;
 
-    /*
-     * Apply an ASCII-only downcasing.	We must not use tolower() since it may
-     * produce the wrong translation in some locales (eg, Turkish).
-     */
-    for (i = 0; i < len; i++) {
-        char ch = text[i];
+	/*
+	 * Compute the hash function.  We assume it was generated to produce
+	 * case-insensitive results.  Since it's a perfect hash, we need only
+	 * match to the specific keyword it identifies.
+	 */
+	h = keywords->hash(str, len);
+	/* An out-of-range result implies no match */
+	if (h < 0 || h >= keywords->num_keywords)
+		return -1;
 
-        if (ch >= 'A' && ch <= 'Z') {
-            ch += 'a' - 'A';
-        }
-        word[i] = ch;
-    }
-    word[len] = '\0';
+	/*
+	 * Compare character-by-character to see if we have a match, applying an
+	 * ASCII-only downcasing to the input characters.  We must not use
+	 * tolower() since it may produce the wrong translation in some locales
+	 * (eg, Turkish).
+	 */
+	kw = GetScanKeyword(h, keywords);
+	while (*str != '\0') {
+		char ch = *str++;
+		if (ch >= 'A' && ch <= 'Z')
+			ch += 'a' - 'A';
+		if (ch != *kw++)
+			return -1;
+	}
+	if (*kw != '\0')
+		return -1;
 
-    /*
-     * Now do a binary search using plain strcmp() comparison.
-     */
-    low = keywords;
-    high = keywords + (num_keywords - 1);
-    while (low <= high) {
-        const ScanKeyword *middle = NULL;
-        int difference;
-
-        middle = low + (high - low) / 2;
-        difference = strcmp(middle->name, word);
-        if (difference == 0) {
-            return middle;
-        } else if (difference < 0) {
-            low = middle + 1;
-        } else {
-            high = middle - 1;
-        }
-    }
-
-    return NULL;
+	/* Success! */
+	return h;
 }

@@ -52,7 +52,7 @@ List *fe_raw_parser(PGClientLogic *client_logic, const char *str, List **query_s
         resetOperatorPlusFlag();
 
         /* initialize the flex scanner */
-        yyscanner = fe_scanner_init(str, &yyextra.core_yy_extra, ScanKeywords, NumScanKeywords);
+        yyscanner = fe_scanner_init(str, &yyextra.core_yy_extra, &ScanKeywords, ScanKeywordTokens);
 
         /* base_yylex() only needs this much initialization */
         yyextra.lookahead_num = 0;

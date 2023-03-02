@@ -4373,7 +4373,7 @@ static char* mask_Password_internal(const char* query_string)
     bool saveEscapeStringWarning = u_sess->attr.attr_sql.escape_string_warning;
     bool need_clear_yylval = false;
     /* initialize the flex scanner  */
-    yyscanner = scanner_init(query_string, &yyextra, ScanKeywords, NumScanKeywords);
+    yyscanner = scanner_init(query_string, &yyextra, &ScanKeywords, ScanKeywordTokens);
     yyextra.warnOnTruncateIdent = false;
     u_sess->attr.attr_sql.escape_string_warning = false;
     /* forbid password truncate */
