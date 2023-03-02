@@ -80,7 +80,7 @@ void heap_page_prune_opt(Relation relation, Buffer buffer)
      * clean the page. The master will likely issue a cleaning WAL record soon
      * anyway, so this is no particular loss.
      */
-    if (RecoveryInProgress() || SSIsServerModeReadOnly())
+    if (RecoveryInProgress() || (ENABLE_DMS && SSIsServerModeReadOnly()))
         return;
 
     oldest_xmin = u_sess->utils_cxt.RecentGlobalXmin;

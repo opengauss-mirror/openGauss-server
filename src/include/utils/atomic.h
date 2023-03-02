@@ -182,7 +182,18 @@ static inline uint32 pg_atomic_fetch_and_u32(volatile uint32* ptr, uint32 inc)
  */
 static inline uint32 pg_atomic_fetch_add_u32(volatile uint32* ptr, uint32 inc)
 {
+#ifdef __x86_64__
+    uint32 res;
+    __asm__ __volatile__(
+    "	lock				\n"
+    "	xaddl	%0,%1		\n"
+    :		"=q"(res), "=m"(*ptr)
+    :		"0" (inc), "m"(*ptr)
+    :		"memory", "cc");
+    return res;
+#else
     return __sync_fetch_and_add(ptr, inc);
+#endif
 }
 
 /*
@@ -232,12 +243,29 @@ static inline uint32 pg_atomic_sub_fetch_u32(volatile uint32* ptr, int32 inc)
  */
 static inline bool pg_atomic_compare_exchange_u32(volatile uint32* ptr, uint32* expected, uint32 newval)
 {
+#ifdef __x86_64__
+    char	ret;
+
+    /*
+     * Perform cmpxchg and use the zero flag which it implicitly sets when
+     * equal to measure the success.
+     */
+    __asm__ __volatile__(
+    "	lock				\n"
+    "	cmpxchgl	%4,%5	\n"
+    "   setz		%2		\n"
+    :		"=a" (*expected), "=m"(*ptr), "=q" (ret)
+    :		"a" (*expected), "r" (newval), "m"(*ptr)
+    :		"memory", "cc");
+    return (bool) ret;
+#else
     bool ret = false;
     uint32	current;
     current = __sync_val_compare_and_swap(ptr, *expected, newval);
     ret = current == *expected;
     *expected = current;
     return ret;
+#endif
 }
 
 /*
@@ -326,7 +354,18 @@ static inline uint64 pg_atomic_fetch_and_u64(volatile uint64* ptr, uint64 inc)
  */
 static inline uint64 pg_atomic_fetch_add_u64(volatile uint64* ptr, uint64 inc)
 {
+#ifdef __x86_64__
+    uint64 res;
+    __asm__ __volatile__(
+    "	lock				\n"
+    "	xaddq	%0,%1		\n"
+    :		"=q"(res), "=m"(*ptr)
+    :		"0" (inc), "m"(*ptr)
+    :		"memory", "cc");
+    return res;
+#else
     return __sync_fetch_and_add(ptr, inc);
+#endif
 }
 
 /*
@@ -376,12 +415,29 @@ static inline uint64 pg_atomic_sub_fetch_u64(volatile uint64* ptr, int64 inc)
  */
 static inline bool pg_atomic_compare_exchange_u64(volatile uint64* ptr, uint64* expected, uint64 newval)
 {
+#ifdef __x86_64__
+    char	ret;
+
+    /*
+     * Perform cmpxchg and use the zero flag which it implicitly sets when
+     * equal to measure the success.
+     */
+    __asm__ __volatile__(
+    "	lock				\n"
+    "	cmpxchgq	%4,%5	\n"
+    "   setz		%2		\n"
+    :		"=a" (*expected), "=m"(*ptr), "=q" (ret)
+    :		"a" (*expected), "r" (newval), "m"(*ptr)
+    :		"memory", "cc");
+    return (bool) ret;
+#else
     bool ret = false;
     uint64	current;
     current = __sync_val_compare_and_swap(ptr, *expected, newval);
     ret = current == *expected;
     *expected = current;
     return ret;
+#endif
 }
 
 /*
