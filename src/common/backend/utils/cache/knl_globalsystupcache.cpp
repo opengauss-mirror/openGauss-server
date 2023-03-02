@@ -781,27 +781,45 @@ GlobalCatCTup *GlobalSysTupCache::SearchTupleMiss(InsertCatTupInfo *tup_info)
     cur_skey[1].sk_argument = arguments[1];
     cur_skey[2].sk_argument = arguments[2];
     cur_skey[3].sk_argument = arguments[3];
-    SysScanDesc scandesc =
-        systable_beginscan(relation, m_relinfo.cc_indexoid, IndexScanOK(cc_id), NULL,
-            m_relinfo.cc_nkeys, cur_skey);
 
     if (tup_info->has_concurrent_lock) {
         AcquireGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
     }
     HeapTuple ntp;
-    while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
-        tup_info->ntp = ntp;
-        if (!tup_info->has_concurrent_lock) {
-            tup_info->canInsertGSC = false;
-        } else {
-            tup_info->canInsertGSC = CanTupleInertGSC(ntp);
-            if (!tup_info->canInsertGSC) {
-                /* unlock concurrent immediately, any one can invalid cache now */
-                ReleaseGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
+    SysScanDesc scandesc = NULL;
+    if (u_sess->hook_cxt.pluginSearchCatHook != NULL) {
+        if (HeapTupleIsValid(ntp = ((searchCatFunc)(u_sess->hook_cxt.pluginSearchCatHook))(relation,
+            m_relinfo.cc_indexoid, cc_id, m_relinfo.cc_nkeys, cur_skey, &scandesc))) {
+            tup_info->ntp = ntp;
+            if (!tup_info->has_concurrent_lock) {
+                tup_info->canInsertGSC = false;
+            } else {
+                tup_info->canInsertGSC = CanTupleInertGSC(ntp);
+                if (!tup_info->canInsertGSC) {
+                    /* unlock concurrent immediately, any one can invalid cache now */
+                    ReleaseGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
+                }
             }
+            ct = InsertHeapTupleIntoCatCacheInSingle(tup_info);
         }
-        ct = InsertHeapTupleIntoCatCacheInSingle(tup_info);
-        break; /* assume only one match */
+    } else {
+        scandesc =
+            systable_beginscan(relation, m_relinfo.cc_indexoid, IndexScanOK(cc_id), NULL,
+                m_relinfo.cc_nkeys, cur_skey);
+        while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
+            tup_info->ntp = ntp;
+            if (!tup_info->has_concurrent_lock) {
+                tup_info->canInsertGSC = false;
+            } else {
+                tup_info->canInsertGSC = CanTupleInertGSC(ntp);
+                if (!tup_info->canInsertGSC) {
+                    /* unlock concurrent immediately, any one can invalid cache now */
+                    ReleaseGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
+                }
+            }
+            ct = InsertHeapTupleIntoCatCacheInSingle(tup_info);
+            break; /* assume only one match */
+        }
     }
     /* unlock finally */
     if (tup_info->has_concurrent_lock) {
@@ -1489,7 +1507,11 @@ void GlobalSysTupCache::InitRelationInfo()
                 ereport(FATAL, (errmsg("only sys attr supported in caches is OID")));
             keytype = OIDOID;
         }
-        GetCCHashEqFuncs(keytype, &m_relinfo.cc_hashfunc[i], &eqfunc, &m_relinfo.cc_fastequal[i]);
+        if (u_sess->hook_cxt.pluginCCHashEqFuncs == NULL ||
+            !((pluginCCHashEqFuncs)(u_sess->hook_cxt.pluginCCHashEqFuncs))(keytype, &m_relinfo.cc_hashfunc[i], &eqfunc,
+                &m_relinfo.cc_fastequal[i], cc_id)) {
+            GetCCHashEqFuncs(keytype, &m_relinfo.cc_hashfunc[i], &eqfunc, &m_relinfo.cc_fastequal[i]);
+        }
         /*
          * Do equality-function lookup (we assume this won't need a catalog
          * lookup for any supported type)
