@@ -68,6 +68,27 @@ typedef struct {
     hyperLogLogState abbr_card; /* cardinality estimator */
 } NumericSortSupport;
 
+typedef struct NumericSumAccum
+{
+    int     ndigits;
+    int     weight;
+    int     dscale;
+    int     num_uncarried;
+    bool    have_carry_space;
+    int32   *pos_digits;
+    int32   *neg_digits;
+} NumericSumAccum;
+
+typedef struct NumericAggState
+{
+    bool        calcSumX2;      /* if true, calculate sumX2 */
+    bool        isNaN;          /* true if any processed number was NaN */
+    MemoryContext agg_context;  /* context we're calculating in */
+    int64       N;              /* count of processed numbers */
+    NumericSumAccum  sumX;           /* sum of processed numbers */
+    NumericSumAccum  sumX2;          /* sum of squares of processed numbers */
+} NumericAggState;
+
 #define NUMERIC_ABBREV_BITS (SIZEOF_DATUM * BITS_PER_BYTE)
 #if SIZEOF_DATUM == 8
 #define DatumGetNumericAbbrev(d) ((int64)d)
@@ -206,6 +227,11 @@ static void strip_var(NumericVar* var);
 static void compute_bucket(
     Numeric operand, Numeric bound1, Numeric bound2, NumericVar* count_var, NumericVar* result_var);
 static void remove_tail_zero(char *ascii);
+
+static void accum_sum_add(NumericSumAccum *accum, NumericVar *var1);
+static void accum_sum_rescale(NumericSumAccum *accum, NumericVar *val);
+static void accum_sum_carry(NumericSumAccum *accum);
+static void accum_sum_final(NumericSumAccum *accum, NumericVar *result);
 
 /*
  * @Description: call corresponding big integer operator functions.
@@ -3325,6 +3351,27 @@ Datum numeric_float4(PG_FUNCTION_ARGS)
  * ----------------------------------------------------------------------
  */
 
+static NumericAggState *makeNumericAggState(FunctionCallInfo fcinfo, bool calcSumX2)
+{
+    NumericAggState *state;
+    MemoryContext agg_context;
+    MemoryContext old_context;
+
+    if (!AggCheckCallContext(fcinfo, &agg_context)) {
+        elog(ERROR, "aggregate function called in non-aggregate context");
+    }
+
+    old_context = MemoryContextSwitchTo(agg_context);
+
+    state = (NumericAggState *) palloc0(sizeof(NumericAggState));
+    state->calcSumX2 = calcSumX2;
+    state->agg_context = agg_context;
+
+    MemoryContextSwitchTo(old_context);
+
+    return state;
+}
+
 static ArrayType* do_numeric_accum(ArrayType* transarray, Numeric newval)
 {
     Datum* transdatums = NULL;
@@ -3352,6 +3399,45 @@ static ArrayType* do_numeric_accum(ArrayType* transarray, Numeric newval)
     result = construct_array(transdatums, 3, NUMERICOID, -1, false, 'i');
 
     return result;
+}
+
+static void do_numeric_accum_numeric(NumericAggState *state, Numeric newval)
+{
+    NumericVar  X;
+    NumericVar  X2;
+    MemoryContext old_context;
+    uint16 num1Flags = NUMERIC_NB_FLAGBITS(newval);
+    /* result is NaN if any processed number is NaN */
+    if (state->isNaN || NUMERIC_FLAG_IS_NAN(num1Flags)) {
+        state->isNaN = true;
+        return;
+    }
+
+    if (NUMERIC_FLAG_IS_BI(num1Flags)) {
+        // num1 is int64/128, num2 is numeric, turn num1 to numeric
+        newval = makeNumericNormal(newval);
+    }
+
+    /* load processed number in short-lived context */
+    init_var_from_num(newval, &X);
+
+    /* if we need X^2, calculate that in short-lived context */
+    if (state->calcSumX2) {
+        init_var(&X2);
+        mul_var(&X, &X, &X2, X.dscale * 2);
+    }
+
+    /* The rest of this needs to work in the aggregate context */
+    old_context = MemoryContextSwitchTo(state->agg_context);
+
+    state->N++;
+
+    /* Accumulate sums */
+    accum_sum_add(&(state->sumX), &X);
+
+    if (state->calcSumX2)
+        accum_sum_add(&(state->sumX2), &X2);
+    MemoryContextSwitchTo(old_context);
 }
 
 /*
@@ -3390,6 +3476,23 @@ Datum numeric_accum(PG_FUNCTION_ARGS)
     PG_RETURN_ARRAYTYPE_P(do_numeric_accum(transarray, newval));
 }
 
+Datum numeric_accum_numeric(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state;
+
+    state = PG_ARGISNULL(0) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
+
+    if (!PG_ARGISNULL(1)) {
+        /* Create the state data when we see the first non-null input. */
+        if (state == NULL)
+            state = makeNumericAggState(fcinfo, true);
+
+        do_numeric_accum_numeric(state, PG_GETARG_NUMERIC(1));
+    }
+
+    PG_RETURN_POINTER(state);
+}
+
 /*
  * Optimized case for average of numeric.
  */
@@ -3399,6 +3502,23 @@ Datum numeric_avg_accum(PG_FUNCTION_ARGS)
     Numeric newval = PG_GETARG_NUMERIC(1);
 
     PG_RETURN_ARRAYTYPE_P(do_numeric_avg_accum(transarray, newval));
+}
+
+Datum numeric_avg_accum_numeric(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state;
+    state = PG_ARGISNULL(0) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
+ 
+    if (!PG_ARGISNULL(1)) {
+        /* Create the state data when we see the first non-null input. */
+        if (state == NULL) {
+            state = makeNumericAggState(fcinfo, false);
+        }
+
+        do_numeric_accum_numeric(state, PG_GETARG_NUMERIC(1));
+    }
+
+    PG_RETURN_POINTER(state);
 }
 
 /*
@@ -3457,6 +3577,28 @@ Datum int8_avg_accum(PG_FUNCTION_ARGS)
     PG_RETURN_ARRAYTYPE_P(do_numeric_avg_accum(transarray, newval));
 }
 
+Datum int8_avg_accum_numeric(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state;
+
+    state = PG_ARGISNULL(0) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
+
+    if (!PG_ARGISNULL(1)) {
+        Numeric     newval;
+
+        newval = DatumGetNumeric(DirectFunctionCall1(int8_numeric,
+                                                     PG_GETARG_DATUM(1)));
+        /* Create the state data when we see the first non-null input. */
+        if (state == NULL) {
+            state = makeNumericAggState(fcinfo, true);
+        }
+        do_numeric_accum_numeric(state, newval);
+    }
+
+    PG_RETURN_POINTER(state);
+
+}
+
 Datum numeric_avg(PG_FUNCTION_ARGS)
 {
     ArrayType* transarray = PG_GETARG_ARRAYTYPE_P(0);
@@ -3477,6 +3619,86 @@ Datum numeric_avg(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
 
     PG_RETURN_DATUM(DirectFunctionCall2(numeric_div, NumericGetDatum(sumX), NumericGetDatum(N)));
+}
+
+Datum numeric_avg_numeric(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state;
+    Datum       N_datum;
+    Datum       sumX_datum;
+    NumericVar	sumX_var;
+    state = PG_ARGISNULL(0) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
+    if (state == NULL) {
+        PG_RETURN_NULL();
+    }
+    if (state->isNaN) {
+        PG_RETURN_NUMERIC(make_result(&const_nan));
+    }
+
+    N_datum = DirectFunctionCall1(int8_numeric, Int64GetDatum(state->N));
+    init_var(&sumX_var);
+    accum_sum_final(&state->sumX, &sumX_var);
+    sumX_datum = NumericGetDatum(make_result(&sumX_var));
+    free_var(&sumX_var); 
+    PG_RETURN_DATUM(DirectFunctionCall2(numeric_div, sumX_datum, N_datum));
+}
+
+Datum numeric_sum(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state;
+    NumericVar	sumX_var;
+    Numeric result; 
+
+    state = PG_ARGISNULL(0) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
+    if (state == NULL) {
+        PG_RETURN_NULL();
+    }
+
+    if (state->isNaN) {
+        PG_RETURN_NUMERIC(make_result(&const_nan));
+    }
+
+    init_var(&sumX_var);
+    accum_sum_final(&state->sumX, &sumX_var);
+    result = make_result(&sumX_var);
+    free_var(&sumX_var);
+
+    PG_RETURN_NUMERIC(result); 
+}
+
+static void int8_to_numericvar(int64 val, NumericVar *var)
+{
+    uint64      uval, newuval;
+    NumericDigit *ptr;
+    int         ndigits;
+
+    /* int8 can require at most 19 decimal digits; add one for safety */
+    alloc_var(var, 20 / DEC_DIGITS);
+    if (val < 0) {
+        var->sign = NUMERIC_NEG;
+        uval = -val;
+    } else {
+        var->sign = NUMERIC_POS;
+        uval = val;
+    }
+    var->dscale = 0;
+    if (val == 0) {
+        var->ndigits = 0;
+        var->weight = 0;
+        return;
+    }
+    ptr = var->digits + var->ndigits;
+    ndigits = 0;
+    do {
+        ptr--;
+        ndigits++;
+        newuval = uval / NBASE;
+        *ptr = uval - newuval * NBASE;
+        uval = newuval;
+    } while (uval);
+    var->digits = ptr;
+    var->ndigits = ndigits;
+    var->weight = ndigits - 1;
 }
 
 /*
@@ -3578,6 +3800,86 @@ static Numeric numeric_stddev_internal(ArrayType* transarray, bool variance, boo
     return res;
 }
 
+static Numeric numeric_stddev_internal_numeric(NumericAggState* state, bool variance, bool sample, bool* is_null)
+{
+    Numeric     res;
+    NumericVar vN, vsumX, vsumX2, vNminus1;
+    NumericVar* comp = NULL;
+    int rscale;
+
+    /* Deal with empty input and NaN-input cases */
+    if (state == NULL) {
+        *is_null = true;
+        return NULL;
+    }
+ 
+    *is_null = false;
+
+    if (state->isNaN) {
+        return make_result(&const_nan);
+    }
+
+    init_var(&vN);
+    init_var(&vsumX);
+    init_var(&vsumX2);
+ 
+    int8_to_numericvar(state->N, &vN);
+    /*
+     * Sample stddev and variance are undefined when N <= 1; population stddev
+     * is undefined when N == 0. Return NULL in either case.
+     */
+    if (sample) {
+        comp = &const_one;
+    } else {
+        comp = &const_zero;
+    }
+
+    if (cmp_var(&vN, comp) <= 0) {
+        *is_null = true;
+        return NULL;
+    }
+
+    init_var(&vNminus1);
+    sub_var(&vN, &const_one, &vNminus1);
+
+    /*
+     * Handle Big Integer
+     */
+    accum_sum_final(&(state->sumX), &vsumX);
+    accum_sum_final(&(state->sumX2), &vsumX2);
+
+    /* compute rscale for mul_var calls */
+    rscale = vsumX.dscale * 2;
+
+    mul_var(&vsumX, &vsumX, &vsumX, rscale); /* vsumX = sumX * sumX */
+    mul_var(&vN, &vsumX2, &vsumX2, rscale);  /* vsumX2 = N * sumX2 */
+    sub_var(&vsumX2, &vsumX, &vsumX2);       /* N * sumX2 - sumX * sumX */
+
+    if (cmp_var(&vsumX2, &const_zero) <= 0) {
+        /* Watch out for roundoff error producing a negative numerator */
+        res = make_result(&const_zero);
+    } else {
+        if (sample) {
+            mul_var(&vN, &vNminus1, &vNminus1, 0); /* N * (N - 1) */
+        } else {
+            mul_var(&vN, &vN, &vNminus1, 0); /* N * N */
+        }
+        rscale = select_div_scale(&vsumX2, &vNminus1);
+        div_var(&vsumX2, &vNminus1, &vsumX, rscale, true); /* variance */
+        if (!variance) {
+            sqrt_var(&vsumX, &vsumX, rscale); /* stddev */
+        }
+
+        res = make_result(&vsumX);
+    }
+
+    free_var(&vNminus1);
+    free_var(&vsumX);
+    free_var(&vsumX2);
+
+    return res;
+}
+
 Datum numeric_var_samp(PG_FUNCTION_ARGS)
 {
     Numeric res;
@@ -3589,6 +3891,23 @@ Datum numeric_var_samp(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     else
         PG_RETURN_NUMERIC(res);
+}
+
+Datum numeric_var_samp_numeric(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state;
+    Numeric res;
+    bool is_null = false;
+
+    state = PG_ARGISNULL(0) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
+
+    res = numeric_stddev_internal_numeric(state, true, true, &is_null);
+
+    if (is_null) {
+        PG_RETURN_NULL();
+    } else {
+        PG_RETURN_NUMERIC(res);
+    }
 }
 
 Datum numeric_stddev_samp(PG_FUNCTION_ARGS)
@@ -3604,6 +3923,38 @@ Datum numeric_stddev_samp(PG_FUNCTION_ARGS)
         PG_RETURN_NUMERIC(res);
 }
 
+void stddev_create_state_4_vector(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state = makeNumericAggState(fcinfo, true);
+    state->N = DatumGetInt64(DirectFunctionCall1(numeric_int8, PG_GETARG_DATUM(1)));
+    NumericVar* sumX = (NumericVar*)palloc0(sizeof(NumericVar));
+    NumericVar* sumX2 = (NumericVar*)palloc0(sizeof(NumericVar));
+    init_var_from_num(DatumGetNumeric(PG_GETARG_DATUM(2)), sumX);
+    init_var_from_num(DatumGetNumeric(PG_GETARG_DATUM(3)), sumX2);
+    accum_sum_add(&(state->sumX), sumX);
+    accum_sum_add(&(state->sumX2), sumX2);
+
+    fcinfo->arg[0] = PointerGetDatum(state);
+    return ;
+}
+
+Datum numeric_stddev_samp_numeric(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state;
+    Numeric res;
+    bool is_null = false;
+
+    state = (fcinfo->isnull && PG_ARGISNULL(0)) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
+
+    res = numeric_stddev_internal_numeric(state, false, true, &is_null);
+
+    if (is_null) {
+        PG_RETURN_NULL();
+    } else {
+        PG_RETURN_NUMERIC(res);
+    }
+}
+
 Datum numeric_var_pop(PG_FUNCTION_ARGS)
 {
     Numeric res;
@@ -3617,6 +3968,23 @@ Datum numeric_var_pop(PG_FUNCTION_ARGS)
         PG_RETURN_NUMERIC(res);
 }
 
+Datum numeric_var_pop_numeric(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state;
+    Numeric res;
+    bool is_null = false;
+
+    state = PG_ARGISNULL(0) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
+
+    res = numeric_stddev_internal_numeric(state, true, false, &is_null);
+
+    if (is_null) {
+        PG_RETURN_NULL();
+    } else {
+        PG_RETURN_NUMERIC(res);
+    }
+}
+
 Datum numeric_stddev_pop(PG_FUNCTION_ARGS)
 {
     Numeric res;
@@ -3628,6 +3996,23 @@ Datum numeric_stddev_pop(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     else
         PG_RETURN_NUMERIC(res);
+}
+
+Datum numeric_stddev_pop_numeric(PG_FUNCTION_ARGS)
+{
+    NumericAggState *state;
+    Numeric res;
+    bool is_null = false;
+
+    state = PG_ARGISNULL(0) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
+
+    res = numeric_stddev_internal_numeric(state, false, false, &is_null);
+
+    if (is_null) {
+        PG_RETURN_NULL();
+    } else {
+        PG_RETURN_NUMERIC(res);
+    }
 }
 
 /*
@@ -19627,4 +20012,278 @@ Datum bool_numeric(PG_FUNCTION_ARGS)
     free_var(&result);
 
     PG_RETURN_NUMERIC(res);
+}
+
+static void accum_sum_add(NumericSumAccum *accum, NumericVar *val)
+{
+    int32   *accum_digits;
+    int i, val_i;
+    int val_ndigits;
+    NumericDigit *val_digits;
+
+    /*
+     * If we have accumulated too many values since the last carry
+     * propagation, do it now, to avoid overflowing.  (We could allow more
+     * than NBASE - 1, if we reserved two extra digits, rather than one, for
+     * carry propagation.  But even with NBASE - 1, this needs to be done so
+     * seldom, that the performance difference is negligible.)
+     */
+    if (accum->num_uncarried == NBASE - 1) {
+        accum_sum_carry(accum);
+    }
+
+    /*
+     * Adjust the weight or scale of the old value, so that it can accommodate
+     * the new value.
+     */
+    accum_sum_rescale(accum, val);
+
+    /* */
+    if (val->sign == NUMERIC_POS) {
+        accum_digits = accum->pos_digits;
+    } else {
+        accum_digits = accum->neg_digits;
+    }
+    /* copy these values into local vars for speed in loop */
+    val_ndigits = val->ndigits;
+    val_digits = val->digits;
+
+    i = accum->weight - val->weight;
+    for (val_i = 0; val_i < val_ndigits; val_i++) {
+        accum_digits[i] += (int32) val_digits[val_i];
+        i++;
+    }
+
+    accum->num_uncarried++;
+}
+
+static void accum_sum_carry(NumericSumAccum *accum)
+{
+    int          i;
+    int          ndigits;
+    int32       *dig;
+    int32        carry;
+    int32        newdig = 0;
+
+    if (accum->num_uncarried == 0) {
+        return;
+    }
+
+    Assert(accum->pos_digits[0] == 0 && accum->neg_digits[0] == 0);
+
+    ndigits = accum->ndigits;
+
+    dig = accum->pos_digits;
+    carry = 0;
+    for (i = ndigits - 1; i >= 0; i--) {
+        newdig = dig[i] + carry;
+        if (newdig >= NBASE) {
+            carry = newdig / NBASE;
+            newdig -= carry * NBASE;
+        } else {
+            carry = 0;
+        }
+        dig[i] = newdig;
+    }
+
+    if (newdig > 0) {
+        accum->have_carry_space = false;
+    }
+
+    dig = accum->neg_digits;
+    carry = 0;
+    for (i = ndigits - 1; i >= 0; i--) {
+        newdig = dig[i] + carry;
+        if (newdig >= NBASE) {
+            carry = newdig / NBASE;
+            newdig -= carry * NBASE;
+        } else {
+            carry = 0;
+        }
+        dig[i] = newdig;
+    }
+    if (newdig > 0) {
+        accum->have_carry_space = false;
+    }
+
+    accum->num_uncarried = 0;
+}
+
+static void accum_sum_rescale(NumericSumAccum *accum, NumericVar *val)
+{
+    int            old_weight = accum->weight;
+    int            old_ndigits = accum->ndigits;
+    int            accum_ndigits;
+    int            accum_weight;
+    int            accum_rscale;
+    int            val_rscale;
+
+    accum_weight = old_weight;
+    accum_ndigits = old_ndigits;
+
+    if (val->weight >= accum_weight) {
+        accum_weight = val->weight + 1;
+        accum_ndigits = accum_ndigits + (accum_weight - old_weight);
+    } else if (!accum->have_carry_space) {
+        accum_weight++;
+        accum_ndigits++;
+    }
+
+    /* Is the new value wider on the right side? */
+    accum_rscale = accum_ndigits - accum_weight - 1;
+    val_rscale = val->ndigits - val->weight - 1;
+    if (val_rscale > accum_rscale) {
+        accum_ndigits = accum_ndigits + (val_rscale - accum_rscale);
+    }
+
+    if (accum_ndigits != old_ndigits ||
+        accum_weight != old_weight) {
+        int32       *new_pos_digits;
+        int32       *new_neg_digits;
+        int          weightdiff;
+        size_t      size = (size_t)accum_ndigits * sizeof(int32);
+
+        weightdiff = accum_weight - old_weight;
+
+        new_pos_digits = (int32*)palloc0(size);
+        new_neg_digits = (int32*)palloc0(size);
+
+        if (accum->pos_digits) {
+            errno_t rc = memcpy_s(&new_pos_digits[weightdiff], size, accum->pos_digits,
+                (size_t)old_ndigits * sizeof(int32));
+            securec_check(rc, "\0", "\0");
+            pfree(accum->pos_digits);
+
+            rc = memcpy_s(&new_neg_digits[weightdiff], size, accum->neg_digits,
+                old_ndigits * sizeof(int32));
+            securec_check(rc, "\0", "\0");
+            pfree(accum->neg_digits);
+        }
+
+        accum->pos_digits = new_pos_digits;
+        accum->neg_digits = new_neg_digits;
+
+        accum->weight = accum_weight;
+        accum->ndigits = accum_ndigits;
+
+        Assert(accum->pos_digits[0] == 0 && accum->neg_digits[0] == 0);
+        accum->have_carry_space = true;
+    }
+
+    if (val->dscale > accum->dscale)
+        accum->dscale = val->dscale;
+}
+
+static void accum_sum_final(NumericSumAccum *accum, NumericVar *result)
+{
+    int            i;
+    NumericVar    pos_var;
+    NumericVar    neg_var;
+
+    if (accum->ndigits == 0) {
+        set_var_from_var(&const_zero, result);
+        return;
+    }
+
+    /* Perform final carry */
+    accum_sum_carry(accum);
+
+    /* Create NumericVars representing the positive and negative sums */
+    init_var(&pos_var);
+    init_var(&neg_var);
+
+    pos_var.ndigits = neg_var.ndigits = accum->ndigits;
+    pos_var.weight = neg_var.weight = accum->weight;
+    pos_var.dscale = neg_var.dscale = accum->dscale;
+    pos_var.sign = NUMERIC_POS;
+    neg_var.sign = NUMERIC_NEG;
+
+    pos_var.buf = pos_var.digits = digitbuf_alloc(accum->ndigits);
+    neg_var.buf = neg_var.digits = digitbuf_alloc(accum->ndigits);
+
+    for (i = 0; i < accum->ndigits; i++) {
+        Assert(accum->pos_digits[i] < NBASE);
+        pos_var.digits[i] = (int16) accum->pos_digits[i];
+
+        Assert(accum->neg_digits[i] < NBASE);
+        neg_var.digits[i] = (int16) accum->neg_digits[i];
+    }
+
+    /* And add them together */
+    add_var(&pos_var, &neg_var, result);
+
+    /* Remove leading/trailing zeroes */
+    strip_var(result);
+}
+
+bool numeric_agg_trans_initvalisnull(Oid transfn_oid, bool initvalisnull)
+{
+    if (transfn_oid == 5440 || transfn_oid == 5442 || transfn_oid == 5439) {
+        return true;
+    }
+
+    return initvalisnull;
+}
+
+void numeric_transfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype)
+{
+    Oid old_type = *transtype;
+    *transtype = 2281;
+
+    switch (aggfn_oid) {
+        case 2100:
+        case 2107:
+            *transfn_oid = 5439;
+            break;
+        case 2103:
+        case 2114:
+            *transfn_oid = 5442;
+            break;
+        case 2723:
+        case 2646:
+        case 2153:
+        case 2729:
+        case 2717:
+        case 2159:
+            *transfn_oid = 5440;
+            break;
+        default:
+            *transtype = old_type;
+    }
+}
+
+void numeric_finalfn_info_change(Oid aggfn_oid, Oid *finalfn_oid)
+{
+    switch (aggfn_oid) {
+        case 2100:
+        case 2103:
+            *finalfn_oid = 5441;
+            break;
+        case 2107:
+        case 2114:
+            *finalfn_oid = 5435;
+            break;
+        case 2723:
+            *finalfn_oid = 5445;
+            break;
+        case 2646:
+        case 2153:
+            *finalfn_oid = 5446;
+            break;
+        case 2729:
+            *finalfn_oid = 5443;
+            break;
+        case 2717:
+        case 2159:
+            *finalfn_oid = 5444;
+            break;
+        default:
+            return;
+    }
+}
+
+void numeric_aggfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype, Oid *finalfn_oid)
+{
+    numeric_transfn_info_change(aggfn_oid, transfn_oid, transtype);
+    numeric_finalfn_info_change(aggfn_oid, finalfn_oid);
 }
