@@ -729,32 +729,32 @@ DROP RULE test_at_change_rule ON test_at_change_depend;
 
 -- --RLSPOLICY reference column.
 DROP TABLE test_at_change_depend;
-CREATE ROLE at_change_role PASSWORD 'Gauss@123';
+CREATE ROLE at_change_ustore_role PASSWORD 'Gauss@123';
 CREATE TABLE test_at_change_depend(
     a int,
     b int NOT NULL
 ) WITH(STORAGE_TYPE=USTORE);
 INSERT INTO test_at_change_depend VALUES(0,0);
-GRANT USAGE ON SCHEMA atbdb_ustore_schema TO at_change_role;
-GRANT SELECT ON test_at_change_depend TO at_change_role;
+GRANT USAGE ON SCHEMA atbdb_ustore_schema TO at_change_ustore_role;
+GRANT SELECT ON test_at_change_depend TO at_change_ustore_role;
 ALTER TABLE test_at_change_depend ENABLE ROW LEVEL SECURITY;
-CREATE ROW LEVEL SECURITY POLICY test_at_change_rls ON test_at_change_depend AS RESTRICTIVE FOR SELECT TO at_change_role USING(b >= 20);
+CREATE ROW LEVEL SECURITY POLICY test_at_change_rls ON test_at_change_depend AS RESTRICTIVE FOR SELECT TO at_change_ustore_role USING(b >= 20);
 ALTER TABLE test_at_change_depend CHANGE COLUMN b b1 int not null;
 INSERT INTO test_at_change_depend VALUES(21,21);
-SET ROLE at_change_role PASSWORD 'Gauss@123';
+SET ROLE at_change_ustore_role PASSWORD 'Gauss@123';
 SELECT * FROM test_at_change_depend ORDER BY 1,2;
 RESET ROLE;
 SELECT * FROM test_at_change_depend ORDER BY 1,2;
 ALTER TABLE test_at_change_depend CHANGE COLUMN b1 b2 bool not null;
 ALTER TABLE test_at_change_depend CHANGE COLUMN b2 b3 int not null;
 INSERT INTO test_at_change_depend VALUES(22,22);
-SET ROLE at_change_role PASSWORD 'Gauss@123';
+SET ROLE at_change_ustore_role PASSWORD 'Gauss@123';
 SELECT * FROM test_at_change_depend ORDER BY 1,2;
 RESET ROLE;
 SELECT * FROM test_at_change_depend ORDER BY 1,2;
 DROP TABLE test_at_change_depend;
-REVOKE ALL PRIVILEGES ON SCHEMA atbdb_ustore_schema FROM at_change_role;
-DROP ROLE at_change_role;
+REVOKE ALL PRIVILEGES ON SCHEMA atbdb_ustore_schema FROM at_change_ustore_role;
+DROP ROLE at_change_ustore_role;
 
 -- test alter command order
 CREATE TABLE test_at_pass(
