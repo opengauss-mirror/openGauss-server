@@ -1727,6 +1727,10 @@ static void PortalRunUtility(Portal portal, Node* utilityStmt, bool isTopLevel, 
 #endif /* PGXC */
         completionTag);
 
+    if (proutility_cxt.parse_tree != NULL && nodeTag(proutility_cxt.parse_tree) == T_ExplainStmt && ((ExplainStmt*)proutility_cxt.parse_tree)->planinfo != NULL) {
+        ((ExplainStmt*)utilityStmt)->planinfo = ((ExplainStmt*)proutility_cxt.parse_tree)->planinfo;
+    }
+
     /* Some utility statements may change context on us */
     MemoryContextSwitchTo(PortalGetHeapMemory(portal));
 
