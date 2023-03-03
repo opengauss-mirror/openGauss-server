@@ -107,8 +107,6 @@ static void MotReceiveAndAppendTarFile(const char* basedir, const char* chkptNam
                 duplicatedfd = -1;
                 disconnect_and_exit(1);
             }
-            close(duplicatedfd);
-            duplicatedfd = -1;
         } else
 #endif
         tarfile = stdout;
@@ -158,6 +156,10 @@ static void MotReceiveAndAppendTarFile(const char* basedir, const char* chkptNam
                 if (gzclose(ztarfile) != 0) {
                     fprintf(stderr, _("%s: could not close compressed file \"%s\": %s\n"), progname, filename,
                         get_gz_error(ztarfile));
+                    if (duplicatedfd != -1) {
+                        close(duplicatedfd);
+                        duplicatedfd = -1;
+                    }
                     disconnect_and_exit(1);
                 }
             } else
@@ -229,6 +231,10 @@ static void MotReceiveAndAppendTarFile(const char* basedir, const char* chkptNam
             if (ztarfile != NULL) {
                 if (!writeGzFile(ztarfile, copybuf, r)) {
                     fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                    if (duplicatedfd != -1) {
+                        close(duplicatedfd);
+                        duplicatedfd = -1;
+                    }
                     disconnect_and_exit(1);
                 }
             } else
@@ -271,6 +277,10 @@ static void MotReceiveAndAppendTarFile(const char* basedir, const char* chkptNam
             if (ztarfile != NULL) {
                 if (!writeGzFile(ztarfile, copybuf, r)) {
                     fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                    if (duplicatedfd != -1) {
+                        close(duplicatedfd);
+                        duplicatedfd = -1;
+                    }
                     disconnect_and_exit(1);
                 }
             } else
@@ -290,6 +300,12 @@ static void MotReceiveAndAppendTarFile(const char* basedir, const char* chkptNam
             }
         } /* continuing data in existing file */
     }     /* loop over all data blocks */
+#ifdef HAVE_LIBZ
+    if (duplicatedfd != -1) {
+        close(duplicatedfd);
+        duplicatedfd = -1;
+    }
+#endif
     if (tarfile != NULL) {
         fclose(tarfile);
         tarfile = NULL;
