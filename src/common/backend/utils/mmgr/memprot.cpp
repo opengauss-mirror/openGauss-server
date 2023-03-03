@@ -580,16 +580,6 @@ static bool memTracker_ReserveMemChunks(int32 numChunksToReserve, bool needProte
 
     Assert(0 < numChunksToReserve);
 
-    /* query level memory verification */
-    if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry && type != MEM_SHRD) {
-        /* 1. increase memory in chunk at query level */
-        total = gs_atomic_add_32(&(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks), numChunksToReserve);
-
-        /* 2. update the peak memory of the query */
-        if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery < total)
-            gs_lock_test_and_set(&(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery), total);
-    }
-
     /* increase chunk quota at global gaussdb process level */
     if (t_thrd.utils_cxt.backend_reserved) {
         currSize = &backendUsedMemInChunk;
@@ -609,6 +599,16 @@ static bool memTracker_ReserveMemChunks(int32 numChunksToReserve, bool needProte
     /* no longer to use the beyond chunk, so reset it */
     if (total < *maxSize) {
         t_thrd.utils_cxt.beyondChunk = 0;
+    }
+
+    /* query level memory verification */
+    if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry && type != MEM_SHRD) {
+        /* 1. increase memory in chunk at query level */
+        total = gs_atomic_add_32(&(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks), numChunksToReserve);
+
+        /* 2. update the peak memory of the query */
+        if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery < total)
+            gs_lock_test_and_set(&(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery), total);
     }
 
     if (peakChunksPerProcess < processMemInChunks + backendUsedMemInChunk) {
