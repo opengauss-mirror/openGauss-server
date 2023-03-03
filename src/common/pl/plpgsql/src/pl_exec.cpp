@@ -5777,7 +5777,12 @@ static void exec_prepare_plan(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, int
      */
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.dolphin) {
-        plan = SPI_prepare_params(expr->query, (ParserSetupHook)plpgsql_parser_setup, (void*)expr, cursorOptions, NULL);
+        if (u_sess->hook_cxt.plpgsqlParserSetHook != NULL) {
+            plan = SPI_prepare_params(expr->query,
+                (ParserSetupHook)u_sess->hook_cxt.plpgsqlParserSetHook, (void*)expr, cursorOptions, NULL);
+        } else {
+            plan = SPI_prepare_params(expr->query, (ParserSetupHook)plpgsql_parser_setup, (void*)expr, cursorOptions, NULL);
+        }
     } else
 #endif
         plan = SPI_prepare_params(expr->query, (ParserSetupHook)plpgsql_parser_setup, (void*)expr, cursorOptions);
