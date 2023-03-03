@@ -52,3 +52,13 @@
 #define ST_DECLARE
 #define ST_DEFINE
 #include "lib/sort_template.h"
+
+ 
+/*
+ * qsort wrapper for strcmp.
+ */
+int
+pg_qsort_strcmp(const void *a, const void *b)
+{
+    return strcmp(*(char *const *) a, *(char *const *) b);
+}

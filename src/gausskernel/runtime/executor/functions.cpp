@@ -839,7 +839,8 @@ static bool postquel_getnext(execution_state* es, SQLFunctionCachePtr fcache)
 #ifdef PGXC
             false,
 #endif /* PGXC */
-            NULL);
+            NULL,
+            PROCESS_UTILITY_QUERY);
         result = true; /* never stops early */
     } else {
         /* Run regular commands to completion unless lazyEval */

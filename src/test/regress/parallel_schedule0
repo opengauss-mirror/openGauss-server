@@ -646,9 +646,9 @@ test: select_into subselect_part2 gs_aggregate
 test: holdable_cursor
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
-test: alter_table_000 alter_table_002 alter_table_003
-#test: alter_table_001
-test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
+test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
+#test: alter_table_001 alter_table_modify_ustore
+test: alter_table_modify_ltt alter_table_modify_gtt
 
 #test: with
 
@@ -1071,6 +1071,10 @@ test: row_count_function
 # show_warnings
 test: show_warnings prevent_table_in_sys_schema
 
+# test event trigger and object address
+test: test_object_alter
+test: event_trigger object_address
+test: event_trigger_dump_restore
 # partition expression key
 test: partition_expr_key
 test: alter_foreign_schema

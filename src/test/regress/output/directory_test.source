@@ -266,6 +266,7 @@ DROP DIRECTORY test_dir2;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_access_server_directory=off" >/dev/null 2>&1
 RESET ROLE;
 alter system set enable_access_server_directory=on;
+\! sleep 3
 create user u_reassign_owned_0008_1 sysadmin password 'test@123';
 create user u_reassign_owned_0008_2 sysadmin password 'test@123';
 SET ROLE u_reassign_owned_0008_1 PASSWORD 'test@123';

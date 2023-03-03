@@ -891,6 +891,7 @@ static void pts_error_callback(void* arg)
 void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p)
 {
     StringInfoData buf;
+    buf.data = NULL;
     List* raw_parsetree_list = NIL;
     SelectStmt* stmt = NULL;
     ResTarget* restarget = NULL;
@@ -958,8 +959,90 @@ void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p)
     return;
 
 fail:
+    pfree_ext(buf.data);
     InsertErrorMessage("invalid type name", u_sess->plsql_cxt.plpgsql_yylloc);
     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid type name \"%s\"", str)));
+}
+
+/*
+ * Given a string that is supposed to be a SQL-compatible type declaration,
+ * such as "int4" or "integer" or "character varying(32)", parse
+ * the string and return the result as a TypeName.
+ * If the string cannot be parsed as a type, an error is raised.
+ */
+TypeName * typeStringToTypeName(const char *str)
+{
+    StringInfoData buf;
+    buf.data = NULL;
+    List* raw_parsetree_list = NIL;
+    SelectStmt* stmt = NULL;
+    ResTarget* restarget = NULL;
+    TypeCast* typecast = NULL;
+    TypeName* typname = NULL;
+    ErrorContextCallback ptserrcontext;
+
+    /* make sure we give useful error for empty input */
+    if (strspn(str, " \t\n\r\f") == strlen(str)) {
+        goto fail;
+    }
+
+    initStringInfo(&buf);
+    appendStringInfo(&buf, "SELECT NULL::%s", str);
+
+    /*
+     * Setup error traceback support in case of ereport() during parse
+     */
+    ptserrcontext.callback = pts_error_callback;
+    ptserrcontext.arg = (void*)str;
+    ptserrcontext.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &ptserrcontext;
+
+    raw_parsetree_list = raw_parser(buf.data);
+
+    t_thrd.log_cxt.error_context_stack = ptserrcontext.previous;
+
+    /*
+     * Make sure we got back exactly what we expected and no more; paranoia is
+     * justified since the string might contain anything.
+     */
+    if (list_length(raw_parsetree_list) != 1)
+        goto fail;
+    stmt = (SelectStmt*)linitial(raw_parsetree_list);
+    if (stmt == NULL || !IsA(stmt, SelectStmt) || stmt->distinctClause != NIL || stmt->intoClause != NULL ||
+        stmt->fromClause != NIL || stmt->whereClause != NULL || stmt->groupClause != NIL ||
+        stmt->havingClause != NULL || stmt->windowClause != NIL || stmt->withClause != NULL ||
+        stmt->valuesLists != NIL || stmt->sortClause != NIL || stmt->limitOffset != NULL || stmt->limitCount != NULL ||
+        stmt->lockingClause != NIL || stmt->op != SETOP_NONE) {
+        goto fail;
+    }
+    if (list_length(stmt->targetList) != 1) {
+        goto fail;
+    }
+    restarget = (ResTarget*)linitial(stmt->targetList);
+    if (restarget == NULL || !IsA(restarget, ResTarget) || restarget->name != NULL || restarget->indirection != NIL) {
+        goto fail;
+    }
+    typecast = (TypeCast*)restarget->val;
+    if (typecast == NULL || !IsA(typecast, TypeCast) || typecast->arg == NULL || !IsA(typecast->arg, A_Const)) {
+        goto fail;
+    }
+    typname = typecast->typname;
+    if (typname == NULL || !IsA(typname, TypeName)) {
+        goto fail;
+    }
+    if (typname->setof) {
+        goto fail;
+    }
+    pfree_ext(buf.data);
+ 
+    return typname;
+ 
+fail:
+    pfree_ext(buf.data);
+    ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+             errmsg("invalid type name \"%s\"", str)));
+    return NULL;
 }
 
 /*

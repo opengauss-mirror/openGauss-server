@@ -1,0 +1,25 @@
+CREATE TABLE parent (
+	a int
+);
+NOTICE:  DDL test: type simple, tag CREATE TABLE
+CREATE TABLE child () INHERITS (parent);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+CREATE TABLE grandchild () INHERITS (child);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+ALTER TABLE parent ADD COLUMN b serial;
+ERROR:  It's not supported to alter table add serial column
+ALTER TABLE parent RENAME COLUMN b TO c;
+ERROR:  column "b" does not exist
+ALTER TABLE parent ADD CONSTRAINT a_pos CHECK (a > 0);
+CREATE TABLE part (
+	a int
+) PARTITION BY RANGE (a);
+ERROR:  syntax error at or near ";"
+LINE 3: ) PARTITION BY RANGE (a);
+                                ^
+CREATE TABLE part1 PARTITION OF part FOR VALUES FROM (1) to (100);
+ERROR:  syntax error at or near "PARTITION OF"
+LINE 1: CREATE TABLE part1 PARTITION OF part FOR VALUES FROM (1) to ...
+                           ^
+ALTER TABLE part ADD PRIMARY KEY (a);
+ERROR:  relation "part" does not exist

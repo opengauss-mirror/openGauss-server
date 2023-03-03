@@ -527,7 +527,7 @@ static void CheckAbsoluteLocationDataPath(const char *location)
  * This seems a reasonable restriction since we're determining the system layout and, anyway, we probably have
  * root if we're doing this kind of activity
  */
-void CreateTableSpace(CreateTableSpaceStmt* stmt)
+Oid CreateTableSpace(CreateTableSpaceStmt* stmt)
 {
 #ifdef HAVE_SYMLINK
     Relation rel;
@@ -841,6 +841,7 @@ void CreateTableSpace(CreateTableSpaceStmt* stmt)
             errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("tablespaces are not supported on this platform")));
 #endif /* HAVE_SYMLINK */
+   return tablespaceoid; 
 }
 
 /*
@@ -1718,14 +1719,16 @@ void remove_tablespace_symlink(const char* linkloc)
 /*
  * Rename a tablespace
  */
-void RenameTableSpace(const char* oldname, const char* newname)
+ObjectAddress RenameTableSpace(const char* oldname, const char* newname)
 {
+    Oid      tspId;    
     Relation rel;
     ScanKeyData entry[1];
     TableScanDesc scan;
     HeapTuple tup;
     HeapTuple newtuple;
     Form_pg_tablespace newform;
+    ObjectAddress address;
 
     if (isSecurityMode) {
         ereport(ERROR,
@@ -1742,6 +1745,7 @@ void RenameTableSpace(const char* oldname, const char* newname)
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace \"%s\" does not exist", oldname)));
 
+    tspId = HeapTupleGetOid(tup);
     newtuple = heap_copytuple(tup);
     newform = (Form_pg_tablespace)GETSTRUCT(newtuple);
 
@@ -1775,19 +1779,24 @@ void RenameTableSpace(const char* oldname, const char* newname)
 
     simple_heap_update(rel, &newtuple->t_self, newtuple);
     CatalogUpdateIndexes(rel, newtuple);
-
+    
+    ObjectAddressSet(address, TableSpaceRelationId, tspId);
     heap_close(rel, NoLock);
+    return address;
 }
 
 /*
  * Change tablespace owner
  */
-void AlterTableSpaceOwner(const char* name, Oid newOwnerId)
+ObjectAddress AlterTableSpaceOwner(const char* name, Oid newOwnerId)
 {
+    Relation rel;
     ScanKeyData entry[1];
     TableScanDesc scandesc;
     Form_pg_tablespace spcForm;
     HeapTuple tup;
+    Oid tsId;
+    ObjectAddress address;
 
     if (isSecurityMode) {
         ereport(ERROR,
@@ -1796,7 +1805,7 @@ void AlterTableSpaceOwner(const char* name, Oid newOwnerId)
     }
 
     /* Search pg_tablespace */
-    Relation rel = heap_open(TableSpaceRelationId, RowExclusiveLock);
+    rel = heap_open(TableSpaceRelationId, RowExclusiveLock);
 
     ScanKeyInit(&entry[0], Anum_pg_tablespace_spcname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(name));
     scandesc = tableam_scan_begin(rel, SnapshotNow, 1, entry);
@@ -1804,6 +1813,7 @@ void AlterTableSpaceOwner(const char* name, Oid newOwnerId)
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace \"%s\" does not exist", name)));
 
+    tsId = HeapTupleGetOid(tup);
     spcForm = (Form_pg_tablespace)GETSTRUCT(tup);
     /*
      * If the new owner is the same as the existing owner, consider the
@@ -1865,14 +1875,16 @@ void AlterTableSpaceOwner(const char* name, Oid newOwnerId)
         changeDependencyOnOwner(TableSpaceRelationId, HeapTupleGetOid(tup), newOwnerId);
     }
 
+    ObjectAddressSet(address, TableSpaceRelationId, tsId);
     tableam_scan_end(scandesc);
     heap_close(rel, NoLock);
+    return address;
 }
 
 /*
  * Alter table space options
  */
-void AlterTableSpaceOptions(AlterTableSpaceOptionsStmt* stmt)
+Oid AlterTableSpaceOptions(AlterTableSpaceOptionsStmt* stmt)
 {
     Relation rel;
     ScanKeyData entry[1];
@@ -2014,6 +2026,8 @@ void AlterTableSpaceOptions(AlterTableSpaceOptionsStmt* stmt)
 
     if (NULL != maxsize)
         pfree_ext(maxsize);
+
+    return spc_oid;
 }
 
 /*

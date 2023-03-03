@@ -24,6 +24,11 @@
 #define INTERVAL_TYPMOD(p, r) ((((r)&INTERVAL_RANGE_MASK) << 16) | ((p)&INTERVAL_PRECISION_MASK))
 #define INTERVAL_PRECISION(t) ((t) & INTERVAL_PRECISION_MASK)
 #define INTERVAL_RANGE(t) (((t) >> 16) & INTERVAL_RANGE_MASK)
+#define COPY_AND_CHECK_TIMESTAMP(targetTimestamp, size, convertTimeStamp)                       \
+do {                                                                                            \
+    errno_t rc = memcpy_s(targetTimestamp, size, timestamptz_to_str(convertTimeStamp), size);   \
+    securec_check(rc, "\0", "\0");                                                              \
+} while (0)
 
 #ifndef FRONTEND_PARSER
 #include "datatype/timestamp.h"

@@ -890,6 +890,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3587 | timestamptz_list_agg_transfn
  3589 | timestamptz_list_agg_noarg2_transfn
  3591 | pgxc_get_thread_wait_status
+ 3594 | event_trigger_in
+ 3595 | event_trigger_out
  3596 | pg_get_gtt_relstats
  3597 | pg_get_gtt_statistics
  3598 | pg_gtt_attached_pid
@@ -1410,10 +1412,19 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5721 | get_local_active_session
  5722 | ledger_hist_check
  5723 | get_wait_event_info
+ 5724 | pg_event_trigger_dropped_objects
+ 5725 | pg_identify_object
+ 5726 | pg_event_trigger_table_rewrite_oid
+ 5727 | pg_event_trigger_table_rewrite_reason
+ 5728 | pg_get_object_address
  5730 | locktag_decode
  5731 | working_version_num
  5732 | statement_detail_decode
  5733 | dynamic_func_control
+ 5801 | pg_ddl_command_in
+ 5803 | pg_ddl_command_out
+ 5807 | pg_ddl_command_recv
+ 5809 | pg_ddl_command_send
  5812 | hash16in
  5813 | hash16out
  5814 | hash32in
@@ -1540,6 +1551,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  8702 | array_intersect_distinct
  8703 | array_except
  8704 | array_except_distinct
+ 8852 | pg_event_trigger_ddl_commands
  9004 | smalldatetime_in
  9006 | smalldatetime_out
  9007 | smalldatetime_recv

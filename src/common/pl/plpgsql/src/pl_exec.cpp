@@ -69,6 +69,7 @@
 #include "storage/mot/jit_exec.h"
 #include "storage/mot/mot_fdw.h"
 #endif
+#include "commands/event_trigger.h"
 
 extern bool checkRecompileCondition(CachedPlanSource* plansource);
 static const char* const raise_skip_msg = "RAISE";
@@ -8867,6 +8868,12 @@ static void evalSubscriptList(PLpgSQL_execstate* estate, const List* subscripts,
             }
             i++;
         }
+        if (i - tableof_level != 1) {
+            ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                    errmodule(MOD_PLSQL),
+                    errmsg("subscripts list has members less than tableof value %s expected", valname)));
+        }
         Assert(estate->eval_tuptable == NULL);
         estate->eval_tuptable = save_eval_tuptable;
         return;
@@ -12234,6 +12241,99 @@ static void exec_set_sql_notfound(PLpgSQL_execstate* estate, PLpgSQL_state state
         var->value = (state == PLPGSQL_TRUE) ? (Datum)1 : (Datum)0;
         var->isnull = false;
     }
+}
+
+void
+plpgsql_exec_event_trigger(PLpgSQL_function *func, EventTriggerData *trigdata)
+{
+    PLpgSQL_execstate estate;
+    ErrorContextCallback plerrcontext;
+    int         i;
+    int         rc;
+    PLpgSQL_var *var;
+
+    /*
+     * Setup the execution state
+     */
+    plpgsql_estate_setup(&estate, func, NULL);
+
+    /*
+     * Setup error traceback support for ereport()
+     */
+    plerrcontext.callback = plpgsql_exec_error_callback;
+    plerrcontext.arg = &estate;
+    plerrcontext.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &plerrcontext;
+
+    /*
+     * Make local execution copies of all the datums
+     */
+    estate.err_text = gettext_noop("during initialization of execution state");
+    for (i = 0; i < estate.ndatums; i++)
+        estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
+
+    /*
+     * Assign the special tg_ variables
+     */
+    var = (PLpgSQL_var *) (estate.datums[func->tg_event_varno]);
+    var->value = CStringGetTextDatum(trigdata->event);
+    var->isnull = false;
+    var->freeval = true;
+
+    var = (PLpgSQL_var *) (estate.datums[func->tg_tag_varno]);
+    var->value = CStringGetTextDatum(trigdata->tag);
+    var->isnull = false;
+    var->freeval = true;
+
+    /*
+     * Let the instrumentation plugin peek at this function
+     */
+    if (*u_sess->plsql_cxt.plugin_ptr && (*u_sess->plsql_cxt.plugin_ptr)->func_beg)
+        ((*u_sess->plsql_cxt.plugin_ptr)->func_beg) (&estate, func);
+
+    /*
+     * Now call the toplevel block of statements
+     */
+    estate.err_text = NULL;
+    estate.err_stmt = (PLpgSQL_stmt *) (func->action);
+    rc = exec_stmt_block(&estate, func->action);
+    if (rc != PLPGSQL_RC_RETURN) {
+        estate.err_stmt = NULL;
+        estate.err_text = NULL;
+
+        /*
+        |* Provide a more helpful message if a CONTINUE or RAISE has been used
+        |* outside the context it can work in.
+        |*/
+        if (rc == PLPGSQL_RC_CONTINUE)
+            ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("CONTINUE cannot be used outside a loop")));
+        else
+            ereport(ERROR,
+                    (errcode(ERRCODE_S_R_E_FUNCTION_EXECUTED_NO_RETURN_STATEMENT),
+                    errmsg("control reached end of trigger procedure without RETURN")));
+    }
+
+    estate.err_stmt = NULL;
+    estate.err_text = gettext_noop("during function exit");
+
+    /*
+     * Let the instrumentation plugin peek at this function
+     */
+    if (*u_sess->plsql_cxt.plugin_ptr && (*u_sess->plsql_cxt.plugin_ptr)->func_end)
+        ((*u_sess->plsql_cxt.plugin_ptr)->func_end) (&estate, func);
+
+    /* Clean up any leftover temporary memory */
+    plpgsql_destroy_econtext(&estate);
+    exec_eval_cleanup(&estate);
+
+    /*
+     * Pop the error context stack
+     */
+    t_thrd.log_cxt.error_context_stack = plerrcontext.previous;
+
+    return;
 }
 
 /*

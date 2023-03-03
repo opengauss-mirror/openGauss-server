@@ -60,6 +60,7 @@
 #include "catalog/gs_package.h"
 #include "catalog/pg_trigger.h"
 #include "commands/defrem.h"
+#include "commands/trigger.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "distribute_core.h"
 #endif
@@ -340,6 +341,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 }
 
 %type <node>	stmt schema_stmt
+		AlterEventTrigStmt
 		AlterDatabaseStmt AlterDatabaseSetStmt AlterDataSourceStmt AlterDomainStmt AlterEnumStmt AlterEventStmt
 		AlterFdwStmt AlterForeignServerStmt AlterGroupStmt AlterSchemaStmt
 		AlterObjectSchemaStmt AlterOwnerStmt AlterSeqStmt AlterTableStmt
@@ -355,7 +357,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 		CreateSchemaStmt CreateSeqStmt CreateStmt CreateStreamStmt CreateTableSpaceStmt
 		CreateFdwStmt CreateForeignServerStmt CreateForeignTableStmt
 		CreateDataSourceStmt
-		CreateAssertStmt CreateTrigStmt
+		CreateAssertStmt CreateTrigStmt CreateEventTrigStmt
 		CreateUserStmt CreateUserMappingStmt CreateRoleStmt CreateRlsPolicyStmt CreateSynonymStmt
 		CreatedbStmt DeclareCursorStmt DefineStmt DeleteStmt DiscardStmt DoStmt
 		DropGroupStmt DropOpClassStmt DropOpFamilyStmt DropPLangStmt DropStmt DropEventStmt ShowEventStmt
@@ -453,6 +455,9 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <list>	TriggerEvents TriggerOneEvent
 %type <value>	TriggerFuncArg
 %type <node>	TriggerWhen
+%type <list>   event_trigger_when_list event_trigger_value_list
+%type <defelt> event_trigger_when_item
+%type <chr>        enable_trigger
 
 %type <str>		copy_file_name definer_opt user ev_body ev_where_body event_where_clause
 				database_name access_method_clause access_method access_method_clause_without_keyword attr_name
@@ -501,7 +506,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 				opt_include opt_c_include index_including_params
 				sort_clause opt_sort_clause sortby_list index_params constraint_params
 				name_list UserIdList from_clause from_list opt_array_bounds
-				qualified_name_list any_name any_name_list collate_name
+				qualified_name_list any_name any_name_list type_name_list collate_name
 				any_operator expr_list attrs callfunc_args
 				target_list insert_column_list set_target_list rename_clause_list rename_clause
 				set_clause_list set_clause multiple_set_clause
@@ -960,6 +965,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 			END_OF_INPUT
 			END_OF_INPUT_COLON
 			END_OF_PROC
+			EVENT_TRIGGER
 			NOT_IN NOT_BETWEEN NOT_LIKE NOT_ILIKE NOT_SIMILAR
 			FORCE_INDEX USE_INDEX
 
@@ -1140,6 +1146,7 @@ stmt :
 			| AlterDefaultPrivilegesStmt
 			| AlterDomainStmt
 			| AlterEnumStmt
+			| AlterEventTrigStmt
 			| AlterExtensionStmt
 			| AlterExtensionContentsStmt
 			| AlterFdwStmt
@@ -1191,6 +1198,7 @@ stmt :
 			| CreateConversionStmt
 			| CreateDomainStmt
 			| CreateDirectoryStmt
+			| CreateEventTrigStmt
 			| CreateExtensionStmt
 			| CreateFdwStmt
 			| CreateForeignServerStmt
@@ -10229,6 +10237,21 @@ AlterExtensionContentsStmt:
 					n->objargs = $7;
 					$$ = (Node *)n;
 				}
+			| ALTER EXTENSION name add_drop EVENT_TRIGGER name
+				{
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}
+					AlterExtensionContentsStmt *n = makeNode(AlterExtensionContentsStmt);
+					n->extname = $3;
+					n->action = $4;
+					n->objtype = OBJECT_EVENT_TRIGGER;
+					n->objname = list_make1(makeString($6));
+					$$ = (Node *)n;
+				}
 			| ALTER EXTENSION name add_drop CAST '(' Typename AS Typename ')'
 				{
 					AlterExtensionContentsStmt *n = makeNode(AlterExtensionContentsStmt);
@@ -10301,8 +10324,7 @@ AlterExtensionContentsStmt:
 					n->extname = $3;
 					n->action = $4;
 					n->objtype = OBJECT_OPCLASS;
-					n->objname = $7;
-					n->objargs = list_make1(makeString($9));
+					n->objname = lcons(makeString($9), $7);
 					$$ = (Node *)n;
 				}
 			| ALTER EXTENSION name add_drop OPERATOR FAMILY any_name USING access_method
@@ -10311,8 +10333,7 @@ AlterExtensionContentsStmt:
 					n->extname = $3;
 					n->action = $4;
 					n->objtype = OBJECT_OPFAMILY;
-					n->objname = $7;
-					n->objargs = list_make1(makeString($9));
+					n->objname = lcons(makeString($9), $7);
 					$$ = (Node *)n;
 				}
 			| ALTER EXTENSION name add_drop SCHEMA name
@@ -11935,6 +11956,84 @@ ConstraintAttributeElem:
 		;
 
 
+CreateEventTrigStmt:
+			CREATE EVENT_TRIGGER name ON ColLabel
+			EXECUTE PROCEDURE func_name '(' ')'
+				{
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}
+					CreateEventTrigStmt *n = makeNode(CreateEventTrigStmt);
+					n->trigname = $3;
+					n->eventname = $5;
+					n->whenclause = NULL;
+					n->funcname = $8;
+					$$ = (Node *)n;
+				}
+			| CREATE EVENT_TRIGGER name ON ColLabel
+			WHEN event_trigger_when_list
+			EXECUTE PROCEDURE func_name '(' ')'
+				{
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}
+					CreateEventTrigStmt *n = makeNode(CreateEventTrigStmt);
+					n->trigname = $3;
+					n->eventname = $5;
+					n->whenclause = $7;
+					n->funcname = $10;
+					$$ = (Node *)n;
+				}
+		;
+ 
+event_trigger_when_list:
+			event_trigger_when_item
+			{ $$ = list_make1($1); }
+			| event_trigger_when_list AND event_trigger_when_item
+			{ $$ = lappend($1, $3); }
+		;
+ 
+event_trigger_when_item:
+		ColId IN_P '(' event_trigger_value_list ')'
+			{ $$ = makeDefElem($1, (Node *) $4); }
+		;
+ 
+event_trigger_value_list:
+		SCONST
+			{ $$ = list_make1(makeString($1)); }
+		| event_trigger_value_list ',' SCONST
+			{ $$ = lappend($1, makeString($3)); }
+		;
+ 
+AlterEventTrigStmt:
+			ALTER EVENT_TRIGGER name enable_trigger
+				{
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}
+					AlterEventTrigStmt *n = makeNode(AlterEventTrigStmt);
+					n->trigname = $3;
+					n->tgenabled = $4;
+					$$ = (Node *) n;
+				}
+		;
+ 
+enable_trigger:
+			ENABLE_P                    { $$ = TRIGGER_FIRES_ON_ORIGIN; }
+			| ENABLE_P REPLICA          { $$ = TRIGGER_FIRES_ON_REPLICA; }
+			| ENABLE_P ALWAYS           { $$ = TRIGGER_FIRES_ALWAYS; }
+			| DISABLE_P                 { $$ = TRIGGER_DISABLED; }
+		;
+
 DropTrigStmt:
 			DROP TRIGGER name ON any_name opt_drop_behavior
 				{
@@ -12523,8 +12622,7 @@ DropOpClassStmt:
 			DROP OPERATOR CLASS any_name USING access_method opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
-					n->objects = list_make1($4);
-					n->arguments = list_make1(list_make1(makeString($6)));
+					n->objects = list_make1(lcons(makeString($6), $4));
 					n->removeType = OBJECT_OPCLASS;
 					n->behavior = $7;
 					n->missing_ok = false;
@@ -12534,8 +12632,7 @@ DropOpClassStmt:
 			| DROP OPERATOR CLASS IF_P EXISTS any_name USING access_method opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
-					n->objects = list_make1($6);
-					n->arguments = list_make1(list_make1(makeString($8)));
+					n->objects = list_make1(lcons(makeString($8), $6));
 					n->removeType = OBJECT_OPCLASS;
 					n->behavior = $9;
 					n->missing_ok = true;
@@ -12548,8 +12645,7 @@ DropOpFamilyStmt:
 			DROP OPERATOR FAMILY any_name USING access_method opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
-					n->objects = list_make1($4);
-					n->arguments = list_make1(list_make1(makeString($6)));
+					n->objects = list_make1(lcons(makeString($6), $4));
 					n->removeType = OBJECT_OPFAMILY;
 					n->behavior = $7;
 					n->missing_ok = false;
@@ -12560,7 +12656,7 @@ DropOpFamilyStmt:
 				{
 					DropStmt *n = makeNode(DropStmt);
 					n->objects = list_make1($6);
-					n->arguments = list_make1(list_make1(makeString($8)));
+					n->objects = list_make1(lcons(makeString($8), $6));
 					n->removeType = OBJECT_OPFAMILY;
 					n->behavior = $9;
 					n->missing_ok = true;
@@ -12617,6 +12713,12 @@ DropStmt:	DROP drop_type IF_P EXISTS any_name_list opt_drop_behavior opt_purge
 					n->behavior = $6;
 					n->concurrent = false;
 					n->purge = $7;
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT && n->removeType==OBJECT_EVENT_TRIGGER)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}					
 					if (n->removeType != OBJECT_TABLE && n->purge) {
         				const char* message = "PURGE clause only allowed in \"DROP TABLE\" statement";
     					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
@@ -12638,6 +12740,12 @@ DropStmt:	DROP drop_type IF_P EXISTS any_name_list opt_drop_behavior opt_purge
 					n->behavior = $4;
 					n->concurrent = false;
 					n->purge = $5;
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT && n->removeType==OBJECT_EVENT_TRIGGER)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}	
 					if (n->removeType != OBJECT_TABLE && n->purge) {
         				const char* message = "PURGE clause only allowed in \"DROP TABLE\" statement";
     					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
@@ -12647,6 +12755,46 @@ DropStmt:	DROP drop_type IF_P EXISTS any_name_list opt_drop_behavior opt_purge
 							 parser_errposition(@5)));
 					}
 					$$ = (Node *)n;
+				}
+			| DROP TYPE_P type_name_list opt_drop_behavior
+				{
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_TYPE;
+					n->missing_ok = FALSE;
+					n->objects = $3;
+					n->behavior = $4;
+					n->concurrent = false;
+					$$ = (Node *) n;
+				}
+			| DROP TYPE_P IF_P EXISTS type_name_list opt_drop_behavior
+				{
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_TYPE;
+					n->missing_ok = TRUE;
+					n->objects = $5;
+					n->behavior = $6;
+					n->concurrent = false;
+					$$ = (Node *) n;
+				}
+			| DROP DOMAIN_P type_name_list opt_drop_behavior
+				{
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_DOMAIN;
+					n->missing_ok = FALSE;
+					n->objects = $3;
+					n->behavior = $4;
+					n->concurrent = false;
+					$$ = (Node *) n;
+				}
+			| DROP DOMAIN_P IF_P EXISTS type_name_list opt_drop_behavior
+				{
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_DOMAIN;
+					n->missing_ok = TRUE;
+					n->objects = $5;
+					n->behavior = $6;
+					n->concurrent = false;
+					$$ = (Node *) n;
 				}
 			| DROP INDEX CONCURRENTLY any_name_list opt_drop_behavior
 				{
@@ -12687,11 +12835,10 @@ drop_type:	TABLE									{ $$ = OBJECT_TABLE; }
 			| MATERIALIZED VIEW 					{ $$ = OBJECT_MATVIEW; }
 			| INDEX									{ $$ = OBJECT_INDEX; }
 			| FOREIGN TABLE							{ $$ = OBJECT_FOREIGN_TABLE; }
-			| TYPE_P								{ $$ = OBJECT_TYPE; }
-			| DOMAIN_P								{ $$ = OBJECT_DOMAIN; }
 			| COLLATION								{ $$ = OBJECT_COLLATION; }
 			| CONVERSION_P							{ $$ = OBJECT_CONVERSION; }
 			| SCHEMA								{ $$ = OBJECT_SCHEMA; }
+			| EVENT_TRIGGER                         { $$ = OBJECT_EVENT_TRIGGER; }
 			| EXTENSION								{ $$ = OBJECT_EXTENSION; }
 			| TEXT_P SEARCH PARSER					{ $$ = OBJECT_TSPARSER; }
 			| TEXT_P SEARCH DICTIONARY				{ $$ = OBJECT_TSDICTIONARY; }
@@ -12707,6 +12854,10 @@ collate_name:	any_name					{ $$ = $1; }
 				| Sconst					{ $$ = list_make1(makeString($1)); }
 		;
 
+type_name_list:
+			Typename                                { $$ = list_make1(list_make1($1)); }
+			| type_name_list ',' Typename           { $$ = lappend($1, list_make1($3)); }
+			
 any_name_list:
 			any_name								{ $$ = list_make1($1); }
 			| any_name_list ',' any_name			{ $$ = lappend($1, $3); }
@@ -12759,7 +12910,7 @@ opt_restart_seqs:
  *				   EXTENSION | ROLE | TEXT SEARCH PARSER |
  *				   TEXT SEARCH DICTIONARY | TEXT SEARCH TEMPLATE |
  *				   TEXT SEARCH CONFIGURATION | FOREIGN TABLE |
- *				   FOREIGN DATA WRAPPER | SERVER | EVENT TRIGGER |
+ *				   FOREIGN DATA WRAPPER | SERVER | EVENT_TRIGGER |
  *				   MATERIALIZED VIEW | SNAPSHOT] <objname> |
  *				 AGGREGATE <aggname> (arg1, ...) |
  *				 FUNCTION <funcname> (arg1, arg2, ...) |
@@ -12779,6 +12930,12 @@ CommentStmt:
 					n->objname = $4;
 					n->objargs = NIL;
 					n->comment = $6;
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT && n->objtype==OBJECT_EVENT_TRIGGER)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}						
 					$$ = (Node *) n;
 				}
 			| COMMENT ON AGGREGATE func_name aggr_args IS comment_text
@@ -12811,10 +12968,24 @@ CommentStmt:
 			| COMMENT ON CONSTRAINT name ON any_name IS comment_text
 				{
 					CommentStmt *n = makeNode(CommentStmt);
-					n->objtype = OBJECT_CONSTRAINT;
+					n->objtype = OBJECT_TABCONSTRAINT;
 					n->objname = lappend($6, makeString($4));
 					n->objargs = NIL;
 					n->comment = $8;
+					$$ = (Node *) n;
+				}
+			| COMMENT ON CONSTRAINT name ON DOMAIN_P any_name IS comment_text
+				{
+					CommentStmt *n = makeNode(CommentStmt);
+					n->objtype = OBJECT_DOMCONSTRAINT;
+					/*
+					 * should use Typename not any_name in the production, but
+					 * there's a shift/reduce conflict if we do that, so fix it
+					 * up here.
+					*/
+					n->objname = list_make1(makeTypeNameFromNameList($7));
+					n->objargs = list_make1(makeString($4));
+					n->comment = $9;
 					$$ = (Node *) n;
 				}
 			| COMMENT ON RULE name ON any_name IS comment_text
@@ -12940,6 +13111,7 @@ comment_type:
 			| COLLATION							{ $$ = OBJECT_COLLATION; }
 			| CONVERSION_P						{ $$ = OBJECT_CONVERSION; }
 			| TABLESPACE						{ $$ = OBJECT_TABLESPACE; }
+			| EVENT_TRIGGER                     { $$ = OBJECT_EVENT_TRIGGER; }
 			| EXTENSION							{ $$ = OBJECT_EXTENSION; }
 			| ROLE								{ $$ = OBJECT_ROLE; }
 			| USER								{ $$ = OBJECT_USER; }
@@ -12966,13 +13138,19 @@ comment_text:
 SecLabelStmt:
 			SECURITY LABEL opt_provider ON security_label_type any_name
 			IS security_label
-				{
+				{					
 					SecLabelStmt *n = makeNode(SecLabelStmt);
 					n->provider = $3;
 					n->objtype = $5;
 					n->objname = $6;
 					n->objargs = NIL;
 					n->label = $8;
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT && n->objtype==OBJECT_EVENT_TRIGGER)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}	
 					$$ = (Node *) n;
 				}
 			| SECURITY LABEL opt_provider ON AGGREGATE func_name aggr_args
@@ -13028,6 +13206,7 @@ opt_provider:	FOR ColId_or_Sconst	{ $$ = $2; }
 security_label_type:
 			COLUMN								{ $$ = OBJECT_COLUMN; }
 			| DATABASE							{ $$ = OBJECT_DATABASE; }
+			| EVENT_TRIGGER                     { $$ = OBJECT_EVENT_TRIGGER; }
 			| FOREIGN TABLE						{ $$ = OBJECT_FOREIGN_TABLE; }
 			| SCHEMA							{ $$ = OBJECT_SCHEMA; }
 			| SEQUENCE							{ $$ = OBJECT_SEQUENCE; }
@@ -17082,11 +17261,39 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->newname = $8;
 					$$ = (Node *)n;
 				}
+			| ALTER EVENT_TRIGGER name RENAME TO name
+				{
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_EVENT_TRIGGER;
+					n->object = list_make1(makeString($3));
+					n->newname = $6;
+					$$ = (Node *)n;
+				}
+			| ALTER EVENT_TRIGGER name OWNER TO RoleId
+				{
+					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
+					{
+						ereport(errstate, 
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
+					}
+					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
+					n->objectType = OBJECT_EVENT_TRIGGER;
+					n->object = list_make1(makeString($3));
+					n->newowner = $6;
+					$$ = (Node *)n;
+				}
 			| ALTER FOREIGN DATA_P WRAPPER name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_FDW;
-					n->subname = $5;
+					n->object = list_make1(makeString($5));
 					n->newname = $8;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -17124,7 +17331,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_LANGUAGE;
-					n->subname = $4;
+					n->object = list_make1(makeString($4));
 					n->newname = $7;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -17133,8 +17340,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_OPCLASS;
-					n->object = $4;
-					n->subname = $6;
+					n->object = lcons(makeString($6), $4);
 					n->newname = $9;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -17143,8 +17349,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_OPFAMILY;
-					n->object = $4;
-					n->subname = $6;
+					n->object = lcons(makeString($6), $4);
 					n->newname = $9;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -17191,7 +17396,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_FOREIGN_SERVER;
-					n->subname = $3;
+					n->object = list_make1(makeString($3));
 					n->newname = $6;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -17446,8 +17651,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 			| ALTER TABLE relation_expr RENAME CONSTRAINT name TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
-					n->renameType = OBJECT_CONSTRAINT;
-					n->relationType = OBJECT_TABLE;
+					n->renameType = OBJECT_TABCONSTRAINT;
 					n->relation = $3;
 					n->subname = $6;
 					n->newname = $8;
@@ -17458,8 +17662,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 			| ALTER TABLE IF_P EXISTS relation_expr RENAME CONSTRAINT name TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
-					n->renameType = OBJECT_CONSTRAINT;
-					n->relationType = OBJECT_TABLE;
+					n->renameType = OBJECT_TABCONSTRAINT;
 					n->relation = $5;
 					n->subname = $8;
 					n->newname = $10;
@@ -17805,8 +18008,7 @@ AlterObjectSchemaStmt:
 				{
 					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
 					n->objectType = OBJECT_OPCLASS;
-					n->object = $4;
-					n->addname = $6;
+					n->object = lcons(makeString($6), $4);
 					n->newschema = $9;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -17815,8 +18017,7 @@ AlterObjectSchemaStmt:
 				{
 					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
 					n->objectType = OBJECT_OPFAMILY;
-					n->object = $4;
-					n->addname = $6;
+					n->object = lcons(makeString($6), $4);
 					n->newschema = $9;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -18087,8 +18288,7 @@ AlterOwnerStmt: ALTER AGGREGATE func_name aggr_args OWNER TO RoleId
 				{
 					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
 					n->objectType = OBJECT_OPCLASS;
-					n->object = $4;
-					n->addname = $6;
+					n->object = lcons(makeString($6), $4);
 					n->newowner = $9;
 					$$ = (Node *)n;
 				}
@@ -18096,8 +18296,7 @@ AlterOwnerStmt: ALTER AGGREGATE func_name aggr_args OWNER TO RoleId
 				{
 					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
 					n->objectType = OBJECT_OPFAMILY;
-					n->object = $4;
-					n->addname = $6;
+					n->object = lcons(makeString($6), $4);
 					n->newowner = $9;
 					$$ = (Node *)n;
 				}
@@ -19432,6 +19631,7 @@ AlterTSConfigurationStmt:
 			ALTER TEXT_P SEARCH CONFIGURATION any_name ADD_P MAPPING FOR name_list WITH any_name_list
 				{
 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+					n->kind = ALTER_TSCONFIG_ADD_MAPPING;
 					n->cfgname = $5;
 					n->tokentype = $9;
 					n->cfoptions = NIL;
@@ -19444,6 +19644,7 @@ AlterTSConfigurationStmt:
 			| ALTER TEXT_P SEARCH CONFIGURATION any_name ALTER MAPPING FOR name_list WITH any_name_list
 				{
 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+					n->kind = ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN;
 					n->cfgname = $5;
 					n->tokentype = $9;
 					n->cfoptions = NIL;
@@ -19456,6 +19657,7 @@ AlterTSConfigurationStmt:
 			| ALTER TEXT_P SEARCH CONFIGURATION any_name ALTER MAPPING REPLACE any_name WITH any_name
 				{
 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+					n->kind = ALTER_TSCONFIG_REPLACE_DICT;
 					n->cfgname = $5;
 					n->tokentype = NIL;
 					n->cfoptions = NIL;
@@ -19468,6 +19670,7 @@ AlterTSConfigurationStmt:
 			| ALTER TEXT_P SEARCH CONFIGURATION any_name ALTER MAPPING FOR name_list REPLACE any_name WITH any_name
 				{
 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+					n->kind = ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN;
 					n->cfgname = $5;
 					n->tokentype = $9;
 					n->cfoptions = NIL;
@@ -19480,6 +19683,7 @@ AlterTSConfigurationStmt:
 			| ALTER TEXT_P SEARCH CONFIGURATION any_name DROP MAPPING FOR name_list
 				{
 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+					n->kind = ALTER_TSCONFIG_DROP_MAPPING;
 					n->cfgname = $5;
 					n->tokentype = $9;
 					n->cfoptions = NIL;
@@ -19490,6 +19694,7 @@ AlterTSConfigurationStmt:
 			| ALTER TEXT_P SEARCH CONFIGURATION any_name DROP MAPPING IF_P EXISTS FOR name_list
 				{
 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+					n->kind = ALTER_TSCONFIG_DROP_MAPPING;
 					n->cfgname = $5;
 					n->tokentype = $11;
 					n->cfoptions = NIL;
@@ -19500,6 +19705,7 @@ AlterTSConfigurationStmt:
 			| ALTER TEXT_P SEARCH CONFIGURATION any_name SET cfoptions
 				{
 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+					n->kind = ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN;
 					n->cfgname = $5;
 					n->tokentype = NIL;
 					n->cfoptions = $7;
@@ -19512,6 +19718,7 @@ AlterTSConfigurationStmt:
 			| ALTER TEXT_P SEARCH CONFIGURATION any_name RESET cfoptions
 				{
 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+					n->kind = ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN;
 					n->cfgname = $5;
 					n->tokentype = NIL;
 					n->cfoptions = $7;

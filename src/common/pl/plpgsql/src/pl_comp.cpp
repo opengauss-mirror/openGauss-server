@@ -47,6 +47,8 @@
 #include "utils/syscache.h"
 #include "miscadmin.h"
 #include "tcop/tcopprot.h"
+#include "commands/event_trigger.h"
+
 
 /* functions reference other modules */
 extern THR_LOCAL List* baseSearchPath;
@@ -566,7 +568,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     PLpgSQL_func_hashkey* hashkey, bool for_validator)
 {
     Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
-    bool is_trigger = CALLED_AS_TRIGGER(fcinfo);
+    bool is_dml_trigger = CALLED_AS_TRIGGER(fcinfo);
+    bool is_event_trigger = CALLED_AS_EVENT_TRIGGER(fcinfo);
     Datum proisprivatedatum;
     bool isnull = false;
     HeapTuple type_tup = NULL;
@@ -723,7 +726,6 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     func->fn_oid = fcinfo->flinfo->fn_oid;
     func->fn_xmin = HeapTupleGetRawXmin(proc_tup);
     func->fn_tid = proc_tup->t_self;
-    func->fn_is_trigger = is_trigger;
     func->fn_input_collation = fcinfo->fncollation;
     func->fn_cxt = curr_compile->compile_cxt;
     func->out_param_varno = -1; /* set up for no OUT param */
@@ -736,6 +738,14 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     func->fn_searchpath->addCatalog = true;
     func->fn_searchpath->addTemp = true;
     func->ns_top = curr_compile->ns_top;
+
+    if (is_dml_trigger)
+        func->fn_is_trigger = PLPGSQL_DML_TRIGGER;
+    else if (is_event_trigger)
+        func->fn_is_trigger = PLPGSQL_EVENT_TRIGGER;
+    else
+        func->fn_is_trigger = PLPGSQL_NOT_TRIGGER;
+
     if (proc_struct->pronamespace == PG_CATALOG_NAMESPACE || proc_struct->pronamespace == PG_DB4AI_NAMESPACE) {
         current_searchpath = fetch_search_path(false);
         if (current_searchpath == NIL) {
@@ -823,8 +833,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     Oid base_oid = InvalidOid;
     bool isHaveTableOfIndexArgs = false;
     bool isHaveOutRefCursorArgs = false;
-    switch ((int)is_trigger) {
-        case false:
+    switch (func->fn_is_trigger) {        
+        case PLPGSQL_NOT_TRIGGER:
 
             /*
              * Fetch info about the procedure's parameters. Allocations aren't
@@ -994,7 +1004,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
             if (type_struct->typtype == TYPTYPE_PSEUDO) {
                 if (rettypeid == VOIDOID || rettypeid == RECORDOID) {
                     /* okay */;
-                } else if (rettypeid == TRIGGEROID) {
+                } else if (rettypeid == TRIGGEROID || rettypeid == EVTTRIGGEROID) {
                     ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("trigger functions can only be called as triggers")));
                 } else {
@@ -1024,7 +1034,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
             ReleaseSysCache(type_tup);
             break;
 
-        case true:
+        case PLPGSQL_DML_TRIGGER:    
             /* Trigger procedure's return type is unknown yet */
             func->fn_rettype = InvalidOid;
             func->fn_retbyval = false;
@@ -1090,10 +1100,39 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
             func->tg_argv_varno = var->dno;
 
             break;
+        case PLPGSQL_EVENT_TRIGGER:
+            func->fn_rettype = VOIDOID;
+            func->fn_retbyval = false;
+            func->fn_retistuple = true;
+            func->fn_retset = false;
+ 
+            /* shouldn't be any declared arguments */
+            if (proc_struct->pronargs != 0)
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                         errmsg("event trigger functions cannot have declared arguments")));
+                                     
+            /* Add the variable tg_event */
+            var = plpgsql_build_variable("tg_event", 0,
+                                         plpgsql_build_datatype(TEXTOID,
+                                                                -1,
+                                               func->fn_input_collation),
+                                         true);
+            func->tg_event_varno = var->dno;
+ 
+            /* Add the variable tg_tag */
+            var = plpgsql_build_variable("tg_tag", 0,
+                                         plpgsql_build_datatype(TEXTOID,
+                                                                -1,
+                                               func->fn_input_collation),
+                                         true);
+            func->tg_tag_varno = var->dno;
+ 
+            break;  
 
         default:
             ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmsg("unrecognized function typecode: %d", (int)is_trigger),
+                    errmsg("unrecognized function typecode: %d", (int)func->fn_is_trigger),
                     errhint("This node type is expected to be a function or trigger.")));
             break;
     }
@@ -1179,7 +1218,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     }
     func->action = curr_compile->plpgsql_parse_result;
 
-    if (is_trigger && func->action->isAutonomous) {
+    if (is_dml_trigger && func->action->isAutonomous) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1377,7 +1416,7 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
     curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(curr_compile->compile_cxt);
 
     func->fn_signature = pstrdup(func_name);
-    func->fn_is_trigger = false;
+    func->fn_is_trigger = PLPGSQL_NOT_TRIGGER;
     func->fn_input_collation = InvalidOid;
     func->fn_cxt = curr_compile->compile_cxt;
     func->out_param_varno = -1; /* set up for no OUT param */
@@ -4394,6 +4433,7 @@ static void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo
     hashkey->packageOid = packageOid;
     /* get call context */
     hashkey->isTrigger = CALLED_AS_TRIGGER(fcinfo);
+    hashkey->isEventTrigger = CALLED_AS_EVENT_TRIGGER(fcinfo);
 
     /*
      * if trigger, get relation OID.  In validation mode we do not know what
@@ -4855,7 +4895,8 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
         expr->func->fn_cxt = CurrentMemoryContext;
     } else {
         expr->func = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile;
-        if (expr->func->fn_is_trigger) {
+        /* if trigger or event trigger return NULL */
+        if (expr->func->fn_is_trigger != PLPGSQL_NOT_TRIGGER) {
             return NULL;
         }
     }

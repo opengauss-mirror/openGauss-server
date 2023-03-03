@@ -191,7 +191,7 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
             rvTypeStruct = (Form_pg_type)GETSTRUCT(rvTypeTup);
             /* Disallow pseudotype result, except for void or record */
             if (rvTypeStruct->typtype == TYPTYPE_PSEUDO) {
-                if (procStruct->prorettype == TRIGGEROID) {
+                if (procStruct->prorettype == TRIGGEROID || rettype == EVTTRIGGEROID) {
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("trigger functions can only be called as triggers")));

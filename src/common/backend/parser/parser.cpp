@@ -257,6 +257,25 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             }
             break;
 
+        case EVENT:
+            /*
+             * Event trigger must be reduced to one token
+             */
+            GET_NEXT_TOKEN();
+            switch (next_token) {
+                case TRIGGER:
+                    cur_token = EVENT_TRIGGER;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
         case WITH:
             /*
              * WITH TIME must be reduced to one token

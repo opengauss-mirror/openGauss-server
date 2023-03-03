@@ -253,4 +253,5 @@ extern void InitMemoryLogDirectory();
 extern void InitShmemForDmsCallBack();
 extern void SignalTermAllBackEnd();
 extern void SSRestartFailoverPromote();
+extern void SIGBUS_handler(SIGNAL_ARGS);
 #endif /* _POSTMASTER_H */

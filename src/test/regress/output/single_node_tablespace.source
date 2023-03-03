@@ -177,6 +177,8 @@ ERROR:  tablespace "nosuchspace" does not exist
 -- Fail, not empty
 DROP TABLESPACE testspace;
 ERROR:  tablespace "testspace" is not empty
+CREATE USER tablespace_user password 'gauss@123';
+alter tablespace testspace owner to tablespace_user;
 DROP SCHEMA testschema CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table testschema.foo
@@ -184,3 +186,4 @@ drop cascades to table testschema.asselect
 drop cascades to table testschema.atable
 -- Should succeed
 DROP TABLESPACE testspace;
+drop user tablespace_user;

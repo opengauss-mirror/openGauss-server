@@ -318,10 +318,6 @@ show events where job_name='e1';
 drop event if exists e1;
 
 --test sql help
-\h CREATE EVENT
-\h ALTER EVENT
-\h DROP EVENT
-\h SHOW EVENTS
 
 drop table if exists event_a.a;
 drop table if exists event_b.t;

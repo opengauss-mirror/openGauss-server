@@ -79,6 +79,7 @@
 #include "commands/cluster.h"
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
+#include "commands/event_trigger.h"
 #include "commands/defrem.h"
 #include "commands/dbcommands.h"
 #include "commands/sec_rls_cmds.h"
@@ -286,7 +287,7 @@ typedef struct AlteredTableInfo {
     List* constraints; /* List of NewConstraint */
     List* newvals;     /* List of NewColumnValue */
     bool new_notnull;  /* T if we added new NOT NULL constraints */
-    bool rewrite;      /* T if a rewrite is forced */
+    int rewrite;      /* Reason if a rewrite is forced */
     Oid newTableSpace; /* new tablespace; 0 means no change */
     /* Objects to rebuild after completing ALTER TYPE operations */
     List* changedConstraintOids; /* OIDs of constraints to rebuild */
@@ -499,7 +500,7 @@ static void AlterIndexNamespaces(
     Relation classRel, Relation rel, Oid oldNspOid, Oid newNspOid, ObjectAddresses* objsMoved);
 static void AlterSeqNamespaces(
     Relation classRel, Relation rel, Oid oldNspOid, Oid newNspOid, ObjectAddresses* objsMoved, LOCKMODE lockmode);
-static void ATExecValidateConstraint(Relation rel, char* constrName, bool recurse, bool recursing, LOCKMODE lockmode);
+static ObjectAddress ATExecValidateConstraint(Relation rel, char* constrName, bool recurse, bool recursing, LOCKMODE lockmode);
 static int transformColumnNameList(Oid relId, List* colList, int16* attnums, Oid* atttypids);
 static int transformFkeyGetPrimaryKey(
     Relation pkrel, Oid* indexOid, List** attnamelist, int16* attnums, Oid* atttypids, Oid* opclasses);
@@ -511,14 +512,13 @@ static void validateCheckConstraintForBucket(Relation rel, Partition part, HeapT
 static void validateForeignKeyConstraint(char* conname, Relation rel, Relation pkrel, Oid pkindOid, Oid constraintOid);
 static void createForeignKeyTriggers(
     Relation rel, Oid refRelOid, Constraint* fkconstraint, Oid constraintOid, Oid indexOid);
-static void ATController(Relation rel, List* cmds, bool recurse, LOCKMODE lockmode);
+static void ATController(AlterTableStmt *parsetree, Relation rel, List* cmds, bool recurse, LOCKMODE lockmode);
 static bool ATCheckLedgerTableCmd(Relation rel, AlterTableCmd* cmd);
 static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recurse, bool recursing, LOCKMODE lockmode,
     bool isDeltaTable = false);
 static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode);
 static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode);
-static void ATRewriteTables(List** wqueue, LOCKMODE lockmode);
-
+static void ATRewriteTables(AlterTableStmt *parsetree, List** wqueue, LOCKMODE lockmode);
 static void ATRewriteTable(AlteredTableInfo* tab, Relation oldrel, Relation newrel);
 static void ATCStoreRewriteTable(AlteredTableInfo* tab, Relation heapRel, LOCKMODE lockMode, Oid targetTblspc);
 static void ATCStoreRewritePartition(AlteredTableInfo* tab, LOCKMODE lockMode);
@@ -592,35 +592,35 @@ static void ATTypedTableRecursion(List** wqueue, Relation rel, AlterTableCmd* cm
 static List* find_typed_table_dependencies(Oid typeOid, const char* typname, DropBehavior behavior);
 static void ATPrepAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, bool recurse,
     bool recursing, AlterTableCmd* cmd, LOCKMODE lockmode);
-static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, ColumnDef* colDef, bool isOid,
+static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, ColumnDef* colDef, bool isOid,
     bool recurse, bool recursing, bool is_first, char *after_name, LOCKMODE lockmode);
 static void check_for_column_name_collision(Relation rel, const char* colname);
 static void add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid);
 static void add_column_collation_dependency(Oid relid, int32 attnum, Oid collid);
 static void ATPrepAddOids(List** wqueue, Relation rel, bool recurse, AlterTableCmd* cmd, LOCKMODE lockmode);
-static void ATExecDropNotNull(Relation rel, const char* colName, LOCKMODE lockmode);
-static void ATExecSetNotNull(AlteredTableInfo* tab, Relation rel, const char* colName, LOCKMODE lockmode);
-static void ATExecColumnDefault(Relation rel, const char* colName, Node* newDefault, LOCKMODE lockmode);
+static ObjectAddress ATExecDropNotNull(Relation rel, const char* colName, LOCKMODE lockmode);
+static ObjectAddress ATExecSetNotNull(AlteredTableInfo* tab, Relation rel, const char* colName, LOCKMODE lockmode);
+static ObjectAddress ATExecColumnDefault(Relation rel, const char* colName, Node* newDefault, LOCKMODE lockmode);
 static void ATPrepSetStatistics(Relation rel);
-static void ATExecSetStatistics(
+static ObjectAddress ATExecSetStatistics(
     Relation rel, const char* colName, Node* newValue, AlterTableStatProperty additional_property, LOCKMODE lockmode);
 static void ATExecAddStatistics(Relation rel, Node* def, LOCKMODE lockmode);
 static void ATExecDeleteStatistics(Relation rel, Node* def, LOCKMODE lockmode);
-static void ATExecSetOptions(Relation rel, const char* colName, Node* options, bool isReset, LOCKMODE lockmode);
-static void ATExecSetStorage(Relation rel, const char* colName, Node* newValue, LOCKMODE lockmode);
+static ObjectAddress ATExecSetOptions(Relation rel, const char* colName, Node* options, bool isReset, LOCKMODE lockmode);
+static ObjectAddress ATExecSetStorage(Relation rel, const char* colName, Node* newValue, LOCKMODE lockmode);
 static void ATPrepCheckDefault(Node* node);
 static bool CheckLastColumn(Relation rel, AttrNumber attrnum);
 static void ATPrepDropColumn(
     List** wqueue, Relation rel, bool recurse, bool recursing, AlterTableCmd* cmd, LOCKMODE lockmode);
-static void ATExecDropColumn(List** wqueue, Relation rel, const char* colName, DropBehavior behavior, bool recurse,
+static ObjectAddress ATExecDropColumn(List** wqueue, Relation rel, const char* colName, DropBehavior behavior, bool recurse,
     bool recursing, bool missing_ok, LOCKMODE lockmode);
-static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt, bool is_rebuild, LOCKMODE lockmode);
-static void ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, Constraint* newConstraint,
+static ObjectAddress ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt, bool is_rebuild, LOCKMODE lockmode);
+static ObjectAddress ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, Constraint* newConstraint,
     bool recurse, bool is_readd, LOCKMODE lockmode);
-static void ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt, LOCKMODE lockmode);
-static void ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, Constraint* constr, bool recurse,
+static ObjectAddress ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt, LOCKMODE lockmode);
+static ObjectAddress ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, Constraint* constr, bool recurse,
     bool recursing, bool is_readd, LOCKMODE lockmode);
-static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Constraint* fkconstraint, LOCKMODE lockmode);
+static ObjectAddress ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Constraint* fkconstraint, LOCKMODE lockmode);
 static void ATExecDropConstraint(Relation rel, const char* constrName, DropBehavior behavior, bool recurse,
     bool recursing, bool missing_ok, LOCKMODE lockmode);
 static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation rel, bool recurse, bool recursing,
@@ -628,9 +628,9 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
 static void ATPrepAlterModifyColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, bool recurse,
     bool recursing, AlterTableCmd* cmd, LOCKMODE lockmode);
 static bool ATColumnChangeRequiresRewrite(Node* expr, AttrNumber varattno);
-static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode);
+static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode);
 static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd);
-static void ATExecAlterColumnGenericOptions(Relation rel, const char* colName, List* options, LOCKMODE lockmode);
+static ObjectAddress ATExecAlterColumnGenericOptions(Relation rel, const char* colName, List* options, LOCKMODE lockmode);
 static void ATPostAlterTypeCleanup(List** wqueue, AlteredTableInfo* tab, LOCKMODE lockmode);
 static void ATPostAlterTypeParse(
     Oid oldId, Oid oldRelId, Oid refRelId, const char* cmd, List** wqueue, LOCKMODE lockmode, bool rewrite);
@@ -641,7 +641,7 @@ void tryReusePartedIndex(Oid oldId, IndexStmt* stmt, Relation rel);
 static void TryReuseForeignKey(Oid oldId, Constraint* con);
 static void change_owner_fix_column_acls(Oid relationOid, Oid oldOwnerId, Oid newOwnerId);
 static void change_owner_recurse_to_sequences(Oid relationOid, Oid newOwnerId, LOCKMODE lockmode);
-static void ATExecClusterOn(Relation rel, const char* indexName, LOCKMODE lockmode);
+static ObjectAddress ATExecClusterOn(Relation rel, const char* indexName, LOCKMODE lockmode);
 static void ATExecDropCluster(Relation rel, LOCKMODE lockmode);
 static void ATPrepSetTableSpace(AlteredTableInfo* tab, Relation rel, const char* tablespacename, LOCKMODE lockmode);
 static void ATExecSetTableSpace(Oid tableOid, Oid newTableSpace, LOCKMODE lockmode);
@@ -655,10 +655,10 @@ static void ATExecEnableDisableTrigger(
     Relation rel, const char* trigname, char fires_when, bool skip_system, LOCKMODE lockmode);
 static void ATExecEnableDisableRule(Relation rel, const char* rulename, char fires_when, LOCKMODE lockmode);
 static void ATPrepAddInherit(Relation child_rel);
-static void ATExecAddInherit(Relation child_rel, RangeVar* parent, LOCKMODE lockmode);
-static void ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode);
+static ObjectAddress ATExecAddInherit(Relation child_rel, RangeVar* parent, LOCKMODE lockmode);
+static ObjectAddress ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode);
 static void drop_parent_dependency(Oid relid, Oid refclassid, Oid refobjid);
-static void ATExecAddOf(Relation rel, const TypeName* ofTypename, LOCKMODE lockmode);
+static ObjectAddress ATExecAddOf(Relation rel, const TypeName* ofTypename, LOCKMODE lockmode);
 static void ATExecDropOf(Relation rel, LOCKMODE lockmode);
 static void ATExecReplicaIdentity(Relation rel, ReplicaIdentityStmt* stmt, LOCKMODE lockmode);
 static void ATExecGenericOptions(Relation rel, List* options);
@@ -2054,16 +2054,17 @@ void UpdatePartKeyExpr(Relation rel, PartitionState *partTableState, Oid partOid
  * The other arguments are used to extend the behavior for other cases:
  * relkind: relkind to assign to the new relation
  * ownerId: if not InvalidOid, use this as the new relation's owner.
+ * typaddress: if not null, it's set to the pg_type entry's address.
  *
  * Note that permissions checks are done against current user regardless of
  * ownerId.  A nonzero ownerId is used when someone is creating a relation
  * "on behalf of" someone else, so we still want to see that the current user
  * has permissions to do it.
  *
- * If successful, returns the OID of the new relation.
+ * If successful, returns the address of the new relation.
  * ----------------------------------------------------------------
  */
-Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
+ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, ObjectAddress* typaddress, bool isCTAS)
 {
     char relname[NAMEDATALEN];
     Oid namespaceId;
@@ -2092,6 +2093,7 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
     bool isInLedgerNsp = false;
     HashBucketInfo* bucketinfo = NULL;
     DistributionType distType;
+    ObjectAddress address;
     bool relhasuids = false;
     Oid nspdefcoll = InvalidOid;
     Oid rel_coll_oid = InvalidOid;
@@ -2784,6 +2786,7 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
                 cooked->contype = CONSTR_GENERATED;
             else
                 cooked->contype = CONSTR_DEFAULT;
+            cooked->conoid = InvalidOid;    /* until created */
             cooked->name = NULL;
             cooked->attnum = attnum;
             cooked->expr = colDef->cooked_default;
@@ -2917,7 +2920,8 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
         true,
         ceLst,
         storage_type,
-        AccessShareLock);
+        AccessShareLock,
+        typaddress);
     if (bucketinfo != NULL) {
         pfree_ext(bucketinfo->bucketcol);
         pfree_ext(bucketinfo->bucketlist);
@@ -3053,6 +3057,7 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
     if (stmt->clusterKeys)
         AddRelClusterConstraints(rel, stmt->clusterKeys);
 
+    ObjectAddressSet(address, RelationRelationId, relationId);
     /*
      * Clean up.  We keep lock on new relation (although it shouldn't be
      * visible to anyone else anyway, until commit).
@@ -3061,7 +3066,7 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
     list_free_ext(rawDefaults);
     list_free_ext(ceLst);
 
-    return relationId;
+    return address;
 }
 
 /*
@@ -5318,6 +5323,7 @@ static List* MergeAttributes(
 
                     cooked = (CookedConstraint*)palloc(sizeof(CookedConstraint));
                     cooked->contype = CONSTR_CHECK;
+                    cooked->conoid = InvalidOid;    /* until created */
                     cooked->name = pstrdup(name);
                     cooked->attnum = 0; /* not used for constraints */
                     cooked->expr = expr;
@@ -5737,14 +5743,14 @@ static void renameatt_check(Oid myrelid, Form_pg_class classform, bool recursing
 /*
  *		renameatt_internal		- workhorse for renameatt
  */
-static void renameatt_internal(Oid myrelid, const char* oldattname, const char* newattname, bool recurse,
+static AttrNumber  renameatt_internal(Oid myrelid, const char* oldattname, const char* newattname, bool recurse,
     bool recursing, int expected_parents, DropBehavior behavior)
 {
     Relation targetrelation;
     Relation attrelation;
     HeapTuple atttup;
     Form_pg_attribute attform;
-    int attnum;
+    AttrNumber attnum;
 
     Relation    ce_relation;
     HeapTuple   ce_tuple;
@@ -5915,6 +5921,7 @@ static void renameatt_internal(Oid myrelid, const char* oldattname, const char* 
 
         heap_close(ce_relation, RowExclusiveLock);
     }
+    return attnum;
 }
 
 /*
@@ -5937,9 +5944,11 @@ static void RangeVarCallbackForRenameAttribute(
 /*
  *		renameatt		- changes the name of a attribute in a relation
  */
-void renameatt(RenameStmt* stmt)
+ObjectAddress renameatt(RenameStmt* stmt)
 {
     Oid relid;
+    AttrNumber  attnum;
+    ObjectAddress address;
 
     /* lock level taken here should match renameatt_internal */
     relid = RangeVarGetRelidExtended(stmt->relation,
@@ -5953,7 +5962,7 @@ void renameatt(RenameStmt* stmt)
 
     if (!OidIsValid(relid)) {
         ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->relation->relname)));
-        return;
+        return InvalidObjectAddress;
     }
 
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
@@ -6013,25 +6022,31 @@ void renameatt(RenameStmt* stmt)
 
     relation_close(rel, AccessShareLock);
 
-    renameatt_internal(relid,
+    attnum = renameatt_internal(relid,
         stmt->subname,                              /* old att name */
         stmt->newname,                              /* new att name */
         interpretInhOption(stmt->relation->inhOpt), /* recursive? */
         false,                                      /* recursing? */
         0,                                          /* expected inhcount */
         stmt->behavior);
+
+    /* This is an ALTER TABLE command so it's about the relid */
+    ObjectAddressSubSet(address, RelationRelationId, relid, attnum);
+    return address;
+
 }
 
 /*
  * same logic as renameatt_internal
  */
-static void rename_constraint_internal(Oid myrelid, Oid mytypid, const char* oldconname, const char* newconname,
+static ObjectAddress  rename_constraint_internal(Oid myrelid, Oid mytypid, const char* oldconname, const char* newconname,
     bool recurse, bool recursing, int expected_parents)
 {
     Relation targetrelation = NULL;
     Oid constraintOid;
     HeapTuple tuple;
     Form_pg_constraint con;
+    ObjectAddress address;
 
     AssertArg(!myrelid || !mytypid);
 
@@ -6100,6 +6115,7 @@ static void rename_constraint_internal(Oid myrelid, Oid mytypid, const char* old
     else
         RenameConstraintById(constraintOid, newconname);
 
+    ObjectAddressSet(address, ConstraintRelationId, constraintOid);
     ReleaseSysCache(tuple);
 
     if (targetrelation) {
@@ -6113,9 +6129,10 @@ static void rename_constraint_internal(Oid myrelid, Oid mytypid, const char* old
 
         relation_close(targetrelation, NoLock); /* close rel but keep lock */
     }
+    return address;
 }
 
-void RenameConstraint(RenameStmt* stmt)
+ObjectAddress RenameConstraint(RenameStmt* stmt)
 {
     Oid relid = InvalidOid;
     Oid typid = InvalidOid;
@@ -6146,11 +6163,11 @@ void RenameConstraint(RenameStmt* stmt)
 
         if (!OidIsValid(relid)) {
             ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->relation->relname)));
-            return;
+            return InvalidObjectAddress;
         }
     }
 
-    rename_constraint_internal(relid,
+    return rename_constraint_internal(relid,
         typid,
         stmt->subname,
         stmt->newname,
@@ -6189,7 +6206,7 @@ static int Compare_RenameTableNameData_func(const void* a, const void* b)
     }
 }
 
-static void RenameTableFeature(RenameStmt* stmt)
+static ObjectAddress RenameTableFeature(RenameStmt* stmt)
 {
     char *orgiSchema = NULL, *orgitable = NULL, *modfySchema = NULL, *modfytable = NULL;
     Oid orgiNameSpace = InvalidOid, modfyNameSpace = InvalidOid;
@@ -6201,7 +6218,8 @@ static void RenameTableFeature(RenameStmt* stmt)
     HeapTuple tup;
     HeapTuple newtup;
     Form_pg_class relform;
-
+    ObjectAddress address;
+    
     Datum values[Natts_pg_class] = { 0 };
     bool nulls[Natts_pg_class] = { false };
     bool replaces[Natts_pg_class] = { false };
@@ -6476,17 +6494,20 @@ static void RenameTableFeature(RenameStmt* stmt)
         pfree(storageTable[num].relname);
     }
     list_free_ext(search_path);
+    ObjectAddressSet(address, RelationRelationId, relid);
+    return address;
 }
 
 /*
  * Execute ALTER TABLE/INDEX/SEQUENCE/VIEW/FOREIGN TABLE RENAME
  */
-void RenameRelation(RenameStmt* stmt)
+ObjectAddress RenameRelation(RenameStmt* stmt)
 {
     if (stmt->renameTableflag) {
-        RenameTableFeature(stmt);
+        return RenameTableFeature(stmt);
     } else {
         Oid relid;
+        ObjectAddress address;
         HeapTuple tuple;
         Datum name;
         bool isnull = false;
@@ -6510,7 +6531,7 @@ void RenameRelation(RenameStmt* stmt)
 
         if (!OidIsValid(relid)) {
             ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->relation->relname)));
-            return;
+            return InvalidObjectAddress;
         }
 
         tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
@@ -6561,7 +6582,10 @@ void RenameRelation(RenameStmt* stmt)
             UpdatePgObjectChangecsn(relOid, userRelaiton->rd_rel->relkind);
             RelationClose(userRelaiton);
         }
-    }
+        ObjectAddressSet(address, RelationRelationId, relid);
+        
+    return address;
+}
 }
 
 /*
@@ -6792,13 +6816,14 @@ void renamePartitionedTable(Oid partitionedTableOid, const char* partitionedTabl
  * Description	:
  * Notes		:
  */
-void renamePartition(RenameStmt* stmt)
+ObjectAddress renamePartition(RenameStmt* stmt)
 {
     Oid partitionedTableOid = InvalidOid;
     Oid partitionOid = InvalidOid;
     ParseState* pstate = NULL;
     RangePartitionDefState* rangePartDef = NULL;
     Relation rel = NULL;
+    ObjectAddress address;
 
     /* shouldn't happen */
     if (!PointerIsValid(stmt) || !PointerIsValid(stmt->newname)) {
@@ -6825,7 +6850,7 @@ void renamePartition(RenameStmt* stmt)
     if (!OidIsValid(partitionedTableOid)) {
         ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->relation->relname)));
 
-        return;
+        return InvalidObjectAddress;
     }
 
     TrForbidAccessRbObject(RelationRelationId, partitionedTableOid, stmt->relation->relname);
@@ -6921,6 +6946,8 @@ void renamePartition(RenameStmt* stmt)
 
     /* hold lock until committed */
     relation_close(rel, NoLock);
+    ObjectAddressSet(address, PartitionRelationId, partitionOid);
+    return address;
 }
 
 /*
@@ -6930,10 +6957,11 @@ void renamePartition(RenameStmt* stmt)
  * Description	:
  * Notes		:
  */
-void renamePartitionIndex(RenameStmt* stmt)
+ObjectAddress renamePartitionIndex(RenameStmt* stmt)
 {
     Oid partitionedTableIndexOid = InvalidOid;
     Oid partitionIndexOid = InvalidOid;
+    ObjectAddress address;
 
     /* shouldn't happen */
     if (!PointerIsValid(stmt) || !PointerIsValid(stmt->subname) || !PointerIsValid(stmt->newname)) {
@@ -6961,7 +6989,7 @@ void renamePartitionIndex(RenameStmt* stmt)
     if (!OidIsValid(partitionedTableIndexOid)) {
         ereport(NOTICE, (errmsg("index \"%s\" does not exist, skipping", stmt->relation->relname)));
 
-        return;
+        return InvalidObjectAddress;
     }
 
     TrForbidAccessRbObject(RelationRelationId, partitionedTableIndexOid, stmt->relation->relname);
@@ -6999,6 +7027,8 @@ void renamePartitionIndex(RenameStmt* stmt)
     Relation partRel = RelationIdGetRelation(parRelOid);
     UpdatePgObjectChangecsn(parRelOid, partRel->rd_rel->relkind);
     RelationClose(partRel);
+    ObjectAddressSet(address, PartitionRelationId, partitionIndexOid);
+    return address;
 }
 
 /*
@@ -7687,7 +7717,7 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
     // Next version remove hack patch for 'ALTER FOREIGN TABLE ... ADD NODE'
     if (stmt->cmds != NIL) {
         /* process 'ALTER TABLE' cmd */
-        ATController(rel, stmt->cmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
+        ATController(stmt, rel, stmt->cmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
     } else {
         /* if do not call ATController, close the relation in here, but keep lock until commit */
         relation_close(rel, NoLock);
@@ -7703,7 +7733,7 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
             /* open error table releation, closed in ATController */
             Relation errtablerel = relation_open(errtableid, lockmode);
 
-            ATController(errtablerel, addNodeCmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
+            ATController(stmt, errtablerel, addNodeCmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
         }
         list_free_ext(addNodeCmds);
     }
@@ -7727,7 +7757,8 @@ void AlterTableInternal(Oid relid, List* cmds, bool recurse)
 
     rel = relation_open(relid, lockmode);
 
-    ATController(rel, cmds, recurse, lockmode);
+    EventTriggerAlterTableRelid(relid);
+    ATController(NULL, rel, cmds, recurse, lockmode);
 }
 
 static LOCKMODE set_lockmode(LOCKMODE mode, LOCKMODE cmd_mode)
@@ -7831,7 +7862,7 @@ LOCKMODE AlterTableGetLockLevel(List* cmds)
     return lockmode;
 }
 
-static void ATController(Relation rel, List* cmds, bool recurse, LOCKMODE lockmode)
+static void ATController(AlterTableStmt *parsetree, Relation rel, List* cmds, bool recurse, LOCKMODE lockmode)
 {
     List* wqueue = NIL;
     ListCell* lcmd = NULL;
@@ -7918,7 +7949,7 @@ static void ATController(Relation rel, List* cmds, bool recurse, LOCKMODE lockmo
 #endif
 
     /* Phase 3: scan/rewrite tables as needed */
-    ATRewriteTables(&wqueue, lockmode);
+    ATRewriteTables(parsetree, &wqueue, lockmode);
 }
 
 /*
@@ -8703,6 +8734,7 @@ static void ATCreateColumComments(Oid relOid, ColumnDef* columnDef)
  */
 static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode)
 {
+    ObjectAddress address = InvalidObjectAddress;
     elog(ES_LOGLEVEL, "[ATExecCmd] cmd subtype: %d", cmd->subtype);
 
     if (PARTITION_DDL_CMD(cmd->subtype) && RELATION_IS_PARTITIONED(rel)) {
@@ -8716,11 +8748,11 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         case AT_AddColumn:       /* ADD COLUMN */
         case AT_AddColumnToView: /* add column via CREATE OR REPLACE
                                   * VIEW */
-            ATExecAddColumn(wqueue, tab, rel, (ColumnDef*)cmd->def, false, false, false,
+            address = ATExecAddColumn(wqueue, tab, rel, (ColumnDef*)cmd->def, false, false, false,
                 cmd->is_first, cmd->after_name, lockmode);
             break;
         case AT_AddColumnRecurse:
-            ATExecAddColumn(wqueue, tab, rel, (ColumnDef*)cmd->def, false, true, false,
+            address = ATExecAddColumn(wqueue, tab, rel, (ColumnDef*)cmd->def, false, true, false,
             cmd->is_first, cmd->after_name, lockmode);
             break;
         case AT_AddPartition: /* add partition */
@@ -8730,16 +8762,16 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             ATExecAddSubPartition(rel, (AddSubPartitionState*)cmd->def);
             break;
         case AT_ColumnDefault: /* ALTER COLUMN DEFAULT */
-            ATExecColumnDefault(rel, cmd->name, cmd->def, lockmode);
+            address = ATExecColumnDefault(rel, cmd->name, cmd->def, lockmode);
             break;
         case AT_DropNotNull: /* ALTER COLUMN DROP NOT NULL */
-            ATExecDropNotNull(rel, cmd->name, lockmode);
+            address = ATExecDropNotNull(rel, cmd->name, lockmode);
             break;
         case AT_SetNotNull: /* ALTER COLUMN SET NOT NULL */
-            ATExecSetNotNull(tab, rel, cmd->name, lockmode);
+            address = ATExecSetNotNull(tab, rel, cmd->name, lockmode);
             break;
         case AT_SetStatistics: /* ALTER COLUMN SET STATISTICS */
-            ATExecSetStatistics(rel, cmd->name, cmd->def, cmd->additional_property, lockmode);
+            address = ATExecSetStatistics(rel, cmd->name, cmd->def, cmd->additional_property, lockmode);
             break;
         case AT_AddStatistics: /* ADD STATISTICS */
             ATExecAddStatistics(rel, cmd->def, lockmode);
@@ -8748,19 +8780,19 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             ATExecDeleteStatistics(rel, cmd->def, lockmode);
             break;
         case AT_SetOptions: /* ALTER COLUMN SET ( options ) */
-            ATExecSetOptions(rel, cmd->name, cmd->def, false, lockmode);
+            address = ATExecSetOptions(rel, cmd->name, cmd->def, false, lockmode);
             break;
         case AT_ResetOptions: /* ALTER COLUMN RESET ( options ) */
-            ATExecSetOptions(rel, cmd->name, cmd->def, true, lockmode);
+            address = ATExecSetOptions(rel, cmd->name, cmd->def, true, lockmode);
             break;
         case AT_SetStorage: /* ALTER COLUMN SET STORAGE */
-            ATExecSetStorage(rel, cmd->name, cmd->def, lockmode);
+            address = ATExecSetStorage(rel, cmd->name, cmd->def, lockmode);
             break;
         case AT_DropColumn: /* DROP COLUMN */
-            ATExecDropColumn(wqueue, rel, cmd->name, cmd->behavior, false, false, cmd->missing_ok, lockmode);
+            address = ATExecDropColumn(wqueue, rel, cmd->name, cmd->behavior, false, false, cmd->missing_ok, lockmode);
             break;
         case AT_DropColumnRecurse: /* DROP COLUMN with recursion */
-            ATExecDropColumn(wqueue, rel, cmd->name, cmd->behavior, true, false, cmd->missing_ok, lockmode);
+            address = ATExecDropColumn(wqueue, rel, cmd->name, cmd->behavior, true, false, cmd->missing_ok, lockmode);
             break;
         case AT_DropPartition: /* drop partition */
             ATExecDropPartition(rel, cmd);
@@ -8784,29 +8816,29 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             ATExecVisibleIndex(rel, cmd->name, true);
             break;
         case AT_AddIndex: /* ADD INDEX */
-            ATExecAddIndex(tab, rel, (IndexStmt*)cmd->def, false, lockmode);
+            address = ATExecAddIndex(tab, rel, (IndexStmt*)cmd->def, false, lockmode);
             break;
         case AT_ReAddIndex: /* ADD INDEX */
-            ATExecAddIndex(tab, rel, (IndexStmt*)cmd->def, true, lockmode);
+            address = ATExecAddIndex(tab, rel, (IndexStmt*)cmd->def, true, lockmode);
             break;
         case AT_AddConstraint: /* ADD CONSTRAINT */
-            ATExecAddConstraint(wqueue, tab, rel, (Constraint*)cmd->def, false, false, lockmode);
+            address = ATExecAddConstraint(wqueue, tab, rel, (Constraint*)cmd->def, false, false, lockmode);
             break;
         case AT_AddConstraintRecurse: /* ADD CONSTRAINT with recursion */
-            ATExecAddConstraint(wqueue, tab, rel, (Constraint*)cmd->def, true, false, lockmode);
+            address = ATExecAddConstraint(wqueue, tab, rel, (Constraint*)cmd->def, true, false, lockmode);
             break;
         case AT_ReAddConstraint: /* Re-add pre-existing check constraint */
-            ATExecAddConstraint(wqueue, tab, rel, (Constraint*)cmd->def, false, true, lockmode);
+            address = ATExecAddConstraint(wqueue, tab, rel, (Constraint*)cmd->def, false, true, lockmode);
             break;
         case AT_AddIndexConstraint: /* ADD CONSTRAINT USING INDEX */
-            ATExecAddIndexConstraint(tab, rel, (IndexStmt*)cmd->def, lockmode);
+            address = ATExecAddIndexConstraint(tab, rel, (IndexStmt*)cmd->def, lockmode);
             break;
         case AT_ValidateConstraint: /* VALIDATE CONSTRAINT */
-            ATExecValidateConstraint(rel, cmd->name, false, false, lockmode);
+            address = ATExecValidateConstraint(rel, cmd->name, false, false, lockmode);
             break;
         case AT_ValidateConstraintRecurse: /* VALIDATE CONSTRAINT with
                                             * recursion */
-            ATExecValidateConstraint(rel, cmd->name, true, false, lockmode);
+            address = ATExecValidateConstraint(rel, cmd->name, true, false, lockmode);
             break;
         case AT_DropConstraint: /* DROP CONSTRAINT */
             ATExecDropConstraint(rel, cmd->name, cmd->behavior, false, false, cmd->missing_ok, lockmode);
@@ -8815,16 +8847,16 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             ATExecDropConstraint(rel, cmd->name, cmd->behavior, true, false, cmd->missing_ok, lockmode);
             break;
         case AT_AlterColumnType: /* ALTER COLUMN TYPE */
-            ATExecAlterColumnType(tab, rel, cmd, lockmode);
+            address = ATExecAlterColumnType(tab, rel, cmd, lockmode);
             break;
         case AT_AlterColumnGenericOptions: /* ALTER COLUMN OPTIONS */
-            ATExecAlterColumnGenericOptions(rel, cmd->name, (List*)cmd->def, lockmode);
+            address = ATExecAlterColumnGenericOptions(rel, cmd->name, (List*)cmd->def, lockmode);
             break;
         case AT_ChangeOwner: /* ALTER OWNER */
             ATExecChangeOwner(RelationGetRelid(rel), get_role_oid(cmd->name, false), false, lockmode);
             break;
         case AT_ClusterOn: /* CLUSTER ON */
-            ATExecClusterOn(rel, cmd->name, lockmode);
+            address = ATExecClusterOn(rel, cmd->name, lockmode);
             break;
         case AT_DropCluster: /* SET WITHOUT CLUSTER */
             ATExecDropCluster(rel, lockmode);
@@ -8832,12 +8864,12 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         case AT_AddOids: /* SET WITH OIDS */
             /* Use the ADD COLUMN code, unless prep decided to do nothing */
             if (cmd->def != NULL)
-                ATExecAddColumn(wqueue, tab, rel, (ColumnDef*)cmd->def, true, false, false, false, NULL, lockmode);
+                address = ATExecAddColumn(wqueue, tab, rel, (ColumnDef*)cmd->def, true, false, false, false, NULL, lockmode);
             break;
         case AT_AddOidsRecurse: /* SET WITH OIDS */
             /* Use the ADD COLUMN code, unless prep decided to do nothing */
             if (cmd->def != NULL)
-                ATExecAddColumn(wqueue, tab, rel, (ColumnDef*)cmd->def, true, true, false, false, NULL, lockmode);
+                address = ATExecAddColumn(wqueue, tab, rel, (ColumnDef*)cmd->def, true, true, false, false, NULL, lockmode);
             break;
         case AT_DropOids: /* SET WITHOUT OIDS */
 
@@ -8913,13 +8945,13 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             ATExecEncryptionKeyRotation(rel, lockmode);
             break;
         case AT_AddInherit:
-            ATExecAddInherit(rel, (RangeVar*)cmd->def, lockmode);
+            address = ATExecAddInherit(rel, (RangeVar*)cmd->def, lockmode);
             break;
         case AT_DropInherit:
-            ATExecDropInherit(rel, (RangeVar*)cmd->def, lockmode);
+            address = ATExecDropInherit(rel, (RangeVar*)cmd->def, lockmode);
             break;
         case AT_AddOf:
-            ATExecAddOf(rel, (TypeName*)cmd->def, lockmode);
+            address = ATExecAddOf(rel, (TypeName*)cmd->def, lockmode);
             break;
         case AT_DropOf:
             ATExecDropOf(rel, lockmode);
@@ -9014,6 +9046,12 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         UpdatePgObjectMtime(tab->relid, objectType);
     }
 
+    /*
+     * Report the subcommand to interested event triggers.
+     */
+    EventTriggerCollectAlterTableSubcmd((Node *) cmd, address);
+ 
+
     /* take ExclusiveLock to avoid PARTITION DDL COMMIT until we finish the InitPlan. Oid info will be masked here, and
      * be locked in CommitTransaction. Distribute mode doesn't support partition DDL/DML parallel work, no need this
      * action */
@@ -9071,7 +9109,7 @@ static void CheckTopRelationIsInMyTempSession(Oid topRelId)
 /*
  * ATRewriteTables: ALTER TABLE phase 3
  */
-static void ATRewriteTables(List** wqueue, LOCKMODE lockmode)
+static void ATRewriteTables(AlterTableStmt *parsetree, List** wqueue, LOCKMODE lockmode)
 {
     ListCell* ltab = NULL;
 
@@ -9083,7 +9121,7 @@ static void ATRewriteTables(List** wqueue, LOCKMODE lockmode)
 
 #ifdef PGXC
         /* Forbid table rewrite operations with online data redistribution */
-        if (tab->rewrite && list_length(tab->subcmds[AT_PASS_DISTRIB]) > 0 && IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        if (tab->rewrite > 0 && list_length(tab->subcmds[AT_PASS_DISTRIB]) > 0 && IS_PGXC_COORDINATOR && !IsConnFromCoord())
             ereport(ERROR,
                 (errcode(ERRCODE_STATEMENT_TOO_COMPLEX), errmsg("Incompatible operation with data redistribution")));
 #endif
@@ -9119,7 +9157,7 @@ static void ATRewriteTables(List** wqueue, LOCKMODE lockmode)
          * constraints, so it's not necessary/appropriate to enforce them just
          * during ALTER.)
          */
-        if (tab->newvals != NIL || tab->rewrite) {
+        if (tab->newvals != NIL || tab->rewrite > 0) {
             Relation rel;
 
             rel = heap_open(tab->relid, NoLock);
@@ -9131,13 +9169,27 @@ static void ATRewriteTables(List** wqueue, LOCKMODE lockmode)
          * We only need to rewrite the table if at least one column needs to
          * be recomputed, or we are adding/removing the OID column.
          */
-        if (tab->rewrite) {
+        if (tab->rewrite > 0) {
             /* Build a temporary relation and copy data */
             Relation OldHeap;
             Oid NewTableSpace;
 
             OldHeap = heap_open(tab->relid, NoLock);
-
+            /*
+             * Fire off an Event Trigger now, before actually rewriting the
+             * table.
+             *
+             * We don't support Event Trigger for nested commands anywhere,                                                                                                                   
+             * here included, and parsetree is given NULL when coming from
+             * AlterTableInternal.
+             *
+             * And fire it only once.
+             */
+            if (parsetree)
+                EventTriggerTableRewrite((Node *)parsetree,
+                                         tab->relid,
+                                         tab->rewrite);
+            
             /*
              * We don't support rewriting of system catalogs; there are too
              * many corner cases and too little benefit.  In particular this
@@ -9278,7 +9330,7 @@ static T EvaluateGenExpr(AlteredTableInfo* tab, T tuple,
     ListCell* l = NULL;
     T tup = tuple;
 
-    if (tab->rewrite) {
+    if (tab->rewrite > 0) {
         foreach(l, tab->newvals)
         {
             NewColumnValue *ex = (NewColumnValue*)lfirst(l);
@@ -9555,7 +9607,7 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
             {
                 utuple = (UHeapTuple)oldslot->tts_tuple;
 
-                if (tab->rewrite)
+                if (tab->rewrite > 0)
                 {
                     int newvals_num = 0;
                     /* Extract data from old tuple */
@@ -9701,7 +9753,7 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
         } else {
             ((HeapScanDesc) scan)->rs_tupdesc = oldTupDesc;
             while ((tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
-                if (tab->rewrite) {
+                if (tab->rewrite > 0) {
                     Oid tupOid = InvalidOid;
                     int newvals_num = 0;
 
@@ -10420,7 +10472,7 @@ static void ATPrepAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
         cmd->subtype = AT_AddColumnRecurse;
 
     if ((cmd->is_first || cmd->after_name != NULL) && (tab != NULL)) {
-        tab->rewrite = true;
+        tab->rewrite |= AT_REWRITE_ALTER_PERSISTENCE;
     }
 }
 
@@ -10461,7 +10513,7 @@ static FORCE_INLINE void ATExecAppendDefValExpr(_in_ AttrNumber attnum, _in_ Exp
     newval->is_generated = (colDef->generatedCol != '\0');
     newval->col_name = pstrdup(colDef->colname);
     newval->is_autoinc = is_autoinc;
-    tab->rewrite = true;
+    tab->rewrite |= AT_REWRITE_ALTER_PERSISTENCE;
 }
 
 static int GetAfterColumnAttnum(Oid attrelid, const char *after_name)
@@ -11704,7 +11756,7 @@ static void ATExecMOTAlterTable(AlterForeingTableCmd* cmd)
 }
 #endif
 
-static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, ColumnDef* colDef, bool isOid,
+static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, ColumnDef* colDef, bool isOid,
     bool recurse, bool recursing, bool is_first, char *after_name, LOCKMODE lockmode)
 {
     Oid myrelid = RelationGetRelid(rel);
@@ -11726,6 +11778,7 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
     ListCell* child = NULL;
     AclResult aclresult;
     bool isDfsTable = RelationIsPAXFormat(rel);
+    ObjectAddress address;
     bool is_addloc = is_first || after_name != NULL;
     List *query_str = NIL;
 
@@ -11824,7 +11877,7 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
                     RelationGetRelationName(rel))));
 
             heap_close(attrdesc, RowExclusiveLock);
-            return;
+            return InvalidObjectAddress;
         }
     }
 
@@ -11930,7 +11983,7 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
         UpdatePgTriggerFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgRlspolicyFirstAfter(rel, newattnum, currattnum, true);
         query_str = CheckPgRewriteFirstAfter(rel);
-        tab->rewrite = true;
+        tab->rewrite |= AT_REWRITE_ALTER_PERSISTENCE;
         tab->is_first_after = true;
     }
 
@@ -12105,7 +12158,7 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
                         errmsg("It's not supported to alter table add column default with nextval expression.")));
             } else if (RelationIsCUFormat(rel)) {
                 ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, false);
-            } else if (tab->rewrite || colDef->generatedCol ||
+            } else if (tab->rewrite>0 || colDef->generatedCol ||
                 RelationUsesSpaceType(rel->rd_rel->relpersistence) == SP_TEMP) {
                 ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, true);
             } else {
@@ -12154,7 +12207,7 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
      * table to fix that.
      */
     if (isOid) {
-        tab->rewrite = true;
+        tab->rewrite |= AT_REWRITE_ALTER_OID;
     }
 
     if (RelationIsColStore(rel)) {
@@ -12162,9 +12215,9 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
          * The DFS table do not rewrite data, only update the catalog for default value.
          */
         if (isDfsTable) {
-            tab->rewrite = false;
+            tab->rewrite = AT_REWRITE_ALTER_OID;
         } else {
-            tab->rewrite = true;
+            tab->rewrite |= AT_REWRITE_ALTER_OID;
         }
     }
 
@@ -12296,6 +12349,8 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
 
         heap_close(childrel, NoLock);
     }
+    ObjectAddressSubSet(address, RelationRelationId, myrelid, newattnum);
+    return address;
 }
 
 /*
@@ -12401,14 +12456,18 @@ static void ATPrepAddOids(List** wqueue, Relation rel, bool recurse, AlterTableC
 
 /*
  * ALTER TABLE ALTER COLUMN DROP NOT NULL
+ *
+ * Return the address of the modified column.  If the column was already
+ * nullable, InvalidObjectAddress is returned.
  */
-static void ATExecDropNotNull(Relation rel, const char* colName, LOCKMODE lockmode)
+static ObjectAddress ATExecDropNotNull(Relation rel, const char* colName, LOCKMODE lockmode)
 {
     HeapTuple tuple;
     AttrNumber attnum;
     Relation attr_rel;
     List* indexoidlist = NIL;
     ListCell* indexoidscan = NULL;
+    ObjectAddress address;
 
     /*
      * lookup the attribute
@@ -12481,20 +12540,29 @@ static void ATExecDropNotNull(Relation rel, const char* colName, LOCKMODE lockmo
 
         /* keep the system catalog indexes current */
         CatalogUpdateIndexes(attr_rel, tuple);
+        ObjectAddressSubSet(address, RelationRelationId,
+                            RelationGetRelid(rel), attnum);
+        
     }
+    else
+        address = InvalidObjectAddress;
 
     heap_close(attr_rel, RowExclusiveLock);
+    return address;
 }
 
 /*
  * ALTER TABLE ALTER COLUMN SET NOT NULL
+ *
+ * Return the address of the modified column.  If the column was already NOT
+ * NULL, InvalidObjectAddress is returned.
  */
-static void ATExecSetNotNull(AlteredTableInfo* tab, Relation rel, const char* colName, LOCKMODE lockmode)
+static ObjectAddress ATExecSetNotNull(AlteredTableInfo* tab, Relation rel, const char* colName, LOCKMODE lockmode)
 {
     HeapTuple tuple;
     AttrNumber attnum;
     Relation attr_rel;
-
+    ObjectAddress address;
     /*
      * lookup the attribute
      */
@@ -12526,9 +12594,14 @@ static void ATExecSetNotNull(AlteredTableInfo* tab, Relation rel, const char* co
 
         /* Tell Phase 3 it needs to test the constraint */
         tab->new_notnull = true;
+        ObjectAddressSubSet(address, RelationRelationId,
+                            RelationGetRelid(rel), attnum);
     }
+    else
+        address = InvalidObjectAddress;
 
     heap_close(attr_rel, RowExclusiveLock);
+    return address;
 }
 
 bool FetchOnUpdateExpress(Relation rel, const char* colName)
@@ -12563,9 +12636,10 @@ bool FetchOnUpdateExpress(Relation rel, const char* colName)
 /*
  * ALTER TABLE ALTER COLUMN SET/DROP DEFAULT
  */
-static void ATExecColumnDefault(Relation rel, const char* colName, Node* newDefault, LOCKMODE lockmode)
+static ObjectAddress ATExecColumnDefault(Relation rel, const char* colName, Node* newDefault, LOCKMODE lockmode)
 {
     AttrNumber attnum;
+    ObjectAddress address;
     TupleDesc tupdesc = RelationGetDescr(rel);
 
     /*
@@ -12579,7 +12653,7 @@ static void ATExecColumnDefault(Relation rel, const char* colName, Node* newDefa
                     errmsg("column \"%s\" of relation \"%s\" does not exist while dropping default",
                         colName,
                         RelationGetRelationName(rel))));
-            return;
+            return InvalidObjectAddress;
         } else
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_COLUMN),
@@ -12629,6 +12703,11 @@ static void ATExecColumnDefault(Relation rel, const char* colName, Node* newDefa
          */
         (void)AddRelationNewConstraints(rel, list_make1(rawEnt), NIL, false, true);
     }
+
+    ObjectAddressSubSet(address, RelationRelationId,
+                        RelationGetRelid(rel), attnum);
+    return address;
+    
 }
 
 /*
@@ -12655,13 +12734,18 @@ static void ATPrepSetStatistics(Relation rel)
     }
 }
 
-static void ATExecSetStatistics(
+/* 
+ * Return value is the address of the modified column
+ */
+static ObjectAddress ATExecSetStatistics(
     Relation rel, const char* colName, Node* newValue, AlterTableStatProperty additional_property, LOCKMODE lockmode)
 {
     int newtarget;
     Relation attrelation;
     HeapTuple tuple;
     Form_pg_attribute attrtuple;
+    AttrNumber  attnum;
+    ObjectAddress address;
 
     Assert(IsA(newValue, Integer));
     newtarget = intVal(newValue);
@@ -12698,7 +12782,8 @@ static void ATExecSetStatistics(
                 errmsg("column \"%s\" of relation \"%s\" does not exist", colName, RelationGetRelationName(rel))));
     attrtuple = (Form_pg_attribute)GETSTRUCT(tuple);
 
-    if (attrtuple->attnum <= 0)
+    attnum = attrtuple->attnum;
+    if (attnum <= 0)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot alter system column \"%s\"", colName)));
 
     attrtuple->attstattarget = newtarget;
@@ -12707,10 +12792,14 @@ static void ATExecSetStatistics(
 
     /* keep system catalog indexes current */
     CatalogUpdateIndexes(attrelation, tuple);
+    ObjectAddressSubSet(address, RelationRelationId,
+                        RelationGetRelid(rel), attnum);
 
     tableam_tops_free_tuple(tuple);
 
     heap_close(attrelation, RowExclusiveLock);
+
+    return address;
 }
 
 /*
@@ -12781,17 +12870,19 @@ static void ATExecDeleteStatistics(Relation rel, Node* def, LOCKMODE lockmode)
     }
 }
 
-static void ATExecSetOptions(Relation rel, const char* colName, Node* options, bool isReset, LOCKMODE lockmode)
+static ObjectAddress ATExecSetOptions(Relation rel, const char* colName, Node* options, bool isReset, LOCKMODE lockmode)
 {
     Relation attrelation;
     HeapTuple tuple, newtuple;
     Form_pg_attribute attrtuple;
+    AttrNumber  attnum;
     Datum datum, newOptions;
     bool isnull = false;
     Datum repl_val[Natts_pg_attribute];
     bool repl_null[Natts_pg_attribute];
     bool repl_repl[Natts_pg_attribute];
     errno_t rc = EOK;
+    ObjectAddress address;
 
     attrelation = heap_open(AttributeRelationId, RowExclusiveLock);
 
@@ -12803,7 +12894,8 @@ static void ATExecSetOptions(Relation rel, const char* colName, Node* options, b
                 errmsg("column \"%s\" of relation \"%s\" does not exist", colName, RelationGetRelationName(rel))));
     attrtuple = (Form_pg_attribute)GETSTRUCT(tuple);
 
-    if (attrtuple->attnum <= 0)
+    attnum = attrtuple->attnum;
+    if (attnum <= 0)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot alter system column \"%s\"", colName)));
 
     Assert(IsA(options, List));
@@ -12831,21 +12923,28 @@ static void ATExecSetOptions(Relation rel, const char* colName, Node* options, b
     /* Update system catalog. */
     simple_heap_update(attrelation, &newtuple->t_self, newtuple);
     CatalogUpdateIndexes(attrelation, newtuple);
+    ObjectAddressSubSet(address, RelationRelationId,
+                        RelationGetRelid(rel), attnum);
     tableam_tops_free_tuple(newtuple);
 
     heap_close(attrelation, RowExclusiveLock);
+    return address;
 }
 
 /*
  * ALTER TABLE ALTER COLUMN SET STORAGE
+ *
+ * Return value is the address of the modified column 
  */
-static void ATExecSetStorage(Relation rel, const char* colName, Node* newValue, LOCKMODE lockmode)
+static ObjectAddress ATExecSetStorage(Relation rel, const char* colName, Node* newValue, LOCKMODE lockmode)
 {
     char* storagemode = NULL;
     char newstorage;
     Relation attrelation;
     HeapTuple tuple;
     Form_pg_attribute attrtuple;
+    AttrNumber  attnum;
+    ObjectAddress address;
 
     Assert(IsA(newValue, String));
     storagemode = strVal(newValue);
@@ -12879,7 +12978,8 @@ static void ATExecSetStorage(Relation rel, const char* colName, Node* newValue, 
                 errmsg("column \"%s\" of relation \"%s\" does not exist", colName, RelationGetRelationName(rel))));
     attrtuple = (Form_pg_attribute)GETSTRUCT(tuple);
 
-    if (attrtuple->attnum <= 0)
+    attnum = attrtuple->attnum;
+    if (attnum <= 0)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot alter system column \"%s\"", colName)));
 
     /*
@@ -12901,6 +13001,9 @@ static void ATExecSetStorage(Relation rel, const char* colName, Node* newValue, 
     tableam_tops_free_tuple(tuple);
 
     heap_close(attrelation, RowExclusiveLock);
+    ObjectAddressSubSet(address, RelationRelationId,
+                        RelationGetRelid(rel), attnum);
+    return address;    
 }
 
 /*
@@ -12996,7 +13099,10 @@ static void ResetTempAutoIncrement(Relation rel, AttrNumber attnum)
     tmptable_autoinc_reset(rel->rd_rel->relfilenode, 1);
 }
 
-static void ATExecDropColumn(List** wqueue, Relation rel, const char* colName, DropBehavior behavior, bool recurse,
+/*
+ * Return value is that of the dropped column.
+ */
+static ObjectAddress  ATExecDropColumn(List** wqueue, Relation rel, const char* colName, DropBehavior behavior, bool recurse,
     bool recursing, bool missing_ok, LOCKMODE lockmode)
 {
     HeapTuple tuple;
@@ -13023,7 +13129,7 @@ static void ATExecDropColumn(List** wqueue, Relation rel, const char* colName, D
                 (errmsg("column \"%s\" of relation \"%s\" does not exist, skipping",
                     colName,
                     RelationGetRelationName(rel))));
-            return;
+            return InvalidObjectAddress;
         }
     }
     targetatt = (Form_pg_attribute)GETSTRUCT(tuple);
@@ -13281,8 +13387,9 @@ static void ATExecDropColumn(List** wqueue, Relation rel, const char* colName, D
         tab = ATGetQueueEntry(wqueue, rel);
 
         /* Tell Phase 3 to physically remove the OID column */
-        tab->rewrite = true;
+        tab->rewrite |= AT_REWRITE_ALTER_OID;
     }
+    return object;
 }
 
 /**
@@ -13303,11 +13410,12 @@ FORCE_INLINE static void CheckCUConstraint(Relation rel, const IndexStmt* stmt)
  * UNIQUE and PRIMARY KEY constraints into AT_AddIndex subcommands.  This lets
  * us schedule creation of the index at the appropriate time during ALTER.
  */
-static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt, bool is_rebuild, LOCKMODE lockmode)
+static ObjectAddress ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt, bool is_rebuild, LOCKMODE lockmode)
 {
     bool check_rights = false;
     bool skip_build = false;
     bool quiet = false;
+    ObjectAddress address;
 
     Assert(IsA(stmt, IndexStmt));
     Assert(!stmt->concurrent);
@@ -13317,13 +13425,13 @@ static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt,
     /* suppress schema rights check when rebuilding existing index */
     check_rights = !is_rebuild;
     /* skip index build if phase 3 will do it or we're reusing an old one */
-    skip_build = tab->rewrite || OidIsValid(stmt->oldNode);
+    skip_build = tab->rewrite > 0 || OidIsValid(stmt->oldNode);
     /* suppress notices when rebuilding existing index */
     quiet = is_rebuild;
 
     /* The IndexStmt has already been through transformIndexStmt */
     WaitState oldStatus = pgstat_report_waitstatus(STATE_CREATE_INDEX);
-    Oid new_index = DefineIndex(RelationGetRelid(rel),
+    address  = DefineIndex(RelationGetRelid(rel),
         stmt,
         InvalidOid, /* no predefined OID */
         true,       /* is_alter_table */
@@ -13333,7 +13441,7 @@ static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt,
         tab->is_modify_primary);
 #ifndef ENABLE_MULTIPLE_NODES
     if (RelationIsCUFormat(rel) && (stmt->primary || stmt->unique)) {
-        DefineDeltaUniqueIndex(RelationGetRelid(rel), stmt, new_index);
+        DefineDeltaUniqueIndex(RelationGetRelid(rel), stmt, address.objectId);
     }
 #endif
     (void)pgstat_report_waitstatus(oldStatus);
@@ -13345,14 +13453,14 @@ static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt,
      * cancel that pending deletion.
      */
     if (OidIsValid(stmt->oldNode)) {
-        Relation irel = index_open(new_index, NoLock);
+        Relation irel = index_open(address.objectId, NoLock);
         /*
          * For global tmp table, the mapping between relid and RelFileNode are not recorded in pg_class,
          * so can not reuse relfilenode.
          */
         if (RELATION_IS_GLOBAL_TEMP(irel)) {
             index_close(irel, NoLock);
-            return;
+            return address;
         }
 
         if (!stmt->isPartitioned || stmt->isGlobal) {
@@ -13378,12 +13486,15 @@ static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt,
 
         index_close(irel, NoLock);
     }
+    return address;
 }
 
 /*
  * ALTER TABLE ADD CONSTRAINT USING INDEX
+ *
+ * Returns the address of the new constraint.
  */
-static void ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt, LOCKMODE lockmode)
+static ObjectAddress ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt, LOCKMODE lockmode)
 {
     Oid index_oid = stmt->indexOid;
     Relation indexRel;
@@ -13391,6 +13502,7 @@ static void ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation rel, IndexS
     IndexInfo* indexInfo = NULL;
     char* constraintName = NULL;
     char constraintType;
+    ObjectAddress address;
 
     Assert(IsA(stmt, IndexStmt));
     Assert(OidIsValid(index_oid));
@@ -13426,7 +13538,7 @@ static void ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation rel, IndexS
 
     /* Extra checks needed if making primary key */
     if (stmt->primary)
-        index_check_primary_key(rel, indexInfo, true);
+        index_check_primary_key(rel, indexInfo, true, stmt);
 
     /* Note we currently don't support EXCLUSION constraints here */
     if (stmt->primary)
@@ -13435,7 +13547,7 @@ static void ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation rel, IndexS
         constraintType = CONSTRAINT_UNIQUE;
 
     /* Create the catalog entries for the constraint */
-    index_constraint_create(rel,
+    address = index_constraint_create(rel,
         index_oid,
         indexInfo,
         constraintName,
@@ -13450,14 +13562,19 @@ static void ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation rel, IndexS
     CreateNonColumnComment(index_oid, stmt->indexOptions, RelationRelationId);
   
     index_close(indexRel, NoLock);
+    return address;
 }
 
 /*
  * ALTER TABLE ADD CONSTRAINT
+ *
+ * Return value is the address of the new constraint; if no constraint was
+ * added, InvalidObjectAddress is returned.
  */
-static void ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, Constraint* newConstraint,
+static ObjectAddress ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, Constraint* newConstraint,
     bool recurse, bool is_readd, LOCKMODE lockmode)
 {
+    ObjectAddress address = InvalidObjectAddress;
     Assert(IsA(newConstraint, Constraint));
 
     if (RelationIsColStore(rel) && !CStoreSupportConstraint(newConstraint))
@@ -13482,7 +13599,7 @@ static void ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation r
      */
     switch (newConstraint->contype) {
         case CONSTR_CHECK:
-            ATAddCheckConstraint(wqueue, tab, rel, newConstraint, recurse, false, is_readd, lockmode);
+            address = ATAddCheckConstraint(wqueue, tab, rel, newConstraint, recurse, false, is_readd, lockmode);
             break;
 
         case CONSTR_FOREIGN:
@@ -13508,15 +13625,18 @@ static void ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation r
                     RelationGetNamespace(rel),
                     NIL);
 
-            ATAddForeignKeyConstraint(tab, rel, newConstraint, lockmode);
+            address = ATAddForeignKeyConstraint(tab, rel, newConstraint, lockmode);
             break;
         case CONSTR_CLUSTER:
             if (rel->rd_rel->relhasclusterkey && !is_readd)
                 ereport(ERROR,
                     (errcode(ERRCODE_DUPLICATE_OBJECT),
                         errmsg("cluster key for relation \"%s\" already exists", RelationGetRelationName(rel))));
-            else
-                AddRelClusterConstraints(rel, list_make1(newConstraint));
+            else {
+                List * tmp = AddRelClusterConstraints(rel, list_make1(newConstraint));
+                Assert(tmp != NIL && list_length(tmp) == 1);
+                address = *((ObjectAddress*)linitial(tmp));
+            }
 
             break;
         default: {
@@ -13525,6 +13645,7 @@ static void ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation r
                     errmsg("unrecognized constraint type: %d", (int)newConstraint->contype)));
         }
     }
+    return address;
 }
 
 /*
@@ -13547,13 +13668,14 @@ static void ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation r
  * "is_readd" flag for that; just setting recurse=false would result in an
  * error if there are child tables.
  */
-static void ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, Constraint* constr, bool recurse,
+static ObjectAddress ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, Constraint* constr, bool recurse,
     bool recursing, bool is_readd, LOCKMODE lockmode)
 {
     List* newcons = NIL;
     ListCell* lcon = NULL;
     List* children = NIL;
     ListCell* child = NULL;
+    ObjectAddress address = InvalidObjectAddress;
 
     /* At top level, permission check was done in ATPrepCmd, else do it */
     if (recursing)
@@ -13574,6 +13696,9 @@ static void ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation 
         list_make1(copyObject(constr)),
         recursing,   /* allow_merge */
         !recursing); /* is_local */
+    /* we don't expect more than one constraint here */
+    Assert(list_length(newcons) <= 1);
+
 
     /* Add each to-be-validated constraint to Phase 3's queue */
     foreach (lcon, newcons) {
@@ -13594,6 +13719,8 @@ static void ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation 
         /* Save the actually assigned name if it was defaulted */
         if (constr->conname == NULL)
             constr->conname = ccon->name;
+
+        ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
     }
 
     /* At this point we must have a locked-down name to use */
@@ -13609,7 +13736,7 @@ static void ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation 
      * incorrect value for coninhcount.
      */
     if (newcons == NIL)
-        return;
+        return address;
 
     /*
      * If adding a NO INHERIT constraint, no need to find our children.
@@ -13617,7 +13744,7 @@ static void ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation 
      * handled at higher levels).
      */
     if (constr->is_no_inherit || is_readd)
-        return;
+        return address;
 
     /*
      * Propagate to children as appropriate.  Unlike most other ALTER
@@ -13652,16 +13779,18 @@ static void ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation 
 
         heap_close(childrel, NoLock);
     }
+    return address;
 }
 
 /*
- * Add a foreign-key constraint to a single table
+ * Add a foreign-key constraint to a single table, return the new constraint's
+ * address.
  *
  * Subroutine for ATExecAddConstraint.	Must already hold exclusive
  * lock on the rel, and have done appropriate validity checks for it.
  * We do permissions checks here, however.
  */
-static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Constraint* fkconstraint, LOCKMODE lockmode)
+static ObjectAddress ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Constraint* fkconstraint, LOCKMODE lockmode)
 {
     Relation pkrel;
     int16 pkattnum[INDEX_MAX_KEYS];
@@ -13678,6 +13807,7 @@ static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Const
     Oid constrOid;
     bool old_check_ok = false;
     ListCell* old_pfeqop_item = list_head(fkconstraint->old_conpfeqop);
+    ObjectAddress address;
 
     /*
      * Grab an exclusive lock on the pk table, so that someone doesn't delete
@@ -14078,6 +14208,7 @@ static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Const
         true,                           /* isnoinherit */
         fkconstraint->inforConstraint); /* @hdfs informational constraint */
 
+    ObjectAddressSet(address, ConstraintRelationId, constrOid);
     /* foreign key constraint */
     CreateNonColumnComment(constrOid, fkconstraint->constraintOptions, ConstraintRelationId);
     
@@ -14109,6 +14240,7 @@ static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Const
      * Close pk table, but keep lock until we've committed.
      */
     heap_close(pkrel, NoLock);
+    return address;
 }
 
 /*
@@ -14118,8 +14250,11 @@ static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Const
  * there's no good way to skip recursing when handling foreign keys: there is
  * no need to lock children in that case, yet we wouldn't be able to avoid
  * doing so at that level.
+ *
+ * Return value is the address of the validated constraint.  If the constraint
+ * was already validated, InvalidObjectAddress is returned.
  */
-static void ATExecValidateConstraint(Relation rel, char* constrName, bool recurse, bool recursing, LOCKMODE lockmode)
+static ObjectAddress ATExecValidateConstraint(Relation rel, char* constrName, bool recurse, bool recursing, LOCKMODE lockmode)
 {
     Relation conrel;
     SysScanDesc scan;
@@ -14127,6 +14262,7 @@ static void ATExecValidateConstraint(Relation rel, char* constrName, bool recurs
     HeapTuple tuple;
     Form_pg_constraint con = NULL;
     bool found = false;
+    ObjectAddress address;
 
     conrel = heap_open(ConstraintRelationId, RowExclusiveLock);
 
@@ -14163,7 +14299,6 @@ static void ATExecValidateConstraint(Relation rel, char* constrName, bool recurs
         Form_pg_constraint copy_con;
 
         if (con->contype == CONSTRAINT_FOREIGN) {
-            Oid conid = HeapTupleGetOid(tuple);
             Relation refrel;
 
             /*
@@ -14176,7 +14311,7 @@ static void ATExecValidateConstraint(Relation rel, char* constrName, bool recurs
              */
             refrel = heap_open(con->confrelid, RowShareLock);
 
-            validateForeignKeyConstraint(constrName, rel, refrel, con->conindid, conid);
+            validateForeignKeyConstraint(constrName, rel, refrel, con->conindid, HeapTupleGetOid(tuple));
             heap_close(refrel, NoLock);
 
             /*
@@ -14301,11 +14436,15 @@ static void ATExecValidateConstraint(Relation rel, char* constrName, bool recurs
         simple_heap_update(conrel, &copyTuple->t_self, copyTuple);
         CatalogUpdateIndexes(conrel, copyTuple);
         tableam_tops_free_tuple(copyTuple);
-    }
+        ObjectAddressSet(address, ConstraintRelationId,
+                         HeapTupleGetOid(tuple));
+    } else
+        address = InvalidObjectAddress;     /* already validated */    
 
     systable_endscan(scan);
 
     heap_close(conrel, RowExclusiveLock);
+    return address;    
 }
 
 /*
@@ -15409,7 +15548,7 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
 
         tab->newvals = lappend(tab->newvals, newval);
         if (ATColumnChangeRequiresRewrite(transform, attnum))
-            tab->rewrite = true;
+            tab->rewrite = AT_REWRITE_COLUMN_REWRITE;
         if (targettype != CLOBOID && targettype != BLOBOID) {
             CheckHugeToast(tab, rel, attnum);
         }
@@ -15892,7 +16031,7 @@ static void UpdateNewvalsAttnum(AlteredTableInfo* tab, Relation rel, AlterTableC
 }
 
 
-static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode)
+static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode)
 {
     char* colName = cmd->name;
     ColumnDef* def = (ColumnDef*)cmd->def;
@@ -15915,6 +16054,7 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
     Node* update_expr = NULL;
     bool flagDropOnUpdateTimestamp = false;
     bool existOnUpdateTimestamp = false;
+    ObjectAddress address;
 
     attrelation = heap_open(AttributeRelationId, RowExclusiveLock);
 
@@ -15929,7 +16069,7 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
     /*
      * data type of a partitioned table's partition key can not be changed
      */
-    if (RELATION_IS_PARTITIONED(rel)) {
+    if (RELATION_IS_PARTITIONED(rel) && is_partition_column(rel, attnum)) {
         int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
         int i = 0;
 
@@ -16329,12 +16469,17 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
 
         StoreAttrDefault(rel, attnum, defaultexpr, generatedCol, update_expr);
     }
-
+    ObjectAddressSubSet(address, RelationRelationId,
+                        RelationGetRelid(rel), attnum);
     /* Cleanup */
     tableam_tops_free_tuple(heapTup);
+    return address;
 }
 
-static void ATExecAlterColumnGenericOptions(Relation rel, const char* colName, List* options, LOCKMODE lockmode)
+ /*
+  * Returns the address of the modified column
+  */
+static ObjectAddress ATExecAlterColumnGenericOptions(Relation rel, const char* colName, List* options, LOCKMODE lockmode)
 {
     Relation ftrel;
     Relation attrel;
@@ -16350,9 +16495,11 @@ static void ATExecAlterColumnGenericOptions(Relation rel, const char* colName, L
     Form_pg_foreign_table fttableform;
     Form_pg_attribute atttableform;
     errno_t rc = EOK;
+    AttrNumber  attnum;
+    ObjectAddress address;
 
     if (options == NIL)
-        return;
+        return InvalidObjectAddress;
 
     /* First, determine FDW validator associated to the foreign table. */
     ftrel = heap_open(ForeignTableRelationId, AccessShareLock);
@@ -16377,7 +16524,8 @@ static void ATExecAlterColumnGenericOptions(Relation rel, const char* colName, L
 
     /* Prevent them from altering a system attribute */
     atttableform = (Form_pg_attribute)GETSTRUCT(tuple);
-    if (atttableform->attnum <= 0)
+    attnum = atttableform->attnum;
+    if (attnum <= 0)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot alter system column \"%s\"", colName)));
 
     /* Initialize buffers for new tuple values */
@@ -16405,6 +16553,10 @@ static void ATExecAlterColumnGenericOptions(Relation rel, const char* colName, L
 
     /* Everything looks good - update the tuple */
     newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(attrel), repl_val, repl_null, repl_repl);
+
+    ObjectAddressSubSet(address, RelationRelationId,
+                        RelationGetRelid(rel), attnum);
+    
     ReleaseSysCache(tuple);
 
     simple_heap_update(attrel, &newtuple->t_self, newtuple);
@@ -16413,6 +16565,8 @@ static void ATExecAlterColumnGenericOptions(Relation rel, const char* colName, L
     heap_close(attrel, RowExclusiveLock);
 
     tableam_tops_free_tuple(newtuple);
+
+    return address;    
 }
 
 // delete record about psort oid and index oid from pg_depend,
@@ -16532,7 +16686,7 @@ static void ATPostAlterTypeCleanup(List** wqueue, AlteredTableInfo* tab, LOCKMOD
         Oid confrelid;
 
         get_constraint_relation_oids(oldId, &relid, &confrelid);
-        ATPostAlterTypeParse(oldId, relid, confrelid, (char*)lfirst(def_item), wqueue, lockmode, tab->rewrite);
+        ATPostAlterTypeParse(oldId, relid, confrelid, (char*)lfirst(def_item), wqueue, lockmode, tab->rewrite > 0);
     }
     forboth(oid_item, tab->changedIndexOids, def_item, tab->changedIndexDefs)
     {
@@ -16540,7 +16694,7 @@ static void ATPostAlterTypeCleanup(List** wqueue, AlteredTableInfo* tab, LOCKMOD
         Oid relid;
 
         relid = IndexGetRelation(oldId, false);
-        ATPostAlterTypeParse(oldId, relid, InvalidOid, (char*)lfirst(def_item), wqueue, lockmode, tab->rewrite);
+        ATPostAlterTypeParse(oldId, relid, InvalidOid, (char*)lfirst(def_item), wqueue, lockmode, tab->rewrite > 0);
     }
 
     /*
@@ -16558,7 +16712,7 @@ static void ATPostAlterTypeCleanup(List** wqueue, AlteredTableInfo* tab, LOCKMOD
         performDeletion(&obj, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
     }
 
-    if (!tab->rewrite && tab->subcmds[AT_PASS_OLD_INDEX]) {
+    if (tab->rewrite <= 0  && tab->subcmds[AT_PASS_OLD_INDEX]) {
         /*
          * existing indexes will be dropped. but rewrite is false, that
          * means existing indexes should be reserved and reused. so we
@@ -16694,7 +16848,7 @@ static void AttachEachCommandInQueue(
                             con = (Constraint*)cmd->def;
                             con->old_pktable_oid = refRelId;
                             /* rewriting neither side of a FK */
-                            if (con->contype == CONSTR_FOREIGN && !rewrite && !tab->rewrite)
+                            if (con->contype == CONSTR_FOREIGN && !rewrite && tab->rewrite <= 0)
                                 TryReuseForeignKey(oldId, con);
                             cmd->subtype = AT_ReAddConstraint;
                             tab->subcmds[AT_PASS_OLD_CONSTR] = lappend(tab->subcmds[AT_PASS_OLD_CONSTR], cmd);
@@ -17450,10 +17604,12 @@ static void change_owner_recurse_to_sequences(Oid relationOid, Oid newOwnerId, L
  * ALTER TABLE CLUSTER ON
  *
  * The only thing we have to do is to change the indisclustered bits.
+ * Return the address of the new clustering index.
  */
-static void ATExecClusterOn(Relation rel, const char* indexName, LOCKMODE lockmode)
+static ObjectAddress ATExecClusterOn(Relation rel, const char* indexName, LOCKMODE lockmode)
 {
     Oid indexOid;
+    ObjectAddress address;
 
     indexOid = get_relname_relid(indexName, rel->rd_rel->relnamespace);
 
@@ -17467,6 +17623,10 @@ static void ATExecClusterOn(Relation rel, const char* indexName, LOCKMODE lockmo
 
     /* And do the work */
     mark_index_clustered(rel, indexOid);
+    ObjectAddressSet(address,
+                     RelationRelationId, indexOid);
+ 
+    return address;
 }
 
 /*
@@ -19090,8 +19250,10 @@ static void ATPrepAddInherit(Relation child_rel)
     if (child_rel->rd_rel->reloftype)
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("cannot change inheritance of typed table")));
 }
-
-static void ATExecAddInherit(Relation child_rel, RangeVar* parent, LOCKMODE lockmode)
+ /*
+  * Return the address of the new parent relation.
+  */
+static ObjectAddress ATExecAddInherit(Relation child_rel, RangeVar* parent, LOCKMODE lockmode)
 {
     Relation parent_rel, catalogRelation;
     SysScanDesc scan;
@@ -19099,6 +19261,7 @@ static void ATExecAddInherit(Relation child_rel, RangeVar* parent, LOCKMODE lock
     HeapTuple inheritsTuple;
     int32 inhseqno;
     List* children = NIL;
+    ObjectAddress address;    
 
     if (RELATION_IS_PARTITIONED(child_rel)) {
         ereport(ERROR,
@@ -19213,11 +19376,16 @@ static void ATExecAddInherit(Relation child_rel, RangeVar* parent, LOCKMODE lock
      */
     StoreCatalogInheritance1(RelationGetRelid(child_rel), RelationGetRelid(parent_rel), inhseqno + 1, catalogRelation);
 
+    ObjectAddressSet(address, RelationRelationId,
+                     RelationGetRelid(parent_rel));
+ 
     /* Now we're done with pg_inherits */
     heap_close(catalogRelation, RowExclusiveLock);
 
     /* keep our lock on the parent relation until commit */
     heap_close(parent_rel, NoLock);
+
+    return address;
 }
 
 /*
@@ -19467,15 +19635,17 @@ static void MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel
  * coninhcount and conislocal for inherited constraints are adjusted in
  * exactly the same way.
  */
-static void ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode)
+static ObjectAddress ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode)
 {
     Relation parent_rel;
+    Oid      parent_oid;  
     Relation catalogRelation;
     SysScanDesc scan;
     ScanKeyData key[3];
     HeapTuple inheritsTuple, attributeTuple, constraintTuple;
     List* connames = NIL;
     bool found = false;
+    ObjectAddress address;
 
     /*
      * AccessShareLock on the parent is probably enough, seeing that DROP
@@ -19507,7 +19677,7 @@ static void ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode)
             break;
         }
     }
-
+    parent_oid = RelationGetRelid(parent_rel);
     systable_endscan(scan);
     heap_close(catalogRelation, RowExclusiveLock);
 
@@ -19626,6 +19796,10 @@ static void ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode)
 
     /* keep our lock on the parent relation until commit */
     heap_close(parent_rel, NoLock);
+
+    ObjectAddressSet(address, RelationRelationId, parent_oid);
+ 
+    return address;
 }
 
 /*
@@ -19670,7 +19844,7 @@ static void drop_parent_dependency(Oid relid, Oid refclassid, Oid refobjid)
  * subject table must not have inheritance parents.  These restrictions ensure
  * that you cannot create a configuration impossible with CREATE TABLE OF alone.
  */
-static void ATExecAddOf(Relation rel, const TypeName* ofTypename, LOCKMODE lockmode)
+static ObjectAddress ATExecAddOf(Relation rel, const TypeName* ofTypename, LOCKMODE lockmode)
 {
     Oid relid = RelationGetRelid(rel);
     Type typetuple;
@@ -19785,6 +19959,8 @@ static void ATExecAddOf(Relation rel, const TypeName* ofTypename, LOCKMODE lockm
     heap_close(relationRelation, RowExclusiveLock);
 
     ReleaseSysCache(typetuple);
+
+    return typeobj;
 }
 
 /*
@@ -20878,7 +21054,7 @@ static Oid* add_node_list(Oid* old_oids, int old_num, Oid* add_oids, int add_num
 /*
  * Execute ALTER TABLE SET SCHEMA
  */
-void AlterTableNamespace(AlterObjectSchemaStmt* stmt)
+ObjectAddress AlterTableNamespace(AlterObjectSchemaStmt* stmt, Oid *oldschema)
 {
     Relation rel;
     Oid relid;
@@ -20886,7 +21062,8 @@ void AlterTableNamespace(AlterObjectSchemaStmt* stmt)
     Oid nspOid;
     RangeVar* newrv = NULL;
     ObjectAddresses* objsMoved = NULL;
-
+    ObjectAddress myself;
+    
     relid = RangeVarGetRelidExtended(stmt->relation,
         AccessExclusiveLock,
         stmt->missing_ok,
@@ -20898,7 +21075,7 @@ void AlterTableNamespace(AlterObjectSchemaStmt* stmt)
 
     if (!OidIsValid(relid)) {
         ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->relation->relname)));
-        return;
+        return InvalidObjectAddress;
     }
 
 #ifdef ENABLE_MOT
@@ -20966,8 +21143,14 @@ void AlterTableNamespace(AlterObjectSchemaStmt* stmt)
     }
     free_object_addresses(objsMoved);
 
+    ObjectAddressSet(myself, RelationRelationId, relid);
+    
+    if (oldschema)
+        *oldschema = oldNspOid;
+    
     /* close rel, but keep lock until commit */
     relation_close(rel, NoLock);
+    return myself;
 }
 
 /*
@@ -29497,7 +29680,7 @@ static void ATCStoreRewriteTable(AlteredTableInfo* tab, Relation oldHeapRel, LOC
     }
 
     /* set NOT NULL constraint for updated columns. */
-    if (tab->rewrite || tab->new_notnull) {
+    if (tab->rewrite>0 || tab->new_notnull) {
         for (int i = 0; i < maxCols; ++i) {
             if (rewriteInfo[i] != NULL && !rewriteInfo[i]->isDropped && newTupDesc->attrs[i].attnotnull) {
                 rewriteInfo[i]->notNull = true;

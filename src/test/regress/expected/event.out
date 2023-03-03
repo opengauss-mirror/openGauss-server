@@ -846,18 +846,6 @@ show events where job_name='e1';
 
 drop event if exists e1;
 --test sql help
-\h CREATE EVENT
-No help available for "CREATE EVENT".
-Try \h with no arguments to see available help.
-\h ALTER EVENT
-No help available for "ALTER EVENT".
-Try \h with no arguments to see available help.
-\h DROP EVENT
-No help available for "DROP EVENT".
-Try \h with no arguments to see available help.
-\h SHOW EVENTS
-No help available for "SHOW EVENTS".
-Try \h with no arguments to see available help.
 drop table if exists event_a.a;
 NOTICE:  table "a" does not exist, skipping
 drop table if exists event_b.t;

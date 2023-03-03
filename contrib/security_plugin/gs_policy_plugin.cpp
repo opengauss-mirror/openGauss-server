@@ -806,7 +806,7 @@ static void light_unified_audit_executor(const Query *query)
 }
 
 static void gsaudit_ProcessUtility_hook(processutility_context* processutility_cxt,
-    DestReceiver *dest, bool sentToRemote, char *completionTag, bool isCTAS = false)
+    DestReceiver *dest, bool sentToRemote, char *completionTag, ProcessUtilityContext context,bool isCTAS = false)
 {
     /* do nothing when enable_security_policy is off */
     if (!u_sess->attr.attr_security.Enable_Security_Policy || !IsConnFromApp() ||
@@ -814,10 +814,10 @@ static void gsaudit_ProcessUtility_hook(processutility_context* processutility_c
         !is_audit_policy_exist_load_policy_info()) {
         if (next_ProcessUtility_hook) {
             next_ProcessUtility_hook(processutility_cxt, dest, sentToRemote, completionTag,
-                false);
+                context, false);
         } else {
             standard_ProcessUtility(processutility_cxt, dest, sentToRemote, completionTag,
-                false);
+                context, false);
         }
         return;
     }
@@ -1611,10 +1611,10 @@ static void gsaudit_ProcessUtility_hook(processutility_context* processutility_c
     {
         if (next_ProcessUtility_hook) {
             next_ProcessUtility_hook(processutility_cxt, dest, sentToRemote, completionTag,
-                false);
+                context, false);
         } else {
             standard_ProcessUtility(processutility_cxt, dest, sentToRemote, completionTag,
-                false);
+                context, false);
         }
         flush_access_logs(AUDIT_OK);
         send_mng_events(AUDIT_OK);

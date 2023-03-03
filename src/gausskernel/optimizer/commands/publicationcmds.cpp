@@ -226,6 +226,7 @@ static void AlterPublicationOptions(AlterPublicationStmt *stmt, Relation rel, He
     bool publish_update;
     bool publish_delete;
     int rc;
+    ObjectAddress obj;
 
     parse_publication_options(stmt->options, &publish_given, &publish_insert, &publish_update, &publish_delete);
 
@@ -278,6 +279,8 @@ static void AlterPublicationOptions(AlterPublicationStmt *stmt, Relation rel, He
             CacheInvalidateRelcacheAll();
         }
     }
+    ObjectAddressSet(obj, PublicationRelationId,  HeapTupleGetOid(tup));
+    EventTriggerCollectSimpleCommand(obj, InvalidObjectAddress, (Node *) stmt);
 }
 
 /*

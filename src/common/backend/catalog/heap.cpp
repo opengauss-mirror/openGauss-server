@@ -156,7 +156,7 @@ static void addNewPartitionTupleForValuePartitionedTable(Relation pg_partition_r
 
 static void heapDropPartitionTable(Relation relation);
 
-static Oid AddNewRelationType(const char* typeName, Oid typeNamespace, Oid new_rel_oid, char new_rel_kind, Oid ownerid,
+static ObjectAddress AddNewRelationType(const char* typeName, Oid typeNamespace, Oid new_rel_oid, char new_rel_kind, Oid ownerid,
     Oid new_row_type, Oid new_array_type);
 static void RelationRemoveInheritance(Oid relid);
 static Oid StoreRelCheck(
@@ -2464,7 +2464,7 @@ Oid* SortRelationDistributionNodes(Oid* nodeoids, int numnodes)
  *		define a composite type corresponding to the new relation
  * --------------------------------
  */
-static Oid AddNewRelationType(const char* typname, Oid typeNamespace, Oid new_rel_oid, char new_rel_kind, Oid ownerid,
+static ObjectAddress AddNewRelationType(const char* typname, Oid typeNamespace, Oid new_rel_oid, char new_rel_kind, Oid ownerid,
     Oid new_row_type, Oid new_array_type)
 {
     return TypeCreate(new_row_type, /* optional predetermined OID */
@@ -2587,6 +2587,8 @@ static bool CheckPartitionExprKey(List* keys, char partStrategy, bool* isFunc)
  *	use_user_acl: TRUE if should look for user-defined default permissions;
  *		if FALSE, relacl is always set NULL
  *	allow_system_table_mods: TRUE to allow creation in system namespaces
+ * Output parameters:
+ * typaddress: if not null, gets the object address of the new pg_type entry
  *
  * Returns the OID of the new relation
  * --------------------------------
@@ -2597,7 +2599,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
                              int oidinhcount, OnCommitAction oncommit, Datum reloptions, bool use_user_acl,
                              bool allow_system_table_mods, PartitionState *partTableState, int8 row_compress,
                              HashBucketInfo *bucketinfo, bool record_dependce, List *ceLst, StorageType storage_type,
-                             LOCKMODE partLockMode)
+                             LOCKMODE partLockMode, ObjectAddress *typaddress)
 {
     Relation pg_class_desc;
     Relation new_rel_desc;
@@ -2612,6 +2614,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
     Oid relbucketOid = InvalidOid;
     int2vector* bucketcol = NULL;
     bool relhasbucket = false;
+    ObjectAddress new_type_addr;
     bool relhasuids = false;
 
     if (IsInitdb && EnableInitDBSegment) {
@@ -2885,7 +2888,11 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
          * we checked for a duplicate name above. in such case we try to emit a
          * nicer error message using try...catch
          */
-        new_type_oid = AddNewRelationType(relname, relnamespace, relid, relkind, ownerid, reltypeid, new_array_oid);
+        new_type_addr = AddNewRelationType(relname, relnamespace, relid, relkind, ownerid, reltypeid, new_array_oid);
+        new_type_oid = new_type_addr.objectId;
+        if (typaddress)
+            *typaddress = new_type_addr;
+        
     }
     PG_CATCH();
     {
@@ -3744,7 +3751,7 @@ void heap_drop_with_catalog(Oid relid)
 /*
  * Store a default expression for column attnum of relation rel.
  */
-void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generatedCol, Node* update_expr, bool skip_dep)
+Oid StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generatedCol, Node* update_expr, bool skip_dep)
 {
     char* adbin = NULL;
     char* adbin_on_update = NULL;
@@ -3886,7 +3893,7 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
     recordDependencyOn(&defobject, &colobject, DEPENDENCY_AUTO);
 
     if (skip_dep) {
-        return;
+        return InvalidOid;
     }
     /*
      * Record dependencies on objects used in the expression, too.
@@ -3906,6 +3913,7 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
          */
         recordDependencyOnExpr(&defobject, expr, NIL, DEPENDENCY_NORMAL);
     }
+    return attrdefOid;
 }
 
 /*
@@ -3913,6 +3921,7 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
  *
  * Caller is responsible for updating the count of constraints
  * in the pg_class entry for the relation.
+ * The OID of the new constraint is returned.
  */
 static Oid StoreRelCheck(
     Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit)
@@ -3922,6 +3931,7 @@ static Oid StoreRelCheck(
     List* varList = NIL;
     int keycount;
     int16* attNos = NULL;
+    Oid constrOid;
 
     /*
      * Flatten expression to string form for storage.
@@ -3966,7 +3976,7 @@ static Oid StoreRelCheck(
     /*
      * Create the Check Constraint
      */
-    Oid oid = CreateConstraintEntry(ccname, /* Constraint Name */
+    constrOid = CreateConstraintEntry(ccname, /* Constraint Name */
         RelationGetNamespace(rel),      /* namespace */
         CONSTRAINT_CHECK,               /* Constraint Type */
         false,                          /* Is Deferrable */
@@ -3998,7 +4008,7 @@ static Oid StoreRelCheck(
 
     pfree(ccbin);
     pfree(ccsrc);
-    return oid;
+    return constrOid;
 }
 
 /*
@@ -4014,7 +4024,7 @@ static void StoreConstraints(Relation rel, List* cooked_constraints)
     int numchecks = 0;
     ListCell* lc = NULL;
 
-    if (cooked_constraints == NULL)
+    if (cooked_constraints == NIL)
         return; /* nothing to do */
 
     /*
@@ -4029,13 +4039,13 @@ static void StoreConstraints(Relation rel, List* cooked_constraints)
 
         switch (con->contype) {
             case CONSTR_DEFAULT:
-                StoreAttrDefault(rel, con->attnum, con->expr, 0, con->update_expr);
+                con->conoid = StoreAttrDefault(rel, con->attnum, con->expr, 0,con->update_expr);
                 break;
             case CONSTR_GENERATED:
-                StoreAttrDefault(rel, con->attnum, con->expr, ATTRIBUTE_GENERATED_STORED, NULL);
+                con->conoid = StoreAttrDefault(rel, con->attnum, con->expr, ATTRIBUTE_GENERATED_STORED, NULL);
                 break;
             case CONSTR_CHECK:
-                StoreRelCheck(
+                con->conoid = StoreRelCheck(
                     rel, con->name, con->expr, !con->skip_validation, con->is_local, con->inhcount, con->is_no_inherit);
                 numchecks++;
                 break;
@@ -4127,6 +4137,7 @@ List* AddRelationNewConstraints(
     ListCell* cell = NULL;
     Node* expr = NULL;
     CookedConstraint* cooked = NULL;
+    Oid defOid;
     AttrNumber autoinc_attnum = RelAutoIncAttrNum(rel);
     Node* update_expr = NULL;
     Bitmapset* generated_by_attrs = NULL;
@@ -4190,10 +4201,11 @@ List* AddRelationNewConstraints(
         if (expr != NULL && !colDef->generatedCol && IsA(expr, Const) && ((Const *)expr)->constisnull)
             continue;
 
-        StoreAttrDefault(rel, colDef->attnum, expr, colDef->generatedCol, update_expr);
+        defOid = StoreAttrDefault(rel, colDef->attnum, expr, colDef->generatedCol, update_expr);
 
         cooked = (CookedConstraint*)palloc(sizeof(CookedConstraint));
         cooked->contype = CONSTR_DEFAULT;
+        cooked->conoid = defOid;
         cooked->name = NULL;
         cooked->attnum = colDef->attnum;
         cooked->expr = expr;
@@ -4222,6 +4234,7 @@ List* AddRelationNewConstraints(
     foreach (cell, newConstraints) {
         Constraint* cdef = (Constraint*)lfirst(cell);
         char* ccname = NULL;
+        Oid constrOid;
 
         if (cdef->contype != CONSTR_CHECK)
             continue;
@@ -4310,13 +4323,14 @@ List* AddRelationNewConstraints(
         /*
          * OK, store it.
          */
-        Oid oid = StoreRelCheck(rel, ccname, expr, !cdef->skip_validation, is_local, is_local ? 0 : 1, cdef->is_no_inherit);
+        constrOid = StoreRelCheck(rel, ccname, expr, !cdef->skip_validation, 
+                                    is_local, is_local ? 0 : 1, cdef->is_no_inherit);
         ListCell *cell = NULL;
         foreach (cell, cdef->constraintOptions) {
             void *pointer = lfirst(cell);
             if (IsA(pointer, CommentStmt)) {
                 CommentStmt *commentStmt = (CommentStmt *)pointer;
-                CreateComments(oid, ConstraintRelationId, 0, commentStmt->comment);
+                CreateComments(constrOid, ConstraintRelationId, 0, commentStmt->comment);
                 break;
             }
         }
@@ -4324,6 +4338,7 @@ List* AddRelationNewConstraints(
 
         cooked = (CookedConstraint*)palloc(sizeof(CookedConstraint));
         cooked->contype = CONSTR_CHECK;
+        cooked->conoid = constrOid;
         cooked->name = ccname;
         cooked->attnum = 0;
         cooked->expr = expr;
@@ -7738,9 +7753,12 @@ void SetRelHasClusterKey(Relation rel, bool has)
 
 /*
  * Add cluster key constraint for relation.
+ * return address List of constraint   
  */
 List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
 {
+    List *result = NIL;
+
     if (!RelationIsColStore(rel)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
@@ -7753,7 +7771,7 @@ List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
 
     foreach (cell, clusterKeys) {
         Constraint* cdef = (Constraint*)lfirst(cell);
-
+        ObjectAddress * address = NULL;
         Assert(cdef->contype == CONSTR_CLUSTER);
 
         List* colNameList = cdef->keys;
@@ -7776,11 +7794,12 @@ List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
             conname =
                 ChooseConstraintName(RelationGetRelationName(rel), NULL, "cluster", RelationGetNamespace(rel), NIL);
         }
-
+        address = (ObjectAddress *)palloc0(sizeof(ObjectAddress));
+        address->classId = ConstraintRelationId;
         /*
          * Create the Check Constraint
          */
-        Oid constraintOid = CreateConstraintEntry(conname, /* Constraint Name */
+        address->objectId = CreateConstraintEntry(conname, /* Constraint Name */
             RelationGetNamespace(rel), /* namespace */
             CONSTRAINT_CLUSTER,        /* Constraint Type */
             false,                     /* Is Deferrable */
@@ -7809,14 +7828,15 @@ List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
             0,                      /* coninhcount */
             true,                   /* connoinherit */
             cdef->inforConstraint); /* @hdfs informational constraint */
-        CreateNonColumnComment(constraintOid, cdef->constraintOptions, ConstraintRelationId);
+        CreateNonColumnComment(address->objectId, cdef->constraintOptions, ConstraintRelationId);
         pfree(attNums);
+        result = lappend(result, address);
     }
 
     if (nKeys > 0)
         SetRelHasClusterKey(rel, true);
 
-    return NULL;
+    return result;
 }
 
 /*

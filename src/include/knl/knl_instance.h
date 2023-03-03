@@ -1023,6 +1023,11 @@ typedef struct knl_g_hypo_context {
     List* hypo_index_list;
 } knl_g_hypo_context;
 
+typedef struct knl_sigbus_context {
+    void* sigbus_addr;
+    int sigbus_code;
+} knl_sigbus_context;
+
 typedef struct knl_g_segment_context {
     uint32 segment_drop_timeline;
 } knl_g_segment_context;

@@ -93,7 +93,8 @@ typedef enum {
     DO_PUBLICATION,
     DO_PUBLICATION_REL,
     DO_SUBSCRIPTION,
-    DO_EVENT
+    DO_EVENT,
+    DO_EVENT_TRIGGER
 } DumpableObjectType;
 
 typedef struct _dumpableObject {
@@ -108,6 +109,16 @@ typedef struct _dumpableObject {
     int nDeps;                      /* number of valid dependencies */
     int allocDeps;                  /* allocated size of dependencies[] */
 } DumpableObject;
+
+typedef struct _evttriggerInfo {
+    DumpableObject dobj;
+    char       *evtname;
+    char       *evtevent;
+    char       *evtowner;
+    char       *evttags;
+    char       *evtfname;
+    char        evtenabled;
+} EventTriggerInfo;
 
 typedef struct _namespaceInfo {
     DumpableObject dobj;
@@ -608,6 +619,7 @@ extern uint32 GetVersionNum(Archive* fout);
 extern void getPublications(Archive *fout);
 extern void getPublicationTables(Archive *fout, TableInfo tblinfo[], int numTables);
 extern void getSubscriptions(Archive *fout);
+extern EventTriggerInfo *getEventTriggers(Archive *fout, int *numEventTriggers);
 
 #ifdef GSDUMP_LLT
 void stopLLT();

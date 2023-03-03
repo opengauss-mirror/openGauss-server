@@ -24,6 +24,7 @@
 #define PG_OPERATOR_H
 
 #include "catalog/genbki.h"
+#include "catalog/objectaddress.h"
 #include "nodes/pg_list.h"
 
 /* ----------------
@@ -279,7 +280,7 @@ typedef FormData_pg_operator *Form_pg_operator;
 #define RECORD_EQ_OP 2988
 #define RECORD_LT_OP 2990
 #define RECORD_GT_OP 2991
-extern void OperatorCreate(const char *operatorName, Oid operatorNamespace, Oid leftTypeId, Oid rightTypeId, Oid procedureId,
+extern ObjectAddress OperatorCreate(const char *operatorName, Oid operatorNamespace, Oid leftTypeId, Oid rightTypeId, Oid procedureId,
     List *commutatorName, List *negatorName, Oid restrictionId, Oid joinId, bool canMerge, bool canHash);
 
 extern Oid OperatorGet(const char *operatorName, Oid operatorNamespace, Oid leftObjectId, Oid rightObjectId, bool *defined);

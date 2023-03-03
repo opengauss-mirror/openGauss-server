@@ -38,6 +38,7 @@
 #include "utils/syscache.h"
 
 static void does_not_exist_skipping(ObjectType objtype, List* objname, List* objargs, bool missing_ok);
+static bool schema_does_not_exist_skipping(List *object, char **msg, char **name);
 
 static bool CheckObjectDropPrivilege(ObjectType removeType, Oid objectId, const Relation relation)
 {
@@ -302,6 +303,34 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
 }
 
 /*
+ * schema_does_not_exist_skipping
+ *      Subroutine for RemoveObjects
+ *
+ * After determining that a specification for a schema-qualifiable object
+ * refers to an object that does not exist, test whether the specified schema
+ * exists or not.  If no schema was specified, or if the schema does exist,
+ * return false -- the object itself is missing instead.  If the specified
+ * schema does not exist, fill the error message format string and the
+ * specified schema name, and return true.
+ */
+static bool schema_does_not_exist_skipping(List *object, char **msg, char **name)
+{
+    RangeVar   *rel;
+
+    rel = makeRangeVarFromNameList(object);
+
+    if (rel->schemaname != NULL &&
+        !OidIsValid(LookupNamespaceNoError(rel->schemaname))) {
+        *msg = gettext_noop("schema \"%s\" does not exist, skipping");
+        *name = rel->schemaname;
+
+        return true;
+    }
+
+    return false;
+}
+
+/*
  * Generate a NOTICE stating that the named object was not found, and is
  * being skipped.  This is only relevant when "IF EXISTS" is used; otherwise,
  * get_object_address() will throw an ERROR.
@@ -316,9 +345,23 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
     switch (objtype) {
         case OBJECT_TYPE:
         case OBJECT_DOMAIN:
-            msg = gettext_noop("type \"%s\" does not exist");
-            name = TypeNameToString(makeTypeNameFromNameList(objname));
-            break;
+        {
+            /*objname migth be a TypeName list or a String list, check its node type firstly*/
+            Node * ptype = (Node*) linitial(objname);
+            TypeName   *typ = NULL;
+            if (ptype->type == T_String)
+                typ = makeTypeNameFromNameList(objname);
+            else if (ptype->type == T_TypeName)
+                typ = (TypeName*)linitial(objname);
+            else
+                ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), (errmsg("unknown type: %d",(int)ptype->type))));
+ 
+            if (!schema_does_not_exist_skipping(typ->names, &msg, &name)) {
+                msg = gettext_noop("type \"%s\" does not exist");
+                name = TypeNameToString(typ);
+            }
+            
+        }  break;
         case OBJECT_COLLATION:
             msg = gettext_noop("collation \"%s\" does not exist");
             name = NameListToString(objname);
@@ -395,6 +438,10 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
                 args = NameListToString(list_truncate(list_copy(objname), list_length(objname) - 1));
                 break;
             }
+        case OBJECT_EVENT_TRIGGER:
+            msg = gettext_noop("event trigger \"%s\" does not exist, skipping");
+            name = NameListToString(objname);
+            break;
         case OBJECT_RULE:
             msg = gettext_noop("rule \"%s\" for relation \"%s\" does not exist");
             name = strVal(llast(objname));
@@ -409,15 +456,25 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
             name = NameListToString(objname);
             break;
         case OBJECT_OPCLASS:
-            msg = gettext_noop("operator class \"%s\" does not exist for access method \"%s\"");
-            name = NameListToString(objname);
-            args = strVal(linitial(objargs));
-            break;
+            {
+                List *opcname = list_copy_tail(objname, 1);
+                if (!schema_does_not_exist_skipping(opcname, &msg, &name)) {
+                    msg = gettext_noop("operator class \"%s\" does not exist for access method \"%s\"");
+                    name = NameListToString(opcname);
+                    args = strVal(linitial(objname));
+                }
+                list_free_ext(opcname);
+            } break;
         case OBJECT_OPFAMILY:
-            msg = gettext_noop("operator family \"%s\" does not exist for access method \"%s\"");
-            name = NameListToString(objname);
-            args = strVal(linitial(objargs));
-            break;
+            {
+                List *opfname = list_copy_tail(objname, 1);
+                if (!schema_does_not_exist_skipping(opfname, &msg, &name)) {
+                    msg = gettext_noop("operator family \"%s\" does not exist for access method \"%s\"");
+                    name = NameListToString(opfname);
+                    args = strVal(linitial(objname));
+                }
+                list_free_ext(opfname);
+            } break;
         case OBJECT_DATA_SOURCE:
             msg = gettext_noop("data source \"%s\" does not exist");
             name = NameListToString(objname);

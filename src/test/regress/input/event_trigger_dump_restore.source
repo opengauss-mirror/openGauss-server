@@ -1,0 +1,45 @@
+create database event_trigger_db dbcompatibility 'PG';
+\c event_trigger_db;
+
+create or replace function test_event_trigger() returns event_trigger as $$
+BEGIN
+    RAISE NOTICE 'test_event_trigger: % %', tg_event, tg_tag;
+END
+$$ language plpgsql;
+
+create event trigger regress_event_trigger1 on ddl_command_start
+  WHEN TAG IN ('CREATE TABLE') execute procedure test_event_trigger();
+
+alter event trigger regress_event_trigger1 DISABLE;
+
+create event trigger regress_event_trigger2 on ddl_command_start
+  WHEN TAG IN ('CREATE TABLE') execute procedure test_event_trigger();
+
+alter event trigger regress_event_trigger2 ENABLE ALWAYS;
+
+create event trigger regress_event_trigger3 on ddl_command_start
+  WHEN TAG IN ('CREATE TABLE') execute procedure test_event_trigger();
+
+alter event trigger regress_event_trigger3 ENABLE REPLICA;
+
+select evtname,evtevent,evtenabled from pg_event_trigger;
+
+-- dump data
+\! @abs_bindir@/gs_dump event_trigger_db -p @portstring@ -f @abs_bindir@/event_trigger_backup.sql
+
+drop event trigger regress_event_trigger1;
+drop event trigger regress_event_trigger2;
+drop event trigger regress_event_trigger3;
+drop function test_event_trigger;
+
+-- restore data
+\! @abs_bindir@/gsql -p @portstring@ -d event_trigger_db -f @abs_bindir@/event_trigger_backup.sql
+
+select evtname,evtevent,evtenabled from pg_event_trigger;
+drop event trigger regress_event_trigger1;
+drop event trigger regress_event_trigger2;
+drop event trigger regress_event_trigger3;
+drop function test_event_trigger;
+
+\c regression
+drop database event_trigger_db;

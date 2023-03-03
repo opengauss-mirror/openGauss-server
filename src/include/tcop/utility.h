@@ -18,6 +18,14 @@
 #include "pgxc/pgxcnode.h"
 #include "tcop/tcopprot.h"
 
+typedef enum
+{
+    PROCESS_UTILITY_TOPLEVEL,       /* toplevel interactive command */
+    PROCESS_UTILITY_QUERY,          /* a complete query, but not toplevel */
+    PROCESS_UTILITY_SUBCOMMAND,     /* a piece of a query */
+    PROCESS_UTILITY_GENERATED       /* internally generated node query node */
+} ProcessUtilityContext;
+
 #define CHOOSE_EXEC_NODES(is_temp) ((is_temp) ? EXEC_ON_DATANODES : EXEC_ON_ALL_NODES)
 
 #define TRANSFER_DISABLE_DDL(namespaceOid) \
@@ -47,6 +55,7 @@ typedef void (*ProcessUtility_hook_type)(processutility_context* processutility_
     bool sentToRemote,
 #endif /* PGXC */
     char* completionTag,
+    ProcessUtilityContext context,
     bool isCTAS);
 extern THR_LOCAL PGDLLIMPORT ProcessUtility_hook_type ProcessUtility_hook;
 
@@ -56,6 +65,7 @@ extern void ProcessUtility(processutility_context* processutility_cxt,
     bool sentToRemote,
 #endif /* PGXC */
     char* completionTag,
+    ProcessUtilityContext context,
     bool isCTAS = false);
 extern void standard_ProcessUtility(processutility_context* processutility_cxt,
     DestReceiver* dest,
@@ -63,6 +73,7 @@ extern void standard_ProcessUtility(processutility_context* processutility_cxt,
     bool sentToRemote,
 #endif /* PGXC */
     char* completionTag,
+    ProcessUtilityContext context,
     bool isCTAS = false);
 
 extern char* find_first_exec_cn();

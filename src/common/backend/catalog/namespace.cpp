@@ -4580,7 +4580,7 @@ static void InitTempTableNamespace(void)
     proutility_cxt.readOnlyTree = false;
     proutility_cxt.params = NULL;
     proutility_cxt.is_top_level = false;
-    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL, PROCESS_UTILITY_GENERATED);
 
     if (IS_PGXC_COORDINATOR)
         if (PoolManagerSetCommand(POOL_CMD_TEMP, namespaceName) < 0)
@@ -4640,7 +4640,7 @@ static void InitTempTableNamespace(void)
     proutility_cxt.readOnlyTree = false;
     proutility_cxt.params = NULL;
     proutility_cxt.is_top_level = false;
-    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL, PROCESS_UTILITY_GENERATED);
 
     /* Advance command counter to make namespace visible */
     CommandCounterIncrement();
@@ -5493,7 +5493,7 @@ dropExistTempNamespace(char *namespaceName)
     proutility_cxt.readOnlyTree = false;
     proutility_cxt.params = NULL;
     proutility_cxt.is_top_level = false;
-    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL, PROCESS_UTILITY_GENERATED);
     CommandCounterIncrement();
 }
 

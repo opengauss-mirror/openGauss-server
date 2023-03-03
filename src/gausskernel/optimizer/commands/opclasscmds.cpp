@@ -33,10 +33,12 @@
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
+#include "catalog/opfam_internal.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "commands/alter.h"
 #include "commands/defrem.h"
+#include "commands/event_trigger.h"
 #include "miscadmin.h"
 #include "parser/parse_func.h"
 #include "parser/parse_oper.h"
@@ -49,22 +51,10 @@
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 
-/*
- * We use lists of this struct type to keep track of both operators and
- * procedures while building or adding to an opfamily.
- */
-typedef struct {
-    Oid object;     /* operator or support proc's OID */
-    int number;     /* strategy or support proc number */
-    Oid lefttype;   /* lefttype */
-    Oid righttype;  /* righttype */
-    Oid sortfamily; /* ordering operator's sort opfamily, or 0 */
-} OpFamilyMember;
-
-static void AlterOpFamilyAdd(
-    List* opfamilyname, Oid amoid, Oid opfamilyoid, int maxOpNumber, int maxProcNumber, List* items);
-static void AlterOpFamilyDrop(
-    List* opfamilyname, Oid amoid, Oid opfamilyoid, int maxOpNumber, int maxProcNumber, List* items);
+static void AlterOpFamilyAdd(AlterOpFamilyStmt *stmt,
+    Oid amoid, Oid opfamilyoid, int maxOpNumber, int maxProcNumber, List* items);
+static void AlterOpFamilyDrop(AlterOpFamilyStmt *stmt,
+    Oid amoid, Oid opfamilyoid, int maxOpNumber, int maxProcNumber, List* items);
 static void processTypesSpec(List* args, Oid* lefttype, Oid* righttype);
 static void assignOperTypes(OpFamilyMember* member, Oid amoid, Oid typeoid);
 static void assignProcTypes(OpFamilyMember* member, Oid amoid, Oid typeoid);
@@ -219,7 +209,7 @@ Oid get_opclass_oid(Oid amID, List* opclassname, bool missing_ok)
  *
  * Caller must have done permissions checks etc. already.
  */
-static Oid CreateOpFamily(char* amname, char* opfname, Oid namespaceoid, Oid amoid)
+static ObjectAddress CreateOpFamily(char* amname, char* opfname, Oid namespaceoid, Oid amoid)
 {
     Oid opfamilyoid;
     Relation rel;
@@ -289,14 +279,14 @@ static Oid CreateOpFamily(char* amname, char* opfname, Oid namespaceoid, Oid amo
 
     heap_close(rel, RowExclusiveLock);
 
-    return opfamilyoid;
+    return myself;
 }
 
 /*
  * DefineOpClass
  *		Define a new index operator class.
  */
-void DefineOpClass(CreateOpClassStmt* stmt)
+ObjectAddress DefineOpClass(CreateOpClassStmt* stmt)
 {
     char* opcname = NULL;   /* name of opclass we're creating */
     Oid amoid,              /* our AM's oid */
@@ -401,7 +391,9 @@ void DefineOpClass(CreateOpClassStmt* stmt)
             /*
              * Create it ... again no need for more permissions ...
              */
-            opfamilyoid = CreateOpFamily(stmt->amname, opcname, namespaceoid, amoid);
+            ObjectAddress tmpAddr; 
+            tmpAddr = CreateOpFamily(stmt->amname, opcname, namespaceoid, amoid);
+            opfamilyoid = tmpAddr.objectId;
         }
     }
 
@@ -596,6 +588,9 @@ void DefineOpClass(CreateOpClassStmt* stmt)
     storeOperators(stmt->opfamilyname, amoid, opfamilyoid, opclassoid, operators, false);
     storeProcedures(stmt->opfamilyname, amoid, opfamilyoid, opclassoid, procedures, false);
 
+    /* let event triggers know what happened */
+    EventTriggerCollectCreateOpClass(stmt, opclassoid, operators, procedures);
+
     /*
      * Create dependencies for the opclass proper.	Note: we do not create a
      * dependency link to the AM, because we don't currently support DROP
@@ -643,13 +638,15 @@ void DefineOpClass(CreateOpClassStmt* stmt)
     heap_close(rel, RowExclusiveLock);
     list_free(operators);
     list_free(procedures);
+
+    return myself;
 }
 
 /*
  * DefineOpFamily
  *		Define a new index operator family.
  */
-void DefineOpFamily(CreateOpFamilyStmt* stmt)
+ObjectAddress DefineOpFamily(CreateOpFamilyStmt* stmt)
 {
     char* opfname = NULL; /* name of opfamily we're creating */
     Oid amoid,            /* our AM's oid */
@@ -677,7 +674,8 @@ void DefineOpFamily(CreateOpFamilyStmt* stmt)
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to create an operator family")));
 
     /* Insert pg_opfamily catalog entry */
-    (void)CreateOpFamily(stmt->amname, opfname, namespaceoid, amoid);
+    return CreateOpFamily(stmt->amname, opfname, namespaceoid, amoid);
+
 }
 
 /*
@@ -688,7 +686,7 @@ void DefineOpFamily(CreateOpFamilyStmt* stmt)
  * other commands called ALTER OPERATOR FAMILY exist, but go through
  * different code paths.
  */
-void AlterOpFamily(AlterOpFamilyStmt* stmt)
+Oid AlterOpFamily(AlterOpFamilyStmt* stmt)
 {
     Oid amoid,         /* our AM's oid */
         opfamilyoid;   /* oid of opfamily */
@@ -730,16 +728,18 @@ void AlterOpFamily(AlterOpFamilyStmt* stmt)
      * ADD and DROP cases need separate code from here on down.
      */
     if (stmt->isDrop)
-        AlterOpFamilyDrop(stmt->opfamilyname, amoid, opfamilyoid, maxOpNumber, maxProcNumber, stmt->items);
+        AlterOpFamilyDrop(stmt, amoid, opfamilyoid, maxOpNumber, maxProcNumber, stmt->items);
     else
-        AlterOpFamilyAdd(stmt->opfamilyname, amoid, opfamilyoid, maxOpNumber, maxProcNumber, stmt->items);
+        AlterOpFamilyAdd(stmt, amoid, opfamilyoid, maxOpNumber, maxProcNumber, stmt->items);
+
+    return opfamilyoid;
 }
 
 /*
  * ADD part of ALTER OP FAMILY
  */
 static void AlterOpFamilyAdd(
-    List* opfamilyname, Oid amoid, Oid opfamilyoid, int maxOpNumber, int maxProcNumber, List* items)
+    AlterOpFamilyStmt *stmt, Oid amoid, Oid opfamilyoid, int maxOpNumber, int maxProcNumber, List* items)
 {
     List* operators = NIL;  /* OpFamilyMember list for operators */
     List* procedures = NIL; /* OpFamilyMember list for support procs */
@@ -843,17 +843,21 @@ static void AlterOpFamilyAdd(
      * Add tuples to pg_amop and pg_amproc tying in the operators and
      * functions.  Dependencies on them are inserted, too.
      */
-    storeOperators(opfamilyname, amoid, opfamilyoid, InvalidOid, operators, true);
-    storeProcedures(opfamilyname, amoid, opfamilyoid, InvalidOid, procedures, true);
+    storeOperators(stmt->opfamilyname, amoid, opfamilyoid, InvalidOid, operators, true);
+    storeProcedures(stmt->opfamilyname, amoid, opfamilyoid, InvalidOid, procedures, true);
     list_free(operators);
     list_free(procedures);
+    /* make information available to event triggers */
+    EventTriggerCollectAlterOpFam(stmt, opfamilyoid,
+                                  operators, procedures);
+    
 }
 
 /*
  * DROP part of ALTER OP FAMILY
  */
 static void AlterOpFamilyDrop(
-    List* opfamilyname, Oid amoid, Oid opfamilyoid, int maxOpNumber, int maxProcNumber, List* items)
+    AlterOpFamilyStmt *stmt, Oid amoid, Oid opfamilyoid, int maxOpNumber, int maxProcNumber, List* items)
 {
     List* operators = NIL;  /* OpFamilyMember list for operators */
     List* procedures = NIL; /* OpFamilyMember list for support procs */
@@ -913,8 +917,13 @@ static void AlterOpFamilyDrop(
     /*
      * Remove tuples from pg_amop and pg_amproc.
      */
-    dropOperators(opfamilyname, amoid, opfamilyoid, operators);
-    dropProcedures(opfamilyname, amoid, opfamilyoid, procedures);
+    dropOperators(stmt->opfamilyname, amoid, opfamilyoid, operators);
+    dropProcedures(stmt->opfamilyname, amoid, opfamilyoid, procedures);
+ 
+    /* make information available to event triggers */
+    EventTriggerCollectAlterOpFam(stmt, opfamilyoid,
+                                  operators, procedures);
+    
 }
 
 /*
@@ -1626,15 +1635,80 @@ void RenameOpFamily(List* name, const char* access_method, const char* newname)
     tableam_tops_free_tuple(tup);
 }
 
+char *
+get_am_name(Oid amOid)
+{
+    HeapTuple   tup;
+    char       *result = NULL;    
+    tup = SearchSysCache1(AMOID, ObjectIdGetDatum(amOid));
+    if (HeapTupleIsValid(tup)) {
+        result = pstrdup(NameStr(((Form_pg_am) GETSTRUCT(tup))->amname));
+        ReleaseSysCache(tup);
+    }
+    return result;
+}
+
+ /*
+  * Subroutine for ALTER OPERATOR CLASS SET SCHEMA/RENAME
+  *
+  * Is there an operator class with the given name and signature already
+  * in the given namespace?  If so, raise an appropriate error message.
+  */
+ void
+ IsThereOpClassInNamespace(const char *opcname, Oid opcmethod,
+                          Oid opcnamespace)
+ {
+
+    /* make sure the new name doesn't exist */
+    if (SearchSysCacheExists3(CLAAMNAMENSP,
+                              ObjectIdGetDatum(opcmethod),
+                              CStringGetDatum(opcname),
+                              ObjectIdGetDatum(opcnamespace)))
+                            
+    {
+        ereport(ERROR,
+            (errcode(ERRCODE_DUPLICATE_OBJECT),
+                errmsg("operator class \"%s\" for access method \"%s\" already exists in schema \"%s\"",
+                        opcname,
+                        get_am_name(opcmethod),
+                        get_namespace_name(opcnamespace))));
+    }
+}
+
+/*
+ * Subroutine for ALTER OPERATOR FAMILY SET SCHEMA/RENAME
+ *
+ * Is there an operator family with the given name and signature already
+ * in the given namespace?  If so, raise an appropriate error message.
+ */
+void
+IsThereOpFamilyInNamespace(const char *opfname, Oid opfmethod,
+                           Oid opfnamespace)
+{
+    /* make sure the new name doesn't exist */
+    if (SearchSysCacheExists3(OPFAMILYAMNAMENSP,
+                              ObjectIdGetDatum(opfmethod),
+                              CStringGetDatum(opfname),
+                              ObjectIdGetDatum(opfnamespace)))
+        ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                 errmsg("operator family \"%s\" for access method \"%s\" already exists in schema \"%s\"",
+                        opfname,
+                        get_am_name(opfmethod),
+                        get_namespace_name(opfnamespace))));
+        
+}
+
 /*
  * Change opclass owner by name
  */
-void AlterOpClassOwner(List* name, const char* access_method, Oid newOwnerId)
+ObjectAddress AlterOpClassOwner(List* name, const char* access_method, Oid newOwnerId)
 {
     Oid amOid;
     Relation rel;
     HeapTuple tup;
     HeapTuple origtup;
+    ObjectAddress address;
 
     amOid = get_am_oid(access_method, false);
 
@@ -1649,6 +1723,8 @@ void AlterOpClassOwner(List* name, const char* access_method, Oid newOwnerId)
 
     tableam_tops_free_tuple(tup);
     heap_close(rel, NoLock);
+    ObjectAddressSet(address, OperatorClassRelationId, amOid);
+    return address;
 }
 
 /*
@@ -1726,12 +1802,13 @@ static void AlterOpClassOwner_internal(Relation rel, HeapTuple tup, Oid newOwner
 /*
  * ALTER OPERATOR CLASS any_name USING access_method SET SCHEMA name
  */
-void AlterOpClassNamespace(List* name, const char* access_method, const char* newschema)
+ObjectAddress AlterOpClassNamespace(List* name, const char* access_method, const char* newschema)
 {
     Oid amOid;
     Relation rel;
     Oid opclassOid;
     Oid nspOid;
+    ObjectAddress address;
 
     amOid = get_am_oid(access_method, false);
 
@@ -1754,6 +1831,8 @@ void AlterOpClassNamespace(List* name, const char* access_method, const char* ne
         ACL_KIND_OPCLASS);
 
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
+    return address;
 }
 
 Oid AlterOpClassNamespace_oid(Oid opclassOid, Oid newNspOid)
@@ -1781,13 +1860,15 @@ Oid AlterOpClassNamespace_oid(Oid opclassOid, Oid newNspOid)
 /*
  * Change opfamily owner by name
  */
-void AlterOpFamilyOwner(List* name, const char* access_method, Oid newOwnerId)
+ObjectAddress AlterOpFamilyOwner(List* name, const char* access_method, Oid newOwnerId)
 {
-    Oid amOid;
+    Oid amOid, opfOid;
+
     Relation rel;
     HeapTuple tup;
     char* opfname = NULL;
     char* schemaname = NULL;
+    ObjectAddress address;
 
     amOid = get_am_oid(access_method, false);
 
@@ -1809,8 +1890,8 @@ void AlterOpFamilyOwner(List* name, const char* access_method, Oid newOwnerId)
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_OBJECT),
                     errmsg("operator family \"%s\" does not exist for access method \"%s\"", opfname, access_method)));
+        opfOid = HeapTupleGetOid(tup);
     } else {
-        Oid opfOid;
 
         opfOid = OpfamilynameGetOpfid(amOid, opfname);
         if (!OidIsValid(opfOid))
@@ -1828,6 +1909,8 @@ void AlterOpFamilyOwner(List* name, const char* access_method, Oid newOwnerId)
 
     tableam_tops_free_tuple(tup);
     heap_close(rel, NoLock);
+    ObjectAddressSet(address, OperatorFamilyRelationId, opfOid);
+    return address;
 }
 
 /*
@@ -1921,12 +2004,13 @@ Oid get_am_oid(const char* amname, bool missing_ok)
 /*
  * ALTER OPERATOR FAMILY any_name USING access_method SET SCHEMA name
  */
-void AlterOpFamilyNamespace(List* name, const char* access_method, const char* newschema)
+ObjectAddress AlterOpFamilyNamespace(List* name, const char* access_method, const char* newschema)
 {
     Oid amOid;
     Relation rel;
     Oid opfamilyOid;
     Oid nspOid;
+    ObjectAddress address;
 
     amOid = get_am_oid(access_method, false);
 
@@ -1949,6 +2033,8 @@ void AlterOpFamilyNamespace(List* name, const char* access_method, const char* n
         ACL_KIND_OPFAMILY);
 
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
+    return address;
 }
 
 Oid AlterOpFamilyNamespace_oid(Oid opfamilyOid, Oid newNspOid)

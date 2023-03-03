@@ -277,7 +277,6 @@ static bool BuildCheckReplChannel(const char* ChannelInfo)
         if (ReplStr == NULL) {
             return false;
         } else {
-            /* check localhost */
             iter = strstr(ReplStr, "localhost");
             if (iter == NULL) {
                 free(ReplStr);
@@ -295,7 +294,6 @@ static bool BuildCheckReplChannel(const char* ChannelInfo)
                 return false;
             }
 
-            /* check localport */
             iter = strstr(ReplStr, "localport");
             if (iter == NULL) {
                 free(ReplStr);
@@ -312,7 +310,6 @@ static bool BuildCheckReplChannel(const char* ChannelInfo)
                 return false;
             }
 
-            /* check remotehost */
             iter = strstr(ReplStr, "remotehost");
             if (NULL == iter) {
                 free(ReplStr);
@@ -330,7 +327,6 @@ static bool BuildCheckReplChannel(const char* ChannelInfo)
                 return false;
             }
 
-            /* check remoteport */
             iter = strstr(ReplStr, "remoteport");
             if (iter == NULL) {
                 free(ReplStr);

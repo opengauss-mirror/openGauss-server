@@ -770,7 +770,8 @@ static void execute_sql_string(const char* sql, const char* filename)
 #ifdef PGXC
                     true, /* this is created at remote node level */
 #endif                    /* PGXC */
-                    NULL);
+                    NULL,
+                    PROCESS_UTILITY_QUERY);
             }
 
             PopActiveSnapshot();
@@ -1154,7 +1155,7 @@ static List* find_update_path(
 /*
  * CREATE EXTENSION
  */
-void CreateExtension(CreateExtensionStmt* stmt)
+ObjectAddress CreateExtension(CreateExtensionStmt* stmt)
 {
     DefElem* d_schema = NULL;
     DefElem* d_new_version = NULL;
@@ -1175,6 +1176,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
     char* c_sql = NULL;
     int keylen;
     uint32 hashvalue = 0;
+    ObjectAddress address;
 
     /* User defined extension only support postgis. */
     if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade &&
@@ -1209,7 +1211,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
             ereport(NOTICE,
                 (errcode(ERRCODE_DUPLICATE_OBJECT),
                     errmsg("extension \"%s\" already exists in schema \"%s\", skipping", stmt->extname, schemaName)));
-            return;
+            return InvalidObjectAddress;
         } else {
 #ifndef ENABLE_MULTIPLE_NODES		
             ereport(ERROR,
@@ -1435,7 +1437,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
     /*
      * Insert new tuple into pg_extension, and create dependency entries.
      */
-    extensionOid = InsertExtensionTuple(control->name,
+    address = InsertExtensionTuple(control->name,
         extowner,
         schemaOid,
         control->relocatable,
@@ -1444,6 +1446,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
         PointerGetDatum(NULL),
         requiredExtensions);
 
+    extensionOid = address.objectId;
     /*
      * Apply any control-file comment on extension
      */
@@ -1470,6 +1473,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
         u_sess->attr.attr_sql.whale = true;
     }
 #endif
+    return address;
 }
 
 /*
@@ -1485,7 +1489,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
  * extConfig and extCondition should be arrays or PointerGetDatum(NULL).
  * We declare them as plain Datum to avoid needing array.h in extension.h.
  */
-Oid InsertExtensionTuple(const char* extName, Oid extOwner, Oid schemaOid, bool relocatable, const char* extVersion,
+ObjectAddress InsertExtensionTuple(const char* extName, Oid extOwner, Oid schemaOid, bool relocatable, const char* extVersion,
     Datum extConfig, Datum extCondition, List* requiredExtensions)
 {
     Oid extensionOid;
@@ -1560,7 +1564,7 @@ Oid InsertExtensionTuple(const char* extName, Oid extOwner, Oid schemaOid, bool 
     /* Post creation hook for new extension */
     InvokeObjectAccessHook(OAT_POST_CREATE, ExtensionRelationId, extensionOid, 0, NULL);
 
-    return extensionOid;
+    return myself;
 }
 
 /*
@@ -2328,7 +2332,7 @@ static void extension_config_remove(Oid extensionoid, Oid tableoid)
 /*
  * Execute ALTER EXTENSION SET SCHEMA
  */
-void AlterExtensionNamespace(List* names, const char* newschema)
+ObjectAddress AlterExtensionNamespace(List* names, const char* newschema)
 {
     char* extensionName = NULL;
     Oid extensionOid;
@@ -2344,7 +2348,7 @@ void AlterExtensionNamespace(List* names, const char* newschema)
     SysScanDesc depScan;
     HeapTuple depTup;
     ObjectAddresses* objsMoved = NULL;
-
+    ObjectAddress extAddr;
     if (list_length(names) != 1)
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("extension name cannot be qualified")));
     extensionName = strVal(linitial(names));
@@ -2402,7 +2406,7 @@ void AlterExtensionNamespace(List* names, const char* newschema)
      */
     if (extForm->extnamespace == nspOid) {
         heap_close(extRel, RowExclusiveLock);
-        return;
+        return InvalidObjectAddress;
     }
 
     /* Check extension is supposed to be relocatable */
@@ -2482,12 +2486,16 @@ void AlterExtensionNamespace(List* names, const char* newschema)
 
     /* update dependencies to point to the new schema */
     changeDependencyFor(ExtensionRelationId, extensionOid, NamespaceRelationId, oldNspOid, nspOid);
+
+    ObjectAddressSet(extAddr, ExtensionRelationId, extensionOid);
+ 
+    return extAddr;
 }
 
 /*
  * Execute ALTER EXTENSION UPDATE
  */
-void ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
+ObjectAddress ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
 {
     DefElem* d_new_version = NULL;
     char* versionName = NULL;
@@ -2502,6 +2510,7 @@ void ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
     Datum datum;
     bool isnull = false;
     ListCell* lc = NULL;
+    ObjectAddress address;
 
     /*
      * We use global variables to track the extension being created, so we can
@@ -2583,7 +2592,7 @@ void ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
     if (strcmp(oldVersionName, versionName) == 0) {
         ereport(
             NOTICE, (errmsg("version \"%s\" of extension \"%s\" is already installed", versionName, stmt->extname)));
-        return;
+        return  InvalidObjectAddress;
     }
 
     /*
@@ -2596,6 +2605,9 @@ void ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
      * time
      */
     ApplyExtensionUpdates(extensionOid, control, oldVersionName, updateVersions);
+    ObjectAddressSet(address, ExtensionRelationId, extensionOid);
+    
+    return address;
 }
 
 /*
@@ -2744,7 +2756,7 @@ static void ApplyExtensionUpdates(
 /*
  * Execute ALTER EXTENSION ADD/DROP
  */
-void ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt* stmt)
+ObjectAddress ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt* stmt, ObjectAddress *objAddr)
 {
     ObjectAddress extension;
     ObjectAddress object;
@@ -2768,6 +2780,10 @@ void ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt* stmt)
     object =
         get_object_address(stmt->objtype, stmt->objname, stmt->objargs, &relation, ShareUpdateExclusiveLock, false);
 
+    Assert(object.objectSubId == 0);
+    if (objAddr)
+        *objAddr = object;
+    
     /* Permission check: must own target object, too */
     check_object_ownership(GetUserId(), stmt->objtype, object, stmt->objname, stmt->objargs, relation);
 
@@ -2836,6 +2852,8 @@ void ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt* stmt)
      */
     if (relation != NULL)
         relation_close(relation, NoLock);
+
+    return extension;
 }
 
 /*

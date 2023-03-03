@@ -42,14 +42,14 @@ create user 'test_user_host'@'127.0.0.%' password 'test123@';
 create user 'test_user_host'@'127.0.%' password 'test123@';
 create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
-select usename from pg_user where usename like 'test_user_host%';
+select usename from pg_user where usename like 'test_user_host%' order by usename;
          usename          
 --------------------------
+ test_user_host%
  test_user_host@%
  test_user_host@127.%
- test_user_host@127.0.0.%
  test_user_host@127.0.%
- test_user_host%
+ test_user_host@127.0.0.%
  test_user_host@127.0.0.1
 (6 rows)
 

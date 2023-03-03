@@ -250,4 +250,5 @@ extern void appendStringInfoHuge(StringInfoHuge str, const char* fmt, ...)
     /* This extension allows gcc to check the format string */
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 
+extern char *psprintf(const char *fmt,...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2))); 
 #endif /* STRINGINFO_H */

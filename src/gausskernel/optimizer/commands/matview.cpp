@@ -65,6 +65,7 @@ typedef struct {
     Query* viewParse; /* the query which defines/populates data */
     /* These fields are filled by intorel_startup: */
     Relation rel;            /* relation to write to */
+    ObjectAddress reladdr;      /* address of rel, for ExecCreateTableAs */
     CommandId output_cid;    /* cmin to insert in output tuples */
     int hi_options;          /* heap_insert performance options */
     BulkInsertState bistate; /* bulk insert state */
@@ -804,7 +805,7 @@ static void ExecutorRefreshMatInc(QueryDesc* queryDesc, Query *query,
     return;
 }
 
-void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
+ObjectAddress ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
                  ParamListInfo params, char *completionTag)
 {
     Oid matviewOid;
@@ -818,6 +819,7 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
     Oid save_userid;
     int save_sec_context;
     int save_nestlevel;
+    ObjectAddress address;
 
     /* Get current timestamp */
     curtime = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
@@ -834,7 +836,7 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
     Datum oldTime = get_matview_refreshtime(matviewOid, &isTimeNULL);
     if (timestamp_cmp_internal(DatumGetTimestamp(curtime),
             DatumGetTimestamp(oldTime)) <= 0) {
-        return;
+        return InvalidObjectAddress;
     }
 
     matviewRel = heap_open(matviewOid, ExclusiveLock);
@@ -897,6 +899,7 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
 
     vacuum_mlog_for_matview(matviewOid);
 
+    ObjectAddressSet(address, RelationRelationId, matviewOid);
     /* and clean up */
     ExecutorFinish(queryDesc);
     ExecutorEnd(queryDesc);
@@ -911,14 +914,14 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
     /* Restore userid and security context */
     SetUserIdAndSecContext(save_userid, save_sec_context);
 
-    return;
+    return address;
 }
 
 /*
  * ExecRefreshMatViewEpq -- execute a REFRESH MATERIALIZED VIEW command.
  * The Matview must be INCREMENTAL.
  */
-void ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
+ObjectAddress ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
                             ParamListInfo params, char *completionTag)
 {
     Oid mapid;
@@ -932,6 +935,7 @@ void ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
     Oid save_userid;
     int save_sec_context;
     int save_nestlevel;
+    ObjectAddress address;
 
     /* Get current timestamp */
     curtime = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
@@ -1016,18 +1020,18 @@ void ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
     ExecutorEnd(queryDesc);
     FreeQueryDesc(queryDesc);
 
+    ObjectAddressSet(address, RelationRelationId, matviewOid);
     heap_close(matviewRel, NoLock);
-
     /* Roll back any GUC changes */
     AtEOXact_GUC(false, save_nestlevel);
 
     /* Restore userid and security context */
     SetUserIdAndSecContext(save_userid, save_sec_context);
 
-    return;
+    return address;
 }
 
-void ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
+ObjectAddress ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
                  ParamListInfo params, char *completionTag)
 {
     Oid matviewOid;
@@ -1042,6 +1046,7 @@ void ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *queryString
     Oid save_userid;
     int save_sec_context;
     int save_nestlevel;
+    ObjectAddress address;
 
     curtime = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
 
@@ -1154,6 +1159,8 @@ void ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *queryString
 
     /* Restore userid and security context */
     SetUserIdAndSecContext(save_userid, save_sec_context);
+    ObjectAddressSet(address, RelationRelationId, matviewOid);
+    return address;
 }
 
 bool isIncMatView(RangeVar *rv)
@@ -1198,7 +1205,7 @@ bool isIncMatView(RangeVar *rv)
  * The scannable state is changed based on whether the contents reflect the
  * result set of the materialized view's query.
  */
-void ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
+ObjectAddress ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
                  ParamListInfo params, char *completionTag)
 {
     if (isIncMatView(stmt->relation)) {
@@ -1297,7 +1304,7 @@ static void ExecCreateMatInc(QueryDesc*queryDesc, Query *query, Relation matview
     return;
 }
 
-void ExecCreateMatViewInc(CreateTableAsStmt* stmt, const char* queryString, ParamListInfo params)
+ObjectAddress  ExecCreateMatViewInc(CreateTableAsStmt* stmt, const char* queryString, ParamListInfo params)
 {
     Datum curtime;
     Relation matview;
@@ -1308,6 +1315,7 @@ void ExecCreateMatViewInc(CreateTableAsStmt* stmt, const char* queryString, Para
     QueryDesc* queryDesc = NULL;
     PlannedStmt* plan = NULL;
     DestReceiver* dest = NULL;
+    ObjectAddress address;
 
     /* Get current timestamp */
     curtime = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
@@ -1350,7 +1358,7 @@ void ExecCreateMatViewInc(CreateTableAsStmt* stmt, const char* queryString, Para
     update_matview_tuple(matviewid, true, curtime);
 
     ExecCreateMatInc(queryDesc, query, matview, mapid, curtime);
-
+    address = ((DR_intorel *) dest)->reladdr;
     (*dest->rShutdown)(dest);
 
     /* and clean up */
@@ -1368,6 +1376,7 @@ void ExecCreateMatViewInc(CreateTableAsStmt* stmt, const char* queryString, Para
     }
 
     CommandCounterIncrement();
+    return address;
 }
 
 /*

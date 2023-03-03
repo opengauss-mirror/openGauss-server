@@ -754,6 +754,8 @@ DATA(insert OID = 3115 ( fdw_handler	PGNSP PGUID  4 t p P f t \054 0 0 0 fdw_han
 #define FDW_HANDLEROID	3115
 DATA(insert OID = 3831 ( anyrange		PGNSP PGUID  -1 f p P f t \054 0 0 0 anyrange_in anyrange_out - - - - - d x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define ANYRANGEOID		3831
+DATA(insert OID = 3838 ( event_trigger     PGNSP PGUID  4 t p P f t \054 0 0 0 event_trigger_in event_trigger_out - - - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
+#define EVTTRIGGEROID      3838
 DATA(insert OID = 9003 ( smalldatetime   PGNSP PGUID    8 FLOAT8PASSBYVAL b D f t \054 0        0 9005 smalldatetime_in smalldatetime_out smalldatetime_recv smalldatetime_send timestamptypmodin timestamptypmodout - d p f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("date and time");
 #define SMALLDATETIMEOID        9003
@@ -809,6 +811,9 @@ DATA(insert OID = 4406 ( TdigestData		PGNSP PGUID -1 f b U f t \054 0 0 4407 tdi
 
 DATA(insert OID = 4407 ( _TdigestData		PGNSP PGUID -1 f b A f t \054 0 4406 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define TDIGESTGARRAYOID		4407
+/* pg_ddl_command type */
+DATA(insert OID = 5729 ( pg_ddl_command   PGNSP PGUID    SIZEOF_POINTER t p P f t \054 0        0 0 pg_ddl_command_in pg_ddl_command_out pg_ddl_command_recv pg_ddl_command_send - - - d p f 0 -1 0 0 _null_ _null_ _null_ ));
+#define PGDDLCOMMANDOID 5729
 DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in anyset_out - - - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
 #define ANYSETOID		3272
 /*

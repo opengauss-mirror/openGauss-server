@@ -228,7 +228,9 @@ static void pgss_ProcessUtility(processutility_context* processutility_cxt,
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
-    char* completionTag);
+    char* completionTag,
+    ProcessUtilityContext context,
+    bool isCTAS);
 static uint32 pgss_hash_fn(const void* key, Size keysize);
 static int pgss_match_fn(const void* key1, const void* key2, Size keysize);
 static uint32 pgss_hash_string(const char* str);
@@ -727,7 +729,9 @@ static void pgss_ProcessUtility(processutility_context* processutility_cxt,
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
-    char* completionTag)
+    char* completionTag,
+    ProcessUtilityContext context,
+    bool isCTAS)
 {
     Node* parsetree = processutility_cxt->parse_tree;
     const char* queryString = processutility_cxt->query_string;
@@ -761,14 +765,18 @@ static void pgss_ProcessUtility(processutility_context* processutility_cxt,
 #ifdef PGXC
                     sentToRemote,
 #endif /* PGXC */
-                    completionTag);
+                    completionTag,
+                    context,
+                    isCTAS);
             else
                 standard_ProcessUtility(processutility_cxt,
                     dest,
 #ifdef PGXC
                     sentToRemote,
 #endif /* PGXC */
-                    completionTag);
+                    completionTag,
+                    context,
+                    isCTAS);
             nested_level--;
         }
         PG_CATCH();
@@ -818,14 +826,18 @@ static void pgss_ProcessUtility(processutility_context* processutility_cxt,
 #ifdef PGXC
                 sentToRemote,
 #endif /* PGXC */
-                completionTag);
+                completionTag,
+                context,
+                isCTAS);
         else
             standard_ProcessUtility(processutility_cxt,
                 dest,
 #ifdef PGXC
                 sentToRemote,
 #endif /* PGXC */
-                completionTag);
+                completionTag,
+                context,
+                isCTAS);
     }
 }
 

@@ -138,10 +138,10 @@ extern HeapTuple SearchUserHostName(const char* userName, Oid* oid);
  * relation, as well as ACL_EXECUTE on the trigger function.  For internal
  * triggers the caller must apply any required permission checks.
  *
- * Note: can return InvalidOid if we decided to not create a trigger at all,
+ * Note: can return  InvalidObjectAddress if we decided to not create a trigger at all,
  * but a foreign-key constraint.  This is a kluge for backwards compatibility.
  */
-Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid refRelOid, Oid constraintOid,
+ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid refRelOid, Oid constraintOid,
     Oid indexOid, bool isInternal)
 {
     uint16 tgtype;
@@ -481,7 +481,10 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
                     systable_endscan(tgscan);
                     heap_close(tgrel, RowExclusiveLock);
                     heap_close(rel, NoLock);
-                    return trigoid;
+                    myself.classId = TriggerRelationId;
+                    myself.objectId = trigoid;
+                    myself.objectSubId = 0;                    
+                    return myself;
                 }
                 else {
                     systable_endscan(tgscan);
@@ -617,7 +620,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
 
         ConvertTriggerToFK(stmt, funcoid);
 
-        return InvalidOid;
+        return InvalidObjectAddress;
     }
 
     /*
@@ -958,7 +961,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
     /* Keep lock on target rel until end of xact */
     heap_close(rel, NoLock);
 
-    return trigoid;
+    return myself;
 }
 
 /*
@@ -1206,7 +1209,8 @@ static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid)
 #ifdef PGXC
             false,
 #endif /* PGXC */
-            NULL);
+            NULL,
+            PROCESS_UTILITY_GENERATED);
 
         /* Remove the matched item from the list */
         u_sess->tri_cxt.info_list = list_delete_ptr(u_sess->tri_cxt.info_list, info);
@@ -1421,7 +1425,7 @@ static void RangeVarCallbackForRenameTrigger(
  *		modify tgname in trigger tuple
  *		update row in catalog
  */
-void renametrig(RenameStmt* stmt)
+ObjectAddress renametrig(RenameStmt* stmt)
 {
     Relation targetrel;
     Relation tgrel;
@@ -1429,7 +1433,8 @@ void renametrig(RenameStmt* stmt)
     SysScanDesc tgscan;
     ScanKeyData key[2];
     Oid relid;
-
+    ObjectAddress address;
+    Oid      tgoid = InvalidOid;    
     /*
      * Look up name, check permissions, and acquire lock (which we will NOT
      * release until end of transaction).
@@ -1478,7 +1483,7 @@ void renametrig(RenameStmt* stmt)
          * Update pg_trigger tuple with new tgname.
          */
         tuple = (HeapTuple)tableam_tops_copy_tuple(tuple); /* need a modifiable copy */
-
+        tgoid = HeapTupleGetOid(tuple);
         (void)namestrcpy(&((Form_pg_trigger)GETSTRUCT(tuple))->tgname, stmt->newname);
 
         simple_heap_update(tgrel, &tuple->t_self, tuple);
@@ -1500,6 +1505,7 @@ void renametrig(RenameStmt* stmt)
                     RelationGetRelationName(targetrel))));
     }
 
+    ObjectAddressSet(address, TriggerRelationId, tgoid);
     systable_endscan(tgscan);
 
     heap_close(tgrel, RowExclusiveLock);
@@ -1508,6 +1514,7 @@ void renametrig(RenameStmt* stmt)
      * Close rel, but keep exclusive lock!
      */
     relation_close(targetrel, NoLock);
+    return address;
 }
 
 /*

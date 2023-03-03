@@ -2817,7 +2817,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
 #ifdef PGXC
                     false,
 #endif /* PGXC */
-                    completionTag);
+                    completionTag, PROCESS_UTILITY_QUERY);
 
                 /* Update "processed" if stmt returned tuples */
                 if (u_sess->SPI_cxt._current->tuptable) {

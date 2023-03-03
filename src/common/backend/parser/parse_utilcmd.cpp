@@ -995,7 +995,7 @@ static bool DropSetOwnedByTable(CreateStmtContext* cxt, char *colname)
 
         DropStmt *stmt = makeNode(DropStmt);
         stmt->removeType = OBJECT_TYPE;
-        stmt->objects = list_make1(list_make2(makeString(nspace), makeString(typname)));
+        stmt->objects = list_make1(list_make1(makeTypeNameFromNameList(list_make2(makeString(nspace), makeString(typname)))));
         stmt->behavior = DROP_CASCADE;
         stmt->arguments = NIL;
         stmt->missing_ok = true;
@@ -6473,7 +6473,7 @@ Oid generateClonedIndex(Relation source_idx, Relation source_relation, char* tem
     Relation heap_rel;
     TupleDesc tupleDesc;
     Oid source_relid = RelationGetRelid(source_idx);
-    Oid ret;
+    ObjectAddress ret;
 
     /* get the relation that the index is created on */
     heap_relid = IndexGetRelation(source_relid, false);
@@ -6529,7 +6529,7 @@ Oid generateClonedIndex(Relation source_idx, Relation source_relation, char* tem
     pfree_ext(attmap);
     relation_close(heap_rel, AccessShareLock);
 
-    return ret;
+    return ret.objectId;
 }
 
 /*

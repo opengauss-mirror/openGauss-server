@@ -42,6 +42,7 @@
 #include "catalog/pg_default_acl.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_directory.h"
+#include "catalog/pg_event_trigger.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_foreign_data_wrapper.h"
 #include "catalog/pg_foreign_server.h"
@@ -86,6 +87,7 @@
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "commands/defrem.h"
+#include "commands/event_trigger.h"
 #include "commands/extension.h"
 #include "commands/matview.h"
 #include "commands/proclang.h"
@@ -155,9 +157,9 @@ static const Oid object_classes[MAX_OCLASS] = {
     PgJobRelationId,                 /* OCLASS_PG_JOB */
     PublicationRelationId,           /* OCLASS_PUBLICATION */
     PublicationRelRelationId,        /* OCLASS_PUBLICATION_REL */
-    SubscriptionRelationId           /* OCLASS_SUBSCRIPTION */
+    SubscriptionRelationId,           /* OCLASS_SUBSCRIPTION */
+    EventTriggerRelationId,          /* OCLASS_EVENT_TRIGGER */
 #ifdef PGXC
-    ,
     PgxcClassRelationId /* OCLASS_PGXCCLASS */
 #endif
 
@@ -183,6 +185,48 @@ static void getRelationDescription(StringInfo buffer, Oid relid);
 static void getOpFamilyDescription(StringInfo buffer, Oid opfid);
 extern char* pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn);
 extern char* pg_get_functiondef_worker(Oid funcid, int* headerlines);
+
+ /*
+  * Go through the objects given running the final actions on them, and execute
+  * the actual deletion.
+  */
+static void deleteObjectsInList(ObjectAddresses *targetObjects, Relation *depRel,
+                    int flags)
+{
+    int i;
+ 
+    /*
+     * Keep track of objects for event triggers, if necessary.
+     */
+    if (trackDroppedObjectsNeeded()) {
+        for (i = 0; i < targetObjects->numrefs; i++) {
+            const ObjectAddress *thisobj = &targetObjects->refs[i];
+            const ObjectAddressExtra *extra = &targetObjects->extras[i];
+            bool original = false;
+            bool normal = false;
+ 
+            if (extra->flags & DEPFLAG_ORIGINAL)
+                original = true;
+            if (extra->flags & DEPFLAG_NORMAL)
+                normal = true;
+            if (extra->flags & DEPFLAG_REVERSE)
+                normal = true;
+            
+            if (EventTriggerSupportsObjectClass(getObjectClass(thisobj))) {
+                EventTriggerSQLDropAddObject(thisobj, original, normal);
+            }
+        }
+    }
+ 
+    /*
+     * Delete all the objects in the proper order.
+     */
+    for (i = 0; i < targetObjects->numrefs; i++) {
+        ObjectAddress *thisobj = targetObjects->refs + i;
+ 
+        deleteOneObject(thisobj, depRel, flags);
+    }
+}
 
 /*
  * performDeletion: attempt to drop the specified object.  If CASCADE
@@ -210,7 +254,6 @@ void performDeletion(const ObjectAddress* object, DropBehavior behavior, int fla
 {
     Relation depRel;
     ObjectAddresses* targetObjects = NULL;
-    int i;
 
     /*
      * We save some cycles by opening pg_depend just once and passing the
@@ -248,11 +291,8 @@ void performDeletion(const ObjectAddress* object, DropBehavior behavior, int fla
         /*
         * Delete all the objects in the proper order.
         */
-        for (i = 0; i < targetObjects->numrefs; i++) {
-            ObjectAddress *thisobj = targetObjects->refs + i;
-
-            deleteOneObject(thisobj, &depRel, flags);
-        }
+        /* do the deed */
+        deleteObjectsInList(targetObjects, &depRel, flags);
     }
 
     /* And clean up */
@@ -348,10 +388,9 @@ void performMultipleDeletions(const ObjectAddresses* objects, DropBehavior behav
     /*
      * Delete all the objects in the proper order.
      */
-    for (i = 0; i < targetObjects->numrefs; i++) {
+    if (i > 0) {
         (void)MemoryContextSwitchTo(objDelCxt);
-        ObjectAddress* thisobj = targetObjects->refs + i;
-        deleteOneObject(thisobj, &depRel, flags);
+        deleteObjectsInList(targetObjects, &depRel, flags);
         MemoryContextReset(objDelCxt);
     }
 
@@ -1388,6 +1427,10 @@ static void doDeletion(const ObjectAddress* object, int flags)
         case OCLASS_SYNONYM:
             RemoveSynonymById(object->objectId);
             break;
+        case OCLASS_EVENT_TRIGGER:
+            RemoveEventTriggerById(object->objectId);
+            break;
+
         case OCLASS_DB4AI_MODEL:
             remove_model_by_oid(object->objectId);
             break;
@@ -2391,6 +2434,8 @@ ObjectClass getObjectClass(const ObjectAddress* object)
 
         case DbPrivilegeId:
             return OCLASS_DB_PRIVILEGE;
+        case EventTriggerRelationId:
+            return OCLASS_EVENT_TRIGGER;
 
         case ExtensionRelationId:
             return OCLASS_EXTENSION;
@@ -3039,6 +3084,19 @@ char* getObjectDescription(const ObjectAddress* object)
             appendStringInfo(&buffer, _("extension %s"), extname);
             break;
         }
+
+        case OCLASS_EVENT_TRIGGER: {
+            HeapTuple	tup;
+
+            tup = SearchSysCache1(EVENTTRIGGEROID,
+                    ObjectIdGetDatum(object->objectId));
+            if (!HeapTupleIsValid(tup))
+                elog(ERROR, "cache lookup failed for event trigger %u",
+                    object->objectId);
+            appendStringInfo(&buffer, _("event trigger %s"),
+                NameStr(((Form_pg_event_trigger) GETSTRUCT(tup))->evtname));
+            ReleaseSysCache(tup);
+        } break;
 
         case OCLASS_GLOBAL_SETTING:
             get_global_setting_description(&buffer, object);

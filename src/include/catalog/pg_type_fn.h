@@ -14,14 +14,15 @@
 #ifndef PG_TYPE_FN_H
 #define PG_TYPE_FN_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/nodes.h"
 
 
-extern Oid TypeShellMake(const char *typname,
+extern ObjectAddress TypeShellMake(const char *typname,
                          Oid typeNamespace,
                          Oid ownerId);
 
-extern Oid TypeCreate(Oid newTypeOid,
+extern ObjectAddress TypeCreate(Oid newTypeOid,
                       const char *typname,
                       Oid typeNamespace,
                       Oid relationOid,
