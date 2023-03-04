@@ -2736,6 +2736,7 @@ typedef struct knl_u_hook_context {
     void *plannerHook;
     void *pluginSearchCatHook;
     void *pluginCCHashEqFuncs;
+    void *plpgsqlParserSetHook;
 } knl_u_hook_context;
 /* PBE message flag */
 typedef enum {
