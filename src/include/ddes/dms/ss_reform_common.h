@@ -28,6 +28,7 @@
 #define BAK_CTRL_FILE_NUM 2
 #define BIT_NUM_INT32 32
 #define REFORM_WAIT_TIME 10000 /* 0.01 sec */
+#define REFORM_WAIT_LONG 100000 /* 0.1 sec */
 #define WAIT_REFORM_CTRL_REFRESH_TRIES 1000
 
 typedef struct SSBroadcastCancelTrx {

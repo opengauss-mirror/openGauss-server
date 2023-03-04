@@ -300,7 +300,6 @@ static int CBDbIsPrimary(void *db_handle)
 
 static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
 {
-    g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
     g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag = true;
     /* allow recovery in switchover to keep LSN in order */
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
@@ -1392,23 +1391,31 @@ static int CBGetDBPrimaryId(void *db_handle, unsigned int *primary_id)
     return GS_SUCCESS;
 }
 
-/* Currently only used in SS switchover */
+/* 
+ * Currently only used in SS switchover. To prevent state machine misjudgement,
+ * DSS status, dms_role, SSClusterState must be set atommically.
+ * DSS recommends we retry dss_set_server_status if it failed.
+ */
 static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
 {
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
-    reform_info->dms_role = reformer_id == (unsigned int)SS_MY_INST_ID ? DMS_ROLE_REFORMER : DMS_ROLE_PARTNER;
-    if (reform_info->dms_role == DMS_ROLE_REFORMER) {
-        /* since original primary must have demoted, it is safe to allow promting standby write */
-        if (dss_set_server_status_wrapper() != GS_SUCCESS) {
-            ereport(PANIC, (errmodule(MOD_DMS),
-                errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
-                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                errhint("Check vgname and socketpath and restart later.")));
+    dms_role_t new_dms_role = reformer_id == (unsigned int)SS_MY_INST_ID ? DMS_ROLE_REFORMER : DMS_ROLE_PARTNER;
+    if (new_dms_role == DMS_ROLE_REFORMER) {
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover]begin to set currrent DSS as primary")));
+        while (dss_set_server_status_wrapper() != GS_SUCCESS) {
+            pg_usleep(REFORM_WAIT_LONG);
+            ereport(WARNING, (errmodule(MOD_DMS),
+                errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
+                    g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                    g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
+                    errhint("Check vgname and socketpath and restart later.")));
         }
+        g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
     }
+
+    reform_info->dms_role = new_dms_role;
     ereport(LOG, (errmodule(MOD_DMS),
-        errmsg("[SS switchover]switching, updated inst:%d with role:%d success",
+        errmsg("[SS switchover]role and lock switched, updated inst:%d with role:%d success",
             SS_MY_INST_ID, reform_info->dms_role)));
 }
 
@@ -1442,8 +1449,13 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform] dms reform start, role:%d, reform type:%d", role, (int)ss_reform_type)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
-        if (dss_set_server_status_wrapper() != GS_SUCCESS) {
-            ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS reform] Could not set dssserver flag=read_write")));
+        while (dss_set_server_status_wrapper() != GS_SUCCESS) {
+            pg_usleep(REFORM_WAIT_LONG);
+            ereport(WARNING, (errmodule(MOD_DMS),
+                errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
+                    g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                    g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
+                    errhint("Check vgname and socketpath and restart later.")));
         }
     }
 
