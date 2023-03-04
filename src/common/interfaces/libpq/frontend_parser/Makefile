@@ -13,7 +13,10 @@ subdir = src/common/interfaces/libpq/frontend_parser
 top_builddir = ../../../../../
 backenddir = $(top_builddir)/src/common/backend
 
-
+# where to find gen_keywordlist.pl and subsidiary files
+TOOLSDIR = $(top_srcdir)/src/tools
+GEN_KEYWORDLIST = $(PERL) -I $(TOOLSDIR) $(TOOLSDIR)/gen_keywordlist.pl
+GEN_KEYWORDLIST_DEPS = $(TOOLSDIR)/gen_keywordlist.pl $(TOOLSDIR)/PerfectHash.pm
 
 # shared library parameters
 NAME= parser_frontend
