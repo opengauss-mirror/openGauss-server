@@ -30,6 +30,7 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "securec_check.h"
 #include "miscadmin.h"
+#include "access/double_write.h"
 
 void InitDmsBufCtrl(void)
 {
@@ -764,4 +765,99 @@ bool DmsCheckBufAccessible()
         return true;
     }
     return false;
+}
+
+bool SSTryFlushBuffer(BufferDesc *buf)
+{
+    //copy from BufferAlloc
+    if (!backend_can_flush_dirty_page()) {
+        return false;
+    }
+
+    if (LWLockConditionalAcquire(buf->content_lock, LW_SHARED)) {
+        if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
+            if (!free_space_enough(buf->buf_id)) {
+                LWLockRelease(buf->content_lock);
+                return false;
+            }
+            uint32 pos = 0;
+            pos = first_version_dw_single_flush(buf);
+            t_thrd.proc->dw_pos = pos;
+            FlushBuffer(buf, NULL);
+            g_instance.dw_single_cxt.single_flush_state[pos] = true;
+            t_thrd.proc->dw_pos = -1;
+        } else {
+            FlushBuffer(buf, NULL);
+        }
+        LWLockRelease(buf->content_lock);
+        ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
+        return true;    
+    }
+    return false;
+}
+
+bool SSTrySegFlushBuffer(BufferDesc* buf)
+{
+    //copy from SegBufferAlloc
+    if (!backend_can_flush_dirty_page()) {
+        return false;
+    }
+
+    if (LWLockConditionalAcquire(buf->content_lock, LW_SHARED)) {
+        FlushOneSegmentBuffer(buf->buf_id + 1);
+        LWLockRelease(buf->content_lock);
+        ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
+        return true;
+    } 
+    return false;
+}
+
+/** true :1)this buffer dms think need flush, and flush success
+*         2) no need flush 
+*   false: this flush dms think need flush, but cannot flush 
+*/ 
+bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
+{
+    if (!ENABLE_DMS) {
+        return true;
+    }
+
+    if (IsInitdb) {
+        return true;
+    }
+
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+        // wait dw_init finish
+        while (!g_instance.dms_cxt.dw_init) {
+            pg_usleep(1000L);
+        }
+
+        XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
+        if (!SS_IN_REFORM) {
+            ereport(PANIC,
+                (errmsg("[SS] this buffer should not exist with BUF_DIRTY_NEED_FLUSH but not in reform, "
+                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u",
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
+                buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, 
+                (unsigned long long)pagelsn, (unsigned int)buf_desc->extra->seg_fileno,
+                buf_desc->extra->seg_blockno)));
+        }
+        bool in_flush_copy = SS_IN_FLUSHCOPY;
+        bool in_recovery = !g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag;
+        ereport(LOG,
+            (errmsg("[SS flush copy] ready to flush buffer with need flush, "
+            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u, reform phase "
+            "is in flush_copy:%d, in recovery:%d",
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
+            buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, 
+            (unsigned long long)pagelsn, (unsigned int)buf_desc->extra->seg_fileno, buf_desc->extra->seg_blockno,
+            in_flush_copy, in_recovery)));
+        if (IsSegmentBufferID(buf_desc->buf_id)) {
+            return SSTrySegFlushBuffer(buf_desc);
+        } else {
+            return SSTryFlushBuffer(buf_desc);
+        }
+    }
+    return true;
 }
