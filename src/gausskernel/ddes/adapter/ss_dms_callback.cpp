@@ -616,8 +616,17 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
         LWLockRelease(partition_lock);
 
         WaitIO(buf_desc);
-        Assert(pg_atomic_read_u32(&buf_desc->state) & BM_VALID);
-        Assert(!(pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR));
+        if ((!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) ||
+            (pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR)) {
+            ereport(WARNING, (errmodule(MOD_DMS),
+                errmsg("[%d/%d/%d/%d %d-%d] invalidate page failed, buffer is not valid or io error, state = 0x%x",
+                tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                tag->forkNum, tag->blockNum, buf_desc->state)));
+            DmsReleaseBuffer(buf_desc->buf_id + 1, IsSegmentBufferID(buf_id));
+            ret = DMS_ERROR;
+            break;
+        }
+
         (void)LWLockAcquire(buf_desc->content_lock, LW_EXCLUSIVE);
         buf_ctrl = GetDmsBufCtrl(buf_id);
         if (ver == buf_ctrl->ver) {
