@@ -156,6 +156,7 @@ extern void set_result_size_estimates(PlannerInfo *root, RelOptInfo *rel);
 extern double adjust_limit_row_count(double lefttree_rows);
 extern void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est,
     RelOptInfo* final_rel = NULL, bool* fix_param = NULL);
+extern PathTarget *set_pathtarget_cost_width(PlannerInfo *root, PathTarget *target);
 
 /*
  * prototypes for clausesel.c

@@ -69,6 +69,7 @@ typedef enum ParseExprKind
     EXPR_KIND_FUNCTION_DEFAULT, /* default parameter value for function */
     EXPR_KIND_INDEX_EXPRESSION, /* index expression */
     EXPR_KIND_INDEX_PREDICATE,    /* index predicate */
+    EXPR_KIND_STATS_EXPRESSION, /* extended statistics expression */
     EXPR_KIND_ALTER_COL_TRANSFORM,    /* transform expr in ALTER COLUMN TYPE */
     EXPR_KIND_EXECUTE_PARAMETER,    /* parameter value in EXECUTE */
     EXPR_KIND_TRIGGER_WHEN,        /* WHEN condition in CREATE TRIGGER */
@@ -78,6 +79,8 @@ typedef enum ParseExprKind
     EXPR_KIND_CALL_ARGUMENT,    /* procedure argument in CALL */
     EXPR_KIND_COPY_WHERE,        /* WHERE condition in COPY FROM */
     EXPR_KIND_GENERATED_COLUMN, /* generation expression for a column */
+    EXPR_KIND_MERGE_WHEN,        /* WHEN condition in MERTE stmt */
+    EXPR_KIND_CYCLE_MARK,        /* cycle mark value */
 } ParseExprKind;
 
 /*
@@ -156,6 +159,7 @@ struct ParseState {
     List* p_relnamespace;                /* current namespace for relations */
     List* p_varnamespace;                /* current namespace for columns */
     bool  p_lateral_active;              /* p_lateral_only items visible? */
+    bool  p_is_flt_frame;                /* Indicates whether it is a flattened expr frame */
     List* p_ctenamespace;                /* current namespace for common table exprs */
     List* p_future_ctes;                 /* common table exprs not yet in namespace */
     CommonTableExpr* p_parent_cte;       /* this query's containing CTE */
@@ -169,6 +173,7 @@ struct ParseState {
     /* Flags telling about things found in the query: */
     bool p_hasAggs;
     bool p_hasWindowFuncs;
+    bool p_hasTargetSRFs;
     bool p_hasSubLinks;
     bool p_hasModifyingCTE;
     bool p_is_insert;
@@ -178,6 +183,8 @@ struct ParseState {
     List* p_target_relation;
     List* p_target_rangetblentry;
     bool p_is_decode;
+
+    Node *p_last_srf; /* most recent set-returning func/op found */
 
     /*
      * used for start with...connect by rewrite

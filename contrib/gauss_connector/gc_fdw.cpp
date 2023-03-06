@@ -348,7 +348,7 @@ static void gcGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid fore
      * columns used in them.  Doesn't seem worth detecting that case though.)
      */
     fpinfo->attrs_used = NULL;
-    pull_varattnos((Node*)baserel->reltargetlist, baserel->relid, &fpinfo->attrs_used);
+    pull_varattnos((Node*)baserel->reltarget->exprs, baserel->relid, &fpinfo->attrs_used);
     foreach (lc, fpinfo->local_conds) {
         RestrictInfo* rinfo = lfirst_node(RestrictInfo, lc);
 
@@ -390,7 +390,7 @@ static void gcGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid fore
             baserel->pages = 10;
             const int BLOCK_NUM = 10;
             baserel->tuples =
-                (double)(BLOCK_NUM * BLCKSZ) / (baserel->width + MAXALIGN(offsetof(HeapTupleHeaderData, t_bits)));
+                (double)(BLOCK_NUM * BLCKSZ) / (baserel->reltarget->width + MAXALIGN(offsetof(HeapTupleHeaderData, t_bits)));
         }
 
         /* Estimate baserel size as best we can with local statistics. */
@@ -1469,7 +1469,7 @@ static void gc_estimate_path_cost_size(PlannerInfo* root, RelOptInfo* foreignrel
          * between foreign relations.
          */
         rows = foreignrel->rows;
-        width = foreignrel->width;
+        width = foreignrel->reltarget->width;
 
         /* Back into an estimate of the number of retrieved rows. */
         retrieved_rows = clamp_row_est(rows / fpinfo->local_conds_sel);

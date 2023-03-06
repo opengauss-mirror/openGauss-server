@@ -387,6 +387,7 @@ enable_kill_query = off			# optional: [on, off], default: off
 					# JOIN clauses
 #plan_mode_seed = 0         # range -1-0x7fffffff
 #check_implicit_conversions = off
+#enable_expr_fusion = off
 #enable_functional_dependency = off
 #enable_indexscan_optimization = off
 #enable_inner_unique_opt = off

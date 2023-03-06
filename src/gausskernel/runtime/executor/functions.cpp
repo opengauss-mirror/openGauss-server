@@ -389,7 +389,7 @@ static Node* sql_fn_post_column_ref(ParseState* p_state, ColumnRef* c_ref, Node*
          * ParseFuncOrColumn will return NULL, and we'll fail back at the
          * caller.
          */
-        param = ParseFuncOrColumn(p_state, list_make1(sub_field), list_make1(param), NULL, c_ref->location);
+        param = ParseFuncOrColumn(p_state, list_make1(sub_field), list_make1(param), p_state->p_last_srf, NULL, c_ref->location);
     }
 
     return param;

@@ -81,6 +81,7 @@
 #define EQUALJOINVARRATIO ((2.0) / (3.0))
 
 static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path);
+static List* build_path_tlist(PlannerInfo* root, Path* path);
 static Plan* create_scan_plan(PlannerInfo* root, Path* best_path);
 static List* build_relation_tlist(RelOptInfo* rel);
 static bool use_physical_tlist(PlannerInfo* root, RelOptInfo* rel);
@@ -90,6 +91,8 @@ static Plan* create_append_plan(PlannerInfo* root, AppendPath* best_path);
 static Plan* create_merge_append_plan(PlannerInfo* root, MergeAppendPath* best_path);
 static BaseResult* create_result_plan(PlannerInfo* root, ResultPath* best_path);
 static void adjust_scan_targetlist(ResultPath* best_path, Plan* subplan);
+static Plan* create_projection_plan(PlannerInfo* root, ProjectionPath* best_path);
+static ProjectSet* create_project_set_plan(PlannerInfo* root, ProjectSetPath* best_path);
 static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path);
 static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path);
 static SeqScan* create_seqscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
@@ -373,7 +376,20 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
             plan = create_merge_append_plan(root, (MergeAppendPath*)best_path);
             break;
         case T_BaseResult:
-            plan = (Plan*)create_result_plan(root, (ResultPath*)best_path);
+            /* In new expression framework, the BaseResult node need do projection. */
+            if (root->parse->is_flt_frame) {
+                if (IsA(best_path, ProjectionPath)) {
+                    plan = create_projection_plan(root, (ProjectionPath *)best_path);
+                } else {
+                    Assert(IsA(best_path, ResultPath));
+                    plan = (Plan*)create_result_plan(root, (ResultPath*)best_path);
+                }
+            } else {
+                plan = (Plan*)create_result_plan(root, (ResultPath*)best_path);
+            }
+            break;
+        case T_ProjectSet:
+            plan = (Plan *) create_project_set_plan(root, (ProjectSetPath *) best_path);
             break;
         case T_Material:
             plan = (Plan*)create_material_plan(root, (MaterialPath*)best_path);
@@ -804,7 +820,7 @@ static List* build_relation_tlist(RelOptInfo* rel)
         rel = rel->base_rel;
     }
 
-    foreach (v, rel->reltargetlist) {
+    foreach (v, rel->reltarget->exprs) {
         /* Do we really need to copy here?	Not sure */
         Node* node = (Node*)copyObject(lfirst(v));
 
@@ -814,6 +830,79 @@ static List* build_relation_tlist(RelOptInfo* rel)
             resjunk = true;
         }
         tlist = lappend(tlist, makeTargetEntry((Expr*)node, resno, NULL, resjunk));
+        resno++;
+    }
+    return tlist;
+}
+
+
+/*
+ * Build a target list (ie, a list of TargetEntry) for the Path's output.
+ *
+ * This is almost just make_tlist_from_pathtarget(), but we also have to
+ * deal with replacing nestloop params.
+ */
+static List *
+build_path_tlist(PlannerInfo *root, Path *path)
+{
+    List *tlist = NIL;
+    Index *sortgrouprefs = path->pathtarget->sortgrouprefs;
+    int resno = 1;
+    ListCell *v;
+
+    foreach (v, path->pathtarget->exprs) {
+        Node *node = (Node *)lfirst(v);
+        TargetEntry *tle;
+
+        /*
+         * If it's a parameterized path, there might be lateral references in
+         * the tlist, which need to be replaced with Params.  There's no need
+         * to remake the TargetEntry nodes, so apply this to each list item
+         * separately.
+         */
+        if (path->param_info)
+            node = replace_nestloop_params(root, node);
+
+        tle = makeTargetEntry((Expr *)node, resno, NULL, false);
+        if (sortgrouprefs)
+            tle->ressortgroupref = sortgrouprefs[resno - 1];
+
+        tlist = lappend(tlist, tle);
+        resno++;
+    }
+    return tlist;
+}
+
+/*
+ * build_plan_tlist
+ *
+ * This is almost just build_path_tlist()
+ */
+List *
+build_plan_tlist(PlannerInfo *root, PathTarget *pathtarget)
+{
+    List *tlist = NIL;
+    Index *sortgrouprefs = pathtarget->sortgrouprefs;
+    int resno = 1;
+    ListCell *v;
+
+    foreach (v, pathtarget->exprs) {
+        Node *node = (Node *)lfirst(v);
+        TargetEntry *tle;
+
+        /*
+         * If it's a parameterized path, there might be lateral references in
+         * the tlist, which need to be replaced with Params.  There's no need
+         * to remake the TargetEntry nodes, so apply this to each list item
+         * separately.
+         */
+        node = replace_nestloop_params(root, node);
+
+        tle = makeTargetEntry((Expr *)node, resno, NULL, false);
+        if (sortgrouprefs)
+            tle->ressortgroupref = sortgrouprefs[resno - 1];
+
+        tlist = lappend(tlist, tle);
         resno++;
     }
     return tlist;
@@ -1444,9 +1533,15 @@ static BaseResult* create_result_plan(PlannerInfo* root, ResultPath* best_path)
             adjust_scan_targetlist(best_path, subplan);
         }
     } else {
-        /* The tlist will be installed later, since we have no RelOptInfo */
-        Assert(best_path->path.parent == NULL);
-        tlist = NIL;
+        if (root->parse->is_flt_frame) {
+            /* This is a bit useless currently, because rel will have empty tlist */
+            tlist = build_path_tlist(root, &best_path->path);
+        } else {
+            /* The tlist will be installed later, since we have no RelOptInfo */
+            Assert(best_path->path.parent == NULL);
+            tlist = NIL;
+        }
+        
     }
 
     /* best_path->quals is just bare clauses */
@@ -1454,6 +1549,89 @@ static BaseResult* create_result_plan(PlannerInfo* root, ResultPath* best_path)
     subquals = order_qual_clauses(root, best_path->pathqual);
 
     return make_result(root, tlist, (Node*)quals, subplan, subquals);
+}
+
+/*
+ * create_projection_plan
+ *
+ *	  Create a plan tree to do a projection step and (recursively) plans
+ *	  for its subpaths.  We may need a Result node for the projection,
+ *	  but sometimes we can just let the subplan do the work.
+ */
+static Plan *
+create_projection_plan(PlannerInfo *root, ProjectionPath *best_path)
+{
+	Plan	   *plan;
+	Plan	   *subplan;
+	List	   *tlist;
+
+	/* Since we intend to project, we don't need to constrain child tlist */
+	subplan = create_plan_recurse(root, best_path->subpath);
+
+	tlist = build_path_tlist(root, &best_path->path);
+
+	/*
+	 * We might not really need a Result node here, either because the subplan
+	 * can project or because it's returning the right list of expressions
+	 * anyway.  Usually create_projection_path will have detected that and set
+	 * dummypp if we don't need a Result; but its decision can't be final,
+	 * because some createplan.c routines change the tlists of their nodes.
+	 * (An example is that create_merge_append_plan might add resjunk sort
+	 * columns to a MergeAppend.)  So we have to recheck here.  If we do
+	 * arrive at a different answer than create_projection_path did, we'll
+	 * have made slightly wrong cost estimates; but label the plan with the
+	 * cost estimates we actually used, not "corrected" ones.  (XXX this could
+	 * be cleaned up if we moved more of the sortcolumn setup logic into Path
+	 * creation, but that would add expense to creating Paths we might end up
+	 * not using.)
+	 */
+	if (is_projection_capable_path(best_path->subpath) ||
+		tlist_same_exprs(tlist, subplan->targetlist))
+	{
+		/* Don't need a separate Result, just assign tlist to subplan */
+		plan = subplan;
+		plan->targetlist = tlist;
+
+		/* Label plan with the estimated costs we actually used */
+		plan->startup_cost = best_path->path.startup_cost;
+		plan->total_cost = best_path->path.total_cost;
+		plan->plan_rows = best_path->path.rows;
+		plan->plan_width = best_path->path.pathtarget->width;
+		/* ... but be careful not to munge subplan's parallel-aware flag */
+	}
+	else
+	{
+		/* We need a Result node */
+		plan = (Plan *) make_result(root, tlist, NULL, subplan, NULL);
+
+		copy_generic_path_info(plan, (Path *) best_path);
+	}
+
+	return plan;
+}
+
+/*
+ * create_project_set_plan
+ *	  Create a ProjectSet plan for 'best_path'.
+ *
+ *	  Returns a Plan node.
+ */
+static ProjectSet *create_project_set_plan(PlannerInfo *root, ProjectSetPath *best_path)
+{
+    ProjectSet *plan;
+    Plan *subplan;
+    List *tlist;
+
+    /* Since we intend to project, we don't need to constrain child tlist */
+    subplan = create_plan_recurse(root, best_path->subpath);
+
+    tlist = build_path_tlist(root, &best_path->path);
+
+    plan = make_project_set(tlist, subplan);
+
+    copy_generic_path_info(&plan->plan, (Path *)best_path);
+
+    return plan;
 }
 
 /*
@@ -4870,7 +5048,7 @@ static Node* replace_nestloop_params_mutator(Node* node, PlannerInfo* root)
  * Note that we also use root->curOuterRels as an implicit parameter for
  * sanity checks.
  */
-void
+static void
 process_subquery_nestloop_params(PlannerInfo *root, List *subplan_params)
 {
 	ListCell *lc = NULL;
@@ -5385,9 +5563,17 @@ static List* order_qual_clauses(PlannerInfo* root, List* clauses)
  */
 static void copy_generic_path_info(Plan *dest, Path *src)
 {
-    dest->startup_cost = src->startup_cost;
-    dest->total_cost = src->total_cost;
-    dest->plan_rows = src->rows;
+    if (src) {
+        dest->startup_cost = src->startup_cost;
+        dest->total_cost = src->total_cost;
+        dest->plan_rows = src->rows;
+        dest->plan_width = src->pathtarget->width;
+    } else {
+        dest->startup_cost = 0;
+        dest->total_cost = 0;
+        dest->plan_rows = 0;
+        dest->plan_width = 0;
+    }
 }
 
 /*
@@ -5400,7 +5586,7 @@ static void copy_path_costsize(Plan* dest, Path* src)
         dest->startup_cost = src->startup_cost;
         dest->total_cost = src->total_cost;
         set_plan_rows(dest, src->rows, src->multiple);
-        dest->plan_width = src->parent->width;
+        dest->plan_width = src->parent->reltarget->width;
         dest->innerdistinct = src->innerdistinct;
         dest->outerdistinct = src->outerdistinct;
     } else {
@@ -6511,7 +6697,8 @@ Plan* create_direct_scan(PlannerInfo* root, List* tlist, RangeTblEntry* realResu
     dummyRel->reloptkind = rel->reloptkind;
     dummyRel->isPartitionedTable = rel->isPartitionedTable;
     dummyRel->rows = rel->rows;
-    dummyRel->width = rel->width;
+    dummyRel->reltarget = create_empty_pathtarget();
+    dummyRel->reltarget->width = rel->reltarget->width;
     dummyRel->pages = rel->pages;
     dummyRel->tuples = rel->tuples;
     dummyRel->multiple = rel->multiple;
@@ -6713,6 +6900,33 @@ static MergeJoin* make_mergejoin(List* tlist, List* joinclauses, List* otherclau
     node->join.jointype = jointype;
     node->join.inner_unique = inner_unique;
     node->join.joinqual = joinclauses;
+
+    return node;
+}
+
+/*
+ * make_project_set
+ *	  Build a ProjectSet plan node
+ */
+ProjectSet *make_project_set(List *tlist, Plan *subplan)
+{
+    ProjectSet *node = makeNode(ProjectSet);
+    Plan *plan = &node->plan;
+
+
+#ifdef STREAMPLAN
+    if (IS_STREAM_PLAN && subplan) {
+        inherit_plan_locator_info(plan, subplan);
+    } else {
+        plan->exec_type = EXEC_ON_ALL_NODES;
+        plan->exec_nodes = ng_get_default_computing_group_exec_node();
+    }
+#endif //STREAMPLAN
+
+    plan->targetlist = tlist;
+    plan->qual = NIL;
+    plan->lefttree = subplan;
+    plan->righttree = NULL;
 
     return node;
 }
@@ -7507,7 +7721,15 @@ Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrateg
     plan->righttree = NULL;
 
     /* check if sonic hashagg is enabled or not */
-    node->is_sonichash = isSonicHashAggEnable(node);
+    if (root->parse->is_flt_frame) {
+        if (!root->parse->hasTargetSRFs) {
+            node->is_sonichash = isSonicHashAggEnable(node);
+        } else {
+            node->is_sonichash = false;
+        }
+    } else {
+        node->is_sonichash = isSonicHashAggEnable(node);
+    }
 
     return node;
 }
@@ -8242,6 +8464,7 @@ Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, No
             list_make1(makeString((char*)"+")),
             (Node*)copyObject(limitCount),
             (Node*)copyObject(limitOffset),
+            NULL,
             -1);
 
     /*
@@ -8955,6 +9178,14 @@ bool is_projection_capable_plan(Plan* plan)
             }
         case T_ExtensiblePlan:
             return ((ExtensiblePlan *)plan)->flags & EXTENSIBLEPATH_SUPPORT_PROJECTION;
+        case T_ProjectSet:
+            /*
+             * Although ProjectSet certainly projects, say "no" because we
+             * don't want the planner to randomly replace its tlist with
+             * something else; the SRFs have to stay at top level.  This might
+             * get relaxed later.
+             */
+            return false;
         default:
             break;
     }
@@ -9590,6 +9821,14 @@ Plan* make_redistribute_for_agg(PlannerInfo* root, Plan* lefttree, List* redistr
 {
     Stream* stream = NULL;
     Plan* plan = NULL;
+
+    if (root->parse->is_flt_frame && root->planner_targets->grouping_contains_srfs) {
+        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                            NOTPLANSHIPPING_LENGTH,
+                            "set-valued function + groupingsets");
+        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        mark_stream_unsupport();
+    }
 
     /* For some agg operations (such as grouping sets), we do computing in their original node group */
     if (distribution == NULL) {
@@ -10313,4 +10552,47 @@ static PlanRowMark* check_lockrows_permission(PlannerInfo* root, Plan* lefttree)
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Unsupported FOR UPDATE/SHARE of non-row table.")));
 
     return rowmark;
+}
+
+/*
+ * is_projection_capable_path
+ *		Check whether a given Path node is able to do projection.
+ */
+bool is_projection_capable_path(Path *path)
+{
+    /* Most plan types can project, so just list the ones that can't */
+    switch (path->pathtype) {
+        case T_Hash:
+        case T_Material:
+        case T_Sort:
+        case T_Unique:
+        case T_SetOp:
+        case T_LockRows:
+        case T_Limit:
+        case T_ModifyTable:
+        case T_MergeAppend:
+        case T_RecursiveUnion:
+            return false;
+        case T_Append:
+
+            /*
+             * Append can't project, but if it's being used to represent a
+             * dummy path, claim that it can project.  This prevents us from
+             * converting a rel from dummy to non-dummy status by applying a
+             * projection to its dummy path.
+             */
+            return IS_DUMMY_PATH(path);
+        case T_ProjectSet:
+
+            /*
+             * Although ProjectSet certainly projects, say "no" because we
+             * don't want the planner to randomly replace its tlist with
+             * something else; the SRFs have to stay at top level.  This might
+             * get relaxed later.
+             */
+            return false;
+        default:
+            break;
+    }
+    return true;
 }

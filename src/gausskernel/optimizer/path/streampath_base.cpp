@@ -354,7 +354,7 @@ List* JoinPathGenBase::getOthersideKey(bool stream_outer)
 
     ListCell *lc1 = NULL, *lc2 = NULL, *lc3 = NULL;
     List* key_list = NULL;
-    List* targetlist = otherside_rel->reltargetlist;
+    List* targetlist = otherside_rel->reltarget->exprs;
     Node* match_var = NULL;
     ListCell* cell = NULL;
 
@@ -814,9 +814,9 @@ void JoinPathGenBase::parallelLocalRedistribute(bool* inner_can_local_distribute
     Path* outer_tmp = m_outerPath;
 
     *inner_can_local_distribute =
-        check_dsitribute_key_in_targetlist(m_root, m_distributeKeysInner, m_innerRel->reltargetlist);
+        check_dsitribute_key_in_targetlist(m_root, m_distributeKeysInner, m_innerRel->reltarget->exprs);
     *outer_can_local_distribute =
-        check_dsitribute_key_in_targetlist(m_root, m_distributeKeysOuter, m_outerRel->reltargetlist);
+        check_dsitribute_key_in_targetlist(m_root, m_distributeKeysOuter, m_outerRel->reltarget->exprs);
 
     if (IS_DUMMY_UNIQUE(inner_tmp))
         inner_tmp = ((UniquePath*)inner_tmp)->subpath;
@@ -1098,6 +1098,7 @@ Path* HashJoinPathGen::createHashJoinPath()
 
     pathnode->jpath.path.pathtype = T_HashJoin;
     pathnode->jpath.path.parent = m_rel;
+    pathnode->jpath.path.pathtarget = m_rel->reltarget;
     pathnode->jpath.path.param_info = get_joinrel_parampathinfo(
         m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_extra->sjinfo, m_requiredOuter, &m_joinRestrictinfo);
 
@@ -1353,6 +1354,7 @@ Path* NestLoopPathGen::createNestloopPath()
 
     pathnode->path.pathtype = T_NestLoop;
     pathnode->path.parent = m_rel;
+    pathnode->path.pathtarget = m_rel->reltarget;
     if (m_root != NULL) {
         pathnode->path.param_info = get_joinrel_parampathinfo(
             m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_extra->sjinfo, m_requiredOuter, &m_joinClauses);
@@ -1545,6 +1547,7 @@ Path* MergeJoinPathGen::createMergejoinPath()
 
     pathnode->jpath.path.pathtype = T_MergeJoin;
     pathnode->jpath.path.parent = m_rel;
+    pathnode->jpath.path.pathtarget = m_rel->reltarget;
     pathnode->jpath.path.param_info = get_joinrel_parampathinfo(
         m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_extra->sjinfo, m_requiredOuter, &m_joinRestrictinfo);
     pathnode->jpath.path.pathkeys = m_pathkeys;

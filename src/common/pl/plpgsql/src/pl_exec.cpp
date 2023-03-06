@@ -11934,7 +11934,8 @@ static void exec_simple_check_plan(PLpgSQL_execstate *estate, PLpgSQL_expr* expr
     bool has_subplans = query->hasAggs || query->hasWindowFuncs || query->hasSubLinks || query->hasForUpdate ||
                         query->cteList || query->jointree->quals || query->groupClause || query->havingQual ||
                         query->windowClause || query->distinctClause || query->sortClause || query->limitOffset ||
-                        query->limitCount || query->setOperations;
+                        query->limitCount || query->setOperations ||
+                        (query->is_flt_frame && query->hasTargetSRFs);
 
     if (has_subplans) {
         return;

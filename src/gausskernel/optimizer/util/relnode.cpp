@@ -27,6 +27,7 @@
 #include "optimizer/plancat.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/var.h"
+#include "optimizer/tlist.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "optimizer/streamplan.h"
@@ -169,10 +170,13 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->isPartitionedTable = rte->ispartrel;
     rel->partflag = PARTITION_NONE;
     rel->rows = 0;
-    rel->width = 0;
     rel->encodedwidth = 0;
     rel->encodednum = 0;
-    rel->reltargetlist = NIL;
+    rel->reltarget = create_empty_pathtarget();
+    rel->reltarget->exprs = NIL;
+    rel->reltarget->cost.startup = 0;
+    rel->reltarget->cost.per_tuple = 0;
+    rel->reltarget->width = 0;
     rel->alternatives = NIL;
     rel->base_rel = NULL;
     rel->pathlist = NIL;
@@ -642,10 +646,13 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->isPartitionedTable = false;
     joinrel->partflag = PARTITION_NONE;
     joinrel->rows = 0;
-    joinrel->width = 0;
     joinrel->encodedwidth = 0;
     joinrel->encodednum = 0;
-    joinrel->reltargetlist = NIL;
+    joinrel->reltarget = create_empty_pathtarget();
+    joinrel->reltarget->exprs = NIL;
+    joinrel->reltarget->cost.startup = 0;
+    joinrel->reltarget->cost.per_tuple = 0;
+    joinrel->reltarget->width = 0;
     joinrel->pathlist = NIL;
     joinrel->ppilist = NIL;
     joinrel->cheapest_gather_path = NULL;
@@ -705,7 +712,7 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
      */
     build_joinrel_tlist(root, joinrel, outer_rel);
     build_joinrel_tlist(root, joinrel, inner_rel);
-    add_placeholders_to_joinrel(root, joinrel);
+    add_placeholders_to_joinrel(root, joinrel, outer_rel, inner_rel);
 
     /*
      * Construct restrict and join clause lists for the new joinrel. (The
@@ -784,7 +791,7 @@ static void build_joinrel_tlist(PlannerInfo* root, RelOptInfo* joinrel, const Re
     Relids relids = joinrel->relids;
     ListCell* vars = NULL;
 
-    foreach (vars, input_rel->reltargetlist) {
+    foreach (vars, input_rel->reltarget->exprs) {
         Var *var = (Var *) lfirst(vars);
         RelOptInfo* baserel = NULL;
         int ndx;
@@ -801,7 +808,7 @@ static void build_joinrel_tlist(PlannerInfo* root, RelOptInfo* joinrel, const Re
          * whole-row Var with a ConvertRowtypeExpr atop it.
          */
         if (!IsA(var, Var))
-            elog(ERROR, "unexpected node type in reltargetlist: %d",
+            elog(ERROR, "unexpected node type in rel targetlist: %d",
                  (int) nodeTag(var));
 
 
@@ -815,8 +822,8 @@ static void build_joinrel_tlist(PlannerInfo* root, RelOptInfo* joinrel, const Re
         ndx = var->varattno - baserel->min_attr;
         if (bms_nonempty_difference(baserel->attr_needed[ndx], relids)) {
             /* Yup, add it to the output */
-            joinrel->reltargetlist = lappend(joinrel->reltargetlist, var);
-            joinrel->width += baserel->attr_widths[ndx];
+            joinrel->reltarget->exprs = lappend(joinrel->reltarget->exprs, var);
+            joinrel->reltarget->width += baserel->attr_widths[ndx];
             if (root->glob->vectorized) {
                 joinrel->encodedwidth += columnar_get_col_width(exprType((Node *)var), baserel->attr_widths[ndx]);
                 joinrel->encodednum++;

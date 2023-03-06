@@ -1866,6 +1866,19 @@ static void InitConfigureNamesBool()
             NULL
         },
 #endif
+        {{"enable_expr_fusion",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING,
+            gettext_noop("Enable expr fusion"),
+            NULL},
+            &u_sess->attr.attr_common.enable_expr_fusion,
+            false,
+            NULL,
+            NULL,
+            NULL,
+            NULL
+        },
         {{"ts_adaptive_threads",
             PGC_SIGHUP, 
             NODE_DISTRIBUTE,

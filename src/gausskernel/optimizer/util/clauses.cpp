@@ -859,20 +859,39 @@ static bool find_window_functions_walker(Node* node, WindowLists* lists)
 /*
  * expression_returns_set_rows
  *	  Estimate the number of rows returned by a set-returning expression.
- *	  The result is 1 if there are no set-returning functions.
+ *	  The result is 1 if it's not a set-returning expression.
  *
- * We use the product of the rowcount estimates of all the functions in
- * the given tree (this corresponds to the behavior of ExecMakeFunctionResult
- * for nested set-returning functions).
+ * We should only examine the top-level function or operator; it used to be
+ * appropriate to recurse, but not anymore.  (Even if there are more SRFs in
+ * the function's inputs, their multipliers are accounted for separately.)
  *
  * Note: keep this in sync with expression_returns_set() in nodes/nodeFuncs.c.
  */
 double expression_returns_set_rows(Node* clause)
 {
-    double result = 1;
+    if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        if (clause == NULL)
+            return 1.0;
+        if (IsA(clause, FuncExpr)) {
+            FuncExpr *expr = (FuncExpr *)clause;
 
-    (void)expression_returns_set_rows_walker(clause, &result);
-    return clamp_row_est(result);
+            if (expr->funcretset)
+                return clamp_row_est(get_func_rows(expr->funcid));
+        }
+        if (IsA(clause, OpExpr)) {
+            OpExpr *expr = (OpExpr *)clause;
+            if (expr->opretset) {
+                set_opfuncid(expr);
+                return clamp_row_est(get_func_rows(expr->opfuncid));
+            }
+        }
+        return 1.0;
+    } else {
+        double result = 1;
+
+        (void)expression_returns_set_rows_walker(clause, &result);
+        return clamp_row_est(result);
+    }
 }
 
 static void expression_returns_set_rows_walker_isa(Node* node, double* count)
@@ -4451,6 +4470,7 @@ static Expr* inline_function(Oid funcid, Oid result_type, Oid result_collid, Oid
         querytree->cteList || querytree->rtable || querytree->jointree->fromlist || querytree->jointree->quals ||
         querytree->groupClause || querytree->havingQual || querytree->windowClause || querytree->distinctClause ||
         querytree->sortClause || querytree->limitOffset || querytree->limitCount || querytree->setOperations ||
+        (querytree->is_flt_frame && querytree->hasTargetSRFs) ||
         list_length(querytree->targetList) != 1)
         goto fail;
 
@@ -4476,16 +4496,17 @@ static Expr* inline_function(Oid funcid, Oid result_type, Oid result_collid, Oid
     AssertEreport(!modifyTargetList, MOD_OPT, "");
 
     /*
-     * Additional validity checks on the expression.  It mustn't return a set,
-     * and it mustn't be more volatile than the surrounding function (this is
-     * to avoid breaking hacks that involve pretending a function is immutable
-     * when it really ain't).  If the surrounding function is declared strict,
-     * then the expression must contain only strict constructs and must use
-     * all of the function parameters (this is overkill, but an exact analysis
-     * is hard).
+     * Additional validity checks on the expression.  It mustn't be more
+     * volatile than the surrounding function (this is to avoid breaking hacks
+     * that involve pretending a function is immutable when it really ain't).
+     * If the surrounding function is declared strict, then the expression
+     * must contain only strict constructs and must use all of the function
+     * parameters (this is overkill, but an exact analysis is hard).
      */
-    if (expression_returns_set(newexpr))
-        goto fail;
+    if (!querytree->is_flt_frame) {
+        if (expression_returns_set(newexpr))
+            goto fail;
+    }
 
     if (funcform->provolatile == PROVOLATILE_IMMUTABLE && contain_mutable_functions(newexpr))
         goto fail;

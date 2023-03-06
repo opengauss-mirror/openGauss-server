@@ -29,6 +29,7 @@ extern List* add_to_flat_tlist(List* tlist, List* exprs);
 extern List* get_tlist_exprs(List* tlist, bool includeJunk);
 extern bool tlist_same_datatypes(List* tlist, List* colTypes, bool junkOK);
 extern bool tlist_same_collations(List* tlist, List* colCollations, bool junkOK);
+extern bool tlist_same_exprs(List *tlist1, List *tlist2);
 
 extern TargetEntry* get_sortgroupref_tle(Index sortref, List* targetList, bool report_error = true);
 extern TargetEntry* get_sortgroupclause_tle(SortGroupClause* sgClause, List* targetList, bool report_error = true);
@@ -36,6 +37,8 @@ extern Node* get_sortgroupclause_expr(SortGroupClause* sgClause, List* targetLis
 extern List* get_sortgrouplist_exprs(List* sgClauses, List* targetList);
 
 extern SortGroupClause* get_sortgroupref_clause(Index sortref, List* clauses);
+extern SortGroupClause *get_sortgroupref_clause_noerr(Index sortref, List *clauses);
+
 extern Oid* extract_grouping_ops(List* groupClause);
 extern Oid* extract_grouping_collations(List* groupClause, List* tlist);
 extern AttrNumber* extract_grouping_cols(List* groupClause, List* tlist);
@@ -49,4 +52,18 @@ extern List* get_dependency_var_list(Query* parse, List* group_cols, List* non_g
 extern bool var_from_dependency_rel(Query* parse, Var* var, List* dep_oids);
 extern bool var_from_sublink_pulluped(Query *parse, Var *var);
 extern bool var_from_subquery_pulluped(Query *parse, Var *var);
+
+extern void apply_tlist_labeling(List *dest_tlist, List *src_tlist);
+extern PathTarget *make_pathtarget_from_tlist(List *tlist);
+extern List *make_tlist_from_pathtarget(PathTarget *target);
+extern PathTarget *create_empty_pathtarget(void);
+extern void add_column_to_pathtarget(PathTarget *target, Expr *expr, Index sortgroupref);
+extern void add_new_column_to_pathtarget(PathTarget *target, Expr *expr);
+extern void add_new_columns_to_pathtarget(PathTarget *target, List *exprs);
+extern bool split_pathtarget_at_srfs(PlannerInfo *root, PathTarget *target, PathTarget *input_target,
+                                    List **targets, List **targets_contain_srfs);
+
+/* Convenience macro to get a PathTarget with valid cost/width fields */
+#define create_pathtarget(root, tlist) \
+    set_pathtarget_cost_width(root, make_pathtarget_from_tlist(tlist))
 #endif /* TLIST_H */

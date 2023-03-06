@@ -319,6 +319,7 @@ extern bool ExecQual(List* qual, ExprContext* econtext, bool resultForNull);
 extern int ExecTargetListLength(List* targetlist);
 extern int ExecCleanTargetListLength(List* targetlist);
 extern TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone);
+extern Datum ExecMakeFunctionResultSet(FuncExprState *fcache, ExprContext *econtext, bool *isNull, ExprDoneCond *isDone);
 
 extern TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd accessMtd, ExecScanRecheckMtd recheckMtd);
 extern void ExecAssignScanProjectionInfo(ScanState* node);

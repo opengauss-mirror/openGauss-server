@@ -801,7 +801,7 @@ void ExecChooseSonicHashTableSize(Path* inner_path, List* hashclauses, int* inne
 
     int tuple_width = 0;
     double ntuples = PATH_LOCAL_ROWS(inner_path) / dop;
-    List* tleList = inner_path->parent->reltargetlist;
+    List* tleList = inner_path->pathtarget->exprs;
     Relids inner_relids = inner_path->parent->relids;
 
     MEMCTL_LOG(

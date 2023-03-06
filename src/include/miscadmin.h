@@ -38,6 +38,7 @@
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
 
+extern const uint32 SRF_FUSION_VERSION_NUM;
 extern const uint32 INNER_UNIQUE_VERSION_NUM;
 extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
 extern const uint32 SELECT_INTO_FILE_VERSION_NUM;

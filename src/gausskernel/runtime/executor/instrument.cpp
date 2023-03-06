@@ -896,6 +896,11 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             pname = "Result";
             plan_type = UTILITY_OP;
             break;
+        case T_ProjectSet: {
+            pname = "ProjectSet";
+            plan_type = IO_OP;
+            break;
+        }
         case T_VecResult:
             pname = "Vector Result";
             plan_type = UTILITY_OP;

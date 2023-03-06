@@ -357,6 +357,7 @@ typedef struct CachedPlanSource {
     Oid rewriteRoleId;     /* Role ID we did rewriting for */
     bool dependsOnRole;    /* is rewritten query specific to role? */
     bool fixed_result;     /* disallow change in result tupdesc? */
+    bool cq_is_flt_frame;  /* Record whether the expression execution frame is a flat frame? 'cq' means CachedQuery */
     TupleDesc resultDesc;  /* result type; NULL = doesn't return tuples */
     MemoryContext context; /* memory context holding all above */
     /* These fields describe the current analyzed-and-rewritten query tree: */

@@ -724,7 +724,7 @@ List* convert_subquery_pathkeys(PlannerInfo* root, RelOptInfo* rel, List* subque
                         continue;
 
                     /* check if targetentry exists in final subquery targetlist */
-                    foreach (lc, rel->reltargetlist) {
+                    foreach (lc, rel->reltarget->exprs) {
                         Node* n = (Node*)lfirst(lc);
                         if (IsA(n, Var) && ((Var*)n)->varattno == seq)
                             break;

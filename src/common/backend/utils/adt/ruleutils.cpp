@@ -7699,7 +7699,7 @@ static bool IsDefaultSlice(StringInfo buf, RangePartitionDefState* sliceDef)
 {
     ParseState* pstate = make_parsestate(NULL);
     Node* valueNode = (Node *)list_nth(sliceDef->boundary, 0);
-    Const* valueConst = (Const *)transformExpr(pstate, valueNode);
+    Const* valueConst = (Const *)transformExprRecurse(pstate, valueNode);
 
     if (valueConst->ismaxvalue) {
         appendStringInfo(buf, "DEFAULT");
@@ -7749,7 +7749,7 @@ static void AppendSliceItemDDL(StringInfo buf, RangePartitionDefState* sliceDef,
             appendStringInfo(buf, ", ");
         }
         valueNode = (Node *)lfirst(cell);
-        valueConst = (Const *)transformExpr(pstate, valueNode);
+        valueConst = (Const*)transformExprRecurse(pstate, valueNode);
 
         if (valueConst->ismaxvalue) {
             /* already took care of DEFAULT slice for LIST tables in IsDefaultSlice */
@@ -7818,7 +7818,7 @@ static void AppendStartEndElement(StringInfo buf, List* valueList, CreateStmt* s
 
     pstate = make_parsestate(NULL);
     valueNode = (Node *)list_nth(valueList, 0);
-    valueConst = (Const *)transformExpr(pstate, valueNode);
+    valueConst = (Const *)transformExprRecurse(pstate, valueNode);
     if (valueConst->ismaxvalue) {
         appendStringInfo(buf, "MAXVALUE");
     } else {

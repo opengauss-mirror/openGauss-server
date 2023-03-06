@@ -563,7 +563,7 @@ static void find_inlist2join_path_walker(Path* path, find_inlist2join_context* c
                  * The rel is new_rel and has an inlist2join path
                  * Remove the mapping from root
                  */
-                foreach (lc1, rel->reltargetlist) {
+                foreach (lc1, rel->reltarget->exprs) {
                     Var* var = (Var*)lfirst(lc1);
                     foreach (lc, context->root->var_mappings) {
                         RewriteVarMapping* rvm = (RewriteVarMapping*)lfirst(lc);
@@ -749,7 +749,7 @@ static bool HasConvertableInlistCond(RelOptInfo* rel)
     }
 
     /* Check if there is place holder var in rel's targetlist */
-    List* var_list = pull_var_clause((Node*)rel->reltargetlist, PVC_INCLUDE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+    List* var_list = pull_var_clause((Node*)rel->reltarget->exprs, PVC_INCLUDE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
 
     foreach (lc, var_list) {
         if (!IsA(lfirst(lc), Var)) {
@@ -917,7 +917,7 @@ static int ConvertableInlistMaxNum(const RelOptInfo* rel)
  */
 static bool belowInlist2JoinThreshold(const RelOptInfo* rel, int num, RelOrientation orientation)
 {
-    int tarnum = list_length(rel->reltargetlist);
+    int tarnum = list_length(rel->reltarget->exprs);
     const int row_threshod = 10;
 
     if (orientation == REL_ROW_ORIENTED || orientation == REL_ORIENT_UNKNOWN) {
@@ -957,7 +957,7 @@ static RangeTblEntry* make_rte_with_subquery(PlannerInfo* root, RelOptInfo* rel,
 
     ListCell* reltarget = NULL;
     if (rte->eref->colnames) {
-        foreach (reltarget, rel->reltargetlist) {
+        foreach (reltarget, rel->reltarget->exprs) {
             Var* relvar = (Var*)lfirst(reltarget);
 
             if (relvar->varattno > 0) {
@@ -1021,10 +1021,11 @@ RelOptInfo* build_alternative_rel(const RelOptInfo* origin, RTEKind rtekind)
     rel->isPartitionedTable = false;
     rel->partflag = origin->partflag;
     rel->rows = origin->rows;
-    rel->width = origin->width;
+    rel->reltarget = create_empty_pathtarget();
+    rel->reltarget->width = origin->reltarget->width;
     rel->encodedwidth = origin->encodedwidth;
     rel->encodednum = origin->encodednum;
-    rel->reltargetlist = list_copy(origin->reltargetlist);
+    rel->reltarget->exprs = list_copy(origin->reltarget->exprs);
     rel->baserestrictinfo = (List*)copyObject(origin->baserestrictinfo);
     rel->pathlist = NIL;
     rel->ppilist = NIL;
@@ -1225,7 +1226,7 @@ static void rebuild_subquery(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* 
      *    return attribues is start from 1
      */
     /* 1. Build SubQuery's target list */
-    foreach (lc1, rel->reltargetlist) {
+    foreach (lc1, rel->reltarget->exprs) {
         Assert(IsA(lfirst(lc1), Var));
         Var* relvar = (Var*)copyObject((Var*)lfirst(lc1));
 
@@ -1253,7 +1254,7 @@ static void rebuild_subquery(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* 
 
     /* 2. Build RelOptInfo's targetlist as alternative rel */
     AttrNumber attno = SUBQUERY_ATTNO;
-    foreach (lc1, rel->reltargetlist) {
+    foreach (lc1, rel->reltarget->exprs) {
         Var* old_var = (Var*)copyObject((Var*)lfirst(lc1));
         Var* new_var = (Var*)copyObject((Var*)lfirst(lc1));
 

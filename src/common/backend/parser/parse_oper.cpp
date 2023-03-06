@@ -695,6 +695,20 @@ static void op_error(
 }
 
 /*
+ *		parse_get_last_srf
+ *
+ * Check pstate, if pstate is NULL, we can't use pstate->p_last_srf directly,
+ * it's okay to return a NULL value.
+ */
+Node* parse_get_last_srf(ParseState* pstate)
+{
+    if (pstate != NULL) {
+        return pstate->p_last_srf;
+    }
+    return NULL;
+}
+
+/*
  *		Operator expression construction.
  *
  * Transform operator expression ensuring type compatibility.
@@ -703,7 +717,7 @@ static void op_error(
  * As with coerce_type, pstate may be NULL if no special unknown-Param
  * processing is wanted.
  */
-Expr* make_op(ParseState* pstate, List* opname, Node* ltree, Node* rtree, int location, bool inNumeric)
+Expr* make_op(ParseState* pstate, List* opname, Node* ltree, Node* rtree, Node* last_srf, int location, bool inNumeric)
 {
     Oid ltypeId, rtypeId;
     Operator tup;
@@ -783,6 +797,13 @@ Expr* make_op(ParseState* pstate, List* opname, Node* ltree, Node* rtree, int lo
     /* opcollid and inputcollid will be set by parse_collate.c */
     result->args = args;
     result->location = location;
+
+    /* if it returns a set, check that's OK */
+    if (result->opretset && pstate && pstate->p_is_flt_frame) {
+        check_srf_call_placement(pstate, last_srf, location);
+        /* ... and remember it for error checks at higher levels */
+        pstate->p_last_srf = (Node*)result;
+    }
 
     ReleaseSysCache(tup);
 

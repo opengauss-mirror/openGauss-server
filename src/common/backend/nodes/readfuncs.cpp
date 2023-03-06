@@ -1514,6 +1514,12 @@ static Query* _readQuery(void)
     READ_INT_FIELD(resultRelation);
     READ_BOOL_FIELD(hasAggs);
     READ_BOOL_FIELD(hasWindowFuncs);
+    IF_EXIST(hasTargetSRFs) {
+        READ_BOOL_FIELD(hasTargetSRFs);
+    }
+    IF_EXIST(is_flt_frame) {
+        READ_BOOL_FIELD(is_flt_frame);
+    }
     READ_BOOL_FIELD(hasSubLinks);
     READ_BOOL_FIELD(hasDistinctOn);
     READ_BOOL_FIELD(hasRecursive);
@@ -4199,6 +4205,20 @@ static ExecNodes* _readExecNodes(void)
     READ_DONE();
 }
 
+/*
+ * _readProjectSet
+ */
+static ProjectSet *_readProjectSet(ProjectSet* local_node)
+{
+    READ_LOCALS_NULL(ProjectSet);
+    READ_TEMP_LOCALS();
+
+    _readPlan(&local_node->plan);
+
+    length = 0;
+    READ_DONE();
+}
+
 static ModifyTable* _readModifyTable(ModifyTable* local_node)
 {
     READ_LOCALS_NULL(ModifyTable);
@@ -4533,6 +4553,9 @@ static PlannedStmt* _readPlannedStmt(void)
     READ_BOOL_FIELD(transientPlan);
     IF_EXIST(dependsOnRole) {
         READ_BOOL_FIELD(dependsOnRole);
+    }
+    IF_EXIST(is_flt_frame) {
+        READ_BOOL_FIELD(is_flt_frame);
     }
     READ_NODE_FIELD(planTree);
     READ_NODE_FIELD(rtable);
@@ -6345,6 +6368,8 @@ Node* parseNodeString(void)
         return_value = _readCteScan(NULL);
     } else if (MATCH("WINDOWAGG", 9)) {
         return_value = _readWindowAgg(NULL);
+    } else if (MATCH("PROJECTSET", 10)) {
+        return_value = _readProjectSet(NULL);
     } else if (MATCH("MODIFYTABLE", 11)) {
         return_value = _readModifyTable(NULL);
     } else if (MATCH("MERGEWHENCLAUSE", 15)) {

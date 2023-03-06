@@ -59,8 +59,9 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92846;
+const uint32 GRAND_VERSION_NUM = 92847;
 
+const uint32 SRF_FUSION_VERSION_NUM = 92847;
 const uint32 INNER_UNIQUE_VERSION_NUM = 92845;
 const uint32 PARTITION_ENHANCE_VERSION_NUM = 92844;
 const uint32 SELECT_INTO_FILE_VERSION_NUM = 92844;

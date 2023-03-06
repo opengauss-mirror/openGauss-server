@@ -35,6 +35,8 @@
 #include "storage/tcap.h"
 #include "parser/parse_utilcmd.h"
 
+static bool query_check_no_flt_walker(Node* node, void* context);
+static bool query_check_srf_walker(Node* node, void* context);
 static bool expression_returns_set_walker(Node* node, void* context);
 static bool expression_rownum_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
@@ -676,6 +678,70 @@ static bool expression_returns_set_walker(Node* node, void* context)
     }
 
     return expression_tree_walker(node, (bool (*)())expression_returns_set_walker, context);
+}
+
+/*
+ * node_query_check_no_flt
+ *
+ * It will check if we need a revert.
+ */
+bool query_check_no_flt(Query* qry)
+{
+    if (IsA(qry, Query)) {
+        /* if we find a query need execute as old expression framework, return true imediately */
+        if (!qry->is_flt_frame) {
+            return true;
+        }
+    }
+    return query_or_expression_tree_walker((Node*)qry, (bool (*)())query_check_no_flt_walker, (void*)NULL, 0);
+}
+
+static bool query_check_no_flt_walker(Node* node, void* context)
+{
+    if (node == NULL)
+        return false;
+    if (IsA(node, Query)) {
+        Query* qry = (Query*)node;
+        /* if we find a query need execute as old expression framework, return true imediately */
+        if (!qry->is_flt_frame) {
+            return true;
+        }
+        return query_tree_walker((Query*)node, (bool (*)())query_check_no_flt_walker, (void*)NULL, 0);
+    }
+    return expression_tree_walker(node, (bool (*)())query_check_no_flt_walker, (void*)NULL);
+}
+
+/*
+ * query_check_srf
+ *
+ * query_check_srf will try to check SRFs in qry->targetList bt
+ * function query_check_srf_walker
+ */
+void query_check_srf(Query* qry)
+{
+    qry->hasTargetSRFs = expression_returns_set((Node*)qry->targetList);
+    /* if the rule_action has SRFs we need revert to old expression framework */
+    if (qry->hasTargetSRFs) {
+        qry->is_flt_frame = false;
+    }
+    query_or_expression_tree_walker((Node*)qry, (bool (*)())query_check_srf_walker, (void*)NULL, 0);
+    return;
+}
+
+static bool query_check_srf_walker(Node* node, void* context)
+{
+    if (node == NULL)
+        return false;
+    if (IsA(node, Query)) {
+        Query* qry = (Query*)node;
+        qry->hasTargetSRFs = expression_returns_set((Node*)qry->targetList);
+        /* if the rule_action has SRFs we need revert to old expression framework */
+        if (qry->hasTargetSRFs) {
+            qry->is_flt_frame = false;
+        }
+        return query_tree_walker((Query*)node, (bool (*)())query_check_srf_walker, (void*)NULL, 0);
+    }
+    return expression_tree_walker(node, (bool (*)())query_check_srf_walker, (void*)NULL);
 }
 
 /*

@@ -757,7 +757,7 @@ void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
                 PATH_LOCAL_ROWS(tmp_path),
                 tmp_path->rows,
                 1.0,
-                parent_rel->width,
+                parent_rel->reltarget->width,
                 false,
                 tmp_path->distribute_keys,
                 &redistribute_cost,
@@ -924,7 +924,7 @@ Path* get_cheapest_path(PlannerInfo* root, RelOptInfo* rel, const double* agg_gr
                 agg_groups[0],
                 cheapest_path->rows,
                 1.0,
-                rel->width,
+                rel->reltarget->width,
                 false,
                 superset_path->distribute_keys,
                 &agg_dis_cost,
@@ -937,7 +937,7 @@ Path* get_cheapest_path(PlannerInfo* root, RelOptInfo* rel, const double* agg_gr
                 PATH_LOCAL_ROWS(cheapest_path),
                 cheapest_path->rows,
                 1.0,
-                rel->width,
+                rel->reltarget->width,
                 false,
                 superset_path->distribute_keys,
                 &path_dis_cost,
@@ -975,7 +975,7 @@ Path* get_cheapest_path(PlannerInfo* root, RelOptInfo* rel, const double* agg_gr
                 rows,
                 cheapest_path->rows,
                 1.0,
-                rel->width,
+                rel->reltarget->width,
                 false,
                 matched_path->distribute_keys,
                 &final_dis_cost,
@@ -1951,6 +1951,7 @@ Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_ou
 
     pathnode->pathtype = T_SeqScan;
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->pathkeys = NIL; /* seqscan has unordered result */
     pathnode->dop = dop;
@@ -1989,6 +1990,7 @@ Path* build_seqScanPath_by_indexScanPath(PlannerInfo* root, Path* index_path)
 
     pathnode->pathtype = T_SeqScan;
     pathnode->parent = index_path->parent;
+    pathnode->pathtarget = index_path->parent->reltarget;
     pathnode->param_info = index_path->param_info;
     pathnode->pathkeys = NIL;
     pathnode->exec_type = index_path->exec_type;
@@ -2021,6 +2023,7 @@ Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop)
     Path* pathnode = makeNode(Path);
 
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->pathkeys = NIL; /* seqscan has unordered result */
     pathnode->dop = dop;
     pathnode->exec_type = SetBasePathExectype(root, rel);
@@ -2064,6 +2067,7 @@ Path* create_tsstorescan_path(PlannerInfo *root, RelOptInfo *rel, int dop)
 
     pathnode->pathtype =  T_TsStoreScan;
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->pathkeys = NIL;    /* seqscan has unordered result */
     pathnode->dop = dop;
     pathnode->exec_type = SetBasePathExectype(root, rel);
@@ -2346,6 +2350,7 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
 
     pathnode->path.pathtype = indexonly ? T_IndexOnlyScan : T_IndexScan;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer, upper_params);
     pathnode->path.pathkeys = pathkeys;
 
@@ -2398,6 +2403,7 @@ BitmapHeapPath* create_bitmap_heap_path(PlannerInfo* root, RelOptInfo* rel, Path
 
     pathnode->path.pathtype = T_BitmapHeapScan;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer, required_upper);
     pathnode->path.pathkeys = NIL; /* always unordered */
     pathnode->path.exec_type = SetBasePathExectype(root, rel);
@@ -2432,6 +2438,7 @@ BitmapAndPath* create_bitmap_and_path(PlannerInfo* root, RelOptInfo* rel, List* 
     pathnode->is_ustore = rel->is_ustore;
     pathnode->path.pathtype = T_BitmapAnd;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = NULL; /* not used in bitmap trees */
     pathnode->path.pathkeys = NIL;    /* always unordered */
     pathnode->path.exec_type = SetBasePathExectype(root, rel);
@@ -2468,6 +2475,7 @@ BitmapOrPath* create_bitmap_or_path(PlannerInfo* root, RelOptInfo* rel, List* bi
     pathnode->is_ustore = rel->is_ustore;
     pathnode->path.pathtype = T_BitmapOr;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = NULL; /* not used in bitmap trees */
     pathnode->path.pathkeys = NIL;    /* always unordered */
     pathnode->path.exec_type = SetBasePathExectype(root, rel);
@@ -2503,6 +2511,7 @@ TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals)
 
     pathnode->path.pathtype = T_TidScan;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = NULL; /* never parameterized at present */
     pathnode->path.pathkeys = NIL;    /* always unordered */
     pathnode->path.exec_type = SetBasePathExectype(root, rel);
@@ -2559,6 +2568,7 @@ AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpath
 
     pathnode->path.pathtype = T_Append;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = get_appendrel_parampathinfo(rel, required_outer, upper_params);
     pathnode->path.pathkeys = NIL; /* result is always considered
                                     * unsorted */
@@ -2702,6 +2712,7 @@ MergeAppendPath* create_merge_append_path(
 
     pathnode->path.pathtype = T_MergeAppend;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = get_appendrel_parampathinfo(rel, required_outer, upper_params);
     pathnode->path.pathkeys = pathkeys;
     pathnode->subpaths = subpaths;
@@ -2869,6 +2880,7 @@ ResultPath* create_result_path(PlannerInfo *root, RelOptInfo *rel, List* quals,
 
         pathnode->path.pathkeys = subpath->pathkeys;
         pathnode->path.parent = subpath->parent;
+        pathnode->path.pathtarget = subpath->pathtarget;
         pathnode->pathqual = quals;
         set_path_rows(&pathnode->path, clamp_row_est(Max(subpath->rows * DEFAULT_EQ_SEL, 1)));
         pathnode->path.startup_cost = subpath->startup_cost;
@@ -2881,7 +2893,13 @@ ResultPath* create_result_path(PlannerInfo *root, RelOptInfo *rel, List* quals,
         inherit_path_locator_info((Path*)pathnode, subpath);
 #endif
     } else {
-        pathnode->path.parent = NULL;
+        if (root->parse->is_flt_frame) {
+            pathnode->path.parent = rel;
+            pathnode->path.pathtarget = rel->reltarget;
+        } else {
+            pathnode->path.parent = NULL;
+            pathnode->path.pathtarget = NULL;
+        }
         pathnode->quals = quals;
         /* Hardly worth defining a cost_result() function ... just do it */
         set_path_rows(&pathnode->path, 1, 1);
@@ -2898,7 +2916,9 @@ ResultPath* create_result_path(PlannerInfo *root, RelOptInfo *rel, List* quals,
      * In theory we should include the qual eval cost as well, but at present
      * that doesn't accomplish much except duplicate work that will be done
      * again in make_result; since this is only used for degenerate cases,
-     * nothing interesting will be done with the path cost values...
+     * nothing interesting will be done with the path cost values.
+    * (Likewise, we don't worry about pathtarget->cost since that tlist will
+    * be empty at this point.)
      */
     return pathnode;
 }
@@ -2915,6 +2935,7 @@ Path *create_resultscan_path(PlannerInfo *root, RelOptInfo *rel,
 
     pathnode->pathtype = T_BaseResult;
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->pathkeys = NIL;       /* result is always unordered */
 
@@ -2936,6 +2957,7 @@ MaterialPath* create_material_path(Path* subpath, bool materialize_all)
 
     pathnode->path.pathtype = T_Material;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = subpath->param_info;
     pathnode->path.pathkeys = subpath->pathkeys;
     pathnode->path.dop = subpath->dop;
@@ -2950,7 +2972,8 @@ MaterialPath* create_material_path(Path* subpath, bool materialize_all)
     pathnode->subpath = subpath;
     set_path_rows(&pathnode->path, input_global_rows, subpath->multiple);
 
-    cost_material(&pathnode->path, subpath->startup_cost, subpath->total_cost, PATH_LOCAL_ROWS(subpath), rel->width);
+    cost_material(&pathnode->path, subpath->startup_cost, subpath->total_cost,
+                  PATH_LOCAL_ROWS(subpath), rel->reltarget->width);
     pathnode->path.stream_cost = subpath->stream_cost;
 
     return pathnode;
@@ -3145,6 +3168,7 @@ UniquePath* create_unique_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath
     pathnode = makeNode(UniquePath);
     pathnode->path.pathtype = T_Unique;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = subpath->param_info;
     pathnode->path.dop = subpath->dop;
 
@@ -3266,7 +3290,7 @@ UniquePath* create_unique_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath
         if (root->glob->vectorized)
             hashentrysize = get_path_actual_total_width(subpath, root->glob->vectorized, OP_HASHAGG, 0);
         else
-            hashentrysize = get_hash_entry_size(rel->width);
+            hashentrysize = get_hash_entry_size(rel->reltarget->width);
 
         Distribution* distribution = ng_get_dest_distribution((Path*)pathnode);
         ng_copy_distribution(&agg_path.distribution, distribution);
@@ -3279,7 +3303,7 @@ UniquePath* create_unique_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath
             subpath->startup_cost,
             subpath->total_cost,
             local_rows,
-            rel->width,
+            rel->reltarget->width,
             hashentrysize,
             1,
             &hash_mem_info);
@@ -3437,6 +3461,7 @@ Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkey
 
     pathnode->pathtype = T_SubqueryScan;
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer, upper_params);
     pathnode->pathkeys = pathkeys;
     pathnode->exec_type = rel->subplan->exec_type;
@@ -3477,7 +3502,7 @@ Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkey
                              * for cost-base query rewrite dummy subquery rel, subplan targetlist
                              * is in same order as rel targetlist, so find it by sequence
                              */
-                            Expr* expr = (Expr*)list_nth(rel->reltargetlist, resno - 1);
+                            Expr* expr = (Expr*)list_nth(rel->reltarget->exprs, resno - 1);
                             relvar = locate_distribute_var(expr);
                             AssertEreport(relvar != NULL, MOD_OPT, "");
                             rel->distribute_keys = lappend(rel->distribute_keys, relvar);
@@ -3488,7 +3513,7 @@ Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkey
                              * be a subset of subplan's targetlist, and there can be type cast on base
                              * vars
                              */
-                            foreach (lc2, rel->reltargetlist) {
+                            foreach (lc2, rel->reltarget->exprs) {
                                 relvar = locate_distribute_var((Expr*)lfirst(lc2));
                                 if (relvar != NULL && relvar->varattno == resno)
                                     break;
@@ -3564,6 +3589,7 @@ Path* create_subqueryscan_path_reparam(PlannerInfo* root, RelOptInfo* rel, List*
 
     pathnode->pathtype = T_SubqueryScan;
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->param_info = get_subquery_parampathinfo(root, rel, required_outer, upper_params);
     pathnode->pathkeys = pathkeys;
     pathnode->exec_type = rel->subplan->exec_type;
@@ -3604,7 +3630,7 @@ Path* create_subqueryscan_path_reparam(PlannerInfo* root, RelOptInfo* rel, List*
                              * for cost-base query rewrite dummy subquery rel, subplan targetlist
                              * is in same order as rel targetlist, so find it by sequence
                              */
-                            Expr* expr = (Expr*)list_nth(rel->reltargetlist, resno - 1);
+                            Expr* expr = (Expr*)list_nth(rel->reltarget->exprs, resno - 1);
                             relvar = locate_distribute_var(expr);
                             AssertEreport(relvar != NULL, MOD_OPT, "");
                             rel->distribute_keys = lappend(rel->distribute_keys, relvar);
@@ -3615,7 +3641,7 @@ Path* create_subqueryscan_path_reparam(PlannerInfo* root, RelOptInfo* rel, List*
                              * be a subset of subplan's targetlist, and there can be type cast on base
                              * vars
                              */
-                            foreach (lc2, rel->reltargetlist) {
+                            foreach (lc2, rel->reltarget->exprs) {
                                 relvar = locate_distribute_var((Expr*)lfirst(lc2));
                                 if (relvar != NULL && relvar->varattno == resno)
                                     break;
@@ -3665,6 +3691,7 @@ Path* create_functionscan_path(PlannerInfo* root, RelOptInfo* rel, Relids requir
 
     pathnode->pathtype = T_FunctionScan;
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->pathkeys = NIL;    /* for now, assume unordered result */
     pathnode->exec_type = SetBasePathExectype(root, rel);
@@ -3705,6 +3732,7 @@ Path* create_valuesscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required
 
     pathnode->pathtype = T_ValuesScan;
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer); /* never parameterized at present */
     pathnode->pathkeys = NIL;    /* result is always unordered */
     pathnode->exec_type = SetBasePathExectype(root, rel);
@@ -3744,6 +3772,7 @@ Path* create_ctescan_path(PlannerInfo* root, RelOptInfo* rel)
 
     pathnode->pathtype = T_CteScan;
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->param_info = NULL; /* never parameterized at present */
     pathnode->pathkeys = NIL;    /* XXX for now, result is always unordered */
     pathnode->exec_type = SetBasePathExectype(root, rel);
@@ -3774,6 +3803,7 @@ Path* create_worktablescan_path(PlannerInfo* root, RelOptInfo* rel)
 
     pathnode->pathtype = T_WorkTableScan;
     pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
     pathnode->param_info = NULL; /* never parameterized at present */
     pathnode->pathkeys = NIL;    /* result is always unordered */
     pathnode->exec_type = SetBasePathExectype(root, rel);
@@ -3836,6 +3866,7 @@ ForeignPath* create_foreignscan_path(PlannerInfo* root, RelOptInfo* rel, Cost st
 
     pathnode->path.pathtype = T_ForeignScan;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
     set_path_rows(&pathnode->path, rel->rows, rel->multiple);
     pathnode->path.startup_cost = startup_cost;
@@ -4232,6 +4263,7 @@ NestPath* create_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
 
     pathnode->path.pathtype = T_NestLoop;
     pathnode->path.parent = joinrel;
+    pathnode->path.pathtarget = joinrel->reltarget;
     pathnode->path.param_info =
         get_joinrel_parampathinfo(root, joinrel, outer_path, inner_path, extra->sjinfo, required_outer, &restrict_clauses);
     pathnode->path.pathkeys = pathkeys;
@@ -4291,6 +4323,7 @@ MergePath* create_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinTyp
 
     pathnode->jpath.path.pathtype = T_MergeJoin;
     pathnode->jpath.path.parent = joinrel;
+    pathnode->jpath.path.pathtarget = joinrel->reltarget;
     pathnode->jpath.path.param_info =
         get_joinrel_parampathinfo(root, joinrel, outer_path, inner_path, extra->sjinfo, required_outer, &restrict_clauses);
     pathnode->jpath.path.pathkeys = pathkeys;
@@ -4354,6 +4387,7 @@ HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
 
     pathnode->jpath.path.pathtype = T_HashJoin;
     pathnode->jpath.path.parent = joinrel;
+    pathnode->jpath.path.pathtarget = joinrel->reltarget;
     pathnode->jpath.path.param_info =
         get_joinrel_parampathinfo(root, joinrel, outer_path, inner_path, extra->sjinfo, required_outer, &restrict_clauses);
 
@@ -4398,6 +4432,173 @@ HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
         check_join_method_alternative(
             restrict_clauses, outer_path->parent, inner_path->parent, jointype, &try_eq_related_indirectly),
         dop);
+
+    return pathnode;
+}
+
+/*
+ * create_projection_path
+ *	  Creates a pathnode that represents performing a projection.
+ *
+ * 'rel' is the parent relation associated with the result
+ * 'subpath' is the path representing the source of data
+ * 'target' is the PathTarget to be computed
+ */
+ProjectionPath *
+create_projection_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath, PathTarget *target)
+{
+    ProjectionPath *pathnode = makeNode(ProjectionPath);
+    PathTarget *oldtarget = subpath->pathtarget;
+
+    pathnode->path.pathtype = T_BaseResult;
+    pathnode->path.parent = rel;
+    pathnode->path.pathtarget = target;
+    /* For now, assume we are above any joins, so no parameterization */
+    pathnode->path.param_info = NULL;
+    /* Projection does not change the sort order */
+    pathnode->path.pathkeys = subpath->pathkeys;
+
+    pathnode->subpath = subpath;
+
+    /*
+     * We might not need a separate Result node.  If the input plan node type
+     * can project, we can just tell it to project something else.  Or, if it
+     * can't project but the desired target has the same expression list as
+     * what the input will produce anyway, we can still give it the desired
+     * tlist (possibly changing its ressortgroupref labels, but nothing else).
+     * Note: in the latter case, create_projection_plan has to recheck our
+     * conclusion; see comments therein.
+     */
+    if (is_projection_capable_path(subpath) || equal(oldtarget->exprs, target->exprs)) {
+        /* No separate Result node needed */
+        pathnode->dummypp = true;
+
+        /*
+         * Set cost of plan as subpath's cost, adjusted for tlist replacement.
+         */
+        pathnode->path.rows = subpath->rows;
+        pathnode->path.startup_cost = subpath->startup_cost + (target->cost.startup - oldtarget->cost.startup);
+        pathnode->path.total_cost = subpath->total_cost + (target->cost.startup - oldtarget->cost.startup) +
+                                    (target->cost.per_tuple - oldtarget->cost.per_tuple) * subpath->rows;
+    } else {
+        /* We really do need the Result node */
+        pathnode->dummypp = false;
+
+        /*
+         * The Result node's cost is cpu_tuple_cost per row, plus the cost of
+         * evaluating the tlist.  There is no qual to worry about.
+         */
+        double cpu_tuple_cost = u_sess->attr.attr_sql.cpu_tuple_cost;
+        pathnode->path.rows = subpath->rows;
+        pathnode->path.startup_cost = subpath->startup_cost + target->cost.startup;
+        pathnode->path.total_cost =
+            subpath->total_cost + target->cost.startup + (cpu_tuple_cost + target->cost.per_tuple) * subpath->rows;
+    }
+
+    return pathnode;
+}
+
+/*
+ * apply_projection_to_path
+ *	  Add a projection step, or just apply the target directly to given path.
+ *
+ * This has the same net effect as create_projection_path(), except that if
+ * a separate Result plan node isn't needed, we just replace the given path's
+ * pathtarget with the desired one.  This must be used only when the caller
+ * knows that the given path isn't referenced elsewhere and so can be modified
+ * in-place.
+ *
+ * If the input path is a GatherPath, we try to push the new target down to
+ * its input as well; this is a yet more invasive modification of the input
+ * path, which create_projection_path() can't do.
+ *
+ * Note that we mustn't change the source path's parent link; so when it is
+ * add_path'd to "rel" things will be a bit inconsistent.  So far that has
+ * not caused any trouble.
+ *
+ * 'rel' is the parent relation associated with the result
+ * 'path' is the path representing the source of data
+ * 'target' is the PathTarget to be computed
+ */
+Path *
+apply_projection_to_path(PlannerInfo *root,
+						 RelOptInfo *rel,
+						 Path *path,
+						 PathTarget *target)
+{
+    QualCost oldcost;
+    /*
+     * If given path can't project, we might need a Result node, so make a
+     * separate ProjectionPath.
+     */
+    if (!is_projection_capable_path(path))
+        return (Path *)create_projection_path(root, rel, path, target);
+
+    /*
+     * We can just jam the desired tlist into the existing path, being sure to
+     * update its cost estimates appropriately.
+     */
+    oldcost = path->pathtarget->cost;
+    path->pathtarget = target;
+
+    path->startup_cost += target->cost.startup - oldcost.startup;
+    path->total_cost +=
+        target->cost.startup - oldcost.startup + (target->cost.per_tuple - oldcost.per_tuple) * path->rows;
+
+    return path;
+}
+
+/*
+ * create_set_projection_path
+ *	  Creates a pathnode that represents performing a projection that
+ *	  includes set-returning functions.
+ *
+ * 'rel' is the parent relation associated with the result
+ * 'subpath' is the path representing the source of data
+ * 'target' is the PathTarget to be computed
+ */
+ProjectSetPath *create_set_projection_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath, PathTarget *target)
+{
+    ProjectSetPath *pathnode = makeNode(ProjectSetPath);
+    double tlist_rows;
+    ListCell *lc;
+
+    pathnode->path.pathtype = T_ProjectSet;
+    pathnode->path.parent = rel;
+    pathnode->path.pathtarget = target;
+    /* For now, assume we are above any joins, so no parameterization */
+    pathnode->path.param_info = NULL;
+    /* Projection does not change the sort order XXX? */
+    pathnode->path.pathkeys = subpath->pathkeys;
+
+    pathnode->subpath = subpath;
+
+    /*
+     * Estimate number of rows produced by SRFs for each row of input; if
+     * there's more than one in this node, use the maximum.
+     */
+    tlist_rows = 1;
+    foreach (lc, target->exprs) {
+        Node *node = (Node *)lfirst(lc);
+        double itemrows;
+
+        itemrows = expression_returns_set_rows(node);
+        if (tlist_rows < itemrows)
+            tlist_rows = itemrows;
+    }
+
+    /*
+     * In addition to the cost of evaluating the tlist, charge cpu_tuple_cost
+     * per input row, and half of cpu_tuple_cost for each added output row.
+     * This is slightly bizarre maybe, but it's what 9.6 did; we may revisit
+     * this estimate later.
+     */
+    double cpu_tuple_cost = u_sess->attr.attr_sql.cpu_tuple_cost;
+    pathnode->path.rows = subpath->rows * tlist_rows;
+    pathnode->path.startup_cost = subpath->startup_cost + target->cost.startup;
+    pathnode->path.total_cost = subpath->total_cost + target->cost.startup +
+                                (cpu_tuple_cost + target->cost.per_tuple) * subpath->rows +
+                                (pathnode->path.rows - subpath->rows) * cpu_tuple_cost / 2;
 
     return pathnode;
 }
@@ -4678,9 +4879,9 @@ static void mark_append_path(PlannerInfo* root, RelOptInfo* rel, Path* pathnode,
             dis_varattno2 = NIL;
         } else if (subpath->distribute_keys != NIL) { /* Check if there is common distribute key for all path */
             if (cell == list_head(subpaths)) { /* first subpath */
-                dis_varattno = find_distrikey_in_targetlist(subpath->distribute_keys, subpath->parent->reltargetlist);
+                dis_varattno = find_distrikey_in_targetlist(subpath->distribute_keys, subpath->pathtarget->exprs);
             } else { /* other subpath */
-                dis_varattno2 = find_distrikey_in_targetlist(subpath->distribute_keys, subpath->parent->reltargetlist);
+                dis_varattno2 = find_distrikey_in_targetlist(subpath->distribute_keys, subpath->pathtarget->exprs);
 
                 /* The dis_varattno should be exact the same. */
                 if (!equal(dis_varattno, dis_varattno2)) {
@@ -4708,7 +4909,7 @@ static void mark_append_path(PlannerInfo* root, RelOptInfo* rel, Path* pathnode,
         foreach (cell, dis_varattno) {
             AttrNumber disno = lfirst_int(cell);
             AttrNumber varno = 1;
-            foreach (lc, rel->reltargetlist) {
+            foreach (lc, rel->reltarget->exprs) {
                 Var* var = (Var*)lfirst(lc);
                 if (IsA(var, Var) && varno == disno) {
                     pathnode->distribute_keys = lappend(pathnode->distribute_keys, var);
@@ -5051,6 +5252,7 @@ Path* get_redist_unique(PlannerInfo* root, Path* path, StreamType stream_type, L
     UniquePath* newpath = makeNode(UniquePath);
     newpath->path.pathtype = T_Unique;
     newpath->path.parent = origin_path->path.parent;
+    newpath->path.pathtarget = origin_path->path.pathtarget;
     newpath->path.param_info = origin_path->path.param_info;
     newpath->path.pathkeys = stream_path->pathkeys;
     newpath->path.exec_type = stream_path->exec_type;
@@ -5098,7 +5300,7 @@ Path* get_redist_unique(PlannerInfo* root, Path* path, StreamType stream_type, L
         if (root->glob->vectorized) {
             hashentrysize = get_path_actual_total_width(stream_path, root->glob->vectorized, OP_HASHAGG, 0);
         } else {
-            hashentrysize = get_hash_entry_size(origin_path->path.parent->width);
+            hashentrysize = get_hash_entry_size(origin_path->path.pathtarget->width);
         }
 
         Distribution* distribution = ng_get_dest_distribution((Path*)newpath);
@@ -5112,7 +5314,7 @@ Path* get_redist_unique(PlannerInfo* root, Path* path, StreamType stream_type, L
             stream_path->startup_cost,
             stream_path->total_cost,
             PATH_LOCAL_ROWS(stream_path),
-            origin_path->path.parent->width,
+            origin_path->path.pathtarget->width,
             hashentrysize,
             1,
             &hash_mem_info);
@@ -5239,7 +5441,7 @@ Path* get_unique_redist_unique(PlannerInfo* root, Path* path, StreamType stream_
     if (root->glob->vectorized) {
         first_hashentrysize = get_path_actual_total_width((Path*)origin_path, root->glob->vectorized, OP_HASHAGG, 0);
     } else {
-        first_hashentrysize = get_hash_entry_size(rel->width);
+        first_hashentrysize = get_hash_entry_size(rel->reltarget->width);
     }
 
     if (UNIQUE_PATH_HASH == origin_path->umethod) {
@@ -5257,7 +5459,7 @@ Path* get_unique_redist_unique(PlannerInfo* root, Path* path, StreamType stream_
             origin_path->subpath->startup_cost,
             origin_path->subpath->total_cost,
             PATH_LOCAL_ROWS((Path*)origin_path->subpath),
-            origin_path->subpath->parent->width,
+            origin_path->subpath->pathtarget->width,
             first_hashentrysize,
             origin_path->path.dop,
             &origin_hash_mem_info);
@@ -5274,7 +5476,7 @@ Path* get_unique_redist_unique(PlannerInfo* root, Path* path, StreamType stream_
             NIL,
             origin_path->subpath->total_cost,
             PATH_LOCAL_ROWS((Path*)origin_path->subpath),
-            origin_path->subpath->parent->width,
+            origin_path->subpath->pathtarget->width,
             0.0,
             u_sess->opt_cxt.op_work_mem,
             -1.0,
@@ -5299,6 +5501,7 @@ Path* get_unique_redist_unique(PlannerInfo* root, Path* path, StreamType stream_
     newpath = makeNode(UniquePath);
     newpath->path.pathtype = T_Unique;
     newpath->path.parent = origin_path->path.parent;
+    newpath->path.pathtarget = origin_path->path.pathtarget;
     newpath->path.param_info = origin_path->path.param_info;
     newpath->path.pathkeys = stream_path->pathkeys;
     newpath->path.exec_type = stream_path->exec_type;
@@ -5337,7 +5540,7 @@ Path* get_unique_redist_unique(PlannerInfo* root, Path* path, StreamType stream_
         if (root->glob->vectorized) {
             hashentrysize = get_path_actual_total_width(stream_path, root->glob->vectorized, OP_HASHAGG, 0);
         } else {
-            hashentrysize = get_hash_entry_size(rel->width);
+            hashentrysize = get_hash_entry_size(rel->reltarget->width);
         }
 
         Distribution* distribution = ng_get_dest_distribution((Path*)newpath);
@@ -5351,7 +5554,7 @@ Path* get_unique_redist_unique(PlannerInfo* root, Path* path, StreamType stream_
             stream_path->startup_cost,
             stream_path->total_cost,
             PATH_LOCAL_ROWS(stream_path),
-            rel->width,
+            rel->reltarget->width,
             hashentrysize,
             1,
             &hash_mem_info);
@@ -5429,7 +5632,7 @@ Path* get_redist_unique_redist_unique(PlannerInfo* root, Path* path, StreamType 
     if (Abs(path->multiple - 1.0) < 0.001 && NULL != path->distribute_keys) {
         final_list_exprs = path->distribute_keys;
     } else {
-        final_list_exprs = path->parent->reltargetlist;
+        final_list_exprs = path->pathtarget->exprs;
     }
     double multiple_less_skew = 0.0;
     List* distribute_key_less_skew =
@@ -5822,7 +6025,7 @@ Node* get_distribute_node(PlannerInfo* root, RestrictInfo* rinfo, RelOptInfo* pa
         }
         bms_free_ext(relIds);
 
-        if (list_member(parent_rel->reltargetlist, nem)) {
+        if (list_member(parent_rel->reltarget->exprs, nem)) {
             match_var = nem;
         } else if (match_var == NULL) {
             /*
@@ -5834,7 +6037,7 @@ Node* get_distribute_node(PlannerInfo* root, RestrictInfo* rinfo, RelOptInfo* pa
             vars = pull_var_clause(nem, PVC_REJECT_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
             foreach (lc2, vars) {
                 Node* node = (Node*)lfirst(lc2);
-                foreach (lc3, parent_rel->reltargetlist) {
+                foreach (lc3, parent_rel->reltarget->exprs) {
                     Node* te = (Node*)lfirst(lc3);
                     if ((IsA(te, Var) && _equalSimpleVar((Var*)te, node)) || (!IsA(te, Var) && equal(te, node))) {
                         break;
@@ -6086,8 +6289,8 @@ void get_distribute_keys(PlannerInfo* root, List* joinclauses, Path* outer_path,
     list_free_ext(disKeyInner);
     list_free_ext(disKeyOuter);
 
-    if (!ng_is_distribute_key_valid(root, *distribute_keys_outer, outer_path->parent->reltargetlist) ||
-        !ng_is_distribute_key_valid(root, *distribute_keys_inner, inner_path->parent->reltargetlist)) {
+    if (!ng_is_distribute_key_valid(root, *distribute_keys_outer, outer_path->pathtarget->exprs) ||
+        !ng_is_distribute_key_valid(root, *distribute_keys_inner, inner_path->pathtarget->exprs)) {
         *distribute_keys_inner = NIL;
         *distribute_keys_outer = NIL;
     }
@@ -6675,9 +6878,9 @@ static List* add_join_parallel_path(StreamType inner_stream, StreamType outer_st
     ParallelDesc* outer_smpDesc = create_smpDesc(u_sess->opt_cxt.query_dop, outer_path->dop, PARALLEL_NONE);
 
     bool inner_can_local_distribute =
-        check_dsitribute_key_in_targetlist(root, inner_path->distribute_keys, inner_path->parent->reltargetlist);
+        check_dsitribute_key_in_targetlist(root, inner_path->distribute_keys, inner_path->pathtarget->exprs);
     bool outer_can_local_distribute =
-        check_dsitribute_key_in_targetlist(root, outer_path->distribute_keys, outer_path->parent->reltargetlist);
+        check_dsitribute_key_in_targetlist(root, outer_path->distribute_keys, outer_path->pathtarget->exprs);
 
     /*
      * If we already have redistribute or local redistribute
@@ -7313,7 +7516,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
 
         /* For redistribute, the distribute key should be in the targetlist of joinrel */
         stream_distribute_key =
-            get_otherside_key(root, rrinfo_outer, innerrel->reltargetlist, inner_path->parent, &skew_stream);
+            get_otherside_key(root, rrinfo_outer, innerrel->reltarget->exprs, inner_path->parent, &skew_stream);
         if (stream_distribute_key != NIL) {
             if (!parallel_enable(inner_path, outer_path)) {
                 stream_path_inner = stream_side_path(root,
@@ -7461,7 +7664,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
             joinpath_list = NIL;
 
             stream_distribute_key =
-                get_otherside_key(root, rrinfo_inner, outerrel->reltargetlist, outer_path->parent, &skew_stream);
+                get_otherside_key(root, rrinfo_inner, outerrel->reltarget->exprs, outer_path->parent, &skew_stream);
             if (stream_distribute_key != NIL) {
                 if (!parallel_enable(inner_path, outer_path)) {
                     stream_path_outer = stream_side_path(root,
@@ -7833,7 +8036,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
 
                 /* For redistribute, the distribute key should be in the targetlist of joinrel */
                 stream_distribute_key =
-                    get_otherside_key(root, rrinfo_outer, innerrel->reltargetlist, inner_path->parent, &skew_stream);
+                    get_otherside_key(root, rrinfo_outer, innerrel->reltarget->exprs, inner_path->parent, &skew_stream);
                 if (stream_distribute_key != NIL) {
                     if (!parallel_enable(inner_path, outer_path)) {
                         stream_path_inner = stream_side_path(root,
@@ -7902,7 +8105,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
 
                 /* For redistribute, the distribute key should be in the targetlist of joinrel */
                 stream_distribute_key =
-                    get_otherside_key(root, rrinfo_inner, outerrel->reltargetlist, outer_path->parent, &skew_stream);
+                    get_otherside_key(root, rrinfo_inner, outerrel->reltarget->exprs, outer_path->parent, &skew_stream);
                 if (stream_distribute_key != NIL) {
                     if (!parallel_enable(inner_path, outer_path)) {
                         stream_path_outer = stream_side_path(root,
@@ -8359,7 +8562,7 @@ void add_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
 
             /* For redistribute, the distribute key should be in the targetlist of joinrel */
             stream_distribute_key =
-                get_otherside_key(root, rrinfo_outer, innerrel->reltargetlist, inner_path->parent, &skew_stream);
+                get_otherside_key(root, rrinfo_outer, innerrel->reltarget->exprs, inner_path->parent, &skew_stream);
             if (stream_distribute_key != NIL) {
                 if (!parallel_enable(inner_path, outer_path)) {
                     stream_path_inner = stream_side_path(root,
@@ -8517,7 +8720,7 @@ void add_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
             joinpath_list = NIL;
 
             stream_distribute_key =
-                get_otherside_key(root, rrinfo_inner, outerrel->reltargetlist, outer_path->parent, &skew_stream);
+                get_otherside_key(root, rrinfo_inner, outerrel->reltarget->exprs, outer_path->parent, &skew_stream);
 
             if (stream_distribute_key != NIL) {
                 if (!parallel_enable(inner_path, outer_path)) {
@@ -8901,7 +9104,7 @@ void add_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
 
                 /* For redistribute, the distribute key should be in the targetlist of joinrel */
                 stream_distribute_key =
-                    get_otherside_key(root, rrinfo_outer, innerrel->reltargetlist, inner_path->parent, &skew_stream);
+                    get_otherside_key(root, rrinfo_outer, innerrel->reltarget->exprs, inner_path->parent, &skew_stream);
                 if (stream_distribute_key != NIL) {
                     if (!parallel_enable(inner_path, outer_path)) {
                         stream_path_inner = stream_side_path(root,
@@ -8966,7 +9169,7 @@ void add_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
 
                 /* For redistribute, the distribute key should be in the targetlist of joinrel */
                 stream_distribute_key =
-                    get_otherside_key(root, rrinfo_inner, outerrel->reltargetlist, outer_path->parent, &skew_stream);
+                    get_otherside_key(root, rrinfo_inner, outerrel->reltarget->exprs, outer_path->parent, &skew_stream);
                 if (stream_distribute_key != NIL) {
                     if (!parallel_enable(inner_path, outer_path)) {
                         stream_path_outer = stream_side_path(root,
@@ -9356,7 +9559,7 @@ void add_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointyp
 
             /* For redistribute, the distribute key should be in the targetlist of joinrel */
             stream_distribute_key =
-                get_otherside_key(root, rrinfo_outer, innerrel->reltargetlist, inner_path->parent, &skew_stream);
+                get_otherside_key(root, rrinfo_outer, innerrel->reltarget->exprs, inner_path->parent, &skew_stream);
             if (stream_distribute_key != NIL) {
                 stream_path_inner = stream_side_path(root,
                     inner_path,
@@ -9455,7 +9658,7 @@ void add_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointyp
             double skew_stream = 0.0;
 
             stream_distribute_key =
-                get_otherside_key(root, rrinfo_inner, outerrel->reltargetlist, outer_path->parent, &skew_stream);
+                get_otherside_key(root, rrinfo_inner, outerrel->reltarget->exprs, outer_path->parent, &skew_stream);
             if (stream_distribute_key != NIL) {
                 stream_path_outer = stream_side_path(root,
                     outer_path,
@@ -9710,7 +9913,7 @@ void add_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointyp
 
                 /* For redistribute, the distribute key should be in the targetlist of joinrel */
                 stream_distribute_key =
-                    get_otherside_key(root, rrinfo_outer, innerrel->reltargetlist, inner_path->parent, &skew_stream);
+                    get_otherside_key(root, rrinfo_outer, innerrel->reltarget->exprs, inner_path->parent, &skew_stream);
                 if (stream_distribute_key != NIL) {
                     stream_path_inner = stream_side_path(root,
                         inner_path,
@@ -9762,7 +9965,7 @@ void add_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointyp
 
                 /* For redistribute, the distribute key should be in the targetlist of joinrel */
                 stream_distribute_key =
-                    get_otherside_key(root, rrinfo_inner, outerrel->reltargetlist, outer_path->parent, &skew_stream);
+                    get_otherside_key(root, rrinfo_inner, outerrel->reltarget->exprs, outer_path->parent, &skew_stream);
                 if (stream_distribute_key != NIL) {
                     stream_path_outer = stream_side_path(root,
                         outer_path,

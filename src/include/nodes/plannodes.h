@@ -81,6 +81,8 @@ typedef struct PlannedStmt {
 
     bool dependsOnRole; /* is plan specific to current role? */
 
+    bool is_flt_frame; /* Indicates whether it is a flattened expr frame */
+
     Plan* planTree; /* tree of Plan nodes */
 
     List* rtable; /* list of RangeTblEntry nodes */
@@ -386,6 +388,16 @@ typedef struct BaseResult {
 
 typedef struct VecResult : public BaseResult {
 } VecResult;
+
+/* ----------------
+ *	 ProjectSet node -
+ *		Apply a projection that includes set-returning functions to the
+ *		output tuples of the outer plan.
+ * ----------------
+ */
+typedef struct ProjectSet {
+    Plan plan;
+} ProjectSet;
 
 /* ----------------
  *	 ModifyTable node -

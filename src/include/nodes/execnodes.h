@@ -864,7 +864,7 @@ typedef struct FuncExprState {
     /*
      * Function manager's lookup info for the target function.  If func.fn_oid
      * is InvalidOid, we haven't initialized it yet (nor any of the following
-     * fields).
+     * fields, except funcReturnsSet).
      */
     FmgrInfo func;
 
@@ -883,6 +883,12 @@ typedef struct FuncExprState {
     TupleDesc funcResultDesc;
     bool funcReturnsTuple; /* valid when funcResultDesc isn't
                             * NULL */
+
+    /*
+     * Remember whether the function is declared to return a set.  This is set
+     * by ExecInitExpr, and is valid even before the FmgrInfo is set up.
+     */
+    bool funcReturnsSet;
 
     /*
      * setArgsValid is true when we are evaluating a set-returning function
@@ -1397,6 +1403,17 @@ typedef struct UpsertState
     TupleTableSlot  *us_updateproj;         /* slot to update */
     List            *us_updateWhere;        /* state for the upsert where clause */
 } UpsertState;
+
+/* ----------------
+ *	 ProjectSetState information
+ * ----------------
+ */
+typedef struct ProjectSetState {
+    PlanState ps;            /* its first field is NodeTag */
+    ExprDoneCond *elemdone;  /* array of per-SRF is-done states */
+    int nelems;              /* length of elemdone[] array */
+    bool pending_srf_tuples; /* still evaluating srfs in tlist? */
+} ProjectSetState;
 
 /* ----------------
  *	 ModifyTableState information

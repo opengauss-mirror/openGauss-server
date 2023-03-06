@@ -435,12 +435,12 @@ Query* transformVariableCreateEventStmt(ParseState* pstate, CreateEventStmt* stm
     Node* new_time_expr = NULL;
     if (stmt->start_time_expr) {
         old_time_expr = stmt->start_time_expr;
-        new_time_expr = transformExpr(pstate, old_time_expr);
+        new_time_expr = transformExprRecurse(pstate, old_time_expr);
         stmt->start_time_expr = new_time_expr;
     }
     if (stmt->end_time_expr) {
         old_time_expr = stmt->end_time_expr;
-        new_time_expr = transformExpr(pstate, old_time_expr);
+        new_time_expr = transformExprRecurse(pstate, old_time_expr);
         stmt->end_time_expr = new_time_expr;
     }
     result->utilityStmt = (Node*)stmt;
@@ -456,7 +456,7 @@ Query* transformVariableAlterEventStmt(ParseState* pstate, AlterEventStmt* stmt)
     DefElem* new_time_expr = NULL;
     if (stmt->start_time_expr) {
         old_time_expr = stmt->start_time_expr->arg;
-        new_time_node = transformExpr(pstate, old_time_expr);
+        new_time_node = transformExprRecurse(pstate, old_time_expr);
         if (new_time_node) {
             new_time_expr = makeDefElem("start_date", new_time_node);
         } else {
@@ -466,7 +466,7 @@ Query* transformVariableAlterEventStmt(ParseState* pstate, AlterEventStmt* stmt)
     }
     if (stmt->end_time_expr) {
         old_time_expr = stmt->end_time_expr->arg;
-        new_time_node = transformExpr(pstate, old_time_expr);
+        new_time_node = transformExprRecurse(pstate, old_time_expr);
         if (new_time_node) {
             new_time_expr = makeDefElem("start_date", new_time_node);
         } else {
@@ -487,6 +487,10 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
 {
     Query* result = NULL;
     AnalyzerRoutine *analyzerRoutineHook = (AnalyzerRoutine*)u_sess->hook_cxt.analyzerRoutineHook;
+
+    if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        pstate->p_is_flt_frame = true;
+    }
 
     switch (nodeTag(parseTree)) {
             /*
@@ -551,7 +555,7 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
         case T_PrepareStmt: {
             PrepareStmt* n = (PrepareStmt *)parseTree;
             if (IsA(n->query, UserVar)) {
-                Node *uvar = transformExpr(pstate, n->query);
+                Node *uvar = transformExpr(pstate, n->query, EXPR_KIND_OTHER);
                 n->query = (Node *)copyObject((UserVar *)uvar);
             }
             result = makeNode(Query);
@@ -603,6 +607,8 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
 
     /* Mark whether synonym object is in rtables or not. */
     result->hasSynonyms = pstate->p_hasSynonyms;
+
+    result->is_flt_frame = pstate->p_is_flt_frame;
 
     if (nodeTag(parseTree) != T_InsertStmt) {
         result->rightRefState = nullptr;
@@ -978,7 +984,7 @@ static List* transformUpdateSortClause(ParseState* pstate, UpdateStmt* stmt, Que
         tle->resjunk = true;
     }
 
-    List* rlst = transformSortClause(pstate, stmt->sortClause, &qry->targetList, true, false);
+    List* rlst = transformSortClause(pstate, stmt->sortClause, &qry->targetList, EXPR_KIND_ORDER_BY, true, false);
     int i = 0;
     foreach(lc, qry->targetList) {
         tle = (TargetEntry*)lfirst(lc);
@@ -997,8 +1003,8 @@ static List* transformUpdateSortClause(ParseState* pstate, UpdateStmt* stmt, Que
 static void transformLimitSortClause(ParseState* pstate, void* stmt, Query* qry, bool forDel)
 {
     List *rlist = NULL;
-    qry->limitCount = forDel ? transformLimitClause(pstate, ((DeleteStmt*)stmt)->limitClause, "LIMIT") :
-                            transformLimitClause(pstate, ((UpdateStmt*)stmt)->limitClause, "LIMIT");
+    qry->limitCount = forDel ? transformLimitClause(pstate, ((DeleteStmt*)stmt)->limitClause, EXPR_KIND_LIMIT, "LIMIT") :
+                            transformLimitClause(pstate, ((UpdateStmt*)stmt)->limitClause, EXPR_KIND_LIMIT, "LIMIT");
 
     if (!IsSupportDeleteLimit((Relation)linitial(pstate->p_target_relation), (qry->limitCount != NULL))) {
         ereport(ERROR,
@@ -1008,7 +1014,7 @@ static void transformLimitSortClause(ParseState* pstate, void* stmt, Query* qry,
                 errdetail("replication table doesn't allow UPDATE LIMIT")));
     }
 
-    rlist =  forDel ? transformSortClause(pstate, ((DeleteStmt*)stmt)->sortClause, &qry->targetList, true, false) :
+    rlist =  forDel ? transformSortClause(pstate, ((DeleteStmt*)stmt)->sortClause, &qry->targetList, EXPR_KIND_ORDER_BY, true, false) :
                 transformUpdateSortClause(pstate, (UpdateStmt*)stmt, qry);
 
     /*
@@ -1239,7 +1245,7 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
 
 
 
-    qual = transformWhereClause(pstate, stmt->whereClause, "WHERE");
+    qual = transformWhereClause(pstate, stmt->whereClause, EXPR_KIND_WHERE, "WHERE");
 
     Relation targetrel = (Relation)linitial(pstate->p_target_relation);
     qry->returningList = transformReturningList(pstate, stmt->returningList);
@@ -1267,6 +1273,7 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
     qry->jointree = makeFromExpr(pstate->p_joinlist, qual);
     transformLimitSortClause(pstate, stmt, qry, true);
 
+    qry->hasTargetSRFs = pstate->p_hasTargetSRFs;
     qry->hasSubLinks = pstate->p_hasSubLinks;
     qry->hasWindowFuncs = pstate->p_hasWindowFuncs;
     if (pstate->p_hasWindowFuncs)
@@ -2033,7 +2040,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
             List* sublist = (List*)lfirst(lc);
 
             /* Do basic expression transformation (same as a ROW() expr) */
-            sublist = transformExpressionList(pstate, sublist);
+            sublist = transformExpressionList(pstate, sublist, EXPR_KIND_VALUES);
 
             /*
              * All the sublists must be the same length, *after*
@@ -2139,7 +2146,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         AssertEreport(selectStmt->intoClause == NULL, MOD_OPT, "intoClause should not happen here");
 
         /* Do basic expression transformation (same as a ROW() expr) */
-        exprList = transformExpressionList(pstate, (List*)linitial(valuesLists));
+        exprList = transformExpressionList(pstate, (List*)linitial(valuesLists), EXPR_KIND_VALUES_SINGLE);
 
         /*
          * If td_compatible_truncation equal true and no foreign table found,
@@ -2222,6 +2229,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     qry->rtable = pstate->p_rtable;
     qry->jointree = makeFromExpr(pstate->p_joinlist, NULL);
 
+    qry->hasTargetSRFs = pstate->p_hasTargetSRFs;
     qry->hasSubLinks = pstate->p_hasSubLinks;
     /* aggregates not allowed (but subselects are okay) */
     if (pstate->p_hasAggs) {
@@ -2435,10 +2443,10 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
         addRTEtoQuery(pstate, exclRte, false, true, true);
         addRTEtoQuery(pstate, (RangeTblEntry*)linitial(pstate->p_target_rangetblentry), false, true, true);
 
-        updateTlist = transformTargetList(pstate, upsertClause->targetList);
+        updateTlist = transformTargetList(pstate, upsertClause->targetList, EXPR_KIND_UPDATE_TARGET);
         /* Done with select-like processing, move on transforming to match update set target column */
         updateTlist = transformUpdateTargetList(pstate, updateTlist, upsertClause->targetList);
-        updateWhere = transformWhereClause(pstate, upsertClause->whereClause, "WHERE");
+        updateWhere = transformWhereClause(pstate, upsertClause->whereClause, EXPR_KIND_WHERE, "WHERE");
 #ifdef ENABLE_MULTIPLE_NODES
         /* Do not support sublinks in update where clause for now */
         if (ContainSubLink(updateWhere)) {
@@ -2536,7 +2544,7 @@ List* transformInsertRow(ParseState* pstate, List* exprlist, List* stmtcols, Lis
         col = (ResTarget*)lfirst(icols);
         AssertEreport(IsA(col, ResTarget), MOD_OPT, "nodeType inconsistant");
 
-        expr = transformAssignedExpr(pstate, expr, col->name, lfirst_int(attnos), col->indirection, col->location,
+        expr = transformAssignedExpr(pstate, expr, EXPR_KIND_INSERT_TARGET, col->name, lfirst_int(attnos), col->indirection, col->location,
             (Relation)linitial(pstate->p_target_relation), (RangeTblEntry*)linitial(pstate->p_target_rangetblentry));
 
         result = lappend(result, expr);
@@ -2691,7 +2699,7 @@ static void transformVariableSetStmt(ParseState* pstate, VariableSetStmt* stmt)
         UserSetElem *newUserElem = makeNode(UserSetElem);
         newUserElem->name = userElem->name;
         
-        Node *node = transformExpr(pstate, (Node *)userElem->val);
+        Node *node = transformExprRecurse(pstate, (Node *)userElem->val);
 
         if (IsA(node, UserSetElem)) {
             newUserElem->name = list_concat(newUserElem->name, ((UserSetElem *)node)->name);
@@ -2725,7 +2733,7 @@ static void transformVariableSetValueStmt(ParseState* pstate, VariableSetStmt* s
         if (IsA(expr, A_Const)) {
             node = expr;
         } else {
-            node = transformExpr(pstate, expr);
+            node = transformExpr(pstate, expr, EXPR_KIND_OTHER);
         }
 
         resultlist = lappend(resultlist, (Expr*)node);
@@ -2789,7 +2797,7 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     }
 
     /* transform targetlist */
-    qry->targetList = transformTargetList(pstate, stmt->targetList);
+    qry->targetList = transformTargetList(pstate, stmt->targetList, EXPR_KIND_SELECT_TARGET);
 
     /* Transform operator "(+)" to outer join */
     if (stmt->hasPlus && stmt->whereClause != NULL) {
@@ -2808,13 +2816,13 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
      * during transform Whereclause.
      */
     setIgnorePlusFlag(pstate, true);
-    qual = transformWhereClause(pstate, stmt->whereClause, "WHERE");
+    qual = transformWhereClause(pstate, stmt->whereClause, EXPR_KIND_WHERE, "WHERE");
     setIgnorePlusFlag(pstate, false);
 
     /*
      * Initial processing of HAVING clause is just like WHERE clause.
      */
-    qry->havingQual = transformWhereClause(pstate, stmt->havingClause, "HAVING");
+    qry->havingQual = transformWhereClause(pstate, stmt->havingClause, EXPR_KIND_HAVING, "HAVING");
 
     pstate->shouldCheckOrderbyCol = (!ALLOW_ORDERBY_UNDISTINCT_COLUMN &&
                                     stmt->distinctClause && linitial(stmt->distinctClause) == NULL &&
@@ -2827,7 +2835,7 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
      * them by reference.
      */
     qry->sortClause = transformSortClause(
-        pstate, stmt->sortClause, &qry->targetList, true /* fix unknowns */, false /* allow SQL92 rules */);
+        pstate, stmt->sortClause, &qry->targetList, EXPR_KIND_ORDER_BY, true /* fix unknowns */, false /* allow SQL92 rules */);
 
     pstate->shouldCheckOrderbyCol = false;
 
@@ -2852,6 +2860,7 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
         &qry->groupingSets,
         &qry->targetList,
         qry->sortClause,
+        EXPR_KIND_GROUP_BY,
         false /* allow SQL92 rules */);
 
     if (stmt->distinctClause == NIL) {
@@ -2869,8 +2878,8 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     }
 
     /* transform LIMIT */
-    qry->limitOffset = transformLimitClause(pstate, stmt->limitOffset, "OFFSET");
-    qry->limitCount = transformLimitClause(pstate, stmt->limitCount, "LIMIT");
+    qry->limitOffset = transformLimitClause(pstate, stmt->limitOffset, EXPR_KIND_OFFSET, "OFFSET");
+    qry->limitCount = transformLimitClause(pstate, stmt->limitCount, EXPR_KIND_LIMIT, "LIMIT");
 
     /* transform window clauses after we have seen all window functions */
     qry->windowClause = transformWindowDefinitions(pstate, pstate->p_windowdefs, &qry->targetList);
@@ -2888,6 +2897,7 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     if (pstate->p_hasWindowFuncs) {
         parseCheckWindowFuncs(pstate, qry);
     }
+    qry->hasTargetSRFs = pstate->p_hasTargetSRFs;
     qry->hasAggs = pstate->p_hasAggs;
 
     foreach (l, stmt->lockingClause) {
@@ -2983,7 +2993,7 @@ static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt)
         List* sublist = (List*)lfirst(lc);
 
         /* Do basic expression transformation (same as a ROW() expr) */
-        sublist = transformExpressionList(pstate, sublist);
+        sublist = transformExpressionList(pstate, sublist, EXPR_KIND_VALUES);
 
         /*
          * All the sublists must be the same length, *after* transformation
@@ -3106,10 +3116,10 @@ static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt)
      * VALUES, so cope.
      */
     qry->sortClause = transformSortClause(
-        pstate, stmt->sortClause, &qry->targetList, true /* fix unknowns */, false /* allow SQL92 rules */);
+        pstate, stmt->sortClause, &qry->targetList, EXPR_KIND_ORDER_BY, true /* fix unknowns */, false /* allow SQL92 rules */);
 
-    qry->limitOffset = transformLimitClause(pstate, stmt->limitOffset, "OFFSET");
-    qry->limitCount = transformLimitClause(pstate, stmt->limitCount, "LIMIT");
+    qry->limitOffset = transformLimitClause(pstate, stmt->limitOffset, EXPR_KIND_OFFSET, "OFFSET");
+    qry->limitCount = transformLimitClause(pstate, stmt->limitCount, EXPR_KIND_LIMIT, "LIMIT");
 
     if (stmt->lockingClause) {
         ereport(ERROR,
@@ -3140,6 +3150,7 @@ static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt)
     qry->rtable = pstate->p_rtable;
     qry->jointree = makeFromExpr(pstate->p_joinlist, NULL);
 
+    qry->hasTargetSRFs = pstate->p_hasTargetSRFs;
     qry->hasSubLinks = pstate->p_hasSubLinks;
     /* aggregates not allowed (but subselects are okay) */
     if (pstate->p_hasAggs) {
@@ -3336,7 +3347,7 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt)
     tllen = list_length(qry->targetList);
 
     qry->sortClause = transformSortClause(
-        pstate, sortClause, &qry->targetList, false /* no unknowns expected */, false /* allow SQL92 rules */);
+        pstate, sortClause, &qry->targetList, EXPR_KIND_ORDER_BY, false /* no unknowns expected */, false /* allow SQL92 rules */);
 
     pstate->p_rtable = list_truncate(pstate->p_rtable, sv_rtable_length);
     pstate->p_relnamespace = sv_relnamespace;
@@ -3351,8 +3362,8 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt)
                 parser_errposition(pstate, exprLocation((const Node*)list_nth(qry->targetList, tllen)))));
     }
 
-    qry->limitOffset = transformLimitClause(pstate, limitOffset, "OFFSET");
-    qry->limitCount = transformLimitClause(pstate, limitCount, "LIMIT");
+    qry->limitOffset = transformLimitClause(pstate, limitOffset, EXPR_KIND_OFFSET, "OFFSET");
+    qry->limitCount = transformLimitClause(pstate, limitCount, EXPR_KIND_LIMIT, "LIMIT");
 
     qry->rtable = pstate->p_rtable;
     qry->jointree = makeFromExpr(pstate->p_joinlist, NULL);
@@ -3362,6 +3373,7 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt)
     if (pstate->p_hasWindowFuncs) {
         parseCheckWindowFuncs(pstate, qry);
     }
+    qry->hasTargetSRFs = pstate->p_hasTargetSRFs;
     qry->hasAggs = pstate->p_hasAggs;
 
     foreach (l, lockingClause) {
@@ -4026,8 +4038,8 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
      */
     transformFromClause(pstate, stmt->fromClause);
 
-    qry->targetList = transformTargetList(pstate, stmt->targetList);
-    qual = transformWhereClause(pstate, stmt->whereClause, "WHERE");
+    qry->targetList = transformTargetList(pstate, stmt->targetList, EXPR_KIND_UPDATE_TARGET);
+    qual = transformWhereClause(pstate, stmt->whereClause, EXPR_KIND_WHERE, "WHERE");
 
     /* remaining clauses can reference the result relation normally */
     foreach (l, pstate->p_varnamespace) {
@@ -4059,6 +4071,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
     qry->rtable = pstate->p_rtable;
     qry->jointree = makeFromExpr(pstate->p_joinlist, qual);
 
+    qry->hasTargetSRFs = pstate->p_hasTargetSRFs;
     qry->hasSubLinks = pstate->p_hasSubLinks;
 
     UpdateParseCheck(pstate, (Node *)qry);
@@ -4338,7 +4351,7 @@ static List* transformReturningList(ParseState* pstate, List* returningList)
     pstate->p_hasWindowFuncs = false;
 
     /* transform RETURNING identically to a SELECT targetlist */
-    rlist = transformTargetList(pstate, returningList);
+    rlist = transformTargetList(pstate, returningList, EXPR_KIND_RETURNING);
 
     /* check for disallowed stuff */
 

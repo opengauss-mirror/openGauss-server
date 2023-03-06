@@ -1865,6 +1865,7 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
     RangeTblEntry* rte = NULL;
     RangeTblEntry* subrte = NULL;
     RowMarkClause* rc = NULL;
+    bool is_flt_frame = parsetree->is_flt_frame;
 
     if (list_length(rule->actions) != 1) {
         ereport(ERROR, (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("expected just one rule action")));
@@ -1971,6 +1972,9 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
         markQueryForLocking(rule_action, (Node*)rule_action->jointree, rc->strength, rc->waitPolicy, true,
                             rc->waitSec);
 
+    /* Pass the is_flt_frame from parsetree to rule_action */
+    rule_action->is_flt_frame = is_flt_frame;
+
     /*
      * Recursively expand any view references inside the view.
      *
@@ -1981,6 +1985,27 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
      * routine).
      */
     rule_action = fireRIRrules(rule_action, activeRIRs, forUpdatePushedDown);
+
+    /*
+     * Refresh view SRFs
+     *
+     * If we create a view when enable_expr_fusion is off, SRFs will not be identified, everything will be okay.
+     * If user set the guc on later, we get an old rule_action, but actually we have the ability to identify
+     * SRFs and resolve them.  We travel the tule_action to fix hasTargetSRFs in Query.
+     *
+     * More detail:
+     *  rule_action
+     *      hasTargetSRFs true
+     *          parsetree->is_flt_frame true, it's ok
+     *          parsetree->is_flt_frame false, modify hasTargetSRFs to false
+     *      hasTargetSRFs false
+     *          parsetree->is_flt_frame, walk and check if it has SRFs
+     *          parsetree->is_flt_frame, it's ok
+     */
+    if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        /* adjust the Query */
+        query_check_srf(rule_action);
+    }
 
     /*
      * Now, plug the view query in as a subselect, replacing the relation's

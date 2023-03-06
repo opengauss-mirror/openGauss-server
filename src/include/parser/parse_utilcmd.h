@@ -69,7 +69,7 @@ extern void transformPartitionValue(ParseState* pstate, Node* rangePartDef, bool
 extern List* transformListPartitionValue(ParseState* pstate, List* boundary, bool needCheck, bool needFree);
 extern List* transformRangePartitionValueInternal(ParseState* pstate, List* boundary,
     bool needCheck, bool needFree, bool isPartition = true);
-extern Node* transformIntoConst(ParseState* pstate, Node* maxElem, bool isPartition = true);
+extern Node* transformIntoConst(ParseState* pstate, ParseExprKind exprKind, Node* maxElem, bool isPartition = true);
 
 #ifdef PGXC
 extern bool CheckLocalIndexColumn(char loctype, char* partcolname, char* indexcolname);

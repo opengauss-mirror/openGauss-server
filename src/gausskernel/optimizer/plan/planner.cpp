@@ -176,6 +176,13 @@ static bool check_sort_for_upsert(PlannerInfo* root);
 extern void PushDownFullPseudoTargetlist(PlannerInfo *root, Plan *topNode, Plan *botNode,
             List *fullEntryList);
 
+static PathTarget *make_sort_input_target(PlannerInfo *root, PathTarget *final_target, bool *have_postponed_srfs);
+static PathTarget *make_window_input_target(PlannerInfo *root, PathTarget *final_target, List *activeWindows);
+static PathTarget *make_group_input_target(PlannerInfo *root, PathTarget *final_target);
+static void process_planner_targets(PlannerInfo *root, PlannerTargets* targets, List *tlist, List* activeWindows);
+static void adjust_paths_for_srfs(PlannerInfo *root, RelOptInfo *rel, List *targets, List *targets_contain_srfs);
+static Plan *adjust_plan_for_srfs(PlannerInfo *root, Plan *plan, List *targets, List *targets_contain_srfs);
+
 #ifdef PGXC
 static void separate_rowmarks(PlannerInfo* root);
 #endif
@@ -1080,7 +1087,7 @@ bool PreprocessOperator(Node* node, void* context)
                     List* name = list_make1(makeString(NameStr(optup->oprname)));
 
                     /* Regenerate the opexpr node. */
-                    OpExpr* newNode = (OpExpr*)make_op(NULL, name, ltree, rtree, expr->location, true);
+                    OpExpr* newNode = (OpExpr*)make_op(NULL, name, ltree, rtree, NULL, expr->location, true);
 
                     Node* lexpr = (Node*)list_nth(newNode->args, 0);
                     Node* rexpr = (Node*)list_nth(newNode->args, 1);
@@ -1576,6 +1583,11 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      */
     parse->targetList = (List*)preprocess_expression(root, (Node*)parse->targetList, EXPRKIND_TARGET);
 
+    /* Constant-folding might have removed all set-returning functions */
+    if (parse->is_flt_frame && parse->hasTargetSRFs) {
+        parse->hasTargetSRFs = expression_returns_set((Node *) parse->targetList);
+    }
+
     foreach(l, parse->withCheckOptions) {
         WithCheckOption* wco = (WithCheckOption*)lfirst(l);
 
@@ -1821,6 +1833,16 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
         plan = inheritance_planner(root);
     else {
         plan = grouping_planner(root, tuple_fraction);
+        /*
+        * Make sure the topmost plan node's targetlist exposes the original
+        * column names and other decorative info.  Targetlists generated within
+        * the planner don't bother with that stuff, but we must have it on the
+        * top-level tlist seen at execution time. 
+        */
+        if (parse->is_flt_frame && parse->hasTargetSRFs && !IsA(plan, ModifyTable)) {
+            apply_tlist_labeling(plan->targetlist, root->processed_tlist);
+        }
+
         /* If it's not SELECT, we need a ModifyTable node */
         if (parse->commandType != CMD_SELECT) {
             List* withCheckOptionLists = NIL;
@@ -2659,6 +2681,17 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
     MemoryContext oldcontext = NULL;
     FDWUpperRelCxt* ufdwCxt = NULL;
     errno_t rc = EOK;
+    PlannerTargets* planner_targets = NULL;
+
+    if (parse->is_flt_frame) {
+        planner_targets = (PlannerTargets*)palloc0(sizeof(PlannerTargets));
+        Assert(!root->planner_targets);
+        planner_targets->final_contains_srfs = false;
+        planner_targets->sort_input_contains_srfs = false;
+        planner_targets->have_postponed_srfs = false;
+        planner_targets->scanjoin_contains_srfs = false;
+        root->planner_targets = planner_targets;
+    }
 
     /*
      * Apply memory context for generate plan in optimizer.
@@ -2705,13 +2738,21 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
          */
         result_plan = plan_set_operations(root, tuple_fraction, &set_sortclauses);
 
+        if (parse->is_flt_frame) {
+            /* Also extract the PathTarget form of the setop result tlist */
+            planner_targets->final_target = create_pathtarget(root, result_plan->targetlist);
+        }
+
         /*
          * Calculate pathkeys representing the sort order (if any) of the set
          * operation's result.  We have to do this before overwriting the sort
          * key information...
          */
         current_pathkeys = make_pathkeys_for_sortclauses(root, set_sortclauses, result_plan->targetlist, true);
-
+        if (parse->is_flt_frame) {
+            /* The setop result tlist couldn't contain any SRFs */
+            Assert(!parse->hasTargetSRFs);
+        }
         /*
          * We should not need to call preprocess_targetlist, since we must be
          * in a SELECT query node.	Instead, use the targetlist returned by
@@ -2871,6 +2912,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
         /* Preprocess targetlist */
         tlist = preprocess_targetlist(root, tlist);
+        if (parse->is_flt_frame) {
+            root->processed_tlist = tlist;
+        }
 
         if (parse->upsertClause) {
             UpsertExpr* upsertClause = parse->upsertClause;
@@ -2888,10 +2932,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
             wflists = make_windows_lists(list_length(parse->windowClause));
             find_window_functions((Node*)tlist, wflists);
 
-            if (wflists->numWindowFuncs > 0)
+            if (wflists->numWindowFuncs > 0) {
                 select_active_windows(root, wflists);
-            else
+            } else {
                 parse->hasWindowFuncs = false;
+            }
         }
 
         /*
@@ -2948,10 +2993,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
          * Figure out whether there's a hard limit on the number of rows that
          * query_planner's result subplan needs to return.  Even if we know a
          * hard limit overall, it doesn't apply if the query has any
-         * grouping/aggregation operations.
+         * grouping/aggregation operations, or SRFs in the tlist.
          */
         if (parse->groupClause || parse->groupingSets || parse->distinctClause || parse->hasAggs ||
-            parse->hasWindowFuncs || root->hasHavingQual)
+            parse->hasWindowFuncs || root->hasHavingQual ||
+            (parse->is_flt_frame && parse->hasTargetSRFs))
             sub_limit_tuples = -1.0;
         else
             sub_limit_tuples = limit_tuples;
@@ -2962,8 +3008,8 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
         /* Set up data needed by standard_qp_callback */
         standard_qp_init(root, (void*)&qp_extra, tlist,
-                    wflists ? wflists->activeWindows : NIL,
-                    parse->groupingSets ?
+                        wflists ? wflists->activeWindows : NIL,
+                        parse->groupingSets ?
                         (rollup_groupclauses ? (List*)llast(rollup_groupclauses) : NIL) :
                         parse->groupClause);
 
@@ -2972,6 +3018,58 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
          * all the pathkeys.
          */
         final_rel = query_planner(root, sub_tlist, standard_qp_callback, &qp_extra);
+
+        if (parse->is_flt_frame && parse->hasTargetSRFs) {
+            ListCell* lc = NULL;
+
+            /*
+            * Convert the query's result tlist into PathTarget format.
+            *
+            * Note: it's desirable to not do this till after query_planner(),
+            * because the target width estimates can use per-Var width numbers
+            * that were obtained within query_planner().
+            */
+            planner_targets->final_target = create_pathtarget(root, tlist);
+
+            /* Now fix things up if scan/join target contains SRFs */
+            process_planner_targets(root, planner_targets, tlist, wflists ? wflists->activeWindows : NIL); 
+            
+            /*
+            * Forcibly apply SRF-free scan/join target to all the Paths for the
+            * scan/join rel.
+            *
+            * In principle we should re-run set_cheapest() here to identify the
+            * cheapest path, but it seems unlikely that adding the same tlist
+            * eval costs to all the paths would change that, so we don't bother.
+            * Instead, just assume that the cheapest-startup and cheapest-total
+            * paths remain so.  (There should be no parameterized paths anymore,
+            * so we needn't worry about updating cheapest_parameterized_paths.)
+            */
+            foreach (lc, final_rel->pathlist) {
+                Path *subpath = (Path *)lfirst(lc);
+                Path *path;
+
+                Assert(subpath->param_info == NULL);
+                path = apply_projection_to_path(root, final_rel, subpath, planner_targets->scanjoin_target);
+                /* If we had to add a Result, path is different from subpath */
+                if (path != subpath) {
+                    lfirst(lc) = path;
+                    if (subpath == final_rel->cheapest_startup_path)
+                        final_rel->cheapest_startup_path = path;
+
+                    ListCell *path_lc = NULL;
+                    foreach (path_lc, final_rel->cheapest_total_path) {
+                        if (subpath == lfirst(path_lc)) {
+                            lfirst(path_lc) = path;
+                        }
+                    }
+                }
+            }
+
+            adjust_paths_for_srfs(root, final_rel,
+                                planner_targets->scanjoin_targets,
+                                planner_targets->scanjoin_targets_contain_srfs);
+        }
 
         /* 
          * In the following, generate the best unsorted and presorted paths for 
@@ -3008,14 +3106,14 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         /*
          * Extract rowcount and width estimates for possible use in grouping
          * decisions.  Beware here of the possibility that
-         * cheapest_path->parent is NULL (ie, there is no FROM clause).  Also,
+         * cheapest_path->pathtarget is NULL (ie, there is no FROM clause).  Also,
          * if the final rel has been proven dummy, its rows estimate will be
          * zero; clamp it to one to avoid zero-divide in subsequent
          * calculations.
          */
-        if (cheapest_path->parent) {
+        if (cheapest_path->pathtarget) {
             path_rows = clamp_row_est(PATH_LOCAL_ROWS(cheapest_path));
-            path_width = cheapest_path->parent->width;
+            path_width = cheapest_path->pathtarget->width;
         } else {
             path_rows = 1;    /* assume non-set result */
             path_width = 100; /* arbitrary */
@@ -3214,7 +3312,20 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                  * evaluation, we must insert a Result node to project the
                  * desired tlist.
                  */
-                if (!is_projection_capable_plan(result_plan) ||
+                if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                    if (!planner_targets->scanjoin_contains_srfs) {
+                        PathTarget* target = (PathTarget*)llast(planner_targets->scanjoin_targets);
+                        result_plan->targetlist = build_plan_tlist(root, target);
+
+                        if (IsA(result_plan, PartIterator)) {
+                            /*
+                            * If is a PartIterator + Scan, push the PartIterator's
+                            * tlist to Scan.
+                            */
+                            result_plan->lefttree->targetlist = result_plan->targetlist;
+                        }
+                    }
+                } else if (!is_projection_capable_plan(result_plan) ||
                     (is_vector_scan(result_plan) && vector_engine_unsupport_expression_walker((Node*)sub_tlist))) {
                     result_plan = (Plan*)make_result(root, sub_tlist, NULL, result_plan);
                 } else {
@@ -3327,9 +3438,15 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
                 root->grouping_map = grouping_map;
 
+                List* grouping_tlist = tlist;
+#ifndef ENABLE_MULTIPLE_NODES
+                if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                    grouping_tlist = build_plan_tlist(root, planner_targets->grouping_target);
+                }
+#endif
                 result_plan = build_groupingsets_plan(root,
                     parse,
-                    &tlist,
+                    &grouping_tlist,
                     need_sort_for_grouping,
                     rollup_groupclauses,
                     rollup_lists,
@@ -3340,7 +3457,13 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     wflists,
                     &needSecondLevelAgg,
                     collectiveGroupExpr);
-
+#ifdef ENABLE_MULTIPLE_NODES
+                /*
+                 * grouping_tlist was modified by build_groupingsets_plan,
+                 * we have to change tlist at the same time.
+                 */
+                tlist = grouping_tlist;
+#endif
                 /* Delete eq class expr after grouping */
                 delete_eq_member(root, tlist, collectiveGroupExpr);
 
@@ -3368,26 +3491,42 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                             erraction("Modify SQL statement according to the manual.")));
                 }
 
-                if (IS_STREAM_PLAN && (is_hashed_plan(result_plan) || is_rangelist_plan(result_plan))) {
-                    if (expression_returns_set((Node*)tlist)) {
-                        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                            NOTPLANSHIPPING_LENGTH,
-                            "set-valued function + groupingsets");
-                        securec_check_ss(sprintf_rc, "\0", "\0");
-                        mark_stream_unsupport();
-                    }
+                if (parse->is_flt_frame) {
+                    if (!parse->hasTargetSRFs && IS_STREAM_PLAN && (is_hashed_plan(result_plan) || is_rangelist_plan(result_plan))) {
+                        Assert(!expression_returns_set((Node*)tlist));
 
-                    if (check_subplan_in_qual(tlist, result_plan->qual)) {
-                        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                            NOTPLANSHIPPING_LENGTH,
-                            "var in quals doesn't exist in targetlist");
-                        securec_check_ss(sprintf_rc, "\0", "\0");
-                        mark_stream_unsupport();
+                        if (check_subplan_in_qual(tlist, result_plan->qual)) {
+                            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                                NOTPLANSHIPPING_LENGTH,
+                                "var in quals doesn't exist in targetlist");
+                            securec_check_ss(sprintf_rc, "\0", "\0");
+                            mark_stream_unsupport();
+                        }
+                    }
+                } else {
+                    if (IS_STREAM_PLAN && (is_hashed_plan(result_plan) || is_rangelist_plan(result_plan))) {
+                        if (expression_returns_set((Node*)tlist)) {
+                            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                                NOTPLANSHIPPING_LENGTH,
+                                "set-valued function + groupingsets");
+                            securec_check_ss(sprintf_rc, "\0", "\0");
+                            mark_stream_unsupport();
+                        }
+
+                        if (check_subplan_in_qual(tlist, result_plan->qual)) {
+                            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                                NOTPLANSHIPPING_LENGTH,
+                                "var in quals doesn't exist in targetlist");
+                            securec_check_ss(sprintf_rc, "\0", "\0");
+                            mark_stream_unsupport();
+                        }
                     }
                 }
             }
 
-            if (IS_STREAM_PLAN) {
+            if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                needs_stream = false;
+            } else if (IS_STREAM_PLAN) {
                 if (is_execute_on_coordinator(result_plan) || is_execute_on_allnodes(result_plan) ||
                     is_replicated_plan(result_plan)) {
                     needs_stream = false;
@@ -3405,22 +3544,34 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
              *
              * HAVING clause, if any, becomes qual of the Agg or Group node.
              */
-            bool contain_sets_expression =
-                expression_returns_set((Node*)tlist) || expression_returns_set((Node*)parse->havingQual);
+            bool contain_sets_expression = false;
+            if (!parse->is_flt_frame) {
+                contain_sets_expression = expression_returns_set((Node*)tlist) || expression_returns_set((Node*)parse->havingQual);
+            }
             bool next_is_second_level_group = false;
 
             /* Don't need second level agg when distribute key is in group clause of groupingsets. */
             if (!needSecondLevelAgg) {
-                /* need do nothing*/
+                if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                    result_plan = adjust_plan_for_srfs(root, result_plan,
+                                                        planner_targets->grouping_targets,
+                                                        planner_targets->grouping_targets_contain_srfs);
+                }
             } else if (use_hashed_grouping)  {
                 /* Hashed aggregate plan --- no sort needed */
                 if (IS_STREAM_PLAN &&
                     is_execute_on_datanodes(result_plan) &&
                     !is_replicated_plan(result_plan)) {
                     if (agg_costs.hasDnAggs || list_length(agg_costs.exprAggs) == 0) {
+                        List* agg_tlist = tlist;
+#ifndef ENABLE_MULTIPLE_NODES
+                        if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                            agg_tlist = build_plan_tlist(root, planner_targets->grouping_target);
+                        }
+#endif
                         result_plan = generate_hashagg_plan(root,
                                                             result_plan,
-                                                            tlist,
+                                                            agg_tlist,
                                                             &agg_costs,
                                                             numGroupCols,
                                                             numGroups,
@@ -3449,6 +3600,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                                                       hash_entry_size,
                                                                       rel_info);
                     }
+                    if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                        result_plan = adjust_plan_for_srfs(root, result_plan, 
+                                                        planner_targets->grouping_targets, 
+                                                        planner_targets->grouping_targets_contain_srfs);
+                    }
 
                     next_is_second_level_group = true;
                 } else if (!parse->groupingSets) {
@@ -3456,8 +3612,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                      * To Ap function, need not do hashagg if it is not stream plan,
                      * in this case, all work always is finished in sort agg.
                     */
+                    List* agg_tlist = tlist;
+                    if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                        agg_tlist = build_plan_tlist(root, planner_targets->grouping_target);
+                    }
                     result_plan = (Plan *) make_agg(root,
-                                    tlist,
+                                    agg_tlist,
                                     (List *) parse->havingQual,
                                     AGG_HASHED,
                                     &agg_costs,
@@ -3473,7 +3633,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                     NIL,
                                     false,
                                     hash_entry_size);
-
+                    if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                        result_plan = adjust_plan_for_srfs(root, result_plan, 
+                                                        planner_targets->grouping_targets, 
+                                                        planner_targets->grouping_targets_contain_srfs);
+                    }
                     next_is_second_level_group = true;
                 }
 
@@ -3482,7 +3646,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     is_execute_on_datanodes(result_plan) &&
                     !is_replicated_plan(result_plan))  {
 
-                    if (next_is_second_level_group && contain_sets_expression) {
+                    if (next_is_second_level_group &&
+                        (contain_sets_expression ||
+                         (parse->is_flt_frame && parse->hasTargetSRFs))) {
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
@@ -3599,9 +3765,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                             if (need_sort_for_grouping)
                                 result_plan =
                                     (Plan*)make_sort_from_groupcols(root, parse->groupClause, groupColIdx, result_plan);
-
+                            List* agg_tlist = tlist;
+                            if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                                agg_tlist = build_plan_tlist(root, planner_targets->grouping_target);
+                            }
                             result_plan = (Plan*)make_agg(root,
-                                tlist,
+                                agg_tlist,
                                 (List*)parse->havingQual,
                                 AGG_SORTED,
                                 &agg_costs,
@@ -3617,6 +3786,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                 NIL,
                                 0,
                                 true);
+                            if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                                result_plan = adjust_plan_for_srfs(root, result_plan, 
+                                                           planner_targets->grouping_targets, 
+                                                           planner_targets->grouping_targets_contain_srfs);
+                            }
 
                             if (wflists != NULL && wflists->activeWindows) {
                                 /* If have windows we need alter agg's targetlist. */
@@ -3642,8 +3816,13 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     }
 
                     /* Add local redistribute for a local group cols. */
-                    if (IS_STREAM_PLAN && !needs_stream && result_plan->dop > 1)
-                        result_plan = create_local_redistribute(root, result_plan, result_plan->distributed_keys, 0);
+                    if (parse->is_flt_frame) {
+                        if (!parse->hasTargetSRFs && IS_STREAM_PLAN && !needs_stream && result_plan->dop > 1)
+                            result_plan = create_local_redistribute(root, result_plan, result_plan->distributed_keys, 0);
+                    } else {
+                        if (IS_STREAM_PLAN && !needs_stream && result_plan->dop > 1)
+                            result_plan = create_local_redistribute(root, result_plan, result_plan->distributed_keys, 0);
+                    }
 
                     if (need_sort_for_grouping && partial_plan == NULL &&
                         (IS_STREAM_PLAN || parse->groupingSets == NULL)) {
@@ -3720,7 +3899,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 }
 
                 /* If two level agg is needs and we have non-exist var in subplan of qual, push down is unsupported */
-                if (IS_STREAM_PLAN && next_is_second_level_group && contain_sets_expression) {
+                if (IS_STREAM_PLAN && next_is_second_level_group &&
+                    (contain_sets_expression ||
+                     (parse->is_flt_frame && parse->hasTargetSRFs))) {
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
@@ -3731,8 +3912,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 if (partial_plan != NULL) {
                     result_plan = mark_top_agg(root, tlist, partial_plan, result_plan, AGG_LEVEL_1_INTENT);
                 } else if (parse->groupingSets == NIL || IS_STREAM) {
+                    List* agg_tlist = tlist;
+                    if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                        agg_tlist = build_plan_tlist(root, planner_targets->grouping_target);
+                    }
                     result_plan = (Plan*)make_agg(root,
-                        tlist,
+                        agg_tlist,
                         (List*)parse->havingQual,
                         aggstrategy,
                         &agg_costs,
@@ -3748,6 +3933,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         NIL,
                         0,
                         true);
+
+                    if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                        result_plan = adjust_plan_for_srfs(root, result_plan, 
+                                                           planner_targets->grouping_targets, 
+                                                           planner_targets->grouping_targets_contain_srfs);
+                    }
                 }
                 next_is_second_level_group = true;
 
@@ -3761,7 +3952,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 #ifdef STREAMPLAN
                 if (IS_STREAM_PLAN && needs_stream && is_execute_on_datanodes(result_plan) &&
                     !is_replicated_plan(result_plan)) {
-                    if (next_is_second_level_group && contain_sets_expression) {
+                    if (next_is_second_level_group &&
+                        (contain_sets_expression ||
+                         (parse->is_flt_frame && parse->hasTargetSRFs))) {
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
@@ -3819,8 +4012,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                      * should be result_plan->targetlist rather than tlist, if not Error(Var can not
                      * be found) can happend.
                      */
+                    List* group_tlst = needs_stream && need_tlist_eval ? result_plan->targetlist : tlist;
+                    if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                        group_tlst = build_plan_tlist(root, planner_targets->grouping_target);
+                    }
                     result_plan = (Plan*)make_group(root,
-                        needs_stream && need_tlist_eval ? result_plan->targetlist : tlist,
+                        group_tlst,
                         (List*)parse->havingQual,
                         numGroupCols,
                         groupColIdx,
@@ -3828,13 +4025,20 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         dNumGroups[0],
                         result_plan,
                         extract_grouping_collations(parse->groupClause,
-                            needs_stream && need_tlist_eval ? result_plan->targetlist : tlist));
+                            group_tlst));
+                    if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                        result_plan = adjust_plan_for_srfs(root, result_plan, 
+                                                           planner_targets->grouping_targets, 
+                                                           planner_targets->grouping_targets_contain_srfs);
+                    }
                     next_is_second_level_group = true;
                 }
 
 #ifdef STREAMPLAN
                 if (needs_stream) {
-                    if (next_is_second_level_group && contain_sets_expression) {
+                    if (next_is_second_level_group &&
+                        (contain_sets_expression ||
+                         (parse->is_flt_frame && parse->hasTargetSRFs))) {
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
@@ -3942,7 +4146,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
              * functions).  As we climb up the stack, we'll add outputs for
              * the WindowFuncs computed at each level.
              */
-            window_tlist = make_windowInputTargetList(root, tlist, wflists->activeWindows);
+            if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                window_tlist = build_plan_tlist(root, planner_targets->grouping_target);
+            } else {
+                window_tlist = make_windowInputTargetList(root, tlist, wflists->activeWindows);
+            }
 
             /*
              * The copyObject steps here are needed to ensure that each plan
@@ -4064,6 +4272,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     result_plan = (Plan*)mark_windowagg_stream(root, result_plan, tlist, wc, current_pathkeys, wflists);
                 }
 #endif
+            }
+
+            if (parse->is_flt_frame && parse->hasTargetSRFs) {
+                result_plan = adjust_plan_for_srfs(root, result_plan, planner_targets->sort_input_targets,
+                                                   planner_targets->sort_input_targets_contain_srfs);
             }
 
             if (ufdwCxt != NULL && ufdwCxt->state != FDW_UPPER_REL_END) {
@@ -4192,7 +4405,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
             if (IS_STREAM_PLAN && needs_stream && is_execute_on_datanodes(result_plan) &&
                 !is_replicated_plan(result_plan)) {
-                if (next_is_second_level_distinct && contain_sets_expression) {
+                if (next_is_second_level_distinct &&
+                    (contain_sets_expression ||
+                     (parse->is_flt_frame && parse->hasTargetSRFs))) {
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"set-valued expression in qual/targetlist + two-level distinct\"");
@@ -4322,6 +4537,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
      * the right order, add an explicit sort step.
      */
     if (parse->sortClause) {
+        if (parse->is_flt_frame && parse->hasTargetSRFs) {
+            List* sort_input_target = build_plan_tlist(root, planner_targets->final_target);
+            result_plan->targetlist = sort_input_target;
+        }
+
         /*
          * Set group_set and again build pathkeys, data's value can be altered groupingSet after,
          * so equal expr can not be deleted from pathkeys. Rebuild pathkey EquivalenceClass's ec_group_set
@@ -4342,6 +4562,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 result_plan = (Plan*)create_remotesort_plan(root, result_plan);
 #endif /* PGXC */
             current_pathkeys = root->sort_pathkeys;
+        }
+
+        if (parse->is_flt_frame && parse->hasTargetSRFs) {
+            result_plan = adjust_plan_for_srfs(root, result_plan, 
+                                            planner_targets->final_targets, 
+                                            planner_targets->final_targets_contain_srfs);
         }
 
         if (ufdwCxt != NULL && ufdwCxt->state != FDW_UPPER_REL_END) {
@@ -4459,7 +4685,6 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
     }
 #endif
     (void)MemoryContextSwitchTo(oldcontext);
-
     return result_plan;
 }
 
@@ -4759,6 +4984,10 @@ static Plan* build_groupingsets_plan(PlannerInfo* root, Query* parse, List** tli
     }
 #endif
 
+    if (root->parse->is_flt_frame && root->planner_targets->grouping_contains_srfs) {
+        stream_plan = false;
+    }
+
     /* We need add redistribute for distinct */
     if (stream_plan) {
         /* Judge above sort agg if need stream and hashagg */
@@ -4919,18 +5148,20 @@ void add_tlist_costs_to_plan(PlannerInfo* root, Plan* plan, List* tlist)
     plan->startup_cost += tlist_cost.startup;
     plan->total_cost += tlist_cost.startup + tlist_cost.per_tuple * PLAN_LOCAL_ROWS(plan);
 
-    tlist_rows = tlist_returns_set_rows(tlist);
-    if (tlist_rows > 1) {
-        /*
-         * We assume that execution costs of the tlist proper were all
-         * accounted for by cost_qual_eval.  However, it still seems
-         * appropriate to charge something more for the executor's general
-         * costs of processing the added tuples.  The cost is probably less
-         * than cpu_tuple_cost, though, so we arbitrarily use half of that.
-         */
-        plan->total_cost += PLAN_LOCAL_ROWS(plan) * (tlist_rows - 1) * u_sess->attr.attr_sql.cpu_tuple_cost / 2;
+    if (!root->parse->is_flt_frame) {
+        tlist_rows = tlist_returns_set_rows(tlist);
+        if (tlist_rows > 1) {
+            /*
+            * We assume that execution costs of the tlist proper were all
+            * accounted for by cost_qual_eval.  However, it still seems
+            * appropriate to charge something more for the executor's general
+            * costs of processing the added tuples.  The cost is probably less
+            * than cpu_tuple_cost, though, so we arbitrarily use half of that.
+            */
+            plan->total_cost += PLAN_LOCAL_ROWS(plan) * (tlist_rows - 1) * u_sess->attr.attr_sql.cpu_tuple_cost / 2;
 
-        plan->plan_rows *= tlist_rows;
+            plan->plan_rows *= tlist_rows;
+        }
     }
 }
 
@@ -7632,7 +7863,7 @@ bool plan_cluster_use_sort(Oid tableOid, Oid indexOid)
      * set_baserel_size_estimates, just do a quick hack for rows and width.
      */
     rel->rows = rel->tuples;
-    rel->width = get_relation_data_width(tableOid, InvalidOid, NULL);
+    rel->reltarget->width = get_relation_data_width(tableOid, InvalidOid, NULL);
 
     root->total_table_pages = rel->pages;
 
@@ -7651,7 +7882,7 @@ bool plan_cluster_use_sort(Oid tableOid, Oid indexOid)
         NIL,
         seqScanPath->total_cost,
         RELOPTINFO_LOCAL_FIELD(root, rel, rows),
-        rel->width,
+        rel->reltarget->width,
         comparisonCost,
         u_sess->attr.attr_memory.maintenance_work_mem,
         -1.0,
@@ -7717,7 +7948,7 @@ bool planClusterPartitionUseSort(Relation partRel, Oid indexOid, PlannerInfo* ro
         NIL,
         seqScanPath->total_cost,
         relOptInfo->tuples,
-        relOptInfo->width,
+        relOptInfo->reltarget->width,
         comparisonCost,
         u_sess->attr.attr_memory.maintenance_work_mem,
         -1.0,
@@ -9638,6 +9869,7 @@ static Plan* fallback_plan(Plan* result_plan)
         case T_Group:
         case T_Unique:
         case T_BaseResult:
+        case T_ProjectSet:
         case T_Sort:
         case T_Stream:
         case T_Material:
@@ -14869,4 +15101,630 @@ bool check_stream_for_loop_fetch(Portal portal)
     }
     portal->hasStreamForPlpgsql = has_stream;
     return has_stream;
+}
+
+/*
+ * make_sort_input_target
+ *	  Generate appropriate PathTarget for initial input to Sort step.
+ *
+ * If the query has ORDER BY, this function chooses the target to be computed
+ * by the node just below the Sort (and DISTINCT, if any, since Unique can't
+ * project) steps.  This might or might not be identical to the query's final
+ * output target.
+ *
+ * The main argument for keeping the sort-input tlist the same as the final
+ * is that we avoid a separate projection node (which will be needed if
+ * they're different, because Sort can't project).  However, there are also
+ * advantages to postponing tlist evaluation till after the Sort: it ensures
+ * a consistent order of evaluation for any volatile functions in the tlist,
+ * and if there's also a LIMIT, we can stop the query without ever computing
+ * tlist functions for later rows, which is beneficial for both volatile and
+ * expensive functions.
+ *
+ * Our current policy is to postpone volatile expressions till after the sort
+ * unconditionally (assuming that that's possible, ie they are in plain tlist
+ * columns and not ORDER BY/GROUP BY/DISTINCT columns).  We also prefer to
+ * postpone set-returning expressions, because running them beforehand would
+ * bloat the sort dataset, and because it might cause unexpected output order
+ * if the sort isn't stable.  However there's a constraint on that: all SRFs
+ * in the tlist should be evaluated at the same plan step, so that they can
+ * run in sync in nodeProjectSet.  So if any SRFs are in sort columns, we
+ * mustn't postpone any SRFs.  (Note that in principle that policy should
+ * probably get applied to the group/window input targetlists too, but we
+ * have not done that historically.)  Lastly, expensive expressions are
+ * postponed if there is a LIMIT, or if root->tuple_fraction shows that
+ * partial evaluation of the query is possible (if neither is true, we expect
+ * to have to evaluate the expressions for every row anyway), or if there are
+ * any volatile or set-returning expressions (since once we've put in a
+ * projection at all, it won't cost any more to postpone more stuff).
+ *
+ * Another issue that could potentially be considered here is that
+ * evaluating tlist expressions could result in data that's either wider
+ * or narrower than the input Vars, thus changing the volume of data that
+ * has to go through the Sort.  However, we usually have only a very bad
+ * idea of the output width of any expression more complex than a Var,
+ * so for now it seems too risky to try to optimize on that basis.
+ *
+ * Note that if we do produce a modified sort-input target, and then the
+ * query ends up not using an explicit Sort, no particular harm is done:
+ * we'll initially use the modified target for the preceding path nodes,
+ * but then change them to the final target with apply_projection_to_path.
+ * Moreover, in such a case the guarantees about evaluation order of
+ * volatile functions still hold, since the rows are sorted already.
+ *
+ * This function has some things in common with make_group_input_target and
+ * make_window_input_target, though the detailed rules for what to do are
+ * different.  We never flatten/postpone any grouping or ordering columns;
+ * those are needed before the sort.  If we do flatten a particular
+ * expression, we leave Aggref and WindowFunc nodes alone, since those were
+ * computed earlier.
+ *
+ * 'final_target' is the query's final target list (in PathTarget form)
+ * 'have_postponed_srfs' is an output argument, see below
+ *
+ * The result is the PathTarget to be computed by the plan node immediately
+ * below the Sort step (and the Distinct step, if any).  This will be
+ * exactly final_target if we decide a projection step wouldn't be helpful.
+ *
+ * In addition, *have_postponed_srfs is set to TRUE if we choose to postpone
+ * any set-returning functions to after the Sort.
+ */
+static PathTarget *
+make_sort_input_target(PlannerInfo *root, PathTarget *final_target, bool *have_postponed_srfs)
+{
+    Query *parse = root->parse;
+    PathTarget *input_target;
+    int ncols;
+    bool *col_is_srf;
+    bool *postpone_col;
+    bool have_srf;
+    bool have_volatile;
+    bool have_expensive;
+    bool have_srf_sortcols;
+    bool postpone_srfs;
+    List *postponable_cols;
+    List *postponable_vars;
+    int i;
+    ListCell *lc;
+
+    /* Shouldn't get here unless query has ORDER BY */
+    Assert(parse->sortClause);
+
+    *have_postponed_srfs = false; /* default result */
+
+    /* Inspect tlist and collect per-column information */
+    ncols = list_length(final_target->exprs);
+    col_is_srf = (bool *)palloc0(ncols * sizeof(bool));
+    postpone_col = (bool *)palloc0(ncols * sizeof(bool));
+    have_srf = have_volatile = have_expensive = have_srf_sortcols = false;
+
+    i = 0;
+    foreach (lc, final_target->exprs) {
+        Expr *expr = (Expr *)lfirst(lc);
+
+        /*
+         * If the column has a sortgroupref, assume it has to be evaluated
+         * before sorting.  Generally such columns would be ORDER BY, GROUP
+         * BY, etc targets.  One exception is columns that were removed from
+         * GROUP BY by remove_useless_groupby_columns() ... but those would
+         * only be Vars anyway.  There don't seem to be any cases where it
+         * would be worth the trouble to double-check.
+         */
+        if (get_pathtarget_sortgroupref(final_target, i) == 0) {
+            /*
+             * Check for SRF or volatile functions.  Check the SRF case first
+             * because we must know whether we have any postponed SRFs.
+             */
+            if (parse->hasTargetSRFs && expression_returns_set((Node *)expr)) {
+                /* We'll decide below whether these are postponable */
+                col_is_srf[i] = true;
+                have_srf = true;
+            } else if (contain_volatile_functions((Node *)expr)) {
+                /* Unconditionally postpone */
+                postpone_col[i] = true;
+                have_volatile = true;
+            } else {
+                /*
+                 * Else check the cost.  XXX it's annoying to have to do this
+                 * when set_pathtarget_cost_width() just did it.  Refactor to
+                 * allow sharing the work?
+                 */
+                QualCost cost;
+
+                cost_qual_eval_node(&cost, (Node *)expr, root);
+
+                /*
+                 * We arbitrarily define "expensive" as "more than 10X
+                 * cpu_operator_cost".  Note this will take in any PL function
+                 * with default cost.
+                 */
+                if (cost.per_tuple > 10 * u_sess->attr.attr_sql.cpu_operator_cost) {
+                    postpone_col[i] = true;
+                    have_expensive = true;
+                }
+            }
+        } else {
+            /* For sortgroupref cols, just check if any contain SRFs */
+            if (!have_srf_sortcols && parse->hasTargetSRFs && expression_returns_set((Node *)expr))
+                have_srf_sortcols = true;
+        }
+
+        i++;
+    }
+
+    /*
+     * We can postpone SRFs if we have some but none are in sortgroupref cols.
+     */
+    postpone_srfs = (have_srf && !have_srf_sortcols);
+
+    /*
+     * If we don't need a post-sort projection, just return final_target.
+     */
+    if (!(postpone_srfs || have_volatile || (have_expensive && (parse->limitCount || root->tuple_fraction > 0))))
+        return final_target;
+
+    /*
+     * Report whether the post-sort projection will contain set-returning
+     * functions.  This is important because it affects whether the Sort can
+     * rely on the query's LIMIT (if any) to bound the number of rows it needs
+     * to return.
+     */
+    *have_postponed_srfs = postpone_srfs;
+
+    /*
+     * Construct the sort-input target, taking all non-postponable columns and
+     * then adding Vars, PlaceHolderVars, Aggrefs, and WindowFuncs found in
+     * the postponable ones.
+     */
+    input_target = create_empty_pathtarget();
+    postponable_cols = NIL;
+
+    i = 0;
+    foreach (lc, final_target->exprs) {
+        Expr *expr = (Expr *)lfirst(lc);
+
+        if (postpone_col[i] || (postpone_srfs && col_is_srf[i]))
+            postponable_cols = lappend(postponable_cols, expr);
+        else
+            add_column_to_pathtarget(input_target, expr, get_pathtarget_sortgroupref(final_target, i));
+
+        i++;
+    }
+
+    /*
+     * Pull out all the Vars, Aggrefs, and WindowFuncs mentioned in
+     * postponable columns, and add them to the sort-input target if not
+     * already present.  (Some might be there already.)  We mustn't
+     * deconstruct Aggrefs or WindowFuncs here, since the projection node
+     * would be unable to recompute them.
+     */
+    postponable_vars = pull_var_clause((Node *)postponable_cols,
+                                       PVC_INCLUDE_AGGREGATES_OR_WINAGGS , PVC_INCLUDE_PLACEHOLDERS);
+    add_new_columns_to_pathtarget(input_target, postponable_vars);
+
+    /* clean up cruft */
+    list_free(postponable_vars);
+    list_free(postponable_cols);
+
+    /* XXX this represents even more redundant cost calculation ... */
+    return set_pathtarget_cost_width(root, input_target);
+}
+
+/*
+ * make_window_input_target
+ *	  Generate appropriate PathTarget for initial input to WindowAgg nodes.
+ *
+ * When the query has window functions, this function computes the desired
+ * target to be computed by the node just below the first WindowAgg.
+ * This tlist must contain all values needed to evaluate the window functions,
+ * compute the final target list, and perform any required final sort step.
+ * If multiple WindowAggs are needed, each intermediate one adds its window
+ * function results onto this base tlist; only the topmost WindowAgg computes
+ * the actual desired target list.
+ *
+ * This function is much like make_group_input_target, though not quite enough
+ * like it to share code.  As in that function, we flatten most expressions
+ * into their component variables.  But we do not want to flatten window
+ * PARTITION BY/ORDER BY clauses, since that might result in multiple
+ * evaluations of them, which would be bad (possibly even resulting in
+ * inconsistent answers, if they contain volatile functions).
+ * Also, we must not flatten GROUP BY clauses that were left unflattened by
+ * make_group_input_target, because we may no longer have access to the
+ * individual Vars in them.
+ *
+ * Another key difference from make_group_input_target is that we don't
+ * flatten Aggref expressions, since those are to be computed below the
+ * window functions and just referenced like Vars above that.
+ *
+ * 'final_target' is the query's final target list (in PathTarget form)
+ * 'activeWindows' is the list of active windows previously identified by
+ *			select_active_windows.
+ *
+ * The result is the PathTarget to be computed by the plan node immediately
+ * below the first WindowAgg node.
+ */
+static PathTarget *
+make_window_input_target(PlannerInfo *root, PathTarget *final_target, List *activeWindows)
+{
+    Query *parse = root->parse;
+    PathTarget *input_target;
+    Bitmapset *sgrefs;
+    List *flattenable_cols;
+    List *flattenable_vars;
+    int i;
+    ListCell *lc;
+
+    Assert(parse->hasWindowFuncs);
+
+    /*
+     * Collect the sortgroupref numbers of window PARTITION/ORDER BY clauses
+     * into a bitmapset for convenient reference below.
+     */
+    sgrefs = NULL;
+    foreach (lc, activeWindows) {
+        WindowClause *wc = (WindowClause *)lfirst(lc);
+        ListCell *lc2;
+
+        foreach (lc2, wc->partitionClause) {
+            SortGroupClause *sortcl = (SortGroupClause *)lfirst(lc2);
+
+            sgrefs = bms_add_member(sgrefs, sortcl->tleSortGroupRef);
+        }
+        foreach (lc2, wc->orderClause) {
+            SortGroupClause *sortcl = (SortGroupClause *)lfirst(lc2);
+
+            sgrefs = bms_add_member(sgrefs, sortcl->tleSortGroupRef);
+        }
+    }
+
+    /* Add in sortgroupref numbers of GROUP BY clauses, too */
+    foreach (lc, parse->groupClause) {
+        SortGroupClause *grpcl = (SortGroupClause *)lfirst(lc);
+
+        sgrefs = bms_add_member(sgrefs, grpcl->tleSortGroupRef);
+    }
+
+    /*
+     * Construct a target containing all the non-flattenable targetlist items,
+     * and save aside the others for a moment.
+     */
+    input_target = create_empty_pathtarget();
+    flattenable_cols = NIL;
+
+    i = 0;
+    foreach (lc, final_target->exprs) {
+        Expr *expr = (Expr *)lfirst(lc);
+        Index sgref = get_pathtarget_sortgroupref(final_target, i);
+
+        /*
+         * Don't want to deconstruct window clauses or GROUP BY items.  (Note
+         * that such items can't contain window functions, so it's okay to
+         * compute them below the WindowAgg nodes.)
+         */
+        if (sgref != 0 && bms_is_member(sgref, sgrefs)) {
+            /*
+             * Don't want to deconstruct this value, so add it to the input
+             * target as-is.
+             */
+            add_column_to_pathtarget(input_target, expr, sgref);
+        } else {
+            /*
+             * Column is to be flattened, so just remember the expression for
+             * later call to pull_var_clause.
+             */
+            flattenable_cols = lappend(flattenable_cols, expr);
+        }
+
+        i++;
+    }
+
+    /*
+     * Pull out all the Vars and Aggrefs mentioned in flattenable columns, and
+     * add them to the input target if not already present.  (Some might be
+     * there already because they're used directly as window/group clauses.)
+     *
+     * Note: it's essential to use PVC_INCLUDE_AGGREGATES here, so that any
+     * Aggrefs are placed in the Agg node's tlist and not left to be computed
+     * at higher levels.  On the other hand, we should recurse into
+     * WindowFuncs to make sure their input expressions are available.
+     */
+    flattenable_vars = pull_var_clause((Node *)flattenable_cols,
+                                       PVC_INCLUDE_AGGREGATES,
+                                       PVC_INCLUDE_PLACEHOLDERS);
+    add_new_columns_to_pathtarget(input_target, flattenable_vars);
+
+    /* clean up cruft */
+    list_free(flattenable_vars);
+    list_free(flattenable_cols);
+
+    /* XXX this causes some redundant cost calculation ... */
+    return set_pathtarget_cost_width(root, input_target);
+}
+
+/*
+ * make_group_input_target
+ *	  Generate appropriate PathTarget for initial input to grouping nodes.
+ *
+ * If there is grouping or aggregation, the scan/join subplan cannot emit
+ * the query's final targetlist; for example, it certainly can't emit any
+ * aggregate function calls.  This routine generates the correct target
+ * for the scan/join subplan.
+ *
+ * The query target list passed from the parser already contains entries
+ * for all ORDER BY and GROUP BY expressions, but it will not have entries
+ * for variables used only in HAVING clauses; so we need to add those
+ * variables to the subplan target list.  Also, we flatten all expressions
+ * except GROUP BY items into their component variables; other expressions
+ * will be computed by the upper plan nodes rather than by the subplan.
+ * For example, given a query like
+ *		SELECT a+b,SUM(c+d) FROM table GROUP BY a+b;
+ * we want to pass this targetlist to the subplan:
+ *		a+b,c,d
+ * where the a+b target will be used by the Sort/Group steps, and the
+ * other targets will be used for computing the final results.
+ *
+ * 'final_target' is the query's final target list (in PathTarget form)
+ *
+ * The result is the PathTarget to be computed by the Paths returned from
+ * query_planner().
+ */
+static PathTarget *
+make_group_input_target(PlannerInfo *root, PathTarget *final_target)
+{
+    Query *parse = root->parse;
+    PathTarget *input_target;
+    List *non_group_cols;
+    List *non_group_vars;
+    int i;
+    ListCell *lc;
+
+    /*
+     * We must build a target containing all grouping columns, plus any other
+     * Vars mentioned in the query's targetlist and HAVING qual.
+     */
+    input_target = create_empty_pathtarget();
+    non_group_cols = NIL;
+
+    i = 0;
+    foreach (lc, final_target->exprs) {
+        Expr *expr = (Expr *)lfirst(lc);
+        Index sgref = get_pathtarget_sortgroupref(final_target, i);
+
+        if (sgref && parse->groupClause && get_sortgroupref_clause_noerr(sgref, parse->groupClause) != NULL) {
+            /*
+             * It's a grouping column, so add it to the input target as-is.
+             */
+            add_column_to_pathtarget(input_target, expr, sgref);
+        } else {
+            /*
+             * Non-grouping column, so just remember the expression for later
+             * call to pull_var_clause.
+             */
+            non_group_cols = lappend(non_group_cols, expr);
+        }
+
+        i++;
+    }
+
+    /*
+     * If there's a HAVING clause, we'll need the Vars it uses, too.
+     */
+    if (parse->havingQual)
+        non_group_cols = lappend(non_group_cols, parse->havingQual);
+
+    /*
+     * Pull out all the Vars mentioned in non-group cols (plus HAVING), and
+     * add them to the input target if not already present.  (A Var used
+     * directly as a GROUP BY item will be present already.)  Note this
+     * includes Vars used in resjunk items, so we are covering the needs of
+     * ORDER BY and window specifications.  Vars used within Aggrefs and
+     * WindowFuncs will be pulled out here, too.
+     */
+    non_group_vars = pull_var_clause((Node *)non_group_cols,
+                                     PVC_RECURSE_AGGREGATES,
+                                     PVC_INCLUDE_PLACEHOLDERS);
+    add_new_columns_to_pathtarget(input_target, non_group_vars);
+
+    /* clean up cruft */
+    list_free(non_group_vars);
+    list_free(non_group_cols);
+
+    /* XXX this causes some redundant cost calculation ... */
+    return set_pathtarget_cost_width(root, input_target);
+}
+
+static void 
+process_planner_targets(PlannerInfo *root, PlannerTargets *targets, List *tlist, List *activeWindows)
+{
+    Query* parse = root->parse;
+
+    /*
+     * If ORDER BY was given, consider whether we should use a post-sort
+     * projection, and compute the adjusted target for preceding steps if
+     * so.
+     */
+    if (parse->sortClause)
+        targets->sort_input_target = 
+            make_sort_input_target(root, targets->final_target, &targets->have_postponed_srfs);
+    else
+        targets->sort_input_target = targets->final_target;
+
+    /*
+     * If we have window functions to deal with, the output from any
+     * grouping step needs to be what the window functions want;
+     * otherwise, it should be sort_input_target.
+     */
+    if (activeWindows)
+        targets->grouping_target = 
+            make_window_input_target(root, targets->final_target, activeWindows);
+    else
+        targets->grouping_target = targets->sort_input_target;
+
+    /*
+     * If we have grouping or aggregation to do, the topmost scan/join
+     * plan node must emit what the grouping step wants; otherwise, it
+     * should emit grouping_target.
+     */
+    bool have_grouping = (parse->groupClause || parse->groupingSets ||
+                    parse->hasAggs || root->hasHavingQual);
+    if (have_grouping)
+        targets->scanjoin_target = 
+            make_group_input_target(root, targets->final_target);
+    else
+        targets->scanjoin_target = targets->grouping_target;
+
+    /*
+     * If there are any SRFs in the targetlist, we must separate each of
+     * these PathTargets into SRF-computing and SRF-free targets.  Replace
+     * each of the named targets with a SRF-free version, and remember the
+     * list of additional projection steps we need to add afterwards.
+     */
+    if (parse->hasTargetSRFs) {
+        /* final_target doesn't recompute any SRFs in sort_input_target */
+        targets->final_contains_srfs =
+                split_pathtarget_at_srfs(root, 
+                                targets->final_target, targets->sort_input_target, 
+                                &targets->final_targets, &targets->final_targets_contain_srfs);
+        targets->final_target = (PathTarget *)linitial(targets->final_targets);
+        Assert(!linitial_int(targets->final_targets_contain_srfs));
+
+        /* likewise for sort_input_target vs. grouping_target */
+        targets->sort_input_contains_srfs =
+                split_pathtarget_at_srfs(root, 
+                                        targets->sort_input_target, targets->grouping_target, 
+                                        &targets->sort_input_targets, &targets->sort_input_targets_contain_srfs);
+        targets->sort_input_target = (PathTarget *)linitial(targets->sort_input_targets);
+        Assert(!linitial_int(targets->sort_input_targets_contain_srfs));
+
+        /* likewise for grouping_target vs. scanjoin_target */
+        targets->grouping_contains_srfs =
+                split_pathtarget_at_srfs(root, 
+                                        targets->grouping_target, targets->scanjoin_target, &targets->grouping_targets,
+                                        &targets->grouping_targets_contain_srfs);
+        targets->grouping_target = (PathTarget *)linitial(targets->grouping_targets);
+        Assert(!linitial_int(targets->grouping_targets_contain_srfs));
+
+        /* scanjoin_target will not have any SRFs precomputed for it */
+        targets->scanjoin_contains_srfs =
+                split_pathtarget_at_srfs(root, targets->scanjoin_target, NULL, 
+                                        &targets->scanjoin_targets, 
+                                        &targets->scanjoin_targets_contain_srfs);
+        targets->scanjoin_target = (PathTarget *)linitial(targets->scanjoin_targets);
+        Assert(!linitial_int(targets->scanjoin_targets_contain_srfs));
+    }
+}
+
+/*
+ * adjust_paths_for_srfs
+ *		Fix up the Paths of the given upperrel to handle tSRFs properly.
+ *
+ * The executor can only handle set-returning functions that appear at the
+ * top level of the targetlist of a ProjectSet plan node.  If we have any SRFs
+ * that are not at top level, we need to split up the evaluation into multiple
+ * plan levels in which each level satisfies this constraint.  This function
+ * modifies each Path of an upperrel that (might) compute any SRFs in its
+ * output tlist to insert appropriate projection steps.
+ *
+ * The given targets and targets_contain_srfs lists are from
+ * split_pathtarget_at_srfs().  We assume the existing Paths emit the first
+ * target in targets.
+ */
+static void 
+adjust_paths_for_srfs(PlannerInfo *root, RelOptInfo *rel, List *targets, List *targets_contain_srfs)
+{
+    ListCell *lc;
+
+    Assert(list_length(targets) == list_length(targets_contain_srfs));
+    Assert(!linitial_int(targets_contain_srfs));
+
+    /* If no SRFs appear at this plan level, nothing to do */
+    if (list_length(targets) == 1)
+        return;
+
+    /*
+     * Stack SRF-evaluation nodes atop each path for the rel.
+     *
+     * In principle we should re-run set_cheapest() here to identify the
+     * cheapest path, but it seems unlikely that adding the same tlist eval
+     * costs to all the paths would change that, so we don't bother. Instead,
+     * just assume that the cheapest-startup and cheapest-total paths remain
+     * so.  (There should be no parameterized paths anymore, so we needn't
+     * worry about updating cheapest_parameterized_paths.)
+     */
+    foreach (lc, rel->pathlist) {
+        Path *subpath = (Path *)lfirst(lc);
+        Path *newpath = subpath;
+        ListCell *lc1, *lc2;
+
+        Assert(subpath->param_info == NULL);
+        forboth(lc1, targets, lc2, targets_contain_srfs)
+        {
+            PathTarget *thistarget = (PathTarget *)lfirst(lc1);
+            bool contains_srfs = (bool)lfirst_int(lc2);
+
+            /* If this level doesn't contain SRFs, do regular projection */
+            if (contains_srfs)
+                newpath = (Path *)create_set_projection_path(root, rel, newpath, thistarget);
+            else
+            {
+                newpath = (Path *)apply_projection_to_path(root, rel, newpath, thistarget);
+            }
+                
+        }
+        lfirst(lc) = newpath;
+        if (subpath == rel->cheapest_startup_path) {
+            rel->cheapest_startup_path = newpath;
+        }
+
+        ListCell* path_lc = NULL;
+        foreach (path_lc, rel->cheapest_total_path) {
+            if (subpath == lfirst(path_lc)) {
+                lfirst(path_lc) = newpath;
+            }
+        }
+    }
+}
+
+/*
+ * adjust_plan_for_srfs
+ *		Fix up the plans of the given plan to handle tSRFs properly.
+ *
+ * This is almost like adjust_paths_for_srfst(), but we adjust the
+ * plan and its targets
+ */
+static Plan *
+adjust_plan_for_srfs(PlannerInfo *root, Plan *plan, List *targets, List *targets_contain_srfs)
+{
+    Assert(list_length(targets) == list_length(targets_contain_srfs));
+    Assert(!linitial_int(targets_contain_srfs));
+
+    /* If no SRFs appear at this plan level, nothing to do */
+    if (list_length(targets) == 1)
+        return plan;
+
+    Plan *newplan = plan;
+    ListCell *lc1, *lc2;
+    forboth(lc1, targets, lc2, targets_contain_srfs)
+    {
+        Plan *subplan = newplan;
+        PathTarget *thistarget = (PathTarget *)lfirst(lc1);
+        bool contains_srfs = (bool)lfirst_int(lc2);
+        List *tlist = build_plan_tlist(root, thistarget);
+
+        /* If this level doesn't contain SRFs, do regular projection */
+        if (contains_srfs) {
+            newplan = (Plan*)make_project_set(tlist, newplan);
+            newplan->startup_cost = subplan->startup_cost;
+            newplan->total_cost = subplan->total_cost;
+            newplan->plan_rows = subplan->plan_width;
+            newplan->plan_width = subplan->plan_rows;
+        } else {
+            if (!is_projection_capable_plan(subplan)) {
+                newplan = (Plan*)make_result(root, tlist, NULL, subplan);
+            } else {
+                newplan->targetlist = tlist;
+            }
+        }
+    }
+    return newplan;
 }

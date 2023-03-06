@@ -252,6 +252,8 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->cursor_options = 0;
     plansource->rewriteRoleId = InvalidOid;
     plansource->dependsOnRole = false;
+    plansource->cq_is_flt_frame = 
+        (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
     plansource->fixed_result = false;
     plansource->resultDesc = NULL;
     plansource->search_path = NULL;
@@ -355,6 +357,8 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
     plansource->cursor_options = 0;
     plansource->rewriteRoleId = InvalidOid;
     plansource->dependsOnRole = false;
+    plansource->cq_is_flt_frame = 
+        (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
     plansource->fixed_result = false;
     plansource->resultDesc = NULL;
     plansource->search_path = NULL;
@@ -922,6 +926,12 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
         }
 #endif
 
+        if (plansource->is_valid &&
+            (plansource->cq_is_flt_frame !=
+             (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1))) {
+            plansource->is_valid = false;
+        }
+
         /*
          * By now, if any invalidation has happened, the inval callback
          * functions will have marked the query invalid.
@@ -1186,6 +1196,12 @@ bool CheckCachedPlan(CachedPlanSource* plansource, CachedPlan *plan)
 
     /* If stream_operator alreadly change, need build plan again.*/
     if ((!plansource->gpc.status.InShareTable()) && plansource->stream_enabled != IsStreamSupport()) {
+        return false;
+    }
+
+    if ((!plansource->gpc.status.InShareTable()) &&
+        (plansource->cq_is_flt_frame != 
+         (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1))) {
         return false;
     }
 
@@ -1482,6 +1498,8 @@ CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamList
         plan->saved_xmin = u_sess->utils_cxt.TransactionXmin;
     } else
         plan->saved_xmin = InvalidTransactionId;
+    plansource->cq_is_flt_frame =
+        (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
     plan->refcount = 0;
     plan->global_refcount = 0;
     plan->context = plan_context;

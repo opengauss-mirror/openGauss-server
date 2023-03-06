@@ -2025,7 +2025,7 @@ void UpdatePartKeyExpr(Relation rel, PartitionState *partTableState, Oid partOid
         return;
     }
 	// Oid* partitionKeyDataType = NULL;
-    Node* expr = transformExpr(pstate, (Node*)(linitial(partTableState->partitionKey)));
+    Node* expr = transformExpr(pstate, (Node*)(linitial(partTableState->partitionKey)), EXPR_KIND_OTHER);
     assign_expr_collations(pstate, expr);
     bool nulls[Natts_pg_partition] = {false};
     bool replaces[Natts_pg_partition] = {false};
@@ -15470,7 +15470,7 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
 
             addRTEtoQuery(pstate, rte, false, true, true);
 
-            transform = transformExpr(pstate, transform);
+            transform = transformExpr(pstate, transform, EXPR_KIND_ALTER_COL_TRANSFORM);
 
             if (RelationIsColStore(rel)) {
                 Bitmapset* attrs_referred = NULL;
@@ -31467,7 +31467,7 @@ static Node* CookRlspolicyQual(Relation rel, Node* src_qual)
     RangeTblEntry* rte = addRangeTableEntryForRelation(pstate, rel, NULL, false, false);
     addRTEtoQuery(pstate, rte, false, true, true);
     /* Transform expr clause */
-    Node *cooked_qual = transformWhereClause(pstate, src_qual, "POLICY");
+    Node *cooked_qual = transformWhereClause(pstate, src_qual, EXPR_KIND_POLICY, "POLICY");
     /* Take care of collations */
     assign_expr_collations(pstate, cooked_qual);
     pfree(pstate);

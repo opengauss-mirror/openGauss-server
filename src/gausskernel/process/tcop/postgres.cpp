@@ -1280,6 +1280,20 @@ List* pg_rewrite_query(Query* query)
         querytree_list = QueryRewrite(query);
     }
 
+    /*
+     * After rewriting the querytree_list, we need to check every query to ensure they can execute
+     * in new expression framework.  If we find a query's is_flt_frame is false, which indicates the query
+     * not support the new expression framework, the top level query need be reverted to old.
+     * One more things, CMD_UTILITY statements cannot be reverted here.  We solve it at explain_proc_query()
+     */
+    if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        ListCell* lc = NULL;
+        foreach(lc, querytree_list) {
+            Query* query_tmp = (Query*)lfirst(lc);
+            query_tmp->is_flt_frame = !query_check_no_flt(query_tmp);
+        }
+    }
+
     PGSTAT_END_TIME_RECORD(REWRITE_TIME);
 
     if (u_sess->attr.attr_common.log_parser_stats)
@@ -1408,6 +1422,11 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
     plan->is_stream_plan = u_sess->opt_cxt.is_stream;
 
     plan->multi_node_hint = multi_node_hint;
+
+    plan->is_flt_frame = false;
+    if (querytree->is_flt_frame) {
+        plan->is_flt_frame = true;
+    }
 
     if (plan->planTree) {
         if (IS_ENABLE_RIGHT_REF(querytree->rightRefState)) {

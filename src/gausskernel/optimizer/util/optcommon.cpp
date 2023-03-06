@@ -34,6 +34,9 @@ void GetPlanNodePlainText(
         case T_BaseResult:
             *pname = *sname = *pt_operation = "Result";
             break;
+        case T_ProjectSet:
+            *pname = *sname = *pt_operation = "ProjectSet";
+            break;
         case T_VecResult:
             *pname = *sname = *pt_operation = "Vector Result";
             break;

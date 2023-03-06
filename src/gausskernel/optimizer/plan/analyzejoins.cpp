@@ -605,6 +605,10 @@ static bool rel_is_distinct_for(PlannerInfo* root, RelOptInfo* rel, List* clause
  */
 bool query_supports_distinctness(Query* query)
 {
+    /* we don't cope with SRFs */
+    if (query->is_flt_frame && query->hasTargetSRFs)
+        return false;
+
     if (query->distinctClause != NIL || query->groupClause != NIL || query->hasAggs || query->havingQual ||
         query->setOperations)
         return true;

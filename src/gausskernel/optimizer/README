@@ -362,6 +362,8 @@ RelOptInfo      - a relation or joined relations
   AppendPath    - append multiple subpaths together
   MergeAppendPath - merge multiple subpaths, preserving their common sort order
   ResultPath    - a Result plan node (used for FROM-less SELECT)
+  ProjectionPath - a Result plan node with child (used for projection)
+  ProjectSetPath - a ProjectSet plan node applied to some sub-path
   MaterialPath  - a Material plan node
   UniquePath    - remove duplicate rows
   NestPath      - nested-loop joins

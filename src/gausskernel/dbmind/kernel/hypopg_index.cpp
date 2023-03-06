@@ -44,6 +44,7 @@
 #include "optimizer/pathnode.h"
 #include "optimizer/plancat.h"
 #include "optimizer/var.h"
+#include "optimizer/tlist.h"
 #include "parser/parse_utilcmd.h"
 #include "parser/parser.h"
 #include "storage/buf/bufmgr.h"
@@ -1334,6 +1335,7 @@ static void hypo_estimate_index_simple(hypoIndex *entry, BlockNumber *pages, dou
     rel->min_attr = FirstLowInvalidHeapAttributeNumber + 1;
     rel->max_attr = RelationGetNumberOfAttributes(relation);
     rel->reltablespace = RelationGetForm(relation)->reltablespace;
+    rel->reltarget = create_empty_pathtarget();
 
     Assert(rel->max_attr >= rel->min_attr);
     rel->attr_needed = (Relids *)palloc0((rel->max_attr - rel->min_attr + 1) * sizeof(Relids));

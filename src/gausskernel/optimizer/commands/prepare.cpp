@@ -520,7 +520,7 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
         Oid expected_type_id = param_types[i];
         Oid given_type_id;
 
-        expr = transformExpr(pstate, expr);
+        expr = transformExpr(pstate, expr, EXPR_KIND_EXECUTE_PARAMETER);
 
         /* Cannot contain subselects or aggregates */
         if (pstate->p_hasSubLinks)

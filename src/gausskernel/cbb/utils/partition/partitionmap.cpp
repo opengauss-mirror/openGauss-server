@@ -2787,11 +2787,11 @@ int constCompare_constType(Const* value1, Const* value2)
 
     eqExpr = (Expr*)makeSimpleA_Expr(AEXPR_OP, "=", (Node*)value1, (Node*)value2, -1);
 
-    eqExpr = (Expr*)transformExpr(pstate, (Node*)eqExpr);
+    eqExpr = (Expr*)transformExpr(pstate, (Node*)eqExpr, EXPR_KIND_PARTITION_EXPRESSION);
 
     gtExpr = (Expr*)makeSimpleA_Expr(AEXPR_OP, ">", (Node*)value1, (Node*)value2, -1);
 
-    gtExpr = (Expr*)transformExpr(pstate, (Node*)gtExpr);
+    gtExpr = (Expr*)transformExpr(pstate, (Node*)gtExpr, EXPR_KIND_PARTITION_EXPRESSION);
     ((OpExpr*)gtExpr)->inputcollid = value1->constcollid;
 
     estate = CreateExecutorState();

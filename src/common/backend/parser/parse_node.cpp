@@ -350,7 +350,7 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
         AssertEreport(IsA(ai, A_Indices), MOD_OPT, "");
         if (isSlice) {
             if (ai->lidx) {
-                subexpr = transformExpr(pstate, ai->lidx);
+                subexpr = transformExpr(pstate, ai->lidx, pstate->p_expr_kind);
                 /* If it's not int4 already, try to coerce */
                 subexpr = coerce_to_target_type(
                     pstate, subexpr, exprType(subexpr), INT4OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
@@ -367,7 +367,7 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
             }
             lowerIndexpr = lappend(lowerIndexpr, subexpr);
         }
-        subexpr = transformExpr(pstate, ai->uidx);
+        subexpr = transformExpr(pstate, ai->uidx, pstate->p_expr_kind);
         if (get_typecategory(arrayType) == TYPCATEGORY_TABLEOF_VARCHAR) {
             isIndexByVarchar = true;
         }

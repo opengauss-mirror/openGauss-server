@@ -100,6 +100,11 @@ extern HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, Jo
     JoinCostWorkspace* workspace, JoinPathExtraData* extra, Path* outer_path,
     Path* inner_path, List* restrict_clauses, Relids required_outer, List* hashclauses, int dop = 1);
 
+extern ProjectionPath *create_projection_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath, PathTarget *target);
+extern Path *apply_projection_to_path(PlannerInfo *root, RelOptInfo *rel, Path *path, PathTarget *target);
+extern ProjectSetPath *create_set_projection_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath,
+                                                  PathTarget *target);
+
 extern Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, double loop_count);
 
 /*

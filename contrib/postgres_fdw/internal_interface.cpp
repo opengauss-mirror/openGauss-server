@@ -274,6 +274,7 @@ ForeignPath *create_foreign_join_path(PlannerInfo *root, RelOptInfo *rel, List *
 
     pathnode->path.pathtype = T_ForeignScan;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = NULL; /* XXX see above */
     pathnode->path.rows = rows;
     pathnode->path.startup_cost = startup_cost;
@@ -346,7 +347,7 @@ RelOptInfo *fetch_upper_rel(FDWUpperRelCxt *ufdwCxt, UpperRelationKind kind)
     upperrel->reloptkind = RELOPT_UPPER_REL;
     upperrel->relids = NULL;
 
-    upperrel->reltargetlist = NIL;
+    upperrel->reltarget = makeNode(PathTarget);
     upperrel->pathlist = NIL;
     upperrel->cheapest_startup_path = NULL;
     upperrel->cheapest_total_path = NULL;
@@ -406,7 +407,7 @@ RelOptInfo *make_upper_rel(FDWUpperRelCxt *ufdwCxt, PgFdwRelationInfo *fpinfo)
     RelOptInfo *upper_rel = fetch_upper_rel(ufdwCxt, fpinfo->stage);
 
     /* Set target. */
-    upper_rel->reltargetlist = extract_target_from_tel(ufdwCxt, fpinfo);
+    upper_rel->reltarget->exprs = extract_target_from_tel(ufdwCxt, fpinfo);
 
     /*
      * If the input rel belongs to a single FDW, so does the grouped rel.
@@ -463,6 +464,7 @@ ForeignPath *create_foreign_upper_path(PlannerInfo *root, RelOptInfo *rel, List 
 
     pathnode->path.pathtype = T_ForeignScan;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = NULL;
     pathnode->path.rows = rows;
     pathnode->path.startup_cost = startup_cost;

@@ -133,6 +133,7 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
     COPY_SCALAR_FIELD(canSetTag);
     COPY_SCALAR_FIELD(transientPlan);
     COPY_SCALAR_FIELD(dependsOnRole);
+    COPY_SCALAR_FIELD(is_flt_frame);
     COPY_NODE_FIELD(planTree);
     COPY_NODE_FIELD(rtable);
     COPY_NODE_FIELD(resultRelations);
@@ -275,6 +276,21 @@ static BaseResult* _copyResult(const BaseResult* from)
      * copy remainder of node
      */
     COPY_NODE_FIELD(resconstantqual);
+
+    return newnode;
+}
+
+/*
+ * _copyProjectSet
+ */
+static ProjectSet *_copyProjectSet(const ProjectSet *from)
+{
+    ProjectSet *newnode = makeNode(ProjectSet);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyPlanFields((const Plan *)from, (Plan *)newnode);
 
     return newnode;
 }
@@ -3544,6 +3560,19 @@ static PlaceHolderInfo* _copyPlaceHolderInfo(const PlaceHolderInfo* from)
     return newnode;
 }
 
+static PathTarget* _copyPathTarget(const PathTarget* from)
+{
+    PathTarget* newnode = makeNode(PathTarget);
+
+    COPY_NODE_FIELD(exprs);
+    COPY_ARRAY_FIELD(sortgrouprefs);
+    COPY_SCALAR_FIELD(cost.startup);
+    COPY_SCALAR_FIELD(cost.per_tuple);
+    COPY_SCALAR_FIELD(width);
+
+    return newnode;
+}
+
 /* ****************************************************************
  *					parsenodes.h copy functions
  * ****************************************************************
@@ -4655,6 +4684,8 @@ static Query* _copyQuery(const Query* from)
     COPY_SCALAR_FIELD(resultRelation);
     COPY_SCALAR_FIELD(hasAggs);
     COPY_SCALAR_FIELD(hasWindowFuncs);
+    COPY_SCALAR_FIELD(hasTargetSRFs);
+    COPY_SCALAR_FIELD(is_flt_frame);
     COPY_SCALAR_FIELD(hasSubLinks);
     COPY_SCALAR_FIELD(hasDistinctOn);
     COPY_SCALAR_FIELD(hasRecursive);
@@ -7161,7 +7192,7 @@ static RelOptInfo *_copyRelOptInfo(const RelOptInfo *from)
     COPY_SCALAR_FIELD(partflag);
     COPY_SCALAR_FIELD(rows);
 
-    COPY_SCALAR_FIELD(width);
+    COPY_NODE_FIELD(reltarget);
     COPY_SCALAR_FIELD(encodedwidth);
     COPY_SCALAR_FIELD(encodednum);
 
@@ -7358,6 +7389,9 @@ void* copyObject(const void* from)
             break;
         case T_BaseResult:
             retval = _copyResult((BaseResult*)from);
+            break;
+        case T_ProjectSet:
+            retval = _copyProjectSet((ProjectSet*)from);
             break;
         case T_ModifyTable:
             retval = _copyModifyTable((ModifyTable*)from);
@@ -7813,6 +7847,9 @@ void* copyObject(const void* from)
             break;
         case T_PlaceHolderVar:
             retval = _copyPlaceHolderVar((PlaceHolderVar*)from);
+            break;
+        case T_PathTarget:
+            retval = _copyPathTarget((PathTarget*)from);
             break;
         case T_SpecialJoinInfo:
             retval = _copySpecialJoinInfo((SpecialJoinInfo*)from);

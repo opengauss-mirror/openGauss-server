@@ -2265,7 +2265,7 @@ static ExprState* ExecInitCopyColExpr(CopyState cstate, int attrno, Oid attroid,
     rte->eref->colnames = colnames;
     addRTEtoQuery(pstate, rte, true, true, true);
 
-    expr = transformExpr(pstate, expr);
+    expr = transformExpr(pstate, expr, EXPR_KIND_VALUES);
     exprtype = exprType(expr);
     expr = coerce_to_target_type(pstate, expr, exprtype, attroid, attrmod,
                                  COERCION_EXPLICIT, COERCE_EXPLICIT_CAST, -1);

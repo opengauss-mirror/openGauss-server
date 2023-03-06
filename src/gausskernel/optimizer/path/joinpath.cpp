@@ -2594,6 +2594,7 @@ static Path* buildPartitionWiseJoinPath(Path* jpath, Path* outter_path, Path* in
     pwjpath->itrs = outer->itrs;
     pwjpath->path.pathtype = T_PartIterator;
     pwjpath->path.parent = jpath->parent;
+    pwjpath->path.pathtarget = jpath->parent->reltarget;
     pwjpath->path.pathkeys = jpath->pathkeys;
     pwjpath->direction = outer->direction;
     pwjpath->path.param_info = jpath->param_info;

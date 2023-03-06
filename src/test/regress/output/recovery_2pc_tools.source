@@ -250,6 +250,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_dolphin_proto                             | bool    |      |           | 
  enable_double_write                              | bool    |      |           | 
  enable_early_free                                | bool    |      |           | 
+ enable_expr_fusion                               | bool    |      |           | 
  enable_extrapolation_stats                       | bool    |      |           | 
  enable_fast_allocate                             | bool    |      |           | 
  enable_fast_numeric                              | bool    |      |           | 

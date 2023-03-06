@@ -174,6 +174,7 @@ typedef struct knl_session_attr_common {
     char* bbox_dump_path;
 
     bool assert_enabled;
+    bool enable_expr_fusion;
     int AlarmReportInterval;
     int xmloption;
     bool enable_ts_compaction;

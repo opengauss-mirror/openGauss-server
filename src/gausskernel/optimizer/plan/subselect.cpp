@@ -2359,7 +2359,7 @@ static bool simplify_EXISTS_query(PlannerInfo *root, Query* query)
 {
     /*
      * We don't try to simplify at all if the query uses set operations,
-     * aggregates, grouping sets, modifying CTEs, HAVING, OFFSET, or FOR
+     * aggregates, grouping sets, SRFs, modifying CTEs, HAVING, OFFSET, or FOR
      * UPDATE/SHARE; none of these seem likely in normal usage and their
      * possible effects are complex.  (Note: we could ignore an "OFFSET 0"
      * clause, but that traditionally is used as an optimization fence, so we
@@ -2369,6 +2369,10 @@ static bool simplify_EXISTS_query(PlannerInfo *root, Query* query)
         query->hasWindowFuncs || query->hasModifyingCTE || query->havingQual || query->limitOffset ||
         query->rowMarks)
         return false;
+
+    if (query->is_flt_frame && query->hasTargetSRFs) {
+        return false;
+    }
 
     /*
      * LIMIT with a constant positive (or NULL) value doesn't affect the
@@ -3294,6 +3298,7 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
             (void)finalize_primnode(((WindowAgg*)plan)->endOffset, &context);
             break;
 
+        case T_ProjectSet:
         case T_Hash:
         case T_Material:
         case T_Sort:
@@ -5218,7 +5223,7 @@ static Node* build_op_expr(PlannerInfo* root, int relid, List* pullUpEqualExpr, 
             param->location = -1;
             param->tableOfIndexTypeList = NULL;
 
-            expr = (OpExpr*)make_op(NULL, list_make1(makeString("=")), left_arg, (Node*)param, 0);
+            expr = (OpExpr*)make_op(NULL, list_make1(makeString("=")), left_arg, (Node*)param, NULL, 0);
 
             op_args = lappend(op_args, expr);
             resno++;

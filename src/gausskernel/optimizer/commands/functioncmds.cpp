@@ -466,7 +466,7 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
                     (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                         errmsg("only input parameters can have default values")));
 
-            def = transformExpr(pstate, fp->defexpr);
+            def = transformExpr(pstate, fp->defexpr, EXPR_KIND_FUNCTION_DEFAULT);
             def = coerce_to_specific_type(pstate, def, toid, "DEFAULT");
             assign_expr_collations(pstate, def);
 

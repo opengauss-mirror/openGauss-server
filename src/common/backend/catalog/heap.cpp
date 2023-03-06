@@ -4600,7 +4600,7 @@ Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 att
      * Transform raw parsetree to executable expression.
      */
     pstate->p_expr_kind = generatedCol ? EXPR_KIND_GENERATED_COLUMN : EXPR_KIND_COLUMN_DEFAULT;
-    expr = transformExpr(pstate, raw_default);
+    expr = transformExpr(pstate, raw_default, pstate->p_expr_kind);
     pstate->p_expr_kind = EXPR_KIND_NONE;
 
     if (generatedCol == ATTRIBUTE_GENERATED_STORED)
@@ -4629,11 +4629,15 @@ Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 att
     ExcludeRownumExpr(pstate, expr);
 #endif
     /*
-     * It can't return a set either.
+     * transformExpr() should have already rejected subqueries, aggregates,
+     * window functions, and SRFs, based on the EXPR_KIND_ for a default
+     * expression.
      */
-    if (expression_returns_set(expr))
-        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
-            errmsg("%s expression must not return a set", generatedCol ? "generated column" : "default")));
+    if (!pstate->p_is_flt_frame) {
+        if (expression_returns_set(expr))
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("%s expression must not return a set", generatedCol ? "generated column" : "default")));
+    }
 
     /*
      * No subplans or aggregates, either...
@@ -4687,7 +4691,7 @@ static Node* cookConstraint(ParseState* pstate, Node* raw_constraint, char* reln
     /*
      * Transform raw parsetree to executable expression.
      */
-    expr = transformExpr(pstate, raw_constraint);
+    expr = transformExpr(pstate, raw_constraint, EXPR_KIND_CHECK_CONSTRAINT);
 
     /*
      * Make sure it yields a boolean result.

@@ -785,7 +785,7 @@ bool plus_outerjoin_preprocess(const OperatorPlusProcessContext* ctx, Node* expr
     setIgnorePlusFlag(ps, true);
 
     ps->p_plusjoin_rte_info = makePlusJoinInfo(true);
-    (void)transformExpr(ps, expr);
+    (void)transformExpr(ps, expr, EXPR_KIND_WHERE);
 
     setIgnorePlusFlag(ps, false);
 

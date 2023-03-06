@@ -486,7 +486,15 @@ void ExplainQuery(
 
         /* Explain every plan */
         foreach (l, rewritten) {
-            ExplainOneQuery((Query*)lfirst(l), NULL, &es, queryString, None_Receiver, params);
+            Query* query_tree = (Query*)lfirst(l);
+
+            /*
+             * We need to revert this query_tree, so that ExplainOneQuery can get correct
+             * message when generating PlanedStmt.
+             */
+            query_tree->is_flt_frame = !query_check_no_flt(query_tree);
+
+            ExplainOneQuery(query_tree, NULL, &es, queryString, None_Receiver, params);
 
             /* Separate plans with an appropriate separator */
             if (lnext(l) != NULL)

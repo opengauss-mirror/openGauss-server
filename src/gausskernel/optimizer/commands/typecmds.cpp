@@ -2993,7 +2993,7 @@ static char* domainAddConstraint(
 
     pstate->p_value_substitute = (Node*)domVal;
 
-    expr = transformExpr(pstate, constr->raw_expr);
+    expr = transformExpr(pstate, constr->raw_expr, EXPR_KIND_DOMAIN_CHECK);
 
     /*
      * Make sure it yields a boolean result.
