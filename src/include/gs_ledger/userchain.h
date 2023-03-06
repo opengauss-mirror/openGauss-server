@@ -38,7 +38,7 @@ void rename_hist_by_newnsp(Oid user_relid, const char *new_nsp_name);
 void rename_histlist_by_newnsp(List *usertable_oid_list, const char *new_nsp_name);
 
 /* DML support for user table */
-HeapTuple set_user_tuple_hash(HeapTuple tup, Relation rel, bool hash_exists = false);
+HeapTuple set_user_tuple_hash(HeapTuple tup, Relation rel, TupleTableSlot *slot, bool hash_exists = false);
 int user_hash_attrno(const TupleDesc rd_att);
 uint64 get_user_tuple_hash(HeapTuple tuple, TupleDesc desc);
 uint64 get_user_tupleid_hash(Relation relation, ItemPointer tupleid);

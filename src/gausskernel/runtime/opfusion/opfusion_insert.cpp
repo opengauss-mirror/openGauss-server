@@ -344,7 +344,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
     if (rel_isblockchain && (!RelationIsUstoreFormat(rel))) {
         HeapTuple tmp_tuple = (HeapTuple)tuple;
         MemoryContext old_context = MemoryContextSwitchTo(m_local.m_tmpContext);
-        tuple = set_user_tuple_hash(tmp_tuple, target_rel);
+        tuple = set_user_tuple_hash(tmp_tuple, target_rel, NULL);
         (void)ExecStoreTuple(tuple, m_local.m_reslot, InvalidBuffer, false);
         m_local.m_ledger_hash_exist = hist_table_record_insert(target_rel, (HeapTuple)tuple, &m_local.m_ledger_relhash);
         (void)MemoryContextSwitchTo(old_context);

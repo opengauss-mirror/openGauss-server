@@ -4796,7 +4796,7 @@ uint64 CopyFrom(CopyState cstate)
                     tuple = slot->tts_tuple;
                 }
                 if (rel_isblockchain) {
-                    tuple = set_user_tuple_hash((HeapTuple)tuple, resultRelationDesc, true);
+                    tuple = set_user_tuple_hash((HeapTuple)tuple, resultRelationDesc, slot, true);
                 }
 
                 /* Check the constraints of the tuple */

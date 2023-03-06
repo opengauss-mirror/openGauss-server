@@ -1103,7 +1103,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
      */
     if (rel_isblockchain) {
         MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-        tuple = set_user_tuple_hash((HeapTuple)tuple, result_relation_desc);
+        tuple = set_user_tuple_hash((HeapTuple)tuple, result_relation_desc, slot);
         (void)MemoryContextSwitchTo(old_context);
     }
 
@@ -1289,7 +1289,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                                                 result_relation_desc->rd_tam_ops);
                 if (rel_isblockchain) {
                     MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-                    tuple = set_user_tuple_hash((HeapTuple)tuple, result_relation_desc);
+                    tuple = set_user_tuple_hash((HeapTuple)tuple, result_relation_desc, NULL);
                     (void)MemoryContextSwitchTo(old_context);
                 }
                 if (tuple != NULL) {
@@ -2282,7 +2282,7 @@ lreplace:
                     if (result_relation_desc->rd_isblockchain) {
                         MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
                         hash_del = get_user_tupleid_hash(fake_relation, tupleid);
-                        tuple = set_user_tuple_hash((HeapTuple)tuple, fake_relation);
+                        tuple = set_user_tuple_hash((HeapTuple)tuple, fake_relation, slot);
                         (void)MemoryContextSwitchTo(old_context);
                     }
 
@@ -2588,7 +2588,7 @@ lreplace:
                         if (result_relation_desc->rd_isblockchain) {
                             MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
                             hash_del = get_user_tupleid_hash(fake_relation, tupleid);
-                            tuple = set_user_tuple_hash((HeapTuple)tuple, fake_relation);
+                            tuple = set_user_tuple_hash((HeapTuple)tuple, fake_relation, slot);
                             (void)MemoryContextSwitchTo(old_context);
                         }
 
@@ -3012,7 +3012,7 @@ ldelete:
                             }
                             if (result_relation_desc->rd_isblockchain) {
                                 MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-                                tuple = set_user_tuple_hash((HeapTuple)tuple, fake_insert_relation);
+                                tuple = set_user_tuple_hash((HeapTuple)tuple, fake_insert_relation, slot);
                                 (void)MemoryContextSwitchTo(old_context);
                             }
 

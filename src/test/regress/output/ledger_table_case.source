@@ -1113,6 +1113,172 @@ CREATE TABLE ledgernsp.bad_tb(a bc_compress_type);
 ERROR:  Unsupport column type "bc_compress_type" of ledger user table.
 DROP TYPE bc_compress_type;
 ----------------------------------------------------------------------
+-- TEST CASE 015. partition table.                                  --
+----------------------------------------------------------------------
+CREATE TABLE ledgernsp.t_partition_range(
+    id number primary key not null,
+    partition_key int,
+    col2 varchar2(20))
+partition by range(partition_key)
+(
+    partition p1 values less than (100),
+    partition p2 values less than(200),
+    partition p3 values less than(300)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_partition_range_pkey" for table "t_partition_range"
+\d ledgernsp.t_partition_range
+        Table "ledgernsp.t_partition_range"
+    Column     |         Type          | Modifiers 
+---------------+-----------------------+-----------
+ id            | numeric               | not null
+ partition_key | integer               | 
+ col2          | character varying(20) | 
+ hash          | hash16                | 
+Indexes:
+    "t_partition_range_pkey" PRIMARY KEY, btree (id) TABLESPACE pg_default
+Partition By RANGE(partition_key)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+
+set enable_opfusion = off;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+INSERT INTO ledgernsp.t_partition_range VALUES(1,50,'p1');
+INSERT INTO ledgernsp.t_partition_range VALUES(2,100,'p2');
+INSERT INTO ledgernsp.t_partition_range VALUES(3,250,'p3');
+select *, hash from ledgernsp.t_partition_range;
+ id | partition_key | col2 |       hash       
+----+---------------+------+------------------
+  1 |            50 | p1   | d8f1b97ffe23e540
+  2 |           100 | p2   | c6d00b47c7008be0
+  3 |           250 | p3   | 079397057329db5f
+(3 rows)
+
+UPDATE ledgernsp.t_partition_range SET partition_key=100 where id=1;
+select *, hash from ledgernsp.t_partition_range;
+ id | partition_key | col2 |       hash       
+----+---------------+------+------------------
+  2 |           100 | p2   | c6d00b47c7008be0
+  1 |           100 | p1   | 850a29600863ff7c
+  3 |           250 | p3   | 079397057329db5f
+(3 rows)
+
+DELETE FROM ledgernsp.t_partition_range WHERE id=1;
+select *, hash from ledgernsp.t_partition_range;
+ id | partition_key | col2 |       hash       
+----+---------------+------+------------------
+  2 |           100 | p2   | c6d00b47c7008be0
+  3 |           250 | p3   | 079397057329db5f
+(2 rows)
+
+explain (costs off) select /*+ indexonlyscan(t_partition_range t_partition_range_pkey) */ id from ledgernsp.t_partition_range;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Index Only Scan using t_partition_range_pkey on t_partition_range
+(1 row)
+
+select /*+ indexonlyscan(t_partition_range t_partition_range_pkey) */ id from ledgernsp.t_partition_range;
+ id 
+----
+  2
+  3
+(2 rows)
+
+create index ledgernsp.i_t_partition_range on ledgernsp.t_partition_range(partition_key) local;
+INSERT INTO ledgernsp.t_partition_range VALUES (11,50,'p1'), (12,100,'p2'), (13,250,'p3');
+INSERT INTO ledgernsp.t_partition_range VALUES (101,50,'p1'), (102,100,'p2'), (103,250,'p3');
+select *, hash from ledgernsp.t_partition_range;
+ id  | partition_key | col2 |       hash       
+-----+---------------+------+------------------
+  11 |            50 | p1   | 406945c1b1ad4f30
+ 101 |            50 | p1   | 83b92ed57e516174
+   2 |           100 | p2   | c6d00b47c7008be0
+  12 |           100 | p2   | 3a1e393393ca9af9
+ 102 |           100 | p2   | 3b9a1b6282e79e4c
+   3 |           250 | p3   | 079397057329db5f
+  13 |           250 | p3   | 123323c3e7c57bd7
+ 103 |           250 | p3   | 0c2b84ca1d32c8f2
+(8 rows)
+
+delete from ledgernsp.t_partition_range where id > 100;
+copy ledgernsp.t_partition_range from stdin;
+select /*+ indexonlyscan(t_partition_range t_partition_range_pkey) */ id from ledgernsp.t_partition_range;
+ id  
+-----
+   2
+   3
+  11
+  12
+  13
+ 101
+ 102
+ 103
+(8 rows)
+
+delete from ledgernsp.t_partition_range where id in (11, 12);
+delete from ledgernsp.t_partition_range where partition_key in (50, 100, 250);
+set enable_opfusion = on;
+INSERT INTO ledgernsp.t_partition_range VALUES (11,50,'p1'), (12,100,'p2'), (13,250,'p3');
+copy ledgernsp.t_partition_range from stdin;
+select *, hash from ledgernsp.t_partition_range;
+ id  | partition_key | col2 |       hash       
+-----+---------------+------+------------------
+  11 |            50 | p1   | 406945c1b1ad4f30
+ 101 |            50 | p1   | 83b92ed57e516174
+  12 |           100 | p2   | 3a1e393393ca9af9
+ 102 |           100 | p2   | 3b9a1b6282e79e4c
+  13 |           250 | p3   | 123323c3e7c57bd7
+ 103 |           250 | p3   | 0c2b84ca1d32c8f2
+(6 rows)
+
+select /*+ indexonlyscan(t_partition_range t_partition_range_pkey) */ id from ledgernsp.t_partition_range;
+ id  
+-----
+  11
+  12
+  13
+ 101
+ 102
+ 103
+(6 rows)
+
+explain (costs off) select /*+ indexonlyscan(t_partition_range i_t_partition_range) */ partition_key from ledgernsp.t_partition_range where partition_key = 100;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Partitioned Index Only Scan using i_t_partition_range on t_partition_range
+   Index Cond: (partition_key = 100)
+   Selected Partitions:  2
+(3 rows)
+
+select /*+ indexonlyscan(t_partition_range i_t_partition_range) */ partition_key from ledgernsp.t_partition_range where partition_key = 100;
+ partition_key 
+---------------
+           100
+           100
+(2 rows)
+
+delete from ledgernsp.t_partition_range where id in (11, 12);
+delete from ledgernsp.t_partition_range where partition_key in (50, 100, 250);
+drop table if exists ledgernsp.t_partition_range;
+reset enable_opfusion;
+reset enable_seqscan;
+reset enable_bitmapscan;
+-- not support subpartition table
+CREATE TABLE ledgernsp.t_subpartition(
+    id number primary key not null,
+    partition_key int,
+    subpartition_key varchar2(20))
+partition by range(partition_key)
+subpartition by hash(subpartition_key)
+(
+    partition p1 values less than (100),
+    partition p2 values less than(200),
+    partition p3 values less than(300)
+);
+ERROR:  Un-support feature
+DETAIL:  Subpartition table does not support ledger user table.
+drop table if exists ledgernsp.t_subpartition;
+NOTICE:  table "t_subpartition" does not exist, skipping
+----------------------------------------------------------------------
 -- TEST CASE 016. index can not contain "hash" column.              --
 ----------------------------------------------------------------------
 create table ledgernsp.t_col_hash(id int, "Hash" int, unique (hash)); -- error

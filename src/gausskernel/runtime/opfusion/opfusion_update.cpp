@@ -336,7 +336,7 @@ lreplace:
             HeapTuple tmp_tup = (HeapTuple)tup;
             MemoryContext oldContext = MemoryContextSwitchTo(m_local.m_tmpContext);
             hash_del = get_user_tuple_hash((HeapTuple)oldtup, RelationGetDescr(ledger_dest_rel));
-            tup = set_user_tuple_hash(tmp_tup, ledger_dest_rel);
+            tup = set_user_tuple_hash(tmp_tup, ledger_dest_rel, NULL);
             (void)MemoryContextSwitchTo(oldContext);
             tableam_tops_free_tuple(tmp_tup);
         }
