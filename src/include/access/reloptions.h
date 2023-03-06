@@ -294,6 +294,7 @@ extern void ForbidToSetOptionsForColTbl(List* options);
 extern void ForbidToSetTdeOptionsForNonTdeTbl(List* options);
 extern void ForbidToAlterOptionsForTdeTbl(List* options);
 extern void ForbidToSetOptionsForUstoreTbl(List *options);
+extern void ForbidToSetOptionsForNotUstoreTbl(List *options);
 extern void ForbidToSetOptionsForRowTbl(List* options);
 extern void ForbidUserToSetDefinedOptions(List* options);
 extern void ForbidUserToSetDefinedIndexOptions(List* options);
