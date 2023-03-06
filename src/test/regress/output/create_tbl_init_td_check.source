@@ -1,7 +1,7 @@
 -- A typical wrong case
 CREATE SCHEMA CREATE_TBL_INIT_TD_CHECK;
 DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_1;
---?.*
+NOTICE:  table "t_init_td_1" does not exist, skipping
 CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_1
 (
 ID NUMBER(20) NOT NULL,
@@ -10,7 +10,7 @@ VARCHAR2_1 VARCHAR2(40)
 ERROR:  Un-support feature
 DETAIL:  Forbid to set option "init_td" for relations except for ustore relation
 DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_2;
---?.*
+NOTICE:  table "t_init_td_2" does not exist, skipping
 CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_2
 (
 ID NUMBER(20) NOT NULL,
@@ -19,7 +19,7 @@ VARCHAR2_1 VARCHAR2(40)
 ERROR:  Un-support feature
 DETAIL:  Forbid to set option "init_td" for relations except for ustore relation
 DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_3;
---?.*
+NOTICE:  table "t_init_td_3" does not exist, skipping
 CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_3
 (
 ID NUMBER(20) NOT NULL,
@@ -29,21 +29,39 @@ ERROR:  Un-support feature
 DETAIL:  Forbid to set option "init_td" for relations except for ustore relation
 -- right cases
 DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_4;
---?.*
+NOTICE:  table "t_init_td_4" does not exist, skipping
 CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_4
 (
 ID NUMBER(20) NOT NULL,
 VARCHAR2_1 VARCHAR2(40)
 )WITH(ORIENTATION=ROW,STORAGE_TYPE=USTORE, INIT_TD=10);
 DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_5;
---?.*
+NOTICE:  table "t_init_td_5" does not exist, skipping
 CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_5
 (
 ID NUMBER(20) not null,
 VARCHAR2_1 VARCHAR2(40)
 )with(INIT_TD=10,STORAGE_TYPE=USTORE);
-DROP SCHEMA CREATE_TBL_INIT_TD_CHECK;
-ERROR:  cannot drop schema create_tbl_init_td_check because other objects depend on it
-DETAIL:  table create_tbl_init_td_check.t_init_td_4 depends on schema create_tbl_init_td_check
-table create_tbl_init_td_check.t_init_td_5 depends on schema create_tbl_init_td_check
-HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+set enable_default_ustore_table = on;
+DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_7;
+NOTICE:  table "t_init_td_7" does not exist, skipping
+CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_7
+(
+ID NUMBER(20) not null,
+VARCHAR2_1 VARCHAR2(40)
+)with(INIT_TD=10);
+set enable_default_ustore_table = off;
+DROP TABLE IF EXISTS CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_6;
+NOTICE:  table "t_init_td_6" does not exist, skipping
+CREATE TABLE CREATE_TBL_INIT_TD_CHECK.T_INIT_TD_6
+(
+ID NUMBER(20) not null,
+VARCHAR2_1 VARCHAR2(40)
+)with(INIT_TD=10);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "init_td" for relations except for ustore relation
+DROP SCHEMA CREATE_TBL_INIT_TD_CHECK CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table create_tbl_init_td_check.t_init_td_4
+drop cascades to table create_tbl_init_td_check.t_init_td_5
+drop cascades to table create_tbl_init_td_check.t_init_td_7
