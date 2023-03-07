@@ -1826,7 +1826,6 @@ static void range_parse(const char* string, bool can_ignore, char* flags, char**
         return;
     }
 
-
     ptr = range_parse_bound(string, ptr, lbound_str, &infinite);
     if (infinite)
         *flags = (unsigned char)(*flags) | RANGE_LB_INF;
@@ -1841,7 +1840,6 @@ static void range_parse(const char* string, bool can_ignore, char* flags, char**
         *should_reset_base = true;
         return;
     }
-
 
     ptr = range_parse_bound(string, ptr, ubound_str, &infinite);
     if (infinite)

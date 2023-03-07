@@ -13,8 +13,8 @@
 CREATE SCHEMA [ IF NOT EXISTS ] schema_name
     [ AUTHORIZATION user_name ] [WITH BLOCKCHAIN] [ schema_element [ ... ] ];
 CREATE SCHEMA schema_name
-    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ];
-NOTICE: '[ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ];
+NOTICE: '[ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]' is only available in CENTRALIZED mode and B-format database!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

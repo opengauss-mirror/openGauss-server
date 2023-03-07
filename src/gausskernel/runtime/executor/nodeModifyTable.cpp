@@ -4080,8 +4080,8 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
          * Initialize result tuple slot and assign its rowtype using the first
          * RETURNING list.	We assume the rest will look the same.
          */
-        tup_desc = ExecTypeFromTL((List*)linitial(node->returningLists), false, false, 
-                    mt_state->resultRelInfo->ri_RelationDesc->rd_tam_ops);
+        tup_desc = ExecTypeFromTL((List *)linitial(node->returningLists), false, false,
+                                  mt_state->resultRelInfo->ri_RelationDesc->rd_tam_ops);
 
         /* Set up a slot for the output of the RETURNING projection(s) */
         ExecInitResultTupleSlot(estate, &mt_state->ps);

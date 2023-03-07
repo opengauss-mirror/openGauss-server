@@ -60,7 +60,7 @@ create database restore_event_dump_db with dbcompatibility  'b';
 select job_name, job_status,failure_msg from pg_job where dbname='restore_event_dump_db';
  job_name | job_status | failure_msg 
 ----------+------------+-------------
---?.*
+ ea       | s          | 
 (1 row)
 
 \c regression

@@ -581,7 +581,8 @@ static inline void tableam_tslot_formbatch(TupleTableSlot* slot, VectorBatch* ba
     slot->tts_tam_ops->tslot_formbatch(slot, batch, cur_rows, natts);
 }
 
-static inline Datum tableam_tslot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool need_transform_anyarray = false)
+static inline Datum tableam_tslot_getattr(TupleTableSlot *slot, int attnum, bool *isnull,
+                                          bool need_transform_anyarray = false)
 {
     return slot->tts_tam_ops->tslot_getattr(slot, attnum, isnull, need_transform_anyarray);
 }
@@ -635,7 +636,8 @@ static inline void tableam_tops_deform_tuple(Tuple tuple, TupleDesc tuple_desc, 
     return tuple_desc->td_tam_ops->tops_deform_tuple(tuple, tuple_desc, values, isnull);
 }
 
-static inline void tableam_tops_deform_tuple2(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull, Buffer buffer)
+static inline void tableam_tops_deform_tuple2(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull,
+                                              Buffer buffer)
 {
     AssertValidTuple(tuple);
     Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
@@ -695,7 +697,6 @@ static inline Tuple tableam_tops_opfusion_modify_tuple(Tuple tuple, TupleDesc tu
 static inline Datum tableam_tops_tuple_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null)
 {
     AssertValidTuple(tuple);
-    //FIXME: Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
     return GetTableAmRoutine((TableAmType)(GetTabelAmIndexTuple(tuple)))->tops_tuple_getattr(tuple, att_num,
         tuple_desc, is_null);
 }
@@ -714,7 +715,8 @@ static inline bool tableam_tops_tuple_attisnull(Tuple tuple, int attnum, TupleDe
      * We allow a NULL tupledesc for relations not expected to have missing
      * values, such as catalog relations and indexes.
      */
-    return GetTableAmRoutine((TableAmType)(GetTabelAmIndexTuple(tuple)))->tops_tuple_attisnull(tuple, attnum, tuple_desc);
+    return GetTableAmRoutine((TableAmType)(GetTabelAmIndexTuple(tuple)))
+        ->tops_tuple_attisnull(tuple, attnum, tuple_desc);
 }
 
 static inline Tuple tableam_tops_copy_tuple(Tuple tuple)
@@ -931,10 +933,11 @@ static inline TableScanDesc tableam_scan_begin_bm(Relation relation, Snapshot sn
 }
 
 static inline TableScanDesc tableam_scan_begin_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
-    bool allow_strat, bool allow_sync, RangeScanInRedis rangeScanInRedis  = { false, 0, 0 } )
+                                                        bool allow_strat, bool allow_sync,
+                                                        RangeScanInRedis rangeScanInRedis = {false, 0, 0})
 {
-    return relation->rd_tam_ops->scan_begin_sampling(relation, snapshot, nkeys, key, allow_strat,
-        allow_sync, rangeScanInRedis);
+    return relation->rd_tam_ops->scan_begin_sampling(relation, snapshot, nkeys, key, allow_strat, allow_sync,
+                                                     rangeScanInRedis);
 }
 
 static inline TableScanDesc tableam_scan_begin_parallel(Relation relation, ParallelHeapScanDesc parallel_scan)
@@ -942,7 +945,8 @@ static inline TableScanDesc tableam_scan_begin_parallel(Relation relation, Paral
     return relation->rd_tam_ops->scan_begin_parallel(relation, parallel_scan);
 }
 
-static inline Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write = NULL)
+static inline Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction,
+                                              bool *has_cur_xact_write = NULL)
 {
     return sscan->rs_rd->rd_tam_ops->scan_getnexttuple(sscan, direction, has_cur_xact_write);
 }
@@ -957,10 +961,10 @@ static inline void tableam_scan_getpage(TableScanDesc sscan, BlockNumber page)
     return sscan->rs_rd->rd_tam_ops->scan_getpage(sscan, page);
 }
 
-static inline Tuple tableam_scan_gettuple_for_verify(TableScanDesc sscan, ScanDirection direction, bool isValidRelationPage)
+static inline Tuple tableam_scan_gettuple_for_verify(TableScanDesc sscan, ScanDirection direction,
+                                                     bool isValidRelationPage)
 {
-    return sscan->rs_rd->rd_tam_ops->scan_gettuple_for_verify(sscan,
-        direction, isValidRelationPage);
+    return sscan->rs_rd->rd_tam_ops->scan_gettuple_for_verify(sscan, direction, isValidRelationPage);
 }
 
 static inline void tableam_scan_end(TableScanDesc sscan)
@@ -1037,14 +1041,16 @@ extern TM_Result HeapamTupleUpdate(Relation relation, Relation parentRelation, I
  * HEAP AM APIs
  * ------------------------------------------------------------------------
  */
-extern Tuple heap_slot_get_tuple_from_slot(TupleTableSlot* slot);
-extern Datum heapam_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool* isnull, Buffer buff);
-extern Tuple heapam_form_tuple(TupleDesc tuple_descriptor, Datum* values, bool* isnull);
-extern void heapam_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull);
+extern Tuple heap_slot_get_tuple_from_slot(TupleTableSlot *slot);
+extern Datum heapam_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool *isnull, Buffer buff);
+extern Tuple heapam_form_tuple(TupleDesc tuple_descriptor, Datum *values, bool *isnull);
+extern void heapam_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull);
 extern void heapam_deform_tuple2(Tuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer);
-extern void heapam_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull, char* cmprs_info);
-extern void heapam_fill_tuple(TupleDesc tuple_desc, Datum* values, const bool* isnull, char* data, Size data_size, uint16* infomask, bits8* bit);
-extern Tuple heapam_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum* repl_values, const bool* repl_isnull, const bool* do_replace);
+extern void heapam_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull, char *cmprs_info);
+extern void heapam_fill_tuple(TupleDesc tuple_desc, Datum *values, const bool *isnull, char *data, Size data_size,
+                              uint16 *infomask, bits8 *bit);
+extern Tuple heapam_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *repl_values, const bool *repl_isnull,
+                                 const bool *do_replace);
 extern bool heapam_attisnull(Tuple tup, int attnum, TupleDesc tuple_desc);
 extern Tuple heapam_copytuple(Tuple tuple);
 

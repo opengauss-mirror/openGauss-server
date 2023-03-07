@@ -640,6 +640,32 @@ INFO:  cursor alread closed
 
 drop procedure pro_cs_trans_1;
 drop table cs_trans_1; 
+-- test for rec in cursor loop
+show behavior_compat_options;
+    behavior_compat_options    
+-------------------------------
+ allow_procedure_compile_check
+(1 row)
+
+create table test_table(col1 varchar2(10));
+create or replace package test_pckg as
+    procedure test_proc(v01 in varchar2);
+end test_pckg;
+/
+create or replace package body test_pckg as
+    procedure test_proc(v01 in varchar2) as
+ cursor cur(vcol1 varchar2) is select col1 from test_table where col1 = vcol1;
+ v02 varchar2;
+ begin
+ for rec in cur(v01) loop
+ v02 := 'a';
+ end loop;
+ end;
+end test_pckg;
+/
+drop table test_table;
+drop package test_pckg;
+NOTICE:  drop cascades to function plpgsql_cursor_rowtype.test_proc(character varying)
 -- test for rec in select loop when rec is defined
 set behavior_compat_options='proc_implicit_for_loop_variable';
 create table t1(a int, b int);
@@ -780,6 +806,45 @@ drop table t1;
 drop table t2;
 set behavior_compat_options='';
 set plsql_compile_check_options='';
+create or replace procedure check_compile() as
+declare
+	cursor c1 is select sysdate a;
+	v_a varchar2;
+begin
+	for rec in c1 loop 
+	select 'aa' into v_a from sys_dummy where sysdate = rec.a;
+	raise info '%' ,v_a;
+	end loop;
+end;
+/
+call  check_compile();
+INFO:  aa
+ check_compile 
+---------------
+ 
+(1 row)
+
+set behavior_compat_options='allow_procedure_compile_check';
+create or replace procedure check_compile_1() as
+declare
+	cursor c1 is select sysdate a;
+	v_a varchar2;
+begin
+	for rec in c1 loop 
+	select 'aa' into v_a from sys_dummy where sysdate = rec.a;
+	raise info '%' ,v_a;
+	end loop;
+end;
+/
+call  check_compile_1();
+INFO:  aa
+ check_compile_1 
+-----------------
+ 
+(1 row)
+
+set behavior_compat_options='';
+drop procedure check_compile;
 ----  clean  ----
 drop package pck1;
 NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
@@ -809,7 +874,7 @@ NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop package pckg_test2;
 NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop schema plpgsql_cursor_rowtype cascade;
-NOTICE:  drop cascades to 12 other objects
+NOTICE:  drop cascades to 13 other objects
 DETAIL:  drop cascades to table emp
 drop cascades to function pro_cursor_no_args_1()
 drop cascades to function pro_cursor_no_args_2()
@@ -822,5 +887,6 @@ drop cascades to table for_loop_test_002
 drop cascades to function test_forloop_001()
 drop cascades to function pro_close_cursor1()
 drop cascades to function pro_close_cursor2()
+drop cascades to function check_compile_1()
 drop schema schema1 cascade;
 NOTICE:  drop cascades to table schema1.t11

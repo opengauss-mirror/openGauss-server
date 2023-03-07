@@ -17,7 +17,7 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
     | LIKE source_table [ like_option [...] ] }
     [, ... ])
     [ AUTO_INCREMENT [ = ] value ]
-    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
     [ COMPRESS | NOCOMPRESS ]

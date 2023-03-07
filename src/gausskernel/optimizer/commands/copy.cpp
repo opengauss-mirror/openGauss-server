@@ -463,6 +463,11 @@ static void CopySendData(CopyState cstate, const void* databuf, int datasize)
     appendBinaryStringInfo(cstate->fe_msgbuf, (const char*)databuf, datasize);
 }
 
+static void CopySendDumpFileNullStr(CopyState cstate, const char* str)
+{
+    appendBinaryStringInfo(cstate->fe_msgbuf, str, 1);
+}
+
 void CopySendString(CopyState cstate, const char* str)
 {
     appendBinaryStringInfo(cstate->fe_msgbuf, str, strlen(str));
@@ -1686,6 +1691,12 @@ void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
                 cstate->without_escaping = defGetBoolean(defel);
             noescapingSpecified = true;
         } else if (strcmp(defel->defname, "formatter") == 0) {
+            if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+                if (cstate->fileformat != FORMAT_FIXED) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("The formatter must be used together with the fixed length.")));
+                }
+            }
             TransformFormatter(cstate, (List*)(defel->arg));
         } else if (strcmp(defel->defname, "fileheader") == 0) {
             if (cstate->headerFilename)
@@ -3361,7 +3372,11 @@ void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nul
                 switch (cstate->fileformat) {
                     case FORMAT_CSV:
                     case FORMAT_TEXT:
-                        CopySendString(cstate, cstate->null_print_client);
+                        if (cstate->is_dumpfile) {
+                            CopySendDumpFileNullStr(cstate, cstate->null_print_client);
+                        } else {
+                            CopySendString(cstate, cstate->null_print_client);
+                        }
                         break;
                     case FORMAT_BINARY:
                         CopySendInt32(cstate, -1);

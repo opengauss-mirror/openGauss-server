@@ -170,7 +170,8 @@ typedef struct tupleDesc {
 
 extern TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, const TableAmRoutine* tam_ops = TableAmHeap);
 
-extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, const TableAmRoutine* tam_ops = TableAmHeap);
+extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute *attrs,
+                                 const TableAmRoutine *tam_ops = TableAmHeap);
 
 extern TupleDesc CreateTupleDescCopy(TupleDesc tupdesc);
 

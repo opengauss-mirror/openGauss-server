@@ -415,8 +415,8 @@ Syntax:
 CREATE SCHEMA [ IF NOT EXISTS ] schema_name
     [ AUTHORIZATION user_name ] [WITH BLOCKCHAIN] [ schema_element [ ... ] ];
 CREATE SCHEMA schema_name
-    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ];
-NOTICE: '[ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ];
+NOTICE: '[ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]' is only available in CENTRALIZED mode and B-format database!
 
 \h alter schema;
 Command:     ALTER SCHEMA
@@ -428,8 +428,8 @@ ALTER SCHEMA schema_name
     OWNER TO new_owner;
 ALTER SCHEMA schema_name {WITH | WITHOUT} BLOCKCHAIN;
 ALTER SCHEMA schema_name
-    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ];
-NOTICE: '[ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ];
+NOTICE: '[ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]' is only available in CENTRALIZED mode and B-format database!
 
 \h create table;
 Command:     CREATE TABLE
@@ -442,7 +442,7 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
     | LIKE source_table [ like_option [...] ] }
     [, ... ])
     [ AUTO_INCREMENT [ = ] value ]
-    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
     [ COMPRESS | NOCOMPRESS ]
@@ -516,7 +516,7 @@ CREATE TABLE [ IF NOT EXISTS ] partition_table_name
     [, ... ]
 ] )
     [ AUTO_INCREMENT [ = ] value ]
-    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ][ [ DEFAULT ] COLLATE [ = ] collation ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ][ [ DEFAULT ] COLLATE [ = ] default_collation ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]
@@ -593,7 +593,7 @@ CREATE TABLE [ IF NOT EXISTS ] subpartition_table_name
     [, ... ]
 )
     [ AUTO_INCREMENT [ = ] value ]
-    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ][ [ DEFAULT ] COLLATE [ = ] collation ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ][ [ DEFAULT ] COLLATE [ = ] default_collation ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]
@@ -695,7 +695,7 @@ column_clause
     | ENCRYPTION KEY ROTATION
     | AUTO_INCREMENT [ = ] value
     | ALTER INDEX index_name [ VISBLE | INVISIBLE ]
-    | [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ]
+    | [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]
     | CONVERT TO CHARACTER SET | CHARSET charset [ COLLATE collation ]
 NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
 NOTICE: '[ COLLATE ]' is only available in CENTRALIZED mode and B-format database!

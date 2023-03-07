@@ -1187,8 +1187,7 @@ static bool PullUpConnectByFuncExprWalker(Node *node, PullUpConnectByFuncExprCon
         }
     }
 
-    return expression_tree_walker(node,
-                (bool (*)())PullUpConnectByFuncExprWalker, (void*)context);
+    return expression_tree_walker(node, (bool (*)())PullUpConnectByFuncExprWalker, (void *)context);
 }
 
 List *pullUpConnectByFuncExprs(Node* node)

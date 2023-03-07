@@ -263,32 +263,32 @@ typedef struct HashPartitionMap {
         }                                                                                                              \
     } while (0)
 
-#define partitionRoutingForValueEqual(rel, keyValue, valueLen, topClosed, result)                                      \
-    do {                                                                                                               \
-        (keyValue) = transformConstIntoPartkeyType(((rel)->rd_att->attrs), GetPartitionKey((rel)->partMap), (keyValue),  \
-            (valueLen));                                                                                               \
-        if ((rel)->partMap->type == PART_TYPE_LIST) {                                                                  \
-            (result)->partArea = PART_AREA_LIST;                                                                       \
-            (result)->partitionId =                                                                                    \
-                getListPartitionOid(((rel)->partMap), (keyValue), (valueLen), &((result)->partSeq), topClosed);        \
-            if ((result)->partSeq < 0) {                                                                               \
-                (result)->fileExist = false;                                                                           \
-            } else {                                                                                                   \
-                (result)->fileExist = true;                                                                            \
-            }                                                                                                          \
-        } else if ((rel)->partMap->type == PART_TYPE_HASH) {                                                           \
-            (result)->partArea = PART_AREA_HASH;                                                                       \
-            (result)->partitionId =                                                                                    \
-                getHashPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq), topClosed);                    \
-            if ((result)->partSeq < 0) {                                                                               \
-                (result)->fileExist = false;                                                                           \
-            } else {                                                                                                   \
-                (result)->fileExist = true;                                                                            \
-            }                                                                                                          \
-        } else {                                                                                                       \
-            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),                                                           \
-                            errmsg("Unsupported partition strategy:%d", (rel)->partMap->type)));                       \
-        }                                                                                                              \
+#define partitionRoutingForValueEqual(rel, keyValue, valueLen, topClosed, result)                               \
+    do {                                                                                                        \
+        (keyValue) = transformConstIntoPartkeyType(((rel)->rd_att->attrs), GetPartitionKey((rel)->partMap),     \
+                                                   (keyValue), (valueLen));                                     \
+        if ((rel)->partMap->type == PART_TYPE_LIST) {                                                           \
+            (result)->partArea = PART_AREA_LIST;                                                                \
+            (result)->partitionId =                                                                             \
+                getListPartitionOid(((rel)->partMap), (keyValue), (valueLen), &((result)->partSeq), topClosed); \
+            if ((result)->partSeq < 0) {                                                                        \
+                (result)->fileExist = false;                                                                    \
+            } else {                                                                                            \
+                (result)->fileExist = true;                                                                     \
+            }                                                                                                   \
+        } else if ((rel)->partMap->type == PART_TYPE_HASH) {                                                    \
+            (result)->partArea = PART_AREA_HASH;                                                                \
+            (result)->partitionId =                                                                             \
+                getHashPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq), topClosed);             \
+            if ((result)->partSeq < 0) {                                                                        \
+                (result)->fileExist = false;                                                                    \
+            } else {                                                                                            \
+                (result)->fileExist = true;                                                                     \
+            }                                                                                                   \
+        } else {                                                                                                \
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),                                                    \
+                            errmsg("Unsupported partition strategy:%d", (rel)->partMap->type)));                \
+        }                                                                                                       \
     } while (0)
 
 typedef enum PruningResultState { PRUNING_RESULT_EMPTY, PRUNING_RESULT_SUBSET, PRUNING_RESULT_FULL } PruningResultState;

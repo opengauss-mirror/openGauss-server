@@ -1440,6 +1440,7 @@ void ApplyWorkerMain()
     gspqsignal(SIGUSR2, SIG_IGN);
     gspqsignal(SIGFPE, FloatExceptionHandler);
     gspqsignal(SIGCHLD, SIG_DFL);
+    (void)gspqsignal(SIGURG, print_stack);
 
     /* Early initialization */
     BaseInit();

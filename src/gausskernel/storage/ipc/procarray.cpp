@@ -1998,10 +1998,10 @@ RETRY:
                 snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
             } else {
                 result = SSGetSnapshotData(snapshot);
-            } 
+            }
         } else {
-           result = GetLocalSnapshotData(snapshot);
-                snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo); 
+            result = GetLocalSnapshotData(snapshot);
+            snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
         }
 
         if (result) {

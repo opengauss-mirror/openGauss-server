@@ -1212,7 +1212,7 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
     (void)gspqsignal(SIGFPE, FloatExceptionHandler);
     (void)gspqsignal(SIGCHLD, SIG_DFL);
     (void)gspqsignal(SIGHUP, SIG_IGN);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /* Early initialization */
     BaseInit();
 

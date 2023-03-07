@@ -372,7 +372,6 @@ loop:
         } else {
             csn = SSTransactionIdGetCommitSeqNo(xid, true, true, false, snapshot, NULL);
         }
-
     } else {
         csn = TransactionIdGetCommitSeqNo(xid, true, true, false, snapshot);
     }

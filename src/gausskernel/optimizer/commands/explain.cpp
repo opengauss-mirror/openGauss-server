@@ -216,7 +216,8 @@ static void show_datanode_time(ExplainState* es, PlanState* planstate);
 static void ShowStreamRunNodeInfo(Stream* stream, ExplainState* es);
 static void ShowRunNodeInfo(const ExecNodes* en, ExplainState* es, const char* qlabel);
 template <bool is_detail>
-static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_original, int nbatch_original, int nbuckets, long spacePeakKb);
+static void show_datanode_hash_info(ExplainState *es, int nbatch, int nbuckets_original, int nbatch_original,
+                                    int nbuckets, long spacePeakKb);
 static void ShowRoughCheckInfo(ExplainState* es, Instrumentation* instrument, int nodeIdx, int smpIdx);
 static void show_hashAgg_info(AggState* hashaggstate, ExplainState* es);
 static void ExplainPrettyList(List* data, ExplainState* es);
@@ -4321,7 +4322,8 @@ static void show_sort_info(SortState* sortstate, ExplainState* es)
 }
 
 template <bool is_detail>
-static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_original, int nbatch_original, int nbuckets, long spacePeakKb)
+static void show_datanode_hash_info(ExplainState *es, int nbatch, int nbuckets_original, int nbatch_original,
+                                    int nbuckets, long spacePeakKb)
 {
     if (es->format != EXPLAIN_FORMAT_TEXT) {
         ExplainPropertyLong("Hash Buckets", nbuckets, es);
@@ -4334,7 +4336,7 @@ static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_o
         if (nbatch_original != nbatch) {
             appendStringInfo(es->planinfo->m_staticInfo->info_str,
                 " Buckets: %d (originally %d) Batches: %d (originally %d)  Memory Usage: %ldkB\n",
-                nbuckets, 
+                nbuckets,
                 nbuckets_original,
                 nbatch,
                 nbatch_original,
@@ -4350,7 +4352,7 @@ static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_o
         if (nbatch_original != nbatch) {
             appendStringInfo(es->str,
                 " Buckets: %d (originally %d) Batches: %d (originally %d)	Memory Usage: %ldkB\n",
-                nbuckets, 
+                nbuckets,
                 nbuckets_original,
                 nbatch,
                 nbatch_original,
@@ -4924,10 +4926,11 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
         nbatch = hashinfo.nbatch;
         nbatch_original = hashinfo.nbatch_original;
         nbuckets = hashinfo.nbuckets;
-        if (es->analyze)
+        if (es->analyze) {
             nbuckets_original = hashtable ? hashtable->nbuckets_original : nbuckets;
-        else
+        } else {
             nbuckets_original = nbuckets;
+        }
         /* wlm_statistics_plan_max_digit: this variable is used to judge, isn't it a active sql */
         if (es->wlm_statistics_plan_max_digit == NULL) {
             if (es->format == EXPLAIN_FORMAT_TEXT)

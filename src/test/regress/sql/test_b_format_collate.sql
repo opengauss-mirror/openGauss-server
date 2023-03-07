@@ -15,6 +15,20 @@ create table t1(a text);
 create index idx_1 on t1(a collate "utf8mb4_unicode_ci");
 create unique index idx_2 on t1(a collate "utf8mb4_unicode_ci");
 
+create table hashjoin1(id int, f1 text, f2 text);
+create table hashjoin2(id int, f3 text, f4 text);
+ 
+insert into hashjoin1 select generate_series(1,100), 'a', 'a';
+insert into hashjoin2 select generate_series(1,100), 'a', 'a';
+ 
+select f1, f3 from hashjoin1 as h1 inner join hashjoin2 as h2
+on (h1.f2 = h2.f4)
+where (('a','a') in (select h1.f2, h2.f4 
+from (hashjoin1 inner join hashjoin2 on hashjoin1.id = hashjoin2.id) order by 1, 2))
+group by h1.f1, h2.f3
+order by 1,2 limit 10;
+drop table if exists hashjoin1, hashjoin2;
+
 -- test binary
 drop table if exists t1;
 create table t1(a blob collate binary);
@@ -202,6 +216,20 @@ select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f
 select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_bin"
 select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_general_ci";
 select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+
+create table hashjoin1(id int, f1 text, f2 text) collate 'utf8mb4_bin';
+create table hashjoin2(id int, f3 text, f4 text) collate 'utf8mb4_bin';
+ 
+insert into hashjoin1 select generate_series(1,100), 'a', 'a';
+insert into hashjoin2 select generate_series(1,100), 'a', 'a';
+ 
+select f1, f3 from hashjoin1 as h1 inner join hashjoin2 as h2
+on (h1.f2 = h2.f4)
+where (('a','a') in (select h1.f2, h2.f4 
+from (hashjoin1 inner join hashjoin2 on hashjoin1.id = hashjoin2.id) order by 1, 2))
+group by h1.f1, h2.f3
+order by 1,2 limit 10;
+drop table if exists hashjoin1, hashjoin2;
 
 -- test nestloop
 set enable_hashjoin=off;
