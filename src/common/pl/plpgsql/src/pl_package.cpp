@@ -341,7 +341,15 @@ int plpgsql_pkg_add_unknown_var_to_namespace(List* name)
     bool isSamePkg = false;
     PLpgSQL_datum* datum = GetPackageDatum(name, &isSamePkg);
     if (datum != NULL) {
-        return plpgsql_build_pkg_variable(name, datum, isSamePkg);
+        /*
+         * The current memory context is temp context, when this function is called by yylex_inparam etc,
+         * so we should swtich to function context.
+         * If add package var, plpgsql_ns_additem will swtich to package context.
+         */
+        MemoryContext oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_cxt);
+        int varno = plpgsql_build_pkg_variable(name, datum, isSamePkg);
+        (void)MemoryContextSwitchTo(oldCxt);
+        return varno;
     } else {
         return -1;
     }

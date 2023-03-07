@@ -4657,6 +4657,7 @@ static void _copy_top_HintState(HintState *dest, HintState *src)
 }
 
 char* GetInsertIntoStmt(CreateTableAsStmt* stmt, bool hasNewColumn)
+
 {
     /* Get the SELECT query string */
     /*

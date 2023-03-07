@@ -58,10 +58,6 @@
 #include "utils/snapmgr.h"
 #include "access/heapam.h"
 
-#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-extern void InitBSqlPluginHookIfNeeded();
-#endif
-
 /* Globally visible state variables */
 THR_LOCAL bool creating_extension = false;
 

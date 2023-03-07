@@ -1048,11 +1048,11 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                         errhint("The arguments of the trigger can be accessed through TG_NARGS and TG_ARGV instead.")));
             }
             /* Add the record for referencing NEW */
-            rec = plpgsql_build_record("new", 0, true);
+            rec = plpgsql_build_record("new", 0, true, NULL);
             func->new_varno = rec->dno;
 
             /* Add the record for referencing OLD */
-            rec = plpgsql_build_record("old", 0, true);
+            rec = plpgsql_build_record("old", 0, true, NULL);
             func->old_varno = rec->dno;
 
             /* Add the variable tg_name */
@@ -3536,7 +3536,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             /* "record" type -- build a record variable */
             PLpgSQL_rec* rec = NULL;
 
-            rec = plpgsql_build_record(refname, lineno, add2namespace);
+            rec = plpgsql_build_record(refname, lineno, add2namespace, NULL);
             rec->addNamespace = add2namespace;
             rec->varname = varname == NULL ? NULL : pstrdup(varname);
             result = (PLpgSQL_variable*)rec;
@@ -3656,7 +3656,7 @@ PLpgSQL_variable* plpgsql_build_tableType(const char* refname, int lineno, PLpgS
 /*
  * Build empty named record variable, and optionally add it to namespace
  */
-PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace)
+PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace, TupleDesc tupleDesc)
 {
     PLpgSQL_rec* rec = NULL;
     int varno;
@@ -3666,7 +3666,8 @@ PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2name
     rec->refname = pstrdup(refname);
     rec->lineno = lineno;
     rec->tup = NULL;
-    rec->tupdesc = NULL;
+    rec->tupdesc = tupleDesc;
+    rec->freetupdesc = (tupleDesc != NULL) ? true : false;
     rec->freetup = false;
     varno = plpgsql_adddatum((PLpgSQL_datum*)rec);
     char* pkgname = NULL;
@@ -4909,6 +4910,10 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
     PG_TRY();
     {
         List* parsetreeList = pg_parse_query(expr->query);
+        if (parsetreeList == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("unexpected null parsetree list")));
+        }
         ListCell* cell = NULL;
         List* queryList = NIL;
         foreach(cell, parsetreeList) {
@@ -4937,6 +4942,10 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
             }
             queryList = pg_analyze_and_rewrite_params(parsetree, expr->query, 
                 (ParserSetupHook)plpgsql_parser_setup, (void*)expr);
+        }
+        if (queryList == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("unexpected null query list")));
         }
         Query* query = (Query*)linitial(queryList);
         Assert(IsA(query, Query));

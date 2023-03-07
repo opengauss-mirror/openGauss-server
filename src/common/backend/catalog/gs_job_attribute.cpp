@@ -1214,7 +1214,7 @@ void create_job_1_internal(PG_FUNCTION_ARGS)
     Datum program_name = CStringGetTextDatum(c_program_name);
     pfree_ext(c_program_name);
 
-    static const short nrgs_job = 17;
+    static const short nrgs_job = 19;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
     errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
@@ -1239,6 +1239,8 @@ void create_job_1_internal(PG_FUNCTION_ARGS)
     fcinfo_job.arg[14] = job_action;            /* job action */
     fcinfo_job.arg[15] = job_type;              /* job type */
     fcinfo_job.argnull[16] = true;
+    fcinfo_job.argnull[17] = true;
+    fcinfo_job.argnull[18] = true;
     create_job_raw(&fcinfo_job);
 }
 
@@ -1324,7 +1326,7 @@ void create_job_2_internal(PG_FUNCTION_ARGS)
     Datum enabled;
     get_program_info(program_name, &job_type, &job_action, &num_of_args, &enabled);
 
-    static const short nrgs_job = 17;
+    static const short nrgs_job = 19;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
     errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
@@ -1351,6 +1353,8 @@ void create_job_2_internal(PG_FUNCTION_ARGS)
     fcinfo_job.arg[14] = job_action;            /* job action */
     fcinfo_job.arg[15] = job_type;              /* job type */
     fcinfo_job.argnull[16] = true;
+    fcinfo_job.argnull[17] = true;
+    fcinfo_job.argnull[18] = true;
     create_job_raw(&fcinfo_job);
 }
 
@@ -1376,7 +1380,7 @@ void create_job_3_internal(PG_FUNCTION_ARGS)
     Datum enabled;
     get_program_info(program_name, &job_type, &job_action, &num_of_args, &enabled);
 
-    static const short nrgs_job = 17;
+    static const short nrgs_job = 19;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
     errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
@@ -1403,6 +1407,8 @@ void create_job_3_internal(PG_FUNCTION_ARGS)
     fcinfo_job.arg[14] = job_action;                    /* job action */
     fcinfo_job.arg[15] = job_type;                      /* job type */
     fcinfo_job.argnull[16] = true;
+    fcinfo_job.argnull[17] = true;
+    fcinfo_job.argnull[18] = true;
     create_job_raw(&fcinfo_job);
 }
 
@@ -1430,7 +1436,7 @@ void create_job_4_internal(PG_FUNCTION_ARGS)
     Datum program_name = CStringGetTextDatum(c_program_name);
     pfree_ext(c_program_name);
 
-    static const short nrgs_job = 17;
+    static const short nrgs_job = 19;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
 
@@ -1453,6 +1459,8 @@ void create_job_4_internal(PG_FUNCTION_ARGS)
     fcinfo_job.arg[14] = job_action;            /* job action */
     fcinfo_job.arg[15] = job_type;              /* job type */
     fcinfo_job.argnull[16] = true;
+    fcinfo_job.argnull[17] = true;
+    fcinfo_job.argnull[18] = true;
     create_job_raw(&fcinfo_job);
 }
 

@@ -181,15 +181,15 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                  * create the hash table, sometimes we should keep nulls
                  */
                 if (hashNode->ps.nodeContext) {
-                    /*enable_memory_limit*/
+                    /* enable_memory_limit */
                     oldcxt = MemoryContextSwitchTo(hashNode->ps.nodeContext);
                 }
 
                 hashtable = ExecHashTableCreate((Hash*)hashNode->ps.plan, node->hj_HashOperators,
-                    HJ_FILL_INNER(node) || node->js.nulleqqual != NIL, node->hj_hash_collations);
+                    HJ_FILL_INNER(node) || node->js.nulleqqual != NIL, node->hj_hashCollations);
                     
                 if (oldcxt) {
-                    /*enable_memory_limit*/
+                    /* enable_memory_limit */
                     MemoryContextSwitchTo(oldcxt);
                 }
                 
@@ -525,6 +525,7 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     List* lclauses = NIL;
     List* rclauses = NIL;
     List* hoperators = NIL;
+    List* hcollations = NIL;
     ListCell* l = NULL;
 
     /* check for unsupported flags */
@@ -649,6 +650,7 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     lclauses = NIL;
     rclauses = NIL;
     hoperators = NIL;
+    hcollations = NIL;
     foreach (l, hjstate->hashclauses) {
         FuncExprState* fstate = (FuncExprState*)lfirst(l);
         OpExpr* hclause = NULL;
@@ -659,11 +661,12 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
         lclauses = lappend(lclauses, linitial(fstate->args));
         rclauses = lappend(rclauses, lsecond(fstate->args));
         hoperators = lappend_oid(hoperators, hclause->opno);
+        hcollations = lappend_oid(hcollations, hclause->inputcollid);
     }
     hjstate->hj_OuterHashKeys = lclauses;
     hjstate->hj_InnerHashKeys = rclauses;
     hjstate->hj_HashOperators = hoperators;
-    hjstate->hj_hash_collations = node->hash_collations;
+    hjstate->hj_hashCollations = hcollations;
     /* child Hash node needs to evaluate inner hash keys, too */
     ((HashState*)innerPlanState(hjstate))->hashkeys = rclauses;
 

@@ -3049,15 +3049,14 @@ static char* pg_get_triggerdef_worker(Oid trigid, bool pretty)
         tgfbody = TextDatumGetCString(value);
         value = fastgetattr(ht_trig, Anum_pg_trigger_tgowner, tgrel->rd_att, &isnull);
         if (DatumGetObjectId(value) != GetUserId()) {
-            appendStringInfo(
-                &buf, "CREATE DEFINER = %s TRIGGER %s ", GetUserNameFromId(DatumGetObjectId(value)), quote_identifier(tgname));
+            appendStringInfo(&buf, "CREATE DEFINER = %s TRIGGER %s ", GetUserNameFromId(DatumGetObjectId(value)),
+                             quote_identifier(tgname));
         } else {
-            appendStringInfo(
-                &buf, "CREATE TRIGGER %s ", quote_identifier(tgname));
+            appendStringInfo(&buf, "CREATE TRIGGER %s ", quote_identifier(tgname));
         }
     } else {
-        appendStringInfo(
-            &buf, "CREATE %sTRIGGER %s ", OidIsValid(trigrec->tgconstraint) ? "CONSTRAINT " : "", quote_identifier(tgname));
+        appendStringInfo(&buf, "CREATE %sTRIGGER %s ", OidIsValid(trigrec->tgconstraint) ? "CONSTRAINT " : "",
+                         quote_identifier(tgname));
     }
 
     if (TRIGGER_FOR_BEFORE(trigrec->tgtype))

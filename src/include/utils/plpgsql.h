@@ -1590,7 +1590,7 @@ extern PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno,
 PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace);
 PLpgSQL_variable* plpgsql_build_tableType(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace);
 extern PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* list, bool add2namespace);
-extern PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace);
+extern PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace, TupleDesc tupleDesc);
 extern int plpgsql_recognize_err_condition(const char* condname, bool allow_sqlstate);
 extern PLpgSQL_condition* plpgsql_parse_err_condition(char* condname);
 extern PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname);

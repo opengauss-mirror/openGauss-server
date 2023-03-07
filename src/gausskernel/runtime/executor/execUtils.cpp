@@ -2716,7 +2716,7 @@ Datum GetTypeZeroValue(Form_pg_attribute att_tup)
             Type targetType = typeidType(att_tup->atttypid);
             result = stringTypeDatum(targetType, "", att_tup->atttypmod, true);
             ReleaseSysCache(targetType);
-            break;            
+            break;
         }
         default: {
             bool typeIsVarlena = (!att_tup->attbyval) && (att_tup->attlen == -1);

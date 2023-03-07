@@ -2309,7 +2309,7 @@ typedef struct HashJoinState {
     bool hj_OuterNotEmpty;
     bool hj_streamBothSides;
     bool hj_rebuildHashtable;
-    List* hj_hash_collations; /* list of collations OIDs */
+    List* hj_hashCollations; /* list of collations OIDs */
 } HashJoinState;
 
 /* ----------------------------------------------------------------

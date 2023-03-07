@@ -49,7 +49,7 @@ typedef struct processutility_context {
 } processutility_context;
 
 /* Hook for plugins to get control in ProcessUtility() */
-typedef void (*ProcessUtility_hook_type)(processutility_context* processutility_cxt, 
+typedef void (*ProcessUtility_hook_type)(processutility_context* processutility_cxt,
     DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,

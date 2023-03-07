@@ -390,32 +390,32 @@ DROP RULE test_at_modify_rule ON test_at_modify_depend;
 
 -- --RLSPOLICY reference column.
 DROP TABLE test_at_modify_depend;
-CREATE ROLE at_modify_role PASSWORD 'Gauss@123';
+CREATE ROLE at_modify_role_ustore PASSWORD 'Gauss@123';
 CREATE TABLE test_at_modify_depend(
     a int,
     b int NOT NULL
 ) WITH(STORAGE_TYPE=USTORE);
 INSERT INTO test_at_modify_depend VALUES(0,0);
-GRANT USAGE ON SCHEMA atbdb_ustore_schema TO at_modify_role;
-GRANT SELECT ON test_at_modify_depend TO at_modify_role;
+GRANT USAGE ON SCHEMA atbdb_ustore_schema TO at_modify_role_ustore;
+GRANT SELECT ON test_at_modify_depend TO at_modify_role_ustore;
 ALTER TABLE test_at_modify_depend ENABLE ROW LEVEL SECURITY;
-CREATE ROW LEVEL SECURITY POLICY test_at_modify_rls ON test_at_modify_depend AS RESTRICTIVE FOR SELECT TO at_modify_role USING(b >= 20);
+CREATE ROW LEVEL SECURITY POLICY test_at_modify_rls ON test_at_modify_depend AS RESTRICTIVE FOR SELECT TO at_modify_role_ustore USING(b >= 20);
 ALTER TABLE test_at_modify_depend MODIFY COLUMN b int not null;
 INSERT INTO test_at_modify_depend VALUES(21,21);
-SET ROLE at_modify_role PASSWORD 'Gauss@123';
+SET ROLE at_modify_role_ustore PASSWORD 'Gauss@123';
 SELECT * FROM test_at_modify_depend ORDER BY 1,2;
 RESET ROLE;
 SELECT * FROM test_at_modify_depend ORDER BY 1,2;
 ALTER TABLE test_at_modify_depend MODIFY COLUMN b bool not null;
 ALTER TABLE test_at_modify_depend MODIFY COLUMN b int not null;
 INSERT INTO test_at_modify_depend VALUES(22,22);
-SET ROLE at_modify_role PASSWORD 'Gauss@123';
+SET ROLE at_modify_role_ustore PASSWORD 'Gauss@123';
 SELECT * FROM test_at_modify_depend ORDER BY 1,2;
 RESET ROLE;
 SELECT * FROM test_at_modify_depend ORDER BY 1,2;
 DROP TABLE test_at_modify_depend;
-REVOKE ALL PRIVILEGES ON SCHEMA atbdb_ustore_schema FROM at_modify_role;
-DROP ROLE at_modify_role;
+REVOKE ALL PRIVILEGES ON SCHEMA atbdb_ustore_schema FROM at_modify_role_ustore;
+DROP ROLE at_modify_role_ustore;
 
 -- ------------------------------------------------------ test ALTER TABLE CHANGE
 -- test change column without data

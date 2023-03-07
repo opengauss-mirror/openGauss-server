@@ -33,8 +33,8 @@
 #include "storage/lmgr.h"
 #include "workload/statctl.h"
 #include "instruments/instr_statement.h"
-#include "instruments/instr_waitevent.h"
 #include "ddes/dms/ss_dms.h"
+#include "instruments/instr_waitevent.h"
 
 const int MASK_CLASS_ID = 0xFF000000;
 const int MASK_EVENT_ID = 0x00FFFFFF;
@@ -402,7 +402,7 @@ static void set_dms_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, 
     values[++i] = CStringGetTextDatum("DMS_EVENT");
     values[++i] = CStringGetTextDatum(pgstat_get_wait_dms(WaitEventDMS(eventId + PG_WAIT_DMS)));
     unsigned long long cnt = 0;
-    unsigned long long time = 0; 
+    unsigned long long time = 0;
     if (g_instance.dms_cxt.dmsInited) {
         dms_get_event(dms_wait_event_t(eventId), &cnt, &time);
     }

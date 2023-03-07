@@ -245,7 +245,6 @@ typedef struct BufferDesc {
  * platform with either 32 or 128 byte line sizes, it's good to align to
  * boundaries and avoid false sharing.
  */
-//#define BUFFERDESC_PAD_TO_SIZE (SIZEOF_VOID_P == 8 ? 128 : 1)
 #define BUFFERDESC_PAD_TO_SIZE (SIZEOF_VOID_P == 8 ? 64 : 1)
 
 typedef union BufferDescPadded {

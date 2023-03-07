@@ -418,16 +418,16 @@ THR_LOCAL bool skip_read_extern_fields = false;
         securec_check(reterrno, "\0", "\0");                                                   \
     } while (0)
 
-#define READ_NODE_ARRAY(fldname, size, itemtype)                                    \
-    do {                                                                            \
-        if (size <= 0) {                                                            \
-            READ_NODE_FIELD(fldname); /* must be null */                            \
-        } else {                                                                    \
-            local_node->fldname = (itemtype*)palloc0(sizeof(itemtype) * (size));    \
-            for (int i = 0; i < size; i++) {                                        \
-                READ_NODE_FIELD(fldname[i]);                                        \
-            }                                                                       \
-        }                                                                           \
+#define READ_NODE_ARRAY(fldname, size, itemtype)                                  \
+    do {                                                                          \
+        if ((size) <= 0) {                                                        \
+            READ_NODE_FIELD(fldname); /* must be null */                          \
+        } else {                                                                  \
+            local_node->fldname = (itemtype *)palloc0(sizeof(itemtype) * (size)); \
+            for (int i = 0; i < (size); i++) {                                    \
+                READ_NODE_FIELD(fldname[i]);                                      \
+            }                                                                     \
+        }                                                                         \
     } while (0)
 
 /* Read a bitmapset field */
@@ -1461,8 +1461,8 @@ static RightRefState* _readRightRefState(Query* query)
 
     token = pg_strtok(&length);
     if (token == nullptr || token[0] != '}') {
-        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
-            errmsg("did not find '}' at end of RightRefState node")));
+        ereport(ERROR,
+                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("did not find '}' at end of RightRefState node")));
     }
 
     READ_DONE();
@@ -1483,8 +1483,8 @@ static RightRefState* _readRightRefStateWrap(Query* query)
 
     token = pg_strtok(&length); /* left brace */
     if (token == nullptr || token[0] != '{') {
-        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
-                    errmsg("did not find '{' at end of RightRefState node")));
+        ereport(ERROR,
+                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("did not find '{' at end of RightRefState node")));
     }
     token = pg_strtok(&length); /* read node name */
     if (length != 13 && memcmp(token, "RIGHTREFSTATE", 13) != 0) {

@@ -680,6 +680,7 @@ void ApplyLauncherMain()
     (void)gspqsignal(SIGUSR2, logicalrep_launcher_sigusr2);
     (void)gspqsignal(SIGFPE, FloatExceptionHandler);
     (void)gspqsignal(SIGCHLD, SIG_DFL);
+    (void)gspqsignal(SIGURG, print_stack);
 
     /* Early initialization */
     BaseInit();

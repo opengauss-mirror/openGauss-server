@@ -16113,7 +16113,6 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot alter type of column \"%s\" twice", colName)));
     }
 
-
     /* Look up the target type (should not fail, since prep found it) */
     typeTuple = typenameType(NULL, typname, &targettypmod);
     tform = (Form_pg_type)GETSTRUCT(typeTuple);
@@ -21987,7 +21986,6 @@ static void CheckListPartitionKeyType(FormData_pg_attribute* attrs, List* pos)
             ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("column %s cannot serve as a list partitioning column because of its datatype",
                     NameStr(attrs[location].attname))));
-
         }
     }
 }
@@ -22276,8 +22274,8 @@ static void FillListPartitionValueList(List** result, RowExpr* row, const List* 
         /* transform the const to target datatype */
         targetExpr = (Const*)GetTargetValue(&attrs[lfirst_int(posCell)], (Const*)lfirst(keyCell), false, false);
         if (targetExpr == NULL) {
-            for (int i = 0; i <= boundId; i++) {
-                list_free_ext(result[boundId]);
+            for (int i = 0; i < boundId; i++) {
+                list_free_ext(result[i]);
             }
             pfree_ext(result);
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
@@ -22288,7 +22286,8 @@ static void FillListPartitionValueList(List** result, RowExpr* row, const List* 
     }
 }
 
-static List** GetListPartitionValueLists(const List* keyPos, FormData_pg_attribute* attrs, List* value, bool partkeyIsFunc)
+static List **GetListPartitionValueLists(const List *keyPos, FormData_pg_attribute *attrs, List *value,
+                                         bool partkeyIsFunc)
 {
     Node* cell = NULL;
     ListCell* valueCell = NULL;
@@ -22315,8 +22314,8 @@ static List** GetListPartitionValueLists(const List* keyPos, FormData_pg_attribu
         /* transform the const to target datatype */
         targetExpr = (Const*)GetTargetValue(&attrs[lfirst_int(keyPos->head)], (Const*)cell, false, partkeyIsFunc);
         if (targetExpr == NULL) {
-            for (int i = 0; i <= count; i++) {
-                list_free_ext(result[count]);
+            for (int i = 0; i < count; i++) {
+                list_free_ext(result[i]);
             }
             pfree_ext(result);
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
@@ -22335,7 +22334,6 @@ static List** GetListPartitionValueLists(const List* keyPos, FormData_pg_attribu
 
     return result;
 }
-
 
 /*
  * @@GaussDB@@
@@ -22718,7 +22716,8 @@ void CompareListValue(const List* pos, FormData_pg_attribute* attrs, List *parti
  * Description	:
  * Notes		:
  */
-void ComparePartitionValue(List* pos, FormData_pg_attribute* attrs, List *partitionList, bool isPartition, bool partkeyIsFunc)
+void ComparePartitionValue(List *pos, FormData_pg_attribute *attrs, List *partitionList, bool isPartition,
+                           bool partkeyIsFunc)
 {
     Const* pre_value = NULL;
     Const* cur_value = NULL;
@@ -24088,7 +24087,8 @@ void ATExecSetIndexVisibleState(Oid objOid, bool newState)
             replaces[Anum_pg_index_indisvisible - 1] = true;
             values[Anum_pg_index_indisvisible - 1] = DatumGetBool(newState);
 
-            newitup = (HeapTuple)tableam_tops_modify_tuple(sys_tuple, RelationGetDescr(sys_table), values, nulls, replaces);
+            newitup =
+                (HeapTuple)tableam_tops_modify_tuple(sys_tuple, RelationGetDescr(sys_table), values, nulls, replaces);
             simple_heap_update(sys_table, &(sys_tuple->t_self), newitup);
             CatalogUpdateIndexes(sys_table, newitup);
             tableam_tops_free_tuple(newitup);
