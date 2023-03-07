@@ -667,6 +667,31 @@ Datum bytea_string_agg_finalfn(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
 }
 
+Oid binary_need_transform_typeid(Oid typeoid, Oid* collation)
+{
+    Oid new_typid = typeoid;
+    if (*collation == BINARY_COLLATION_OID) {
+        /* use switch case stmt for extension in feature */
+        switch (typeoid) {
+            /* binary type no need to transform */
+            case BLOBOID:
+                break;
+            /* string type need to transform to binary type */
+            case TEXTOID:
+                new_typid = BLOBOID;
+                break;
+            default:
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Un-support feature"),
+                        errdetail("type %s cannot be set to binary collation currently", get_typename(typeoid))));
+                break;
+        }
+        /* binary collation in attribute level collation no need to be set. */
+        *collation = InvalidOid;
+    }
+    return new_typid;
+}
+
 /*
  *		textin			- converts "..." to internal representation
  */
