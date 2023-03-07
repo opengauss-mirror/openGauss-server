@@ -106,6 +106,7 @@ static bool UseODBCLinker(char* connstr);
 #define REMOTE_CONN_HASH (get_session_context()->remoteConnHash)
 /* initial number of connection hashes */
 #define NUMCONN 16
+#define NAX_ERR_MSG_LEN 1000
 #define MAX_BUF_LEN 100000
 #define MAX_DRIVERNAME_LEN 50
 #define DBLINK_NOTIFY_COLS 3
@@ -559,6 +560,9 @@ ODBCLinker::ODBCLinker(char* connstr_or_name)
     }
     
     LinkInfo linfo;
+    linfo.drivername = NULL;
+    linfo.password = NULL;
+    linfo.username = NULL;
     int len = strlen(connstr_or_name);
     GetDrivername(connstr_or_name, &linfo);
     /* atuo commit is the default value */
@@ -568,11 +572,13 @@ ODBCLinker::ODBCLinker(char* connstr_or_name)
     securec_check(rc, "\0", "\0");
 
     if ((error != SQL_SUCCESS) && (error != SQL_SUCCESS_WITH_INFO)) {
+        SQLCHAR sqlcode[NAX_ERR_MSG_LEN];
+        SQLGetDiagField(SQL_HANDLE_DBC, this->connHandle, 1, SQL_DIAG_MESSAGE_TEXT, &sqlcode, NAX_ERR_MSG_LEN, NULL);
         SQLFreeHandle(SQL_HANDLE_DBC, this->connHandle);
         SQLFreeHandle(SQL_HANDLE_ENV, this->envHandle);
         ereport(ERROR,
             (errcode(ERRCODE_CONNECTION_FAILURE),
-                errmsg("Error SQLConnect")));
+                errmsg("Error SQLConnect\n%s", sqlcode)));
     }
 }
 
@@ -629,9 +635,8 @@ char* ODBCLinker::errorMsg()
     if (this->stmt == NULL) {
         return NULL;
     }
-    int msgLen = 100;
-    char* msg = (char*)palloc(sizeof(char) * msgLen);
-    SQLGetDiagRec(SQL_HANDLE_STMT, this->stmt, 1, NULL, NULL, (SQLCHAR*)msg, 100 ,NULL);
+    char* msg = (char*)palloc(sizeof(char) * NAX_ERR_MSG_LEN);
+    SQLGetDiagRec(SQL_HANDLE_STMT, this->stmt, 1, NULL, NULL, (SQLCHAR*)msg, NAX_ERR_MSG_LEN, NULL);
     return msg;
 }
 
