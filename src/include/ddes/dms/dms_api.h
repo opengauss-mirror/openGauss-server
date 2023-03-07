@@ -286,7 +286,13 @@ typedef struct st_dms_buf_ctrl {
     unsigned char seg_fileno;
     unsigned int seg_blockno;
 #endif
-}dms_buf_ctrl_t;
+} dms_buf_ctrl_t;
+
+typedef struct st_dms_ctrl_info {
+    dms_buf_ctrl_t      ctrl;
+    unsigned long long  lsn;
+    unsigned char       is_dirty;
+} dms_ctrl_info_t;
 
 typedef enum en_dms_page_latch_mode {
     DMS_PAGE_LATCH_MODE_S = 1,
@@ -301,7 +307,7 @@ typedef enum en_dms_page_latch_mode {
 #define DMS_ENTER_PAGE_TRY            (unsigned char)8    // try to read from buffer, don't read from disk
 #define DMS_ENTER_PAGE_LRU_STATS_SCAN (unsigned char)0x10 // add to stats LRU list
 #define DMS_ENTER_PAGE_LRU_HIGH_AGE   (unsigned char)0x20 // decrease possibility to be recycled of page
-#define DMS_ENTER_PAGE_LOCAL          (unsigned char)0x40 // check local page without redo log
+#define DMS_ENTER_PAGE_LOCAL          (unsigned char)0x40 // check local page without redo log, use carefully
 #define DMS_ENTER_PAGE_REMOTE         (unsigned char)0x80 // remote access mode
 
 // pack read page parameters together
@@ -486,6 +492,7 @@ typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned cha
 typedef int(*dms_confirm_owner)(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
     unsigned long long *lsn);
 typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
+typedef int(*dms_need_flush)(void *db_handle, char *pageid);
 typedef int(*dms_edp_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int is_reformer);
@@ -573,7 +580,8 @@ typedef char *(*dms_display_pageid)(char *display_buf, unsigned int count, char 
 typedef char *(*dms_display_xid)(char *display_buf, unsigned int count, char *xid);
 typedef char *(*dms_display_rowid)(char *display_buf, unsigned int count, char *rowid);
 typedef int (*dms_drc_buf_res_rebuild)(void *db_handle);
-typedef int (*dms_drc_buf_res_rebuild_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
+typedef int (*dms_drc_buf_res_rebuild_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num,
+    unsigned char for_rebuild);
 typedef unsigned char(*dms_ckpt_session)(void *db_handle);
 typedef void (*dms_check_if_build_complete)(void *db_handle, unsigned int *build_complete);
 typedef int (*dms_db_is_primary)(void *db_handle);
@@ -622,6 +630,7 @@ typedef struct st_dms_callback {
     dms_confirm_owner confirm_owner;
     dms_confirm_converting confirm_converting;
     dms_flush_copy flush_copy;
+    dms_need_flush need_flush;
     dms_edp_lsn edp_lsn;
     dms_disk_lsn disk_lsn;
     dms_recovery recovery;
@@ -803,7 +812,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           52
+#define DMS_LOCAL_VERSION           54
 
 #ifdef __cplusplus
 }
