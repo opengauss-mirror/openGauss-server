@@ -148,9 +148,6 @@ Node* MultiExecHash(HashState* node)
     }
     (void)pgstat_report_waitstatus(oldStatus);
 
-    /* analyze hash table information for unique sql hash state */
-    UpdateUniqueSQLHashStats(hashtable, &start_time);
-
     /* resize the hash table if needed (NTUP_PER_BUCKET exceeded) */
     if (hashtable->nbuckets != hashtable->nbuckets_optimal) {
         /* We never decrease the number of buckets. */
@@ -171,6 +168,9 @@ Node* MultiExecHash(HashState* node)
     hashtable->spaceUsed += hashtable->nbuckets * sizeof(HashJoinTuple);
     if (hashtable->spaceUsed > hashtable->spacePeak)
         hashtable->spacePeak = hashtable->spaceUsed;
+
+    /* analyze hash table information for unique sql hash state */
+    UpdateUniqueSQLHashStats(hashtable, &start_time);
 
     /* must provide our own instrumentation support */
     if (node->ps.instrument) {
