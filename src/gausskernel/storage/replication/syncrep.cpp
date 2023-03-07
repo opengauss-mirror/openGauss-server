@@ -733,32 +733,25 @@ void SetXactLastCommitToSyncedStandby(XLogRecPtr recptr)
 }
 #endif
 
-static SyncStandbyNumState check_sync_standbys_num(const SyncRepStandbyData* sync_standbys, int num_standbys)
+static SyncStandbyNumState check_sync_standbys_num(const SyncRepStandbyData* sync_standbys, const int num_standbys)
 {
-    int i;
-    int* num_group_standbys;
-    const SyncRepStandbyData* stby = sync_standbys;
-
-    SyncStandbyNumState res = STANDBIES_ENOUGH;
-
-    
-    if (t_thrd.syncrep_cxt.SyncRepConfig == NULL)
+    if (t_thrd.syncrep_cxt.SyncRepConfig == NULL) {
         return STANDBIES_ENOUGH;
+    }
 
-
-    if(num_standbys == 0) {
+    if (num_standbys == 0) {
         return STANDBIES_EMPTY;
     }
 
-    num_group_standbys = (int*)palloc0(t_thrd.syncrep_cxt.SyncRepConfigGroups * sizeof(int));
-
-    for(i = 0; i < num_standbys; i++) {
-        stby = sync_standbys + i;
-        (*(num_group_standbys + stby->sync_standby_group))++;
+    int *num_group_standbys = (int*)palloc0(t_thrd.syncrep_cxt.SyncRepConfigGroups * sizeof(int));
+    for(int i = 0; i < num_standbys; ++i) {
+        int group = sync_standbys[i].sync_standby_group;
+        ++num_group_standbys[group];
     }
 
-    for(i = 0; i < t_thrd.syncrep_cxt.SyncRepConfigGroups; i++) {		
-        if((*(num_group_standbys + stby->sync_standby_group)) < t_thrd.syncrep_cxt.SyncRepConfig[i]->num_sync) {
+    SyncStandbyNumState res = STANDBIES_ENOUGH;
+    for(int i = 0; i < t_thrd.syncrep_cxt.SyncRepConfigGroups; ++i) {
+        if(num_group_standbys[i] < t_thrd.syncrep_cxt.SyncRepConfig[i]->num_sync) {
             res = STANDBIES_NOT_ENOUGH;
             break;
         }
@@ -1397,8 +1390,10 @@ int SyncRepGetSyncStandbys(SyncRepStandbyData** sync_standbys, List** catchup_st
     if (t_thrd.syncrep_cxt.SyncRepConfig == NULL)
         return 0;
 
+    SyncRepStandbyData *sync_standbys_cur = *sync_standbys;
     for(int i = 0; i < t_thrd.syncrep_cxt.SyncRepConfigGroups; i++) {
-        num_sync += SyncRepGetSyncStandbysInGroup(sync_standbys, i,catchup_standbys);
+        sync_standbys_cur = *sync_standbys + num_sync;
+        num_sync += SyncRepGetSyncStandbysInGroup(&sync_standbys_cur, i, catchup_standbys);
     }
 
     return num_sync;
