@@ -2679,7 +2679,7 @@ void check_collate_in_options(List *user_options)
                         (errmsg("Un-support feature"),
                          errdetail("Forbid to set or change \"%s\" in non-B format", "collate"))));
 
-            if (!COLLATION_IN_B_FORMAT(collate))
+            if (!COLLATION_IN_B_FORMAT(collate) && collate != DEFAULT_COLLATION_OID)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("this collation only cannot be specified here")));
             tp = SearchSysCache1(COLLOID, ObjectIdGetDatum(collate));

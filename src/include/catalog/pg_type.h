@@ -860,9 +860,6 @@ DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in 
 ((typid) == BYTEAWITHOUTORDERCOLOID || \
 (typid) == BYTEAWITHOUTORDERWITHEQUALCOLOID)
 
-#define IsBinaryType(typid) \
-	((typid) == BLOBOID)
-
 #define IsSupportCharsetType(typid) \
 	(((typid) == TEXTOID) || \
 	 ((typid) == VARCHAROID) || \

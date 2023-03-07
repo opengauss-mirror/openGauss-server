@@ -1802,6 +1802,382 @@ select * from pg_get_tabledef('test25');
  WITH (orientation=row, compression=no);
 (1 row)
 
+--test utf8 collate
+select 'abCdEf' = 'abcdef' collate "utf8_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf' != 'abcdef' collate "utf8_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' > 'abcdef' collate "utf8_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' < 'abcdef' collate "utf8_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' = 'abcdef' collate "utf8_unicode_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf' != 'abcdef' collate "utf8_unicode_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' > 'abcdef' collate "utf8_unicode_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' < 'abcdef' collate "utf8_unicode_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' = 'abcdef' collate "utf8_bin";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' > 'abcdef' collate "utf8_bin";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' < 'abcdef' collate "utf8_bin";
+ ?column? 
+----------
+ t
+(1 row)
+
+drop table if exists column_collate;
+create table column_collate(f1 text collate "utf8_general_ci", f2 char(15) collate "utf8_bin", f3 text collate 'utf8_unicode_ci');
+insert into column_collate values('S','S','S'),('s','s','s'),('ś','ś','ś'),('Š','Š','Š'),('z','z','z'),('Z','Z','Z'),('c','c','c'),('A','A','A'),('C','C','C');
+insert into column_collate values('AaA','AaA','AaA'),('bb','bb','bb'),('aAA','aAA','aAA'),('Bb','Bb','Bb'),('dD','dd','dd'),('Cc','Cc','Cc'),('AAA','AAA','AAA');
+insert into column_collate values('A1中文','A1中文','A1中文'), ('b1中文','b1中文','b1中文'), ('a2中文','a2中文','a2中文'),
+('B2中文','B2中文','B2中文'), ('中文d1','中文d1','中文d1'), ('中文C1','中文C1','中文C1'), ('中文A3','中文A3','中文A3');
+-- test where clause
+select f1 from column_collate where f1 = 's';
+ f1 
+----
+ S
+ s
+ ś
+ Š
+(4 rows)
+
+select f1 from column_collate where f1 = 'aaa';
+ f1  
+-----
+ AaA
+ aAA
+ AAA
+(3 rows)
+
+select f2 from column_collate where f2 = 's';
+       f2        
+-----------------
+ s              
+(1 row)
+
+select f2 from column_collate where f2 = 'aaa';
+ f2 
+----
+(0 rows)
+
+select f2 from column_collate where f3 = 's';
+       f2        
+-----------------
+ S              
+ s              
+ ś             
+ Š             
+(4 rows)
+
+select f2 from column_collate where f3 = 'aaa';
+       f2        
+-----------------
+ AaA            
+ aAA            
+ AAA            
+(3 rows)
+
+-- test order by clause
+select f1 from column_collate order by f1;
+   f1   
+--------
+ A
+ A1中文
+ a2中文
+ AaA
+ AAA
+ aAA
+ b1中文
+ B2中文
+ Bb
+ bb
+ c
+ C
+ Cc
+ dD
+ S
+ s
+ ś
+ Š
+ Z
+ z
+ 中文A3
+ 中文C1
+ 中文d1
+(23 rows)
+
+select f2 from column_collate order by f2;
+       f2        
+-----------------
+ A              
+ A1中文       
+ AAA            
+ AaA            
+ B2中文       
+ Bb             
+ C              
+ Cc             
+ S              
+ Z              
+ a2中文       
+ aAA            
+ b1中文       
+ bb             
+ c              
+ dd             
+ s              
+ z              
+ ś             
+ Š             
+ 中文A3       
+ 中文C1       
+ 中文d1       
+(23 rows)
+
+select f3 from column_collate order by f3;
+   f3   
+--------
+ A
+ A1中文
+ a2中文
+ AaA
+ AAA
+ aAA
+ b1中文
+ B2中文
+ Bb
+ bb
+ c
+ C
+ Cc
+ dd
+ S
+ s
+ ś
+ Š
+ Z
+ z
+ 中文A3
+ 中文C1
+ 中文d1
+(23 rows)
+
+-- test distinct clause
+insert into column_collate values ('AbcdEf','AbcdEf','AbcdEf'), ('abcdEF','abcdEF','abcdEF'), ('中文AbCdEFG','中文AbCdEFG','中文AbCdEFG'),
+('中文abcdEFG','中文abcdEFG','中文abcdEFG'), ('中文Ab','中文Ab','中文Ab'), ('中文ab','中文ab','中文ab');
+select distinct f1 from column_collate order by f1 limit 10;
+   f1   
+--------
+ A
+ A1中文
+ a2中文
+ AaA
+ AbcdEf
+ b1中文
+ B2中文
+ bb
+ c
+ Cc
+(10 rows)
+
+select distinct f2 from column_collate order by f2 limit 10;
+       f2        
+-----------------
+ A              
+ A1中文       
+ AAA            
+ AaA            
+ AbcdEf         
+ B2中文       
+ Bb             
+ C              
+ Cc             
+ S              
+(10 rows)
+
+select distinct f3 from column_collate order by f3 limit 10;
+   f3   
+--------
+ A
+ A1中文
+ a2中文
+ AaA
+ AbcdEf
+ b1中文
+ B2中文
+ bb
+ c
+ Cc
+(10 rows)
+
+-- test group by 
+select count(f1),f1 from column_collate group by f1 order by f1 limit 10;
+ count |   f1   
+-------+--------
+     1 | A
+     1 | A1中文
+     1 | a2中文
+     3 | AaA
+     2 | AbcdEf
+     1 | b1中文
+     1 | B2中文
+     2 | bb
+     2 | c
+     1 | Cc
+(10 rows)
+
+select count(f2),f2 from column_collate group by f2 order by f2 limit 10;
+ count |       f2        
+-------+-----------------
+     1 | A              
+     1 | A1中文       
+     1 | AAA            
+     1 | AaA            
+     1 | AbcdEf         
+     1 | B2中文       
+     1 | Bb             
+     1 | C              
+     1 | Cc             
+     1 | S              
+(10 rows)
+
+select count(f3),f3 from column_collate group by f3 order by f3 limit 10;
+ count |   f3   
+-------+--------
+     1 | A
+     1 | A1中文
+     1 | a2中文
+     3 | AaA
+     2 | AbcdEf
+     1 | b1中文
+     1 | B2中文
+     2 | bb
+     2 | c
+     1 | Cc
+(10 rows)
+
+-- test like
+select f1 from column_collate where f1 like 'A_%';
+   f1   
+--------
+ AaA
+ aAA
+ AAA
+ A1中文
+ a2中文
+ AbcdEf
+ abcdEF
+(7 rows)
+
+select f1 from column_collate where f1 like '%s%';
+ f1 
+----
+ S
+ s
+ ś
+ Š
+(4 rows)
+
+select f1 from column_collate where f1 like 'A%f';
+   f1   
+--------
+ AbcdEf
+ abcdEF
+(2 rows)
+
+select f2 from column_collate where f2 like 'A_%';
+       f2        
+-----------------
+ A              
+ AaA            
+ AAA            
+ A1中文       
+ AbcdEf         
+(5 rows)
+
+select f2 from column_collate where f2 like '%s%';
+       f2        
+-----------------
+ s              
+(1 row)
+
+select f2 from column_collate where f2 like 'A%f';
+ f2 
+----
+(0 rows)
+
+select f3 from column_collate where f3 like 'A_%';
+   f3   
+--------
+ AaA
+ aAA
+ AAA
+ A1中文
+ a2中文
+ AbcdEf
+ abcdEF
+(7 rows)
+
+select f3 from column_collate where f3 like '%s%';
+ f3 
+----
+ S
+ s
+ ś
+ Š
+(4 rows)
+
+select f3 from column_collate where f3 like 'A%f';
+   f3   
+--------
+ AbcdEf
+ abcdEF
+(2 rows)
+
 \c regression
 clean connection to all force for database test_collate_A;
 clean connection to all force for database test_collate_B;

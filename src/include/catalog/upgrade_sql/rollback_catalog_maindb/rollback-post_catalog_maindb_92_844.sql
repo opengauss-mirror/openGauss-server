@@ -10,7 +10,7 @@ query_str_nodes text;
 BEGIN
   query_str_nodes := 'select * from dbe_perf.node_name';
   FOR row_name IN EXECUTE(query_str_nodes) LOOP
-    delete from pg_catalog.pg_collation where collname in ('utf8mb4_general_ci', 'utf8mb4_unicode_ci', 'utf8mb4_bin', 'binary');
+    delete from pg_catalog.pg_collation where collname in ('utf8mb4_general_ci', 'utf8mb4_unicode_ci', 'utf8mb4_bin', 'binary', 'utf8_general_ci', 'utf8_unicode_ci', 'utf8_bin');
   END LOOP;
 return;
 END;

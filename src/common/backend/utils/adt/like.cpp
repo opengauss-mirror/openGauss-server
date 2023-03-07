@@ -156,7 +156,7 @@ int GenericMatchText(char* s, int slen, char* p, int plen)
 
 int generic_match_text_with_collation(char* s, int slen, char* p, int plen, Oid collation)
 {
-    if (collation == UTF8MB4_GENERAL_CI_COLLATION_OID || collation == UTF8MB4_UNICODE_CI_COLLATION_OID) {
+    if (IS_UTF8_GENERAL_COLLATION(collation)) {
         return matchtext_utf8mb4((unsigned char*)s, slen, (unsigned char*)p, plen);
     }
 
