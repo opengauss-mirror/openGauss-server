@@ -1283,6 +1283,11 @@ static int CBFlushCopy(void *db_handle, char *pageid)
         smgrcloseall();
     }
 
+    // only 1) primary restart 2) failover need flush_copy
+    if (SS_REFORM_REFORMER && g_instance.dms_cxt.dms_status == DMS_STATUS_IN && !SS_STANDBY_FAILOVER) {
+        return GS_SUCCESS;
+    }
+
     BufferTag* tag = (BufferTag*)pageid;
     Buffer buffer;
     SegSpace *spc = NULL;
@@ -1304,7 +1309,7 @@ static int CBFlushCopy(void *db_handle, char *pageid)
         ErrorData* edata = CopyErrorData();
         FlushErrorState();
         FreeErrorData(edata);
-        ereport(PANIC, (errmsg("[SS Flush Copy] Error happend, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
+        ereport(PANIC, (errmsg("[SS flush copy] Error happend, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
                         tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                         tag->forkNum, tag->blockNum)));
     }
@@ -1417,6 +1422,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     if (ss_reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
         if (role == DMS_ROLE_REFORMER) {
+            g_instance.dms_cxt.dw_init = false;
             // variable set order: SharedRecoveryInProgress -> failover_triggered -> dms_role
             volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
             SpinLockAcquire(&xlogctl->info_lck);
