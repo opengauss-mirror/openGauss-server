@@ -77,5 +77,6 @@ void BufValidateDrc(BufferDesc *buf_desc);
 bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc);
 bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer);
 bool DmsCheckBufAccessible();
+bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc);
 
 #endif

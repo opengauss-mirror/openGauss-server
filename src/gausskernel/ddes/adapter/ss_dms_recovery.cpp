@@ -327,7 +327,6 @@ void ss_failover_dw_init()
         }
     }
     ckpt_shutdown_pagewriter();
-    g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
     ss_failover_dw_init_internal();
     g_instance.dms_cxt.dw_init = true;
 }
@@ -346,5 +345,6 @@ void ss_switchover_promoting_dw_init()
     dw_exit(false);
     dw_ext_init();
     dw_init();
+    g_instance.dms_cxt.dw_init = true;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover] dw init finished")));
 }

@@ -75,6 +75,7 @@ void AbortSegBufferIO(void)
 static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
 {
     uint32 buf_state;
+    bool dms_need_flush = false; // used in dms
 
     SegmentCheck(!InProgressBuf);
 
@@ -98,7 +99,14 @@ static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
         WaitIO(buf);
     }
 
-    if (forInput ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY)) {
+    if (ENABLE_DMS) {
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf->buf_id);
+        if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+            dms_need_flush = true;
+        }
+    }
+
+    if (forInput ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY) && !dms_need_flush) {
         /* IO finished */
         UnlockBufHdr(buf, buf_state);
         LWLockRelease(buf->io_in_progress_lock);
@@ -128,6 +136,23 @@ void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bit
         if (ENABLE_INCRE_CKPT) {
             if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->extra->rec_lsn))) {
                 remove_dirty_page_from_queue(buf);
+            } else if (ENABLE_DMS) {
+                dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf->buf_id);
+                if (!(buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
+                    ereport(PANIC, (errmodule(MOD_INCRE_CKPT), errcode(ERRCODE_INVALID_BUFFER),
+                        (errmsg("buffer is dirty but not in dirty page queue in SegTerminateBufferIO"))));
+                }
+                buf_ctrl->state &= ~BUF_DIRTY_NEED_FLUSH;
+                XLogRecPtr pagelsn = BufferGetLSN(buf);
+                bool in_flush_copy = SS_IN_FLUSHCOPY;
+                bool in_recovery = !g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag;
+                ereport(LOG,
+                    (errmsg("[SS flush copy] finish seg flush buffer with need flush, "
+                    "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u, reform phase "
+                    "is in flush_copy:%d, in recovery:%d",
+                    buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode, buf->tag.rnode.bucketNode,
+                    buf->tag.forkNum, buf->tag.blockNum, (unsigned long long)pagelsn, 
+                    (unsigned int)buf->extra->seg_fileno, buf->extra->seg_blockno, in_flush_copy, in_recovery)));
             } else {
                 ereport(PANIC, (errmodule(MOD_INCRE_CKPT), errcode(ERRCODE_INVALID_BUFFER),
                                 (errmsg("buffer is dirty but not in dirty page queue in TerminateBufferIO_common"))));
@@ -704,7 +729,7 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
 
         SegPinBufferLocked(buf, &new_tag);
 
-        if (!SSPageCheckIfCanEliminate(buf)) {
+        if (!SSHelpFlushBufferIfNeed(buf)) {
             SegUnpinBuffer(buf);
             continue;
         }
