@@ -124,7 +124,7 @@ public:
 
     void executeInit();
 
-    bool executeEnd(const char* portal_name, bool* completionTag);
+    bool executeEnd(const char* portal_name, bool* completionTag, long max_rows);
 
     void auditRecord();
 

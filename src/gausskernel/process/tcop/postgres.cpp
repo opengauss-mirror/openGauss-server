@@ -5143,6 +5143,11 @@ static void exec_execute_message(const char* portal_name, long max_rows)
             pq_putemptymessage('s');
 
         u_sess->xact_cxt.pbe_execute_complete = false;
+        /* when only set maxrows, we don't need to set pbe_execute_complete flag. */
+        if ((portal_name == NULL || portal_name[0] == '\0') &&
+            max_rows != FETCH_ALL && IsConnFromApp()) {
+            u_sess->xact_cxt.pbe_execute_complete = true;
+        }
 #ifndef ENABLE_MULTIPLE_NODES
         /* reset stream info for session */
         if (u_sess->stream_cxt.global_obj != NULL) {
