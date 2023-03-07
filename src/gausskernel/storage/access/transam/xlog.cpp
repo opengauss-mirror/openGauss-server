@@ -9866,7 +9866,9 @@ void StartupXLOG(void)
      * replay.  This avoids as well any subsequent scans when doing recovery
      * of the on-disk two-phase data.
      */
-    restoreTwoPhaseData();
+    if (!ENABLE_DMS || SS_PRIMARY_MODE) {
+        restoreTwoPhaseData();
+    }
 
     StartupCSNLOG();
 
