@@ -657,13 +657,13 @@ static HeapTuple PLy_modify_tuple(PLyProcedure* proc, PyObject* pltd, TriggerDat
             } else if (plval != Py_None) {
                 PLyObToDatum* att = &proc->result.out.r.atts[atti];
 
-                modvalues[i] = (att->func)(att, tupdesc->attrs[atti]->atttypmod, plval);
+                modvalues[i] = (att->func)(att, tupdesc->attrs[atti].atttypmod, plval);
                 modnulls[i] = ' ';
             } else {
                 modvalues[i] = InputFunctionCall(&proc->result.out.r.atts[atti].typfunc,
                     NULL,
                     proc->result.out.r.atts[atti].typioparam,
-                    tupdesc->attrs[atti]->atttypmod);
+                    tupdesc->attrs[atti].atttypmod);
                 modnulls[i] = 'n';
             }
 

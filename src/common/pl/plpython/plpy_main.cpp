@@ -13,6 +13,7 @@
 #include "executor/spi.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
+#include "auditfuncs.h"
 #include "pgaudit.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
@@ -29,7 +30,6 @@
 #include "plpy_plpymodule.h"
 #include "plpy_procedure.h"
 
-const int PGAUDIT_MAXLENGTH = 1024;
 
 /* exported functions */
 #if PY_MAJOR_VERSION >= 3
