@@ -1249,12 +1249,10 @@ static int CBRecoveryStandby(void *db_handle, int inst_id)
     Assert(inst_id == g_instance.attr.attr_storage.dms_attr.instance_id);
     ereport(LOG, (errmsg("[SS reform] Recovery as standby")));
 
-    g_instance.dms_cxt.SSRecoveryInfo.skip_redo_replay = true;
     if (!SSRecoveryNodes()) {
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("Recovery failed in startup first")));
         return GS_ERROR;
     }
-    g_instance.dms_cxt.SSRecoveryInfo.skip_redo_replay = false;
 
     return GS_SUCCESS;
 }
@@ -1263,7 +1261,6 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
 {
     Assert(g_instance.dms_cxt.SSReformerControl.primaryInstId == inst_id ||
         g_instance.dms_cxt.SSReformerControl.primaryInstId == -1);
-    g_instance.dms_cxt.SSRecoveryInfo.skip_redo_replay = false;
     g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
     ereport(LOG, (errmsg("[SS reform] Recovery as primary, will replay xlog from inst:%d",
                          g_instance.dms_cxt.SSReformerControl.primaryInstId)));

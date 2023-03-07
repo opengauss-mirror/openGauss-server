@@ -99,7 +99,7 @@ bool SSRecoveryNodes()
     return result;
 }
 
-bool SSRecoveryApplyDelay(const XLogReaderState *record)
+bool SSRecoveryApplyDelay()
 {
     if (!ENABLE_REFORM) {
         return false;
