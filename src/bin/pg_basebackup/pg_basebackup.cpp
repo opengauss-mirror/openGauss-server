@@ -1154,8 +1154,6 @@ static void BaseBackup(void)
         /* Error message already written in GetConnection() */
         exit(1);
 
-    ClearAndFreePasswd();
-
     /*
      * Run IDENTIFY_SYSTEM so we can get the timeline
      */
@@ -1335,6 +1333,7 @@ static void BaseBackup(void)
         StartLogStreamer((const char *)xlogstart, timeline, sysidentifier);
     }
 
+    ClearAndFreePasswd();
     /* free sysidentifier after use */
     PQfreemem(sysidentifier);
     sysidentifier = NULL;
