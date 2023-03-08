@@ -273,6 +273,7 @@ static int errstate;
 static void CheckPartitionExpr(Node* expr, int* colCount);
 static char* transformIndexOptions(List* list);
 static void setAccessMethod(Constraint *n);
+static char* GetValidUserHostId(char* userName, char* hostId);
 static void CheckHostId(char* hostId);
 static void CheckUserHostIsValid();
 
@@ -1676,23 +1677,24 @@ CreateOptRoleElem:
  *****************************************************************************/
 
 UserId:
-			SCONST '@' SCONST
+			SCONST SET_USER_IDENT
 					{
-						CheckUserHostIsValid();
-						CheckHostId($3);
-						StringInfoData buf;
-						initStringInfo(&buf);
-						appendStringInfoString(&buf, $1);
-						appendStringInfoString(&buf, "@");
-						appendStringInfoString(&buf, $3);
-						$$ = buf.data;
+						$$ = GetValidUserHostId($1, $2);
+					}
+			| SCONST '@' SCONST
+					{
+						$$ = GetValidUserHostId($1, $3);
 					}
 			| SCONST
 					{
 						CheckUserHostIsValid();
 						if (strchr($1,'@'))
-							CheckHostId(strchr($1,'@') + 1);
+							ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("@ can't be allowed in username")));
 						$$ = $1;
+					}
+			| RoleId SET_USER_IDENT
+					{
+						$$ = GetValidUserHostId($1, $2);
 					}
 			| RoleId
 					{
@@ -31306,6 +31308,26 @@ static CharsetCollateOptions* MakeCharsetCollateOptions(CharsetCollateOptions *o
 			break;
 	}
 	return options;
+}
+
+static char* GetValidUserHostId(char* userName, char* hostId)
+{
+	CheckUserHostIsValid();
+	char* userHostId = NULL;
+	if (*hostId == '\'') {
+		userHostId = hostId + 1;
+		hostId[strlen(hostId)-1] = '\0';
+	} else {
+		userHostId = hostId;
+	}
+	if (strcmp("localhost", userHostId) != 0)
+		CheckHostId(userHostId);
+	StringInfoData buf;
+	initStringInfo(&buf);
+	appendStringInfoString(&buf, userName);
+	appendStringInfoString(&buf, "@");
+	appendStringInfoString(&buf, userHostId);
+	return buf.data;
 }
 
 static void CheckHostId(char* hostId)
