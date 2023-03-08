@@ -5896,9 +5896,15 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
      */
     if (stmt->into) {
         if (!stmt->mod_stmt & !stmt->bulk_collect) {
+            if (!DB_IS_CMPT(PG_FORMAT | B_FORMAT) || SELECT_INTO_RETURN_NULL == 0) {
+                stmt->strict = true;
+            }
+        }
+#ifdef ENABLE_MULTIPLE_NODES
+        if (!stmt->mod_stmt & !stmt->bulk_collect) {
             stmt->strict = true;
         }
-
+#endif
         if (stmt->bulk_collect) {
             tcount = 0;
         } else if (stmt->strict || stmt->mod_stmt) {
