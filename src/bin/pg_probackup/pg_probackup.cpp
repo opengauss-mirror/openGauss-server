@@ -531,12 +531,15 @@ static int do_validate_operate()
 
 static int do_actual_operate()
 {
+    int res = 0;
+    pgut_atexit_push(unlink_lock_atexit, NULL);
     switch (backup_subcmd)
     {
         case ADD_INSTANCE_CMD:
             return do_add_instance(&instance_config);
         case DELETE_INSTANCE_CMD:
-            return do_delete_instance();
+            res = do_delete_instance();
+            break;
         case INIT_CMD:
             return do_init();
         case BACKUP_CMD:
@@ -550,14 +553,17 @@ static int do_actual_operate()
                     elog(ERROR, "required parameter not specified: BACKUP_MODE "
                          "(-b, --backup-mode)");
 
-                return do_backup(start_time, set_backup_params, no_validate, no_sync, backup_logs);
+                res = do_backup(start_time, set_backup_params, no_validate, no_sync, backup_logs);
+                break;
             }
         case RESTORE_CMD:
-            return do_restore_or_validate(current.backup_id,
+            res = do_restore_or_validate(current.backup_id,
                             recovery_target_options,
                             restore_params, no_sync);
+            break;
         case VALIDATE_CMD:
-            return do_validate_operate();
+            res = do_validate_operate();
+            break;
         case SHOW_CMD:
             return do_show(instance_name, current.backup_id, show_archive);
         case DELETE_CMD:
@@ -583,10 +589,9 @@ static int do_actual_operate()
     }
 
     on_cleanup();
-    unlink_lock_atexit();
     release_logfile();
 
-    return 0;
+    return res;
 }
 
 static void parse_backup_option_to_params(char *command, char *command_name)
