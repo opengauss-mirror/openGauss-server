@@ -1329,14 +1329,14 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
 
 static int CBFlushCopy(void *db_handle, char *pageid)
 {
-    if (SS_REFORM_REFORMER && !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
-        g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = true;
-        smgrcloseall();
-    }
-
     // only 1) primary restart 2) failover need flush_copy
     if (SS_REFORM_REFORMER && g_instance.dms_cxt.dms_status == DMS_STATUS_IN && !SS_STANDBY_FAILOVER) {
         return GS_SUCCESS;
+    }
+
+    if (SS_REFORM_REFORMER && !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
+        g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = true;
+        smgrcloseall();
     }
 
     BufferTag* tag = (BufferTag*)pageid;
@@ -1476,6 +1476,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
+    g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
     g_instance.dms_cxt.resetSyscache = true;
     if (ss_reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
@@ -1542,6 +1543,7 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSReformInfo.in_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
+    Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     ereport(LOG,
             (errmodule(MOD_DMS),
                 errmsg("[SS reform/SS switchover/SS failover] Reform success, instance:%d is running.",

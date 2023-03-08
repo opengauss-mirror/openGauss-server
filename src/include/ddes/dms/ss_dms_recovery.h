@@ -55,8 +55,7 @@ typedef struct ss_recovery_info {
     bool startup_reform;                // used to judge DB first start, when first reform finshed set false
     bool restart_failover_flag;         // used to indicate do failover when DB start
     bool reform_ready;
-    bool in_failover;      // used to judge this is failover, this tag will combine with failover_triggered later
-    // in failover Scenario,before failover_triggered become true, this node knows itself will become new primary
+    bool in_failover;      // used to detemin failover scenario, especially for the non-promoting node
     bool in_flushcopy;
     bool no_backend_left;
 } ss_recovery_info_t;
