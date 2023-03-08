@@ -690,10 +690,9 @@ static bool check_syscache_threshold_gpc(int* newval, void** extra, GucSource so
        at least 16MB if gpc is on. */
     if (g_instance.attr.attr_common.enable_global_plancache && *newval < 16 * 1024) {
         ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            errmsg("cannot set local_syscache_threshold to %dMB in case gpc is on but not valid."
-                   "Set local_syscache_threshold to 16MB default.",
+            errmsg("cannot set local_syscache_threshold to %dMB in case gpc is on but not valid.",
                    *newval / 1024)));
-        u_sess->attr.attr_memory.local_syscache_threshold = 16 * 1024;
+        return false;
     }
     return true;
 }
