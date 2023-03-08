@@ -9915,7 +9915,6 @@ void StartupXLOG(void)
     }
 
     if (SS_STANDBY_MODE && t_thrd.xlog_cxt.InRecovery == true) {
-        SSRecoveryApplyDelay();
         /* do not need replay anything in SS standby mode */
         ereport(LOG, (errmsg("[SS] Skip redo replay in standby mode")));
         t_thrd.xlog_cxt.InRecovery = false;
