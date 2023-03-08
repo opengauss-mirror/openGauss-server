@@ -361,9 +361,10 @@ int ginPostingListDecodeAllSegmentsToTbm(GinPostingList *ptr, int len, TIDBitmap
 {
     int ndecoded;
     ItemPointer items;
+    TBMHandler tbm_handler = tbm_get_handler(tbm);
 
     items = ginPostingListDecodeAllSegments(ptr, len, &ndecoded);
-    tbm_add_tuples(tbm, items, ndecoded, false);
+    tbm_handler._add_tuples(tbm, items, ndecoded, false, InvalidOid, InvalidBktId);
     pfree(items);
     return ndecoded;
 }

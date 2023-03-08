@@ -489,8 +489,9 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
 
 /* storeRes subroutine for getbitmap case */
 static void storeBitmap(SpGistScanOpaque so, ItemPointer heapPtr, Datum leafValue, bool isnull, bool recheck)
-{
-    tbm_add_tuples(so->tbm, heapPtr, 1, recheck, so->partHeapOid);
+{   
+    TBMHandler tbm_handler = tbm_get_handler(so->tbm);
+    tbm_handler._add_tuples(so->tbm, heapPtr, 1, recheck, so->partHeapOid, InvalidBktId);
     so->ntids++;
 }
 

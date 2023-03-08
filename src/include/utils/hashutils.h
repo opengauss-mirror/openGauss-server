@@ -42,4 +42,10 @@ static inline uint32 murmurhash32(uint32 data)
     return h;
 }
 
+static inline uint32 hash_combine(uint32 a, uint32 b)
+{
+    a ^= b + 0x9e3779b9 + (a << 6) + (a >> 2);
+    return a;
+}
+
 #endif /* HASHUTILS_H */

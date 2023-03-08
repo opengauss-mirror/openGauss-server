@@ -72,6 +72,8 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext TopMemoryContext;
 #define MemoryContextAllocZero(context, size) MemoryContextAllocZeroDebug(context, size, __FILE__, __LINE__)
 #define MemoryContextAllocZeroAligned(context, size) \
     MemoryContextAllocZeroAlignedDebug(context, size, __FILE__, __LINE__)
+#define MemoryContextAllocExtended(context, size, flags) \
+    MemoryContextAllocExtendedDebug(context, size, flags, __FILE__, __LINE__)
 #define MemoryContextStrdup(context, size) MemoryContextStrdupDebug(context, size, __FILE__, __LINE__)
 #define repalloc(pointer, size) repallocDebug(pointer, size, __FILE__, __LINE__)
 #define repalloc_noexcept(pointer, size) repalloc_noexcept_Debug(pointer, size, __FILE__, __LINE__)
@@ -90,6 +92,7 @@ extern void* MemoryContextAllocHugeDebug(MemoryContext context, Size size, const
 extern void* repallocHugeDebug(void* pointer, Size size, const char* file, int line);
 extern void* MemoryContextAllocZeroDebug(MemoryContext context, Size size, const char* file, int line);
 extern void* MemoryContextAllocZeroAlignedDebug(MemoryContext context, Size size, const char* file, int line);
+extern void* MemoryContextAllocExtendedDebug(MemoryContext context, Size size, int flags, const char* file, int line);
 extern char* MemoryContextStrdupDebug(MemoryContext context, const char* string, const char* file, int line);
 extern void* MemoryContextMemalignAllocDebug(MemoryContext context, Size align, Size size, const char* file, int line);
 extern void MemoryContextMemalignFree(MemoryContext context, void* pointer);

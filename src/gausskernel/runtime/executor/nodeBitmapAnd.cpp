@@ -112,8 +112,10 @@ Node* MultiExecBitmapAnd(BitmapAndState* node)
      */
     for (i = 0; i < nplans; i++) {
         PlanState* subnode = bitmapplans[i];
-        subnode->hbktScanSlot.currSlot = node->ps.hbktScanSlot.currSlot;
         TIDBitmap* subresult = NULL;
+        TBMHandler tbm_handler;
+
+        subnode->hbktScanSlot.currSlot = node->ps.hbktScanSlot.currSlot;
 
         subresult = (TIDBitmap*)MultiExecProcNode(subnode);
         if (subresult == NULL || !IsA(subresult, TIDBitmap))
@@ -125,6 +127,8 @@ Node* MultiExecBitmapAnd(BitmapAndState* node)
         if (result == NULL) {
             result = subresult; /* first subplan */
         } else {
+            /* get tbm handlers */
+            tbm_handler = tbm_get_handler(result);
             /*
              * If the global tbm intersect with non-global tbm,
              * set the final result to non-global tbm.
@@ -137,7 +141,7 @@ Node* MultiExecBitmapAnd(BitmapAndState* node)
                 tbm_set_global(result, false);
             }
 
-            tbm_intersect(result, subresult);
+            tbm_handler._intersect(result, subresult);
             tbm_free(subresult);
         }
 

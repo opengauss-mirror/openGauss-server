@@ -178,10 +178,11 @@ int GinDataLeafPageGetItemsToTbm(Page page, TIDBitmap *tbm)
 
         nitems = ginPostingListDecodeAllSegmentsToTbm(segment, len, tbm);
     } else {
+        TBMHandler tbm_handler = tbm_get_handler(tbm);
         uncompressed = dataLeafPageGetUncompressed(page, &nitems);
 
         if (nitems > 0)
-            tbm_add_tuples(tbm, uncompressed, nitems, false);
+            tbm_handler._add_tuples(tbm, uncompressed, nitems, false, InvalidOid, InvalidBktId);
     }
 
     return nitems;
