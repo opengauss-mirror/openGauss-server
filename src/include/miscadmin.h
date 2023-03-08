@@ -178,7 +178,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_PGFORMAT_SUBSTR 8388608
 #define OPT_TRUNC_NUMERIC_TAIL_ZERO 16777216
 #define OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN 33554432
-#define OPT_MAX 26
+#define OPT_SELECT_INTO_RETURN_NULL 67108864
+#define OPT_MAX 27
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -217,6 +218,8 @@ extern bool contain_backend_version(uint32 version_number);
 
 #define PLSQL_COMPILE_FOR_LOOP (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_FOR_LOOP)
 #define PLSQL_COMPILE_OUTPARAM (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_OUTPARAM)
+
+#define SELECT_INTO_RETURN_NULL (u_sess->utils_cxt.behavior_compat_flags & OPT_SELECT_INTO_RETURN_NULL)
 
 /* define database compatibility Attribute */
 typedef struct {
