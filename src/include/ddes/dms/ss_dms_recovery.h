@@ -30,7 +30,6 @@
 
 #define RECOVERY_WAIT_TIME 10000
 #define SSFAILOVER_TRIGGER (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.failover_triggered == true)
-#define SSSKIP_REDO_REPLAY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.skip_redo_replay == true)
 #define SS_BEFORE_RECOVERY (ENABLE_DMS && g_instance.dms_cxt.SSReformInfo.in_reform == true \
                             && g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag == true)
 #define SS_IN_FAILOVER (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_failover == true)
@@ -68,7 +67,7 @@ extern int SSGetPrimaryInstId();
 extern void SSSavePrimaryInstId(int id);
 extern void SSReadControlFile(int id, bool updateDmsCtx = false);
 extern void SSWriteReformerControlPages(void);
-extern bool SSRecoveryApplyDelay(const XLogReaderState *record);
+extern bool SSRecoveryApplyDelay();
 extern void SShandle_promote_signal();
 extern void SSTriggerFailover();
 extern void ss_failover_dw_init();

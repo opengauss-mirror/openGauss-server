@@ -9912,7 +9912,7 @@ void StartupXLOG(void)
         }
     }
 
-    if (SSSKIP_REDO_REPLAY && t_thrd.xlog_cxt.InRecovery == true) {
+    if (SS_STANDBY_MODE && t_thrd.xlog_cxt.InRecovery == true) {
         /* do not need replay anything in SS standby mode */
         ereport(LOG, (errmsg("[SS] Skip redo replay in standby mode")));
         t_thrd.xlog_cxt.InRecovery = false;
@@ -10324,7 +10324,7 @@ void StartupXLOG(void)
                 CountRedoTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_2]);
 #endif
                 
-                if (ENABLE_DMS && !SS_PERFORMING_SWITCHOVER && SSRecoveryApplyDelay(xlogreader)) {
+                if (ENABLE_DMS && !SS_PERFORMING_SWITCHOVER && SSRecoveryApplyDelay()) {
                     if (xlogctl->recoveryPause) {
                         recoveryPausesHere();
                     }
