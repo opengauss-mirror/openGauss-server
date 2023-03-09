@@ -496,15 +496,6 @@ void BufValidateDrc(BufferDesc *buf_desc)
 
 int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
 {
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    Assert(buf_ctrl != NULL);
-    Assert(buf_ctrl->is_edp != 1);
-    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
-
-    if (buf_ctrl->lock_mode == (unsigned char)DMS_LOCK_NULL) {
-        return DMS_SUCCESS;
-    }
-
 #ifdef USE_ASSERT_CHECKING
     if (IsSegmentPhysicalRelNode(buf_desc->tag.rnode)) {
         SegNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
@@ -513,6 +504,10 @@ int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
     }
 #endif
 
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    Assert(buf_ctrl != NULL);
+    Assert(buf_ctrl->is_edp != 1);
+    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
     bool is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;

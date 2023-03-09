@@ -1034,6 +1034,31 @@ static void CBSetDmsStatus(void *db_handle, int dms_status)
     g_instance.dms_cxt.dms_status = (dms_status_t)dms_status;
 }
 
+static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint32 buf_state)
+{
+    bool ret = false;
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    if ((buf_state & BM_VALID) && (buf_ctrl->lock_mode != (unsigned char)DMS_LOCK_NULL)) {
+        ret = true;
+    } else if ((buf_state & BM_TAG_VALID) && (buf_ctrl->lock_mode != (unsigned char)DMS_LOCK_NULL)) {
+        if (LWLockConditionalAcquire(buf_desc->io_in_progress_lock, LW_SHARED)) {
+            ret = true;
+        } else {
+            /*
+             * In the condition of (Phase1)readbuffer_common->(Phase2)dms_request_page->(Phase3)seg_read->(Phase4)lock
+             * seg_head buffer, and stuck in Phase4 as reform happened. It will block the request of data pase as the
+             * lock mode of dms_buf_ctrl was already set to DMS_LOCK_EXCLUSIVE and IO is still in process.
+             * In order to get rid of this dilemma, we force set the lock mode back to null and don't rebuild this
+             * page. The stucked process will request the page again when it add content lock and the reformer will
+             * become owner when it request the page.
+             */
+            buf_ctrl->lock_mode = DMS_LOCK_NULL;
+        }
+    }
+
+    return ret;
+}
+
 static int32 CBDrcBufRebuild(void *db_handle)
 {
     /* Load Control File */
@@ -1044,12 +1069,18 @@ static int32 CBDrcBufRebuild(void *db_handle)
     for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         buf_state = LockBufHdr(buf_desc);
-        if ((buf_state & BM_VALID) || (buf_state & BM_TAG_VALID)) {
+        if (SSCheckBufferIfCanGoRebuild(buf_desc, buf_state)) {
             int ret = CheckBuf4Rebuild(buf_desc);
             if (ret != DMS_SUCCESS) {
+                if (LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
+                    LWLockRelease(buf_desc->io_in_progress_lock);
+                }
                 UnlockBufHdr(buf_desc, buf_state);
                 return ret;
             }
+        }
+        if (LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
+            LWLockRelease(buf_desc->io_in_progress_lock);
         }
         UnlockBufHdr(buf_desc, buf_state);
     }
