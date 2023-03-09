@@ -30,7 +30,7 @@
 #include "utils/elf_parser.h"
 #include <cxxabi.h>
 
-#define MAX_LEN_KEY 20
+#define MAX_LEN_KEY 30
 #define GS_STACK_HASHTBL "stack hash table"
 
 const int FINISH_STACK = 2;
@@ -261,8 +261,11 @@ bool find_symbol_entry(const char *filename, HTAB *gs_stack_hashtbl, GsStackEntr
 
     char* base_name = basename((char*)filename);
     key_gs_stack.length_name = strlen(base_name);
-    n_ret = sprintf_s(key_gs_stack.elfname, MAX_LEN_KEY, "%s", base_name);
-    securec_check_ss(n_ret, "\0", "\0");
+    n_ret = snprintf_s(key_gs_stack.elfname, MAX_LEN_KEY, MAX_LEN_KEY - 1, "%s", base_name);
+    if (n_ret < 0) {
+        /* if file name longer than keysize, we just choose first keysize byte from filename as key. */
+        ereport(LOG, (errmsg("elf name %s is too long.", base_name)));
+    }
 
     *entry = (GsStackEntry *)hash_search(gs_stack_hashtbl, (const void*)(&key_gs_stack),
         HASH_ENTER, &found);
@@ -421,28 +424,37 @@ void get_stack_according_to_tid(ThreadId tid,         StringInfoData* call_stack
         return;
     }
     (void)LWLockAcquire(GsStackLock, LW_EXCLUSIVE);
-    init_backtrace_info();
+    PG_TRY();
+    {
+        init_backtrace_info();
 
-    signal_child(tid, SIGURG, -1);
-    for (i = 0; i < MAX_WAIT; i++) {
-        if (ready_to_get_backtrace()) {
-            break;
+        signal_child(tid, SIGURG, -1);
+        for (i = 0; i < MAX_WAIT; i++) {
+            if (ready_to_get_backtrace()) {
+                break;
+            }
+            pg_usleep(US_PER_WAIT);
         }
-        pg_usleep(US_PER_WAIT);
+        ereport(LOG, (errmsg("wait %d times.", i)));
+        if (i == MAX_WAIT) {
+            ereport(WARNING,
+                (errmodule(MOD_GSSTACK),
+                 errcode(ERRCODE_INVALID_STATUS),
+                 (errmsg("can not get backtrace for thread %lu.", tid),
+                  errdetail("This thread maybe finished,"
+                      "or the signal handler of this thread had not been registed."))));
+            appendStringInfo(call_stack, "thread %lu not available\n", tid);
+        } else {
+            get_stack(call_stack);
+        }
+        finish_backtrace();
     }
-    ereport(LOG, (errmsg("wait %d times.", i)));
-    if (i == MAX_WAIT) {
-        ereport(WARNING,
-            (errmodule(MOD_GSSTACK),
-             errcode(ERRCODE_INVALID_STATUS),
-             (errmsg("can not get backtrace for thread %lu.", tid),
-              errdetail("This thread maybe finished, or the signal handler of this thread had not been registed."))));
-        appendStringInfo(call_stack, "thread %lu not available\n", tid);
-    } else {
-        get_stack(call_stack);
+    PG_CATCH();
+    {
+        LWLockRelease(GsStackLock);
+        PG_RE_THROW();
     }
-
-    finish_backtrace();
+    PG_END_TRY();
     LWLockRelease(GsStackLock);
 }
 

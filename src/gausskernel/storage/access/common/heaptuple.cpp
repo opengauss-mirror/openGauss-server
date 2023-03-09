@@ -292,11 +292,13 @@ bool heap_attisnull_impl(HeapTuple tup, int attnum, TupleDesc tupDesc)
     return false;
 }
 
-bool heap_attisnull(HeapTuple tup, int attnum, TupleDesc tupDesc) {
+bool heap_attisnull(HeapTuple tup, int attnum, TupleDesc tupDesc)
+{
     return heap_attisnull_impl(tup, attnum, tupDesc);
 }
 
-bool heapam_attisnull(Tuple tup, int attnum, TupleDesc tuple_desc) {
+bool heapam_attisnull(Tuple tup, int attnum, TupleDesc tuple_desc)
+{
     return heap_attisnull_impl((HeapTuple)tup, attnum, tuple_desc);
 }
 
@@ -552,8 +554,7 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
  * has already determined that the attnum refers to a system attribute.
  * ----------------
  */
-static FORCE_INLINE 
-Datum heap_getsysattr_impl(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull)
+static FORCE_INLINE Datum heap_getsysattr_impl(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull)
 {
     Datum result;
 
@@ -610,11 +611,13 @@ Datum heap_getsysattr_impl(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool 
     return result;
 }
 
-Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull) {
+Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull)
+{
     return heap_getsysattr_impl(tup, attnum, tupleDesc, isnull);
 }
 
-Datum heapam_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool* isnull, Buffer buff) {
+Datum heapam_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool *isnull, Buffer buff)
+{
     return heap_getsysattr_impl((HeapTuple)tup, attnum, tuple_desc, isnull);
 }
 
@@ -704,11 +707,13 @@ void heap_copytuple_with_tuple(HeapTuple src, HeapTuple dest)
     securec_check(rc, "\0", "\0");
 }
 
-HeapTuple heap_copytuple(HeapTuple tuple) {
+HeapTuple heap_copytuple(HeapTuple tuple)
+{
     return heap_copytuple_impl(tuple);
 }
 
-Tuple heapam_copytuple(Tuple tuple) {
+Tuple heapam_copytuple(Tuple tuple)
+{
     Assert(TUPLE_IS_HEAP_TUPLE(HeapTuple(tuple)));
     return heap_copytuple((HeapTuple)tuple);
 }
@@ -733,10 +738,10 @@ HeapTuple heap_form_tuple_impl(TupleDesc tupleDescriptor, Datum *values, bool *i
     int i;
 
     if (numberOfAttributes > MaxTupleAttributeNumber) {
-        ereport(ERROR,
-                (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                 errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
-                        MaxTupleAttributeNumber, GetTableAmType(tupleDescriptor->td_tam_ops), tupleDescriptor->tdtypeid)));
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                        errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)",
+                               numberOfAttributes, MaxTupleAttributeNumber, GetTableAmType(tupleDescriptor->td_tam_ops),
+                               tupleDescriptor->tdtypeid)));
     }
 
     /*
@@ -878,9 +883,8 @@ HeapTuple heap_formtuple(TupleDesc tupleDescriptor, Datum *values, const char *n
  *
  * The result is allocated in the current memory context.
  */
-static FORCE_INLINE
-HeapTuple heap_modify_tuple_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *replValues, const bool *replIsnull,
-                            const bool *doReplace)
+static FORCE_INLINE HeapTuple heap_modify_tuple_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *replValues,
+                                                     const bool *replIsnull, const bool *doReplace)
 {
     int numberOfAttributes = tupleDesc->natts;
     int attoff;
@@ -944,11 +948,11 @@ HeapTuple heap_modify_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *replVal
     return heap_modify_tuple_impl(tuple, tupleDesc, replValues, replIsnull, doReplace);
 }
 
-Tuple heapam_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum* repl_values, const bool* repl_isnull, const bool* do_replace)
+Tuple heapam_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *repl_values, const bool *repl_isnull,
+                          const bool *do_replace)
 {
     return (Tuple)heap_modify_tuple_impl((HeapTuple)tuple, tuple_desc, repl_values, repl_isnull, do_replace);
 }
-
 
 /*
  *		heap_modifytuple
@@ -1000,8 +1004,7 @@ HeapTuple heap_modifytuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *replValu
  *		heap_getattr; the loop will become O(N^2) as soon as any
  *		noncacheable attribute offsets are involved.
  */
-static FORCE_INLINE void 
-heap_deform_tuple_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull)
+static FORCE_INLINE void heap_deform_tuple_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull)
 {
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
@@ -2611,10 +2614,10 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
     int i;
 
     if (numberOfAttributes > MaxTupleAttributeNumber) {
-        ereport(ERROR,
-                (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                 errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
-                        MaxTupleAttributeNumber, GetTableAmType(tupleDescriptor->td_tam_ops), tupleDescriptor->tdtypeid)));
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                        errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)",
+                               numberOfAttributes, MaxTupleAttributeNumber, GetTableAmType(tupleDescriptor->td_tam_ops),
+                               tupleDescriptor->tdtypeid)));
     }
 
     /*
@@ -2729,8 +2732,8 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
  *		heap_getattr; the loop will become O(N^2) as soon as any
  *		noncacheable attribute offsets are involved.
  */
-static FORCE_INLINE void 
-heap_deform_cmprs_tuple_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, char *cmprsInfo)
+static FORCE_INLINE void heap_deform_cmprs_tuple_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull,
+                                                      char *cmprsInfo)
 {
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
@@ -2825,9 +2828,8 @@ void heapam_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum* values,
     heap_deform_cmprs_tuple_impl((HeapTuple)tuple, tuple_desc, values, isnull, cmprs_info);
 }
 
-
-static FORCE_INLINE void 
-heap_deform_tuple2_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer)
+static FORCE_INLINE void heap_deform_tuple2_impl(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull,
+                                                 Buffer buffer)
 {
     Assert((tuple != NULL) && (tuple->t_data != NULL));
     if (!HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {

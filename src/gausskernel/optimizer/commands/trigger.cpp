@@ -661,7 +661,6 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
             NULL); /* @hdfs informational constraint */
     }
 
-
     values[Anum_pg_trigger_tgrelid - 1] = ObjectIdGetDatum(RelationGetRelid(rel));
     values[Anum_pg_trigger_tgname - 1] = DirectFunctionCall1(namein, CStringGetDatum(trigname));
     values[Anum_pg_trigger_tgfoid - 1] = ObjectIdGetDatum(funcoid);

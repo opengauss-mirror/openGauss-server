@@ -4729,7 +4729,7 @@ const char* pgstat_get_wait_dms(WaitEventDMS w)
             break;
         case WAIT_EVENT_LATCH_S_REMOTE:
             event_name = "LatchSRemote";
-            break;      
+            break;
         default:
             event_name = "unknown wait event";
             break;

@@ -990,6 +990,7 @@ static void SetupSignal(void)
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
+    (void)gspqsignal(SIGURG, print_stack);
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -2417,7 +2418,7 @@ static void get_wait_events_full_info(StatementStatContext *statement_stat, Stri
             event_idx = virt_event_idx - wait_event_io_event_max_index;
             event_str = pgstat_get_wait_dms(WaitEventDMS(event_idx + PG_WAIT_DMS));
             event_type = STATEMENT_EVENT_TYPE_DMS;
-        }else if (virt_event_idx < wait_event_lock_event_max_index) {
+        } else if (virt_event_idx < wait_event_lock_event_max_index) {
             event_idx = virt_event_idx - wait_event_dms_event_max_index;
             event_str = GetLockNameFromTagType(event_idx);
             event_type = STATEMENT_EVENT_TYPE_LOCK;

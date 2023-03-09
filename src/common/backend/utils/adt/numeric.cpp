@@ -5920,8 +5920,9 @@ static void div_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int 
             idivisor = idivisor * NBASE + var2->digits[1];
             idivisor_weight--;
         }
-        if (var2->sign == NUMERIC_NEG)
+        if (var2->sign == NUMERIC_NEG) {
             idivisor = -idivisor;
+        }
 
         div_var_int(var1, idivisor, idivisor_weight, result, rscale, round);
         return;
@@ -6182,8 +6183,9 @@ static void div_var_fast(NumericVar* var1, NumericVar* var2, NumericVar* result,
             idivisor = idivisor * NBASE + var2->digits[1];
             idivisor_weight--;
         }
-        if (var2->sign == NUMERIC_NEG)
+        if (var2->sign == NUMERIC_NEG) {
             idivisor = -idivisor;
+        }
 
         div_var_int(var1, idivisor, idivisor_weight, result, rscale, round);
         return;
@@ -6451,7 +6453,7 @@ div_var_int(const NumericVar *var, int ival, int ival_weight, NumericVar *result
         res_ndigits++;
 
     res_buf = digitbuf_alloc(res_ndigits + 1);
-    res_buf[0] = 0;				/* spare digit for later rounding */
+    res_buf[0] = 0; /* spare digit for later rounding */
     res_digits = res_buf + 1;
 
     /*
@@ -6465,7 +6467,6 @@ div_var_int(const NumericVar *var, int ival, int ival_weight, NumericVar *result
      * integer if this exceeds UINT_MAX.
      */
     divisor = Abs(ival);
-
     if (divisor <= UINT_MAX / NBASE) {
         /* carry cannot overflow 32 bits */
         uint32		carry = 0;

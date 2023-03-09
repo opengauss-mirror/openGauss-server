@@ -622,3 +622,4 @@ BEGIN
         LANGUAGE 'plpgsql' NOT FENCED;
     END IF;
 END$DO$;
+

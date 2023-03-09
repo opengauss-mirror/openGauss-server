@@ -317,6 +317,36 @@ show events like 'e_';
 show events where job_name='e1';
 drop event if exists e1;
 
+--security check
+drop user if exists event_se_a cascade;
+drop user if exists event_se_b cascade;
+drop user if exists event_se_c cascade;
+drop user if exists event_se_d cascade;
+
+create user event_se_a with MONADMIN password 'event_123';
+create user event_se_b with OPRADMIN password 'event_123';
+create user event_se_c with INDEPENDENT password 'event_123';
+create user event_se_d with SYSADMIN  password 'event_123';
+drop event if exists e;
+create definer=event_se_a event e on schedule at sysdate do select 1;
+create definer=event_se_b event e on schedule at sysdate do select 1;
+create definer=event_se_c event e on schedule at sysdate do select 1;
+create definer=event_se_d event e on schedule at sysdate do select 1;
+drop event if exists e;
+
+create event e on schedule at sysdate disable do select 1;
+alter definer=event_se_a event e;
+alter definer=event_se_b event e;
+alter definer=event_se_c event e;
+alter definer=event_se_d event e;
+drop event if exists e;
+
+\c event_b
+drop user if exists event_se_a cascade;
+drop user if exists event_se_b cascade;
+drop user if exists event_se_c cascade;
+drop user if exists event_se_d cascade;
+
 --test sql help
 
 drop table if exists event_a.a;

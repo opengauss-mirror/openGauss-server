@@ -48,6 +48,15 @@ select * from t into dumpfile '@abs_srcdir@/data/select_into_file.data';
 ERROR:  Result consisted of more than one row
 select * from t limit 1 into dumpfile '@abs_srcdir@/data/select_into_file.data';
 \! cat @abs_srcdir@/data/select_into_file.data
-1c1text1ENUM101DEADBEEF\\xdeadbeef\c regression;
+1c1text1ENUM101DEADBEEF\\xdeadbeefcreate table test_null(a int, b int, c int);
+insert into test_null values(null,null,null);
+select * from test_null;
+ a | b | c 
+---+---+---
+   |   |  
+(1 row)
+
+select * from test_null into dumpfile '@abs_srcdir@/data/select_into_file.data';
+\c regression;
 drop database test_select_into_file;
 \! rm @abs_srcdir@/data/select_into_file.data

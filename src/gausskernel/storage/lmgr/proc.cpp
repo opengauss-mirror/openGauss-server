@@ -250,7 +250,7 @@ int GetThreadPoolStreamProcNum()
 void InitProcGlobal(void)
 {
     PGPROC **procs = NULL;
-    int i, j;
+    int i, j, cmaProcCount;
     uint32 TotalProcs = (uint32)(GLOBAL_ALL_PROCS);
     bool needPalloc = false;
 
@@ -384,7 +384,7 @@ void InitProcGlobal(void)
         ereport(LOG, (errmsg("Get stream thread proc num [%d].", thread_pool_stream_proc_num)));
     }
 
-    for (i = 0; (unsigned int)(i) < TotalProcs; i++) {
+    for (i = 0, cmaProcCount = 0; (unsigned int)(i) < TotalProcs; i++) {
         /* Common initialization for all PGPROCs, regardless of type.
          *
          * Set up per-PGPROC semaphore, latch, and backendLock. Prepared xact
@@ -442,6 +442,10 @@ void InitProcGlobal(void)
              */
             procs[i]->links.next = (SHM_QUEUE*)g_instance.proc_base->cmAgentFreeProcs;
             g_instance.proc_base->cmAgentFreeProcs = procs[i];
+            /* Record all cma proc, just print information if necessary */
+            Assert(cmaProcCount < NUM_CMAGENT_PROCS);
+            g_instance.proc_base->cmAgentAllProcs[cmaProcCount] = procs[i];
+            cmaProcCount++;
         } else if (i < g_instance.shmem_cxt.MaxConnections + thread_pool_stream_proc_num + AUXILIARY_BACKENDS +
                    g_instance.attr.attr_sql.job_queue_processes + 1 +
                    NUM_CMAGENT_PROCS + g_max_worker_processes + NUM_DCF_CALLBACK_PROCS + NUM_DMS_CALLBACK_PROCS) {
@@ -526,46 +530,19 @@ PGPROC *GetFreeProc()
  */
 void PgStatCMAThreadStatus()
 {
-    const char* appName = "cm_agent";
-    MemoryContext oldContext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
-    /* get all threads from global status entries which name is 'cm_agent' */
-    PgBackendStatusNode* result = pgstat_get_backend_status_by_appname(appName, NULL);
-
-    if (result == NULL) {
-        (void)MemoryContextSwitchTo(oldContext);
-        return;
-    }
-
-    PgBackendStatusNode* tempNode = result;
-    tempNode = tempNode->next;
-
-    while (tempNode != NULL) {
-        PgBackendStatus* beentry = tempNode->data;
-        tempNode = tempNode->next;
-        if (beentry == NULL) {
-            continue;
+    StringInfoData callStack;
+    initStringInfo(&callStack);
+    for (int i = 0; i < NUM_CMAGENT_PROCS; i++) {
+        ThreadId pid = g_instance.proc_base->cmAgentAllProcs[i]->pid;
+        if (pid != 0) {
+            resetStringInfo(&callStack);
+            get_stack_according_to_tid(pid, &callStack);
+            ereport(LOG, (errmsg("Print cm_agent thread stack when proc is going to be not available, pid is %lu, "
+                "stack is \n%s",
+                pid, callStack.data)));
         }
-
-        char* wait_status = getThreadWaitStatusDesc(beentry);
-        ereport(LOG, (errmsg("Print cm_agent thread information when proc is going to be not available, node_name<%s>,"
-            " datid<%u>, app_name<%s>, query_id<%lu>, tid<%lu>, lwtid<%d>, parent_sessionid<%lu>, "
-            "thread_level<%d>, wait_status<%s>",
-            g_instance.attr.attr_common.PGXCNodeName,
-            beentry->st_databaseid,
-            beentry->st_appname ? beentry->st_appname : "unnamed thread",
-            beentry->st_queryid,
-            beentry->st_procpid,
-            beentry->st_tid,
-            beentry->st_parent_sessionid,
-            beentry->st_thread_level,
-            wait_status)));
-
-        pfree_ext(wait_status);
     }
-
-    /* Free node list memory */
-    FreeBackendStatusNodeMemory(result);
-    (void)MemoryContextSwitchTo(oldContext);
+    FreeStringInfo(&callStack);
 }
 
 /*
@@ -623,7 +600,7 @@ static void CheckCMAReservedProc()
      */
     if (curCMAProcCount >= (int)procWarningCount) {
         ereport(WARNING, (errmsg("Get free proc from CMA-proc list, proc location is %p."
-            " Current proc count %d is more than threshold %u. Ready to print thread wait status",
+            " Current proc count %d is more than threshold %u. Ready to print thread stack",
             cmaProc, curCMAProcCount, procWarningCount)));
         PgStatCMAThreadStatus();
     }
@@ -813,10 +790,6 @@ void InitProcess(void)
                         (u_sess->libpq_cxt.IsConnFromCmAgent) ? cmaConnNumInfo : "")));
     }
 
-    if (u_sess->libpq_cxt.IsConnFromCmAgent) {
-        CheckCMAReservedProc();
-    }
-
 #ifdef __USE_NUMA
     if (g_instance.shmem_cxt.numaNodeNum > 1) {
         if (!g_instance.numa_cxt.inheritThreadPool) {
@@ -993,6 +966,15 @@ void InitProcess(void)
      * Arrange to clean up at backend exit.
      */
     on_shmem_exit(ProcKill, 0);
+
+    /*
+     * We call this function to check reserved proc and print stack.
+     * Must after register ProcKill, so that ProcKill will release all lwlock and put back proc to
+     * g_instance.proc_base->cmAgentFreeProcs if proc_ext happend.
+     */
+    if (u_sess->libpq_cxt.IsConnFromCmAgent) {
+        CheckCMAReservedProc();
+    }
 
     init_proc_dw_buf();
 

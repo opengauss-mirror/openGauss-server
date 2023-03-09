@@ -25,6 +25,10 @@ select * from t into outfile '@abs_srcdir@/data/select_into_file.data' FIELDS TE
 select * from t into dumpfile '@abs_srcdir@/data/select_into_file.data';
 select * from t limit 1 into dumpfile '@abs_srcdir@/data/select_into_file.data';
 \! cat @abs_srcdir@/data/select_into_file.data
+create table test_null(a int, b int, c int);
+insert into test_null values(null,null,null);
+select * from test_null;
+select * from test_null into dumpfile '@abs_srcdir@/data/select_into_file.data';
 \c regression;
 drop database test_select_into_file;
 \! rm @abs_srcdir@/data/select_into_file.data

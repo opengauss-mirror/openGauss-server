@@ -3514,11 +3514,17 @@ for_control		: for_variable K_IN
                             newp->argquery = read_cursor_args(cursor,
                                                              K_LOOP,
                                                              "LOOP");
+                            TupleDesc tupleDesc = NULL;
+                            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK &&
+                                cursor->cursor_explicit_expr->query != NULL) {
+                                tupleDesc = getCursorTupleDesc(cursor->cursor_explicit_expr, false);
+                            }
 
                             /* create loop's private RECORD variable */
                             newp->rec = plpgsql_build_record($1.name,
                                                             $1.lineno,
-                                                            true);
+                                                            true,
+                                                            tupleDesc);
 
                             $$ = (PLpgSQL_stmt *) newp;
                         }

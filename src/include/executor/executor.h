@@ -193,14 +193,15 @@ extern TupleHashEntry FindTupleHashEntry(
 /*
  * prototypes from functions in execJunk.c
  */
-extern JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, const TableAmRoutine* tam_ops);
-extern void ExecInitJunkAttr(EState* estate, CmdType operation, List* targetlist, ResultRelInfo* result_rel_info);
-extern JunkFilter* ExecInitJunkFilterConversion(List* targetList, TupleDesc cleanTupType, TupleTableSlot* slot);
-extern AttrNumber ExecFindJunkAttribute(JunkFilter* junkfilter, const char* attrName);
-extern AttrNumber ExecFindJunkAttributeInTlist(List* targetlist, const char* attrName);
-extern Datum ExecGetJunkAttribute(TupleTableSlot* slot, AttrNumber attno, bool* isNull);
-extern TupleTableSlot* ExecFilterJunk(JunkFilter* junkfilter, TupleTableSlot* slot);
-extern void ExecSetjunkFilteDescriptor(JunkFilter* junkfilter, TupleDesc tupdesc);
+extern JunkFilter *ExecInitJunkFilter(List *targetList, bool hasoid, TupleTableSlot *slot,
+                                      const TableAmRoutine *tam_ops);
+extern void ExecInitJunkAttr(EState *estate, CmdType operation, List *targetlist, ResultRelInfo *result_rel_info);
+extern JunkFilter *ExecInitJunkFilterConversion(List *targetList, TupleDesc cleanTupType, TupleTableSlot *slot);
+extern AttrNumber ExecFindJunkAttribute(JunkFilter *junkfilter, const char *attrName);
+extern AttrNumber ExecFindJunkAttributeInTlist(List *targetlist, const char *attrName);
+extern Datum ExecGetJunkAttribute(TupleTableSlot *slot, AttrNumber attno, bool *isNull);
+extern TupleTableSlot *ExecFilterJunk(JunkFilter *junkfilter, TupleTableSlot *slot);
+extern void ExecSetjunkFilteDescriptor(JunkFilter *junkfilter, TupleDesc tupdesc);
 
 #ifdef PGXC
 extern List* ExecFindJunkPrimaryKeys(List* targetlist);
@@ -290,17 +291,16 @@ static inline TupleTableSlot *ExecProcNode(PlanState *node)
     node->ps_rownum++;
     return result;
 }
-#else  /*ENABLE_MULTIPLE_NODES*/
+#else  /* ENABLE_MULTIPLE_NODES */
 
 static inline TupleTableSlot *ExecProcNode(PlanState *node)
 {
-    //TODO: FIX ENABLE_MULTIPLE_NODES
     return NULL;
 }
 
-#endif /*ENABLE_MULTIPLE_NODES*/
+#endif /* ENABLE_MULTIPLE_NODES */
 
-#endif /*FRONTEND*/
+#endif /* FRONTEND */
 
 
 /*
@@ -333,17 +333,18 @@ extern bool is_huge_clob(Oid type_oid, bool is_null, Datum value);
 /*
  * prototypes from functions in execTuples.c
  */
-extern void ExecInitResultTupleSlot(EState* estate, PlanState* planstate, const TableAmRoutine* tam_ops = TableAmHeap);
-extern void ExecInitScanTupleSlot(EState* estate, ScanState* scanstate, const TableAmRoutine* tam_ops = TableAmHeap);
-extern TupleTableSlot* ExecInitExtraTupleSlot(EState* estate, const TableAmRoutine* tam_ops = TableAmHeap);
-extern TupleTableSlot* ExecInitNullTupleSlot(EState* estate, TupleDesc tupType);
-extern TupleDesc ExecTypeFromTL(List* targetList, bool hasoid, bool markdropped = false, const TableAmRoutine* tam_ops = TableAmHeap);
-extern TupleDesc ExecCleanTypeFromTL(List* targetList, bool hasoid, const TableAmRoutine* tam_ops = TableAmHeap);
-extern TupleDesc ExecTypeFromExprList(List* exprList, List* namesList, const TableAmRoutine* tam_ops = TableAmHeap);
-extern void UpdateChangedParamSet(PlanState* node, Bitmapset* newchg);
-extern void InitOutputValues(RightRefState* refState, GenericExprState* targetArr[],
-                             Datum* values, bool* isnull, int targetCount, bool* hasExecs);
-extern void SortTargetListAsArray(RightRefState* refState, List* targetList, GenericExprState* targetArr[]);
+extern void ExecInitResultTupleSlot(EState *estate, PlanState *planstate, const TableAmRoutine *tam_ops = TableAmHeap);
+extern void ExecInitScanTupleSlot(EState *estate, ScanState *scanstate, const TableAmRoutine *tam_ops = TableAmHeap);
+extern TupleTableSlot *ExecInitExtraTupleSlot(EState *estate, const TableAmRoutine *tam_ops = TableAmHeap);
+extern TupleTableSlot *ExecInitNullTupleSlot(EState *estate, TupleDesc tupType);
+extern TupleDesc ExecTypeFromTL(List *targetList, bool hasoid, bool markdropped = false,
+                                const TableAmRoutine *tam_ops = TableAmHeap);
+extern TupleDesc ExecCleanTypeFromTL(List *targetList, bool hasoid, const TableAmRoutine *tam_ops = TableAmHeap);
+extern TupleDesc ExecTypeFromExprList(List *exprList, List *namesList, const TableAmRoutine *tam_ops = TableAmHeap);
+extern void UpdateChangedParamSet(PlanState *node, Bitmapset *newchg);
+extern void InitOutputValues(RightRefState *refState, GenericExprState *targetArr[], Datum *values, bool *isnull,
+                             int targetCount, bool *hasExecs);
+extern void SortTargetListAsArray(RightRefState *refState, List *targetList, GenericExprState *targetArr[]);
 
 typedef struct TupOutputState {
     TupleTableSlot* slot;

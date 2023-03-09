@@ -437,7 +437,6 @@ typedef enum en_dms_wait_event {
     DMS_EVT_LATCH_X_REMOTE,
     DMS_EVT_LATCH_S_REMOTE,
 
-
     DMS_EVT_COUNT,
 } dms_wait_event_t;
 

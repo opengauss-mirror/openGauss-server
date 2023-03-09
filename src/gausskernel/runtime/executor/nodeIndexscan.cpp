@@ -89,7 +89,6 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
     // we should change abs_idx_getnext to call IdxScanAm(scan)->idx_getnext and channge .idx_getnext in g_HeapIdxAm to
     // IndexGetnextSlot
     while (true) {
-        
         CHECK_FOR_INTERRUPTS();
 
         IndexScanDesc indexScan = GetIndexScanDesc(scandesc);
@@ -163,7 +162,7 @@ static bool IndexRecheck(IndexScanState* node, TupleTableSlot* slot)
  *		ExecIndexScan(node)
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecIndexScan(PlanState* state)
+static TupleTableSlot* ExecIndexScan(PlanState* state)
 {
     IndexScanState* node = castNode(IndexScanState, state);
     /*

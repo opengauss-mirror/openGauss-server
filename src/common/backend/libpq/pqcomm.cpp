@@ -1049,12 +1049,15 @@ int StreamConnection(pgsocket server_fd, Port* port)
         int opval = 0;
         on = 1;
 
+#ifndef USE_LIBNET
+        /* libnet not support SO_PROTOCOL in lwip */
         socklen_t oplen = sizeof(opval);
         /* CommProxy Support */
         if (comm_getsockopt(port->sock, SOL_SOCKET, SO_PROTOCOL, &opval, &oplen) < 0) {
             ereport(LOG, (errmsg("comm_getsockopt(SO_PROTOCOL) failed: %m")));
             return STATUS_ERROR;
         }
+#endif
 
         /* CommProxy Support */
         if (comm_setsockopt(port->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on)) < 0) {

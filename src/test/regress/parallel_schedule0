@@ -649,6 +649,7 @@ test: holdable_cursor
 test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
 #test: alter_table_001 alter_table_modify_ustore
 test: alter_table_modify_ltt alter_table_modify_gtt
+test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
 
 #test: with
 
@@ -1087,4 +1088,3 @@ test: alter_foreign_schema
 test: slow_sql
 # test user@host
 test: user_host_test
-

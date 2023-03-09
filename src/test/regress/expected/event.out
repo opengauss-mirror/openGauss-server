@@ -845,6 +845,45 @@ show events where job_name='e1';
 (1 row)
 
 drop event if exists e1;
+--security check
+drop user if exists event_se_a cascade;
+NOTICE:  role "event_se_a" does not exist, skipping
+drop user if exists event_se_b cascade;
+NOTICE:  role "event_se_b" does not exist, skipping
+drop user if exists event_se_c cascade;
+NOTICE:  role "event_se_c" does not exist, skipping
+drop user if exists event_se_d cascade;
+NOTICE:  role "event_se_d" does not exist, skipping
+create user event_se_a with MONADMIN password 'event_123';
+create user event_se_b with OPRADMIN password 'event_123';
+create user event_se_c with INDEPENDENT password 'event_123';
+WARNING:  Please carefully use independent user as it need more self-management.
+HINT:  Self-management include logical backup, password manage and so on.
+create user event_se_d with SYSADMIN  password 'event_123';
+drop event if exists e;
+NOTICE:  event "e" is not exists, skipping
+create definer=event_se_a event e on schedule at sysdate do select 1;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+create definer=event_se_b event e on schedule at sysdate do select 1;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+create definer=event_se_c event e on schedule at sysdate do select 1;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+create definer=event_se_d event e on schedule at sysdate do select 1;
+drop event if exists e;
+create event e on schedule at sysdate disable do select 1;
+alter definer=event_se_a event e;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+alter definer=event_se_b event e;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+alter definer=event_se_c event e;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+alter definer=event_se_d event e;
+drop event if exists e;
+\c event_b
+drop user if exists event_se_a cascade;
+drop user if exists event_se_b cascade;
+drop user if exists event_se_c cascade;
+drop user if exists event_se_d cascade;
 --test sql help
 drop table if exists event_a.a;
 NOTICE:  table "a" does not exist, skipping

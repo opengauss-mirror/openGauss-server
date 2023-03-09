@@ -474,15 +474,18 @@ static bool CheckLedgerIndex_walker(Node* node, int* context)
 {
     if (IsA(node, Var)) {
         Var *var = (Var*)node;
-        if (var->varattno == *context)
+        if (var->varattno == *context) {
             return true;
+        }
     }
     if (IsA(node, IndexElem)) {
         IndexElem *elem = (IndexElem *)node;
-        if (elem->name && strcmp(elem->name, "hash") == 0)
+        if (elem->name && strcmp(elem->name, "hash") == 0) {
             return true;
-        if (elem->expr)
+        }
+        if (elem->expr) {
             return CheckLedgerIndex_walker(elem->expr, context);
+        }
 
         return false;
     }
@@ -1802,6 +1805,13 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         heap_close(rel, NoLock);
         ObjectAddressSet(address, RelationRelationId, indexRelationId);
         return address;
+    }
+
+    if (RELATION_IS_PARTITIONED(rel)) {
+        releasePartitionOidList(&partitionOidList);
+    }
+    if (RelationIsSubPartitioned(rel)) {
+        ReleaseSubPartitionOidList(&subPartitionOidList);
     }
 
     /* Roll back any GUC changes executed by index functions. */
@@ -5376,11 +5386,11 @@ static void CheckIndexParamsNumber(IndexStmt* stmt) {
     }
 }
 
-
 static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams)
 {
-    if (!PartExprKeyIsNull(rel, NULL))
+    if (!PartExprKeyIsNull(rel, NULL)) {
         return false;
+    }
     int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
     for (int i = 0; i < partKey->dim1; i++) {
         int2 attNum = partKey->values[i];
