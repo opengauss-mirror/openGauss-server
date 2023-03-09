@@ -1617,5 +1617,31 @@ DROP FUNCTION func_increment_sql_1;
 DROP FUNCTION func_increment_sql_2;
 DROP FUNCTION fun_test_1;
 DROP FUNCTION fun_test_2;
+set behavior_compat_options='select_into_return_null';
+create table test_table_030(id int, name text);
+insert into test_table_030 values(1,'a'),(2,'b');
+CREATE OR REPLACE FUNCTION select_into_null_func(canshu varchar(16))
+returns int
+as $$
+DECLARE test_table_030a int;
+begin
+    SELECT ID into test_table_030a FROM test_table_030 WHERE NAME = canshu;
+    return test_table_030a;
+end; $$ language plpgsql;
+select select_into_null_func('aaa');
+ select_into_null_func 
+-----------------------
+                      
+(1 row)
+
+select select_into_null_func('aaa') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+drop table test_table_030;
+drop function select_into_null_func;
+reset behavior_compat_options;
 \c regression;
 drop database IF EXISTS pl_test_funcion;
