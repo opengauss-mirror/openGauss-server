@@ -204,6 +204,7 @@ extern Const* make_greater_string(const Const* str_const, FmgrInfo* ltproc, Oid 
 extern Datum eqsel(PG_FUNCTION_ARGS);
 extern Datum neqsel(PG_FUNCTION_ARGS);
 extern Datum scalarltsel(PG_FUNCTION_ARGS);
+extern float8 scalarltsel_internal(PlannerInfo* root, Oid opera, List* args, int varRelid);
 extern Datum scalargtsel(PG_FUNCTION_ARGS);
 extern Datum regexeqsel(PG_FUNCTION_ARGS);
 extern Datum icregexeqsel(PG_FUNCTION_ARGS);
@@ -247,6 +248,8 @@ extern Selectivity estimate_hash_bucketsize(
     PlannerInfo* root, Node* hashkey, double nbuckets, Path* inner_path, SpecialJoinInfo* sjinfo, double* distinctnum);
 
 extern Datum btcostestimate(PG_FUNCTION_ARGS);
+extern void btcostestimate_internal(PlannerInfo *root, IndexPath *path, double loop_count, Cost *indexStartupCost,
+                                  Cost *indexTotalCost, Selectivity *indexSelectivity, double *indexCorrelation);
 extern Datum ubtcostestimate(PG_FUNCTION_ARGS);
 extern Datum hashcostestimate(PG_FUNCTION_ARGS);
 extern Datum gistcostestimate(PG_FUNCTION_ARGS);

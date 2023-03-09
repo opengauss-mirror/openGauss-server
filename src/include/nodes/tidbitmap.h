@@ -72,7 +72,7 @@ typedef struct TMBHandler {
 } TBMHandler;
 
 /* function prototypes in nodes/tidbitmap.c */
-extern TIDBitmap* tbm_create(long maxbytes, bool is_global_part = true, bool is_crossbucket =true, bool is_ustore = false);
+extern TIDBitmap* tbm_create(long maxbytes, bool is_global_part = false, bool is_crossbucket = false, bool is_partitioned = false, bool is_ustore = false);
 extern void tbm_free(TIDBitmap* tbm);
 extern long tbm_calculate_entries(double maxbytes, bool complex_key);
 

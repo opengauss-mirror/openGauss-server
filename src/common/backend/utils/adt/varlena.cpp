@@ -255,7 +255,7 @@ char* output_text_to_cstring(const text* t)
         u_sess->utils_cxt.varcharoutput_buffer[0] = '\0';
         result = u_sess->utils_cxt.varcharoutput_buffer;
     }
-    MemCpy(result, VARDATA_ANY(tunpacked), len);
+    memcpy(result, VARDATA_ANY(tunpacked), len);
     result[len] = '\0';
 
     if (tunpacked != t)

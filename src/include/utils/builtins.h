@@ -1001,6 +1001,7 @@ extern char* output_text_to_cstring(const text* t);
 extern char* output_int32_to_cstring(int32 value);
 extern char* output_int64_to_cstring(int64 value);
 extern char* output_int128_to_cstring(int128 value);
+extern char* output_date_out(int32 date);
 extern void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len);
 extern int text_instr_3args(text* textStr, text* textStrToSearch, int32 beginIndex);
 extern int text_instr_4args(text* textStr, text* textStrToSearch, int32 beginIndex, int occurTimes);

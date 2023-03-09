@@ -1800,6 +1800,7 @@ typedef struct ScanState {
     bool isSampleScan;               /* identify is it table sample scan or not. */
     bool runTimePredicatesReady;
     bool is_scan_end; /* @hdfs Mark whether iterator is over or not, if the scan uses informational constraint. */
+    bool isVersionScan;
 
     int currentSlot; /* current iteration position */
     int part_id;

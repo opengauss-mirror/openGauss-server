@@ -1367,6 +1367,12 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum, Sca
             case F_INT84EQ:
                 test = (int64)datum == (int64)(int32)key->sk_argument;
                 break;
+            case F_INT84LE:
+                test = (int64)datum <= (int64)(int32)key->sk_argument;
+                break;
+            case F_INT84GE:
+                test = (int64)datum >= (int64)(int32)key->sk_argument;
+                break;
             case F_INT4EQ:
                 test = (int32)datum == (int32)key->sk_argument;
                 break;
@@ -1376,6 +1382,22 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum, Sca
             case F_INT4LT:
                 test = (int32)datum < (int32)key->sk_argument;
                 break;
+            case F_INT4LE:
+                test = (int32)datum <= (int32)key->sk_argument;
+                break;
+            case F_INT4GE:
+                test = (int32)datum >= (int32)key->sk_argument;
+                break;
+            case F_DATE_LE:
+                test = (int32)datum <= (int32)key->sk_argument;
+                break;
+            case F_DATE_GE:
+                test = (int32)datum >= (int32)key->sk_argument;
+                break;
+            case F_DATE_EQ:
+                test = (int32)datum == (int32)key->sk_argument;
+                break;
+            
             default:
                 test = DatumGetBool(FunctionCall2Coll(&key->sk_func, key->sk_collation, datum, key->sk_argument));
         }

@@ -96,6 +96,7 @@
 #include "utils/selfuncs.h"
 #include "utils/spccache.h"
 #include "utils/tuplesort.h"
+#include "utils/fmgroids.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
@@ -1032,14 +1033,15 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
      * the fraction of main-table tuples we will have to retrieve) and its
      * correlation to the main-table tuple order.
      */
-    OidFunctionCall7(index->amcostestimate,
-        PointerGetDatum(root),
-        PointerGetDatum(path),
-        Float8GetDatum(loop_count),
-        PointerGetDatum(&indexStartupCost),
-        PointerGetDatum(&indexTotalCost),
-        PointerGetDatum(&indexSelectivity),
-        PointerGetDatum(&indexCorrelation));
+    if (index->amcostestimate == F_BTCOSTESTIMATE) {
+        btcostestimate_internal(root, path, loop_count, &indexStartupCost, &indexTotalCost, &indexSelectivity, &indexCorrelation);
+    } else {
+        OidFunctionCall7(index->amcostestimate, PointerGetDatum(root), PointerGetDatum(path),
+                         Float8GetDatum(loop_count), PointerGetDatum(&indexStartupCost),
+                         PointerGetDatum(&indexTotalCost), PointerGetDatum(&indexSelectivity),
+                         PointerGetDatum(&indexCorrelation));
+    }
+
 
     /*
      * Save amcostestimate's results for possible use in bitmap scan planning.

@@ -85,7 +85,8 @@ Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
         /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
         long maxbytes = u_sess->attr.attr_memory.work_mem * 1024L;
         tbm = tbm_create(maxbytes, RelationIsGlobalIndex(node->biss_RelationDesc),
-                         RelationIsCrossBucketIndex(node->biss_RelationDesc), isUstore);
+                         RelationIsCrossBucketIndex(node->biss_RelationDesc),
+                         RelationIsPartitioned(node->biss_RelationDesc), isUstore);
     }
 
     /* Cross-bucket index scan should not switch the index bucket. */
