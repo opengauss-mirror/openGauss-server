@@ -832,6 +832,7 @@
 ./lib/libpagecompression.so*
 ./lib/libdssapi.so
 ./lib/libdms.so
+./lib/libodbc.so*
 
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
