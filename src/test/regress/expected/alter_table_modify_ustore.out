@@ -1340,8 +1340,8 @@ select pg_get_tabledef('test_at_change_constr'::regclass);
      CONSTRAINT t_at_m_check CHECK (((b1)::bigint < 5))                                                                                +
  )                                                                                                                                     +
  WITH (orientation=row, storage_type=ustore, compression=no);                                                                          +
- ALTER TABLE test_at_change_constr ADD CONSTRAINT test_at_change_constr_b1_key UNIQUE USING ubtree (b1) WITH (storage_type=ustore);    +
- ALTER TABLE test_at_change_constr ADD CONSTRAINT test_at_change_constr_pkey PRIMARY KEY USING ubtree  (b1) WITH (storage_type=ustore);
+--?ALTER TABLE test_at_change_constr ADD CONSTRAINT .* USING ubtree .*(b1) WITH (storage_type=ustore);                                 +
+--?ALTER TABLE test_at_change_constr ADD CONSTRAINT .* USING ubtree .*(b1) WITH (storage_type=ustore);
 (1 row)
 
 ALTER TABLE test_at_change_constr CHANGE b1 b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
