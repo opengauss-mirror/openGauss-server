@@ -15,21 +15,27 @@ create user 'test_user_host'@'127.0.%' password 'test123@';
 create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
 set test_user_host = on;
-create user if not exists 'test_user_host@%' password 'test123@';
-alter user 'test_user_host@%' with account lock;
-alter user 'test_user_host@%' password 'test1234@';
-alter user 'test_user_host@%' with account unlock;
-create user 'test_user_host@127.%' password 'test123@';
+create user if not exists 'test_user_host'@'%' password 'test123@';
+alter user 'test_user_host'@'%' with account lock;
+alter user 'test_user_host'@'%' password 'test1234@';
+alter user 'test_user_host'@'%' with account unlock;
+create user 'test_user_host'@'127.%' password 'test123@';
 create user 'test_user_host'@'127.0.0.%' password 'test123@';
 create user 'test_user_host'@'127.0.%' password 'test123@';
 create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
+create user 'test_user_host1@127.0.0.1' password 'test123@';
+create user test_user_host1@127.0.0.1 password 'test123@';
+create user test_user_host1@127.0.0. password 'test123@';
+create user test_user_host2@localhost password 'test123@';
+create user 'test_user_host3'@'localhost' password 'test123@';
+create user test_user_host1@127.0.0.% password 'test123@';
 select usename from pg_user where usename like 'test_user_host%' order by usename;
 create table test1(a int);
-alter table test1 owner to 'test_user_host@%';
-GRANT ALL PRIVILEGES TO 'test_user_host@%';
-REVOKE ALL PRIVILEGES FROM 'test_user_host@%';
-ALTER USER 'test_user_host@%' RENAME TO 'test_user_host@1%';
+alter table test1 owner to 'test_user_host'@'%';
+GRANT ALL PRIVILEGES TO 'test_user_host'@'%';
+REVOKE ALL PRIVILEGES FROM 'test_user_host'@'%';
+ALTER USER 'test_user_host'@'%' RENAME TO 'test_user_host'@'1%';
 CREATE  DEFINER='test_user_host'@'127.0.%' FUNCTION test_func(integer, integer) RETURNS integer SECURITY INVOKER
 AS 'select $1 + $2;'
 LANGUAGE SQL
