@@ -327,10 +327,29 @@ Datum TranslateArg(char *act_name, Node *act_node)
     return result;
 }
 
+void CheckDefinerPriviledge(char *user_name)
+{
+    Oid user_oid = GetSysCacheOid1(AUTHNAME, CStringGetDatum(user_name));
+    int init_user_id = 10;
+    if (user_oid != GetUserId()) {
+        if (g_instance.attr.attr_security.enablePrivilegesSeparate) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                            errmsg("definer_name cannot be specified when PrivilegesSeparate is enabled.")));
+        } else if (user_oid == init_user_id) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                            errmsg("definer_name cannot be specified as the initial user.")));
+        } else if (is_role_independent(user_oid) || isMonitoradmin(user_oid) || isOperatoradmin(user_oid)) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("definer_name cannot be specified as a private user, operator admin, or monitoradmin.")));
+        }
+    }
+}
+
 Datum SetDefinerName(char *def_name, Datum program_name, char** definer_oid)
 {
     Datum curuser = get_priv_user(program_name, CharGetDatum(JOB_INTYPE_PLAIN));
     if (def_name) {
+        CheckDefinerPriviledge(def_name);
         if (!superuser()) {
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                             errmsg("The current user does not have sufficient permissions to specify the definer.")));
@@ -794,6 +813,8 @@ void AlterEventCommand(AlterEventStmt *stmt)
     /* Check if object is visible for current user. */
     check_object_is_visible(ev_name, false);
     if (stmt->def_name) {
+        Value *ev_definer_node = (Value *)stmt->def_name->arg;
+        CheckDefinerPriviledge(ev_definer_node->val.str);
         if (!superuser()) {
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                             errmsg("The current user does not have sufficient permissions to specify the definer.")));

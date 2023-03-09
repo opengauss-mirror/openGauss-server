@@ -86,15 +86,18 @@ TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, const TableAmRoutine* 
  * Tuple type ID information is initially set for an anonymous record type;
  * caller can overwrite this if needed.
  */
-TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, const TableAmRoutine* tam_ops)
+TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute *attrs, const TableAmRoutine *tam_ops)
 {
     TupleDesc desc;
     int i;
+    errno_t rc;
 
     desc = CreateTemplateTupleDesc(natts, hasoid, tam_ops);
 
-    for (i = 0; i < natts; ++i)
-        memcpy(TupleDescAttr(desc, i), attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+    for (i = 0; i < natts; ++i) {
+        rc = memcpy_s(TupleDescAttr(desc, i), ATTRIBUTE_FIXED_PART_SIZE, attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        securec_check(rc, "\0", "\0");
+    }
 
     return desc;
 }
@@ -132,13 +135,15 @@ TupleDesc CreateTupleDescCopy(TupleDesc tupdesc)
 {
     TupleDesc desc;
     int i;
+    errno_t rc;
 
     desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->td_tam_ops);
 
     for (i = 0; i < desc->natts; i++) {
         Form_pg_attribute att = TupleDescAttr(desc, i);
 
-        memcpy(att, &tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        rc = memcpy_s(att, ATTRIBUTE_FIXED_PART_SIZE, &tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        securec_check(rc, "\0", "\0");
         att->attnotnull = false;
         att->atthasdef = false;
     }

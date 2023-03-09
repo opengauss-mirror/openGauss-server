@@ -682,11 +682,12 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
     if (buf_desc->extra->seg_fileno == EXTENT_INVALID) {
         buf_desc->extra->seg_fileno = buf_ctrl->seg_fileno;
         buf_desc->extra->seg_blockno = buf_ctrl->seg_blockno;
-    } else if (buf_desc->extra->seg_fileno != buf_ctrl->seg_fileno || buf_desc->extra->seg_blockno != buf_ctrl->seg_blockno) {
+    } else if (buf_desc->extra->seg_fileno != buf_ctrl->seg_fileno ||
+               buf_desc->extra->seg_blockno != buf_ctrl->seg_blockno) {
         ereport(PANIC, (errmsg("[%u/%u/%u/%d/%d %d-%u] location mismatch, seg_fileno:%d, seg_blockno:%u",
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-            buf_desc->tag.rnode.bucketNode, buf_desc->tag.rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-            buf_desc->extra->seg_fileno, buf_desc->extra->seg_blockno)));
+                               buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                               buf_desc->tag.rnode.bucketNode, buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
+                               buf_desc->tag.blockNum, buf_desc->extra->seg_fileno, buf_desc->extra->seg_blockno)));
     }
 
     /* page content is not valid */
@@ -1327,7 +1328,6 @@ static int CBFlushCopy(void *db_handle, char *pageid)
     LockBuffer(buffer, BUFFER_LOCK_SHARE);
     BufferDesc* buf_desc = GetBufferDescriptor(buffer - 1);
     XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
-
     if (XLByteLT(g_instance.dms_cxt.ckptRedo, pagelsn)) {
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
         buf_ctrl->state |= BUF_DIRTY_NEED_FLUSH;

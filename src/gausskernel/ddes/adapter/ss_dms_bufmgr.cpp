@@ -221,10 +221,11 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
         SMGR_READ_STATUS rdStatus;
         if (pblk != NULL) {
             rdStatus = SmgrNetPageCheckRead(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, pblk->relNode,
-                            buf_desc->tag.forkNum, pblk->block, (char *)temp_buf);
+                                            buf_desc->tag.forkNum, pblk->block, (char *)temp_buf);
         } else if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
             rdStatus = SmgrNetPageCheckRead(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
-                            buf_desc->extra->seg_fileno, buf_desc->tag.forkNum, buf_desc->extra->seg_blockno, (char *)temp_buf);
+                                            buf_desc->extra->seg_fileno, buf_desc->tag.forkNum,
+                                            buf_desc->extra->seg_blockno, (char *)temp_buf);
         } else {
             rdStatus = smgrread(smgr, buf_desc->tag.forkNum, buf_desc->tag.blockNum, (char *)temp_buf);
         }

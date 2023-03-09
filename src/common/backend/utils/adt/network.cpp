@@ -73,7 +73,7 @@ static int ip_addrsize(inet* inetptr)
 static inet* network_in(char* src, bool is_cidr, bool can_ignore = false)
 {
     int bits;
-    inet* dst = (inet*)palloc0(sizeof(inet));;
+    inet *dst = (inet *)palloc0(sizeof(inet));
     bool should_reset_base = false;
     int level = can_ignore ? WARNING : ERROR;
 
@@ -97,7 +97,6 @@ static inet* network_in(char* src, bool is_cidr, bool can_ignore = false)
         
         should_reset_base = true;
     }
-
 
     /*
      * Error check: CIDR values must not have any bits set beyond the masklen.

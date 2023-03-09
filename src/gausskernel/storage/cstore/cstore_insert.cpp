@@ -2032,6 +2032,7 @@ void CStoreInsert::InitIndexInsertArg(Relation heap_rel, const int* key_map, int
 {
     /* plus TID system attribute */
     int nkeys_plus_tid = nkeys + 1;
+    errno_t rc;
 
     struct tupleDesc *index_tupdesc = CreateTemplateTupleDesc(nkeys_plus_tid, false);
 
@@ -2046,13 +2047,16 @@ void CStoreInsert::InitIndexInsertArg(Relation heap_rel, const int* key_map, int
 
     /* set attribute point exlcuding TID field */
     for (int i = 0; i < nkeys; ++i) {
-        memcpy(&index_tupdesc->attrs[i], &heap_rel->rd_att->attrs[key_map[i]], ATTRIBUTE_FIXED_PART_SIZE);
+        rc = memcpy_s(&index_tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &heap_rel->rd_att->attrs[key_map[i]],
+                      ATTRIBUTE_FIXED_PART_SIZE);
+        securec_check(rc, "\0", "\0");
     }
 
     /* set TID attribute */
     FormData_pg_attribute tid_attr;
     init_tid_attinfo(&tid_attr);
-    memcpy(&index_tupdesc->attrs[nkeys], &tid_attr, ATTRIBUTE_FIXED_PART_SIZE);
+    rc = memcpy_s(&index_tupdesc->attrs[nkeys], ATTRIBUTE_FIXED_PART_SIZE, &tid_attr, ATTRIBUTE_FIXED_PART_SIZE);
+    securec_check(rc, "\0", "\0");
 
     args.es_result_relations = NULL;
     /* psort index will use tuple sort */

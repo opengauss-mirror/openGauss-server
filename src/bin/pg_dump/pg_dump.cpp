@@ -21939,7 +21939,8 @@ static void dumpEvent(Archive *fout, EventInfo *einfo)
     if (einfo->evdefiner) {
         appendPQExpBuffer(query, "definer=%s ", einfo->evdefiner);
     }
-    appendPQExpBuffer(query, "EVENT %s.%s ON SCHEDULE ", fmtId(einfo->nspname), fmtId(einfo->evname));
+    appendPQExpBuffer(query, "EVENT %s.", fmtId(einfo->nspname));
+    appendPQExpBuffer(query, "%s ON SCHEDULE ", fmtId(einfo->evname));
     if (strcmp(einfo->intervaltime, "null") != 0) {
         int interval_len = 10;
         char* begin_pos = einfo->intervaltime + interval_len;
@@ -22005,6 +22006,7 @@ static void dumpEvent(Archive *fout, EventInfo *einfo)
         NULL,
         NULL);
     destroyPQExpBuffer(query);
+    destroyPQExpBuffer(delqry);
 }
 /*
  * dumpRlsPolicy

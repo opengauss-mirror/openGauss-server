@@ -271,10 +271,10 @@ struct ParseState {
                               */
     List* p_updateRangeVars; /* For multiple-update, use relationClase to generate RangeVar list. */
 
-    RightRefState* rightRefState; 
+    RightRefState* rightRefState;
 
     /*
-     * whether to record the columns referenced by the ORDER BY statement 
+     * whether to record the columns referenced by the ORDER BY statement
      * when transforming the SortClause.
      */
     bool shouldCheckOrderbyCol;

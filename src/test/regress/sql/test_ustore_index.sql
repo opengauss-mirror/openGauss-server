@@ -259,3 +259,32 @@ select /*+ indexscan(t) */ * from t where a = 1;
 
 set ustore_attr="index_trace_level=no;enable_log_tuple=off";
 drop table t;
+
+-- test ustore querying with bitmapindexscan when updated in the same transaction
+set enable_indexscan to off;
+set enable_indexonlyscan to off;
+set enable_seqscan to off;
+set enable_bitmapscan to on;
+
+drop table if exists test;
+create table test(a int);
+create index test_idx on test(a);
+insert into test values(2);
+insert into test values(2);
+insert into test values(1);
+insert into test values(1);
+
+begin;
+declare c1 cursor for select a from test where a = 2;
+update test set a = 2;
+fetch next from c1;
+fetch next from c1;
+fetch next from c1;
+fetch next from c1;
+rollback;
+
+drop table if exists test;
+reset enable_indexscan;
+reset enable_indexonlyscan;
+reset enable_seqscan;
+reset enable_bitmapscan;

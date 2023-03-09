@@ -128,9 +128,7 @@
 #define TTS_FLAG_SLOW (1 << 4)
 #define TTS_SLOW(slot) (((slot)->tts_flags & TTS_FLAG_SLOW) != 0)
 
-/* 
- * openGauss flags
- */
+/* openGauss flags */
 
 /* should pfree should pfree tts_dataRow? */
 #define TTS_FLAG_SHOULDFREE_ROW (1 << 12)
@@ -165,7 +163,6 @@ typedef struct TupleTableSlot {
     Oid tts_xcnodeoid;                   /* Oid of node from where the datarow is fetched */
     MemoryContext tts_per_tuple_mcxt;
 #endif
-
 } TupleTableSlot;
 
 #define TTS_HAS_PHYSICAL_TUPLE(slot) ((slot)->tts_tuple != NULL && (slot)->tts_tuple != &((slot)->tts_minhdr))

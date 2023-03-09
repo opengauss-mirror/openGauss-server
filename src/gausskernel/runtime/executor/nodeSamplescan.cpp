@@ -118,10 +118,8 @@ TupleTableSlot* HeapSeqSampleNext(SeqScanState* node)
     TupleTableSlot* slot = node->ss_ScanTupleSlot;
     node->ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops = node->ss_currentRelation->rd_tam_ops;
     HeapTuple tuple = SampleFetchNextTuple(node);
-    return ExecMakeTupleSlot(tuple, 
-                            GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation), 
-                            slot, 
-                            node->ss_currentRelation->rd_tam_ops);
+    return ExecMakeTupleSlot(tuple, GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation), slot,
+                             node->ss_currentRelation->rd_tam_ops);
 }
 
 TupleTableSlot* UHeapSeqSampleNext(SeqScanState* node)

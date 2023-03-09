@@ -575,9 +575,8 @@ bool findPartialMatch(TupleHashTable hashtable, TupleTableSlot* slot, FmgrInfo* 
 
     InitTupleHashIterator(hashtable, &hashiter);
     while ((entry = ScanTupleHashTable(&hashiter)) != NULL) {
-
         CHECK_FOR_INTERRUPTS();
-        
+
         ExecStoreMinimalTuple(entry->firstTuple, hashtable->tableslot, false);
         if (!execTuplesUnequal(slot, hashtable->tableslot, num_cols, key_col_idx, eqfunctions,
                 hashtable->tempcxt, hashtable->tab_collations)) {

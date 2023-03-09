@@ -331,6 +331,7 @@ Datum ubtgetbitmap(PG_FUNCTION_ARGS)
                 }
 
                 /* Save tuple ID, and continue scanning */
+                scan->xs_recheck_itup = so->currPos.items[so->currPos.itemIndex].needRecheck;
                 heapTid = &so->currPos.items[so->currPos.itemIndex].heapTid;
                 currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
                 tbm_handler._add_tuples(tbm, heapTid, 1, scan->xs_recheck_itup, currPartOid, InvalidBktId);

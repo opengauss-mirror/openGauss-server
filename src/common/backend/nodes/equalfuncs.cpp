@@ -4435,6 +4435,7 @@ bool equal(const void* a, const void* b)
             retval = _equalIndexHintRelationData((IndexHintRelationData *)a, (IndexHintRelationData *)b);
             break;
 
+
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(a))));

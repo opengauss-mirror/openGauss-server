@@ -468,14 +468,15 @@ void MarkSegPageRedoChildPageDirty(RedoBufferInfo *bufferinfo)
             mode = PANIC;
 #endif
             const uint32 shiftSz = 32;
-            ereport(mode, (errmsg("extreme_rto segment page not mark dirty:lsn %X/%X, lsn_disk %X/%X, \
+            ereport(mode,
+                    (errmsg("extreme_rto segment page not mark dirty:lsn %X/%X, lsn_disk %X/%X, \
                                   lsn_page %X/%X, page %u/%u/%u %u",
-                                  (uint32)(bufferinfo->lsn >> shiftSz), (uint32)(bufferinfo->lsn),
-                                  (uint32)(bufDesc->extra->lsn_on_disk >> shiftSz), (uint32)(bufDesc->extra->lsn_on_disk),
-                                  (uint32)(PageGetLSN(bufferinfo->pageinfo.page) >> shiftSz),
-                                  (uint32)(PageGetLSN(bufferinfo->pageinfo.page)),
-                                  bufferinfo->blockinfo.rnode.spcNode, bufferinfo->blockinfo.rnode.dbNode,
-                                  bufferinfo->blockinfo.rnode.relNode, bufferinfo->blockinfo.blkno)));
+                            (uint32)(bufferinfo->lsn >> shiftSz), (uint32)(bufferinfo->lsn),
+                            (uint32)(bufDesc->extra->lsn_on_disk >> shiftSz), (uint32)(bufDesc->extra->lsn_on_disk),
+                            (uint32)(PageGetLSN(bufferinfo->pageinfo.page) >> shiftSz),
+                            (uint32)(PageGetLSN(bufferinfo->pageinfo.page)), bufferinfo->blockinfo.rnode.spcNode,
+                            bufferinfo->blockinfo.rnode.dbNode, bufferinfo->blockinfo.rnode.relNode,
+                            bufferinfo->blockinfo.blkno)));
         }
 #ifdef USE_ASSERT_CHECKING
         bufDesc->lsn_dirty = PageGetLSN(bufferinfo->pageinfo.page);

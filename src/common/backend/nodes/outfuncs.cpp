@@ -155,24 +155,24 @@
         }                                      \
     } while (0)
 
-#define WRITE_BASE_TYPE_ARRAY(fldname, size, format)                \
-    do {                                                            \
-        appendStringInfo(str, " :" CppAsString(fldname) " ");       \
-        if (size <= 0) {                                            \
-            appendStringInfo(str, "<>");                            \
-        } else {                                                    \
-            for (int i = 0; i < size; i++) {                        \
-                appendStringInfo(str, format, node->fldname[i]);    \
-            }                                                       \
-        }                                                           \
-    } while(0)
+#define WRITE_BASE_TYPE_ARRAY(fldname, size, format)               \
+    do {                                                           \
+        appendStringInfo(str, " :" CppAsString(fldname) " ");      \
+        if ((size) <= 0) {                                         \
+            appendStringInfo(str, "<>");                           \
+        } else {                                                   \
+            for (int i = 0; i < (size); i++) {                     \
+                appendStringInfo(str, (format), node->fldname[i]); \
+            }                                                      \
+        }                                                          \
+    } while (0)
 
 #define WRITE_NODE_ARRAY(fldname, size)                             \
     do {                                                            \
-        if (node->fldname == nullptr || size <= 0) {                \
+        if (node->fldname == nullptr || (size) <= 0) {              \
             appendStringInfo(str, " :" CppAsString(fldname) " <>"); \
         } else {                                                    \
-            for (int i = 0; i < size; i++) {                        \
+            for (int i = 0; i < (size); i++) {                      \
                 WRITE_NODE_FIELD(fldname[i]);                       \
             }                                                       \
         }                                                           \

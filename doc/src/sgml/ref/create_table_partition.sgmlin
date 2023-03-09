@@ -19,7 +19,7 @@ CREATE TABLE [ IF NOT EXISTS ] partition_table_name
     [, ... ]
 ] )
     [ AUTO_INCREMENT [ = ] value ]
-    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ][ [ DEFAULT ] COLLATE [ = ] collation ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ][ [ DEFAULT ] COLLATE [ = ] default_collation ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]

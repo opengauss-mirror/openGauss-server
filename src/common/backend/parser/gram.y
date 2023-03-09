@@ -218,6 +218,7 @@ static char *pg_strsep(char **stringp, const char *delim);
 static long long get_pid(const char *strsid);
 static Node *MakeAnonyBlockFuncStmt(int flag, const char * str);
 static CharsetCollateOptions* MakeCharsetCollateOptions(CharsetCollateOptions *options, CharsetCollateOptions *option);
+static Node *checkNullNode(Node *n);
 #define  TYPE_LEN     4 /* strlen("TYPE") */
 #define  DATE_LEN     4 /* strlen("DATE") */
 #define  DECLARE_LEN     9 /* strlen(" DECLARE ") */
@@ -9272,9 +9273,10 @@ SnapshotStmt:
 
 				$$ = makeCallFuncStmt(
 					list_make2(makeString("db4ai"), makeString("create_snapshot")),
-					lcons(makeStringConst($4->schemaname, @4), list_make4(makeStringConst($4->relname, @4),
+					lcons(checkNullNode(makeStringConst($4->schemaname, @4)),
+					list_make4(checkNullNode(makeStringConst($4->relname, @4)),
 					makeAArrayExpr(list_make1(make_node_from_scanbuf(@10, yylloc , yyscanner)), @10),
-					makeStringConst($5, @5),makeStringConst($8, @8))));
+					checkNullNode(makeStringConst($5, @5)), checkNullNode(makeStringConst($8, @8)))));
 			}
 			| CREATE OptTemp SNAPSHOT qualified_name OptSnapshotVersion
 /* PGXC_BEGIN */
@@ -9338,8 +9340,11 @@ SnapshotStmt:
 
 				$$ = makeCallFuncStmt(
 					list_make2(makeString("db4ai"), makeString("prepare_snapshot")),
-					lcons(makeStringConst($4->schemaname, @4), list_make4(makeStringConst($4->relname, @4),
-					makeAArrayExpr($13, @13), makeStringConst($5, @5), makeStringConst($10, @10))));
+					lcons(checkNullNode(makeStringConst($4->schemaname, @4)),
+					list_make4(checkNullNode(makeStringConst($4->relname, @4)),
+					makeAArrayExpr($13, @13),
+					checkNullNode(makeStringConst($5, @5)),
+					checkNullNode(makeStringConst($10, @10)))));
 			}
 			| SAMPLE SNAPSHOT qualified_name SnapshotVersion OptSnapshotStratify SnapshotSampleList
 			{
@@ -9358,7 +9363,8 @@ SnapshotStmt:
 				List *stratify = NIL;
 				foreach_cell (c, $5) {
 					ColumnRef *r = (ColumnRef*)lfirst(c);
-					stratify = lappend(stratify, makeStringConst(((Value *)llast(r->fields))->val.str, @5));
+					stratify = lappend(stratify,
+					checkNullNode(makeStringConst(((Value *)llast(r->fields))->val.str, @5)));
 				}
 
 				List *names = NIL, *ratios = NIL, *comments = NIL;
@@ -9372,8 +9378,8 @@ SnapshotStmt:
 
 				$$ = makeCallFuncStmt(
 					list_make2(makeString("db4ai"), makeString("sample_snapshot")),
-					lcons(makeStringConst($3->schemaname, @3),
-					lcons(makeStringConst($3->relname, @3),
+					lcons(checkNullNode(makeStringConst($3->schemaname, @3)),
+					lcons(checkNullNode(makeStringConst($3->relname, @3)),
 					list_make4(makeAArrayExpr(names, -1), makeAArrayExpr(ratios, -1),
 						(stratify == NIL) ? makeNullAConst(-1) : makeAArrayExpr(stratify, @5),
 						makeAArrayExpr(comments, -1)))));
@@ -9394,7 +9400,8 @@ SnapshotStmt:
 
 				$$ = makeCallFuncStmt(
 					list_make2(makeString("db4ai"), makeString("archive_snapshot")),
-					list_make2(makeStringConst($3->schemaname, @3), makeStringConst($3->relname, @3)));
+					list_make2(checkNullNode(makeStringConst($3->schemaname, @3)),
+					checkNullNode(makeStringConst($3->relname, @3))));
 			}
 			| PUBLISH SNAPSHOT qualified_name SnapshotVersion
 			{
@@ -9412,7 +9419,8 @@ SnapshotStmt:
 
 				$$ = makeCallFuncStmt(
 					list_make2(makeString("db4ai"), makeString("publish_snapshot")),
-					list_make2(makeStringConst($3->schemaname, @3), makeStringConst($3->relname, @3)));
+					list_make2(checkNullNode(makeStringConst($3->schemaname, @3)),
+					checkNullNode(makeStringConst($3->relname, @3))));
 			}
 			| PURGE SNAPSHOT qualified_name SnapshotVersion {}
 			{
@@ -9430,7 +9438,8 @@ SnapshotStmt:
 
 				$$ = makeCallFuncStmt(
 					list_make2(makeString("db4ai"), makeString("purge_snapshot")),
-					list_make2(makeStringConst($3->schemaname, @3), makeStringConst($3->relname, @3)));
+					list_make2(checkNullNode(makeStringConst($3->schemaname, @3)),
+					checkNullNode(makeStringConst($3->relname, @3))));
 			}
 		;
 
@@ -31324,6 +31333,19 @@ static void CheckUserHostIsValid()
 	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("user@host is only supported in b database when the test_user_host is on")));
 }
 
+static Node *checkNullNode(Node *n)
+{
+	A_Const *c = (A_Const *)n;
+	A_Const *r = makeNode(A_Const);
+	if (c->val.val.str == NULL || strlen(c->val.val.str) == 0)
+	{
+		r->val.type = T_Null;
+		r->val.val.str = c->val.val.str;
+		r->location = c->location;
+		return (Node *)r;
+	}
+	return n;
+}
 /*
  * Must undefine this stuff before including scan.c, since it has different
  * definitions for these macros.

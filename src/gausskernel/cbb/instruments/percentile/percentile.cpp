@@ -304,6 +304,7 @@ void PercentileSpace::calculatePercentileOfSingleNode(void)
     {
         (void)MemoryContextSwitchTo(oldcxt);
         pfree_ext(sqlRT);
+        LWLockReleaseAll();
         FlushErrorState();
         elog(WARNING, "Percentile job failed");
     }
@@ -323,6 +324,7 @@ void PercentileSpace::calculatePercentileOfMultiNode(void)
         /* free all handles */
         release_pgxc_handles(t_thrd.percentile_cxt.pgxc_all_handles);
         t_thrd.percentile_cxt.pgxc_all_handles = NULL;
+        LWLockReleaseAll();
         FlushErrorState();
         elog(WARNING, "Percentile job failed");
     }

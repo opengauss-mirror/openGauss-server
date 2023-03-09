@@ -2592,8 +2592,8 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLoc
 
     Block tmpBlock = BufHdrGetBlock(buf);
 
-    if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->extra->lsn_on_disk, PageGetLSN(tmpBlock)) && !(*oldFlags & BM_DIRTY) &&
-        RecoveryInProgress()) {
+    if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->extra->lsn_on_disk, PageGetLSN(tmpBlock)) &&
+        !(*oldFlags & BM_DIRTY) && RecoveryInProgress()) {
         int mode = DEBUG1;
 #ifdef USE_ASSERT_CHECKING
         mode = PANIC;
@@ -4767,7 +4767,8 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
             iocb_ptr->data = (void *)bufdesc;
             DSSAioAppendIOCB(aio_cxt, iocb_ptr);
         } else {
-            seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno, bufToWrite, false);
+            seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno, bufToWrite,
+                               false);
         }
     } else {
         SegmentCheck(!IsSegmentFileNode(bufdesc->tag.rnode));

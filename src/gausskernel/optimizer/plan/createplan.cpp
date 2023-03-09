@@ -168,7 +168,7 @@ static BitmapOr* make_bitmap_or(List* bitmapplans);
 static NestLoop* make_nestloop(List* tlist, List* joinclauses, List* otherclauses, List* nestParams, Plan* lefttree,
     Plan* righttree, JoinType jointype, bool inner_unique);
 static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses, Plan* lefttree,
-    Plan* righttree, JoinType jointype, List *hashcollations, bool inner_unique);
+    Plan* righttree, JoinType jointype, bool inner_unique);
 static Hash* make_hash(
     Plan* lefttree, Oid skewTable, AttrNumber skewColumn, bool skewInherit, Oid skewColType, int32 skewColTypmod);
 static MergeJoin* make_mergejoin(List* tlist, List* joinclauses, List* otherclauses, List* mergeclauses,
@@ -4812,7 +4812,6 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
     HashJoin* join_plan = NULL;
     Hash* hash_plan = NULL;
     Relids left_relids = NULL;
-    List *hashcollations = NIL;
 
     /* Sort join qual clauses into best execution order */
     joinclauses = order_qual_clauses(root, best_path->jpath.joinrestrictinfo);
@@ -4888,19 +4887,12 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
         }
     }
 
-    ListCell *lc;
-    foreach(lc, hashclauses)
-    {
-        OpExpr *hclause = lfirst_node(OpExpr, lc);
-        hashcollations = lappend_oid(hashcollations, hclause->inputcollid);
-    }
-
     /*
      * Build the hash node and hash join node.
      */
     hash_plan = make_hash(inner_plan, skewTable, skewColumn, skewInherit, skewColType, skewColTypmod);
     join_plan = make_hashjoin(tlist, joinclauses, otherclauses, hashclauses, outer_plan, (Plan*)hash_plan,
-                              best_path->jpath.jointype, hashcollations, best_path->jpath.inner_unique);
+                              best_path->jpath.jointype, best_path->jpath.inner_unique);
 
     /*
      * @hdfs
@@ -6615,7 +6607,7 @@ HashJoin* create_direct_hashjoin(
     }
 
     hash_plan = (Plan*)make_hash(innerPlan, skewTable, skewColumn, skewInherit, skewColType, skewColTypmod);
-    join_plan = make_hashjoin(tlist, joinClauses, NIL, hashclauses, outerPlan, hash_plan, joinType, NULL, false);
+    join_plan = make_hashjoin(tlist, joinClauses, NIL, hashclauses, outerPlan, hash_plan, joinType, false);
 
     /* estimate the mem_info for join_plan,  refered to the function initial_cost_hashjoin */
     estimate_directHashjoin_Cost(root, hashclauses, outerPlan, hash_plan, join_plan);
@@ -6828,7 +6820,7 @@ Plan* create_direct_righttree(
 }
 
 static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses, Plan* lefttree,
-    Plan* righttree, JoinType jointype, List *hashcollations, bool inner_unique)
+    Plan* righttree, JoinType jointype, bool inner_unique)
 {
     HashJoin* node = makeNode(HashJoin);
     Plan* plan = &node->join.plan;
@@ -6842,7 +6834,6 @@ static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclause
     node->join.jointype = jointype;
     node->join.inner_unique = inner_unique;
     node->join.joinqual = joinclauses;
-    node->hash_collations = hashcollations;
 
     return node;
 }

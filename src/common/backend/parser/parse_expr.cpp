@@ -181,7 +181,7 @@ static Const* BuildColumnBaseValue(Form_pg_attribute attTup)
     if (IsBaseRightRefSupportType(attTup->atttypid)) {
         Datum datum = GetTypeZeroValue(attTup);
         return makeConst(attTup->atttypid,
-                         attTup->atttypmod, 
+                         attTup->atttypmod,
                          attTup->attcollation,
                          attTup->attlen,
                          datum,

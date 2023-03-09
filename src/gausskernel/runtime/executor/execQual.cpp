@@ -630,17 +630,18 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
 
     RightRefState* refState = econtext->rightRefState;
     int index = attnum - 1;
-   if (refState && refState->values && (IS_ENABLE_INSERT_RIGHT_REF(refState) ||
-        (IS_ENABLE_UPSERT_RIGHT_REF(refState) && refState->hasExecs[index] && index < refState->colCnt))) {
+    if (refState && refState->values &&
+        (IS_ENABLE_INSERT_RIGHT_REF(refState) ||
+         (IS_ENABLE_UPSERT_RIGHT_REF(refState) && refState->hasExecs[index] && index < refState->colCnt))) {
         *isNull = refState->isNulls[index];
         return refState->values[index];
     }
 
     if (slot == nullptr) {
-        ereport(ERROR,(errcode(ERRCODE_INVALID_ATTRIBUTE), errmodule(MOD_EXECUTOR),
+        ereport(ERROR, (errcode(ERRCODE_INVALID_ATTRIBUTE), errmodule(MOD_EXECUTOR),
                         errmsg("attribute number %d does not exists.", attnum)));
     }
-    
+
     /*
      * If it's a user attribute, check validity (bogus system attnums will be
      * caught inside table's getattr).  What we have to check for here is the

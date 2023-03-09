@@ -205,7 +205,8 @@ void ExecResetTupleTable(List* tuple_table, /* tuple table */
     }
 }
 
-TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot* slot, const TableAmRoutine* tam_ops)
+TupleTableSlot *ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot *slot,
+                                  const TableAmRoutine *tam_ops)
 {
     if (unlikely(RELATION_CREATE_BUCKET(tableScan->rs_rd))) {
         tableScan = ((HBktTblScanDesc)tableScan)->currBktScan;
@@ -673,8 +674,7 @@ Datum ExecFetchSlotTupleDatum(TupleTableSlot* slot)
  *		to scribble on.
  * --------------------------------
  */
-static FORCE_INLINE
-HeapTuple ExecMaterializeSlot_impl(TupleTableSlot* slot) 
+static FORCE_INLINE HeapTuple ExecMaterializeSlot_impl(TupleTableSlot *slot)
 {
     /*
      * sanity checks
@@ -684,7 +684,6 @@ HeapTuple ExecMaterializeSlot_impl(TupleTableSlot* slot)
 
     return tableam_tslot_materialize(slot);
 }
-
 
 HeapTuple ExecMaterializeSlot(TupleTableSlot* slot)
 {
@@ -1150,10 +1149,11 @@ TupleTableSlot* ExecStoreDataRowTuple(char* msg, size_t len, Oid msgnode_oid, Tu
     slot->tts_flags &= ~TTS_FLAG_EMPTY;
     slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
     slot->tts_flags &= ~TTS_FLAG_SHOULDFREEMIN;
-    if(should_free)
+    if (should_free) {
         slot->tts_flags |= TTS_FLAG_SHOULDFREE_ROW;
-    else
+    } else {
         slot->tts_flags &= ~TTS_FLAG_SHOULDFREE_ROW;
+    }
     slot->tts_tuple = NULL;
     slot->tts_mintuple = NULL;
     slot->tts_dataRow = msg;

@@ -197,8 +197,7 @@ typedef struct {
 
 #define SLAB_SLOT_SIZE 1024
 
-typedef union SlabSlot
-{
+typedef union SlabSlot {
     union SlabSlot *nextfree;
     char buffer[SLAB_SLOT_SIZE];
 } SlabSlot;
@@ -244,13 +243,13 @@ struct Tuplesortstate {
                                 * tuples to return? */
     bool boundUsed;            /* true if we made use of a bounded heap */
     int bound;                 /* if bounded, the maximum number of tuples */
-    bool tuples;			/* Can SortTuple.tuple ever be set? */
+    bool tuples;               /* Can SortTuple.tuple ever be set? */
     int64 availMem;            /* remaining memory available, in bytes */
     int64 allowedMem;          /* total memory allowed, in bytes */
     int maxTapes;              /* number of tapes (Knuth's T) */
     int tapeRange;             /* maxTapes-1 (Knuth's P) */
     MemoryContext sortcontext; /* memory context holding all sort data */
-    MemoryContext tuplecontext;	/* memory context holding tuple data */
+    MemoryContext tuplecontext; /* memory context holding tuple data */
     LogicalTapeSet* tapeset;   /* logtape.c object for tapes in a temp file */
 #ifdef PGXC
     Oid current_xcnode; /* node from where we are got last tuple */
@@ -343,9 +342,9 @@ struct Tuplesortstate {
      */
     bool slabAllocatorUsed;
 
-    char *slabMemoryBegin;	/* beginning of slab memory arena */
-    char *slabMemoryEnd;	/* end of slab memory arena */
-    SlabSlot *slabFreeHead;	/* head of free list */
+    char *slabMemoryBegin;  /* beginning of slab memory arena */
+    char *slabMemoryEnd;    /* end of slab memory arena */
+    SlabSlot *slabFreeHead; /* head of free list */
 
     /*
      * When we return a tuple to the caller in tuplesort_gettuple_XXX, that
@@ -522,17 +521,16 @@ struct Tuplesortstate {
  * Return the given tuple to the slab memory free list, or free it
  * if it was palloc'd.
  */
-#define RELEASE_SLAB_SLOT(state, tuple)             \
-    do {                                            \
-        SlabSlot *buf = (SlabSlot *) tuple;         \
-                                                    \
-        if (IS_SLAB_SLOT((state), buf))             \
-        {                                           \
-            buf->nextfree = (state)->slabFreeHead;  \
-            (state)->slabFreeHead = buf;            \
-        } else                                      \
-            pfree(buf);                             \
-    } while(0)
+#define RELEASE_SLAB_SLOT(state, tuple)            \
+    do {                                           \
+        SlabSlot *buf = (SlabSlot *)(tuple);       \
+                                                   \
+        if (IS_SLAB_SLOT((state), buf)) {          \
+            buf->nextfree = (state)->slabFreeHead; \
+            (state)->slabFreeHead = buf;           \
+        } else                                     \
+            pfree(buf);                            \
+    } while (0)
 
 #define COMPARETUP(state, a, b) ((*(state)->comparetup)(a, b, state))
 #define COPYTUP(state, stup, tup) ((*(state)->copytup)(state, stup, tup))
@@ -553,9 +551,9 @@ static bool LACKMEM(Tuplesortstate* state)
 {
     int64 usedMem = state->allowedMem - state->availMem;
 
-    if ((state->availMem < 0 && !state->slabAllocatorUsed) || 
-        gs_sysmemory_busy(usedMem * state->dop, true))
+    if ((state->availMem < 0 && !state->slabAllocatorUsed) || gs_sysmemory_busy(usedMem * state->dop, true)) {
         return true;
+    }
 
     return false;
 }
@@ -811,7 +809,7 @@ static Tuplesortstate* tuplesort_begin_common(int64 workMem, bool randomAccess, 
                                          ALLOCSET_DEFAULT_MINSIZE,
                                          ALLOCSET_DEFAULT_INITSIZE,
                                          ALLOCSET_DEFAULT_MAXSIZE,
-                                         STANDARD_CONTEXT, 
+                                         STANDARD_CONTEXT,
                                          workMem * 1024L);
 
     /*
@@ -2456,8 +2454,7 @@ static void selectnewtape(Tuplesortstate* state)
 /*
  * Initialize the slab allocation arena, for the given number of slots.
  */
-static void
-init_slab_allocator(Tuplesortstate *state, int numSlots)
+static void init_slab_allocator(Tuplesortstate *state, int numSlots)
 {
     if (numSlots > 0) {
         char *p;
@@ -2490,13 +2487,17 @@ init_slab_allocator(Tuplesortstate *state, int numSlots)
  * numInputTapes tapes, and one tape is used for output (unless we do an
  * on-the-fly final merge, in which case we don't have an output tape).
  */
-static void
-init_tape_buffers(Tuplesortstate *state, int numInputTapes)
+static void init_tape_buffers(Tuplesortstate *state, int numInputTapes)
 {
     int64 availBlocks;
     int64 blocksPerTape;
     int remainder;
     int tapenum;
+
+    if (numInputTapes == 0) {
+        elog(ERROR, "init_tape_buffers: numInputTapes can not be 0");
+        return;
+    }
 
     /*
      * Divide availMem evenly among the number of input tapes.
@@ -2639,10 +2640,11 @@ static void mergeruns(Tuplesortstate* state)
      * From this point on, we no longer use the USEMEM()/LACKMEM() mechanism
      * to track memory usage of individual tuples.
      */
-    if (state->tuples)
+    if (state->tuples) {
         init_slab_allocator(state, numInputTapes + 1);
-    else
+    } else {
         init_slab_allocator(state, 0);
+    }
 
     /*
      * Use all the spare memory we have available for read buffers for the
@@ -2763,8 +2765,9 @@ static void mergeruns(Tuplesortstate* state)
     state->status = TSS_SORTEDONTAPE;
 
     for (tapenum = 0; tapenum < state->maxTapes; tapenum++) {
-        if (tapenum != state->result_tape)
+        if (tapenum != state->result_tape) {
             LogicalTapeRewindForWrite(state->tapeset, tapenum);
+        }
     }
 }
 
@@ -3410,9 +3413,9 @@ static void* readtup_alloc(Tuplesortstate *state, Size tuplen)
      */
     Assert(state->slabFreeHead);
 
-    if (tuplen > SLAB_SLOT_SIZE || !state->slabFreeHead)
+    if (tuplen > SLAB_SLOT_SIZE || !state->slabFreeHead) {
         return MemoryContextAlloc(state->sortcontext, tuplen);
-    else {
+    } else {
         buf = state->slabFreeHead;
         /* Reuse this slot */
         state->slabFreeHead = buf->nextfree;
@@ -3563,7 +3566,7 @@ static void copytup_heap(Tuplesortstate* state, SortTuple* stup, void* tup)
     /* set up first-column key value */
     htup.t_len = tuple->t_len + MINIMAL_TUPLE_OFFSET;
     htup.t_data = (HeapTupleHeader)((char*)tuple - MINIMAL_TUPLE_OFFSET);
-    original = tableam_tops_tuple_getattr(&htup, state->sortKeys[0].ssup_attno, state->tupDesc, &stup->isnull1);    
+    original = tableam_tops_tuple_getattr(&htup, state->sortKeys[0].ssup_attno, state->tupDesc, &stup->isnull1);
 
     MemoryContextSwitchTo(oldcontext);
 

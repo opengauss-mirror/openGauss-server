@@ -387,9 +387,8 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
     hashtable->outer_hashfunctions = (FmgrInfo*)palloc(nkeys * sizeof(FmgrInfo));
     hashtable->inner_hashfunctions = (FmgrInfo*)palloc(nkeys * sizeof(FmgrInfo));
     hashtable->hashStrict = (bool*)palloc(nkeys * sizeof(bool));
-    hashtable->collations = (Oid *)palloc(nkeys * sizeof(Oid));
     i = 0;
-    forboth (ho, hashOperators, hc, hash_collations) {
+    foreach (ho, hashOperators) {
         Oid hashop = lfirst_oid(ho);
         Oid left_hashfn;
         Oid right_hashfn;
@@ -402,8 +401,17 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
         fmgr_info(left_hashfn, &hashtable->outer_hashfunctions[i]);
         fmgr_info(right_hashfn, &hashtable->inner_hashfunctions[i]);
         hashtable->hashStrict[i] = op_strict(hashop);
-        hashtable->collations[i] = lfirst_oid(hc);
         i++;
+    }
+
+    if (hash_collations != NULL) {
+        int nums = list_length(hash_collations);
+        hashtable->collations = (Oid *)palloc(nums * sizeof(Oid));
+        i = 0;
+        foreach(hc, hash_collations) {
+            hashtable->collations[i] = lfirst_oid(hc);
+            i++;
+        }
     }
 
     /*
@@ -1037,8 +1045,8 @@ static void ExecHashIncreaseNumBatches(HashJoinTable hashtable)
         hashtable->nbuckets = hashtable->nbuckets_optimal;
         hashtable->log2_nbuckets = hashtable->log2_nbuckets_optimal;
 
-        hashtable->buckets = (struct HashJoinTupleData**) repalloc(
-                hashtable->buckets, sizeof(HashJoinTuple) * hashtable->nbuckets);
+        hashtable->buckets =
+            (struct HashJoinTupleData **)repalloc(hashtable->buckets, sizeof(HashJoinTuple) * hashtable->nbuckets);
     }
 
     /*
@@ -1133,8 +1141,9 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
     errno_t rc;
 
     /* do nothing if not an increase (it's called increase for a reason) */
-    if (hashtable->nbuckets >= hashtable->nbuckets_optimal)
+    if (hashtable->nbuckets >= hashtable->nbuckets_optimal) {
         return;
+    }
 
     /*
      * We already know the optimal number of buckets, so let's just
@@ -1159,10 +1168,7 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
      */
     hashtable->buckets = (HashJoinTuple *)repalloc(hashtable->buckets, hashtable->nbuckets * sizeof(HashJoinTuple));
 
-    rc = memset_s(hashtable->buckets, 
-        sizeof(void *) * hashtable->nbuckets, 
-        0, 
-        sizeof(void *) * hashtable->nbuckets);
+    rc = memset_s(hashtable->buckets, sizeof(void *) * hashtable->nbuckets, 0, sizeof(void *) * hashtable->nbuckets);
     securec_check(rc, "\0", "\0");
 
     /* scan through all tuples in all chunks to rebuild the hash table */
@@ -1202,8 +1208,8 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
  * case by not forcing the slot contents into minimal form; not clear if it's
  * worth the messiness required.
  */
-void ExecHashTableInsert(
-    HashJoinTable hashtable, TupleTableSlot* slot, uint32 hashvalue, int planid, int dop, Instrumentation* instrument)
+void ExecHashTableInsert(HashJoinTable hashtable, TupleTableSlot *slot, uint32 hashvalue, int planid, int dop,
+                         Instrumentation *instrument)
 {
     MinimalTuple tuple = ExecFetchSlotMinimalTuple(slot);
     int bucketno;
@@ -1264,46 +1270,38 @@ void ExecHashTableInsert(
             hashtable->spacePeak = hashtable->spaceUsed;
         }
         bool sysBusy = gs_sysmemory_busy(hashtable->spaceUsed * dop, false);
-        if (hashtable->spaceUsed + int64(hashtable->nbuckets_optimal * sizeof(HashJoinTuple)) > hashtable->spaceAllowed 
-            || sysBusy) {
-            AllocSetContext* set = (AllocSetContext*)(hashtable->hashCxt);
+        if (hashtable->spaceUsed + int64(hashtable->nbuckets_optimal * sizeof(HashJoinTuple)) >
+                hashtable->spaceAllowed ||
+            sysBusy) {
+            AllocSetContext *set = (AllocSetContext *)(hashtable->hashCxt);
             if (sysBusy) {
                 hashtable->causedBySysRes = true;
                 hashtable->spaceAllowed = hashtable->spaceUsed;
                 set->maxSpaceSize = hashtable->spaceUsed;
                 /* if hashtable failed to grow, this branch can be kicked many times */
                 if (hashtable->growEnabled) {
-                    MEMCTL_LOG(LOG,
-                        "HashJoin(%d) early spilled, workmem: %ldKB, usedmem: %ldKB",
-                        planid,
-                        hashtable->spaceAllowed / 1024L,
-                        hashtable->spaceUsed / 1024L);
+                    MEMCTL_LOG(LOG, "HashJoin(%d) early spilled, workmem: %ldKB, usedmem: %ldKB", planid,
+                               hashtable->spaceAllowed / 1024L, hashtable->spaceUsed / 1024L);
                     pgstat_add_warning_early_spill();
                 }
-            /* try to auto spread memory if possible */
+                /* try to auto spread memory if possible */
             } else if (hashtable->curbatch == 0 && hashtable->maxMem > hashtable->spaceAllowed) {
                 hashtable->spaceAllowed = hashtable->spaceUsed;
                 int64 spreadMem = Min(Min(dywlm_client_get_memory() * 1024L, hashtable->spaceAllowed),
-                    hashtable->maxMem - hashtable->spaceAllowed);
+                                      hashtable->maxMem - hashtable->spaceAllowed);
                 if (spreadMem > hashtable->spaceAllowed * MEM_AUTO_SPREAD_MIN_RATIO) {
                     hashtable->spaceAllowed += spreadMem;
                     hashtable->spreadNum++;
                     ExecHashIncreaseBuckets(hashtable);
                     set->maxSpaceSize += spreadMem;
-                    MEMCTL_LOG(DEBUG2,
-                        "HashJoin(%d) auto mem spread %ldKB succeed, and work mem is %ldKB.",
-                        planid,
-                        spreadMem / 1024L,
-                        hashtable->spaceAllowed / 1024L);
+                    MEMCTL_LOG(DEBUG2, "HashJoin(%d) auto mem spread %ldKB succeed, and work mem is %ldKB.", planid,
+                               spreadMem / 1024L, hashtable->spaceAllowed / 1024L);
                     return;
                 }
                 /* if hashtable failed to grow, this branch can be kicked many times */
                 if (hashtable->growEnabled) {
-                    MEMCTL_LOG(LOG,
-                        "HashJoin(%d) auto mem spread %ldKB failed, and work mem is %ldKB.",
-                        planid,
-                        spreadMem / 1024L,
-                        hashtable->spaceAllowed / 1024L);
+                    MEMCTL_LOG(LOG, "HashJoin(%d) auto mem spread %ldKB failed, and work mem is %ldKB.", planid,
+                               spreadMem / 1024L, hashtable->spaceAllowed / 1024L);
                     if (hashtable->spreadNum) {
                         pgstat_add_warning_spill_on_memory_spread();
                     }
