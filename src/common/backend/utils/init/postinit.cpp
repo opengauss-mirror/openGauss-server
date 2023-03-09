@@ -247,7 +247,7 @@ static HeapTuple GetDatabaseTuple(const char* dbname)
 
 char* GetDatabaseCompatibility(const char* dbname)
 {
-    if (!dbname)
+    if (!dbname || dbname[0] == 0)
         return NULL;
     HeapTuple tuple = GetDatabaseTuple(dbname);
     if (!tuple)

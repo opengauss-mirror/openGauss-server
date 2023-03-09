@@ -66,7 +66,7 @@ timelineInfoFree(void *tliInfo)
 
 /* Iterate over locked backups and delete locks files */
 void
-unlink_lock_atexit(void)
+unlink_lock_atexit(bool fatal, void *userdata)
 {
     int i;
 
