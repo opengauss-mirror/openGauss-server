@@ -2235,6 +2235,8 @@ void PostgresInitializer::InitStreamSession()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 }
 
