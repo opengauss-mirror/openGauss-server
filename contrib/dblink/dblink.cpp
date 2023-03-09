@@ -827,6 +827,9 @@ Datum dblink_connect(PG_FUNCTION_ARGS)
             rconn->linker = olinker;
             createNewConnection(conname, rconn);
         } else {
+            if (PCONN->linker) {
+                PCONN->linker->finish();
+            }
             PCONN->linker = olinker;  
         }
     } else {
@@ -844,6 +847,9 @@ Datum dblink_connect(PG_FUNCTION_ARGS)
             rconn->linker = plinker;
             createNewConnection(conname, rconn);
         } else {
+            if (PCONN->linker) {
+                PCONN->linker->finish();
+            }
             PCONN->linker = plinker;       
         }
     }
