@@ -2064,6 +2064,10 @@ Datum dblink_get_notify(PG_FUNCTION_ARGS)
         linker = PCONN->linker;
     }
 
+    if (linker == NULL) {
+        DBLINK_CONN_NOT_AVAIL;
+    }
+
     linker->getNotify(rsinfo);
 
     return (Datum)0;
