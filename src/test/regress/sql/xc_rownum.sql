@@ -646,4 +646,59 @@ select * from partition_hash where rownum < 5;
 
 drop table partition_hash;
 
+create table test_rownum_subquery
+(
+  pk integer,
+  no varchar2
+);
 
+insert into test_rownum_subquery values (1,'1');
+insert into test_rownum_subquery values (2,'2');
+insert into test_rownum_subquery values (3,'3');
+insert into test_rownum_subquery values (4,'4');
+insert into test_rownum_subquery values (5,'5');
+select * from test_rownum_subquery;
+
+update  test_rownum_subquery t set t.no = to_char(100 - 1 + (
+    select vou_no from (
+        select rownum as vou_no, no from (
+            select distinct no from test_rownum_subquery b order by 1
+        )
+    ) where nvl(no, 0) = nvl(t.no, 0)
+));
+select * from test_rownum_subquery;
+drop table test_rownum_subquery;
+
+create table test_rownum_push_qual(id int);
+
+insert into test_rownum_push_qual values(generate_series(1, 20));
+
+-- having qual should not be pushed if accompanied by rownum reference
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual group by id,rownum having ROWNUM < 10 and id between 10 and 20 order by 1;
+
+select rownum, * from test_rownum_push_qual group by id,rownum having ROWNUM < 10 and id between 10 and 20 order by 1; -- expect 0 rows
+
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual group by id,rownum having ROWNUM < 10 or id between 10 and 20 order by 1;
+
+select rownum, * from test_rownum_push_qual group by id,rownum having ROWNUM < 10 or id between 10 and 20 order by 1; -- expect 20 rows
+
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual group by id,rownum having case when ROWNUM < 10 then 'true'::boolean else 'false'::boolean end and id between 10 and 20 order by 1;
+
+select rownum, * from test_rownum_push_qual group by id,rownum having case when ROWNUM < 10 then 'true'::boolean else 'false'::boolean end and id between 10 and 20 order by 1; -- expect 0 rows
+
+-- do not transform rownum op const to limit const -1, if limit clause is stated
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual where rownum < 10 limit 10 offset 10;
+
+select rownum, * from test_rownum_push_qual where rownum < 10 limit 10 offset 10; -- expected 0 rows
+
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual where rownum > 10 limit 10 offset 10;
+
+select rownum, * from test_rownum_push_qual where rownum > 10 limit 10 offset 10; -- expected 0 rows
+
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual where rownum < 15 limit 10 offset 10;
+
+select rownum, * from test_rownum_push_qual where rownum < 15 limit 10 offset 10; -- expected 4 rows
+
+explain (verbose on, costs off) select rownum, * from (select * from test_rownum_push_qual order by 1) where rownum < 10 limit 10 offset 10;
+
+select rownum, * from (select * from test_rownum_push_qual order by 1) where rownum < 10 limit 10 offset 10;  -- expected 0 rows

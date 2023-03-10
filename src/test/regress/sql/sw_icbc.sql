@@ -76,12 +76,15 @@ CONNECT BY PRIOR tt.id = tt.pid
 START WITH tt.id = 1;
 
 --test correlated sublink in targetlist
-explain select b.id, (select count(a.id) from t1 a where a.pid = b.id) c from t1 b
+explain (costs off) select b.id, (select count(a.id) from t1 a where a.pid = b.id) c from t1 b
 start with b.id=1 connect by prior b.id = b.pid;
 
-explain select * from t1 as test
+explain (costs off) select * from t1 as test
 where not exists (select 1 from t1 where test.id = t1.id)
 start with test.id = 1 connect by prior test.id = test.pid;
+
+--test start with in correlated sublink
+explain (costs off) select * from t1 where t1.name = 'test' and exists(select * from t2 where t1.id = id start with name = 'test' connect by prior id = pid);
 
 --multiple tables case
 explain (costs off) select * from t1, t2 where t1.id = t2.id start with t1.id = t2.id and t1.id = 1 connect by prior t1.id = t1.pid;

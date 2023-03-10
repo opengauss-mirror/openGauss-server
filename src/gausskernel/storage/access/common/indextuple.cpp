@@ -310,9 +310,9 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
          * cached offsets for these attrs.
          */
         if (IndexTupleHasVarwidths(tup)) {
-            uint32 j;
+            int j;
 
-            for (j = 0; j <= attnum; j++) {
+            for (j = 0; j <= (int)attnum; j++) {
                 if (att[j].attlen <= 0) {
                     slow = true;
                     break;
@@ -322,8 +322,8 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
     }
 
     if (!slow) {
-        uint32 natts = tuple_desc->natts;
-        uint32 j = 1;
+        int natts = tuple_desc->natts;
+        int j = 1;
 
         /*
          * If we get here, we have a tuple with no nulls or var-widths up to
@@ -353,12 +353,12 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
             off += att[j].attlen;
         }
 
-        Assert(j > attnum);
+        Assert(j > (int)attnum);
 
         off = att[attnum].attcacheoff;
     } else {
         bool usecache = true;
-        uint32 i;
+        int i;
 
         /*
          * Now we know that we have to walk the tuple CAREFULLY.  But we still
@@ -401,7 +401,7 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
                     att[i].attcacheoff = off;
             }
 
-            if (i == attnum)
+            if (i == (int)attnum)
                 break;
 
             off = att_addlength_pointer(off, att[i].attlen, tp + off);

@@ -1041,7 +1041,7 @@ bool JoinSkewInfo::checkOuterJoinNulls(Path* jpath)
     if (!IS_JOIN_OUTER(((JoinPath*)jpath)->jointype))
         return false;
 
-    List* target_list = jpath->parent->reltargetlist;
+    List* target_list = jpath->pathtarget->exprs;
     List* subtarget_list = NIL;
     List* join_clauses = NIL;
     List* null_list = NIL;
@@ -1098,11 +1098,11 @@ List* JoinSkewInfo::getSubTargetList(JoinPath* jpath) const
 
     /* find the target list that may need add null */
     if (jpath->jointype == JOIN_LEFT || jpath->jointype == JOIN_LEFT_ANTI_FULL) {
-        subtarget_list = right_path->parent->reltargetlist;
+        subtarget_list = right_path->pathtarget->exprs;
     } else if (jpath->jointype == JOIN_RIGHT || jpath->jointype == JOIN_RIGHT_ANTI_FULL) {
-        subtarget_list = left_path->parent->reltargetlist;
+        subtarget_list = left_path->pathtarget->exprs;
     } else if (jpath->jointype == JOIN_FULL) {
-        subtarget_list = list_union(left_path->parent->reltargetlist, right_path->parent->reltargetlist);
+        subtarget_list = list_union(left_path->pathtarget->exprs, right_path->pathtarget->exprs);
     }
 
     return subtarget_list;

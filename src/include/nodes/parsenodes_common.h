@@ -47,6 +47,8 @@ typedef enum RoleLockType { DO_NOTHING, LOCK_ROLE, UNLOCK_ROLE } RoleLockType;
  */
 typedef enum ObjectType {
     OBJECT_AGGREGATE,
+    OBJECT_AMOP,
+    OBJECT_AMPROC,
     OBJECT_ATTRIBUTE, /* type's attribute, when distinct from column */
     OBJECT_CAST,
     OBJECT_COLUMN,
@@ -57,7 +59,10 @@ typedef enum ObjectType {
     OBJECT_DATABASE,
     OBJECT_DATA_SOURCE,
     OBJECT_DB4AI_MODEL,  // DB4AI
+    OBJECT_DEFAULT,
     OBJECT_DOMAIN,
+    OBJECT_DOMCONSTRAINT,
+    OBJECT_EVENT_TRIGGER,
     OBJECT_EXTENSION,
     OBJECT_FDW,
     OBJECT_FOREIGN_SERVER,
@@ -85,6 +90,7 @@ typedef enum ObjectType {
     OBJECT_SEQUENCE,
     OBJECT_STREAM,
     OBJECT_SYNONYM,
+    OBJECT_TABCONSTRAINT,
     OBJECT_TABLE,
     OBJECT_TABLE_PARTITION,
     OBJECT_TABLESPACE,
@@ -96,13 +102,15 @@ typedef enum ObjectType {
     OBJECT_TYPE,
     OBJECT_USER,
     OBJECT_VIEW,
+    OBJECT_USER_MAPPING,
     OBJECT_DIRECTORY,
     OBJECT_GLOBAL_SETTING,
     OBJECT_COLUMN_SETTING,
     OBJECT_PUBLICATION,
     OBJECT_PUBLICATION_NAMESPACE,
     OBJECT_PUBLICATION_REL,
-    OBJECT_SUBSCRIPTION
+    OBJECT_SUBSCRIPTION,
+    OBJECT_EVENT
 } ObjectType;
 
 #define OBJECT_IS_SEQUENCE(obj) \
@@ -172,6 +180,7 @@ typedef struct TypeName {
     int location;      /* token location, or -1 if unknown */
     int end_location;  /* %TYPE and date specified, token end location */
     bool pct_rowtype;  /* %ROWTYPE specified? */
+    int charset;
 } TypeName;
 
 typedef enum FunctionParameterMode {
@@ -730,6 +739,19 @@ typedef struct CollateClause {
     int location;   /* token location, or -1 if unknown */
 } CollateClause;
 
+typedef enum {
+    OPT_CHARSET,
+    OPT_COLLATE,
+    OPT_CHARSETCOLLATE
+} CharsetCollateType;
+
+typedef struct CharsetCollateOptions {
+    NodeTag type;
+    CharsetCollateType cctype;
+    int charset;
+    char* collate;
+} CharsetCollateOptions;
+
 /* ----------------------
  * Create Schema Statement
  *
@@ -754,6 +776,8 @@ typedef struct CreateSchemaStmt {
     List *schemaElts;  /* schema components (list of parsenodes) */
     TempType temptype; /* if the schema is temp table's schema */
     List *uuids;       /* the list of uuid(only create sequence or table with serial type need) */
+    int charset;
+    char *collate;
 } CreateSchemaStmt;
 
 /* ----------------------
@@ -865,6 +889,10 @@ typedef enum AlterTableType {
     AT_COMMENTS,
     AT_InvisibleIndex,
     AT_VisibleIndex,
+    AT_ModifyColumn,
+    AT_SetCharsetCollate,
+    AT_ConvertCharset,
+    AT_ResetPartitionno
 } AlterTableType;
 
 typedef enum AlterTableStatProperty { /* Additional Property for AlterTableCmd */
@@ -891,6 +919,8 @@ typedef struct AlterTableCmd { /* one subcommand of an ALTER TABLE */
     AlterTableStatProperty additional_property; /* additional property for AlterTableCmd */
     List *bucket_list;                          /* bucket list to drop */
     bool alterGPI;                              /* check whether is global partition index alter statement */
+    bool is_first;                               /* a flag of ALTER TABLE ... ADD ... FIRST */
+    char *after_name;                            /* column name of ALTER TABLE ... ADD ... AFTER column_name */
 } AlterTableCmd;
 
 typedef struct AddTableIntoCBIState {
@@ -1058,18 +1088,26 @@ typedef struct ColumnDef {
 } ColumnDef;
 
 /*
+ * PartitionDefState is a basic struct of all different partition types.
+ * NEVER create a new node with this struct!
+ */
+typedef struct PartitionDefState {
+    NodeTag type;
+    char* partitionName;  /* name of partition */
+    List* boundary;       /* the boundary of a partition */
+    char* tablespacename; /* table space to use, or NULL */
+    List* subPartitionDefState;
+    int4 partitionno; /* the partition no of current partition */
+} PartitionDefState;
+
+/*
  * definition of a range partition.
  * range partition pattern: PARTITION [partitionName] LESS THAN [boundary]
  *
  */
-typedef struct RangePartitionDefState {
-    NodeTag type;
-    char *partitionName;  /* name of range partition */
-    List *boundary;       /* the boundary of a range partition */
-    char *tablespacename; /* table space to use, or NULL */
+typedef struct RangePartitionDefState : PartitionDefState {
     Const *curStartVal;
     char *partitionInitName;
-    List* subPartitionDefState;
 } RangePartitionDefState;
 
 typedef struct RangePartitionStartEndDefState {
@@ -1081,20 +1119,10 @@ typedef struct RangePartitionStartEndDefState {
     char *tableSpaceName; /* table space to use, or NULL */
 } RangePartitionStartEndDefState;
 
-typedef struct ListPartitionDefState {
-    NodeTag type;
-    char* partitionName;  /* name of list partition */
-    List* boundary;       /* the boundary of a list partition */
-    char* tablespacename; /* table space to use, or NULL */
-    List* subPartitionDefState;
+typedef struct ListPartitionDefState : PartitionDefState {
 } ListPartitionDefState;
 
-typedef struct HashPartitionDefState {
-    NodeTag type;
-    char* partitionName;  /* name of hash partition */
-    List* boundary;       /* the boundary of a hash partition */
-    char* tablespacename; /* table space to use, or NULL */
-    List* subPartitionDefState;
+typedef struct HashPartitionDefState : PartitionDefState {
 } HashPartitionDefState;
 
 typedef struct RangePartitionindexDefState {
@@ -1140,6 +1168,7 @@ typedef struct PartitionState {
     RowMovementValue rowMovement; /* default: for colum-stored table means true, for row-stored means false */
     PartitionState *subPartitionState;
     List *partitionNameList; /* existing partitionNameList for add partition */
+    int partitionsNum;  /* for PARTITIONS/SUBPARTITIONS num clause, valid when greater than zero */
 } PartitionState;
 
 typedef struct AddPartitionState { /* ALTER TABLE ADD PARTITION */
@@ -1219,12 +1248,20 @@ typedef struct CreateStmt {
     List *oldToastNode; /* toastnode of resizing table  */
     char relkind;       /* type of object */
     Node *autoIncStart; /* DefElem for AUTO_INCREMENT = value*/
+    int charset;
+    char *collate;
 } CreateStmt;
 
 typedef struct LedgerHashState {
     bool has_histhash;
     uint64 histhash;
 } LedgerHashState;
+
+typedef enum CopyFileType {
+    S_COPYFILE,
+    S_OUTFILE,
+    S_DUMPFILE
+} CopyFileType;
 
 /* ----------------------
  * 		Copy Statement
@@ -1248,6 +1285,7 @@ typedef struct CopyStmt {
     AdaptMem memUsage;
     bool encrypted;
     LedgerHashState hashstate;
+    CopyFileType filetype;
 } CopyStmt;
 
 #define ATT_KV_UNDEFINED (0)
@@ -1933,6 +1971,8 @@ typedef struct Query {
 
     bool canSetTag; /* do I set the command result tag? */
 
+    bool is_flt_frame; /* Indicates whether it is a flattened expr frame */
+
     Node* utilityStmt; /* non-null if this is DECLARE CURSOR or a
                         * non-optimizable statement */
 
@@ -1940,6 +1980,7 @@ typedef struct Query {
 
     bool hasAggs;         /* has aggregates in tlist or havingQual */
     bool hasWindowFuncs;  /* has window functions in tlist */
+    bool hasTargetSRFs;	  /* has set-returning functions in tlist */
     bool hasSubLinks;     /* has subquery SubLink */
     bool hasDistinctOn;   /* distinctClause is from DISTINCT ON */
     bool hasRecursive;    /* WITH RECURSIVE was specified */
@@ -2037,6 +2078,7 @@ typedef struct Query {
     
     RightRefState* rightRefState;
     List* withCheckOptions; /* a list of WithCheckOption's */
+    List* indexhintList;   /* a list of b mode index hint members */
 } Query;
 
 /* ----------------------
@@ -2185,6 +2227,70 @@ typedef struct FunctionSources {
     char* bodySrc;
 } FunctionSources;
 
+/*
+ * + *  *  * EventStatus - for event status
+ * + *   *   */
+typedef enum EventStatus {
+    EVENT_ENABLE,
+    EVENT_DISABLE,
+    EVENT_DISABLE_ON_SLAVE
+} EventStatus;
+ 
+/* ----------------------
+ *  *             Create EVENT Statement
+ *   * ----------------------
+ *    */
+typedef struct CreateEventStmt {
+    NodeTag type;
+    char* def_name;           /* definer name */
+    RangeVar* event_name;
+    Node* start_time_expr;
+    Node* end_time_expr;
+    Node *interval_time;
+    bool  complete_preserve;
+    EventStatus event_status;       /* ENABLE | DISABLE | DISABLE ON SLAVE */
+    char* event_comment_str;
+    char* event_query_str;
+    bool if_not_exists;
+} CreateEventStmt;
+ 
+ 
+/* ----------------------
+ *  *  *             Alter EVENT Statement
+ *   *   * ----------------------
+ *    *    */
+ 
+typedef struct AlterEventStmt {
+    NodeTag type;
+    DefElem* def_name;           /* definer name */
+    RangeVar* event_name;
+    DefElem* start_time_expr;
+    DefElem* end_time_expr;
+    DefElem* interval_time;
+    DefElem* complete_preserve;
+    DefElem* event_status;       /* ENABLE | DISABLE | DISABLE ON SLAVE */
+    DefElem* event_comment_str;
+    DefElem* event_query_str;
+    DefElem* new_name;
+} AlterEventStmt;
+ 
+ 
+/* ----------------------
+ *  *  *             Drop EVENT Statement
+ *   *   * ----------------------
+ *    *    */
+typedef struct DropEventStmt {
+    NodeTag type;
+    RangeVar* event_name;
+    bool missing_ok;
+} DropEventStmt;
+ 
+typedef struct ShowEventStmt {
+    NodeTag type;
+    Node* from_clause;
+    char* where_clause;
+} ShowEventStmt;
+
 /* ----------------------
  *		DO Statement
  *
@@ -2276,6 +2382,30 @@ typedef struct PredictByFunction{ // DB4AI
     int model_args_location; // Only for parser
 } PredictByFunction;
 
+/* ----------------------
+ *     Create EVENT TRIGGER Statement
+ * ----------------------
+ */
+typedef struct CreateEventTrigStmt
+{
+    NodeTag     type;
+    char       *trigname;       /* TRIGGER's name */
+    char       *eventname;      /* event's identifier */
+    List       *whenclause;     /* list of DefElems indicating filtering */
+    List       *funcname;       /* qual. name of function to call */
+} CreateEventTrigStmt;
+ 
+/* ----------------------
+ *     Alter EVENT TRIGGER Statement
+ * ----------------------
+ */
+typedef struct AlterEventTrigStmt
+{
+    NodeTag     type;
+    char       *trigname;       /* TRIGGER's name */
+    char        tgenabled;      /* trigger's firing configuration WRT
+                                 * session_replication_role */
+} AlterEventTrigStmt;
 typedef struct CreatePublicationStmt {
     NodeTag type;
     char *pubname;       /* Name of of the publication */
@@ -2331,5 +2461,25 @@ typedef struct AutoIncrement {
     Oid autoincin_funcid;
     Oid autoincout_funcid;
 } AutoIncrement;
+
+typedef enum IndexHintType {
+    INDEX_HINT_USE =1,
+    INDEX_HINT_FORCE, 
+    INDEX_HINT_MIX,
+    INDEX_HINT_NOT_EXISTS
+}IndexHintType;
+
+typedef struct IndexHintDefinition {
+    NodeTag type;
+    List* indexnames;
+    IndexHintType index_type;
+}IndexHintDefinition;
+
+typedef struct IndexHintRelationData{
+    NodeTag type;
+    Oid relationOid; 
+    Oid indexOid;
+    IndexHintType index_type;
+}IndexHintRelationData;
 
 #endif /* PARSENODES_COMMONH */

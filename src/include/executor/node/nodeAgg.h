@@ -79,7 +79,8 @@ typedef struct AggStatePerAggData {
 
     /* number of inputs including ORDER BY expressions */
     int numInputs;
-
+    /* offset of input columns in AggState->evalslot */
+    int inputoff;
     bool        is_avg;
 
     /*
@@ -151,19 +152,19 @@ typedef struct AggStatePerAggData {
     bool inputtypeByVal, resulttypeByVal, transtypeByVal;
 
     /*
-     * Stuff for evaluation of inputs.	We used to just use ExecEvalExpr, but
-     * with the addition of ORDER BY we now need at least a slot for passing
-     * data to the sort object, which requires a tupledesc, so we might as
-     * well go whole hog and use ExecProject too.
+     * Stuff for evaluation of aggregate inputs in cases where the aggregate
+     * requires sorted input.  The arguments themselves will be evaluated via
+     * AggState->evalslot/evalproj for all aggregates at once, but we only
+     * want to sort the relevant columns for individual aggregates.
      */
-    TupleDesc evaldesc;       /* descriptor of input tuples */
-    ProjectionInfo* evalproj; /* projection machinery */
+    TupleDesc	sortdesc;		/* descriptor of input tuples */
 
     /*
      * Slots for holding the evaluated input arguments.  These are set up
-     * during ExecInitAgg() and then used for each input row.
+     * during ExecInitAgg() and then used for each input row requiring
+     * procesessing besides what's done in AggState->evalproj.
      */
-    TupleTableSlot* evalslot; /* current input tuple */
+    TupleTableSlot *sortslot;	/* current input tuple */
     TupleTableSlot* uniqslot; /* used for multi-column DISTINCT */
 
     /*
@@ -185,9 +186,14 @@ typedef struct AggStatePerAggData {
      * This field is a pre-initialized FunctionCallInfo struct used for
      * calling this aggregate's transfn.  We save a few cycles per row by not
      * re-initializing the unchanging fields; which isn't much, but it seems
-     * worth the extra space consumption.
+     * worth the extra space consumption. cached for transhfn and collectfn now.
      */
     FunctionCallInfoData transfn_fcinfo;
+
+    /* XXX: use for vector engine now, better remove later*/
+    TupleDesc	evaldesc;		/* descriptor of input tuples */
+    ProjectionInfo *evalproj;	/* projection machinery */
+    TupleTableSlot *evalslot;	/* current input tuple */
 } AggStatePerAggData;
 
 /*

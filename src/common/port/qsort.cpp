@@ -45,138 +45,20 @@
 
 #include "c.h"
 
-static char* med3(char* a, char* b, char* c, int (*cmp)(const void*, const void*));
-static void swapfunc(char*, char*, size_t, int);
+#define ST_SORT pg_qsort
+#define ST_ELEMENT_TYPE_VOID
+#define ST_COMPARE_RUNTIME_POINTER
+#define ST_SCOPE
+#define ST_DECLARE
+#define ST_DEFINE
+#include "lib/sort_template.h"
 
+ 
 /*
- * Qsort routine based on J. L. Bentley and M. D. McIlroy,
- * "Engineering a sort function",
- * Software--Practice and Experience 23 (1993) 1249-1265.
- * We have modified their original by adding a check for already-sorted input,
- * which seems to be a win per discussions on pgsql-hackers around 2006-03-21.
+ * qsort wrapper for strcmp.
  */
-#define swapcode(TYPE, parmi, parmj, n)   \
-    do {                                  \
-        size_t i = (n) / sizeof(TYPE);    \
-        TYPE* pi = (TYPE*)(void*)(parmi); \
-        TYPE* pj = (TYPE*)(void*)(parmj); \
-        do {                              \
-            TYPE t = *pi;                 \
-            *pi++ = *pj;                  \
-            *pj++ = t;                    \
-        } while (--i > 0);                \
-    } while (0)
-
-#define SWAPINIT(a, es) \
-    swaptype = ((char*)(a) - (char*)0) % sizeof(long) || (es) % sizeof(long) ? 2 : ((es) == sizeof(long) ? 0 : 1);
-
-static void swapfunc(char* a, char* b, size_t n, int swaptype)
+int
+pg_qsort_strcmp(const void *a, const void *b)
 {
-    if (swaptype <= 1) {
-        swapcode(long, a, b, n);
-    } else {
-        swapcode(char, a, b, n);
-    }
-}
-
-#define swap(a, b)                               \
-    if (swaptype == 0) {                         \
-        long t = *(long*)(void*)(a);             \
-        *(long*)(void*)(a) = *(long*)(void*)(b); \
-        *(long*)(void*)(b) = t;                  \
-    } else                                       \
-        swapfunc(a, b, es, swaptype)
-
-#define vecswap(a, b, n) \
-    if ((n) > 0)         \
-    swapfunc((a), (b), (size_t)(n), swaptype)
-
-#define returnifzero(a)   \
-    if (a == 0) {         \
-        return;           \
-    }                     \
-
-static char* med3(char* a, char* b, char* c, int (*cmp)(const void*, const void*))
-{
-    return (cmp(a, b) < 0) ? ((cmp(b, c) < 0) ? b : ((cmp(a, c) < 0) ? c : a))
-                         : ((cmp(b, c) > 0) ? b : ((cmp(a, c) < 0) ? a : c));
-}
-
-void pg_qsort(void* a, size_t n, size_t es, int (*cmp)(const void*, const void*))
-{
-    char *pa = NULL, *pb = NULL, *pc = NULL, *pd = NULL, *pl = NULL, *pm = NULL, *pn = NULL;
-    int d, r, swaptype, presorted;
-
-    returnifzero(es);
-
-loop:
-    SWAPINIT(a, es);
-    if (n < 7) {
-        for (pm = (char*)a + es; pm < (char*)a + n * es; pm += es) {
-            for (pl = pm; pl > (char*)a && cmp(pl - es, pl) > 0; pl -= es) {
-                swap(pl, pl - es);
-            }
-        }
-        return;
-    }
-    presorted = 1;
-    for (pm = (char*)a + es; pm < (char*)a + n * es; pm += es) {
-        if (cmp(pm - es, pm) > 0) {
-            presorted = 0;
-            break;
-        }
-    }
-    if (presorted) {
-        return;
-    }
-    pm = (char*)a + (n / 2) * es;
-    if (n > 7) {
-        pl = (char*)a;
-        pn = (char*)a + (n - 1) * es;
-        if (n > 40) {
-            d = (n / 8) * es;
-            pl = med3(pl, pl + d, pl + 2 * d, cmp);
-            pm = med3(pm - d, pm, pm + d, cmp);
-            pn = med3(pn - 2 * d, pn - d, pn, cmp);
-        }
-        pm = med3(pl, pm, pn, cmp);
-    }
-    swap((char*)a, pm);
-    pa = pb = (char*)a + es;
-    pc = pd = (char*)a + (n - 1) * es;
-    for (;;) {
-        while (pb <= pc && (r = cmp(pb, a)) <= 0) {
-            if (r == 0) {
-                swap(pa, pb);
-                pa += es;
-            }
-            pb += es;
-        }
-        while (pb <= pc && (r = cmp(pc, a)) >= 0) {
-            if (r == 0) {
-                swap(pc, pd);
-                pd -= es;
-            }
-            pc -= es;
-        }
-        if (pb > pc) {
-            break;
-        }
-        swap(pb, pc);
-        pb += es;
-        pc -= es;
-    }
-    pn = (char*)a + n * es;
-    r = Min(pa - (char*)a, pb - pa);
-    vecswap((char*)a, pb - r, r);
-    r = Min((size_t)(pd - pc), (size_t)(pn - pd - es));
-    vecswap(pb, pn - r, r);
-    if ((size_t)(r = pb - pa) > es)
-        qsort(a, r / es, es, cmp);
-    if ((size_t)(r = pd - pc) > es) {
-        /* Iterate rather than recurse to save stack space */
-        a = pn - r;
-        n = r / es;
-        goto loop;
-    }
+    return strcmp(*(char *const *) a, *(char *const *) b);
 }

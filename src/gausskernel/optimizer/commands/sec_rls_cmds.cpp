@@ -144,7 +144,8 @@ void CreateRlsPolicy(CreateRlsPolicyStmt* stmt)
     addRTEtoQuery(usingQualState, rte, false, true, true);
 
     /* Transform expr clause */
-    Node* usingQual = transformWhereClause(usingQualState, (Node*)copyObject(stmt->usingQual), "POLICY");
+    Node* usingQual = transformWhereClause(usingQualState, (Node*)copyObject(stmt->usingQual),
+                                           EXPR_KIND_POLICY, "POLICY");
 
     /* Take care of collations */
     assign_expr_collations(usingQualState, usingQual);
@@ -372,7 +373,8 @@ void AlterRlsPolicy(AlterRlsPolicyStmt* stmt)
         rte = addRangeTableEntryForRelation(usingQualState, targetTable, NULL, false, false);
         addRTEtoQuery(usingQualState, rte, false, true, true);
         /* Transform expr clause */
-        usingQual = transformWhereClause(usingQualState, (Node*)copyObject(stmt->usingQual), "POLICY");
+        usingQual = transformWhereClause(usingQualState, (Node*)copyObject(stmt->usingQual),
+                                         EXPR_KIND_POLICY, "POLICY");
         /* Take cate of collations */
         assign_expr_collations(usingQualState, usingQual);
         /* Check whether contain RangeTblEntry in usingQual */
@@ -461,12 +463,15 @@ void AlterRlsPolicy(AlterRlsPolicyStmt* stmt)
  * @param (in) renameStmt: RenameStmt describes the policy name, table name and new rls policy name
  * @return: void
  */
-void RenameRlsPolicy(RenameStmt* renameStmt)
+ObjectAddress RenameRlsPolicy(RenameStmt* renameStmt)
 {
+    Oid rlsp_id;    
+    ObjectAddress address;
+
     Assert(renameStmt != NULL);
     /* Check whether need to rename rls policy on current node */
     if (SupportRlsOnCurrentNode() == false) {
-        return;
+        return InvalidObjectAddress;
     }
     /* Check license whether support this feature */
     LicenseSupportRls();
@@ -532,7 +537,7 @@ void RenameRlsPolicy(RenameStmt* renameStmt)
                     renameStmt->subname,
                     renameStmt->relation->relname)));
     }
-
+    rlsp_id = HeapTupleGetOid(rlsPolicyTuple);
     /* Copy tuple here, because of update index later */
     rlsPolicyTuple = (HeapTuple)tableam_tops_copy_tuple(rlsPolicyTuple);
     /* Update RLS policy name */
@@ -551,7 +556,8 @@ void RenameRlsPolicy(RenameStmt* renameStmt)
     systable_endscan(scanDesc);
     heap_close(pg_rlspolicy, RowExclusiveLock);
     heap_close(targetTable, NoLock);
-    return;
+    ObjectAddressSet(address, RlsPolicyRelationId, rlsp_id);
+    return address;
 }
 
 /*

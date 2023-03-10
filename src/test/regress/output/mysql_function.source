@@ -119,6 +119,7 @@ CREATE DATABASE mysqltestbak DBCOMPATIBILITY  'B';
 --? .*
 --? .*
 --? .*
+--? .*
 \c mysqltestbak
 \sf proc_definer1
 CREATE DEFINER = testusr1 PROCEDURE public.proc_definer1()

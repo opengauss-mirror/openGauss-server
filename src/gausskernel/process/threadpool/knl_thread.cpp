@@ -897,9 +897,9 @@ static void knl_t_utils_init(knl_t_utils_context* utils_cxt)
     utils_cxt->partId = (PartitionIdentifier*)palloc0(sizeof(PartitionIdentifier));
     utils_cxt->gValueCompareContext = NULL;
     utils_cxt->ContextUsedCount = 0;
-#define RANGE_PARTKEYMAXNUM 4
+
     int rc = memset_s(
-        utils_cxt->valueItemArr, RANGE_PARTKEYMAXNUM * sizeof(Const*), 0, RANGE_PARTKEYMAXNUM * sizeof(Const*));
+        utils_cxt->valueItemArr, PARTITION_PARTKEYMAXNUM * sizeof(Const*), 0, PARTITION_PARTKEYMAXNUM * sizeof(Const*));
     securec_check(rc, "\0", "\0");
     utils_cxt->CurrentResourceOwner = NULL;
     utils_cxt->STPSavedResourceOwner = NULL;
@@ -1532,6 +1532,8 @@ static void knl_t_postmaster_init(knl_t_postmaster_context* postmaster_cxt)
     securec_check(rc, "\0", "\0");
 
     postmaster_cxt->HaShmData = NULL;
+    postmaster_cxt->can_listen_addresses_reload = false;
+    postmaster_cxt->is_listen_addresses_reload = false;
     postmaster_cxt->IsRPCWorkerThread = false;
     postmaster_cxt->audit_primary_start = true;
     postmaster_cxt->audit_primary_failover = false;
@@ -1701,7 +1703,13 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     dms_cxt->size = 0;
     dms_cxt->file_size = 0;
 }
-
+static void knl_t_rc_init(knl_t_rc_context* rc_cxt)
+{
+    errno_t rc = EOK;
+    rc = memset_s(rc_cxt, sizeof(knl_t_rc_context), 0, sizeof(knl_t_rc_context));
+    securec_check(rc, "\0", "\0");
+    return;
+}
 #ifdef ENABLE_MOT
 static void knl_t_mot_init(knl_t_mot_context* mot_cxt)
 {
@@ -1899,6 +1907,7 @@ void knl_thread_init(knl_thread_role role)
     KnlDcfContextInit(&t_thrd.dcf_cxt);
     knl_t_page_compression_init(&t_thrd.page_compression_cxt);
     knl_t_libsw_init(&t_thrd.libsw_cxt);
+    knl_t_rc_init(&t_thrd.rc_cxt);
 }
 
 __attribute__ ((__used__)) knl_thrd_context *GetCurrentThread()

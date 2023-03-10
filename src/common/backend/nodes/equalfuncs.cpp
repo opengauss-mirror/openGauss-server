@@ -129,6 +129,7 @@ static bool _equalRangeVar(const RangeVar* a, const RangeVar* b)
     COMPARE_NODE_FIELD(buckets);
     COMPARE_SCALAR_FIELD(withVerExpr);
     COMPARE_NODE_FIELD(partitionNameList);
+    COMPARE_NODE_FIELD(indexhints);
 
     return true;
 }
@@ -145,7 +146,15 @@ static bool _equalIntoClause(const IntoClause* a, const IntoClause* b)
     COMPARE_SCALAR_FIELD(ivm);
     COMPARE_SCALAR_FIELD(relkind);
     COMPARE_NODE_FIELD(userVarList);
+    COMPARE_NODE_FIELD(copyOption);
+    COMPARE_STRING_FIELD(filename);
+    COMPARE_SCALAR_FIELD(is_outfile);
 
+    if (t_thrd.proc->workingVersionNum >= CREATE_TABLE_AS_VERSION_NUM) {
+        COMPARE_NODE_FIELD(tableElts);
+        COMPARE_NODE_FIELD(autoIncStart);
+        COMPARE_SCALAR_FIELD(onduplicate);
+    }
     return true;
 }
 
@@ -490,6 +499,7 @@ static bool _equalCaseExpr(const CaseExpr* a, const CaseExpr* b)
     COMPARE_NODE_FIELD(args);
     COMPARE_NODE_FIELD(defresult);
     COMPARE_LOCATION_FIELD(location);
+    COMPARE_SCALAR_FIELD(fromDecode);
 
     return true;
 }
@@ -911,6 +921,8 @@ static bool _equalQuery(const Query* a, const Query* b)
     COMPARE_SCALAR_FIELD(resultRelation);
     COMPARE_SCALAR_FIELD(hasAggs);
     COMPARE_SCALAR_FIELD(hasWindowFuncs);
+    COMPARE_SCALAR_FIELD(hasTargetSRFs);
+    COMPARE_SCALAR_FIELD(is_flt_frame);
     COMPARE_SCALAR_FIELD(hasSubLinks);
     COMPARE_SCALAR_FIELD(hasDistinctOn);
     COMPARE_SCALAR_FIELD(hasRecursive);
@@ -964,6 +976,7 @@ static bool _equalQuery(const Query* a, const Query* b)
         return false;
     }
     
+    COMPARE_NODE_FIELD(indexhintList);
     return true;
 }
 
@@ -1100,6 +1113,8 @@ static bool _equalAlterTableCmd(const AlterTableCmd* a, const AlterTableCmd* b)
     COMPARE_STRING_FIELD(target_partition_tablespace);
     COMPARE_NODE_FIELD(bucket_list);
     COMPARE_SCALAR_FIELD(alterGPI);
+    COMPARE_SCALAR_FIELD(is_first);
+    COMPARE_STRING_FIELD(after_name);
 
     return true;
 }
@@ -1261,6 +1276,8 @@ static bool _equalRangePartitionDefState(const RangePartitionDefState* a, const 
     COMPARE_STRING_FIELD(tablespacename);
     COMPARE_SCALAR_FIELD(curStartVal);
     COMPARE_STRING_FIELD(partitionInitName);
+    COMPARE_NODE_FIELD(subPartitionDefState);
+    COMPARE_SCALAR_FIELD(partitionno);
 
     return true;
 }
@@ -1270,6 +1287,8 @@ static bool _equalListPartitionDefState(const ListPartitionDefState* a, const Li
     COMPARE_STRING_FIELD(partitionName);
     COMPARE_NODE_FIELD(boundary);
     COMPARE_STRING_FIELD(tablespacename);
+    COMPARE_NODE_FIELD(subPartitionDefState);
+    COMPARE_SCALAR_FIELD(partitionno);
 
     return true;
 }
@@ -1279,6 +1298,8 @@ static bool _equalHashPartitionDefState(const HashPartitionDefState* a, const Ha
     COMPARE_STRING_FIELD(partitionName);
     COMPARE_NODE_FIELD(boundary);
     COMPARE_STRING_FIELD(tablespacename);
+    COMPARE_NODE_FIELD(subPartitionDefState);
+    COMPARE_SCALAR_FIELD(partitionno);
 
     return true;
 }
@@ -1338,6 +1359,7 @@ static bool _equalPartitionState(const PartitionState* a, const PartitionState* 
     COMPARE_SCALAR_FIELD(rowMovement);
     COMPARE_NODE_FIELD(subPartitionState);
     COMPARE_NODE_FIELD(partitionNameList);
+    COMPARE_SCALAR_FIELD(partitionsNum);
     return true;
 }
 
@@ -2066,6 +2088,8 @@ static bool _equalAlterSchemaStmt(const AlterSchemaStmt* a, const AlterSchemaStm
     COMPARE_STRING_FIELD(schemaname);
     COMPARE_STRING_FIELD(authid);
     COMPARE_SCALAR_FIELD(hasBlockChain);
+    COMPARE_SCALAR_FIELD(charset);
+    COMPARE_STRING_FIELD(collate);
 
     return true;
 }
@@ -2113,6 +2137,21 @@ static bool _equalCreateWeakPasswordDictionaryStmt(const CreateWeakPasswordDicti
 
 static bool _equalDropWeakPasswordDictionaryStmt(const DropWeakPasswordDictionaryStmt* a, const DropWeakPasswordDictionaryStmt* b)
 {
+    return true;
+}
+
+static bool _equalIndexHintDefinition (const IndexHintDefinition* a, const IndexHintDefinition* b)
+{
+    COMPARE_NODE_FIELD(indexnames);
+    COMPARE_SCALAR_FIELD(index_type);
+    return true;
+}
+
+static bool _equalIndexHintRelationData (const IndexHintRelationData* a, const IndexHintRelationData* b)
+{
+    COMPARE_SCALAR_FIELD(relationOid);
+    COMPARE_SCALAR_FIELD(indexOid);
+    COMPARE_SCALAR_FIELD(index_type);
     return true;
 }
 
@@ -2236,6 +2275,26 @@ static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* 
     return true;
 }
 
+static bool
+_equalCreateEventTrigStmt(const CreateEventTrigStmt *a, const CreateEventTrigStmt *b)
+{
+    COMPARE_STRING_FIELD(trigname);
+    COMPARE_SCALAR_FIELD(eventname);
+    COMPARE_NODE_FIELD(funcname);
+    COMPARE_NODE_FIELD(whenclause);
+ 
+    return true;
+}
+ 
+static bool
+_equalAlterEventTrigStmt(const AlterEventTrigStmt *a, const AlterEventTrigStmt *b)
+{
+    COMPARE_STRING_FIELD(trigname);
+    COMPARE_SCALAR_FIELD(tgenabled);
+ 
+    return true;
+}
+
 static bool _equalCreatePLangStmt(const CreatePLangStmt* a, const CreatePLangStmt* b)
 {
     COMPARE_SCALAR_FIELD(replace);
@@ -2325,6 +2384,9 @@ static bool _equalCreateSchemaStmt(const CreateSchemaStmt* a, const CreateSchema
     COMPARE_STRING_FIELD(authid);
     COMPARE_SCALAR_FIELD(hasBlockChain);
     COMPARE_NODE_FIELD(schemaElts);
+    COMPARE_NODE_FIELD(uuids);
+    COMPARE_SCALAR_FIELD(charset);
+    COMPARE_STRING_FIELD(collate);
 
     return true;
 }
@@ -2401,6 +2463,7 @@ static bool _equalAlterTSDictionaryStmt(const AlterTSDictionaryStmt* a, const Al
 
 static bool _equalAlterTSConfigurationStmt(const AlterTSConfigurationStmt* a, const AlterTSConfigurationStmt* b)
 {
+    COMPARE_SCALAR_FIELD(kind);
     COMPARE_NODE_FIELD(cfgname);
     COMPARE_NODE_FIELD(tokentype);
     COMPARE_NODE_FIELD(dicts);
@@ -2517,6 +2580,8 @@ static bool _equalTypeName(const TypeName* a, const TypeName* b)
     COMPARE_NODE_FIELD(arrayBounds);
     COMPARE_LOCATION_FIELD(location);
     COMPARE_LOCATION_FIELD(end_location);
+    COMPARE_SCALAR_FIELD(pct_rowtype);
+    COMPARE_SCALAR_FIELD(charset);
 
     return true;
 }
@@ -3392,10 +3457,62 @@ static bool _equalAutoIncrement(const AutoIncrement* a, const AutoIncrement* b)
     return true;
 }
 
+static bool _equalCharsetcollateOptions(const CharsetCollateOptions* a, const CharsetCollateOptions* b)
+{
+    COMPARE_SCALAR_FIELD(cctype);
+    COMPARE_SCALAR_FIELD(charset);
+    COMPARE_STRING_FIELD(collate);
+    return true;
+}
+
 static bool _equalPrefixKey(const PrefixKey* a, const PrefixKey* b)
 {
     COMPARE_NODE_FIELD(arg);
     COMPARE_SCALAR_FIELD(length);
+    return true;
+}
+
+static bool node_equal_create_event_info(const CreateEventStmt* a, const CreateEventStmt* b)
+{
+    COMPARE_NODE_FIELD(event_name);
+    COMPARE_NODE_FIELD(start_time_expr);
+    COMPARE_NODE_FIELD(end_time_expr);
+    COMPARE_NODE_FIELD(interval_time);
+    COMPARE_STRING_FIELD(def_name);
+    COMPARE_STRING_FIELD(event_comment_str);
+    COMPARE_STRING_FIELD(event_query_str);
+    COMPARE_SCALAR_FIELD(complete_preserve);
+    COMPARE_SCALAR_FIELD(if_not_exists);
+    COMPARE_SCALAR_FIELD(event_status);
+    return true;
+}
+
+static bool node_equal_alter_event_info(const AlterEventStmt* a, const AlterEventStmt* b)
+{
+    COMPARE_NODE_FIELD(def_name);
+    COMPARE_NODE_FIELD(event_name);
+    COMPARE_NODE_FIELD(start_time_expr);
+    COMPARE_NODE_FIELD(end_time_expr);
+    COMPARE_NODE_FIELD(interval_time);
+    COMPARE_NODE_FIELD(complete_preserve);
+    COMPARE_NODE_FIELD(event_status);
+    COMPARE_NODE_FIELD(event_comment_str);
+    COMPARE_NODE_FIELD(event_query_str);
+    COMPARE_NODE_FIELD(new_name);
+    return true;
+}
+
+static bool node_equal_drop_event_info(const DropEventStmt* a, const DropEventStmt* b)
+{
+    COMPARE_NODE_FIELD(event_name);
+    COMPARE_SCALAR_FIELD(missing_ok);
+    return true;
+}
+
+static bool node_equal_show_event_info(const ShowEventStmt* a, const ShowEventStmt* b)
+{
+    COMPARE_NODE_FIELD(from_clause);
+    COMPARE_STRING_FIELD(where_clause);
     return true;
 }
 
@@ -3983,6 +4100,12 @@ bool equal(const void* a, const void* b)
         case T_CreateTrigStmt:
             retval = _equalCreateTrigStmt((CreateTrigStmt*)a, (CreateTrigStmt*)b);
             break;
+        case T_CreateEventTrigStmt:
+            retval = _equalCreateEventTrigStmt((CreateEventTrigStmt*)a, (CreateEventTrigStmt*)b);
+            break;
+        case T_AlterEventTrigStmt:
+            retval = _equalAlterEventTrigStmt((AlterEventTrigStmt*)a, (AlterEventTrigStmt*)b);
+            break;
         case T_CreatePLangStmt:
             retval = _equalCreatePLangStmt((CreatePLangStmt*)a, (CreatePLangStmt*)b);
             break;
@@ -4287,9 +4410,31 @@ bool equal(const void* a, const void* b)
         case T_AutoIncrement:
             retval = _equalAutoIncrement((const AutoIncrement *)a, (const AutoIncrement *)b);
             break;
+        case T_CharsetCollateOptions:
+            retval = _equalCharsetcollateOptions((const CharsetCollateOptions *)a,
+                                                 (const CharsetCollateOptions *)b);
+            break;
         case T_PrefixKey:
             retval = _equalPrefixKey((PrefixKey *)a, (PrefixKey *)b);
             break;
+        case T_CreateEventStmt:
+            retval = node_equal_create_event_info((const CreateEventStmt *)a, (const CreateEventStmt *)b);
+            break;
+        case T_AlterEventStmt:
+            retval = node_equal_alter_event_info((const AlterEventStmt *)a, (const AlterEventStmt *)b);
+            break;
+        case T_DropEventStmt:
+            retval = node_equal_drop_event_info((const DropEventStmt *)a, (const DropEventStmt *)b);
+            break;
+        case T_ShowEventStmt:
+            retval = node_equal_show_event_info((const ShowEventStmt *)a, (const ShowEventStmt *)b);
+        case T_IndexHintDefinition:
+            retval = _equalIndexHintDefinition((IndexHintDefinition *)a, (IndexHintDefinition *)b);
+            break;
+        case T_IndexHintRelationData:
+            retval = _equalIndexHintRelationData((IndexHintRelationData *)a, (IndexHintRelationData *)b);
+            break;
+
 
         default:
             ereport(ERROR,

@@ -263,20 +263,34 @@ static Oid binary_oper_exact(List* opname, Oid arg1, Oid arg2, bool use_a_style_
 {
     Oid result;
     bool was_unknown = false;
-    bool other_was_num = false;
+
+    if (use_a_style_coercion) {
+        /*
+         * For A-style decode,
+         * decode(<num>, <unknwon>, ...) will be compared as characters
+         * decode(<unknwon/known string>, <num>, ...) will be compared as numbers
+         * Note that decode(<num>, <known string type>, ...) categories are not
+         * handled, because PG-style coercion suffers from blankspace padding of
+         * bpchar and displaying fractional part of numeric, the behavior is tricky
+         * to describe.
+         */
+        char arg1_category = get_typecategory(arg1);
+        char arg2_category = get_typecategory(arg2);
+        if (arg1_category == TYPCATEGORY_NUMERIC && arg2_category == TYPCATEGORY_UNKNOWN) {
+            return OpernameGetOprid(opname, TEXTOID, TEXTOID);
+        } else if (arg2_category == TYPCATEGORY_NUMERIC &&
+                   (arg1_category == TYPCATEGORY_UNKNOWN || arg1_category == TYPCATEGORY_STRING)) {
+            return OpernameGetOprid(opname, NUMERICOID, NUMERICOID);
+        }
+    }
 
     /* Unspecified type for one of the arguments? then use the other */
     if ((arg1 == UNKNOWNOID) && (arg2 != InvalidOid)) {
         arg1 = arg2;
         was_unknown = true;
-        other_was_num = get_typecategory(arg2) == TYPCATEGORY_NUMERIC;
     } else if ((arg2 == UNKNOWNOID) && (arg1 != InvalidOid)) {
         arg2 = arg1;
         was_unknown = true;
-        other_was_num = get_typecategory(arg1) == TYPCATEGORY_NUMERIC;
-    }
-    if (use_a_style_coercion && was_unknown && other_was_num) {
-        return OpernameGetOprid(opname, TEXTOID, TEXTOID);
     }
 
     result = OpernameGetOprid(opname, arg1, arg2);
@@ -392,7 +406,7 @@ Operator oper(ParseState* pstate, List* opname, Oid ltypeId, Oid rtypeId, bool n
      * Try to find the mapping in the lookaside cache.
      */
     if (pstate != NULL) {
-        use_a_style_coercion = pstate->p_is_case_when && ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE);
+        use_a_style_coercion = pstate->p_is_decode && ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE);
     }
         
     key_ok = make_oper_cache_key(&key, opname, ltypeId, rtypeId, use_a_style_coercion);
@@ -681,6 +695,20 @@ static void op_error(
 }
 
 /*
+ *		parse_get_last_srf
+ *
+ * Check pstate, if pstate is NULL, we can't use pstate->p_last_srf directly,
+ * it's okay to return a NULL value.
+ */
+Node* parse_get_last_srf(ParseState* pstate)
+{
+    if (pstate != NULL) {
+        return pstate->p_last_srf;
+    }
+    return NULL;
+}
+
+/*
  *		Operator expression construction.
  *
  * Transform operator expression ensuring type compatibility.
@@ -689,7 +717,7 @@ static void op_error(
  * As with coerce_type, pstate may be NULL if no special unknown-Param
  * processing is wanted.
  */
-Expr* make_op(ParseState* pstate, List* opname, Node* ltree, Node* rtree, int location, bool inNumeric)
+Expr* make_op(ParseState* pstate, List* opname, Node* ltree, Node* rtree, Node* last_srf, int location, bool inNumeric)
 {
     Oid ltypeId, rtypeId;
     Operator tup;
@@ -769,6 +797,13 @@ Expr* make_op(ParseState* pstate, List* opname, Node* ltree, Node* rtree, int lo
     /* opcollid and inputcollid will be set by parse_collate.c */
     result->args = args;
     result->location = location;
+
+    /* if it returns a set, check that's OK */
+    if (result->opretset && pstate && pstate->p_is_flt_frame) {
+        check_srf_call_placement(pstate, last_srf, location);
+        /* ... and remember it for error checks at higher levels */
+        pstate->p_last_srf = (Node*)result;
+    }
 
     ReleaseSysCache(tup);
 

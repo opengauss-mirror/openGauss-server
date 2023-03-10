@@ -2153,7 +2153,8 @@ static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
         XLByteLT(buf_desc->extra->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress() && !segment_buf;
 
     if (ENABLE_DMS && check_lsn_not_match &&
-        (XLogRecPtrIsInvalid(buf_desc->extra->lsn_on_disk) || GetDmsBufCtrl(buf_desc->buf_id)->state & BUF_DIRTY_NEED_FLUSH)) {
+        (XLogRecPtrIsInvalid(buf_desc->extra->lsn_on_disk) ||
+         GetDmsBufCtrl(buf_desc->buf_id)->state & BUF_DIRTY_NEED_FLUSH)) {
         return false;
     }
 

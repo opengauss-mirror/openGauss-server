@@ -49,7 +49,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  audit_rotation_size                              | integer | kB   | 1024      | 1048576
  audit_set_parameter                              | integer |      | 0         | 1
  audit_space_limit                                | integer | kB   | 1024      | 1073741824
- audit_system_object                              | integer |      | 0         | 134217727
+ audit_system_function_exec                       | integer |      | 0         | 1
+ audit_system_object                              | integer |      | 0         | 268435455
  audit_thread_num                                 | integer |      | 1         | 48
  audit_user_locked                                | integer |      | 0         | 1
  audit_user_violation                             | integer |      | 0         | 1
@@ -81,6 +82,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  bbox_dump_count                                  | integer |      | 1         | 20
  bbox_dump_path                                   | string  |      |           | 
  behavior_compat_options                          | string  |      |           | 
+ b_format_behavior_compat_options                 | string  |      |           | 
  bgwriter_delay                                   | integer | ms   | 10        | 10000
  bgwriter_flush_after                             | integer | 8kB  | 0         | 256
  bgwriter_lru_maxpages                            | integer |      | 0         | 1000
@@ -219,6 +221,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_asp                                       | bool    |      |           | 
  enable_auto_clean_unique_sql                     | bool    |      |           | 
  enable_auto_explain                              | bool    |      |           | 
+ enable_availablezone                             | bool    |      |           | 
  enable_bbox_dump                                 | bool    |      |           | 
  enable_beta_features                             | bool    |      |           | 
  enable_beta_opfusion                             | bool    |      |           | 
@@ -247,6 +250,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_dolphin_proto                             | bool    |      |           | 
  enable_double_write                              | bool    |      |           | 
  enable_early_free                                | bool    |      |           | 
+ enable_expr_fusion                               | bool    |      |           | 
  enable_extrapolation_stats                       | bool    |      |           | 
  enable_fast_allocate                             | bool    |      |           | 
  enable_fast_numeric                              | bool    |      |           | 
@@ -267,6 +271,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_index_nestloop                            | bool    |      |           | 
  enable_indexonlyscan                             | bool    |      |           | 
  enable_indexscan                                 | bool    |      |           | 
+ enable_indexscan_optimization                    | bool    |      |           | 
+ enable_inner_unique_opt                          | bool    |      |           | 
  enable_instance_metric_persistent                | bool    |      |           | 
  enable_instr_cpu_timer                           | bool    |      |           | 
  enable_instr_rt_percentile                       | bool    |      |           | 
@@ -339,6 +345,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  force_promote                                    | integer |      | 0         | 1
  from_collapse_limit                              | integer |      | 1         | 2147483647
  fsync                                            | bool    |      |           | 
+ full_audit_users                                 | string  |      |           | 
  full_page_writes                                 | bool    |      |           | 
  geqo                                             | bool    |      |           | 
  geqo_effort                                      | integer |      | 1         | 10
@@ -482,6 +489,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ngram_grapsymbol_ignore                          | bool    |      |           | 
  ngram_punctuation_ignore                         | bool    |      |           | 
  nls_timestamp_format                             | string  |      |           | 
+ no_audit_client                                  | string  |      |           | 
  numa_distribute_mode                             | string  |      |           | 
  num_internal_lock_partitions                     | string  |      |           | 
  nvm_buffers                                      | integer | 8kB  | 0         | 1073741823
@@ -616,7 +624,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ssl_ciphers                                      | string  |      |           | 
  ssl_crl_file                                     | string  |      |           | 
  ssl_key_file                                     | string  |      |           | 
- ss_log_backup_file_count                         | integer |      | 0         | 128
+ ss_log_backup_file_count                         | integer |      | 0         | 1024
  ss_log_level                                     | integer |      | 0         | 887
  ss_log_max_file_size                             | integer | kB   | 1024      | 4194304
  ssl_renegotiation_limit                          | integer | kB   | 0         | 2147483647
@@ -653,6 +661,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  temp_buffers                                     | integer | 8kB  | 100       | 1073741823
  temp_file_limit                                  | integer | kB   | -1        | 2147483647
  temp_tablespaces                                 | string  |      |           | 
+ test_user_host                                   | bool    |      |           | 
  thread_pool_attr                                 | string  |      |           | 
  thread_pool_stream_attr                          | string  |      |           | 
  time_to_target_rpo                               | integer |      | 0         | 3600

@@ -16,7 +16,7 @@ DETAIL:  N/A
 GRANT ALL PRIVILEGES TO "Test_User";
 CREATE DEFINER="Test_User" VIEW definer_test_view2 AS SELECT log(10, 100);
 CREATE OR REPLACE DEFINER="Test_User" VIEW definer_test_view3 AS SELECT log(10, 100);
-SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
+SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%' order by view_name;
      view_name      |  rolname  
 --------------------+-----------
  definer_test_view1 | Root_Test
@@ -49,7 +49,7 @@ n:=n+1;
 until n>10 end repeat;
 end;
 /
-SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
+SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%' order by view_name;
      view_name      |  rolname   
 --------------------+------------
  definer_test_view1 | Root_Test
@@ -137,7 +137,7 @@ SELECT * FROM definer_test_view3;
  2.0000000000000000
 (1 row)
 
-SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
+SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%' order by view_name;
      view_name      |  rolname   
 --------------------+------------
  definer_test_view1 | Root_Test
@@ -159,6 +159,7 @@ drop database if exists test_2;
 NOTICE:  database "test_2" does not exist, skipping
 create database test_2;
 \! @abs_bindir@/gsql -d test_2 -p @portstring@ -f @abs_bindir@/dump_postgres.sql
+SET
 SET
 SET
 SET

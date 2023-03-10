@@ -140,7 +140,6 @@ CachedColumn::~CachedColumn()
 
 unsigned int CachedColumn::get_col_idx() const
 {
-    Assert(m_column_index > 0);
     return m_column_index;
 }
 

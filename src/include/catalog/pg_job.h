@@ -175,6 +175,13 @@ extern bool is_scheduler_job_id(Relation relation, int64 job_id);
 
 /* For run_job_internal */
 extern void job_finish(PG_FUNCTION_ARGS);
+extern Datum job_submit(PG_FUNCTION_ARGS);
+extern void create_job_raw(PG_FUNCTION_ARGS);
+extern char *create_inline_program(Datum job_name, Datum job_type, Datum job_action, Datum num_of_args, Datum enabled);
+extern char *get_inline_schedule_name(Datum job_name);
+extern void drop_single_job_internal(PG_FUNCTION_ARGS);
+extern void ShowEventCommand(ShowEventStmt *stmt, DestReceiver* dest);
+extern TupleDesc GetEventResultDesc();
 
 #define JOBID_ALLOC_OK         0                /* alloc jobid ok */
 #define JOBID_ALLOC_ERROR      1                /* alloc jobid error */

@@ -16,6 +16,7 @@
 #ifndef INDEX_H
 #define INDEX_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/execnodes.h"
 #include "utils/tuplesort.h"
 
@@ -78,7 +79,8 @@ typedef enum CheckWaitMode
     CHECK_NOWAIT,
 } CheckWaitMode;
 
-extern void index_check_primary_key(Relation heapRel, IndexInfo *indexInfo, bool is_alter_table);
+extern void index_check_primary_key(Relation heapRel, IndexInfo *indexInfo, bool is_alter_table, IndexStmt *stmt,
+    bool is_modify_primary = false);
 
 /*
  * Parameter isPartitionedIndex indicates whether the index is a partition index.
@@ -133,7 +135,7 @@ extern void index_concurrently_set_dead(Oid heapId, Oid indexId);
 extern void index_concurrently_part_build(Oid heapRelationId, Oid heapPartitionId, Oid indexRelationId, Oid IndexPartitionId, AdaptMem* memInfo = NULL, bool dbWide = false);
 extern void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const char *oldName);
 
-extern void index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo *indexInfo,
+extern ObjectAddress index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo *indexInfo,
                                     const char *constraintName, char constraintType, bool deferrable,
                                     bool initdeferred, bool mark_as_primary, bool update_pgindex,
                                     bool remove_old_dependencies, bool allow_system_table_mods);

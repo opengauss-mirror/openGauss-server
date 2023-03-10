@@ -105,7 +105,6 @@ SubqueryScanState* ExecInitSubqueryScan(SubqueryScan* node, EState* estate, int 
     sub_query_state->ss.ps.state = estate;
     sub_query_state->ss.ps.ExecProcNode = ExecSubqueryScan;
 
-
     /*
      * Miscellaneous initialization
      *

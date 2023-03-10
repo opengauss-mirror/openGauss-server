@@ -51,13 +51,18 @@ typedef struct PartitionMap {
     bool isDirty;
 } PartitionMap;
 
+typedef struct PartitionKey {
+    int count;      /* partition key values count */
+    Const **values;
+} PartitionKey;
+
 // describe range partition
-#define RANGE_PARTKEYMAXNUM 4
-#define PARTITION_PARTKEYMAXNUM 4
+#define RANGE_PARTKEYMAXNUM 16
+#define PARTITION_PARTKEYMAXNUM 16
 #define VALUE_PARTKEYMAXNUM 4
 #define INTERVAL_PARTKEYMAXNUM 1
 
-#define LIST_PARTKEYMAXNUM 1
+#define LIST_PARTKEYMAXNUM 16
 
 #define HASH_PARTKEYMAXNUM 1
 
@@ -100,7 +105,8 @@ void decre_partmap_refcount(PartitionMap* map);
 extern void RelationInitPartitionMap(Relation relation, bool isSubPartition = false);
 
 extern int partOidGetPartSequence(Relation rel, Oid partOid);
-extern Oid getListPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
+extern Oid getListPartitionOid(
+    PartitionMap* partitionmap, Const** partKeyValue, int partKeyCount, int* partIndex, bool topClosed);
 extern Oid getHashPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
 extern Oid getRangePartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
 extern Oid GetPartitionOidByParam(PartitionMap* partitionmap, Param *paramArg, ParamExternData *prm);
@@ -119,12 +125,12 @@ extern int2vector* getPartitionKeyAttrNo(
     Oid** typeOids, HeapTuple pg_part_tup, TupleDesc tupledsc, TupleDesc rel_tupledsc);
 extern void unserializePartitionStringAttribute(Const** outMax, int outMaxLen, Oid* partKeyType, int partKeyTypeLen,
     Oid relid, int2vector* partkey, HeapTuple pg_part_tup, int att_num, TupleDesc tupledsc);
-extern void unserializeListPartitionAttribute(int *len, Const*** listValues, Oid* partKeyType, int partKeyTypeLen,
+extern void unserializeListPartitionAttribute(int *len, PartitionKey** listValues, Oid* partKeyType, int partKeyTypeLen,
     Oid relid, int2vector* partkey, HeapTuple pg_part_tup, int att_num, TupleDesc tupledsc);
 extern void unserializeHashPartitionAttribute(Const** outMax, int outMaxLen,
     Oid relid, int2vector* partkey, HeapTuple pg_part_tup, int att_num, TupleDesc tupledsc);
 
-extern int partitonKeyCompare(Const** value1, Const** value2, int len);
+extern int partitonKeyCompare(Const** value1, Const** value2, int len, bool nullEqual = false);
 extern int getPartitionNumber(PartitionMap* map);
 extern int GetSubPartitionNumber(Relation rel);
 

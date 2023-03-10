@@ -34,6 +34,9 @@
 #include "utils/syscache.h"
 #include "pgxc/pgxc.h"
 #include "utils/lsyscache.h"
+#include "mb/pg_wchar.h"
+#include "parser/parse_utilcmd.h"
+#include "catalog/gs_utf8_collation.h"
 
 /*
  * CreateTemplateTupleDesc
@@ -83,15 +86,18 @@ TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, const TableAmRoutine* 
  * Tuple type ID information is initially set for an anonymous record type;
  * caller can overwrite this if needed.
  */
-TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, const TableAmRoutine* tam_ops)
+TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute *attrs, const TableAmRoutine *tam_ops)
 {
     TupleDesc desc;
     int i;
+    errno_t rc;
 
     desc = CreateTemplateTupleDesc(natts, hasoid, tam_ops);
 
-    for (i = 0; i < natts; ++i)
-        memcpy(TupleDescAttr(desc, i), attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+    for (i = 0; i < natts; ++i) {
+        rc = memcpy_s(TupleDescAttr(desc, i), ATTRIBUTE_FIXED_PART_SIZE, attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        securec_check(rc, "\0", "\0");
+    }
 
     return desc;
 }
@@ -129,13 +135,15 @@ TupleDesc CreateTupleDescCopy(TupleDesc tupdesc)
 {
     TupleDesc desc;
     int i;
+    errno_t rc;
 
     desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->td_tam_ops);
 
     for (i = 0; i < desc->natts; i++) {
         Form_pg_attribute att = TupleDescAttr(desc, i);
 
-        memcpy(att, &tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        rc = memcpy_s(att, ATTRIBUTE_FIXED_PART_SIZE, &tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        securec_check(rc, "\0", "\0");
         att->attnotnull = false;
         att->atthasdef = false;
     }
@@ -328,6 +336,7 @@ void FreeTupleDesc(TupleDesc tupdesc, bool need_check)
             pfree(check);
         }
         pfree_ext(tupdesc->constr->clusterKeys);
+        pfree_ext(tupdesc->constr->cons_autoinc);
         pfree(tupdesc->constr);
         tupdesc->constr = NULL;
     }
@@ -514,6 +523,11 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
         if (strcmp(NameStr(attr1->attname), NameStr(attr2->attname)) != 0) {
             return false;
         }
+
+        if (attr1->attnum != attr2->attnum) {
+            return false;
+        }
+
         const bool cl_skip = IsClientLogicType(attr1->atttypid) && (Oid)attr1->atttypmod == attr2->atttypid;
         if (attr1->atttypid != attr2->atttypid && !cl_skip) {
             return false;
@@ -940,7 +954,7 @@ static void BlockColumnRelOption(const char *tableFormat, const Oid atttypid, co
  * TupleDesc if it wants OIDs.	Also, tdtypeid will need to be filled in
  * later on.
  */
-TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
+TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind, Oid rel_coll_oid)
 {
     int natts;
     AttrNumber attnum = 0;
@@ -982,6 +996,10 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         attname = entry->colname;
 
         typenameTypeIdAndMod(NULL, entry->typname, &atttypid, &atttypmod);
+        attcollation = GetColumnDefCollation(NULL, entry, atttypid, rel_coll_oid);
+        if (DB_IS_CMPT(B_FORMAT)) {
+            atttypid = binary_need_transform_typeid(atttypid, &attcollation);
+        }
 #ifndef ENABLE_MULTIPLE_NODES
     /* don't allow package or procedure type as column type */
     if (u_sess->plsql_cxt.curr_compile_context == NULL && IsPackageDependType(atttypid, InvalidOid)) {
@@ -1027,7 +1045,6 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         if (aclresult != ACLCHECK_OK)
             aclcheck_error_type(aclresult, atttypid);
 
-        attcollation = GetColumnDefCollation(NULL, entry, atttypid);
         attdim = UpgradeAdaptAttr(atttypid, entry);
 
         BlockColumnRelOption(tableFormat, atttypid, atttypmod);

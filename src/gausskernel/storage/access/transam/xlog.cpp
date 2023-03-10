@@ -8542,7 +8542,7 @@ void ResourceManagerStop(void)
     }
 }
 
-#define RecoveryXlogReader(_oldXlogReader, _xlogreader) do { \
+#define RecoveryXlogReader(_oldXlogReader, _xlogreader) do {                                   \
     if (get_real_recovery_parallelism() > 1) {                                                 \
         if (GetRedoWorkerCount() > 0) {                                                        \
             errno_t errorno;                                                                   \
@@ -8561,6 +8561,12 @@ void ResourceManagerStop(void)
             errorno = memcpy_s((_oldXlogReader)->readBuf, XLOG_BLCKSZ, (_xlogreader)->readBuf, \
                                (_oldXlogReader)->readLen);                                     \
             securec_check(errorno, "", "");                                                    \
+            if (ENABLE_DSS && ENABLE_DMS) {                                                    \
+                (_oldXlogReader)->preReadStartPtr = (_xlogreader)->preReadStartPtr;            \
+                errorno = memcpy_s((_oldXlogReader)->preReadBuf, XLogPreReadSize,              \
+                    (_xlogreader)->preReadBuf, XLogPreReadSize);                               \
+                securec_check(errorno, "", "");                                                \
+            }                                                                                  \
             ResetDecoder(_oldXlogReader);                                                      \
             (_xlogreader) = (_oldXlogReader);                                                  \
         }                                                                                      \
@@ -9860,7 +9866,9 @@ void StartupXLOG(void)
      * replay.  This avoids as well any subsequent scans when doing recovery
      * of the on-disk two-phase data.
      */
-    restoreTwoPhaseData();
+    if (!ENABLE_DMS || SS_PRIMARY_MODE) {
+        restoreTwoPhaseData();
+    }
 
     StartupCSNLOG();
 
@@ -9904,6 +9912,12 @@ void StartupXLOG(void)
         if (ArchiveRecoveryByPending) {
             RecoveryByPending = true;
         }
+    }
+
+    if (SS_STANDBY_MODE && t_thrd.xlog_cxt.InRecovery == true) {
+        /* do not need replay anything in SS standby mode */
+        ereport(LOG, (errmsg("[SS] Skip redo replay in standby mode")));
+        t_thrd.xlog_cxt.InRecovery = false;
     }
 
     ReadRemainSegsFile();
@@ -10312,14 +10326,10 @@ void StartupXLOG(void)
                 CountRedoTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_2]);
 #endif
                 
-                if (ENABLE_DMS && !SS_PERFORMING_SWITCHOVER && SSRecoveryApplyDelay(xlogreader)) {
+                if (ENABLE_DMS && !SS_PERFORMING_SWITCHOVER && SSRecoveryApplyDelay()) {
                     if (xlogctl->recoveryPause) {
                         recoveryPausesHere();
                     }
-                }
-
-                if (ENABLE_DMS && SSSKIP_REDO_REPLAY) {
-                    break;
                 }
 
                 /*
@@ -11874,6 +11884,15 @@ void CreateCheckPoint(int flags)
 
     /* allow standby do checkpoint only after it has promoted AND has finished recovery. */
     if (ENABLE_DMS && SS_STANDBY_MODE) {
+        if (shutdown) {
+            START_CRIT_SECTION();
+            LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+            t_thrd.shemem_ptr_cxt.ControlFile->state = DB_SHUTDOWNED;
+            t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
+            UpdateControlFile();
+            LWLockRelease(ControlFileLock);
+            END_CRIT_SECTION();
+        }
         return;
     } else if (SSFAILOVER_TRIGGER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do not do CreateCheckpoint during failover")));
@@ -13364,7 +13383,8 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
         }
         LWLockRelease(XlogRemoveSegLock);
     }
-    if (t_thrd.xlog_cxt.server_mode == STANDBY_MODE && t_thrd.xlog_cxt.is_hadr_main_standby) {
+    if (t_thrd.xlog_cxt.server_mode == STANDBY_MODE && t_thrd.xlog_cxt.is_hadr_main_standby &&
+        !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
         XLogSegNo mainStandbySegNo = CalcRecycleSegNoForHadrMainStandby(recptr, segno, repl_slot_state.min_required);
         if (mainStandbySegNo < segno && mainStandbySegNo > 0) {
             segno = mainStandbySegNo;
@@ -13653,6 +13673,7 @@ void xlog_redo(XLogReaderState *record)
         if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, checkPoint.nextXid)) {
             t_thrd.xact_cxt.ShmemVariableCache->nextXid = checkPoint.nextXid;
         }
+        ExtendCSNLOG(checkPoint.nextXid);
         LWLockRelease(XidGenLock);
         LWLockAcquire(OidGenLock, LW_EXCLUSIVE);
         t_thrd.xact_cxt.ShmemVariableCache->nextOid = checkPoint.nextOid;
@@ -13778,6 +13799,7 @@ void xlog_redo(XLogReaderState *record)
         if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, checkPoint.nextXid)) {
             t_thrd.xact_cxt.ShmemVariableCache->nextXid = checkPoint.nextXid;
         }
+        ExtendCSNLOG(checkPoint.nextXid);
         LWLockRelease(XidGenLock);
         /* ... but still treat OID counter as exact */
         LWLockAcquire(OidGenLock, LW_EXCLUSIVE);
@@ -17149,7 +17171,12 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
         if (readSource & XLOG_FROM_STREAM) {
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
-            readLen = ParallelXLogPageReadFile(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
+            if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+                readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
+                    xlogreader->readBuf, readTLI, NULL);
+            } else {
+                readLen = ParallelXLogPageReadFile(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
+            }
         }
 
         if (readLen > 0 || t_thrd.xlog_cxt.recoveryTriggered || !t_thrd.xlog_cxt.StandbyMode || DoEarlyExit()) {
@@ -17876,7 +17903,7 @@ retry:
         if (!ss_ret) {
             ereport(emode_for_corrupt_record(emode, RecPtr),
                 (errcode_for_file_access(),
-                 errmsg("[ss] could not read from log file %s to offset %u: %m",
+                 errmsg("[SS] could not read from log file %s to offset %u: %m",
                         XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
                         t_thrd.xlog_cxt.readOff)));
             goto next_record_is_invalid;

@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
+#include "nodes/makefuncs.h"
 #include "tcop/utility.h"
 #include "pgaudit.h"
 #include "libpq/libpq-be.h"
@@ -33,6 +34,24 @@
 #include "auditfuncs.h"
 #include "utils/elog.h"
 #include "libpq/libpq-be.h"
+#include "utils/builtins.h"
+#include "miscadmin.h"
+#include "utils/rangetypes.h"
+#include "utils/inet.h"
+#include "fmgr.h"
+#include "utils/nabstime.h"
+#include "access/tupmacs.h"
+#include "utils/fmgrtab.h"
+#include "lib/stringinfo.h"
+#include "utils/cash.h"
+#include "utils/lsyscache.h"
+#include "catalog/namespace.h"
+#include "utils/uuid.h"
+#include "utils/builtins.h"
+#include "utils/date.h"
+#include "utils/numeric.h"
+#include "utils/numeric_gs.h"
+#include "workload/cpwlm.h"
 
 #define AUDIT_BUFFERSIZ 512
 
@@ -55,6 +74,7 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
     bool sentToRemote,
 #endif /* PGXC */
     char* completionTag,
+    ProcessUtilityContext context,
     bool isCTAS);
 static void pgaudit_ddl_database(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_directory(const char* objectname, const char* cmdtext);
@@ -68,6 +88,7 @@ static void pgaudit_ddl_trigger(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_user(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_view(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_matview(const char* objectname, const char* cmdtext);
+static void pgaudit_ddl_event(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_function(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_package(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_resourcepool(const char* objectname, const char* cmdtext);
@@ -92,6 +113,12 @@ static void pgaudit_ddl_synonym(const char* objectName, const char* cmdText);
 static void pgaudit_ddl_textsearch(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_publication_subscription(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_fdw(const char* objectname, const char* cmdtext);
+static char* audit_get_func_args(FunctionCallInfo fcinfo);
+static char* audit_get_text_array_value(ArrayType* array, int* numitems);
+ 
+#define BUF_LENGTH 64
+#define PG_GETARG_COMMANDID(n) DatumGetCommandId(PG_GETARG_DATUM(n))
+#define SYSTEM_FUNC_DEFAULT_VALUE "NULL"
 
 static const AuditFuncMap g_auditFuncMap[] = {
     {OBJECT_SCHEMA, pgaudit_ddl_schema},
@@ -120,7 +147,8 @@ static const AuditFuncMap g_auditFuncMap[] = {
     {OBJECT_TSCONFIGURATION, pgaudit_ddl_textsearch},
     {OBJECT_PUBLICATION, pgaudit_ddl_publication_subscription},
     {OBJECT_SUBSCRIPTION, pgaudit_ddl_publication_subscription},
-    {OBJECT_FDW, pgaudit_ddl_fdw}
+    {OBJECT_FDW, pgaudit_ddl_fdw},
+    {OBJECT_EVENT, pgaudit_ddl_event}
 };
 static const int g_auditFuncMapNum = sizeof(g_auditFuncMap) / sizeof(AuditFuncMap);
 
@@ -360,6 +388,7 @@ static void pgaudit_ddl_database_object(
         case AUDIT_DDL_TRIGGER:
         case AUDIT_DDL_USER:
         case AUDIT_DDL_VIEW:
+        case AUDIT_DDL_EVENT:
         case AUDIT_DDL_RESOURCEPOOL:
         case AUDIT_DDL_GLOBALCONFIG:
         case AUDIT_DDL_WORKLOAD:
@@ -400,8 +429,10 @@ void pgaudit_dml_table(const char* objectname, const char* cmdtext)
     AuditResult audit_result = AUDIT_OK;
     char* mask_string = NULL;
     Assert(cmdtext);
-    if (u_sess->attr.attr_security.Audit_DML == 0)
+    bool is_full_audit_user = audit_check_full_audit_user();
+    if (u_sess->attr.attr_security.Audit_DML == 0 && !is_full_audit_user) {
         return;
+    }
 
     mask_string = maskPassword(cmdtext);
     if (mask_string == NULL)
@@ -420,9 +451,10 @@ void pgaudit_dml_table_select(const char* objectname, const char* cmdtext)
     AuditType audit_type = AUDIT_DML_ACTION_SELECT;
     AuditResult audit_result = AUDIT_OK;
     char* mask_string = NULL;
-    Assert(cmdtext);
-    if (u_sess->attr.attr_security.Audit_DML_SELECT == 0)
+    bool is_full_audit_user = audit_check_full_audit_user();
+    if (u_sess->attr.attr_security.Audit_DML_SELECT == 0 && !is_full_audit_user) {
         return;
+    }
 
     mask_string = maskPassword(cmdtext);
     if (mask_string == NULL)
@@ -532,6 +564,20 @@ static void pgaudit_ddl_view(const char* objectname, const char* cmdtext)
     return;
 }
 
+static void pgaudit_ddl_event(const char* objectname, const char* cmdtext)
+{
+    AuditType audit_type = AUDIT_DDL_EVENT;
+    AuditResult audit_result = AUDIT_OK;
+
+    Assert(cmdtext != NULL);
+    if (!CHECK_AUDIT_DDL(DDL_EVENT)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(audit_type, audit_result, objectname, cmdtext);
+    return;
+}
+
 /*
  * Brief		    : pgaudit_ddl_matview(char* objectname, const char* cmdtext)
  * Description	: Audit the operations of matview
@@ -633,7 +679,7 @@ static void pgaudit_grant_or_revoke_role(bool isgrant, const char* objectname, c
     char* mask_string = NULL;
 
     Assert(cmdtext != NULL);
-    if (u_sess->attr.attr_security.Audit_PrivilegeAdmin == 0) {
+    if (u_sess->attr.attr_security.Audit_PrivilegeAdmin == 0  && !audit_check_full_audit_user()) {
         return;
     }
     mask_string = maskPassword(cmdtext);
@@ -1034,8 +1080,9 @@ static void pgaudit_process_set_parameter(const char* objectname, const char* cm
     char* mask_string = NULL;
 
     Assert(cmdtext != NULL);
-    if (u_sess->attr.attr_security.Audit_Set == 0)
+    if (u_sess->attr.attr_security.Audit_Set == 0 && !audit_check_full_audit_user()) {
         return;
+    }
 
     /* make the cmdtext which may contain senstive info like password. */
     mask_string = maskPassword(cmdtext);
@@ -1058,11 +1105,24 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
     DropStmt* stmt = (DropStmt*)node;
     ListCell* arg = NULL;
     char* objectname = NULL;
-
     foreach (arg, stmt->objects) {
-        List* names = (List*)lfirst(arg);
+        List* names = NIL;
         RangeVar* rel = NULL;
-
+        if (stmt->removeType == OBJECT_DOMAIN ||
+             stmt->removeType == OBJECT_TYPE ) {
+        List *objname = (List*)lfirst(arg);
+        Node *ptype = (Node *) linitial(objname);
+        TypeName* typname = NULL;
+        if(ptype->type == T_String)
+            typname = makeTypeNameFromNameList(list_make1(ptype));
+        else if(ptype->type == T_TypeName)
+            typname = (TypeName *) linitial(objname);
+        else
+            ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unkonw type: %d", (int)ptype->type)));
+        names = typname->names;
+        } else {
+            names = (List*)lfirst(arg);
+        }
         switch (stmt->removeType) {
             case OBJECT_TABLE:
             case OBJECT_STREAM:
@@ -1073,6 +1133,11 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
             } break;
             case OBJECT_CONTQUERY:
             case OBJECT_VIEW: {
+                rel = makeRangeVarFromNameList(names);
+                objectname = rel->relname;
+                pgaudit_ddl_view(objectname, querystring);
+            } break;
+            case OBJECT_EVENT: {
                 rel = makeRangeVarFromNameList(names);
                 objectname = rel->relname;
                 pgaudit_ddl_view(objectname, querystring);
@@ -1248,12 +1313,13 @@ static void pgaudit_process_rename_object(Node* node, const char* querystring)
         case OBJECT_SCHEMA:
         case OBJECT_TABLESPACE:
         case OBJECT_TRIGGER:
-        case OBJECT_FDW:
-        case OBJECT_FOREIGN_SERVER:
         case OBJECT_RLSPOLICY:
         case OBJECT_DATA_SOURCE:
             objectname = stmt->subname;
             break;
+        case OBJECT_EVENT_TRIGGER:
+        case OBJECT_FDW:
+        case OBJECT_FOREIGN_SERVER:
         case OBJECT_FUNCTION:
         case OBJECT_TYPE:
         case OBJECT_TSDICTIONARY:
@@ -1340,6 +1406,7 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
     bool sentToRemote,
 #endif /* PGXC */
     char* completionTag,
+    ProcessUtilityContext context,
     bool isCTAS)
 {
     char* object_name_pointer = NULL;
@@ -1351,6 +1418,7 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
             sentToRemote,
 #endif /* PGXC */
             completionTag,
+            context,
             isCTAS);
     else
         standard_ProcessUtility(processutility_cxt,
@@ -1359,6 +1427,7 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
             sentToRemote,
 #endif /* PGXC */
             completionTag,
+            context,
             isCTAS);
 
     Node* parsetree = processutility_cxt->parse_tree;
@@ -1473,6 +1542,18 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
         case T_ViewStmt: { /* Audit create View */
             ViewStmt* viewstmt = (ViewStmt*)(parsetree);
             pgaudit_ddl_view(viewstmt->view->relname, queryString);
+        } break;
+        case T_CreateEventStmt: {
+            CreateEventStmt* eventstmt = (CreateEventStmt*)(parsetree);
+            pgaudit_ddl_event(eventstmt->event_name->relname, queryString);
+        } break;
+        case T_AlterEventStmt: {
+            AlterEventStmt* eventstmt = (AlterEventStmt*)(parsetree);
+            pgaudit_ddl_event(eventstmt->event_name->relname, queryString);
+        } break;
+        case T_DropEventStmt: {
+            DropEventStmt* eventstmt = (DropEventStmt*)(parsetree);
+            pgaudit_ddl_event(eventstmt->event_name->relname, queryString);
         } break;
         case T_CreateEnumStmt: {
             CreateEnumStmt* enumstmt = (CreateEnumStmt*)(parsetree);
@@ -1852,18 +1933,19 @@ static void pgaudit_ExecutorEnd(QueryDesc* queryDesc)
 void light_pgaudit_ExecutorEnd(Query* query)
 {
     char* object_name = NULL;
+    bool is_full_audit_user = audit_check_full_audit_user();
 
     switch (query->commandType) {
         case CMD_INSERT:
         case CMD_DELETE:
         case CMD_UPDATE:
-            if (u_sess->attr.attr_security.Audit_DML != 0) {
+            if (u_sess->attr.attr_security.Audit_DML != 0 || is_full_audit_user) {
                 object_name = pgaudit_get_relation_name(query->rtable);
                 pgaudit_dml_table(object_name, query->sql_statement);
             }
             break;
         case CMD_SELECT:
-            if (u_sess->attr.attr_security.Audit_DML_SELECT != 0) {
+            if (u_sess->attr.attr_security.Audit_DML_SELECT != 0 || is_full_audit_user) {
                 object_name = pgaudit_get_relation_name(query->rtable);
                 pgaudit_dml_table_select(object_name, query->sql_statement);
             }
@@ -1872,4 +1954,506 @@ void light_pgaudit_ExecutorEnd(Query* query)
         default:
             break;
     }
+}
+
+/*
+ * Brief        : check if src_str includes target_str
+ * Description  : split src_str by delimiter and search for target_str
+ */
+bool audit_search_str(char* src_str, char* target_str)
+{
+    bool is_found = false;
+    char* ptok = NULL;
+    char* sub_str = NULL;
+    char* src_str_tmp = NULL;
+    char* src_str_trim = NULL;
+    src_str_tmp = pstrdup(src_str);
+    if (src_str_tmp == NULL) {
+        pfree(src_str_tmp);
+        return is_found;
+    }
+    sub_str = (char*)strchr(src_str, ',');
+    if (sub_str == NULL) {
+        src_str_trim = trim(src_str_tmp);
+        if (strcmp(target_str, src_str_trim) == 0) {
+            pfree(src_str_tmp);
+            return true;
+        }
+    } else {
+        sub_str = strtok_s(src_str_tmp, ",", &ptok);
+        while (sub_str != NULL) {
+            src_str_trim = trim(sub_str);
+            if (strcmp(target_str, src_str_trim) == 0) {
+                is_found = true;
+                break;
+            }
+            sub_str = strtok_s(NULL, ",", &ptok);
+        }
+    }
+    pfree(src_str_tmp);
+    return is_found;
+}
+ 
+ 
+/*
+ * Brief        : check if the client_info is in the blackist, consists of clients
+ *                whoes audit records should not be sent to audit pipe
+ * Description  : search No_Audit_Client for current clientconn_info, if exists, skip audit_report
+ */
+bool audit_check_client_blacklist(char* client_info)
+{
+    bool is_blacklist = false;
+    /* check if apply audit blacklist */
+    if (u_sess->attr.attr_security.no_audit_client == NULL || strlen(u_sess->attr.attr_security.no_audit_client) == 0) {
+        return is_blacklist;
+    }
+    is_blacklist = audit_search_str(u_sess->attr.attr_security.no_audit_client, client_info);
+    return is_blacklist;
+}
+ 
+/*
+ * Brief        : check if current user is under comprehensive audit
+ * Description  : search Full_Audit_Users for current username, if exists, open all the audit options
+ */
+bool audit_check_full_audit_user()
+{
+    bool is_full_audit = false;
+    char* username = NULL;
+    if (u_sess->proc_cxt.MyProcPort == NULL) {
+        return is_full_audit;
+    }
+    if (u_sess->misc_cxt.CurrentUserName != NULL) {
+        username = (char*)u_sess->misc_cxt.CurrentUserName;
+    } else {
+        username = u_sess->proc_cxt.MyProcPort->user_name;
+    }
+    if (strlen(u_sess->attr.attr_security.full_audit_users) == 0 || username == NULL) {
+        return is_full_audit;
+    }
+    is_full_audit = audit_search_str(u_sess->attr.attr_security.full_audit_users, username);
+    return is_full_audit;
+}
+ 
+ 
+/*
+ * Brief        : check if the system function should be audited
+ * Description  : search list g_audit_system_funcs for func_name, if exists, do audit
+ */
+static bool audit_is_system_func(char *func_name)
+{
+    bool is_audit = false;
+    int i;
+    for (i = 0; g_audit_system_funcs[i] != NULL; i++) {
+        if (strcmp((const char*)func_name, g_audit_system_funcs[i]) == 0) {
+            is_audit = true;
+        }
+    }
+    if (!is_audit) {
+        List* search_path = fetch_search_path(false);
+        char* nspname = NULL;
+ 
+        if (search_path == NIL) {
+            list_free_ext(search_path);
+            return is_audit;
+        }
+        nspname = get_namespace_name(linitial_oid(search_path));
+        func_name = quote_qualified_identifier(nspname, func_name);
+        list_free_ext(search_path);
+        for (i = 0; g_audit_system_funcs[i] != NULL; i++) {
+            if (strcmp((const char*)func_name, g_audit_system_funcs[i]) == 0) {
+                is_audit = true;
+            }
+        }
+    }
+    return is_audit;
+}
+
+/*
+ * Brief        : check if the system function includes crypt information
+ * Description  : search list g_audit_crypt_funcs for func_name
+ */
+static bool audit_is_crypt_func(char *func_name)
+{
+    bool is_crypt = false;
+    for (int i = 0; g_audit_crypt_funcs[i] != NULL; i++) {
+        if (strcmp((const char*)func_name, g_audit_crypt_funcs[i]) == 0) {
+            is_crypt = true;
+        }
+    }
+    return is_crypt;
+}
+
+/*
+ * Brief        : generate audit record of system function in white list, and do audit_report
+ * Description  : extract funtion name, oid and parameters of system function
+ */
+void audit_system_function(FunctionCallInfo fcinfo, const AuditResult result)
+{
+    Oid fn_oid = fcinfo->flinfo->fn_oid;
+    char* fn_signature = format_procedure(fn_oid);
+    /* extract function name */
+    char* func_name = NULL;
+    char* next_token = NULL;
+    const char* token = "(";
+    func_name = strtok_s((char*)format_procedure(fn_oid), token, &next_token);
+    if (func_name == NULL) {
+        return;
+    }
+    /* check if current function is system function and included the white list */
+    if (fn_oid >= FirstBootstrapObjectId || !audit_is_system_func(func_name)) {
+        return;
+    }
+    /* if function includes crypt infomation, skip extract arguments */
+    bool is_crypt = audit_is_crypt_func(func_name);
+    char details[PGAUDIT_MAXLENGTH];
+    errno_t rcs = EOK;
+    if (is_crypt) {
+        rcs = snprintf_s(details, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1,
+                         "Execute system function(oid = %u). args = %s",
+                         fn_oid, CRYPT_FUNC_ARG);
+    } else {
+        char* fn_args = audit_get_func_args(fcinfo);
+        rcs = snprintf_s(details, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1,
+                         "Execute system function(oid = %u). args = %s",
+                         fn_oid, fn_args);
+        pfree(fn_args);
+    }
+    securec_check_ss(rcs, "\0", "\0");
+    audit_report(AUDIT_SYSTEM_FUNCTION_EXEC, result, fn_signature, details);
+}
+
+/*
+ * Brief        : generate the detail_info by extract arguments of system function
+ * Description  : traverse fcinfo to get arguments value and form string
+ */
+static char* audit_get_func_args(FunctionCallInfo fcinfo)
+{
+    char* arg;
+    StringInfoData buf;
+    initStringInfo(&buf);
+    appendStringInfo(&buf, "%s(", "");
+
+    for (int i = 0; i < fcinfo->nargs; i++) {
+        if (i > 0) {
+            appendStringInfoString(&buf, ",");
+        }
+        arg = audit_get_value_bytype(fcinfo, i);
+        appendStringInfo(&buf, "%s", arg);
+    }
+    appendStringInfoString(&buf, ")");
+    char* result = buf.data;
+    return result;
+}
+ 
+/*
+ * Brief        : extract args from the fcinfo
+ * Description  : get value from fcinfo by different arguments type and sequence number
+ */
+char* audit_get_value_bytype(FunctionCallInfo fcinfo, int n_arg)
+{
+    char* value = (char*)palloc(BUF_LENGTH);
+    errno_t nRet = EOK;
+    /* paramater can be NULL if it has default value */
+    if (PG_ARGISNULL(n_arg)) {
+        nRet = strncpy_s(value, BUF_LENGTH, SYSTEM_FUNC_DEFAULT_VALUE, BUF_LENGTH - 1);
+        securec_check(nRet, "\0", "\0");
+        return value;
+    }
+    Oid typeOid = fcinfo->argTypes[n_arg];
+    switch (typeOid) {
+        case TEXTARRAYOID: {
+            int option_nitems;
+            ArrayType* option_array = PG_GETARG_ARRAYTYPE_P(n_arg);
+            pfree(value);
+            value = audit_get_text_array_value(option_array, &option_nitems);
+            break;
+        }
+        case BOOLOID: {
+            bool arg = PG_GETARG_BOOL(n_arg);
+            nRet = strncpy_s(value, BUF_LENGTH, (arg) ? "true" : "false", BUF_LENGTH - 1);
+            securec_check(nRet, "\0", "\0");
+            break;
+        }
+        case BYTEAOID: {
+            bytea* v = PG_GETARG_BYTEA_P(n_arg);
+            pfree(value);
+            value = VARDATA_ANY(v);
+            break;
+        }
+        case CHAROID: {
+            char v = PG_GETARG_CHAR(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%c", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case NAMEOID: {
+            pfree(value);
+            value = NameStr(*PG_GETARG_NAME(n_arg));
+            break;
+        }
+        case INT8OID: {
+            int64 v = PG_GETARG_INT64(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lld", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case INT2OID: {
+            int2 v = PG_GETARG_INT16(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%d", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case INT4OID: {
+            int4 v = PG_GETARG_INT32(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%ld", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case REGPROCOID: {
+            RegProcedure v = PG_GETARG_OID(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%u", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case TEXTOID: {
+            pfree(value);
+            value = text_to_cstring(PG_GETARG_TEXT_P(n_arg));
+            break;
+        }
+        case OIDOID: {
+            Oid v = PG_GETARG_OID(n_arg);
+            if (v) {
+                nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%u", v);
+                securec_check_ss(nRet, "\0", "\0");
+            }
+            break;
+        }
+        case TIDOID: {
+            ThreadId v = (unsigned long)PG_GETARG_INT64(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lld", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case XIDOID: {
+            TransactionId v = PG_GETARG_TRANSACTIONID(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%llu", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case CIDOID: {
+            CommandId v = PG_GETARG_COMMANDID(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lu", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case SHORTXIDOID: {
+            ShortTransactionId v = PG_GETARG_SHORTTRANSACTIONID(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lu", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case FLOAT4OID: {
+            float4 v = PG_GETARG_FLOAT4(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%.4f", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case FLOAT8OID: {
+            float8 v = PG_GETARG_FLOAT8(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%.8f", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case ABSTIMEOID: {
+            AbsoluteTime v = PG_GETARG_ABSOLUTETIME(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%ld", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case RELTIMEOID: {
+            RelativeTime v = PG_GETARG_RELATIVETIME(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%ld", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case INTERVALOID: {
+            Interval* v = PG_GETARG_INTERVAL_P(n_arg);
+            TmToChar tmtc;
+            struct pg_tm* tm = NULL;
+            ZERO_tmtc(&tmtc);
+            tm = tmtcTm(&tmtc);
+            if (interval2tm(*v, tm, &tmtcFsec(&tmtc)) != 0) {
+                nRet = strncpy_s(value, BUF_LENGTH, SYSTEM_FUNC_DEFAULT_VALUE, BUF_LENGTH - 1);
+            } else {
+                nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1,
+                    "%d year %d mon %d day %02d:%02d:%02d", tm->tm_year,
+                    tm->tm_mon, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+            }
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case TINTERVALOID: {
+            TimeInterval v = PG_GETARG_TIMEINTERVAL(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%d", v->data);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case CASHOID: {
+            Cash v = PG_GETARG_CASH(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lld", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case INETOID:case CIDROID: {
+            inet* v = PG_GETARG_INET_PP(n_arg);
+            pfree(value);
+            value = (char*)VARDATA_ANY(v);
+            break;
+        }
+        case BPCHAROID: {
+            BpChar* v = PG_GETARG_BPCHAR_PP(n_arg);
+            pfree(value);
+            value = VARDATA_ANY(v);
+            break;
+        }
+        case DATEOID: {
+            DateADT v = PG_GETARG_DATEADT(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%ld", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case TIMEOID: {
+            TimeADT v = PG_GETARG_TIMEADT(n_arg);
+#ifdef HAVE_INT64_TIMESTAMP
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lld", v);
+#else
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lf", v);
+#endif
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case TIMESTAMPOID: {
+            Timestamp v = PG_GETARG_TIMESTAMP(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lld", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case TIMESTAMPTZOID: {
+            TimestampTz v = PG_GETARG_TIMESTAMPTZ(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lld", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case CSTRINGOID:
+        case NVARCHAR2OID:
+        case VARCHAROID:
+        case RAWOID:
+        case SMALLDATETIMEOID: {
+            pfree(value);
+            value = PG_GETARG_CSTRING(n_arg);
+            break;
+        }
+        case TIMETZOID: {
+            TimeTzADT* v = PG_GETARG_TIMETZADT_P(n_arg);
+#ifdef HAVE_INT64_TIMESTAMP
+            int64 time = v->time;
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "time %ld zone %lu", time, v->zone);
+#else
+            float8 time = v->time;
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "time %f zone %lu", time, v->zone);
+#endif
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case INT1OID: {
+            int1 v = PG_GETARG_INT8(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%s", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case UUIDOID: {
+            pg_uuid_t* v_uuid = PG_GETARG_UUID_P(n_arg);
+            char* v = (char*)v_uuid->data;
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%s", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case ANYENUMOID: {
+            uint32 v = (uint32)PG_GETARG_OID(n_arg);
+            nRet = snprintf_s(value, BUF_LENGTH, BUF_LENGTH - 1, "%lu", v);
+            securec_check_ss(nRet, "\0", "\0");
+            break;
+        }
+        case INT2VECTOROID: {
+            int2vector *key = (int2vector *)PG_GETARG_POINTER(n_arg);
+            pfree(value);
+            value = (char *)key->values;
+            break;
+        }
+        case OIDVECTOROID: {
+            oidvector *key = (oidvector *)PG_GETARG_POINTER(n_arg);
+            pfree(value);
+            value = (char *)key->values;
+            break;
+        }
+        default: {
+            ereport(LOG, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("UNKOWN PARAMETER TYPE FOR SYSTEM FUNCTION AUDIT.")));
+            nRet = strncpy_s(value, BUF_LENGTH, SYSTEM_FUNC_DEFAULT_VALUE, BUF_LENGTH - 1);
+            securec_check(nRet, "\0", "\0");
+            break;
+        }
+    }
+    return value;
+}
+ 
+/*
+ * Brief        : get values of optional arguments in form of text array
+ * Description  : deconstruct a text[] into C-strings
+ */
+static char* audit_get_text_array_value(ArrayType* array, int* numitems)
+{
+    int ndim = ARR_NDIM(array);
+    int* dims = ARR_DIMS(array);
+    int nitems;
+    int16 typlen;
+    bool typbyval = false;
+    char typalign;
+    char* ptr = NULL;
+    bits8* bitmap = NULL;
+    uint32 bitmask;
+    int i;
+    char* val = NULL;
+ 
+    StringInfoData buf;
+    initStringInfo(&buf);
+    Assert(ARR_ELEMTYPE(array) == TEXTOID);
+    *numitems = nitems = ArrayGetNItems(ndim, dims);
+    get_typlenbyvalalign(ARR_ELEMTYPE(array), &typlen, &typbyval, &typalign);
+ 
+    ptr = ARR_DATA_PTR(array);
+    bitmap = ARR_NULLBITMAP(array);
+    bitmask = 1;
+    for (i = 0; i < nitems; i++) {
+        if (i > 0)
+            appendStringInfo(&buf, "%s", ",");
+        if (bitmap && (*bitmap & bitmask) == 0) {
+            val = NULL;
+        } else {
+            val = TextDatumGetCString(PointerGetDatum(ptr));
+            ptr = att_addlength_pointer(ptr, typlen, ptr);
+            ptr = (char*)att_align_nominal(ptr, typalign);
+        }
+        appendStringInfo(&buf, "%s", val);
+        /* advance bitmap pointer if any */
+        if (bitmap) {
+            bitmask <<= 1;
+            if (bitmask == 0x100) {
+                bitmap++;
+                bitmask = 1;
+            }
+        }
+    }
+    char* values = buf.data;
+    return values;
 }

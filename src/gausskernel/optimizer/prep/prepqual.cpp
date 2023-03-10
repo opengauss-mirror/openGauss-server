@@ -38,8 +38,6 @@
 #include "optimizer/prep.h"
 #include "utils/lsyscache.h"
 
-static List* pull_ands(List* andlist);
-static List* pull_ors(List* orlist);
 static Expr* find_duplicate_ors(Expr* qual, bool is_check);
 static Expr* process_duplicate_ors(List* orlist);
 
@@ -277,7 +275,7 @@ Expr* canonicalize_qual(Expr* qual, bool is_check)
  * Input is the arglist of an AND clause.
  * Returns the rebuilt arglist (note original list structure is not touched).
  */
-static List* pull_ands(List* andlist)
+List* pull_ands(List* andlist)
 {
     List* out_list = NIL;
     ListCell* arg = NULL;
@@ -306,7 +304,7 @@ static List* pull_ands(List* andlist)
  * Input is the arglist of an OR clause.
  * Returns the rebuilt arglist (note original list structure is not touched).
  */
-static List* pull_ors(List* orlist)
+List* pull_ors(List* orlist)
 {
     List* out_list = NIL;
     ListCell* arg = NULL;

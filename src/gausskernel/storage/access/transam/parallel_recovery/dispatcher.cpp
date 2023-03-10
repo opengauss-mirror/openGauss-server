@@ -1304,7 +1304,11 @@ static bool DispatchHeap2VacuumRecord(XLogReaderState *record, List *expectedTLI
     bool isNeedFullSync = false;
     uint8 info = ((XLogRecGetInfo(record) & (~XLR_INFO_MASK)) & XLOG_HEAP_OPMASK);
     if (info == XLOG_HEAP2_CLEANUP_INFO) {
-        DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
+        xl_heap_cleanup_info* xlrec = (xl_heap_cleanup_info*)XLogRecGetData(record);
+        RelFileNode tmp_node;
+        RelFileNodeCopy(tmp_node, xlrec->node, (int2)XLogRecGetBucketId(record));
+
+        DispatchToOnePageWorker(record, tmp_node, expectedTLIs);
     } else {
         DispatchRecordWithPages(record, expectedTLIs, SUPPORT_FPAGE_DISPATCH);
     }
@@ -1471,6 +1475,11 @@ static bool StandbyWillChangeStandbyState(XLogReaderState *record)
     if ((t_thrd.xlog_cxt.standbyState < STANDBY_SNAPSHOT_READY) && (XLogRecGetRmid(record) == RM_STANDBY_ID) &&
         ((XLogRecGetInfo(record) & (~XLR_INFO_MASK)) == XLOG_RUNNING_XACTS)) {
         /* change standbystate, must be full sync, see UpdateStandbyState */
+        return true;
+    }
+
+    if ((XLogRecGetRmid(record) == RM_STANDBY_ID) &&
+        ((XLogRecGetInfo(record) & (~XLR_INFO_MASK)) == XLOG_STANDBY_LOCK)) {
         return true;
     }
 

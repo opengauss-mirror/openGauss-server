@@ -15,7 +15,7 @@ function test_1() {
 	exec_sql $case_db $pub_node1_port "CREATE TABLE tab_full2 (x text)"
 	exec_sql $case_db $pub_node1_port "INSERT INTO tab_full2 VALUES ('a'), ('b'), ('b')"
 	exec_sql $case_db $pub_node1_port "CREATE TABLE tab_rep (a int primary key)"
-	exec_sql $case_db $pub_node1_port "CREATE TABLE tab_mixed (a int primary key, b text, c numeric)"
+	exec_sql $case_db $pub_node1_port "CREATE TABLE tab_mixed (a int primary key, b text, c numeric(10,2))"
 	exec_sql $case_db $pub_node1_port "INSERT INTO tab_mixed (a, b, c) VALUES (1, 'foo', 1.1)"
 	exec_sql $case_db $pub_node1_port "CREATE TABLE tab_include (a int, b text) WITH (storage_type = ustore)"
 	exec_sql $case_db $pub_node1_port "CREATE INDEX covering ON tab_include USING ubtree (a) INCLUDE(b)"
@@ -40,7 +40,7 @@ function test_1() {
 	exec_sql $case_db $sub_node1_port "CREATE TABLE tab_nothing (a int)"
 
 	# different column count and order than on publisher
-	exec_sql $case_db $sub_node1_port "CREATE TABLE tab_mixed (d text default 'local', c numeric, b text, a int primary key)"
+	exec_sql $case_db $sub_node1_port "CREATE TABLE tab_mixed (d text default 'local', c numeric(10,2), b text, a int primary key)"
 
 	# replication of the table with included index
 	exec_sql $case_db $sub_node1_port "CREATE TABLE tab_include (a int, b text) WITH (storage_type = ustore)"
@@ -106,8 +106,8 @@ function test_1() {
 		exit 1
 	fi
 
-	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_mixed")" = "local|1.1|foo|1
-local|2.2|bar|2" ]; then
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_mixed")" = "local|1.10|foo|1
+local|2.20|bar|2" ]; then
 		echo "check replicated changes with different column order success"
 	else
 		echo "$failed_keyword when check replicated changes with different column order"
@@ -261,8 +261,8 @@ bb" ]; then
 		exit 1
 	fi
 
-	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_mixed ORDER BY a")" = "local|1.1|baz|1
-local|2.2|bar|2" ]; then
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_mixed ORDER BY a")" = "local|1.10|baz|1
+local|2.20|bar|2" ]; then
 		echo "check update works with different column order and subscriber local values success"
 	else
 		echo "$failed_keyword when check update works with different column order and subscriber local values"
@@ -305,8 +305,8 @@ local|2.2|bar|2" ]; then
 
 	wait_for_catchup $case_db $pub_node1_port "tap_sub"
 
-	if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, length(b), c, d FROM tab_mixed ORDER BY a")" = "1|3|1.1|local
-2|500000|2.2|local" ]; then
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, length(b), c, d FROM tab_mixed ORDER BY a")" = "1|3|1.10|local
+2|500000|2.20|local" ]; then
 		echo "check update transmits large column value success"
 	else
 		echo "$failed_keyword when check update transmits large column value"
@@ -317,8 +317,8 @@ local|2.2|bar|2" ]; then
 
 	wait_for_catchup $case_db $pub_node1_port "tap_sub"
 
-	if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, length(b), c, d FROM tab_mixed ORDER BY a")" = "1|3|1.1|local
-2|500000|3.3|local" ]; then
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, length(b), c, d FROM tab_mixed ORDER BY a")" = "1|3|1.10|local
+2|500000|3.30|local" ]; then
 		echo "check update with non-transmitted large column value success"
 	else
 		echo "$failed_keyword when check update with non-transmitted large column value"
@@ -335,7 +335,7 @@ local|2.2|bar|2" ]; then
 	wait_for_catchup $case_db $pub_node1_port "tap_sub"
 
 	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_mixed ORDER BY a")" = "local|11.11|baz|1
-local|2.2|bar|2" ]; then
+local|2.20|bar|2" ]; then
 		echo "check update works with dropped publisher column success"
 	else
 		echo "$failed_keyword when check update works with dropped publisher column"

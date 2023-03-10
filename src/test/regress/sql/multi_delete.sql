@@ -11,6 +11,10 @@ create table t_t_mutil_t3(col1 int,col2 int);
 insert into t_t_mutil_t1 values(1,1),(1,1);
 insert into t_t_mutil_t2 values(1,1),(1,2);
 insert into t_t_mutil_t3 values(1,1),(1,3);
+-- subselect
+begin;
+delete t_t_mutil_t1,t_t_mutil_t2 from (select * from t_t_mutil_t3);
+rollback;
 begin;
 delete from t_t_mutil_t1 a,t_t_mutil_t2 b,t_t_mutil_t3 c where a.col2=b.col2 and b.col2=c.col2;
 select * from t_t_mutil_t1;

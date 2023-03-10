@@ -293,6 +293,9 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
     if (!redirect_manager->get_remote_excute()) {
         return false;
     }
+    if (commandTag == NULL) {
+        commandTag = "";
+    }
     bool need_redirect = false;
     if (!libpqsw_enable_autocommit()) {
         if (strcmp(commandTag, "SET") == 0) {
@@ -314,9 +317,11 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
         if (strcmp(commandTag, "SHOW") == 0) {
             return false;
         }
+        if (query_list == NIL) {
+            return false;
+        }
 
         ListCell* remote_lc = NULL;
-        Assert(query_list != NULL);
         foreach (remote_lc, query_list) {
             Query* tmp_query = (Query*)lfirst(remote_lc);
             if (!queryIsReadOnly(tmp_query)) {
@@ -606,15 +611,13 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
 // is start transaction command
 bool libpqsw_begin_command(const char* commandTag)
 {
-    return (strcmp(commandTag, "BEGIN") == 0)
-            || (strcmp(commandTag, "START TRANSACTION") == 0);
+    return commandTag != NULL && (strcmp(commandTag, "BEGIN") == 0 || strcmp(commandTag, "START TRANSACTION") == 0);
 }
 
 // is end transaction command
 bool libpqsw_end_command(const char* commandTag)
 {
-    return (strcmp(commandTag, "COMMIT") == 0)
-           || (strcmp(commandTag, "ROLLBACK") == 0);
+    return commandTag != NULL && (strcmp(commandTag, "COMMIT") == 0 || strcmp(commandTag, "ROLLBACK") == 0);
 }
 
 // set commandTag

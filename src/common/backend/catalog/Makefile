@@ -24,7 +24,7 @@ OBJS = catalog.o dependency.o heap.o index.o indexing.o namespace.o aclchk.o \
        pg_type.o pgxc_class.o storage.o storage_gtt.o toasting.o pg_job.o pg_partition.o\
        pg_hashbucket.o cstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
        gs_matview.o pgxc_slice.o pg_job_proc.o gs_job_argument.o gs_job_attribute.o pg_uid.o gs_global_config.o\
-       gs_db_privilege.o pg_publication.o pg_subscription.o
+       gs_db_privilege.o pg_publication.o pg_subscription.o gs_utf8_collation.o
 
 BKIFILES = postgres.bki postgres.description postgres.shdescription
 
@@ -41,7 +41,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	pg_attrdef.h pg_constraint.h pg_inherits.h pg_index.h pg_operator.data \
 	pg_opfamily.h pg_opclass.h pg_am.h pg_amop.data pg_amproc.h \
 	pg_language.h pg_largeobject_metadata.h pg_largeobject.h pg_aggregate.h \
-	pg_statistic.h pg_rewrite.h pg_trigger.h pg_description.h \
+	pg_statistic.h pg_rewrite.h pg_trigger.h pg_event_trigger.h pg_description.h \
 	pg_cast.h pg_enum.h pg_set.h pg_namespace.h pg_conversion.h pg_depend.h \
 	pg_database.h pg_db_role_setting.h pg_tablespace.h pg_pltemplate.h \
 	pg_authid.h pg_auth_members.h pg_shdepend.h pg_shdescription.h \

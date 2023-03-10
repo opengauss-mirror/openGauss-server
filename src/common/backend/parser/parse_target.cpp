@@ -36,6 +36,8 @@
 #include "utils/typcache.h"
 #include "executor/executor.h"
 #include "gs_ledger/ledger_utils.h"
+#include "mb/pg_wchar.h"
+#include "parser/parse_utilcmd.h"
 
 static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var, int levelsup);
 static Node* transformAssignmentIndirection(ParseState* pstate, Node* basenode, const char* targetName,
@@ -46,7 +48,7 @@ static Node* transformAssignmentSubscripts(ParseState* pstate, Node* basenode, c
     int location);
 static List* ExpandColumnRefStar(ParseState* pstate, ColumnRef* cref, bool targetlist);
 static List* ExpandAllTables(ParseState* pstate, int location);
-static List* ExpandIndirectionStar(ParseState* pstate, A_Indirection* ind, bool targetlist);
+static List* ExpandIndirectionStar(ParseState* pstate, A_Indirection* ind, bool targetlist, ParseExprKind exprKind);
 static List* ExpandSingleTable(ParseState* pstate, RangeTblEntry* rte, int location, bool targetlist);
 static List* ExpandRowReference(ParseState* pstate, Node* expr, bool targetlist);
 static int FigureColnameInternal(Node* node, char** name);
@@ -83,7 +85,7 @@ static char* find_last_field_name(List* field)
  * resjunk	true if the target should be marked resjunk, ie, it is not
  *			wanted in the final projected tuple.
  */
-TargetEntry* transformTargetEntry(ParseState* pstate, Node* node, Node* expr, char* colname, bool resjunk)
+TargetEntry* transformTargetEntry(ParseState* pstate, Node* node, Node* expr, ParseExprKind exprKind, char* colname, bool resjunk)
 {
     /* Generate a suitable name for column shown in error case */
     if (colname == NULL && !resjunk) {
@@ -93,7 +95,7 @@ TargetEntry* transformTargetEntry(ParseState* pstate, Node* node, Node* expr, ch
 
     /* Transform the node if caller didn't do it already */
     if (expr == NULL) {
-        expr = transformExpr(pstate, node);
+        expr = transformExpr(pstate, node, exprKind);
     }
     ELOG_FIELD_NAME_END;
 
@@ -116,7 +118,7 @@ TargetEntry* transformTargetEntry(ParseState* pstate, Node* node, Node* expr, ch
  * At this point, we don't care whether we are doing SELECT, INSERT,
  * or UPDATE; we just transform the given expressions (the "val" fields).
  */
-List* transformTargetList(ParseState* pstate, List* targetlist)
+List* transformTargetList(ParseState* pstate, List* targetlist, ParseExprKind exprKind)
 {
     List* p_target = NIL;
     ListCell* o_target = NULL;
@@ -148,7 +150,7 @@ List* transformTargetList(ParseState* pstate, List* targetlist)
 
             if (IsA(llast(ind->indirection), A_Star)) {
                 /* It is something.*, expand into multiple items */
-                p_target = list_concat(p_target, ExpandIndirectionStar(pstate, ind, true));
+                p_target = list_concat(p_target, ExpandIndirectionStar(pstate, ind, true, exprKind));
                 continue;
             }
         }
@@ -156,7 +158,7 @@ List* transformTargetList(ParseState* pstate, List* targetlist)
         /*
          * Not "something.*", so transform as a single expression
          */
-        p_target = lappend(p_target, transformTargetEntry(pstate, res->val, NULL, res->name, false));
+        p_target = lappend(p_target, transformTargetEntry(pstate, res->val, NULL, exprKind, res->name, false));
         pstate->p_target_list = p_target;
     }
 
@@ -171,7 +173,7 @@ List* transformTargetList(ParseState* pstate, List* targetlist)
  * and the output elements are likewise just expressions without TargetEntry
  * decoration.	We use this for ROW() and VALUES() constructs.
  */
-List* transformExpressionList(ParseState* pstate, List* exprlist)
+List* transformExpressionList(ParseState* pstate, List* exprlist, ParseExprKind exprKind)
 {
     List* result = NIL;
     ListCell* lc = NULL;
@@ -197,7 +199,7 @@ List* transformExpressionList(ParseState* pstate, List* exprlist)
 
             if (IsA(llast(ind->indirection), A_Star)) {
                 /* It is something.*, expand into multiple items */
-                result = list_concat(result, ExpandIndirectionStar(pstate, ind, false));
+                result = list_concat(result, ExpandIndirectionStar(pstate, ind, false, exprKind));
                 continue;
             }
         }
@@ -205,7 +207,7 @@ List* transformExpressionList(ParseState* pstate, List* exprlist)
         /*
          * Not "something.*", so transform as a single expression
          */
-        result = lappend(result, transformExpr(pstate, e));
+        result = lappend(result, transformExpr(pstate, e, exprKind));
     }
 
     return result;
@@ -366,14 +368,25 @@ static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var,
  * omits the column name list.	So we should usually prefer to use
  * exprLocation(expr) for errors that can happen in a default INSERT.
  */
-Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int attrno, List* indirection, int location,
-                            Relation rd, RangeTblEntry* rte)
+Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKind, char* colname, int attrno,
+                            List* indirection, int location, Relation rd, RangeTblEntry* rte)
 {
     Oid type_id;    /* type of value provided */
     int32 type_mod; /* typmod of value provided */
     Oid attrtype;   /* type of target column */
     int32 attrtypmod;
     Oid attrcollation; /* collation of target column */
+    int attrcharset = PG_INVALID_ENCODING;
+    ParseExprKind sv_expr_kind;
+
+    /*
+    * Save and restore identity of expression type we're parsing.  We must
+    * set p_expr_kind here because we can parse subscripts without going
+    * through transformExpr().
+    */
+    Assert(exprKind != EXPR_KIND_NONE);
+    sv_expr_kind = pstate->p_expr_kind;
+    pstate->p_expr_kind = exprKind;
 
     AssertEreport(rd != NULL, MOD_OPT, "");
     /*
@@ -391,6 +404,9 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
     attrtype = attnumTypeId(rd, attrno);
     attrtypmod = rd->rd_att->attrs[attrno - 1].atttypmod;
     attrcollation = rd->rd_att->attrs[attrno - 1].attcollation;
+    if (DB_IS_CMPT(B_FORMAT)) {
+        attrcharset = get_charset_by_collation(attrcollation);
+    }
 
     /*
      * If the expression is a DEFAULT placeholder, insert the attribute's
@@ -534,8 +550,13 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
             }
         }
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    expr = (Expr*)coerce_to_target_charset((Node*)expr, attrcharset, attrtype);
+#endif
 
     ELOG_FIELD_NAME_END;
+
+    pstate->p_expr_kind = sv_expr_kind;
 
     return expr;
 }
@@ -559,7 +580,8 @@ void updateTargetListEntry(ParseState* pstate, TargetEntry* tle, char* colname, 
     List* indirection, int location, Relation rd, RangeTblEntry* rte)
 {
     /* Fix up expression as needed */
-    tle->expr = transformAssignedExpr(pstate, tle->expr, colname, attrno, indirection, location, rd, rte);
+    tle->expr = transformAssignedExpr(pstate, tle->expr, EXPR_KIND_UPDATE_TARGET, colname, attrno,
+                                      indirection, location, rd, rte);
 
     /*
      * Set the resno to identify the target column --- the rewriter and
@@ -1130,7 +1152,7 @@ static List* ExpandAllTables(ParseState* pstate, int location)
  * target list (where we want TargetEntry nodes in the result) and foo.* in
  * a ROW() or VALUES() construct (where we want just bare expressions).
  */
-static List* ExpandIndirectionStar(ParseState* pstate, A_Indirection* ind, bool targetlist)
+static List* ExpandIndirectionStar(ParseState* pstate, A_Indirection* ind, bool targetlist, ParseExprKind exprKind)
 {
     Node* expr = NULL;
 
@@ -1139,7 +1161,7 @@ static List* ExpandIndirectionStar(ParseState* pstate, A_Indirection* ind, bool 
     ind->indirection = list_truncate(ind->indirection, list_length(ind->indirection) - 1);
 
     /* And transform that */
-    expr = transformExpr(pstate, (Node*)ind);
+    expr = transformExpr(pstate, (Node*)ind, exprKind);
 
     /* Expand the rowtype expression into individual fields */
     return ExpandRowReference(pstate, expr, targetlist);

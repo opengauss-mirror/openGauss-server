@@ -302,17 +302,16 @@ xufailed		[uU]&
 					 * We will pass this along as a normal character string,
 					 * but preceded with an internally-generated "NCHAR".
 					 */
-					const ScanKeyword *keyword;
+					int kwnum;
 
 					yyless(1);				/* eat only 'n' this time */
 
-					keyword = ScanKeywordLookup("nchar",
-												yyextra->keywords,
-												yyextra->num_keywords);
-					if (keyword != NULL)
+					kwnum = ScanKeywordLookup("nchar",
+											  yyextra->keywordlist);
+					if (kwnum >= 0)
 					{
 						yyextra->is_hint_str = true;
-						return keyword->value;
+						return yyextra->keyword_tokens[kwnum];
 					}
 					else
 					{

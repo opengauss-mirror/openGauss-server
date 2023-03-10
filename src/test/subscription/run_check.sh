@@ -1,7 +1,7 @@
 #!/bin/sh
 
 count=0
-source $1/env_utils.sh $1 $2
+source $1/env_utils.sh $1 $2 $3
 
 #clean temporary files generated after last check 
 echo "removing $g_data_path"

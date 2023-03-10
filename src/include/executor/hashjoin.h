@@ -185,6 +185,7 @@ typedef struct HashJoinTableData {
     int spreadNum;          /* auto spread times */
     int64* spill_size;
     uint64 spill_count;     /* times of spilling to disk */
+    Oid *collations;
 } HashJoinTableData;
 
 #endif /* HASHJOIN_H */

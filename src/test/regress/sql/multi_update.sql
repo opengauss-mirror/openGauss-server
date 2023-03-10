@@ -20,6 +20,10 @@ update t_t_mutil_t1 a,t_t_mutil_t2 b set a.col2=7,b.col2=8 where a.col1=b.col1;
 select * from t_t_mutil_t1;
 select * from t_t_mutil_t2;
 rollback;
+-- subselect
+begin;
+update t_t_mutil_t1 a,t_t_mutil_t2 b set b.col2=5,a.col2=4 where a.col1 in (select col1 from t_t_mutil_t2);
+rollback;
 -- setof type, report error
 update t_t_mutil_t1 a,t_t_mutil_t2 b set a.col1 = generate_series(2,3), b.col1=1;
 update t_t_mutil_t1 a,t_t_mutil_t2 b set b.col1 = generate_series(2,3), a.col1=1;

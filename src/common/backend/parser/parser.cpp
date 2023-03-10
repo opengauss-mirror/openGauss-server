@@ -76,7 +76,7 @@ List* raw_parser(const char* str, List** query_string_locationlist)
     resetForbidTruncateFlag();
 
     /* initialize the flex scanner */
-    yyscanner = scanner_init(str, &yyextra.core_yy_extra, ScanKeywords, NumScanKeywords);
+    yyscanner = scanner_init(str, &yyextra.core_yy_extra, &ScanKeywords, ScanKeywordTokens);
 
     /* base_yylex() only needs this much initialization */
     yyextra.lookahead_num = 0;
@@ -257,6 +257,25 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             }
             break;
 
+        case EVENT:
+            /*
+             * Event trigger must be reduced to one token
+             */
+            GET_NEXT_TOKEN();
+            switch (next_token) {
+                case TRIGGER:
+                    cur_token = EVENT_TRIGGER;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
         case WITH:
             /*
              * WITH TIME must be reduced to one token
@@ -588,6 +607,50 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             switch (next_token) {
                 case ERRORS:
                     cur_token = SHOW_ERRORS;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
+        case USE_P:
+        /*
+        * USE INDEX \USE KEY must be reduced to one token,to allow KEY\USE as table / column alias.
+        */
+            GET_NEXT_TOKEN();
+
+            switch (next_token) {
+                case KEY:
+                    cur_token = USE_INDEX;
+                    break;
+                case INDEX:
+                    cur_token = USE_INDEX;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
+        case FORCE:
+        /*
+        * FORCE INDEX \FORCE KEY must be reduced to one token,to allow KEY\FORCE as table / column alias.
+        */
+            GET_NEXT_TOKEN();
+
+            switch (next_token) {
+                case KEY:
+                    cur_token = FORCE_INDEX;
+                    break;
+                case INDEX:
+                    cur_token = FORCE_INDEX;
                     break;
                 default:
                     /* save the lookahead token for next time */

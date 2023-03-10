@@ -1,0 +1,15 @@
+--
+-- ALTER_SEQUENCE
+--
+ALTER SEQUENCE fkey_table_seq
+  MINVALUE 10
+  START 20
+  CACHE 1
+  NO CYCLE;
+ERROR:  ALTER SEQUENCE is not yet supported.
+ALTER SEQUENCE fkey_table_seq
+  RENAME TO fkey_table_seq_renamed;
+ERROR:  RENAME SEQUENCE is not yet supported.
+ALTER SEQUENCE fkey_table_seq_renamed
+  SET SCHEMA foo;
+ERROR:  relation "fkey_table_seq_renamed" does not exist

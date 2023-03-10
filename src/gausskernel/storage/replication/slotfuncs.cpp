@@ -1088,10 +1088,9 @@ void slot_redo(XLogReaderState *record)
         return;
     }
 
-
     /* Backup blocks are not used in xlog records */
     Assert(!XLogRecHasAnyBlockRefs(record));
-    if (GET_SLOT_EXTRA_DATA_LENGTH(*xlrec) != 0) {
+    if (info != XLOG_SLOT_CHECK && GET_SLOT_EXTRA_DATA_LENGTH(*xlrec) != 0) {
         extra_content = (char*)XLogRecGetData(record) + ReplicationSlotPersistentDataConstSize;
         Assert(strlen(extra_content) == (uint32)(GET_SLOT_EXTRA_DATA_LENGTH(*xlrec)));
     }

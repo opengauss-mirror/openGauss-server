@@ -580,3 +580,10 @@ create domain testdomain1 as int constraint unsigned check (value > 0);
 alter domain testdomain1 rename constraint unsigned to unsigned_foo;
 alter domain testdomain1 drop constraint unsigned_foo;
 drop domain testdomain1;
+
+create domain testdomain2 as int ;
+alter domain testdomain2 drop default;
+alter domain testdomain2 drop not null;
+alter domain testdomain2 add constraint t check (VALUE < 34);
+alter domain testdomain2 validate CONSTRAINT t;
+drop domain testdomain2;

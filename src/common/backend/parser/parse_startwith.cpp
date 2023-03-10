@@ -1748,7 +1748,7 @@ static void CreateStartWithCTE(ParseState *pstate, Query *qry,
      */
     pstate->p_hasStartWith = false;
     common_expr->swoptions->connect_by_level_quals =
-                transformWhereClause(pstate, context->connectByLevelExpr, "LEVEL/ROWNUM quals");
+        transformWhereClause(pstate, context->connectByLevelExpr, EXPR_KIND_SELECT_TARGET, "LEVEL/ROWNUM quals");
 
     /* need to fix the collations in the quals as well */
     assign_expr_collations(pstate, common_expr->swoptions->connect_by_level_quals);

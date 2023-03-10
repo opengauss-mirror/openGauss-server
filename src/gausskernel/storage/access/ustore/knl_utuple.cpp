@@ -1804,10 +1804,11 @@ void UHeapSlotStoreMinimalTuple(MinimalTuple mtup, TupleTableSlot *slot, bool sh
      */
     slot->tts_flags &= ~TTS_FLAG_EMPTY;
     slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
-    if (shouldFree)
+    if (shouldFree) {
         slot->tts_flags |= TTS_FLAG_SHOULDFREEMIN;
-    else 
+    } else {
         slot->tts_flags &= ~TTS_FLAG_SHOULDFREEMIN;
+    }
 
     slot->tts_tuple = &slot->tts_minhdr;
     slot->tts_mintuple = mtup;

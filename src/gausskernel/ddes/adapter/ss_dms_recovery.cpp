@@ -54,27 +54,9 @@ void SSSavePrimaryInstId(int id)
     SSSaveReformerCtrl();
 }
 
-/*
- * Wake up startup process to replay WAL, or to notice that
- * failover has been requested.
- */
-void SSWakeupRecovery(void)
-{
-    uint32 thread_num = (uint32)g_instance.ckpt_cxt_ctl->pgwr_procs.num;
-    /* need make sure pagewriter started first */
-    while (pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) != thread_num) {
-        pg_usleep(REFORM_WAIT_TIME);
-    }
-
-    g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
-}
-
 bool SSRecoveryNodes()
 {
     bool result = false;
-    /* Release my own lock before recovery */
-    SSLockReleaseAll();
-    SSWakeupRecovery();
     while (true) {
         if (dms_reform_failed()) {
             result = false;
@@ -99,7 +81,7 @@ bool SSRecoveryNodes()
     return result;
 }
 
-bool SSRecoveryApplyDelay(const XLogReaderState *record)
+bool SSRecoveryApplyDelay()
 {
     if (!ENABLE_REFORM) {
         return false;
@@ -327,7 +309,6 @@ void ss_failover_dw_init()
         }
     }
     ckpt_shutdown_pagewriter();
-    g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
     ss_failover_dw_init_internal();
     g_instance.dms_cxt.dw_init = true;
 }
@@ -346,5 +327,6 @@ void ss_switchover_promoting_dw_init()
     dw_exit(false);
     dw_ext_init();
     dw_init();
+    g_instance.dms_cxt.dw_init = true;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover] dw init finished")));
 }

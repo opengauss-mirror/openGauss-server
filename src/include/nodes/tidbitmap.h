@@ -28,8 +28,8 @@
  * Actual bitmap representation is private to tidbitmap.c.	Callers can
  * do IsA(x, TIDBitmap) on it, but nothing else.
  */
-typedef struct TIDBitmap TIDBitmap;
 
+typedef struct TIDBitmap TIDBitmap;
 /* Likewise, TBMIterator is private */
 typedef struct TBMIterator TBMIterator;
 
@@ -44,27 +44,47 @@ typedef struct {
     OffsetNumber offsets[FLEXIBLE_ARRAY_MEMBER];
 } TBMIterateResult;
 
+/*
+ * We want the caller to choose between their own best hash between
+ * dynamic hash and a more cache-friendly simple simple hash table.
+ * Therefore a set of handler is required to avoid all kinds of
+ * unnecessary branches inside this performance-critical area.
+ * 
+ * All handlers defined here can be templated base on the hash
+ * table the caller used.And the caller can invoke the handler
+ * with little to no overheads.
+ * 
+ * Most of external use of tbm related functions are exposed by
+ * this handler interface.Some of others like tbm_oterate does
+ * not templated like handlers are not included.
+ */
+typedef struct TMBHandler {
+    /* page generic handlers */
+    void (*_add_tuples)(TIDBitmap*, const ItemPointer, int, bool, Oid, int2);
+    void (*_add_page)(TIDBitmap*, BlockNumber, Oid, int2);
+
+    /* page operator handlers */
+    void (*_union)(TIDBitmap*, const TIDBitmap*);
+    void (*_intersect)(TIDBitmap*, const TIDBitmap*);
+
+    /* iterator handlers */
+    TBMIterator* (*_begin_iterate)(TIDBitmap*);
+} TBMHandler;
+
 /* function prototypes in nodes/tidbitmap.c */
-extern TIDBitmap* TbmCreate(long maxbytes, bool is_ustore = false);
+extern TIDBitmap* tbm_create(long maxbytes, bool is_global_part = true, bool is_crossbucket =true, bool is_ustore = false);
 extern void tbm_free(TIDBitmap* tbm);
-extern long tbm_calculate_entries(double maxbytes);
+extern long tbm_calculate_entries(double maxbytes, bool complex_key);
 
-extern void tbm_add_tuples(
-    TIDBitmap* tbm, const ItemPointer tids, int ntids, bool recheck, Oid partitionOid = InvalidOid,
-    int2 bucketid = InvalidBktId);
-extern void tbm_add_page(TIDBitmap* tbm, BlockNumber pageno, Oid partitionOid = InvalidOid,
-    int2 bucketid = InvalidBktId);
-
-extern void tbm_union(TIDBitmap* a, const TIDBitmap* b);
-extern void tbm_intersect(TIDBitmap* a, const TIDBitmap* b);
-
-extern bool tbm_is_empty(const TIDBitmap* tbm);
-
-extern TBMIterator* tbm_begin_iterate(TIDBitmap* tbm);
+/* iterator prototypes in nodes/tidbitmap.c */
 extern TBMIterateResult* tbm_iterate(TBMIterator* iterator);
 extern void tbm_end_iterate(TBMIterator* iterator);
+
+/* function prototypes for TIDBitmap member checks */
+extern void tbm_set_global(TIDBitmap* tbm, bool val);
 extern bool tbm_is_global(const TIDBitmap* tbm);
-extern void tbm_set_global(TIDBitmap* tbm, bool isGlobal);
+extern bool tbm_is_empty(const TIDBitmap* tbm);
 extern bool tbm_is_crossbucket(const TIDBitmap* tbm);
-extern void tbm_set_crossbucket(TIDBitmap* tbm, bool crossbucket);
+extern TBMHandler tbm_get_handler(TIDBitmap* tbm);
+
 #endif /* TIDBITMAP_H */

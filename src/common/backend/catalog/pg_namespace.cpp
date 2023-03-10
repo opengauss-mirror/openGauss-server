@@ -28,6 +28,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
+#include "catalog/pg_collation.h"
 
 /* ----------------
  * NamespaceCreate
@@ -41,7 +42,7 @@
  * schema to become part of the extension.)
  * ---------------
  */
-Oid NamespaceCreate(const char* nspName, Oid ownerId, bool isTemp, bool hasBlockChain)
+Oid NamespaceCreate(const char* nspName, Oid ownerId, bool isTemp, bool hasBlockChain, Oid colloid)
 {
     Relation nspdesc;
     HeapTuple tup;
@@ -78,6 +79,12 @@ Oid NamespaceCreate(const char* nspName, Oid ownerId, bool isTemp, bool hasBlock
     nulls[Anum_pg_namespace_nspacl - 1] = true;
 
     values[Anum_pg_namespace_in_redistribution - 1] = 'n';
+    if (colloid != InvalidOid) {
+        values[Anum_pg_namespace_nspcollation - 1] = colloid;
+    } else {
+        nulls[Anum_pg_namespace_nspcollation - 1] = true;
+    }
+
     nspdesc = heap_open(NamespaceRelationId, RowExclusiveLock);
     tupDesc = nspdesc->rd_att;
 
@@ -138,4 +145,19 @@ bool IsLedgerNameSpace(Oid nspOid)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema of oid \"%u\" does not exist", nspOid)));
     }
     return is_nspblockchain;
+}
+
+Oid get_nsp_default_collation(Oid nsp_oid)
+{
+    Oid nsp_def_coll = InvalidOid;
+    HeapTuple tp = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(nsp_oid));
+    if (HeapTupleIsValid(tp)) {
+        bool is_null = true;
+        Datum datum = SysCacheGetAttr(NAMESPACEOID, tp, Anum_pg_namespace_nspcollation, &is_null);
+        if (!is_null) {
+            nsp_def_coll = DatumGetObjectId(datum);
+        }
+        ReleaseSysCache(tp);
+    }
+    return nsp_def_coll;
 }

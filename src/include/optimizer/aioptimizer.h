@@ -122,7 +122,9 @@ public:
         loc = 0;
     };
 
-    ~TableScannerSample2()
+    ~TableScannerSample2(){};
+
+    void delete_tuple()
     {
         pfree(datumTuple.values);
         pfree(datumTuple.typid);

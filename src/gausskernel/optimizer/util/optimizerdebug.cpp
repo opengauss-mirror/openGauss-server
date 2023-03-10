@@ -304,7 +304,7 @@ void debug1_print_rel(PlannerInfo* root, RelOptInfo* rel)
     appendStringInfoString(buf, tmpBufPtr);
     pfree_ext(tmpBufPtr);
 
-    appendStringInfo(buf, "): rows=%.0f, width=%d, multiple=%lf\n", rel->rows, rel->width, rel->multiple);
+    appendStringInfo(buf, "): rows=%.0f, width=%d, multiple=%lf\n", rel->rows, rel->reltarget->width, rel->multiple);
 
     if (rel->baserestrictinfo) {
         appendStringInfoString(buf, "\tbaserestrictinfo: ");

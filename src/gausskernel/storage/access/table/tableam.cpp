@@ -135,7 +135,7 @@ static void HeapamTopsDestroyTuple(Tuple tuple)
     pfree_ext(tup);
 }
 
-static void HeapamTopsUpdateTupleWithOid (Relation rel, Tuple tuple, TupleTableSlot *slot)
+static void HeapamTopsUpdateTupleWithOid(Relation rel, Tuple tuple, TupleTableSlot *slot)
 {
     return;
 }
@@ -228,23 +228,20 @@ void HeapamTupleGetLatestTid(Relation relation, Snapshot snapshot,
  * ------------------------------------------------------------------------
  */
 
-Oid HeapamTupleInsert (Relation relation, Tuple tup, CommandId cid,
-                           int options, struct BulkInsertStateData *bistate) {
+Oid HeapamTupleInsert(Relation relation, Tuple tup, CommandId cid, int options, struct BulkInsertStateData *bistate)
+{
     return heap_insert(relation, (HeapTuple)tup, cid, options, bistate);
 }
 
-int HeapamTupleMultiInsert(Relation relation, Relation parent,
-                                  Tuple* tuples, int ntuples, CommandId cid, 
-                                  int options, struct BulkInsertStateData *bistate, 
-                                  HeapMultiInsertExtraArgs *args) {
-    return heap_multi_insert(relation, parent, (HeapTuple*)tuples, ntuples, cid, options, bistate, args);
+int HeapamTupleMultiInsert(Relation relation, Relation parent, Tuple *tuples, int ntuples, CommandId cid, int options,
+                           struct BulkInsertStateData *bistate, HeapMultiInsertExtraArgs *args)
+{
+    return heap_multi_insert(relation, parent, (HeapTuple *)tuples, ntuples, cid, options, bistate, args);
 }
 
-TM_Result HeapamTupleDelete(Relation relation, ItemPointer tid,
-                                    CommandId cid, Snapshot crosscheck, Snapshot snapshot,
-                                    bool wait, TupleTableSlot** oldslot, TM_FailureData *tmfd,
-                                    bool allow_delete_self) {
-
+TM_Result HeapamTupleDelete(Relation relation, ItemPointer tid, CommandId cid, Snapshot crosscheck, Snapshot snapshot,
+                            bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd, bool allow_delete_self)
+{
     return heap_delete(relation, tid, cid, crosscheck, wait, tmfd, allow_delete_self);
 }
 
@@ -403,7 +400,7 @@ void HeapamAbortSpeculative(Relation relation, Tuple tuple)
     heap_abort_speculative(relation, (HeapTuple) tuple);
 }
 
-void HeapamTcapPromoteLock (Relation relation, LOCKMODE *lockmode)
+void HeapamTcapPromoteLock(Relation relation, LOCKMODE *lockmode)
 {
     /* Protect old versions from recycling during timecapsule. */
     *lockmode = AccessExclusiveLock;

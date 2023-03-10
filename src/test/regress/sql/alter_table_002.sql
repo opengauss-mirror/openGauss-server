@@ -331,6 +331,17 @@ alter table def_test alter column c2 set default 20;
 -- set defaults on a non-existent column: this should fail
 alter table def_test alter column c3 set default 30;
 
+-- create rule based on table
+create table t_base (id int);
+
+create table t_actual (id int);
+insert into t_actual values(2);
+
+select relname,reloptions,relkind from pg_class where relname='t_base' or relname='t_actual' order by 1;
+CREATE RULE "_RETURN" AS ON SELECT TO t_base DO INSTEAD SELECT * FROM t_actual;
+select relname,reloptions,relkind from pg_class where relname='t_base' or relname='t_actual' order by 1;
+drop table t_actual cascade;
+
 -- set defaults on views: we need to create a view, add a rule
 -- to allow insertions into it, and then alter the view to add
 -- a default

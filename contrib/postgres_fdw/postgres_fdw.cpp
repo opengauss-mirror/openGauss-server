@@ -420,7 +420,7 @@ static void postgresGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oi
      * columns used in them.  Doesn't seem worth detecting that case though.)
      */
     fpinfo->attrs_used = NULL;
-    pull_varattnos((Node *)baserel->reltargetlist, baserel->relid, &fpinfo->attrs_used);
+    pull_varattnos((Node *)baserel->reltarget->exprs, baserel->relid, &fpinfo->attrs_used);
     foreach (lc, fpinfo->local_conds) {
         RestrictInfo *rinfo = (RestrictInfo *)lfirst(lc);
 
@@ -463,7 +463,7 @@ static void postgresGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oi
 
         /* Report estimated baserel size to planner. */
         baserel->rows = fpinfo->rows;
-        baserel->width = fpinfo->width;
+        baserel->reltarget->width = fpinfo->width;
     } else {
         /*
          * If the foreign table has never been ANALYZEd, it will have relpages
@@ -476,7 +476,7 @@ static void postgresGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oi
          */
         if (baserel->pages == 0 && baserel->tuples == 0) {
             baserel->pages = 10;
-            baserel->tuples = (double)(10 * BLCKSZ) / (baserel->width + sizeof(HeapTupleHeaderData));
+            baserel->tuples = (double)(10 * BLCKSZ) / (baserel->reltarget->width + sizeof(HeapTupleHeaderData));
         }
 
         /* Estimate baserel size as best we can with local statistics. */
@@ -2108,7 +2108,7 @@ static void estimate_path_cost_size(PlannerInfo *root, RelOptInfo *foreignrel, L
 
             /* Use rows/width estimates made by the core code. */
             rows = foreignrel->rows;
-            width = foreignrel->width;
+            width = foreignrel->reltarget->width;
 
             /* For join we expect inner and outer relations set */
             Assert(fpinfo->innerrel && fpinfo->outerrel);
@@ -2199,7 +2199,7 @@ static void estimate_path_cost_size(PlannerInfo *root, RelOptInfo *foreignrel, L
             /* Collect statistics about aggregates for estimating costs. */
             MemSet(&aggcosts, 0, sizeof(AggClauseCosts));
             if (root->parse->hasAggs) {
-                count_agg_clauses(root, (Node*)foreignrel->reltargetlist, &aggcosts);
+                count_agg_clauses(root, (Node*)foreignrel->reltarget->exprs, &aggcosts);
                 count_agg_clauses(root, root->parse->havingQual, &aggcosts);
             }
 
@@ -2226,7 +2226,7 @@ static void estimate_path_cost_size(PlannerInfo *root, RelOptInfo *foreignrel, L
             }
 
             /* Use width estimate made by the core code. */
-            width = foreignrel->width;
+            width = foreignrel->reltarget->width;
 
             /* -----
              * Startup cost includes:
@@ -2269,7 +2269,7 @@ static void estimate_path_cost_size(PlannerInfo *root, RelOptInfo *foreignrel, L
 
             /* Use rows/width estimates made by set_baserel_size_estimates. */
             rows = foreignrel->rows;
-            width = foreignrel->width;
+            width = foreignrel->reltarget->width;
 
             /*
              * Back into an estimate of the number of retrieved rows.  Just in
@@ -3963,7 +3963,7 @@ static void postgresGetForeignJoinPaths(PlannerInfo *root, RelOptInfo *joinrel, 
     estimate_path_cost_size(root, joinrel, NIL, NIL, NULL, &rows, &width, &startup_cost, &total_cost);
     /* Now update this information in the joinrel */
     joinrel->rows = rows;
-    joinrel->width = width;
+    joinrel->reltarget->width = width;
     fpinfo->rows = rows;
     fpinfo->width = width;
     fpinfo->startup_cost = startup_cost;
@@ -4228,7 +4228,7 @@ static void init_upperrel_paths_context(FDWUpperRelCxt* ufdwCxt, Plan* mainPlan)
     fpinfo->stage = UPPERREL_INIT;
 
     /* the reltargetlist may bave been evaluted, we shoule adept it. */
-    ufdwCxt->currentRel->reltargetlist = extract_target_from_tel(ufdwCxt, fpinfo);
+    ufdwCxt->currentRel->reltarget->exprs = extract_target_from_tel(ufdwCxt, fpinfo);
 
     ufdwCxt->state = FDW_UPPER_REL_INIT;
 }
@@ -4398,7 +4398,7 @@ static void add_foreign_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
     fpinfo->total_cost = total_cost;
 
     /* Create and add foreign path to the grouping relation. */
-    grouppath = create_foreign_upper_path(root, grouped_rel, grouped_rel->reltargetlist, rows, startup_cost, total_cost,
+    grouppath = create_foreign_upper_path(root, grouped_rel, grouped_rel->reltarget->exprs, rows, startup_cost, total_cost,
         NIL,        /* no pathkeys */
         NULL, NIL); /* no fdw_private */
 
@@ -4501,7 +4501,7 @@ static void add_foreign_ordered_paths(PlannerInfo *root, RelOptInfo *input_rel, 
 
     /* Construct PgFdwPathExtraData */
     fpextra = (PgFdwPathExtraData *)palloc0(sizeof(PgFdwPathExtraData));
-    fpextra->target = ordered_rel->reltargetlist;
+    fpextra->target = ordered_rel->reltarget->exprs;
     fpextra->has_final_sort = true;
 
     /* Estimate the costs of performing the final sort remotely */
@@ -4515,7 +4515,7 @@ static void add_foreign_ordered_paths(PlannerInfo *root, RelOptInfo *input_rel, 
     fdw_private = list_make2(makeInteger(1), makeInteger(0));
 
     /* Create foreign ordering path */
-    ordered_path = create_foreign_upper_path(root, input_rel, ordered_rel->reltargetlist, rows, startup_cost,
+    ordered_path = create_foreign_upper_path(root, input_rel, ordered_rel->reltarget->exprs, rows, startup_cost,
         total_cost, root->sort_pathkeys, NULL, /* no extra plan */
         fdw_private);
 

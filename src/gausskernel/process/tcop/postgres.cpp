@@ -274,7 +274,6 @@ static XLogRecPtr xlogCopyStart = InvalidXLogRecPtr;
 static int InteractiveBackend(StringInfo inBuf);
 static int interactive_getc(void);
 static int ReadCommand(StringInfo inBuf);
-static List* pg_rewrite_query(Query* query);
 bool check_log_statement(List* stmt_list);
 static int errdetail_execute(List* raw_parsetree_list);
 int errdetail_params(ParamListInfo params);
@@ -1181,7 +1180,7 @@ List* pg_analyze_and_rewrite_params(
  * Note: query must just have come from the parser, because we do not do
  * AcquireRewriteLocks() on it.
  */
-static List* pg_rewrite_query(Query* query)
+List* pg_rewrite_query(Query* query)
 {
     List* querytree_list = NIL;
     PGSTAT_INIT_TIME_RECORD();
@@ -1279,6 +1278,20 @@ static List* pg_rewrite_query(Query* query)
     } else {
         /* rewrite regular queries */
         querytree_list = QueryRewrite(query);
+    }
+
+    /*
+     * After rewriting the querytree_list, we need to check every query to ensure they can execute
+     * in new expression framework.  If we find a query's is_flt_frame is false, which indicates the query
+     * not support the new expression framework, the top level query need be reverted to old.
+     * One more things, CMD_UTILITY statements cannot be reverted here.  We solve it at explain_proc_query()
+     */
+    if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        ListCell* lc = NULL;
+        foreach(lc, querytree_list) {
+            Query* query_tmp = (Query*)lfirst(lc);
+            query_tmp->is_flt_frame = !query_check_no_flt(query_tmp);
+        }
     }
 
     PGSTAT_END_TIME_RECORD(REWRITE_TIME);
@@ -1409,6 +1422,11 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
     plan->is_stream_plan = u_sess->opt_cxt.is_stream;
 
     plan->multi_node_hint = multi_node_hint;
+
+    plan->is_flt_frame = false;
+    if (querytree->is_flt_frame) {
+        plan->is_flt_frame = true;
+    }
 
     if (plan->planTree) {
         if (IS_ENABLE_RIGHT_REF(querytree->rightRefState)) {
@@ -3521,34 +3539,36 @@ static void exec_parse_message(const char* query_string, /* string to execute */
             MemoryContextSwitchTo(oldcxt);
         }
 #endif
-        CachedPlanSource * plansource = g_instance.plan_cache->Fetch(query_string, strlen(query_string),
+        psrc = g_instance.plan_cache->Fetch(query_string, strlen(query_string),
                                                                      numParams, paramTypes, NULL);
-        if (plansource != NULL) {
+        if (psrc != NULL) {
             bool hasGetLock = false;
             if (is_named) {
                 if (ENABLE_CN_GPC)
-                    StorePreparedStatementCNGPC(stmt_name, plansource, false, true);
+                    StorePreparedStatementCNGPC(stmt_name, psrc, false, true);
                 else {
-                    u_sess->pcache_cxt.cur_stmt_psrc = plansource;
-                    if (g_instance.plan_cache->CheckRecreateCachePlan(plansource, &hasGetLock))
-                        g_instance.plan_cache->RecreateCachePlan(plansource, stmt_name, NULL, NULL, NULL, hasGetLock);
+                    u_sess->pcache_cxt.cur_stmt_psrc = psrc;
+                    if (g_instance.plan_cache->CheckRecreateCachePlan(psrc, &hasGetLock))
+                        g_instance.plan_cache->RecreateCachePlan(psrc, stmt_name, NULL, NULL, NULL, hasGetLock);
                 }
                 goto pass_parsing;
             } else {
                 drop_unnamed_stmt();
-                u_sess->pcache_cxt.unnamed_stmt_psrc = plansource;
+                u_sess->pcache_cxt.unnamed_stmt_psrc = psrc;
                 if (ENABLE_DN_GPC)
                     u_sess->pcache_cxt.private_refcount--;
                 /* don't share unnamed invalid or lightproxy plansource */
-                if (!g_instance.plan_cache->CheckRecreateCachePlan(plansource, &hasGetLock) && plansource->gplan) {
+                if (!g_instance.plan_cache->CheckRecreateCachePlan(psrc, &hasGetLock) && psrc->gplan) {
                     goto pass_parsing;
                 } else {
                     if (hasGetLock) {
-                        AcquirePlannerLocks(plansource->query_list, false);
-                        if (plansource->gplan) {
-                            AcquireExecutorLocks(plansource->gplan->stmt_list, false);
+                        AcquirePlannerLocks(psrc->query_list, false);
+                        if (psrc->gplan) {
+                            AcquireExecutorLocks(psrc->gplan->stmt_list, false);
                         }
                     }
+                    /* not pass parsing, set psrc to NULL to prevent accidental modification. */
+                    psrc = NULL;
                 }
             }
         }
@@ -3869,14 +3889,15 @@ pass_parsing:
     /*
      * Send ParseComplete.
      */
-    bool need_redirect = libpqsw_process_parse_message(commandTag, psrc->query_list);
-    if (need_redirect) {
-        libpqsw_trace("we find pbe new transfer cmdtag:%s, sql:%s", commandTag, psrc == NULL ? "" : psrc->query_string);
-    } else {
-        libpqsw_trace("we find pbe new select cmdtag:%s, sql:%s", commandTag, psrc == NULL ? "" : psrc->query_string);
-        if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
-            pq_putemptymessage('1');
+    bool need_redirect = libpqsw_process_parse_message(psrc->commandTag, psrc->query_list);
+    libpqsw_trace("we find pbe new %s cmdtag:%s, sql:%s",
+                  need_redirect ? "transfer" : "select",
+                  psrc->commandTag == NULL ? "" : psrc->commandTag,
+                  psrc->query_string);
+    if (!need_redirect && t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
+        pq_putemptymessage('1');
     }
+
     /*
      * Emit duration logging if appropriate.
      */
@@ -5287,6 +5308,11 @@ static void exec_execute_message(const char* portal_name, long max_rows)
             pq_putemptymessage('s');
 
         u_sess->xact_cxt.pbe_execute_complete = false;
+        /* when only set maxrows, we don't need to set pbe_execute_complete flag. */
+        if ((portal_name == NULL || portal_name[0] == '\0') &&
+            max_rows != FETCH_ALL && IsConnFromApp()) {
+            u_sess->xact_cxt.pbe_execute_complete = true;
+        }
 #ifndef ENABLE_MULTIPLE_NODES
         /* reset stream info for session */
         if (u_sess->stream_cxt.global_obj != NULL) {
@@ -6251,7 +6277,6 @@ void RecoveryConflictInterrupt(ProcSignalReason reason)
             case PROCSIG_RECOVERY_CONFLICT_LOCK:
             case PROCSIG_RECOVERY_CONFLICT_TABLESPACE:
             case PROCSIG_RECOVERY_CONFLICT_SNAPSHOT:
-
                 /*
                  * If we aren't in a transaction any longer then ignore.
                  */
@@ -6455,6 +6480,9 @@ void ProcessInterrupts(void)
                     errdetail_recovery_conflict()));
         } else if (t_thrd.postgres_cxt.RecoveryConflictPending) {
             /* Currently there is only one non-retryable recovery conflict */
+            if (LWLockHeldByMe(ProcArrayLock)) {
+                LWLockRelease(ProcArrayLock);
+            }
             Assert(t_thrd.postgres_cxt.RecoveryConflictReason == PROCSIG_RECOVERY_CONFLICT_DATABASE);
             pgstat_report_recovery_conflict(t_thrd.postgres_cxt.RecoveryConflictReason);
             ereport(FATAL,
@@ -8455,6 +8483,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         t_thrd.log_cxt.msgbuf->cursor = 0;
         t_thrd.log_cxt.msgbuf->len = 0;
         lc_replan_nodegroup = InvalidOid;
+        /* reset xmin before ReadCommand, in case blocking redo */
+        if (RecoveryInProgress()) {
+            t_thrd.pgxact->xmin = InvalidTransactionId;
+        }
 
         /*
          * (1) If we've reached idle state, tell the frontend we're ready for

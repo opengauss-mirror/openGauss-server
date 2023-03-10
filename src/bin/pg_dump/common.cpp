@@ -97,7 +97,8 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
     int numForeignDataWrappers;
     int numForeignServers;
     int numDefaultACLs;
-
+    int numEventTriggers;
+    int numEvents;
     if (g_verbose)
         write_msg(NULL, "reading schemas\n");
     nspinfo = getNamespaces(fout, &numNamespaces);
@@ -241,6 +242,11 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading triggers\n");
     getTriggers(fout, tblinfo, numTables);
 
+    if (g_verbose) {
+        write_msg(NULL, "reading events\n");
+    }
+    getEvents(fout, &numEvents);
+    
     /*Open-source-fix: Fix ordering of obj id for Rules and EventTriggers*/
     if (g_verbose)
         write_msg(NULL, "reading rewrite rules\n");
@@ -271,6 +277,10 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading subscriptions\n");
     }
     getSubscriptions(fout);
+    if (g_verbose) {
+        write_msg(NULL, "reading event triggers\n");
+    }
+    getEventTriggers(fout, &numEventTriggers);
 
     *numTablesPtr = numTables;
     GS_FREE(inhinfo);
@@ -618,7 +628,7 @@ static int DOCatalogIdCompare(const void* p1, const void* p2)
 
 /*
  * Build an array of pointers to all known dumpable objects
- * 
+ *
  * This simply creates a modifiable copy of the internal map.
  */
 void getDumpableObjects(DumpableObject*** objs, int* numObjs)

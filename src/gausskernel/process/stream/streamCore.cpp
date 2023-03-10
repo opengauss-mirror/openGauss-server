@@ -919,7 +919,7 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
     if (u_sess->stream_cxt.global_obj != NULL) {
 #ifndef ENABLE_MULTIPLE_NODES
         if (u_sess->stream_cxt.global_obj->m_portal != NULL) {
-            u_sess->stream_cxt.global_obj->m_portal->streamInfo.streamGroup = NULL;
+            u_sess->stream_cxt.global_obj->m_portal->streamInfo.Reset();
         }
 #endif
         u_sess->stream_cxt.global_obj->deInit(status);
@@ -951,6 +951,15 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
     if (IS_PGXC_COORDINATOR || (StreamTopConsumerAmI() == false && StreamThreadAmI() == false) ||
         u_sess->stream_cxt.enter_sync_point == true)
         return;
+
+    /* add trace info while smp not correct. */
+    if (t_thrd.log_cxt.errordata_stack_depth == (ERRORDATA_STACK_SIZE - 1) && StreamTopConsumerAmI()) {
+        if (u_sess->stream_cxt.global_obj != NULL) {
+            ereport(LOG, (errmsg("[StreamSyncQuit] global_obj: %lu, runtime_mem_cxt: %lu",
+                (uint64)u_sess->stream_cxt.global_obj, (uint64)u_sess->stream_cxt.stream_runtime_mem_cxt)));
+            return;
+        }
+    }
 
     /* We must relase all pthread mutex by my thread, Or it will dead lock. But it is not a good solution. */
     // lock the same thread mutex can't be conflict in one thread.
@@ -1012,14 +1021,14 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
     pgstat_report_waitstatus(oldStatus);
 }
 
-void StreamNodeGroup::ReleaseStreamGroup(bool resetSession)
+void StreamNodeGroup::ReleaseStreamGroup(bool resetSession, StreamObjStatus status)
 {
     if (u_sess->stream_cxt.global_obj != NULL) {
         StreamTopConsumerIam();
         /* Set sync point for waiting all stream threads complete. */
-        StreamNodeGroup::syncQuit(STREAM_COMPLETE);
+        StreamNodeGroup::syncQuit(status);
         UnRegisterStreamSnapshots();
-        StreamNodeGroup::destroy(STREAM_COMPLETE);
+        StreamNodeGroup::destroy(status);
         if (!resetSession) {
             /* reset some flag related to stream */
             ResetStreamEnv();

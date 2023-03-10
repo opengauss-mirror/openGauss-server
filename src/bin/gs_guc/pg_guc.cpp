@@ -2634,6 +2634,8 @@ int main(int argc, char** argv)
     char* pgdata_C = NULL;
     char* nodename = NULL;
     char* instance_name = NULL;
+    int nodeNum = 0;
+    int instanceNum = 0;
     int nRet = 0;
     errno_t rc = 0;
     progname = PROG_NAME;
@@ -2753,11 +2755,13 @@ int main(int argc, char** argv)
                 case 'N': {
                     GS_FREE(nodename);
                     nodename = xstrdup(optarg);
+                    nodeNum++;
                     break;
                 }
                 case 'I': {
                     GS_FREE(instance_name);
                     instance_name = xstrdup(optarg);
+                    instanceNum++;
                     break;
                 }
                 case 'M': {
@@ -2907,6 +2911,11 @@ int main(int argc, char** argv)
         GS_FREE(pgdata_R);
         GS_FREE(pgdata_C);
         return 0;
+    }
+
+    if (nodeNum > 1 || instanceNum > 1) {
+        write_stderr(_("ERROR: The number of -I or -N must less than 2.\n"));
+        exit(1);
     }
 
     if (false == allocate_memory_list()) {

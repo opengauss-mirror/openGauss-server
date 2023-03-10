@@ -41,6 +41,8 @@ static bool rel_supports_distinctness(PlannerInfo* root, RelOptInfo* rel);
 static bool rel_is_distinct_for(PlannerInfo* root, RelOptInfo* rel, List* clause_list);
 static bool check_column_uniqueness(List* groupClause, List* targetList, List* colnos, List* opids);
 static Oid distinct_col_search(int colno, List* colnos, List* opids);
+static bool is_innerrel_unique_for(PlannerInfo *root, RelOptInfo *outerrel, RelOptInfo *innerrel, JoinType jointype,
+                                   List *restrictlist);
 
 /*
  * remove_useless_joins
@@ -603,6 +605,10 @@ static bool rel_is_distinct_for(PlannerInfo* root, RelOptInfo* rel, List* clause
  */
 bool query_supports_distinctness(Query* query)
 {
+    /* we don't cope with SRFs */
+    if (query->is_flt_frame && query->hasTargetSRFs)
+        return false;
+
     if (query->distinctClause != NIL || query->groupClause != NIL || query->hasAggs || query->havingQual ||
         query->setOperations)
         return true;
@@ -781,4 +787,77 @@ static Oid distinct_col_search(int colno, List* colnos, List* opids)
             return lfirst_oid(lc2);
     }
     return InvalidOid;
+}
+
+bool innerrel_is_unique(PlannerInfo *root, RelOptInfo *outerrel, RelOptInfo *innerrel, JoinType jointype,
+                        List *restrictlist)
+{
+    MemoryContext old_context;
+    ListCell *lc;
+
+    if (restrictlist == NIL) {
+        return false;
+    }
+
+    if (!rel_supports_distinctness(root, innerrel)) {
+        return false;
+    }
+
+    foreach (lc, innerrel->unique_for_rels) {
+        Relids unique_for_rels = (Relids)lfirst(lc);
+
+        if (bms_is_subset(unique_for_rels, outerrel->relids)) {
+            return true;
+        }
+    }
+
+    foreach (lc, innerrel->non_unique_for_rels) {
+        Relids unique_for_rels = (Relids)lfirst(lc);
+
+        if (bms_is_subset(outerrel->relids, unique_for_rels)) {
+            return false;
+        }
+    }
+
+    if (is_innerrel_unique_for(root, outerrel, innerrel, jointype, restrictlist)) {
+        old_context = MemoryContextSwitchTo(root->planner_cxt);
+        innerrel->unique_for_rels = lappend(innerrel->unique_for_rels, bms_copy(outerrel->relids));
+        MemoryContextSwitchTo(old_context);
+        return true;
+    } else {
+        if (root->join_search_private) {
+            old_context = MemoryContextSwitchTo(root->planner_cxt);
+            innerrel->non_unique_for_rels = lappend(innerrel->non_unique_for_rels, bms_copy(outerrel->relids));
+            MemoryContextSwitchTo(old_context);
+        }
+
+        return false;
+    }
+}
+
+static bool is_innerrel_unique_for(PlannerInfo *root, RelOptInfo *outerrel, RelOptInfo *innerrel, JoinType jointype,
+                                   List *restrictlist)
+{
+    List *clause_list = NIL;
+    ListCell *lc;
+
+    foreach (lc, restrictlist) {
+        RestrictInfo *restrictinfo = (RestrictInfo *)lfirst(lc);
+
+        if (restrictinfo->is_pushed_down && IS_OUTER_JOIN(jointype)) {
+            continue;
+        }
+
+        if (!restrictinfo->can_join || restrictinfo->mergeopfamilies == NIL) {
+            continue;
+        }
+
+        if (!clause_sides_match_join(restrictinfo, outerrel->relids, innerrel->relids)) {
+            continue;
+        }
+
+        clause_list = lappend(clause_list, restrictinfo);
+    }
+
+    return rel_is_distinct_for(root, innerrel, clause_list);
 }

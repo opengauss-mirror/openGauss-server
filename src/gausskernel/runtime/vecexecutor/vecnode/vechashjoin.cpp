@@ -211,6 +211,7 @@ VecHashJoinState* ExecInitVecHashJoin(VecHashJoin* node, EState* estate, int efl
     hash_state->hj_OuterHashKeys = lclauses;
     hash_state->hj_InnerHashKeys = rclauses;
     hash_state->hj_HashOperators = hoperators;
+    hash_state->hj_hashCollations = NIL;
     hash_state->eqfunctions = eqfunctions;
     hash_state->js.ps.ps_TupFromTlist = false;
 

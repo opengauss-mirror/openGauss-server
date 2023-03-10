@@ -154,9 +154,9 @@ void add_vars_to_targetlist(PlannerInfo* root, List* vars, Relids where_needed, 
             AssertEreport(attno >= rel->min_attr && attno <= rel->max_attr, MOD_OPT, "attno is out of range");
             attno -= rel->min_attr;
             if (rel->attr_needed[attno] == NULL) {
-                /* Variable not yet requested, so add to reltargetlist */
+                /* Variable not yet requested, so add to rel's targetlist */
                 /* XXX is copyObject necessary here? */
-                rel->reltargetlist = lappend(rel->reltargetlist, copyObject(var));
+                rel->reltarget->exprs = lappend(rel->reltarget->exprs, copyObject(var));
             }
             rel->attr_needed[attno] = bms_add_members(rel->attr_needed[attno], where_needed);
         } else if (IsA(node, PlaceHolderVar)) {

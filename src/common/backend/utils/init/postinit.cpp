@@ -132,6 +132,8 @@ static bool hasTuples(const Oid relOid);
 
 THR_LOCAL LoginUserPtr user_login_hook = nullptr;
 
+#define MAX_COPY_NUM 20
+
 /*** InitPostgres support ***/
 AlarmCheckResult ConnAuthMethodChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
@@ -241,6 +243,17 @@ static HeapTuple GetDatabaseTuple(const char* dbname)
     heap_close(relation, AccessShareLock);
 
     return tuple;
+}
+
+char* GetDatabaseCompatibility(const char* dbname)
+{
+    if (!dbname || dbname[0] == 0)
+        return NULL;
+    HeapTuple tuple = GetDatabaseTuple(dbname);
+    if (!tuple)
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database %s does not exist", dbname)));
+    Form_pg_database dbform = (Form_pg_database)GETSTRUCT(tuple);
+    return dbform->datcompatibility.data;
 }
 
 /*
@@ -1569,6 +1582,8 @@ void PostgresInitializer::InitApplyWorker()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 
     return;
@@ -2160,6 +2175,11 @@ void PostgresInitializer::InitLoadLocalSysCache(Oid db_oid, const char *db_name)
 
 void PostgresInitializer::InitSession()
 {
+    /* standby read on paraller redo */
+    if (RecoveryInProgress() && g_instance.attr.attr_storage.EnableHotStandby && u_sess->proc_cxt.clientIsGsql) {
+        u_sess->proc_cxt.gsqlRemainCopyNum = MAX_COPY_NUM;
+    }
+
     /* Init rel cache for new session. */
     InitSysCache();
 
@@ -2214,6 +2234,8 @@ void PostgresInitializer::InitStreamSession()
     InitPGXCPort();
 
     InitSettings();
+
+    InitExtensionVariable();
 
     FinishInit();
 }

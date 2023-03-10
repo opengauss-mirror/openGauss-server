@@ -37,9 +37,14 @@
 
 extern Oid exprType(const Node* expr);
 extern int32 exprTypmod(const Node* expr);
+extern int exprCharset(const Node* expr);
 extern bool exprIsLengthCoercion(const Node* expr, int32* coercedTypmod);
 extern Node* relabel_to_typmod(Node* expr, int32 typmod);
 extern bool expression_returns_set(Node* clause);
+extern bool expression_contains_rownum(Node* clause);
+
+extern bool query_check_no_flt(Query* qry);
+extern void query_check_srf(Query* qry);
 
 extern Oid exprCollation(const Node* expr);
 extern Oid exprInputCollation(const Node* expr);

@@ -136,6 +136,7 @@ static void write_eventlog(int level, const char* line, int len);
 #endif
 
 static const int CREATE_ALTER_SUBSCRIPTION = 16;
+static const int CREATE_ALTER_USERMAPPING = 18;
 
 /* Macro for checking t_thrd.log_cxt.errordata_stack_depth is reasonable */
 #define CHECK_STACK_DEPTH()                                               \
@@ -4124,6 +4125,9 @@ static char* mask_execute_direct_cmd(const char* query_string)
             break;
         }
     }
+    if (position >= query_len) {
+        return NULL;
+    }
     /* Parsing execute direct on detail content */
     parse_query = (char*)palloc0(query_len - position);
     rc = memcpy_s(parse_query, (query_len - position), 
@@ -4132,6 +4136,10 @@ static char* mask_execute_direct_cmd(const char* query_string)
     rc = strcat_s(parse_query, (query_len - position), ";\0");
     securec_check(rc, "\0", "\0");
     mask_query = mask_Password_internal(parse_query);
+    if (mask_query == NULL) {
+        pfree_ext(parse_query);
+        return NULL;
+    }
     mask_len = strlen(mask_query);
     /* Concatenate character string */
     tmp_string = (char*)palloc0(mask_len + 1 + position + 1);
@@ -4351,6 +4359,7 @@ static char* mask_Password_internal(const char* query_string)
      * 15 - for funCrypt
      * 16 - create/alter subscription(CREATE_ALTER_SUBSCRIPTION)
      * 17 - set password (b compatibility)
+     * 18 - create/alter user mapping
      */
     int curStmtType = 0;
     int prevToken[5] = {0};
@@ -4364,7 +4373,7 @@ static char* mask_Password_internal(const char* query_string)
     bool saveEscapeStringWarning = u_sess->attr.attr_sql.escape_string_warning;
     bool need_clear_yylval = false;
     /* initialize the flex scanner  */
-    yyscanner = scanner_init(query_string, &yyextra, ScanKeywords, NumScanKeywords);
+    yyscanner = scanner_init(query_string, &yyextra, &ScanKeywords, ScanKeywordTokens);
     yyextra.warnOnTruncateIdent = false;
     u_sess->attr.attr_sql.escape_string_warning = false;
     /* forbid password truncate */
@@ -4569,7 +4578,7 @@ static char* mask_Password_internal(const char* query_string)
                     }
                     idx = 0;
                     isPassword = false;
-                    if (curStmtType == 10 || curStmtType == 11) {
+                    if (curStmtType == 10 || curStmtType == 11 || curStmtType == CREATE_ALTER_USERMAPPING) {
                         curStmtType = 0;
                     }
                 }
@@ -4629,6 +4638,9 @@ static char* mask_Password_internal(const char* query_string)
                         currToken = IDENT;
                     } else if (DB_IS_CMPT(B_FORMAT) && prevToken[0] == SET) {
                         curStmtType = 17;
+                    } else if (prevToken[1] == MAPPING && prevToken[2] == SERVER && prevToken[3] == OPTIONS) {
+                        curStmtType = CREATE_ALTER_USERMAPPING;
+                        currToken = IDENT;
                     }
 
                     if (curStmtType != 17) {
@@ -4842,6 +4854,8 @@ static char* mask_Password_internal(const char* query_string)
                 case SERVER:
                     if (prevToken[0] == CREATE || prevToken[0] == ALTER) {
                         prevToken[1] = SERVER;
+                    } else if (prevToken[1] == MAPPING) {
+                        prevToken[2] = SERVER;
                     }
                     break;
                 case OPTIONS:
@@ -4850,6 +4864,8 @@ static char* mask_Password_internal(const char* query_string)
                     } else if (prevToken[1] == FOREIGN && prevToken[2] == TABLE) {
                         prevToken[3] = OPTIONS;
                     } else if (prevToken[1] == DATA_P && prevToken[2] == SOURCE_P) {
+                        prevToken[3] = OPTIONS;
+                    } else if (prevToken[1] == MAPPING && prevToken[2] == SERVER) {
                         prevToken[3] = OPTIONS;
                     }
                     break;
@@ -4925,6 +4941,20 @@ static char* mask_Password_internal(const char* query_string)
                          * 3. ALTER SUBSCRIPTION name SET (conninfo='xx'). Here we deal with this case.
                          */
                         curStmtType = pg_strcasecmp(yylval.str, "conninfo") == 0 ? CREATE_ALTER_SUBSCRIPTION : 0;
+                        idx = 0;
+                    } else if (prevToken[1] == MAPPING && prevToken[2] == SERVER && prevToken[3] == OPTIONS) {
+                        /*
+                         * For create/alter user mapping: sensitive opt is 'password'.
+                         * 'password' is usually marked as a standard Token.
+                         * However, password will be taken as SCONST if wrapped around double-quote, which needs
+                         * to be handled here.
+                         */
+                        if (pg_strcasecmp(yylval.str, "password") == 0) {
+                            curStmtType = CREATE_ALTER_USERMAPPING;
+                            isPassword = true;
+                        } else {
+                            curStmtType = 0;
+                        }
                         idx = 0;
                     }
                     break;
@@ -5034,6 +5064,11 @@ static char* mask_Password_internal(const char* query_string)
                         securec_check(rc, "", "");
                         idx = 0;
                         curStmtType = 0;
+                    }
+                    break;
+                case MAPPING:
+                    if (prevToken[0] == USER) {
+                        prevToken[1] = MAPPING;
                     }
                     break;
                 default:

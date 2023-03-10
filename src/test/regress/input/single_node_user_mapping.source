@@ -1,6 +1,9 @@
 --clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 --- prepare
+\! echo $GAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.cipher
+\! echo $GAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.rand
+\! echo $GAUSSHOME | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o usermapping > /dev/null 2>&1 ; echo $?
 \! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.cipher
 \! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.rand
 \! echo $OLDGAUSSHOME | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o usermapping > /dev/null 2>&1 ; echo $?
@@ -13,9 +16,19 @@ CREATE SERVER dummy_srv2 FOREIGN DATA WRAPPER dummy;
 CREATE USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(username 'test', password 'shouldBeEncrypt');
 CREATE USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(username 'test');
 
-ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(ADD password 'shouldBeEncrypt');
-ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(SET password 'shouldBeEncrypt2');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(ADD password 'shouldBe''''''''''''''''''''''''''''''Encrypt');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(SET password 'shouldBe''''''''''''''''''''''''''''''Encrypt2');
 ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(DROP password);
+
+DROP USER MAPPING FOR current_user SERVER dummy_srv2;
+DROP USER MAPPING FOR current_user SERVER dummy_srv;
+
+-- test with password keyword double-quote
+CREATE USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(username 'test', "password" 'shouldBe''''''''''''''''''''''''''''''Encrypt_tmp');
+CREATE USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(username 'test');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(SET "password" 'shouldBe''''''''''''''''''''''''''''''Encrypt_tmp2');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(ADD "password" 'shouldBe''''''''''''''''''''''''''''''Encrypt_tmp');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(SET "password" 'shouldBe''''''''''''''''''''''''''''''Encrypt_tmp2');
 
 DROP USER MAPPING FOR current_user SERVER dummy_srv2;
 DROP USER MAPPING FOR current_user SERVER dummy_srv;

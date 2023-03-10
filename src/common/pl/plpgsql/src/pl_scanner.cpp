@@ -23,13 +23,14 @@
 
 #include "pl_gram.hpp" /* must be after parser/scanner.h */
 
-#define PG_KEYWORD(a, b, c) {a, b, c},
 #define LENGTH_OF_DOT_AND_STR_END 4
 #define INT32_STRING_SIZE 12
 /*
  * A word about keywords:
  *
- * We keep reserved and unreserved keywords in separate arrays.  The
+ * We keep reserved and unreserved keywords in separate headers.  Be careful
+ * not to put the same word in both headers.  Also be sure that pl_gram.y's
+ * unreserved_keyword production agrees with the unreserved header.  The
  * reserved keywords are passed to the core scanner, so they will be
  * recognized before (and instead of) any variable name.  Unreserved
  * words are checked for separately, after determining that the identifier
@@ -58,148 +59,21 @@
  * gram.y's unreserved_keyword production agrees with the second list.
  */
 
-static const ScanKeyword reserved_keywords[] = {
-    PG_KEYWORD("all", K_ALL, RESERVED_KEYWORD) 
-    PG_KEYWORD("begin", K_BEGIN, RESERVED_KEYWORD) 
-    PG_KEYWORD("by", K_BY, RESERVED_KEYWORD) 
-    PG_KEYWORD("case", K_CASE, RESERVED_KEYWORD) 
-    PG_KEYWORD("close", K_CLOSE, RESERVED_KEYWORD) 
-    PG_KEYWORD("collate", K_COLLATE, RESERVED_KEYWORD) 
-    PG_KEYWORD("declare", K_DECLARE, RESERVED_KEYWORD) 
-    PG_KEYWORD("default", K_DEFAULT, RESERVED_KEYWORD) 
-    PG_KEYWORD("delete", K_DELETE, RESERVED_KEYWORD) 
-    PG_KEYWORD("diagnostics", K_DIAGNOSTICS, RESERVED_KEYWORD) 
-    PG_KEYWORD("else", K_ELSE, RESERVED_KEYWORD) 
-    PG_KEYWORD("elseif", K_ELSIF, RESERVED_KEYWORD) 
-    PG_KEYWORD("elsif", K_ELSIF, RESERVED_KEYWORD) 
-    PG_KEYWORD("end", K_END, RESERVED_KEYWORD) 
-    PG_KEYWORD("exception", K_EXCEPTION, RESERVED_KEYWORD) 
-    PG_KEYWORD("execute", K_EXECUTE, RESERVED_KEYWORD) 
-    PG_KEYWORD("exit", K_EXIT, RESERVED_KEYWORD) 
-    PG_KEYWORD("fetch", K_FETCH, RESERVED_KEYWORD) 
-    PG_KEYWORD("for", K_FOR, RESERVED_KEYWORD) 
-    PG_KEYWORD("forall", K_FORALL, RESERVED_KEYWORD) 
-    PG_KEYWORD("foreach", K_FOREACH, RESERVED_KEYWORD) 
-    PG_KEYWORD("from", K_FROM, RESERVED_KEYWORD) 
-    PG_KEYWORD("function", K_FUNCTION, RESERVED_KEYWORD)
-    PG_KEYWORD("get", K_GET, RESERVED_KEYWORD)
-    PG_KEYWORD("goto", K_GOTO, RESERVED_KEYWORD) 
-    PG_KEYWORD("if", K_IF, RESERVED_KEYWORD) 
-    PG_KEYWORD("in", K_IN, RESERVED_KEYWORD) 
-    PG_KEYWORD("insert", K_INSERT, RESERVED_KEYWORD) 
-    PG_KEYWORD("into", K_INTO, RESERVED_KEYWORD) 
-    PG_KEYWORD("limit", K_LIMIT, RESERVED_KEYWORD) 
-    PG_KEYWORD("loop", K_LOOP, RESERVED_KEYWORD) 
-    PG_KEYWORD("move", K_MOVE, RESERVED_KEYWORD)
-    PG_KEYWORD("not", K_NOT, RESERVED_KEYWORD) 
-    PG_KEYWORD("null", K_NULL, RESERVED_KEYWORD)
-    PG_KEYWORD("of", K_OF, RESERVED_KEYWORD) 
-    PG_KEYWORD("open", K_OPEN, RESERVED_KEYWORD) 
-    PG_KEYWORD("or", K_OR, RESERVED_KEYWORD) 
-    PG_KEYWORD("out", K_OUT, RESERVED_KEYWORD) 
-    PG_KEYWORD("procedure", K_PROCEDURE, RESERVED_KEYWORD)
-    PG_KEYWORD("raise", K_RAISE, RESERVED_KEYWORD) 
-    PG_KEYWORD("ref", K_REF, RESERVED_KEYWORD) 
-    PG_KEYWORD("return", K_RETURN, RESERVED_KEYWORD) 
-    PG_KEYWORD("select", K_SELECT, RESERVED_KEYWORD) 
-    PG_KEYWORD("strict", K_STRICT, RESERVED_KEYWORD)
-    PG_KEYWORD("then", K_THEN, RESERVED_KEYWORD) 
-    PG_KEYWORD("to", K_TO, RESERVED_KEYWORD)
-    PG_KEYWORD("update", K_UPDATE, RESERVED_KEYWORD)
-    PG_KEYWORD("using", K_USING, RESERVED_KEYWORD) 
-    PG_KEYWORD("when", K_WHEN, RESERVED_KEYWORD)
-    PG_KEYWORD("while", K_WHILE, RESERVED_KEYWORD) 
+/* ScanKeywordList lookup data for PL/pgSQL keywords */
+#include "pl_reserved_kwlist_d.h"
+#include "pl_unreserved_kwlist_d.h"
+
+/* Token codes for PL/pgSQL keywords */
+#define PG_KEYWORD(kwname, value) value,
+
+static const uint16 ReservedPLKeywordTokens[] = {
+#include "pl_reserved_kwlist.h"
+};
+static const uint16 UnreservedPLKeywordTokens[] = {
+#include "pl_unreserved_kwlist.h"
 };
 
-static const int num_reserved_keywords = lengthof(reserved_keywords);
-
-static const ScanKeyword unreserved_keywords[] = {
-    PG_KEYWORD("absolute", K_ABSOLUTE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("alias", K_ALIAS, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("alter", K_ALTER, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("array", K_ARRAY, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("as", K_AS, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("backward", K_BACKWARD, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("bulk", K_BULK, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("call", K_CALL, UNRESERVED_KEYWORD)
-    PG_KEYWORD("collect", K_COLLECT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("commit", K_COMMIT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("condition", K_CONDITION, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("constant", K_CONSTANT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("continue", K_CONTINUE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("current", K_CURRENT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("cursor", K_CURSOR, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("debug", K_DEBUG, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("detail", K_DETAIL, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("distinct", K_DISTINCT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("do", K_DO, UNRESERVED_KEYWORD)
-    PG_KEYWORD("dump", K_DUMP, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("errcode", K_ERRCODE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("error", K_ERROR, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("except", K_EXCEPT, UNRESERVED_KEYWORD)
-    PG_KEYWORD("exceptions", K_EXCEPTIONS, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("first", K_FIRST, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("forward", K_FORWARD, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("function", K_FUNCTION, UNRESERVED_KEYWORD)
-    PG_KEYWORD("hint", K_HINT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("immediate", K_IMMEDIATE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("index", K_INDEX, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("info", K_INFO, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("instantiation", K_INSTANTIATION, UNRESERVED_KEYWORD)
-    PG_KEYWORD("intersect", K_INTERSECT, UNRESERVED_KEYWORD)
-    PG_KEYWORD("is", K_IS, UNRESERVED_KEYWORD)
-    PG_KEYWORD("iterate", K_ITERATE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("last", K_LAST, UNRESERVED_KEYWORD)
-    PG_KEYWORD("leave", K_LEAVE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("log", K_LOG, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("merge", K_MERGE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("message", K_MESSAGE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("message_text", K_MESSAGE_TEXT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("multiset", K_MULTISET, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("next", K_NEXT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("no", K_NO, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("notice", K_NOTICE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("option", K_OPTION, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("package", K_PACKAGE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("perform", K_PERFORM, UNRESERVED_KEYWORD)
-    PG_KEYWORD("pg_exception_context", K_PG_EXCEPTION_CONTEXT, UNRESERVED_KEYWORD)
-    PG_KEYWORD("pg_exception_detail", K_PG_EXCEPTION_DETAIL, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("pg_exception_hint", K_PG_EXCEPTION_HINT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("pragma", K_PRAGMA, UNRESERVED_KEYWORD)
-    PG_KEYWORD("prior", K_PRIOR, UNRESERVED_KEYWORD)
-    PG_KEYWORD("procedure", K_PROCEDURE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("query", K_QUERY, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("record", K_RECORD, UNRESERVED_KEYWORD)
-    PG_KEYWORD("relative", K_RELATIVE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("release", K_RELEASE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("repeat", K_REPEAT, UNRESERVED_KEYWORD)
-    PG_KEYWORD("replace", K_REPLACE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("result_oid", K_RESULT_OID, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("returned_sqlstate", K_RETURNED_SQLSTATE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("reverse", K_REVERSE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("rollback", K_ROLLBACK, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("row_count", K_ROW_COUNT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("rowtype", K_ROWTYPE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("save", K_SAVE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("savepoint", K_SAVEPOINT, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("scroll", K_SCROLL, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("slice", K_SLICE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("sqlstate", K_SQLSTATE, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("stacked", K_STACKED, UNRESERVED_KEYWORD) 
-    PG_KEYWORD("sys_refcursor", K_SYS_REFCURSOR, UNRESERVED_KEYWORD)
-    PG_KEYWORD("table", K_TABLE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("type", K_TYPE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("union", K_UNION, UNRESERVED_KEYWORD)
-    PG_KEYWORD("until", K_UNTIL, UNRESERVED_KEYWORD)
-    PG_KEYWORD("use_column", K_USE_COLUMN, UNRESERVED_KEYWORD)
-    PG_KEYWORD("use_variable", K_USE_VARIABLE, UNRESERVED_KEYWORD)
-    PG_KEYWORD("variable_conflict", K_VARIABLE_CONFLICT, UNRESERVED_KEYWORD)
-    PG_KEYWORD("varray", K_VARRAY, UNRESERVED_KEYWORD)
-    PG_KEYWORD("warning", K_WARNING, UNRESERVED_KEYWORD)
-    PG_KEYWORD("with", K_WITH, UNRESERVED_KEYWORD)
-};
-
-static const int num_unreserved_keywords = lengthof(unreserved_keywords);
+#undef PG_KEYWORD
 
 static const struct PlpgsqlKeywordValue keywordsValue = {
     .procedure = K_PROCEDURE,
@@ -247,7 +121,7 @@ int plpgsql_yylex(void)
     int tok1;
     int loc = 0;
     TokenAuxData aux1;
-    const ScanKeyword* kw = NULL;
+    int kwnum;
     /* enum flag for returning specified tokens */
     int tok_flag = -1;
     int dbl_tok_flag = -1;
@@ -387,10 +261,11 @@ int plpgsql_yylex(void)
                         tok1 = T_DATUM;
                     }
                 } else if (!aux1.lval.word.quoted &&
-                           (kw = ScanKeywordLookup(
-                                aux1.lval.word.ident, unreserved_keywords, num_unreserved_keywords))) {
-                    aux1.lval.keyword = kw->name;
-                    tok1 = kw->value;
+                           (kwnum = ScanKeywordLookup(aux1.lval.word.ident,
+													  &UnreservedPLKeywords)) >= 0) {
+                    aux1.lval.keyword = GetScanKeyword(kwnum,
+													   &UnreservedPLKeywords);
+					tok1 = UnreservedPLKeywordTokens[kwnum];
                 } else {
                     tok1 = T_WORD;
                 }
@@ -408,9 +283,11 @@ int plpgsql_yylex(void)
                     tok1 = T_DATUM;
                 }
             } else if (!aux1.lval.word.quoted &&
-                       (kw = ScanKeywordLookup(aux1.lval.word.ident, unreserved_keywords, num_unreserved_keywords))) {
-                aux1.lval.keyword = kw->name;
-                tok1 = kw->value;
+                       (kwnum = ScanKeywordLookup(aux1.lval.word.ident,
+											      &UnreservedPLKeywords)) >= 0) {
+                aux1.lval.keyword = GetScanKeyword(kwnum,
+								                   &UnreservedPLKeywords);
+                tok1 = UnreservedPLKeywordTokens[kwnum];
             } else if (aux1.lval.str[0] == ':' && tok1 == PARAM) {
                 /* Check place holder, it should be like :({identifier}|{integer})
                  * It is a placeholder in exec statement. */
@@ -448,7 +325,7 @@ int plpgsql_yylex_single(void)
     int tok1;
     int loc = 0;
     TokenAuxData aux1;
-    const ScanKeyword* kw = NULL;
+    int kwnum;
     /* enum flag for returning specified tokens */
     int tok_flag = -1;
 
@@ -471,10 +348,11 @@ int plpgsql_yylex_single(void)
                 tok1 = T_DATUM;
             }
         } else if (!aux1.lval.word.quoted &&
-            (kw = ScanKeywordLookup(
-                aux1.lval.word.ident, unreserved_keywords, num_unreserved_keywords))) {
-                    aux1.lval.keyword = kw->name;
-                    tok1 = kw->value;
+            (kwnum = ScanKeywordLookup(aux1.lval.word.ident,
+									   &UnreservedPLKeywords)) >= 0) {
+                    aux1.lval.keyword = GetScanKeyword(kwnum,
+												       &UnreservedPLKeywords);
+                    tok1 = UnreservedPLKeywordTokens[kwnum];
             } else {
                 tok1 = T_WORD;
             }
@@ -641,6 +519,23 @@ void plpgsql_process_stmt_array(StringInfo buf, List* bracket_loc)
 }
 
 /*
+ * Peek one tokens ahead in the input stream. 
+ *
+ * NB: no variable or unreserved keyword lookup is performed here, they will
+ * be returned as IDENT. Reserved keywords are resolved as usual.
+ */
+void plpgsql_peek(int* tok1_p)
+{
+    int tok1;
+    TokenAuxData aux1;
+
+    tok1 = internal_yylex(&aux1);
+    *tok1_p = tok1;
+
+    push_back_token(tok1, &aux1);
+}
+
+/*
  * Peek two tokens ahead in the input stream. The first token and its
  * location the query are returned in *tok1_p and *tok1_loc, second token
  * and its location in *tok2_p and *tok2_loc.
@@ -669,16 +564,6 @@ void plpgsql_peek2(int* tok1_p, int* tok2_p, int* tok1_loc, int* tok2_loc)
     push_back_token(tok1, &aux1);
 }
 
-void plpgsql_peek(int* tok1_p)
-{
-    int tok1;
-    TokenAuxData aux1;
-
-    tok1 = internal_yylex(&aux1);
-
-    *tok1_p = tok1;
-    push_back_token(tok1, &aux1);
-}
 /*
  * plpgsql_scanner_errposition
  *		Report an error cursor position, if possible.
@@ -844,7 +729,7 @@ void plpgsql_scanner_init(const char* str)
     PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
     /* Start up the core scanner */
     curr_compile->yyscanner =
-        scanner_init(str, curr_compile->core_yy, reserved_keywords, num_reserved_keywords);
+        scanner_init(str, curr_compile->core_yy, &ReservedPLKeywords, ReservedPLKeywordTokens);
     curr_compile->core_yy->isPlpgsqlKeyWord = true;
     curr_compile->core_yy->plKeywordValue = &keywordsValue;
 
@@ -1159,13 +1044,14 @@ static int plpgsql_parse_declare(int* loc)
         int tok3 = -1;
         tok2 = internal_yylex(&aux2);
         tok3 = internal_yylex(&aux3);
-        if (tok2 != IDENT || tok3 != IDENT) {
+        if (tok3 != IDENT) {
             push_back_token(tok3, &aux3);
             push_back_token(tok2, &aux2);
             push_back_token(tok1, &aux1);
             return token;
         }
         if (strcasecmp(aux3.lval.str, "cursor") == 0) {
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_DECLARE;
             token = T_DECLARE_CURSOR;
             push_back_token(tok3, &aux3);
             push_back_token(tok2, &aux2);
@@ -1173,7 +1059,16 @@ static int plpgsql_parse_declare(int* loc)
             *loc = aux1.lloc;
             plpgsql_yylval = aux1.lval;
         } else if (strcasecmp(aux3.lval.str, "condition") == 0) {
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_DECLARE;
             token = T_DECLARE_CONDITION;
+            push_back_token(tok3, &aux3);
+            push_back_token(tok2, &aux2);
+            /* get the declare attribute location */
+            *loc = aux1.lloc;
+            plpgsql_yylval = aux1.lval;
+        } else if (strcasecmp(aux3.lval.str, "handler") == 0) {
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_DECLARE;
+            token = T_DECLARE_HANDLER;
             push_back_token(tok3, &aux3);
             push_back_token(tok2, &aux2);
             /* get the declare attribute location */
@@ -1246,9 +1141,9 @@ bool plpgsql_is_token_keyword(int token)
 {
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
-    if ((token >= MIN(reserved_keywords[0].value, unreserved_keywords[0].value)) &&
-        (token <= MAX(reserved_keywords[num_reserved_keywords - 1].value,
-        unreserved_keywords[num_unreserved_keywords - 1].value))) {
+    if ((token >= MIN(ReservedPLKeywordTokens[0], UnreservedPLKeywordTokens[0])) 
+        && (token <= MAX(ReservedPLKeywordTokens[lengthof(ReservedPLKeywordTokens) - 1],
+                         UnreservedPLKeywordTokens[lengthof(UnreservedPLKeywordTokens) - 1]))) {
         return true;
     } else {
         return false;

@@ -318,5 +318,6 @@ NON_EXEC_STATIC void UndoLauncherMain()
 shutdown:
     ereport(LOG, (errmsg("undo launcher shutting down")));
     t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_launcher_pid = 0;
+    DisownLatch(&t_thrd.undolauncher_cxt.UndoWorkerShmem->latch);
     proc_exit(0);
 }

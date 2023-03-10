@@ -402,18 +402,20 @@ Datum UHeapFastGetAttr(UHeapTuple tup, int attnum, TupleDesc tupleDesc, bool *is
      * See comments in att_align_pointer()
      */
     char *tp = (char *)(tup)->disk_tuple + (tup)->disk_tuple->t_hoff;
-    char *dp = ((tupleDesc)->attrs[0].attlen >= 0) ?
-        tp :
-        (char *)att_align_pointer(tp, (tupleDesc)->attrs[(attnum)-1].attalign, -1, tp);
+    char *dp = ((tupleDesc)->attrs[0].attlen >= 0)
+                   ? tp
+                   : (char *)att_align_pointer(tp, (tupleDesc)->attrs[(attnum)-1].attalign, -1, tp);
 
-    return ((attnum) > 0 ? ((*(isnull) = false), UHeapDiskTupNoNulls(tup->disk_tuple) ?
-        ( TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff >= 0 ?
-        (fetchatt( TupleDescAttr((tupleDesc), (attnum)-1), (dp + TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff))
-            ) :
-        (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc)))) :
-        (att_isnull((attnum)-1, (tup)->disk_tuple->data) ? ((*(isnull) = true), (Datum)NULL) :
-                                                           (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc))))) :
-                           ((Datum)NULL));
+    return ((attnum) > 0 ? ((*(isnull) = false),
+                            UHeapDiskTupNoNulls(tup->disk_tuple)
+                                ? (TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff >= 0
+                                       ? (fetchatt(TupleDescAttr((tupleDesc), (attnum)-1),
+                                                   (dp + TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff)))
+                                       : (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc))))
+                                : (att_isnull((attnum)-1, (tup)->disk_tuple->data)
+                                       ? ((*(isnull) = true), (Datum)NULL)
+                                       : (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc)))))
+                         : ((Datum)NULL));
 }
 
 enum UHeapDMLType {

@@ -336,7 +336,7 @@ lreplace:
             HeapTuple tmp_tup = (HeapTuple)tup;
             MemoryContext oldContext = MemoryContextSwitchTo(m_local.m_tmpContext);
             hash_del = get_user_tuple_hash((HeapTuple)oldtup, RelationGetDescr(ledger_dest_rel));
-            tup = set_user_tuple_hash(tmp_tup, ledger_dest_rel);
+            tup = set_user_tuple_hash(tmp_tup, ledger_dest_rel, NULL);
             (void)MemoryContextSwitchTo(oldContext);
             tableam_tops_free_tuple(tmp_tup);
         }
@@ -366,16 +366,18 @@ lreplace:
             result_rel_info = result_rel_info + m_c_local.m_estate->result_rel_index;
             if (relkind == RELKIND_RELATION || RELKIND_IS_SEQUENCE(relkind)) {
                 if (result_rel_info->ri_junkFilter != NULL) {
-                    tupleid = (ItemPointer)DatumGetPointer(ExecGetJunkAttribute(m_local.m_reslot, result_rel_info->ri_junkFilter->jf_junkAttNo, &isNull));
+                    tupleid = (ItemPointer)DatumGetPointer(
+                        ExecGetJunkAttribute(m_local.m_reslot, result_rel_info->ri_junkFilter->jf_junkAttNo, &isNull));
                 } else {
-                    tupleid = (ItemPointer)&(((HeapTuple)tup)->t_self);
+                    tupleid = (ItemPointer) & (((HeapTuple)tup)->t_self);
                 }
             }
             temp_isnull = m_local.m_reslot->tts_isnull;
             m_local.m_reslot->tts_isnull = m_local.m_isnull;
             temp_values = m_local.m_reslot->tts_values;
             m_local.m_reslot->tts_values = m_local.m_values;
-            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, m_c_local.m_estate, m_local.m_reslot, tup, CMD_UPDATE, tupleid, InvalidOid, bucketid);
+            bool update_fix_result = ExecComputeStoredUpdateExpr(result_rel_info, m_c_local.m_estate, m_local.m_reslot,
+                                                                 tup, CMD_UPDATE, tupleid, InvalidOid, bucketid);
             if (!update_fix_result) {
                 if (tup != m_local.m_reslot->tts_tuple) {
                     tableam_tops_free_tuple(tup);

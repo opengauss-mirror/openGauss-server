@@ -20,12 +20,7 @@
 #define TYPE_FUNC_NAME_KEYWORD 2
 #define RESERVED_KEYWORD 3
 
-typedef struct ScanKeyword {
-    const char* name; /* in lower case */
-    int16 value;      /* grammar's token code */
-    int16 category;   /* see codes above */
-} ScanKeyword;
-
+#include "parser/kwlookup.h"
 typedef struct PlpgsqlKeywordValue {
     int16 procedure;
     int16 function;
@@ -37,13 +32,10 @@ typedef struct PlpgsqlKeywordValue {
     int16 merge;
 } PlpgsqlKeywordValue;
 
-extern PGDLLIMPORT const ScanKeyword ScanKeywords[];
-extern PGDLLIMPORT const int NumScanKeywords;
+extern PGDLLIMPORT const ScanKeywordList ScanKeywords;
+extern PGDLLIMPORT const uint8 ScanKeywordCategories[];
 
 /* Globals from keywords.c */
-extern const ScanKeyword SQLScanKeywords[];
-extern const int NumSQLScanKeywords;
-
-extern const ScanKeyword* ScanKeywordLookup(const char* text, const ScanKeyword* keywords, int num_keywords);
+extern const ScanKeywordList SQLScanKeywords[];
 
 #endif /* KEYWORDS_H */

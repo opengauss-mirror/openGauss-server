@@ -3516,9 +3516,11 @@ static unsigned int get_rewrite_rule_bits(RewriteHint* hint)
         }
         else if (pg_strcasecmp(param_name, "disable_pullup_expr_sublink") == 0) {
             bits = bits | SUBLINK_PULLUP_DISABLE_EXPR;
+        } else if (pg_strcasecmp(param_name, "enable_sublink_pullup_enhanced") == 0) {
+            bits = bits | SUBLINK_PULLUP_ENHANCED;
         } else {
             elog(WARNING, "invalid rewrite rule. (Supported rules: lazyagg, magicset, partialpush, uniquecheck, "
-                          "disablerep, intargetlist,disable_pullup_expr_sublink)");
+                          "disablerep, intargetlist,disable_pullup_expr_sublink, enable_sublink_pullup_enhanced)");
         }
     }
 
@@ -3819,7 +3821,7 @@ bool permit_predpush(PlannerInfo *root)
     return !predpushHint->negative;
 }
 
-const unsigned int G_NUM_SET_HINT_WHITE_LIST = 38;
+const unsigned int G_NUM_SET_HINT_WHITE_LIST = 39;
 const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     /* keep in the ascending alphabetical order of frequency */
     (char*)"best_agg_plan",
@@ -3838,6 +3840,7 @@ const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     (char*)"enable_index_nestloop",
     (char*)"enable_indexonlyscan",
     (char*)"enable_indexscan",
+    (char*)"enable_inner_unique_opt",
     (char*)"enable_material",
     (char*)"enable_mergejoin",
     (char*)"enable_nestloop",

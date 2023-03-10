@@ -1,0 +1,141 @@
+CREATE DATABASE db_audit_client;
+\c db_audit_client
+-- set guc parameter
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state_select=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=134217727" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "no_audit_client" > /dev/null 2>&1
+-- clear audit log
+SELECT pg_delete_audit(current_date, current_date + interval '24 hours');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+-- set no audit client
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "no_audit_client ='test_gsql@[local], gsql@[local]_test,test_gsql@[local]_test'" > /dev/null 2>&1
+\! sleep 1
+-- crerate table
+DROP TABLE IF EXISTS t_audit_client;
+NOTICE:  table "t_audit_client" does not exist, skipping
+CREATE TABLE t_audit_client (id INTEGER, col1 VARCHAR(20));
+-- query audit log, count > 0
+SELECT (SELECT count(detail_info) FROM pg_query_audit(current_date,current_date + interval '24 hours') WHERE client_conninfo = 'gsql@[local]') > 0 AS count_gsql;
+ count_gsql 
+------------
+ t
+(1 row)
+
+-- set no audit client
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "no_audit_client =',, gsql@[local] , ,'" > /dev/null 2>&1
+\! sleep 1 
+-- clear audit log
+SELECT pg_delete_audit(current_date, current_date + interval '24 hours');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+-- generate audit logs
+DO $$DECLARE i record; 
+BEGIN 
+    FOR i IN 1..10
+    LOOP 
+    execute 'INSERT INTO t_audit_client VALUES (' || i || ', ''audit'');';
+    execute 'SELECT * FROM t_audit_client;';
+    END LOOP;
+END$$;
+-- query audit log, count = 0
+SELECT (SELECT count(detail_info) FROM pg_query_audit(current_date,current_date + interval '24 hours') WHERE client_conninfo = 'gsql@[local]') > 0 AS count_gsql;
+ count_gsql 
+------------
+ f
+(1 row)
+
+-- set no_audit_client
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "no_audit_client ='audit gsql@[local]'" > /dev/null 2>&1
+\! sleep 1
+-- change current application name
+SET application_name TO 'audit gsql';
+SELECT pg_delete_audit(current_date, current_date + interval '24 hours');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+-- generate audit logs
+DO $$DECLARE i record; 
+BEGIN 
+    FOR i IN 1..10
+    LOOP 
+    execute 'INSERT INTO t_audit_client VALUES (' || i || ', ''audit'');';
+    execute 'SELECT * FROM t_audit_client;';
+    END LOOP;
+END$$;
+-- query audit log, count = 0
+SELECT (SELECT count(detail_info) FROM pg_query_audit(current_date,current_date + interval '24 hours') WHERE client_conninfo = 'audit gsql@[local]') > 0 AS count_gsql;
+ count_gsql 
+------------
+ f
+(1 row)
+
+-- change current application name
+SET application_name TO 'gsql';
+SELECT pg_delete_audit(current_date, current_date + interval '24 hours');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+-- generate audit logs
+DO $$DECLARE i record; 
+BEGIN 
+    FOR i IN 1..10
+    LOOP 
+    execute 'INSERT INTO t_audit_client VALUES (' || i || ', ''audit'');';
+    execute 'SELECT * FROM t_audit_client;';
+    END LOOP;
+END$$;
+-- query audit log, count > 0
+SELECT (SELECT count(detail_info) FROM pg_query_audit(current_date,current_date + interval '24 hours') WHERE client_conninfo = 'gsql@[local]') > 0 AS count_gsql;
+ count_gsql 
+------------
+ t
+(1 row)
+
+-- change current application name
+SET application_name TO audit;
+SELECT pg_delete_audit(current_date, current_date + interval '24 hours');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+-- generate audit logs
+DO $$DECLARE i record; 
+BEGIN 
+    FOR i IN 1..10
+    LOOP 
+    execute 'INSERT INTO t_audit_client VALUES (' || i || ', ''audit'');';
+    execute 'SELECT * FROM t_audit_client;';
+    END LOOP;
+END$$;
+-- query audit log, count > 0
+SELECT (SELECT count(detail_info) FROM pg_query_audit(current_date,current_date + interval '24 hours') WHERE client_conninfo = 'audit@[local]') > 0 AS count_gsql;
+ count_gsql 
+------------
+ t
+(1 row)
+
+--reset guc parameter
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state_select" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=511" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "no_audit_client" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "no_audit_client" > /dev/null 2>&1
+-- clean env
+DROP TABLE IF EXISTS t_audit_client_client;
+NOTICE:  table "t_audit_client_client" does not exist, skipping
+\c regression
+CLEAN CONNECTION TO ALL FORCE FOR DATABASE db_audit_client;
+DROP DATABASE db_audit_client;

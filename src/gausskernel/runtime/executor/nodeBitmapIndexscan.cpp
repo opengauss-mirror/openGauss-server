@@ -34,21 +34,6 @@
 #include "nodes/makefuncs.h"
 
 static void ExecInitNextPartitionForBitmapIndexScan(BitmapIndexScanState* node);
-/* If bitmapscan uses global partition index, set tbm to global */
-static inline void GPIUpdateTbmType(BitmapIndexScanState* node, TIDBitmap* tbm)
-{
-    if (RelationIsGlobalIndex(node->biss_RelationDesc)) {
-        tbm_set_global(tbm, true);
-    }
-}
-
-/* if bitmapscan uses crossbucket index, set tbm->crossbucket to true */
-static inline void CBIUpdateTbmType(BitmapIndexScanState* node, TIDBitmap* tbm)
-{
-    if (RelationIsCrossBucketIndex(node->biss_RelationDesc)) {
-        tbm_set_crossbucket(tbm, true);
-    }
-}
 
 /* ----------------------------------------------------------------
  *		MultiExecBitmapIndexScan(node)
@@ -98,13 +83,9 @@ Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
         node->biss_result = NULL; /* reset for next time */
     } else {
         /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
-        tbm = TbmCreate(u_sess->attr.attr_memory.work_mem * 1024L, isUstore);
-
-        /* If bitmapscan uses global partition index, set tbm to global. */
-        GPIUpdateTbmType(node, tbm);
-
-        /* If bitmapscan uses crossbucket index, set tbm->crossbucket to true. */
-        CBIUpdateTbmType(node, tbm);
+        long maxbytes = u_sess->attr.attr_memory.work_mem * 1024L;
+        tbm = tbm_create(maxbytes, RelationIsGlobalIndex(node->biss_RelationDesc),
+                         RelationIsCrossBucketIndex(node->biss_RelationDesc), isUstore);
     }
 
     /* Cross-bucket index scan should not switch the index bucket. */
@@ -556,36 +537,50 @@ void ExecInitPartitionForBitmapIndexScan(BitmapIndexScanState* indexstate, EStat
             indexstate->ss.part_id = 0;
         }
 
-        ListCell* cell = NULL;
+        ListCell* cell1 = NULL;
+        ListCell* cell2 = NULL;
         List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
+        List* partitionnos = resultPlan->ls_selectedPartitionnos;
+        Assert(list_length(part_seqs) == list_length(partitionnos));
+        StringInfo partNameInfo = makeStringInfo();
+        StringInfo partOidInfo = makeStringInfo();
 
-        foreach (cell, part_seqs) {
+        forboth (cell1, part_seqs, cell2, partitionnos) {
             Oid tablepartitionid = InvalidOid;
-            int partSeq = lfirst_int(cell);
+            int partSeq = lfirst_int(cell1);
+            int partitionno = lfirst_int(cell2);
             Oid indexpartitionid = InvalidOid;
             Partition tablePartition = NULL;
             List* partitionIndexOidList = NIL;
 
             /* get index partition list for the special index */
-            tablepartitionid = getPartitionOidFromSequence(rel, partSeq, plan->scan.pruningInfo->partMap);
-            tablePartition = partitionOpen(rel, tablepartitionid, lock);
+            tablepartitionid = getPartitionOidFromSequence(rel, partSeq, partitionno);
+            tablePartition = PartitionOpenWithPartitionno(rel, tablepartitionid, partitionno, lock);
+
+            appendStringInfo(partNameInfo, "%s ", tablePartition->pd_part->relname.data);
+            appendStringInfo(partOidInfo, "%u ", tablepartitionid);
 
             if (RelationIsSubPartitioned(rel)) {
-                ListCell *lc = NULL;
+                ListCell *lc1 = NULL;
+                ListCell *lc2 = NULL;
                 SubPartitionPruningResult *subPartPruningResult =
-                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq);
+                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq, partitionno);
                 if (subPartPruningResult == NULL) {
                     continue;
                 }
                 List *subpartList = subPartPruningResult->ls_selectedSubPartitions;
+                List *subpartitionnos = subPartPruningResult->ls_selectedSubPartitionnos;
+                Assert(list_length(subpartList) == list_length(subpartitionnos));
                 List *subIndexList = NULL;
 
-                foreach (lc, subpartList)
+                forboth (lc1, subpartList, lc2, subpartitionnos)
                 {
-                    int subpartSeq = lfirst_int(lc);
+                    int subpartSeq = lfirst_int(lc1);
+                    int subpartitionno = lfirst_int(lc2);
                     Relation tablepartrel = partitionGetRelation(rel, tablePartition);
-                    Oid subpartitionid = getPartitionOidFromSequence(tablepartrel, subpartSeq);
-                    Partition subpart = partitionOpen(tablepartrel, subpartitionid, AccessShareLock);
+                    Oid subpartitionid = getPartitionOidFromSequence(tablepartrel, subpartSeq, subpartitionno);
+                    Partition subpart =
+                        PartitionOpenWithPartitionno(tablepartrel, subpartitionid, subpartitionno, AccessShareLock);
 
                     partitionIndexOidList = PartitionGetPartIndexList(subpart);
 

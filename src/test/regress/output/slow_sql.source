@@ -1,0 +1,183 @@
+--?.*
+--?.*
+--?.*
+--?.*
+server signaled
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\c postgres
+create schema slow_sql;
+SET search_path = slow_sql, public;
+create table slow_sql.test(col1 int, col2 numeric, col3 text);
+create index index1 on slow_sql.test(col1);
+create index index2 on slow_sql.test(col2);
+create index index3 on slow_sql.test(col3);
+insert into slow_sql.test values (generate_series(1,100), generate_series(101,200), generate_series(201,300));
+delete from statement_history;
+set track_stmt_stat_level='L0,L0';
+-- test col1(integer)
+select col1 from slow_sql.test where col1 = 12;
+ col1 
+------
+   12
+(1 row)
+
+select col2 from slow_sql.test where col1 = 123456781234567812345678;
+ col2 
+------
+(0 rows)
+
+select col3 from slow_sql.test where col1 = '12';
+ col3 
+------
+ 212
+(1 row)
+
+select * from slow_sql.test where col1::numeric = 12;
+ col1 | col2 | col3 
+------+------+------
+   12 |  112 | 212
+(1 row)
+
+select * from slow_sql.test where col1::text = '12';
+ col1 | col2 | col3 
+------+------+------
+   12 |  112 | 212
+(1 row)
+
+-- test col2(numeric)
+select col1 from slow_sql.test where col2 = 123456781234567812345678;
+ col1 
+------
+(0 rows)
+
+select col2 from slow_sql.test where col2 = 12;
+ col2 
+------
+(0 rows)
+
+select col3 from slow_sql.test where col2 = '123456781234567812345678';
+ col3 
+------
+(0 rows)
+
+select * from slow_sql.test where col2::integer = 123456781234567812345678;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+select * from slow_sql.test where col2::text = '123456781234567812345678';
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+-- test col3(text)
+select col1 from slow_sql.test where col3 = '12';
+ col1 
+------
+(0 rows)
+
+select col2 from slow_sql.test where col3 = 12;
+ col2 
+------
+(0 rows)
+
+select col3 from slow_sql.test where col3 = 123456781234567812345678;
+ col3 
+------
+(0 rows)
+
+select * from slow_sql.test where col3::integer = 12;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+select * from slow_sql.test where col3::numeric = 12;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+-- test limit
+select col1 from slow_sql.test where col1 = 12 limit 4999;
+ col1 
+------
+   12
+(1 row)
+
+select col2 from slow_sql.test where col1 = 12 limit 5000;
+ col2 
+------
+  112
+(1 row)
+
+select col3 from slow_sql.test where col1 = 12 limit 5001;
+ col3 
+------
+ 212
+(1 row)
+
+-- test all
+select col1,col2 from slow_sql.test where col1 = 12 limit 4999;
+ col1 | col2 
+------+------
+   12 |  112
+(1 row)
+
+select col1,col3 from slow_sql.test where col1 = 123456781234567812345678 limit 4999;
+ col1 | col3 
+------+------
+(0 rows)
+
+select col2,col3 from slow_sql.test where col1 = 12 limit 5000;
+ col2 | col3 
+------+------
+  112 | 212
+(1 row)
+
+select col1,col2,col3 from slow_sql.test where col1 = 123456781234567812345678 limit 5000;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+set track_stmt_stat_level='OFF,L0';
+--wait insert history
+insert into slow_sql.test values (generate_series(1,10000), generate_series(10001,20000), generate_series(20001,30000));
+select schema_name, query, advise from statement_history order by start_time;
+   schema_name    |                              query                               |                        advise                        
+------------------+------------------------------------------------------------------+------------------------------------------------------
+ slow_sql, public | set track_stmt_stat_level='L0,L0';                               | 
+ slow_sql, public | select col1 from slow_sql.test where col1 = ?;                   | 
+ slow_sql, public | select col2 from slow_sql.test where col1 = ?;                   | Cast Function Cause Index Miss. 
+ slow_sql, public | select col3 from slow_sql.test where col1 = ?;                   | 
+ slow_sql, public | select * from slow_sql.test where col1::numeric = ?;             | Cast Function Cause Index Miss. 
+ slow_sql, public | select * from slow_sql.test where col1::text = ?;                | Cast Function Cause Index Miss. 
+ slow_sql, public | select col1 from slow_sql.test where col2 = ?;                   | 
+ slow_sql, public | select col2 from slow_sql.test where col2 = ?;                   | 
+ slow_sql, public | select col3 from slow_sql.test where col2 = ?;                   | 
+ slow_sql, public | select * from slow_sql.test where col2::integer = ?;             | Cast Function Cause Index Miss. 
+ slow_sql, public | select * from slow_sql.test where col2::text = ?;                | Cast Function Cause Index Miss. 
+ slow_sql, public | select col1 from slow_sql.test where col3 = ?;                   | 
+ slow_sql, public | select col2 from slow_sql.test where col3 = ?;                   | Cast Function Cause Index Miss. 
+ slow_sql, public | select col3 from slow_sql.test where col3 = ?;                   | Cast Function Cause Index Miss. 
+ slow_sql, public | select * from slow_sql.test where col3::integer = ?;             | Cast Function Cause Index Miss. 
+ slow_sql, public | select * from slow_sql.test where col3::numeric = ?;             | Cast Function Cause Index Miss. 
+ slow_sql, public | select col1 from slow_sql.test where col1 = ? limit ?;           | 
+ slow_sql, public | select col2 from slow_sql.test where col1 = ? limit ?;           | Limit too much rows.
+ slow_sql, public | select col3 from slow_sql.test where col1 = ? limit ?;           | Limit too much rows.
+ slow_sql, public | select col1,col2 from slow_sql.test where col1 = ? limit ?;      | 
+ slow_sql, public | select col1,col3 from slow_sql.test where col1 = ? limit ?;      | Cast Function Cause Index Miss. 
+ slow_sql, public | select col2,col3 from slow_sql.test where col1 = ? limit ?;      | Limit too much rows.
+ slow_sql, public | select col1,col2,col3 from slow_sql.test where col1 = ? limit ?; | Cast Function Cause Index Miss. Limit too much rows.
+(23 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+server signaled
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+

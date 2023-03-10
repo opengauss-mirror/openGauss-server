@@ -46,6 +46,7 @@ typedef enum NodeTag {
      */
     T_Plan = 100,
     T_BaseResult,
+    T_ProjectSet,
     T_ModifyTable,
     T_Append,
     T_PartIterator,
@@ -143,6 +144,7 @@ typedef enum NodeTag {
      */
     T_PlanState = 200,
     T_ResultState,
+    T_ProjectSetState,
     T_VecToRowState,
     T_MergeActionState,
     T_ModifyTableState,
@@ -299,6 +301,7 @@ typedef enum NodeTag {
     T_AddSubPartitionState,
     T_RangePartitionStartEndDefState,
     T_RownumState,
+    T_UserSetElemState,
     T_ListPartitionDefState,
     T_HashPartitionDefState,
 
@@ -324,12 +327,15 @@ typedef enum NodeTag {
     T_AppendPath,
     T_MergeAppendPath,
     T_ResultPath,
+    T_ProjectionPath,
+    T_ProjectSetPath,
     T_MaterialPath,
     T_UniquePath,
     T_PartIteratorPath,
     T_EquivalenceClass,
     T_EquivalenceMember,
     T_PathKey,
+    T_PathTarget,
     T_RestrictInfo,
     T_PlaceHolderVar,
     T_SpecialJoinInfo,
@@ -360,6 +366,10 @@ typedef enum NodeTag {
 
     T_MemoryTracking,
 
+    /*
+     * TAGS FOR AMROUTINE NODES (amapi.h)
+     */
+    T_IndexAmRoutine = 649,
     /*
      * TAGS FOR VALUE NODES (value.h)
      */
@@ -424,6 +434,11 @@ typedef enum NodeTag {
     T_IndexStmt,
     T_CreateFunctionStmt,
     T_AlterFunctionStmt,
+    T_CreateEventStmt,
+    T_AlterEventStmt,
+    T_DropEventStmt,
+    T_ShowEventStmt,
+    T_CompileStmt,
     T_DoStmt,
     T_RenameStmt,
     T_RuleStmt,
@@ -499,6 +514,8 @@ typedef enum NodeTag {
     T_CreateExtensionStmt,
     T_AlterExtensionStmt,
     T_AlterExtensionContentsStmt,
+    T_CreateEventTrigStmt,
+    T_AlterEventTrigStmt,
     T_CreateDataSourceStmt,
     T_AlterDataSourceStmt,
     T_ReplicaIdentityStmt,
@@ -553,6 +570,8 @@ typedef enum NodeTag {
     T_WithCheckOption,
     T_TableSampleClause,
     T_TimeCapsuleClause,
+    T_IndexHintDefinition,
+    T_IndexHintRelationData,
     T_SortGroupClause,
     T_GroupingSet,
     T_WindowClause,
@@ -616,6 +635,7 @@ typedef enum NodeTag {
      * pass multiple object types through the same pointer).
      */
     T_TriggerData = 980, /* in commands/trigger.h */
+    T_EventTriggerData,         /* in commands/event_trigger.h */
     T_ReturnSetInfo,     /* in nodes/execnodes.h */
     T_WindowObjectData,  /* private in nodeWindowAgg.c */
     T_TIDBitmap,         /* in nodes/tidbitmap.h */
@@ -805,7 +825,8 @@ typedef enum NodeTag {
     T_RelCI,
     T_CentroidPoint,
     T_UserSetElem,
-    T_UserVar
+    T_UserVar,
+	T_CharsetCollateOptions
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */

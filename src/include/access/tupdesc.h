@@ -23,6 +23,7 @@
 #include "access/attnum.h"
 #include "catalog/pg_attribute.h"
 #include "nodes/pg_list.h"
+#include "mb/pg_wchar.h"
 
 /*
  * Total number of different Table Access Method types.
@@ -169,7 +170,8 @@ typedef struct tupleDesc {
 
 extern TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, const TableAmRoutine* tam_ops = TableAmHeap);
 
-extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, const TableAmRoutine* tam_ops = TableAmHeap);
+extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute *attrs,
+                                 const TableAmRoutine *tam_ops = TableAmHeap);
 
 extern TupleDesc CreateTupleDescCopy(TupleDesc tupdesc);
 
@@ -202,7 +204,8 @@ extern void TupleDescInitEntryCollation(TupleDesc desc, AttrNumber attribute_num
 
 extern void VerifyAttrCompressMode(int8 mode, int attlen, const char* attname);
 
-extern TupleDesc BuildDescForRelation(List* schema, Node* oriented_from = NULL, char relkind = '\0');
+extern TupleDesc BuildDescForRelation(List* schema, Node* oriented_from = NULL, char relkind = '\0',
+    Oid rel_coll_oid = InvalidOid);
 
 extern TupleDesc BuildDescFromLists(List* names, List* types, List* typmods, List* collations);
 

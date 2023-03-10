@@ -49,6 +49,7 @@
 #include "access/transam.h"
 #include "access/xact.h"
 #include "access/ustore/knl_uheap.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_statistic_ext.h"
 #include "catalog/namespace.h"
@@ -512,6 +513,7 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     }
     print_duration(queryDesc);
     instr_stmt_report_query_plan(queryDesc);
+    instr_stmt_report_cause_type(queryDesc->plannedstmt->cause_type);
 
     /* sql active feature, opeartor history statistics */
     if (can_operator_history_statistics) {
@@ -1204,6 +1206,19 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     bool check = false;
 
     gstrace_entry(GS_TRC_ID_InitPlan);
+
+    /* We release the partition object lock in InitPlan, here the snapshow is already obtained, so instantaneous
+     * inconsistency will never happend. See pg_partition_fn.h for more detail. Distribute mode doesn't support
+     * partition DDL/DML parallel work, no need this action. */
+#ifndef ENABLE_MULTIPLE_NODES
+    ListCell *cell;
+    foreach(cell, u_sess->storage_cxt.partition_dml_oids) {
+        UnlockPartitionObject(lfirst_oid(cell), PARTITION_OBJECT_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK);
+    }
+    list_free_ext(u_sess->storage_cxt.partition_dml_oids);
+    u_sess->storage_cxt.partition_dml_oids = NIL;
+#endif
+
     /*
      * Do permissions checks
      */
@@ -2152,7 +2167,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
 #endif
 
     /* Mark sync-up step is required */
-    if (NeedSyncUpProducerStep(planstate->plan)) {
+    if (unlikely(NeedSyncUpProducerStep(planstate->plan))) {
         need_sync_step = true;
         /*
          * (G)Distributed With-Recursive Support

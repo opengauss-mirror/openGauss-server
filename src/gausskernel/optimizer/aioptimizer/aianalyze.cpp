@@ -534,6 +534,7 @@ bool analyze_compute_bayesnet(int *slot_idx, Relation onerel, AnalyzeMode analyz
     spec->stats->staop[*slot_idx] = 0;
     (*slot_idx)++;
     pfree_ext(model_name.data);
+    tss.delete_tuple();
     return true;
 }
 

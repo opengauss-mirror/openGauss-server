@@ -13,13 +13,13 @@ function test_1() {
     # Create tables on both sides of the replication
     ddl="CREATE TABLE public.test_numerical (
 		a INTEGER PRIMARY KEY,
-		b NUMERIC,
+		b NUMERIC(10,2),
 		c FLOAT,
 		d BIGINT
 		);
 	CREATE TABLE public.test_arrays (
 		a INTEGER[] PRIMARY KEY,
-		b NUMERIC[],
+		b NUMERIC(10,2)[],
 		c TEXT[]
 		)"
 
@@ -48,9 +48,9 @@ function test_1() {
 
     wait_for_catchup $case_db $pub_node1_port "tsub"
 
-    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c, d FROM test_numerical ORDER BY a")" = "1|1.2|1.3|10
-2|2.2|2.3|20
-3|3.2|3.3|30" ]; then
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c, d FROM test_numerical ORDER BY a")" = "1|1.20|1.3|10
+2|2.20|2.3|20
+3|3.20|3.3|30" ]; then
 		echo "check replicated data on subscriber success"
 	else
 		echo "$failed_keyword when check replicated data on subscriber"
@@ -63,17 +63,17 @@ function test_1() {
 
     wait_for_catchup $case_db $pub_node1_port "tsub"
 
-    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c FROM test_arrays ORDER BY a")" = "{1,2,3}|{42,1.2,1.3}|
-{3,1,2}|{42,1.1,1.2}|" ]; then
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c FROM test_arrays ORDER BY a")" = "{1,2,3}|{42.00,1.20,1.30}|
+{3,1,2}|{42.00,1.10,1.20}|" ]; then
 		echo "check updated replicated data on subscriber success"
 	else
 		echo "$failed_keyword when check updated replicated data on subscriber"
 		exit 1
 	fi
 
-    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c, d FROM test_numerical ORDER BY a")" = "1|42||10
-2|42||20
-3|42||30" ]; then
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c, d FROM test_numerical ORDER BY a")" = "1|42.00||10
+2|42.00||20
+3|42.00||30" ]; then
 		echo "check updated replicated data on subscriber success"
 	else
 		echo "$failed_keyword when check updated replicated data on subscriber"
@@ -87,10 +87,10 @@ function test_1() {
 
     wait_for_catchup $case_db $pub_node1_port "tsub"
 
-    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c, d FROM test_numerical ORDER BY a")" = "1|42||10
-2|42||20
-3|42||30
-4|4.2|4.3|40" ]; then
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c, d FROM test_numerical ORDER BY a")" = "1|42.00||10
+2|42.00||20
+3|42.00||30
+4|4.20|4.3|40" ]; then
 		echo "check replicated data on subscriber success"
 	else
 		echo "$failed_keyword when check replicated data on subscriber"
@@ -104,9 +104,9 @@ function test_1() {
     
     wait_for_catchup $case_db $pub_node1_port "tsub"
 
-    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c FROM test_arrays ORDER BY a")" = "{1,2,3}|{42,1.2,1.3}|
-{2,3,1}|{1.2,1.3,1.1}|{two,three,one}
-{3,1,2}|{42,1.1,1.2}|" ]; then
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, b, c FROM test_arrays ORDER BY a")" = "{1,2,3}|{42.00,1.20,1.30}|
+{2,3,1}|{1.20,1.30,1.10}|{two,three,one}
+{3,1,2}|{42.00,1.10,1.20}|" ]; then
 		echo "check replicated data on subscriber success"
 	else
 		echo "$failed_keyword when check replicated data on subscriber"

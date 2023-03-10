@@ -203,39 +203,6 @@ static Oid GetUserOidFromMapping(const char* username, bool missing_ok)
 }
 
 /*
- * Rename foreign-data wrapper
- */
-void RenameForeignDataWrapper(const char* oldname, const char* newname)
-{
-    HeapTuple tup;
-    Relation rel;
-
-    rel = heap_open(ForeignDataWrapperRelationId, RowExclusiveLock);
-
-    tup = SearchSysCacheCopy1(FOREIGNDATAWRAPPERNAME, CStringGetDatum(oldname));
-    if (!HeapTupleIsValid(tup))
-        ereport(
-            ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("foreign-data wrapper \"%s\" does not exist", oldname)));
-
-    /* make sure the new name doesn't exist */
-    if (SearchSysCacheExists1(FOREIGNDATAWRAPPERNAME, CStringGetDatum(newname)))
-        ereport(
-            ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("foreign-data wrapper \"%s\" already exists", newname)));
-
-    /* must be owner of FDW */
-    if (!pg_foreign_data_wrapper_ownercheck(HeapTupleGetOid(tup), GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_FDW, oldname);
-
-    /* rename */
-    (void)namestrcpy(&(((Form_pg_foreign_data_wrapper)GETSTRUCT(tup))->fdwname), newname);
-    simple_heap_update(rel, &tup->t_self, tup);
-    CatalogUpdateIndexes(rel, tup);
-
-    heap_close(rel, NoLock);
-    heap_freetuple(tup);
-}
-
-/*
  * Must be owner or have alter privilege to alter server
  */
 static void AlterServerPermissionCheck(Oid srvId, const char* servername)
@@ -244,36 +211,6 @@ static void AlterServerPermissionCheck(Oid srvId, const char* servername)
     if (aclresult != ACLCHECK_OK && !pg_foreign_server_ownercheck(srvId, GetUserId())) {
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_FOREIGN_SERVER, servername);
     }
-}
-
-/*
- * Rename foreign server
- */
-void RenameForeignServer(const char* oldname, const char* newname)
-{
-    HeapTuple tup;
-    Relation rel;
-
-    rel = heap_open(ForeignServerRelationId, RowExclusiveLock);
-
-    tup = SearchSysCacheCopy1(FOREIGNSERVERNAME, CStringGetDatum(oldname));
-    if (!HeapTupleIsValid(tup))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("server \"%s\" does not exist", oldname)));
-
-    /* make sure the new name doesn't exist */
-    if (SearchSysCacheExists1(FOREIGNSERVERNAME, CStringGetDatum(newname)))
-        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("server \"%s\" already exists", newname)));
-
-    /* Permission check. */
-    AlterServerPermissionCheck(HeapTupleGetOid(tup), oldname);
-
-    /* rename */
-    (void)namestrcpy(&(((Form_pg_foreign_server)GETSTRUCT(tup))->srvname), newname);
-    simple_heap_update(rel, &tup->t_self, tup);
-    CatalogUpdateIndexes(rel, tup);
-
-    heap_close(rel, NoLock);
-    heap_freetuple(tup);
 }
 
 /*
@@ -319,10 +256,12 @@ static void AlterForeignDataWrapperOwner_internal(Relation rel, HeapTuple tup, O
  *
  * Note restrictions in the "_internal" function, above.
  */
-void AlterForeignDataWrapperOwner(const char* name, Oid newOwnerId)
+ObjectAddress AlterForeignDataWrapperOwner(const char* name, Oid newOwnerId)
 {
+    Oid       fdwId;    
     HeapTuple tup;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(ForeignDataWrapperRelationId, RowExclusiveLock);
 
@@ -330,12 +269,14 @@ void AlterForeignDataWrapperOwner(const char* name, Oid newOwnerId)
 
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("foreign-data wrapper \"%s\" does not exist", name)));
-
+    fdwId = HeapTupleGetOid(tup);
     AlterForeignDataWrapperOwner_internal(rel, tup, newOwnerId);
 
+    ObjectAddressSet(address, ForeignDataWrapperRelationId, fdwId);
     heap_freetuple(tup);
 
     heap_close(rel, RowExclusiveLock);
+    return address;
 }
 
 /*
@@ -409,10 +350,12 @@ static void AlterForeignServerOwner_internal(Relation rel, HeapTuple tup, Oid ne
 /*
  * Change foreign server owner -- by name
  */
-void AlterForeignServerOwner(const char* name, Oid newOwnerId)
+ObjectAddress AlterForeignServerOwner(const char* name, Oid newOwnerId)
 {
+    Oid       servOid;    
     HeapTuple tup;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(ForeignServerRelationId, RowExclusiveLock);
 
@@ -420,12 +363,14 @@ void AlterForeignServerOwner(const char* name, Oid newOwnerId)
 
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("server \"%s\" does not exist", name)));
-
+    servOid = HeapTupleGetOid(tup);
     AlterForeignServerOwner_internal(rel, tup, newOwnerId);
 
+    ObjectAddressSet(address, ForeignServerRelationId, servOid);
     heap_freetuple(tup);
 
     heap_close(rel, RowExclusiveLock);
+    return address;
 }
 
 /*
@@ -525,7 +470,7 @@ static void parse_func_options(
 /*
  * Create a foreign-data wrapper
  */
-void CreateForeignDataWrapper(CreateFdwStmt* stmt)
+ObjectAddress CreateForeignDataWrapper(CreateFdwStmt* stmt)
 {
     Relation rel;
     Datum values[Natts_pg_foreign_data_wrapper];
@@ -623,12 +568,13 @@ void CreateForeignDataWrapper(CreateFdwStmt* stmt)
     InvokeObjectAccessHook(OAT_POST_CREATE, ForeignDataWrapperRelationId, fdwId, 0, NULL);
 
     heap_close(rel, RowExclusiveLock);
+    return myself;
 }
 
 /*
  * Alter foreign-data wrapper
  */
-void AlterForeignDataWrapper(AlterFdwStmt* stmt)
+ObjectAddress AlterForeignDataWrapper(AlterFdwStmt* stmt)
 {
     Relation rel;
     HeapTuple tp;
@@ -644,6 +590,7 @@ void AlterForeignDataWrapper(AlterFdwStmt* stmt)
     Oid fdwhandler;
     Oid fdwvalidator;
     errno_t ret = EOK;
+    ObjectAddress myself;
 
     /* Must be super user */
     if (!superuser())
@@ -730,9 +677,10 @@ void AlterForeignDataWrapper(AlterFdwStmt* stmt)
 
     heap_freetuple(tp);
 
+    ObjectAddressSet(myself, ForeignDataWrapperRelationId, fdwId);    
+
     /* Update function dependencies if we changed them */
     if (handler_given || validator_given) {
-        ObjectAddress myself;
         ObjectAddress referenced;
 
         /*
@@ -742,10 +690,6 @@ void AlterForeignDataWrapper(AlterFdwStmt* stmt)
         (void)deleteDependencyRecordsForClass(
             ForeignDataWrapperRelationId, fdwId, ProcedureRelationId, DEPENDENCY_NORMAL);
 
-        /* And build new ones. */
-        myself.classId = ForeignDataWrapperRelationId;
-        myself.objectId = fdwId;
-        myself.objectSubId = 0;
 
         if (OidIsValid(fdwhandler)) {
             referenced.classId = ProcedureRelationId;
@@ -763,6 +707,7 @@ void AlterForeignDataWrapper(AlterFdwStmt* stmt)
     }
 
     heap_close(rel, RowExclusiveLock);
+    return myself;
 }
 
 /*
@@ -791,7 +736,7 @@ void RemoveForeignDataWrapperById(Oid fdwId)
 /*
  * Create a foreign server
  */
-void CreateForeignServer(CreateForeignServerStmt* stmt)
+ObjectAddress CreateForeignServer(CreateForeignServerStmt* stmt)
 {
     Relation rel;
     Datum srvoptions;
@@ -928,12 +873,13 @@ void CreateForeignServer(CreateForeignServerStmt* stmt)
             relation_close(tmp_rel, ShareUpdateExclusiveLock);
         }
     }
+    return myself;
 }
 
 /*
  * Alter foreign server
  */
-void AlterForeignServer(AlterForeignServerStmt* stmt)
+ObjectAddress AlterForeignServer(AlterForeignServerStmt* stmt)
 {
     Relation rel;
     HeapTuple tp;
@@ -943,6 +889,7 @@ void AlterForeignServer(AlterForeignServerStmt* stmt)
     Oid srvId;
     Form_pg_foreign_server srvForm;
     errno_t ret = EOK;
+    ObjectAddress address;
 
     rel = heap_open(ForeignServerRelationId, RowExclusiveLock);
 
@@ -1039,6 +986,9 @@ void AlterForeignServer(AlterForeignServerStmt* stmt)
     } else if (0 == pg_strcasecmp(typeName, DUMMY_SERVER)) {
         InvalidDummyServerCache(srvId);
     }
+
+    ObjectAddressSet(address, ForeignServerRelationId, srvId);
+    return address;
 }
 
 /*
@@ -1098,7 +1048,7 @@ static void user_mapping_ddl_aclcheck(Oid umuserid, Oid serverid, const char* se
 /*
  * Create user mapping
  */
-void CreateUserMapping(CreateUserMappingStmt* stmt)
+ObjectAddress CreateUserMapping(CreateUserMappingStmt* stmt)
 {
     Relation rel;
     Datum useoptions;
@@ -1185,12 +1135,13 @@ void CreateUserMapping(CreateUserMappingStmt* stmt)
     InvokeObjectAccessHook(OAT_POST_CREATE, UserMappingRelationId, umId, 0, NULL);
 
     heap_close(rel, RowExclusiveLock);
+    return myself;
 }
 
 /*
  * Alter user mapping
  */
-void AlterUserMapping(AlterUserMappingStmt* stmt)
+ObjectAddress AlterUserMapping(AlterUserMappingStmt* stmt)
 {
     Relation rel;
     HeapTuple tp;
@@ -1201,6 +1152,7 @@ void AlterUserMapping(AlterUserMappingStmt* stmt)
     Oid umId;
     ForeignServer* srv = NULL;
     errno_t ret = EOK;
+    ObjectAddress address;
 
     rel = heap_open(UserMappingRelationId, RowExclusiveLock);
 
@@ -1242,7 +1194,6 @@ void AlterUserMapping(AlterUserMappingStmt* stmt)
             datum = PointerGetDatum(NULL);
 
         EncryptGenericOptions(stmt->options, g_sensitiveOptionsArray, g_sensitiveArrayLength, USER_MAPPING_MODE);
-
         /* Prepare the options array */
         datum = transformGenericOptions(UserMappingRelationId, datum, stmt->options, fdw->fdwvalidator);
 
@@ -1260,15 +1211,17 @@ void AlterUserMapping(AlterUserMappingStmt* stmt)
     simple_heap_update(rel, &tp->t_self, tp);
     CatalogUpdateIndexes(rel, tp);
 
+    ObjectAddressSet(address, UserMappingRelationId, umId);
     heap_freetuple(tp);
 
     heap_close(rel, RowExclusiveLock);
+    return address;
 }
 
 /*
  * Drop user mapping
  */
-void RemoveUserMapping(DropUserMappingStmt* stmt)
+Oid RemoveUserMapping(DropUserMappingStmt* stmt)
 {
     ObjectAddress object;
     Oid useId;
@@ -1286,7 +1239,7 @@ void RemoveUserMapping(DropUserMappingStmt* stmt)
         ereport(NOTICE,
             (errcode(ERRCODE_INVALID_ROLE_SPECIFICATION),
                 errmsg("role \"%s\" does not exist, skipping", stmt->username)));
-        return;
+        return InvalidOid;
     }
 
     if (srv == NULL) {
@@ -1295,7 +1248,7 @@ void RemoveUserMapping(DropUserMappingStmt* stmt)
                 ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("server \"%s\" does not exist", stmt->servername)));
         /* IF EXISTS, just note it */
         ereport(NOTICE, (errcode(ERRCODE_LOG), (errmsg("server does not exist, skipping"))));
-        return;
+        return InvalidOid;
     }
 
     umId = GetSysCacheOid2(USERMAPPINGUSERSERVER, ObjectIdGetDatum(useId), ObjectIdGetDatum(srv->serverid));
@@ -1309,7 +1262,7 @@ void RemoveUserMapping(DropUserMappingStmt* stmt)
         /* IF EXISTS specified, just note it */
         ereport(
             NOTICE, (errmsg("user mapping \"%s\" does not exist for the server, skipping", MappingUserName(useId))));
-        return;
+        return InvalidOid;
     }
 
     user_mapping_ddl_aclcheck(useId, srv->serverid, srv->servername);
@@ -1322,6 +1275,7 @@ void RemoveUserMapping(DropUserMappingStmt* stmt)
     object.objectSubId = 0;
 
     performDeletion(&object, DROP_CASCADE, 0);
+    return umId;
 }
 
 /*
@@ -1604,10 +1558,6 @@ void encryptOBSForeignTableOption(List** options)
     securec_check(rc, "", "");
 }
 
-/*
- * Create a foreign table
- * call after DefineRelation().
- */
 void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
 {
     Relation ftrel;
@@ -1770,6 +1720,7 @@ void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
         static const char* const validnsps[] = HEAP_RELOPT_NAMESPACES;
         List* colList = NIL;
         ColumnDef* col = NULL;
+        ObjectAddress tmp;
         CreateStmt* errorStmt = makeNode(CreateStmt);
         char* schemaname =
             ((CreateStmt*)stmt)->relation->schemaname ? pstrdup(((CreateStmt*)stmt)->relation->schemaname) : NULL;
@@ -1822,6 +1773,7 @@ void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
             u_sess->upg_cxt.binary_upgrade_next_etbl_toast_pg_class_oid = 0;
         }
 
+        errorStmt->charset = PG_INVALID_ENCODING;
         errorStmt->relation =
             makeRangeVar(schemaname, pstrdup(error_relation->relname), ((CreateStmt*)stmt)->relation->location);
         col = makeColumnDef("nodeid", "int4");
@@ -1878,8 +1830,8 @@ void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
 
             errorStmt->subcluster->members = list_make1(makeString(group_name));
         }
-        errortableOid = DefineRelation(errorStmt, RELKIND_RELATION, InvalidOid);
-
+        tmp = DefineRelation(errorStmt, RELKIND_RELATION, InvalidOid, NULL);
+        errortableOid = tmp.objectId;
         /*
          * Let AlterTableCreateToastTable decide if this one
          * needs a secondary relation too.

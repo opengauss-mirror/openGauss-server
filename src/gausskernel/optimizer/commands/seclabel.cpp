@@ -42,7 +42,7 @@ typedef struct {
  *
  * Apply a security label to a database object.
  */
-void ExecSecLabelStmt(SecLabelStmt* stmt)
+ObjectAddress ExecSecLabelStmt(SecLabelStmt* stmt)
 {
     LabelProvider* provider = NULL;
     ObjectAddress address;
@@ -130,6 +130,7 @@ void ExecSecLabelStmt(SecLabelStmt* stmt)
      */
     if (relation != NULL)
         relation_close(relation, NoLock);
+    return address;
 }
 
 /*

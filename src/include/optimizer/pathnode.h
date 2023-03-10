@@ -89,16 +89,21 @@ extern Relids calc_nestloop_required_outer(Path* outer_path, Path* inner_path);
 extern Relids calc_non_nestloop_required_outer(Path* outer_path, Path* inner_path);
 
 extern NestPath* create_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype,
-    JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path,
+    JoinCostWorkspace* workspace, JoinPathExtraData* extra, Path* outer_path,
     Path* inner_path, List* restrict_clauses, List* pathkeys, Relids required_outer, int dop = 1);
 
 extern MergePath* create_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype,
-    JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, Path* outer_path, Path* inner_path, List* restrict_clauses,
+    JoinCostWorkspace* workspace, JoinPathExtraData* extra, Path* outer_path, Path* inner_path, List* restrict_clauses,
     List* pathkeys, Relids required_outer, List* mergeclauses, List* outersortkeys, List* innersortkeys);
 
 extern HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype,
-    JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path,
+    JoinCostWorkspace* workspace, JoinPathExtraData* extra, Path* outer_path,
     Path* inner_path, List* restrict_clauses, Relids required_outer, List* hashclauses, int dop = 1);
+
+extern ProjectionPath *create_projection_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath, PathTarget *target);
+extern Path *apply_projection_to_path(PlannerInfo *root, RelOptInfo *rel, Path *path, PathTarget *target);
+extern ProjectSetPath *create_set_projection_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath,
+                                                  PathTarget *target);
 
 extern Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, double loop_count);
 

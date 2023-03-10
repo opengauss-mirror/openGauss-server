@@ -217,6 +217,10 @@ void CBMWriterMain(void)
 
         if (t_thrd.cbm_cxt.shutdown_requested) {
             g_instance.proc_base->cbmwriterLatch = NULL;
+
+            /* clean cbm track resources */
+            ResetXlogCbmSys();
+
             /* Normal exit from the walwriter is here */
             proc_exit(0); /* done */
         }

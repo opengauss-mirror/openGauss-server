@@ -705,11 +705,13 @@ bool CheckWhiteList(const List *whiteList, const char *schema, const char *table
     foreach(lc, whiteList) {
         chosenTable *cTable = (chosenTable *)lfirst(lc);
 
-        if ((cTable->schema == NULL || strncmp(cTable->schema, schema, strlen(schema)) == 0) &&
-            (cTable->table == NULL || strncmp(cTable->table, table, strlen(table)) == 0)) {
-                return true;
+        if ((cTable->schema == NULL || strcmp(cTable->schema, schema) == 0) &&
+            (cTable->table == NULL || strcmp(cTable->table, table) == 0)) {
+            return true;
         }
     }
+    ereport(DEBUG1, (errmodule(MOD_LOGICAL_DECODE),
+        errmsg("logical change record of table %s.%s is filtered by white-table-list", schema, table)));
     return false;
 }
 
@@ -1142,6 +1144,11 @@ void ParallelDecodeWorkerMain(void* point)
                 break;
             }
 
+            if (t_thrd.parallel_decode_cxt.got_SIGHUP) {
+                t_thrd.parallel_decode_cxt.got_SIGHUP = false;
+                ProcessConfigFile(PGC_SIGHUP);
+            }
+
             LogicalChangeHead = (ParallelReorderBufferChange *)LogicalQueueTop(worker->changeQueue);
             if (LogicalChangeHead == NULL) {
                 continue;
@@ -1293,6 +1300,10 @@ void LogicalReadRecordMain(ParallelDecodeReaderWorker *worker)
                 break;
             }
 
+            if (t_thrd.parallel_decode_cxt.got_SIGHUP) {
+                t_thrd.parallel_decode_cxt.got_SIGHUP = false;
+                ProcessConfigFile(PGC_SIGHUP);
+            }
             char *errm = NULL;
             XLogRecord *record = XLogReadRecord(ctx->reader, startptr, &errm);
             if (errm != NULL) {

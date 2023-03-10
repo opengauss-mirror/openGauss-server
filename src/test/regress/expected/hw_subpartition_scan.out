@@ -662,6 +662,7 @@ explain (format yaml, costs off)  select * from list_range_02 where col_2 in
  - Plan:                                                                                                  +
      Node Type: "Nested Loop"                                                                             +
      Join Type: "Semi"                                                                                    +
+     Inner Unique: false                                                                                  +
      Join Filter: "(subpartition_scan.list_range_02.col_2 = subpartition_scan.list_range_02.col_1)"       +
      Plans:                                                                                               +
        - Node Type: "Partition Iterator"                                                                  +
@@ -706,6 +707,7 @@ explain (format json, costs off)  select * from list_range_02 where col_2 in
      "Plan": {                                                                                                 +
        "Node Type": "Nested Loop",                                                                             +
        "Join Type": "Semi",                                                                                    +
+       "Inner Unique": false,                                                                                  +
        "Join Filter": "(subpartition_scan.list_range_02.col_2 = subpartition_scan.list_range_02.col_1)",       +
        "Plans": [                                                                                              +
          {                                                                                                     +
@@ -803,7 +805,7 @@ explain (costs off) select * from list_list_02 where col_1=(select max(1) from l
                                QUERY PLAN                               
 ------------------------------------------------------------------------
  Partition Iterator
-   Iterations: PART
+   Iterations: 7, Sub Iterations: 16
    InitPlan 2 (returns $3)
      ->  Result
            InitPlan 1 (returns $2)
@@ -817,8 +819,9 @@ explain (costs off) select * from list_list_02 where col_1=(select max(1) from l
                                      Selected Subpartitions:  ALL
    ->  Partitioned Seq Scan on list_list_02
          Filter: (col_1 = $3)
-         Selected Partitions:  PART
-(16 rows)
+         Selected Partitions:  1..7
+         Selected Subpartitions:  ALL
+(17 rows)
 
 select * from list_list_02 where col_1=(select max(1) from list_list_02);
  col_1 | col_2 | col_3 | col_4 

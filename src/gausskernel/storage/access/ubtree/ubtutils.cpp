@@ -33,8 +33,8 @@
 
 static bool UBTreeVisibilityCheckWrap(IndexScanDesc scan, Page page, OffsetNumber offnum, bool *needRecheck);
 static bool UBTreeVisibilityCheckXid(TransactionId xmin, TransactionId xmax, bool xminCommitted, bool xmaxCommitted,
-    Snapshot snapshot, bool isUpsert = false);
-static bool UBTreeXidSatisfiesMVCC(TransactionId xid, bool committed, Snapshot snapshot);
+    Snapshot snapshot, Buffer buffer, bool isUpsert = false);
+static bool UBTreeXidSatisfiesMVCC(TransactionId xid, bool committed, Snapshot snapshot, Buffer buffer);
 static int UBTreeKeepNatts(Relation rel, IndexTuple lastleft, IndexTuple firstright, BTScanInsert itupKey);
 static bool UBTreeVisibilityCheckCid(IndexScanDesc scan, IndexTuple itup, bool *needRecheck);
 static bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2);
@@ -365,8 +365,10 @@ static bool UBTreeVisibilityCheckWrap(IndexScanDesc scan, Page page, OffsetNumbe
             IndexTuple tuple = (IndexTuple)PageGetItem(page, iid);
             isVisible = UBTreeVisibilityCheckCid(scan, tuple, needRecheck); /* need check cid */
         } else {
+            BTScanOpaque so = (BTScanOpaque)scan->opaque;
+            Buffer buffer = so->currPos.buf;
             isVisible = UBTreeVisibilityCheckXid(xmin, xmax, xminCommitted, xmaxCommitted,
-                                                 scan->xs_snapshot, scan->isUpsert);
+                                                 scan->xs_snapshot, buffer, scan->isUpsert);
         }
     }
 
@@ -710,7 +712,7 @@ static bool UBTreeVisibilityCheckCid(IndexScanDesc scan, IndexTuple itup, bool *
  *      xminCommitted && xmaxCommitted are just hint: true means committed, but false may also be committed.
  */
 static bool UBTreeVisibilityCheckXid(TransactionId xmin, TransactionId xmax, bool xminCommitted, bool xmaxCommitted,
-    Snapshot snapshot, bool isUpsert)
+    Snapshot snapshot, Buffer buffer, bool isUpsert)
 {
     if (snapshot->satisfies == SNAPSHOT_DIRTY && isUpsert) {
         bool xmaxVisible = xmaxCommitted || TransactionIdIsCurrentTransactionId(xmax);
@@ -730,10 +732,10 @@ static bool UBTreeVisibilityCheckXid(TransactionId xmin, TransactionId xmax, boo
 
     /* handle snapshot MVCC */
     if (snapshot->satisfies == SNAPSHOT_VERSION_MVCC || snapshot->satisfies == SNAPSHOT_MVCC) {
-        if (UBTreeXidSatisfiesMVCC(xmax, xmaxCommitted, snapshot)) {
+        if (UBTreeXidSatisfiesMVCC(xmax, xmaxCommitted, snapshot, buffer)) {
             return false; /* already deleted */
         }
-        if (!UBTreeXidSatisfiesMVCC(xmin, xminCommitted, snapshot)) {
+        if (!UBTreeXidSatisfiesMVCC(xmin, xminCommitted, snapshot, buffer)) {
             return false; /* have not inserted yet */
         }
     }
@@ -749,7 +751,7 @@ static bool UBTreeVisibilityCheckXid(TransactionId xmin, TransactionId xmax, boo
 /*
  * BtXidSatisfiesMvcc() -- Check whether the xid is visible for the given MVCC snapshot.
  */
-static bool UBTreeXidSatisfiesMVCC(TransactionId xid, bool committed, Snapshot snapshot)
+static bool UBTreeXidSatisfiesMVCC(TransactionId xid, bool committed, Snapshot snapshot, Buffer buffer)
 {
     TransactionIdStatus ignore;
 
@@ -765,7 +767,7 @@ static bool UBTreeXidSatisfiesMVCC(TransactionId xid, bool committed, Snapshot s
      */
 
     /* we can't tell visibility by snapshot's xmin/xmax alone, check snapshot */
-    return XidVisibleInSnapshot(xid, snapshot, &ignore, InvalidBuffer, NULL);
+    return XidVisibleInSnapshot(xid, snapshot, &ignore, (RecoveryInProgress() ? buffer : InvalidBuffer), NULL);
 }
 
 /*

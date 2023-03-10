@@ -98,7 +98,7 @@ void statement_init_metric_context()
     StatementStatContext *reusedHandle = NULL;
 
     /* won't assign handle when statement flush thread not started */
-    if (g_instance.pid_cxt.StatementPID == 0) {
+    if (g_instance.pid_cxt.StatementPID == 0 || u_sess -> attr.attr_storage.DefaultXactReadOnly) {
         return;
     }
     CHECK_STMT_TRACK_ENABLED();
@@ -224,6 +224,8 @@ static void print_stmt_basic_debug_log(int log_level)
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t unique query: %s", CURRENT_STMT_METRIC_HANDLE->query)));
     ereport(log_level, (errmodule(MOD_INSTR),
         errmsg("\t slow query threshold: %ld", CURRENT_STMT_METRIC_HANDLE->slow_query_threshold)));
+    ereport(log_level, (errmodule(MOD_INSTR),
+        errmsg("\t slow query cause type: %u", CURRENT_STMT_METRIC_HANDLE->cause_type)));
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t thread id: %lu", CURRENT_STMT_METRIC_HANDLE->tid)));
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t transaction id: %lu", CURRENT_STMT_METRIC_HANDLE->txn_id)));
     ereport(log_level, (errmodule(MOD_INSTR),

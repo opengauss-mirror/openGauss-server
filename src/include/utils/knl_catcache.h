@@ -43,4 +43,6 @@ extern uint32 CatalogCacheComputeHashValue(CCHashFN *cc_hashfunc, int nkeys, Dat
 HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute attr);
 void GetCCHashEqFuncs(Oid keytype, CCHashFN *hashfunc, RegProcedure *eqfunc, CCFastEqualFN *fasteqfunc);
 void SearchCatCacheCheck();
+typedef HeapTuple (*searchCatFunc)(Relation relation, Oid indexoid, int cacheId, int nkeys, ScanKeyData* cur_skey, SysScanDesc *scandesc);
+typedef bool (*pluginCCHashEqFuncs)(Oid keytype, CCHashFN *hashfunc, RegProcedure *eqfunc, CCFastEqualFN *fasteqfunc, int cacheId);
 #endif

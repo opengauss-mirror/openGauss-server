@@ -81,6 +81,8 @@ typedef struct PlannedStmt {
 
     bool dependsOnRole; /* is plan specific to current role? */
 
+    bool is_flt_frame; /* Indicates whether it is a flattened expr frame */
+
     Plan* planTree; /* tree of Plan nodes */
 
     List* rtable; /* list of RangeTblEntry nodes */
@@ -190,6 +192,8 @@ typedef struct PlannedStmt {
     bool multi_node_hint;
 
     uint64 uniqueSQLId;
+
+    uint32 cause_type; /* Possible Slow SQL Risks in the Plan. */
 } PlannedStmt;
 
 typedef struct NodeGroupInfoContext {
@@ -384,6 +388,16 @@ typedef struct BaseResult {
 
 typedef struct VecResult : public BaseResult {
 } VecResult;
+
+/* ----------------
+ *	 ProjectSet node -
+ *		Apply a projection that includes set-returning functions to the
+ *		output tuples of the outer plan.
+ * ----------------
+ */
+typedef struct ProjectSet {
+    Plan plan;
+} ProjectSet;
 
 /* ----------------
  *	 ModifyTable node -
@@ -1013,11 +1027,13 @@ typedef struct ExtensiblePlan {
  * (But plan.qual is still applied before actually returning a tuple.)
  * For an outer join, only joinquals are allowed to be used as the merge
  * or hash condition of a merge or hash join.
+ * 
  * ----------------
  */
 typedef struct Join {
     Plan plan;
     JoinType jointype;
+    bool inner_unique;
     List* joinqual; /* JOIN quals (in addition to plan.qual) */
     /*
      * @hdfs
@@ -1069,6 +1085,7 @@ typedef struct NestLoopParam {
  */
 typedef struct MergeJoin {
     Join join;
+    bool skip_mark_restore; /* Can we skip mark/restore calls? */
     List* mergeclauses; /* mergeclauses as expression trees */
     /* these are arrays, but have the same length as the mergeclauses list: */
     Oid* mergeFamilies;    /* per-clause OIDs of btree opfamilies */
@@ -1092,6 +1109,7 @@ typedef struct HashJoin {
     bool isSonicHash;
     OpMemInfo mem_info; /* Memory info for inner hash table */
     double joinRows;
+    List* hash_collations;
 } HashJoin;
 
 /* ----------------
@@ -1141,6 +1159,7 @@ typedef struct Group {
     int numCols;           /* number of grouping columns */
     AttrNumber* grpColIdx; /* their indexes in the target list */
     Oid* grpOperators;     /* equality operators to compare with */
+    Oid* grp_collations;
 } Group;
 
 typedef struct VecGroup : public Group {
@@ -1201,6 +1220,7 @@ typedef struct Agg {
     bool is_dummy;        /* just for coop analysis, if true, agg node does nothing */
     uint32 skew_optimize; /* skew optimize method for agg */
     bool   unique_check;  /* we will report an error when meet duplicate in unique check mode */
+    Oid* grp_collations;
 } Agg;
 
 /* ----------------
@@ -1220,6 +1240,8 @@ typedef struct WindowAgg {
     Node* startOffset;      /* expression for starting bound, if any */
     Node* endOffset;        /* expression for ending bound, if any */
     OpMemInfo mem_info;     /* Memory info for window agg with agg func */
+    Oid* part_collations;    /* collations for partition columns */
+    Oid* ord_collations;     /* equality collations for ordering columns */
 } WindowAgg;
 
 typedef struct VecWindowAgg : public WindowAgg {
@@ -1233,6 +1255,7 @@ typedef struct Unique {
     int numCols;            /* number of columns to check for uniqueness */
     AttrNumber* uniqColIdx; /* their indexes in the target list */
     Oid* uniqOperators;     /* equality operators to compare with */
+    Oid* uniq_collations;    /* collations for equality comparisons */
 } Unique;
 
 /* ----------------
@@ -1277,6 +1300,7 @@ typedef struct SetOp {
     int firstFlag;          /* flag value for first input relation */
     long numGroups;         /* estimated number of groups in input */
     OpMemInfo mem_info;     /* Memory info for hashagg set op */
+    Oid* dup_collations;
 } SetOp;
 
 /* ----------------

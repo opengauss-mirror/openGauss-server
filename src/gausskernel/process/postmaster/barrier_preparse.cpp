@@ -198,6 +198,7 @@ void BarrierPreParseMain(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, BarrierPreParseSigUsr1Handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
+    (void)gspqsignal(SIGURG, print_stack);
 
     /*
      * Reset some signals that are accepted by postmaster but not here

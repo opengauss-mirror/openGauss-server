@@ -276,6 +276,7 @@ Boot_CreateStmt:
 													  NULL, // partTableState add by data partition
 													  REL_CMPRS_NOT_SUPPORT,
                                                                                                           NULL,
+													  NULL,
 													  NULL);
 						if (id == DescriptionRelationId) {
 							 InsertBuiltinFuncDescInBootstrap();

@@ -53,8 +53,8 @@ void preprocess_rownum(PlannerInfo *root, Query *parse)
     if (quals == NULL) {
         return;
     }
-    /* If it includes {aggregation function} or {order by} or {group by}, can not be rewrited */
-    if (parse->hasAggs || (parse->sortClause != NULL) || (parse->groupClause != NULL)) {
+    /* If it includes {aggregation function} or {order by} or {group by} or {offset}, can not be rewrited */
+    if (parse->hasAggs || (parse->sortClause != NULL) || (parse->groupClause != NULL) || (parse->limitOffset != NULL)) {
         return;
     }
     if (parse->limitCount != NULL) {

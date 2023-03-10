@@ -222,7 +222,16 @@ void StreamProducer::init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo
     m_sliceBoundary = m_consumerNodes->boundaries;
     m_parentPlanNodeId = parentPlanNodeId;
     m_desc = CreateTupleDescCopyConstr(desc);
+#ifdef ENABLE_MULTIPLE_NODES
     m_params = params;
+#else
+    /* smp in producer should copy paramlist to avoid main thread exit that memory not available. */
+    if (u_sess->SPI_cxt._connected >= 0) {
+        m_params = copyParamList(params);
+    } else {
+        m_params = params;
+    }
+#endif
 
     m_streamTxnCxt = txnCxt;
     m_streamTxnCxt.CurrentTransactionState =

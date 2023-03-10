@@ -104,7 +104,10 @@ bool get_stored_password(const char* role, password_info* pass_info)
     t_thrd.int_cxt.ImmediateInterruptOK = false;
 
     /* Get role info from pg_authid */
-    roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(role));
+    if (strchr(role, '@'))
+        ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("@ can't be allowed in username")));
+    roleTup = SearchUserHostName(role, NULL);
+
     if (!HeapTupleIsValid(roleTup)) {
         t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
         return false; /* no such user */
@@ -164,7 +167,9 @@ static bool GetValidPeriod(const char *role, password_info *passInfo)
     t_thrd.int_cxt.ImmediateInterruptOK = false;
     
     /* Get role info from pg_authid */
-    HeapTuple roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(role));
+    if (strchr(role, '@'))
+        ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("@ can't be allowed in username")));
+    HeapTuple roleTup = SearchUserHostName(role, NULL);
     if (!HeapTupleIsValid(roleTup)) {
         t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
         return false;	/* no such user */

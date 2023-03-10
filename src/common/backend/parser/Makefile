@@ -83,6 +83,17 @@ else
 	sed -i 's/YY_NULL nullptr/YY_NULL 0/g' hint_gram.cpp
 endif
 
+# where to find gen_keywordlist.pl and subsidiary files
+TOOLSDIR = $(top_srcdir)/src/tools
+GEN_KEYWORDLIST = $(PERL) -I $(TOOLSDIR) $(TOOLSDIR)/gen_keywordlist.pl
+GEN_KEYWORDLIST_DEPS = $(TOOLSDIR)/gen_keywordlist.pl $(TOOLSDIR)/PerfectHash.pm
+
+distprep: kwlist_d.h
+
+# generate SQL keyword lookup table to be included into keywords*.o.
+kwlist_d.h: $(top_srcdir)/src/include/parser/kwlist.h $(GEN_KEYWORDLIST_DEPS)
+	$(GEN_KEYWORDLIST) --extern -o $(top_srcdir)/src/include/parser $(top_srcdir)/src/include/parser/kwlist.h
+
 hint_scan.inc: hint_scan.l | scan.inc
 ifdef FLEX
 	$(FLEX) $(FLEXFLAGS) -o'$@' $<
@@ -91,12 +102,13 @@ else
 	@$(missing) flex $< $@
 endif
 
-hint_gram.o: hint_gram.hpp
+hint_gram.o keywords.o parser.0: hint_gram.hpp kwlist_d.h
 
 # gram.cpp, gram.hpp, and scan.inc are in the distribution tarball, so they
 # are not cleaned here.
 clean distclean maintainer-clean:
 	rm -f lex.backup hint_gram.cpp
+	rm -f kwlist_d.h
 
 
 maintainer-check:

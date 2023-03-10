@@ -46,6 +46,7 @@
 #include "utils/rel.h"
 #include "access/heapam.h"
 #include "miscadmin.h"
+#include "client_logic/client_logic.h"
 
 static Oid SynonymCreate(
     Oid synNamespace, const char* synName, Oid synOwner, const char* objSchema, const char* objName, bool replace);
@@ -123,8 +124,14 @@ void CreateSynonym(CreateSynonymStmt* stmt)
         ereport(ERROR, (errmsg("synonym name is already used by an existing object")));
     }
 
-    /* Main entry to create a synonym */
-    SynonymCreate(synNamespace, synName, GetUserId(), objSchema, objName, stmt->replace);
+    if (IsFullEncryptedRel(objSchema, objName)) {
+        ereport(ERROR, (errmsg("Unsupport to CREATE SYNONYM for encryption table.")));
+    } else if (IsFuncProcOnEncryptedRel(objSchema, objName)) {
+        ereport(ERROR, (errmsg("Unsupport to CREATE SYNONYM for encryption procedure or function.")));
+    } else {
+        /* Main entry to create a synonym */
+        SynonymCreate(synNamespace, synName, GetUserId(), objSchema, objName, stmt->replace);
+    }
 }
 
 /*
@@ -303,12 +310,13 @@ static void SynonymDrop(Oid synNamespace, char* synName, DropBehavior behavior, 
 /*
  * ALTER Synonym name OWNER TO newowner
  */
-void AlterSynonymOwner(List* name, Oid newOwnerId)
+ObjectAddress AlterSynonymOwner(List* name, Oid newOwnerId)
 {
     HeapTuple tuple = NULL;
     Relation rel = NULL;
-    Oid synNamespace;
+    Oid synNamespace, synOid;
     char* synName = NULL;
+    ObjectAddress address;
 
     /* Convert list of synonym names to a synName and a synNamespace. */
     synNamespace = QualifiedNameGetCreationNamespace(name, &synName);
@@ -321,6 +329,7 @@ void AlterSynonymOwner(List* name, Oid newOwnerId)
         heap_close(rel, RowExclusiveLock);
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("synonym \"%s\" does not exist", synName)));
     }
+    synOid = HeapTupleGetOid(tuple);
     Form_pg_synonym synForm = (Form_pg_synonym)GETSTRUCT(tuple);
 
     /*
@@ -354,11 +363,13 @@ void AlterSynonymOwner(List* name, Oid newOwnerId)
         CatalogUpdateIndexes(rel, tuple);
 
         /* Update owner dependency reference. */
-        changeDependencyOnOwner(PgSynonymRelationId, HeapTupleGetOid(tuple), newOwnerId);
+        changeDependencyOnOwner(PgSynonymRelationId, synOid, newOwnerId);
     }
 
     heap_freetuple_ext(tuple);
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, PgSynonymRelationId, synOid);
+    return address;
 }
 
 /*

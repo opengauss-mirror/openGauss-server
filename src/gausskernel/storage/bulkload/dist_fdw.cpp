@@ -749,7 +749,7 @@ bool check_selective_binary_conversion(RelOptInfo *baserel, Oid foreigntableid, 
     }
 
     /* Collect all the attributes needed for joins or final output. */
-    pull_varattnos((Node *)baserel->reltargetlist, baserel->relid, &attrs_used);
+    pull_varattnos((Node *)baserel->reltarget->exprs, baserel->relid, &attrs_used);
 
     /* Add all the attributes used by restriction clauses. */
     foreach (lc, baserel->baserestrictinfo) {

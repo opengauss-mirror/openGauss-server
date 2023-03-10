@@ -17,6 +17,7 @@ include $(top_builddir)/src/Makefile.global
 # where to find psql for testing an existing installation
 PSQLDIR = $(bindir)
 p=25800
+dbcompatibility=A
 ##
 ## Run tests
 ##
@@ -25,7 +26,7 @@ REGRESS_OPTS = --dlpath=. $(EXTRA_REGRESS_OPTS)
 REG_CONF = --regconf=regress.conf
 
 check: all
-	sh $(CURDIR)/run_check.sh $(CURDIR) $p
+	sh $(CURDIR)/run_check.sh $(CURDIR) $p $(dbcompatibility)
 
 ##
 ## Clean up

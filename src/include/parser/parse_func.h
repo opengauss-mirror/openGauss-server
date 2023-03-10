@@ -39,8 +39,8 @@ typedef enum {
     FUNCDETAIL_COERCION    /* it's a type coercion request */
 } FuncDetailCode;
 
-extern Node* ParseFuncOrColumn(
-    ParseState* pstate, List* funcname, List* fargs, FuncCall* fn, int location, bool call_func = false);
+extern Node *ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs, Node *last_srf, FuncCall *fn,
+                               int location, bool call_func = false);
 
 extern FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int nargs, Oid* argtypes,
     bool expand_variadic, bool expand_defaults, Oid* funcid, Oid* rettype, bool* retset, int* nvargs, Oid* vatype,
@@ -63,6 +63,7 @@ extern Oid LookupPackageNames(List* pkgname);
 extern Oid LookupAggNameTypeNames(List* aggname, List* argtypes, bool noError);
 extern Oid LookupTypeNameOid(const TypeName* typname);
 
+extern void check_srf_call_placement(ParseState *pstate, Node *last_srf, int location);
 extern void check_pg_get_expr_args(ParseState* pstate, Oid fnoid, List* args);
 extern int GetPriority(Oid typeoid);
 #endif /* PARSE_FUNC_H */

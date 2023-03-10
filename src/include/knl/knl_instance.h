@@ -1023,6 +1023,11 @@ typedef struct knl_g_hypo_context {
     List* hypo_index_list;
 } knl_g_hypo_context;
 
+typedef struct knl_sigbus_context {
+    void* sigbus_addr;
+    int sigbus_code;
+} knl_sigbus_context;
+
 typedef struct knl_g_segment_context {
     uint32 segment_drop_timeline;
 } knl_g_segment_context;
@@ -1130,10 +1135,14 @@ typedef struct knl_g_listen_context {
     #define IP_LEN 64
     /* The socket(s) we're listening to. */
     pgsocket ListenSocket[MAXLISTEN];
-    char LocalAddrList[MAXLISTEN][IP_LEN];
-    int LocalIpNum;
     int listen_sock_type[MAXLISTEN]; /* ori type: enum ListenSocketType */
     bool reload_fds;
+
+    /* use for reload listen_addresses */
+    char all_listen_addr_list[MAXLISTEN][IP_LEN];
+    int all_listen_port_list[MAXLISTEN];
+    int listen_chanel_type[MAXLISTEN];  /* ori type: enum ListenChanelType */
+    volatile uint32 is_reloading_listen_socket;  /* mark PM is reloading listen_addresses */
 } knl_g_listen_context;
 
 typedef struct knl_g_startup_context {

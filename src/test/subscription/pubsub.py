@@ -11,12 +11,13 @@ install_path = os.environ.get("install_path")
 g_local_ip = os.environ.get("g_local_ip")
 g_username = os.environ.get("g_username")
 g_passwd = "Gauss@123"
-pub_node1_port = int(os.environ.get("pub_node1_port"));
-pub_node2_port = int(os.environ.get("pub_node2_port"));
-pub_node3_port = int(os.environ.get("pub_node3_port"));
-sub_node1_port = int(os.environ.get("sub_node1_port"));
-sub_node2_port = int(os.environ.get("sub_node2_port"));
-sub_node3_port = int(os.environ.get("sub_node3_port"));
+dbcompatibility = os.environ.get("dbcompatibility")
+pub_node1_port = int(os.environ.get("pub_node1_port"))
+pub_node2_port = int(os.environ.get("pub_node2_port"))
+pub_node3_port = int(os.environ.get("pub_node3_port"))
+sub_node1_port = int(os.environ.get("sub_node1_port"))
+sub_node2_port = int(os.environ.get("sub_node2_port"))
+sub_node3_port = int(os.environ.get("sub_node3_port"))
 
 
 class Pterodb():
@@ -30,7 +31,7 @@ class Pterodb():
 		self.heartbeat_port_arr = [port_arr[i] + 2 for i in range(data_node_num)]
 
 	def real_init_env(self, i):
-		datanode_cmd_init = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i) + " --nodename=" + self.dname_prefix + str(i)  + " -w " + g_passwd
+		datanode_cmd_init = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i) + " --nodename=" + self.dname_prefix + str(i)  + " -w " + g_passwd + " --dbcompatibility=" + dbcompatibility
 		print datanode_cmd_init
 		os.system(datanode_cmd_init)
 

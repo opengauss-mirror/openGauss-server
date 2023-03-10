@@ -11,23 +11,22 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
- * ---------------------------------------------------------------------------------------
+ * -------------------------------------------------------------------------
  *
  * dms_api.h
  *
- * IDENTIFICATION
- *        src/interface/dms_api.h
  *
- * ---------------------------------------------------------------------------------------
+ * IDENTIFICATION
+ *    src/interface/dms_api.h
+ *
+ * -------------------------------------------------------------------------
  */
-
 #ifndef __DMS_API_H__
 #define __DMS_API_H__
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -287,7 +286,13 @@ typedef struct st_dms_buf_ctrl {
     unsigned char seg_fileno;
     unsigned int seg_blockno;
 #endif
-}dms_buf_ctrl_t;
+} dms_buf_ctrl_t;
+
+typedef struct st_dms_ctrl_info {
+    dms_buf_ctrl_t      ctrl;
+    unsigned long long  lsn;
+    unsigned char       is_dirty;
+} dms_ctrl_info_t;
 
 typedef enum en_dms_page_latch_mode {
     DMS_PAGE_LATCH_MODE_S = 1,
@@ -302,7 +307,7 @@ typedef enum en_dms_page_latch_mode {
 #define DMS_ENTER_PAGE_TRY            (unsigned char)8    // try to read from buffer, don't read from disk
 #define DMS_ENTER_PAGE_LRU_STATS_SCAN (unsigned char)0x10 // add to stats LRU list
 #define DMS_ENTER_PAGE_LRU_HIGH_AGE   (unsigned char)0x20 // decrease possibility to be recycled of page
-#define DMS_ENTER_PAGE_LOCAL          (unsigned char)0x40 // check local page without redo log
+#define DMS_ENTER_PAGE_LOCAL          (unsigned char)0x40 // check local page without redo log, use carefully
 #define DMS_ENTER_PAGE_REMOTE         (unsigned char)0x80 // remote access mode
 
 // pack read page parameters together
@@ -382,6 +387,12 @@ typedef enum en_dms_cm_stat {
     DMS_CM_RES_STATE_COUNT = 3,
 } dms_cm_stat_t;
 
+typedef struct st_dw_recovery_info {
+    unsigned long long bitmap_old_join;     // the old-join-inst bitmap in dw_recovery phase
+    unsigned long long bitmap_old_remove;   // the old-remove-inst bitmap in dw_recovery phase
+    unsigned long long bitmap_new_join;     // the new-join-inst bitmap in dw_recovery phase
+} dw_recovery_info_t;
+
 typedef struct st_inst_list {
     unsigned char inst_id_list[DMS_MAX_INSTANCES];
     unsigned char inst_id_count;
@@ -425,7 +436,6 @@ typedef enum en_dms_wait_event {
     DMS_EVT_LATCH_S,
     DMS_EVT_LATCH_X_REMOTE,
     DMS_EVT_LATCH_S_REMOTE,
-
 
     DMS_EVT_COUNT,
 } dms_wait_event_t;
@@ -473,17 +483,19 @@ typedef struct st_dcs_batch_buf {
 
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
 typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
-            unsigned int save_ctrl);
+    unsigned int save_ctrl);
 typedef int(*dms_get_dms_status)(void *db_handle);
 typedef void(*dms_set_dms_status)(void *db_handle, int status);
 typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned char smon_chk,
     unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn, unsigned int *ver);
 typedef int(*dms_confirm_owner)(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
-            unsigned long long *lsn);
+    unsigned long long *lsn);
 typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
+typedef int(*dms_need_flush)(void *db_handle, char *pageid);
 typedef int(*dms_edp_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int is_reformer);
+typedef int(*dms_dw_recovery)(void *db_handle, void *recovery_list, int is_reformer);
 typedef int(*dms_opengauss_startup)(void *db_handle);
 typedef int(*dms_opengauss_recovery_standby)(void *db_handle, int inst_id);
 typedef int(*dms_opengauss_recovery_primary)(void *db_handle, int inst_id);
@@ -506,9 +518,9 @@ typedef unsigned long long(*dms_get_global_scn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_lsn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_flushed_lfn)(void *db_handle);
 typedef int(*dms_read_local_page4transfer)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
-                                           dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl);
+    dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl);
 typedef int(*dms_try_read_local_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
-                                      dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl);
+    dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl);
 typedef unsigned char(*dms_page_is_dirty)(dms_buf_ctrl_t *buf_ctrl);
 typedef void(*dms_leave_local_page)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
 typedef void(*dms_get_pageid)(dms_buf_ctrl_t *buf_ctrl, char **pageid, unsigned int *size);
@@ -518,20 +530,20 @@ typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index);
 typedef void *(*dms_stack_push_cr_cursor)(void *db_handle);
 typedef void (*dms_stack_pop_cr_cursor)(void *db_handle);
 typedef void(*dms_init_cr_cursor)(void *cr_cursor, char pageid[DMS_PAGEID_SIZE], char xid[DMS_XID_SIZE],
-                                  unsigned long long query_scn, unsigned int ssn);
+    unsigned long long query_scn, unsigned int ssn);
 typedef void(*dms_init_index_cr_cursor)(void *cr_cursor, char pageid[DMS_PAGEID_SIZE], char xid[DMS_XID_SIZE],
     unsigned long long query_scn, unsigned int ssn, char entry[DMS_PAGEID_SIZE], char *index_profile);
 typedef void(*dms_init_check_cr_cursor)(void *cr_cursor, char rowid[DMS_ROWID_SIZE], char xid[DMS_XID_SIZE],
-                                        unsigned long long query_scn, unsigned int ssn);
+    unsigned long long query_scn, unsigned int ssn);
 typedef char *(*dms_get_wxid_from_cr_cursor)(void *cr_cursor);
 typedef unsigned char(*dms_get_instid_of_xid_from_cr_cursor)(void *db_handle, void *cr_cursor);
-typedef int (*dms_get_page_invisible_txn_list)(void *db_handle, void *cr_cursor, void *cr_page,
+typedef int(*dms_get_page_invisible_txn_list)(void *db_handle, void *cr_cursor, void *cr_page,
     unsigned char *is_empty_txn_list, unsigned char *exist_waiting_txn);
-typedef int (*dms_reorganize_heap_page_with_undo)(void *db_handle, void *cr_cursor, void *cr_page,
+typedef int(*dms_reorganize_heap_page_with_undo)(void *db_handle, void *cr_cursor, void *cr_page,
     unsigned char *fb_mark);
-typedef int (*dms_reorganize_index_page_with_undo)(void *db_handle, void *cr_cursor, void *cr_page);
+typedef int(*dms_reorganize_index_page_with_undo)(void *db_handle, void *cr_cursor, void *cr_page);
 typedef int(*dms_check_heap_page_visible_with_undo_snapshot)(void *db_handle, void *cr_cursor, void *page,
-                                                             unsigned char *is_found);
+    unsigned char *is_found);
 typedef void(*dms_set_page_force_request)(void *db_handle, char pageid[DMS_PAGEID_SIZE]);
 typedef void(*dms_get_entry_pageid_from_cr_cursor)(void *cr_cursor, char index_entry_pageid[DMS_PAGEID_SIZE]);
 typedef void(*dms_get_index_profile_from_cr_cursor)(void *cr_cursor, char index_profile[DMS_INDEX_PROFILE_SIZE]);
@@ -544,22 +556,22 @@ typedef void(*dms_mem_free)(void *context, void *ptr);
 typedef void(*dms_mem_reset)(void *context);
 // The maximum length of output_msg is 128 bytes.
 typedef int (*dms_process_broadcast)(void *db_handle, char *data, unsigned int len, char *output_msg,
-                                     unsigned int *output_msg_len);
+    unsigned int *output_msg_len);
 typedef int (*dms_process_broadcast_ack)(void *db_handle, char *data, unsigned int len);
 typedef int(*dms_get_txn_info)(void *db_handle, unsigned long long xid,
-                               unsigned char is_scan, dms_txn_info_t *txn_info);
+    unsigned char is_scan, dms_txn_info_t *txn_info);
 typedef int(*dms_get_opengauss_xid_csn)(void *db_handle, dms_opengauss_xid_csn_t *csn_req,
-                                        dms_opengauss_csn_result_t *csn_ack);
+    dms_opengauss_csn_result_t *csn_ack);
 typedef int(*dms_get_opengauss_update_xid)(void *db_handle, unsigned long long xid,
-                                           unsigned int t_infomask, unsigned int t_infomask2, unsigned long long *uxid);
+    unsigned int t_infomask, unsigned int t_infomask2, unsigned long long *uxid);
 typedef int(*dms_get_opengauss_txn_status)(void *db_handle, unsigned long long xid, unsigned char type,
-                                           unsigned char* status);
+    unsigned char* status);
 typedef int(*dms_opengauss_lock_buffer)(void *db_handle, int buffer, unsigned char lock_mode,
-                                        unsigned char* curr_mode);
+    unsigned char* curr_mode);
 typedef int(*dms_get_txn_snapshot)(void *db_handle, unsigned int xmap, dms_txn_snapshot_t *txn_snapshot);
 typedef int(*dms_get_opengauss_txn_snapshot)(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot);
 typedef void (*dms_log_output)(dms_log_id_t log_type, dms_log_level_t log_level, const char *code_file_name,
-                               unsigned int code_line_num, const char *module_name, const char *format, ...);
+    unsigned int code_line_num, const char *module_name, const char *format, ...);
 typedef int (*dms_log_flush)(void *db_handle, unsigned long long *lsn);
 typedef int(*dms_process_edp)(void *db_handle, dms_edp_info_t *pages, unsigned int count);
 typedef void (*dms_clean_ctrl_edp)(void *db_handle, dms_buf_ctrl_t *dms_ctrl);
@@ -567,6 +579,8 @@ typedef char *(*dms_display_pageid)(char *display_buf, unsigned int count, char 
 typedef char *(*dms_display_xid)(char *display_buf, unsigned int count, char *xid);
 typedef char *(*dms_display_rowid)(char *display_buf, unsigned int count, char *rowid);
 typedef int (*dms_drc_buf_res_rebuild)(void *db_handle);
+typedef int (*dms_drc_buf_res_rebuild_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num,
+    unsigned char for_rebuild);
 typedef unsigned char(*dms_ckpt_session)(void *db_handle);
 typedef void (*dms_check_if_build_complete)(void *db_handle, unsigned int *build_complete);
 typedef int (*dms_db_is_primary)(void *db_handle);
@@ -590,11 +604,11 @@ typedef void (*dms_get_rowid_by_rmid)(void *db_handle, unsigned short rmid, char
 typedef void (*dms_get_sql_from_session)(void *db_handle, unsigned short sid, char *sql_str, unsigned int sql_str_len);
 typedef void (*dms_get_itl_lock_by_xid)(void *db_handle, char xid[DMS_XID_SIZE], char *ilock, unsigned int ilock_len);
 typedef void (*dms_check_tlock_status)(void *db_handle, unsigned int type, unsigned short sid,
-                                       unsigned long long tableid, unsigned int *in_use);
+    unsigned long long tableid, unsigned int *in_use);
 typedef void (*dms_get_tlock_msg_by_tid)(void *db_handle, unsigned long long table_id, unsigned int type, char *rsp,
-                                         unsigned int rsp_len, unsigned int *tlock_cnt);
+    unsigned int rsp_len, unsigned int *tlock_cnt);
 typedef void (*dms_get_tlock_msg_by_rm)(void *db_handle, unsigned short sid, unsigned short rmid, int type, char *tlock,
-                                        unsigned int tlock_len);
+    unsigned int tlock_len);
 
 typedef int (*dms_switchover_demote)(void *db_handle);
 typedef int (*dms_switchover_promote)(void *db_handle);
@@ -615,9 +629,11 @@ typedef struct st_dms_callback {
     dms_confirm_owner confirm_owner;
     dms_confirm_converting confirm_converting;
     dms_flush_copy flush_copy;
+    dms_need_flush need_flush;
     dms_edp_lsn edp_lsn;
     dms_disk_lsn disk_lsn;
     dms_recovery recovery;
+    dms_dw_recovery dw_recovery;
     dms_db_is_primary db_is_primary;
     dms_get_open_status get_open_status;
     dms_undo_init undo_init;
@@ -626,6 +642,7 @@ typedef struct st_dms_callback {
     dms_tx_rollback_finish tx_rollback_finish;
     dms_recovery_in_progress recovery_in_progress;
     dms_drc_buf_res_rebuild dms_reform_rebuild_buf_res;
+    dms_drc_buf_res_rebuild_parallel dms_reform_rebuild_parallel;
     dms_check_if_build_complete check_if_build_complete;
 
     // used in reform for opengauss
@@ -763,10 +780,10 @@ typedef struct st_dms_profile {
     unsigned char rdma_rpc_bind_core_end;
     char ock_log_path[DMS_OCK_LOG_PATH_LEN];
     unsigned char enable_reform;
-    //ock scrlock configs
+    // ock scrlock configs
     unsigned char enable_scrlock;
     unsigned int primary_inst_id;
-    unsigned char enable_ssl;
+    unsigned char enable_ssl;  
     unsigned int scrlock_log_level;
     unsigned char enable_scrlock_worker_bind_core;
     unsigned int scrlock_worker_cnt;
@@ -776,6 +793,7 @@ typedef struct st_dms_profile {
     unsigned char enable_scrlock_server_sleep_mode;
     unsigned char scrlock_server_bind_core_start;
     unsigned char scrlock_server_bind_core_end;
+    unsigned char parallel_thread_num;
 } dms_profile_t;
 
 typedef struct st_logger_param {
@@ -793,7 +811,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           51
+#define DMS_LOCAL_VERSION           54
 
 #ifdef __cplusplus
 }

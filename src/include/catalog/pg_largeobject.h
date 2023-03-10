@@ -20,6 +20,7 @@
 #define PG_LARGEOBJECT_H
 
 #include "catalog/genbki.h"
+#include "catalog/objectaddress.h"
 
 /* ----------------
  *        pg_largeobject definition. cpp turns this into
@@ -56,7 +57,7 @@ typedef FormData_pg_largeobject *Form_pg_largeobject;
 
 extern Oid  LargeObjectCreate(Oid loid);
 extern void LargeObjectDrop(Oid loid);
-extern void LargeObjectAlterOwner(Oid loid, Oid newOwnerId);
+extern ObjectAddress LargeObjectAlterOwner(Oid loid, Oid newOwnerId);
 extern bool LargeObjectExists(Oid loid);
 
 #endif   /* PG_LARGEOBJECT_H */

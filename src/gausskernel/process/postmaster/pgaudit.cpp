@@ -49,6 +49,7 @@
 #include "utils/timestamp.h"
 #include "utils/builtins.h"
 #include "utils/acl.h"
+#include "utils/elog.h"
 #include "auditfuncs.h"
 
 #include "gssignal/gs_signal.h"
@@ -263,6 +264,7 @@ static const char* AuditTypeDescs[] = {"unknown",
                                        "dml_action_select",
                                        "internal_event",
                                        "function_exec",
+                                       "system_function_exec",
                                        "copy_to",
                                        "copy_from",
                                        "set_parameter",
@@ -276,7 +278,9 @@ static const char* AuditTypeDescs[] = {"unknown",
                                        "ddl_globalconfig",
                                        "ddl_publication_subscription",
                                        "ddl_foreign_data_wrapper",
-                                       "ddl_sql_patch"};
+                                       "ddl_sql_patch",
+                                       "ddl_event"
+};
 
 static const int AuditTypeNum = sizeof(AuditTypeDescs) / sizeof(char*);
 
@@ -456,6 +460,7 @@ static void init_audit_signal_handlers()
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
+    (void)gspqsignal(SIGURG, print_stack);
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -1072,6 +1077,23 @@ static void pgaudit_write_file(char* buffer, int count)
     securec_check(errorno, "\0", "\0");
 
     errno = 0;
+     
+    /* if record time is earlier than current file's create time,
+     * create a new audit file to avoid the confusion caused by system clock change */
+    FILE* fh = NULL;
+    if (g_instance.audit_cxt.audit_indextbl) {
+        AuditIndexItem *cur_item =
+        g_instance.audit_cxt.audit_indextbl->data +
+        g_instance.audit_cxt.audit_indextbl->curidx[t_thrd.audit.cur_thread_idx];
+        if (curtime < cur_item->ctime) {
+            auditfile_close(SYSAUDITFILE_TYPE);
+            fh = auditfile_open((pg_time_t)time(NULL), "a", true);
+            if (fh != NULL) {
+                t_thrd.audit.sysauditFile = fh;
+            }
+        }
+    }
+
 retry1:
     rc = fwrite(buffer, 1, count, t_thrd.audit.sysauditFile);
 
@@ -1718,6 +1740,9 @@ static bool audit_type_validcheck(AuditType type)
         case AUDIT_DDL_VIEW:
             type_status = CHECK_AUDIT_DDL(DDL_VIEW);
             break;
+        case AUDIT_DDL_EVENT:
+            type_status = CHECK_AUDIT_DDL(DDL_EVENT);
+            break;
         case AUDIT_DDL_TRIGGER:
             type_status = CHECK_AUDIT_DDL(DDL_TRIGGER);
             break;
@@ -1781,6 +1806,9 @@ static bool audit_type_validcheck(AuditType type)
         case AUDIT_FUNCTION_EXEC:
             type_status = (unsigned int)u_sess->attr.attr_security.Audit_Exec;
             break;
+        case AUDIT_SYSTEM_FUNCTION_EXEC:
+            type_status = (unsigned int)u_sess->attr.attr_security.audit_system_function_exec;
+            break;
         case AUDIT_POLICY_EVENT:
         case MASKING_POLICY_EVENT:
         case SECURITY_EVENT:
@@ -1802,6 +1830,9 @@ static bool audit_type_validcheck(AuditType type)
             type_status = 0;
             ereport(WARNING, (errmsg("unknown audit type, discard it.")));
             break;
+    }
+    if (audit_check_full_audit_user() && type != AUDIT_UNKNOWN_TYPE) {
+        type_status = 1;
     }
 
     return type_status > 0;
@@ -1949,6 +1980,10 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     AuditEventInfo event_info;
     if (!audit_get_clientinfo(type, object_name, event_info)) {
         return; 
+    }
+    /* judge if the remote_host  info in the blacklist */
+    if (audit_check_client_blacklist(event_info.client_info)) {
+        return;
     }
     char *userid = event_info.userid;
     const char* username = event_info.username;
@@ -2944,7 +2979,7 @@ static bool pgaudit_check_system(TimestampTz begtime, TimestampTz endtime, uint3
         curr_filetime = time_t_to_timestamptz(item->ctime);
         /* check whether the item is the last item */
         if ((index >= earliest_idx && index < t_thrd.audit.audit_indextbl->latest_idx)) {
-            if (curr_filetime <= begtime || curr_filetime <= endtime) {
+            if (curr_filetime <= endtime) {
                 satisfied = true;
             }
         } else {
@@ -2996,7 +3031,7 @@ static TimestampTz pgaudit_headertime(uint32 fnum, const char *audit_directory)
     securec_check_intval(rc, , time_t_to_timestamptz(0));
 
     /* Open the audit file to scan the audit record. */
-    fd = open(t_thrd.audit.pgaudit_filepath, O_RDWR, pgaudit_filemode);
+    fd = open(pgaudit_filepath, O_RDWR, pgaudit_filemode);
     if (fd < 0) {
         ereport(LOG,
             (errcode_for_file_access(), errmsg("could not open audit file \"%s\": %m", pgaudit_filepath)));

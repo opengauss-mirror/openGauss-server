@@ -177,13 +177,14 @@ ScanState* search_plan_tree(PlanState* node, Oid table_oid);
  * prototypes from functions in execGrouping.c
  */
 extern bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
-    FmgrInfo* eqfunctions, MemoryContext evalContext);
+    FmgrInfo* eqfunctions, MemoryContext evalContext, Oid *collations);
 extern bool execTuplesUnequal(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
-    FmgrInfo* eqfunctions, MemoryContext evalContext);
+    FmgrInfo* eqfunctions, MemoryContext evalContext, Oid *collations);
 extern FmgrInfo* execTuplesMatchPrepare(int numCols, Oid* eqOperators);
 extern void execTuplesHashPrepare(int numCols, Oid* eqOperators, FmgrInfo** eqFunctions, FmgrInfo** hashFunctions);
 extern TupleHashTable BuildTupleHashTable(int numCols, AttrNumber* keyColIdx, FmgrInfo* eqfunctions,
-    FmgrInfo* hashfunctions, long nbuckets, Size entrysize, MemoryContext tablecxt, MemoryContext tempcxt, int workMem);
+    FmgrInfo* hashfunctions, long nbuckets, Size entrysize, MemoryContext tablecxt, MemoryContext tempcxt, int workMem,
+    Oid *collations = NULL);
 extern TupleHashEntry LookupTupleHashEntry(
     TupleHashTable hashtable, TupleTableSlot* slot, bool* isnew, bool isinserthashtbl = true);
 extern TupleHashEntry FindTupleHashEntry(
@@ -192,14 +193,15 @@ extern TupleHashEntry FindTupleHashEntry(
 /*
  * prototypes from functions in execJunk.c
  */
-extern JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, const TableAmRoutine* tam_ops);
-extern void ExecInitJunkAttr(EState* estate, CmdType operation, List* targetlist, ResultRelInfo* result_rel_info);
-extern JunkFilter* ExecInitJunkFilterConversion(List* targetList, TupleDesc cleanTupType, TupleTableSlot* slot);
-extern AttrNumber ExecFindJunkAttribute(JunkFilter* junkfilter, const char* attrName);
-extern AttrNumber ExecFindJunkAttributeInTlist(List* targetlist, const char* attrName);
-extern Datum ExecGetJunkAttribute(TupleTableSlot* slot, AttrNumber attno, bool* isNull);
-extern TupleTableSlot* ExecFilterJunk(JunkFilter* junkfilter, TupleTableSlot* slot);
-extern void ExecSetjunkFilteDescriptor(JunkFilter* junkfilter, TupleDesc tupdesc);
+extern JunkFilter *ExecInitJunkFilter(List *targetList, bool hasoid, TupleTableSlot *slot,
+                                      const TableAmRoutine *tam_ops);
+extern void ExecInitJunkAttr(EState *estate, CmdType operation, List *targetlist, ResultRelInfo *result_rel_info);
+extern JunkFilter *ExecInitJunkFilterConversion(List *targetList, TupleDesc cleanTupType, TupleTableSlot *slot);
+extern AttrNumber ExecFindJunkAttribute(JunkFilter *junkfilter, const char *attrName);
+extern AttrNumber ExecFindJunkAttributeInTlist(List *targetlist, const char *attrName);
+extern Datum ExecGetJunkAttribute(TupleTableSlot *slot, AttrNumber attno, bool *isNull);
+extern TupleTableSlot *ExecFilterJunk(JunkFilter *junkfilter, TupleTableSlot *slot);
+extern void ExecSetjunkFilteDescriptor(JunkFilter *junkfilter, TupleDesc tupdesc);
 
 #ifdef PGXC
 extern List* ExecFindJunkPrimaryKeys(List* targetlist);
@@ -289,17 +291,16 @@ static inline TupleTableSlot *ExecProcNode(PlanState *node)
     node->ps_rownum++;
     return result;
 }
-#else  /*ENABLE_MULTIPLE_NODES*/
+#else  /* ENABLE_MULTIPLE_NODES */
 
 static inline TupleTableSlot *ExecProcNode(PlanState *node)
 {
-    //TODO: FIX ENABLE_MULTIPLE_NODES
     return NULL;
 }
 
-#endif /*ENABLE_MULTIPLE_NODES*/
+#endif /* ENABLE_MULTIPLE_NODES */
 
-#endif /*FRONTEND*/
+#endif /* FRONTEND */
 
 
 /*
@@ -312,11 +313,13 @@ extern Tuplestorestate* ExecMakeTableFunctionResult(
 extern Datum ExecEvalExprSwitchContext(
     ExprState* expression, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 extern ExprState* ExecInitExpr(Expr* node, PlanState* parent);
+extern List* ExecInitExprList(List* nodes, PlanState *parent);
 extern ExprState* ExecPrepareExpr(Expr* node, EState* estate);
 extern bool ExecQual(List* qual, ExprContext* econtext, bool resultForNull);
 extern int ExecTargetListLength(List* targetlist);
 extern int ExecCleanTargetListLength(List* targetlist);
 extern TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone);
+extern Datum ExecMakeFunctionResultSet(FuncExprState *fcache, ExprContext *econtext, bool *isNull, ExprDoneCond *isDone);
 
 extern TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd accessMtd, ExecScanRecheckMtd recheckMtd);
 extern void ExecAssignScanProjectionInfo(ScanState* node);
@@ -330,17 +333,18 @@ extern bool is_huge_clob(Oid type_oid, bool is_null, Datum value);
 /*
  * prototypes from functions in execTuples.c
  */
-extern void ExecInitResultTupleSlot(EState* estate, PlanState* planstate, const TableAmRoutine* tam_ops = TableAmHeap);
-extern void ExecInitScanTupleSlot(EState* estate, ScanState* scanstate, const TableAmRoutine* tam_ops = TableAmHeap);
-extern TupleTableSlot* ExecInitExtraTupleSlot(EState* estate, const TableAmRoutine* tam_ops = TableAmHeap);
-extern TupleTableSlot* ExecInitNullTupleSlot(EState* estate, TupleDesc tupType);
-extern TupleDesc ExecTypeFromTL(List* targetList, bool hasoid, bool markdropped = false, const TableAmRoutine* tam_ops = TableAmHeap);
-extern TupleDesc ExecCleanTypeFromTL(List* targetList, bool hasoid, const TableAmRoutine* tam_ops = TableAmHeap);
-extern TupleDesc ExecTypeFromExprList(List* exprList, List* namesList, const TableAmRoutine* tam_ops = TableAmHeap);
-extern void UpdateChangedParamSet(PlanState* node, Bitmapset* newchg);
-extern void InitOutputValues(RightRefState* refState, GenericExprState* targetArr[],
-                             Datum* values, bool* isnull, int targetCount, bool* hasExecs);
-extern void SortTargetListAsArray(RightRefState* refState, List* targetList, GenericExprState* targetArr[]);
+extern void ExecInitResultTupleSlot(EState *estate, PlanState *planstate, const TableAmRoutine *tam_ops = TableAmHeap);
+extern void ExecInitScanTupleSlot(EState *estate, ScanState *scanstate, const TableAmRoutine *tam_ops = TableAmHeap);
+extern TupleTableSlot *ExecInitExtraTupleSlot(EState *estate, const TableAmRoutine *tam_ops = TableAmHeap);
+extern TupleTableSlot *ExecInitNullTupleSlot(EState *estate, TupleDesc tupType);
+extern TupleDesc ExecTypeFromTL(List *targetList, bool hasoid, bool markdropped = false,
+                                const TableAmRoutine *tam_ops = TableAmHeap);
+extern TupleDesc ExecCleanTypeFromTL(List *targetList, bool hasoid, const TableAmRoutine *tam_ops = TableAmHeap);
+extern TupleDesc ExecTypeFromExprList(List *exprList, List *namesList, const TableAmRoutine *tam_ops = TableAmHeap);
+extern void UpdateChangedParamSet(PlanState *node, Bitmapset *newchg);
+extern void InitOutputValues(RightRefState *refState, GenericExprState *targetArr[], Datum *values, bool *isnull,
+                             int targetCount, bool *hasExecs);
+extern void SortTargetListAsArray(RightRefState *refState, List *targetList, GenericExprState *targetArr[]);
 
 typedef struct TupOutputState {
     TupleTableSlot* slot;
@@ -441,6 +445,22 @@ extern void ExecCloseScanRelation(Relation scanrel);
 static inline RangeTblEntry *exec_rt_fetch(Index rti, EState *estate)
 {
     return (RangeTblEntry *)list_nth(estate->es_range_table, rti - 1);
+}
+
+static inline int128 datum2autoinc(ConstrAutoInc *cons_autoinc, Datum datum)
+{
+    if (cons_autoinc->datum2autoinc_func != NULL) {
+        return DatumGetInt128(DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->datum2autoinc_func, datum));
+    }
+    return DatumGetInt128(datum);
+}
+
+static inline Datum autoinc2datum(ConstrAutoInc *cons_autoinc, int128 autoinc)
+{
+    if (cons_autoinc->autoinc2datum_func != NULL) {
+        return DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->autoinc2datum_func, Int128GetDatum(autoinc));
+    }
+    return Int128GetDatum(autoinc);
 }
 
 extern Partition ExecOpenScanParitition(
@@ -631,6 +651,13 @@ public:
     {
         if (likely(u_sess != NULL)) {
             u_sess->opt_cxt.smp_enabled = false;
+        }
+    }
+
+    void ResetSmp()
+    {
+        if (u_sess != NULL) {
+            u_sess->opt_cxt.smp_enabled = m_smpEnabled;
         }
     }
 

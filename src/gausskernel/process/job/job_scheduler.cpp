@@ -739,7 +739,8 @@ static void ScanExpireJobs()
             continue;
         }
 
-        if (false == DatumGetBool(DirectFunctionCall2(timestamp_gt, curtime, values[Anum_pg_job_next_run_date - 1]))) {
+        Datum cur_job_start_time = DirectFunctionCall1(timestamp_timestamptz, values[Anum_pg_job_next_run_date - 1]);
+        if (false == DatumGetBool(DirectFunctionCall2(timestamp_gt, curtime, cur_job_start_time))) {
             /* skip since it doesnot reach book time */
             continue;
         }

@@ -362,10 +362,10 @@ function Reg()
         log "can't find inst id. Aborting."
         exit 1
     fi
-    dsscmd reghl -i ${LOCAL_INSTANCE_ID} -D ${DSS_HOME} >> /dev/null 2>&1
+    dsscmd reghl -D ${DSS_HOME} >> /dev/null 2>&1
     if [[ $? != 0 ]]
     then
-        log "dsscmd reghl -i ${LOCAL_INSTANCE_ID} -D ${DSS_HOME} fail."
+        log "dsscmd reghl -D ${DSS_HOME} fail."
         exit 1
     fi
     log "register success."
@@ -381,7 +381,7 @@ function Unreg()
     fi
     if [[ ${LOCAL_INSTANCE_ID} == ${INSTANCE_ID} ]]
     then
-        dsscmd unreghl -i ${LOCAL_INSTANCE_ID} -D ${DSS_HOME} >> /dev/null 2>&1
+        dsscmd unreghl -D ${DSS_HOME} >> /dev/null 2>&1
     else
         pid=$(program_pid dssserver ${DSS_HOME})
         if [[ -z ${pid} ]]
@@ -394,7 +394,7 @@ function Unreg()
 
     if [[ $? != 0 ]]
     then
-        log "dsscmd kickh -i ${INSTANCE_ID} -D ${DSS_HOME} fail, or dsscmd unreghl -i ${LOCAL_INSTANCE_ID} -D ${DSS_HOME} fail."
+        log "dsscmd kickh -i ${INSTANCE_ID} -D ${DSS_HOME} fail, or dsscmd unreghl -D ${DSS_HOME} fail."
         exit 1
     fi
     log "unregister ${INSTANCE_ID} success."

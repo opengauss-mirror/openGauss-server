@@ -25,6 +25,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "utils/fmgroids.h"
 
 typedef struct BTSortArrayContext {
     FmgrInfo flinfo;
@@ -1277,7 +1278,7 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum, Sca
     for (key = so->keyData, ikey = 0; ikey < keysz; key++, ikey++) {
         Datum datum;
         bool isNull = false;
-        Datum test;
+        bool test;
 
         /* row-comparison keys need special processing */
         if (key->sk_flags & SK_ROW_HEADER) {
@@ -1355,9 +1356,31 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum, Sca
              */
             return NULL;
         }
-
-        test = FunctionCall2Coll(&key->sk_func, key->sk_collation, datum, key->sk_argument);
-        if (!DatumGetBool(test)) {
+        
+        switch (key->sk_func.fn_oid) {
+            case F_INT8EQ:
+                test = (int64)datum == (int64)key->sk_argument;
+                break;
+            case F_INT48EQ:
+                test = (int64)(int32)datum == (int64)key->sk_argument;
+                break;
+            case F_INT84EQ:
+                test = (int64)datum == (int64)(int32)key->sk_argument;
+                break;
+            case F_INT4EQ:
+                test = (int32)datum == (int32)key->sk_argument;
+                break;
+            case F_INT4GT:
+                test = (int32)datum > (int32)key->sk_argument;
+                break;
+            case F_INT4LT:
+                test = (int32)datum < (int32)key->sk_argument;
+                break;
+            default:
+                test = DatumGetBool(FunctionCall2Coll(&key->sk_func, key->sk_collation, datum, key->sk_argument));
+        }
+        
+        if (!test) {
             /*
              * Tuple fails this qual.  If it's a required qual for the current
              * scan direction, then we can conclude no further tuples will

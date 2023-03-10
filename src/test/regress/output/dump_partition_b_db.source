@@ -1,0 +1,275 @@
+drop database if exists dump_partition_db;
+NOTICE:  database "dump_partition_db" does not exist, skipping
+drop database if exists restore_partition_db;
+NOTICE:  database "restore_partition_db" does not exist, skipping
+create database dump_partition_db with dbcompatibility = 'B';
+create database restore_partition_db with dbcompatibility = 'B';
+\c dump_partition_db
+CREATE TABLE t_single_key_list (a int, b int, c int)
+PARTITION BY list(a)
+(
+    PARTITION p1 VALUES (100),
+    PARTITION p2 VALUES (200),
+    PARTITION p3 VALUES (300),
+    PARTITION p4 VALUES (400)
+);
+SELECT pg_get_tabledef('t_single_key_list'::regclass);
+                   pg_get_tabledef                    
+------------------------------------------------------
+ SET search_path = public;                           +
+ CREATE TABLE t_single_key_list (                    +
+     a integer,                                      +
+     b integer,                                      +
+     c integer                                       +
+ )                                                   +
+ WITH (orientation=row, compression=no)              +
+ PARTITION BY LIST (a)                               +
+ (                                                   +
+     PARTITION p1 VALUES (100) TABLESPACE pg_default,+
+     PARTITION p2 VALUES (200) TABLESPACE pg_default,+
+     PARTITION p3 VALUES (300) TABLESPACE pg_default,+
+     PARTITION p4 VALUES (400) TABLESPACE pg_default +
+ )                                                   +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+CREATE TABLE t_multi_keys_list_null (a int, b int, c int)
+PARTITION BY LIST COLUMNS(a,b)
+(
+    PARTITION p1 VALUES IN ( (0,NULL) ),
+    PARTITION p2 VALUES IN ( (0,1), (0,2), (0,3), (1,1), (1,2) ),
+    PARTITION p3 VALUES IN ( (NULL,0), (2,1) ),
+    PARTITION p4 VALUES IN ( (3,2), (NULL,NULL) )
+);
+SELECT pg_get_tabledef('t_multi_keys_list_null'::regclass);
+                                pg_get_tabledef                                 
+--------------------------------------------------------------------------------
+ SET search_path = public;                                                     +
+ CREATE TABLE t_multi_keys_list_null (                                         +
+     a integer,                                                                +
+     b integer,                                                                +
+     c integer                                                                 +
+ )                                                                             +
+ WITH (orientation=row, compression=no)                                        +
+ PARTITION BY LIST (a, b)                                                      +
+ (                                                                             +
+     PARTITION p2 VALUES ((0,1),(0,2),(0,3),(1,1),(1,2)) TABLESPACE pg_default,+
+     PARTITION p1 VALUES ((0,NULL)) TABLESPACE pg_default,                     +
+     PARTITION p4 VALUES ((3,2),(NULL,NULL)) TABLESPACE pg_default,            +
+     PARTITION p3 VALUES ((NULL,0),(2,1)) TABLESPACE pg_default                +
+ )                                                                             +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+CREATE TABLE t_multi_keys_list (a varchar(8), b int, c DATE, d int DEFAULT 0)
+PARTITION BY LIST COLUMNS(a,b,c)
+(
+    PARTITION p1 VALUES IN ( ('0',0,'2022-12-31')),
+    PARTITION p2 VALUES IN ( ('{',1,'2022-12-31'), ('''',2,'2022-12-31'), ('0',3,'2022-12-31'), (',',1,'2022-12-31'), (NULL,2,'2022-12-31') ),
+    PARTITION p3 VALUES IN ( ('NULL',0,'2022-12-31'), ('}',1,'2022-12-31') ),
+    PARTITION p4 VALUES IN ( ('{',2,'2022-12-31'), ('3',3,'2022-12-31') ),
+    PARTITION pd VALUES IN (DEFAULT)
+);
+SELECT pg_get_tabledef('t_multi_keys_list'::regclass);
+                                                                       pg_get_tabledef                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                                                                                  +
+ CREATE TABLE t_multi_keys_list (                                                                                                                           +
+     a character varying(8),                                                                                                                                +
+     b integer,                                                                                                                                             +
+     c date,                                                                                                                                                +
+     d integer DEFAULT 0                                                                                                                                    +
+ )                                                                                                                                                          +
+ WITH (orientation=row, compression=no)                                                                                                                     +
+ PARTITION BY LIST (a, b, c)                                                                                                                                +
+ (                                                                                                                                                          +
+     PARTITION p1 VALUES (('0',0,'2022-12-31')) TABLESPACE pg_default,                                                                                      +
+     PARTITION p2 VALUES (('{',1,'2022-12-31'),('''',2,'2022-12-31'),('0',3,'2022-12-31'),(',',1,'2022-12-31'),(NULL,2,'2022-12-31')) TABLESPACE pg_default,+
+     PARTITION p4 VALUES (('{',2,'2022-12-31'),('3',3,'2022-12-31')) TABLESPACE pg_default,                                                                 +
+     PARTITION pd VALUES (DEFAULT) TABLESPACE pg_default,                                                                                                   +
+     PARTITION p3 VALUES (('NULL',0,'2022-12-31'),('}',1,'2022-12-31')) TABLESPACE pg_default                                                               +
+ )                                                                                                                                                          +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+INSERT INTO t_multi_keys_list VALUES('{',1,'2022-12-31');
+INSERT INTO t_multi_keys_list VALUES(',',1,'2022-12-31');
+SELECT * FROM t_multi_keys_list PARTITION(p2) ORDER BY a,b,c; 
+ a | b |     c      | d 
+---+---+------------+---
+ , | 1 | 12-31-2022 | 0
+ { | 1 | 12-31-2022 | 0
+(2 rows)
+
+CREATE TABLE t_part_by_key_num (a int, b int, c int)
+PARTITION BY KEY(a) PARTITIONS 5 SUBPARTITION BY KEY(c) SUBPARTITIONS 3;
+CREATE TABLE t_multi_keys_list_tmtz (a DATE, b timestamp with time zone, c int, d int DEFAULT 0)
+PARTITION BY LIST (a,b,c)
+(
+    PARTITION p1 VALUES ( ('2022-01-01','2022-01-01 12:00:00 pst',1)),
+    PARTITION p2 VALUES ( ('2022-02-01','2022-02-01 12:00:00 pst',2), ('2022-02-02','2022-02-02 12:00:00 pst',2), ('2022-02-03','2022-02-03 12:00:00 pst',2)),
+    PARTITION p3 VALUES ( ('2022-03-01','2022-03-01 12:00:00 pst',3), ('2022-03-02','2022-03-02 12:00:00 pst',3) ),
+    PARTITION pd VALUES (DEFAULT)
+);
+SELECT pg_get_tabledef('t_multi_keys_list_tmtz'::regclass);
+                                                                                  pg_get_tabledef                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                                                                                                        +
+ CREATE TABLE t_multi_keys_list_tmtz (                                                                                                                                            +
+     a date,                                                                                                                                                                      +
+     b timestamp with time zone,                                                                                                                                                  +
+     c integer,                                                                                                                                                                   +
+     d integer DEFAULT 0                                                                                                                                                          +
+ )                                                                                                                                                                                +
+ WITH (orientation=row, compression=no)                                                                                                                                           +
+ PARTITION BY LIST (a, b, c)                                                                                                                                                      +
+ (                                                                                                                                                                                +
+     PARTITION p1 VALUES (('2022-01-01','2022-01-01 12:00:00 pst',1)) TABLESPACE pg_default,                                                                                      +
+     PARTITION p2 VALUES (('2022-02-01','2022-02-01 12:00:00 pst',2),('2022-02-02','2022-02-02 12:00:00 pst',2),('2022-02-03','2022-02-03 12:00:00 pst',2)) TABLESPACE pg_default,+
+     PARTITION p3 VALUES (('2022-03-01','2022-03-01 12:00:00 pst',3),('2022-03-02','2022-03-02 12:00:00 pst',3)) TABLESPACE pg_default,                                           +
+     PARTITION pd VALUES (DEFAULT) TABLESPACE pg_default                                                                                                                          +
+ )                                                                                                                                                                                +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-01-01','2022-01-01 12:00:00 pst',1);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-02-01','2022-02-01 12:00:00 pst',2);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-02-02','2022-02-02 12:00:00 pst',2);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-02-03','2022-02-03 12:00:00 pst',2);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-03-01','2022-03-01 12:00:00 pst',3);
+INSERT INTO t_multi_keys_list_tmtz VALUES('2022-03-02','2022-03-02 12:00:00 pst',3);
+SELECT * FROM t_multi_keys_list_tmtz PARTITION(p2) ORDER BY a,b,c; 
+     a      |              b               | c | d 
+------------+------------------------------+---+---
+ 02-01-2022 | Tue Feb 01 12:00:00 2022 PST | 2 | 0
+ 02-02-2022 | Wed Feb 02 12:00:00 2022 PST | 2 | 0
+ 02-03-2022 | Thu Feb 03 12:00:00 2022 PST | 2 | 0
+(3 rows)
+
+\! @abs_bindir@/gs_dump dump_partition_db -p @portstring@ -f @abs_bindir@/dump_listpart_test.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d restore_partition_db -p @portstring@ @abs_bindir@/dump_listpart_test.tar >/dev/null 2>&1; echo $?
+0
+\c restore_partition_db
+\d+ t_multi_keys_list
+                         Table "public.t_multi_keys_list"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ a      | character varying(8) |           | extended |              | 
+ b      | integer              |           | plain    |              | 
+ c      | date                 |           | plain    |              | 
+ d      | integer              | default 0 | plain    |              | 
+Partition By LIST(a, b, c)
+Number of partitions: 5 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+SELECT pg_get_tabledef('t_multi_keys_list'::regclass);
+                                                                       pg_get_tabledef                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                                                                                  +
+ CREATE TABLE t_multi_keys_list (                                                                                                                           +
+     a character varying(8),                                                                                                                                +
+     b integer,                                                                                                                                             +
+     c date,                                                                                                                                                +
+     d integer DEFAULT 0                                                                                                                                    +
+ )                                                                                                                                                          +
+ WITH (orientation=row, compression=no)                                                                                                                     +
+ PARTITION BY LIST (a, b, c)                                                                                                                                +
+ (                                                                                                                                                          +
+     PARTITION p1 VALUES (('0',0,'2022-12-31')) TABLESPACE pg_default,                                                                                      +
+     PARTITION p2 VALUES (('{',1,'2022-12-31'),('''',2,'2022-12-31'),('0',3,'2022-12-31'),(',',1,'2022-12-31'),(NULL,2,'2022-12-31')) TABLESPACE pg_default,+
+     PARTITION p4 VALUES (('{',2,'2022-12-31'),('3',3,'2022-12-31')) TABLESPACE pg_default,                                                                 +
+     PARTITION pd VALUES (DEFAULT) TABLESPACE pg_default,                                                                                                   +
+     PARTITION p3 VALUES (('NULL',0,'2022-12-31'),('}',1,'2022-12-31')) TABLESPACE pg_default                                                               +
+ )                                                                                                                                                          +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+INSERT INTO t_multi_keys_list VALUES('''',2,'2022-12-31'); 
+SELECT * FROM t_multi_keys_list PARTITION(p2) ORDER BY b,a,c;
+ a | b |     c      | d 
+---+---+------------+---
+ , | 1 | 12-31-2022 | 0
+ { | 1 | 12-31-2022 | 0
+ ' | 2 | 12-31-2022 | 0
+(3 rows)
+
+SELECT pg_get_tabledef('t_part_by_key_num'::regclass);
+                  pg_get_tabledef                  
+---------------------------------------------------
+ SET search_path = public;                        +
+ CREATE TABLE t_part_by_key_num (                 +
+     a integer,                                   +
+     b integer,                                   +
+     c integer                                    +
+ )                                                +
+ WITH (orientation=row, compression=no)           +
+ PARTITION BY HASH (a) SUBPARTITION BY HASH (c)   +
+ (                                                +
+     PARTITION p0 TABLESPACE pg_default           +
+     (                                            +
+         SUBPARTITION p0sp0 TABLESPACE pg_default,+
+         SUBPARTITION p0sp1 TABLESPACE pg_default,+
+         SUBPARTITION p0sp2 TABLESPACE pg_default +
+     ),                                           +
+     PARTITION p1 TABLESPACE pg_default           +
+     (                                            +
+         SUBPARTITION p1sp0 TABLESPACE pg_default,+
+         SUBPARTITION p1sp1 TABLESPACE pg_default,+
+         SUBPARTITION p1sp2 TABLESPACE pg_default +
+     ),                                           +
+     PARTITION p2 TABLESPACE pg_default           +
+     (                                            +
+         SUBPARTITION p2sp0 TABLESPACE pg_default,+
+         SUBPARTITION p2sp1 TABLESPACE pg_default,+
+         SUBPARTITION p2sp2 TABLESPACE pg_default +
+     ),                                           +
+     PARTITION p3 TABLESPACE pg_default           +
+     (                                            +
+         SUBPARTITION p3sp0 TABLESPACE pg_default,+
+         SUBPARTITION p3sp1 TABLESPACE pg_default,+
+         SUBPARTITION p3sp2 TABLESPACE pg_default +
+     ),                                           +
+     PARTITION p4 TABLESPACE pg_default           +
+     (                                            +
+         SUBPARTITION p4sp0 TABLESPACE pg_default,+
+         SUBPARTITION p4sp1 TABLESPACE pg_default,+
+         SUBPARTITION p4sp2 TABLESPACE pg_default +
+     )                                            +
+ )                                                +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+SELECT pg_get_tabledef('t_multi_keys_list_tmtz'::regclass);
+                                                                                  pg_get_tabledef                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                                                                                                        +
+ CREATE TABLE t_multi_keys_list_tmtz (                                                                                                                                            +
+     a date,                                                                                                                                                                      +
+     b timestamp with time zone,                                                                                                                                                  +
+     c integer,                                                                                                                                                                   +
+     d integer DEFAULT 0                                                                                                                                                          +
+ )                                                                                                                                                                                +
+ WITH (orientation=row, compression=no)                                                                                                                                           +
+ PARTITION BY LIST (a, b, c)                                                                                                                                                      +
+ (                                                                                                                                                                                +
+     PARTITION p1 VALUES (('2022-01-01','2022-01-01 12:00:00 pst',1)) TABLESPACE pg_default,                                                                                      +
+     PARTITION p2 VALUES (('2022-02-01','2022-02-01 12:00:00 pst',2),('2022-02-02','2022-02-02 12:00:00 pst',2),('2022-02-03','2022-02-03 12:00:00 pst',2)) TABLESPACE pg_default,+
+     PARTITION p3 VALUES (('2022-03-01','2022-03-01 12:00:00 pst',3),('2022-03-02','2022-03-02 12:00:00 pst',3)) TABLESPACE pg_default,                                           +
+     PARTITION pd VALUES (DEFAULT) TABLESPACE pg_default                                                                                                                          +
+ )                                                                                                                                                                                +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+SELECT * FROM t_multi_keys_list_tmtz PARTITION(p2) ORDER BY a,b,c; 
+     a      |              b               | c | d 
+------------+------------------------------+---+---
+ 02-01-2022 | Tue Feb 01 12:00:00 2022 PST | 2 | 0
+ 02-02-2022 | Wed Feb 02 12:00:00 2022 PST | 2 | 0
+ 02-03-2022 | Thu Feb 03 12:00:00 2022 PST | 2 | 0
+(3 rows)
+
+\c regression
+drop database if exists restore_partition_db;
+drop database if exists dump_partition_db;

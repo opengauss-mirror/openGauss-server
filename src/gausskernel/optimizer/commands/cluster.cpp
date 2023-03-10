@@ -233,7 +233,7 @@ void cluster(ClusterStmt* stmt, bool isTopLevel)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("table is not partitioned")));
             }
 
-            partOid = partitionNameGetPartitionOid(tableOid,
+            partOid = PartitionNameGetPartitionOid(tableOid,
                 stmt->relation->partitionname,
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 ExclusiveLock,
@@ -1052,7 +1052,7 @@ static void rebuildPartitionedTable(
          * set_baserel_size_estimates, just do a quick hack for rows and width.
          */
         relOptInfo->rows = relOptInfo->tuples;
-        relOptInfo->width = getPartitionDataWidth(partRel, NULL);
+        relOptInfo->reltarget->width = getPartitionDataWidth(partRel, NULL);
         root->total_table_pages = relOptInfo->pages;
 
         /* make a temp table for swapping partition */
@@ -1256,7 +1256,7 @@ static void rebuildPartition(Relation partTableRel, Oid partitionOid, Oid indexO
      * set_baserel_size_estimates, just do a quick hack for rows and width.
      */
     relOptInfo->rows = relOptInfo->tuples;
-    relOptInfo->width = getPartitionDataWidth(partRel, NULL);
+    relOptInfo->reltarget->width = getPartitionDataWidth(partRel, NULL);
     root->total_table_pages = relOptInfo->pages;
 
     /* make a temp table for swapping partition */

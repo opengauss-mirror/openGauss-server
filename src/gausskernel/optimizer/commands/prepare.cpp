@@ -240,10 +240,12 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
         case CMD_MERGE:
             /* OK */
             break;
-        default:
-	    if (IsA(query->utilityStmt, VariableMultiSetStmt)) {
+        case CMD_UTILITY:
+            if (IsA(query->utilityStmt, VariableMultiSetStmt) ||
+                IsA(query->utilityStmt, CopyStmt)) {
                 break;
             }
+        default:
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PSTATEMENT_DEFINITION), errmsg("utility statements cannot be prepared")));
             break;
@@ -518,7 +520,7 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
         Oid expected_type_id = param_types[i];
         Oid given_type_id;
 
-        expr = transformExpr(pstate, expr);
+        expr = transformExpr(pstate, expr, EXPR_KIND_EXECUTE_PARAMETER);
 
         /* Cannot contain subselects or aggregates */
         if (pstate->p_hasSubLinks)

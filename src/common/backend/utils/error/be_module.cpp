@@ -117,6 +117,7 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_SEC_POLICY, "SEC_POLICY"},
     {MOD_SEC_SDD, "SEC_SDD"},
     {MOD_SEC_TDE, "SEC_TDE"},
+    {MOD_COMM_FRAMEWORK, "COMM_FRAMEWORK"},
     {MOD_COMM_PROXY, "COMM_PROXY"},
     {MOD_COMM_POOLER, "COMM_POOLER"},
     {MOD_VACUUM, "VACUUM"},
@@ -133,6 +134,8 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_DMS, "DMS"},
     {MOD_DSS, "DSS_API"},
     {MOD_GPI, "GPI"},
+    {MOD_PARTITION, "PARTITION"},
+    {MOD_SRF, "SRF"},
 
     /* add your module name above */
     {MOD_MAX, "BACKEND"}};

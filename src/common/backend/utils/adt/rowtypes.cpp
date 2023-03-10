@@ -481,14 +481,7 @@ Datum record_out(PG_FUNCTION_ARGS)
             column_info->column_type = column_type;
         }
 
-        /*
-         * If we have a toasted datum, forcibly detoast it here to avoid
-         * memory leakage inside the type's output routine.
-         */
-        if (column_info->typisvarlena)
-            attr = PointerGetDatum(PG_DETOAST_DATUM(values[i]));
-        else
-            attr = values[i];
+        attr = values[i];
 
         value = OutputFunctionCall(&column_info->proc, attr);
 
@@ -523,12 +516,9 @@ Datum record_out(PG_FUNCTION_ARGS)
         }
         if (nq)
             appendStringInfoCharMacro(&buf, '"');
-
-        pfree_ext(value);
-
-        /* Clean up detoasted copy, if any */
-        if (DatumGetPointer(attr) != DatumGetPointer(values[i]))
-            pfree(DatumGetPointer(attr));
+        if (value != NULL) {
+            pfree_ext(value);
+        }
     }
 
     appendStringInfoChar(&buf, ')');
@@ -784,26 +774,14 @@ Datum record_send(PG_FUNCTION_ARGS)
             column_info->column_type = column_type;
         }
 
-        /*
-         * If we have a toasted datum, forcibly detoast it here to avoid
-         * memory leakage inside the type's output routine.
-         */
-        if (column_info->typisvarlena)
-            attr = PointerGetDatum(PG_DETOAST_DATUM(values[i]));
-        else
-            attr = values[i];
+        attr = values[i];
 
         outputbytes = SendFunctionCall(&column_info->proc, attr);
 
-        /* We assume the result will not have been toasted */
         pq_sendint32(&buf, VARSIZE(outputbytes) - VARHDRSZ);
         pq_sendbytes(&buf, VARDATA(outputbytes), VARSIZE(outputbytes) - VARHDRSZ);
 
         pfree_ext(outputbytes);
-
-        /* Clean up detoasted copy, if any */
-        if (DatumGetPointer(attr) != DatumGetPointer(values[i]))
-            pfree(DatumGetPointer(attr));
     }
 
     pfree_ext(values);

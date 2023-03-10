@@ -1338,6 +1338,8 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
     if (!RelationIsUstoreFormat(heapRelation))
         return;
 
+    AcceptInvalidationMessages();
+
     /*
      * for each index, form and insert the index tuple
      */
@@ -1358,6 +1360,10 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
         /* If the index is marked as read-only, ignore it */
         /* XXXX: ???? */
         if (!indexInfo->ii_ReadyForInserts) {
+            continue;
+        }
+
+        if (!IndexIsUsable(indexRelation->rd_index)) {
             continue;
         }
 
@@ -1390,6 +1396,7 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
                                              estate->es_query_cxt,
                                              indexRelation,
                                              indexpartitionid,
+                                             INVALID_PARTITION_NO,
                                              actualindex,
                                              indexpartition,
                                              RowExclusiveLock);
@@ -1458,22 +1465,6 @@ void ExecUHeapDeleteIndexTuplesGuts(
                               inplaceUpdated,
                               exec_index_tuples_state.rollbackIndex);
     }
-}
-
-static inline int128 datum2autoinc(ConstrAutoInc *cons_autoinc, Datum datum)
-{
-    if (cons_autoinc->datum2autoinc_func != NULL) {
-        return DatumGetInt128(DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->datum2autoinc_func, datum));
-    }
-    return DatumGetInt128(datum);
-}
-
-static inline Datum autoinc2datum(ConstrAutoInc *cons_autoinc, int128 autoinc)
-{
-    if (cons_autoinc->autoinc2datum_func != NULL) {
-        return DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->autoinc2datum_func, Int128GetDatum(autoinc));
-    }
-    return Int128GetDatum(autoinc);
 }
 
 static Tuple autoinc_modify_tuple(TupleDesc desc, EState* estate, TupleTableSlot* slot, Tuple tuple, int128 autoinc)
@@ -1734,6 +1725,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
                 estate->es_query_cxt,
                 indexRelation,
                 indexpartitionid,
+                INVALID_PARTITION_NO,
                 actualIndex,
                 indexpartition,
                 RowExclusiveLock);
@@ -1917,6 +1909,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                 estate->es_query_cxt,
                 indexRelation,
                 indexpartitionid,
+                INVALID_PARTITION_NO,
                 actualindex,
                 indexpartition,
                 RowExclusiveLock);
@@ -2723,7 +2716,7 @@ Datum GetTypeZeroValue(Form_pg_attribute att_tup)
             Type targetType = typeidType(att_tup->atttypid);
             result = stringTypeDatum(targetType, "", att_tup->atttypmod, true);
             ReleaseSysCache(targetType);
-            break;            
+            break;
         }
         default: {
             bool typeIsVarlena = (!att_tup->attbyval) && (att_tup->attlen == -1);

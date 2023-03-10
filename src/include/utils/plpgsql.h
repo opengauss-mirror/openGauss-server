@@ -22,6 +22,7 @@
 #include "access/xact.h"
 #include "catalog/namespace.h"
 #include "commands/trigger.h"
+#include "commands/event_trigger.h"
 #include "executor/spi.h"
 #include "executor/functions.h"
 #include "parser/scanner.h"
@@ -239,6 +240,12 @@ typedef enum {
  * --------
  */
 typedef enum { PLPGSQL_TRUE, PLPGSQL_FALSE, PLPGSQL_NULL } PLpgSQL_state;
+/* --------
+ * Type of the DECLARE HANDLER.
+ * ref: https://dev.mysql.com/doc/refman/8.0/en/declare-handler.html
+ * --------
+ */
+typedef enum { DECLARE_HANDLER_EXIT, DECLARE_HANDLER_CONTINUE } PLpgSQL_declare_handler;
 
 /**********************************************************************
  * Node and structure definitions
@@ -252,6 +259,14 @@ typedef struct PLpgSQL_datum { /* Generic datum array item		*/
     int dno;
     bool ispkg;
 } PLpgSQL_datum;
+
+typedef enum PLpgSQL_trigtype
+{
+    PLPGSQL_DML_TRIGGER,
+    PLPGSQL_EVENT_TRIGGER,
+    PLPGSQL_NOT_TRIGGER
+} PLpgSQL_trigtype;
+
 /*
  * The variants PLpgSQL_var, PLpgSQL_row, and PLpgSQL_rec share these
  * fields
@@ -592,6 +607,7 @@ typedef struct { /* One EXCEPTION ... WHEN clause */
     int lineno;
     PLpgSQL_condition* conditions;
     List* action; /* List of statements */
+    PLpgSQL_declare_handler handler_type;
 } PLpgSQL_exception;
 
 typedef struct PLpgSQL_stmt_block { /* Block of statements			*/
@@ -599,6 +615,7 @@ typedef struct PLpgSQL_stmt_block { /* Block of statements			*/
     int lineno;
     char* label;
     bool isAutonomous;
+    bool isDeclareHandlerStmt;      /* mysql declare handler syntax */
     List* body; /* List of statements */
     int n_initvars;
     int* initvarnos;
@@ -941,6 +958,7 @@ typedef struct PLpgSQL_func_hashkey { /* Hash lookup key for functions */
     Oid funcOid;
 
     bool isTrigger; /* true if called as a trigger */
+    bool isEventTrigger; /* true if called as an event trigger */
 
     /* be careful that pad bytes in this struct get zeroed! */
 
@@ -988,7 +1006,7 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     TransactionId fn_xmin;
     ItemPointerData fn_tid;
     bool is_private;
-    bool fn_is_trigger;
+    PLpgSQL_trigtype fn_is_trigger;
     Oid fn_input_collation;
     PLpgSQL_func_hashkey* fn_hashkey; /* back-link to hashtable key */
     MemoryContext fn_cxt;
@@ -1030,9 +1048,11 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     int tg_table_schema_varno;
     int tg_nargs_varno;
     int tg_argv_varno;
+    /* for event triggers */
+    int         tg_event_varno;
+    int         tg_tag_varno;
 
     List* invalItems; /* other dependencies, like other pkg's type or variable */
-
     PLpgSQL_resolve_option resolve_option;
 
     int ndatums;
@@ -1570,9 +1590,10 @@ extern PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno,
 PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace);
 PLpgSQL_variable* plpgsql_build_tableType(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace);
 extern PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* list, bool add2namespace);
-extern PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace);
+extern PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace, TupleDesc tupleDesc);
 extern int plpgsql_recognize_err_condition(const char* condname, bool allow_sqlstate);
 extern PLpgSQL_condition* plpgsql_parse_err_condition(char* condname);
+extern PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname);
 extern int plpgsql_adddatum(PLpgSQL_datum* newm, bool isChange = true);
 extern int plpgsql_add_initdatums(int** varnos);
 extern void plpgsql_HashTableInit(void);
@@ -1725,6 +1746,7 @@ extern int plpgsql_base_yylex(void);
 extern int plpgsql_yylex(void);
 extern void plpgsql_push_back_token(int token);
 extern void plpgsql_append_source_text(StringInfo buf, int startlocation, int endlocation);
+extern void plpgsql_peek(int* tok1_p);
 extern void plpgsql_peek2(int* tok1_p, int* tok2_p, int* tok1_loc, int* tok2_loc);
 extern void plpgsql_peek(int* tok1_p);
 extern int plpgsql_scanner_errposition(int location);
@@ -1738,6 +1760,7 @@ extern void plpgsql_process_stmt_array(StringInfo buf, List* bracket_loc);
 extern void plpgsql_append_object_typename(StringInfo buf, PLpgSQL_type *var_type);
 extern void CheckSaveExceptionsDML(int errstate);
 
+extern void plpgsql_exec_event_trigger(PLpgSQL_function *func, EventTriggerData *trigdata);
 /* ----------
  * Externs in gram.y
  * ----------
@@ -1827,6 +1850,8 @@ typedef struct ExceptionContext {
 
     int spi_connected;              /* SPI connected level before exception. */
     int64 stackId;                  /* the start stack Id before entry exception block. */
+
+    PLpgSQL_declare_handler handler_type;
 } ExceptionContext;
 
 /* Quick access array state */

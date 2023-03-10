@@ -86,6 +86,10 @@ select * from t_t_mutil_t2;
 (2 rows)
 
 rollback;
+-- subselect
+begin;
+update t_t_mutil_t1 a,t_t_mutil_t2 b set b.col2=5,a.col2=4 where a.col1 in (select col1 from t_t_mutil_t2);
+rollback;
 -- setof type, report error
 update t_t_mutil_t1 a,t_t_mutil_t2 b set a.col1 = generate_series(2,3), b.col1=1;
 ERROR:  Un-support feature
@@ -343,6 +347,7 @@ explain(format xml) update public.t_t_mutil_t1 a,t_t_mutil_t2 b set b.col2=5,a.c
            <Total-Cost>355.67</Total-Cost>                         +
            <Plan-Rows>23091</Plan-Rows>                            +
            <Plan-Width>20</Plan-Width>                             +
+           <Inner-Unique>false</Inner-Unique>                      +
            <Hash-Cond>(a.col1 = b.col1)</Hash-Cond>                +
            <Plans>                                                 +
              <Plan>                                                +
@@ -405,6 +410,7 @@ explain(format json) update public.t_t_mutil_t1 a,t_t_mutil_t2 b set b.col2=5,a.
            "Total Cost": 355.67,                   +
            "Plan Rows": 23091,                     +
            "Plan Width": 20,                       +
+           "Inner Unique": false,                  +
            "Hash Cond": "(a.col1 = b.col1)",       +
            "Plans": [                              +
              {                                     +
@@ -464,6 +470,7 @@ explain(format yaml) update public.t_t_mutil_t1 a,t_t_mutil_t2 b set b.col2=5,a.
          Total Cost: 355.67                   +
          Plan Rows: 23091                     +
          Plan Width: 20                       +
+         Inner Unique: false                  +
          Hash Cond: "(a.col1 = b.col1)"       +
          Plans:                               +
            - Node Type: "Seq Scan"            +
@@ -636,8 +643,8 @@ select * from t_p_mutil_t1;
 select * from t_p_mutil_t2;
  t1 | t2 
 ----+----
-  2 |  6
   3 |  6
+  2 |  6
 (2 rows)
 
 -- subpartition

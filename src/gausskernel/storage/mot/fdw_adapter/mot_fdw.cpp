@@ -446,7 +446,7 @@ static void MOTGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid for
         }
     } else {
         /* Pull "var" clauses to build an appropriate target list */
-        pull_varattnos((Node*)baserel->reltargetlist, baserel->relid, &attrs);
+        pull_varattnos((Node*)baserel->reltarget->exprs, baserel->relid, &attrs);
         if (attrs != NULL) {
             bool all = bms_is_member(-FirstLowInvalidHeapAttributeNumber, attrs);
             for (int i = 0; i < planstate->m_numAttrs; i++) {

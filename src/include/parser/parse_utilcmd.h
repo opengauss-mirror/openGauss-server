@@ -57,6 +57,8 @@ typedef struct {
 typedef enum TransformTableType { TRANSFORM_INVALID = 0, TRANSFORM_TO_HASHBUCKET, TRANSFORM_TO_NONHASHBUCKET} TransformTableType;
 
 extern void checkPartitionSynax(CreateStmt *stmt);
+extern Oid fill_relation_collation(const char* collate, int charset, List** options,
+    Oid nsp_coll_oid = InvalidOid);
 extern List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List* uuids,
     bool preCheck, Oid *namespaceid, bool isFirstNode = true);
 extern List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* queryString);
@@ -67,7 +69,7 @@ extern void transformPartitionValue(ParseState* pstate, Node* rangePartDef, bool
 extern List* transformListPartitionValue(ParseState* pstate, List* boundary, bool needCheck, bool needFree);
 extern List* transformRangePartitionValueInternal(ParseState* pstate, List* boundary,
     bool needCheck, bool needFree, bool isPartition = true);
-extern Node* transformIntoConst(ParseState* pstate, Node* maxElem, bool isPartition = true);
+extern Node* transformIntoConst(ParseState* pstate, ParseExprKind exprKind, Node* maxElem, bool isPartition = true);
 
 #ifdef PGXC
 extern bool CheckLocalIndexColumn(char loctype, char* partcolname, char* indexcolname);
@@ -93,5 +95,9 @@ extern char* getTmptableIndexName(const char* srcSchema, const char* srcIndex);
 extern IndexStmt* generateClonedIndexStmt(
     CreateStmtContext* cxt, Relation source_idx, const AttrNumber* attmap, int attmap_length, Relation rel,
     TransformTableType transformType);
+extern int get_charset_by_collation(Oid colloid);
+extern Oid get_default_collation_by_charset(int charset);
+extern Oid transform_default_collation(const char* collate, int charset, Oid def_coll_oid = InvalidOid,
+    bool is_attr = false);
 
 #endif /* PARSE_UTILCMD_H */

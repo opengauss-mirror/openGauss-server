@@ -27,6 +27,7 @@
 #include "utils/partitionmap.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_publication.h"
+#include "access/amapi.h"
 
 static void RelationPointerToNULL(Relation rel)
 {
@@ -47,6 +48,7 @@ static void RelationPointerToNULL(Relation rel)
     rel->rd_index = NULL;
     rel->rd_indextuple = NULL;
     rel->rd_am = NULL;
+    rel->rd_amroutine = NULL;
     rel->rd_indexcxt = NULL;
     rel->rd_aminfo = NULL;
     rel->rd_opfamily = NULL;
@@ -189,6 +191,16 @@ static Form_pg_am CopyRelationAm(Relation rel)
     Form_pg_am rd_am = (Form_pg_am)palloc(sizeof(FormData_pg_am));
     *rd_am = *rel->rd_am;
     return rd_am;
+}
+
+static IndexAmRoutine* copy_relation_amroutine(Relation rel, MemoryContext index_cxt)
+{
+    if (rel->rd_amroutine == NULL) {
+        return NULL;
+    }
+    IndexAmRoutine* rd_amroutine = (IndexAmRoutine*)MemoryContextAlloc(index_cxt, sizeof(IndexAmRoutine));
+    *rd_amroutine = *rel->rd_amroutine;
+    return rd_amroutine;
 }
 
 static void CopyRelationIndexAccessInfo(Relation newrel, Relation rel, MemoryContext index_cxt)
@@ -429,7 +441,7 @@ Relation CopyRelationData(Relation newrel, Relation rel, MemoryContext rules_cxt
      * otherwise, do the copy work here
      * if the variable changed, there is no lock and no rel inval msg,
      * set it zero and reinit it when copy into local */
-    Assert(sizeof(RelationData) == 520);
+    Assert(sizeof(RelationData) == 528);
     /* all copied exclude pointer */
     *newrel = *rel;
     Assert(rel->rd_createSubid == InvalidSubTransactionId);
@@ -469,6 +481,7 @@ Relation CopyRelationData(Relation newrel, Relation rel, MemoryContext rules_cxt
     }
 
     newrel->rd_am = CopyRelationAm(rel);
+    newrel->rd_amroutine = copy_relation_amroutine(rel, index_cxt);
 
     CopyRelationIndexAccessInfo(newrel, rel, index_cxt);
 
@@ -699,6 +712,7 @@ Relation BuildRelationFromPartRel(Relation rel, Partition part, bytea* merge_rel
             ALLOCSET_SMALL_MAXSIZE);
     }
 
+    relation->rd_amroutine = copy_relation_amroutine(rel, relation->rd_indexcxt);
     CopyRelationIndexAccessInfo(relation, rel, relation->rd_indexcxt);
     if (rel->rd_aminfo != NULL) {
         relation->rd_aminfo = (RelationAmInfo *)palloc(sizeof(RelationAmInfo));

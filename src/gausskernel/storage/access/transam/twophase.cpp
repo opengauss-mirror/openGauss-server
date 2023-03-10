@@ -721,6 +721,8 @@ static void MarkAsPreparingGuts(GTM_TransactionHandle handle, GlobalTransaction 
     pgxact->handle = handle;
     pgxact->xid = xid;
     pgxact->xmin = InvalidTransactionId;
+    proc->snapXmax = InvalidTransactionId;
+    proc->snapCSN = InvalidCommitSeqNo;
     pgxact->csn_min = InvalidCommitSeqNo;
     pgxact->csn_dr = InvalidCommitSeqNo;
     pgxact->delayChkpt = false;

@@ -985,6 +985,16 @@ Datum compress_statistic_info(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
+void item_state_free(CompressAddressItemState *itemState)
+{
+    if (itemState->rbStruct.header != NULL) {
+        MmapFree(&itemState->rbStruct);
+        itemState->rbStruct.header = NULL;
+    }
+    (void)FreeFile(itemState->compressedFd);
+    itemState->compressedFd = NULL;
+}
+
 Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
 {
     int32 startBlockNum = PG_GETARG_INT32(1);
@@ -1023,6 +1033,11 @@ Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
             CfsReadStruct cfsReadStruct{itemState->compressedFd, itemState->rbStruct.header, extentCount};
             len = CfsReadCompressedPage(VARDATA(buf), BLCKSZ, itemState->blkno % CFS_LOGIC_BLOCKS_PER_EXTENT,
                                         &cfsReadStruct, CFS_LOGIC_BLOCKS_PER_FILE * itemState->segmentNo + itemState->blkno);
+            if (len > MIN_COMPRESS_ERROR_RT) {
+                item_state_free(itemState);
+                ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+                                errmsg("can not read actual block %u, error code: %lu,", itemState->blkno, len)));
+            }
         }
         SET_VARSIZE(buf, len + VARHDRSZ);
         Datum values[6];
@@ -1041,10 +1056,7 @@ Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
         itemState->blkno++;
         SRF_RETURN_NEXT(fctx, result);
     } else {
-        if (itemState->rbStruct.header != NULL) {
-            MmapFree(&itemState->rbStruct);
-        }
-        (void)FreeFile(itemState->compressedFd);
+        item_state_free(itemState);
         SRF_RETURN_DONE(fctx);
     }
 }

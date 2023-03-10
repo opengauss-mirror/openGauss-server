@@ -70,9 +70,9 @@
 template<typename T_Form>
 static T_Form read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple seqtuple, GTM_UUID* uuid);
 template<typename T_FormData, typename T_Int, bool large>
-static void DefineSequence(CreateSeqStmt* seq);
+static ObjectAddress DefineSequence(CreateSeqStmt* seq);
 template<typename T_Form, typename T_Int, bool large>
-static void AlterSequence(const AlterSeqStmt* stmt);
+static ObjectAddress AlterSequence(const AlterSeqStmt* stmt);
 #ifdef PGXC
 template<typename T_Form, typename T_Int, bool large>
 static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
@@ -761,16 +761,16 @@ static Datum GetIntDefVal(TypeName* name, T value)
     }
 }
 
-void DefineSequenceWrapper(CreateSeqStmt *seq)
+ObjectAddress DefineSequenceWrapper(CreateSeqStmt* seq)
 {
     if (seq->is_large) {
         if (t_thrd.proc->workingVersionNum < LARGE_SEQUENCE_VERSION_NUM) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("It is not supported to create large sequence during upgrade.")));
         }
-        DefineSequence<FormData_pg_large_sequence, int128, true>(seq);
+        return DefineSequence<FormData_pg_large_sequence, int128, true>(seq);
     } else {
-        DefineSequence<FormData_pg_sequence, int64, false>(seq);
+        return DefineSequence<FormData_pg_sequence, int64, false>(seq);
     }
 }
 
@@ -804,7 +804,7 @@ int CreateSequenceWithUUIDGTMWrapper(FormData_pg_large_sequence newm, int64 uuid
  *				Creates a new sequence relation
  */
 template<typename T_FormData, typename T_Int, bool large>
-static void DefineSequence(CreateSeqStmt* seq)
+static ObjectAddress DefineSequence(CreateSeqStmt* seq)
 {
     T_FormData newm;
     List* owned_by = NIL;
@@ -820,6 +820,8 @@ static void DefineSequence(CreateSeqStmt* seq)
     bool need_seq_rewrite = false;
     bool isUseLocalSeq = false;
     Oid namespaceOid = InvalidOid;
+    ObjectAddress address;
+
 #ifdef PGXC /* PGXC_COORD */
     GTM_Sequence start_value = 1;
     GTM_Sequence min_value = 1;
@@ -993,8 +995,10 @@ static void DefineSequence(CreateSeqStmt* seq)
     stmt->oncommit = ONCOMMIT_NOOP;
     stmt->tablespacename = NULL;
     stmt->if_not_exists = false;
+    stmt->charset = PG_INVALID_ENCODING;
     char rel_kind = large ? RELKIND_LARGE_SEQUENCE : RELKIND_SEQUENCE;
-    seqoid = DefineRelation(stmt, rel_kind, seq->ownerId);
+    address = DefineRelation(stmt, rel_kind, seq->ownerId, NULL);
+    seqoid = address.objectId;
     Assert(seqoid != InvalidOid);
 
     rel = heap_open(seqoid, AccessExclusiveLock);
@@ -1031,6 +1035,7 @@ static void DefineSequence(CreateSeqStmt* seq)
         register_sequence_cb(seq->uuid, GTM_CREATE_SEQ);
     }
 #endif
+    return address;
 }
 
 template<typename T_Form>
@@ -1118,12 +1123,12 @@ void ResetSequence(Oid seq_relid, bool restart)
     relation_close(seq_rel, NoLock);
 }
 
-void AlterSequenceWrapper(AlterSeqStmt* stmt)
+ObjectAddress AlterSequenceWrapper(AlterSeqStmt* stmt)
 {
     if (stmt->is_large) {
-        AlterSequence<Form_pg_large_sequence, int128, true>(stmt);
+        return AlterSequence<Form_pg_large_sequence, int128, true>(stmt);
     } else {
-        AlterSequence<Form_pg_sequence, int64, false>(stmt);
+        return AlterSequence<Form_pg_sequence, int64, false>(stmt);
     }
 }
 
@@ -1154,7 +1159,7 @@ bool CheckSeqOwnedByAutoInc(Oid seqoid)
  * Alter sequence maxvalue needs update info in GTM.
  */
 template<typename T_Form, typename T_Int, bool large>
-static void AlterSequence(const AlterSeqStmt* stmt)
+static ObjectAddress AlterSequence(const AlterSeqStmt* stmt)
 {
     Oid relid;
     SeqTable elm = NULL;
@@ -1169,12 +1174,13 @@ static void AlterSequence(const AlterSeqStmt* stmt)
     bool is_restart = false;
 #endif
     bool need_seq_rewrite = false;
+    ObjectAddress address;
 
     /* Open and lock sequence. */
     relid = RangeVarGetRelid(stmt->sequence, ShareRowExclusiveLock, stmt->missing_ok);
     if (relid == InvalidOid) {
         ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->sequence->relname)));
-        return;
+        return InvalidObjectAddress;
     }
 
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->sequence->relname);
@@ -1283,7 +1289,9 @@ static void AlterSequence(const AlterSeqStmt* stmt)
         UpdatePgObjectMtime(seqrel->rd_id, objectType);
     }
 
+    ObjectAddressSet(address, RelationRelationId, relid);
     relation_close(seqrel, NoLock);
+    return address;
 }
 
 /*

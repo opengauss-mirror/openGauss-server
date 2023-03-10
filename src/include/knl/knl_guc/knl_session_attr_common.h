@@ -174,6 +174,7 @@ typedef struct knl_session_attr_common {
     char* bbox_dump_path;
 
     bool assert_enabled;
+    bool enable_expr_fusion;
     int AlarmReportInterval;
     int xmloption;
     bool enable_ts_compaction;
@@ -237,7 +238,9 @@ typedef struct knl_session_attr_common {
     void** extension_session_vars_array;
     char* threadpool_reset_percent_item;
     int threadpool_reset_percent_list[2];
+    bool enable_indexscan_optimization;
     char* delimiter_name;
+    bool test_user_host;
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

@@ -772,6 +772,98 @@ explain (costs off) select /*+ no broadcast(hint_vec) */ a from hint_vec where a
 explain (costs off) select /*+ no redistribute(hint_vec) */ a from hint_vec where a = 10;
 explain (costs off) select /*+ skew(hint_vec(a)) */ a from hint_vec where a = 10;
 
+explain (costs off) select /*+indexscan(''')*/ 1;
+explain (costs off) select /*+indexscan(""")*/ 1;
+explain (costs off) select /*+indexscan($$$)*/ 1;
+create table subpartition_hash_hash (
+    c1 int,
+    c2 int,
+    c3 text,
+    c4 varchar(20),
+    c5 int generated always as(2 * c1) stored
+) partition by hash(c1) subpartition by hash(c2) (
+    partition p1 (
+        subpartition p1_1,
+        subpartition p1_2,
+        subpartition p1_3,
+        subpartition p1_4,
+        subpartition p1_5
+    ),
+    partition p2 (
+        subpartition p2_1,
+        subpartition p2_2,
+        subpartition p2_3,
+        subpartition p2_4,
+        subpartition p2_5
+    ),
+    partition p3 (
+        subpartition p3_1,
+        subpartition p3_2,
+        subpartition p3_3,
+        subpartition p3_4,
+        subpartition p3_5
+    ),
+    partition p4 (
+        subpartition p4_1,
+        subpartition p4_2,
+        subpartition p4_3,
+        subpartition p4_4,
+        subpartition p4_5
+    ),
+    partition p5 (
+        subpartition p5_1,
+        subpartition p5_2,
+        subpartition p5_3,
+        subpartition p5_4,
+        subpartition p5_5
+    )
+);
+create index subpartition_hash_hash_i1 on subpartition_hash_hash(c1) local;
+create index subpartition_hash_hash_i2 on subpartition_hash_hash(c2) local;
+create index subpartition_hash_hash_i3 on subpartition_hash_hash(c3) local;
+create index subpartition_hash_hash_i4 on subpartition_hash_hash(c4) local;
+create index subpartition_hash_hash_i5 on subpartition_hash_hash(c5) local;
+create table partition_range (c1 int, c2 int, c3 text, c4 varchar(20)) with(orientation = column) partition by range(c1, c2) (
+    partition p1
+    values less than(10000, 10000),
+        partition p2
+    values less than(20000, 20000),
+        partition p3
+    values less than(30000, 30000),
+        partition p4
+    values less than(40000, 40000),
+        partition p5
+    values less than(50000, 50000),
+        partition p6
+    values less than(60000, 60000),
+        partition p7
+    values less than(70000, 70000),
+        partition p8
+    values less than(80000, 80000),
+        partition p9
+    values less than(90000, 90000),
+        partition p10
+    values less than(MAXVALUE, MAXVALUE)
+);
+create index partition_range_i1 on partition_range using btree(c1) local;
+create index partition_range_i2 on partition_range using psort(c2) local;
+create index partition_range_i3 on partition_range using btree(c3) local;
+create index partition_range_i4 on partition_range using btree(c4) local;
+
+explain (analyse,timing off,costs off) create table tb_create_merge_append6 as (
+    select
+        /*+ indexscan(subpartition_hash_hash subpartition_hash_hash_i1)*/
+        subpartition_hash_hash.c1 c1,
+        subpartition_hash_hash.c3 c2,
+        partition_range.c1 c3
+    from subpartition_hash_hash
+        join partition_range on subpartition_hash_hash.c2 = partition_range.c2
+        and subpartition_hash_hash.c1 > 8888
+        and subpartition_hash_hash.c1 < 88888
+    order by subpartition_hash_hash.c1
+    limit 100 offset 10
+);
+
 drop view hint_view_1;
 drop view hint_view_2;
 drop view hint_view_3;

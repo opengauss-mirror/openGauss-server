@@ -395,7 +395,9 @@ static const char* WaitStateDesc[] = {
     "wait sync consumer next step",  // STATE_WAIT_SYNC_CONSUMER_NEXT_STEP
     "wait sync producer next step",  // STATE_WAIT_SYNC_PRODUCER_NEXT_STEP
     "gtm set consistency point",     // STATE_GTM_SET_CONSISTENCY_POINT
-    "wait sync bgworkers"            // STATE_WAIT_SYNC_BGWORKERS
+    "wait sync bgworkers",           // STATE_WAIT_SYNC_BGWORKERS
+    "stanby read recovery conflict", // STATE_STANDBY_READ_RECOVERY_CONFLICT
+    "standby get snapshot"           // STATE_STANDBY_GET_SNAPSHOT
 };
 
 // description for WaitStatePhase enums.
@@ -3931,10 +3933,10 @@ void get_network_info(char** node_host, int* node_port)
     *node_host = get_pgxc_nodehost(node_oid);
     *node_port = get_pgxc_nodeport(node_oid);
 #else
-    if (strcmp("*", g_instance.attr.attr_network.ListenAddresses) == 0) {
+    if (strcmp("*", u_sess->attr.attr_network.ListenAddresses) == 0) {
         *node_host = "localhost";
     } else {
-        *node_host = g_instance.attr.attr_network.ListenAddresses;
+        *node_host = u_sess->attr.attr_network.ListenAddresses;
     }
     *node_port = g_instance.attr.attr_network.PostPortNumber;
 #endif

@@ -1,2 +1,10 @@
 --run
 \! sh @abs_srcdir@/snapshots_test/test.sh -r -p @portstring@ -d regression
+
+drop database if exists test1;
+create database test1 dbcompatibility 'b';
+\c test1
+create table t1(id int);
+insert into t1 values(1);
+create snapshot qwer as select * from t1;
+\c regression

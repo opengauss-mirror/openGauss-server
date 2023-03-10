@@ -88,14 +88,8 @@ size_t PageCompression::ReadCompressedBuffer(BlockNumber blockNum, char *buffer,
     size_t actualSize = CfsReadCompressedPage(buffer, bufferLen,
         blockNum % CFS_LOGIC_BLOCKS_PER_EXTENT, &cfsReadStruct, globalBlockNumber);
     /* valid check */
-    if (actualSize == COMPRESS_FSEEK_ERROR) {
-        return 0;
-    } else if (actualSize == COMPRESS_FREAD_ERROR) {
-        return 0;
-    } else if (actualSize == COMPRESS_CHECKSUM_ERROR) {
-        return 0;
-    } else if (actualSize == COMPRESS_BLOCK_ERROR) {
-        return 0;
+    if (actualSize > MIN_COMPRESS_ERROR_RT) {
+        return actualSize;
     }
 
     if (zeroAlign && actualSize != bufferLen) {
@@ -250,15 +244,6 @@ bool PageCompression::WriteBufferToCurrentBlock(char *buf, BlockNumber blkNumber
     }
     uint16 chkSize = cfsExtentHeader->chunk_size;
 
-    uint32 nchunks = (size - 1) / (int32)chkSize + 1;
-    /* fill zero in the last chunk */
-    uint64 realSize = nchunks * chkSize;
-    if ((uint64)size < realSize) {
-        uint64 leftSize = realSize - size;
-        errno_t rc = memset_s(buf + (uint32)size, (uint32)leftSize, 0, (uint32)leftSize);
-        securec_check(rc, "", "");
-    }
-    size = realSize;
     BlockNumber logicBlockNumber = blkNumber % CFS_LOGIC_BLOCKS_PER_EXTENT;
     BlockNumber extentOffset = (blkNumber / CFS_LOGIC_BLOCKS_PER_EXTENT) % CFS_EXTENT_COUNT_PER_FILE;
     int needChunks = size / (int32)chkSize;

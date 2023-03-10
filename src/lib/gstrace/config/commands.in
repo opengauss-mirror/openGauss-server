@@ -1,6 +1,7 @@
 <func> createdb
 <func> dropdb
 <func> RenameDatabase
+<func> AlterDatabasePermissionCheck
 <func> AlterDatabase
 <func> AlterDatabaseSet
 <func> AlterDatabaseOwner

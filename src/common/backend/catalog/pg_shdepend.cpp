@@ -29,6 +29,7 @@
 #include "catalog/pg_conversion.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_default_acl.h"
+#include "catalog/pg_event_trigger.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_foreign_data_wrapper.h"
 #include "catalog/pg_foreign_server.h"
@@ -49,6 +50,7 @@
 #include "commands/collationcmds.h"
 #include "commands/conversioncmds.h"
 #include "commands/defrem.h"
+#include "commands/event_trigger.h"
 #include "commands/extension.h"
 #include "commands/proclang.h"
 #include "commands/publicationcmds.h"
@@ -1397,6 +1399,10 @@ void shdepReassignOwned(List* roleids, Oid newrole)
                     AlterForeignDataWrapperOwner_oid(sdepForm->objid, newrole);
                     break;
 
+                case EventTriggerRelationId:
+                    AlterEventTriggerOwner_oid(sdepForm->objid, newrole);
+                    break;
+                    
                 case ExtensionRelationId:
                     AlterExtensionOwner_oid(sdepForm->objid, newrole);
                     break;

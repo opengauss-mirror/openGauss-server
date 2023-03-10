@@ -229,7 +229,7 @@ void SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress)
 {
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
-    dms_ctx.xid_ctx.xid = *(uint64 *)(&transactionId);   
+    dms_ctx.xid_ctx.xid = *(uint64 *)(&transactionId);
 
     do {
         dms_ctx.xid_ctx.inst_id = (unsigned char)SS_PRIMARY_ID;

@@ -187,5 +187,6 @@ extern bool repair_deleted_file_check(RelFileNodeForkNum fileNode, int fd);
 #define PG_TEMP_FILES_DIR "pgsql_tmp"
 #define PG_TEMP_FILE_PREFIX "pgsql_tmp"
 #define SS_PG_TEMP_FILES_DIR "ss_pgsql_tmp"
+#define EIO_RETRY_TIMES 3
 
 #endif /* FD_H */

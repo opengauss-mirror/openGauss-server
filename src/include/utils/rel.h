@@ -196,6 +196,8 @@ typedef struct RelationData {
     /* use "struct" here to avoid needing to include htup.h: */
     struct HeapTupleData* rd_indextuple; /* all of pg_index tuple */
     Form_pg_am rd_am;                    /* pg_am tuple for index's AM */
+    /* use "struct" here to avoid needing to include amapi.h*/
+    struct IndexAmRoutine* rd_amroutine; /* index AM's API struct */
 
     int rd_indnkeyatts;     /* index relation's indexkey nums */
     int1 rd_indexsplit;  /* determines the page split method to use */
@@ -406,6 +408,7 @@ typedef struct StdRdOptions {
     bool on_commit_delete_rows; /* global temp table */
     PageCompressOpts compress; /* page compress related reloptions. */
     int check_option_offset; /* for views */
+    Oid collate; /* table's default collation in b format. */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
@@ -846,5 +849,7 @@ extern void RelationDecrementReferenceCount(Oid relationId);
 extern void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info);
 extern char RelationGetRelReplident(Relation r);
 extern void SetupPageCompressForRelation(RelFileNode* node, PageCompressOpts* compressOpts, const char* name);
+extern bool IsRelationReplidentKey(Relation r, int attno);
+
 #endif /* REL_H */
 

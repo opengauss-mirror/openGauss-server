@@ -42,6 +42,10 @@
 #include "utils/memutils.h"
 #include "commands/user.h"
 #include "libpq/crypt.h"
+#include "catalog/pg_authid.h"
+#include "catalog/indexing.h"
+#include "utils/fmgroids.h"
+#include "utils/builtins.h"
 
 
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
@@ -2371,3 +2375,91 @@ bool check_ip_whitelist(hbaPort* port, char* ip, unsigned int ip_len)
     return isWhitelistIP;
 }
 
+int CompareUserHostName(char* s1, char* s2)
+{
+    char* tmp1 = strchr(s1, '%');
+    char* tmp2 = strchr(s2, '%');
+    if (tmp1 && tmp2) {
+        if ((tmp1 - s1) > (tmp2 - s2))
+            return 1;
+        else if ((tmp1 - s1) < (tmp2 - s2))
+            return -1;
+        else
+            return CompareUserHostName(tmp1+1, tmp2+1);
+    } else if (tmp1) {
+        return -1;
+    } else if (tmp2) {
+        return 1;
+    } else {
+        return (strlen(s1) > strlen(s2));
+    }
+}
+
+char* MatchOtherUserHostName(const char* rolname, char* userHostName)
+{
+    char* firstPrivName = NULL;
+    Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
+    HeapTuple tup = NULL;
+    bool result = false;
+    while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
+        auto auth = (Form_pg_authid)GETSTRUCT(tup);
+        result = (GenericMatchText(userHostName, strlen(userHostName), NameStr(auth->rolname), strlen(NameStr(auth->rolname))) == 1);
+        if (result) {
+            char* matchName = pstrdup(NameStr(auth->rolname));
+            if (!firstPrivName || CompareUserHostName(matchName, firstPrivName) == 1)
+                firstPrivName = matchName;
+            else
+                pfree_ext(matchName);
+        }
+    }
+    systable_endscan(scan);
+    heap_close(relation, AccessShareLock);
+    return firstPrivName;
+}
+
+char* GenUserHostName(hbaPort* port, const char* role)
+{
+    if (!port)
+        ereport(ERROR,(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),errmsg("The MyProcPort can't be NULL")));
+    char remoteHostname[NI_MAXHOST] = {0};
+    int userLen = strlen(role);
+    char userHostName[NI_MAXHOST+userLen] = {0};
+    inet_net_ntop(AF_INET, &((struct sockaddr_in*)(&port->raddr.addr))->sin_addr,
+                  ((const struct sockaddr*)(&port->raddr.addr))->sa_family == AF_INET ? 32 : 128,
+                  remoteHostname,
+                  sizeof(remoteHostname));
+    errno_t rc = snprintf_s(userHostName, sizeof(userHostName), sizeof(userHostName) - 1, "%s@%s", role, remoteHostname);
+    securec_check_ss(rc, "", "");
+    return pstrdup(userHostName);
+}
+
+extern char* GetDatabaseCompatibility(const char* dbname);
+HeapTuple SearchUserHostName(const char* userName, Oid* oid)
+{
+    char* userHostName = NULL;
+    HeapTuple roleTup = NULL;
+    if (u_sess->attr.attr_common.test_user_host && !OidIsValid(u_sess->proc_cxt.MyDatabaseId) && u_sess->proc_cxt.MyProcPort) {
+        bool isBFormat = false;
+        char* dbCompatibility = GetDatabaseCompatibility(u_sess->proc_cxt.MyProcPort->database_name);
+        if (dbCompatibility)
+            isBFormat = (strcmp(dbCompatibility, "B") == 0);
+        if (isBFormat) {
+            userHostName = GenUserHostName(u_sess->proc_cxt.MyProcPort, userName);
+            roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(userHostName));
+            if (!roleTup) {
+                char* matchName = MatchOtherUserHostName(userName, userHostName);
+                if (matchName) {
+                    roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(matchName));
+                    pfree_ext(matchName);
+                }
+            }
+        }
+    }
+    if (!roleTup) {
+        roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(userName));
+    }
+    if (roleTup && oid)
+        *oid = HeapTupleGetOid(roleTup);
+    return roleTup;
+}

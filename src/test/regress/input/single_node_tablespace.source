@@ -85,7 +85,11 @@ CREATE TABLE bar (i int) TABLESPACE nosuchspace;
 -- Fail, not empty
 DROP TABLESPACE testspace;
 
+CREATE USER tablespace_user password 'gauss@123';
+alter tablespace testspace owner to tablespace_user;
+
 DROP SCHEMA testschema CASCADE;
 
 -- Should succeed
 DROP TABLESPACE testspace;
+drop user tablespace_user;

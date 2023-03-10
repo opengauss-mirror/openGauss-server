@@ -305,7 +305,7 @@ extern void fmgr_info_copy(FmgrInfo* dstinfo, FmgrInfo* srcinfo, MemoryContext d
         (Fcinfo).fncollation = (Collation);                                             \
         (Fcinfo).isnull = false;                                                        \
         (Fcinfo).nargs = (Nargs);                                                       \
-        if ((Nargs) > FUNC_PREALLOCED_ARGS) {                                           \
+        if (unlikely((Nargs) > FUNC_PREALLOCED_ARGS)) {                                 \
             (Fcinfo).arg = (Datum*)palloc0((Nargs) * sizeof(Datum));                    \
             (Fcinfo).argnull = (bool*)palloc0((Nargs) * sizeof(bool));                  \
             (Fcinfo).argTypes = (Oid*)palloc0((Nargs) * sizeof(Oid));                   \

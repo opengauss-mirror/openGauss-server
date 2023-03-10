@@ -38,6 +38,11 @@
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
 
+extern const uint32 SRF_FUSION_VERSION_NUM;
+extern const uint32 INNER_UNIQUE_VERSION_NUM;
+extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
+extern const uint32 SELECT_INTO_FILE_VERSION_NUM;
+extern const uint32 CHARACTER_SET_VERSION_NUM;
 extern const uint32 SELECT_INTO_VAR_VERSION_NUM;
 extern const uint32 LARGE_SEQUENCE_VERSION_NUM;
 extern const uint32 GRAND_VERSION_NUM;
@@ -121,11 +126,31 @@ extern const uint32 FDW_SUPPORT_JOIN_AGG_VERSION_NUM;
 extern const uint32 UNION_NULL_VERSION_NUM;
 extern const uint32 INSERT_RIGHT_REF_VERSION_NUM;
 extern const uint32 CREATE_INDEX_IF_NOT_EXISTS_VERSION_NUM;
+extern const uint32 SLOW_SQL_VERSION_NUM;
+extern const uint32 INDEX_HINT_VERSION_NUM;
+extern const uint32 CREATE_TABLE_AS_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
 
 #define INPLACE_UPGRADE_PRECOMMIT_VERSION 1
+
+// b_format_behavior_compat_options params
+#define B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION 1
+#define B_FORMAT_OPT_ENABLE_SET_VARIABLES 2
+#define B_FORMAT_OPT_ENABLE_MODIFY_COLUMN 4
+#define B_FORMAT_OPT_DEFAULT_COLLATION 8
+#define B_FORMAT_OPT_MAX 4
+
+#define ENABLE_SET_SESSION_TRANSACTION                                                                   \
+    ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION) && \
+     u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+#define ENABLE_SET_VARIABLES (u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_VARIABLES)
+#define USE_DEFAULT_COLLATION (u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_DEFAULT_COLLATION && \
+    t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM && u_sess->attr.attr_common.upgrade_mode == 0)
+#define ENABLE_MODIFY_COLUMN \
+        ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_MODIFY_COLUMN) && \
+        u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 
 #define OPT_DISPLAY_LEADING_ZERO 1
 #define OPT_END_MONTH_CALCULATE 2
@@ -153,7 +178,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_PGFORMAT_SUBSTR 8388608
 #define OPT_TRUNC_NUMERIC_TAIL_ZERO 16777216
 #define OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN 33554432
-#define OPT_MAX 26
+#define OPT_SELECT_INTO_RETURN_NULL 67108864
+#define OPT_MAX 27
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -192,6 +218,8 @@ extern bool contain_backend_version(uint32 version_number);
 
 #define PLSQL_COMPILE_FOR_LOOP (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_FOR_LOOP)
 #define PLSQL_COMPILE_OUTPARAM (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_OUTPARAM)
+
+#define SELECT_INTO_RETURN_NULL (u_sess->utils_cxt.behavior_compat_flags & OPT_SELECT_INTO_RETURN_NULL)
 
 /* define database compatibility Attribute */
 typedef struct {

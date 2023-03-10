@@ -41,6 +41,7 @@ static TupleTableSlot* ExecGroup(PlanState* state)
     AttrNumber* grpColIdx = NULL;
     TupleTableSlot* firsttupleslot = NULL;
     TupleTableSlot* outerslot = NULL;
+    Oid* grpCollations = NULL;
 
     CHECK_FOR_INTERRUPTS();
 
@@ -52,6 +53,7 @@ static TupleTableSlot* ExecGroup(PlanState* state)
     econtext = node->ss.ps.ps_ExprContext;
     numCols = ((Group*)node->ss.ps.plan)->numCols;
     grpColIdx = ((Group*)node->ss.ps.plan)->grpColIdx;
+    grpCollations = ((Group*)node->ss.ps.plan)->grp_collations;
 
     /*
      * Check to see if we're still projecting out tuples from a previous group
@@ -140,9 +142,10 @@ static TupleTableSlot* ExecGroup(PlanState* state)
              * Compare with first tuple and see if this tuple is of the same
              * group.  If so, ignore it and keep scanning.
              */
-            if (!execTuplesMatch(
-                    firsttupleslot, outerslot, numCols, grpColIdx, node->eqfunctions, econtext->ecxt_per_tuple_memory))
+            if (!execTuplesMatch(firsttupleslot, outerslot, numCols, grpColIdx, node->eqfunctions,
+                                 econtext->ecxt_per_tuple_memory, grpCollations)) {
                 break;
+            }
         }
 
         /*

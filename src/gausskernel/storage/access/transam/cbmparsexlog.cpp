@@ -70,7 +70,6 @@ static const char *const bmp_file_name_template = "%s%s%lu_%08X%08X_%08X%08X.cbm
 static const char *const merged_bmp_file_name_template = "%s%s%08X%08X_%08X%08X_%ld-%d.cbm";
 
 static void CBMFileHomeInitialize(void);
-static void ResetXlogCbmSys(void);
 static bool IsCBMFile(const char *fileName, uint64 *seqNum, XLogRecPtr *startLSN, XLogRecPtr *endLSN);
 static void ValidateCBMFile(const char *filename, XLogRecPtr *trackedLSN, uint64 *lastfileSize, bool truncErrPage);
 static bool ReadCBMPage(BitmapFile *cbmFile, char *page, bool *checksum_ok);
@@ -214,7 +213,7 @@ static void CBMFileHomeInitialize(void)
         ereport(FATAL, (errmsg("Length of absolute CBM file path would exceed MAXPGPATH!")));
 }
 
-static void ResetXlogCbmSys(void)
+extern void ResetXlogCbmSys(void)
 {
     int rc = 0;
 
@@ -428,9 +427,13 @@ static void ValidateCBMFile(const char *filename, XLogRecPtr *trackedLSN, uint64
         *lastfileSize = (off_t)0;
     else {
         if (cbmFile.offset < st.st_size && truncErrPage) {
-            if (ftruncate(cbmFile.fd, cbmFile.offset))
+            if (ftruncate(cbmFile.fd, cbmFile.offset)) {
+                if (close(cbmFile.fd))
+                    ereport(WARNING, (errcode_for_file_access(), errmsg("could not close CBM file \"%s\": %m", filePath)));
+
                 ereport(ERROR, (errcode_for_file_access(),
                                 errmsg("Failed to truncate CBM file \"%s\" to length %ld", filePath, cbmFile.offset)));
+            }
         }
 
         *lastfileSize = cbmFile.offset;
@@ -605,6 +608,7 @@ static void StartNextCBMFile(XLogRecPtr startLSN)
         ereport(ERROR, (errcode_for_file_access(),
                         errmsg("could not create new CBM file \"%s\": %m", t_thrd.cbm_cxt.XlogCbmSys->out.name)));
 
+    Assert(t_thrd.cbm_cxt.XlogCbmSys->out.fd == -1);
     t_thrd.cbm_cxt.XlogCbmSys->out.fd = fd;
     t_thrd.cbm_cxt.XlogCbmSys->out.size = 0;
     t_thrd.cbm_cxt.XlogCbmSys->out.offset = (off_t)0;
@@ -619,6 +623,7 @@ static void StartExistCBMFile(uint64 lastfileSize)
         ereport(ERROR, (errcode_for_file_access(),
                         errmsg("could not open CBM file \"%s\": %m", t_thrd.cbm_cxt.XlogCbmSys->out.name)));
 
+    Assert(t_thrd.cbm_cxt.XlogCbmSys->out.fd == -1);
     t_thrd.cbm_cxt.XlogCbmSys->out.fd = fd;
     t_thrd.cbm_cxt.XlogCbmSys->out.size = lastfileSize;
     t_thrd.cbm_cxt.XlogCbmSys->out.offset = (off_t)lastfileSize;
@@ -2004,6 +2009,7 @@ static void RotateCBMFile(void)
     if (close(t_thrd.cbm_cxt.XlogCbmSys->out.fd) != 0)
         ereport(ERROR, (errcode_for_file_access(),
                         errmsg("close CBM file \"%s\" failed during rotate", t_thrd.cbm_cxt.XlogCbmSys->out.name)));
+    t_thrd.cbm_cxt.XlogCbmSys->out.fd = -1;
 
     if (strncmp(t_thrd.cbm_cxt.XlogCbmSys->out.name, t_thrd.cbm_cxt.XlogCbmSys->cbmFileHome,
                 strlen(t_thrd.cbm_cxt.XlogCbmSys->cbmFileHome)) ||

@@ -256,6 +256,7 @@ extern Partition partitionOpenWithRetry(Relation relation, Oid partitionId, LOCK
 extern Partition partitionOpen(Relation relation, Oid partitionId, LOCKMODE lockmode, int2 bucketId=-1);
 extern void partitionClose(Relation relation, Partition partition, LOCKMODE lockmode);
 extern Partition tryPartitionOpen(Relation relation, Oid partitionId, LOCKMODE lockmode);
+extern Partition PartitionOpenWithPartitionno(Relation relation, Oid partition_id, int partitionno, LOCKMODE lockmode);
 extern Relation try_relation_open(Oid relationId, LOCKMODE lockmode);
 extern Relation relation_openrv(const RangeVar* relation, LOCKMODE lockmode);
 extern Relation relation_openrv_extended(const RangeVar* relation, LOCKMODE lockmode, bool missing_ok,
@@ -371,6 +372,13 @@ static inline void ReportPartitionOpenError(Relation relation, Oid partition_id)
         errcause("If there is a DDL operation, the cause is incorrect operation. Otherwise, it is a system error."),
         erraction("Retry this operation after the DDL operation finished or Contact engineer for support.")));
 #endif
+}
+
+static inline void ReportNoExistPartition(PartStatus partStatus, Oid partOid)
+{
+    if (partStatus == PART_METADATA_NOEXIST && module_logging_is_on(MOD_GPI)) {
+        ereport(LOG, (errmodule(MOD_GPI), errmsg("Partition %u does not exist in GPI", partOid)));
+    }
 }
 
 extern void heap_redo(XLogReaderState* rptr);

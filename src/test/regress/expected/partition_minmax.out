@@ -1455,7 +1455,7 @@ explain(costs off, verbose on) select * from test_list_lt t1 where a = (select m
 --------------------------------------------------------------------------------------------------------------------------
  Partition Iterator
    Output: t1.a, t1.b
-   Iterations: PART
+   Iterations: 3
    InitPlan 2 (returns $3)
      ->  Result
            Output: $2
@@ -1477,10 +1477,10 @@ explain(costs off, verbose on) select * from test_list_lt t1 where a = (select m
    ->  Partitioned Bitmap Heap Scan on partition_minmax.test_list_lt t1
          Output: t1.a, t1.b
          Recheck Cond: (t1.a = $3)
-         Selected Partitions:  PART
+         Selected Partitions:  1..3
          ->  Partitioned Bitmap Index Scan on idx_list_a
                Index Cond: (t1.a = $3)
-               Selected Partitions:  PART
+               Selected Partitions:  1..3
 (28 rows)
 
 select * from test_list_lt t1 where a = (select min(t2.a) from test_list_lt t2);

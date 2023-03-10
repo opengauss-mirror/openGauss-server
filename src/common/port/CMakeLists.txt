@@ -18,6 +18,7 @@ execute_process(
     COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/inet_net_ntop.cpp ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/inet_net_ntop.cpp
     COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/noblock.cpp ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/noblock.cpp
     COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/path.cpp ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/path.cpp
+    COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/pg_bitutils.cpp ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/pg_bitutils.cpp
     COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/pgcheckdir.cpp ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/pgcheckdir.cpp
     COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/pgmkdirp.cpp ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/pgmkdirp.cpp
     COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/pgsleep.cpp ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/pgsleep.cpp
@@ -58,7 +59,8 @@ list(APPEND TGT_port_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/exec.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/inet_net_ntop.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/noblock.cpp 
-    ${CMAKE_CURRENT_SOURCE_DIR}/path.cpp 
+    ${CMAKE_CURRENT_SOURCE_DIR}/path.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pg_bitutils.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/pgcheckdir.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/pgmkdirp.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/pgsleep.cpp 
@@ -127,7 +129,8 @@ list(APPEND TGT_pgport_srv_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/exec.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/inet_net_ntop.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/noblock.cpp 
-    ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/path.cpp 
+    ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/path.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/pg_bitutils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/pgcheckdir.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/pgmkdirp.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/pgsleep.cpp 
@@ -191,6 +194,7 @@ set(TGT_pgport_tool_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/inet_net_ntop.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/noblock.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/path.cpp 
+    ${CMAKE_CURRENT_SOURCE_DIR}/pg_bitutils.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/pgcheckdir.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/pgmkdirp.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/pgsleep.cpp 

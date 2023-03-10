@@ -98,5 +98,8 @@ extern bool listExtensionContents(const char* pattern);
 /* \ded+ */
 extern bool listDataSource(const char* pattern, bool verbose);
 
+/* \dy */
+extern bool listEventTriggers(const char *pattern, bool verbose);
+
 #endif /* DESCRIBE_H */
 

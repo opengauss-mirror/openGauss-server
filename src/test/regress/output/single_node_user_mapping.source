@@ -6,6 +6,10 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 (1 row)
 
 --- prepare
+\! echo $GAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.cipher
+\! echo $GAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.rand
+\! echo $GAUSSHOME | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o usermapping > /dev/null 2>&1 ; echo $?
+0
 \! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.cipher
 \! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.rand
 \! echo $OLDGAUSSHOME | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o usermapping > /dev/null 2>&1 ; echo $?
@@ -17,9 +21,17 @@ CREATE SERVER dummy_srv FOREIGN DATA WRAPPER dummy;
 CREATE SERVER dummy_srv2 FOREIGN DATA WRAPPER dummy;
 CREATE USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(username 'test', password 'shouldBeEncrypt');
 CREATE USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(username 'test');
-ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(ADD password 'shouldBeEncrypt');
-ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(SET password 'shouldBeEncrypt2');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(ADD password 'shouldBe''''''''''''''''''''''''''''''Encrypt');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(SET password 'shouldBe''''''''''''''''''''''''''''''Encrypt2');
 ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(DROP password);
+DROP USER MAPPING FOR current_user SERVER dummy_srv2;
+DROP USER MAPPING FOR current_user SERVER dummy_srv;
+-- test with password keyword double-quote
+CREATE USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(username 'test', "password" 'shouldBe''''''''''''''''''''''''''''''Encrypt_tmp');
+CREATE USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(username 'test');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(SET "password" 'shouldBe''''''''''''''''''''''''''''''Encrypt_tmp2');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(ADD "password" 'shouldBe''''''''''''''''''''''''''''''Encrypt_tmp');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(SET "password" 'shouldBe''''''''''''''''''''''''''''''Encrypt_tmp2');
 DROP USER MAPPING FOR current_user SERVER dummy_srv2;
 DROP USER MAPPING FOR current_user SERVER dummy_srv;
 DROP SERVER dummy_srv;
@@ -30,8 +42,8 @@ RESET SESSION AUTHORIZATION;
 --can't drop role regress_usermapping_user, since FOREIGN DATA WRAPPER dummy depend on it
 --DROP ROLE regress_usermapping_user;
 SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_user' and object_name = 'current_user';
- object_name  |                                             detail_info                                              
---------------+------------------------------------------------------------------------------------------------------
+ object_name  |                                              detail_info                                               
+--------------+--------------------------------------------------------------------------------------------------------
  current_user | CREATE USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(username 'test', password '********');
  current_user | CREATE USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(username 'test');
  current_user | ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(ADD password '********');
@@ -39,7 +51,14 @@ SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-1
  current_user | ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(DROP password);
  current_user | DROP USER MAPPING FOR current_user SERVER dummy_srv2;
  current_user | DROP USER MAPPING FOR current_user SERVER dummy_srv;
-(7 rows)
+ current_user | CREATE USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(username 'test', "password" '********');
+ current_user | CREATE USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(username 'test');
+ current_user | ALTER USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(SET "password" '********');
+ current_user | ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(ADD "password" '********');
+ current_user | ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(SET "password" '********');
+ current_user | DROP USER MAPPING FOR current_user SERVER dummy_srv2;
+ current_user | DROP USER MAPPING FOR current_user SERVER dummy_srv;
+(14 rows)
 
 --clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');

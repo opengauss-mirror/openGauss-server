@@ -37,6 +37,7 @@
 #include "pgstat.h"
 #include "pgxc/pgxc.h"
 #include "instruments/instr_unique_sql.h"
+#include "port/pg_bitutils.h"
 #include "utils/anls_opt.h"
 #include "utils/dynahash.h"
 #include "utils/lsyscache.h"
@@ -44,6 +45,7 @@
 #include "utils/memutils.h"
 #include "utils/selfuncs.h"
 #include "utils/syscache.h"
+#include "utils/hashutils.h"
 #include "vecexecutor/vechashtable.h"
 #include "vectorsonic/vsonicarray.h"
 #include "vectorsonic/vsonichash.h"
@@ -146,9 +148,6 @@ Node* MultiExecHash(HashState* node)
     }
     (void)pgstat_report_waitstatus(oldStatus);
 
-    /* analyze hash table information for unique sql hash state */
-    UpdateUniqueSQLHashStats(hashtable, &start_time);
-
     /* resize the hash table if needed (NTUP_PER_BUCKET exceeded) */
     if (hashtable->nbuckets != hashtable->nbuckets_optimal) {
         /* We never decrease the number of buckets. */
@@ -169,6 +168,9 @@ Node* MultiExecHash(HashState* node)
     hashtable->spaceUsed += hashtable->nbuckets * sizeof(HashJoinTuple);
     if (hashtable->spaceUsed > hashtable->spacePeak)
         hashtable->spacePeak = hashtable->spaceUsed;
+
+    /* analyze hash table information for unique sql hash state */
+    UpdateUniqueSQLHashStats(hashtable, &start_time);
 
     /* must provide our own instrumentation support */
     if (node->ps.instrument) {
@@ -284,7 +286,7 @@ void ExecEndHash(HashState* node)
  *		create an empty hashtable data structure for hashjoin.
  * ----------------------------------------------------------------
  */
-HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNulls)
+HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNulls, List *hash_collations)
 {
     HashJoinTable hashtable;
     Plan* outerNode = NULL;
@@ -297,6 +299,7 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
     int64 local_work_mem = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
     int64 max_mem = (node->plan.operatorMaxMem > 0) ? SET_NODEMEM(node->plan.operatorMaxMem, node->plan.dop) : 0;
     ListCell* ho = NULL;
+    ListCell* hc = NULL;
     MemoryContext oldcxt;
 
     /*
@@ -399,6 +402,16 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
         fmgr_info(right_hashfn, &hashtable->inner_hashfunctions[i]);
         hashtable->hashStrict[i] = op_strict(hashop);
         i++;
+    }
+
+    if (hash_collations != NULL) {
+        int nums = list_length(hash_collations);
+        hashtable->collations = (Oid *)palloc(nums * sizeof(Oid));
+        i = 0;
+        foreach(hc, hash_collations) {
+            hashtable->collations[i] = lfirst_oid(hc);
+            i++;
+        }
     }
 
     /*
@@ -796,7 +809,7 @@ void ExecChooseSonicHashTableSize(Path* inner_path, List* hashclauses, int* inne
 
     int tuple_width = 0;
     double ntuples = PATH_LOCAL_ROWS(inner_path) / dop;
-    List* tleList = inner_path->parent->reltargetlist;
+    List* tleList = inner_path->pathtarget->exprs;
     Relids inner_relids = inner_path->parent->relids;
 
     MEMCTL_LOG(
@@ -1032,8 +1045,8 @@ static void ExecHashIncreaseNumBatches(HashJoinTable hashtable)
         hashtable->nbuckets = hashtable->nbuckets_optimal;
         hashtable->log2_nbuckets = hashtable->log2_nbuckets_optimal;
 
-        hashtable->buckets = (struct HashJoinTupleData**) repalloc(
-                hashtable->buckets, sizeof(HashJoinTuple) * hashtable->nbuckets);
+        hashtable->buckets =
+            (struct HashJoinTupleData **)repalloc(hashtable->buckets, sizeof(HashJoinTuple) * hashtable->nbuckets);
     }
 
     /*
@@ -1128,8 +1141,9 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
     errno_t rc;
 
     /* do nothing if not an increase (it's called increase for a reason) */
-    if (hashtable->nbuckets >= hashtable->nbuckets_optimal)
+    if (hashtable->nbuckets >= hashtable->nbuckets_optimal) {
         return;
+    }
 
     /*
      * We already know the optimal number of buckets, so let's just
@@ -1154,10 +1168,7 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
      */
     hashtable->buckets = (HashJoinTuple *)repalloc(hashtable->buckets, hashtable->nbuckets * sizeof(HashJoinTuple));
 
-    rc = memset_s(hashtable->buckets, 
-        sizeof(void *) * hashtable->nbuckets, 
-        0, 
-        sizeof(void *) * hashtable->nbuckets);
+    rc = memset_s(hashtable->buckets, sizeof(void *) * hashtable->nbuckets, 0, sizeof(void *) * hashtable->nbuckets);
     securec_check(rc, "\0", "\0");
 
     /* scan through all tuples in all chunks to rebuild the hash table */
@@ -1197,8 +1208,8 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
  * case by not forcing the slot contents into minimal form; not clear if it's
  * worth the messiness required.
  */
-void ExecHashTableInsert(
-    HashJoinTable hashtable, TupleTableSlot* slot, uint32 hashvalue, int planid, int dop, Instrumentation* instrument)
+void ExecHashTableInsert(HashJoinTable hashtable, TupleTableSlot *slot, uint32 hashvalue, int planid, int dop,
+                         Instrumentation *instrument)
 {
     MinimalTuple tuple = ExecFetchSlotMinimalTuple(slot);
     int bucketno;
@@ -1259,46 +1270,38 @@ void ExecHashTableInsert(
             hashtable->spacePeak = hashtable->spaceUsed;
         }
         bool sysBusy = gs_sysmemory_busy(hashtable->spaceUsed * dop, false);
-        if (hashtable->spaceUsed + int64(hashtable->nbuckets_optimal * sizeof(HashJoinTuple)) > hashtable->spaceAllowed 
-            || sysBusy) {
-            AllocSetContext* set = (AllocSetContext*)(hashtable->hashCxt);
+        if (hashtable->spaceUsed + int64(hashtable->nbuckets_optimal * sizeof(HashJoinTuple)) >
+                hashtable->spaceAllowed ||
+            sysBusy) {
+            AllocSetContext *set = (AllocSetContext *)(hashtable->hashCxt);
             if (sysBusy) {
                 hashtable->causedBySysRes = true;
                 hashtable->spaceAllowed = hashtable->spaceUsed;
                 set->maxSpaceSize = hashtable->spaceUsed;
                 /* if hashtable failed to grow, this branch can be kicked many times */
                 if (hashtable->growEnabled) {
-                    MEMCTL_LOG(LOG,
-                        "HashJoin(%d) early spilled, workmem: %ldKB, usedmem: %ldKB",
-                        planid,
-                        hashtable->spaceAllowed / 1024L,
-                        hashtable->spaceUsed / 1024L);
+                    MEMCTL_LOG(LOG, "HashJoin(%d) early spilled, workmem: %ldKB, usedmem: %ldKB", planid,
+                               hashtable->spaceAllowed / 1024L, hashtable->spaceUsed / 1024L);
                     pgstat_add_warning_early_spill();
                 }
-            /* try to auto spread memory if possible */
+                /* try to auto spread memory if possible */
             } else if (hashtable->curbatch == 0 && hashtable->maxMem > hashtable->spaceAllowed) {
                 hashtable->spaceAllowed = hashtable->spaceUsed;
                 int64 spreadMem = Min(Min(dywlm_client_get_memory() * 1024L, hashtable->spaceAllowed),
-                    hashtable->maxMem - hashtable->spaceAllowed);
+                                      hashtable->maxMem - hashtable->spaceAllowed);
                 if (spreadMem > hashtable->spaceAllowed * MEM_AUTO_SPREAD_MIN_RATIO) {
                     hashtable->spaceAllowed += spreadMem;
                     hashtable->spreadNum++;
                     ExecHashIncreaseBuckets(hashtable);
                     set->maxSpaceSize += spreadMem;
-                    MEMCTL_LOG(DEBUG2,
-                        "HashJoin(%d) auto mem spread %ldKB succeed, and work mem is %ldKB.",
-                        planid,
-                        spreadMem / 1024L,
-                        hashtable->spaceAllowed / 1024L);
+                    MEMCTL_LOG(DEBUG2, "HashJoin(%d) auto mem spread %ldKB succeed, and work mem is %ldKB.", planid,
+                               spreadMem / 1024L, hashtable->spaceAllowed / 1024L);
                     return;
                 }
                 /* if hashtable failed to grow, this branch can be kicked many times */
                 if (hashtable->growEnabled) {
-                    MEMCTL_LOG(LOG,
-                        "HashJoin(%d) auto mem spread %ldKB failed, and work mem is %ldKB.",
-                        planid,
-                        spreadMem / 1024L,
-                        hashtable->spaceAllowed / 1024L);
+                    MEMCTL_LOG(LOG, "HashJoin(%d) auto mem spread %ldKB failed, and work mem is %ldKB.", planid,
+                               spreadMem / 1024L, hashtable->spaceAllowed / 1024L);
                     if (hashtable->spreadNum) {
                         pgstat_add_warning_spill_on_memory_spread();
                     }
@@ -1399,7 +1402,7 @@ bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* 
             /* Compute the hash function */
             uint32 hkey;
 
-            hkey = DatumGetUInt32(FunctionCall1(&hashfunctions[i], keyval));
+            hkey = DatumGetUInt32(FunctionCall1Coll(&hashfunctions[i], hashtable->collations[i], keyval));
             hashkey ^= hkey;
         }
 
@@ -1407,8 +1410,7 @@ bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* 
     }
 
     MemoryContextSwitchTo(oldContext);
-    hashkey = DatumGetUInt32(hash_uint32(hashkey));
-    *hashvalue = hashkey;
+    *hashvalue = murmurhash32(hashkey);
     return true;
 }
 
@@ -1421,7 +1423,7 @@ bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* 
  * chains), and must only cause the batch number to remain the same or
  * increase.  Our algorithm is
  *		bucketno = hashvalue MOD nbuckets
- *		batchno = (hashvalue DIV nbuckets) MOD nbatch
+ *		batchno = ROR(hashvalue, log2_nbuckets) MOD nbatch
  * where nbuckets and nbatch are both expected to be powers of 2, so we can
  * do the computations by shifting and masking.  (This assumes that all hash
  * functions are good about randomizing all their output bits, else we are
@@ -1433,7 +1435,11 @@ bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* 
  * number the way we do here).
  *
  * nbatch is always a power of 2; we increase it only by doubling it.  This
- * effectively adds one more bit to the top of the batchno.
+ * effectively adds one more bit to the top of the batchno.  In very large
+ * joins, we might run out of bits to add, so we do this by rotating the hash
+ * value.  This causes batchno to steal bits from bucketno when the number of
+ * virtual buckets exceeds 2^32.  It's better to have longer bucket chains
+ * than to lose the ability to divide batches.
  */
 void ExecHashGetBucketAndBatch(HashJoinTable hashtable, uint32 hashvalue, int* bucketno, int* batchno)
 {
@@ -1443,7 +1449,7 @@ void ExecHashGetBucketAndBatch(HashJoinTable hashtable, uint32 hashvalue, int* b
     if (nbatch > 1) {
         /* we can do MOD by masking, DIV by shifting */
         *bucketno = hashvalue & (nbuckets - 1);
-        *batchno = (hashvalue >> hashtable->log2_nbuckets) & (nbatch - 1);
+        *batchno = pg_rotate_right32(hashvalue, hashtable->log2_nbuckets) & (nbatch - 1);
     } else {
         *bucketno = hashvalue & (nbuckets - 1);
         *batchno = 0;
@@ -1787,7 +1793,7 @@ static void ExecHashBuildSkewHash(HashJoinTable hashtable, Hash* node, int mcvsT
             uint32 hashvalue;
             int bucket;
 
-            hashvalue = DatumGetUInt32(FunctionCall1(&hashfunctions[0], values[i]));
+            hashvalue = DatumGetUInt32(FunctionCall1Coll(&hashfunctions[0], hashtable->collations[0], values[i]));
 
             /*
              * While we have not hit a hole in the hashtable and have not hit

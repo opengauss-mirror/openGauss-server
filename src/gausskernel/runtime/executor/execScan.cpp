@@ -180,10 +180,12 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
          * tupleDesc.
          */
         if (TupIsNull(slot) || unlikely(executorEarlyStop())) {
-            if (proj_info != NULL)
+            if (proj_info != NULL) {
                 return ExecClearTuple(proj_info->pi_slot);
-            else
-                return slot;
+            } else {
+                /* slot is not used whild early free happen */
+                return NULL;
+            }
         }
 
         /*

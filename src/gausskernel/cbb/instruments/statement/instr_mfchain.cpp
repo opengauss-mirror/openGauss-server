@@ -34,7 +34,6 @@
 #include "access/heapam.h"
 #include "miscadmin.h"
 
-
 #define GetMemFileItemLen(item) (((MemFileItem*)(item))->len)
 #define MFCHAIN_IS_ONLINE(mfchain) (mfchain != NULL && mfchain->state == MFCHAIN_STATE_ONLINE)
 
@@ -43,7 +42,8 @@
 #define MFBLOCK_GET_FIRSTITEM_P(buff, ofs) (char*)(((char*)(buff)) + (ofs))
 #define MFBLOCK_GET_FIRSTITEM_O(buff, ptr) (uint32)((ptr) - ((char*)(buff)))
 
-#define BlockIsEmpty(block) (((block)->state == MFBLOCK_IN_MEMORY && (block)->firstItem == (block)->barrier2) || \
+#define BlockIsEmpty(block) ((block) == NULL || \
+                             ((block)->state == MFBLOCK_IN_MEMORY && (block)->firstItem == (block)->barrier2) || \
                              (block)->state == MFBLOCK_DELETED)
 
 typedef enum BlockActionState {
@@ -63,7 +63,8 @@ typedef enum BlockActionState {
     BLOCK_RELOAD_FILE_DAMAGE_ERR,
     BLOCK_VERIFY_VERSION_ERR,
     BLOCK_VERIFY_CHECKSUM_ERR,
-    BLOCK_VERIFY_SDESC_ERR
+    BLOCK_VERIFY_SDESC_ERR,
+    BLOCK_GET_PATH_ERR
 } BlockActionState;
 
 typedef enum ChainActionState {
@@ -75,6 +76,7 @@ typedef enum ChainActionState {
     CHAIN_CREATE_SIZEPARAM_ERR,
     CHAIN_CREATE_TYPEMOD_ERR,
     CHAIN_CREATE_LOCK_ERR,
+    CHAIN_CREATE_BLOCK_ERR,
 
     /* ADVANCE */
     CHAIN_ADV_DISK_ERR,
@@ -83,7 +85,9 @@ typedef enum ChainActionState {
     CHAIN_SDESC_RECREATE,
 
     CHAIN_TURN_ON,
-    CHAIN_TURN_OFF
+    CHAIN_TURN_OFF,
+
+    CHAIN_LOAD_FILE_ERR
 } ChainActionState;
 
 typedef struct BlockAdvanceResult {
@@ -97,6 +101,7 @@ typedef struct BlockAdvanceResult {
 } BlockAdvanceResult;
 
 static ChainActionState ResetChain(MemFileChain* mfchain);
+void ReportChainException(MemFileChain* mfchain, ChainActionState state);
 
 /* ------------------------------------------------
  * UTILS func
@@ -202,6 +207,10 @@ static void ReportBlockException(uint32 blockId, BlockActionState state, int lev
         case BLOCK_VERIFY_SDESC_ERR:
             ereport(level, (errmsg("MemFileBlock %u verify exception: SimpleTupleDesc not match to now.", blockId)));
             break;
+        case BLOCK_GET_PATH_ERR:
+            ereport(level, (errmodule(MOD_INSTR),
+                errmsg("MemFileBlock %u get path exception: The memory is inaccessible or insufficient.", blockId)));
+            break;
         default:
             ereport(ERROR, (errmsg("Unknow Mem-File-Block action state.")));
     }
@@ -226,7 +235,11 @@ static char* GetBlockPath(MemFileBlock* block, char* buff = NULL)
 {
     Assert(block->parent != NULL);
 
-    char* path = buff != NULL ? buff : (char*)palloc(MAXPGPATH);
+    char* path = buff != NULL ? buff : (char*)palloc0_noexcept(MAXPGPATH);
+    if (path == NULL) {
+        ReportBlockException(block->id, BLOCK_GET_PATH_ERR);
+        return path;
+    }
     errno_t rc = sprintf_s(path, MAXPGPATH, "%s/%u", block->parent->path, block->id);
     securec_check_ss(rc, "", "");
     return path;
@@ -297,6 +310,9 @@ static BlockActionState FlushBlockBuff(MemFileBlock* block)
     }
 
     char* path = GetBlockPath(block);
+    if (path == NULL) {
+        return BLOCK_GET_PATH_ERR;
+    }
     int fd = open(path, O_RDWR | O_CREAT, S_IREAD | S_IWRITE);
     if (fd == -1) {
         pfree(path);
@@ -359,9 +375,18 @@ static MemFileBlock* CreateBlock(MemFileChain* parent, uint32 id, MemFileBlockBu
 {
     Assert(parent != NULL && id > MFCHAIN_INVALID_ID);
 
-    MemFileBlock* block = (MemFileBlock*)palloc(sizeof(MemFileBlock));
+    MemFileBlock* block = (MemFileBlock*)palloc0_noexcept(sizeof(MemFileBlock));
+    if (block == NULL) {
+        ReportChainException(parent, CHAIN_CREATE_BLOCK_ERR);
+        return block;
+    }
     if (buff == NULL) {
-        buff = (MemFileBlockBuff*)palloc(sizeof(MemFileBlockBuff));
+        buff = (MemFileBlockBuff*)palloc0_noexcept(sizeof(MemFileBlockBuff));
+    }
+    if (buff == NULL) {
+        ReportChainException(parent, CHAIN_CREATE_BLOCK_ERR);
+        pfree_ext(block);
+        return NULL;
     }
 
     block->state = MFBLOCK_IN_MEMORY;
@@ -471,8 +496,10 @@ static void DestoryBlock(MemFileBlock* block, bool deep = true)
 
     if (deep) {
         char* path = GetBlockPath(block);
-        unlink(path);
-        pfree(path);
+        if (path != nullptr) {
+            unlink(path);
+            pfree(path);
+        }
     }
 
     if (block->state == MFBLOCK_IN_BOTH) {
@@ -522,12 +549,12 @@ typedef ChainActionState (*CreateMFChainStep)(MemFileChain* mfchain, MemFileChai
      (maxBlockNum)  >= MIN_FBLOCK_NUM && (maxBlockNum)  <= MAX_FBLOCK_NUM &&  \
      (maxBlockNumM) <= (maxBlockNum)  && (retentionTime) > 0)
 
-static void ReportChainException(MemFileChain* mfchain, ChainActionState state, int level = WARNING)
+void ReportChainException(MemFileChain* mfchain, ChainActionState state)
 {
     if (state == CHAIN_ACTION_SUCCESS) {
         return;
     }
-
+    int level = WARNING;
     switch (state) {
         case CHAIN_CREATE_LONGNAME_ERR:
             ereport(level, (errmsg("MemFileChain create exception: name '%s' too long.", mfchain->name)));
@@ -544,6 +571,10 @@ static void ReportChainException(MemFileChain* mfchain, ChainActionState state, 
         case CHAIN_CREATE_LOCK_ERR:
             ereport(level, (errmsg("MemFileChain create exception: invalid lock.")));
             break;
+        case CHAIN_CREATE_BLOCK_ERR:
+            ereport(level,
+                (errmsg("MemFileChain create block exception: The memory is inaccessible or insufficient.")));
+            break;
         case CHAIN_ADV_DISK_ERR:
             ereport(level, (errmsg("MemFileChain advance exception: Disk is inaccessible or insufficient space.")));
             break;
@@ -555,6 +586,9 @@ static void ReportChainException(MemFileChain* mfchain, ChainActionState state, 
             break;
         case CHAIN_TURN_OFF:
             ereport(level, (errmsg("MemFileChain exception: Something bad happened, mem file chain turn off.")));
+            break;
+        case CHAIN_LOAD_FILE_ERR:
+            ereport(level, (errmsg("MemFileChain exception: load file error.")));
             break;
         default:
             ereport(ERROR, (errmsg("Unknow MemFileChain action state.")));
@@ -580,15 +614,15 @@ static bool GetBlockFileAndPrecheck(const char* name, const char* path, char* ou
 
 static MemFileBlock** ReconstructOldBlockFile(MemFileChain* mfchain, List* blocksList, int* size)
 {
-    if (blocksList == NULL) {
-        *size = 0;
-        ereport(LOG, (errmsg("there is no block file to reconstruct. ")));
+    /* firstly, sort by id */
+    int len = list_length(blocksList);
+    MemFileBlock** blocks = (MemFileBlock**)palloc0_noexcept(len * sizeof(MemFileBlock*));
+    if (blocks == NULL) {
+        ereport(WARNING, (errmodule(MOD_INSTR),
+                errmsg("MemFileChain load file, palloc file blocks memory is inaccessible or insufficient.")));
         return NULL;
     }
 
-    /* firstly, sort by id */
-    int len = list_length(blocksList);
-    MemFileBlock** blocks = (MemFileBlock**)palloc(len * sizeof(MemFileBlock*));
     int i = 0;
     ListCell* lc = NULL;
     foreach(lc, blocksList) {
@@ -609,17 +643,20 @@ static MemFileBlock** ReconstructOldBlockFile(MemFileChain* mfchain, List* block
             GetBlockPath(blocks[i], path);
             blocks[i]->id = newId;
             GetBlockPath(blocks[i], newpath);
+            if (path[0] == '\0' || newpath[0] == '\0') {
+                return NULL;
+            }
 
             rename(path, newpath);
             newId++;
         }
     }
-    *size = newId - 1;
+    *size = (int)newId - 1;
     return blocks;
 }
 
 /* scan all file in chain location, remove or reload it. */
-static MemFileBlock** ReloadOrCleanOldBlockFile(MemFileChain* mfchain, int* len)
+static List* ReloadOrCleanOldBlockFile(MemFileChain* mfchain, int* len)
 {
     struct dirent* direntry = NULL;
     char filename[MAXPGPATH] = {'\0'};
@@ -627,6 +664,8 @@ static MemFileBlock** ReloadOrCleanOldBlockFile(MemFileChain* mfchain, int* len)
     bool clean = mfchain->needClean;
     if (unlikely(NULL == dirdesc)) {
         *len = 0;
+        ereport(WARNING, (errmodule(MOD_INSTR),
+                errmsg("MemFileChain load file, allocate dir error.")));
         return NULL;
     }
 
@@ -653,11 +692,7 @@ static MemFileBlock** ReloadOrCleanOldBlockFile(MemFileChain* mfchain, int* len)
     }
     pfree(buffer);
     FreeDir(dirdesc);
-
-    MemFileBlock** blocks = ReconstructOldBlockFile(mfchain, blocksList, len);
-    list_free(blocksList);
-
-    return blocks;
+    return blocksList;
 }
 
 static inline bool ChainNeedTrimOldest(MemFileChain* mfchain)
@@ -712,7 +747,10 @@ static ChainActionState CreateMFChainLocation(MemFileChain* mfchain, MemFileChai
         return CHAIN_CREATE_LONGNAME_ERR;
     }
 
-    char* path = (char*)palloc(MAXPGPATH);
+    char* path = (char*)palloc0_noexcept(MAXPGPATH);
+    if (path == NULL) {
+        return CHAIN_CREATE_DIR_ERR;
+    }
     errno_t rc = sprintf_s(path, MAXPGPATH, "%s/%s", t_thrd.proc_cxt.DataDir, param->dir);
     securec_check_ss(rc, "", "");
     if (access(path, F_OK) == -1) {
@@ -749,14 +787,27 @@ static ChainActionState CreateMFChainSize(MemFileChain* mfchain, MemFileChainCre
 static ChainActionState CreateMFChainBlocks(MemFileChain* mfchain, MemFileChainCreateParam* param)
 {
     MemFileBlock** blocks = NULL;
-    int len = 0;
+    int newId = 0;
     mfchain->needClean = param->needClean;
 
     /* 1, reload or clean old block file, it will do some trimming here. */
-    blocks = ReloadOrCleanOldBlockFile(mfchain, &len);
+    List* blocksList = ReloadOrCleanOldBlockFile(mfchain, &newId);
+    int len = 0;
+    if (blocksList != NULL) {
+        len = list_length(blocksList);
+        blocks = ReconstructOldBlockFile(mfchain, blocksList, &newId);
+        list_free(blocksList);
+ 
+        if (blocks == NULL) {
+            return CHAIN_LOAD_FILE_ERR;
+        }
+    }
 
     /* 2, create a new chain head */
-    MemFileBlock* headBlock = CreateBlock(mfchain, len + MFCHAIN_FIRST_ID);
+    MemFileBlock* headBlock = CreateBlock(mfchain, newId + MFCHAIN_FIRST_ID);
+    if (headBlock == NULL) {
+        return CHAIN_CREATE_BLOCK_ERR;
+    }
     mfchain->chainHead = headBlock;
     mfchain->chainBoundary = headBlock;
     mfchain->chainTail = headBlock;
@@ -765,6 +816,9 @@ static ChainActionState CreateMFChainBlocks(MemFileChain* mfchain, MemFileChainC
 
     /* 3.append old blocks if have */
     for (int i = 0; i < len; i++) {
+        if (blocks[i] == NULL) {
+            continue;
+        }
         mfchain->chainTail->next = blocks[i];
         blocks[i]->prev = mfchain->chainTail;
         mfchain->chainTail = blocks[i];
@@ -871,10 +925,23 @@ static ChainActionState AdvanceChain(MemFileChain* mfchain)
         return CHAIN_ACTION_SUCCESS;
     }
     MemoryContext oldContext = MemoryContextSwitchTo(mfchain->memCxt);
-
-    /* 1, flush header node into disk */
+    /* 1. extend chain */
+    uint32 newId = mfchain->chainHead->id + 1;
+    MemFileBlockBuff* buff = (mfchain->blockNumM < mfchain->maxBlockNumM) ? NULL : mfchain->chainBoundary->buff;
+    MemFileBlock* newBlock = CreateBlock(mfchain, newId, buff);
+    if (newBlock == NULL) {
+        return CHAIN_CREATE_BLOCK_ERR;
+    }
+ 
+    /* 2. AdvanceBlock */
+    /* 2.1, flush header node into disk */
     BlockAdvanceResult res = AdvanceBlock(mfchain->chainHead);
     if (res.state != BLOCK_ACTION_SUCCESS) {
+        if (res.state == BLOCK_GET_PATH_ERR) {
+            DestoryBlock(newBlock, false);
+            return CHAIN_CREATE_BLOCK_ERR;
+        }
+ 
         Assert(res.state == BLOCK_FLUSH_DISK_ERR);
         // disk is full, so try to trim 1/3 of chain and retry, if still failed,
         // report and turn off the chain.
@@ -890,28 +957,15 @@ static ChainActionState AdvanceChain(MemFileChain* mfchain)
         }
     }
 
-    /* 2, extend chain */
-    uint32 newId = mfchain->chainHead->id + 1;
+    /* 2.2, extend chain */
+    newBlock->next = mfchain->chainHead;
+    mfchain->chainHead->prev = newBlock;
+    mfchain->chainHead = newBlock;
+    mfchain->blockNum++;
     if (mfchain->blockNumM < mfchain->maxBlockNumM) {
-        MemFileBlock* newBlock = CreateBlock(mfchain, newId);
-        newBlock->next = mfchain->chainHead;
-        mfchain->chainHead->prev = newBlock;
-        mfchain->chainHead = newBlock;
-        mfchain->blockNum++;
         mfchain->blockNumM++;
-
     } else {
-        // change last mem block to file block, using free buff of it to create a new block
-        Assert(mfchain->blockNumM == mfchain->maxBlockNumM);
-        
-        res = AdvanceBlock(mfchain->chainBoundary);
-        Assert(res.state == BLOCK_ACTION_SUCCESS);
-
-        MemFileBlock* newBlock = CreateBlock(mfchain, newId, res.freeBuff);
-        newBlock->next = mfchain->chainHead;
-        mfchain->chainHead->prev = newBlock;
-        mfchain->chainHead = newBlock;
-        mfchain->blockNum++;
+        (void)AdvanceBlock(mfchain->chainBoundary);
         mfchain->chainBoundary = mfchain->chainBoundary->prev;
     }
 
@@ -985,6 +1039,7 @@ MemFileChain* MemFileChainCreate(MemFileChainCreateParam* param)
             ReportChainException(mfchain, res);
             MemFileChainDestory(mfchain);
             MemoryContextSwitchTo(oldcxt);
+            ereport(ERROR, (errmodule(MOD_INSTR), errmsg("MemFileChain of %s init done and error.", param->name)));
             return NULL;
         }
     }
@@ -1001,6 +1056,8 @@ void MemFileChainDestory(MemFileChain* mfchain)
     if (mfchain == NULL || mfchain->state == MFCHAIN_STATE_NOT_READY) {
         return;
     }
+    ereport(LOG, (errmodule(MOD_INSTR),
+            errmsg("MemFileChain destory start, clean is %d.", mfchain->needClean)));
 
     LWLock* lock = mfchain->lock;
     if (lock != NULL) {
@@ -1020,9 +1077,15 @@ void MemFileChainDestory(MemFileChain* mfchain)
             DestoryBlock(block, true);
             block = next;
         }
-        rmdir(mfchain->path);
+        if (rmdir(mfchain->path) < 0) {
+            ereport(WARNING, (errmodule(MOD_INSTR),
+                errmsg("MemFileChain destory block failed: %s.", mfchain->path)));
+        }
     } else {
-        AdvanceChain(mfchain);
+        ChainActionState cres = AdvanceChain(mfchain);
+        if (cres != CHAIN_ACTION_SUCCESS) {
+            ReportChainException(mfchain, cres);
+        }
     }
     ereport(LOG, (errmsg("Mem-file chain of %s %s destory.", mfchain->name, mfchain->needClean ? "deep" : "light")));
     MemoryContextDelete(mfchain->memCxt);
@@ -1117,8 +1180,7 @@ bool MemFileChainInsert(MemFileChain* mfchain, HeapTuple tup, Relation rel)
         LWLockAcquire(mfchain->lock, LW_EXCLUSIVE);
         ChainActionState cres = AdvanceChain(mfchain);
         LWLockRelease(mfchain->lock);
-        Assert(cres == CHAIN_ACTION_SUCCESS || cres == CHAIN_TURN_OFF);
-        if (cres == CHAIN_TURN_OFF) {
+        if (cres == CHAIN_TURN_OFF || cres == CHAIN_CREATE_BLOCK_ERR) {
             return false;
         }
         res = FillBlock(mfchain->chainHead, tup);
@@ -1191,6 +1253,9 @@ static BlockActionState ScannerLoadBlock(MemFileChainScanner* scanner, MemFileBl
 
     } else if (block->state == MFBLOCK_IN_FILE) {
         char* path = GetBlockPath(block);
+        if (path == NULL) {
+            ereport(ERROR, (errmodule(MOD_INSTR), errmsg("Load File: memory is temporarily unavailable")));
+        }
         BlockActionState res = ReloadBlockFile(path, (char*)scanner->buff, false);
         pfree(path);
         if (res != BLOCK_ACTION_SUCCESS) {

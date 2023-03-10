@@ -291,6 +291,8 @@ Datum ubtgetbitmap(PG_FUNCTION_ARGS)
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
     int64 ntids = 0;
     ItemPointer heapTid;
+    Oid currPartOid;
+    TBMHandler tbm_handler = tbm_get_handler(tbm);
 
     WHITEBOX_TEST_STUB("ubtgetbitmap", WhiteboxDefaultErrorEmit);
 
@@ -312,8 +314,8 @@ Datum ubtgetbitmap(PG_FUNCTION_ARGS)
         if (UBTreeFirst(scan, ForwardScanDirection)) {
             /* Save tuple ID, and continue scanning */
             heapTid = &scan->xs_ctup.t_self;
-            Oid currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
-            tbm_add_tuples(tbm, heapTid, 1, scan->xs_recheck_itup, currPartOid);
+            currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
+            tbm_handler._add_tuples(tbm, heapTid, 1, scan->xs_recheck_itup, currPartOid, InvalidBktId);
             ntids++;
 
             for (;;) {
@@ -329,9 +331,10 @@ Datum ubtgetbitmap(PG_FUNCTION_ARGS)
                 }
 
                 /* Save tuple ID, and continue scanning */
+                scan->xs_recheck_itup = so->currPos.items[so->currPos.itemIndex].needRecheck;
                 heapTid = &so->currPos.items[so->currPos.itemIndex].heapTid;
                 currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
-                tbm_add_tuples(tbm, heapTid, 1, scan->xs_recheck_itup, currPartOid);
+                tbm_handler._add_tuples(tbm, heapTid, 1, scan->xs_recheck_itup, currPartOid, InvalidBktId);
                 ntids++;
             }
         }

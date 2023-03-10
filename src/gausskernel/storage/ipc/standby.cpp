@@ -37,7 +37,8 @@
 #include "pgxc/poolutils.h"
 #include "replication/walreceiver.h"
 static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlist, TransactionId* xminArray,
-                                                   ProcSignalReason reason);
+                                                   ProcSignalReason reason, TimestampTz waitStart,
+                                                   TransactionId limitXmin = InvalidTransactionId);
 static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid);
 static void LogAccessExclusiveLocks(int nlocks, xl_standby_lock* locks);
 static void LogReleaseAccessExclusiveLocks(int nlocks, xl_standby_lock* locks);
@@ -132,19 +133,11 @@ void ShutdownRecoveryTransactionEnvironment(void)
 static TimestampTz GetStandbyLimitTime(TimestampTz startTime)
 {
     TimestampTz rtime = startTime;
-    bool fromStream = (t_thrd.xlog_cxt.XLogReceiptSource == XLOG_FROM_STREAM);
 
-    if (fromStream) {
-        if (u_sess->attr.attr_storage.max_standby_streaming_delay < 0)
-            return 0; /* wait forever */
+    if (u_sess->attr.attr_storage.max_standby_streaming_delay < 0)
+        return 0; /* wait forever */
 
-        return TimestampTzPlusMilliseconds(rtime, u_sess->attr.attr_storage.max_standby_streaming_delay);
-    } else {
-        if (u_sess->attr.attr_storage.max_standby_archive_delay < 0)
-            return 0; /* wait forever */
-
-        return TimestampTzPlusMilliseconds(rtime, u_sess->attr.attr_storage.max_standby_archive_delay);
-    }
+    return TimestampTzPlusMilliseconds(rtime, u_sess->attr.attr_storage.max_standby_streaming_delay);
 }
 
 #define STANDBY_INITIAL_WAIT_US 1000
@@ -187,9 +180,9 @@ static bool WaitExceedsMaxStandbyDelay(TimestampTz startTime)
  * then throw the required error as instructed.
  */
 static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlist, TransactionId* xminArray,
-                                                   ProcSignalReason reason)
+                                                   ProcSignalReason reason, TimestampTz waitStart,
+                                                   TransactionId limitXmin)
 {
-    TimestampTz waitStart;
     char* new_status = NULL;
     bool waited = false;
 
@@ -197,8 +190,7 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
     if (!VirtualTransactionIdIsValid(*waitlist))
         return;
 
-    waitStart = GetCurrentTimestamp();
-
+    WaitState oldStatus = pgstat_report_waitstatus(STATE_STANDBY_READ_RECOVERY_CONFLICT);
     while (VirtualTransactionIdIsValid(*waitlist)) {
         /* reset standbyWait_us for each xact we wait for */
         t_thrd.storage_cxt.standbyWait_us = STANDBY_INITIAL_WAIT_US;
@@ -207,7 +199,8 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
         while (!VirtualXactLock(*waitlist, false)) {
             PGPROC* proc = BackendIdGetProc((*waitlist).backendId);
             PGXACT* pgxact = &g_instance.proc_base_all_xacts[proc->pgprocno];
-            if (xminArray != NULL && pgxact->xmin != *xminArray) {
+            if (xminArray != NULL && pgxact->xmin != *xminArray &&
+                (!TransactionIdIsValid(pgxact->xmin) || TransactionIdFollows(pgxact->xmin, limitXmin))) {
                 ereport(WARNING, (errmsg("hotstandby:snapshot changed old xmin = %lu, new xmin = %lu",
                                          *xminArray, pgxact->xmin)));
                 break;
@@ -255,6 +248,7 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
                     waited = true;
                     ereport(LOG, (errmsg("hotstandby:snapshot changed, wait pid %lu", pid)));
                 }
+                break;
             }
         }
 
@@ -263,6 +257,7 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
         if (xminArray != NULL)
             xminArray++;
     }
+    (void)pgstat_report_waitstatus(oldStatus);
 
     /* Reset ps display if we changed it */
     if (new_status != NULL) {
@@ -280,6 +275,7 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
 void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid, const RelFileNode& node, XLogRecPtr lsn)
 {
     VirtualTransactionId* backends = NULL;
+    TimestampTz waitStart;
 
     /*
      * If we get passed InvalidTransactionId then we are a little surprised,
@@ -314,15 +310,24 @@ void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid, const R
         if (t_thrd.storage_cxt.xminArray == NULL)
             ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
     }
-    backends = GetConflictingVirtualXIDs(latestRemovedXid, node.dbNode, lsn, limitXminCSN,
-                                         t_thrd.storage_cxt.xminArray);
 
-    ResolveRecoveryConflictWithVirtualXIDs(backends, t_thrd.storage_cxt.xminArray, PROCSIG_RECOVERY_CONFLICT_SNAPSHOT);
+    waitStart = GetCurrentTimestamp();
+    while (true) {
+        backends = GetConflictingVirtualXIDs(latestRemovedXid, node.dbNode, lsn, limitXminCSN,
+            t_thrd.storage_cxt.xminArray);
+        if (!VirtualTransactionIdIsValid(*backends)) {
+            break;
+        }
+
+        ResolveRecoveryConflictWithVirtualXIDs(backends, t_thrd.storage_cxt.xminArray,
+            PROCSIG_RECOVERY_CONFLICT_SNAPSHOT, waitStart, latestRemovedXid);
+    }
 }
 
 void ResolveRecoveryConflictWithSnapshotOid(TransactionId latestRemovedXid, Oid dbid, XLogRecPtr lsn)
 {
     VirtualTransactionId* backends = NULL;
+    TimestampTz waitStart;
     /*
      * If we get passed InvalidTransactionId then we are a little surprised,
      * but it is theoretically possible in normal running. It also happens
@@ -343,14 +348,24 @@ void ResolveRecoveryConflictWithSnapshotOid(TransactionId latestRemovedXid, Oid 
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
     }
 
-    backends = GetConflictingVirtualXIDs(latestRemovedXid, dbid, lsn, InvalidCommitSeqNo, t_thrd.storage_cxt.xminArray);
-    ResolveRecoveryConflictWithVirtualXIDs(backends, t_thrd.storage_cxt.xminArray, PROCSIG_RECOVERY_CONFLICT_SNAPSHOT);
+    waitStart = GetCurrentTimestamp();
+    while (true) {
+        backends = GetConflictingVirtualXIDs(latestRemovedXid, dbid, lsn, InvalidCommitSeqNo,
+            t_thrd.storage_cxt.xminArray);
+        if (!VirtualTransactionIdIsValid(*backends)) {
+            break;
+        }
+
+        ResolveRecoveryConflictWithVirtualXIDs(backends, t_thrd.storage_cxt.xminArray,
+            PROCSIG_RECOVERY_CONFLICT_SNAPSHOT, waitStart, latestRemovedXid);
+    }
 }
 
 
 void ResolveRecoveryConflictWithTablespace(Oid tsid)
 {
     VirtualTransactionId* temp_file_users = NULL;
+    TimestampTz waitStart;
 
     /*
      * Standby users may be currently using this tablespace for their
@@ -369,8 +384,16 @@ void ResolveRecoveryConflictWithTablespace(Oid tsid)
      *
      * We don't wait for commit because drop tablespace is non-transactional.
      */
-    temp_file_users = GetConflictingVirtualXIDs(InvalidTransactionId, InvalidOid);
-    ResolveRecoveryConflictWithVirtualXIDs(temp_file_users, NULL, PROCSIG_RECOVERY_CONFLICT_TABLESPACE);
+    waitStart = GetCurrentTimestamp();
+    while (true) {
+        temp_file_users = GetConflictingVirtualXIDs(InvalidTransactionId, InvalidOid);
+        if (!VirtualTransactionIdIsValid(*temp_file_users)) {
+            break;
+        }
+
+        ResolveRecoveryConflictWithVirtualXIDs(temp_file_users, NULL,
+            PROCSIG_RECOVERY_CONFLICT_TABLESPACE, waitStart);
+    }
 }
 
 void ResolveRecoveryConflictWithDatabase(Oid dbid)
@@ -410,6 +433,7 @@ static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
     bool lock_acquired = false;
     int num_attempts = 0;
     LOCKTAG locktag;
+    TimestampTz waitStart;
 
     SET_LOCKTAG_RELATION(locktag, dbOid, relOid);
 
@@ -421,13 +445,14 @@ static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
      * people crowding for the same table. Recovery must win; the end
      * justifies the means.
      */
+    waitStart = GetCurrentTimestamp();
     while (!lock_acquired) {
         if (++num_attempts < 3)
             backends = GetLockConflicts(&locktag, AccessExclusiveLock);
         else
             backends = GetConflictingVirtualXIDs(InvalidTransactionId, InvalidOid);
 
-        ResolveRecoveryConflictWithVirtualXIDs(backends, NULL, PROCSIG_RECOVERY_CONFLICT_LOCK);
+        ResolveRecoveryConflictWithVirtualXIDs(backends, NULL, PROCSIG_RECOVERY_CONFLICT_LOCK, waitStart);
 
         if (LockAcquireExtended(&locktag, AccessExclusiveLock, true, true, false) != LOCKACQUIRE_NOT_AVAIL)
             lock_acquired = true;
@@ -1006,13 +1031,13 @@ XLogRecPtr LogStandbySnapshot(void)
      * record. Fortunately this routine isn't executed frequently, and it's
      * only a shared lock.
      */
-    if (g_instance.attr.attr_storage.wal_level < WAL_LEVEL_LOGICAL)
+    if (g_instance.attr.attr_storage.wal_level < WAL_LEVEL_LOGICAL || g_instance.streaming_dr_cxt.isInSwitchover)
         LWLockRelease(ProcArrayLock);
 
     recptr = LogCurrentRunningXacts(running);
 
     /* Release lock if we kept it longer ... */
-    if (g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_LOGICAL)
+    if (g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_LOGICAL && !g_instance.streaming_dr_cxt.isInSwitchover)
         LWLockRelease(ProcArrayLock);
 
     /* GetRunningTransactionData() acquired XidGenLock, we must release it */

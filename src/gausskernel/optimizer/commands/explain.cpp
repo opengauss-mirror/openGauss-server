@@ -216,7 +216,8 @@ static void show_datanode_time(ExplainState* es, PlanState* planstate);
 static void ShowStreamRunNodeInfo(Stream* stream, ExplainState* es);
 static void ShowRunNodeInfo(const ExecNodes* en, ExplainState* es, const char* qlabel);
 template <bool is_detail>
-static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_original, int nbatch_original, int nbuckets, long spacePeakKb);
+static void show_datanode_hash_info(ExplainState *es, int nbatch, int nbuckets_original, int nbatch_original,
+                                    int nbuckets, long spacePeakKb);
 static void ShowRoughCheckInfo(ExplainState* es, Instrumentation* instrument, int nodeIdx, int smpIdx);
 static void show_hashAgg_info(AggState* hashaggstate, ExplainState* es);
 static void ExplainPrettyList(List* data, ExplainState* es);
@@ -486,7 +487,15 @@ void ExplainQuery(
 
         /* Explain every plan */
         foreach (l, rewritten) {
-            ExplainOneQuery((Query*)lfirst(l), NULL, &es, queryString, None_Receiver, params);
+            Query* query_tree = (Query*)lfirst(l);
+
+            /*
+             * We need to revert this query_tree, so that ExplainOneQuery can get correct
+             * message when generating PlanedStmt.
+             */
+            query_tree->is_flt_frame = !query_check_no_flt(query_tree);
+
+            ExplainOneQuery(query_tree, NULL, &es, queryString, None_Receiver, params);
 
             /* Separate plans with an appropriate separator */
             if (lnext(l) != NULL)
@@ -772,11 +781,18 @@ void ExplainOneUtility(
  */
 static void ExecRemoteprocessPlan(EState* estate)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     ListCell* lc = NULL;
     foreach (lc, estate->es_remotequerystates) {
         PlanState* ps = (PlanState*)lfirst(lc);
         ExecEndRemoteQuery((RemoteQueryState*)ps, true);
     }
+#else
+    if (u_sess->stream_cxt.global_obj) {
+        u_sess->stream_cxt.global_obj->SigStreamThreadClose();
+        StreamNodeGroup::syncQuit(STREAM_COMPLETE);
+    }
+#endif
 }
 
 /*
@@ -1636,8 +1652,6 @@ static StringInfo get_subpartition_pruning_info(Scan* scanplan, List* rtable)
     RangeTblEntry* rte = rt_fetch(scanplan->scanrelid, rtable);
     Relation rel = heap_open(rte->relid, NoLock);
     List* subpartList = RelationGetSubPartitionOidListList(rel);
-    /* Concurrent DDL may change the partition map. Do not check for 'ALL' if it is known to be misarranged */
-    bool checkAll = (pr->partMap != NULL) && (getPartitionNumber(pr->partMap) == list_length(subpartList));
 
     int idx = 0;
     foreach (lc, pr->ls_selectedSubPartitions) {
@@ -1648,7 +1662,10 @@ static StringInfo get_subpartition_pruning_info(Scan* scanplan, List* rtable)
         SubPartitionPruningResult* spr = (SubPartitionPruningResult*)lfirst(lc);
         /* check if all subpartition is selected */
         int selected = list_length(spr->ls_selectedSubPartitions);
-        if (checkAll) {
+        /* the partseq may be dislocationed if parallel DDL commits, even out of range */
+        if (spr->partSeq >= list_length(subpartList)) {
+            all = false;
+        } else {
             int count = list_length((List*)list_nth(subpartList, spr->partSeq));
             all &= (selected == count);
         }
@@ -1659,7 +1676,7 @@ static StringInfo get_subpartition_pruning_info(Scan* scanplan, List* rtable)
         }
     }
 
-    if (checkAll && all) {
+    if (all) {
         resetStringInfo(strif);
         appendStringInfo(strif, "ALL");
     }
@@ -2514,6 +2531,23 @@ static void ExplainNode(
     /* Show exec nodes of plan nodes when it's not a single installation group scenario */
     if (es->nodes && es->verbose && ng_enable_nodegroup_explain()) {
         show_plan_execnodes(planstate, es);
+    }
+
+    /* unique join */
+    switch (nodeTag(plan)) {
+        case T_NestLoop:
+        case T_MergeJoin:
+        case T_HashJoin:
+            if (es->format != EXPLAIN_FORMAT_TEXT || (es->verbose && ((Join *) plan)->inner_unique))
+                ExplainProperty("Inner Unique", ((Join *) plan)->inner_unique?"true":"false", true, es);
+            if (is_pretty && es->verbose && ((Join *)plan)->inner_unique) {
+                es->planinfo->m_detailInfo->set_plan_name<true, true>();
+                appendStringInfo(es->planinfo->m_detailInfo->info_str, "Inner Unique: %s\n",
+                                 ((Join *)plan)->inner_unique ? "true" : "false");
+            }
+            break;
+        default:
+            break;
     }
 
     /* quals, sort keys, etc */
@@ -4288,7 +4322,8 @@ static void show_sort_info(SortState* sortstate, ExplainState* es)
 }
 
 template <bool is_detail>
-static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_original, int nbatch_original, int nbuckets, long spacePeakKb)
+static void show_datanode_hash_info(ExplainState *es, int nbatch, int nbuckets_original, int nbatch_original,
+                                    int nbuckets, long spacePeakKb)
 {
     if (es->format != EXPLAIN_FORMAT_TEXT) {
         ExplainPropertyLong("Hash Buckets", nbuckets, es);
@@ -4301,7 +4336,7 @@ static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_o
         if (nbatch_original != nbatch) {
             appendStringInfo(es->planinfo->m_staticInfo->info_str,
                 " Buckets: %d (originally %d) Batches: %d (originally %d)  Memory Usage: %ldkB\n",
-                nbuckets, 
+                nbuckets,
                 nbuckets_original,
                 nbatch,
                 nbatch_original,
@@ -4317,7 +4352,7 @@ static void show_datanode_hash_info(ExplainState* es, int nbatch, int nbuckets_o
         if (nbatch_original != nbatch) {
             appendStringInfo(es->str,
                 " Buckets: %d (originally %d) Batches: %d (originally %d)	Memory Usage: %ldkB\n",
-                nbuckets, 
+                nbuckets,
                 nbuckets_original,
                 nbatch,
                 nbatch_original,
@@ -4891,10 +4926,11 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
         nbatch = hashinfo.nbatch;
         nbatch_original = hashinfo.nbatch_original;
         nbuckets = hashinfo.nbuckets;
-        if (es->analyze)
+        if (es->analyze) {
             nbuckets_original = hashtable ? hashtable->nbuckets_original : nbuckets;
-        else
+        } else {
             nbuckets_original = nbuckets;
+        }
         /* wlm_statistics_plan_max_digit: this variable is used to judge, isn't it a active sql */
         if (es->wlm_statistics_plan_max_digit == NULL) {
             if (es->format == EXPLAIN_FORMAT_TEXT)

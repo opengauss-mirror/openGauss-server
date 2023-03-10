@@ -1,0 +1,191 @@
+-- Clean up in case a prior regression run failed
+create database test_obj_rename dbcompatibility 'PG';
+\c test_obj_rename;
+SET client_min_messages TO 'warning';
+DROP ROLE IF EXISTS regress_addr_user;
+RESET client_min_messages;
+CREATE USER regress_addr_user password 'Gaussdba@Mpp';
+reset role;
+CREATE OPERATOR CLASS gin_trgm_ops
+FOR TYPE text USING gin
+AS
+        STORAGE         int4;
+-- Test generic object addressing/identification functions
+CREATE FOREIGN DATA WRAPPER addr_fdw;
+CREATE SERVER addr_fserv FOREIGN DATA WRAPPER addr_fdw;
+CREATE TEXT SEARCH DICTIONARY addr_ts_dict (template=simple);
+CREATE TEXT SEARCH CONFIGURATION addr_ts_conf (copy=english);
+CREATE AGGREGATE genaggr(int4) (sfunc = int4pl, stype = int4);
+CREATE function test_event_trigger() returns event_trigger as $$
+BEGIN
+    RAISE NOTICE 'test_event_trigger: % %', tg_event, tg_tag;
+END
+$$ language plpgsql;
+create event trigger regress_event_trigger on ddl_command_start
+   execute procedure test_event_trigger();
+create conversion ascii_to_utf8 for 'sql_ascii' to 'utf8' from ascii_to_utf8;
+NOTICE:  test_event_trigger: ddl_command_start CREATE CONVERSION
+ERROR:  user defined conversion is not yet supported.
+SET ROLE regress_addr_user PASSWORD 'Gaussdba@Mpp';
+-- test alter table rename while permission checks are needed. All of these should failed.
+ALTER AGGREGATE genaggr(int4) RENAME TO genaggr_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+ERROR:  permission denied for function genaggr
+DETAIL:  N/A
+ALTER COLLATION POSIX RENAME TO POSIX_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER COLLATION
+ERROR:  collation "posix" for encoding "UTF8" does not exist
+ALTER CONVERSION ascii_to_utf8 RENAME TO ascii_to_utf8_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER CONVERSION
+ERROR:  permission denied for schema pg_catalog
+DETAIL:  N/A
+ALTER EVENT TRIGGER regress_event_trigger RENAME TO regress_event_trigger_rename;
+ERROR:  must be owner of event trigger regress_event_trigger
+DETAIL:  N/A
+ALTER FOREIGN DATA WRAPPER addr_fdw RENAME TO addr_fdw_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER FOREIGN DATA WRAPPER
+ERROR:  must be owner of foreign-data wrapper addr_fdw
+DETAIL:  N/A
+ALTER SERVER addr_fserv RENAME TO addr_fserv_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER SERVER
+ERROR:  permission denied for foreign server addr_fserv
+DETAIL:  N/A
+ALTER OPERATOR CLASS int4_ops USING btree RENAME TO int4_ops_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR CLASS
+ERROR:  must be owner of operator class int4_ops
+DETAIL:  N/A
+ALTER OPERATOR FAMILY integer_ops USING btree RENAME TO integer_ops_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR FAMILY
+ERROR:  must be owner of operator family integer_ops
+DETAIL:  N/A
+ALTER TEXT SEARCH DICTIONARY addr_ts_dict RENAME TO addr_ts_dict_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH DICTIONARY
+ERROR:  must be owner of text search dictionary addr_ts_dict
+DETAIL:  N/A
+ALTER TEXT SEARCH CONFIGURATION addr_ts_conf RENAME TO addr_ts_conf_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH CONFIGURATION
+ERROR:  must be owner of text search configuration addr_ts_conf
+DETAIL:  N/A
+reset role;
+-- create name_rename object
+CREATE FOREIGN DATA WRAPPER addr_fdw_rename;
+NOTICE:  test_event_trigger: ddl_command_start CREATE FOREIGN DATA WRAPPER
+CREATE SERVER addr_fserv_rename FOREIGN DATA WRAPPER addr_fdw;
+NOTICE:  test_event_trigger: ddl_command_start CREATE SERVER
+CREATE TEXT SEARCH DICTIONARY addr_ts_dict_rename (template=simple);
+NOTICE:  test_event_trigger: ddl_command_start CREATE TEXT SEARCH DICTIONARY
+CREATE TEXT SEARCH CONFIGURATION addr_ts_conf_rename (copy=english);
+NOTICE:  test_event_trigger: ddl_command_start CREATE TEXT SEARCH CONFIGURATION
+CREATE AGGREGATE genaggr_rename(int4) (sfunc = int4pl, stype = int4);
+NOTICE:  test_event_trigger: ddl_command_start CREATE AGGREGATE
+create event trigger regress_event_trigger_rename on ddl_command_start
+   execute procedure test_event_trigger();
+create conversion ascii_to_utf8_rename for 'sql_ascii' to 'utf8' from ascii_to_utf8;
+NOTICE:  test_event_trigger: ddl_command_start CREATE CONVERSION
+NOTICE:  test_event_trigger: ddl_command_start CREATE CONVERSION
+ERROR:  user defined conversion is not yet supported.
+-- test duplicate name , should failed.
+ALTER AGGREGATE genaggr(int4) RENAME TO genaggr_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+ERROR:  function genaggr_rename(integer) already exists in schema "public"
+ALTER COLLATION POSIX RENAME TO POSIX_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER COLLATION
+NOTICE:  test_event_trigger: ddl_command_start ALTER COLLATION
+ERROR:  collation "posix" for encoding "UTF8" does not exist
+ALTER CONVERSION ascii_to_utf8 RENAME TO ascii_to_utf8_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER CONVERSION
+NOTICE:  test_event_trigger: ddl_command_start ALTER CONVERSION
+ALTER EVENT TRIGGER regress_event_trigger RENAME TO regress_event_trigger_rename;
+ERROR:  event trigger "regress_event_trigger_rename" already exists
+ALTER FOREIGN DATA WRAPPER addr_fdw RENAME TO addr_fdw_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER FOREIGN DATA WRAPPER
+NOTICE:  test_event_trigger: ddl_command_start ALTER FOREIGN DATA WRAPPER
+ERROR:  foreign-data wrapper "addr_fdw_rename" already exists
+ALTER SERVER addr_fserv RENAME TO addr_fserv_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER SERVER
+NOTICE:  test_event_trigger: ddl_command_start ALTER SERVER
+ERROR:  server "addr_fserv_rename" already exists
+ALTER OPERATOR CLASS int4_ops USING btree RENAME TO int4_ops_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR CLASS
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR CLASS
+ALTER OPERATOR CLASS int4_ops_rename USING btree RENAME TO int4_ops;
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR CLASS
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR CLASS
+ALTER OPERATOR FAMILY integer_ops USING btree RENAME TO integer_ops_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR FAMILY
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR FAMILY
+ALTER OPERATOR FAMILY integer_ops_rename USING btree RENAME TO integer_ops;
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR FAMILY
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR FAMILY
+ALTER TEXT SEARCH DICTIONARY addr_ts_dict RENAME TO addr_ts_dict_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH DICTIONARY
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH DICTIONARY
+ERROR:  text search dictionary "addr_ts_dict_rename" already exists in schema "public"
+ALTER TEXT SEARCH CONFIGURATION addr_ts_conf RENAME TO addr_ts_conf_rename;
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH CONFIGURATION
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH CONFIGURATION
+ERROR:  text search configuration "addr_ts_conf_rename" already exists in schema "public"
+-- test alter object namespace
+reset role;
+create schema test_sch;
+NOTICE:  test_event_trigger: ddl_command_start CREATE SCHEMA
+NOTICE:  test_event_trigger: ddl_command_start CREATE SCHEMA
+GRANT ALL ON SCHEMA public TO regress_addr_user;
+NOTICE:  test_event_trigger: ddl_command_start GRANT
+NOTICE:  test_event_trigger: ddl_command_start GRANT
+GRANT ALL ON SCHEMA test_sch TO regress_addr_user;
+NOTICE:  test_event_trigger: ddl_command_start GRANT
+NOTICE:  test_event_trigger: ddl_command_start GRANT
+SET ROLE regress_addr_user PASSWORD 'Gaussdba@Mpp';
+ALTER AGGREGATE genaggr(int4) SET schema public;
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+-- should failed, not owner.
+ALTER AGGREGATE genaggr(int4) SET schema test_sch;
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+ERROR:  must be owner of operator genaggr
+DETAIL:  N/A
+reset role;
+ALTER AGGREGATE genaggr(int4) owner to regress_addr_user;
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+SET ROLE regress_addr_user PASSWORD 'Gaussdba@Mpp';
+ALTER AGGREGATE genaggr(int4) SET schema test_sch;
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+ALTER AGGREGATE test_sch.genaggr(int4) SET schema public;
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+reset role;
+ALTER TEXT SEARCH DICTIONARY addr_ts_dict_rename SET schema test_sch;
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH DICTIONARY
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH DICTIONARY
+ALTER TEXT SEARCH DICTIONARY test_sch.addr_ts_dict_rename SET schema public;
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH DICTIONARY
+NOTICE:  test_event_trigger: ddl_command_start ALTER TEXT SEARCH DICTIONARY
+ALTER AGGREGATE genaggr(int4) owner to regress_addr_user;
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+NOTICE:  test_event_trigger: ddl_command_start ALTER AGGREGATE
+ALTER OPERATOR CLASS gin_trgm_ops USING gin owner to regress_addr_user;
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR CLASS
+NOTICE:  test_event_trigger: ddl_command_start ALTER OPERATOR CLASS
+--test alter database
+CREATE DATABASE test_db1;
+ALTER DATABASE test_db1 RENAME TO test_db2;
+ALTER DATABASE test_db2 RENAME TO test_db1;
+ALTER DATABASE test_db1 owner TO regress_addr_user;
+DROP DATABASE test_db1;
+\set VERBOSITY terse \\ -- suppress cascade details
+DROP EVENT TRIGGER regress_event_trigger;
+DROP FOREIGN DATA WRAPPER addr_fdw CASCADE;
+NOTICE:  test_event_trigger: ddl_command_start DROP FOREIGN DATA WRAPPER
+NOTICE:  drop cascades to 2 other objects
+DROP SCHEMA test_sch cascade;
+NOTICE:  test_event_trigger: ddl_command_start DROP SCHEMA
+DROP OWNED BY regress_addr_user;
+NOTICE:  test_event_trigger: ddl_command_start DROP OWNED
+DROP USER regress_addr_user CASCADE;
+\c regression;
+drop database test_obj_rename;

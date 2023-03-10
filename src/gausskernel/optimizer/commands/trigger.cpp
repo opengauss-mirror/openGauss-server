@@ -113,6 +113,8 @@ inline bool IsReplicatedRelationWithoutPK(Relation rel, AttrNumber* indexed_col,
 }
 #endif
 
+extern HeapTuple SearchUserHostName(const char* userName, Oid* oid);
+
 /*
  * Create a trigger.  Returns the OID of the created trigger.
  *
@@ -136,10 +138,10 @@ inline bool IsReplicatedRelationWithoutPK(Relation rel, AttrNumber* indexed_col,
  * relation, as well as ACL_EXECUTE on the trigger function.  For internal
  * triggers the caller must apply any required permission checks.
  *
- * Note: can return InvalidOid if we decided to not create a trigger at all,
+ * Note: can return  InvalidObjectAddress if we decided to not create a trigger at all,
  * but a foreign-key constraint.  This is a kluge for backwards compatibility.
  */
-Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid refRelOid, Oid constraintOid,
+ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid refRelOid, Oid constraintOid,
     Oid indexOid, bool isInternal)
 {
     uint16 tgtype;
@@ -259,7 +261,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
     if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
         Oid curuser = GetUserId();
         if (stmt->definer) {
-            HeapTuple roletuple = SearchSysCache1(AUTHNAME, PointerGetDatum(stmt->definer));
+            HeapTuple roletuple = SearchUserHostName(stmt->definer, NULL);
             if (!HeapTupleIsValid(roletuple)) {
                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" is not exists", stmt->definer)));
             }
@@ -339,7 +341,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
         addRTEtoQuery(pstate, rte, false, true, true);
 
         /* Transform expression.  Copy to be sure we don't modify original */
-        whenClause = transformWhereClause(pstate, (Node*)copyObject(stmt->whenClause), "WHEN");
+        whenClause = transformWhereClause(pstate, (Node*)copyObject(stmt->whenClause), EXPR_KIND_TRIGGER_WHEN, "WHEN");
         /* we have to fix its collations too */
         assign_expr_collations(pstate, whenClause);
 
@@ -479,7 +481,10 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
                     systable_endscan(tgscan);
                     heap_close(tgrel, RowExclusiveLock);
                     heap_close(rel, NoLock);
-                    return trigoid;
+                    myself.classId = TriggerRelationId;
+                    myself.objectId = trigoid;
+                    myself.objectSubId = 0;                    
+                    return myself;
                 }
                 else {
                     systable_endscan(tgscan);
@@ -615,7 +620,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
 
         ConvertTriggerToFK(stmt, funcoid);
 
-        return InvalidOid;
+        return InvalidObjectAddress;
     }
 
     /*
@@ -655,7 +660,6 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
             true,  /* isnoinherit */
             NULL); /* @hdfs informational constraint */
     }
-
 
     values[Anum_pg_trigger_tgrelid - 1] = ObjectIdGetDatum(RelationGetRelid(rel));
     values[Anum_pg_trigger_tgname - 1] = DirectFunctionCall1(namein, CStringGetDatum(trigname));
@@ -956,7 +960,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
     /* Keep lock on target rel until end of xact */
     heap_close(rel, NoLock);
 
-    return trigoid;
+    return myself;
 }
 
 /*
@@ -1204,7 +1208,8 @@ static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid)
 #ifdef PGXC
             false,
 #endif /* PGXC */
-            NULL);
+            NULL,
+            PROCESS_UTILITY_GENERATED);
 
         /* Remove the matched item from the list */
         u_sess->tri_cxt.info_list = list_delete_ptr(u_sess->tri_cxt.info_list, info);
@@ -1419,7 +1424,7 @@ static void RangeVarCallbackForRenameTrigger(
  *		modify tgname in trigger tuple
  *		update row in catalog
  */
-void renametrig(RenameStmt* stmt)
+ObjectAddress renametrig(RenameStmt* stmt)
 {
     Relation targetrel;
     Relation tgrel;
@@ -1427,7 +1432,8 @@ void renametrig(RenameStmt* stmt)
     SysScanDesc tgscan;
     ScanKeyData key[2];
     Oid relid;
-
+    ObjectAddress address;
+    Oid      tgoid = InvalidOid;    
     /*
      * Look up name, check permissions, and acquire lock (which we will NOT
      * release until end of transaction).
@@ -1476,7 +1482,7 @@ void renametrig(RenameStmt* stmt)
          * Update pg_trigger tuple with new tgname.
          */
         tuple = (HeapTuple)tableam_tops_copy_tuple(tuple); /* need a modifiable copy */
-
+        tgoid = HeapTupleGetOid(tuple);
         (void)namestrcpy(&((Form_pg_trigger)GETSTRUCT(tuple))->tgname, stmt->newname);
 
         simple_heap_update(tgrel, &tuple->t_self, tuple);
@@ -1498,6 +1504,7 @@ void renametrig(RenameStmt* stmt)
                     RelationGetRelationName(targetrel))));
     }
 
+    ObjectAddressSet(address, TriggerRelationId, tgoid);
     systable_endscan(tgscan);
 
     heap_close(tgrel, RowExclusiveLock);
@@ -1506,6 +1513,7 @@ void renametrig(RenameStmt* stmt)
      * Close rel, but keep exclusive lock!
      */
     relation_close(targetrel, NoLock);
+    return address;
 }
 
 /*

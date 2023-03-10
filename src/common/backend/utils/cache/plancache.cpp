@@ -252,6 +252,8 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->cursor_options = 0;
     plansource->rewriteRoleId = InvalidOid;
     plansource->dependsOnRole = false;
+    plansource->cq_is_flt_frame = 
+        (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
     plansource->fixed_result = false;
     plansource->resultDesc = NULL;
     plansource->search_path = NULL;
@@ -287,6 +289,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->spi_signature = {(uint32)-1, 0, (uint32)-1, -1};
     plansource->sql_patch_sequence = pg_atomic_read_u64(&g_instance.cost_cxt.sql_patch_sequence_id);
     plansource->planManager = NULL;
+    plansource->hasSubQuery = false;
     plansource->gpc_lockid = -1;
     plansource->hasSubQuery = false;
 
@@ -354,6 +357,8 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
     plansource->cursor_options = 0;
     plansource->rewriteRoleId = InvalidOid;
     plansource->dependsOnRole = false;
+    plansource->cq_is_flt_frame = 
+        (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
     plansource->fixed_result = false;
     plansource->resultDesc = NULL;
     plansource->search_path = NULL;
@@ -675,6 +680,10 @@ void DropCachedPlan(CachedPlanSource* plansource)
  */
 void ReleaseGenericPlan(CachedPlanSource* plansource)
 {
+    if (ENABLE_CACHEDPLAN_MGR) {
+        ReleaseCustomPlan(plansource);
+    }
+
     /* Be paranoid about the possibility that ReleaseCachedPlan fails */
     if (plansource->gplan || plansource->cplan) {
         CachedPlan* plan = NULL;
@@ -859,6 +868,10 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
             }
             /* generic root and all candidate plans need to be rebuilt. */
             if (ENABLE_CACHEDPLAN_MGR && plansource->planManager != NULL) {
+                ereport(DEBUG2,
+                    (errmodule(MOD_OPT),
+                     errmsg("SearchPath has been changed, invalid planManager; query: \"%s\"",
+                     plansource->query_string)));
                 plansource->planManager->is_valid = false;
             }
         }
@@ -913,6 +926,12 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
         }
 #endif
 
+        if (plansource->is_valid &&
+            (plansource->cq_is_flt_frame !=
+             (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1))) {
+            plansource->is_valid = false;
+        }
+
         /*
          * By now, if any invalidation has happened, the inval callback
          * functions will have marked the query invalid.
@@ -947,6 +966,9 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
      * correctly in the race condition case.)
      */
     plansource->is_valid = false;
+    if (plansource->planManager != NULL) {
+        plansource->planManager->is_valid = false;
+    }
     plansource->query_list = NIL;
     plansource->relationOids = NIL;
     plansource->invalItems = NIL;
@@ -1174,6 +1196,12 @@ bool CheckCachedPlan(CachedPlanSource* plansource, CachedPlan *plan)
 
     /* If stream_operator alreadly change, need build plan again.*/
     if ((!plansource->gpc.status.InShareTable()) && plansource->stream_enabled != IsStreamSupport()) {
+        return false;
+    }
+
+    if ((!plansource->gpc.status.InShareTable()) &&
+        (plansource->cq_is_flt_frame != 
+         (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1))) {
         return false;
     }
 
@@ -1470,6 +1498,8 @@ CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamList
         plan->saved_xmin = u_sess->utils_cxt.TransactionXmin;
     } else
         plan->saved_xmin = InvalidTransactionId;
+    plansource->cq_is_flt_frame =
+        (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
     plan->refcount = 0;
     plan->global_refcount = 0;
     plan->context = plan_context;
@@ -1478,6 +1508,7 @@ CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamList
     plan->is_valid = true;
     plan->cpi = NULL;
     plan->is_candidate = false;
+    plan->cost = -1;
 
     /* assign generation number to new plan */
     plan->generation = ++(plansource->generation);
@@ -1647,7 +1678,7 @@ static bool choose_cplan_by_hint(const CachedPlanSource* plansource, bool* choos
     HintState *hint = parse->hintState;
     if (hint != NULL && hint->cache_plan_hint != NIL) {
         PlanCacheHint* pchint = (PlanCacheHint*)llast(hint->cache_plan_hint);
-        if (pchint == NULL) {
+        if (pchint == NULL || pchint->base.hint_keyword == HINT_KEYWORD_CHOOSE_ADAPTIVE_GPLAN) {
             return false;
         }
         pchint->base.state = HINT_STATE_USED;
@@ -1853,7 +1884,7 @@ CachedPlan* GetWiseCachedPlan(CachedPlanSource* plansource,
     customplan = ChooseCustomPlan(plansource, boundParams);
     if (!customplan) {
         if (ChooseAdaptivePlan(plansource, boundParams)) {
-            plan = GetAdaptGenericPlan(plansource, boundParams, &qlist);
+            plan = GetAdaptGenericPlan(plansource, boundParams, &qlist, &customplan);
         } else {
             plan = GetDefaultGenericPlan(plansource, boundParams, &qlist, &customplan);
         }
@@ -2944,6 +2975,10 @@ CheckRelDependency(CachedPlanSource *plansource, Oid relid)
              * parsing context, 'GenericRoot', need to be rebuilt.
              */
             if (ENABLE_CACHEDPLAN_MGR && plansource->planManager != NULL) {
+                ereport(DEBUG2,
+                    (errmodule(MOD_OPT),
+                     errmsg("relation has been changed or updated, invalid planManager; query: \"%s\"",
+                     plansource->query_string)));
                 plansource->planManager->is_valid = false;
             }
         }
@@ -3190,6 +3225,10 @@ ResetPlanCache(CachedPlanSource *plansource)
     				plansource->gplan->is_valid = false;
                 }
                 if (ENABLE_CACHEDPLAN_MGR && plansource->planManager != NULL) {
+                    ereport(DEBUG2,
+                        (errmodule(MOD_OPT),
+                         errmsg("Reset plan cache, invalid planManager; query: \"%s\"",
+                         plansource->query_string)));
                     plansource->planManager->is_valid = false;
                 }
             }

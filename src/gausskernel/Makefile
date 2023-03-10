@@ -622,6 +622,7 @@ endif
 	cp $(SECUREDYNAMICLIB_HOME)/libsecurec* '$(DESTDIR)$(libdir)/'
 ifneq (, $(findstring __USE_NUMA, $(CFLAGS)))
 	cp $(ZSTD_LIB_PATH)/libzstd* '$(DESTDIR)$(libdir)/'
+	cp $(LIBODBC_LIB_PATH)/libodbc* '$(DESTDIR)$(libdir)/'
 	cp $(NUMA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 endif
 ifeq ($(enable_mot), yes)
@@ -685,7 +686,7 @@ ifeq ($(enable_lite_mode), no)
 endif
 endif
 	cp '$(ZSTD_LIB_PATH)'/libzstd.so* '$(DESTDIR)$(libdir)/'
-
+	cp '$(LIBODBC_LIB_PATH)'/libodbc* '$(DESTDIR)$(libdir)/'
 	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
 endif
 
@@ -874,8 +875,7 @@ maintainer-clean: distclean
 	      storage/lmgr/lwlocknames.cpp \
 	      storage/lmgr/lwlocknames.h \
 	      ../common/backend/utils/errcodes.h \
-	      ../common/backend/utils/misc/guc-file.cpp \
-	      ../common/backend/utils/sort/qsort_tuple.cpp
+	      ../common/backend/utils/misc/guc-file.cpp
 
 
 ##########################################################################

@@ -45,6 +45,8 @@
 #include "utils/pg_locale.h"
 #include "utils/selfuncs.h"
 #include "optimizer/gplanmgr.h"
+#include "instruments/instr_statement.h"
+#include "utils/expr_distinct.h"
 
 #define IsBooleanOpfamily(opfamily) ((opfamily) == BOOL_BTREE_FAM_OID || \
     (opfamily) == BOOL_HASH_FAM_OID || (opfamily) == BOOL_UBTREE_FAM_OID)
@@ -154,6 +156,8 @@ static int get_index_column_prefix_lenth(IndexOptInfo *index, int indexcol);
 static Const* prefix_const_node(Const* con, int prefix_len, Oid datatype);
 static RestrictInfo* rewrite_opclause_for_prefixkey(
     RestrictInfo *rinfo, IndexOptInfo* index, Oid opfamily, int prefix_len);
+void check_report_cause_type(FuncExpr *funcExpr, int indkey);
+Node* match_first_var_to_indkey(Node* node, int indkey);
 
 /*
  * create_index_paths
@@ -1756,6 +1760,7 @@ static Cost bitmap_scan_cost_est(PlannerInfo* root, RelOptInfo* rel, Path* ipath
     bpath.path.type = T_BitmapHeapPath;
     bpath.path.pathtype = T_BitmapHeapScan;
     bpath.path.parent = rel;
+    bpath.path.pathtarget = rel->reltarget;
     bpath.path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
     bpath.path.pathkeys = NIL;
     bpath.bitmapqual = ipath;
@@ -1779,6 +1784,7 @@ static Cost bitmap_and_cost_est(PlannerInfo* root, RelOptInfo* rel, List* paths)
     apath.path.type = T_BitmapAndPath;
     apath.path.pathtype = T_BitmapAnd;
     apath.path.parent = rel;
+    bpath.path.pathtarget = rel->reltarget;
     apath.path.param_info = NULL; /* not used in bitmap trees */
     apath.path.pathkeys = NIL;
     apath.bitmapquals = paths;
@@ -1791,6 +1797,7 @@ static Cost bitmap_and_cost_est(PlannerInfo* root, RelOptInfo* rel, List* paths)
     bpath.path.type = T_BitmapHeapPath;
     bpath.path.pathtype = T_BitmapHeapScan;
     bpath.path.parent = rel;
+    bpath.path.pathtarget = rel->reltarget;
     bpath.path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
     bpath.path.pathkeys = NIL;
     bpath.bitmapqual = (Path*)&apath;
@@ -2018,10 +2025,10 @@ static bool check_index_only(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo* i
      */
     /*
      * Add all the attributes needed for joins or final output.  Note: we must
-     * look at reltargetlist, not the attr_needed data, because attr_needed
+     * look at rel's targetlist, not the attr_needed data, because attr_needed
      * isn't computed for inheritance child rels.
      */
-    pull_varattnos((Node*)rel->reltargetlist, rel->relid, &attrs_used);
+    pull_varattnos((Node*)rel->reltarget->exprs, rel->relid, &attrs_used);
 
     /* Add all the attributes used by restriction clauses. */
     foreach (lc, rel->baserestrictinfo) {
@@ -3105,6 +3112,12 @@ bool match_index_to_operand(Node* operand, int indexcol, IndexOptInfo* index, bo
         if (equal(indexkey, operand))
             return true;
     }
+
+    /*
+     * if FuncExpr, check whether there are risks caused by type conversion.
+     */
+    if (IsA(operand, FuncExpr))
+        check_report_cause_type((FuncExpr*)operand, indkey);
 
     return false;
 }
@@ -4309,5 +4322,51 @@ static RestrictInfo* rewrite_opclause_for_prefixkey(RestrictInfo *rinfo, IndexOp
     return make_simple_restrictinfo(newop);
 }
 
+/*
+ * Check whether there are risks caused by type conversion.
+ * If yes, report cause_type.
+ */
+void check_report_cause_type(FuncExpr* funcExpr, int indkey)
+{
+    Node* varNode = NULL;
+    ListCell* argsCell = NULL;
+    if (list_length(funcExpr->args) != 1) {
+        return;
+    }
+    
+    argsCell = list_head(funcExpr->args);
+    Node* node = (Node*)lfirst(argsCell);
+    if (IsA(node, Var)) {
+        varNode = node;
+    } else if (IsA(node, FuncExpr)) {
+        varNode = match_first_var_to_indkey(node, indkey);
+    }
 
+    /* Type conversion in g_typeCastFuncOids with only one parameter is supported. */
+    if (IsFunctionTransferNumDistinct(funcExpr) && varNode != NULL && IsA(varNode, Var) &&
+        indkey == ((Var*)varNode)->varattno) {
+        instr_stmt_report_cause_type(NUM_F_TYPECASTING);
+    }
+}
 
+/*
+ * return the first var that matches the index column
+ * return NULL if not exist
+ */
+Node* match_first_var_to_indkey(Node* node, int indkey)
+{
+    Node* lastNode = NULL;
+
+    List* varList = pull_var_clause(node, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS, PVC_RECURSE_SPECIAL_EXPR);
+    if (varList != NULL) {
+        ListCell* var_cell = NULL;
+        foreach (var_cell, varList) {
+            Node* var = (Node*)lfirst(var_cell);
+            if (indkey == ((Var*)var)->varattno) {
+                lastNode = var;
+                break;
+            }
+        }
+    }
+    return lastNode;
+}

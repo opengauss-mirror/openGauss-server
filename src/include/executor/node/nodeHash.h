@@ -25,7 +25,7 @@ extern Node* MultiExecHash(HashState* node);
 extern void ExecEndHash(HashState* node);
 extern void ExecReScanHash(HashState* node);
 
-extern HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNulls);
+extern HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNulls, List *hash_collations);
 extern void ExecHashTableDestroy(HashJoinTable hashtable);
 extern void ExecHashTableInsert(HashJoinTable hashtable, TupleTableSlot* slot, uint32 hashvalue, int planid, int dop,
     Instrumentation* instrument = NULL);

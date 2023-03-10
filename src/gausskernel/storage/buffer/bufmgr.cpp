@@ -2592,8 +2592,8 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLoc
 
     Block tmpBlock = BufHdrGetBlock(buf);
 
-    if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->extra->lsn_on_disk, PageGetLSN(tmpBlock)) && !(*oldFlags & BM_DIRTY) &&
-        RecoveryInProgress()) {
+    if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->extra->lsn_on_disk, PageGetLSN(tmpBlock)) &&
+        !(*oldFlags & BM_DIRTY) && RecoveryInProgress()) {
         int mode = DEBUG1;
 #ifdef USE_ASSERT_CHECKING
         mode = PANIC;
@@ -2746,7 +2746,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
         /* Pin the buffer and then release the buffer spinlock */
         PinBuffer_Locked(buf);
 
-        if (!SSPageCheckIfCanEliminate(buf)) {
+        if (!SSHelpFlushBufferIfNeed(buf)) {
             // for dms this page cannot eliminate, get another one 
             UnpinBuffer(buf, true);
             continue;
@@ -4767,7 +4767,8 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
             iocb_ptr->data = (void *)bufdesc;
             DSSAioAppendIOCB(aio_cxt, iocb_ptr);
         } else {
-            seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno, bufToWrite, false);
+            seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno, bufToWrite,
+                               false);
         }
     } else {
         SegmentCheck(!IsSegmentFileNode(bufdesc->tag.rnode));
@@ -6350,6 +6351,7 @@ void CheckIOState(volatile void *buf_desc)
 bool StartBufferIO(BufferDesc *buf, bool for_input)
 {
     uint32 buf_state;
+    bool dms_need_flush = false; // used in dms
 
     Assert(!t_thrd.storage_cxt.InProgressBuf);
 
@@ -6390,8 +6392,15 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
         WaitIO(buf);
     }
 
+    if (ENABLE_DMS) {
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf->buf_id);
+        if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+            dms_need_flush = true;
+        }
+    }
+
     /* Once we get here, there is definitely no I/O active on this buffer */
-    if (for_input ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY)) {
+    if (for_input ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY) && !dms_need_flush) {
         /* someone else already did the I/O */
         UnlockBufHdr(buf, buf_state);
         LWLockRelease(buf->io_in_progress_lock);
@@ -6483,6 +6492,23 @@ static void TerminateBufferIO_common(BufferDesc *buf, bool clear_dirty, uint32 s
         if (ENABLE_INCRE_CKPT) {
             if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->extra->rec_lsn))) {
                 remove_dirty_page_from_queue(buf);
+            } else if (ENABLE_DMS) {
+                dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf->buf_id);
+                if (!(buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
+                    ereport(PANIC, (errmodule(MOD_INCRE_CKPT), errcode(ERRCODE_INVALID_BUFFER),
+                        (errmsg("buffer is dirty but not in dirty page queue in TerminateBufferIO_common"))));
+                }
+                buf_ctrl->state &= ~BUF_DIRTY_NEED_FLUSH;
+                XLogRecPtr pagelsn = BufferGetLSN(buf);
+                bool in_flush_copy = SS_IN_FLUSHCOPY;
+                bool in_recovery = !g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag;
+                ereport(LOG,
+                    (errmsg("[SS flush copy] finish flush buffer with need flush, "
+                    "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u, reform phase "
+                    "is in flush_copy:%d, in recovery:%d",
+                    buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode, buf->tag.rnode.bucketNode,
+                    buf->tag.forkNum, buf->tag.blockNum, (unsigned long long)pagelsn, 
+                    (unsigned int)buf->extra->seg_fileno, buf->extra->seg_blockno, in_flush_copy, in_recovery)));
             } else {
                 ereport(PANIC, (errmodule(MOD_INCRE_CKPT), errcode(ERRCODE_INVALID_BUFFER),
                                 (errmsg("buffer is dirty but not in dirty page queue in TerminateBufferIO_common"))));

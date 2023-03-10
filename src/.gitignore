@@ -86,7 +86,6 @@
 /common/backend/utils/misc/guc-file.cpp
 /common/backend/utils/pg_builtin_proc.h
 /common/backend/utils/probes.h
-/common/backend/utils/sort/qsort_tuple.cpp
 /common/interfaces/ecpg/compatlib/exports.list
 /common/interfaces/ecpg/ecpglib/exports.list
 /common/interfaces/ecpg/ecpglib/path.cpp

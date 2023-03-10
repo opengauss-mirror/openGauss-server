@@ -88,6 +88,9 @@ typedef struct knl_session_attr_security {
     char* tde_cmk_id;    
     bool Enable_Security_Policy;
     int audit_xid_info;
+    char* no_audit_client;
+    char* full_audit_users;
+    int audit_system_function_exec;
 } knl_session_attr_security;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SECURITY_H_ */

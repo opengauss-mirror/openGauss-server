@@ -31,8 +31,7 @@
 #include "client_logic_fmt/gs_fmt.h"
 #include "client_logic_cache/icached_column.h"
 
-extern unsigned char *PQescapeByteaConn1(PGconn *conn, const unsigned char *from, size_t from_length, size_t *to_length,
-    bool add_quotes);
+unsigned char *PQescapeByteaCe(PGconn *conn, const unsigned char *from, size_t fromlen, size_t *tolen, bool addquote);
 
 RawValue::RawValue(PGconn *conn)
     : m_is_param(false),
@@ -168,7 +167,7 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
     if (!m_is_param || m_data_value_format == 0) {
         /* replace processedData with its escaped version */
         size_t processed_data_size_tmp(0);
-        const char *processed_data_tmp = (char *)PQescapeByteaConn1(m_conn, (const unsigned char *)m_processed_data,
+        const char *processed_data_tmp = (char *)PQescapeByteaCe(m_conn, (const unsigned char *)m_processed_data,
             m_processed_data_size, &processed_data_size_tmp, !m_is_param);
         free_processed_data();
         if (!processed_data_tmp) {
@@ -180,7 +179,7 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
 
         m_processed_data = (unsigned char *)processed_data_tmp;
         m_processed_data_size = processed_data_size_tmp -
-            1; /* the \0 is counted in the orignal PQescapeByteaConn function, so we need -1 */
+            1; /* the \0 is counted in the orignal PQescapeByteaCe function, so we need -1 */
     }
 
     return true;

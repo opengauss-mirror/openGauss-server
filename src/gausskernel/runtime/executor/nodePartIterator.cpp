@@ -48,7 +48,7 @@ PartIteratorState* ExecInitPartIterator(PartIterator* node, EState* estate, int 
     state = makeNode(PartIteratorState);
     state->ps.plan = (Plan*)node;
     state->ps.state = estate;
-     state->ps.ExecProcNode = ExecPartIterator;
+    state->ps.ExecProcNode = ExecPartIterator;
 
     /* initiate sub node */
     state->ps.lefttree = ExecInitNode(node->plan.lefttree, estate, eflags);

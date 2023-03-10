@@ -111,6 +111,13 @@
 #define CAS_NOT_VALID				0x10
 #define CAS_NO_INHERIT				0x20
 
+/*
+ * In the IntoClause structure there is a char value which will eventually be
+ * set to RELKIND_RELATION or RELKIND_MATVIEW based on the relkind field in
+ * the statement-level structure, which is an ObjectType. Define the default
+ * here, which should always be overridden later.
+ */
+#define INTO_CLAUSE_RELKIND_DEFAULT    '\0'
 
 #define parser_yyerror(msg)  scanner_yyerror(msg, yyscanner)
 #define parser_errposition(pos)  scanner_errposition(pos, yyscanner)
@@ -144,6 +151,8 @@ static void doNegateFloat(Value *v);
 static Node *makeAArrayExpr(List *elements, int location);
 static Node *makeXmlExpr(XmlExprOp op, char *name, List *named_args,
 						 List *args, int location);
+static void SplitColQualList(List *qualList, List **constraintList, CollateClause **collClause, 
+                             core_yyscan_t yyscanner);
 static void SplitColQualList(List *qualList,
                              List **constraintList, CollateClause **collClause, ClientLogicColumnRef **clientLogicColumnRef,
                              core_yyscan_t yyscanner);
@@ -217,7 +226,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
         AlterRoleStmt AlterTableStmt AlterUserStmt
         SelectStmt UpdateStmt InsertStmt DeleteStmt
         VariableResetStmt VariableSetStmt
-        CopyStmt CreateStmt TransactionStmt PreparableStmt CreateSchemaStmt
+        CopyStmt CreateAsStmt CreateStmt TransactionStmt PreparableStmt CreateSchemaStmt
         DeclareCursorStmt CreateFunctionStmt CreateProcedureStmt CallFuncStmt
         PrepareStmt ExecDirectStmt ExecuteStmt
         CreateKeyStmt ViewStmt MergeStmt
@@ -226,8 +235,8 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %type <node>	select_no_parens select_with_parens select_clause
 				simple_select values_clause
 
-%type <node>	alter_column_default alter_using
-%type <ival>	opt_asc_desc opt_nulls_order
+%type <node>	alter_column_default alter_using AutoIncrementValue
+%type <ival>	opt_asc_desc opt_nulls_order con_asc_desc
 
 %type <objtype> drop_type
 %type <node>	alter_table_cmd alter_partition_cmd opt_collate_clause exchange_partition_cmd move_partition_cmd
@@ -239,6 +248,8 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 %type <list>	copy_opt_list callfunc_args
 %type <defelt>	copy_opt_item
+%type <boolean>	opt_with_data
+
 %type <str>		copy_file_name
                 database_name
 
@@ -268,6 +279,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 				OptWith opt_distinct opt_definition definition def_list
 				opt_column_list columnList opt_name_list opt_multi_name_list
 				sort_clause opt_sort_clause sortby_list
+				opt_c_include constraint_params
 				name_list from_clause from_list opt_array_bounds
 				qualified_name_list any_name
 				any_operator expr_list attrs 
@@ -284,14 +296,14 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 %type <list>	group_by_list
 %type <node>	group_by_item empty_grouping_set rollup_clause cube_clause
-%type <node>	grouping_sets_clause
+%type <node>	grouping_sets_clause OptAutoIncrement
 
 %type <range>	OptTempTableName
-%type <into>	into_clause
+%type <into>	into_clause create_as_target
 
 %type <typnam>	func_type
 
-%type <ival>	 OptTemp opt_wait
+%type <ival>	 OptTemp opt_wait OptKind
 %type <ival>	 opt_nowait_or_skip
 %type <oncommit> OnCommitOption
 
@@ -347,7 +359,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %type <value>	NumericOnly
 %type <alias>	alias_clause opt_alias_clause
 %type <sortby>	sortby
-%type <ielem>	index_elem
+%type <ielem>	index_elem constraint_elem
 %type <node>	table_ref
 %type <jexpr>	joined_table
 %type <range>	relation_expr
@@ -413,15 +425,18 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 				opt_frame_clause frame_extent frame_bound
 %type <str>		opt_existing_window_name
 %type <chr>		OptCompress
+%type <ival>	KVType
 %type <ival>		ColCmprsMode
 %type <node>	column_item opt_table_partitioning_clause
 				range_partitioning_clause value_partitioning_clause opt_interval_partition_clause
 				interval_expr maxValueItem list_partitioning_clause hash_partitioning_clause
 				range_start_end_item range_less_than_item list_partition_item hash_partition_item
-%type <list>	range_partition_definition_list list_partition_definition_list hash_partition_definition_list maxValueList
-			column_item_list tablespaceList opt_interval_tablespaceList
-			split_dest_partition_define_list
-			range_start_end_list range_less_than_list opt_range_every_list
+				subpartitioning_clause range_subpartitioning_clause hash_subpartitioning_clause
+				list_subpartitioning_clause subpartition_item
+%type <list>	range_partition_definition_list list_partition_definition_list hash_partition_definition_list
+			maxValueList listValueList column_item_list tablespaceList opt_interval_tablespaceList
+			split_dest_partition_define_list range_start_end_list range_less_than_list opt_range_every_list
+			subpartition_definition_list
 %type <range> partition_name
 
 %type <ival> opt_row_movement_clause
@@ -500,27 +515,27 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_INTEGER BIT BLANKS BLOB_P BLOCKCHAIN BODY_P BOGUS
 	BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
-	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CHAIN CHAR_P
-	CHARACTER CHARACTERISTICS CHARACTERSET CHECK CHECKPOINT CLASS CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
-	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COMMENT COMMENTS COMMIT
-	CONNECT COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPRESS CONDITION CONCURRENTLY CONFIGURATION CONNECTBY CONNECTION CONSTANT CONSTRAINT CONSTRAINTS
+	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CHAIN CHANGE CHAR_P
+	CHARACTER CHARACTERISTICS CHARACTERSET CHECK CHECKPOINT CHARSET CLASS CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
+	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COLUMNS COMMENT COMMENTS COMMIT CONVERT_P
+	CONNECT COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPLETION COMPRESS CONDITION CONCURRENTLY CONFIGURATION CONNECTBY CONNECTION CONSTANT CONSTRAINT CONSTRAINTS
 	CONTENT_P CONTINUE_P CONTVIEW CONVERSION_P COORDINATOR COORDINATORS COPY COST CREATE
 	CROSS CSN CSV CUBE CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
 	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
-    SHRINK
+    SHRINK USE_P
 
 	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
 /* PGXC_BEGIN */
 	DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
 /* PGXC_END */
-	DROP DUPLICATE DISCONNECT
+	DROP DUPLICATE DISCONNECT DUMPFILE
 
 	EACH ELASTIC ELSE ENABLE_P ENCLOSED ENCODING ENCRYPTED ENCRYPTED_VALUE ENCRYPTION ENCRYPTION_TYPE
-	END_P ENFORCED ENUM_P ERRORS ESCAPE EOL ESCAPING EVERY EXCEPT EXCHANGE
+	END_P ENDS ENFORCED ENUM_P ERRORS ESCAPE EOL ESCAPING EVENT EVENTS EVERY EXCEPT EXCHANGE
 	EXCLUDE EXCLUDED EXCLUDING EXCLUSIVE EXECUTE EXPIRED_P EXISTS EXPLAIN
-	EXTENSION EXTERNAL EXTRACT 
+	EXTENSION EXTERNAL EXTRACT ESCAPED
 
 	FALSE_P FAMILY FAST FENCED FETCH FIELDS FILEHEADER_P FILL_MISSING_FIELDS FILLER FILTER FIRST_P FIXED_P FLOAT_P FOLLOWING FOLLOWS_P FOR FORCE FOREIGN FORMATTER FORWARD
 	FEATURES // DB4AI
@@ -530,7 +545,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P
 
-	IDENTIFIED IDENTITY_P IF_P IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P
+	IDENTIFIED IDENTITY_P IF_P IGNORE IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P
 	INCLUDE INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER INTERNAL
 	INTERSECT INTERVAL INTO INVISIBLE INVOKER IP IS ISNULL ISOLATION
@@ -539,7 +554,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 	KEY KILL KEY_PATH KEY_STORE
 
-	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF
+	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIST LIKE LIMIT LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
 	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_SUCCESS LOGIN_FAILURE LOGOUT LOOP
 	MAPPING MASKING MASTER MASTR MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
@@ -548,7 +563,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
 
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
-	ORDER OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER
+	ORDER OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER OUTFILE
 
 	PACKAGE PACKAGES PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
 /* PGXC_BEGIN */
@@ -567,12 +582,12 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
 	ROTATION ROW ROWNUM ROWS ROWTYPE_P RULE
 
-	SAMPLE SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
+	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN SIBLINGS
-	SIMILAR SIMPLE SIZE SKIP SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START STARTWITH
-	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBPARTITION SUBSCRIPTION SUBSTRING SWLEVEL SWNOCYCLE SWROWNUM
-	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR
-
+	SIMILAR SIMPLE SIZE SKIP SLAVE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START STARTS STARTWITH
+	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBPARTITION SUBPARTITIONS SUBSCRIPTION SUBSTRING SWLEVEL SWNOCYCLE SWROWNUM
+	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR STARTING
+	
 	TABLE TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
 	TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TSFIELD TSTAG TSTIME TYPE_P TYPES_P
@@ -612,6 +627,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %nonassoc   PARTIAL_EMPTY_PREC
 %nonassoc   CLUSTER
 %nonassoc	SET				/* see relation_expr_opt_alias */
+%nonassoc	AUTO_INCREMENT
 %left		UNION EXCEPT MINUS_P
 %left		INTERSECT
 %left		OR
@@ -729,6 +745,7 @@ stmt :
             | AlterRoleStmt
             | AlterUserStmt
             | CopyStmt
+            | CreateAsStmt
             | CreateStmt
             | CreateSchemaStmt
             | DeclareCursorStmt
@@ -4191,34 +4208,37 @@ AnonyBlockStmt:
  *****************************************************************************/
 
 CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
-			OptInherit OptWith OnCommitOption OptCompress OptPartitionElement
+			OptInherit OptAutoIncrement OptWith OnCommitOption OptCompress OptPartitionElement
 /* PGXC_BEGIN */
 			OptDistributeBy OptSubCluster
 /* PGXC_END */
 			opt_table_partitioning_clause
-			opt_internal_data
+			opt_internal_data OptKind
 				{
 					CreateStmt *n = makeNode(CreateStmt);
 					$4->relpersistence = $2;
+					n->relkind = $18;
 					n->relation = $4;
 					n->tableElts = $6;
 					n->inhRelations = $8;
 					n->constraints = NIL;
-					n->options = $9;
-					n->oncommit = $10;
-					n->row_compress = $11;
-					n->tablespacename = $12;
+					n->options = $10;
+					n->oncommit = $11;
+					n->row_compress = $12;
+					n->tablespacename = $13;
 					n->if_not_exists = false;
 /* PGXC_BEGIN */
-					n->distributeby = $13;
-					n->subcluster = $14;
+					n->distributeby = $14;
+					n->subcluster = $15;
 /* PGXC_END */
-					n->partTableState = (PartitionState *)$15;
-					n->internalData = $16;
+					n->partTableState = (PartitionState *)$16;
+					n->internalData = $17;
+					n->autoIncStart = $9;
+					n->charset = PG_INVALID_ENCODING;
 					$$ = (Node *)n;
 				}
 		| CREATE OptTemp TABLE IF_P NOT EXISTS qualified_name '('
-			OptTableElementList ')' OptInherit OptWith OnCommitOption
+			OptTableElementList ')' OptInherit OptAutoIncrement OptWith OnCommitOption
 			OptCompress OptPartitionElement
 /* PGXC_BEGIN */
 			OptDistributeBy OptSubCluster
@@ -4232,17 +4252,19 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->tableElts = $9;
 					n->inhRelations = $11;
 					n->constraints = NIL;
-					n->options = $12;
-					n->oncommit = $13;
-					n->row_compress = $14;
-					n->tablespacename = $15;
+					n->options = $13;
+					n->oncommit = $14;
+					n->row_compress = $15;
+					n->tablespacename = $16;
 					n->if_not_exists = true;
 /* PGXC_BEGIN */
-					n->distributeby = $16;
-					n->subcluster = $17;
+					n->distributeby = $17;
+					n->subcluster = $18;
 /* PGXC_END */
-					n->partTableState = (PartitionState *)$18;
-					n->internalData = $19;
+					n->partTableState = (PartitionState *)$19;
+					n->internalData = $20;
+					n->autoIncStart = $12;
+					n->charset = PG_INVALID_ENCODING;
 					$$ = (Node *)n;
 				}
 		| CREATE OptTemp TABLE qualified_name OF any_name
@@ -4269,6 +4291,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 /* PGXC_END */
 					n->partTableState = NULL;
 					n->internalData = NULL;
+					n->charset = PG_INVALID_ENCODING;
 					$$ = (Node *)n;
 				}
 		| CREATE OptTemp TABLE IF_P NOT EXISTS qualified_name OF any_name
@@ -4295,24 +4318,35 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 /* PGXC_END */
 					n->partTableState = NULL;
 					n->internalData = NULL;
+					n->charset = PG_INVALID_ENCODING;
 					$$ = (Node *)n;
 				}
 		;
+OptKind:
+	FOR MATERIALIZED VIEW
+		{
+			$$ = OBJECT_MATVIEW;
+		}
+	| /* empty */
+		{
+			$$ = OBJECT_TABLE;
+		}
+	;
 
 opt_table_partitioning_clause:
 		range_partitioning_clause
 			{
 				$$ = $1;
 			}
-		|hash_partitioning_clause
+		| hash_partitioning_clause
 			{
 				$$ = $1;
 			}
-		|list_partitioning_clause
+		| list_partitioning_clause
 			{
 				$$ = $1;
 			}
-		|value_partitioning_clause
+		| value_partitioning_clause
 			{
 				$$ = $1;
 			}
@@ -4321,27 +4355,164 @@ opt_table_partitioning_clause:
 
 range_partitioning_clause:
 		PARTITION BY RANGE '(' column_item_list ')'
-		opt_interval_partition_clause '(' range_partition_definition_list ')' opt_row_movement_clause
+		opt_interval_partition_clause subpartitioning_clause '(' range_partition_definition_list ')' opt_row_movement_clause
 			{
 				PartitionState *n = makeNode(PartitionState);
+				if ($8 != NULL && list_length($5) != 1) {
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("The partition key's length should be 1.")));
+				}
+				if ($8 != NULL && $7 != NULL) {
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Subpartitions do not support interval partition."),
+							errcause("System error."), erraction("Contact engineer to support.")));
+				}
 				n->partitionKey = $5;
 				n->intervalPartDef = (IntervalPartitionDefState *)$7;
-				n->partitionList = $9;
+				n->partitionList = $10;
 
 				if (n->intervalPartDef)
 					n->partitionStrategy = 'i';
 				else
 					n->partitionStrategy = 'r';
 
-				n->rowMovement = (RowMovementValue)$11;
+				n->rowMovement = (RowMovementValue)$12;
+				n->subPartitionState = (PartitionState *)$8;
 
 				$$ = (Node *)n;
 			}
 		;
 
 list_partitioning_clause:
-		PARTITION BY LIST '(' column_item_list ')'
-		'(' list_partition_definition_list ')'
+		PARTITION BY LIST '(' column_item_list ')' subpartitioning_clause
+		'(' list_partition_definition_list ')' opt_row_movement_clause
+			{
+#ifdef ENABLE_MULTIPLE_NODES
+				ereport(errstate,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("Un-support feature"),
+						errdetail("The distributed capability is not supported currently.")));
+#endif
+				if (list_length($5) != 1) {
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("The partition key's length should be 1.")));
+				}
+				PartitionState *n = makeNode(PartitionState);
+				n->partitionKey = $5;
+				n->intervalPartDef = NULL;
+				n->partitionList = $9;
+				n->partitionStrategy = 'l';
+				n->subPartitionState = (PartitionState *)$7;
+				n->rowMovement = (RowMovementValue)$11;
+ 
+				$$ = (Node *)n;
+ 
+			}
+		;
+ 
+hash_partitioning_clause:
+		PARTITION BY IDENT '(' column_item_list ')' subpartitioning_clause
+		'(' hash_partition_definition_list ')' opt_row_movement_clause
+			{
+#ifdef ENABLE_MULTIPLE_NODES
+				ereport(errstate,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("Un-support feature"),
+						errdetail("The distributed capability is not supported currently.")));
+#endif
+				if (list_length($5) != 1) {
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("The partition key's length should be 1.")));
+				}
+				if (strcmp($3, "hash") != 0) {
+					ereport(errstate, (errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("unrecognized option \"%s\"", $3)));	
+				}
+				PartitionState *n = makeNode(PartitionState);
+				n->partitionKey = $5;
+				n->intervalPartDef = NULL;
+				n->partitionList = $9;
+				n->partitionStrategy = 'h';
+				n->subPartitionState = (PartitionState *)$7;;
+				n->rowMovement = (RowMovementValue)$11;
+				int i = 0;
+				ListCell *elem = NULL;
+				List *parts = n->partitionList;
+				foreach(elem, parts) {
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
+				$$ = (Node *)n;
+ 
+			}
+		;
+ 
+value_partitioning_clause:
+		PARTITION BY VALUES '(' column_item_list ')'
+			{
+				PartitionState *n = makeNode(PartitionState);
+				n->partitionKey = $5;
+				n->partitionStrategy = 'v';
+ 
+				$$ = (Node *)n;
+			}
+		;
+ 
+subpartitioning_clause:
+		range_subpartitioning_clause
+			{
+				$$ = $1;
+			}
+		| hash_subpartitioning_clause
+			{
+				$$ = $1;
+			}
+		| list_subpartitioning_clause
+			{
+				$$ = $1;
+			}
+		| /* empty */			{ $$ = NULL; }
+		;
+ 
+range_subpartitioning_clause:
+		SUBPARTITION BY RANGE '(' column_item_list ')'
+			{
+#ifdef ENABLE_MULTIPLE_NODES
+				ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("Un-support feature"),
+						errdetail("The distributed capability is not supported currently.")));
+#endif
+				PartitionState *n = makeNode(PartitionState);
+				if (list_length($5) != 1) {
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("The partition key's length should be 1.")));
+				}
+				n->partitionKey = $5;
+				n->intervalPartDef = NULL;
+				n->partitionList = NIL;
+				n->partitionStrategy = 'r';
+ 
+				n->rowMovement = ROWMOVEMENT_DEFAULT;
+				n->subPartitionState = NULL;
+ 
+				$$ = (Node *)n;
+			}
+		;
+ 
+list_subpartitioning_clause:
+		SUBPARTITION BY LIST '(' column_item_list ')'
 			{
 #ifdef ENABLE_MULTIPLE_NODES
 				ereport(ERROR,
@@ -4355,24 +4526,19 @@ list_partitioning_clause:
 							errmsg("Un-support feature"),
 							errdetail("The partition key's length should be 1.")));
 				}
-				if (list_length($8) > 64) {
-					ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("Un-support feature"),
-						errdetail("The partition's length should be less than 65.")));
-				}
 				PartitionState *n = makeNode(PartitionState);
 				n->partitionKey = $5;
 				n->intervalPartDef = NULL;
-				n->partitionList = $8;
+				n->partitionList = NIL;
 				n->partitionStrategy = 'l';
+				n->subPartitionState = NULL;
 				$$ = (Node *)n;
 
 			}
 		;
 
-hash_partitioning_clause:
-		PARTITION BY IDENT '(' column_item_list ')'
+hash_subpartitioning_clause:
+		SUBPARTITION BY IDENT '(' column_item_list ')'
 		'(' hash_partition_definition_list ')'
 			{
 #ifdef ENABLE_MULTIPLE_NODES
@@ -4391,41 +4557,57 @@ hash_partitioning_clause:
 					ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
 						errmsg("unrecognized option \"%s\"", $3)));	
 				}
-				if (list_length($8) > 64) {
-					ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("Un-support feature"),
-						errdetail("The partition's length should be less than 65.")));
-				}
 				PartitionState *n = makeNode(PartitionState);
 				n->partitionKey = $5;
 				n->intervalPartDef = NULL;
-				n->partitionList = $8;
+				n->partitionList = NIL;
 				n->partitionStrategy = 'h';
-				int i = 0;
-				ListCell *elem = NULL;
-				List *parts = n->partitionList;
-				foreach(elem, parts) {
-					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
-					hashPart->boundary = list_make1(makeIntConst(i, -1));
-					i++;
-				}
+				n->subPartitionState = NULL;
 				$$ = (Node *)n;
 
 			}
 		;
 		
-value_partitioning_clause:
-		PARTITION BY VALUES '(' column_item_list ')'
+subpartition_definition_list:
+		subpartition_item
 			{
-				PartitionState *n = makeNode(PartitionState);
-				n->partitionKey = $5;
-				n->partitionStrategy = 'v';
+				$$ = list_make1($1);
+			}
+		| subpartition_definition_list ',' subpartition_item
+			{
+				$$ = lappend($1, $3);
+			}
+		;
+ 
+subpartition_item:
+		SUBPARTITION name VALUES '(' listValueList ')' OptTableSpace
+			{
+				ListPartitionDefState *n = makeNode(ListPartitionDefState);
+				n->partitionName = $2;
+				n->boundary = $5;
+				n->tablespacename = $7;
+ 
+				$$ = (Node *)n;
+			}
+		| SUBPARTITION name OptTableSpace
+			{
+				HashPartitionDefState *n = makeNode(HashPartitionDefState);
+				n->partitionName = $2;
+				n->tablespacename = $3;
+ 
+				$$ = (Node*)n;
+			}
+		| SUBPARTITION name VALUES LESS THAN
+		'(' maxValueList ')' OptTableSpace
+			{
+				RangePartitionDefState *n = makeNode(RangePartitionDefState);
+				n->partitionName = $2;
+				n->boundary = $7;
+				n->tablespacename = $9;
 
 				$$ = (Node *)n;
 			}
 		;
-
 column_item_list:
 		column_item
 			{
@@ -4529,7 +4711,7 @@ range_less_than_list:
 		;
 
 list_partition_item:
-		PARTITION name VALUES '(' expr_list ')' OptTableSpace
+		PARTITION name VALUES '(' listValueList ')' OptTableSpace
 			{
 				ListPartitionDefState *n = makeNode(ListPartitionDefState);
 				n->partitionName = $2;
@@ -4538,19 +4720,24 @@ list_partition_item:
 
 				$$ = (Node *)n;
 			}
-		| PARTITION name VALUES '(' DEFAULT ')' OptTableSpace
+		| PARTITION name VALUES '(' listValueList ')' OptTableSpace '(' subpartition_definition_list ')'
 			{
-				ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("Un-support feature"),
-						errdetail("The default list's partition is not supported currently."))); 
 				ListPartitionDefState *n = makeNode(ListPartitionDefState);
 				n->partitionName = $2;
-				Const *n_default = makeNode(Const);
-				n_default->ismaxvalue = true;
-				n_default->location = -1;
-				n->boundary = list_make1(n_default);
+				n->boundary = $5;
 				n->tablespacename = $7;
+				n->subPartitionDefState = $9;
+				int i = 0;
+				ListCell *elem = NULL;
+				List *parts = n->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
 				$$ = (Node *)n;
 			}
 		;
@@ -4564,6 +4751,26 @@ hash_partition_item:
 
 				$$ = (Node*)n;
 			}
+		| PARTITION name OptTableSpace '(' subpartition_definition_list ')'
+			{
+				HashPartitionDefState *n = makeNode(HashPartitionDefState);
+				n->partitionName = $2;
+				n->tablespacename = $3;
+				n->subPartitionDefState = $5;
+				int i = 0;
+				ListCell *elem = NULL;
+				List *parts = n->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
+				$$ = (Node *)n;
+			}
+		;
 
 range_less_than_item:
 		PARTITION name VALUES LESS THAN
@@ -4573,6 +4780,28 @@ range_less_than_item:
 				n->partitionName = $2;
 				n->boundary = $7;
 				n->tablespacename = $9;
+
+				$$ = (Node *)n;
+			}
+		| PARTITION name VALUES LESS THAN
+		'(' maxValueList ')' OptTableSpace '(' subpartition_definition_list ')'
+			{
+				RangePartitionDefState *n = makeNode(RangePartitionDefState);
+				n->partitionName = $2;
+				n->boundary = $7;
+				n->tablespacename = $9;
+				n->subPartitionDefState = $11;
+				int i = 0;
+				ListCell *elem = NULL;
+				List *parts = n->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
 
 				$$ = (Node *)n;
 			}
@@ -4631,7 +4860,7 @@ opt_range_every_list:
 				$$ = $3;
 			}
 		| /* empty */ { $$ = NIL; }
-		
+
 partition_name:
 		ColId
 			{
@@ -4666,6 +4895,21 @@ maxValueItem:
 			}
 		;
 
+listValueList:
+		expr_list
+			{
+				$$ = $1;
+			}
+		| DEFAULT
+			{
+				Const *n = makeNode(Const);
+ 
+				n->ismaxvalue = true;
+				n->location = @1;
+ 
+				$$ = list_make1(n);
+			}
+		;
 
 opt_row_movement_clause: ENABLE_P ROW MOVEMENT		{ $$ = ROWMOVEMENT_ENABLE; }
 			| DISABLE_P ROW MOVEMENT					{ $$ = ROWMOVEMENT_DISABLE; }
@@ -4689,13 +4933,19 @@ OptTemp:	TEMPORARY					{ $$ = RELPERSISTENCE_TEMP; }
 			| LOCAL TEMP				{ $$ = RELPERSISTENCE_TEMP; }
 			| GLOBAL TEMPORARY
 				{
-					feparser_printf("GLOBAL is deprecated in temporary table creation\n");
+#ifdef ENABLE_MULTIPLE_NODES
 					$$ = RELPERSISTENCE_TEMP;
+#else
+					$$ = RELPERSISTENCE_GLOBAL_TEMP;
+#endif
 				}
 			| GLOBAL TEMP
 				{
-					feparser_printf("GLOBAL is deprecated in temporary table creation\n");
+#ifdef ENABLE_MULTIPLE_NODES
 					$$ = RELPERSISTENCE_TEMP;
+#else
+					$$ = RELPERSISTENCE_GLOBAL_TEMP;
+#endif
 				}
 			| UNLOGGED					{ $$ = RELPERSISTENCE_UNLOGGED; }
 			| /*EMPTY*/					{ $$ = RELPERSISTENCE_PERMANENT; }
@@ -4744,25 +4994,30 @@ TypedTableElement:
 			| TableConstraint	 				{ $$ = $1; }
 		;
 
-columnDef:	ColId Typename ColCmprsMode create_generic_options ColQualList
+columnDef:	ColId Typename KVType ColCmprsMode create_generic_options ColQualList
 				{
 					ColumnDef *n = makeNode(ColumnDef);
 					n->colname = $1;
 					n->typname = $2;
+					n->kvtype = $3;
 					n->inhcount = 0;
 					n->is_local = true;
 					n->is_not_null = false;
 					n->is_from_type = false;
 					n->storage = 0;
-					n->cmprs_mode = $3;
+					n->cmprs_mode = $4;
 					n->raw_default = NULL;
 					n->cooked_default = NULL;
 					n->collOid = InvalidOid;
-					n->fdwoptions = $4;
+					n->fdwoptions = $5;
                     n->clientLogicColumnRef=NULL;
-					
-                    SplitColQualList($5, &n->constraints, &n->collClause,&n->clientLogicColumnRef, yyscanner);
-
+			if ($3 == ATT_KV_UNDEFINED) {
+						SplitColQualList($6, &n->constraints, &n->collClause, &n->clientLogicColumnRef,
+									 yyscanner);
+					} else {
+						SplitColQualList($6, &n->constraints, &n->collClause,
+										yyscanner);
+					}
 					$$ = (Node *)n;
 				}
 		;
@@ -4841,7 +5096,11 @@ alter_generic_option_elem:
                     $$ = makeDefElemExtended(NULL, $2, NULL, DEFELEM_DROP);
                 }
         ;
-
+KVType: TSTAG		{$$ = ATT_KV_TAG;}  /* tag for kv storage */
+		| TSFIELD	{$$ = ATT_KV_FIELD;}  /* field for kv storage */
+		| TSTIME	{$$ = ATT_KV_TIMETAG;}  /* field for kv storage */
+		| /* EMPTY */	{$$ = ATT_KV_UNDEFINED;} /* not using kv storage */
+;
 ColCmprsMode:	DELTA		{$$ = ATT_CMPR_DELTA;}  /* delta compression */
 		| PREFIX	{$$ = ATT_CMPR_PREFIX;}  /* prefix compression */
 		| DICTIONARY		{$$ = ATT_CMPR_DICTIONARY;}  /* dictionary compression */
@@ -4908,6 +5167,20 @@ ColConstraint:
                 { 
                     $$=$2;
                 }
+			| AUTO_INCREMENT
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(errstate,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("auto_increment is not yet supported")));
+#endif
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_AUTO_INCREMENT;
+					n->location = @1;
+					n->raw_expr = NULL;
+					n->cooked_expr = NULL;
+					$$ = (Node *)n;
+				}
 		;	
 			
 with_algorithm:
@@ -5406,6 +5679,9 @@ TableLikeClause:
 					TableLikeClause *n = makeNode(TableLikeClause);
 					n->relation = $2;
 					n->options = CREATE_TABLE_LIKE_ALL & ~$4;
+#ifndef ENABLE_MULTIPLE_NODES					
+						n->options = n->options & ~CREATE_TABLE_LIKE_DISTRIBUTION;
+#endif		
 					$$ = (Node *)n;
 				}
 		;
@@ -5418,11 +5694,11 @@ excluding_option_list:
 TableLikeOptionList:
 				TableLikeOptionList INCLUDING TableLikeIncludingOption	{ $$ = $1 | $3; }
 				| TableLikeOptionList EXCLUDING TableLikeExcludingOption	{ $$ = $1 & ~$3; }
-				| /* EMPTY */						{ $$ = 0; }
+				| /* EMPTY */						{ $$ = CREATE_TABLE_LIKE_DEFAULTS_SERIAL; }
 		;
 
 TableLikeIncludingOption:
-				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS; }
+				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS | CREATE_TABLE_LIKE_DEFAULTS_SERIAL; }
 				| CONSTRAINTS		{ $$ = CREATE_TABLE_LIKE_CONSTRAINTS; }
 				| INDEXES			{ $$ = CREATE_TABLE_LIKE_INDEXES; }
 				| STORAGE			{ $$ = CREATE_TABLE_LIKE_STORAGE; }
@@ -5435,7 +5711,7 @@ TableLikeIncludingOption:
 		;
 
 TableLikeExcludingOption:
-				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS; }
+				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS | CREATE_TABLE_LIKE_DEFAULTS_SERIAL; }
 				| CONSTRAINTS		{ $$ = CREATE_TABLE_LIKE_CONSTRAINTS; }
 				| INDEXES			{ $$ = CREATE_TABLE_LIKE_INDEXES; }
 				| STORAGE			{ $$ = CREATE_TABLE_LIKE_STORAGE; }
@@ -5449,7 +5725,7 @@ TableLikeExcludingOption:
 		;
 
 opt_internal_data: 
-            INTERNAL DATA_P 	internal_data_body		{$$ = NULL;}
+            INTERNAL DATA_P 	internal_data_body		{$$ = $3;}
 			| /* EMPTY */      	{$$ = NULL;}
 		;
 
@@ -5497,11 +5773,34 @@ TableConstraint:
 				{
 					Constraint *n = (Constraint *) $3;
 					Assert(IsA(n, Constraint));
-					n->conname = $2;
+					if ((n->conname == NULL) || (n->conname != NULL && n->contype == CONSTR_FOREIGN)) {
+						n->conname = $2;
+					}
 					n->location = @1;
 					$$ = (Node *) n;
 				}
 			| ConstraintElem  						{ $$ = $1; }
+			| CONSTRAINT ConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES				
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("CONSTRAINT without constraint_name is not yet supported in distributed database.")));
+#endif	
+					if (fe_pg_yyget_extra(yyscanner)->core_yy_extra.m_clientLogic->m_cached_column_manager->get_sql_compatibility() == M_FORMAT) {
+						Constraint *n = (Constraint *) $2;
+						Assert(IsA(n, Constraint));
+						n->location = @1;
+						$$ = (Node *) n;
+					} else {
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("CONSTRAINT without constraint_name is supported only in B-format database."),
+									parser_errposition(@1)));
+  						$$ = NULL;/* not reached */
+					}
+				}
 		;
 
 ConstraintElem:
@@ -5518,20 +5817,87 @@ ConstraintElem:
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *)n;
 				}
-			| UNIQUE '(' columnList ')' opt_definition OptConsTableSpace
+						| UNIQUE name access_method_clause '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("UNIQUE name is not yet supported in distributed database.")));
+#endif	
+					if (fe_pg_yyget_extra(yyscanner)->core_yy_extra.m_clientLogic->m_cached_column_manager->get_sql_compatibility() == M_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_UNIQUE;
+						n->location = @1;
+						n->conname = $2;
+						n->access_method = $3;
+						n->keys = $5;
+						n->including = $7;
+						n->options = $8;
+						n->indexname = NULL;
+						n->indexspace = $9;
+						processCASbits($10, @10, "UNIQUE",
+									   &n->deferrable, &n->initdeferred, NULL,
+									   NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+						$$ = (Node *)n;
+					} else {
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("UNIQUE name is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+					
+				}
+			| UNIQUE USING access_method '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("UNIQUE access_method_clause is not yet supported in distributed database.")));
+#endif	
+					if (fe_pg_yyget_extra(yyscanner)->core_yy_extra.m_clientLogic->m_cached_column_manager->get_sql_compatibility() == M_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_UNIQUE;
+						n->location = @1;
+						n->access_method = $3;
+						n->keys = $5;
+						n->including = $7;
+						n->options = $8;
+						n->indexname = NULL;
+						n->indexspace = $9;
+						processCASbits($10, @10, "UNIQUE",
+									   &n->deferrable, &n->initdeferred, NULL,
+									   NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+						$$ = (Node *)n;
+					} else {
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("UNIQUE access_method_clause is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */						
+					}
+				}
+			| UNIQUE '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_UNIQUE;
 					n->location = @1;
 					n->keys = $3;
-					n->options = $5;
+					n->including = $5;
+					n->options = $6;
 					n->indexname = NULL;
-					n->indexspace = $6;
-					processCASbits($7, @7, "UNIQUE",
+					n->indexspace = $7;
+					processCASbits($8, @8, "UNIQUE",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
-					n->inforConstraint = (InformationalConstraint *) $8; /* informational constraint info */
+					n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
 					$$ = (Node *)n;
 				}
 			| UNIQUE ExistingIndex ConstraintAttributeSpec InformationalConstraintElem
@@ -5540,6 +5906,7 @@ ConstraintElem:
 					n->contype = CONSTR_UNIQUE;
 					n->location = @1;
 					n->keys = NIL;
+					n->including = NIL;
 					n->options = NIL;
 					n->indexname = $2;
 					n->indexspace = NULL;
@@ -5549,20 +5916,53 @@ ConstraintElem:
 					n->inforConstraint = (InformationalConstraint *) $4; /* informational constraint info */
 					$$ = (Node *)n;
 				}
-			| PRIMARY KEY '(' columnList ')' opt_definition OptConsTableSpace
+			| PRIMARY KEY USING access_method '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("PRIMARY KEY USING access_method is not yet supported in distributed database.")));
+#endif	
+					if (fe_pg_yyget_extra(yyscanner)->core_yy_extra.m_clientLogic->m_cached_column_manager->get_sql_compatibility() == M_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_PRIMARY;
+						n->location = @1;
+						n->access_method = $4;
+						n->keys = $6;
+						n->including = $8;
+						n->options = $9;
+						n->indexname = NULL;
+						n->indexspace = $10;
+						processCASbits($11, @11, "PRIMARY KEY",
+									   &n->deferrable, &n->initdeferred, NULL,
+									   NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $12; /* informational constraint info */
+						$$ = (Node *)n;
+					} else {
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("PRIMARY KEY USING access_method is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */					
+					}
+				}
+			| PRIMARY KEY '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_PRIMARY;
 					n->location = @1;
 					n->keys = $4;
-					n->options = $6;
+					n->including = $6;
+					n->options = $7;
 					n->indexname = NULL;
-					n->indexspace = $7;
-					processCASbits($8, @8, "PRIMARY KEY",
+					n->indexspace = $8;
+					processCASbits($9, @9, "PRIMARY KEY",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
-					n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
+					n->inforConstraint = (InformationalConstraint *) $10; /* informational constraint info */
 					$$ = (Node *)n;
 				}
 			| PRIMARY KEY ExistingIndex ConstraintAttributeSpec InformationalConstraintElem
@@ -5581,7 +5981,7 @@ ConstraintElem:
 					$$ = (Node *)n;
 				}
 			| EXCLUDE access_method_clause '(' ExclusionConstraintList ')'
-				opt_definition OptConsTableSpace ExclusionWhereClause
+				opt_c_include opt_definition OptConsTableSpace ExclusionWhereClause
 				ConstraintAttributeSpec
 				{
 					Constraint *n = makeNode(Constraint);
@@ -5589,14 +5989,49 @@ ConstraintElem:
 					n->location = @1;
 					n->access_method	= $2;
 					n->exclusions		= $4;
-					n->options			= $6;
+					n->including		= $6;
+					n->options			= $7;
 					n->indexname		= NULL;
-					n->indexspace		= $7;
-					n->where_clause		= $8;
-					processCASbits($9, @9, "EXCLUDE",
+					n->indexspace		= $8;
+					n->where_clause		= $9;
+					processCASbits($10, @10, "EXCLUDE",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
 					$$ = (Node *)n;
+				}
+			| FOREIGN KEY name '(' columnList ')' REFERENCES qualified_name
+				opt_column_list key_match key_actions ConstraintAttributeSpec
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES				
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("FOREIGN KEY name ... REFERENCES constraint is not yet supported.")));
+#endif						
+					if (fe_pg_yyget_extra(yyscanner)->core_yy_extra.m_clientLogic->m_cached_column_manager->get_sql_compatibility() == M_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_FOREIGN;
+						n->location = @1;
+						n->conname = $3;
+						n->pktable			= $8;
+						n->fk_attrs			= $5;
+						n->pk_attrs			= $9;
+						n->fk_matchtype		= $10;
+						n->fk_upd_action	= (char) ($11 >> 8);
+						n->fk_del_action	= (char) ($11 & 0xFF);
+						processCASbits($12, @12, "FOREIGN KEY",
+									   &n->deferrable, &n->initdeferred,
+									   &n->skip_validation, NULL,
+									   yyscanner);
+						n->initially_valid = !n->skip_validation;
+						$$ = (Node *)n;
+					} else {
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("FOREIGN KEY name is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */	
+					}
 				}
 			| FOREIGN KEY '(' columnList ')' REFERENCES qualified_name
 				opt_column_list key_match key_actions ConstraintAttributeSpec
@@ -5694,6 +6129,10 @@ columnElem: ColId
 				}
 		;
 
+opt_c_include:	INCLUDE '(' columnList ')'			{ $$ = $3; }
+			 |		/* EMPTY */						{ $$ = NIL; }
+		;
+
 key_match:  MATCH FULL
 			{
 				$$ = FKCONSTR_MATCH_FULL;
@@ -5789,6 +6228,76 @@ index_elem: ColId opt_collate opt_class opt_asc_desc opt_nulls_order
                     $$->nulls_ordering = (SortByNulls)$7;
                 }
         ;
+constraint_params:	constraint_elem							{ $$ = list_make1($1); }
+			| constraint_params ',' constraint_elem			{ $$ = lappend($1, $3); }
+		;
+con_asc_desc: ASC							{ $$ = SORTBY_ASC; }
+			| DESC							{ $$ = SORTBY_DESC; }
+		;
+ 
+constraint_elem: ColId con_asc_desc
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES		
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("ASC/DESC is not yet supported in distributed database.")));
+#endif	
+					if (fe_pg_yyget_extra(yyscanner)->core_yy_extra.m_clientLogic->m_cached_column_manager->get_sql_compatibility() == M_FORMAT) {
+						$$ = makeNode(IndexElem);
+						$$->name = $1;
+						$$->expr = NULL;
+						$$->indexcolname = NULL;
+						$$->collation = NIL;
+						$$->opclass = NIL;
+						$$->ordering = (SortByDir)$2;
+						$$->nulls_ordering = SORTBY_NULLS_DEFAULT;
+					} else {
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("ASC/DESC is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+				}
+			| ColId
+				{
+					$$ = makeNode(IndexElem);
+					$$->name = $1;
+					$$->expr = NULL;
+					$$->indexcolname = NULL;
+					$$->collation = NIL;
+					$$->opclass = NIL;
+					$$->ordering = SORTBY_DEFAULT;
+					$$->nulls_ordering = SORTBY_NULLS_DEFAULT;
+				}
+			| '(' a_expr ')' opt_asc_desc
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES				
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("expression is not yet supported in distributed database.")));
+#endif	
+					if (fe_pg_yyget_extra(yyscanner)->core_yy_extra.m_clientLogic->m_cached_column_manager->get_sql_compatibility() == M_FORMAT) {
+						$$ = makeNode(IndexElem);
+						$$->name = NULL;
+						$$->expr = $2;
+						$$->indexcolname = NULL;
+						$$->collation = NIL;
+						$$->opclass = NIL;
+						$$->ordering = (SortByDir)$4;
+						$$->nulls_ordering = SORTBY_NULLS_DEFAULT;
+					} else {
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("expression is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+					
+				}
+		;
 
 
 opt_nulls_order: NULLS_FIRST                { $$ = SORTBY_NULLS_FIRST; }
@@ -5880,7 +6389,27 @@ OnCommitOption:  ON COMMIT DROP				{ $$ = ONCOMMIT_DROP; }
 			| ON COMMIT PRESERVE ROWS		{ $$ = ONCOMMIT_PRESERVE_ROWS; }
 			| /*EMPTY*/						{ $$ = ONCOMMIT_NOOP; }
 		;
+AutoIncrementValue: AUTO_INCREMENT Iconst	{ $$ = (Node *)makeInteger($2); }
+        | AUTO_INCREMENT '=' Iconst	{ $$ = (Node *)makeInteger($3); }
+        | AUTO_INCREMENT FCONST	{ $$ = (Node *)makeFloat($2); }
+		| AUTO_INCREMENT '=' FCONST	{ $$ = (Node *)makeFloat($3); }
+		;
 
+OptAutoIncrement: AutoIncrementValue
+            {
+#ifdef ENABLE_MULTIPLE_NODES
+                ereport(errstate,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("auto_increment is not yet supported")));
+#endif
+                if (fe_pg_yyget_extra(yyscanner)->core_yy_extra.m_clientLogic->m_cached_column_manager->get_sql_compatibility() != M_FORMAT) {
+                    ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("auto_increment is supported only in B-format database")));
+                }
+                $$ = (Node*)makeDefElem("start", $1);
+            }
+            | /* EMPTY */ { $$ = NULL; }
+		;
 OptTableSpace:   TABLESPACE name					{ $$ = $2; }
 			| /*EMPTY*/								{ $$ = NULL; }
 		;
@@ -6283,9 +6812,48 @@ ExistingIndex:   USING INDEX index_name				{ $$ = $3; }
  *
  *****************************************************************************/
 
+CreateAsStmt:
+		CREATE OptTemp TABLE create_as_target AS SelectStmt opt_with_data
+				{
+					CreateTableAsStmt *ctas = makeNode(CreateTableAsStmt);
+					ctas->query = $6;
+					ctas->into = $4;
+					ctas->relkind = OBJECT_TABLE;
+					ctas->is_select_into = false;
+					/* cram additional flags into the IntoClause */
+					$4->rel->relpersistence = $2;
+					$4->skipData = !($7);
+					$$ = (Node *) ctas;
+				}
+		;
 
+create_as_target:
+			qualified_name opt_column_list OptWith OnCommitOption OptCompress OptTableSpace
+/* PGXC_BEGIN */
+			OptDistributeBy OptSubCluster
 /* PGXC_END */
+				{
+					$$ = makeNode(IntoClause);
+					$$->rel = $1;
+					$$->colNames = $2;
+					$$->options = $3;
+					$$->onCommit = $4;
+					$$->row_compress = $5;
+					$$->tableSpaceName = $6;
+					$$->skipData = false;		/* might get changed later */
+/* PGXC_BEGIN */
+					$$->distributeby = $7;
+					$$->subcluster = $8;
+					$$->relkind = INTO_CLAUSE_RELKIND_DEFAULT;
+/* PGXC_END */
+				}
+		;
 
+opt_with_data:
+			WITH DATA_P								{ $$ = TRUE; }
+			| WITH NO DATA_P						{ $$ = FALSE; }
+			| /*EMPTY*/								{ $$ = TRUE; }
+		;
 opt_as:		AS										{}
 			| /* EMPTY */							{}
 		;
@@ -7878,35 +8446,41 @@ Typename:	SimpleTypename opt_array_bounds
 				{
 					$$ = $1;
 					$$->arrayBounds = $2;
+					$$->end_location = yylloc;
 				}
 			| SETOF SimpleTypename opt_array_bounds
 				{
 					$$ = $2;
 					$$->arrayBounds = $3;
 					$$->setof = TRUE;
+					$$->end_location = yylloc;
 				}
 			/* SQL standard syntax, currently only one-dimensional */
 			| SimpleTypename ARRAY '[' Iconst ']'
 				{
 					$$ = $1;
 					$$->arrayBounds = list_make1(makeInteger($4));
+					$$->end_location = yylloc;
 				}
 			| SETOF SimpleTypename ARRAY '[' Iconst ']'
 				{
 					$$ = $2;
 					$$->arrayBounds = list_make1(makeInteger($5));
 					$$->setof = TRUE;
+					$$->end_location = yylloc;
 				}
 			| SimpleTypename ARRAY
 				{
 					$$ = $1;
 					$$->arrayBounds = list_make1(makeInteger(-1));
+					$$->end_location = yylloc;
 				}
 			| SETOF SimpleTypename ARRAY
 				{
 					$$ = $2;
 					$$->arrayBounds = list_make1(makeInteger(-1));
 					$$->setof = TRUE;
+					$$->end_location = yylloc;
 				}
 		;
 
@@ -11068,6 +11642,7 @@ unreserved_keyword:
 			| CASCADED
 			| CATALOG_P
 			| CHAIN
+			| CHANGE
 			| CHARACTERISTICS
 			| CHARACTERSET
 			| CHECKPOINT
@@ -11081,12 +11656,14 @@ unreserved_keyword:
 			| CLUSTER
             | COLUMN_ENCRYPTION_KEY
             | COLUMN_ENCRYPTION_KEYS
+			| COLUMNS
 			| COMMENT
 			| COMMENTS
 			| COMMIT
 			| COMMITTED
 			| COMPATIBLE_ILLEGAL_CHARS
 			| COMPLETE
+			| COMPLETION
 			| COMPRESS
 			| CONDITION
 			| CONFIGURATION
@@ -11136,6 +11713,7 @@ unreserved_keyword:
 			| DOMAIN_P
 			| DOUBLE_P
 			| DROP
+			| DUMPFILE
 			| EACH
 			| ENABLE_P
 			| ENCLOSED
@@ -11145,11 +11723,15 @@ unreserved_keyword:
             | ENCRYPTED_VALUE
             | ENCRYPTION
             | ENCRYPTION_TYPE
+			| ENDS
 			| ENUM_P
 			| EOL
 			| ERRORS
 			| ESCAPE
+			| ESCAPED
 			| ESCAPING
+			| EVENT
+			| EVENTS
 			| EVERY
 			| EXCHANGE
 			| EXCLUDE
@@ -11220,6 +11802,7 @@ unreserved_keyword:
 			| LC_CTYPE_P
 			| LEAKPROOF
 			| LEVEL
+			| LINES
 			| LIST
 			| LISTEN
 			| LOAD
@@ -11280,6 +11863,7 @@ unreserved_keyword:
 			| OPTIONS
 			| OWNED
 			| OWNER
+			| OUTFILE
 			| PACKAGE
 			| PARSER
 			| PARTIAL %prec PARTIAL_EMPTY_PREC
@@ -11349,6 +11933,7 @@ unreserved_keyword:
 			| ROWS
 			| RULE
 			| SAVEPOINT
+			| SCHEDULE
 			| SCHEMA
 			| SCROLL
 			| SEARCH
@@ -11369,6 +11954,7 @@ unreserved_keyword:
 			| SIMPLE
 			| SIZE
 			| SKIP
+			| SLAVE
 			| SLICE
 			| SMALLDATETIME_FORMAT_P
 			| SNAPSHOT
@@ -11378,6 +11964,8 @@ unreserved_keyword:
 			| STABLE
 			| STANDALONE_P
 			| START
+			| STARTING
+			| STARTS
 			| STATEMENT
 			| STATISTICS
 			| STDIN
@@ -11388,6 +11976,7 @@ unreserved_keyword:
 			| STRICT_P
 			| STRIP_P
 			| SUBPARTITION
+			| SUBPARTITIONS
             | SUBSCRIPTION
 			| SYNONYM
 			| SYS_REFCURSOR					{ $$ = "refcursor"; }
@@ -11425,6 +12014,7 @@ unreserved_keyword:
 			| UNTIL
 			| UNUSABLE
 			| UPDATE
+			| USE_P
                         | USEEOF
 			| VACUUM
 			| VALID
@@ -12120,7 +12710,58 @@ makeXmlExpr(XmlExprOp op, char *name, List *named_args, List *args,
 	x->location = location;
 	return (Node *) x;
 }
-
+/* Separate Constraint nodes from COLLATE clauses in a ColQualList */
+static void
+SplitColQualList(List *qualList,
+				 List **constraintList, CollateClause **collClause,
+				 core_yyscan_t yyscanner)
+{
+	ListCell   *cell;
+	ListCell   *prev;
+	ListCell   *next;
+ 
+	*collClause = NULL;
+	prev = NULL;
+	for (cell = list_head(qualList); cell; cell = next)
+	{
+		Node   *n = (Node *) lfirst(cell);
+ 
+		next = lnext(cell);
+		if (IsA(n, Constraint))
+		{
+			/* keep it in list */
+			prev = cell;
+			continue;
+		}
+		if (IsA(n, CollateClause))
+		{
+			CollateClause *c = (CollateClause *) n;
+ 
+			if (*collClause) {
+				ereport(errstate,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("multiple COLLATE clauses not allowed"),
+						 parser_errposition(c->location)));
+			}
+			*collClause = c;
+		}
+		else if (IsA(n, ClientLogicColumnRef))
+		{
+			ereport(errstate, (errmodule(MOD_SEC), errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("unsupported syntax: ENCRYPTED WITH in this operation"), errdetail("N/A"),
+					errcause("client encryption feature is not supported this operation."),
+						erraction("Check client encryption feature whether supported this operation.")));
+		}
+		else {
+			ereport(errstate,
+					(errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+						errmsg("unexpected node type %d", (int) n->type)));
+		}
+		/* remove non-Constraint nodes from qualList */
+		qualList = list_delete_cell(qualList, cell, prev);
+	}
+	*constraintList = qualList;
+}
 /* Separate Constraint nodes from COLLATE clauses in a ColQualList */
 static void
 SplitColQualList(List *qualList,

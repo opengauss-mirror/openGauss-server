@@ -252,12 +252,6 @@ EXPLAIN (COSTS OFF) SELECT * FROM ft6;  --err
 SELECT * FROM ft6;
  c1 | c2  |   c3   
 ----+-----+--------
- 12 |  13 | AAA012
- 18 |  19 | AAA018
- 27 |  28 | AAA027
- 39 |  40 | AAA039
- 45 |  46 | AAA045
- 48 |  49 | AAA048
   3 |   4 | AAA003
   6 |   7 | AAA006
   9 |  10 | AAA009
@@ -268,12 +262,12 @@ SELECT * FROM ft6;
  33 |  34 | AAA033
  36 |  37 | AAA036
  42 |  43 | AAA042
- 51 |  52 | AAA051
- 63 |  64 | AAA063
- 66 |  67 | AAA066
- 69 |  70 | AAA069
- 75 |  76 | AAA075
- 84 |  85 | AAA084
+ 12 |  13 | AAA012
+ 18 |  19 | AAA018
+ 27 |  28 | AAA027
+ 39 |  40 | AAA039
+ 45 |  46 | AAA045
+ 48 |  49 | AAA048
  54 |  55 | AAA054
  57 |  58 | AAA057
  60 |  61 | AAA060
@@ -285,6 +279,12 @@ SELECT * FROM ft6;
  93 |  94 | AAA093
  96 |  97 | AAA096
  99 | 100 | AAA099
+ 51 |  52 | AAA051
+ 63 |  64 | AAA063
+ 66 |  67 | AAA066
+ 69 |  70 | AAA069
+ 75 |  76 | AAA075
+ 84 |  85 | AAA084
 (33 rows)
 
 SHOW sql_beta_feature;
@@ -313,12 +313,6 @@ EXPLAIN (COSTS OFF) SELECT * FROM ft6;  --suc
 SELECT * FROM ft6;
  c1 | c2  |   c3   
 ----+-----+--------
- 12 |  13 | AAA012
- 18 |  19 | AAA018
- 27 |  28 | AAA027
- 39 |  40 | AAA039
- 45 |  46 | AAA045
- 48 |  49 | AAA048
   3 |   4 | AAA003
   6 |   7 | AAA006
   9 |  10 | AAA009
@@ -329,12 +323,12 @@ SELECT * FROM ft6;
  33 |  34 | AAA033
  36 |  37 | AAA036
  42 |  43 | AAA042
- 51 |  52 | AAA051
- 63 |  64 | AAA063
- 66 |  67 | AAA066
- 69 |  70 | AAA069
- 75 |  76 | AAA075
- 84 |  85 | AAA084
+ 12 |  13 | AAA012
+ 18 |  19 | AAA018
+ 27 |  28 | AAA027
+ 39 |  40 | AAA039
+ 45 |  46 | AAA045
+ 48 |  49 | AAA048
  54 |  55 | AAA054
  57 |  58 | AAA057
  60 |  61 | AAA060
@@ -346,6 +340,12 @@ SELECT * FROM ft6;
  93 |  94 | AAA093
  96 |  97 | AAA096
  99 | 100 | AAA099
+ 51 |  52 | AAA051
+ 63 |  64 | AAA063
+ 66 |  67 | AAA066
+ 69 |  70 | AAA069
+ 75 |  76 | AAA075
+ 84 |  85 | AAA084
 (33 rows)
 
 -- ======================================================================================================================================
@@ -1931,10 +1931,10 @@ SELECT t1.c1, t1.c2, t2.c1, t2.c2 FROM ft4 t1 LEFT JOIN (SELECT * FROM ft5 WHERE
 SELECT t1.c1, t1.c2, t2.c1, t2.c2 FROM ft4 t1 LEFT JOIN (SELECT * FROM ft5 WHERE c1 < 10) t2 ON (t1.c1 = t2.c1) WHERE t1.c1 < 10;
  c1 | c2 | c1 | c2 
 ----+----+----+----
+  4 |  5 |    |   
   2 |  3 |    |   
   6 |  7 |  6 |  7
   8 |  9 |    |   
-  4 |  5 |    |   
 (4 rows)
 
 -- clauses within the nullable side are not pulled up, but the top level clause
@@ -1980,10 +1980,10 @@ SELECT t1.c1, t1.c2, t2.c1, t2.c2 FROM ft4 t1 LEFT JOIN (SELECT * FROM ft5 WHERE
             WHERE (t2.c1 < 10 OR t2.c1 IS NULL) AND t1.c1 < 10;
  c1 | c2 | c1 | c2 
 ----+----+----+----
+  4 |  5 |    |   
   2 |  3 |    |   
   6 |  7 |  6 |  7
   8 |  9 |    |   
-  4 |  5 |    |   
 (4 rows)
 
 -- right outer join
@@ -2492,7 +2492,7 @@ SELECT t1.c1, ss.a, ss.b FROM (SELECT c1 FROM "S 1"."T 3" WHERE c1 = 50) t1 INNE
                ->  Partitioned Index Scan using t3_pkey on "S 1"."T 3"
                      Output: "T 3".c1, "T 3".ctid, "T 3".tableoid
                      Index Cond: ("T 3".c1 = 50)
-                     Selected Partitions:  1
+                     Selected Partitions:  2
                ->  Hash Full Join
                      Output: ft4.c1, ft4.*, ft5.c1, ft5.*
                      Hash Cond: (ft4.c1 = ft5.c1)
@@ -4058,9 +4058,9 @@ SELECT ft4.c1, q.* FROM ft4 LEFT JOIN (SELECT 13, ft1.c1, ft2.c1 FROM ft1 RIGHT 
 SELECT ft4.c1, q.* FROM ft4 LEFT JOIN (SELECT 13, ft1.c1, ft2.c1 FROM ft1 RIGHT JOIN ft2 ON (ft1.c1 = ft2.c1) WHERE ft1.c1 = 12) q(a, b, c) ON (ft4.c1 = q.b) WHERE ft4.c1 BETWEEN 10 AND 15;
  c1 | a  | b  | c  
 ----+----+----+----
- 12 | 13 | 12 | 12
  10 |    |    |   
  14 |    |    |   
+ 12 | 13 | 12 | 12
 (3 rows)
 
 -- join with nullable side with some columns with null values
@@ -5547,7 +5547,6 @@ create operator public.>^ (
  procedure = int4gt
 );
 create operator family my_op_family using btree;
-ERROR:  user defined operator is not yet supported.
 create function my_op_cmp(a int, b int) returns int as
   $$begin return btint4cmp(a, b); end $$ language plpgsql;
 create operator class my_op_class for type int using btree family my_op_family as
@@ -5555,23 +5554,35 @@ create operator class my_op_class for type int using btree family my_op_family a
  operator 3 public.=^,
  operator 5 public.>^,
  function 1 my_op_cmp(int, int);
-ERROR:  operator family "my_op_family" does not exist for access method "btree"
 -- NOTICES: 
 -- openGauss not support create operator class.  remove the case. If you want to restore the test case later, refer to README in the file header.
 -- This will not be pushed as sort operator is now removed from the extension.
 explain (verbose, costs off)
 select array_agg(c1 order by c1 using operator(public.<^)) from ft2 where c2 = 6 and c1 < 100 group by c2;
-ERROR:  operator <^ is not a valid ordering operator
-LINE 2: select array_agg(c1 order by c1 using operator(public.<^)) f...
-                                              ^
-HINT:  Ordering operators must be "<" or ">" members of btree operator families.
-CONTEXT:  referenced column: array_agg
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: array_agg(c1 ORDER BY c1 USING <^ NULLS LAST), c2
+   Group By Key: ft2.c2
+   ->  Foreign Scan on public.ft2
+         Output: c2, c1
+         Node ID: 1
+         Remote SQL: SELECT "C 1", c2 FROM "S 1"."T 1" WHERE (("C 1" < 100)) AND ((c2 = 6))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT "C 1", c2 FROM "S 1"."T 1" WHERE (("C 1" < 100)) AND ((c2 = 6)) 
+   Partitioned Index Scan using t1_pkey on "S 1"."T 1"
+     Output: "C 1", c2
+     Index Cond: ("T 1"."C 1" < 100)
+     Filter: ("T 1".c2 = 6)
+     Selected Partitions:  1
+ 
+(16 rows)
+
 -- Cleanup
 drop operator class my_op_class using btree;
-ERROR:  operator class "my_op_class" does not exist for access method "btree"
 drop function my_op_cmp(a int, b int);
 drop operator family my_op_family using btree;
-ERROR:  operator family "my_op_family" does not exist for access method "btree"
 drop operator public.>^(int, int);
 drop operator public.=^(int, int);
 drop operator public.<^(int, int);
@@ -9636,12 +9647,6 @@ EXPLAIN (VERBOSE, COSTS OFF)select * from ftx;
 select * from ftx;
  c1 | c2  |   c3   
 ----+-----+--------
- 12 |  13 | AAA012
- 39 |  40 | AAA039
- 48 |  49 | AAA048
- 18 |  19 | 
- 27 |  28 | 
- 45 |  46 | 
   3 |   4 | AAA003
   6 |   7 | AAA006
  15 |  16 | AAA015
@@ -9652,12 +9657,12 @@ select * from ftx;
  42 |  43 | AAA042
   9 |  10 | 
  36 |  37 | 
- 51 |  52 | AAA051
- 66 |  67 | AAA066
- 69 |  70 | AAA069
- 75 |  76 | AAA075
- 84 |  85 | AAA084
- 63 |  64 | 
+ 12 |  13 | AAA012
+ 39 |  40 | AAA039
+ 48 |  49 | AAA048
+ 18 |  19 | 
+ 27 |  28 | 
+ 45 |  46 | 
  57 |  58 | AAA057
  60 |  61 | AAA060
  78 |  79 | AAA078
@@ -9669,6 +9674,12 @@ select * from ftx;
  81 |  82 | 
  90 |  91 | 
  99 | 100 | 
+ 51 |  52 | AAA051
+ 66 |  67 | AAA066
+ 69 |  70 | AAA069
+ 75 |  76 | AAA075
+ 84 |  85 | AAA084
+ 63 |  64 | 
 (33 rows)
 
 EXPLAIN (VERBOSE, COSTS OFF)select * from ftx partition(ptb1);  --ERR

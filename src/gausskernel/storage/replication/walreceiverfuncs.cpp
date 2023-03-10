@@ -1425,20 +1425,25 @@ static void GetHadrUserInfo(char *hadr_user_info)
 void GetPasswordForHadrStreamingReplication(char user[], char password[])
 {
     char hadr_user_info[MAXPGPATH] = {0};
-    char plain_hadr_user_info[MAXPGPATH] = {0};
+    char *plain_hadr_user_info = NULL;
     errno_t rc = EOK;
 
     GetHadrUserInfo(hadr_user_info);
-    if (!decryptECString(hadr_user_info, plain_hadr_user_info, MAXPGPATH, HADR_MODE)) {
-        rc = memset_s(plain_hadr_user_info, sizeof(plain_hadr_user_info), 0, sizeof(plain_hadr_user_info));
-        securec_check(rc, "\0", "\0");
+    if (!decryptECString(hadr_user_info, &plain_hadr_user_info, HADR_MODE)) {
+        if (plain_hadr_user_info != NULL) {
+            rc = memset_s(plain_hadr_user_info, strlen(plain_hadr_user_info), 0, strlen(plain_hadr_user_info));
+            securec_check(rc, "\0", "\0");
+            pfree(plain_hadr_user_info);
+        }
         ereport(ERROR, (errmsg("In disaster cluster, decrypt hadr_user_info fail.")));
     }
     if (sscanf_s(plain_hadr_user_info, "%[^|]|%s", user, MAXPGPATH, password, MAXPGPATH) != 2) {
-        rc = memset_s(plain_hadr_user_info, sizeof(plain_hadr_user_info), 0, sizeof(plain_hadr_user_info));
+        rc = memset_s(plain_hadr_user_info, strlen(plain_hadr_user_info), 0, strlen(plain_hadr_user_info));
         securec_check(rc, "\0", "\0");
+        pfree(plain_hadr_user_info);
         ereport(ERROR, (errmsg("In disaster cluster, parse plain hadr_user_info fail.")));
     }
-    rc = memset_s(plain_hadr_user_info, sizeof(plain_hadr_user_info), 0, sizeof(plain_hadr_user_info));
+    rc = memset_s(plain_hadr_user_info, strlen(plain_hadr_user_info), 0, strlen(plain_hadr_user_info));
     securec_check(rc, "\0", "\0");
+    pfree(plain_hadr_user_info);
 }

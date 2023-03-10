@@ -263,6 +263,9 @@ size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBloc
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
         if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
+            ereport(DEBUG1,
+                    (errmsg("could not write block %u in file \"%s\" headerNum: %u, this relation has been removed",
+                            logicBlockNumber, FilePathName(location.fd), location.headerNum)));
             return 0;
         }
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),

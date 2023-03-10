@@ -1,0 +1,1809 @@
+create database test_collate_A dbcompatibility = 'A';
+create database test_collate_B dbcompatibility = 'B';
+\c test_collate_A
+-- test A format
+select 'abCdEf' = 'abcdef' collate "utf8mb4_general_ci";
+ERROR:  Un-support feature
+LINE 1: select 'abCdEf' = 'abcdef' collate "utf8mb4_general_ci";
+                                   ^
+DETAIL:  this collation only support in B-format database
+select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_general_ci";
+ERROR:  Un-support feature
+LINE 1: select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_gene...
+                                               ^
+DETAIL:  this collation only support in B-format database
+select 'abCdEf' = 'abcdef' collate "utf8mb4_unicode_ci";
+ERROR:  Un-support feature
+LINE 1: select 'abCdEf' = 'abcdef' collate "utf8mb4_unicode_ci";
+                                   ^
+DETAIL:  this collation only support in B-format database
+select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_unicode_ci";
+ERROR:  Un-support feature
+LINE 1: select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_unic...
+                                               ^
+DETAIL:  this collation only support in B-format database
+select 'abCdEf' = 'abcdef' collate "utf8mb4_bin";
+ERROR:  Un-support feature
+LINE 1: select 'abCdEf' = 'abcdef' collate "utf8mb4_bin";
+                                   ^
+DETAIL:  this collation only support in B-format database
+select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_bin";
+ERROR:  Un-support feature
+LINE 1: select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_bin"...
+                                               ^
+DETAIL:  this collation only support in B-format database
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(a varchar(10) collate "utf8mb4_general_ci");
+ERROR:  Un-support feature
+LINE 1: create table t1(a varchar(10) collate "utf8mb4_general_ci");
+                                      ^
+DETAIL:  this collation only support in B-format database
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(a text);
+create index idx_1 on t1(a collate "utf8mb4_unicode_ci");
+ERROR:  Un-support feature
+DETAIL:  this collation only support in B-format database
+create unique index idx_2 on t1(a collate "utf8mb4_unicode_ci");
+ERROR:  Un-support feature
+DETAIL:  this collation only support in B-format database
+create table hashjoin1(id int, f1 text, f2 text);
+create table hashjoin2(id int, f3 text, f4 text);
+ 
+insert into hashjoin1 select generate_series(1,100), 'a', 'a';
+insert into hashjoin2 select generate_series(1,100), 'a', 'a';
+ 
+select f1, f3 from hashjoin1 as h1 inner join hashjoin2 as h2
+on (h1.f2 = h2.f4)
+where (('a','a') in (select h1.f2, h2.f4 
+from (hashjoin1 inner join hashjoin2 on hashjoin1.id = hashjoin2.id) order by 1, 2))
+group by h1.f1, h2.f3
+order by 1,2 limit 10;
+ f1 | f3 
+----+----
+ a  | a
+(1 row)
+
+drop table if exists hashjoin1, hashjoin2;
+-- test binary
+drop table if exists t1;
+create table t1(a blob collate binary);
+ERROR:  collation "binary" for encoding "UTF8" does not exist
+LINE 1: create table t1(a blob collate binary);
+                               ^
+create table t1(a blob collate utf8mb4_bin);
+ERROR:  Un-support feature
+LINE 1: create table t1(a blob collate utf8mb4_bin);
+                               ^
+DETAIL:  this collation only support in B-format database
+create table t1(a blob);
+-- test B format
+\c test_collate_B
+-- test create table/alter table
+drop table if exists t_collate;
+NOTICE:  table "t_collate" does not exist, skipping
+create table t_collate(id int, f1 text collate "utf8mb4_general_ci");
+alter table t_collate add column f2 text collate "utf8mb4_unicode_ci",add column f3 varchar collate "utf8mb4_general_ci";
+alter table t_collate alter f1 type text collate "utf8mb4_bin";
+\d+ t_collate
+                                    Table "public.t_collate"
+ Column |       Type        |         Modifiers          | Storage  | Stats target | Description 
+--------+-------------------+----------------------------+----------+--------------+-------------
+ id     | integer           |                            | plain    |              | 
+ f1     | text              | collate utf8mb4_bin        | extended |              | 
+ f2     | text              | collate utf8mb4_unicode_ci | extended |              | 
+ f3     | character varying | collate utf8mb4_general_ci | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+-- test create index
+insert into t_collate select generate_series(1,1000), repeat(chr(int4(random()*26)+65),4),repeat(chr(int4(random()*26)+97),4),repeat(chr(int4(random()*26)+97),4);
+create index idx_f1_default on t_collate(f3);
+explain (verbose, costs off) select * from t_collate where f3 in ('aaaa','bbbb');
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Bitmap Heap Scan on public.t_collate
+   Output: id, f1, f2, f3
+   Recheck Cond: ((t_collate.f3)::text = ANY ('{aaaa,bbbb}'::text[]))
+   ->  Bitmap Index Scan on idx_f1_default
+         Index Cond: ((t_collate.f3)::text = ANY ('{aaaa,bbbb}'::text[]))
+(5 rows)
+
+drop index if exists idx_f1_default;
+create index idx_f1_utf8mb4 on t_collate(f3 collate "utf8mb4_general_ci");
+explain (verbose, costs off) select * from t_collate where f3 in ('aaaa','bbbb');
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Bitmap Heap Scan on public.t_collate
+   Output: id, f1, f2, f3
+   Recheck Cond: ((t_collate.f3)::text = ANY ('{aaaa,bbbb}'::text[]))
+   ->  Bitmap Index Scan on idx_f1_utf8mb4
+         Index Cond: ((t_collate.f3)::text = ANY ('{aaaa,bbbb}'::text[]))
+(5 rows)
+
+drop index if exists idx_f1_utf8mb4;
+create index idx_f1_C on t_collate(f3 collate "C");
+explain (verbose, costs off) select * from t_collate where f3 in ('aaaa','bbbb');
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Seq Scan on public.t_collate
+   Output: id, f1, f2, f3
+   Filter: ((t_collate.f3)::text = ANY ('{aaaa,bbbb}'::text[]))
+(3 rows)
+
+drop index if exists idx_f1_C;
+drop table if exists t_collate;
+--test unique/primary key
+drop table if exists t_uft8_general_text;
+NOTICE:  table "t_uft8_general_text" does not exist, skipping
+create table t_uft8_general_text(f1 text unique collate "utf8mb4_general_ci");
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_uft8_general_text_f1_key" for table "t_uft8_general_text"
+insert into t_uft8_general_text values('S');
+insert into t_uft8_general_text values('s');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_general_text_f1_key"
+DETAIL:  Key (f1)=(s) already exists.
+insert into t_uft8_general_text values('ś');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_general_text_f1_key"
+DETAIL:  Key (f1)=(ś) already exists.
+insert into t_uft8_general_text values('Š');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_general_text_f1_key"
+DETAIL:  Key (f1)=(Š) already exists.
+drop table if exists t_uft8_general_char;
+NOTICE:  table "t_uft8_general_char" does not exist, skipping
+create table t_uft8_general_char(f2 char(10) primary key collate "utf8mb4_general_ci");
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_uft8_general_char_pkey" for table "t_uft8_general_char"
+insert into t_uft8_general_char values('S');
+insert into t_uft8_general_char values('s');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_general_char_pkey"
+DETAIL:  Key (f2)=(s         ) already exists.
+insert into t_uft8_general_char values('ś');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_general_char_pkey"
+DETAIL:  Key (f2)=(ś        ) already exists.
+insert into t_uft8_general_char values('Š');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_general_char_pkey"
+DETAIL:  Key (f2)=(Š        ) already exists.
+drop table if exists t_uft8_unicode_text;
+NOTICE:  table "t_uft8_unicode_text" does not exist, skipping
+create table t_uft8_unicode_text(f1 text unique collate "utf8mb4_unicode_ci");
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_uft8_unicode_text_f1_key" for table "t_uft8_unicode_text"
+insert into t_uft8_unicode_text values('S');
+insert into t_uft8_unicode_text values('s');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_unicode_text_f1_key"
+DETAIL:  Key (f1)=(s) already exists.
+insert into t_uft8_unicode_text values('ś');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_unicode_text_f1_key"
+DETAIL:  Key (f1)=(ś) already exists.
+insert into t_uft8_unicode_text values('Š');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_unicode_text_f1_key"
+DETAIL:  Key (f1)=(Š) already exists.
+drop table if exists t_uft8_unicode_char;
+NOTICE:  table "t_uft8_unicode_char" does not exist, skipping
+create table t_uft8_unicode_char(f2 char(10) primary key collate "utf8mb4_unicode_ci");
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_uft8_unicode_char_pkey" for table "t_uft8_unicode_char"
+insert into t_uft8_unicode_char values('S');
+insert into t_uft8_unicode_char values('s');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_unicode_char_pkey"
+DETAIL:  Key (f2)=(s         ) already exists.
+insert into t_uft8_unicode_char values('ś');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_unicode_char_pkey"
+DETAIL:  Key (f2)=(ś        ) already exists.
+insert into t_uft8_unicode_char values('Š');    -- fail
+ERROR:  duplicate key value violates unique constraint "t_uft8_unicode_char_pkey"
+DETAIL:  Key (f2)=(Š        ) already exists.
+--
+-- test collate utf8mb4_general_ci
+--
+-- test collation used in expr
+select 'abCdEf' = 'abcdef' collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf' != 'abcdef' collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' > 'abcdef' collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' < 'abcdef' collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf'::character varying = 'abcdef'::character varying collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf'::clob = 'abcdef'::clob collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf'::bpchar = 'abcdef'::bpchar collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf'::char(10) = 'abcdef'::char(10);
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf'::char(10) = 'abcdef'::char(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abcdefg'::char(10) = 'abcdef'::char(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf'::char(10) != 'abcdef'::char(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf'::char(10) > 'abcdef'::char(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf'::char(10) < 'abcdef'::char(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf'::nchar(10) = 'abcdef'::nchar(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abcdefg'::nchar(10) = 'abcdef'::nchar(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf'::character(10) = 'abcdef'::character(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abcdefg'::character(10) = 'abcdef'::character(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'ś' = 'Š' collate "utf8mb4_general_ci" , 'Š' = 's' collate "utf8mb4_general_ci";
+ ?column? | ?column? 
+----------+----------
+ t        | t
+(1 row)
+
+select 'ś' != 'Š' collate "utf8mb4_general_ci", 'Š' != 's' collate "utf8mb4_general_ci";
+ ?column? | ?column? 
+----------+----------
+ f        | f
+(1 row)
+
+select 'ŠSśs' = 'ssss' collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'ŠSśs'::character varying = 'ssss'::character varying collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'ŠSśs'::clob = 'ssss'::clob collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'ŠSśs'::bpchar = 'ssss'::bpchar collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 's'::char(3) = 'Š'::char(3) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'ŠSśs'::char = 'ssss'::char collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'ŠSśs'::char(10) = 'ssss'::char(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'ŠSśs'::nchar(10) = 'ssss'::nchar(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'ŠSśs'::character(10) = 'ssss'::character(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+-- compare between different types, expected success
+select 'ŠSśs'::character(10) = 'ssss'::varchar collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'ŠSśs'::clob = 'ssss'::char(10) collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+-- compare str with different collation, expected fail
+select 'abCdEf' collate "utf8mb4_general_ci"  = 'abcdef' collate "utf8mb4_general_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf' collate "utf8mb4_bin"  = 'abcdef' collate "utf8mb4_general_ci";
+ERROR:  collation mismatch between explicit collations "utf8mb4_bin" and "utf8mb4_general_ci"
+LINE 1: select 'abCdEf' collate "utf8mb4_bin"  = 'abcdef' collate "u...
+                                                          ^
+select 'abCdEf' collate "utf8mb4_bin"  = 'abcdef' collate "C";
+ERROR:  collation mismatch between explicit collations "utf8mb4_bin" and "C"
+LINE 1: select 'abCdEf' collate "utf8mb4_bin"  = 'abcdef' collate "C...
+                                                          ^
+-- types not support collation, expected fail
+select 100 > 50 collate "utf8mb4_general_ci";
+ERROR:  collations are not supported by type integer
+LINE 1: select 100 > 50 collate "utf8mb4_general_ci";
+                        ^
+select '0'::bool = '1'::bool collate "utf8mb4_general_ci";
+ERROR:  collations are not supported by type boolean
+LINE 1: select '0'::bool = '1'::bool collate "utf8mb4_general_ci";
+                                     ^
+select '100'::money > '50'::money collate "utf8mb4_general_ci";
+ERROR:  collations are not supported by type money
+LINE 1: select '100'::money > '50'::money collate "utf8mb4_general_c...
+                                          ^
+select '00:00:02'::time > '00:00:01'::time collate "utf8mb4_general_ci";
+ERROR:  collations are not supported by type time without time zone
+LINE 1: select '00:00:02'::time > '00:00:01'::time collate "utf8mb4_...
+                                                   ^
+-- test column collation
+drop table if exists column_collate;
+NOTICE:  table "column_collate" does not exist, skipping
+create table column_collate(f1 text collate "utf8mb4_general_ci", f2 char(15) collate "utf8mb4_general_ci");
+insert into column_collate values('S','S'),('s','s'),('ś','ś'),('Š','Š'),('z','z'),('Z','Z'),('c','c'),('A','A'),('C','C');
+insert into column_collate values('AaA','AaA'),('bb','bb'),('aAA','aAA'),('Bb','Bb'),('dD','dd'),('Cc','Cc'),('AAA','AAA');
+insert into column_collate values('A1中文','A1中文'), ('b1中文','b1中文'), ('a2中文','a2中文'),
+('B2中文','B2中文'), ('中文d1','中文d1'), ('中文C1','中文C1'), ('中文A3','中文A3');
+-- test where clause
+select f1 from column_collate where f1 = 's';
+ f1 
+----
+ S
+ s
+ ś
+ Š
+(4 rows)
+
+select f1 from column_collate where f1 = 'aaa';
+ f1  
+-----
+ AaA
+ aAA
+ AAA
+(3 rows)
+
+select f2 from column_collate where f2 = 's';
+       f2        
+-----------------
+ S              
+ s              
+ ś             
+ Š             
+(4 rows)
+
+select f2 from column_collate where f2 = 'aaa';
+       f2        
+-----------------
+ AaA            
+ aAA            
+ AAA            
+(3 rows)
+
+-- test order by clause
+select f1 from column_collate order by f1;
+   f1   
+--------
+ A
+ A1中文
+ a2中文
+ AaA
+ AAA
+ aAA
+ b1中文
+ B2中文
+ Bb
+ bb
+ c
+ C
+ Cc
+ dD
+ S
+ s
+ ś
+ Š
+ Z
+ z
+ 中文A3
+ 中文C1
+ 中文d1
+(23 rows)
+
+select f2 from column_collate order by f2;
+       f2        
+-----------------
+ A              
+ A1中文       
+ a2中文       
+ AaA            
+ AAA            
+ aAA            
+ b1中文       
+ B2中文       
+ Bb             
+ bb             
+ c              
+ C              
+ Cc             
+ dd             
+ S              
+ s              
+ ś             
+ Š             
+ Z              
+ z              
+ 中文A3       
+ 中文C1       
+ 中文d1       
+(23 rows)
+
+-- test distinct clause
+insert into column_collate values ('AbcdEf','AbcdEf'), ('abcdEF','abcdEF'), ('中文AbCdEFG','中文AbCdEFG'),
+('中文abcdEFG','中文abcdEFG'), ('中文Ab','中文Ab'), ('中文ab','中文ab');
+select distinct f1 from column_collate;
+     f1      
+-------------
+ a2中文
+ Cc
+ dD
+ 中文A3
+ B2中文
+ A
+ c
+ AbcdEf
+ 中文Ab
+ 中文AbCdEFG
+ 中文C1
+ b1中文
+ bb
+ S
+ 中文d1
+ z
+ A1中文
+ AaA
+(18 rows)
+
+select distinct f2 from column_collate;
+       f2        
+-----------------
+ a2中文       
+ Cc             
+ dd             
+ 中文A3       
+ B2中文       
+ A              
+ c              
+ AbcdEf         
+ 中文Ab       
+ 中文AbCdEFG  
+ 中文C1       
+ b1中文       
+ bb             
+ S              
+ 中文d1       
+ z              
+ A1中文       
+ AaA            
+(18 rows)
+
+explain (verbose, costs off) select distinct (f1) from column_collate order by f1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Output: f1
+   Sort Key: column_collate.f1 COLLATE utf8mb4_general_ci
+   ->  HashAggregate
+         Output: f1
+         Group By Key: column_collate.f1
+         ->  Seq Scan on public.column_collate
+               Output: f1
+(8 rows)
+
+select distinct f1 from column_collate order by f1;
+     f1      
+-------------
+ A
+ A1中文
+ a2中文
+ AaA
+ AbcdEf
+ b1中文
+ B2中文
+ bb
+ c
+ Cc
+ dD
+ S
+ z
+ 中文A3
+ 中文Ab
+ 中文AbCdEFG
+ 中文C1
+ 中文d1
+(18 rows)
+
+select distinct f2 from column_collate order by f2;
+       f2        
+-----------------
+ A              
+ A1中文       
+ a2中文       
+ AaA            
+ AbcdEf         
+ b1中文       
+ B2中文       
+ bb             
+ c              
+ Cc             
+ dd             
+ S              
+ z              
+ 中文A3       
+ 中文Ab       
+ 中文AbCdEFG  
+ 中文C1       
+ 中文d1       
+(18 rows)
+
+--test unique node
+analyze column_collate;
+explain (verbose, costs off) select distinct (f1) from column_collate order by f1;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Unique
+   Output: f1
+   ->  Sort
+         Output: f1
+         Sort Key: column_collate.f1 COLLATE utf8mb4_general_ci
+         ->  Seq Scan on public.column_collate
+               Output: f1
+(7 rows)
+
+select distinct f1 from column_collate order by f1;
+     f1      
+-------------
+ A
+ A1中文
+ a2中文
+ AAA
+ abcdEF
+ b1中文
+ B2中文
+ bb
+ C
+ Cc
+ dD
+ S
+ Z
+ 中文A3
+ 中文ab
+ 中文AbCdEFG
+ 中文C1
+ 中文d1
+(18 rows)
+
+select distinct f2 from column_collate order by f2;
+       f2        
+-----------------
+ A              
+ A1中文       
+ a2中文       
+ AAA            
+ abcdEF         
+ b1中文       
+ B2中文       
+ bb             
+ C              
+ Cc             
+ dd             
+ S              
+ Z              
+ 中文A3       
+ 中文ab       
+ 中文AbCdEFG  
+ 中文C1       
+ 中文d1       
+(18 rows)
+
+-- test group by 
+select count(f1),f1 from column_collate group by f1;
+ count |     f1      
+-------+-------------
+     1 | Cc
+     1 | A1中文
+     1 | 中文C1
+     1 | A
+     1 | b1中文
+     1 | a2中文
+     2 | c
+     1 | dD
+     2 | AbcdEf
+     2 | 中文Ab
+     1 | 中文d1
+     1 | 中文A3
+     2 | bb
+     1 | B2中文
+     2 | z
+     4 | S
+     3 | AaA
+     2 | 中文AbCdEFG
+(18 rows)
+
+select count(f2),f2 from column_collate group by f2;
+ count |       f2        
+-------+-----------------
+     1 | Cc             
+     1 | A1中文       
+     1 | 中文C1       
+     1 | A              
+     1 | b1中文       
+     1 | a2中文       
+     2 | c              
+     1 | dd             
+     2 | AbcdEf         
+     2 | 中文Ab       
+     1 | 中文d1       
+     1 | 中文A3       
+     2 | bb             
+     1 | B2中文       
+     2 | z              
+     4 | S              
+     3 | AaA            
+     2 | 中文AbCdEFG  
+(18 rows)
+
+-- test like
+select f1 from column_collate where f1 like 'A_%';
+   f1   
+--------
+ AaA
+ aAA
+ AAA
+ A1中文
+ a2中文
+ AbcdEf
+ abcdEF
+(7 rows)
+
+select f1 from column_collate where f1 like '%s%';
+ f1 
+----
+ S
+ s
+ ś
+ Š
+(4 rows)
+
+select f1 from column_collate where f1 like 'A%f';
+   f1   
+--------
+ AbcdEf
+ abcdEF
+(2 rows)
+
+select f1 from column_collate where f1 like 'A__';
+ f1  
+-----
+ AaA
+ aAA
+ AAA
+(3 rows)
+
+select f1 from column_collate where f1 like '\A__';
+ f1  
+-----
+ AaA
+ aAA
+ AAA
+(3 rows)
+
+select f1 from column_collate where f1 like 'A%\'; -- error
+ERROR:  LIKE pattern must not end with escape character
+select f1 from column_collate where f1 like 'A_\';-- error
+ERROR:  LIKE pattern must not end with escape character
+select f2 from column_collate where f2 like 'A_%';
+       f2        
+-----------------
+ A              
+ AaA            
+ aAA            
+ AAA            
+ A1中文       
+ a2中文       
+ AbcdEf         
+ abcdEF         
+(8 rows)
+
+select f2 from column_collate where f2 like 'A%\'; -- error
+ERROR:  LIKE pattern must not end with escape character
+select f2 from column_collate where f2 like 'A_\';-- error
+ERROR:  LIKE pattern must not end with escape character
+-- test notlike
+select f1 from column_collate where f1 not like 'A_%';
+     f1      
+-------------
+ S
+ s
+ ś
+ Š
+ z
+ Z
+ c
+ A
+ C
+ bb
+ Bb
+ dD
+ Cc
+ b1中文
+ B2中文
+ 中文d1
+ 中文C1
+ 中文A3
+ 中文AbCdEFG
+ 中文abcdEFG
+ 中文Ab
+ 中文ab
+(22 rows)
+
+select f1 from column_collate where f1 not like '%s%';
+     f1      
+-------------
+ z
+ Z
+ c
+ A
+ C
+ AaA
+ bb
+ aAA
+ Bb
+ dD
+ Cc
+ AAA
+ A1中文
+ b1中文
+ a2中文
+ B2中文
+ 中文d1
+ 中文C1
+ 中文A3
+ AbcdEf
+ abcdEF
+ 中文AbCdEFG
+ 中文abcdEFG
+ 中文Ab
+ 中文ab
+(25 rows)
+
+-- test hashjoin
+drop table if exists test_join1;
+NOTICE:  table "test_join1" does not exist, skipping
+drop table if exists test_join2;
+NOTICE:  table "test_join2" does not exist, skipping
+create table test_join1(f1 text collate "utf8mb4_general_ci", f2 char(15) collate "utf8mb4_general_ci");
+insert into test_join1 values('S','S'),('s','s'),('ś','ś'),('Š','Š');
+create table test_join2(f1 text collate "utf8mb4_general_ci", f2 char(15) collate "utf8mb4_general_ci");
+insert into test_join2 values('S','S');
+create table test_join3(f1 text collate "utf8mb4_unicode_ci", f2 char(15) collate "utf8mb4_unicode_ci");
+insert into test_join3 values('S','S');
+explain (verbose, costs off) select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Output: tab1.f1, tab2.f1
+   Hash Cond: (tab1.f1 = tab2.f1)
+   ->  Seq Scan on public.test_join1 tab1
+         Output: tab1.f1, tab1.f2
+   ->  Hash
+         Output: tab2.f1
+         ->  Seq Scan on public.test_join2 tab2
+               Output: tab2.f1
+(9 rows)
+
+select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1;
+ f1 | f1 
+----+----
+ S  | S
+ s  | S
+ ś  | S
+ Š  | S
+(4 rows)
+
+select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1 collate "C";
+ f1 | f1 
+----+----
+ S  | S
+(1 row)
+
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_bin"
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_general_ci";
+ERROR:  syntax error at or near "select"
+LINE 2: select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 ...
+        ^
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+ f1 | f1 
+----+----
+ S  | S
+(1 row)
+
+create table hashjoin1(id int, f1 text, f2 text) collate 'utf8mb4_bin';
+create table hashjoin2(id int, f3 text, f4 text) collate 'utf8mb4_bin';
+ 
+insert into hashjoin1 select generate_series(1,100), 'a', 'a';
+insert into hashjoin2 select generate_series(1,100), 'a', 'a';
+ 
+select f1, f3 from hashjoin1 as h1 inner join hashjoin2 as h2
+on (h1.f2 = h2.f4)
+where (('a','a') in (select h1.f2, h2.f4 
+from (hashjoin1 inner join hashjoin2 on hashjoin1.id = hashjoin2.id) order by 1, 2))
+group by h1.f1, h2.f3
+order by 1,2 limit 10;
+ f1 | f3 
+----+----
+ a  | a
+(1 row)
+
+drop table if exists hashjoin1, hashjoin2;
+-- test nestloop
+set enable_hashjoin=off;
+set enable_nestloop=on;
+set enable_mergejoin=off;
+explain (verbose, costs off) select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Nested Loop
+   Output: tab1.f1, tab2.f1
+   Join Filter: (tab1.f1 = tab2.f1)
+   ->  Seq Scan on public.test_join1 tab1
+         Output: tab1.f1, tab1.f2
+   ->  Materialize
+         Output: tab2.f1
+         ->  Seq Scan on public.test_join2 tab2
+               Output: tab2.f1
+(9 rows)
+
+select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1;
+ f1 | f1 
+----+----
+ S  | S
+ s  | S
+ ś  | S
+ Š  | S
+(4 rows)
+
+select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1 collate "C";
+ f1 | f1 
+----+----
+ S  | S
+(1 row)
+
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_bin"
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_general_ci";
+ERROR:  syntax error at or near "select"
+LINE 2: select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 ...
+        ^
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+ f1 | f1 
+----+----
+ S  | S
+(1 row)
+
+-- test mergejoin
+set enable_hashjoin=off;
+set enable_nestloop=off;
+set enable_mergejoin=on;
+explain (verbose, costs off) select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Merge Join
+   Output: tab1.f1, tab2.f1
+   Merge Cond: (tab1.f1 = tab2.f1)
+   ->  Sort
+         Output: tab1.f1
+         Sort Key: tab1.f1 COLLATE utf8mb4_general_ci
+         ->  Seq Scan on public.test_join1 tab1
+               Output: tab1.f1
+   ->  Sort
+         Output: tab2.f1
+         Sort Key: tab2.f1 COLLATE utf8mb4_general_ci
+         ->  Seq Scan on public.test_join2 tab2
+               Output: tab2.f1
+(13 rows)
+
+select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1;
+ f1 | f1 
+----+----
+ S  | S
+ s  | S
+ ś  | S
+ Š  | S
+(4 rows)
+
+select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1 collate "C";
+ f1 | f1 
+----+----
+ S  | S
+(1 row)
+
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_bin";
+ f1 | f1 
+----+----
+ S  | S
+(1 row)
+
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_general_ci";
+ f1 | f1 
+----+----
+ S  | S
+ s  | S
+ ś  | S
+ Š  | S
+(4 rows)
+
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+ERROR:  could not determine which collation to use for string comparison
+HINT:  Use the COLLATE clause to set the collation explicitly.
+-- test union
+drop table if exists test_sep_option1;
+NOTICE:  table "test_sep_option1" does not exist, skipping
+drop table if exists test_sep_option2;
+NOTICE:  table "test_sep_option2" does not exist, skipping
+drop table if exists test_sep_option3;
+NOTICE:  table "test_sep_option3" does not exist, skipping
+drop table if exists test_sep_option4;
+NOTICE:  table "test_sep_option4" does not exist, skipping
+create table test_sep_option1(f1 text collate "utf8mb4_general_ci", f2 text collate "utf8mb4_general_ci");
+create table test_sep_option2(f1 text collate "utf8mb4_general_ci", f2 text collate "utf8mb4_general_ci");
+create table test_sep_option3(f1 text collate "utf8mb4_bin", f2 text collate "utf8mb4_bin");
+create table test_sep_option4(f1 text collate "utf8mb4_bin", f2 text collate "utf8mb4_bin");
+insert into test_sep_option1 values ('s','s'),('ś','ś'),('Š','Š');
+insert into test_sep_option2 values ('S','S');
+insert into test_sep_option3 values ('s','s'),('ś','ś'),('Š','Š');
+insert into test_sep_option4 values ('S','S');
+select * from test_sep_option1 union select * from test_sep_option2;
+ f1 | f2 
+----+----
+ s  | s
+(1 row)
+
+select * from test_sep_option3 union select * from test_sep_option4;
+ f1 | f2 
+----+----
+ S  | S
+ ś  | ś
+ s  | s
+ Š  | Š
+(4 rows)
+
+select * from test_sep_option1 union select * from test_sep_option3;  -- fail
+ERROR:  collation mismatch between implicit collations "utf8mb4_general_ci" and "utf8mb4_bin"
+LINE 1: select * from test_sep_option1 union select * from test_sep_...
+                                                    ^
+HINT:  You can choose the collation by applying the COLLATE clause to one or both expressions.
+-- test setop
+drop table if exists test_sep_option1;
+drop table if exists test_sep_option2;
+drop table if exists test_sep_option3;
+drop table if exists test_sep_option4;
+create table test_sep_option1(f1 text collate "utf8mb4_general_ci", f2 text collate "utf8mb4_general_ci");
+create table test_sep_option2(f1 text collate "utf8mb4_general_ci", f2 text collate "utf8mb4_general_ci");
+create table test_sep_option3(f1 text collate "utf8mb4_bin", f2 text collate "utf8mb4_bin");
+create table test_sep_option4(f1 text collate "utf8mb4_bin", f2 text collate "utf8mb4_bin");
+insert into test_sep_option1 values ('s','s'),('ś','ś'),('Š','Š');
+insert into test_sep_option2 values ('S','S');
+insert into test_sep_option3 values ('s','s'),('ś','ś'),('Š','Š');
+insert into test_sep_option4 values ('S','S');
+-- test constraint
+drop table if exists test_primary_key;
+NOTICE:  table "test_primary_key" does not exist, skipping
+create table test_primary_key(f1 text primary key collate "utf8mb4_general_ci");
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_primary_key_pkey" for table "test_primary_key"
+insert into test_primary_key values ('a');
+insert into test_primary_key values ('A'); -- fail
+ERROR:  duplicate key value violates unique constraint "test_primary_key_pkey"
+DETAIL:  Key (f1)=(A) already exists.
+drop table if exists test_unique;
+NOTICE:  table "test_unique" does not exist, skipping
+create table test_unique(f1 text unique collate "utf8mb4_general_ci");
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_unique_f1_key" for table "test_unique"
+insert into test_unique values ('a');
+insert into test_unique values ('A'); -- fail
+ERROR:  duplicate key value violates unique constraint "test_unique_f1_key"
+DETAIL:  Key (f1)=(A) already exists.
+drop table if exists test_unique;
+create table test_unique(f1 text  collate "utf8mb4_general_ci");
+insert into test_unique values('aaa'), ('AaA');
+create unique index u_idx_1 on test_unique(f1); -- fail
+ERROR:  could not create unique index "u_idx_1"
+DETAIL:  Key (f1)=(aaa) is duplicated.
+drop table if exists test_constraunt;
+NOTICE:  table "test_constraunt" does not exist, skipping
+create table test_constraunt (f1 text);
+alter table test_constraunt add column f text collate "utf8mb4_general_ci"; --success
+--
+-- test ustore with collation utf8mb4_general_ci
+--
+drop table if exists ustore_column_collate;
+NOTICE:  table "ustore_column_collate" does not exist, skipping
+create table ustore_column_collate(f1 text collate "utf8mb4_general_ci", f2 char(15) collate "utf8mb4_general_ci") with (storage_type=ustore);
+-- create table column_collate(f1 text collate "utf8mb4_unicode_ci", f2 char(10) collate "utf8mb4_unicode_ci");
+insert into ustore_column_collate values('S','S'),('s','s'),('ś','ś'),('Š','Š'),('z','z'),('Z','Z'),('c','c'),('A','A'),('C','C');
+insert into ustore_column_collate values('AaA','AaA'),('bb','bb'),('aAA','aAA'),('Bb','Bb'),('dD','dd'),('Cc','Cc'),('AAA','AAA');
+insert into ustore_column_collate values('A1中文','A1中文'), ('b1中文','b1中文'), ('a2中文','a2中文'),
+('B2中文','B2中文'), ('中文d1','中文d1'), ('中文C1','中文C1'), ('中文A3','中文A3');
+-- test where clause
+select f1 from ustore_column_collate where f1 = 'aaa';
+ f1  
+-----
+ AaA
+ aAA
+ AAA
+(3 rows)
+
+select f2 from ustore_column_collate where f2 = 'aaa';
+       f2        
+-----------------
+ AaA            
+ aAA            
+ AAA            
+(3 rows)
+
+-- test order by clause
+select f1 from ustore_column_collate order by f1;
+   f1   
+--------
+ A
+ A1中文
+ a2中文
+ AaA
+ AAA
+ aAA
+ b1中文
+ B2中文
+ Bb
+ bb
+ c
+ C
+ Cc
+ dD
+ S
+ s
+ ś
+ Š
+ Z
+ z
+ 中文A3
+ 中文C1
+ 中文d1
+(23 rows)
+
+select f2 from ustore_column_collate order by f2;
+       f2        
+-----------------
+ A              
+ A1中文       
+ a2中文       
+ AaA            
+ AAA            
+ aAA            
+ b1中文       
+ B2中文       
+ Bb             
+ bb             
+ c              
+ C              
+ Cc             
+ dd             
+ S              
+ s              
+ ś             
+ Š             
+ Z              
+ z              
+ 中文A3       
+ 中文C1       
+ 中文d1       
+(23 rows)
+
+-- test distinct clause
+insert into ustore_column_collate values ('AbcdEf','AbcdEf'), ('abcdEF','abcdEF'), ('中文AbCdEFG','中文AbCdEFG'),
+('中文abcdEFG','中文abcdEFG'), ('中文Ab','中文Ab'), ('中文ab','中文ab');
+select distinct f1 from ustore_column_collate;
+     f1      
+-------------
+ a2中文
+ Cc
+ dD
+ 中文A3
+ B2中文
+ A
+ c
+ AbcdEf
+ 中文Ab
+ 中文AbCdEFG
+ 中文C1
+ b1中文
+ bb
+ S
+ 中文d1
+ z
+ A1中文
+ AaA
+(18 rows)
+
+select distinct f2 from ustore_column_collate;
+       f2        
+-----------------
+ a2中文       
+ Cc             
+ dd             
+ 中文A3       
+ B2中文       
+ A              
+ c              
+ AbcdEf         
+ 中文Ab       
+ 中文AbCdEFG  
+ 中文C1       
+ b1中文       
+ bb             
+ S              
+ 中文d1       
+ z              
+ A1中文       
+ AaA            
+(18 rows)
+
+select distinct f1 from ustore_column_collate order by f1;
+     f1      
+-------------
+ A
+ A1中文
+ a2中文
+ AaA
+ AbcdEf
+ b1中文
+ B2中文
+ bb
+ c
+ Cc
+ dD
+ S
+ z
+ 中文A3
+ 中文Ab
+ 中文AbCdEFG
+ 中文C1
+ 中文d1
+(18 rows)
+
+select distinct f2 from ustore_column_collate order by f2;
+       f2        
+-----------------
+ A              
+ A1中文       
+ a2中文       
+ AaA            
+ AbcdEf         
+ b1中文       
+ B2中文       
+ bb             
+ c              
+ Cc             
+ dd             
+ S              
+ z              
+ 中文A3       
+ 中文Ab       
+ 中文AbCdEFG  
+ 中文C1       
+ 中文d1       
+(18 rows)
+
+-- test group by 
+select count(f1),f1 from ustore_column_collate group by f1;
+ count |     f1      
+-------+-------------
+     1 | a2中文
+     1 | Cc
+     1 | dD
+     1 | 中文A3
+     1 | B2中文
+     1 | A
+     2 | c
+     2 | AbcdEf
+     2 | 中文Ab
+     2 | 中文AbCdEFG
+     1 | 中文C1
+     1 | b1中文
+     2 | bb
+     4 | S
+     1 | 中文d1
+     2 | z
+     1 | A1中文
+     3 | AaA
+(18 rows)
+
+select count(f2),f2 from ustore_column_collate group by f2;
+ count |       f2        
+-------+-----------------
+     1 | a2中文       
+     1 | Cc             
+     1 | dd             
+     1 | 中文A3       
+     1 | B2中文       
+     1 | A              
+     2 | c              
+     2 | AbcdEf         
+     2 | 中文Ab       
+     2 | 中文AbCdEFG  
+     1 | 中文C1       
+     1 | b1中文       
+     2 | bb             
+     4 | S              
+     1 | 中文d1       
+     2 | z              
+     1 | A1中文       
+     3 | AaA            
+(18 rows)
+
+-- test like
+select f1 from ustore_column_collate where f1 like 'A_%';
+   f1   
+--------
+ AaA
+ aAA
+ AAA
+ A1中文
+ a2中文
+ AbcdEf
+ abcdEF
+(7 rows)
+
+select f1 from ustore_column_collate where f1 like 'A%f';
+   f1   
+--------
+ AbcdEf
+ abcdEF
+(2 rows)
+
+select f1 from ustore_column_collate where f1 like 'A__';
+ f1  
+-----
+ AaA
+ aAA
+ AAA
+(3 rows)
+
+select f1 from ustore_column_collate where f1 like '\A__';
+ f1  
+-----
+ AaA
+ aAA
+ AAA
+(3 rows)
+
+select f1 from ustore_column_collate where f1 like 'A%\'; -- error
+ERROR:  LIKE pattern must not end with escape character
+select f1 from ustore_column_collate where f1 like 'A_\'; -- error
+ERROR:  LIKE pattern must not end with escape character
+select f2 from ustore_column_collate where f2 like 'A_%';
+       f2        
+-----------------
+ A              
+ AaA            
+ aAA            
+ AAA            
+ A1中文       
+ a2中文       
+ AbcdEf         
+ abcdEF         
+(8 rows)
+
+select f2 from ustore_column_collate where f2 like 'A%f';
+ f2 
+----
+(0 rows)
+
+select f2 from ustore_column_collate where f2 like 'A__';
+ f2 
+----
+(0 rows)
+
+select f2 from ustore_column_collate where f2 like '\A__';
+ f2 
+----
+(0 rows)
+
+select f2 from ustore_column_collate where f2 like 'A%\'; -- error
+ERROR:  LIKE pattern must not end with escape character
+select f2 from ustore_column_collate where f2 like 'A_\'; -- error
+ERROR:  LIKE pattern must not end with escape character
+-- test grouping sets
+create table date_dim(d_year int, d_moy int, d_date_sk int);
+create table store_sales(ss_sold_date_sk int, ss_item_sk int, ss_ext_sales_price int );
+create table item(i_category text, i_item_sk int ,i_manager_id int );
+insert into date_dim values(2000, 11, 1);
+insert into store_sales values(1, 1, 1000);
+insert into item values('Music', 1, 1);
+select dt.d_year, ss_ext_sales_price, item.i_category, grouping(dt.d_year), grouping(ss_ext_sales_price), grouping(item.i_category)
+from date_dim dt, store_sales, item
+where dt.d_date_sk = store_sales.ss_sold_date_sk and store_sales.ss_item_sk = item.i_item_sk and item.i_manager_id = 1 and dt.d_moy = 11 and dt.d_year = 2000 and i_category = 'Music'
+group by grouping sets(dt.d_year,ss_ext_sales_price),item.i_category having grouping(i_category) = 0  order by 1,2,3,4,5,6;
+ d_year | ss_ext_sales_price | i_category | grouping | grouping | grouping 
+--------+--------------------+------------+----------+----------+----------
+   2000 |                    | Music      |        0 |        1 |        0
+        |               1000 | Music      |        1 |        0 |        0
+(2 rows)
+
+-- test collate utf8mb4_unicode_ci
+-- test collation used in expr
+select 'abCdEf' = 'abcdef' collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf' != 'abcdef' collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' > 'abcdef' collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' < 'abcdef' collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'AAaabb'::char != 'AAaABb'::char collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'AAaabb'::char > 'AAaABb'::char collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'AAaabb'::char < 'AAaABb'::char collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'ś' = 'Š' collate "utf8mb4_unicode_ci" , 'Š' = 's' collate "utf8mb4_unicode_ci";
+ ?column? | ?column? 
+----------+----------
+ t        | t
+(1 row)
+
+select 'ŠSśs' = 'ssss' collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 's'::char(3) = 'Š'::char(3) collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'ŠSśs'::char(10) = 'ssss'::char(10) collate "utf8mb4_unicode_ci";
+ ?column? 
+----------
+ t
+(1 row)
+
+-- test collate utf8mb4_bin
+select 'abCdEf' = 'abcdef' collate "utf8mb4_bin";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' > 'abcdef' collate "utf8mb4_bin";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' < 'abcdef' collate "utf8mb4_bin";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf' = 'ab' collate "utf8mb4_bin";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'abCdEf' > 'ab' collate "utf8mb4_bin";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'abCdEf' < 'ab' collate "utf8mb4_bin";
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'a' > 'A' collate "utf8mb4_bin", 'B' > 'A' collate "utf8mb4_bin", 'a' > 'B' collate "utf8mb4_bin",'b' > 'a' collate "utf8mb4_bin";
+ ?column? | ?column? | ?column? | ?column? 
+----------+----------+----------+----------
+ t        | t        | t        | t
+(1 row)
+
+-- test binary
+create table t1(a blob collate utf8mb4_bin);
+ERROR:  binary collation only support binary type in B format
+create table t1(a blob collate "C");
+ERROR:  binary collation only support binary type in B format
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(a blob collate binary);
+-- test partition table
+drop table if exists test_part_collate;
+NOTICE:  table "test_part_collate" does not exist, skipping
+create table test_part_collate (
+f1 int,
+f2 text collate utf8mb4_general_ci,
+f3 text collate utf8mb4_bin
+) partition by range(f1) (
+partition p1 values less than (5),
+partition p2 values less than (10),
+partition p3 values less than MAXVALUE
+);
+insert into test_part_collate values(1, 'bbb', 'a');
+insert into test_part_collate values(2, 'aba', 'A');
+insert into test_part_collate values(6, 'Bbb', 'b');
+insert into test_part_collate values(15, 'BBB', 'B');
+insert into test_part_collate values(3, 'ccc', 'C');
+select * from test_part_collate order by f2;
+ f1 | f2  | f3 
+----+-----+----
+  2 | aba | A
+  1 | bbb | a
+  6 | Bbb | b
+ 15 | BBB | B
+  3 | ccc | C
+(5 rows)
+
+select * from test_part_collate order by f3;
+ f1 | f2  | f3 
+----+-----+----
+  2 | aba | A
+ 15 | BBB | B
+  3 | ccc | C
+  1 | bbb | a
+  6 | Bbb | b
+(5 rows)
+
+select distinct f2 from test_part_collate order by f2;
+ f2  
+-----
+ aba
+ bbb
+ ccc
+(3 rows)
+
+select distinct f3 from test_part_collate order by f3;
+ f3 
+----
+ A
+ B
+ C
+ a
+ b
+(5 rows)
+
+select * from test_part_collate where f2 = 'bbb';
+ f1 | f2  | f3 
+----+-----+----
+  1 | bbb | a
+  6 | Bbb | b
+ 15 | BBB | B
+(3 rows)
+
+select * from test_part_collate where f3 = 'b';
+ f1 | f2  | f3 
+----+-----+----
+  6 | Bbb | b
+(1 row)
+
+select f2,count(*) from test_part_collate group by f2;
+ f2  | count 
+-----+-------
+ aba |     1
+ bbb |     3
+ ccc |     1
+(3 rows)
+
+select f3,count(*) from test_part_collate group by f3;
+ f3 | count 
+----+-------
+ b  |     1
+ A  |     1
+ C  |     1
+ B  |     1
+ a  |     1
+(5 rows)
+
+-- test table collate
+drop table if exists test_table_collate;
+NOTICE:  table "test_table_collate" does not exist, skipping
+create table test_table_collate (a text, b char(10),c character(10) collate "utf8mb4_bin") collate = utf8mb4_general_ci;
+insert into test_table_collate values('bb','bb','bb');
+insert into test_table_collate values('bB','bB','bB');
+insert into test_table_collate values('BB','BB','BB');
+insert into test_table_collate values('ba','ba','ba');
+select * from test_table_collate where b = 'bb';
+ a  |     b      |     c      
+----+------------+------------
+ bb | bb         | bb        
+ bB | bB         | bB        
+ BB | BB         | BB        
+(3 rows)
+
+select * from test_table_collate where b = 'bb' collate "utf8mb4_bin";
+ a  |     b      |     c      
+----+------------+------------
+ bb | bb         | bb        
+(1 row)
+
+select * from test_table_collate where c = 'bb';
+ a  |     b      |     c      
+----+------------+------------
+ bb | bb         | bb        
+(1 row)
+
+select * from test_table_collate where c = 'bb' collate "utf8mb4_general_ci";
+ a  |     b      |     c      
+----+------------+------------
+ bb | bb         | bb        
+ bB | bB         | bB        
+ BB | BB         | BB        
+(3 rows)
+
+select 'a' > 'A' collate utf8mb4_bin;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'a' > 'A' collate 'utf8mb4_bin';
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'a' > 'A' collate "utf8mb4_bin";
+ ?column? 
+----------
+ t
+(1 row)
+
+create table test1(a text charset utf8mb4 collate utf8mb4_bin);
+create table test2(a text charset 'utf8mb4' collate 'utf8mb4_bin');
+create table test3(a text charset "utf8mb4" collate 'utf8mb4_bin');
+-- test table charset binary
+create table test4(a text) charset "binary";
+alter table test4 charset utf8mb4;
+alter table test4 add a2 varchar(20);
+alter table test4 add a3 varchar(20) collate 'utf8mb4_bin';
+select pg_get_tabledef('test4');
+                                pg_get_tabledef                                
+-------------------------------------------------------------------------------
+ SET search_path = public;                                                    +
+ CREATE TABLE test4 (                                                         +
+     a blob,                                                                  +
+     a2 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     a3 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_bin        +
+ )                                                                            +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"                        +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+create table test5(a blob charset "binary");
+ERROR:  type blob not support set charset
+create table test6(a int charset "binary");
+ERROR:  type integer not support set charset
+create table test6(a float charset "binary");
+ERROR:  type double precision not support set charset
+select 'a' > 'A' collate UTF8MB4_BIN;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'a' > 'A' collate 'UTF8MB4_BIN';
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'a' > 'A' collate "UTF8MB4_BIN";
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'a' > 'A' collate "UTF8MB4_bin";
+ ?column? 
+----------
+ t
+(1 row)
+
+create table test7(a text charset 'UTF8MB4' collate 'UTF8MB4_BIN');
+create table test8(a text) charset 'UTF8MB4' collate 'UTF8MB4_bin';
+create table test9(a text collate 'UTF8MB4_BIN');
+create table test10(a text charset 'UTF8MB4');
+create table test11(a text charset 'aaa' collate 'UTF8MB4_BIN');
+ERROR:  aaa is not a valid encoding name
+LINE 1: create table test11(a text charset 'aaa' collate 'UTF8MB4_BI...
+                                           ^
+create table test12(a text collate 'utf8mb4_bin.utf8');
+ERROR:  collation "utf8mb4_bin.utf8" does not exist
+create table test13(a text collate utf8mb4_bin.utf8);
+ERROR:  error schema name for collate
+create table test14(a text collate 'pg_catalog.utf8mb4_bin');
+ERROR:  collation "pg_catalog.utf8mb4_bin" does not exist
+create table test15(a text collate pg_catalog.utf8mb4_bin); -- ok
+create table test16(a text collate 'aa_DJ.utf8'); -- ok
+create table test17(a text collate aa_DJ.utf8);
+ERROR:  error schema name for collate
+create table test18(a text collate 'pg_catalog.aa_DJ.utf8');
+ERROR:  collation "pg_catalog.aa_DJ.utf8" does not exist
+create table test19(a text collate pg_catalog.aa_DJ.utf8);
+ERROR:  error schema name for collate
+create table test20(a text collate pg_catalog.utf8);
+ERROR:  collation "utf8" does not exist
+ 
+-- test create table as
+create table test21(a text collate utf8mb4_bin, b text collate utf8mb4_general_ci, c text);
+create table test22 as select * from test21;
+select * from pg_get_tabledef('test22');
+                       pg_get_tabledef                       
+-------------------------------------------------------------
+ SET search_path = public;                                  +
+ CREATE TABLE test22 (                                      +
+     a text CHARACTER SET "UTF8" COLLATE utf8mb4_bin,       +
+     b text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     c text                                                 +
+ )                                                          +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+create table test23 as select a, c from test21;
+select * from pg_get_tabledef('test23');
+                   pg_get_tabledef                    
+------------------------------------------------------
+ SET search_path = public;                           +
+ CREATE TABLE test23 (                               +
+     a text CHARACTER SET "UTF8" COLLATE utf8mb4_bin,+
+     c text                                          +
+ )                                                   +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+set b_format_behavior_compat_options = enable_set_variables;
+set @v1 = 'aa', @v2 = 'bb';
+create table test24 as select @v1 collate 'utf8mb4_bin';
+select * from pg_get_tabledef('test24');
+                     pg_get_tabledef                     
+---------------------------------------------------------
+ SET search_path = public;                              +
+ CREATE TABLE test24 (                                  +
+     "@v1" text CHARACTER SET "UTF8" COLLATE utf8mb4_bin+
+ )                                                      +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+create table test25 as select @v1 collate 'utf8mb4_bin', @v2;
+select * from pg_get_tabledef('test25');
+                     pg_get_tabledef                      
+----------------------------------------------------------
+ SET search_path = public;                               +
+ CREATE TABLE test25 (                                   +
+     "@v1" text CHARACTER SET "UTF8" COLLATE utf8mb4_bin,+
+     "@v2" text                                          +
+ )                                                       +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+\c regression
+clean connection to all force for database test_collate_A;
+clean connection to all force for database test_collate_B;
+DROP DATABASE IF EXISTS test_collate_A;
+DROP DATABASE IF EXISTS test_collate_B;

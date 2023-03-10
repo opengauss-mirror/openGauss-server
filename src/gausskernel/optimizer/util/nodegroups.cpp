@@ -2228,7 +2228,7 @@ void ng_stream_side_paths_for_replicate(PlannerInfo* root, Path** outer_path, Pa
                 target_distribution,
                 outer_smpDesc);
         } else {
-            if (!ng_is_distribute_key_valid(root, distribute_keys_outer, (*outer_path)->parent->reltargetlist)) {
+            if (!ng_is_distribute_key_valid(root, distribute_keys_outer, (*outer_path)->pathtarget->exprs)) {
                 *outer_path = NULL;
                 return;
             }
@@ -2268,7 +2268,7 @@ void ng_stream_side_paths_for_replicate(PlannerInfo* root, Path** outer_path, Pa
                 SKEW,
                 target_distribution);
         } else {
-            if (!ng_is_distribute_key_valid(root, distribute_keys_inner, (*inner_path)->parent->reltargetlist)) {
+            if (!ng_is_distribute_key_valid(root, distribute_keys_inner, (*inner_path)->pathtarget->exprs)) {
                 *inner_path = NULL;
                 return;
             }
@@ -2313,13 +2313,13 @@ Path* ng_stream_non_broadcast_side_for_join(PlannerInfo* root, Path* non_stream_
 
         if (stream_distribute_key == NIL) {
             stream_distribute_key = get_distributekey_from_tlist(root,
-                non_stream_path->parent->reltargetlist,
-                non_stream_path->parent->reltargetlist,
+                non_stream_path->pathtarget->exprs,
+                non_stream_path->pathtarget->exprs,
                 non_stream_path->parent->rows,
                 &skew_stream);
         }
 
-        if (ng_is_distribute_key_valid(root, stream_distribute_key, non_stream_path->parent->reltargetlist)) {
+        if (ng_is_distribute_key_valid(root, stream_distribute_key, non_stream_path->pathtarget->exprs)) {
             ParallelDesc* smpDesc = NULL;
 
             /* stream for shuffle's producer and consumer dop are the same */
