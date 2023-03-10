@@ -181,7 +181,7 @@ static	char			*NameOfDatum(PLwdatum *wdatum);
 static  char                    *CopyNameOfDatum(PLwdatum *wdatum);
 static	void			 check_assignable(PLpgSQL_datum *datum, int location);
 static	bool			 read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row,
-                                          bool *strict, bool bulk_collect);
+                                          bool *strict, int firsttoken, bool bulk_collect);
 static	PLpgSQL_row		*read_into_scalar_list(char *initial_name,
                                                PLpgSQL_datum *initial_datum,
                                                int initial_dno,
@@ -5060,7 +5060,7 @@ stmt_dynexecute : K_EXECUTE
                             if (newp->into)			/* multiple INTO */
                                 yyerror("syntax error");
                             newp->into = true;
-                            (void)read_into_target(&newp->rec, &newp->row, &newp->strict, false);
+                            (void)read_into_target(&newp->rec, &newp->row, &newp->strict, K_EXECUTE, false);
                             endtoken = yylex();
                         }
                         /* If we found "USING", collect the argument */
@@ -5209,7 +5209,7 @@ stmt_fetch		: K_FETCH opt_fetch_direction cursor_variable K_INTO
                         PLpgSQL_row	   *row;
 
                         /* We have already parsed everything through the INTO keyword */
-                        (void)read_into_target(&rec, &row, NULL, false);
+                        (void)read_into_target(&rec, &row, NULL, -1, false);
 
                         if (yylex() != ';')
                             yyerror("syntax error");
@@ -5308,7 +5308,7 @@ fetch_into_target :
                         PLpgSQL_datum *datum = NULL;
                         PLpgSQL_rec *rec;
                         PLpgSQL_row *row;
-                        (void)read_into_target(&rec, &row, NULL, true);
+                        (void)read_into_target(&rec, &row, NULL, -1, true);
 
                         if (rec != NULL) {
                             datum = (PLpgSQL_datum *)rec;
@@ -9388,7 +9388,7 @@ make_execsql_stmt(int firsttoken, int location)
                 into_start_loc = yylloc;
             }
             u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
-            is_user_var = read_into_target(&rec, &row, &have_strict, have_bulk_collect);
+            is_user_var = read_into_target(&rec, &row, &have_strict, firsttoken, have_bulk_collect);
             if (is_user_var) {
                 u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = save_IdentifierLookup;
                 have_into = false;
@@ -10770,15 +10770,24 @@ read_into_using_add_tableelem(char **fieldnames, int *varnos, int *nfields, int 
  * INTO keyword. If it is into_user_defined_variable_list_clause return true.
  */
 static bool
-read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, bool bulk_collect)
+read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, int firsttoken, bool bulk_collect)
 {
     int			tok;
 
     /* Set default results */
     *rec = NULL;
     *row = NULL;
+    if (strict) {
+        if (DB_IS_CMPT(PG_FORMAT | B_FORMAT) && firsttoken == K_SELECT && SELECT_INTO_RETURN_NULL) {
+            *strict = false;
+        } else {
+            *strict = true;
+        }
+    }
+#ifdef ENABLE_MULTIPLE_NODES
     if (strict)
         *strict = true;
+#endif
     tok = yylex();
     if (tok == '@' || tok == SET_USER_IDENT) {
         return true;

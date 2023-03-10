@@ -379,7 +379,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"char_coerce_compat", OPT_CHAR_COERCE_COMPAT},
     {"pgformat_substr", OPT_PGFORMAT_SUBSTR},
     {"truncate_numeric_tail_zero", OPT_TRUNC_NUMERIC_TAIL_ZERO},
-    {"allow_orderby_undistinct_column", OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN}
+    {"allow_orderby_undistinct_column", OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN},
+    {"select_into_return_null", OPT_SELECT_INTO_RETURN_NULL}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
