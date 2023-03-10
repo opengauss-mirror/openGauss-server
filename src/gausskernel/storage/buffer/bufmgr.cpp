@@ -2196,7 +2196,7 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
     if (need_verify) {
         XLogRecPtr lsn_past = PageGetLSN(past_image);
         XLogRecPtr lsn_now = PageGetLSN(bufBlock);
-        if (lsn_now < lsn_past) {
+        if (!PageIsNew(past_image) && lsn_now < lsn_past) {
             RelFileNode rnode = buf_desc->tag.rnode;
             ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than past lsn(0x%llx)",
                 rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
