@@ -1110,7 +1110,6 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                 t_thrd.xact_cxt.callPrint = true;
 #endif
                 need_free = false;
-                outputstr = OutputFunctionCall(&thisState->finfo, attr);
                 switch (thisState->typoutput) {
                     case F_INT4OUT: 
                         outputstr = output_int32_to_cstring(DatumGetInt32(attr));
