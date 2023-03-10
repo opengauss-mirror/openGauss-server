@@ -3201,7 +3201,7 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
             uint64 processed;
             uint64 histhash;
             bool has_histhash;
-            processed = DoCopy((CopyStmt*)parse_tree, query_string, &processed);
+            DoCopy((CopyStmt*)parse_tree, query_string, &processed);
             has_histhash = ((CopyStmt*)parse_tree)->hashstate.has_histhash;
             histhash = ((CopyStmt*)parse_tree)->hashstate.histhash;
             if (completion_tag != NULL) {
