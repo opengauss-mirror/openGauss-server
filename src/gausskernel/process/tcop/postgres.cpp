@@ -487,7 +487,7 @@ static int InteractiveBackend(StringInfo inBuf)
 static int interactive_getc(void)
 {
     int c;
-    if (u_sess->attr.attr_common.light_comm == FALSE) {
+    if (g_instance.attr.attr_common.light_comm == FALSE) {
         prepare_for_client_read();
         c = getc(stdin);
         client_read_ended();
@@ -6038,7 +6038,7 @@ void die(SIGNAL_ARGS)
     if (t_thrd.proc)
         SetLatch(&t_thrd.proc->procLatch);
 
-    if (u_sess->attr.attr_common.light_comm == TRUE &&
+    if (g_instance.attr.attr_common.light_comm == TRUE &&
         t_thrd.postgres_cxt.DoingCommandRead &&
         t_thrd.postgres_cxt.whereToSendOutput != DestRemote) {
         ProcessInterrupts();
