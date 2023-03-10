@@ -32,32 +32,46 @@ ERROR:  user@host is only supported in b database when the test_user_host is on
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
 ERROR:  user@host is only supported in b database when the test_user_host is on
 set test_user_host = on;
-create user if not exists 'test_user_host@%' password 'test123@';
-alter user 'test_user_host@%' with account lock;
-alter user 'test_user_host@%' password 'test1234@';
+create user if not exists 'test_user_host'@'%' password 'test123@';
+alter user 'test_user_host'@'%' with account lock;
+alter user 'test_user_host'@'%' password 'test1234@';
 ERROR:  The account has been locked.
-alter user 'test_user_host@%' with account unlock;
-create user 'test_user_host@127.%' password 'test123@';
+alter user 'test_user_host'@'%' with account unlock;
+create user 'test_user_host'@'127.%' password 'test123@';
 create user 'test_user_host'@'127.0.0.%' password 'test123@';
 create user 'test_user_host'@'127.0.%' password 'test123@';
 create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
+create user 'test_user_host1@127.0.0.1' password 'test123@';
+ERROR:  @ can't be allowed in username
+create user test_user_host1@127.0.0.1 password 'test123@';
+create user test_user_host1@127.0.0. password 'test123@';
+create user test_user_host2@localhost password 'test123@';
+create user 'test_user_host3'@'localhost' password 'test123@';
+create user test_user_host1@127.0.0.% password 'test123@';
+ERROR:  syntax error at or near "%"
+LINE 1: create user test_user_host1@127.0.0.% password 'test123@';
+                                            ^
 select usename from pg_user where usename like 'test_user_host%' order by usename;
-         usename          
---------------------------
+          usename          
+---------------------------
  test_user_host%
+ test_user_host1@127.0.0.
+ test_user_host1@127.0.0.1
+ test_user_host2@localhost
+ test_user_host3@localhost
  test_user_host@%
  test_user_host@127.%
  test_user_host@127.0.%
  test_user_host@127.0.0.%
  test_user_host@127.0.0.1
-(6 rows)
+(10 rows)
 
 create table test1(a int);
-alter table test1 owner to 'test_user_host@%';
-GRANT ALL PRIVILEGES TO 'test_user_host@%';
-REVOKE ALL PRIVILEGES FROM 'test_user_host@%';
-ALTER USER 'test_user_host@%' RENAME TO 'test_user_host@1%';
+alter table test1 owner to 'test_user_host'@'%';
+GRANT ALL PRIVILEGES TO 'test_user_host'@'%';
+REVOKE ALL PRIVILEGES FROM 'test_user_host'@'%';
+ALTER USER 'test_user_host'@'%' RENAME TO 'test_user_host'@'1%';
 CREATE  DEFINER='test_user_host'@'127.0.%' FUNCTION test_func(integer, integer) RETURNS integer SECURITY INVOKER
 AS 'select $1 + $2;'
 LANGUAGE SQL
