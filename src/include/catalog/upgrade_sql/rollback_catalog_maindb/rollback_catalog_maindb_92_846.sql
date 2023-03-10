@@ -142,4 +142,5 @@ FROM
 --rollback TABLE
 DROP INDEX IF EXISTS pg_event_trigger_evtname_index;
 DROP INDEX IF EXISTS pg_event_trigger_oid_index;
+DROP TYPE IF EXISTS pg_catalog.pg_event_trigger;
 DROP TABLE IF EXISTS pg_catalog.pg_event_trigger;
