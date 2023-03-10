@@ -176,6 +176,19 @@ explain select count(*) from force_vector_test;
                            ->  Seq Scan on force_vector_test  (cost=0.00..36.25 rows=10000 width=0)
 (6 rows)
 
+set enable_seqscan_dopcost = off;
+explain select count(*) from force_vector_test;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter  (cost=95.01..95.01 rows=1 width=8)
+   ->  Vector Aggregate  (cost=95.00..95.01 rows=1 width=8)
+         ->  Vector Streaming(type: LOCAL GATHER dop: 1/4)  (cost=95.00..95.01 rows=1 width=8)
+               ->  Vector Aggregate  (cost=95.00..95.01 rows=1 width=8)
+                     ->  Vector Adapter(type: BATCH MODE)  (cost=70.00..70.00 rows=10000 width=0)
+                           ->  Seq Scan on force_vector_test  (cost=0.00..70.00 rows=10000 width=0)
+(6 rows)
+
+set enable_seqscan_dopcost = on;
 select count(*) from force_vector_test;
  count 
 -------

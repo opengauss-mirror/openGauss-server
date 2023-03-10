@@ -307,6 +307,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_segment                                   | bool    |      |           | 
  enableSeparationOfDuty                           | bool    |      |           | 
  enable_seqscan                                   | bool    |      |           | 
+ enable_seqscan_dopcost                           | bool    |      |           | 
  enable_seqscan_fusion                            | bool    |      |           | 
  enable_set_variable_b_format                     | bool    |      |           | 
  enable_show_any_tuples                           | bool    |      |           | 
