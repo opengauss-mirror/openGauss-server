@@ -2439,6 +2439,11 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
                 ereport(ERROR, (errmsg("Ustore is disabled, please set enable_ustore=on.")));
 
             }
+            if (isInLedgerNsp) {
+                ereport(ERROR, 
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                         errmsg("Ustore table is not supported ledger user table.")));
+            }
             orientedFrom = (Node *)makeString(TABLE_ACCESS_METHOD_USTORE);
             storeChar = TABLE_ACCESS_METHOD_USTORE;
         }
