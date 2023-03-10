@@ -740,3 +740,72 @@ ORDER BY I.ZB_CODE;
 DROP TABLE zb_layer;
 DROP TABLE rtms_dict;
 DROP TABLE zb_model;
+
+--test SYNONYM case
+ create table swtest.pf_org_rela_test
+(
+    org_parent_no varchar2(32),
+    org_no varchar2(32) not null ,
+    org_rela_type varchar2(32) not null
+);
+
+ INSERT INTO swtest.pf_org_rela_test (org_no,org_parent_no,org_rela_type) VALUES
+  ('201855','201844','ADMINISTRATION'),
+  ('201856','201844','ADMINISTRATION'),
+  ('119208','119200','ADMINISTRATION'),
+  ('201953','201932','ADMINISTRATION'),
+  ('201954','201932','ADMINISTRATION'),
+  ('201955','201932','ADMINISTRATION'),
+  ('201956','201932','ADMINISTRATION'),
+  ('120301','120300','ADMINISTRATION'),
+  ('201957','202573','ADMINISTRATION'),
+  ('201958','201957','ADMINISTRATION');
+
+ create synonym sy_pf for swtest.pf_org_rela_test;
+--normal case
+select
+    org_no
+from
+    swtest.pf_org_rela_test
+start with
+    org_no = '201957'
+    and org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and org_rela_type = 'ADMINISTRATION';
+--SYNONYM case
+select
+    org_no
+from
+    sy_pf
+start with
+    org_no = '201957'
+    and org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and org_rela_type = 'ADMINISTRATION';
+--SYNONYM alias
+select
+    aak.org_no
+from
+    sy_pf aak
+start with
+    org_no = '201957'
+    and org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and org_rela_type = 'ADMINISTRATION';
+--SYNONYM case
+select
+    org_no
+from
+    sy_pf 
+start with
+    sy_pf.org_no = '201957'
+    and sy_pf.org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and sy_pf.org_rela_type = 'ADMINISTRATION';
+
+drop synonym sy_pf;
+drop table pf_org_rela_test;
