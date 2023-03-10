@@ -4,6 +4,18 @@ show sql_compatibility;
  A
 (1 row)
 
+select short_desc from pg_settings where name = 'test_user_host';
+                                    short_desc                                     
+-----------------------------------------------------------------------------------
+ Enable the feature that supported username as user@host, 'user'@'host' and 'user'
+(1 row)
+
+select extra_desc from pg_settings where name = 'test_user_host';
+                         extra_desc                          
+-------------------------------------------------------------
+ It affected in DDL scenario and the connecting DB scenario.
+(1 row)
+
 create user 'test_user_host'@'%' password 'test123@';
 ERROR:  user@host is only supported in b database when the test_user_host is on
 create user 'test_user_host'@'127.%' password 'test123@';
@@ -13,7 +25,9 @@ ERROR:  user@host is only supported in b database when the test_user_host is on
 create user 'test_user_host'@'127.0.%' password 'test123@';
 ERROR:  user@host is only supported in b database when the test_user_host is on
 create user 'test_user_host%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  syntax error at or near "test_user_host%"
+LINE 1: create user 'test_user_host%' password 'test123@';
+                    ^
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
 ERROR:  user@host is only supported in b database when the test_user_host is on
 create database user_host_db dbcompatibility 'B';
@@ -28,7 +42,9 @@ ERROR:  user@host is only supported in b database when the test_user_host is on
 create user 'test_user_host'@'127.0.%' password 'test123@';
 ERROR:  user@host is only supported in b database when the test_user_host is on
 create user 'test_user_host%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  syntax error at or near "test_user_host%"
+LINE 1: create user 'test_user_host%' password 'test123@';
+                    ^
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
 ERROR:  user@host is only supported in b database when the test_user_host is on
 set test_user_host = on;
