@@ -4105,7 +4105,7 @@ bool SyncFlushOneBuffer(int buf_id, bool get_condition_lock)
      */
     PinBuffer_Locked(buf_desc);
 
-    if (dw_enabled() && get_condition_lock) {
+    if ((dw_enabled() || ENABLE_DSS) && get_condition_lock) {
         /*
          * We must use a conditional lock acquisition here to avoid deadlock. If
          * page_writer and double_write are enabled, only page_writer is allowed to
