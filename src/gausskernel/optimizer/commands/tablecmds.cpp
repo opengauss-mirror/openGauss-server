@@ -726,7 +726,7 @@ static void CheckForAddPartition(Relation rel, List *partDefStateList);
 static void CheckForAddSubPartition(Relation rel, Relation partrel, List *subpartDefStateList);
 static void CheckTablespaceForAddPartition(Relation rel, List *partDefStateList);
 static void CheckPartitionNameConflictForAddPartition(List *newPartitionNameList, List *existingPartitionNameList);
-static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partDefState);
+static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partDefState, bool partkeyIsFunc = false);
 static void CheckSubpartitionForAddPartition(Relation rel, Node *partDefState);
 static void ATExecDropPartition(Relation rel, AlterTableCmd *cmd);
 static void ATExecDropSubPartition(Relation rel, AlterTableCmd *cmd);
@@ -23140,7 +23140,7 @@ static void CheckPartitionNameConflictForAddPartition(List *newPartitionNameList
  * Used for adding a list partition syntax, for example:
  * 'ADD PARTITION VALUES (listValueList)' or 'SPLIT PARTITION VALUES (expr_list)'
  */
-static Oid FindPartOidByListBoundary(Relation rel, ListPartitionMap *partMap, Node* boundKey)
+static Oid FindPartOidByListBoundary(Relation rel, ListPartitionMap *partMap, Node* boundKey, bool partkeyIsFunc)
 {
     List *partKeyValueList = NIL;
     Oid res;
@@ -23169,7 +23169,7 @@ static Oid FindPartOidByListBoundary(Relation rel, ListPartitionMap *partMap, No
         }
         return InvalidOid;
     }
-    con = (Const*)GetTargetValue(&attr, con, false);
+    con = (Const*)GetTargetValue(&attr, con, false, partkeyIsFunc);
     if (!PointerIsValid(con)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
             errmsg("partition key value must be const or const-evaluable expression")));
@@ -23183,7 +23183,7 @@ static Oid FindPartOidByListBoundary(Relation rel, ListPartitionMap *partMap, No
     return res;
 }
 
-static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partDefState)
+static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partDefState, bool partkeyIsFunc)
 {
     Assert(IsA(partDefState, RangePartitionDefState) || IsA(partDefState, ListPartitionDefState));
 
@@ -23205,7 +23205,7 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
                 partDef->partitionInitName ? partDef->partitionInitName : partDef->partitionName)));
         }
         partKeyValueList = transformConstIntoTargetType(rel->rd_att->attrs,
-            partMap->partitionKey, partDef->boundary);
+            partMap->partitionKey, partDef->boundary, partkeyIsFunc);
         pfree_ext(curBound);
         existingPartOid = PartitionValuesGetPartitionOid(rel, partKeyValueList, AccessShareLock, false, true, false);
         list_free_ext(partKeyValueList);
@@ -23217,7 +23217,7 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
         ListPartitionDefState *partDef = (ListPartitionDefState *)partDefState;
 
         foreach (cell, partDef->boundary) {
-            existingPartOid = FindPartOidByListBoundary(rel, (ListPartitionMap *)rel->partMap, (Node*)lfirst(cell));
+            existingPartOid = FindPartOidByListBoundary(rel, (ListPartitionMap *)rel->partMap, (Node*)lfirst(cell), partkeyIsFunc);
             if (OidIsValid(existingPartOid)) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("list boundary of adding partition MUST NOT overlap with existing partition")));
@@ -23226,6 +23226,63 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
     }
 
     decre_partmap_refcount(rel->partMap);
+}
+
+bool IsPartKeyFunc(Relation rel, bool isPartRel, bool forSubPartition)
+{
+    HeapTuple partTuple = NULL;
+    if (forSubPartition) {
+        if (isPartRel) {
+            partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(rel->rd_id));
+        } else {
+            PartitionMap* map = rel->partMap;
+            Oid partitionId = InvalidOid;
+            if (map->type == PART_TYPE_LIST) {
+                partitionId = ((ListPartitionMap*)map)->listElements[0].partitionOid;
+            } else if (map->type == PART_TYPE_HASH) {
+                partitionId = ((HashPartitionMap*)map)->hashElements[0].partitionOid;
+            } else {
+                partitionId = ((RangePartitionMap*)map)->rangeElements[0].partitionOid;
+            }
+            partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partitionId));
+        }
+    } else {
+        partTuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, rel->rd_id);
+    }
+    if (!partTuple)
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The partTuple for oid %d can't be found", rel->rd_id)));
+
+    bool isPartExprKeyNull = false;
+    Datum datum = 0;
+    datum = SysCacheGetAttr(PARTRELID, partTuple, Anum_pg_partition_partkeyexpr, &isPartExprKeyNull);
+    if (isPartExprKeyNull) {
+        if (forSubPartition)
+            ReleaseSysCache(partTuple);
+        else
+            heap_freetuple(partTuple);
+        return false;
+    }
+
+    char* partkeystr = TextDatumGetCString(datum);
+    Node* partkeyexpr = NULL;
+    if (forSubPartition)
+        ReleaseSysCache(partTuple);
+    else
+        heap_freetuple(partTuple);
+
+    partkeyexpr = (Node*)stringToNode_skip_extern_fields(partkeystr);
+    pfree_ext(partkeystr);
+    if (!partkeyexpr)
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The partkeyexpr can't be NULL")));
+
+    if (partkeyexpr->type == T_OpExpr)
+        return false;
+    else if (partkeyexpr->type == T_FuncExpr)
+        return true;
+    else
+        ereport(ERROR,
+            (errcode(ERRCODE_NODE_ID_MISSMATCH),
+                errmsg("The node type %d is wrong, it must be T_OpExpr or T_FuncExpr", partkeyexpr->type)));
 }
 
 static void CheckSubpartitionForAddPartition(Relation rel, Node *partDefState)
@@ -23275,13 +23332,14 @@ static void CheckSubpartitionForAddPartition(Relation rel, Node *partDefState)
         }
     }
 
+    bool partkeyIsFunc = IsPartKeyFunc(rel, false, true);
     /* c. subpartition values constraint */
     switch (subparttype) {
         case PART_STRATEGY_RANGE:
-            ComparePartitionValue(subpartKeyPosList, (RelationGetDescr(rel))->attrs, subPartitionDefStateList);
+            ComparePartitionValue(subpartKeyPosList, (RelationGetDescr(rel))->attrs, subPartitionDefStateList, true, partkeyIsFunc);
             break;
         case PART_STRATEGY_LIST:
-            CompareListValue(subpartKeyPosList, (RelationGetDescr(rel))->attrs, subPartitionDefStateList);
+            CompareListValue(subpartKeyPosList, (RelationGetDescr(rel))->attrs, subPartitionDefStateList, partkeyIsFunc);
             break;
         case PART_STRATEGY_HASH:
             break;
@@ -23321,22 +23379,23 @@ static void CheckForAddPartition(Relation rel, List *partDefStateList)
     list_free_ext(newPartitionNameList);
 
     /* check 4: partition values constraint */
+    bool partkeyIsFunc = IsPartKeyFunc(rel, false, false);
     int2vector *partitionKey = GetPartitionKey(rel->partMap);
     List *partKeyPosList = NIL;
     for (int i = 0; i < partitionKey->dim1; i++) {
         partKeyPosList = lappend_int(partKeyPosList, partitionKey->values[i] - 1);
     }
     if (rel->partMap->type == PART_TYPE_RANGE) {
-        ComparePartitionValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList);
+        ComparePartitionValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList, true, partkeyIsFunc);
     } else if (rel->partMap->type == PART_TYPE_LIST) {
-        CompareListValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList);
+        CompareListValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList, partkeyIsFunc);
     }
     list_free_ext(partKeyPosList);
 
     ListCell *cell = NULL;
     foreach (cell, partDefStateList) {
         /* check 5: new adding partitions behind the last partition */
-        CheckPartitionValueConflictForAddPartition(rel, (Node*)lfirst(cell));
+        CheckPartitionValueConflictForAddPartition(rel, (Node*)lfirst(cell), partkeyIsFunc);
 
         /* check 6: constraint for subpartition */
         CheckSubpartitionForAddPartition(rel, (Node*)lfirst(cell));
@@ -23379,22 +23438,23 @@ static void CheckForAddSubPartition(Relation rel, Relation partrel, List *subpar
     list_free_ext(newPartitionNameList);
 
     /* check 4: partition values constraint */
+    bool partkeyIsFunc = IsPartKeyFunc(partrel, true, true);
     int2vector *partitionKey = GetPartitionKey(partrel->partMap);
     List *partKeyPosList = NIL;
     for (int i = 0; i < partitionKey->dim1; i++) {
         partKeyPosList = lappend_int(partKeyPosList, partitionKey->values[i] - 1);
     }
     if (partrel->partMap->type == PART_TYPE_RANGE) {
-        ComparePartitionValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList);
+        ComparePartitionValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList, true, partkeyIsFunc);
     } else if (partrel->partMap->type == PART_TYPE_LIST) {
-        CompareListValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList);
+        CompareListValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList, partkeyIsFunc);
     }
     list_free_ext(partKeyPosList);
 
     ListCell *cell = NULL;
     foreach (cell, subpartDefStateList) {
         /* check 5: new adding partitions behind the last partition */
-        CheckPartitionValueConflictForAddPartition(partrel, (Node*)lfirst(cell));
+        CheckPartitionValueConflictForAddPartition(partrel, (Node*)lfirst(cell), partkeyIsFunc);
     }
 
     /* check 6: whether has the unusable local index */
@@ -27788,8 +27848,9 @@ void CheckDestListSubPartitionBoundaryForSplit(Relation rel, Oid partOid, SplitP
         }
     }
 
+    bool partkeyIsFunc = IsPartKeyFunc(partRel, true, true);
     foreach (cell, splitSubPart->newListSubPartitionBoundry) {
-        existingSubPartOid = FindPartOidByListBoundary(partRel, partMap, (Node*)lfirst(cell));
+        existingSubPartOid = FindPartOidByListBoundary(partRel, partMap, (Node*)lfirst(cell), partkeyIsFunc);
         if (OidIsValid(existingSubPartOid) && existingSubPartOid != defaultSubPartOid) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
                 errmsg("list subpartition %s has overlapped value", getPartitionName(existingSubPartOid, false))));
@@ -28133,7 +28194,7 @@ static List* getDestPartBoundaryList(Relation partTableRel, List* destPartDefLis
 {
     ListCell* cell = NULL;
     List* result = NIL;
-
+    bool partkeyIsFunc = IsPartKeyFunc(partTableRel, false, false);
     foreach (cell, destPartDefList) {
         RangePartitionDefState* rangePartDef = (RangePartitionDefState*)lfirst(cell);
         List* partKeyValueList = NIL;
@@ -28143,7 +28204,7 @@ static List* getDestPartBoundaryList(Relation partTableRel, List* destPartDefLis
 
         partKeyValueList = transformConstIntoTargetType(partTableRel->rd_att->attrs,
             ((RangePartitionMap*)partTableRel->partMap)->partitionKey,
-            rangePartDef->boundary);
+            rangePartDef->boundary, partkeyIsFunc);
 
         foreach (otherCell, partKeyValueList) {
             partKeyValueArr[i++] = (Const*)lfirst(otherCell);
@@ -28988,7 +29049,7 @@ List* transformIntoTargetType(FormData_pg_attribute* attrs, int2 keypos, List* b
  * Description	:
  * Notes		:
  */
-List* transformConstIntoTargetType(FormData_pg_attribute* attrs, int2vector* partitionKey, List* boundary)
+List* transformConstIntoTargetType(FormData_pg_attribute* attrs, int2vector* partitionKey, List* boundary, bool partkeyIsFunc)
 {
     int counter = 0;
     int2 partKeyPos = 0;
@@ -29015,7 +29076,7 @@ List* transformConstIntoTargetType(FormData_pg_attribute* attrs, int2vector* par
         if (constBoundaryItem->ismaxvalue) {
             targetConstBoundaryItem = constBoundaryItem;
         } else {
-            targetConstBoundaryItem = (Const*)GetTargetValue(&attrs[partKeyPos - 1], constBoundaryItem, false);
+            targetConstBoundaryItem = (Const*)GetTargetValue(&attrs[partKeyPos - 1], constBoundaryItem, false, partkeyIsFunc);
             if (!PointerIsValid(targetConstBoundaryItem)) {
                 list_free_ext(newBoundaryList);
                 ereport(ERROR,
