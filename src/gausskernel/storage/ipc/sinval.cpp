@@ -225,7 +225,7 @@ void HandleCatchupInterrupt(void)
      * you do here.
      */
     catchupInterruptPending = true;
-    if (u_sess->attr.attr_common.light_comm == TRUE && t_thrd.proc) {
+    if (g_instance.attr.attr_common.light_comm == TRUE && t_thrd.proc) {
         SetLatch(&t_thrd.proc->procLatch);
     }
 }

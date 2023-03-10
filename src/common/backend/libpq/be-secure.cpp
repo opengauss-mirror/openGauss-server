@@ -448,7 +448,7 @@ readloop:
 ssize_t secure_read(Port *port, void *ptr, size_t len)
 {
     ssize_t n = 0;
-    if (u_sess->attr.attr_common.light_comm == TRUE) {
+    if (g_instance.attr.attr_common.light_comm == TRUE) {
         n = light_secure_read(port, ptr, len);
     } else {
         n = old_secure_read(port, ptr, len);
@@ -696,7 +696,7 @@ retry:
 ssize_t secure_write(Port *port, void *ptr, size_t len)
 {
     ssize_t n = 0;
-    if (u_sess->attr.attr_common.light_comm == TRUE) {
+    if (g_instance.attr.attr_common.light_comm == TRUE) {
         n = light_secure_write(port, ptr, len);
     } else {
         n = old_secure_write(port, ptr, len);
