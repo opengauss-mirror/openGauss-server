@@ -1,16 +1,18 @@
+create schema schema_hw_cstore_partition;
+set search_path = schema_hw_cstore_partition;
 --test create
 create table CstoreTestTable(id int) with (orientation = column)
 partition by range (id)
 (
-     partition CstorePartition1 values less than (5),
-     partition CstorePartition2 values less than (10)
+     partition hwcp_CstorePartition1 values less than (5),
+     partition hwcp_CstorePartition2 values less than (10)
 );
 
 select reloptions from pg_class where relname = 'cstoretesttable';
 
-select boundaries from pg_partition where relname = 'cstorepartition1';
+select boundaries from pg_partition where relname = 'hwcp_cstorepartition1';
 
-select boundaries from pg_partition where relname = 'cstorepartition2';
+select boundaries from pg_partition where relname = 'hwcp_cstorepartition2';
 
 --test truncate
 create table CstorePartition1Col(col int);
@@ -22,39 +24,39 @@ create table CstorePartition2CuDescIdxCol(col int);
 create table CstorePartition1DeltaCol(col int);
 create table CstorePartition2DeltaCol(col int);
 
-insert into CstorePartition1Col(col) select relfilenode from pg_partition where RELNAME='cstorepartition1';
+insert into CstorePartition1Col(col) select relfilenode from pg_partition where RELNAME='hwcp_cstorepartition1';
 
-insert into CstorePartition2Col(col) select relfilenode from pg_partition where RELNAME='cstorepartition2';
+insert into CstorePartition2Col(col) select relfilenode from pg_partition where RELNAME='hwcp_cstorepartition2';
 
-insert into CstorePartition1CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'cstorepartition1');
+insert into CstorePartition1CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'hwcp_cstorepartition1');
 
-insert into CstorePartition2CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'cstorepartition2');
+insert into CstorePartition2CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'hwcp_cstorepartition2');
 
-insert into CstorePartition1CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'cstorepartition1');
+insert into CstorePartition1CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'hwcp_cstorepartition1');
 
-insert into CstorePartition2CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'cstorepartition2');
+insert into CstorePartition2CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'hwcp_cstorepartition2');
 
-insert into CstorePartition1DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'cstorepartition1');
+insert into CstorePartition1DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'hwcp_cstorepartition1');
 
-insert into CstorePartition2DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'cstorepartition2');
+insert into CstorePartition2DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'hwcp_cstorepartition2');
 
 truncate CstoreTestTable;
 
-insert into CstorePartition1Col(col) select relfilenode from pg_partition where RELNAME='cstorepartition1';
+insert into CstorePartition1Col(col) select relfilenode from pg_partition where RELNAME='hwcp_cstorepartition1';
 
-insert into CstorePartition2Col(col) select relfilenode from pg_partition where RELNAME='cstorepartition2';
+insert into CstorePartition2Col(col) select relfilenode from pg_partition where RELNAME='hwcp_cstorepartition2';
 
-insert into CstorePartition1CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'cstorepartition1');
+insert into CstorePartition1CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'hwcp_cstorepartition1');
 
-insert into CstorePartition2CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'cstorepartition2');
+insert into CstorePartition2CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'hwcp_cstorepartition2');
 
-insert into CstorePartition1CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'cstorepartition1');
+insert into CstorePartition1CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'hwcp_cstorepartition1');
 
-insert into CstorePartition2CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'cstorepartition2');
+insert into CstorePartition2CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'hwcp_cstorepartition2');
 
-insert into CstorePartition1DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'cstorepartition1');
+insert into CstorePartition1DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'hwcp_cstorepartition1');
 
-insert into CstorePartition2DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'cstorepartition2');
+insert into CstorePartition2DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'hwcp_cstorepartition2');
 
 
 select count(distinct(col)) from CstorePartition1Col;
@@ -86,14 +88,14 @@ drop table CstorePartition2DeltaCol;
 
 select * from pg_class where relname = 'cstoretesttable';
 
-select * from pg_partition where relname = 'cstorepartition1';
+select * from pg_partition where relname = 'hwcp_cstorepartition1';
 
-select * from pg_partition where relname = 'cstorepartition2';
+select * from pg_partition where relname = 'hwcp_cstorepartition2';
 
 --test for copyfrom partition table 
 
-create schema vector_engine;
-CREATE TABLE vector_engine.tbl_partition_operator_batch_001(
+create schema hwcp_vector_engine;
+CREATE TABLE hwcp_vector_engine.tbl_partition_operator_batch_001(
     C_CHAR_1 CHAR(1),
     C_CHAR_2 CHAR(10),
     C_CHAR_3 CHAR(100),
@@ -158,12 +160,12 @@ CALL PROC_tbl_partition_operator_batch_001_1();
 CALL PROC_tbl_partition_operator_batch_001_1();
 CALL PROC_tbl_partition_operator_batch_001_1();
 
-insert into vector_engine.tbl_partition_operator_batch_001 select * from row_engine.tbl_partition_operator_batch_001;
-analyze vector_engine.tbl_partition_operator_batch_001;
-select count(*) from vector_engine.tbl_partition_operator_batch_001;
-drop table vector_engine.tbl_partition_operator_batch_001;
+insert into hwcp_vector_engine.tbl_partition_operator_batch_001 select * from row_engine.tbl_partition_operator_batch_001;
+analyze hwcp_vector_engine.tbl_partition_operator_batch_001;
+select count(*) from hwcp_vector_engine.tbl_partition_operator_batch_001;
+drop table hwcp_vector_engine.tbl_partition_operator_batch_001;
 drop table row_engine.tbl_partition_operator_batch_001;
-drop schema vector_engine;
+drop schema hwcp_vector_engine;
 drop schema row_engine;
 
 --test for analyze table with index
@@ -202,3 +204,61 @@ drop table test_exchange_partition;
 drop table test_exchange_col;
 drop table test_exchange_row;
 
+
+-- Insert ... Select 的时候，会判断两分区表的分区属性是否相同
+create table hwcp_pt1(a int,b text) with (orientation = column)
+partition by range(a)
+(
+partition pl values less than (10),
+partition p2 values less than (100)
+);
+create table hwcp_pt2(a int,b text) with (orientation = column)
+partition by range(a)
+(
+partition p1 values less than (10),
+partition p2 values less than (100)
+);
+create table hwcp_pt3(a int,b text) with (orientation = column)
+partition by range(a)
+(
+partition p1 values less than (10),
+partition p2 values less than (200)
+);
+
+create table hwcp_pt4(a int,b text)
+partition by range(a)
+(
+partition p1 values less than (10),
+partition p2 values less than (20)
+);
+create table hwcp_pt5(a int,b text)
+partition by list(a)
+(
+partition p1 values (1, 2),
+partition p2 values (3, 4, 5)
+);
+create table hwcp_pt6(a int,b text)
+partition by hash(a)
+(
+partition p1,
+partition p2
+);
+
+insert into hwcp_pt2 values (1, 'hwcp_pt2 p1'),(20,'hwcp_pt2 p2');
+insert into hwcp_pt3 values (2, 'hwcp_pt3 p1'),(21,'hwcp_pt3 p2');
+
+insert into hwcp_pt1 select * from hwcp_pt2;
+insert into hwcp_pt1 select * from hwcp_pt3;
+select * from hwcp_pt1;
+
+insert into hwcp_pt4 values (4, 'hwcp_pt4 p1'),(14,'hwcp_pt4 p2');
+insert into hwcp_pt5 values (1, 'hwcp_pt5 p1'),(5,'hwcp_pt5 p2');
+insert into hwcp_pt6 values (6, 'hwcp_pt6'),(66,'hwcp_pt6');
+
+insert into hwcp_pt1 select * from hwcp_pt4;
+insert into hwcp_pt1 select * from hwcp_pt5;
+insert into hwcp_pt1 select * from hwcp_pt6;
+select * from hwcp_pt1 order by a, b;
+
+reset search_path;
+drop schema schema_hw_cstore_partition cascade;
