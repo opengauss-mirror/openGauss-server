@@ -953,3 +953,184 @@ drop function select_into_null_func;
 reset behavior_compat_options;
 \c regression;
 drop database IF EXISTS pl_test_funcion;
+
+-- test create internal functions
+create function fn_void(cstring) returns void language internal as 'int8in';
+select fn_void(null);
+select fn_void('');
+select fn_void('1234');
+select fn_void(1234); --  should error, no function matches
+drop function fn_void(cstring);
+
+create function fn_n(cstring) returns int language internal as 'int4in';
+select fn_n(null);
+select fn_n('');
+select fn_n('666');
+select fn_n(666); --  should error, no function matches
+select fn_n('666666666666666666666666666666666666666666666666666'); -- out of range
+select fn_n('fhdsfhdj'); -- invalid input
+drop function fn_n(cstring);
+
+create function fn_n2(int8) returns cstring language internal as 'int8out';
+select fn_n2(0);
+select fn_n2(1::int2);
+select fn_n2(1234);
+select fn_n2(-1234::int4);
+select fn_n2('1234');
+drop function fn_n2(int8);
+
+create function fn_n3(int8, cstring) returns cstring language internal as 'int8out'; -- exeeded param is ok
+select fn_n3(null, null);
+select fn_n3('', '');
+select fn_n3(123456789, null);
+select fn_n3(12345, ''); -- empty string will be treated as null
+select fn_n3(12345, 'rtrgfgf');
+drop function fn_n3(int8, cstring);
+
+create function fn_txt(text) returns cstring as 'textout' language internal;
+select fn_txt(null);
+select fn_txt('');
+select fn_txt('084329sdjhfdsffdjf');
+select fn_txt('sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf');
+drop function fn_txt(text);
+
+create function fn_txt2(text, ot out int) returns cstring as 'textout' language internal;
+select fn_txt2(null);
+select fn_txt2('');
+select fn_txt2('084329sdjhfdsffdjf');
+select fn_txt2('sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf');
+drop function fn_txt2(text, ot out int);
+
+create function fn_txt3(text, ot out cstring) as 'textout' language internal;
+select fn_txt3(null);
+select fn_txt3('');
+select fn_txt3('084329sdjhfdsffdjf');
+select fn_txt3('sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf');
+drop function fn_txt3(text, ot out cstring);
+
+create function fn_txt4(ot out cstring, text) as 'textout' language internal;
+select fn_txt4(null);
+select fn_txt4('');
+select fn_txt4('084329sdjhfdsffdjf');
+select fn_txt4('sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf');
+drop function fn_txt4(ot out cstring, text);
+
+create function gt(int8, int8) returns bool as 'int8gt' language internal;
+select gt(123, 234);
+select gt(123, 122);
+select gt(123, null);
+select gt('', null);
+select gt(null, null);
+select gt('12', '12');
+select gt('123', '13');
+
+select gt(123, 234) = int8gt(123, 234) as eq;
+select gt(123, 122) = int8gt(123, 122) as eq;
+select gt(123, null) is null and int8gt(123, null) is null as eq;
+select gt('', null) is null and int8gt('', null) is null as eq;
+select gt(null, null) is null and int8gt(null, null)is null  as eq;
+select gt('12', '12') = int8gt('12', '12') as eq;
+select gt('123', '13') = int8gt('123', '13') as eq;
+
+drop function gt(int8, int8);
+
+create type circle_tbl_ct;
+create function fn_txt4(text) returns circle_tbl_ct as 'textout' language internal; -- OK
+create function fn_tfn_txt5(text, ot out circle_tbl_ct) as 'textout' language internal; -- OK
+drop type circle_tbl_ct cascade;
+
+create function gt(int, int) returns bool as 'int8gt' language internal; -- should error
+create function gt(int8, int) returns bool as 'int8gt' language internal; -- should error
+create function fn_p(int, cstring) returns int8 language internal as 'int8in'; -- should error
+create function fn_p2(int, cstring) returns int8 language internal as 'int8in'; -- should error
+create function fn_r(cstring) returns int language internal as 'int8in'; -- should error
+create function fn_r(cstring, o out int) language internal as 'int8in'; -- should error
+create function fn_txt_r(int8) returns text language internal as 'int8out'; -- ERROR:  return type cstring
+create function fn_txt_p(cstring) returns cstring as 'textout' language internal; -- error: param is text type
+
+-- test function for custum type
+create type cc1_type;
+create function cc1_in(cstring) returns cc1_type
+    strict immutable language internal as 'int8in';
+
+create function cc1_out(cc1_type) returns cstring
+    strict immutable language internal as 'int8out';
+
+create function cc1_in_bad(cstring) returns cc1_type
+    strict immutable language internal as 'textin';
+
+create function cc1_out_bad(cc1_type) returns cstring
+    strict immutable language internal as 'textout';
+
+-- should failed: internallength
+create type cc1_type(
+    input = cc1_in,
+    output = cc1_out
+);
+
+-- should failed: internallength
+create type cc1_type(
+    internallength = 6,
+    input = cc1_in,
+    output = cc1_out
+);
+-- should failed: output
+create type cc1_type(
+    internallength = 8,
+    passedbyvalue = true,
+    alignment = double,
+    storage=plain,
+    input = cc1_in,
+    output = cc1_out_bad
+);
+-- should failed
+create type cc1_type(
+    internallength = 8,
+    passedbyvalue = true,
+    input = cc1_in,
+    output = cc1_out
+);
+-- should pass
+create type cc1_type(
+    internallength = 8,
+    passedbyvalue = true,
+	alignment = double,
+    input = cc1_in,
+    output = cc1_out
+);
+create cast (int8 as cc1_type) with inout;
+select 1234::int8::cc1_type;
+
+-- case 2
+create type cc2_type;
+create function cc2_in(cstring) returns cc2_type
+    strict immutable language internal as 'textin';
+
+create function cc2_out(cc2_type) returns cstring
+    strict immutable language internal as 'textout';
+
+create function cc2_out_bad(cc2_type) returns cstring
+    strict immutable language internal as 'int8out';
+
+-- should failed
+create type cc2_type(
+    input = cc2_in,
+    output = cc2_out_bad
+);
+-- should failed
+create type cc2_type(
+    internallength = 8,
+    input = cc2_in,
+    output = cc2_out_bad
+);
+-- passed
+create type cc2_type(
+    input = cc2_in,
+    output = cc2_out
+);
+select 1234::cc2_type; -- error
+select '1234'::cc2_type;
+select 'fdsfdfg#@$'::text::cc2_type;
+
+drop type cc1_type cascade;
+drop type cc2_type cascade;

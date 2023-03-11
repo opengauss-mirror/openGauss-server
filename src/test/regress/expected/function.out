@@ -1645,3 +1645,467 @@ drop function select_into_null_func;
 reset behavior_compat_options;
 \c regression;
 drop database IF EXISTS pl_test_funcion;
+-- test create internal functions
+create function fn_void(cstring) returns void language internal as 'int8in';
+select fn_void(null);
+ fn_void 
+---------
+ 
+(1 row)
+
+select fn_void('');
+ fn_void 
+---------
+ 
+(1 row)
+
+select fn_void('1234');
+ fn_void 
+---------
+ 
+(1 row)
+
+select fn_void(1234); --  should error, no function matches
+ERROR:  function fn_void(integer) does not exist
+LINE 1: select fn_void(1234);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: fn_void
+drop function fn_void(cstring);
+create function fn_n(cstring) returns int language internal as 'int4in';
+select fn_n(null);
+ fn_n 
+------
+     
+(1 row)
+
+select fn_n('');
+ fn_n 
+------
+     
+(1 row)
+
+select fn_n('666');
+ fn_n 
+------
+  666
+(1 row)
+
+select fn_n(666); --  should error, no function matches
+ERROR:  function fn_n(integer) does not exist
+LINE 1: select fn_n(666);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: fn_n
+select fn_n('666666666666666666666666666666666666666666666666666'); -- out of range
+ERROR:  value "666666666666666666666666666666666666666666666666666" is out of range for type integer
+CONTEXT:  referenced column: fn_n
+select fn_n('fhdsfhdj'); -- invalid input
+ERROR:  invalid input syntax for integer: "fhdsfhdj"
+CONTEXT:  referenced column: fn_n
+drop function fn_n(cstring);
+create function fn_n2(int8) returns cstring language internal as 'int8out';
+select fn_n2(0);
+ fn_n2 
+-------
+ 0
+(1 row)
+
+select fn_n2(1::int2);
+ fn_n2 
+-------
+ 1
+(1 row)
+
+select fn_n2(1234);
+ fn_n2 
+-------
+ 1234
+(1 row)
+
+select fn_n2(-1234::int4);
+ fn_n2 
+-------
+ -1234
+(1 row)
+
+select fn_n2('1234');
+ fn_n2 
+-------
+ 1234
+(1 row)
+
+drop function fn_n2(int8);
+create function fn_n3(int8, cstring) returns cstring language internal as 'int8out'; -- exeeded param is ok
+select fn_n3(null, null);
+ fn_n3 
+-------
+ 
+(1 row)
+
+select fn_n3('', '');
+ fn_n3 
+-------
+ 
+(1 row)
+
+select fn_n3(123456789, null);
+ fn_n3 
+-------
+ 
+(1 row)
+
+select fn_n3(12345, ''); -- empty string will be treated as null
+ fn_n3 
+-------
+ 
+(1 row)
+
+select fn_n3(12345, 'rtrgfgf');
+ fn_n3 
+-------
+ 12345
+(1 row)
+
+drop function fn_n3(int8, cstring);
+create function fn_txt(text) returns cstring as 'textout' language internal;
+select fn_txt(null);
+ fn_txt 
+--------
+ 
+(1 row)
+
+select fn_txt('');
+ fn_txt 
+--------
+ 
+(1 row)
+
+select fn_txt('084329sdjhfdsffdjf');
+       fn_txt       
+--------------------
+ 084329sdjhfdsffdjf
+(1 row)
+
+select fn_txt('sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf');
+                         fn_txt                          
+---------------------------------------------------------
+ sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf
+(1 row)
+
+drop function fn_txt(text);
+create function fn_txt2(text, ot out int) returns cstring as 'textout' language internal;
+select fn_txt2(null);
+ fn_txt2 
+---------
+ 
+(1 row)
+
+select fn_txt2('');
+ fn_txt2 
+---------
+ 
+(1 row)
+
+select fn_txt2('084329sdjhfdsffdjf');
+      fn_txt2       
+--------------------
+ 084329sdjhfdsffdjf
+(1 row)
+
+select fn_txt2('sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf');
+                         fn_txt2                         
+---------------------------------------------------------
+ sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf
+(1 row)
+
+drop function fn_txt2(text, ot out int);
+create function fn_txt3(text, ot out cstring) as 'textout' language internal;
+select fn_txt3(null);
+ fn_txt3 
+---------
+ 
+(1 row)
+
+select fn_txt3('');
+ fn_txt3 
+---------
+ 
+(1 row)
+
+select fn_txt3('084329sdjhfdsffdjf');
+      fn_txt3       
+--------------------
+ 084329sdjhfdsffdjf
+(1 row)
+
+select fn_txt3('sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf');
+                         fn_txt3                         
+---------------------------------------------------------
+ sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf
+(1 row)
+
+drop function fn_txt3(text, ot out cstring);
+create function fn_txt4(ot out cstring, text) as 'textout' language internal;
+select fn_txt4(null);
+ fn_txt4 
+---------
+ 
+(1 row)
+
+select fn_txt4('');
+ fn_txt4 
+---------
+ 
+(1 row)
+
+select fn_txt4('084329sdjhfdsffdjf');
+      fn_txt4       
+--------------------
+ 084329sdjhfdsffdjf
+(1 row)
+
+select fn_txt4('sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf');
+                         fn_txt4                         
+---------------------------------------------------------
+ sfiewr0239408497867^&*%&^$%^$*&()&*(&084329sdjhfdsffdjf
+(1 row)
+
+drop function fn_txt4(ot out cstring, text);
+create function gt(int8, int8) returns bool as 'int8gt' language internal;
+select gt(123, 234);
+ gt 
+----
+ f
+(1 row)
+
+select gt(123, 122);
+ gt 
+----
+ t
+(1 row)
+
+select gt(123, null);
+ gt 
+----
+ 
+(1 row)
+
+select gt('', null);
+ gt 
+----
+ 
+(1 row)
+
+select gt(null, null);
+ gt 
+----
+ 
+(1 row)
+
+select gt('12', '12');
+ gt 
+----
+ f
+(1 row)
+
+select gt('123', '13');
+ gt 
+----
+ t
+(1 row)
+
+select gt(123, 234) = int8gt(123, 234) as eq;
+ eq 
+----
+ t
+(1 row)
+
+select gt(123, 122) = int8gt(123, 122) as eq;
+ eq 
+----
+ t
+(1 row)
+
+select gt(123, null) is null and int8gt(123, null) is null as eq;
+ eq 
+----
+ t
+(1 row)
+
+select gt('', null) is null and int8gt('', null) is null as eq;
+ eq 
+----
+ t
+(1 row)
+
+select gt(null, null) is null and int8gt(null, null)is null  as eq;
+ eq 
+----
+ t
+(1 row)
+
+select gt('12', '12') = int8gt('12', '12') as eq;
+ eq 
+----
+ t
+(1 row)
+
+select gt('123', '13') = int8gt('123', '13') as eq;
+ eq 
+----
+ t
+(1 row)
+
+drop function gt(int8, int8);
+create type circle_tbl_ct;
+create function fn_txt4(text) returns circle_tbl_ct as 'textout' language internal; -- OK
+NOTICE:  return type circle_tbl_ct is only a shell
+create function fn_tfn_txt5(text, ot out circle_tbl_ct) as 'textout' language internal; -- OK
+NOTICE:  argument type circle_tbl_ct is only a shell
+drop type circle_tbl_ct cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function fn_txt4(text)
+drop cascades to function fn_tfn_txt5(text)
+create function gt(int, int) returns bool as 'int8gt' language internal; -- should error
+ERROR:  The 1st input parameter of the function does not match the parameter type of the built-in function
+create function gt(int8, int) returns bool as 'int8gt' language internal; -- should error
+ERROR:  The 2nd input parameter of the function does not match the parameter type of the built-in function
+create function fn_p(int, cstring) returns int8 language internal as 'int8in'; -- should error
+ERROR:  The 1st input parameter of the function does not match the parameter type of the built-in function
+create function fn_p2(int, cstring) returns int8 language internal as 'int8in'; -- should error
+ERROR:  The 1st input parameter of the function does not match the parameter type of the built-in function
+create function fn_r(cstring) returns int language internal as 'int8in'; -- should error
+ERROR:  return type mismatch in function declared to return integer
+DETAIL:  actual return type is bigint
+create function fn_r(cstring, o out int) language internal as 'int8in'; -- should error
+ERROR:  return type mismatch in function declared to return integer
+DETAIL:  actual return type is bigint
+create function fn_txt_r(int8) returns text language internal as 'int8out'; -- ERROR:  return type cstring
+ERROR:  return type mismatch in function declared to return text
+DETAIL:  actual return type is cstring
+create function fn_txt_p(cstring) returns cstring as 'textout' language internal; -- error: param is text type
+ERROR:  The 1st input parameter of the function does not match the parameter type of the built-in function
+-- test function for custum type
+create type cc1_type;
+create function cc1_in(cstring) returns cc1_type
+    strict immutable language internal as 'int8in';
+NOTICE:  return type cc1_type is only a shell
+create function cc1_out(cc1_type) returns cstring
+    strict immutable language internal as 'int8out';
+NOTICE:  argument type cc1_type is only a shell
+create function cc1_in_bad(cstring) returns cc1_type
+    strict immutable language internal as 'textin';
+NOTICE:  return type cc1_type is only a shell
+create function cc1_out_bad(cc1_type) returns cstring
+    strict immutable language internal as 'textout';
+NOTICE:  argument type cc1_type is only a shell
+-- should failed: internallength
+create type cc1_type(
+    input = cc1_in,
+    output = cc1_out
+);
+ERROR:  the input function's real return type bigint mismatch the type
+DETAIL:  attribute typlen 8 mismatch internallength -1
+-- should failed: internallength
+create type cc1_type(
+    internallength = 6,
+    input = cc1_in,
+    output = cc1_out
+);
+ERROR:  the input function's real return type bigint mismatch the type
+DETAIL:  attribute typlen 8 mismatch internallength 6
+-- should failed: output
+create type cc1_type(
+    internallength = 8,
+    passedbyvalue = true,
+    alignment = double,
+    storage=plain,
+    input = cc1_in,
+    output = cc1_out_bad
+);
+ERROR:  the output function's real parameter type text mismatch the type
+DETAIL:  attribute typlen -1 mismatch internallength 8
+-- should failed
+create type cc1_type(
+    internallength = 8,
+    passedbyvalue = true,
+    input = cc1_in,
+    output = cc1_out
+);
+ERROR:  alignment "i" is invalid for passed-by-value type of size 8
+-- should pass
+create type cc1_type(
+    internallength = 8,
+    passedbyvalue = true,
+	alignment = double,
+    input = cc1_in,
+    output = cc1_out
+);
+create cast (int8 as cc1_type) with inout;
+select 1234::int8::cc1_type;
+ cc1_type 
+----------
+ 1234
+(1 row)
+
+-- case 2
+create type cc2_type;
+create function cc2_in(cstring) returns cc2_type
+    strict immutable language internal as 'textin';
+NOTICE:  return type cc2_type is only a shell
+create function cc2_out(cc2_type) returns cstring
+    strict immutable language internal as 'textout';
+NOTICE:  argument type cc2_type is only a shell
+create function cc2_out_bad(cc2_type) returns cstring
+    strict immutable language internal as 'int8out';
+NOTICE:  argument type cc2_type is only a shell
+-- should failed
+create type cc2_type(
+    input = cc2_in,
+    output = cc2_out_bad
+);
+ERROR:  the output function's real parameter type bigint mismatch the type
+DETAIL:  attribute typlen 8 mismatch internallength -1
+-- should failed
+create type cc2_type(
+    internallength = 8,
+    input = cc2_in,
+    output = cc2_out_bad
+);
+ERROR:  the input function's real return type text mismatch the type
+DETAIL:  attribute typlen -1 mismatch internallength 8
+-- passed
+create type cc2_type(
+    input = cc2_in,
+    output = cc2_out
+);
+select 1234::cc2_type; -- error
+ERROR:  cannot cast type integer to cc2_type
+LINE 1: select 1234::cc2_type;
+                   ^
+CONTEXT:  referenced column: cc2_type
+select '1234'::cc2_type;
+ cc2_type 
+----------
+ 1234
+(1 row)
+
+select 'fdsfdfg#@$'::text::cc2_type;
+  cc2_type  
+------------
+ fdsfdfg#@$
+(1 row)
+
+drop type cc1_type cascade;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to function cc1_in(cstring)
+drop cascades to function cc1_out(cc1_type)
+drop cascades to function cc1_in_bad(cstring)
+drop cascades to function cc1_out_bad(cc1_type)
+drop cascades to cast from bigint to cc1_type
+drop type cc2_type cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to function cc2_in(cstring)
+drop cascades to function cc2_out(cc2_type)
+drop cascades to function cc2_out_bad(cc2_type)
