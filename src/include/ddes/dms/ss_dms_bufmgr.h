@@ -26,6 +26,7 @@
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_dms.h"
 #include "storage/buf/buf_internals.h"
+#include "access/xlogproc.h"
 
 #define GetDmsBufCtrl(id) (&t_thrd.storage_cxt.dmsBufCtl[(id)])
 
@@ -78,5 +79,6 @@ bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc);
 bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer);
 bool DmsCheckBufAccessible();
 bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc);
+void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo);
 
 #endif
