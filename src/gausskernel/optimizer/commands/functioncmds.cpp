@@ -73,6 +73,7 @@
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/fmgrtab.h"
 #include "utils/guc.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
@@ -101,6 +102,9 @@ typedef struct PendingLibraryDelete {
 static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwnerId);
 static void checkAllowAlter(HeapTuple tup);
 static int2vector* GetDefaultArgPos(List* defargpos);
+static void CheckInternalParamsReturnType(Oid declaredRetOid, Oid languageOid,
+    List* asClause, oidvector* parameterTypes, bool* isStrict);
+static bool IsTypeMatch(Oid oid1, Oid oid2);
 
 static void CreateFunctionComment(Oid funcOid, List* options, bool lock = false)
 {
@@ -1196,6 +1200,8 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
     compute_attributes_with_style((const List*)stmt->withClause, &isStrict, &volatility);
     interpret_AS_clause(languageOid, language, funcname, as_clause, &prosrc_str, &probin_str);
 
+    CheckInternalParamsReturnType(prorettype, languageOid, as_clause, parameterTypes, &isStrict);
+
     /*
      * Set default values for COST and ROWS depending on other parameters;
      * reject ROWS if it's not returnsSet.  NB: pg_dump knows these default
@@ -1262,6 +1268,145 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
         pfree_ext(u_sess->plsql_cxt.debug_query_string);
     }
     return address;
+}
+
+static void CheckInternalParamsReturnType(Oid declaredRetOid, Oid languageOid,
+    List* asClause, oidvector* parameterTypes, bool* isStrict)
+{
+    if (languageOid != INTERNALlanguageId || !asClause ||
+        u_sess->attr.attr_common.IsInplaceUpgrade || IsInitdb) {
+        return;
+    }
+
+    /* check return type */
+    HeapTuple declaredRetTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(declaredRetOid));
+    if (!HeapTupleIsValid(declaredRetTuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for type %u", declaredRetOid)));
+    }
+    Form_pg_type declaredType = (Form_pg_type)GETSTRUCT(declaredRetTuple);
+    bool isDeclaredTypeDefined = declaredType->typisdefined;
+    declaredType = NULL; /* donot use anymore */
+    ReleaseSysCache(declaredRetTuple);
+
+    char* internalFuncName = strVal(linitial(asClause));
+    Assert(PointerIsValid(internalFuncName));
+
+    Oid builtinFuncOid = fmgr_internal_function(internalFuncName);
+    if (builtinFuncOid == InvalidOid) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmsg("there is no built-in function named \"%s\"", internalFuncName)));
+    }
+
+    HeapTuple funcTuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(builtinFuncOid));
+    if (!HeapTupleIsValid(funcTuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for function %u", builtinFuncOid)));
+    }
+
+    Form_pg_proc builtin = (Form_pg_proc)GETSTRUCT(funcTuple);
+    Oid builtinRetType = builtin->prorettype;
+    if (builtin->proisstrict) {
+        *isStrict = true;
+    }
+
+    /* compare return types */
+    if (declaredRetOid != VOIDOID && isDeclaredTypeDefined &&
+        !IsBinaryCoercible(builtinRetType, declaredRetOid) &&
+        !IsTypeMatch(builtinRetType, declaredRetOid)) {
+        ReleaseSysCache(funcTuple);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+            errmsg("return type mismatch in function declared to return %s", format_type_be(declaredRetOid)),
+                errdetail("actual return type is %s", format_type_be(builtinRetType))));
+    }
+
+    /* check parameters */
+    if (builtin->pronargs <= 0) {
+        ReleaseSysCache(funcTuple);
+        return;
+    }
+
+    int nonDefautCnt = builtin->pronargs - builtin->pronargdefaults;
+    int paramCnt = (parameterTypes == nullptr) ? 0 : parameterTypes->dim1;
+    if (paramCnt == 0) {
+        ReleaseSysCache(funcTuple);
+        if (nonDefautCnt > 0) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                    errmsg("the number of input parameters does not match the built-in function"),
+                    errdetail("the number of input parameters: %d, minimum number of mandatory parameters: %d",
+                              paramCnt, nonDefautCnt)));
+        }
+        return;
+    }
+
+    if (paramCnt < nonDefautCnt) {
+        ReleaseSysCache(funcTuple);
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("the number of input parameters does not match the built-in function"),
+                errdetail("the number of input parameters: %d, minimum number of mandatory parameters: %d",
+                            paramCnt, nonDefautCnt)));
+    }
+
+    const int minCnt = (builtin->pronargs > paramCnt) ? paramCnt : builtin->proargtypes.dim1;
+    for (int i = 0; i < minCnt; i++) {
+        Oid realParamOid = parameterTypes->values[i];
+        Oid expectedOid = builtin->proargtypes.values[i];
+        if (realParamOid == expectedOid ||
+            !get_typisdefined(realParamOid) ||
+            IsBinaryCoercible(realParamOid, expectedOid) ||
+            IsTypeMatch(realParamOid, expectedOid)) {
+            continue; /* OK */
+        }
+
+        ReleaseSysCache(funcTuple);
+        if (i == 0) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("The 1st input parameter of the function does not match the parameter type of the built-in function")));
+        } else if (i == 1) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("The 2nd input parameter of the function does not match the parameter type of the built-in function")));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("The %dth input parameter of the function does not match the parameter type of the built-in function",
+                        i + 1)));
+        }
+    }
+
+    ReleaseSysCache(funcTuple);
+}
+
+static bool IsTypeMatch(Oid oid1, Oid oid2)
+{
+    HeapTuple tuple1 = NULL;
+    Form_pg_type type1 = NULL;
+    HeapTuple tuple2 = NULL;
+    Form_pg_type type2 = NULL;
+
+    tuple1 = SearchSysCache1(TYPEOID, ObjectIdGetDatum(oid1));
+    if (!HeapTupleIsValid(tuple1)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for type %u", oid1)));
+    }
+
+    tuple2 = SearchSysCache1(TYPEOID, ObjectIdGetDatum(oid2));
+    if (!HeapTupleIsValid(tuple2)) {
+        ReleaseSysCache(tuple1);
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for type %u", oid2)));
+    }
+
+    type1 = (Form_pg_type)GETSTRUCT(tuple1);
+    type2 = (Form_pg_type)GETSTRUCT(tuple2);
+
+    bool isMatch = type1->typlen == type2->typlen &&
+                   type1->typbyval == type2->typbyval;
+
+    ReleaseSysCache(tuple1);
+    ReleaseSysCache(tuple2);
+    
+    return isMatch;
 }
 
 /*
