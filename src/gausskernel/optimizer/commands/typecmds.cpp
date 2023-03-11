@@ -109,6 +109,8 @@ static void checkEnumAlterPrivilege(HeapTuple tup);
 static char* domainAddConstraint(
     Oid domainOid, Oid domainNamespace, Oid baseTypeOid, int typMod, Constraint* constr, char* domainName, ObjectAddress *constrAddr);
 static void CheckFuncParamType(Oid foid, Oid toid, bool isin);
+static void CheckTypeMatch(Oid funcOid, bool isInputFunc, int16 typlen, bool typbyval);
+static Oid GetBuiltinFuncTypeOid(Oid custumTypeFunc, bool isInputFunc);
 
 /*
  * DefineType
@@ -539,6 +541,13 @@ ObjectAddress DefineType(List* names, List* parameters)
     if (!u_sess->attr.attr_common.IsInplaceUpgrade || !TypeCreateType ||
         (TypeCreateType != TYPTYPE_PSEUDO && TypeCreateType != TYPTYPE_SET))
         array_oid = AssignTypeArrayOid();
+
+    /* check the input and output functions's real type whether match the custum attributes */
+    if (!(u_sess->attr.attr_common.IsInplaceUpgrade) && !IsInitdb &&
+        TypeCreateType != TYPTYPE_PSEUDO && TypeCreateType != TYPTYPE_SET) {
+        CheckTypeMatch(inputOid, true, internalLength, byValue);
+        CheckTypeMatch(outputOid, false, internalLength, byValue);
+    }
 
     /*
      * now have TypeCreate do all the real work.
@@ -3809,4 +3818,73 @@ static void CheckFuncParamType(Oid foid, Oid toid, bool isin)
         if (HeapTupleIsValid(tup2))
             ReleaseSysCache(tup2);
     }
+}
+
+static void CheckTypeMatch(Oid funcOid, bool isInputFunc, int16 typlen, bool typbyval)
+{
+    Oid realTypeOid = GetBuiltinFuncTypeOid(funcOid, isInputFunc);
+    if (realTypeOid == InvalidOid) {
+        return;
+    }
+
+    HeapTuple tuple = NULL;
+    Form_pg_type formType = NULL;
+    tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(realTypeOid));
+    if (!HeapTupleIsValid(tuple)) {
+        return;
+    }
+
+    formType = (Form_pg_type)GETSTRUCT(tuple);
+    int2 realTypeLen = formType->typlen;
+    bool isByValue = formType->typbyval;
+    formType = NULL; /* no longer used */
+    ReleaseSysCache(tuple);
+
+    const char* funcMsg = isInputFunc ?
+                            "the input function's real return type" :
+                            "the output function's real parameter type";
+
+    if (realTypeLen != typlen) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("%s %s mismatch the type", funcMsg, format_type_be(realTypeOid)),
+                errdetail("attribute typlen %d mismatch internallength %d", realTypeLen, typlen)));
+    }
+    if (isByValue != typbyval) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("%s %s mismatch the type", funcMsg, format_type_be(realTypeOid)),
+                errdetail("attribute typbyval %s mismatch passedbyvalue %s", 
+                    isByValue ? "true" : "false", 
+                    typbyval ? "true" : "false")));
+    }
+}
+
+static Oid GetBuiltinFuncTypeOid(Oid custumTypeFunc, bool isInputFunc)
+{
+    Oid realTypeOid = InvalidOid;
+    bool isNull = true;
+    Datum src = 0;
+    const FuncGroup* fgroup = NULL;
+
+    HeapTuple tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(custumTypeFunc));
+    if (!HeapTupleIsValid(tuple)) {
+        return InvalidOid;
+    }
+
+    src = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prosrc, &isNull);
+    if (!isNull) {
+        fgroup = SearchBuiltinFuncByName(TextDatumGetCString(src));
+        if (fgroup != NULL) {
+            if (isInputFunc) {
+                realTypeOid = fgroup->funcs->rettype;
+            } else if (fgroup->funcs->proargtypes.count == 1) {
+                realTypeOid = fgroup->funcs->proargtypes.values[0];
+            }
+        }
+    }
+
+    ReleaseSysCache(tuple);
+
+    return realTypeOid;
 }
