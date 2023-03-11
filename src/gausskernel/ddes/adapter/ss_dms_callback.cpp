@@ -471,9 +471,10 @@ static void DmsReleaseBuffer(int buffer, bool is_seg)
     }
 }
 
-static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl)
+static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl)
 {
     bool is_seg;
+    int ret = DMS_SUCCESS;
     int buf_id = -1;
     uint32 hash;
     LWLock *partition_lock = NULL;
@@ -525,6 +526,7 @@ static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                ret = DMS_ERROR;
                 break;
             }
 
@@ -534,6 +536,7 @@ static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                ret = DMS_ERROR;
                 break;
             }
 
@@ -555,16 +558,18 @@ static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl
     {
         t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
         ReleaseResource();
+        ret = DMS_ERROR;
     }
     PG_END_TRY();
+
+    return ret;
 }
 
 static int CBEnterLocalPage(void *db_handle, char pageid[DMS_PAGEID_SIZE], dms_lock_mode_t mode,
     dms_buf_ctrl_t **buf_ctrl)
 {
     BufferTag *tag = (BufferTag *)pageid;
-    tryEnterLocalPage(tag, mode, buf_ctrl);
-    return  DMS_SUCCESS;
+    return tryEnterLocalPage(tag, mode, buf_ctrl);
 }
 
 static unsigned char CBPageDirty(dms_buf_ctrl_t *buf_ctrl)
