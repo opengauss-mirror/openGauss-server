@@ -4822,6 +4822,7 @@ static void LogicalLogHandleAbortOrCommit(ParallelReorderBuffer *prb, logicalLog
     txn->final_lsn = logChange->finalLsn;
     txn->nsubtxns = logChange->nsubxacts;
     txn->commit_time = logChange->commitTime;
+    txn->origin_id = logChange->origin_id;
 
     bool isForget = false;
     if (XLByteLT(txn->final_lsn, g_Logicaldispatcher[slotId].startpoint) ||

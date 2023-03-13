@@ -324,6 +324,7 @@ void ParseCommitXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     change->endLsn = buf->endptr;
     change->nsubxacts = nsubxacts;
     change->commitTime = commit_time;
+    change->origin_id = XLogRecGetOrigin(buf->record);
 
     if (nsubxacts > 0) {
         MemoryContext oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);

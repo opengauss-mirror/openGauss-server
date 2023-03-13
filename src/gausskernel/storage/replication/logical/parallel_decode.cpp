@@ -841,6 +841,7 @@ static logicalLog* ParallelDecodeCommitOrAbort(ParallelReorderBufferChange* chan
     logChange->endLsn = change->endLsn;
     logChange->nsubxacts = change->nsubxacts;
     logChange->commitTime = change->commitTime;
+    logChange->origin_id = change->origin_id;
     int slotId = worker->slotId;
     Size subXidSize = sizeof(TransactionId) * change->nsubxacts;
     if (subXidSize > 0 && change->subXids != NULL) {
