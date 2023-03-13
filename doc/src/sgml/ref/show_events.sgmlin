@@ -1,0 +1,18 @@
+<refentry id="SQL-SHOW_EVENTS">
+<refmeta>
+<refentrytitle>SHOW EVENTS</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SHOW EVENTS</refname>
+<refpurpose>show the info of the events</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+SHOW EVENTS
+    [{FROM | IN} schema_name]
+    [LIKE 'pattern' | WHERE expr];
+</synopsis>
+</refsynopsisdiv>
+</refentry>
