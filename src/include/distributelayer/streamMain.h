@@ -30,6 +30,7 @@ extern void SetStreamWorkerInfo(class StreamProducer* proObj);
 extern void ResetStreamEnv();
 extern void ResetSessionEnv();
 extern void ExtractProduerInfo();
+extern void ExtractProduerSkewInfo();
 extern ThreadId ApplyStreamThread(StreamProducer *producer);
 extern void RestoreStream();
 extern void StreamExit();

@@ -57,6 +57,37 @@ typedef struct {
 } generate_series_numeric_fctx;
 
 /* ----------
+ * Fast sum accumulator.
+ *
+ * NumericSumAccum is used to implement SUM(), and other standard aggregates
+ * that track the sum of input values.  It uses 32-bit integers to store the
+ * digits, instead of the normal 16-bit integers (with NBASE=10000).  This
+ * way, we can safely accumulate up to NBASE - 1 values without propagating
+ * carry, before risking overflow of any of the digits.  'num_uncarried'
+ * tracks how many values have been accumulated without propagating carry.
+ *
+ * Positive and negative values are accumulated separately, in 'pos_digits'
+ * and 'neg_digits'.  This is simpler and faster than deciding whether to add
+ * or subtract from the current value, for each new value (see sub_var() for
+ * the logic we avoid by doing this).  Both buffers are of same size, and
+ * have the same weight and scale.  In accum_sum_final(), the positive and
+ * negative sums are added together to produce the final result.
+ *
+ * When a new value has a larger ndigits or weight than the accumulator
+ * currently does, the accumulator is enlarged to accommodate the new value.
+ * We normally have one zero digit reserved for carry propagation, and that
+ * is indicated by the 'have_carry_space' flag.  When accum_sum_carry() uses
+ * up the reserved digit, it clears the 'have_carry_space' flag.  The next
+ * call to accum_sum_add() will enlarge the buffer, to make room for the
+ * extra digit, and set the flag again.
+ *
+ * To initialize a new accumulator, simply reset all fields to zeros.
+ *
+ * The accumulator does not handle NaNs.
+ * ----------
+ */
+
+/* ----------
  * Sort support.
  * ----------
  */
@@ -232,6 +263,14 @@ static void accum_sum_add(NumericSumAccum *accum, NumericVar *var1);
 static void accum_sum_rescale(NumericSumAccum *accum, NumericVar *val);
 static void accum_sum_carry(NumericSumAccum *accum);
 static void accum_sum_final(NumericSumAccum *accum, NumericVar *result);
+
+static void accum_sum_add(NumericSumAccum *accum, NumericVar *var1);
+static void accum_sum_rescale(NumericSumAccum *accum, NumericVar *val);
+static void accum_sum_carry(NumericSumAccum *accum);
+static void accum_sum_reset(NumericSumAccum *accum);
+static void accum_sum_final(NumericSumAccum *accum, NumericVar *result);
+static void accum_sum_copy(NumericSumAccum *dst, NumericSumAccum *src);
+static void accum_sum_combine(NumericSumAccum *accum, NumericSumAccum *accum2);
 
 /*
  * @Description: call corresponding big integer operator functions.
@@ -461,7 +500,7 @@ char* output_numeric_out(Numeric num)
      */
     init_var_from_num(num, &x);
     str = output_get_str_from_var(&x);
-    
+
     if (TRUNC_NUMERIC_TAIL_ZERO) {
         remove_tail_zero(str);
     }
@@ -3639,7 +3678,7 @@ Datum numeric_avg_numeric(PG_FUNCTION_ARGS)
     init_var(&sumX_var);
     accum_sum_final(&state->sumX, &sumX_var);
     sumX_datum = NumericGetDatum(make_result(&sumX_var));
-    free_var(&sumX_var); 
+    free_var(&sumX_var);
     PG_RETURN_DATUM(DirectFunctionCall2(numeric_div, sumX_datum, N_datum));
 }
 
@@ -3647,8 +3686,7 @@ Datum numeric_sum(PG_FUNCTION_ARGS)
 {
     NumericAggState *state;
     NumericVar	sumX_var;
-    Numeric result; 
-
+    Numeric result;
     state = PG_ARGISNULL(0) ? NULL : (NumericAggState *) PG_GETARG_POINTER(0);
     if (state == NULL) {
         PG_RETURN_NULL();
@@ -3663,7 +3701,7 @@ Datum numeric_sum(PG_FUNCTION_ARGS)
     result = make_result(&sumX_var);
     free_var(&sumX_var);
 
-    PG_RETURN_NUMERIC(result); 
+    PG_RETURN_NUMERIC(result);
 }
 
 static void int8_to_numericvar(int64 val, NumericVar *var)
@@ -3812,7 +3850,7 @@ static Numeric numeric_stddev_internal_numeric(NumericAggState* state, bool vari
         *is_null = true;
         return NULL;
     }
- 
+
     *is_null = false;
 
     if (state->isNaN) {
@@ -4838,18 +4876,18 @@ static char* get_str_from_var(NumericVar* var)
 }
 
 /*
- * output_get_str_from_var() - 
+ * output_get_str_from_var() -
  *
  *      Convert a var to text representation (guts of numeric_out).
  *      CAUTION: var's contents may be modified by rounding!
  *      Returns a palloc'd string.
- */ 
+ */
 static char* output_get_str_from_var(NumericVar* var)
 {
     int dscale;
-    char* str = NULL;     
-    char* cp = NULL;      
-    char* endcp = NULL;   
+    char* str = NULL;
+    char* cp = NULL;
+    char* endcp = NULL;
     int i;
     int d;
     NumericDigit dig;
@@ -4857,18 +4895,18 @@ static char* output_get_str_from_var(NumericVar* var)
 
 #if DEC_DIGITS > 1
     NumericDigit d1;
-#endif  
-    
+#endif
+
     dscale = var->dscale;
-    
+
     /*
      * Allocate space for the result.
-     *      
+     *
      * i is set to the # of decimal digits before decimal point. dscale is the
      * # of decimal digits we will print after decimal point. We may generate
      * as many as DEC_DIGITS-1 excess digits at the end, and in addition we
      * need room for sign, decimal point, null terminator.
-     */ 
+     */
     i = (var->weight + 1) * DEC_DIGITS;
     if (i <= 0)
         i = 1;
@@ -20038,6 +20076,29 @@ Datum bool_numeric(PG_FUNCTION_ARGS)
 
     PG_RETURN_NUMERIC(res);
 }
+/* ----------------------------------------------------------------------
+ *
+ * Fast sum accumulator functions
+ *
+ * ----------------------------------------------------------------------
+ */
+
+/*
+ * Reset the accumulator's value to zero.  The buffers to hold the digits
+ * are not free'd.
+ */
+static void
+    accum_sum_reset(NumericSumAccum *accum)
+{
+    int			i;
+
+    accum->dscale = 0;
+    for (i = 0; i < accum->ndigits; i++)
+    {
+        accum->pos_digits[i] = 0;
+        accum->neg_digits[i] = 0;
+    }
+}
 
 static void accum_sum_add(NumericSumAccum *accum, NumericVar *val)
 {
@@ -20311,4 +20372,40 @@ void numeric_aggfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype, 
 {
     numeric_transfn_info_change(aggfn_oid, transfn_oid, transtype);
     numeric_finalfn_info_change(aggfn_oid, finalfn_oid);
+}
+
+/*
+ * Copy an accumulator's state.
+ *
+ * 'dst' is assumed to be uninitialized beforehand.  No attempt is made at
+ * freeing old values.
+ */
+static void
+    accum_sum_copy(NumericSumAccum *dst, NumericSumAccum *src)
+{
+    dst->pos_digits = (int32*)palloc(src->ndigits * sizeof(int32));
+    dst->neg_digits = (int32*)palloc(src->ndigits * sizeof(int32));
+
+    memcpy(dst->pos_digits, src->pos_digits, src->ndigits * sizeof(int32));
+    memcpy(dst->neg_digits, src->neg_digits, src->ndigits * sizeof(int32));
+    dst->num_uncarried = src->num_uncarried;
+    dst->ndigits = src->ndigits;
+    dst->weight = src->weight;
+    dst->dscale = src->dscale;
+}
+
+/*
+ * Add the current value of 'accum2' into 'accum'.
+ */
+static void
+    accum_sum_combine(NumericSumAccum *accum, NumericSumAccum *accum2)
+{
+    NumericVar	tmp_var;
+
+    init_var(&tmp_var);
+
+    accum_sum_final(accum2, &tmp_var);
+    accum_sum_add(accum, &tmp_var);
+
+    free_var(&tmp_var);
 }

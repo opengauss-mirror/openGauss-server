@@ -126,7 +126,7 @@ static void advance_windowaggregate(
     foreach (arg, wfuncstate->args) {
         ExprState* arg_state = (ExprState*)lfirst(arg);
 
-        fcinfo->arg[i] = ExecEvalExpr(arg_state, econtext, &fcinfo->argnull[i], NULL);
+        fcinfo->arg[i] = ExecEvalExpr(arg_state, econtext, &fcinfo->argnull[i]);
         fcinfo->argTypes[i] = arg_state->resultType;
         i++;
     }
@@ -971,12 +971,12 @@ static TupleTableSlot* ExecWindowAgg(PlanState* state)
      * output tuple (because there is a function-returning-set in the
      * projection expressions).  If so, try to project another one.
      */
-    if (winstate->ss.ps.ps_TupFromTlist) {
+    if (winstate->ss.ps.ps_vec_TupFromTlist) {
         TupleTableSlot* res = ExecProject(winstate->ss.ps.ps_ProjInfo, &is_done);
         if (is_done == ExprMultipleResult)
             return res;
         /* Done with that source tuple... */
-        winstate->ss.ps.ps_TupFromTlist = false;
+        winstate->ss.ps.ps_vec_TupFromTlist = false;
     }
 
     /*
@@ -1128,7 +1128,7 @@ restart:
         goto restart;
     }
 
-    winstate->ss.ps.ps_TupFromTlist = (is_done == ExprMultipleResult);
+    winstate->ss.ps.ps_vec_TupFromTlist = (is_done == ExprMultipleResult);
     return result;
 }
 
@@ -1201,7 +1201,10 @@ WindowAggState* ExecInitWindowAgg(WindowAgg* node, EState* estate, int eflags)
     winstate->temp_slot_1 = ExecInitExtraTupleSlot(estate);
     winstate->temp_slot_2 = ExecInitExtraTupleSlot(estate);
 
-    winstate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->plan.targetlist, (PlanState*)winstate);
+    if (!estate->es_is_flt_frame)
+    {
+        winstate->ss.ps.targetlist = (List *)ExecInitExprByRecursion((Expr *)node->plan.targetlist, (PlanState *)winstate);
+    }
 
     /*
      * WindowAgg nodes never have quals, since they can only occur at the
@@ -1235,7 +1238,7 @@ WindowAggState* ExecInitWindowAgg(WindowAgg* node, EState* estate, int eflags)
 
     ExecAssignProjectionInfo(&winstate->ss.ps, NULL);
 
-    winstate->ss.ps.ps_TupFromTlist = false;
+    winstate->ss.ps.ps_vec_TupFromTlist = false;
 
     /* Set up data for comparing tuples */
     if (node->partNumCols > 0)
@@ -1407,7 +1410,7 @@ void ExecReScanWindowAgg(WindowAggState* node)
 
     node->all_done = false;
 
-    node->ss.ps.ps_TupFromTlist = false;
+    node->ss.ps.ps_vec_TupFromTlist = false;
     node->all_first = true;
 
     /* release tuplestore et al */

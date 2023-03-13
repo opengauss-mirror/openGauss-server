@@ -240,8 +240,12 @@ CteScanState* ExecInitCteScan(CteScan* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    scanstate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)scanstate);
-    scanstate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)scanstate);
+    if (estate->es_is_flt_frame) {
+        scanstate->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)scanstate);
+    } else {
+        scanstate->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)scanstate);
+        scanstate->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)scanstate);
+    }
 
     /*
      * tuple table initialization
@@ -265,8 +269,7 @@ CteScanState* ExecInitCteScan(CteScan* node, EState* estate, int eflags)
 
     Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
-    scanstate->ss.ps.ps_TupFromTlist = false;
-
+    scanstate->ss.ps.ps_vec_TupFromTlist = false;
     return scanstate;
 }
 

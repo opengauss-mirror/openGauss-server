@@ -3768,8 +3768,12 @@ RemoteQueryState* ExecInitRemoteQuery(RemoteQuery* node, EState* estate, int efl
     ExecAssignExprContext(estate, &remotestate->ss.ps);
 
     /* Initialise child expressions */
-    remotestate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)remotestate);
-    remotestate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)remotestate);
+    if (estate->es_is_flt_frame) {
+        remotestate->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)remotestate);
+    } else {
+        remotestate->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)remotestate);
+        remotestate->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)remotestate);
+    }
 
     /* check for unsupported flags */
     Assert(!(eflags & (EXEC_FLAG_MARK)));
@@ -3787,9 +3791,7 @@ RemoteQueryState* ExecInitRemoteQuery(RemoteQuery* node, EState* estate, int efl
     ExecInitScanTupleSlot(estate, &remotestate->ss);
     scan_type = ExecTypeFromTL(node->base_tlist, false);
     ExecAssignScanType(&remotestate->ss, scan_type);
-
-    remotestate->ss.ps.ps_TupFromTlist = false;
-
+    remotestate->ss.ps.ps_vec_TupFromTlist = false;
     /*
      * If there are parameters supplied, get them into a form to be sent to the
      * Datanodes with bind message. We should not have had done this before.

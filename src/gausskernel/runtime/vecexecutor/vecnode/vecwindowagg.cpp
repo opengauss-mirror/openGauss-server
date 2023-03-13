@@ -160,7 +160,7 @@ VecWindowAggState* ExecInitVecWindowAgg(VecWindowAgg* node, EState* estate, int 
         ExecAssignVectorForExprEval(planstate->ps_ProjInfo->pi_exprContext);
     }
 
-    winstate->ss.ps.ps_TupFromTlist = false;
+    winstate->ss.ps.ps_vec_TupFromTlist = false;
 
     /* Set up data for comparing tuples */
     if (node->partNumCols > 0)

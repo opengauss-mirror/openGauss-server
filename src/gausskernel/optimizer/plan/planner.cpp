@@ -10283,8 +10283,7 @@ bool CheckColumnsSuportedByBatchMode(List *targetList, List *qual)
     /* Consider the  targetList */
     foreach (l, targetList) {
         ListCell *vl = NULL;
-        GenericExprState *gstate = (GenericExprState *)lfirst(l);
-        TargetEntry *tle = (TargetEntry *)gstate->xprstate.expr;
+        TargetEntry *tle = lfirst_node(TargetEntry, l);
 
         /* if have set-returning function, not support. */
         if (vector_engine_setfunc_walker((Node*)tle, NULL)) {

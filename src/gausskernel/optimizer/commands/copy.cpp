@@ -1511,11 +1511,11 @@ void ProcessFileOptions(CopyState cstate, bool is_from, List* options, bool is_d
         cstate->mode = MODE_NORMAL;
     if (cstate->eol_type != EOL_UD && !is_from)
         cstate->eol_type = EOL_NL;
-    
+
     if ((cstate->delim_len = strlen(cstate->delim)) > DELIM_MAX_LEN)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("FIELDS TERMINATED must be less than %d bytes", DELIM_MAX_LEN)));
-    
+
     if (cstate->o_enclosed && cstate->enclosed) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("enclosed sentence can only be specified once")));
@@ -6547,7 +6547,7 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
         Assert(econtext != NULL);
         Assert(CurrentMemoryContext == econtext->ecxt_per_tuple_memory);
 
-        values[defmap[i]] = ExecEvalExpr(defexprs[i], econtext, &nulls[defmap[i]], NULL);
+        values[defmap[i]] = ExecEvalExpr(defexprs[i], econtext, &nulls[defmap[i]]);
     }
 
     if (cstate->transexprs != NULL)
@@ -6587,8 +6587,7 @@ static void ExecTransColExpr(CopyState cstate, ExprContext* econtext, int numPhy
             if (!cstate->transexprs[i])
                 continue;
 
-            values[i] = ExecEvalExpr(cstate->transexprs[i], econtext,
-                                    &nulls[i], NULL);
+            values[i] = ExecEvalExpr(cstate->transexprs[i], econtext, &nulls[i]);
         }
 
         ExecDropSingleTupleTableSlot(slot);

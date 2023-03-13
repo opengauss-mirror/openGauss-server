@@ -1925,7 +1925,11 @@ static void compute_index_stats(Relation onerel, double totalrows, AnlIndexData*
         econtext->ecxt_scantuple = slot;
 
         /* Set up execution state for predicate. */
-        predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+        if (estate->es_is_flt_frame){
+            predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+        } else {
+            predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+        }
 
         /* Compute and save index expression values */
         exprvals = (Datum*)palloc(numrows * attr_cnt * sizeof(Datum));
@@ -1946,7 +1950,7 @@ static void compute_index_stats(Relation onerel, double totalrows, AnlIndexData*
 
             /* If index is partial, check predicate */
             if (predicate != NIL) {
-                if (!ExecQual(predicate, econtext, false))
+                if (!ExecQual(predicate, econtext))
                     continue;
             }
             numindexrows++;

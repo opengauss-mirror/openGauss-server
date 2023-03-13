@@ -3286,7 +3286,7 @@ static HeapTuple make_tuple_from_result_row(PGresult *res, int row, Relation rel
     if (OidIsValid(oid)) {
         HeapTupleSetOid(tuple, oid);
     }
-    
+
     /*
      * If we have an TABLEOID to return, install it.
      */
@@ -3379,7 +3379,7 @@ static void conversion_error_callback(void *arg)
         }
     }
 
-    if (relname && is_wholerow){ 
+    if (relname && is_wholerow){
         errcontext("whole-row reference to foreign table \"%s\"", relname);
     } else if (relname && attname) {
         errcontext("column \"%s\" of foreign table \"%s\"", attname, relname);
@@ -3640,8 +3640,8 @@ static bool foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType joi
      *
      * The joining sides can not have local conditions, thus no need to test
      * shippability of the clauses being pulled up.
-     * 
-     * The foreign join path is not necessarily better than join foreign scan 
+     *
+     * The foreign join path is not necessarily better than join foreign scan
      * path, so we should use list_concat2.
      */
     switch (jointype) {
@@ -3928,7 +3928,7 @@ static void postgresGetForeignJoinPaths(PlannerInfo *root, RelOptInfo *joinrel, 
      * dominate the only suitable local path available.  We also do it before
      * calling foreign_join_ok(), since that function updates fpinfo and marks
      * it as pushable if the join is found to be pushable.
-     * 
+     *
      * currently not support.
      */
     if (root->parse->commandType == CMD_DELETE || root->parse->commandType == CMD_UPDATE || root->rowMarks) {
@@ -4212,12 +4212,12 @@ static void init_upperrel_paths_context(FDWUpperRelCxt* ufdwCxt, Plan* mainPlan)
     Assert(ufdwCxt->root != NULL && ufdwCxt->currentRel != NULL && ufdwCxt->spjExtra != NULL);
 
     PlannerInfo* root = ufdwCxt->root;
-    
+
     if (root->parse->groupingSets) {
         ufdwCxt->state = FDW_UPPER_REL_END;
         return;
     }
-    
+
     /* if the spj rel is unsafe to push down, upper rel is unsafe alse. */
     PgFdwRelationInfo* fpinfo = (PgFdwRelationInfo *)ufdwCxt->currentRel->fdw_private;
     if (!fpinfo->pushdown_safe) {
@@ -4311,7 +4311,7 @@ static void _postgresGetForeignUpperPaths(FDWUpperRelCxt *ufdw_cxt, UpperRelatio
     fpinfo->stage = stage;
 
     output_rel = make_upper_rel(ufdw_cxt, fpinfo);
-    
+
     switch (stage) {
         case UPPERREL_GROUP_AGG:
             add_foreign_grouping_paths(ufdw_cxt->root, input_rel, output_rel, ufdw_cxt->groupExtra);
@@ -4560,7 +4560,7 @@ static void add_foreign_final_paths(PlannerInfo *root, RelOptInfo *input_rel, Re
      */
     if (!parse->rowMarks && !extra->limit_needed) {
         ListCell* lc = NULL;
-        Path* path = NULL; 
+        Path* path = NULL;
         ForeignPath *final_path = NULL;
         foreach(lc, input_rel->pathlist) {
             path = (Path*)lfirst(lc);
@@ -4571,7 +4571,7 @@ static void add_foreign_final_paths(PlannerInfo *root, RelOptInfo *input_rel, Re
 
                 /* and add it to the final_rel */
                 add_path(root, final_rel, (Path *)final_path);
-                
+
                 /* Safe to push down */
                 fpinfo->pushdown_safe = true;
             }

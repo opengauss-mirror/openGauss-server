@@ -421,11 +421,11 @@ static TupleTableSlot* MJFillOuter(MergeJoinState* node)
         ExprDoneCond isDone;
 
         MJ_printf("ExecMergeJoin: returning outer fill tuple\n");
-                        
+
         TupleTableSlot* result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
 
         if (isDone != ExprEndResult) {
-            node->js.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+            node->js.ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
             return result;
         }
     } else
@@ -460,7 +460,7 @@ static TupleTableSlot* MJFillInner(MergeJoinState* node)
         TupleTableSlot* result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
 
         if (isDone != ExprEndResult) {
-            node->js.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+            node->js.ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
             return result;
         }
     } else
@@ -560,7 +560,7 @@ static TupleTableSlot* ExecMergeJoin(PlanState* state)
     ExprDoneCond isDone;
 
     CHECK_FOR_INTERRUPTS();
-    
+
     /*
      * get information from node
      */
@@ -577,14 +577,14 @@ static TupleTableSlot* ExecMergeJoin(PlanState* state)
      * tuple (because there is a function-returning-set in the projection
      * expressions).  If so, try to project another one.
      */
-    if (node->js.ps.ps_TupFromTlist) {
+    if (node->js.ps.ps_vec_TupFromTlist) {
         TupleTableSlot* result = NULL;
 
         result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
         if (isDone == ExprMultipleResult)
             return result;
         /* Done with that source tuple... */
-        node->js.ps.ps_TupFromTlist = false;
+        node->js.ps.ps_vec_TupFromTlist = false;
     }
 
     /*
@@ -771,7 +771,7 @@ static TupleTableSlot* ExecMergeJoin(PlanState* state)
                 inner_tuple_slot = node->mj_InnerTupleSlot;
                 econtext->ecxt_innertuple = inner_tuple_slot;
 
-                qual_result = (join_qual == NIL || ExecQual(join_qual, econtext, false));
+                qual_result = (join_qual == NIL || ExecQual(join_qual, econtext));
                 MJ_DEBUG_QUAL(join_qual, qual_result);
 
                 if (qual_result) {
@@ -790,7 +790,7 @@ static TupleTableSlot* ExecMergeJoin(PlanState* state)
                         node->mj_JoinState = EXEC_MJ_NEXTOUTER;
                     }
 
-                    qual_result = (other_qual == NIL || ExecQual(other_qual, econtext, false));
+                    qual_result = (other_qual == NIL || ExecQual(other_qual, econtext));
                     MJ_DEBUG_QUAL(other_qual, qual_result);
 
                     if (qual_result) {
@@ -798,13 +798,14 @@ static TupleTableSlot* ExecMergeJoin(PlanState* state)
                          * qualification succeeded.  now form the desired
                          * projection tuple and return the slot containing it.
                          */
+                        ExprDoneCond isDone;
 
                         MJ_printf("ExecMergeJoin: returning tuple\n");
 
                         TupleTableSlot* result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
 
                         if (isDone != ExprEndResult) {
-                            node->js.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+                            node->js.ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
 
                             return result;
                         }
@@ -1425,12 +1426,20 @@ MergeJoinState* ExecInitMergeJoin(MergeJoin* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    merge_state->js.ps.targetlist =
-        (List*)ExecInitExpr((Expr*)node->join.plan.targetlist, (PlanState*)merge_state);
-    merge_state->js.ps.qual = (List*)ExecInitExpr((Expr*)node->join.plan.qual, (PlanState*)merge_state);
-    merge_state->js.jointype = node->join.jointype;
-    merge_state->js.joinqual = (List*)ExecInitExpr((Expr*)node->join.joinqual, (PlanState*)merge_state);
-    merge_state->js.nulleqqual = (List*)ExecInitExpr((Expr*)node->join.nulleqqual, (PlanState*)merge_state);
+    if (estate->es_is_flt_frame) {
+        merge_state->js.ps.qual = (List*)ExecInitQualByFlatten(node->join.plan.qual, (PlanState*)merge_state);
+        merge_state->js.jointype = node->join.jointype;
+        merge_state->js.joinqual = (List*)ExecInitQualByFlatten(node->join.joinqual, (PlanState*)merge_state);
+        merge_state->js.nulleqqual = (List*)ExecInitQualByFlatten(node->join.nulleqqual, (PlanState*)merge_state);
+        merge_state->mj_ConstFalseJoin = false;
+    } else {
+        merge_state->js.ps.targetlist =
+        (List*)ExecInitExprByRecursion((Expr*)node->join.plan.targetlist, (PlanState*)merge_state);
+        merge_state->js.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->join.plan.qual, (PlanState*)merge_state);
+        merge_state->js.jointype = node->join.jointype;
+        merge_state->js.joinqual = (List*)ExecInitExprByRecursion((Expr*)node->join.joinqual, (PlanState*)merge_state);
+        merge_state->js.nulleqqual = (List*)ExecInitExprByRecursion((Expr*)node->join.nulleqqual, (PlanState*)merge_state);
+    }
     merge_state->mj_ConstFalseJoin = false;
 
     Assert(node->join.joinqual == NIL || !node->skip_mark_restore);
@@ -1533,7 +1542,7 @@ MergeJoinState* ExecInitMergeJoin(MergeJoin* node, EState* estate, int eflags)
      * initialize join state
      */
     merge_state->mj_JoinState = EXEC_MJ_INITIALIZE_OUTER;
-    merge_state->js.ps.ps_TupFromTlist = false;
+    merge_state->js.ps.ps_vec_TupFromTlist = false;
     merge_state->mj_MatchedOuter = false;
     merge_state->mj_MatchedInner = false;
     merge_state->mj_OuterTupleSlot = NULL;
@@ -1583,7 +1592,7 @@ void ExecReScanMergeJoin(MergeJoinState* node)
     (void)ExecClearTuple(node->mj_MarkedTupleSlot);
 
     node->mj_JoinState = EXEC_MJ_INITIALIZE_OUTER;
-    node->js.ps.ps_TupFromTlist = false;
+    node->js.ps.ps_vec_TupFromTlist = false;
     node->mj_MatchedOuter = false;
     node->mj_MatchedInner = false;
     node->mj_OuterTupleSlot = NULL;

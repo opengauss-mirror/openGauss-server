@@ -2051,7 +2051,7 @@ VectorBatch* SonicHashJoin::buildRes(VectorBatch* inBatch, VectorBatch* outBatch
     if (m_runtime->js.ps.qual != NULL) {
         has_qual = true;
         econtext->ecxt_scanbatch = inBatch;
-        pvector = ExecVecQual(m_runtime->js.ps.qual, econtext, false);
+        pvector = ExecVecQual((List*)m_runtime->js.ps.qual, econtext, false);
 
         if (pvector == NULL) {
             inBatch->Reset();

@@ -1792,7 +1792,11 @@ void StreamSkew::init(bool isVec)
         if (isVec) {
             qsstate->skew_quals_state = (List*)ExecInitVecExpr((Expr*)(qsinfo->skew_quals), NULL);
         } else {
-            qsstate->skew_quals_state = (List*)ExecInitExpr((Expr*)(qsinfo->skew_quals), NULL);
+            if (m_estate->es_is_flt_frame) {
+                qsstate->skew_quals_state = (List*)ExecInitQualByFlatten(qsinfo->skew_quals, NULL);
+            } else {
+                qsstate->skew_quals_state = (List*)ExecInitExprByRecursion((Expr*)(qsinfo->skew_quals), NULL);
+            }
         }
 
         if (qsstate->skew_quals_state != NIL)
@@ -1821,7 +1825,7 @@ int StreamSkew::chooseStreamType(TupleTableSlot* tuple)
 
     foreach(lc, m_skewQual) {
         qsstate = (QualSkewState*)lfirst(lc);
-        if (ExecQual(qsstate->skew_quals_state, m_econtext, false)) {
+        if (ExecQual(qsstate->skew_quals_state, m_econtext)) {
             switch (qsstate->skew_stream_type) {
                 case PART_REDISTRIBUTE_PART_BROADCAST:
                 case PART_LOCAL_PART_BROADCAST:

@@ -313,14 +313,14 @@ TupleTableSlot* ExecMergeProjQual(ModifyTableState* mtstate, List* mergeMatchedA
          * (no need to check separately since ExecQual() will return true if
          * there are no conditions to evaluate).
          */
-        if (ExecQual((List*)action->whenqual, econtext, false)) {
+        if (ExecQual((List*)action->whenqual, econtext)) {
             if (estate->es_result_update_remoterel == NULL) {
                 /*
                  * We set up the projection earlier, so all we do here is
                  * Project, no need for any other tasks prior to the
                  * ExecUpdate.
                  */
-                result_slot = ExecProject(action->proj, NULL);
+                result_slot = ExecProject(action->proj);
             } else {
                 /* we don't do projection in remote query */
             }
@@ -483,14 +483,14 @@ static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, Tuple
          * (no need to check separately since ExecQual() will return true if
          * there are no conditions to evaluate).
          */
-        if (ExecQual((List*)action->whenqual, econtext, false)) {
+        if (ExecQual((List *)action->whenqual, econtext)) {
             /*
              * We set up the projection earlier, so all we do here is
              * Project, no need for any other tasks prior to the
              * ExecInsert.
              */
             if (estate->es_result_insert_remoterel == NULL) {
-                ExecProject(action->proj, NULL);
+                ExecProject(action->proj);
                 /*
                  * ExecPrepareTupleRouting may modify the passed-in slot. Hence
                  * pass a local reference so that action->slot is not modified.
@@ -556,11 +556,14 @@ void ExecInitMerge(ModifyTableState* mtstate, EState* estate, ResultRelInfo* res
         MergeAction* action = (MergeAction*)lfirst(l);
         MergeActionState* action_state = makeNode(MergeActionState);
         TupleDesc tupDesc;
-        List* targetList = NULL;
 
         action_state->matched = action->matched;
         action_state->commandType = action->commandType;
-        action_state->whenqual = ExecInitExpr((Expr*)action->qual, &mtstate->ps);
+        if (estate->es_is_flt_frame) {
+            action_state->whenqual = ExecInitQualByFlatten((List*)action->qual, &mtstate->ps);
+        } else {
+            action_state->whenqual = ExecInitExprByRecursion((Expr*)action->qual, &mtstate->ps);
+        }
 
         /* create target slot for this action's projection */
         tupDesc = ExecTypeFromTL((List*)action->targetList, false, true, relationDesc->td_tam_ops);
@@ -579,8 +582,7 @@ void ExecInitMerge(ModifyTableState* mtstate, EState* estate, ResultRelInfo* res
         }
 
         /* build action projection state */
-        targetList = (List*)ExecInitExpr((Expr*)action->targetList, &mtstate->ps);
-        action_state->proj = ExecBuildProjectionInfo(targetList, econtext, mtstate->mt_mergeproj, relationDesc);
+        action_state->proj = ExecBuildProjectionInfo(action->targetList, econtext, mtstate->mt_mergeproj, &mtstate->ps, relationDesc);
 
         /*
          * We create two lists - one for WHEN MATCHED actions and one

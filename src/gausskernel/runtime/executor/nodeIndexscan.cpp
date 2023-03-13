@@ -666,7 +666,7 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
      */
     ExecAssignExprContext(estate, &index_state->ss.ps);
 
-    index_state->ss.ps.ps_TupFromTlist = false;
+    index_state->ss.ps.ps_vec_TupFromTlist = false;
 
     /*
      * initialize child expressions
@@ -678,9 +678,14 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
      * would be nice to improve that.  (Problem is that any SubPlans present
      * in the expression must be found now...)
      */
-    index_state->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)index_state);
-    index_state->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)index_state);
-    index_state->indexqualorig = (List*)ExecInitExpr((Expr*)node->indexqualorig, (PlanState*)index_state);
+    if (estate->es_is_flt_frame) {
+        index_state->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)index_state);
+        index_state->indexqualorig = (List*)ExecInitQualByFlatten(node->indexqualorig, (PlanState*)index_state);
+    } else {
+        index_state->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)index_state);
+        index_state->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)index_state);
+        index_state->indexqualorig = (List*)ExecInitExprByRecursion((Expr*)node->indexqualorig, (PlanState*)index_state);
+    }
 
     /*
      * open the base relation and acquire appropriate lock on it.

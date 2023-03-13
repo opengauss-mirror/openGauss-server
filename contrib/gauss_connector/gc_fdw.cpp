@@ -2046,7 +2046,7 @@ static void prepare_query_params(PlanState* node, List* fdw_exprs, int numParams
      * benefit, and it'd require gc_fdw to know more than is desirable
      * about Param evaluation.)
      */
-    *param_exprs = (List *)ExecInitExpr((Expr *)fdw_exprs, node);
+    *param_exprs = ExecInitExprList(fdw_exprs, node);
 
     /* Allocate buffer for text form of query parameters. */
     *param_values = (const char **)palloc0(numParams * sizeof(char *));
@@ -2068,7 +2068,7 @@ static void process_query_params(
         bool isNull = false;
 
         /* Evaluate the parameter expression */
-        expr_value = ExecEvalExpr(expr_state, econtext, &isNull, NULL);
+        expr_value = ExecEvalExpr(expr_state, econtext, &isNull);
 
         /*
          * Get string representation of each parameter value by invoking

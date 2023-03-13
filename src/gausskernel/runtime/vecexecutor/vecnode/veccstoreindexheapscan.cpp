@@ -88,7 +88,12 @@ CStoreIndexHeapScanState* ExecInitCstoreIndexHeapScan(CStoreIndexHeapScan* node,
     CIHSState->ps.state = estate;
     CIHSState->ps.vectorized = true;
     CIHSState->ps.type = T_CStoreIndexHeapScanState;
-    CIHSState->m_deltaQual = (List*)ExecInitExpr((Expr*)node->bitmapqualorig, (PlanState*)&CIHSState->ps);
+
+    if (estate->es_is_flt_frame) {
+        CIHSState->m_deltaQual = (List*)ExecInitQualByFlatten(node->bitmapqualorig, (PlanState*)&CIHSState->ps);
+    } else {
+        CIHSState->m_deltaQual = (List*)ExecInitExprByRecursion((Expr*)node->bitmapqualorig, (PlanState*)&CIHSState->ps);
+    }
 
     outerPlanState(CIHSState) = ExecInitNode(outerPlan(node), estate, eflags);
 
@@ -117,14 +122,14 @@ VectorBatch* ExecCstoreIndexHeapScan(CStoreIndexHeapScanState* state)
     /*
      * for function-returning-set.
      */
-    if (state->ps.ps_TupFromTlist) {
+    if (state->ps.ps_vec_TupFromTlist) {
         Assert(state->ps.ps_ProjInfo);
         pOutBatch = ExecVecProject(state->ps.ps_ProjInfo, true, &isDone);
         if (pOutBatch->m_rows > 0) {
             return pOutBatch;
         }
 
-        state->ps.ps_TupFromTlist = false;
+        state->ps.ps_vec_TupFromTlist = false;
     }
     state->ps.ps_ProjInfo->pi_exprContext->current_row = 0;
 
@@ -149,7 +154,7 @@ restart:
         pOutBatch = ApplyProjectionAndFilter(state, pScanBatch, &isDone);
 
         if (isDone != ExprEndResult) {
-            state->ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+            state->ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
         }
 
         if (BatchIsNull(pOutBatch))
@@ -166,7 +171,7 @@ restart:
         pOutBatch = ApplyProjectionAndFilter(state, pScanBatch, &isDone);
 
         if (isDone != ExprEndResult) {
-            state->ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+            state->ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
         }
 
         if (BatchIsNull(pOutBatch))

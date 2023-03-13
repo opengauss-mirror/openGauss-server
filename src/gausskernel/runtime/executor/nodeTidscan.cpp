@@ -45,11 +45,86 @@
         ((Var*)(node))->varlevelsup == 0)
 
 static TupleTableSlot* ExecTidScan(PlanState* state);
-static void TidListCreate(TidScanState* tidstate, bool isBucket);
+static void TidListCreateByRecursion(TidScanState* tidstate, bool isBucket);
+/* one element in tss_tidexprs */
+typedef struct TidExpr
+{
+	ExprState  *exprstate;		/* ExprState for a TID-yielding subexpr */
+	bool		isarray;		/* if true, it yields tid[] not just tid */
+	CurrentOfExpr *cexpr;		/* alternatively, we can have CURRENT OF */
+} TidExpr;
+
+static void TidExprListInit(TidScanState *tidstate);
+static void TidListCreateByFlatten(TidScanState* tidstate, bool isBucket);
 static int ItemptrComparator(const void* a, const void* b);
 static TupleTableSlot* TidNext(TidScanState* node);
 static void ExecInitNextPartitionForTidScan(TidScanState* node);
 static void ExecInitPartitionForTidScan(TidScanState* tidstate, EState* estate);
+
+/*
+ * Extract the qual subexpressions that yield TIDs to search for,
+ * and compile them into ExprStates if they're ordinary expressions.
+ *
+ * CURRENT OF is a special case that we can't compile usefully;
+ * just drop it into the TidExpr list as-is.
+ */
+static void
+TidExprListInit(TidScanState *tidstate)
+{
+	TidScan    *node = (TidScan *) tidstate->ss.ps.plan;
+	ListCell   *l;
+
+	tidstate->tss_tidexprs = NIL;
+	tidstate->tss_isCurrentOf = false;
+
+	foreach(l, node->tidquals)
+	{
+		Expr	   *expr = (Expr *) lfirst(l);
+		TidExpr    *tidexpr = (TidExpr *) palloc0(sizeof(TidExpr));
+
+		if (is_opclause(expr))
+		{
+			Node	   *arg1;
+			Node	   *arg2;
+
+			arg1 = get_leftop(expr);
+			arg2 = get_rightop(expr);
+			if (IsCTIDVar(arg1))
+				tidexpr->exprstate = ExecInitExpr((Expr *) arg2,
+												  &tidstate->ss.ps);
+			else if (IsCTIDVar(arg2))
+				tidexpr->exprstate = ExecInitExpr((Expr *) arg1,
+												  &tidstate->ss.ps);
+			else
+				elog(ERROR, "could not identify CTID variable");
+			tidexpr->isarray = false;
+		}
+		else if (expr && IsA(expr, ScalarArrayOpExpr))
+		{
+			ScalarArrayOpExpr *saex = (ScalarArrayOpExpr *) expr;
+
+			Assert(IsCTIDVar(linitial(saex->args)));
+			tidexpr->exprstate = ExecInitExpr((Expr*)lsecond(saex->args),
+											  &tidstate->ss.ps);
+			tidexpr->isarray = true;
+		}
+		else if (expr && IsA(expr, CurrentOfExpr))
+		{
+			CurrentOfExpr *cexpr = (CurrentOfExpr *) expr;
+
+			tidexpr->cexpr = cexpr;
+			tidstate->tss_isCurrentOf = true;
+		}
+		else
+			elog(ERROR, "could not identify CTID expression");
+
+		tidstate->tss_tidexprs = lappend(tidstate->tss_tidexprs, tidexpr);
+	}
+
+	/* CurrentOfExpr could never appear OR'd with something else */
+	Assert(list_length(tidstate->tss_tidexprs) == 1 ||
+		   !tidstate->tss_isCurrentOf);
+}
 
 /*
  * Compute the list of TIDs to be visited, by evaluating the expressions
@@ -57,9 +132,131 @@ static void ExecInitPartitionForTidScan(TidScanState* tidstate, EState* estate);
  *
  * (The result is actually an array, not a list.)
  */
-static void TidListCreate(TidScanState* tidstate, bool isBucket)
+static void TidListCreateByFlatten(TidScanState* tidstate, bool isBucket)
 {
-    List* eval_list = tidstate->tss_tidquals;
+    ExprContext* econtext = tidstate->ss.ps.ps_ExprContext;
+    BlockNumber nblocks;
+    ItemPointerData* tid_list = NULL;
+    int num_alloc_tids;
+    int num_tids;
+    ListCell* l = NULL;
+
+    /*
+     * We silently discard any TIDs that are out of range at the time of scan
+     * start.  (Since we hold at least AccessShareLock on the table, it won't
+     * be possible for someone to truncate away the blocks we intend to
+     * visit.)
+     */
+    if (isBucket) {
+        nblocks = MaxBlockNumber;
+    } else {
+        if (tidstate->ss.isPartTbl) {
+            nblocks = RelationGetNumberOfBlocks(tidstate->ss.ss_currentPartition);
+        } else {
+            nblocks = RelationGetNumberOfBlocks(tidstate->ss.ss_currentRelation);
+        }
+    }
+
+    /*
+     * We initialize the array with enough slots for the case that all quals
+     * are simple OpExprs or CurrentOfExprs.  If there are any
+     * ScalarArrayOpExprs, we may have to enlarge the array.
+     */
+    num_alloc_tids = list_length(tidstate->tss_tidexprs);
+    tid_list = (ItemPointerData*)palloc(num_alloc_tids * sizeof(ItemPointerData));
+    num_tids = 0;
+
+    foreach(l, tidstate->tss_tidexprs) {
+        TidExpr    *tidexpr = (TidExpr *) lfirst(l);
+        ItemPointer itemptr;
+        bool is_null = false;
+
+        if (tidexpr->exprstate && !tidexpr->isarray) {
+            itemptr = (ItemPointer)DatumGetPointer(ExecEvalExprSwitchContext(tidexpr->exprstate, econtext, &is_null));
+            if (!is_null && ItemPointerIsValid(itemptr) && ItemPointerGetBlockNumber(itemptr) < nblocks) {
+                if (num_tids >= num_alloc_tids) {
+                    num_alloc_tids *= 2;
+                    tid_list = (ItemPointerData*)repalloc(tid_list, num_alloc_tids * sizeof(ItemPointerData));
+                }
+                tid_list[num_tids++] = *itemptr;
+            }
+        } else if (tidexpr->exprstate && tidexpr->isarray) {
+            Datum arraydatum;
+            ArrayType* itemarray = NULL;
+            Datum* ipdatums = NULL;
+            bool* ipnulls = NULL;
+            int ndatums;
+            int i;
+
+            arraydatum = ExecEvalExprSwitchContext(tidexpr->exprstate, econtext, &is_null);
+            if (is_null)
+                continue;
+            itemarray = DatumGetArrayTypeP(arraydatum);
+            deconstruct_array(itemarray, TIDOID, SizeOfIptrData, false, 's', &ipdatums, &ipnulls, &ndatums);
+            if (num_tids + ndatums > num_alloc_tids) {
+                num_alloc_tids = num_tids + ndatums;
+                tid_list = (ItemPointerData*)repalloc(tid_list, num_alloc_tids * sizeof(ItemPointerData));
+            }
+            for (i = 0; i < ndatums; i++) {
+                if (!ipnulls[i]) {
+                    itemptr = (ItemPointer)DatumGetPointer(ipdatums[i]);
+                    if (ItemPointerIsValid(itemptr) && ItemPointerGetBlockNumber(itemptr) < nblocks)
+                        tid_list[num_tids++] = *itemptr;
+                }
+            }
+            pfree_ext(ipdatums);
+            pfree_ext(ipnulls);
+        } else {
+            ItemPointerData cursor_tid;
+
+            Assert(tidexpr->cexpr);
+            if (execCurrentOf(tidexpr->cexpr, econtext, tidstate->ss.ss_currentRelation, &cursor_tid,
+                &(tidstate->tss_CurrentOf_CurrentPartition))) {
+                if (num_tids >= num_alloc_tids) {
+                    num_alloc_tids *= 2;
+                    tid_list = (ItemPointerData*)repalloc(tid_list, num_alloc_tids * sizeof(ItemPointerData));
+                }
+                tid_list[num_tids++] = cursor_tid;
+            }
+        }
+    }
+
+    /*
+     * Sort the array of TIDs into order, and eliminate duplicates.
+     * Eliminating duplicates is necessary since we want OR semantics across
+     * the list.  Sorting makes it easier to detect duplicates, and as a bonus
+     * ensures that we will visit the heap in the most efficient way.
+     */
+    if (num_tids > 1) {
+        int last_tid;
+        int i;
+
+        /* CurrentOfExpr could never appear OR'd with something else */
+        Assert(!tidstate->tss_isCurrentOf);
+
+        qsort((void*)tid_list, num_tids, sizeof(ItemPointerData), ItemptrComparator);
+        last_tid = 0;
+        for (i = 1; i < num_tids; i++) {
+            if (!ItemPointerEquals(&tid_list[last_tid], &tid_list[i]))
+                tid_list[++last_tid] = tid_list[i];
+        }
+        num_tids = last_tid + 1;
+    }
+
+    tidstate->tss_TidList = tid_list;
+    tidstate->tss_NumTids = num_tids;
+    tidstate->tss_TidPtr = -1;
+}
+
+/*
+ * Compute the list of TIDs to be visited, by evaluating the expressions
+ * for them.
+ *
+ * (The result is actually an array, not a list.)
+ */
+static void TidListCreateByRecursion(TidScanState* tidstate, bool isBucket)
+{
+    List* eval_list = tidstate->tss_tidexprs;
     ExprContext* econtext = tidstate->ss.ps.ps_ExprContext;
     BlockNumber nblocks;
     ItemPointerData* tid_list = NULL;
@@ -154,7 +351,7 @@ static void TidListCreate(TidScanState* tidstate, bool isBucket)
             ItemPointerData cursor_tid;
 
             if (execCurrentOf(cexpr, econtext, tidstate->ss.ss_currentRelation, &cursor_tid,
-                &(tidstate->tss_CurrentOf_CurrentPartition))) {
+                              &(tidstate->tss_CurrentOf_CurrentPartition))) {
                 if (num_tids >= num_alloc_tids) {
                     num_alloc_tids *= 2;
                     tid_list = (ItemPointerData*)repalloc(tid_list, num_alloc_tids * sizeof(ItemPointerData));
@@ -164,8 +361,8 @@ static void TidListCreate(TidScanState* tidstate, bool isBucket)
             }
         } else
             ereport(ERROR,
-                (errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("could not identify CTID expression, %s", (expr == NULL) ? "expr is NULL" : "")));
+                    (errcode(ERRCODE_DATA_EXCEPTION),
+                     errmsg("could not identify CTID expression, %s", (expr == NULL) ? "expr is NULL" : "")));
     }
 
     /*
@@ -411,8 +608,13 @@ static TupleTableSlot* TidNext(TidScanState* node)
     /*
      * First time through, compute the list of TIDs to be visited
      */
-    if (node->tss_TidList == NULL)
-        TidListCreate(node, RELATION_CREATE_BUCKET(heap_relation));
+    if (node->tss_TidList == NULL) {
+        if (estate->es_is_flt_frame) {
+            TidListCreateByFlatten(node, RELATION_CREATE_BUCKET(heap_relation));
+        } else {
+            TidListCreateByRecursion(node, RELATION_CREATE_BUCKET(heap_relation));
+        }
+    }
 
     if (node->tss_isCurrentOf && node->ss.isPartTbl) {
         if (PointerIsValid(node->tss_CurrentOf_CurrentPartition)) {
@@ -445,8 +647,8 @@ static bool TidRecheck(TidScanState* node, TupleTableSlot* slot)
     ExprContext* econtext = node->ss.ps.ps_ExprContext;
     econtext->ecxt_scantuple = slot;
     ResetExprContext(econtext);
-    if (node->tss_tidquals != NIL) {
-        return ExecQual(node->tss_tidquals, econtext, false);
+    if (node->tss_tidexprs != NIL) {
+        return ExecQual(node->tss_tidexprs, econtext);
     } else
         return true;
 }
@@ -588,7 +790,7 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     tidstate->ss.currentSlot = 0;
     tidstate->ss.partScanDirection = node->scan.partScanDirection;
     tidstate->ss.ps.ExecProcNode = ExecTidScan;
-	
+
     tidstate->tss_htup.tupTableType = HEAP_TUPLE;
     /*
      * Miscellaneous initialization
@@ -597,15 +799,17 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
      */
     ExecAssignExprContext(estate, &tidstate->ss.ps);
 
-    tidstate->ss.ps.ps_TupFromTlist = false;
-
     /*
      * initialize child expressions
      */
-    tidstate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)tidstate);
-    tidstate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)tidstate);
-
-    tidstate->tss_tidquals = (List*)ExecInitExpr((Expr*)node->tidquals, (PlanState*)tidstate);
+    if (estate->es_is_flt_frame) {
+        tidstate->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)tidstate);
+        TidExprListInit(tidstate);
+    } else {
+        tidstate->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)tidstate);
+        tidstate->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)tidstate);
+        tidstate->tss_tidexprs = (List*)ExecInitExprByRecursion((Expr*)node->tidquals, (PlanState*)tidstate);
+    }
 
     /*
      * mark tid list as not computed yet

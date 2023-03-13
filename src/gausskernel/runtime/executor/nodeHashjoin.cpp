@@ -88,14 +88,14 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
      * tuple (because there is a function-returning-set in the projection
      * expressions).  If so, try to project another one.
      */
-    if (node->js.ps.ps_TupFromTlist) {
+    if (node->js.ps.ps_vec_TupFromTlist) {
         TupleTableSlot* result = NULL;
 
         result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
         if (isDone == ExprMultipleResult)
             return result;
         /* Done with that source tuple... */
-        node->js.ps.ps_TupFromTlist = false;
+        node->js.ps.ps_vec_TupFromTlist = false;
     }
 
     /*
@@ -361,7 +361,7 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                         
                         result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
                         if (isDone != ExprEndResult) {
-                            node->js.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+                            node->js.ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
                             return result;
                         }
                     } else
@@ -396,7 +396,7 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                         result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
 
                         if (isDone != ExprEndResult) {
-                            node->js.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+                            node->js.ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
                             return result;
                         }
                     } else
@@ -429,7 +429,7 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                     result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
 
                     if (isDone != ExprEndResult) {
-                        node->js.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+                        node->js.ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
                         return result;
                     }
                 } else
@@ -551,12 +551,20 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    hjstate->js.ps.targetlist = (List*)ExecInitExpr((Expr*)node->join.plan.targetlist, (PlanState*)hjstate);
-    hjstate->js.ps.qual = (List*)ExecInitExpr((Expr*)node->join.plan.qual, (PlanState*)hjstate);
-    hjstate->js.jointype = node->join.jointype;
-    hjstate->js.joinqual = (List*)ExecInitExpr((Expr*)node->join.joinqual, (PlanState*)hjstate);
-    hjstate->js.nulleqqual = (List*)ExecInitExpr((Expr*)node->join.nulleqqual, (PlanState*)hjstate);
-    hjstate->hashclauses = (List*)ExecInitExpr((Expr*)node->hashclauses, (PlanState*)hjstate);
+    if (estate->es_is_flt_frame) {
+        hjstate->js.ps.qual = (List*)ExecInitQualByFlatten(node->join.plan.qual, (PlanState*)hjstate);
+        hjstate->js.jointype = node->join.jointype;
+        hjstate->js.joinqual = (List*)ExecInitQualByFlatten(node->join.joinqual, (PlanState*)hjstate);
+        hjstate->js.nulleqqual = (List*)ExecInitQualByFlatten(node->join.nulleqqual, (PlanState*)hjstate);
+        hjstate->hashclauses = (List*)ExecInitQualByFlatten(node->hashclauses, (PlanState*)hjstate);
+    } else {
+        hjstate->js.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->join.plan.targetlist, (PlanState*)hjstate);
+        hjstate->js.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->join.plan.qual, (PlanState*)hjstate);
+        hjstate->js.jointype = node->join.jointype;
+        hjstate->js.joinqual = (List*)ExecInitExprByRecursion((Expr*)node->join.joinqual, (PlanState*)hjstate);
+        hjstate->js.nulleqqual = (List*)ExecInitExprByRecursion((Expr*)node->join.nulleqqual, (PlanState*)hjstate);
+        hjstate->hashclauses = (List*)ExecInitExprByRecursion((Expr*)node->hashclauses, (PlanState*)hjstate);
+    }
 
     /*
      * initialize child nodes
@@ -650,19 +658,30 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     lclauses = NIL;
     rclauses = NIL;
     hoperators = NIL;
-    hcollations = NIL;
-    foreach (l, hjstate->hashclauses) {
-        FuncExprState* fstate = (FuncExprState*)lfirst(l);
-        OpExpr* hclause = NULL;
+    if (estate->es_is_flt_frame) {
+        foreach (l, node->hashclauses) {
+            OpExpr *hclause = (OpExpr *)lfirst(l);
 
-        Assert(IsA(fstate, FuncExprState));
-        hclause = (OpExpr*)fstate->xprstate.expr;
-        Assert(IsA(hclause, OpExpr));
-        lclauses = lappend(lclauses, linitial(fstate->args));
-        rclauses = lappend(rclauses, lsecond(fstate->args));
-        hoperators = lappend_oid(hoperators, hclause->opno);
-        hcollations = lappend_oid(hcollations, hclause->inputcollid);
+            lclauses = lappend(lclauses, ExecInitExpr((Expr *)linitial(hclause->args), (PlanState *)hjstate));
+            rclauses = lappend(rclauses, ExecInitExpr((Expr *)lsecond(hclause->args), (PlanState *)hjstate));
+            hoperators = lappend_oid(hoperators, hclause->opno);
+            hcollations = lappend_oid(hcollations, hclause->inputcollid);
+        }
+    } else {
+        foreach (l, hjstate->hashclauses) {
+            FuncExprState *fstate = (FuncExprState *)lfirst(l);
+            OpExpr *hclause = NULL;
+
+            Assert(IsA(fstate, FuncExprState));
+            hclause = (OpExpr *)fstate->xprstate.expr;
+            Assert(IsA(hclause, OpExpr));
+            lclauses = lappend(lclauses, linitial(fstate->args));
+            rclauses = lappend(rclauses, lsecond(fstate->args));
+            hoperators = lappend_oid(hoperators, hclause->opno);
+            hcollations = lappend_oid(hcollations, hclause->inputcollid);
+        }
     }
+
     hjstate->hj_OuterHashKeys = lclauses;
     hjstate->hj_InnerHashKeys = rclauses;
     hjstate->hj_HashOperators = hoperators;
@@ -670,7 +689,7 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     /* child Hash node needs to evaluate inner hash keys, too */
     ((HashState*)innerPlanState(hjstate))->hashkeys = rclauses;
 
-    hjstate->js.ps.ps_TupFromTlist = false;
+    hjstate->js.ps.ps_vec_TupFromTlist = false;
     hjstate->hj_JoinState = HJ_BUILD_HASHTABLE;
     hjstate->hj_MatchedOuter = false;
     hjstate->hj_OuterNotEmpty = false;
@@ -1092,7 +1111,6 @@ void ExecReScanHashJoin(HashJoinState* node)
     node->hj_CurSkewBucketNo = INVALID_SKEW_BUCKET_NO;
     node->hj_CurTuple = NULL;
 
-    node->js.ps.ps_TupFromTlist = false;
     node->hj_MatchedOuter = false;
     node->hj_FirstOuterTupleSlot = NULL;
 
@@ -1176,7 +1194,7 @@ void ExecReSetHashJoin(HashJoinState* node)
     node->hj_CurSkewBucketNo = INVALID_SKEW_BUCKET_NO;
     node->hj_CurTuple = NULL;
 
-    node->js.ps.ps_TupFromTlist = false;
+    node->js.ps.ps_vec_TupFromTlist = false;
     node->hj_MatchedOuter = false;
     node->hj_FirstOuterTupleSlot = NULL;
     node->js.ps.recursive_reset = true;

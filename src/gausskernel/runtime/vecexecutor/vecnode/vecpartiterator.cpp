@@ -49,7 +49,7 @@ VecPartIteratorState* ExecInitVecPartIterator(VecPartIterator* node, EState* est
     state->ps.subPlan = NULL;
     state->currentItr = -1;
     state->subPartCurrentItr = -1;
-    state->ps.ps_TupFromTlist = false;
+    state->ps.ps_vec_TupFromTlist = false;
     state->ps.ps_ProjInfo = NULL;
     state->ps.vectorized = true;
     state->ps.ps_ResultTupleSlot = state->ps.lefttree->ps_ResultTupleSlot;

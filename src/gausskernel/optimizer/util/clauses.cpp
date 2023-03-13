@@ -692,7 +692,7 @@ static void count_agg_clauses_walker_isa(Node* node, count_agg_clauses_context* 
         costs->aggWidth += avgwidth;
     } else if (aggtranstype == INTERNALOID) {
 #ifndef ENABLE_MULTIPLE_NODES
-        /* 
+        /*
          * XXX: we apply the pg commit 69c8fbac201652282e18b0e2e301d4ada991fbde
          * but the difference of pg_aggregate bwtween pg and og
          * we have to do some hard code here(og's pg_aggregate doesn't have the column aggtransspace)
@@ -2485,7 +2485,7 @@ Node* simplify_select_into_expression(Node* node, ParamListInfo boundParams)
             /* If the user-defined variable has been defined,
              * then find the existed value.
              */
-            optbase_eval_user_var_in_opexpr(((OpExpr *)tn)->args);        
+            optbase_eval_user_var_in_opexpr(((OpExpr *)tn)->args);
         }
         tn = eval_const_expressions_mutator(tn, &context);
         te = makeTargetEntry((Expr *)tn, attno++, te->resname, false);
@@ -4792,7 +4792,7 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
     if (econtext != NULL) {
         econtext->can_ignore = can_ignore;
     }
-    const_val = ExecEvalExprSwitchContext(exprstate, econtext, &const_is_null, NULL);
+    const_val = ExecEvalExprSwitchContext(exprstate, econtext, &const_is_null);
 
     /* Get info needed about result datatype */
     get_typlenbyval(result_type, &resultTypLen, &resultTypByVal);

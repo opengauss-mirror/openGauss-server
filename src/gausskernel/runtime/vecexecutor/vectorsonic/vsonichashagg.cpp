@@ -2343,7 +2343,7 @@ VectorBatch* SonicHashAgg::ProducerBatch()
     }
     m_outBatch->m_rows = m_scanBatch->m_rows;
 
-    if (list_length(m_runtime->ss.ps.qual) != 0) {
+    if (list_length((List*)m_runtime->ss.ps.qual) != 0) {
         ScalarVector* pVector = NULL;
 
         expr_context = m_runtime->ss.ps.ps_ExprContext;
@@ -2351,7 +2351,7 @@ VectorBatch* SonicHashAgg::ProducerBatch()
         expr_context->ecxt_aggbatch = m_scanBatch;
         expr_context->ecxt_outerbatch = m_outBatch;
 
-        pVector = ExecVecQual(m_runtime->ss.ps.qual, expr_context, false);
+        pVector = ExecVecQual((List*)m_runtime->ss.ps.qual, expr_context, false);
 
         if (pVector == NULL) {
             return NULL;

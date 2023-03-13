@@ -739,7 +739,7 @@ void CStoreRewriter::AddColumns(_in_ uint32 cuId, _in_ int rowsCntInCu, _in_ boo
         if (newColInfo->newValue) {
             // compute the new value by expression
             m_econtext->ecxt_scantuple = fakeSlot;
-            newColVal = ExecEvalExpr(newColInfo->newValue->exprstate, m_econtext, &newColValIsNull, NULL);
+            newColVal = ExecEvalExpr(newColInfo->newValue->exprstate, m_econtext, &newColValIsNull);
         } else if (newColInfo->notNull) {
             // DEFAULT must be defined if NOT NULL exists and
             // the table is not empty now.
@@ -1141,7 +1141,7 @@ void CStoreRewriter::SetDataTypeHandleSameValCu(
     // compute the new value only once if it's cu with the same value.
     Assert(setDataTypeColInfo->newValue);
     bool attNewIsNull = false;
-    Datum attNewValue = ExecEvalExpr(setDataTypeColInfo->newValue->exprstate, m_econtext, &attNewIsNull, NULL);
+    Datum attNewValue = ExecEvalExpr(setDataTypeColInfo->newValue->exprstate, m_econtext, &attNewIsNull);
     if (attNewIsNull && setDataTypeColInfo->notNull) {
         ereport(ERROR,
                 (errcode(ERRCODE_NOT_NULL_VIOLATION),
@@ -1253,7 +1253,7 @@ void CStoreRewriter::SetDataTypeHandleNormalCu(
 
         m_SDTColIsNull[cnt] = false;
         m_SDTColValues[cnt] =
-            ExecEvalExpr(setDataTypeColInfo->newValue->exprstate, m_econtext, (m_SDTColIsNull + cnt), NULL);
+            ExecEvalExpr(setDataTypeColInfo->newValue->exprstate, m_econtext, (m_SDTColIsNull + cnt));
         if (!m_SDTColIsNull[cnt]) {
             fullNull = false;
 

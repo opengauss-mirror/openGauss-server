@@ -185,6 +185,7 @@ static void InitStreamThread()
 
     if (!IS_THREAD_POOL_STREAM) {
         ExtractProduerInfo();
+        ExtractProduerSkewInfo();
         t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(
             u_sess->stream_cxt.producer_obj->getDbName(), InvalidOid, u_sess->stream_cxt.producer_obj->getUserName());
         repair_guc_variables();
@@ -294,9 +295,6 @@ void ExtractProduerInfo()
 
     u_sess->stream_cxt.producer_obj->netInit();
     u_sess->stream_cxt.producer_obj->setThreadInit(true);
-#ifdef ENABLE_MULTIPLE_NODES
-    u_sess->stream_cxt.producer_obj->initSkewState();
-#endif
 
     if (u_sess->stream_cxt.producer_obj->isDummy()) {
         u_sess->exec_cxt.executorStopFlag = true;
@@ -320,6 +318,12 @@ void ExtractProduerInfo()
                u_sess->stream_cxt.producer_obj->getKey().queryId,
                u_sess->stream_cxt.producer_obj->getKey().planNodeId,
                u_sess->stream_cxt.producer_obj->getKey().smpIdentifier);
+}
+void ExtractProduerSkewInfo()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    u_sess->stream_cxt.producer_obj->initSkewState();
+#endif
 }
 
 static void HandleStreamSigjmp()

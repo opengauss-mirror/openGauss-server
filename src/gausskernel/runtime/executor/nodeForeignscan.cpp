@@ -142,9 +142,7 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
 #ifdef ENABLE_MOT
     }
 #endif
-
-    scanstate->ss.ps.ps_TupFromTlist = false;
-
+    scanstate->ss.ps.ps_vec_TupFromTlist = false;
     /*
      * This function ExecInitForeignScan will be called by ExecInitVecForeignScan.
      * If the node is VecForeignScan, do not need initialize here.
@@ -153,8 +151,12 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
         /*
          * initialize child expressions
          */
-        scanstate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)scanstate);
-        scanstate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)scanstate);
+        if (estate->es_is_flt_frame) {
+            scanstate->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)scanstate);
+        } else {
+            scanstate->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)scanstate);
+            scanstate->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)scanstate);
+        }
     }
     /*
      * tuple table initialization

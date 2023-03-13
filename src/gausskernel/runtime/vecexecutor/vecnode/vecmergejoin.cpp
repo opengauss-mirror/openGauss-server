@@ -1048,7 +1048,7 @@ VectorBatch* ExecVecMergeJoinT(VecMergeJoinState* node)
     VectorBatch* resultBatch = NULL;
 
     /* prevent excessive calls */
-    DBG_ASSERT(!node->js.ps.ps_TupFromTlist);
+    DBG_ASSERT(!node->js.ps.ps_vec_TupFromTlist);
 
     econtext = node->js.ps.ps_ExprContext;
     doFillOuter = node->mj_FillOuter;
@@ -1941,7 +1941,7 @@ VecMergeJoinState* ExecInitVecMergeJoin(VecMergeJoin* node, EState* estate, int 
      */
     mergestate->m_fDone = false;
     mergestate->mj_JoinState = EXEC_MJ_INITIALIZE_OUTER;
-    mergestate->js.ps.ps_TupFromTlist = false;
+    mergestate->js.ps.ps_vec_TupFromTlist = false;
     mergestate->mj_MatchedOuter = false;
     mergestate->mj_MatchedInner = false;
     mergestate->mj_OuterOffset = NullBatchTuple;
@@ -2014,7 +2014,7 @@ void ExecReScanVecMergeJoin(VecMergeJoinState* node)
 {
     BatchAccessor* pbaccessor = NULL;
     node->mj_JoinState = EXEC_MJ_INITIALIZE_OUTER;
-    node->js.ps.ps_TupFromTlist = false;
+    node->js.ps.ps_vec_TupFromTlist = false;
     node->mj_MatchedOuter = false;
     node->mj_MatchedInner = false;
     node->mj_OuterOffset = NullBatchTuple;

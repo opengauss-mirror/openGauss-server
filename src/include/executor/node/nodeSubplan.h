@@ -17,9 +17,9 @@
 #include "nodes/execnodes.h"
 
 extern SubPlanState* ExecInitSubPlan(SubPlan* subplan, PlanState* parent);
-
+extern Datum ExecSubPlan(SubPlanState* node, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone = NULL);
 extern AlternativeSubPlanState* ExecInitAlternativeSubPlan(AlternativeSubPlan* asplan, PlanState* parent);
-
+extern Datum ExecAlternativeSubPlan(AlternativeSubPlanState *node, ExprContext *econtext, bool *isNull, ExprDoneCond* isDone = NULL);
 extern void ExecReScanSetParamPlan(SubPlanState* node, PlanState* parent);
 
 extern void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext);

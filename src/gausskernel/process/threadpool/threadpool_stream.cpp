@@ -152,6 +152,7 @@ void ThreadPoolStream::InitStream()
     repair_guc_variables();
     RestoreStreamSyncParam(&m_producer->m_syncParam);
 
+    ExtractProduerSkewInfo();
     u_sess->exec_cxt.under_stream_runtime = true;
     u_sess->attr.attr_common.remoteConnType = REMOTE_CONN_DATANODE;
 

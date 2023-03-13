@@ -141,8 +141,12 @@ FunctionScanState* ExecInitFunctionScan(FunctionScan* node, EState* estate, int 
     /*
      * initialize child expressions
      */
-    scanstate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)scanstate);
-    scanstate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)scanstate);
+    if (estate->es_is_flt_frame) {
+        scanstate->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)scanstate);
+    } else {
+        scanstate->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)scanstate);
+        scanstate->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)scanstate);
+    }
 
     /*
      * Now determine if the function returns a simple or composite type, and
@@ -195,9 +199,17 @@ FunctionScanState* ExecInitFunctionScan(FunctionScan* node, EState* estate, int 
      * Other node-specific setup
      */
     scanstate->tuplestorestate = NULL;
-    scanstate->funcexpr = ExecInitExpr((Expr*)node->funcexpr, (PlanState*)scanstate);
-
-    scanstate->ss.ps.ps_TupFromTlist = false;
+    if (estate->es_is_flt_frame) {
+        if (IsA((Expr *)node->funcexpr, FuncExpr)) {
+            scanstate->funcexpr =
+                (ExprState *)ExecInitTableFunctionResult((Expr *)node->funcexpr, scanstate->ss.ps.ps_ExprContext, &scanstate->ss.ps);
+        } else {
+            scanstate->funcexpr = (ExprState *)ExecInitExprByFlatten((Expr *)node->funcexpr, (PlanState *)scanstate);
+        }
+    } else {
+        scanstate->funcexpr = ExecInitExprByRecursion((Expr *)node->funcexpr, (PlanState *)scanstate);
+    }
+    scanstate->ss.ps.ps_vec_TupFromTlist = false;
 
     /*
      * Initialize result tuple type and projection info.

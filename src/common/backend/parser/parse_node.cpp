@@ -60,6 +60,7 @@ ParseState* make_parsestate(ParseState* parentParseState)
     pstate->p_rawdefaultlist = NIL;
     pstate->p_has_ignore = false;
     pstate->p_indexhintLists = NIL;
+    pstate->p_is_flt_frame = false;
 
     if (parentParseState != NULL) {
         pstate->p_sourcetext = parentParseState->p_sourcetext;

@@ -248,8 +248,12 @@ WorkTableScanState* ExecInitWorkTableScan(WorkTableScan* node, EState* estate, i
     /*
      * initialize child expressions
      */
-    scan_state->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)scan_state);
-    scan_state->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)scan_state);
+    if (estate->es_is_flt_frame) {
+        scan_state->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)scan_state);
+    } else {
+        scan_state->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)scan_state);
+        scan_state->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)scan_state);
+    }
 
     /*
      * tuple table initialization
@@ -262,7 +266,7 @@ WorkTableScanState* ExecInitWorkTableScan(WorkTableScan* node, EState* estate, i
      */
     ExecAssignResultTypeFromTL(&scan_state->ss.ps);
 
-    scan_state->ss.ps.ps_TupFromTlist = false;
+    scan_state->ss.ps.ps_vec_TupFromTlist = false;
 
     return scan_state;
 }

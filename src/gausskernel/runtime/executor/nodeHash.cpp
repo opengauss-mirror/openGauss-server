@@ -236,8 +236,12 @@ HashState* ExecInitHash(Hash* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    hashstate->ps.targetlist = (List*)ExecInitExpr((Expr*)node->plan.targetlist, (PlanState*)hashstate);
-    hashstate->ps.qual = (List*)ExecInitExpr((Expr*)node->plan.qual, (PlanState*)hashstate);
+    if (estate->es_is_flt_frame) {
+        hashstate->ps.qual = (List*)ExecInitQualByFlatten(node->plan.qual, (PlanState*)hashstate);
+    } else {
+        hashstate->ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->plan.targetlist, (PlanState*)hashstate);
+        hashstate->ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->plan.qual, (PlanState*)hashstate);
+    }
 
     /*
      * initialize child nodes

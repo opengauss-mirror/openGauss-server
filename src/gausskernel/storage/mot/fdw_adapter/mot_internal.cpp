@@ -1823,7 +1823,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
         if (opers[i] < KEY_OPER::READ_INVALID) {
             bool is_null = false;
             ExprState* expr = (ExprState*)list_nth(festate->m_execExprs, exprs[i] - 1);
-            Datum val = ExecEvalExpr((ExprState*)(expr), festate->m_econtext, &is_null, nullptr);
+            Datum val = ExecEvalExpr((ExprState*)(expr), festate->m_econtext, &is_null);
             if (is_null) {
                 MOT_ASSERT((offset + fieldLengths[i]) <= keyLength);
                 errno_t erc = memset_s(buf + offset, fieldLengths[i], 0x00, fieldLengths[i]);

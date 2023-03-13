@@ -319,7 +319,7 @@ static VectorBatch *ApplyProjectionAndFilterBatch(VectorBatch *pScanBatch,
     VectorBatch *pOutBatch = NULL;
     bool fSimpleMap = false;
     uint64 inputRows = pScanBatch->m_rows;
-    List* qual = node->ps.qual;
+    List* qual = (List*)node->ps.qual;
 
     econtext = node->ps.ps_ExprContext;
     pOutBatch = node->scanBatchState->pCurrentBatch;

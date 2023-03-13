@@ -224,7 +224,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
         aggstate->ss.ps.ps_ResultTupleSlot,
         NULL);
 
-    aggstate->ss.ps.ps_TupFromTlist = false;
+    aggstate->ss.ps.ps_vec_TupFromTlist = false;
 
     /*
      * get the count of aggregates in targetlist and quals
@@ -763,7 +763,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
  */
 VectorBatch* ExecVecAggregation(VecAggState* node)
 {
-    Assert(!node->ss.ps.ps_TupFromTlist);
+    Assert(!node->ss.ps.ps_vec_TupFromTlist);
 
     /*
      * just for cooperation analysis. do nothing if is_dummy is true.
@@ -1323,14 +1323,14 @@ VectorBatch* BaseAggRunner::ProducerBatch()
     /* To AP functio, set column to NULL when group columns has not include it. */
     prepare_projection_batch();
 
-    if (list_length(m_runtime->ss.ps.qual) != 0) {
+    if (list_length((List*)m_runtime->ss.ps.qual) != 0) {
         ScalarVector* p_vector = NULL;
 
         econtext = m_runtime->ss.ps.ps_ExprContext;
         econtext->ecxt_scanbatch = m_scanBatch;
         econtext->ecxt_aggbatch = m_scanBatch;
         econtext->ecxt_outerbatch = m_outerBatch;
-        p_vector = ExecVecQual(m_runtime->ss.ps.qual, econtext, false);
+        p_vector = ExecVecQual((List*)m_runtime->ss.ps.qual, econtext, false);
 
         if (p_vector == NULL) {
             return NULL;

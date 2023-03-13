@@ -1364,6 +1364,7 @@ EState* CreateExecutorStateForOpfusion(MemoryContext nodeCxt, MemoryContext quer
     estate->es_query_cxt = queryCxt;
     estate->es_const_query_cxt = queryCxt; /* set to tmpCxt, will be reset at each query */
     estate->es_range_table = NIL;
+    estate->es_is_flt_frame = (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
     ResetOpfusionExecutorState(estate);
 
     /*

@@ -113,13 +113,13 @@ static TupleTableSlot* ExecResult(PlanState* state)
      * tuple (because there is a function-returning-set in the projection
      * expressions).  If so, try to project another one.
      */
-    if (node->ps.ps_TupFromTlist) {
+    if (node->ps.ps_vec_TupFromTlist) {
         result_slot = ExecProject(node->ps.ps_ProjInfo, &is_done);
         if (is_done == ExprMultipleResult) {
             return result_slot;
         }
         /* Done with that source tuple... */
-        node->ps.ps_TupFromTlist = false;
+        node->ps.ps_vec_TupFromTlist = false;
     }
 
     if (econtext->hasSetResultStore) {
@@ -167,7 +167,7 @@ static TupleTableSlot* ExecResult(PlanState* state)
         result_slot = ExecProject(node->ps.ps_ProjInfo, &is_done);
 
         if (is_done != ExprEndResult) {
-            node->ps.ps_TupFromTlist = (is_done == ExprMultipleResult);
+            node->ps.ps_vec_TupFromTlist = (is_done == ExprMultipleResult);
             return result_slot;
         }
     }
@@ -238,7 +238,7 @@ ResultState* ExecInitResult(BaseResult* node, EState* estate, int eflags)
      */
     ExecAssignExprContext(estate, &resstate->ps);
 
-    resstate->ps.ps_TupFromTlist = false;
+    resstate->ps.ps_vec_TupFromTlist = false;
 
     /*
      * tuple table initialization
@@ -248,10 +248,14 @@ ResultState* ExecInitResult(BaseResult* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    resstate->ps.targetlist = (List*)ExecInitExpr((Expr*)node->plan.targetlist, (PlanState*)resstate);
-    resstate->ps.qual = (List*)ExecInitExpr((Expr*)node->plan.qual, (PlanState*)resstate);
-    resstate->resconstantqual = ExecInitExpr((Expr*)node->resconstantqual, (PlanState*)resstate);
-
+    if (estate->es_is_flt_frame) {
+        resstate->ps.qual = (List*)ExecInitQualByFlatten(node->plan.qual, (PlanState*)resstate);
+        resstate->resconstantqual = ExecInitQualByFlatten((List*)node->resconstantqual, (PlanState*)resstate);
+    } else {
+        resstate->ps.targetlist = (List*)ExecInitExpr((Expr*)node->plan.targetlist, (PlanState*)resstate);
+        resstate->ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->plan.qual, (PlanState*)resstate);
+        resstate->resconstantqual = ExecInitExprByRecursion((Expr*)node->resconstantqual, (PlanState*)resstate);
+    }
     /*
      * initialize child nodes
      */
@@ -301,7 +305,7 @@ void ExecEndResult(ResultState* node)
 void ExecReScanResult(ResultState* node)
 {
     node->rs_done = false;
-    node->ps.ps_TupFromTlist = false;
+    node->ps.ps_vec_TupFromTlist = false;
     node->rs_checkqual = (node->resconstantqual == NULL) ? false : true;
 
     /*

@@ -35,6 +35,7 @@ endif
 
 OBJS = execAmi.o execCurrent.o execGrouping.o execJunk.o execMain.o \
        execProcnode.o execQual.o execReplication.o execScan.o execTuples.o \
+       execExprInterp.o execExpr.o execSRF.o\
        execUtils.o functions.o instrument.o nodeAppend.o nodeAgg.o \
        nodeBitmapAnd.o nodeBitmapOr.o \
        nodeBitmapHeapscan.o nodeBitmapIndexscan.o nodeHash.o \

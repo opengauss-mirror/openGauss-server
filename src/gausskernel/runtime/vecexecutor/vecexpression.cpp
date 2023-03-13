@@ -2136,7 +2136,7 @@ static ScalarVector* ExecMakeVecFunctionResultWithSets(
         hasSetArg = (argDone != ExprSingleResult);
     } else {
         /* Re-use callinfo from previous evaluation */
-        hasSetArg = fcache->setHasSetArg;
+        hasSetArg = fcache->vec_setHasSetArg;
         /* Reset flag (we may set it again below) */
         fcache->setArgsValid = false;
     }
@@ -2200,7 +2200,7 @@ static ScalarVector* ExecMakeVecFunctionResultWithSets(
                  * on the next call.
                  */
                 if (fcache->func.fn_retset && *isDone == ExprMultipleResult) {
-                    fcache->setHasSetArg = hasSetArg;
+                    fcache->vec_setHasSetArg = hasSetArg;
                     fcache->setArgsValid = true;
                 }
 
@@ -3659,7 +3659,7 @@ VectorBatch* ExecVecProject(ProjectionInfo* projInfo, bool selReSet, ExprDoneCon
                     econtext,
                     pProjBatch,
                     projInfo->pi_setFuncBatch,
-                    projInfo->pi_itemIsDone,
+                    projInfo->pi_vec_itemIsDone,
                     isDone);
             } else {
                 ExecVecTargetList(projInfo->pi_targetlist, econtext, pProjBatch);
