@@ -2134,13 +2134,6 @@ static Node* transformSelectIntoVarList(ParseState* pstate, SelectIntoVarList* s
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("unexpected non-SELECT command in SubLink")));
     }
     sublink->subselect = (Node*)qtree;
-    
-    if (list_length(qtree->targetList) != list_length(sis->userVarList)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_SYNTAX_ERROR),
-                errmsg("number of variables must equal the number of columns"),
-                parser_errposition(pstate, sublink->location)));
-    }
     return (Node *)sis;
 }
 

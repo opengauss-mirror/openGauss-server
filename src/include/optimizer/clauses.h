@@ -116,7 +116,7 @@ extern Node* eval_const_expressions_params(PlannerInfo* root, Node* node, ParamL
 
 extern Node *eval_const_expression_value(PlannerInfo* root, Node* node, ParamListInfo boundParams);
 
-extern Node* simplify_select_into_expression(Node* node, ParamListInfo boundParams);
+extern Node* simplify_select_into_expression(Node* node, ParamListInfo boundParams, int *targetlist_len);
 
 extern Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate = NULL);
 

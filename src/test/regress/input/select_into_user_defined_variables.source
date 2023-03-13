@@ -54,7 +54,17 @@ select * from t where i isnull into @aa,@bb,@cc,@dd,@ee,@ff;
 select @aa,@bb,@cc,@dd,@ee,@ff;
 select * from t where i=100 into @aa,@bb,@cc,@dd,@ee,@ff;
 select @aa,@bb,@cc,@dd,@ee,@ff;
+create table int_tb(c1 TINYINT,c2 SMALLINT,c3 INTEGER,c5 BIGINT);
+insert into int_tb values(0,-32768,-2147483648,-9223372036854775808),(0,1,100000,100000000);
+select c1 into @my_var from int_tb order by c1 limit 1;
+select @my_var;
 
+CREATE TABLE t001(c1 int, c2 int, c3 int);
+insert into t001 values(100,100,100),(100,101,101);
+SELECT SUM(c2) as f1, @aa as f2 INTO @aa,@bb FROM t001 GROUP BY c1; 
+SELECT @aa,@bb;
+SELECT SUM(c2) as f1, SUM(c1) as f2 INTO @aa,@bb FROM t001 GROUP BY c1; 
+SELECT @aa,@bb;
 create or replace procedure my_pro()
 as
 declare outfile int default 0;
@@ -200,6 +210,21 @@ delete t1 where a = 200;
 select @num;
 
 drop trigger tri_delete_after on t1;
+drop table if exists trigger_t2;
+create table trigger_t2(a int);
+create or replace function tri_func3() returns trigger as
+$$
+begin
+    select abs(@num)+1 into @num;
+    return NEW;
+end
+$$ LANGUAGE PLPGSQL;
+create trigger tri_insert_before before insert on trigger_t2 for each row execute procedure tri_func3();
+select -1 into @num;
+select @num;
+insert into trigger_t2 values(10);
+select @num;
+drop trigger tri_insert_before on trigger_t2;
 
 select 10,@v1/2 into @v1,@v2;
 select @v1,@v2;
