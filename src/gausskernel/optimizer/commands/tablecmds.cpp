@@ -46,6 +46,7 @@
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_depend.h"
+#include "catalog/pg_description.h"
 #include "catalog/pg_foreign_table.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_inherits_fn.h"
@@ -557,6 +558,7 @@ static void ExecChangeTableSpaceForCStorePartition(AlteredTableInfo*, LOCKMODE);
 
 static int GetAfterColumnAttnum(Oid attrelid, const char *after_name);
 static Node *UpdateVarattnoAfterAddColumn(Node *node, int startattnum, int endattnum, bool is_increase);
+static void UpdatePgDescriptionFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static void UpdatePgAttributeFirstAfter(Relation attr_rel, Oid attrelid, int startattnum, int endattnum,
     bool is_increase);
 static void UpdatePgIndexFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
@@ -10828,6 +10830,54 @@ static Node *UpdateVarattnoAfterAddColumn(Node *node, int startattnum, int endat
     }
     return NULL;
 }
+
+/*
+ * update pg_description
+ * 1. add column with first or after col_name.
+ * 2. modify column to first or after column.
+ */
+static void UpdatePgDescriptionFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase)
+{
+    Relation desc_rel;
+    HeapTuple desc_tuple;
+    ScanKeyData key[3];
+    SysScanDesc scan;
+    Form_pg_description desc_form;
+    
+    desc_rel = heap_open(DescriptionRelationId, RowExclusiveLock);
+
+    for (int i = (is_increase ? endattnum : startattnum);
+        (is_increase ? i >= startattnum : i <= endattnum); (is_increase ? i-- : i++)) {
+        ScanKeyInit(&key[0], Anum_pg_description_objoid, BTEqualStrategyNumber, F_OIDEQ,
+            ObjectIdGetDatum(RelationGetRelid(rel)));
+        ScanKeyInit(&key[1], Anum_pg_description_classoid, BTEqualStrategyNumber, F_OIDEQ, RelationRelationId);
+        ScanKeyInit(&key[2], Anum_pg_description_objsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(i));
+
+        scan = systable_beginscan(desc_rel, DescriptionObjIndexId, true, NULL, 3, key);
+
+        while (HeapTupleIsValid(desc_tuple = systable_getnext(scan))) {
+            Datum values[Natts_pg_description] = { 0 };
+            bool nulls[Natts_pg_description] = { 0 };
+            bool replaces[Natts_pg_description] = { 0 };
+            HeapTuple new_desc_tuple;
+
+            desc_form = (Form_pg_description)GETSTRUCT(desc_tuple);
+
+            values[Anum_pg_description_objsubid - 1] = is_increase ? Int32GetDatum(desc_form->objsubid + 1) :
+                Int32GetDatum(desc_form->objsubid - 1);
+            replaces[Anum_pg_description_objsubid - 1] = true;
+
+            new_desc_tuple = heap_modify_tuple(desc_tuple, RelationGetDescr(desc_rel), values, nulls, replaces);
+            simple_heap_update(desc_rel, &new_desc_tuple->t_self, new_desc_tuple);
+            CatalogUpdateIndexes(desc_rel, new_desc_tuple);
+
+            heap_freetuple_ext(new_desc_tuple);
+        }
+        systable_endscan(scan);
+    }
+
+    heap_close(desc_rel, RowExclusiveLock);
+}
  
 /* 
  * update pg_attribute.
@@ -11976,6 +12026,7 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
 
     if (is_addloc) {
         UpdatePgAttributeFirstAfter(attrdesc, myrelid, newattnum, currattnum, true);
+        UpdatePgDescriptionFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgIndexFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgConstraintFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgConstraintConfkeyFirstAfter(rel, newattnum, currattnum, true);
@@ -15697,6 +15748,46 @@ static void UpdateAttrdefAdnumFirstAfter(Relation rel, Oid myrelid, int curattnu
  
     systable_endscan(scan);
 }
+
+/*
+ * update pg_description objsubid for the modified column with first or after column.
+ */
+static void UpdateDescriptionObjsubidFirstAfter(Relation rel, Oid myrelid, int curattnum, int newattnum,
+    bool *has_comment)
+{
+    ScanKeyData key[3];
+    HeapTuple desc_tuple;
+    SysScanDesc scan;
+
+    ScanKeyInit(&key[0], Anum_pg_description_objoid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(myrelid));
+    ScanKeyInit(&key[1], Anum_pg_description_classoid, BTEqualStrategyNumber, F_OIDEQ, RelationRelationId);
+    ScanKeyInit(&key[2], Anum_pg_description_objsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(curattnum));
+
+    scan = systable_beginscan(rel, DescriptionObjIndexId, true, NULL, 3, key);
+
+    desc_tuple = systable_getnext(scan);
+    if (HeapTupleIsValid(desc_tuple)) {
+        Datum values[Natts_pg_description] = { 0 };
+        bool nulls[Natts_pg_description] = { 0 };
+        bool replaces[Natts_pg_description] = { 0 };
+        HeapTuple new_desc_tuple;
+
+        if (has_comment != NULL) {
+            *has_comment = true;
+        }
+
+        values[Anum_pg_description_objsubid - 1] = Int32GetDatum(newattnum);
+        replaces[Anum_pg_description_objsubid - 1] = true;
+
+        new_desc_tuple = heap_modify_tuple(desc_tuple, RelationGetDescr(rel), values, nulls, replaces);
+        simple_heap_update(rel, &new_desc_tuple->t_self, new_desc_tuple);
+        CatalogUpdateIndexes(rel, new_desc_tuple);
+
+        heap_freetuple_ext(new_desc_tuple);
+    }
+
+    systable_endscan(scan);
+}
  
 /* 
  * update pg_depend refobjsubid for the modified column with first or after column.
@@ -15882,6 +15973,7 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
     HeapTuple att_tuple_old, att_tuple_new;
     Form_pg_attribute att_form_old, attr_form_new;
     int startattnum, endattnum;
+    bool has_comment = false;
     bool has_default = false;
     bool has_depend = false;
     bool has_partition = false;
@@ -15910,6 +16002,9 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
  
     simple_heap_update(attr_rel, &att_tuple_old->t_self, att_tuple_old);
     CatalogUpdateIndexes(attr_rel, att_tuple_old);
+
+    Relation desc_rel = heap_open(DescriptionRelationId, RowExclusiveLock);
+    UpdateDescriptionObjsubidFirstAfter(desc_rel, myrelid, curattnum, 0, &has_comment);
  
     Relation def_rel = heap_open(AttrDefaultRelationId, RowExclusiveLock);
     UpdateAttrdefAdnumFirstAfter(def_rel, myrelid, curattnum, 0, &has_default);
@@ -15928,6 +16023,7 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
  
     UpdatePgPartitionFirstAfter(rel, startattnum, endattnum, is_increase, true, &has_partition);
     UpdatePgAttributeFirstAfter(attr_rel, myrelid, startattnum, endattnum, is_increase);
+    UpdatePgDescriptionFirstAfter(rel, startattnum, endattnum, is_increase);
     UpdatePgIndexFirstAfter(rel, startattnum, endattnum, is_increase);
     UpdatePgConstraintFirstAfter(rel, startattnum, endattnum, is_increase);
     UpdatePgConstraintConfkeyFirstAfter(rel, startattnum, endattnum, is_increase);
@@ -15957,6 +16053,11 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
     heap_close(attr_rel, RowExclusiveLock);
     heap_freetuple_ext(att_tuple_old);
     heap_freetuple_ext(att_tuple_new);
+
+    if (has_comment) {
+        UpdateDescriptionObjsubidFirstAfter(desc_rel, myrelid, 0, newattnum, NULL);
+    }
+    heap_close(desc_rel, RowExclusiveLock);
  
     if (has_default) {
         UpdateAttrdefAdnumFirstAfter(def_rel, myrelid, 0, newattnum, NULL);
