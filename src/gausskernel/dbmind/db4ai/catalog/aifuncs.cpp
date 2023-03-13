@@ -168,7 +168,6 @@ static AlgorithmAPI* algorithm_apis[] = {
 
 AlgorithmAPI *get_algorithm_api(AlgorithmML algorithm)
 {
-    Assert(sizeof(algorithm_apis) > 0 && sizeof(algorithm_apis) / sizeof(algorithm_apis[0]) > algorithm);
     if (algorithm >= INVALID_ALGORITHM_ML || algorithm_apis[algorithm] == nullptr)
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("invalid ML algorithm: %d", algorithm)));
