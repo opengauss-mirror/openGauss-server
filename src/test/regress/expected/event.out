@@ -893,18 +893,18 @@ CREATE
     [DEFINER = user]
     EVENT
     [IF NOT EXISTS]
-    event_name
-    ON SCHEDULE schedule
+    event_name_str
+    ON SCHEDULE schedule_expr
     [ON COMPLETION [NOT] PRESERVE]
     [ENABLE | DISABLE | DISABLE ON SLAVE]
     [COMMENT 'string']
     DO event_body;
-schedule: {
-    AT timestamp [+ INTERVAL interval] ...
-  | EVERY interval
-    [STARTS timestamp [+ INTERVAL interval] ...]
-    [ENDS timestamp [+ INTERVAL interval] ...]
-interval:
+schedule_expr: {
+    AT timestamp_expr [+ INTERVAL interval_expr] ...
+  | EVERY interval_expr
+    [STARTS timestamp_expr [+ INTERVAL interval_expr] ...]
+    [ENDS timestamp_expr [+ INTERVAL interval_expr] ...]
+interval_expr:
     quantity {YEAR | MONTH | DAY | HOUR | MINUTE |
               SECOND | YEAR_MONTH | DAY_HOUR | DAY_MINUTE |
               DAY TO SECOND | HOUR TO MINUTE | HOUR TO SECOND | MINUTE TO SECOND}
