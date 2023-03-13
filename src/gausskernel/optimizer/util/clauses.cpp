@@ -137,7 +137,6 @@ static bool is_exec_external_param_const(PlannerInfo* root, Node* node);
 static bool is_operator_pushdown(Oid opno);
 static bool contain_var_unsubstitutable_functions_walker(Node* node, void* context);
 static bool is_accurate_estimatable_func(Oid funcId);
-static void optbase_eval_user_var_in_opexpr(List *args);
 
 /*****************************************************************************
  *		OPERATOR clause functions
@@ -2451,7 +2450,7 @@ Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate)
  * for the following process to calculate the value.
  * --------------------
  */
-Node* simplify_select_into_expression(Node* node, ParamListInfo boundParams)
+Node* simplify_select_into_expression(Node* node, ParamListInfo boundParams, int *targetlist_len)
 {
     eval_const_expressions_context context;
 
@@ -2476,42 +2475,19 @@ Node* simplify_select_into_expression(Node* node, ParamListInfo boundParams)
     }
 
     ListCell *lc = NULL;
-    AttrNumber attno = 1;
     List *newTargetList = NIL;
     foreach (lc, qt->targetList) {
         TargetEntry *te = (TargetEntry *)lfirst(lc);
-        Node *tn = (Node *)te->expr;
-        if (IsA(tn, OpExpr)) {
-            /* If the user-defined variable has been defined,
-             * then find the existed value.
-             */
-            optbase_eval_user_var_in_opexpr(((OpExpr *)tn)->args);        
+        if (!te->resjunk) {
+            (*targetlist_len)++; 
         }
+        Node *tn = (Node *)te->expr;
         tn = eval_const_expressions_mutator(tn, &context);
-        te = makeTargetEntry((Expr *)tn, attno++, te->resname, false);
+        te->expr = (Expr *)tn;
         newTargetList = lappend(newTargetList, te);
     }
-
     qt->targetList = newTargetList;
     return node;
-}
-
-static void optbase_eval_user_var_in_opexpr(List *args)
-{
-    ListCell *argcell = NULL;
-    foreach (argcell, args) {
-        if (IsA(lfirst(argcell), UserVar)) {
-            bool found = false;
-            GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(
-                u_sess->utils_cxt.set_user_params_htab,
-                ((UserVar *)lfirst(argcell))->name,
-                HASH_ENTER,
-                &found);
-            if (found) {
-                ((UserVar *)lfirst(argcell))->value = (Expr *)copyObject(entry->value);
-            }
-        }
-    }
 }
 
 Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context* context)

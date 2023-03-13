@@ -277,6 +277,7 @@ static int ReadCommand(StringInfo inBuf);
 bool check_log_statement(List* stmt_list);
 static int errdetail_execute(List* raw_parsetree_list);
 int errdetail_params(ParamListInfo params);
+static List* pg_rewrite_query(Query* query);
 static int errdetail_recovery_conflict(void);
 bool IsTransactionExitStmt(Node* parsetree);
 static bool IsTransactionExitStmtList(List* parseTrees);
@@ -1180,7 +1181,7 @@ List* pg_analyze_and_rewrite_params(
  * Note: query must just have come from the parser, because we do not do
  * AcquireRewriteLocks() on it.
  */
-List* pg_rewrite_query(Query* query)
+static List* pg_rewrite_query(Query* query)
 {
     List* querytree_list = NIL;
     PGSTAT_INIT_TIME_RECORD();
