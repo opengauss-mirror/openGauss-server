@@ -261,11 +261,11 @@ void XLogRegisterBuffer(uint8 block_id, Buffer buffer, uint8 flags, TdeInfo* tde
             return;
         }
         BufferDesc *bufDesc = GetBufferDescriptor(buffer - 1);
-        if (bufDesc->seg_fileno != EXTENT_INVALID) {  
+        if (bufDesc->extra->seg_fileno != EXTENT_INVALID) {  
             // buffer descriptor contains the physical location
-            SegmentCheck(bufDesc->seg_fileno <= EXTENT_TYPES);
-            regbuf->seg_file_no = bufDesc->seg_fileno;
-            regbuf->seg_block = bufDesc->seg_blockno;
+            SegmentCheck(bufDesc->extra->seg_fileno <= EXTENT_TYPES);
+            regbuf->seg_file_no = bufDesc->extra->seg_fileno;
+            regbuf->seg_block = bufDesc->extra->seg_blockno;
         } else {
             SegPageLocation loc = seg_get_physical_location(regbuf->rnode, regbuf->forkno, regbuf->block);
             SegmentCheck(loc.blocknum != InvalidBlockNumber);

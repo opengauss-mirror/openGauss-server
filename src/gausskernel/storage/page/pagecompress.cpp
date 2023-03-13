@@ -109,7 +109,7 @@ static uint32 getBitsOfDelta(uint64 delta)
 #define isToastTuple(_tup) (HeapTupleHasExternal(_tup) || (_tup)->t_len > TOAST_TUPLE_THRESHOLD)
 
 /* judge whether this attribute is dropped */
-#define isAttrDropped(_attr) (InvalidOid == ((_attr)->atttypid))
+#define isAttrDropped(_attr) (InvalidOid == ((_attr).atttypid))
 
 /* one data repeats at least such times so that it will be added into dict. */
 #define DICTITEM_MIN_REPEATS 3
@@ -421,9 +421,9 @@ PageCompress::PageCompress(Relation rel, MemoryContext memCtx)
 
     (void)MemoryContextSwitchTo(oldMemCnxt);
 
-    Form_pg_attribute* attrs = m_rel->rd_att->attrs;
+    FormData_pg_attribute* attrs = m_rel->rd_att->attrs;
     for (int col = 0; col < nattrs; ++col) {
-        m_numTypeOpt[col] = binarySearch(attrs[col]->atttypid);
+        m_numTypeOpt[col] = binarySearch(attrs[col].atttypid);
     }
 
 #ifdef TRACE_COMPRESS
@@ -847,7 +847,7 @@ Datum PageCompress::PrefixUncompress(int attlen, PrefixCmprMeta* prefix, char* s
  */
 void PageCompress::ChooseMethodForFixedLenType(ColArray* colArray, int col)
 {
-    int hintMode = m_rel->rd_att->attrs[col]->attcmprmode;
+    int hintMode = m_rel->rd_att->attrs[col].attcmprmode;
 
     /* first, try to use the user's hint */
     if (SetCmprMethod(colArray, col, hintMode))
@@ -1010,7 +1010,7 @@ bool PageCompress::NumstrEvaluate(ColArray* colArray)
  */
 void PageCompress::ChooseMethodForVaryLenType(ColArray* colArray, int col)
 {
-    int hintMode = m_rel->rd_att->attrs[col]->attcmprmode;
+    int hintMode = m_rel->rd_att->attrs[col].attcmprmode;
 
     /* first, try to use the user's hint */
     if (SetCmprMethod(colArray, col, hintMode))
@@ -1041,8 +1041,8 @@ void PageCompress::ChooseMethodForVaryLenType(ColArray* colArray, int col)
  */
 bool PageCompress::SetCmprMethod(ColArray* colArray, int col, int mode)
 {
-    Form_pg_attribute* attrs = m_rel->rd_att->attrs;
-    int attlen = attrs[col]->attlen;
+    FormData_pg_attribute* attrs = m_rel->rd_att->attrs;
+    int attlen = attrs[col].attlen;
 
     switch (mode) {
         case CMPR_DELTA: {
@@ -1135,11 +1135,11 @@ bool PageCompress::SetCmprMethod(ColArray* colArray, int col, int mode)
 void PageCompress::ChooseCmprMethod(ColArray* colArrays)
 {
     int attrNum = RelationGetNumberOfAttributes(m_rel);
-    Form_pg_attribute* attrs = m_rel->rd_att->attrs;
+    FormData_pg_attribute* attrs = m_rel->rd_att->attrs;
 
     for (int col = 0; col < attrNum; ++col) {
         /* continue if this attribute shouldn't be compressed specified by user; */
-        if (CMPR_NONE == attrs[col]->attcmprmode)
+        if (CMPR_NONE == attrs[col].attcmprmode)
             continue;
 
         /* continue if this attribute is dropped by user */
@@ -1148,13 +1148,13 @@ void PageCompress::ChooseCmprMethod(ColArray* colArrays)
             continue;
         }
         if (m_numTypeOpt[col] != NULL) {
-            Assert(attrs[col]->attlen > 1);
+            Assert(attrs[col].attlen > 1);
             ChooseMethodForFixedLenType(colArrays + col, col);
-        } else if (attrs[col]->attlen > 0) {
+        } else if (attrs[col].attlen > 0) {
             /* These types are not compressed. */
             (void)SetCmprMethod(colArrays + col, col, CMPR_NONE);
         } else {
-            Assert(attrs[col]->attlen == -1 || attrs[col]->attlen == -2);
+            Assert(attrs[col].attlen == -1 || attrs[col].attlen == -2);
             ChooseMethodForVaryLenType(colArrays + col, col);
         }
     }
@@ -1162,7 +1162,7 @@ void PageCompress::ChooseCmprMethod(ColArray* colArrays)
 
 void PageCompress::SetCmprHeaderData(void)
 {
-    Form_pg_attribute* atts = RelationGetDescr(m_rel)->attrs;
+    FormData_pg_attribute* atts = RelationGetDescr(m_rel)->attrs;
     int nattrs = RelationGetNumberOfAttributes(m_rel);
     int offset = 0;
     int rawCols = 0;
@@ -1174,7 +1174,7 @@ void PageCompress::SetCmprHeaderData(void)
         switch (m_cmprMode[col]) {
             case CMPR_DELTA: {
                 DeltaCmprMeta* deltaInfo = (DeltaCmprMeta*)m_cmprMeta[col];
-                int attrLen = atts[col]->attlen;
+                int attrLen = atts[col].attlen;
                 Assert(deltaInfo->bytes < g_number_max_value_in_bytes);
                 Assert(attrLen > 0);
 
@@ -1198,7 +1198,7 @@ void PageCompress::SetCmprHeaderData(void)
             }
 
             case CMPR_PREFIX: {
-                Assert(-2 == atts[col]->attlen || -1 == atts[col]->attlen);
+                Assert(-2 == atts[col].attlen || -1 == atts[col].attlen);
                 PrefixCmprMeta* prefixInfo = (PrefixCmprMeta*)m_cmprMeta[col];
                 Assert(prefixInfo->len > 0 && prefixInfo->len < MAX_PREFIX_LEN);
                 /* how many bytes is used for prefix string */
@@ -1461,7 +1461,7 @@ Datum PageCompress::UncompressOneAttr(
 bool PageCompress::DictCompress(int col, Datum val, unsigned char& dicItemId)
 {
     bool found = false;
-    int attlen = m_rel->rd_att->attrs[col]->attlen;
+    int attlen = m_rel->rd_att->attrs[col].attlen;
     DictCmprMeta* dicInfo = (DictCmprMeta*)m_cmprMeta[col];
     DictItemData key;
 
@@ -1491,7 +1491,7 @@ void PageCompress::CompressOneAttr(Datum val, bool null, FormCmprTupleData* form
         return;
     }
 
-    Form_pg_attribute* attrs = m_rel->rd_att->attrs;
+    FormData_pg_attribute* attrs = m_rel->rd_att->attrs;
     formTuple->values[col] = val;
     formTuple->isnulls[col] = false;
 
@@ -1537,7 +1537,7 @@ void PageCompress::CompressOneAttr(Datum val, bool null, FormCmprTupleData* form
         }
 
         case CMPR_PREFIX: {
-            int attrLen = attrs[col]->attlen;
+            int attrLen = attrs[col].attlen;
             Assert(attrLen == -1 || attrLen == -2);
             PrefixCmprMeta* prefixInfo = (PrefixCmprMeta*)m_cmprMeta[col];
             Datum cmprsVal;
@@ -1566,7 +1566,7 @@ void PageCompress::CompressOneAttr(Datum val, bool null, FormCmprTupleData* form
         }
 
         case CMPR_NUMSTR: {
-            int attrLen = attrs[col]->attlen;
+            int attrLen = attrs[col].attlen;
             Assert(-1 == attrLen || -2 == attrLen);
 
             int outSize = 0;
@@ -1699,7 +1699,7 @@ bool PageCompress::CompressOnePage(void)
          * or all compressed tuples fill part of one page.
          */
         if (hascmpr) {
-            fillOnePage = Dispatch(m_mappedTups[row], (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, HEAP_TUPLE), size, blksize);
+            fillOnePage = Dispatch(m_mappedTups[row], (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, TableAmHeap), size, blksize);
         } else {
             fillOnePage = Dispatch(m_mappedTups[row], size, blksize);
         }
@@ -1746,7 +1746,7 @@ bool PageCompress::CompressOnePage(void)
         }
 
         if (hascmpr) {
-            fillOnePage = Dispatch(raw, (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, HEAP_TUPLE), size, blksize);
+            fillOnePage = Dispatch(raw, (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, TableAmHeap), size, blksize);
         } else {
             fillOnePage = Dispatch(raw, size, blksize);
         }
@@ -2218,24 +2218,24 @@ void PageCompress::CheckCmprAttr(Datum rawVal, bool rawNull, int col, FormCmprTu
     }
 
     Assert(m_cmprMode[col] != CMPR_UNDEF);
-    Form_pg_attribute* atts = RelationGetDescr(m_rel)->attrs;
-    Assert(1 != atts[col]->attlen);
+    FormData_pg_attribute* atts = RelationGetDescr(m_rel)->attrs;
+    Assert(1 != atts[col].attlen);
     int cmprSize;
     Datum value = UncompressOneAttr(m_cmprMode[col],
                                     m_cmprMeta[col],
-                                    atts[col]->atttypid,
-                                    atts[col]->attlen,
+                                    atts[col].atttypid,
+                                    atts[col].attlen,
                                     DatumGetPointer(formTuple->values[col]),
                                     &cmprSize);
 
     Assert(cmprSize == formTuple->valsize[col]);
-    CheckCmprDatum(rawVal, value, atts[col]);
+    CheckCmprDatum(rawVal, value, &atts[col]);
 }
 
 void PageCompress::CheckCmprTuple(HeapTuple rawTup, HeapTuple cmprTup)
 {
     TupleDesc desc = RelationGetDescr(m_rel);
-    Form_pg_attribute* atts = desc->attrs;
+    FormData_pg_attribute* atts = desc->attrs;
     int nattrs = desc->natts;
 
     Datum* values = (Datum*)palloc(sizeof(Datum) * nattrs);
@@ -2254,7 +2254,7 @@ void PageCompress::CheckCmprTuple(HeapTuple rawTup, HeapTuple cmprTup)
             continue;
         }
 
-        CheckCmprDatum(values[col], values2[col], atts[col]);
+        CheckCmprDatum(values[col], values2[col], &atts[col]);
     }
 
     pfree(values);
@@ -2269,7 +2269,7 @@ void PageCompress::CheckCmprHeaderData(void)
         return;
     }
 
-    Form_pg_attribute* atts = RelationGetDescr(m_rel)->attrs;
+    FormData_pg_attribute* atts = RelationGetDescr(m_rel)->attrs;
     int nattrs = RelationGetNumberOfAttributes(m_rel);
     int cmprsOff = 0; /* pointer to the start of compression meta */
     void* metaInfo = NULL;
@@ -2277,7 +2277,7 @@ void PageCompress::CheckCmprHeaderData(void)
 
     for (int col = 0; col < nattrs; ++col) {
         int metaSize = 0;
-        metaInfo = PageCompress::FetchAttrCmprMeta(m_cmprHeaderData + cmprsOff, atts[col]->attlen, &metaSize, &mode);
+        metaInfo = PageCompress::FetchAttrCmprMeta(m_cmprHeaderData + cmprsOff, atts[col].attlen, &metaSize, &mode);
         cmprsOff += metaSize;
 
         Assert(mode != CMPR_UNDEF && m_cmprMode[col] == mode);

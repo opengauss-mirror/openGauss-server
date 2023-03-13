@@ -548,7 +548,7 @@ static bool resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector* declared_a
 
     /* See if there are any polymorphic outputs; quick out if not */
     for (i = 0; i < natts; i++) {
-        switch (tupdesc->attrs[i]->atttypid) {
+        switch (tupdesc->attrs[i].atttypid) {
             case ANYELEMENTOID:
                 have_anyelement_result = true;
                 break;
@@ -664,21 +664,21 @@ static bool resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector* declared_a
 
     /* And finally replace the tuple column types as needed */
     for (i = 0; i < natts; i++) {
-        switch (tupdesc->attrs[i]->atttypid) {
+        switch (tupdesc->attrs[i].atttypid) {
             case ANYELEMENTOID:
             case ANYNONARRAYOID:
             case ANYENUMOID:
-                TupleDescInitEntry(tupdesc, i + 1, NameStr(tupdesc->attrs[i]->attname), anyelement_type, -1, 0);
+                TupleDescInitEntry(tupdesc, i + 1, NameStr(tupdesc->attrs[i].attname), anyelement_type, -1, 0);
                 TupleDescInitEntryCollation(tupdesc, i + 1, anycollation);
                 break;
 
             case ANYARRAYOID:
-                TupleDescInitEntry(tupdesc, i + 1, NameStr(tupdesc->attrs[i]->attname), anyarray_type, -1, 0);
+                TupleDescInitEntry(tupdesc, i + 1, NameStr(tupdesc->attrs[i].attname), anyarray_type, -1, 0);
                 TupleDescInitEntryCollation(tupdesc, i + 1, anycollation);
                 break;
 
             case ANYRANGEOID:
-                TupleDescInitEntry(tupdesc, i + 1, NameStr(tupdesc->attrs[i]->attname), anyrange_type, -1, 0);
+                TupleDescInitEntry(tupdesc, i + 1, NameStr(tupdesc->attrs[i].attname), anyrange_type, -1, 0);
                 /* no collation should be attached to a range type */
                 break;
 
@@ -1335,7 +1335,7 @@ TupleDesc build_function_result_tupdesc_d(Datum proallargtypes, Datum proargmode
      * functions use default heap tuple operations like heap_form_tuple, and they are
      * accessed via tam type in tuple descriptor.
      */
-    desc = CreateTemplateTupleDesc(numoutargs, false, TAM_HEAP);
+    desc = CreateTemplateTupleDesc(numoutargs, false);
     for (int i = 0; i < numoutargs; i++) {
         if (outargtypes_orig != NULL) {
             /* in case of a client-logic parameter, we pass the original data type in the typmod field */
@@ -1416,7 +1416,7 @@ TupleDesc TypeGetTupleDesc(Oid typeoid, List* colaliases)
                 char* label = strVal(list_nth(colaliases, varattno));
 
                 if (label != NULL) {
-                    (void)namestrcpy(&(tupdesc->attrs[varattno]->attname), label);
+                    (void)namestrcpy(&(tupdesc->attrs[varattno].attname), label);
                 }
             }
 
@@ -1441,7 +1441,7 @@ TupleDesc TypeGetTupleDesc(Oid typeoid, List* colaliases)
 
         /* OK, get the column alias */
         attname = strVal(linitial(colaliases));
-        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(1, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, attname, typeoid, -1, 0);
     } else if (functypclass == TYPEFUNC_RECORD) {
         /* XXX can't support this because typmod wasn't passed in ... */

@@ -1190,9 +1190,9 @@ struct SelectRowFunctor {
     inline void operator()()
     {
         uint8_t* rowData = const_cast<uint8_t*>(m_row->GetData());
-        m_slot->tts_tupleDescriptor->attrs[m_tupleColumnId]->attnum = m_tableColumnId;
+        m_slot->tts_tupleDescriptor->attrs[m_tupleColumnId].attnum = m_tableColumnId;
         MOTAdaptor::MOTToDatum(m_table,
-            m_slot->tts_tupleDescriptor->attrs[m_tupleColumnId],
+            &m_slot->tts_tupleDescriptor->attrs[m_tupleColumnId],
             rowData,
             &(m_slot->tts_values[m_tupleColumnId]),
             &(m_slot->tts_isnull[m_tupleColumnId]));
@@ -1208,14 +1208,14 @@ void selectColumn(MOT::Table* table, MOT::Row* row, TupleTableSlot* slot, int ta
         table_colid,
         table->GetFieldName(table_colid));
     uint8_t* rowData = const_cast<uint8_t*>(row->GetData());
-    slot->tts_tupleDescriptor->attrs[tuple_colid]->attnum = table_colid;
+    slot->tts_tupleDescriptor->attrs[tuple_colid].attnum = table_colid;
     MOTAdaptor::MOTToDatum(table,
-        slot->tts_tupleDescriptor->attrs[tuple_colid],
+        &slot->tts_tupleDescriptor->attrs[tuple_colid],
         rowData,
         &(slot->tts_values[tuple_colid]),
         &(slot->tts_isnull[tuple_colid]));
     DEBUG_PRINT_DATUM("Column Datum",
-        slot->tts_tupleDescriptor->attrs[tuple_colid]->atttypid,
+        slot->tts_tupleDescriptor->attrs[tuple_colid].atttypid,
         slot->tts_values[tuple_colid],
         slot->tts_isnull[tuple_colid]);
 }
@@ -2138,7 +2138,7 @@ Datum readTupleDatum(TupleTableSlot* slot, int tuple_colid)
     MOT_LOG_DEBUG("Reading datum from tuple column %d ", tuple_colid);
     Datum result = slot->tts_values[tuple_colid];
     DEBUG_PRINT_DATUM("Pre-sum Tuple Datum",
-        slot->tts_tupleDescriptor->attrs[tuple_colid]->atttypid,
+        slot->tts_tupleDescriptor->attrs[tuple_colid].atttypid,
         slot->tts_values[tuple_colid],
         slot->tts_isnull[tuple_colid]);
     bool isnull = (result == PointerGetDatum(NULL));
@@ -2152,7 +2152,7 @@ void writeTupleDatum(TupleTableSlot* slot, int tuple_colid, Datum datum, int isn
     slot->tts_values[tuple_colid] = datum;
     slot->tts_isnull[tuple_colid] = isnull;
     DEBUG_PRINT_DATUM("Post-sum Tuple Datum",
-        slot->tts_tupleDescriptor->attrs[tuple_colid]->atttypid,
+        slot->tts_tupleDescriptor->attrs[tuple_colid].atttypid,
         slot->tts_values[tuple_colid],
         slot->tts_isnull[tuple_colid]);
 }
@@ -2599,13 +2599,13 @@ static bool CopyHeapTupleHeader(HeapTupleHeader tupleHeader, TupleTableSlot* slo
     int resultIndex = 0;
     for (int i = 0; i < tupDescAttrCount; ++i) {
         // skip dropped columns in destination
-        if (tupDesc->attrs[i]->attisdropped) {
+        if (tupDesc->attrs[i].attisdropped) {
             continue;
         }
 
         bool isNull = true;
         Datum value = (Datum)0;
-        if ((i < tupleAttrCount) && !tupDesc->attrs[i]->attisdropped) {
+        if ((i < tupleAttrCount) && !tupDesc->attrs[i].attisdropped) {
             value = SPI_getbinval(tuple, tupDesc, i + 1, &isNull);
             if (SPI_result != 0) {
                 MOT_LOG_TRACE(
@@ -2736,7 +2736,7 @@ int InvokeStoredProcedure()
 int IsCompositeResult(TupleTableSlot* slot)
 {
     int res = 0;
-    if ((slot->tts_tupleDescriptor->natts == 1) && slot->tts_tupleDescriptor->attrs[0]->atttypid == RECORDOID) {
+    if ((slot->tts_tupleDescriptor->natts == 1) && slot->tts_tupleDescriptor->attrs[0].atttypid == RECORDOID) {
         res = 1;
     }
     MOT_LOG_DEBUG("Result is composite: %d", res);
@@ -3309,13 +3309,13 @@ static bool CopyHeapTuple(
     int resultIndex = 0;
     for (int i = 0; i < tupleDescAttrCount; ++i) {
         // skip dropped columns in destination
-        if (tupleDesc->attrs[i]->attisdropped) {
+        if (tupleDesc->attrs[i].attisdropped) {
             continue;
         }
 
         bool isNull = true;
         Datum value = (Datum)0;
-        if ((i < tupleAttrCount) && !tupleDesc->attrs[i]->attisdropped) {
+        if ((i < tupleAttrCount) && !tupleDesc->attrs[i].attisdropped) {
             value = SPI_getbinval(tuple, tupleDesc, i + 1, &isNull);
             if (SPI_result != 0) {
                 MOT_LOG_TRACE(
@@ -3364,13 +3364,13 @@ static void CopyTupleTableSlot(JitExec::JitInvokedQueryExecState* invokeExecStat
     int resultIndex = 0;
     for (int i = 0; i < tupDesc->natts; ++i) {
         // skip dropped columns in destination
-        if (tupDesc->attrs[i]->attisdropped) {
+        if (tupDesc->attrs[i].attisdropped) {
             continue;
         }
 
         bool isNull = tuple->tts_isnull[i];
         Datum value = tuple->tts_values[i];
-        Oid type = tuple->tts_tupleDescriptor->attrs[i]->atttypid;
+        Oid type = tuple->tts_tupleDescriptor->attrs[i].atttypid;
 
         // perform proper type conversion as in exec_assign_value() at pl_exec.cpp
         PLpgSQL_type* resultType = &invokeExecState->m_resultTypes[resultIndex];
@@ -3432,13 +3432,13 @@ static bool RecompilePlanIfNeeded(
 
 static void PrintResultSlot(TupleTableSlot* resultSlot)
 {
-    if (resultSlot->tts_isempty) {
+    if (TTS_EMPTY(resultSlot)) {
         MOT_LOG_DEBUG("Query result is empty");
     } else {
         MOT_LOG_BEGIN(MOT::LogLevel::LL_DEBUG, "Query result slot:");
         for (int i = 0; i < resultSlot->tts_tupleDescriptor->natts; ++i) {
             MOT_LOG_APPEND(MOT::LogLevel::LL_DEBUG, "Datum[%d]: ", i);
-            Oid type = resultSlot->tts_tupleDescriptor->attrs[i]->atttypid;
+            Oid type = resultSlot->tts_tupleDescriptor->attrs[i].atttypid;
             JitExec::PrintDatum(MOT::LogLevel::LL_DEBUG, type, resultSlot->tts_values[i], resultSlot->tts_isnull[i]);
             MOT_LOG_APPEND(MOT::LogLevel::LL_DEBUG, "\n");
         }
@@ -3861,7 +3861,7 @@ int JitExecSubQuery(int subQueryId, int tcount)
                     if (slot == subQueryExecState->m_resultSlot) {
                         // we need to copy slot if there is a minimal tuple or SPI push was called and the tuple is not
                         // empty
-                        if ((slot->tts_mintuple != nullptr) || (isSpiPushed && !slot->tts_isempty)) {
+                        if ((slot->tts_mintuple != nullptr) || (isSpiPushed && !TTS_EMPTY(slot))) {
                             CopyTupleTableSlot(subQueryExecState, subQueryExecState->m_resultSlot);
                         }
                     }

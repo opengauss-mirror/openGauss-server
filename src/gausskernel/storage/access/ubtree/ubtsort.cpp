@@ -750,8 +750,6 @@ static void UBTreeLoad(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2
     bool merge = (btspool2 != NULL);
     IndexTuple itup = NULL;
     IndexTuple itup2 = NULL;
-    bool should_free = false;
-    bool should_free2 = false;
     bool load1 = false;
     TupleDesc tupdes = RelationGetDescr(wstate->index);
     int keysz = IndexRelationGetNumberOfKeyAttributes(wstate->index);
@@ -763,8 +761,8 @@ static void UBTreeLoad(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2
          *
          * the preparation of merge
          */
-        itup = tuplesort_getindextuple(btspool->sortstate, true, &should_free);
-        itup2 = tuplesort_getindextuple(btspool2->sortstate, true, &should_free2);
+        itup = tuplesort_getindextuple(btspool->sortstate, true);
+        itup2 = tuplesort_getindextuple(btspool2->sortstate, true);
 
         for (;;) {
             if (itup == NULL && itup2 == NULL) {
@@ -780,32 +778,20 @@ static void UBTreeLoad(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2
 
             if (load1) {
                 UBTreeBuildAdd(wstate, state, itup, false);
-                if (should_free) {
-                    pfree(itup);
-                    itup = NULL;
-                }
-                itup = tuplesort_getindextuple(btspool->sortstate, true, &should_free);
+                itup = tuplesort_getindextuple(btspool->sortstate, true);
             } else {
                 UBTreeBuildAdd(wstate, state, itup2, false);
-                if (should_free2) {
-                    pfree(itup2);
-                    itup2 = NULL;
-                }
-                itup2 = tuplesort_getindextuple(btspool2->sortstate, true, &should_free2);
+                itup2 = tuplesort_getindextuple(btspool2->sortstate, true);
             }
         }
     } else {
         /* merge is unnecessary */
-        while ((itup = tuplesort_getindextuple(btspool->sortstate, true, &should_free)) != NULL) {
+        while ((itup = tuplesort_getindextuple(btspool->sortstate, true)) != NULL) {
             /* When we see first tuple, create first index page */
             if (state == NULL)
                 state = UBTreePageState(wstate, 0);
 
             UBTreeBuildAdd(wstate, state, itup, false);
-            if (should_free) {
-                pfree(itup);
-                itup = NULL;
-            }
         }
     }
 

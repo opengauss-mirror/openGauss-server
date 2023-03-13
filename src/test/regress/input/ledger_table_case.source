@@ -538,6 +538,87 @@ CREATE TABLE ledgernsp.bad_tb(a bc_compress_type);
 DROP TYPE bc_compress_type;
 
 ----------------------------------------------------------------------
+-- TEST CASE 015. partition table.                                  --
+----------------------------------------------------------------------
+CREATE TABLE ledgernsp.t_partition_range(
+    id number primary key not null,
+    partition_key int,
+    col2 varchar2(20))
+partition by range(partition_key)
+(
+    partition p1 values less than (100),
+    partition p2 values less than(200),
+    partition p3 values less than(300)
+);
+\d ledgernsp.t_partition_range
+
+set enable_opfusion = off;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+INSERT INTO ledgernsp.t_partition_range VALUES(1,50,'p1');
+INSERT INTO ledgernsp.t_partition_range VALUES(2,100,'p2');
+INSERT INTO ledgernsp.t_partition_range VALUES(3,250,'p3');
+select *, hash from ledgernsp.t_partition_range;
+
+UPDATE ledgernsp.t_partition_range SET partition_key=100 where id=1;
+select *, hash from ledgernsp.t_partition_range;
+DELETE FROM ledgernsp.t_partition_range WHERE id=1;
+select *, hash from ledgernsp.t_partition_range;
+explain (costs off) select /*+ indexonlyscan(t_partition_range t_partition_range_pkey) */ id from ledgernsp.t_partition_range;
+select /*+ indexonlyscan(t_partition_range t_partition_range_pkey) */ id from ledgernsp.t_partition_range;
+
+create index ledgernsp.i_t_partition_range on ledgernsp.t_partition_range(partition_key) local;
+INSERT INTO ledgernsp.t_partition_range VALUES (11,50,'p1'), (12,100,'p2'), (13,250,'p3');
+INSERT INTO ledgernsp.t_partition_range VALUES (101,50,'p1'), (102,100,'p2'), (103,250,'p3');
+select *, hash from ledgernsp.t_partition_range;
+delete from ledgernsp.t_partition_range where id > 100;
+copy ledgernsp.t_partition_range from stdin;
+101	50	p1	83b92ed57e516174
+102	100	p2	3b9a1b6282e79e4c
+103	250	p3	0c2b84ca1d32c8f2
+\.
+
+select /*+ indexonlyscan(t_partition_range t_partition_range_pkey) */ id from ledgernsp.t_partition_range;
+
+delete from ledgernsp.t_partition_range where id in (11, 12);
+delete from ledgernsp.t_partition_range where partition_key in (50, 100, 250);
+set enable_opfusion = on;
+INSERT INTO ledgernsp.t_partition_range VALUES (11,50,'p1'), (12,100,'p2'), (13,250,'p3');
+copy ledgernsp.t_partition_range from stdin;
+101	50	p1	83b92ed57e516174
+102	100	p2	3b9a1b6282e79e4c
+103	250	p3	0c2b84ca1d32c8f2
+\.
+
+select *, hash from ledgernsp.t_partition_range;
+select /*+ indexonlyscan(t_partition_range t_partition_range_pkey) */ id from ledgernsp.t_partition_range;
+explain (costs off) select /*+ indexonlyscan(t_partition_range i_t_partition_range) */ partition_key from ledgernsp.t_partition_range where partition_key = 100;
+select /*+ indexonlyscan(t_partition_range i_t_partition_range) */ partition_key from ledgernsp.t_partition_range where partition_key = 100;
+
+delete from ledgernsp.t_partition_range where id in (11, 12);
+delete from ledgernsp.t_partition_range where partition_key in (50, 100, 250);
+
+drop table if exists ledgernsp.t_partition_range;
+reset enable_opfusion;
+reset enable_seqscan;
+reset enable_bitmapscan;
+
+-- not support subpartition table
+CREATE TABLE ledgernsp.t_subpartition(
+    id number primary key not null,
+    partition_key int,
+    subpartition_key varchar2(20))
+partition by range(partition_key)
+subpartition by hash(subpartition_key)
+(
+    partition p1 values less than (100),
+    partition p2 values less than(200),
+    partition p3 values less than(300)
+);
+drop table if exists ledgernsp.t_subpartition;
+
+
+----------------------------------------------------------------------
 -- TEST CASE 016. index can not contain "hash" column.              --
 ----------------------------------------------------------------------
 create table ledgernsp.t_col_hash(id int, "Hash" int, unique (hash)); -- error
@@ -565,6 +646,23 @@ select *, hash from ledgernsp.t_col_hash3;
 drop table if exists ledgernsp.t_col_hash;
 drop table if exists ledgernsp.t_col_hash2;
 drop table if exists ledgernsp.t_col_hash3;
+
+----------------------------------------------------------------------
+-- TEST CASE 017. Ustore table.                                     --
+----------------------------------------------------------------------
+create table ledgernsp.ut1(a int primary key, b int) with (storage_type=ustore); -- error
+\d ledgernsp.ut1
+
+set enable_opfusion = on;
+insert into ledgernsp.ut1 values (1,1);
+
+set enable_opfusion = off;
+insert into ledgernsp.ut1 values (2,2);
+
+select *, hash from ledgernsp.ut1;
+
+reset enable_opfusion;
+drop table if exists ledgernsp.ut1;
 
 ----------------------------------------------------------------------
 -- clear enviroment.                                                --

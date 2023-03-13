@@ -21,6 +21,8 @@
 #define PG_AGGREGATE_H
 
 #include "catalog/genbki.h"
+#include "catalog/objectaddress.h"
+#include "catalog/objectaddress.h"
 #include "nodes/pg_list.h"
 
 /* ----------------------------------------------------------------
@@ -487,7 +489,7 @@ DATA(insert ( 9986	tdigest_mergep		tdigest_merge_to_one		calculate_value_at				0
 /*
  * prototypes for functions in pg_aggregate.c
  */
-extern void AggregateCreate(const char *aggName,
+extern ObjectAddress AggregateCreate(const char *aggName,
 				Oid aggNamespace,
 				char aggKind,
 				Oid *aggArgTypes,

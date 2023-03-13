@@ -166,6 +166,7 @@ typedef unsigned int pg_wchar;
 /*  FREE				0xfe	free (unused) */
 /*  FREE				0xff	free (unused) */
 
+#define PG_INVALID_ENCODING -1
 /*
  * openGauss encoding identifiers
  *
@@ -270,6 +271,10 @@ typedef struct pg_encname {
 
 extern pg_encname pg_encname_tbl[];
 extern unsigned int pg_encname_tbl_sz;
+
+extern pg_enc pg_enc_coll_map_b[];
+#define FAST_GET_CHARSET_BY_COLL(coll_oid) \
+    (pg_enc_coll_map_b[(coll_oid - B_FORMAT_COLLATION_OID_MIN) / B_FORMAT_COLLATION_INTERVAL])
 
 /*
  * Careful:

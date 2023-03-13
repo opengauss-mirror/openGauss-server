@@ -1,0 +1,110 @@
+
+create schema windows_srf;
+set search_path to windows_srf;
+
+set enable_expr_fusion = on;
+show enable_expr_fusion;
+
+create table empsalary (id int, depname text, empno int, salary int);
+
+INSERT INTO empsalary (id, depname, empno, salary) VALUES 
+    (1,'develop',11,5200), (2, 'develop',7,4200),
+    (3, 'personnel', 9, 4500), (4, 'personnel', 8, 6000),
+    (5, 'sales', 10, 5300) , (6, 'sales', 18, 6200);
+
+explain (costs off, verbose) 
+SELECT generate_series(1, id), depname, empno, salary, rank() OVER (PARTITION BY depname ORDER BY salary DESC) FROM empsalary;
+SELECT generate_series(1, id), depname, empno, salary, rank() OVER (PARTITION BY depname ORDER BY salary DESC) FROM empsalary;
+
+explain (costs off, verbose) 
+SELECT generate_series(id, generate_series(1, 2)), depname, empno, salary, rank() OVER (PARTITION BY depname ORDER BY salary DESC) FROM empsalary;
+SELECT generate_series(id, generate_series(1, 2)), depname, empno, salary, rank() OVER (PARTITION BY depname ORDER BY salary DESC) FROM empsalary;
+
+
+explain (costs off, verbose) 
+SELECT id, generate_series(1, id), salary, sum(salary) OVER () FROM empsalary;
+SELECT id, generate_series(1, id), salary, sum(salary) OVER () FROM empsalary;
+
+
+explain (costs off, verbose) 
+SELECT id, generate_series(1, id), salary, sum(salary) OVER (ORDER BY salary) FROM empsalary;
+SELECT id, generate_series(1, id), salary, sum(salary) OVER (ORDER BY salary) FROM empsalary;
+
+explain (costs off, verbose) 
+SELECT generate_series(1,id), sum(salary) OVER w, avg(salary) OVER w
+  FROM empsalary
+  WINDOW w AS (PARTITION BY depname ORDER BY salary DESC);
+SELECT generate_series(1,id), sum(salary) OVER w, avg(salary) OVER w
+  FROM empsalary
+  WINDOW w AS (PARTITION BY depname ORDER BY salary DESC);
+
+
+-- window + sort
+explain (costs off, verbose)
+SELECT id, generate_series(1, id) as g, salary, sum(salary) OVER (ORDER BY salary) FROM empsalary order by g;
+SELECT id, generate_series(1, id) as g, salary, sum(salary) OVER (ORDER BY salary) FROM empsalary order by g;
+
+drop table empsalary;
+
+create table tbl_1k(id bigint, v1 numeric, v2 numeric);
+insert into tbl_1k select generate_series(1, 1000), (RANDOM() * 67)::int::numeric, (RANDOM() * 77)::int::numeric;
+analyze tbl_1k;
+
+set enable_hashagg=off;
+explain (costs off, verbose) 
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+
+create table agg_group as
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+
+set enable_hashagg=on;
+explain (costs off, verbose) 
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+
+create table agg_hash as
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+
+-- Compare results to hash aggregation results
+(select * from agg_group except select * from agg_hash)
+  union all
+(select * from agg_hash except select * from agg_group);
+
+drop table tbl_1k,agg_group,agg_hash;
+
+create table few(id int, dataa text, datab text);
+insert into few values(1, 'a', 'foo'), (2, 'a', 'bar'), (3, 'b', 'bar');
+explain (costs off)
+select id, lag(id) over(order by id), count(*) over(), generate_series(1, 3) from few order by 1,2,3,4;
+select id, lag(id) over(order by id), count(*) over(), generate_series(1, 3) from few order by 1,2,3,4;
+drop table few;
+
+
+create table part_tsrf(a int,b int) partition by range(a) (partition p1 values less than (50), partition p2 values less than (MAXVALUE));
+insert into part_tsrf(a,b) select (RANDOM() * 100)::int, generate_series(1, 100);
+create table tsrf as select * from part_tsrf;
+
+--scan/join contains srf
+explain (costs off, verbose)
+SELECT a,generate_series(1,a+b) FROM part_tsrf;
+create table t1 as SELECT a,generate_series(1,a+b) FROM part_tsrf;
+create table t2 as SELECT a,generate_series(1,a+b) FROM tsrf;
+
+(select * from t1 except select * from t2)
+  union all
+(select * from t2 except select * from t1);
+
+drop table t1, t2;
+
+--agg contsins srf
+explain (costs off, verbose)
+SELECT generate_series(1, max(a*b)), (a+b) % 1000 + 1 FROM part_tsrf group by (a+b) % 1000;
+create table t1 as SELECT generate_series(1, max(a*b)), (a+b) % 1000 + 1 FROM part_tsrf group by (a+b) % 1000;
+create table t2 as SELECT generate_series(1, max(a*b)), (a+b) % 1000 + 1 FROM tsrf group by (a+b) % 1000;
+
+(select * from t1 except select * from t2)
+  union all
+(select * from t2 except select * from t1);
+
+drop table t1, t2, part_tsrf, tsrf;
+
+drop schema windows_srf cascade;

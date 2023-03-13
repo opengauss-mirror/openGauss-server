@@ -125,9 +125,9 @@ void updateIOFlowData4GroupUserOnCN(UserData* userdata);
 bool IsQidInvalid(const Qid* qid)
 {
 #ifdef ENABLE_MULTIPLE_NODES
-    return (qid == NULL || qid->queryId <= 0 || qid->procId > KBYTES || qid->procId <= 0 || qid->stamp < 0);
+    return (qid == NULL || qid->queryId == 0 || qid->procId > KBYTES || qid->procId == 0 || qid->stamp < 0);
 #else
-    return (qid == NULL || qid->queryId <= 0 || qid->stamp < 0);
+    return (qid == NULL || qid->queryId == 0 || qid->stamp < 0);
 #endif
 }
 
@@ -1089,7 +1089,7 @@ void WLMAdjustCGroup4EachThreadOnDN(WLMDNodeInfo* info)
     }
 
     /* Check the thread id whether is valid, and get the next group. */
-    if (info->tid <= 0 || gscgroup_get_next_group(ng, info->cgroup) <= 0) {
+    if (info->tid == 0 || gscgroup_get_next_group(ng, info->cgroup) <= 0) {
         return;
     }
 

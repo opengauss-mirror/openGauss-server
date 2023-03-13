@@ -4,10 +4,10 @@ declare
 begin
     select rolname into var_name from pg_authid where oid=10;
 
-    query_str := 'create schema ' || var_name;
+    query_str := 'create schema "' || var_name || '"';
     EXECUTE IMMEDIATE query_str;
     
-    query_str := 'drop schema ' || var_name ||' CASCADE';
+    query_str := 'drop schema "' || var_name ||'" CASCADE';
     EXECUTE IMMEDIATE query_str;
 end;
 /
@@ -18,10 +18,10 @@ declare
 begin
     select rolname into var_name from pg_authid where oid=10;
 
-    query_str := 'create schema authorization ' || var_name;
+    query_str := 'create schema authorization "' || var_name || '"';
     EXECUTE IMMEDIATE query_str;
     
-    query_str := 'drop schema ' || var_name ||' CASCADE';
+    query_str := 'drop schema "' || var_name ||'" CASCADE';
     EXECUTE IMMEDIATE query_str;
 end;
 /
@@ -32,10 +32,10 @@ declare
 begin
     select rolname into var_name from pg_authid where oid=10;
     
-    query_str := 'create schema ' || var_name ||'_123';
+    query_str := 'create schema "' || var_name ||'_123"';
     EXECUTE IMMEDIATE query_str;
 
-    query_str := 'drop schema ' || var_name || '_123 CASCADE';
+    query_str := 'drop schema "' || var_name || '_123" CASCADE';
     EXECUTE IMMEDIATE query_str;
 end;
 /

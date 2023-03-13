@@ -181,15 +181,15 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                  * create the hash table, sometimes we should keep nulls
                  */
                 if (hashNode->ps.nodeContext) {
-                    /*enable_memory_limit*/
+                    /* enable_memory_limit */
                     oldcxt = MemoryContextSwitchTo(hashNode->ps.nodeContext);
                 }
 
                 hashtable = ExecHashTableCreate((Hash*)hashNode->ps.plan, node->hj_HashOperators,
-                    HJ_FILL_INNER(node) || node->js.nulleqqual != NIL);
+                    HJ_FILL_INNER(node) || node->js.nulleqqual != NIL, node->hj_hashCollations);
                     
                 if (oldcxt) {
-                    /*enable_memory_limit*/
+                    /* enable_memory_limit */
                     MemoryContextSwitchTo(oldcxt);
                 }
                 
@@ -303,14 +303,6 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
 
                 /* fall through */
             case HJ_SCAN_BUCKET:
-
-                /*
-                 * We check for interrupts here because this corresponds to
-                 * where we'd fetch a row from a child plan node in other join
-                 * types.
-                 */
-                CHECK_FOR_INTERRUPTS();
-
                 /*
                  * Scan the selected hash bucket for matches to current outer
                  */
@@ -359,10 +351,9 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                             continue;
                         }
 
-                        /* Semi join: we'll consider returning the first match, but after
-                         *	that we're done with this outer tuple */
-                        if (jointype == JOIN_SEMI)
+                        if (node->js.single_match) {
                             node->hj_JoinState = HJ_NEED_NEW_OUTER;
+                        }
                     }
 
                     if (otherqual == NIL || ExecQual(otherqual, econtext, false)) {
@@ -534,6 +525,7 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     List* lclauses = NIL;
     List* rclauses = NIL;
     List* hoperators = NIL;
+    List* hcollations = NIL;
     ListCell* l = NULL;
 
     /* check for unsupported flags */
@@ -585,6 +577,8 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     ExecInitResultTupleSlot(estate, &hjstate->js.ps);
     hjstate->hj_OuterTupleSlot = ExecInitExtraTupleSlot(estate);
 
+    hjstate->js.single_match = (node->join.inner_unique || node->join.jointype == JOIN_SEMI);
+
     /* set up null tuples for outer joins, if needed */
     switch (node->join.jointype) {
         case JOIN_INNER:
@@ -631,7 +625,7 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
      * result tupleSlot only contains virtual tuple, so the default
      * tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&hjstate->js.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&hjstate->js.ps);
     ExecAssignProjectionInfo(&hjstate->js.ps, NULL);
 
     ExecSetSlotDescriptor(hjstate->hj_OuterTupleSlot, ExecGetResultType(outerPlanState(hjstate)));
@@ -656,6 +650,7 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     lclauses = NIL;
     rclauses = NIL;
     hoperators = NIL;
+    hcollations = NIL;
     foreach (l, hjstate->hashclauses) {
         FuncExprState* fstate = (FuncExprState*)lfirst(l);
         OpExpr* hclause = NULL;
@@ -666,10 +661,12 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
         lclauses = lappend(lclauses, linitial(fstate->args));
         rclauses = lappend(rclauses, lsecond(fstate->args));
         hoperators = lappend_oid(hoperators, hclause->opno);
+        hcollations = lappend_oid(hcollations, hclause->inputcollid);
     }
     hjstate->hj_OuterHashKeys = lclauses;
     hjstate->hj_InnerHashKeys = rclauses;
     hjstate->hj_HashOperators = hoperators;
+    hjstate->hj_hashCollations = hcollations;
     /* child Hash node needs to evaluate inner hash keys, too */
     ((HashState*)innerPlanState(hjstate))->hashkeys = rclauses;
 

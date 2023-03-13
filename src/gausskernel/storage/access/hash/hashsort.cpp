@@ -113,13 +113,10 @@ void _h_spool(HSpool *hspool, ItemPointer self, Datum *values, const bool *isnul
 void _h_indexbuild(HSpool *hspool, Relation heapRel)
 {
     IndexTuple itup;
-    bool should_free = false;
 
     tuplesort_performsort(hspool->sortstate);
 
-    while ((itup = tuplesort_getindextuple(hspool->sortstate, true, &should_free)) != NULL) {
+    while ((itup = tuplesort_getindextuple(hspool->sortstate, true)) != NULL) {
         _hash_doinsert(hspool->index, itup, heapRel);
-        if (should_free)
-            pfree(itup);
     }
 }

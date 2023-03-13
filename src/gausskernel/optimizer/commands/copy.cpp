@@ -234,10 +234,10 @@ static const char BinarySignature[15] = "PGCOPY\n\377\r\n\0";
 
 /* non-export function prototypes */
 static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const char* queryString, List* attnamelist,
-    List* options, bool is_copy = true);
+    List* options, bool is_copy = true, CopyFileType filetype = S_COPYFILE);
 static void EndCopy(CopyState cstate);
-CopyState BeginCopyTo(
-    Relation rel, Node* query, const char* queryString, const char* filename, List* attnamelist, List* options);
+CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
+    const char* filename, List* attnamelist, List* options, CopyFileType filetype);
 void EndCopyTo(CopyState cstate);
 uint64 DoCopyTo(CopyState cstate);
 static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast);
@@ -271,6 +271,8 @@ static Datum CopyReadBinaryAttribute(
     CopyState cstate, int column_no, FmgrInfo* flinfo, Oid typioparam, int32 typmod, bool* isnull);
 static void CopyAttributeOutText(CopyState cstate, char* string);
 static void CopyAttributeOutCSV(CopyState cstate, char* string, bool use_quote, bool single_attr);
+static void SelectAttributeIntoOutfile(CopyState cstate, char* string, bool is_optionally, Oid fn_oid);
+static void ProcessEnclosedChar(CopyState cstate, char* cur_char, char enclosedc, char escapedc);
 static void CopyNonEncodingAttributeOut(CopyState cstate, char* string, bool use_quote);
 List* CopyGetAttnums(TupleDesc tupDesc, Relation rel, List* attnamelist);
 List* CopyGetAllAttnums(TupleDesc tupDesc, Relation rel);
@@ -352,7 +354,7 @@ static void SendCopyBegin(CopyState cstate)
         pq_sendint16(&buf, natts);
 
         TupleDesc	tupDesc;
-        Form_pg_attribute *attr = NULL;
+        FormData_pg_attribute *attr = NULL;
         ListCell *cur = NULL;
         if (cstate->rel)
             tupDesc = RelationGetDescr(cstate->rel);
@@ -363,9 +365,9 @@ static void SendCopyBegin(CopyState cstate)
         {
             int16 fmt = format;
             int attnum = lfirst_int(cur);
-            if (attr[attnum - 1]->atttypid == BYTEAWITHOUTORDERWITHEQUALCOLOID ||
-                attr[attnum - 1]->atttypid == BYTEAWITHOUTORDERCOLOID)
-                fmt = (int16)attr[attnum - 1]->atttypmod;
+            if (attr[attnum - 1].atttypid == BYTEAWITHOUTORDERWITHEQUALCOLOID ||
+                attr[attnum - 1].atttypid == BYTEAWITHOUTORDERCOLOID)
+                fmt = (int16)attr[attnum - 1].atttypmod;
             pq_sendint16(&buf, fmt); /* per-column formats */
         }
         pq_endmessage(&buf);
@@ -459,6 +461,11 @@ static void SendCopyEnd(CopyState cstate)
 static void CopySendData(CopyState cstate, const void* databuf, int datasize)
 {
     appendBinaryStringInfo(cstate->fe_msgbuf, (const char*)databuf, datasize);
+}
+
+static void CopySendDumpFileNullStr(CopyState cstate, const char* str)
+{
+    appendBinaryStringInfo(cstate->fe_msgbuf, str, 1);
 }
 
 void CopySendString(CopyState cstate, const char* str)
@@ -979,15 +986,16 @@ static void CheckCopyFilePermission(char *filename)
  * Do not allow the copy if user doesn't have proper permission to access
  * the table or the specifically requested columns.
  */
-uint64 DoCopy(CopyStmt* stmt, const char* queryString)
+Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64 *processed)
 {
     CopyState cstate;
     bool is_from = stmt->is_from;
     bool pipe = (stmt->filename == NULL);
     Relation rel;
-    uint64 processed = 0;
     RangeTblEntry* rte = NULL;
     Node* query = NULL;
+    Oid relid;
+
     stmt->hashstate.has_histhash = false;
     /*
      * we can't retry gsql \copy from command and JDBC 'CopyManager.copyIn' operation,
@@ -1044,6 +1052,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
                 (errcode(ERRCODE_INVALID_OPERATION),
                     errmsg("%s is redistributing, please retry later.", rel->rd_rel->relname.data)));
 
+        relid = RelationGetRelid(rel);
         rte = makeNode(RangeTblEntry);
         rte->rtekind = RTE_RELATION;
         rte->relid = RelationGetRelid(rel);
@@ -1111,7 +1120,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         {
             SyncBulkloadStates(cstate);
 
-            processed = CopyFrom(cstate); /* copy from file to database */
+            *processed = CopyFrom(cstate); /* copy from file to database */
 
             /* Record copy from to gchain. */
             if (cstate->hashstate.has_histhash) {
@@ -1132,9 +1141,9 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         EndCopyFrom(cstate);
     } else {
         pgstat_set_stmt_tag(STMTTAG_READ);
-        cstate = BeginCopyTo(rel, query, queryString, stmt->filename, stmt->attlist, stmt->options);
+        cstate = BeginCopyTo(rel, query, queryString, stmt->filename, stmt->attlist, stmt->options, stmt->filetype);
         cstate->range_table = list_make1(rte);
-        processed = DoCopyTo(cstate); /* copy from database to file */
+        *processed = DoCopyTo(cstate); /* copy from database to file */
         EndCopyTo(cstate);
     }
 
@@ -1153,7 +1162,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
             audit_report(AUDIT_COPY_TO, AUDIT_OK, stmt->filename ? stmt->filename : "stdout", queryString);
     }
 
-    return processed;
+    return relid;
 }
 
 static void TransformFormatter(CopyState cstate, List* formatter)
@@ -1256,7 +1265,7 @@ void VerifyEncoding(int encoding)
 static void PrintDelimHeader(CopyState cstate)
 {
     TupleDesc tupDesc;
-    Form_pg_attribute* attr = NULL;
+    FormData_pg_attribute* attr = NULL;
     ListCell* cur = NULL;
     bool hdr_delim = false;
     char* colname = NULL;
@@ -1273,7 +1282,7 @@ static void PrintDelimHeader(CopyState cstate)
         if (hdr_delim)
             CopySendString(cstate, cstate->delim);
         hdr_delim = true;
-        colname = NameStr(attr[attnum - 1]->attname);
+        colname = NameStr(attr[attnum - 1].attname);
         CopyAttributeOutCSV(cstate, colname, false, list_length(cstate->attnumlist) == 1);
     }
 }
@@ -1385,6 +1394,169 @@ void GetTransSourceStr(CopyState cstate, int beginPos, int endPos)
     cstate->transform_query_string = transString;
 }
 
+void ProcessFileOptions(CopyState cstate, bool is_from, List* options, bool is_dumpfile)
+{
+    if (is_dumpfile) {
+        cstate->is_dumpfile = true;
+        cstate->fileformat = FORMAT_TEXT;
+        cstate->is_from = is_from;
+        cstate->file_encoding = -1;
+        cstate->delim = "";
+        cstate->eol = "";
+        cstate->eol_type = EOL_UD;
+        cstate->null_print = "";
+        cstate->null_print_len = strlen(cstate->null_print);
+        if (cstate->mode == MODE_INVALID)
+            cstate->mode = MODE_NORMAL;
+        return;
+    }
+    ListCell* option = NULL;
+    cstate->file_encoding = -1;
+    cstate->fileformat = FORMAT_TEXT;
+    cstate->is_from = false;
+
+    foreach (option, options) {
+        DefElem* defel = (DefElem*)lfirst(option);
+        if (strcmp(defel->defname, "o_enclosed") == 0) {
+            if (cstate->o_enclosed)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("conflicting or redundant options")));
+            if (strlen(defGetString(defel)) != 1) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("enclosed must be a single one-byte character")));
+            }
+            cstate->o_enclosed = defGetString(defel);
+        } else if (strcmp(defel->defname, "enclosed") == 0) {
+            if (cstate->enclosed)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("conflicting or redundant options")));
+            if (strlen(defGetString(defel)) != 1) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("enclosed must be a single one-byte character")));
+            }
+            cstate->enclosed = defGetString(defel);
+        } else if (strcmp(defel->defname, "encoding") == 0) {
+            if (cstate->file_encoding >= 0)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("conflicting or redundant options")));
+            cstate->file_encoding = pg_char_to_encoding(defGetString(defel));
+            if (cstate->file_encoding < 0)
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("argument to option \"%s\" must be a valid CHARACTER SET name", defel->defname)));
+        } else if (strcmp(defel->defname, "delimiter") == 0) {
+            if (cstate->delim)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("conflicting or redundant options")));
+            cstate->delim = defGetString(defel);
+        } else if (strcmp(defel->defname, "escape") == 0) {
+            if (cstate->escape)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("conflicting or redundant options")));
+            if (strlen(defGetString(defel)) != 1) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("escaped must be a single one-byte character")));
+            }
+            cstate->escape = defGetString(defel);
+        } else if (strcmp(defel->defname, "eol") == 0) {
+            if (cstate->eol_type == EOL_UD)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("conflicting or redundant options")));
+            cstate->eol_type = EOL_UD;
+            cstate->eol = defGetString(defel);
+            size_t eol_len = strlen(defGetString(defel));
+            if (strstr(defGetString(defel), "\\r\\n") != NULL) {
+                int eol_start = eol_len - strlen("\\r\\n");
+                cstate->eol[eol_start] = '\r';
+                cstate->eol[eol_start + 1] = '\n';
+                cstate->eol[eol_start + 2] = '\0';
+            } else if (strstr(defGetString(defel), "\\n") != NULL) {
+                int eol_start = eol_len - strlen("\\n");
+                cstate->eol[eol_start] = '\n';
+                cstate->eol[eol_start + 1] = '\0';
+            } else if (strstr(defGetString(defel), "\\r") != NULL) {
+                int eol_start = eol_len - strlen("\\r");
+                cstate->eol[eol_start] = '\r';
+                cstate->eol[eol_start + 1] = '\0';
+            } else {
+                if (eol_len == 0)
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("\"%s\" is not a valid LINES TERMINATED string, "
+                                "LINES TERMINATED string must not be empty",
+                                defGetString(defel))));
+                else if (eol_len > EOL_MAX_LEN)
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("\"%s\" is not a valid LINES TERMINATED string, "
+                                   "LINES TERMINATED string must not exceed the maximum length (10 bytes)",
+                                defGetString(defel))));
+            }
+        } else if (strcmp(defel->defname, "line_start") == 0) {
+            if (cstate->line_start)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("conflicting or redundant options")));
+            cstate->line_start = defGetString(defel);
+        }
+    }
+
+    if (!cstate->delim)
+        cstate->delim = "\t";
+    if (!cstate->escape)
+        cstate->escape = "\\";
+    if (!cstate->null_print)
+        cstate->null_print = "\\N";
+    cstate->null_print_len = strlen(cstate->null_print);
+
+    if (cstate->mode == MODE_INVALID)
+        cstate->mode = MODE_NORMAL;
+    if (cstate->eol_type != EOL_UD && !is_from)
+        cstate->eol_type = EOL_NL;
+    
+    if ((cstate->delim_len = strlen(cstate->delim)) > DELIM_MAX_LEN)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("FIELDS TERMINATED must be less than %d bytes", DELIM_MAX_LEN)));
+    
+    if (cstate->o_enclosed && cstate->enclosed) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("enclosed sentence can only be specified once")));
+    }
+
+    /*
+     * check delimiter
+     */
+    if (cstate->delim && (cstate->delim_len == 1) && ((cstate->delim[0] == ' ') || (cstate->delim[0] == '?')) &&
+        (cstate->compatible_illegal_chars)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+            errmsg("illegal chars conversion may confuse FIELDS TERMINATED 0x%x", cstate->delim[0])));
+    }
+
+    /*
+     * check OPTIONALLY ENCLOSED
+     */
+    if (cstate->o_enclosed && ((cstate->o_enclosed[0] == ' ') || (cstate->o_enclosed[0] == '?')) &&
+        (cstate->compatible_illegal_chars)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+            errmsg("illegal chars conversion may confuse OPTIONALLY ENCLOSED 0x%x", cstate->o_enclosed[0])));
+    }
+
+    /*
+     * check ENCLOSED
+     */
+    if (cstate->enclosed && ((cstate->enclosed[0] == ' ') || (cstate->enclosed[0] == '?')) &&
+        (cstate->compatible_illegal_chars)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+            errmsg("illegal chars conversion may confuse ENCLOSED 0x%x", cstate->enclosed[0])));
+    }
+
+    /*
+     * check escape
+     */
+    if (cstate->escape && ((cstate->escape[0] == ' ') || (cstate->escape[0] == '?')) &&
+        (cstate->compatible_illegal_chars)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+            errmsg("illegal chars conversion may confuse ESCAPED 0x%x", cstate->escape[0])));
+    }
+}
 
 /*
  * Process the statement option list for COPY.
@@ -1519,6 +1691,12 @@ void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
                 cstate->without_escaping = defGetBoolean(defel);
             noescapingSpecified = true;
         } else if (strcmp(defel->defname, "formatter") == 0) {
+            if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+                if (cstate->fileformat != FORMAT_FIXED) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("The formatter must be used together with the fixed length.")));
+                }
+            }
             TransformFormatter(cstate, (List*)(defel->arg));
         } else if (strcmp(defel->defname, "fileheader") == 0) {
             if (cstate->headerFilename)
@@ -1987,14 +2165,14 @@ static void TransformColExpr(CopyState cstate)
 #endif
 
         attroid = attnumTypeId(cstate->rel, attrno);
-        attrmod = cstate->rel->rd_att->attrs[attrno - 1]->atttypmod;
+        attrmod = cstate->rel->rd_att->attrs[attrno - 1].atttypmod;
 
         if (col->typname != NULL) {
             SetColInFunction(cstate, attrno, col->typname);
 
             /* Build a ColumnRef in order to transform datatype */
             if (col->colexpr == NULL &&
-                (attroid != cstate->trans_tupledesc->attrs[attrno - 1]->atttypid
+                (attroid != cstate->trans_tupledesc->attrs[attrno - 1].atttypid
                 || attrmod != cstate->as_typemods[attrno - 1].typemod)) {
                 ColumnRef *cref = makeNode(ColumnRef);
 
@@ -2041,13 +2219,13 @@ static void SetColInFunction(CopyState cstate, int attrno, const TypeName* type)
     cstate->as_typemods[attrno - 1].assign = true;
     cstate->as_typemods[attrno - 1].typemod = attrmod;
 
-    if (cstate->trans_tupledesc->attrs[attrno - 1]->atttypid != attroid) {
-        cstate->trans_tupledesc->attrs[attrno - 1]->atttypid =  attroid;
-        cstate->trans_tupledesc->attrs[attrno - 1]->atttypmod = attrmod;
-        cstate->trans_tupledesc->attrs[attrno - 1]->attalign = ((Form_pg_type)GETSTRUCT(tup))->typalign;
-        cstate->trans_tupledesc->attrs[attrno - 1]->attlen = ((Form_pg_type)GETSTRUCT(tup))->typlen;
-        cstate->trans_tupledesc->attrs[attrno - 1]->attbyval = ((Form_pg_type)GETSTRUCT(tup))->typbyval;
-        cstate->trans_tupledesc->attrs[attrno - 1]->attstorage = ((Form_pg_type)GETSTRUCT(tup))->typstorage;
+    if (cstate->trans_tupledesc->attrs[attrno - 1].atttypid != attroid) {
+        cstate->trans_tupledesc->attrs[attrno - 1].atttypid =  attroid;
+        cstate->trans_tupledesc->attrs[attrno - 1].atttypmod = attrmod;
+        cstate->trans_tupledesc->attrs[attrno - 1].attalign = ((Form_pg_type)GETSTRUCT(tup))->typalign;
+        cstate->trans_tupledesc->attrs[attrno - 1].attlen = ((Form_pg_type)GETSTRUCT(tup))->typlen;
+        cstate->trans_tupledesc->attrs[attrno - 1].attbyval = ((Form_pg_type)GETSTRUCT(tup))->typbyval;
+        cstate->trans_tupledesc->attrs[attrno - 1].attstorage = ((Form_pg_type)GETSTRUCT(tup))->typstorage;
     }
     ReleaseSysCache(tup);
 
@@ -2083,9 +2261,9 @@ static ExprState* ExecInitCopyColExpr(CopyState cstate, int attrno, Oid attroid,
         Var* value;
 
         if (i == attrno - 1)
-            attr = cstate->trans_tupledesc->attrs[i];
+            attr = &cstate->trans_tupledesc->attrs[i];
         else
-            attr = cstate->rel->rd_att->attrs[i];
+            attr = &cstate->rel->rd_att->attrs[i];
 
         value = makeVar(0, i + 1, attr->atttypid, attr->atttypmod, attr->attcollation, 0);
 
@@ -2098,7 +2276,7 @@ static ExprState* ExecInitCopyColExpr(CopyState cstate, int attrno, Oid attroid,
     rte->eref->colnames = colnames;
     addRTEtoQuery(pstate, rte, true, true, true);
 
-    expr = transformExpr(pstate, expr);
+    expr = transformExpr(pstate, expr, EXPR_KIND_VALUES);
     exprtype = exprType(expr);
     expr = coerce_to_target_type(pstate, expr, exprtype, attroid, attrmod,
                                  COERCION_EXPLICIT, COERCE_EXPLICIT_CAST, -1);
@@ -2146,14 +2324,14 @@ static void ProcessCopyNotAllowedOptions(CopyState cstate)
 /*
  * ProcessCopyErrorLogSetUps is used to set up necessary structures used for copy from error logging.
  */
-static bool CheckCopyErrorTableDef(int nattrs, Form_pg_attribute* attr)
+static bool CheckCopyErrorTableDef(int nattrs, FormData_pg_attribute* attr)
 {
     if (nattrs != COPY_ERROR_TABLE_NUM_COL) {
         return false;
     }
 
     for (int attnum = 0; attnum < nattrs; attnum++) {
-        if (attr[attnum]->atttypid != copy_error_table_col_typid[attnum])
+        if (attr[attnum].atttypid != copy_error_table_col_typid[attnum])
             return false;
     }
     return true;
@@ -2202,7 +2380,7 @@ static void ProcessCopyErrorLogSetUps(CopyState cstate)
     /* err_out_functions used when reading error info from cache files. */
     int natts = RelationGetNumberOfAttributes(cstate->err_table);
     TupleDesc tupDesc = RelationGetDescr(cstate->err_table);
-    Form_pg_attribute* attr = tupDesc->attrs;
+    FormData_pg_attribute* attr = tupDesc->attrs;
     cstate->err_out_functions = (FmgrInfo*)palloc(natts * sizeof(FmgrInfo));
 
     if (!CheckCopyErrorTableDef(natts, attr)) {
@@ -2219,7 +2397,7 @@ static void ProcessCopyErrorLogSetUps(CopyState cstate)
         Oid out_func_oid;
         bool isvarlena = false;
 
-        getTypeOutputInfo(attr[attnum]->atttypid, &out_func_oid, &isvarlena);
+        getTypeOutputInfo(attr[attnum].atttypid, &out_func_oid, &isvarlena);
         fmgr_info(out_func_oid, &cstate->err_out_functions[attnum]);
     }
 }
@@ -2227,14 +2405,14 @@ static void ProcessCopyErrorLogSetUps(CopyState cstate)
 /*
  * ProcessCopySummaryLogSetUps is used to set up necessary structures used for copy from summary logging.
  */
-static bool CheckCopySummaryTableDef(int nattrs, Form_pg_attribute *attr)
+static bool CheckCopySummaryTableDef(int nattrs, FormData_pg_attribute *attr)
 {
     if (nattrs != COPY_SUMMARY_TABLE_NUM_COL) {
         return false;
     }
 
     for (int attnum = 0; attnum < nattrs; attnum++) {
-        if (attr[attnum]->atttypid != copy_summary_table_col_typid[attnum])
+        if (attr[attnum].atttypid != copy_summary_table_col_typid[attnum])
             return false;
     }
     return true;
@@ -2266,7 +2444,7 @@ static void ProcessCopySummaryLogSetUps(CopyState cstate)
     cstate->summary_table = relation_open(summary_table_reloid, RowExclusiveLock);
     int natts = RelationGetNumberOfAttributes(cstate->summary_table);
     TupleDesc tupDesc = RelationGetDescr(cstate->summary_table);
-    Form_pg_attribute *attr = tupDesc->attrs;
+    FormData_pg_attribute *attr = tupDesc->attrs;
 
     if (!CheckCopySummaryTableDef(natts, attr)) {
         ereport(ERROR,
@@ -2294,7 +2472,7 @@ static void ProcessCopySummaryLogSetUps(CopyState cstate)
  * NULL values as <null_print>.
  */
 static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const char* queryString, List* attnamelist,
-    List* options, bool is_copy)
+    List* options, bool is_copy, CopyFileType filetype)
 {
     CopyState cstate;
     TupleDesc tupDesc;
@@ -2315,8 +2493,21 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
 
     cstate->source_query_string = queryString;
 
-    /* Extract options from the statement node tree */
-    ProcessCopyOptions(cstate, is_from, options);
+    switch (filetype) {
+        case S_COPYFILE:
+            /* Extract options from the statement node tree */
+            ProcessCopyOptions(cstate, is_from, options);
+            break;
+        case S_OUTFILE:
+            ProcessFileOptions(cstate, is_from, options, false);
+            break;
+        case S_DUMPFILE:
+            ProcessFileOptions(cstate, is_from, options, true);
+            break;
+        default:
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("undefined file type")));
+    }
+
     if (is_copy)
         ProcessCopyNotAllowedOptions(cstate);
     /* Process the source/target relation or query */
@@ -2456,7 +2647,7 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
                         errmsg("FORCE QUOTE column \"%s\" not referenced by COPY",
-                            NameStr(tupDesc->attrs[attnum - 1]->attname))));
+                            NameStr(tupDesc->attrs[attnum - 1].attname))));
             cstate->force_quote_flags[attnum - 1] = true;
         }
     }
@@ -2476,7 +2667,7 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
                         errmsg("FORCE NOT NULL column \"%s\" not referenced by COPY",
-                            NameStr(tupDesc->attrs[attnum - 1]->attname))));
+                            NameStr(tupDesc->attrs[attnum - 1].attname))));
             cstate->force_notnull_flags[attnum - 1] = true;
         }
     }
@@ -2488,7 +2679,7 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
         /* find last valid column */
         int i = num_phys_attrs - 1;
         for (; i >= 0; i--) {
-            if (!tupDesc->attrs[i]->attisdropped)
+            if (!tupDesc->attrs[i].attisdropped)
                 break;
         }
 
@@ -2496,7 +2687,7 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("fill_missing_fields can't be set while \"%s\" is NOT NULL",
-                        NameStr(tupDesc->attrs[i]->attname))));
+                        NameStr(tupDesc->attrs[i].attname))));
     }
 
     /* Use client encoding when ENCODING option is not specified. */
@@ -2650,8 +2841,8 @@ static void CopyToCheck(Relation rel)
 /*
  * Setup CopyState to read tuples from a table or a query for COPY TO.
  */
-CopyState BeginCopyTo(
-    Relation rel, Node* query, const char* queryString, const char* filename, List* attnamelist, List* options)
+CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
+    const char* filename, List* attnamelist, List* options, CopyFileType filetype)
 {
     CopyState cstate;
     bool pipe = (filename == NULL);
@@ -2662,7 +2853,7 @@ CopyState BeginCopyTo(
         CopyToCheck(rel);
     }
 
-    cstate = BeginCopy(false, rel, query, queryString, attnamelist, options);
+    cstate = BeginCopy(false, rel, query, queryString, attnamelist, options, true, filetype);
     oldcontext = MemoryContextSwitchTo(cstate->copycontext);
 
     if (pipe) {
@@ -2780,7 +2971,7 @@ static void DeformCopyTuple(
     MemoryContext perBatchMcxt, CopyState cstate, VectorBatch* batch, TupleDesc tupDesc, Datum* values, bool* nulls)
 {
     errno_t rc = EOK;
-    Form_pg_attribute* attrs = tupDesc->attrs;
+    FormData_pg_attribute* attrs = tupDesc->attrs;
 
     // deform values from vectorbatch.
     for (int nrow = 0; nrow < batch->m_rows; nrow++) {
@@ -2789,7 +2980,7 @@ static void DeformCopyTuple(
 
         for (int ncol = 0; ncol < batch->m_cols; ncol++) {
             /* If the column is dropped, skip deform values from vectorbatch */
-            if (attrs[ncol]->attisdropped) {
+            if (attrs[ncol].attisdropped) {
                 continue;
             }
             ScalarVector* pVec = &(batch->m_arr[ncol]);
@@ -2804,12 +2995,12 @@ static void DeformCopyTuple(
                 Datum val = ScalarVector::Decode(pVal[nrow]);
                 MemoryContext oldmcxt = MemoryContextSwitchTo(perBatchMcxt);
 
-                if (attrs[ncol]->attlen > 8) {
+                if (attrs[ncol].attlen > 8) {
                     char* result = NULL;
                     result = (char*)val + VARHDRSZ_SHORT;
-                    values[ncol] = datumCopy(PointerGetDatum(result), attrs[ncol]->attbyval, attrs[ncol]->attlen);
+                    values[ncol] = datumCopy(PointerGetDatum(result), attrs[ncol].attbyval, attrs[ncol].attlen);
                 } else
-                    values[ncol] = datumCopy(val, attrs[ncol]->attbyval, attrs[ncol]->attlen);
+                    values[ncol] = datumCopy(val, attrs[ncol].attbyval, attrs[ncol].attlen);
 
                 MemoryContextSwitchTo(oldmcxt);
             } else
@@ -2841,7 +3032,7 @@ static uint64 CStoreCopyTo(CopyState cstate, TupleDesc tupDesc, Datum* values, b
     CStoreScanDesc scandesc;
     VectorBatch* batch = NULL;
     int16* colIdx = (int16*)palloc0(sizeof(int16) * tupDesc->natts);
-    Form_pg_attribute* attrs = tupDesc->attrs;
+    FormData_pg_attribute* attrs = tupDesc->attrs;
     MemoryContext perBatchMcxt = AllocSetContextCreate(CurrentMemoryContext,
         "COPY TO PER BATCH",
         ALLOCSET_DEFAULT_MINSIZE,
@@ -2850,7 +3041,7 @@ static uint64 CStoreCopyTo(CopyState cstate, TupleDesc tupDesc, Datum* values, b
     uint64 processed = 0;
 
     for (int i = 0; i < tupDesc->natts; i++)
-        colIdx[i] = attrs[i]->attnum;
+        colIdx[i] = attrs[i].attnum;
 
     scandesc = CStoreBeginScan(cstate->curPartionRel, tupDesc->natts, colIdx, GetActiveSnapshot(), true);
 
@@ -2874,7 +3065,7 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
 {
     TupleDesc tupDesc;
     int num_phys_attrs;
-    Form_pg_attribute* attr = NULL;
+    FormData_pg_attribute* attr = NULL;
     ListCell* cur = NULL;
     uint64 processed;
 
@@ -2906,9 +3097,9 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
         bool isvarlena = false;
 
         if (IS_BINARY(cstate))
-            getTypeBinaryOutputInfo(attr[attnum - 1]->atttypid, &out_func_oid, &isvarlena);
+            getTypeBinaryOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
         else
-            getTypeOutputInfo(attr[attnum - 1]->atttypid, &out_func_oid, &isvarlena);
+            getTypeOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
         fmgr_info(out_func_oid, &cstate->out_functions[attnum - 1]);
     }
 
@@ -3160,6 +3351,9 @@ void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nul
         need_delim = true;
     }
 
+    if (cstate->line_start) {
+        CopySendString(cstate, cstate->line_start);
+    }
     if (IS_FIXED(cstate))
         FixedRowOut(cstate, values, nulls);
     else {
@@ -3178,7 +3372,11 @@ void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nul
                 switch (cstate->fileformat) {
                     case FORMAT_CSV:
                     case FORMAT_TEXT:
-                        CopySendString(cstate, cstate->null_print_client);
+                        if (cstate->is_dumpfile) {
+                            CopySendDumpFileNullStr(cstate, cstate->null_print_client);
+                        } else {
+                            CopySendString(cstate, cstate->null_print_client);
+                        }
                         break;
                     case FORMAT_BINARY:
                         CopySendInt32(cstate, -1);
@@ -3187,7 +3385,14 @@ void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nul
                         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Invalid file format")));
                 }
             } else {
-                if (!IS_BINARY(cstate)) {
+                if (cstate->enclosed || cstate->o_enclosed) {
+                    string = OutputFunctionCall(&out_functions[attnum - 1], value);
+                    if (cstate->enclosed) {
+                        SelectAttributeIntoOutfile(cstate, string, false, out_functions[attnum -1].fn_oid);
+                    } else {
+                        SelectAttributeIntoOutfile(cstate, string, true, out_functions[attnum -1].fn_oid);
+                    }
+                } else if (!IS_BINARY(cstate)) {
                     bool use_quote = cstate->force_quote_flags[attnum - 1];
                     string = OutputFunctionCall(&out_functions[attnum - 1], value);
                     switch (out_functions[attnum -1].fn_oid) {
@@ -3637,13 +3842,18 @@ void CopyFromBulkInsert(EState* estate, CopyFromBulk bulk, PageCompress* pcState
 
     /* step 1: open PARTITION relation */
     if (isPartitional) {
-        searchFakeReationForPartitionOid(estate->esfRelations,
+        bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
             estate->es_query_cxt,
             resultRelationDesc,
             bulk->partOid,
-            heaprel,
-            partition,
+            RelationIsSubPartitioned(resultRelationDesc) ? GetCurrentSubPartitionNo(bulk->partOid) :
+                                                           GetCurrentPartitionNo(bulk->partOid),
+            &heaprel,
+            &partition,
             RowExclusiveLock);
+        if (!res) {
+            return;
+        }
         estate->esCurrentPartition = heaprel;
         insertRel = heaprel;
     }
@@ -3725,7 +3935,7 @@ static void CStoreCopyConstraintsCheck(ResultRelInfo* resultRelInfo, Datum* valu
         int attrChk;
 
         for (attrChk = 1; attrChk <= natts; attrChk++) {
-            if (rel->rd_att->attrs[attrChk - 1]->attnotnull && nulls[attrChk - 1]) {
+            if (rel->rd_att->attrs[attrChk - 1].attnotnull && nulls[attrChk - 1]) {
                 HeapTuple tuple = heap_form_tuple(tupDesc, values, nulls);
                 TupleTableSlot* slot = ExecInitExtraTupleSlot(estate);
                 Bitmapset* modifiedCols = NULL;
@@ -3743,7 +3953,7 @@ static void CStoreCopyConstraintsCheck(ResultRelInfo* resultRelInfo, Datum* valu
                 ereport(ERROR,
                     (errcode(ERRCODE_NOT_NULL_VIOLATION),
                         errmsg("null value in column \"%s\" violates not-null constraint",
-                            NameStr(tupDesc->attrs[attrChk - 1]->attname)),
+                            NameStr(tupDesc->attrs[attrChk - 1].attname)),
                         val_desc ? errdetail("Failing row contains %s.", val_desc) : 0));
             }
         }
@@ -4037,7 +4247,7 @@ uint64 CopyFrom(CopyState cstate)
     estate->es_range_table = cstate->range_table;
 
     /* Set up a tuple slot too */
-    myslot = ExecInitExtraTupleSlot(estate, cstate->rel->rd_tam_type);
+    myslot = ExecInitExtraTupleSlot(estate, cstate->rel->rd_tam_ops);
     ExecSetSlotDescriptor(myslot, tupDesc);
     /* Triggers might need a slot as well */
     estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate);
@@ -4484,7 +4694,7 @@ uint64 CopyFrom(CopyState cstate)
          * are to be inserted, append them onto the data row.
          */
         if (IS_PGXC_COORDINATOR && cstate->remoteCopyState && cstate->remoteCopyState->rel_loc) {
-            Form_pg_attribute* attr = tupDesc->attrs;
+            FormData_pg_attribute* attr = tupDesc->attrs;
             Oid* att_type = NULL;
             RemoteCopyData* remoteCopyState = cstate->remoteCopyState;
             ExecNodes* exec_nodes = NULL;
@@ -4505,16 +4715,16 @@ uint64 CopyFrom(CopyState cstate)
                     TsRelWithImplDistColumn(attr, dcolNum)) {
                     pseudoTsDistcol = true;
                     for (int i = 0; i < tupDesc->natts; i++) {
-                        att_type[i] = attr[i]->atttypid;
+                        att_type[i] = attr[i].atttypid;
                         /* collect all the tag columns info to taglist */
-                        if (attr[i]->attkvtype == ATT_KV_TAG) {
+                        if (attr[i].attkvtype == ATT_KV_TAG) {
                             taglist = lappend_int(taglist, i);
                         }
                     }
                     Assert(taglist != NULL);
                 } else {
                     for (int i = 0; i < tupDesc->natts; i++) {
-                        att_type[i] = attr[i]->atttypid;
+                        att_type[i] = attr[i].atttypid;
                     }
                 }
             }
@@ -4563,7 +4773,7 @@ uint64 CopyFrom(CopyState cstate)
 #endif
 
             /* And now we can form the input tuple. */
-            tuple = (Tuple)tableam_tops_form_tuple(tupDesc, values, nulls, tableam_tops_get_tuple_type(cstate->rel));
+            tuple = (Tuple)tableam_tops_form_tuple(tupDesc, values, nulls, cstate->rel->rd_tam_ops);
 
             if (loaded_oid != InvalidOid)
                 HeapTupleSetOid((HeapTuple)tuple, loaded_oid);
@@ -4601,7 +4811,7 @@ uint64 CopyFrom(CopyState cstate)
                     tuple = slot->tts_tuple;
                 }
                 if (rel_isblockchain) {
-                    tuple = set_user_tuple_hash((HeapTuple)tuple, resultRelationDesc, true);
+                    tuple = set_user_tuple_hash((HeapTuple)tuple, resultRelationDesc, slot, true);
                 }
 
                 /* Check the constraints of the tuple */
@@ -4624,7 +4834,7 @@ uint64 CopyFrom(CopyState cstate)
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
                             targetOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
                         } else {
-                            targetOid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+                            targetOid = heapTupleGetPartitionId(resultRelationDesc, tuple, NULL);
                         }
                     } else {
                         targetOid = RelationGetRelid(resultRelationDesc);
@@ -4677,7 +4887,7 @@ uint64 CopyFrom(CopyState cstate)
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
                             targetPartOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
                         } else {
-                            targetPartOid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+                            targetPartOid = heapTupleGetPartitionId(resultRelationDesc, tuple, NULL);
                         }
                         partitionList = list_append_unique_oid(partitionList, targetPartOid);
                     }
@@ -4689,19 +4899,22 @@ uint64 CopyFrom(CopyState cstate)
                     Partition subPart = NULL;
                     if (isPartitionRel) {
                         /* get partititon oid to insert the record */
-                        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+                        int partitionno = INVALID_PARTITION_NO;
+                        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple, &partitionno);
                         searchFakeReationForPartitionOid(estate->esfRelations,
                             estate->es_query_cxt,
                             resultRelationDesc,
                             partitionid,
+                            partitionno,
                             heaprel,
                             partition,
                             RowExclusiveLock);
 
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
-                            partitionid = heapTupleGetPartitionId(heaprel, tuple);
+                            int subpartitionno = INVALID_PARTITION_NO;
+                            partitionid = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno);
                             searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, heaprel,
-                                                             partitionid, subPartRel, subPart, RowExclusiveLock);
+                                partitionid, subpartitionno, subPartRel, subPart, RowExclusiveLock);
                             heaprel = subPartRel;
                             partition = subPart;
                         }
@@ -4738,7 +4951,7 @@ uint64 CopyFrom(CopyState cstate)
                      * Global Partition Index stores the partition's tableOid with the index
                      * tuple which is extracted from the tuple of the slot. Make sure it is set.
                      */
-                    if (slot->tts_tupslotTableAm != TAM_USTORE) {
+                    if (!TTS_TABLEAM_IS_USTORE(slot)) {
                         ((HeapTuple)slot->tts_tuple)->t_tableOid = RelationGetRelid(targetRel);
                     } else {
                         ((UHeapTuple)slot->tts_tuple)->table_oid = RelationGetRelid(targetRel);
@@ -5230,7 +5443,7 @@ void UHeapCopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int
              * Global Partition Index stores the partition's tableOid with the index
              * tuple which is extracted from the tuple of the slot. Make sure it is set.
              */
-            if (myslot->tts_tupslotTableAm != TAM_USTORE) {
+            if (!TTS_TABLEAM_IS_USTORE(myslot)) {
                 ((HeapTuple)myslot->tts_tuple)->t_tableOid = RelationGetRelid(rel);
             } else {
                 ((UHeapTuple)myslot->tts_tuple)->table_oid = RelationGetRelid(rel);
@@ -5523,7 +5736,7 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
     CopyState cstate;
     bool pipe = (filename == NULL);
     TupleDesc tupDesc;
-    Form_pg_attribute* attr = NULL;
+    FormData_pg_attribute* attr = NULL;
     AttrNumber num_phys_attrs, num_defaults;
     FmgrInfo* in_functions = NULL;
     Oid* typioparams = NULL;
@@ -5586,15 +5799,15 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
 
     for (attnum = 1; attnum <= num_phys_attrs; attnum++) {
         /* We don't need info for dropped attributes */
-        if (attr[attnum - 1]->attisdropped)
+        if (attr[attnum - 1].attisdropped)
             continue;
 
-        accept_empty_str[attnum - 1] = IsTypeAcceptEmptyStr(attr[attnum - 1]->atttypid);
+        accept_empty_str[attnum - 1] = IsTypeAcceptEmptyStr(attr[attnum - 1].atttypid);
         /* Fetch the input function and typioparam info */
         if (IS_BINARY(cstate))
-            getTypeBinaryInputInfo(attr[attnum - 1]->atttypid, &in_func_oid, &typioparams[attnum - 1]);
+            getTypeBinaryInputInfo(attr[attnum - 1].atttypid, &in_func_oid, &typioparams[attnum - 1]);
         else
-            getTypeInputInfo(attr[attnum - 1]->atttypid, &in_func_oid, &typioparams[attnum - 1]);
+            getTypeInputInfo(attr[attnum - 1].atttypid, &in_func_oid, &typioparams[attnum - 1]);
         fmgr_info(in_func_oid, &in_functions[attnum - 1]);
 
         /* Get default info if needed */
@@ -5626,9 +5839,9 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
                          * values into output form before appending to data row.
                          */
                         if (IS_BINARY(cstate))
-                            getTypeBinaryOutputInfo(attr[attnum - 1]->atttypid, &out_func_oid, &isvarlena);
+                            getTypeBinaryOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
                         else
-                            getTypeOutputInfo(attr[attnum - 1]->atttypid, &out_func_oid, &isvarlena);
+                            getTypeOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
                         fmgr_info(out_func_oid, &cstate->out_functions[attnum - 1]);
                     }
                 } else {
@@ -5883,7 +6096,7 @@ static void ReportIllegalCharError(IllegalCharErrInfo* err_info)
  * @in field_strings: each parsed field string
  * @return: void
  */
-static void BulkloadIllegalCharsErrorCheck(CopyState cstate, Form_pg_attribute* attr, char** field_strings)
+static void BulkloadIllegalCharsErrorCheck(CopyState cstate, FormData_pg_attribute* attr, char** field_strings)
 {
     ListCell* cur = NULL;
     ListCell* attr_cur = NULL;
@@ -5911,7 +6124,7 @@ static void BulkloadIllegalCharsErrorCheck(CopyState cstate, Form_pg_attribute* 
                     /*
                      * for non-char type attribute illegal chars error still be thrown.
                      */
-                    if (!IsCharType(attr[m]->atttypid)) {
+                    if (!IsCharType(attr[m].atttypid)) {
                         /*
                          * reflush illegal chars error list for the next parsed line.
                          * no need extra pfree and depends on memory context reset.
@@ -6045,7 +6258,7 @@ Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str
 bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* nulls, Oid* tupleOid)
 {
     TupleDesc tupDesc;
-    Form_pg_attribute* attr = NULL;
+    FormData_pg_attribute* attr = NULL;
     AttrNumber num_phys_attrs;
     AttrNumber attr_count;
     AttrNumber num_defaults = cstate->num_defaults;
@@ -6178,7 +6391,7 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
             if (cstate->fill_missing_fields != -1){
                 if (fieldno > fldct || (!cstate->fill_missing_fields && fieldno == fldct))
                     ereport(ERROR, (errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
-                                    errmsg("missing data for column \"%s\"", NameStr(attr[m]->attname))));
+                                    errmsg("missing data for column \"%s\"", NameStr(attr[m].attname))));
             }
 
             if (fieldno < fldct) {
@@ -6203,9 +6416,9 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
                 string = cstate->null_print;
             }
 
-            cstate->cur_attname = NameStr(attr[m]->attname);
+            cstate->cur_attname = NameStr(attr[m].attname);
             cstate->cur_attval = string;
-            atttypmod = (asTypemods != NULL && asTypemods[m].assign) ? asTypemods[m].typemod : attr[m]->atttypmod;
+            atttypmod = (asTypemods != NULL && asTypemods[m].assign) ? asTypemods[m].typemod : attr[m].atttypmod;
             values[m] =
                 InputFunctionCallForBulkload(cstate, &in_functions[m], string, typioparams[m], atttypmod);
             if (string != NULL)
@@ -6312,9 +6525,9 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
             /* Skip the hidden distribute column */
             if (pseudoTsDistcol && m == tgt_col_num) continue;
 
-            cstate->cur_attname = NameStr(attr[m]->attname);
+            cstate->cur_attname = NameStr(attr[m].attname);
             i++;
-            atttypmod = (asTypemods != NULL && asTypemods[m].assign) ? asTypemods[m].typemod : attr[m]->atttypmod;
+            atttypmod = (asTypemods != NULL && asTypemods[m].assign) ? asTypemods[m].typemod : attr[m].atttypmod;
             values[m] =
                 CopyReadBinaryAttribute(cstate, i, &in_functions[m], typioparams[m], atttypmod, &nulls[m]);
             cstate->cur_attname = NULL;
@@ -7971,6 +8184,43 @@ static void CopyAttributeOutCSV(CopyState cstate, char* string, bool use_quote, 
     }
 }
 
+static void ProcessEnclosedChar(CopyState cstate, char* cur_char, char enclosedc, char escapedc)
+{
+    CopySendChar(cstate, enclosedc);
+    while (*cur_char != '\0') {
+        if (*cur_char == enclosedc) {
+            CopySendChar(cstate, escapedc);
+        }
+        CopySendChar(cstate, *cur_char);
+        cur_char++;
+    }
+    CopySendChar(cstate, enclosedc);
+}
+
+static void SelectAttributeIntoOutfile(CopyState cstate, char* string, bool is_optionally, Oid fn_oid)
+{
+    char* start = string;
+    char escapedc = cstate->escape[0];
+    char enclosedc;
+
+    if (!is_optionally) {
+        enclosedc= cstate->enclosed[0];
+        ProcessEnclosedChar(cstate, start, enclosedc, escapedc);
+    } else {
+        enclosedc= cstate->o_enclosed[0];
+        switch (fn_oid) {
+            case F_BPCHAROUT:
+            case F_TEXTOUT:
+            case F_RAWOUT:
+            case F_ENUM_OUT:
+                ProcessEnclosedChar(cstate, start, enclosedc, escapedc);
+                break;
+            default:
+                CopySendString(cstate, string);
+        }
+    }
+}
+
 /*
  * Send text representation of one attribute, without encoding conversion.
  */
@@ -8005,12 +8255,12 @@ static void CopyNonEncodingAttributeOut(CopyState cstate, char* string, bool use
 List* CopyGetAllAttnums(TupleDesc tupDesc, Relation rel)
 {
     List* attnums = NIL;
-    Form_pg_attribute* attr = tupDesc->attrs;
+    FormData_pg_attribute* attr = tupDesc->attrs;
     int attr_count = tupDesc->natts;
     int i;
 
     for (i = 0; i < attr_count; i++) {
-        if (attr[i]->attisdropped)
+        if (attr[i].attisdropped)
             continue;
         attnums = lappend_int(attnums, i + 1);
     }
@@ -8038,12 +8288,12 @@ List* CopyGetAttnums(TupleDesc tupDesc, Relation rel, List* attnamelist)
 
     if (attnamelist == NIL) {
         /* Generate default column list */
-        Form_pg_attribute *attr = tupDesc->attrs;
+        FormData_pg_attribute *attr = tupDesc->attrs;
         int attr_count = tupDesc->natts;
         int i;
 
         for (i = 0; i < attr_count; i++) {
-            if (attr[i]->attisdropped)
+            if (attr[i].attisdropped)
                 continue;
             if (ISGENERATEDCOL(tupDesc, i))
                 continue;
@@ -8061,15 +8311,15 @@ List* CopyGetAttnums(TupleDesc tupDesc, Relation rel, List* attnamelist)
             /* Lookup column name */
             attnum = InvalidAttrNumber;
             for (i = 0; i < tupDesc->natts; i++) {
-                if (tupDesc->attrs[i]->attisdropped)
+                if (tupDesc->attrs[i].attisdropped)
                     continue;
-                if (namestrcmp(&(tupDesc->attrs[i]->attname), name) == 0) {
+                if (namestrcmp(&(tupDesc->attrs[i].attname), name) == 0) {
                     if (ISGENERATEDCOL(tupDesc, i)) {
                         ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
                             errmsg("column \"%s\" is a generated column", name),
                             errdetail("Generated columns cannot be used in COPY.")));
                     }
-                    attnum = tupDesc->attrs[i]->attnum;
+                    attnum = tupDesc->attrs[i].attnum;
                     break;
                 }
             }
@@ -8103,10 +8353,10 @@ void SetFixedAlignment(TupleDesc tupDesc, Relation rel, FixFormatter* formatter,
         // Validate the user-supplied list
         //
         for (int j = 0; j < tupDesc->natts; j++) {
-            if (tupDesc->attrs[j]->attisdropped)
+            if (tupDesc->attrs[j].attisdropped)
                 continue;
-            if (namestrcmp(&(tupDesc->attrs[j]->attname), name) == 0) {
-                attr = tupDesc->attrs[j];
+            if (namestrcmp(&(tupDesc->attrs[j].attname), name) == 0) {
+                attr = &tupDesc->attrs[j];
                 break;
             }
         }
@@ -8167,6 +8417,10 @@ static void copy_dest_receive(TupleTableSlot* slot, DestReceiver* self)
     DR_copy* myState = (DR_copy*)self;
     CopyState cstate = myState->cstate;
 
+    if (cstate->is_dumpfile && myState->processed == 1) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Result consisted of more than one row")));
+    }
     /* Make sure the tuple is fully deconstructed */
     tableam_tslot_getallattrs(slot);
 
@@ -9288,7 +9542,7 @@ CopyState beginExport(
 
     Assert(cstate->rel);
     TupleDesc tupDesc = RelationGetDescr(cstate->rel);
-    Form_pg_attribute* attr = tupDesc->attrs;
+    FormData_pg_attribute* attr = tupDesc->attrs;
     int num_phys_attrs = tupDesc->natts;
 
     cstate->curPartionRel = cstate->rel;
@@ -9350,9 +9604,9 @@ CopyState beginExport(
         bool isvarlena = false;
 
         if (IS_BINARY(cstate))
-            getTypeBinaryOutputInfo(attr[attnum - 1]->atttypid, &out_func_oid, &isvarlena);
+            getTypeBinaryOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
         else
-            getTypeOutputInfo(attr[attnum - 1]->atttypid, &out_func_oid, &isvarlena);
+            getTypeOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
         fmgr_info(out_func_oid, &cstate->out_functions[attnum - 1]);
     }
 
@@ -10064,10 +10318,10 @@ static void CopyGetWhenExprAttFieldno(CopyState cstate, LoadWhenExpr *when, List
         }
         tupDesc = RelationGetDescr(cstate->rel);
         for (int i = 0; i < tupDesc->natts; i++) {
-            if (tupDesc->attrs[i]->attisdropped)
+            if (tupDesc->attrs[i].attisdropped)
                 continue;
-            if (namestrcmp(&(tupDesc->attrs[i]->attname), when->attname) == 0) {
-                when->attnum = tupDesc->attrs[i]->attnum; /* based 1 */
+            if (namestrcmp(&(tupDesc->attrs[i].attname), when->attname) == 0) {
+                when->attnum = tupDesc->attrs[i].attnum; /* based 1 */
                 return;
             }
         }
@@ -10178,10 +10432,10 @@ static int CopyGetColumnListIndex(CopyState cstate, List *attnamelist, const cha
         }
         tupDesc = RelationGetDescr(cstate->rel);
         for (int i = 0; i < tupDesc->natts; i++) {
-            if (tupDesc->attrs[i]->attisdropped)
+            if (tupDesc->attrs[i].attisdropped)
                 continue;
-            if (namestrcmp(&(tupDesc->attrs[i]->attname), colname) == 0) {
-                return tupDesc->attrs[i]->attnum; /* based 1 */
+            if (namestrcmp(&(tupDesc->attrs[i].attname), colname) == 0) {
+                return tupDesc->attrs[i].attnum; /* based 1 */
             }
         }
         ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("Column name %s not find", colname)));
@@ -10232,7 +10486,7 @@ static void BatchInsertCopyLog(LogInsertState copyLogInfo, int nBufferedTuples, 
     return;
 }
 
-static LogInsertState InitInsertCopyLogInfo(CopyState cstate, TableAmType tam)
+static LogInsertState InitInsertCopyLogInfo(CopyState cstate, const TableAmRoutine* tam_ops)
 {
     LogInsertState copyLogInfo = NULL;
     ResultRelInfo *resultRelInfo = NULL;
@@ -10255,7 +10509,7 @@ static LogInsertState InitInsertCopyLogInfo(CopyState cstate, TableAmType tam)
     estate->es_result_relation_info = resultRelInfo;
     copyLogInfo->estate = estate;
 
-    copyLogInfo->myslot = ExecInitExtraTupleSlot(estate, tam);
+    copyLogInfo->myslot = ExecInitExtraTupleSlot(estate, tam_ops);
     ExecSetSlotDescriptor(copyLogInfo->myslot, RelationGetDescr(copyLogInfo->rel));
 
     copyLogInfo->bistate = GetBulkInsertState();
@@ -10297,7 +10551,7 @@ static void LogCopyErrorLogBulk(CopyState cstate)
     /* Reset the offset of the logger. Read from 0. */
     cstate->logger->Reset();
 
-    copyLogInfo = InitInsertCopyLogInfo(cstate, TAM_HEAP);
+    copyLogInfo = InitInsertCopyLogInfo(cstate, TableAmHeap);
     bufferedTuples = (HeapTuple *)palloc0(MAX_TUPLES * sizeof(HeapTuple));
 
     for (;;) {
@@ -10355,7 +10609,7 @@ static void LogCopyUErrorLogBulk(CopyState cstate)
     /* Reset the offset of the logger. Read from 0. */
     cstate->logger->Reset();
 
-    copyLogInfo = InitInsertCopyLogInfo(cstate, TAM_USTORE);
+    copyLogInfo = InitInsertCopyLogInfo(cstate, TableAmUstore);
     bufferedUTuples = (UHeapTuple *)palloc0(MAX_TUPLES * sizeof(UHeapTuple));
 
     for (;;) {

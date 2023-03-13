@@ -369,7 +369,8 @@ static void stream_walker_query_jointree(Query* query, shipping_context *cxt)
         expression_tree_walker((Node*)query->jointree->fromlist, (bool (*)())stream_walker, (void *)cxt)) {
         cxt->current_shippable = false;
     }
-    if (query->jointree != NULL && stream_walker((Node*)query->jointree->quals, (void *)cxt)) {
+    if (query->jointree != NULL &&
+        contain_unsupport_expression((Node*)query->jointree->quals, (void *)cxt)) {
         cxt->current_shippable = false;
     }
 }
@@ -913,6 +914,18 @@ static bool contain_unsupport_expression(Node* expr, void* context)
                         cxt->current_shippable = false;
                     }
                 }
+            }
+        } break;
+        case T_OpExpr: {
+            OpExpr* op = (OpExpr*)expr;
+            if (contain_unsupport_expression((Node*)op->args, context)) {
+                cxt->current_shippable = false;
+            }
+        } break;
+        case T_BoolExpr: {
+            BoolExpr* be = (BoolExpr*)expr;
+            if (contain_unsupport_expression((Node*)be->args, context)) {
+                cxt->current_shippable = false;
             }
         } break;
         case T_FuncExpr: {

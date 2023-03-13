@@ -478,7 +478,7 @@ Datum cginbuild(PG_FUNCTION_ARGS)
             list_free(varsOrigin);
         }
         heapScanAttrNumbers[i] = keycol;
-        transferFuncs[i] = GetTransferFuncByTypeOid(heap->rd_att->attrs[heapScanAttrNumbers[i] - 1]->atttypid);
+        transferFuncs[i] = GetTransferFuncByTypeOid(heap->rd_att->attrs[heapScanAttrNumbers[i] - 1].atttypid);
     }
 
     /* add ctid column for cstore scan */

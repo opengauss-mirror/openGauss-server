@@ -671,7 +671,7 @@ static ScalarVector* ExecVecScanSubplan(
                     Assert(slot->tts_tupleDescriptor != NULL);
                     Datum res = tableam_tslot_getattr(slot, 1, &is_null);
                     if (pVector->m_desc.typeId == 0) {
-                        pVector->m_desc.typeId = slot->tts_tupleDescriptor->attrs[0]->atttypid;
+                        pVector->m_desc.typeId = slot->tts_tupleDescriptor->attrs[0].atttypid;
                         pVector->m_desc.encoded = COL_IS_ENCODE(pVector->m_desc.typeId);
                     }
                     if (!is_null) {
@@ -684,7 +684,7 @@ static ScalarVector* ExecVecScanSubplan(
                              *  Like: MACADDR/TIMETZ/TINTERVAL/INTERVAL/NAME/UNKNOWN/CSTRING
                              */
                             result =
-                                ScalarVector::DatumToScalar(res, slot->tts_tupleDescriptor->attrs[0]->atttypid, false);
+                                ScalarVector::DatumToScalar(res, slot->tts_tupleDescriptor->attrs[0].atttypid, false);
                             /* Need copy to encode datatype */
                             int key_size = VARSIZE_ANY(result);
                             char* addr = pVector->m_buf->Allocate(key_size);
@@ -695,7 +695,7 @@ static ScalarVector* ExecVecScanSubplan(
                                 pfree(DatumGetPointer(result));
                         } else {
                             /* In vector engine, tid data should be copyed */
-                            if (slot->tts_tupleDescriptor->attrs[0]->atttypid == TIDOID) {
+                            if (slot->tts_tupleDescriptor->attrs[0].atttypid == TIDOID) {
                                 pVector->m_vals[res_vector_idx] = 0;
                                 ItemPointer dest_tid = (ItemPointer)&pVector->m_vals[res_vector_idx];
                                 ItemPointer src_tid = (ItemPointer)DatumGetPointer(res);
@@ -741,7 +741,7 @@ static ScalarVector* ExecVecScanSubplan(
                         Assert(slot->tts_tupleDescriptor != NULL);
                         prmdata->value = tableam_tslot_getattr(slot, col, &(prmdata->isnull));
                         prmdata->isChanged = true;
-                        prmdata->valueType = slot->tts_tupleDescriptor->attrs[col - 1]->atttypid;
+                        prmdata->valueType = slot->tts_tupleDescriptor->attrs[col - 1].atttypid;
                         col++;
                     }
 

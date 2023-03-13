@@ -833,8 +833,6 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
     bool merge = (btspool2 != NULL);
     IndexTuple itup = NULL;
     IndexTuple itup2 = NULL;
-    bool should_free = false;
-    bool should_free2 = false;
     bool load1 = false;
     TupleDesc tupdes = RelationGetDescr(wstate->index);
     int keysz = IndexRelationGetNumberOfKeyAttributes(wstate->index);
@@ -847,8 +845,8 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
          *
          * the preparation of merge
          */
-        itup = tuplesort_getindextuple(btspool->sortstate, true, &should_free);
-        itup2 = tuplesort_getindextuple(btspool2->sortstate, true, &should_free2);
+        itup = tuplesort_getindextuple(btspool->sortstate, true);
+        itup2 = tuplesort_getindextuple(btspool2->sortstate, true);
         indexScanKey = _bt_mkscankey_nodata(wstate->index);
 
         for (;;) {
@@ -863,33 +861,21 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
 
             if (load1) {
                 _bt_buildadd(wstate, state, itup);
-                if (should_free) {
-                    pfree(itup);
-                    itup = NULL;
-                }
-                itup = tuplesort_getindextuple(btspool->sortstate, true, &should_free);
+                itup = tuplesort_getindextuple(btspool->sortstate, true);
             } else {
                 _bt_buildadd(wstate, state, itup2);
-                if (should_free2) {
-                    pfree(itup2);
-                    itup2 = NULL;
-                }
-                itup2 = tuplesort_getindextuple(btspool2->sortstate, true, &should_free2);
+                itup2 = tuplesort_getindextuple(btspool2->sortstate, true);
             }
         }
         _bt_freeskey(indexScanKey);
     } else {
         /* merge is unnecessary */
-        while ((itup = tuplesort_getindextuple(btspool->sortstate, true, &should_free)) != NULL) {
+        while ((itup = tuplesort_getindextuple(btspool->sortstate, true)) != NULL) {
             /* When we see first tuple, create first index page */
             if (state == NULL)
                 state = _bt_pagestate(wstate, 0);
 
             _bt_buildadd(wstate, state, itup);
-            if (should_free) {
-                pfree(itup);
-                itup = NULL;
-            }
         }
     }
 
@@ -1381,7 +1367,7 @@ static void _bt_parallel_scan_and_sort(BTSpool *btspool, BTSpool *btspool2, BTSh
     indexInfo->ii_Concurrent = false;
 
     /* do the heap scan */
-    IndexBuildCallback callback = (btspool->heap->rd_tam_type == TAM_USTORE)? UBTreeBuildCallback : btbuildCallback;
+    IndexBuildCallback callback = (btspool->heap->rd_tam_ops == TableAmUstore)? UBTreeBuildCallback : btbuildCallback;
     if (btshared->isplain) {
         /* plain table or partition */
         scan = tableam_scan_begin_parallel(btspool->heap, &btshared->heapdesc);
@@ -1555,7 +1541,7 @@ static double _bt_spools_heapscan_utility(Relation heap, Relation index,  BTBuil
     /* Fill spool using either serial or parallel heap scan */
     if (!buildstate->btleader) {
 serial_build:
-        IndexBuildCallback callback = (heap->rd_tam_type == TAM_USTORE)? UBTreeBuildCallback : btbuildCallback;
+        IndexBuildCallback callback = (heap->rd_tam_ops == TableAmUstore)? UBTreeBuildCallback : btbuildCallback;
         if (RelationIsGlobalIndex(index)) {
             *allPartTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, callback, (void *)buildstate);
         } else if (RelationIsCrossBucketIndex(index)) {

@@ -30,12 +30,12 @@ extern Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry*
 
 extern Node* transformJoinOnClause(ParseState* pstate, JoinExpr* j, RangeTblEntry* l_rte, RangeTblEntry* r_rte,
     List* relnamespace);
-extern Node* transformWhereClause(ParseState* pstate, Node* clause, const char* constructName);
-extern Node* transformLimitClause(ParseState* pstate, Node* clause, const char* constructName);
+extern Node* transformWhereClause(ParseState* pstate, Node* clause, ParseExprKind exprKind, const char* constructName);
+extern Node* transformLimitClause(ParseState* pstate, Node* clause, ParseExprKind exprKind, const char* constructName);
 extern List* transformGroupClause(
-    ParseState* pstate, List* grouplist, List** groupingSets, List** targetlist, List* sortClause, bool useSQL99);
+    ParseState* pstate, List* grouplist, List** groupingSets, List** targetlist, List* sortClause, ParseExprKind exprKind, bool useSQL99);
 extern List* transformSortClause(
-    ParseState* pstate, List* orderlist, List** targetlist, bool resolveUnknown, bool useSQL99);
+    ParseState* pstate, List* orderlist, List** targetlist, ParseExprKind exprKind, bool resolveUnknown, bool useSQL99);
 
 extern List* transformWindowDefinitions(ParseState* pstate, List* windowdefs, List** targetlist);
 

@@ -12,7 +12,7 @@ GRANT ALL PRIVILEGES TO "Test_User";
 CREATE DEFINER="Test_User" VIEW definer_test_view2 AS SELECT log(10, 100);
 CREATE OR REPLACE DEFINER="Test_User" VIEW definer_test_view3 AS SELECT log(10, 100);
 
-SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
+SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%' order by view_name;
 
 CREATE USER test_user2 with password 'openGauss@123';
 SELECT * FROM definer_test_view1;
@@ -30,7 +30,7 @@ until n>10 end repeat;
 end;
 /
 
-SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
+SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%' order by view_name;
 
 -- dump all views
 \! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^ALTER|^DROP'| tr -s ‘'\n' > @abs_bindir@/definer_view_dump.sql 2>&1
@@ -53,7 +53,7 @@ SELECT * FROM definer_test_view1;
 SELECT * FROM definer_test_view2;
 SELECT * FROM definer_test_view3;
 
-SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
+SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%' order by view_name;
 
 RESET ROLE;
 

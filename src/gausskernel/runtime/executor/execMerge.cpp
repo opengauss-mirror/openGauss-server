@@ -189,7 +189,7 @@ static TupleTableSlot* ExtractConstraintTuple(
         case CMD_UPDATE:
             constrSlot = mtstate->mt_update_constr_slot;
             for (i = 0; i < originTupleDesc->natts; i++) {
-                if (strstr(originTupleDesc->attrs[i]->attname.data, "action UPDATE target")) {
+                if (strstr(originTupleDesc->attrs[i].attname.data, "action UPDATE target")) {
                     values[index] = slot->tts_values[i];
                     isnull[index] = slot->tts_isnull[i];
                     index++;
@@ -199,7 +199,7 @@ static TupleTableSlot* ExtractConstraintTuple(
         case CMD_INSERT:
             constrSlot = mtstate->mt_insert_constr_slot;
             for (i = 0; i < originTupleDesc->natts; i++) {
-                if (strstr(originTupleDesc->attrs[i]->attname.data, "action INSERT target")) {
+                if (strstr(originTupleDesc->attrs[i].attname.data, "action INSERT target")) {
                     values[index] = slot->tts_values[i];
                     isnull[index] = slot->tts_isnull[i];
                     index++;
@@ -210,8 +210,8 @@ static TupleTableSlot* ExtractConstraintTuple(
             Assert(0);
     }
 
-    Assert(constrSlot->tts_tupleDescriptor->tdTableAmType == originTupleDesc->tdTableAmType);
-    tempTuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, values, isnull, HEAP_TUPLE);
+    Assert(constrSlot->tts_tupleDescriptor->td_tam_ops == originTupleDesc->td_tam_ops);
+    tempTuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, values, isnull);
     (void)ExecStoreTuple(tempTuple, constrSlot, InvalidBuffer, false);
 
     return constrSlot;
@@ -247,7 +247,7 @@ TupleTableSlot* ExtractScanTuple(ModifyTableState* mtstate, TupleTableSlot* slot
     }
 
     for (index = 0; index < tupDesc->natts; index++) {
-        if (tupDesc->attrs[index]->attisdropped == true) {
+        if (tupDesc->attrs[index].attisdropped == true) {
             isnull[index] = true;
             continue;
         }
@@ -257,7 +257,7 @@ TupleTableSlot* ExtractScanTuple(ModifyTableState* mtstate, TupleTableSlot* slot
         startIdx++;
     }
 
-    tempTuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, values, isnull, HEAP_TUPLE);
+    tempTuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, values, isnull);
     (void)ExecStoreTuple(tempTuple, scanSlot, InvalidBuffer, false);
 
     return scanSlot;
@@ -563,7 +563,7 @@ void ExecInitMerge(ModifyTableState* mtstate, EState* estate, ResultRelInfo* res
         action_state->whenqual = ExecInitExpr((Expr*)action->qual, &mtstate->ps);
 
         /* create target slot for this action's projection */
-        tupDesc = ExecTypeFromTL((List*)action->targetList, false, true, relationDesc->tdTableAmType);
+        tupDesc = ExecTypeFromTL((List*)action->targetList, false, true, relationDesc->td_tam_ops);
         action_state->tupDesc = tupDesc;
 
         if (IS_PGXC_DATANODE && CMD_UPDATE == action->commandType) {

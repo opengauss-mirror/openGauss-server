@@ -54,6 +54,7 @@ static RemoteQueryPath* create_remotequery_path(PlannerInfo* root, RelOptInfo* r
 
     rqpath->path.pathtype = T_RemoteQuery;
     rqpath->path.parent = rel;
+    rqpath->path.pathtarget = rel->reltarget;
     /* PGXC_TODO: do we want to care about it */
     rqpath->path.param_info = NULL;
     rqpath->path.pathkeys = NIL; /* result is always unordered */
@@ -83,7 +84,7 @@ static RemoteQueryPath* create_remotequery_path(PlannerInfo* root, RelOptInfo* r
             elog(ERROR, "can not create remote path for relation of type %d", rel->reloptkind);
     }
     rqpath->rqhas_unshippable_qual = unshippable_quals;
-    rqpath->rqhas_unshippable_tlist = !pgxc_is_expr_shippable((Expr*)rel->reltargetlist, NULL);
+    rqpath->rqhas_unshippable_tlist = !pgxc_is_expr_shippable((Expr*)rel->reltarget->exprs, NULL);
 
     /* set cost properly */
     cost_remotequery(rqpath, root, rel);
@@ -121,7 +122,7 @@ extern bool create_plainrel_rqpath(PlannerInfo* root, RelOptInfo* rel, RangeTblE
         return false;
 
     if (IsExecNodesDistributedByValue(exec_nodes)) {
-        Var* dist_var = pgxc_get_dist_var(rel->relid, rte, rel->reltargetlist);
+        Var* dist_var = pgxc_get_dist_var(rel->relid, rte, rel->reltarget->exprs);
         exec_nodes->en_dist_vars = list_make1(dist_var);
     }
 

@@ -286,7 +286,7 @@ static void print_literal(StringInfo s, Oid typid, char* outputstr)
 /*
  * Decode tuple into stringinfo.
  */
-static void TupleToStringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool skip_nulls)
+static void TupleToStringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple)
 {
     Assert(tuple != NULL);
     if ((tuple->tupTableType == HEAP_TUPLE) && (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) ||
@@ -302,7 +302,7 @@ static void TupleToStringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, 
         Oid typoutput = 0;          /* output function */
         Datum origval = 0;          /* possibly toasted Datum */
 
-        Form_pg_attribute attr = tupdesc->attrs[natt]; /* the attribute itself */
+        Form_pg_attribute attr = &tupdesc->attrs[natt]; /* the attribute itself */
 
         if (attr->attisdropped || attr->attnum < 0) {
             continue;
@@ -313,10 +313,6 @@ static void TupleToStringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, 
             origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
         } else {
             origval = uheap_getattr((UHeapTuple)tuple, natt + 1, tupdesc, &isnull);
-        }
-
-        if (skip_nulls && isnull) {
-            continue;
         }
 
         /* query output function */
@@ -343,7 +339,7 @@ static void TupleToStringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, 
  * Decode tuple into stringinfo.
  * This function is used for UPDATE or DELETE statements.
  */
-static void TupleToStringinfoUpd(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool skip_nulls)
+static void TupleToStringinfoUpd(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple)
 {
     if ((tuple->tupTableType == HEAP_TUPLE) && (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) ||
         (int)HeapTupleHeaderGetNatts(tuple->t_data, tupdesc) > tupdesc->natts)) {
@@ -358,9 +354,9 @@ static void TupleToStringinfoUpd(StringInfo s, TupleDesc tupdesc, HeapTuple tupl
         bool isnull = false;        /* column is null? */
         bool typisvarlena = false;
 
-        Form_pg_attribute attr = tupdesc->attrs[natt]; /* the attribute itself */
+        Form_pg_attribute attr = &tupdesc->attrs[natt]; /* the attribute itself */
 
-        if (attr->attisdropped || attr->attnum < 0) {
+        if (attr->attisdropped || attr->attnum < 0 || !IsRelationReplidentKey(relation, attr->attnum)) {
             continue;
         }
 
@@ -369,10 +365,6 @@ static void TupleToStringinfoUpd(StringInfo s, TupleDesc tupdesc, HeapTuple tupl
             origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
         } else {
             origval = uheap_getattr((UHeapTuple)tuple, natt + 1, tupdesc, &isnull);
-        }
-
-        if (isnull && skip_nulls) {
-            continue;
         }
 
         if (!isFirstAtt) {
@@ -403,31 +395,32 @@ static void TupleToStringinfoUpd(StringInfo s, TupleDesc tupdesc, HeapTuple tupl
  * Callback for handle decoded tuple.
  * Additional info will be added if the tuple is found null.
  */
-static void TupleHandler(StringInfo s, TupleDesc tupdesc, ReorderBufferChange* change, bool isHeap, bool isNewTuple)
+static void TupleHandler(Relation relation, StringInfo s, TupleDesc tupdesc, ReorderBufferChange* change,
+    bool isHeap, bool isNewTuple)
 {
     if (isHeap && isNewTuple) {
         if (change->data.tp.newtuple == NULL) {
             appendStringInfoString(s, " (no-tuple-data)");
         } else {
-            TupleToStringinfo(s, tupdesc, &change->data.tp.newtuple->tuple, false);
+            TupleToStringinfo(s, tupdesc, &change->data.tp.newtuple->tuple);
         }
     } else if (isHeap && !isNewTuple) {
         if (change->data.tp.oldtuple == NULL) {
             appendStringInfoString(s, " (no-tuple-data)");
         } else {
-            TupleToStringinfoUpd(s, tupdesc, &change->data.tp.oldtuple->tuple, true);
+            TupleToStringinfoUpd(relation, s, tupdesc, &change->data.tp.oldtuple->tuple);
         }
     } else if (!isHeap && isNewTuple) {
         if (change->data.utp.newtuple == NULL) {
             appendStringInfoString(s, " (no-tuple-data)");
         } else {
-            TupleToStringinfo(s, tupdesc, (HeapTuple)(&change->data.utp.newtuple->tuple), false);
+            TupleToStringinfo(s, tupdesc, (HeapTuple)(&change->data.utp.newtuple->tuple));
         }
     } else {
         if (change->data.utp.oldtuple == NULL) {
             appendStringInfoString(s, " (no-tuple-data)");
         } else {
-            TupleToStringinfoUpd(s, tupdesc, (HeapTuple)(&change->data.utp.oldtuple->tuple), true);
+            TupleToStringinfoUpd(relation, s, tupdesc, (HeapTuple)(&change->data.utp.oldtuple->tuple));
         }
     }
 }
@@ -472,7 +465,7 @@ static void pg_decode_change(
                 isHeap = false;
             }
             appendStringInfoString(ctx->out, " values ");
-            TupleHandler(ctx->out, tupdesc, change, isHeap, true);
+            TupleHandler(relation, ctx->out, tupdesc, change, isHeap, true);
             break;
         case REORDER_BUFFER_CHANGE_UPDATE:
         case REORDER_BUFFER_CHANGE_UUPDATE:
@@ -483,12 +476,12 @@ static void pg_decode_change(
                 isHeap = false;
             }
             appendStringInfoString(ctx->out, " where ");
-            TupleHandler(ctx->out, tupdesc, change, isHeap, false);
+            TupleHandler(relation, ctx->out, tupdesc, change, isHeap, false);
             appendStringInfoChar(ctx->out, ';');
             appendStringInfoString(ctx->out, "insert into ");
             appendStringInfoString(ctx->out, quote_qualified_identifier(schema, table));
             appendStringInfoString(ctx->out, " values ");
-            TupleHandler(ctx->out, tupdesc, change, isHeap, true);
+            TupleHandler(relation, ctx->out, tupdesc, change, isHeap, true);
 
             break;
 
@@ -502,7 +495,7 @@ static void pg_decode_change(
             }
             appendStringInfoString(ctx->out, " where ");
 
-            TupleHandler(ctx->out, tupdesc, change, isHeap, false);
+            TupleHandler(relation, ctx->out, tupdesc, change, isHeap, false);
             break;
         default:
             Assert(false);

@@ -36,6 +36,7 @@
 #include "utils/snapmgr.h"
 #include "pgstat.h"
 #include "pgaudit.h"
+#include "auditfuncs.h"
 #include "pgxc/route.h"
 #include "libpq/pqformat.h"
 #include "gs_policy/policy_common.h"
@@ -1019,8 +1020,9 @@ void lightProxy::runSimpleQuery(StringInfo exec_message)
     handleResponse();
 
     /* pgaudit */
-    if ((u_sess->attr.attr_security.Audit_DML_SELECT != 0 || u_sess->attr.attr_security.Audit_DML != 0) &&
-        u_sess->attr.attr_security.Audit_enabled && IsPostmasterEnvironment) {
+    bool is_full_audit_user = audit_check_full_audit_user();
+    if ((u_sess->attr.attr_security.Audit_DML_SELECT != 0 || u_sess->attr.attr_security.Audit_DML != 0 ||
+        is_full_audit_user) && u_sess->attr.attr_security.Audit_enabled && IsPostmasterEnvironment) {
         light_pgaudit_ExecutorEnd(m_query);
     }
     /* unified auditing policy */
@@ -1097,8 +1099,9 @@ int lightProxy::runBatchMsg(StringInfo batch_message, bool sendDMsg, int batch_c
     CommandCounterIncrement();
 
     /* pgaudit */
-    if ((u_sess->attr.attr_security.Audit_DML_SELECT != 0 || u_sess->attr.attr_security.Audit_DML != 0) &&
-        u_sess->attr.attr_security.Audit_enabled && IsPostmasterEnvironment) {
+    bool is_full_audit_user = audit_check_full_audit_user();
+    if ((u_sess->attr.attr_security.Audit_DML_SELECT != 0 || u_sess->attr.attr_security.Audit_DML != 0 ||
+        is_full_audit_user) && u_sess->attr.attr_security.Audit_enabled && IsPostmasterEnvironment) {
         for (int i = 0; i < batch_count; i++)
             light_pgaudit_ExecutorEnd((Query*)linitial(m_cplan->query_list));
     }
@@ -1213,8 +1216,9 @@ void lightProxy::runMsg(StringInfo exec_message)
     }
 
     /* pgaudit */
-    if ((u_sess->attr.attr_security.Audit_DML_SELECT != 0 || u_sess->attr.attr_security.Audit_DML != 0) &&
-        u_sess->attr.attr_security.Audit_enabled && IsPostmasterEnvironment) {
+    bool is_full_audit_user = audit_check_full_audit_user();
+    if ((u_sess->attr.attr_security.Audit_DML_SELECT != 0 || u_sess->attr.attr_security.Audit_DML != 0 ||
+        is_full_audit_user) && u_sess->attr.attr_security.Audit_enabled && IsPostmasterEnvironment) {
         light_pgaudit_ExecutorEnd((Query*)linitial(m_cplan->query_list));
     }
     /* unified auditing policy */

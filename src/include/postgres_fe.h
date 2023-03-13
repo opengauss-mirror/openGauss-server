@@ -53,7 +53,8 @@
 /* Type of database; increase for sql compatibility */
 typedef enum {
     ORA_FORMAT,
-    TD_FORMAT
+    TD_FORMAT,
+    M_FORMAT
 } DatabaseType;
 #endif // HAVE_DATABASE_TYPE
 

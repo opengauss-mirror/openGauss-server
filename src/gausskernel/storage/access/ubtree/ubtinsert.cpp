@@ -222,8 +222,8 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
     if (npreviousDead > 0 || prstate.ndead > 0) {
         /* Set up flags and try to repair page  fragmentation */
         WaitState oldStatus = pgstat_report_waitstatus(STATE_PRUNE_INDEX);
-        UBTreePagePruneExecute(page, prstate.previousdead, npreviousDead, &prstate);
-        UBTreePagePruneExecute(page, prstate.nowdead, prstate.ndead, &prstate);
+        UBTreePagePruneExecute(page, prstate.previousdead, npreviousDead, &prstate, oldestXmin);
+        UBTreePagePruneExecute(page, prstate.nowdead, prstate.ndead, &prstate, oldestXmin);
 
         UBTreePageRepairFragmentation(rel, BufferGetBlockNumber(buf), page);
 
@@ -321,7 +321,8 @@ bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, I
 /*
  *  UBTreePagePruneExecute() -- Traverse the nowdead array, set the corresponding tuples as dead.
  */
-void UBTreePagePruneExecute(Page page, OffsetNumber *nowdead, int ndead, IndexPruneState *prstate)
+void UBTreePagePruneExecute(Page page, OffsetNumber *nowdead, int ndead, IndexPruneState *prstate,
+    TransactionId oldest_xmin)
 {
     OffsetNumber *offnum = NULL;
     int i;
@@ -339,8 +340,9 @@ void UBTreePagePruneExecute(Page page, OffsetNumber *nowdead, int ndead, IndexPr
 
             TransactionId xid = ShortTransactionIdToNormal(opaque->xid_base, uxid->xmax);
             if (TransactionIdIsNormal(xid)) {
-                if (!TransactionIdIsValid(prstate->latestRemovedXid) ||
-                    TransactionIdPrecedes(prstate->latestRemovedXid, xid)) {
+                if ((!TransactionIdIsValid(prstate->latestRemovedXid) ||
+                    TransactionIdPrecedes(prstate->latestRemovedXid, xid)) &&
+                    TransactionIdPrecedes(xid, oldest_xmin)) {
                     /* update latestRemovedXid */
                     prstate->latestRemovedXid = xid;
                 }

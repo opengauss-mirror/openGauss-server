@@ -3,7 +3,7 @@ set(POSTGRES_BKI_SRCS_S
 "@pg_proc.h @pg_type.h @pg_attribute.h @pg_class.h @pg_partition.h @pg_attrdef.h @pg_constraint.h
 @pg_inherits.h @pg_index.h @pg_operator.data @pg_opfamily.h @pg_opclass.h @pg_am.h @pg_amop.data @pg_amproc.h
 @pg_language.h @pg_largeobject_metadata.h @pg_largeobject.h @pg_aggregate.h @pg_statistic.h @pg_rewrite.h
-@pg_trigger.h @pg_description.h @pg_cast.h @pg_enum.h @pg_set.h @pg_namespace.h @pg_conversion.h @pg_depend.h @pg_database.h
+@pg_trigger.h @pg_event_trigger.h @pg_description.h @pg_cast.h @pg_enum.h @pg_set.h @pg_namespace.h @pg_conversion.h @pg_depend.h @pg_database.h
 @pg_db_role_setting.h @pg_tablespace.h @pg_pltemplate.h @pg_authid.h @pg_auth_members.h @pg_shdepend.h @pg_shdescription.h
 @pg_ts_config.h @pg_ts_config_map.h @pg_ts_dict.h @pg_ts_parser.h @pg_ts_template.h @pg_auth_history.h @pg_user_status.h
 @pg_extension.h @pg_obsscaninfo.h @pg_foreign_data_wrapper.h @pg_foreign_server.h @pg_user_mapping.h @pgxc_class.h @pgxc_node.h

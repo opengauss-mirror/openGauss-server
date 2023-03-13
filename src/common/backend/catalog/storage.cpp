@@ -333,11 +333,11 @@ static void CStoreRelDropStorage(Relation rel, RelFileNode* rnode, Oid ownerid)
 
     TupleDesc desc = RelationGetDescr(rel);
     int nattrs = desc->natts;
-    Form_pg_attribute* attrs = desc->attrs;
+    FormData_pg_attribute* attrs = desc->attrs;
 
     /* add all the cu files to the list of stuff to delete at commit */
     for (int i = 0; i < nattrs; ++i) {
-        InsertStorageIntoPendingList(rnode, attrs[i]->attnum, rel->rd_backend, ownerid, true);
+        InsertStorageIntoPendingList(rnode, attrs[i].attnum, rel->rd_backend, ownerid, true);
     }
 }
 
@@ -965,6 +965,7 @@ void push_del_rel_to_hashtbl(bool isCommit)
                             entry->rnode.bucketNode = pending->relnode.bucketNode;
                             entry->rnode.opt = pending->relnode.opt;
                             entry->maxSegNo = -1;
+                            entry->fileUnlink = false;
                         }
                         BatchClearBadBlock(pending->relnode, pending->forknum, 0);
                     }

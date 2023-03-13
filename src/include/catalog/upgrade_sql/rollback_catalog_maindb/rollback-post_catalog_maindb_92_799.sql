@@ -336,18 +336,7 @@ BEGIN
     end if;
 END$DO$;
 
-DO $$
-DECLARE 
-query_str text; 
-ans bool;
-BEGIN
-    select case when count(*)=1 then true else false end as ans from 
-        (select *from pg_class where relname='snapshot_sequence' and relnamespace = 4991) into ans;
-    if ans = true then
-        query_str := 'DROP SEQUENCE db4ai.snapshot_sequence;';
-        EXECUTE IMMEDIATE query_str;
-    end if;
-END$$;DROP FUNCTION IF EXISTS pg_catalog.gs_stack() CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.gs_stack() CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_stack(INT8) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_stack(pid bigint) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_stack(OUT tid bigint, OUT lwtid bigint, OUT stack text) CASCADE;

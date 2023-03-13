@@ -72,12 +72,19 @@ void InitBufferPool(void)
     bool found_bufs = false;
     bool found_descs = false;
     bool found_buf_ckpt = false;
+    bool found_buf_extra = false;
     uint64 buffer_size;
+    BufferDescExtra *extra = NULL;
 
     t_thrd.storage_cxt.BufferDescriptors = (BufferDescPadded *)CACHELINEALIGN(
         ShmemInitStruct("Buffer Descriptors",
                         TOTAL_BUFFER_NUM * sizeof(BufferDescPadded) + PG_CACHE_LINE_SIZE,
                         &found_descs));
+
+    extra = (BufferDescExtra *)CACHELINEALIGN(
+        ShmemInitStruct("Buffer Descriptors Extra",
+                        TOTAL_BUFFER_NUM * sizeof(BufferDescExtra) + PG_CACHE_LINE_SIZE,
+                        &found_buf_extra));
 
     /* Init candidate buffer list and candidate buffer free map */
     candidate_buf_init();
@@ -145,9 +152,9 @@ void InitBufferPool(void)
             relfilenode_fork_hashtbl_create("unlink_rel_one_fork_hashtbl", true);
     }
 
-    if (found_descs || found_bufs || found_buf_ckpt) {
+    if (found_descs || found_bufs || found_buf_ckpt || found_buf_extra) {
         /* both should be present or neither */
-        Assert(found_descs && found_bufs && found_buf_ckpt);
+        Assert(found_descs && found_bufs && found_buf_ckpt && found_buf_extra);
         /* note: this path is only taken in EXEC_BACKEND case */
     } else {
         int i;
@@ -162,13 +169,14 @@ void InitBufferPool(void)
             pg_atomic_init_u32(&buf->state, 0);
             buf->wait_backend_pid = 0;
 
+            buf->extra = &extra[i];
             buf->buf_id = i;
             buf->io_in_progress_lock = LWLockAssign(LWTRANCHE_BUFFER_IO_IN_PROGRESS);
             buf->content_lock = LWLockAssign(LWTRANCHE_BUFFER_CONTENT);
-            pg_atomic_init_u64(&buf->rec_lsn, InvalidXLogRecPtr);
-            buf->aio_in_progress = false;
-            buf->dirty_queue_loc = PG_UINT64_MAX;
-            buf->encrypt = false;
+            pg_atomic_init_u64(&buf->extra->rec_lsn, InvalidXLogRecPtr);
+            buf->extra->aio_in_progress = false;
+            buf->extra->dirty_queue_loc = PG_UINT64_MAX;
+            buf->extra->encrypt = false;
         }
         g_instance.bgwriter_cxt.rel_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_TBL);
         g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_FORK_TBL);
@@ -206,6 +214,8 @@ Size BufferShmemSize(void)
 
     /* size of buffer descriptors */
     size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(BufferDescPadded)));
+    size = add_size(size, PG_CACHE_LINE_SIZE);
+    size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(BufferDescExtra)));
     size = add_size(size, PG_CACHE_LINE_SIZE);
 
     /* size of data pages */

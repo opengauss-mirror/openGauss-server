@@ -42,7 +42,11 @@ if %DIST%==1 if exist src\backend\utils\misc\guc-file.c del /q src\backend\utils
 
 
 if exist src\bin\psql\sql_help.h del /q src\bin\psql\sql_help.h
-
+if %DIST%==1 if exist src\common\kwlist_d.h del /q src\common\kwlist_d.h
+if %DIST%==1 if exist src\pl\plpgsql\src\pl_reserved_kwlist_d.h del /q src\pl\plpgsql\src\pl_reserved_kwlist_d.h
+if %DIST%==1 if exist src\pl\plpgsql\src\pl_unreserved_kwlist_d.h del /q src\pl\plpgsql\src\pl_unreserved_kwlist_d.h
+if %DIST%==1 if exist src\interfaces\ecpg\preproc\c_kwlist_d.h del /q src\interfaces\ecpg\preproc\c_kwlist_d.h
+if %DIST%==1 if exist src\interfaces\ecpg\preproc\ecpg_kwlist_d.h del /q src\interfaces\ecpg\preproc\ecpg_kwlist_d.h
 if exist src\interfaces\libpq\libpq.rc del /q src\interfaces\libpq\libpq.rc
 if exist src\interfaces\libpq\libpqdll.def del /q src\interfaces\libpq\libpqdll.def
 if exist src\interfaces\ecpg\compatlib\compatlib.def del /q src\interfaces\ecpg\compatlib\compatlib.def

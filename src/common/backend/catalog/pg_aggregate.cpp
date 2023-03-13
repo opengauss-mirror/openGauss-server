@@ -99,7 +99,7 @@ void CheckAggregateCreatePrivilege(Oid aggNamespace, const char* aggName)
  * AggregateCreate
  * aggKind, aggregation function kind, 'n' for normal aggregation, 'o' for ordered set aggregation.
  */
-void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* aggArgTypes, int numArgs, 
+ObjectAddress AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* aggArgTypes, int numArgs, 
                      List* aggtransfnName,
 #ifdef PGXC
     List* aggcollectfnName,
@@ -345,7 +345,7 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* a
      * Fenced mode is not supportted for create aggregate, so set false for
      * argument fenced.
      */
-    procOid = ProcedureCreate(aggName,
+    myself = ProcedureCreate(aggName,
         aggNamespace,
         InvalidOid,
         false,                                /* A db compatible*/
@@ -379,7 +379,7 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* a
         false,
         false,
         NULL);                               /* default value for proisprocedure */
-
+     procOid = myself.objectId;
     /*
      * Okay to create the pg_aggregate entry.
      */
@@ -461,6 +461,7 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* a
         referenced.objectSubId = 0;
         recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
     }
+    return myself;
 }
 
 /*

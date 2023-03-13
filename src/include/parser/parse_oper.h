@@ -51,7 +51,9 @@ extern bool IsIntType(Oid typeoid);
 extern bool IsCharType(Oid typeoid);
 
 /* Build expression tree for an operator invocation */
-extern Expr* make_op(ParseState* pstate, List* opname, Node* ltree, Node* rtree, int location, bool inNumeric = false);
+extern Node* parse_get_last_srf(ParseState* pstate);
+extern Expr *make_op(ParseState *pstate, List *opname, Node *ltree, Node *rtree, Node *last_srf, int location,
+                     bool inNumeric = false);
 extern Expr* make_scalar_array_op(ParseState* pstate, List* opname, bool useOr, Node* ltree, Node* rtree, int location);
 extern Oid OperatorLookup(List* operatorName, Oid leftObjectId, Oid rightObjectId, bool* defined);
 extern void InvalidateOprCacheCallBack(Datum arg, int cacheid, uint32 hashvalue);

@@ -395,16 +395,20 @@ void RemoveDirectoryById(Oid dirOid)
     heap_close(relation, RowExclusiveLock);
 }
 
-static void AlterPgDirectoryOwner_internal(Relation rel, HeapTuple tuple, Oid newOwnerId)
+static ObjectAddress AlterPgDirectoryOwner_internal(Relation rel, HeapTuple tuple, Oid newOwnerId)
 {
     Form_pg_directory dirForm = (Form_pg_directory)GETSTRUCT(tuple);
+    Oid dOid;
+    ObjectAddress address;
+    dOid = HeapTupleGetOid(tuple);
+    ObjectAddressSet(address, PgDirectoryRelationId, dOid);
     /*
      * If the new owner is the same as the existing owner, consider the
      * command to have succeeded.  This is to be consistent with other
      * objects.
      */
     if (dirForm->owner == newOwnerId) {
-        return;
+        return address;
     }
 
     Datum repl_val[Natts_pg_directory];
@@ -459,17 +463,21 @@ static void AlterPgDirectoryOwner_internal(Relation rel, HeapTuple tuple, Oid ne
 
     /* Update owner dependency reference */
     changeDependencyOnOwner(PgDirectoryRelationId, HeapTupleGetOid(tuple), newOwnerId);
+
+    return address;    
 }
 
 /*
  * ALTER Directory name OWNER TO newowner
  */
-void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
+ObjectAddress AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
 {
     HeapTuple tuple = NULL;
     Relation rel;
     ScanKeyData scankey;
     SysScanDesc scan = NULL;
+    Oid dOid;
+    ObjectAddress address;
 
     /*
      * Get the old tuple.  We don't need a lock on the directory per se,
@@ -485,12 +493,15 @@ void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("directory \"%s\" does not exist", dirname)));
     }
 
+    dOid = HeapTupleGetOid(tuple);
     AlterPgDirectoryOwner_internal(rel, tuple, newOwnerId);
 
     systable_endscan(scan);
 
     /* Close pg_database, but keep lock till commit */
     heap_close(rel, NoLock);
+    ObjectAddressSet(address, PgDirectoryRelationId, dOid);
+    return address;
 }
 
 

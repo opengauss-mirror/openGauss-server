@@ -10,16 +10,16 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-CREATE [ UNIQUE ] INDEX [ CONCURRENTLY ] [ [schema_name.] index_name ] ON table_name [ USING method ]
+CREATE [ UNIQUE ] INDEX [ CONCURRENTLY ] [ IF NOT EXISTS ] [ [schema_name.] index_name ] ON table_name [ USING method ]
     ({ { column_name [ ( length ) ] | ( expression ) } [ COLLATE collation ] [ opclass ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ] }[, ...] )
     [ INCLUDE ( { column_name | ( expression ) }[, ...] ) ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ TABLESPACE tablespace_name ]
     [ VISIBLE | INVISIBLE ]
     [ WHERE predicate ];
-CREATE [ UNIQUE ] INDEX [ [schema_name.] index_name ] ON table_name [ USING method ]
+CREATE [ UNIQUE ] INDEX [ IF NOT EXISTS ] [ [schema_name.] index_name ] ON table_name [ USING method ]
     ( { { column_name | ( expression ) } [ COLLATE collation ] [ opclass ] [ ASC | DESC ] [ NULLS LAST ] } [, ...] )
-    [ LOCAL [ ( { PARTITION index_partition_name | SUBPARTITION index_subpartition_name [ TABLESPACE index_partition_tablespace ] } [, ...] ) ] | GLOBAL ]
+    [ LOCAL [ ( { PARTITION index_partition_name [ ( SUBPARTITION index_subpartition_name [, ...] ) ] [ TABLESPACE index_partition_tablespace ] } [, ...] ) ] | GLOBAL ]
     [ INCLUDE ( { column_name | ( expression ) }[, ...] ) ]
     [ WITH ( { storage_parameter = value } [, ...] ) ]
     [ TABLESPACE tablespace_name ]

@@ -48,6 +48,7 @@
 #include "utils/syscache.h"
 #include "utils/typcache.h"
 #include "vecexecutor/vecexecutor.h"
+#include "access/tableam.h"
 
 /* We only create optimized path only when the skew ratio is large than the limit. */
 #define SKEW_RATIO_LIMIT 3.0
@@ -1398,7 +1399,7 @@ bool SkewInfo::canValuePassQual(List* varList, List* valueList, Expr* expr)
     rte = planner_rt_fetch(rel->relid, m_root);
     heaprel = heap_open(rte->relid, NoLock);
     tupdesc = RelationGetDescr(heaprel);
-    slot = MakeSingleTupleTableSlot(tupdesc, false, heaprel->rd_tam_type);
+    slot = MakeSingleTupleTableSlot(tupdesc, false, heaprel->rd_tam_ops);
     slot->tts_nvalid = tupdesc->natts;
     heap_close(heaprel, NoLock);
 
@@ -1408,7 +1409,7 @@ bool SkewInfo::canValuePassQual(List* varList, List* valueList, Expr* expr)
             var = (Var*)list_nth(varList, j);
             con = (Const*)list_nth(valueList, j);
 
-            if (tupdesc->attrs[i]->attnum == var->varattno) {
+            if (tupdesc->attrs[i].attnum == var->varattno) {
                 if (con == NULL) {
                     slot->tts_isnull[i] = true;
                 } else {

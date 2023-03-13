@@ -11,6 +11,7 @@
 #test: recovery_2pc_tools recovery_2pc_tools02
 test: recovery_2pc_tools
 
+test: sqlbypass_partition
 test: sqlpatch_base
 test: sqlpatch_func
 
@@ -41,9 +42,14 @@ test: postgres_fdw postgres_fdw_cstore postgres_fdw_partition
 
 #test user_defined_variable
 test: set_user_defined_variables_test
-test: select_into_user_defined_variables
-
 test: set_system_variables_test
+
+# test for set [session | global] transaction
+test: set_transaction_test
+
+# test select into statement
+test: select_into_user_defined_variables
+test: select_into_file
 
 test: gs_dump_package trigger_dump
 test: out_param_func
@@ -72,14 +78,21 @@ test: hw_pwd_encryption_sm3
 
 test: sync_standy_names
 
+#test event
+test: event
+test: event_dump_audit
+
 #test sha func
 test: single_node_sha
+
+#test b format collation
+test: test_b_format_collate charset_b_format
 
 # test subpartition
 test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size
 test: hw_subpartition_vacuum_partition hw_subpartition_tablespace_global
 test: gs_dump_subpartition
-test: partition_dml_operations partition_minmax
+test: partition_dml_operations partition_minmax partition_pruning hw_partitionno hw_partition_parallel
 test: partition_param_path
 #test: partition_cost_model
 test: row_partition_iterator_elimination col_partition_iterator_elimination
@@ -496,6 +509,8 @@ test: vec_prepare_003
 test: sort_optimize_row sort_optimize_column sort_optimize_001
 #test early free
 test: early_free
+#test sublink enhanced, including pullup-non-correlated-sublink and winmagic
+test: sublink_pullup_enhance
 #test for col tpch with vector engine disabled
 test: tpch_disablevec01 tpch_disablevec03 tpch_disablevec04
 test: tpch_disablevec05 tpch_disablevec06 tpch_disablevec07
@@ -539,7 +554,7 @@ test: xc_dml
 
 test: hw_cstore_tablespace hw_cstore_truncate hw_cstore_update
 #test: hw_cstore_roughcheck
-test: hw_cstore_partition_update hw_cstore_partition_update1 hw_cstore_partition_update2
+test: hw_cstore_partition_update hw_cstore_partition_update1 hw_cstore_partition_update2 hw_cstore_partition
 
 #------------------------------
 # CStore compression test cases
@@ -615,7 +630,7 @@ test: copy_new_gram
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-test: drop_if_exists test_if_not_exists
+test: drop_if_exists test_if_not_exists test_create_index_if_not_exists
 #test: constraints
 
 #test: errors subplan_base
@@ -631,8 +646,10 @@ test: select_into subselect_part2 gs_aggregate
 test: holdable_cursor
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
-test: alter_table_000 alter_table_002 alter_table_003
-#test: alter_table_001
+test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
+#test: alter_table_001 alter_table_modify_ustore
+test: alter_table_modify_ltt alter_table_modify_gtt
+test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
 
 #test: with
 
@@ -672,6 +689,10 @@ test: bypass_preparedexecute_support
 test: sqlbypass_partition
 test: sqlbypass_partition_prepare
 
+# test srf_fusion
+# Please fell free to execute each case independently
+test: srf_fusion srf_fusion_basic srf_fusion_agg
+ 
 test: string_digit_to_numeric tablesample_3
 # Another group of parallel tests
 # ----------
@@ -699,6 +720,10 @@ test: hw_pwd_reuse
 
 test: hw_audit_toughness
 test: hw_audit_detailinfo
+
+test: hw_audit_client
+test: hw_audit_full
+test: hw_audit_system_func
 
 test: performance_enhance
 test: explain_fqs
@@ -911,6 +936,8 @@ test: hw_partition_hash_dml
 test: hw_partition_hash_dql
 test: hw_partition_list_dml
 test: hw_partition_list_dql
+test: hw_partition_b_db
+test: dump_partition_b_db
 test: hw_cipher_sm4
 test: hw_cipher_aes128
 test: hw_pwd_encryption_sm3
@@ -996,7 +1023,7 @@ test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
 test: gs_dump_encrypt substr
-test: composite_datum_record mysql_function b_comments mysql_syntax mysql_delimiter mysql_delimiter_fix
+test: composite_datum_record mysql_function b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint
 
 test: join_test_alias alter_ctable_compress
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition ignore/ignore_invalid_input
@@ -1039,13 +1066,25 @@ test: ceil_negtive_zero
 # dolphin_guc_config
 test: dolphin_guc_config
 
+# optimizing_index_scan
+test: optimizing_index_scan_cstore
+test: optimizing_index_scan_ustore
+
 # row_count()
 test: row_count_function
 
 # show_warnings
-test: show_warnings
+test: show_warnings prevent_table_in_sys_schema create_tbl_init_td_check
 
+# test event trigger and object address
+test: test_object_alter
+test: event_trigger object_address
+test: event_trigger_dump_restore
 # partition expression key
 test: partition_expr_key
 test: alter_foreign_schema
 
+# test for slow_sql
+test: slow_sql
+# test user@host
+test: user_host_test

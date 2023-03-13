@@ -25,6 +25,7 @@
 
 #include "postgres.h"
 #include "access/xlog.h"
+#include "access/multi_redo_api.h"
 #include "postmaster/postmaster.h"
 #include "storage/smgr/fd.h"
 #include "storage/dss/fio_dss.h"
@@ -114,8 +115,9 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
 {
     /* Load reader private data */
     XLogPageReadPrivate *readprivate = (XLogPageReadPrivate *)xlogreader->private_data;
-    int emode = readprivate->emode;
-    bool randAccess = readprivate->randAccess;
+    int emode = IsExtremeRedo() ? LOG : readprivate->emode;
+    bool randAccess = IsExtremeRedo() ? false : readprivate->randAccess;
+    XLogRecPtr RecPtr = targetPagePtr;
     uint32 targetPageOff;
 
 #ifdef USE_ASSERT_CHECKING
@@ -136,6 +138,7 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
     }
 
     XLByteToSeg(targetPagePtr, t_thrd.xlog_cxt.readSegNo);
+    XLByteAdvance(RecPtr, expectReadLen);
 
     /* In archive or crash recovery. */
     if (t_thrd.xlog_cxt.readFile < 0) {
@@ -176,7 +179,7 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
                                                         static_cast<uint32>(targetPagePtr >> BIT_NUM_INT32),
                                                         static_cast<uint32>(targetPagePtr), targetPageOff,
                                                         expectReadLen)));
-        ereport(emode_for_corrupt_record(emode, targetPagePtr),
+        ereport(emode_for_corrupt_record(emode, RecPtr),
                 (errcode_for_file_access(),
                  errmsg("could not read from log file %s to offset %u: %m",
                         XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),

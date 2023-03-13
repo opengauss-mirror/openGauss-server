@@ -1,0 +1,68 @@
+--audit test
+drop database if exists event_audit_b;
+NOTICE:  database "event_audit_b" does not exist, skipping
+create database event_audit_b with dbcompatibility  'b';
+\c event_audit_b
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=268435455" > /dev/null 2>&1
+\! sleep 1s
+drop event if exists e;
+NOTICE:  event "e" is not exists, skipping
+show audit_system_object;
+ audit_system_object 
+---------------------
+ 268435455
+(1 row)
+
+create event e on schedule at '3000-01-01 00:00:00' disable do select 1;
+select pg_sleep(10);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select detail_info from pg_query_audit(trunc((localtimestamp - interval '1' minute), 'second'), trunc(localtimestamp, 'second')) 
+where database = 'event_audit_b' AND type='ddl_event';
+                               detail_info                                
+--------------------------------------------------------------------------
+ drop event if exists e;
+ create event e on schedule at '3000-01-01 00:00:00' disable do select 1;
+(2 rows)
+
+drop event if exists e;
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+\c regression
+drop database if exists event_audit_b;
+--gs_dump
+drop database if exists dump_ev;
+NOTICE:  database "dump_ev" does not exist, skipping
+create database dump_ev with dbcompatibility  'b';
+\c dump_ev
+create user event_dump_a with sysadmin password 'Test_event1';
+set role  event_dump_a password 'Test_event1';
+create event e on schedule at '3000-01-01 00:00:00' disable do select 1;
+create event public.ea on schedule at '3000-01-01 00:00:00' disable do select 1;
+select job_name from pg_job where dbname='dump_ev';
+ job_name 
+----------
+ e
+ ea
+(2 rows)
+
+\c dump_ev
+\! @abs_bindir@/gs_dump dump_ev -p @portstring@ -f @abs_bindir@/dump_ev.tar -n public -F t >/dev/null 2>&1; echo $?
+0
+drop database if exists restore_event_dump_db;
+NOTICE:  database "restore_event_dump_db" does not exist, skipping
+create database restore_event_dump_db with dbcompatibility  'b';
+\! @abs_bindir@/gs_restore -d restore_event_dump_db -p @portstring@ @abs_bindir@/dump_ev.tar >/dev/null 2>&1; echo $?
+0
+\c restore_event_dump_db
+select job_name, job_status,failure_msg from pg_job where dbname='restore_event_dump_db';
+ job_name | job_status | failure_msg 
+----------+------------+-------------
+ ea       | s          | 
+(1 row)
+
+\c regression
+drop database if exists dump_ev;
+drop database if exists restore_event_dump_db;

@@ -485,6 +485,13 @@ test: char_truncation_common char_truncation_cast
 #this case is dispatched from schedule10(gin_test)
 test: gin_test1 gin_test2 gin_test3
 
+test: db4ai_snapshots
+test: db4ai_gd_train_predict
+test: db4ai_gd_houses
+test: db4ai_gd_snapshots
+test: db4ai_gd_pca_train_predict
+test: db4ai_kmeans_train_predict
+test: db4ai_xgboost_train_predict
 #the fallowing part is dispatched from schedule15
 
 # FIXME: move me back to the parallel test when the refcnt issue is fixed

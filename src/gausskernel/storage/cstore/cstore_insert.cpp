@@ -185,11 +185,11 @@ CStoreInsert::CStoreInsert(_in_ Relation relation, _in_ const InsertArg& args, _
     m_cuCmprsOptions = (compression_options*)palloc(sizeof(compression_options) * attNo);
 
     for (int i = 0; i < attNo; ++i) {
-        if (m_relation->rd_att->attrs[i]->attisdropped) {
+        if (m_relation->rd_att->attrs[i].attisdropped) {
             m_cuStorage[i] = NULL;
         } else {
             // Here we must use physical column id
-            CFileNode cFileNode(m_relation->rd_node, m_relation->rd_att->attrs[i]->attnum, MAIN_FORKNUM);
+            CFileNode cFileNode(m_relation->rd_node, m_relation->rd_att->attrs[i].attnum, MAIN_FORKNUM);
             m_cuStorage[i] = New(CurrentMemoryContext) CUStorage(cFileNode);
         }
         /* init compression filter */
@@ -463,7 +463,7 @@ void CStoreInsert::InitInsertMemArg(Plan* plan, MemInfoArg* ArgmemInfo)
 void CStoreInsert::InitFuncPtr()
 {
     int attNo = m_relation->rd_att->natts;
-    Form_pg_attribute* attrs = m_relation->rd_att->attrs;
+    FormData_pg_attribute* attrs = m_relation->rd_att->attrs;
 
     m_setMinMaxFuncs = (FuncSetMinMax*)palloc(attNo * sizeof(FuncSetMinMax));
     m_formCUFuncArray = (FormCUFuncArray*)palloc(sizeof(FormCUFuncArray) * attNo);
@@ -474,9 +474,9 @@ void CStoreInsert::InitFuncPtr()
      * Initilize FormCU function
      */
     for (int col = 0; col < attNo; ++col) {
-        if (!attrs[col]->attisdropped) {
-            m_setMinMaxFuncs[col] = GetMinMaxFunc(attrs[col]->atttypid);
-            SetFormCUFuncArray(attrs[col], col);
+        if (!attrs[col].attisdropped) {
+            m_setMinMaxFuncs[col] = GetMinMaxFunc(attrs[col].atttypid);
+            SetFormCUFuncArray(&attrs[col], col);
             m_cuDescPPtr[col] = New(CurrentMemoryContext) CUDesc;
         } else {
             m_setMinMaxFuncs[col] = NULL;
@@ -490,14 +490,14 @@ void CStoreInsert::InitFuncPtr()
 void CStoreInsert::InitColSpaceAlloc()
 {
     int attNo = m_relation->rd_att->natts;
-    Form_pg_attribute* attrs = m_relation->rd_att->attrs;
+    FormData_pg_attribute* attrs = m_relation->rd_att->attrs;
 
     AttrNumber* attrIds = (AttrNumber*)palloc(sizeof(AttrNumber) * attNo);
     for (int i = 0; i < attNo; ++i) {
-        attrIds[i] = attrs[i]->attnum;
+        attrIds[i] = attrs[i].attnum;
 
         /* Set all column use APPEND_ONLY */
-        if (!attrs[i]->attisdropped)
+        if (!attrs[i].attisdropped)
             m_cuStorage[i]->SetAllocateStrategy(APPEND_ONLY);
     }
 
@@ -601,7 +601,7 @@ void CStoreInsert::InitDeltaInfo()
 void CStoreInsert::InitIndexColId(int which_index)
 {
     int attrs_num = m_relation->rd_att->natts;
-    Form_pg_attribute* attrs = m_relation->rd_att->attrs;
+    FormData_pg_attribute* attrs = m_relation->rd_att->attrs;
     AttrNumber* keyPtr = NULL;
     List* exprList = NULL;
 
@@ -613,7 +613,7 @@ void CStoreInsert::InitIndexColId(int which_index)
     if (exprList == NIL) {
         for (int which_idxkey = 0; which_idxkey < m_idxKeyNum[which_index]; ++which_idxkey) {
             for (int attr_cnt = 0; attr_cnt < attrs_num; ++attr_cnt) {
-                if (attrs[attr_cnt]->attnum == keyPtr[which_idxkey]) {
+                if (attrs[attr_cnt].attnum == keyPtr[which_idxkey]) {
                     m_idxKeyAttr[which_index][which_idxkey] = attr_cnt;
                     break;
                 }
@@ -631,7 +631,7 @@ void CStoreInsert::InitIndexColId(int which_index)
             }
 
             for (int attr_cnt = 0; attr_cnt < attrs_num; ++attr_cnt) {
-                if (attrs[attr_cnt]->attnum == keycol) {
+                if (attrs[attr_cnt].attnum == keycol) {
                     m_idxKeyAttr[which_index][which_idxkey] = attr_cnt;
                     break;
                 }
@@ -810,7 +810,7 @@ void CStoreInsert::BatchInsertCommon(bulkload_rows* batchRowPtr, int options)
     CHECK_FOR_INTERRUPTS();
     /* step 1: form CU and CUDesc; */
     for (col = 0; col < attno; ++col) {
-        if (!m_relation->rd_att->attrs[col]->attisdropped) {
+        if (!m_relation->rd_att->attrs[col].attisdropped) {
             m_cuPPtr[col] = FormCU(col, batchRowPtr, m_cuDescPPtr[col]);
             m_cuCmprsOptions[col].m_sampling_fihished = true;
         }
@@ -827,7 +827,7 @@ void CStoreInsert::BatchInsertCommon(bulkload_rows* batchRowPtr, int options)
     SaveAll(options);
 
     /* step 3: batch insert index table */
-    if (m_relation->rd_att->attrs[0]->attisdropped) {
+    if (m_relation->rd_att->attrs[0].attisdropped) {
         int fstColIdx = CStoreGetfstColIdx(m_relation);
         InsertIdxTableIfNeed(batchRowPtr, m_cuDescPPtr[fstColIdx]->cu_id);
     } else
@@ -870,7 +870,7 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
     iter.begin(batchRowPtr);
     while (iter.not_end()) {
         iter.next(values, nulls);
-        tuple = (HeapTuple)tableam_tops_form_tuple(m_delta_desc, values, nulls, HEAP_TUPLE);
+        tuple = (HeapTuple)tableam_tops_form_tuple(m_delta_desc, values, nulls);
 
         /* We always generate xlog for delta tuple */
         uint32 tmpVal = (uint32)options;
@@ -963,7 +963,7 @@ void CStoreInsert::InsertNotPsortIdx(int indice)
             }
 
             MemoryContext oldCxt = MemoryContextSwitchTo(GetPerTupleMemoryContext(m_estate));
-            HeapTuple fakeTuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, m_fake_values, m_fake_isnull, HEAP_TUPLE);
+            HeapTuple fakeTuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, m_fake_values, m_fake_isnull);
             TupleTableSlot* fakeSlot = MakeSingleTupleTableSlot(tupDesc);
 
             (void)ExecStoreTuple(fakeTuple, fakeSlot, InvalidBuffer, false);
@@ -1206,7 +1206,7 @@ void CStoreInsert::CUListWrite()
     PG_ENSURE_ERROR_CLEANUP(CUListWriteAbort, (Datum)this);
     {
         for (col = 0; col < attno; ++col) {
-            if (!m_relation->rd_att->attrs[col]->attisdropped) {
+            if (!m_relation->rd_att->attrs[col].attisdropped) {
                 if (m_cuDescPPtr[col]->cu_size > 0) {
                     CUWrite(attno, col);
                 } else {
@@ -1342,7 +1342,7 @@ void CStoreInsert::SaveAll(int options, _in_ const char* delBitmap)
     LockRelationForExtension(m_relation, ExclusiveLock);
     uint32 curCUID = CStoreAllocator::GetNextCUID(m_relation);
     for (col = 0; col < attno; ++col) {
-        if (m_relation->rd_att->attrs[col]->attisdropped)
+        if (m_relation->rd_att->attrs[col].attisdropped)
             continue;
         /* step 2: Allocate space, update m_cuDescPPtr[col]->cu_pointer */
         CUDesc* cuDesc = m_cuDescPPtr[col];
@@ -1375,7 +1375,7 @@ void CStoreInsert::SaveAll(int options, _in_ const char* delBitmap)
     ADIO_ELSE()
     {
         for (col = 0; col < attno; ++col) {
-            if (m_relation->rd_att->attrs[col]->attisdropped) {
+            if (m_relation->rd_att->attrs[col].attisdropped) {
                 if (m_cuPPtr[col])
                     DELETE_EX(m_cuPPtr[col]);
                 continue;
@@ -1429,18 +1429,18 @@ void CStoreInsert::SaveAll(int options, _in_ const char* delBitmap)
  */
 CU* CStoreInsert::FormCU(int col, bulkload_rows* batchRowPtr, CUDesc* cuDescPtr)
 {
-    Form_pg_attribute* attrs = m_relation->rd_att->attrs;
-    int attlen = attrs[col]->attlen;
+    FormData_pg_attribute* attrs = m_relation->rd_att->attrs;
+    int attlen = attrs[col].attlen;
     CU* cuPtr = NULL;
 
     ADIO_RUN()
     {
         /* cuPtr need keep untill async write finish */
-        cuPtr = New(m_aio_memcnxt) CU(attlen, attrs[col]->atttypmod, attrs[col]->atttypid);
+        cuPtr = New(m_aio_memcnxt) CU(attlen, attrs[col].atttypmod, attrs[col].atttypid);
     }
     ADIO_ELSE()
     {
-        cuPtr = New(CurrentMemoryContext) CU(attlen, attrs[col]->atttypmod, attrs[col]->atttypid);
+        cuPtr = New(CurrentMemoryContext) CU(attlen, attrs[col].atttypmod, attrs[col].atttypid);
     }
     ADIO_END();
 
@@ -1458,7 +1458,7 @@ CU* CStoreInsert::FormCU(int col, bulkload_rows* batchRowPtr, CUDesc* cuDescPtr)
         // a little tricky to reduce the recomputation of min/max value.
         // some data type is equal to int8/int16/int32/int32. for them it
         // is not necessary to recompute the min/max value.
-        m_cuTempInfo.m_valid_minmax = !NeedToRecomputeMinMax(attrs[col]->atttypid);
+        m_cuTempInfo.m_valid_minmax = !NeedToRecomputeMinMax(attrs[col].atttypid);
         if (m_cuTempInfo.m_valid_minmax) {
             m_cuTempInfo.m_min_value = ConvertToInt64Data(cuDescPtr->cu_min, attlen);
             m_cuTempInfo.m_max_value = ConvertToInt64Data(cuDescPtr->cu_max, attlen);
@@ -1572,7 +1572,7 @@ bool CStoreInsert::TryEncodeNumeric(int col, bulkload_rows* batchRowPtr, CUDesc*
 template <bool bpcharType, bool hasNull, bool has_MinMax_func>
 bool CStoreInsert::FormNumberStringCU(int col, bulkload_rows* batchRowPtr, CUDesc* cuDescPtr, CU* cuPtr)
 {
-    int attlen = this->m_relation->rd_att->attrs[col]->attlen;
+    int attlen = this->m_relation->rd_att->attrs[col].attlen;
     int rows = batchRowPtr->m_rows_curnum;
     bulkload_datums* batch_values = &(batchRowPtr->m_vectors[col].m_values_nulls);
     uint64 data = 0;
@@ -1736,7 +1736,7 @@ bool CStoreInsert::TryFormNumberStringCU(
 
     if (atttypid == BPCHAROID) {
         /* for type define bpchar, we do not know the length, so we don't do the change */
-        if (this->m_relation->rd_att->attrs[col]->atttypmod == -1) {
+        if (this->m_relation->rd_att->attrs[col].atttypmod == -1) {
             return ret;
         }
         if (func == NULL) {
@@ -1791,7 +1791,7 @@ void CStoreInsert::FormCUTCopyMem(
     CU* cuPtr, bulkload_rows* batchRowPtr, CUDesc* cuDescPtr, Size dtSize, int col, bool hasNull)
 {
     bulkload_vector* vector = batchRowPtr->m_vectors + col;
-    Form_pg_attribute attr = this->m_relation->rd_att->attrs[col];
+    Form_pg_attribute attr = &this->m_relation->rd_att->attrs[col];
 
     /* copy null-bitmap */
     if (hasNull) {
@@ -1880,7 +1880,7 @@ void CStoreInsert::FormCUTNumeric(int col, bulkload_rows* batchRowPtr, CUDesc* c
 template <bool hasNull>
 void CStoreInsert::FormCUTNumString(int col, bulkload_rows* batchRowPtr, CUDesc* cuDescPtr, CU* cuPtr)
 {
-    Form_pg_attribute attr = this->m_relation->rd_att->attrs[col];
+    Form_pg_attribute attr = &this->m_relation->rd_att->attrs[col];
 
     Size dataSize = this->FormCUTInitMem(cuPtr, batchRowPtr, col, hasNull);
 
@@ -1918,7 +1918,7 @@ void CStoreInsert::CUInsert(_in_ BatchCUData* CUData, _in_ int options)
 
     // step 1: pass CUDesc and CU to CStoreInsert
     for (col = 0; col < attno; ++col) {
-        if (m_relation->rd_att->attrs[col]->attisdropped)
+        if (m_relation->rd_att->attrs[col].attisdropped)
             continue;
         *m_cuDescPPtr[col] = *CUData->CUDescData[col];
         m_cuPPtr[col] = CUData->CUptrData[col];
@@ -2032,27 +2032,31 @@ void CStoreInsert::InitIndexInsertArg(Relation heap_rel, const int* key_map, int
 {
     /* plus TID system attribute */
     int nkeys_plus_tid = nkeys + 1;
+    errno_t rc;
 
-    struct tupleDesc index_tupdesc;
-    index_tupdesc.natts = nkeys_plus_tid;
-    index_tupdesc.attrs = (Form_pg_attribute*)palloc(sizeof(Form_pg_attribute) * nkeys_plus_tid);
+    struct tupleDesc *index_tupdesc = CreateTemplateTupleDesc(nkeys_plus_tid, false);
+
+    index_tupdesc->natts = nkeys_plus_tid;
     /* the following are not important to us, just init them */
-    index_tupdesc.constr = NULL;
-    index_tupdesc.initdefvals = NULL;
-    index_tupdesc.tdhasoid = false;
-    index_tupdesc.tdrefcount = 1;
-    index_tupdesc.tdtypeid = InvalidOid;
-    index_tupdesc.tdtypmod = -1;
+    index_tupdesc->constr = NULL;
+    index_tupdesc->initdefvals = NULL;
+    index_tupdesc->tdhasoid = false;
+    index_tupdesc->tdrefcount = 1;
+    index_tupdesc->tdtypeid = InvalidOid;
+    index_tupdesc->tdtypmod = -1;
 
     /* set attribute point exlcuding TID field */
     for (int i = 0; i < nkeys; ++i) {
-        index_tupdesc.attrs[i] = heap_rel->rd_att->attrs[key_map[i]];
+        rc = memcpy_s(&index_tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &heap_rel->rd_att->attrs[key_map[i]],
+                      ATTRIBUTE_FIXED_PART_SIZE);
+        securec_check(rc, "\0", "\0");
     }
 
     /* set TID attribute */
     FormData_pg_attribute tid_attr;
     init_tid_attinfo(&tid_attr);
-    index_tupdesc.attrs[nkeys] = &tid_attr;
+    rc = memcpy_s(&index_tupdesc->attrs[nkeys], ATTRIBUTE_FIXED_PART_SIZE, &tid_attr, ATTRIBUTE_FIXED_PART_SIZE);
+    securec_check(rc, "\0", "\0");
 
     args.es_result_relations = NULL;
     /* psort index will use tuple sort */
@@ -2061,11 +2065,11 @@ void CStoreInsert::InitIndexInsertArg(Relation heap_rel, const int* key_map, int
     args.idxBatchRow = NULL;
     /* init temp batch buffer for psort index */
     args.tmpBatchRows =
-        New(CurrentMemoryContext) bulkload_rows(&index_tupdesc, RelationGetMaxBatchRows(heap_rel), true);
+        New(CurrentMemoryContext) bulkload_rows(index_tupdesc, RelationGetMaxBatchRows(heap_rel), true);
     args.using_vectorbatch = false;
 
     /* release temp memory */
-    pfree(index_tupdesc.attrs);
+    pfree(index_tupdesc);
 }
 
 /*
@@ -2581,7 +2585,7 @@ void CStorePartitionInsert::BatchInsert(VectorBatch* batch, int hi_options)
     int ncols = batch->m_cols;
     int rows = batch->m_rows;
 
-    Form_pg_attribute* attrs = m_relation->rd_att->attrs;
+    FormData_pg_attribute* attrs = m_relation->rd_att->attrs;
     ScalarVector* pVec = NULL;
     ScalarValue* pVals = NULL;
 
@@ -2602,10 +2606,10 @@ void CStorePartitionInsert::BatchInsert(VectorBatch* batch, int hi_options)
             if (pVec->m_desc.encoded == false)
                 m_val[col] = pVals[rowCnt];
             else {
-                Assert(attrs[col]->attlen < 0 || attrs[col]->attlen > 8);
+                Assert(attrs[col].attlen < 0 || attrs[col].attlen > 8);
                 Datum v = ScalarVector::Decode(pVals[rowCnt]);
                 /* m_val[] just point to existing memory, not allocing new space. */
-                m_val[col] = (attrs[col]->attlen < 0) ? v : PointerGetDatum((char*)v + VARHDRSZ_SHORT);
+                m_val[col] = (attrs[col].attlen < 0) ? v : PointerGetDatum((char*)v + VARHDRSZ_SHORT);
             }
         }
 
@@ -2800,12 +2804,12 @@ Size PartitionValueCache::WriteRow(Datum* values, const bool* nulls)
 {
     TupleDesc tupleDesc = RelationGetDescr(m_rel);
     int natts = tupleDesc->natts;
-    Form_pg_attribute* attrs = tupleDesc->attrs;
+    FormData_pg_attribute* attrs = tupleDesc->attrs;
     Size row_size = 0;
 
     for (int i = 0; i < natts; i++) {
         Datum val = values[i];
-        int att_len = attrs[i]->attlen;
+        int att_len = attrs[i].attlen;
 
         if (nulls[i]) {
             InternalWriteInt(-1);
@@ -2837,7 +2841,7 @@ Size PartitionValueCache::WriteRow(Datum* values, const bool* nulls)
 int PartitionValueCache::ReadRow(_out_ Datum* values, _out_ bool* nulls)
 {
     TupleDesc tupleDesc = RelationGetDescr(m_rel);
-    Form_pg_attribute* attrs = tupleDesc->attrs;
+    FormData_pg_attribute* attrs = tupleDesc->attrs;
     int natts = tupleDesc->natts;
     int i;
     int nread = 0;
@@ -2861,13 +2865,13 @@ int PartitionValueCache::ReadRow(_out_ Datum* values, _out_ bool* nulls)
             continue;
         }
 
-        if (attrs[i]->attlen > 0 && attrs[i]->attlen <= 8) {
-            Assert(len == tupleDesc->attrs[i]->attlen);
+        if (attrs[i].attlen > 0 && attrs[i].attlen <= 8) {
+            Assert(len == tupleDesc->attrs[i].attlen);
             retval = InternalRead((char*)&(val), len);
-        } else if (attrs[i]->attlen > 8 || attrs[i]->attlen == -2) {
+        } else if (attrs[i].attlen > 8 || attrs[i].attlen == -2) {
             val = (Datum)palloc(len);
             retval = InternalRead(DatumGetPointer(val), len);
-        } else if (attrs[i]->attlen == -1) {
+        } else if (attrs[i].attlen == -1) {
             val = (Datum)palloc(VARHDRSZ + len);
             SET_VARSIZE(val, VARHDRSZ + len);
             retval = InternalRead(VARDATA(DatumGetPointer(val)), len);

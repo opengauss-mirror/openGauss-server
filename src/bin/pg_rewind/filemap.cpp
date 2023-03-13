@@ -22,6 +22,7 @@
 #include "PageCompression.h"
 #include "storage/cu.h"
 #include "storage/smgr/fd.h"
+#include "storage/cfs/cfs_converter.h"
 
 #define BLOCKSIZE (8 * 1024)
 #define BUILD_PATH_LEN 2560 /* (MAXPGPATH*2 + 512) */
@@ -682,7 +683,7 @@ void process_block_change(ForkNumber forknum, RelFileNode rnode, BlockNumber blk
     file_entry_t* key_ptr = NULL;
     file_entry_t* entry = NULL;
     BlockNumber blkno_inseg;
-    int segno;
+    BlockNumber segno;
     filemap_t* map = filemap;
     file_entry_t** e;
     bool processed = false;
@@ -695,6 +696,8 @@ void process_block_change(ForkNumber forknum, RelFileNode rnode, BlockNumber blk
 
     if (rnode.opt != 0) {
         compress = true;
+        segno = blkno / CFS_LOGIC_BLOCKS_PER_FILE;
+        blkno_inseg = blkno % CFS_LOGIC_BLOCKS_PER_FILE;
     }
     path = datasegpath(rnode, forknum, segno, compress);
 

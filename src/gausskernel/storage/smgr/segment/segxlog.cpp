@@ -533,7 +533,7 @@ void move_extent_flush_buffer(XLogMoveExtent *xlog_data)
             BlockNumber new_seg_blockno = xlog_data->new_extent + i;
 
             BufferDesc *buf_desc = BufferGetBufferDescriptor(buffer);
-            if (buf_desc->seg_blockno == old_seg_blockno) {
+            if (buf_desc->extra->seg_blockno == old_seg_blockno) {
                 uint32 buf_state = LockBufHdr(buf_desc);
                 if (buf_state & BM_DIRTY) {
                     /* spin-lock should be released before IO */
@@ -558,7 +558,7 @@ void move_extent_flush_buffer(XLogMoveExtent *xlog_data)
                 }
             } else {
                 /* Get here only because standby read after we modifiy the segment head */
-                SegmentCheck(buf_desc->seg_blockno == new_seg_blockno);
+                SegmentCheck(buf_desc->extra->seg_blockno == new_seg_blockno);
                 UnpinBuffer(buf_desc, true);
             }
         }

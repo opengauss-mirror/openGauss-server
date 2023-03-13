@@ -29,6 +29,7 @@
 #include "catalog/indexing.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_snapshot.h"
+#include "client_logic/client_logic.h"
 #include "commands/tablecmds.h"
 #include "commands/matview.h"
 #include "executor/node/nodeModifyTable.h"
@@ -134,7 +135,7 @@ static bool TvFeatureSupport(Oid relid, char **errstr, bool isTimecapsuleTable)
         *errstr = "timecapsule feature does not support system table";
     } else if (classForm->relpersistence != RELPERSISTENCE_PERMANENT) {
         *errstr = "timecapsule feature does not support non-permanent table";
-    } else if (rel->rd_tam_type == TAM_HEAP) {
+    } else if (rel->rd_tam_ops == TableAmHeap) {
         *errstr = "timecapsule feature does not support heap table";
     } else if ((RELATION_HAS_BUCKET(rel) || RELATION_OWN_BUCKET(rel))) {
         *errstr = "timecapsule feature does not support hash-bucket table";
@@ -154,6 +155,8 @@ static bool TvFeatureSupport(Oid relid, char **errstr, bool isTimecapsuleTable)
         *errstr = "timecapsule feature does not support in non READ COMMITTED transaction";
     } else if (TvForeignKeyCheck(relid) && isTimecapsuleTable) {
         *errstr = "timecapsule feature does not support the table included foreign key or referenced by foreign key";
+    } else if (is_full_encrypted_rel(rel)) {
+        *errstr = "timecapsule feature does not support full encrypted table";
     } else {
         *errstr = NULL;
     }
@@ -207,7 +210,7 @@ Node *TvTransformVersionExpr(ParseState *pstate, TvVersionType tvtype, Node *tvv
 {
     Node *verExpr = tvver;
 
-    verExpr = transformExpr(pstate, tvver);
+    verExpr = transformExpr(pstate, tvver, pstate->p_expr_kind);
     if (checkExprHasSubLink(verExpr)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("timecapsule clause not support sublink.")));
     }
@@ -808,7 +811,7 @@ static void TvUheapInsertLostImpl(Relation rel, Relation partRel, Partition p,
 
     Relation relRel = (partRel != NULL) ? partRel : rel;
     /* Set up a tuple slot too */
-    myslot = ExecInitExtraTupleSlot(estate, TAM_USTORE);
+    myslot = ExecInitExtraTupleSlot(estate, TableAmUstore);
     ExecSetSlotDescriptor(myslot, RelationGetDescr(relRel));
 
     /* Switch into its memory context */
@@ -834,7 +837,7 @@ static void TvUheapInsertLostImpl(Relation rel, Relation partRel, Partition p,
         recheckIndexes = ExecInsertIndexTuples(myslot, &tuple->ctid, estate, partRel, p, InvalidBktId, NULL, NULL);
         if (relRel != NULL && relRel->rd_mlogoid != InvalidOid) {
             HeapTuple htup = NULL;
-            Assert(relRel->rd_tam_type == TAM_USTORE);
+            Assert(relRel->rd_tam_ops == TableAmUstore);
             htup = (HeapTuple)UHeapToHeap(relRel->rd_att, (UHeapTuple)tuple);
             insert_into_mlog_table(relRel, relRel->rd_mlogoid, (HeapTuple)tuple,
                 &(((HeapTuple)tuple)->t_self), GetCurrentTransactionId(), 'I');

@@ -36,6 +36,7 @@ pg_encname pg_encname_tbl[] = {
     {"abc", PG_WIN1258},             /* alias for WIN1258 */
     {"alt", PG_WIN866},              /* IBM866 */
     {"big5", PG_BIG5},               /* Big5; Chinese for Taiwan multibyte set */
+    {"binary", PG_SQL_ASCII},        /* Binary; alias for sqlascii */
     {"euccn", PG_EUC_CN},            /* EUC-CN; Extended Unix Code for simplified Chinese */
     /* EUC-JIS-2004; Extended UNIX Code fixed
      * Width for Japanese, standard JIS X 0213 */
@@ -85,6 +86,7 @@ pg_encname pg_encname_tbl[] = {
     {"uhc", PG_UHC},             /* UHC; Korean Windows CodePage 949 */
     {"unicode", PG_UTF8},        /* alias for UTF8 */
     {"utf8", PG_UTF8},           /* alias for UTF8 */
+    {"utf8mb4", PG_UTF8},        /* alias for UTF8 */
     {"vscii", PG_WIN1258},       /* alias for WIN1258 */
     {"win", PG_WIN1251},         /* _dirty_ alias for windows-1251 (backward compatibility) */
     {"win1250", PG_WIN1250},     /* alias for Windows-1250 */
@@ -121,6 +123,17 @@ pg_encname pg_encname_tbl[] = {
 };
 
 unsigned int pg_encname_tbl_sz = sizeof(pg_encname_tbl) / sizeof(pg_encname_tbl[0]) - 1;
+
+/*
+ * character set and its map supported in B format. We can find charset quickly
+ * by collation oid use FAST_GET_CHARSET_BY_COLL.
+ */
+pg_enc pg_enc_coll_map_b[] = {
+    PG_SQL_ASCII,     /* SQL/ASCII */
+    PG_GBK,           /* GBK (Windows-936) */
+    PG_UTF8,          /* Unicode UTF8 */
+    PG_GB18030        /* GB18030 */
+};
 
 /* ----------
  * These are "official" encoding names.

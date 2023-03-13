@@ -103,6 +103,7 @@ typedef struct knl_instance_attr_common {
 #endif
     int cluster_run_mode;
     int stream_cluster_run_mode;
+    bool light_comm;
 } knl_instance_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_COMMON_H_ */

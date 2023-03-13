@@ -542,8 +542,8 @@ hashFileSource::hashFileSource(VectorBatch* batch, MemoryContext context, int ce
          */
         ScalarDesc* type_arr = (ScalarDesc*)palloc(sizeof(ScalarDesc) * (m_cols + 1));
         for (i = 0; i < m_cols; i++) {
-            type_arr[i].typeId = tuple_desc->attrs[i]->atttypid;
-            type_arr[i].typeMod = tuple_desc->attrs[i]->atttypmod;
+            type_arr[i].typeId = tuple_desc->attrs[i].atttypid;
+            type_arr[i].typeMod = tuple_desc->attrs[i].atttypmod;
             type_arr[i].encoded = COL_IS_ENCODE(type_arr[i].typeId);
         }
         /* attributes of last column, its typeId we dont care */
@@ -559,7 +559,7 @@ hashFileSource::hashFileSource(VectorBatch* batch, MemoryContext context, int ce
     m_funType = (int*)palloc(m_cols * sizeof(int));
     m_stripFunArray = (stripValFun*)palloc(sizeof(stripValFun) * m_cols);
     for (i = 0; i < m_cols; i++) {
-        Oid typid = tuple_desc->attrs[i]->atttypid;
+        Oid typid = tuple_desc->attrs[i].atttypid;
         if (COL_IS_ENCODE(typid)) {
             m_funType[i] = VAR_FUN;
         } else {
@@ -659,7 +659,7 @@ hashFileSource::hashFileSource(VectorBatch* batch, MemoryContext context, int ce
         m_tupleSize = 100;
         m_tuple = (MinimalTuple)palloc(m_tupleSize);
         m_tuple->t_len = m_tupleSize;
-        m_hashTupleSlot = MakeTupleTableSlot(true, tuple_desc->tdTableAmType);
+        m_hashTupleSlot = MakeTupleTableSlot(true, tuple_desc->td_tam_ops);
         ExecSetSlotDescriptor(m_hashTupleSlot, tuple_desc);
     }
 
@@ -675,7 +675,7 @@ hashFileSource::hashFileSource(TupleTableSlot* hash_slot, int file_num)
     m_context = NULL;
     if (m_hashTupleSlot->tts_tupleDescriptor == NULL) {
         ExecSetSlotDescriptor(m_hashTupleSlot, hash_slot->tts_tupleDescriptor);
-        m_hashTupleSlot->tts_tupslotTableAm = hash_slot->tts_tupleDescriptor->tdTableAmType;
+        m_hashTupleSlot->tts_tam_ops = hash_slot->tts_tupleDescriptor->td_tam_ops;
     }
 
     m_cols = 0;
@@ -1202,7 +1202,7 @@ size_t hashFileSource::writeCellCompress(hashCell* cell, int file_idx)
     /* restore the len */
     m_tuple->t_len = m_tupleSize;
 
-    m_tuple = tableam_tops_form_minimal_tuple(m_hashTupleSlot->tts_tupleDescriptor, m_values, m_isnull, m_tuple, HEAP_TUPLE);
+    m_tuple = tableam_tops_form_minimal_tuple(m_hashTupleSlot->tts_tupleDescriptor, m_values, m_isnull, m_tuple);
     m_tupleSize = (m_tuple->t_len > m_tupleSize) ? m_tuple->t_len : m_tupleSize;
     writeTupCompress<true>(m_tuple, file_idx);
 
@@ -1285,7 +1285,7 @@ size_t hashFileSource::writeBatchCompress(VectorBatch* batch, int idx, int file_
 
     /* restore the len */
     m_tuple->t_len = m_tupleSize;
-	m_tuple = tableam_tops_form_minimal_tuple(m_hashTupleSlot->tts_tupleDescriptor, m_values, m_isnull, m_tuple, HEAP_TUPLE);
+	m_tuple = tableam_tops_form_minimal_tuple(m_hashTupleSlot->tts_tupleDescriptor, m_values, m_isnull, m_tuple);
     m_tupleSize = (m_tuple->t_len > m_tupleSize) ? m_tuple->t_len : m_tupleSize;
 
     writeTupCompress<true>(m_tuple, file_idx);
@@ -1393,7 +1393,7 @@ void hashFileSource::assembleBatch(TupleTableSlot* slot, int idx)
                 pVector->m_vals[idx] = DatumToScalarInContext(m_context, slot->tts_values[i], pVector->m_desc.typeId);
             } else {
                 /* for vector engine,  pVector->m_desc.typeId is INT8OID, not TIDOID */
-                if (slot->tts_tupleDescriptor->attrs[i]->atttypid == TIDOID) {
+                if (slot->tts_tupleDescriptor->attrs[i].atttypid == TIDOID) {
                     pVector->m_vals[idx] = 0;
                     ItemPointer destTid = (ItemPointer)&pVector->m_vals[idx];
                     ItemPointer srcTid = (ItemPointer)DatumGetPointer(slot->tts_values[i]);
@@ -1597,7 +1597,7 @@ hashCell* hashFileSource::getCellCompress()
                     cell->m_val[i].val = DatumToScalarInContext(m_context, slot->tts_values[i], pVector->m_desc.typeId);
                 } else {
                     /* for vector engine,  pVector->m_desc.typeId is INT8OID, not TIDOID */
-                    if (TIDOID == slot->tts_tupleDescriptor->attrs[i]->atttypid) {
+                    if (TIDOID == slot->tts_tupleDescriptor->attrs[i].atttypid) {
                         ItemPointer destTid = (ItemPointer)&cell->m_val[i].val;
                         ItemPointer srcTid = (ItemPointer)DatumGetPointer(slot->tts_values[i]);
                         *destTid = *srcTid;

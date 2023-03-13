@@ -233,7 +233,7 @@ void cluster(ClusterStmt* stmt, bool isTopLevel)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("table is not partitioned")));
             }
 
-            partOid = partitionNameGetPartitionOid(tableOid,
+            partOid = PartitionNameGetPartitionOid(tableOid,
                 stmt->relation->partitionname,
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 ExclusiveLock,
@@ -1052,7 +1052,7 @@ static void rebuildPartitionedTable(
          * set_baserel_size_estimates, just do a quick hack for rows and width.
          */
         relOptInfo->rows = relOptInfo->tuples;
-        relOptInfo->width = getPartitionDataWidth(partRel, NULL);
+        relOptInfo->reltarget->width = getPartitionDataWidth(partRel, NULL);
         root->total_table_pages = relOptInfo->pages;
 
         /* make a temp table for swapping partition */
@@ -1256,7 +1256,7 @@ static void rebuildPartition(Relation partTableRel, Oid partitionOid, Oid indexO
      * set_baserel_size_estimates, just do a quick hack for rows and width.
      */
     relOptInfo->rows = relOptInfo->tuples;
-    relOptInfo->width = getPartitionDataWidth(partRel, NULL);
+    relOptInfo->reltarget->width = getPartitionDataWidth(partRel, NULL);
     root->total_table_pages = relOptInfo->pages;
 
     /* make a temp table for swapping partition */
@@ -1368,7 +1368,7 @@ static void CopyPartialClusterKeyToNewRelation(Oid OIDNewHeap, TupleDesc tupleDe
         /* get attribute name list for PCK */
         for (pckCnt = 0; pckCnt < pckNum; ++pckCnt) {
             AttrNumber attrNum = constr->clusterKeys[pckCnt];
-            Form_pg_attribute attribute = tupleDesc->attrs[attrNum - 1];
+            Form_pg_attribute attribute = &tupleDesc->attrs[attrNum - 1];
             char* attrName = NameStr(attribute->attname);
 
             pck->contype = CONSTR_CLUSTER;
@@ -1699,7 +1699,7 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
     values = (Datum *)palloc(natts * sizeof(Datum));
     isnull = (bool *)palloc(natts * sizeof(bool));
 
-    slot = MakeSingleTupleTableSlot(oldTupDesc, false, oldTupDesc->tdTableAmType);
+    slot = MakeSingleTupleTableSlot(oldTupDesc, false, oldTupDesc->td_tam_ops);
 
     /* Initialize the rewrite operation */
     rwstate = begin_heap_rewrite(oldHeap, newHeap, oldestXmin, freezeXid, useWal);
@@ -1897,11 +1897,9 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
 
         for (;;) {
             UHeapTuple utuple;
-            bool shouldfree = false;
-
             CHECK_FOR_INTERRUPTS();
 
-            utuple = (UHeapTuple)tuplesort_getheaptuple(tuplesort, true, &shouldfree);
+            utuple = (UHeapTuple)tuplesort_getheaptuple(tuplesort, true);
             if (utuple == NULL)
                 break;
 
@@ -1909,9 +1907,6 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
 
             ReformAndRewriteUTuple(utuple, oldTupDesc, newTupDesc, values, isnull, newHeap->rd_rel->relhasoids,
                 rwstate);
-
-            if (shouldfree)
-                UHeapFreeTuple(utuple);
         }
 
         tuplesort_end(tuplesort);
@@ -2173,7 +2168,7 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
 
             /* Be sure to null out any dropped columns */
             for (int i = 0; i < newTupDesc->natts; i++) {
-                if (newTupDesc->attrs[i]->attisdropped)
+                if (newTupDesc->attrs[i].attisdropped)
                     isnull[i] = true;
             }
 
@@ -2226,19 +2221,14 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
 
         for (;;) {
             HeapTuple tuple;
-            bool shouldfree = false;
-
             CHECK_FOR_INTERRUPTS();
 
-            tuple = (HeapTuple)tuplesort_getheaptuple(tuplesort, true, &shouldfree);
+            tuple = (HeapTuple)tuplesort_getheaptuple(tuplesort, true);
             if (tuple == NULL)
                 break;
 
             reform_and_rewrite_tuple(
                 tuple, oldTupDesc, newTupDesc, values, isnull, NewHeap->rd_rel->relhasoids, rwstate);
-
-            if (shouldfree)
-                heap_freetuple(tuple);
         }
 
         tuplesort_end(tuplesort);
@@ -2382,7 +2372,7 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
 
             if (isNull) {
                 relfrozenxid = OldHeap->rd_rel->relfrozenxid;
-                if (OldHeap->rd_tam_type == TAM_USTORE) {
+                if (OldHeap->rd_tam_ops == TableAmUstore) {
                     elog(ERROR, "cluster not supported in ustore");
                 }
 
@@ -3626,7 +3616,7 @@ static void reform_and_rewrite_tuple(HeapTuple tuple, TupleDesc oldTupDesc, Tupl
 
     /* Be sure to null out any dropped columns */
     for (i = 0; i < newTupDesc->natts; i++) {
-        if (newTupDesc->attrs[i]->attisdropped)
+        if (newTupDesc->attrs[i].attisdropped)
             isnull[i] = true;
     }
 
@@ -3768,7 +3758,7 @@ ReformAndRewriteUTuple(UHeapTuple tuple,
         /* Be sure to null out any dropped columns */
         for (i = 0; i < newTupDesc->natts; i++)
         {
-                if (newTupDesc->attrs[i]->attisdropped)
+                if (newTupDesc->attrs[i].attisdropped)
                         isnull[i] = true;
         }
 
@@ -3776,7 +3766,7 @@ ReformAndRewriteUTuple(UHeapTuple tuple,
         if (usePrivateMemcxt)
                 oldMemCxt = MemoryContextSwitchTo(get_heap_rewrite_memcxt(rwstate));
 
-        copiedTuple = tableam_tops_form_tuple(newTupDesc, values, isnull, UHEAP_TUPLE);
+        copiedTuple = tableam_tops_form_tuple(newTupDesc, values, isnull, TableAmUstore);
 
         {
                 RewriteUHeapTuple(rwstate, tuple, (UHeapTuple)copiedTuple);
@@ -4228,7 +4218,7 @@ static void CopyCStoreData(Relation oldRel, Relation newRel, int freeze_min_age,
 static void filter_batch(const TupleDesc oldTupDesc, const VectorBatch* pbatch) 
 {
     for (int i = 0; i < oldTupDesc->natts; i++) {
-        if (!oldTupDesc->attrs[i]->attisdropped) {
+        if (!oldTupDesc->attrs[i].attisdropped) {
             continue;
         }
         
@@ -4250,7 +4240,7 @@ static void DoCopyCUFormatData(Relation oldRel, Relation newRel, TupleDesc oldTu
     CStoreInsert* cstoreOpt = NULL;
     CStoreScanDesc scan = NULL;
     int16* colIdx = NULL;
-    Form_pg_attribute* oldAttrs = NULL;
+    FormData_pg_attribute* oldAttrs = NULL;
     MemInfoArg memInfo;
 
     // Init CStore insertion.
@@ -4269,7 +4259,7 @@ static void DoCopyCUFormatData(Relation oldRel, Relation newRel, TupleDesc oldTu
     colIdx = (int16*)palloc0(sizeof(int16) * oldTupDesc->natts);
     oldAttrs = oldTupDesc->attrs;
     for (int i = 0; i < oldTupDesc->natts; i++)
-        colIdx[i] = oldAttrs[i]->attnum;
+        colIdx[i] = oldAttrs[i].attnum;
     scan = CStoreBeginScan(oldRel, oldTupDesc->natts, colIdx, SnapshotNow, true);
 
     /*
@@ -4610,9 +4600,9 @@ void HbktTransferDeletePgAttributeTablebucketid(Oid relid, bool cboffIndex)
     Relation rel1 = relation_open(relid, NoLock);
 
     for (i = 0; i < rel1->rd_att->natts; i++) {
-        char *attr_name = pstrdup(NameStr(rel1->rd_att->attrs[i]->attname));
+        char *attr_name = pstrdup(NameStr(rel1->rd_att->attrs[i].attname));
         if (strcmp(attr_name, "tablebucketid") == 0) {
-            attrnum = rel1->rd_att->attrs[i]->attnum;
+            attrnum = rel1->rd_att->attrs[i].attnum;
             break;
         }
     }

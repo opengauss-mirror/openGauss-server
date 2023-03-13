@@ -1,12 +1,24 @@
 -- test normal db
-create database test;
-\c test
+create database group_concat_test1 dbcompatibility 'A';;
+\c group_concat_test1
+CREATE TABLE t(id int, v text);
+INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
+select id, group_concat(v separator ';') from t group by id order by id asc;
+create database group_concat_test2 dbcompatibility 'C';;
+\c group_concat_test2
+CREATE TABLE t(id int, v text);
+INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
+select id, group_concat(v separator ';') from t group by id order by id asc;
+create database group_concat_test3 dbcompatibility 'PG';;
+\c group_concat_test3
 CREATE TABLE t(id int, v text);
 INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
 select id, group_concat(v separator ';') from t group by id order by id asc;
 \c regression
-drop database test;
--- test group_concat (compatible with B db)
+drop database group_concat_test1;
+drop database group_concat_test2;
+drop database group_concat_test3;
+-- test group_concat (in B db)
 create database test_group_concat_B_db dbcompatibility 'B';
 \c test_group_concat_B_db
 set group_concat_max_len to 20480;
@@ -118,9 +130,9 @@ SELECT mgrno, ename, job, group_concat(ename,job) OVER(PARTITION BY mgrno) AS em
 
 -- test for plan changes, dfx
 SET explain_perf_mode=pretty;
-EXPLAIN verbose SELECT deptno, group_concat(ename ORDER BY ename SEPARATOR ',') AS employees_order_by_ename_varchar FROM emp GROUP BY deptno;
-EXPLAIN verbose SELECT deptno, group_concat(sign ORDER BY email SEPARATOR '##') AS email_order_by_email_text_en FROM emp GROUP BY deptno;
-EXPLAIN verbose SELECT deptno, group_concat(VARIADIC ARRAY[ename,':',job]  ORDER BY ename) AS bonus_order_by_bonus_numeric FROM emp GROUP BY deptno;
+EXPLAIN (costs off) SELECT deptno, group_concat(ename ORDER BY ename SEPARATOR ',') AS employees_order_by_ename_varchar FROM emp GROUP BY deptno;
+EXPLAIN (costs off) SELECT deptno, group_concat(sign ORDER BY email SEPARATOR '##') AS email_order_by_email_text_en FROM emp GROUP BY deptno;
+EXPLAIN (costs off) SELECT deptno, group_concat(VARIADIC ARRAY[ename,':',job]  ORDER BY ename) AS bonus_order_by_bonus_numeric FROM emp GROUP BY deptno;
 
 -- test for date print format
 SET datestyle = 'SQL,DMY';
@@ -185,10 +197,11 @@ select * from test_group_concat_bin order by bt_col1;
 select group_concat(BT_COL2,BT_COL3,BT_COL4 order by BT_COL1 separator '') from test_group_concat_bin;
 
 \c regression
+clean connection to all force for database test_group_concat_B_db;
 drop database test_group_concat_B_db;
 
-create database t dbcompatibility 'B';
-\c t;
+create database test_group_concat_max_len dbcompatibility 'B';
+\c test_group_concat_max_len;
 
 CREATE TABLE t(id int, v text);
 INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
@@ -202,12 +215,12 @@ show group_concat_max_len;
 select id, group_concat(v separator ';') from t group by id order by id asc;
 
 --alter database XXX set XXX to XXX (current session)
-alter database t set group_concat_max_len to 10;
+alter database test_group_concat_max_len set group_concat_max_len to 10;
 show group_concat_max_len;
 select id, group_concat(v separator ';') from t group by id order by id asc;
 --new session
 \c regression
-\c t
+\c test_group_concat_max_len
 show group_concat_max_len;
 select id, group_concat(v separator ';') from t group by id order by id asc;
 
@@ -219,7 +232,7 @@ select id, group_concat(v separator ';') from t group by id order by id asc;
 
 --show database value above
 \c regression
-\c t
+\c test_group_concat_max_len
 show group_concat_max_len;
 select id, group_concat(v separator ';') from t group by id order by id asc;
 
@@ -228,4 +241,5 @@ set group_concat_max_len to -1;
 set group_concat_max_len to 9223372036854775808;
 
 \c regression
-drop database t;
+clean connection to all force for database test_group_concat_max_len;
+drop database test_group_concat_max_len;

@@ -105,7 +105,6 @@ SubqueryScanState* ExecInitSubqueryScan(SubqueryScan* node, EState* estate, int 
     sub_query_state->ss.ps.state = estate;
     sub_query_state->ss.ps.ExecProcNode = ExecSubqueryScan;
 
-
     /*
      * Miscellaneous initialization
      *
@@ -142,11 +141,11 @@ SubqueryScanState* ExecInitSubqueryScan(SubqueryScan* node, EState* estate, int 
      */
     ExecAssignResultTypeFromTL(
             &sub_query_state->ss.ps,
-            sub_query_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            sub_query_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     ExecAssignScanProjectionInfo(&sub_query_state->ss);
 
-    Assert(sub_query_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(sub_query_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     return sub_query_state;
 }

@@ -140,7 +140,7 @@ void RemoteCopy_BuildStatement(
         if (state->is_from) {
             for (attnum = 1; attnum <= tupDesc->natts; attnum++) {
                 /* Don't let dropped attributes go into the column list */
-                if (tupDesc->attrs[attnum - 1]->attisdropped)
+                if (tupDesc->attrs[attnum - 1].attisdropped)
                     continue;
 
                 if (!list_member_int(attnums, attnum)) {
@@ -149,7 +149,7 @@ void RemoteCopy_BuildStatement(
                     if (defexpr && ((!pgxc_is_expr_shippable(expression_planner(defexpr), NULL)) ||
                                        (list_member_int(state->idx_dist_by_col, attnum - 1)))) {
                         appendStringInfoString(
-                            &state->query_buf, quote_identifier(NameStr(tupDesc->attrs[attnum - 1]->attname)));
+                            &state->query_buf, quote_identifier(NameStr(tupDesc->attrs[attnum - 1].attname)));
                         appendStringInfoString(&state->query_buf, ", ");
                     }
                 }

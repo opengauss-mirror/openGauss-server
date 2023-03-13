@@ -1,0 +1,263 @@
+CREATE SCHEMA srf_fusion_gs_aggregate;
+SET search_path TO srf_fusion_gs_aggregate;
+
+SET enable_expr_fusion = on;
+SHOW enable_expr_fusion;
+
+-- case 1
+
+CREATE TABLE customer
+(
+    c_customer_sk             integer               not null,
+    c_customer_id             char(16)              not null,
+    c_current_cdemo_sk        integer                       ,
+    c_current_hdemo_sk        integer                       ,
+    c_current_addr_sk         integer                       ,
+    c_first_shipto_date_sk    integer                       ,
+    c_first_sales_date_sk     integer                       ,
+    c_salutation              char(10)                      ,
+    c_first_name              char(20)                      ,
+    c_last_name               char(30)                      ,
+    c_preferred_cust_flag     char(1)                       ,
+    c_birth_day               integer                       ,
+    c_birth_month             integer                       ,
+    c_birth_year              integer                       ,
+    c_birth_country           varchar(20)                   ,
+    c_login                   char(13)                      ,
+    c_email_address           char(50)                      ,
+    c_last_review_date        char(10)                      
+) ;
+
+explain (verbose on, costs off)
+select 
+    count(*),
+    regexp_split_to_table(c_birth_day::text||c_birth_month::text,c_birth_month::text)
+from customer
+where length(c_birth_country)<5 and c_birth_month<9
+group by c_birth_day,c_birth_month;
+
+explain (verbose on, costs off)
+select 
+    regexp_split_to_table(c_birth_day::text||c_birth_month::text,c_birth_month::text)
+from customer
+where length(c_birth_country)<5 and c_birth_month<9
+group by c_birth_day,c_birth_month;
+
+explain (verbose on, costs off)
+select 
+    count(*)||
+    regexp_split_to_table(c_birth_day::text||c_birth_month::text,c_birth_month::text)
+from customer
+where length(c_birth_country)<5 and c_birth_month<9
+group by c_birth_day,c_birth_month;
+
+explain (verbose on, costs off)
+select 
+    sum(c_birth_month),
+    regexp_split_to_table(c_birth_day::text||c_birth_month::text,c_birth_month::text)
+from customer
+where length(c_birth_country)<5 and c_birth_month<9
+group by c_birth_day,c_birth_month;
+
+DROP TABLE customer;
+
+-- case 2
+CREATE TABLE few(id int, dataa text, datab text);
+INSERT INTO few VALUES(1, 'a', 'foo'),(2, 'a', 'bar'),(3, 'b', 'bar'),(4, 'd', 'foo');
+
+explain (verbose on, costs off) SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab) ORDER BY 1,2,3,4;
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab) ORDER BY 1,2,3,4;
+
+explain (verbose on, costs off)  SELECT generate_series(1,2) ,sum(id) FROM few order by 1,2;
+SELECT generate_series(1,2) ,sum(id) FROM few order by 1,2;
+
+DROP TABLE few;
+
+-- case 3
+create table party(
+party_id text not null ,
+party_type_cd character varying(100) ,
+party_zip character(100) ,
+party_info_source_type_cd character(100) ,
+party_start_dt timestamp(0) without time zone not null ,
+active_lines character varying(50) ,
+all_related_geo text )
+ ;
+
+SELECT regexp_split_to_table(party_id, '\W[0-9]\W\w\W\d$')
+FROM party 
+GROUP BY 1;
+
+SELECT lengthb(lower(rtrim(regexp_replace(lower(overlay(trim(leading
+from 'G') PLACING 'G'
+FROM 6 FOR 8)), '\d[A-Z]\s\N?', regexp_split_to_table(party_id, '\W[0-9]\W\w\W\d$')), 'y'))) Column_013,
+party_start_dt ,party_id 
+FROM party 
+GROUP BY 1,2,3;
+
+DROP TABLE party;
+
+-- case 4
+CREATE TABLE supplier_part
+(
+S_SUPPKEY BIGINT NOT NULL
+, S_NAME CHAR(25)
+, S_ADDRESS VARCHAR(40)
+, S_NATIONKEY INT
+, S_PHONE CHAR(15)
+, S_ACCTBAL DECIMAL(15,2)
+, S_COMMENT VARCHAR(101)
+--, primary key (S_SUPPKEY)
+)  
+partition by range (S_SUPPKEY)
+(
+partition p1 values less than (1000),
+partition p2 values less than (2000),
+partition p3 values less than (3000),
+partition p4 values less than (4000),
+partition p5 values less than (5000),
+partition p6 values less than (6000),
+partition p7 values less than (7000),
+partition p8 values less than (8000),
+partition p9 values less than (9000),
+partition p10 values less than (10000),
+partition p11 values less than (maxvalue)
+);
+
+explain (verbose on, costs off) select count(*) from (select s_comment,regexp_split_to_table(s_comment, E' '),count(*) as num from supplier_part where S_SUPPKEY < 2000 group by 1  order by 1,2,3);
+--force to do two-level agg
+SET enable_sort = off;
+select
+    s_comment,
+    regexp_split_to_table(regexp_split_to_table(s_comment, E' '), ','),
+    count(*) as num 
+from supplier_part 
+where S_SUPPKEY < 2000 
+group by 1,2
+order by 3,2,1 desc;
+
+-- case 5
+RESET ALL;
+SET search_path TO srf_fusion_gs_aggregate;
+
+SET enable_expr_fusion = on;
+SHOW enable_expr_fusion;
+
+CREATE TABLE web_site (
+    web_site_sk integer NOT NULL,
+    web_site_id character(16) NOT NULL,
+    web_rec_start_date timestamp(0) without time zone,
+    web_rec_end_date timestamp(0) without time zone,
+    web_name character varying(50),
+    web_open_date_sk integer,
+    web_close_date_sk integer,
+    web_class character varying(50),
+    web_manager character varying(40),
+    web_mkt_id integer,
+    web_mkt_class character varying(50),
+    web_mkt_desc character varying(100),
+    web_market_manager character varying(40),
+    web_company_id integer,
+    web_company_name character(50),
+    web_street_number character(10),
+    web_street_name character varying(60),
+    web_street_type character(15),
+    web_suite_number character(10),
+    web_city character varying(60),
+    web_county character varying(30),
+    web_state character(2),
+    web_zip character(10),
+    web_country character varying(20),
+    web_gmt_offSET numeric(5,2),
+    web_tax_percentage numeric(5,2)
+)
+WITH (orientation=row, compression=no)
+ 
+PARTITION BY RANGE (web_rec_start_date)
+(
+    PARTITION p1 VALUES LESS THAN ('1990-01-01') TABLESPACE pg_default,
+    PARTITION p2 VALUES LESS THAN ('1995-01-01') TABLESPACE pg_default,
+    PARTITION p3 VALUES LESS THAN ('2000-01-01') TABLESPACE pg_default,
+    PARTITION p4 VALUES LESS THAN ('2005-01-01') TABLESPACE pg_default,
+    PARTITION p5 VALUES LESS THAN ('2010-01-01') TABLESPACE pg_default,
+    PARTITION p6 VALUES LESS THAN ('2015-01-01') TABLESPACE pg_default,
+    PARTITION p7 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default
+);
+
+CREATE TABLE customer_address (
+    ca_address_sk integer NOT NULL,
+    ca_address_id character(16) NOT NULL,
+    ca_street_number character(10),
+    ca_street_name character varying(60),
+    ca_street_type character(15),
+    ca_suite_number character(10),
+    ca_city character varying(60),
+    ca_county character varying(30),
+    ca_state character(2),
+    ca_zip character(10),
+    ca_country character varying(20),
+    ca_gmt_offset numeric(5,2),
+    ca_location_type character(20)
+)
+WITH (orientation=row, compression=no)
+ ;
+
+COPY customer_address FROM '@abs_srcdir@/data/customer_address.dat';
+COPY web_site FROM '@abs_srcdir@/data/web_site.data' DELIMITER as ',' NULL as '';
+
+ANALYZE customer_address;
+ANALYZE web_site;
+SET enable_hashagg = off;
+SET enable_hashjoin = off;
+SET enable_nestloop = off;
+SET enable_mergejoin = on;
+SET explain_perf_mode = pretty;
+
+explain (verbose on, costs off)
+select count(*) from 
+(
+with tmp as (select regexp_split_to_table(ca_street_name,' ') a,regexp_split_to_table(ca_city,' ')b ,regexp_split_to_table(ca_county,' ')c ,regexp_split_to_table(ca_country,' ') d from customer_address),
+
+tmp1 as (select regexp_split_to_table(web_street_name,' ') e,regexp_split_to_table(web_city,' ') f,regexp_split_to_table(web_county,' ') g from web_site)
+
+select distinct regexp_split_to_table(a||e,'a') ,count(*) from tmp join tmp1 on a=e group by a,e 
+union ALL
+select distinct regexp_split_to_table(nullif (a||e,'n'),'a') ,length(regexp_split_to_table(a||e,' ')) from tmp join tmp1 on a=e group by a,e order by 1,2
+);
+
+select count(*) from 
+(
+with tmp as (select regexp_split_to_table(ca_street_name,' ') a,regexp_split_to_table(ca_city,' ')b ,regexp_split_to_table(ca_county,' ')c ,regexp_split_to_table(ca_country,' ') d from customer_address),
+
+tmp1 as (select regexp_split_to_table(web_street_name,' ') e,regexp_split_to_table(web_city,' ') f,regexp_split_to_table(web_county,' ') g from web_site)
+
+select distinct regexp_split_to_table(a||e,'a') ,count(*) from tmp join tmp1 on a=e group by a,e 
+union ALL
+select distinct regexp_split_to_table(nullif (a||e,'n'),'a') ,length(regexp_split_to_table(a||e,' ')) from tmp join tmp1 on a=e group by a,e order by 1,2
+);
+
+CREATE TABLE test_string 
+(
+    id character varying,
+    name text,
+    pid character varying,
+    pname text,
+    "time" timestamp without time zone
+)
+WITH (orientation=row, compression=no)
+ ;
+
+explain (verbose on, costs off)
+SELECT 
+Column_003
+FROM
+(
+    SELECT
+        (SELECT '1' where id LIKE 'Q%') Column_003
+    FROM test_string
+    GROUP BY CUBE(Column_003)
+) 
+WHERE Column_003='dfm';
+
+RESET search_path;
+DROP SCHEMA srf_fusion_gs_aggregate CASCADE;

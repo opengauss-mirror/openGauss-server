@@ -72,7 +72,7 @@ ParallelReorderBufferTXN *ParallelReorderBufferGetOldestTXN(ParallelReorderBuffe
     return txn;
 }
 
-void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool skip_nulls)
+void tuple_to_stringinfo(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool isOld)
 {
     if ((tuple->tupTableType == HEAP_TUPLE) && (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) ||
         (int)HeapTupleHeaderGetNatts(tuple->t_data, tupdesc) > tupdesc->natts)) {
@@ -88,9 +88,9 @@ void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool 
         Datum origval;      /* possibly toasted Datum */
         bool isnull = true; /* column is null? */
 
-        attr = tupdesc->attrs[natt];
+        attr = &tupdesc->attrs[natt];
 
-        if (attr->attisdropped || attr->attnum < 0)
+        if (attr->attisdropped || attr->attnum < 0 || (isOld && !IsRelationReplidentKey(relation, attr->attnum)))
             continue;
 
         typid = attr->atttypid;
@@ -100,10 +100,6 @@ void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool 
             origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
         } else {
             origval = uheap_getattr((UHeapTuple)tuple, natt + 1, tupdesc, &isnull);
-        }
-
-        if (isnull && skip_nulls) {
-            continue;
         }
 
         /* print attribute name */
@@ -221,6 +217,7 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
     char *schema = get_namespace_name(class_form->relnamespace);
     char *table = NameStr(class_form->relname);
     if (FilterWhiteList(schema, table, slotId, old, data->context)) {
+        logChange->type = LOGICAL_LOG_EMPTY;
         return;
     }
 
@@ -240,7 +237,7 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
             if (change->data.tp.newtuple == NULL)
                 appendStringInfoString(logChange->out, " (no-tuple-data)");
             else
-                tuple_to_stringinfo(logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                tuple_to_stringinfo(relation, logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             break;
 
         case PARALLEL_REORDER_BUFFER_CHANGE_UPDATE:
@@ -248,14 +245,14 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
             appendStringInfoString(logChange->out, " UPDATE:");
             if (change->data.tp.oldtuple != NULL) {
                 appendStringInfoString(logChange->out, " old-key:");
-                tuple_to_stringinfo(logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                tuple_to_stringinfo(relation, logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
                 appendStringInfoString(logChange->out, " new-tuple:");
             }
 
             if (change->data.tp.newtuple == NULL)
                 appendStringInfoString(logChange->out, " (no-tuple-data)");
             else
-                tuple_to_stringinfo(logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                tuple_to_stringinfo(relation, logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             break;
 
         case PARALLEL_REORDER_BUFFER_CHANGE_DELETE:
@@ -267,7 +264,7 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
                 appendStringInfoString(logChange->out, " (no-tuple-data)");
             /* In DELETE, only the replica identity is present; display that */
             else
-                tuple_to_stringinfo(logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                tuple_to_stringinfo(relation, logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
             break;
 
         default:
@@ -283,8 +280,8 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
     MemoryContextReset(data->context);
 }
 
-static void TupleToJsoninfo(
-    cJSON* cols_name, cJSON* cols_type, cJSON* cols_val, TupleDesc tupdesc, HeapTuple tuple, bool skip_nulls)
+static void TupleToJsoninfo(Relation relation, cJSON* cols_name, cJSON* cols_type, cJSON* cols_val, TupleDesc tupdesc,
+    HeapTuple tuple, bool isOld)
 {
     if ((tuple->tupTableType == HEAP_TUPLE) && (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) ||
         (int)HeapTupleHeaderGetNatts(tuple->t_data, tupdesc) > tupdesc->natts)) {
@@ -293,8 +290,8 @@ static void TupleToJsoninfo(
 
     /* print all columns individually */
     for (int natt = 0; natt < tupdesc->natts; natt++) {
-        Form_pg_attribute attr = tupdesc->attrs[natt]; /* the attribute itself */
-        if (attr->attisdropped || attr->attnum < 0) {
+        Form_pg_attribute attr = &tupdesc->attrs[natt]; /* the attribute itself */
+        if (attr->attisdropped || attr->attnum < 0 || (isOld && !IsRelationReplidentKey(relation, attr->attnum))) {
             continue;
         }
 
@@ -307,9 +304,6 @@ static void TupleToJsoninfo(
             origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
         } else {
             origval = uheap_getattr((UHeapTuple)tuple, natt + 1, tupdesc, &isnull);
-        }
-        if (isnull && skip_nulls) {
-            continue;
         }
 
         /* print attribute name */
@@ -375,6 +369,7 @@ void parallel_decode_change_to_json(Relation relation, ParallelReorderBufferChan
     char *schema = get_namespace_name(class_form->relnamespace);
     char *table = NameStr(class_form->relname);
     if (FilterWhiteList(schema, table, slotId, old, data->context)) {
+        logChange->type = LOGICAL_LOG_EMPTY;
         return;
     }
 
@@ -409,25 +404,29 @@ void parallel_decode_change_to_json(Relation relation, ParallelReorderBufferChan
         case PARALLEL_REORDER_BUFFER_CHANGE_UINSERT:
             opType = cJSON_CreateString("INSERT");
             if (change->data.tp.newtuple != NULL) {
-                TupleToJsoninfo(columnsName, columnsType, columnsVal, tupdesc, &change->data.tp.newtuple->tuple, false);
+                TupleToJsoninfo(relation, columnsName, columnsType, columnsVal, tupdesc,
+                    &change->data.tp.newtuple->tuple, false);
             }
             break;
         case PARALLEL_REORDER_BUFFER_CHANGE_UPDATE:
         case PARALLEL_REORDER_BUFFER_CHANGE_UUPDATE:
             opType = cJSON_CreateString("UPDATE");
             if (change->data.tp.oldtuple != NULL) {
-                TupleToJsoninfo(oldKeysName, oldKeysType, oldKeysVal, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                TupleToJsoninfo(relation, oldKeysName, oldKeysType, oldKeysVal, tupdesc,
+                    &change->data.tp.oldtuple->tuple, true);
             }
 
             if (change->data.tp.newtuple != NULL) {
-                TupleToJsoninfo(columnsName, columnsType, columnsVal, tupdesc, &change->data.tp.newtuple->tuple, false);
+                TupleToJsoninfo(relation, columnsName, columnsType, columnsVal, tupdesc,
+                    &change->data.tp.newtuple->tuple, false);
             }
             break;
         case PARALLEL_REORDER_BUFFER_CHANGE_DELETE:
         case PARALLEL_REORDER_BUFFER_CHANGE_UDELETE:
             opType = cJSON_CreateString("DELETE");
             if (change->data.tp.oldtuple != NULL) {
-                TupleToJsoninfo(oldKeysName, oldKeysType, oldKeysVal, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                TupleToJsoninfo(relation, oldKeysName, oldKeysType, oldKeysVal, tupdesc,
+                    &change->data.tp.oldtuple->tuple, true);
             }
             /* if there was no PK, we only know that a delete happened */
             break;
@@ -480,7 +479,7 @@ static inline bool AppendInvalidations(StringInfo s, TupleDesc tupdesc, HeapTupl
 }
 
 /* decode a tuple into binary style */
-static void AppendTuple(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool skipNulls)
+static void AppendTuple(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool isOld)
 {
     if (AppendInvalidations(s, tupdesc, tuple)) {
         return;
@@ -489,8 +488,8 @@ static void AppendTuple(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool s
     uint16 attrNum = 0;
     pq_sendint16(s, (uint16)(tupdesc->natts));
     for (int natt = 0; natt < tupdesc->natts; natt++) {
-        Form_pg_attribute attr = tupdesc->attrs[natt];
-        if (attr->attisdropped || attr->attnum < 0) {
+        Form_pg_attribute attr = &tupdesc->attrs[natt];
+        if (attr->attisdropped || attr->attnum < 0 || (isOld && !IsRelationReplidentKey(relation, attr->attnum))) {
             continue;
         }
 
@@ -501,9 +500,6 @@ static void AppendTuple(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool s
             origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
         } else {
             origval = uheap_getattr((UHeapTuple)tuple, natt + 1, tupdesc, &isnull);
-        }
-        if (isnull && skipNulls) {
-            continue;
         }
         attrNum++;
         const char *columnName = quote_identifier(NameStr(attr->attname));
@@ -548,6 +544,7 @@ void parallel_decode_change_to_bin(Relation relation, ParallelReorderBufferChang
     char *schema = get_namespace_name(class_form->relnamespace);
     char *table = NameStr(class_form->relname);
     if (FilterWhiteList(schema, table, slotId, old, data->context)) {
+        logChange->type = LOGICAL_LOG_EMPTY;
         return;
     }
 
@@ -562,7 +559,7 @@ void parallel_decode_change_to_bin(Relation relation, ParallelReorderBufferChang
             AppendRelation(logChange->out, tupdesc, schema, table);
             if (change->data.tp.newtuple != NULL) {
                 appendStringInfoChar(logChange->out, 'N');
-                AppendTuple(logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                AppendTuple(relation, logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             }
             break;
 
@@ -573,11 +570,11 @@ void parallel_decode_change_to_bin(Relation relation, ParallelReorderBufferChang
 
             if (change->data.tp.newtuple != NULL) {
                 appendStringInfoChar(logChange->out, 'N');
-                AppendTuple(logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                AppendTuple(relation, logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             }
             if (change->data.tp.oldtuple != NULL) {
                 appendStringInfoChar(logChange->out, 'O');
-                AppendTuple(logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                AppendTuple(relation, logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
             }
             break;
 
@@ -588,7 +585,7 @@ void parallel_decode_change_to_bin(Relation relation, ParallelReorderBufferChang
             /* if there was no PK, we only know that a delete happened */
             if (change->data.tp.oldtuple != NULL) {
                 appendStringInfoChar(logChange->out, 'O');
-                AppendTuple(logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                AppendTuple(relation, logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
             }
             break;
 
@@ -773,16 +770,7 @@ logicalLog* getIUDLogicalLog(ParallelReorderBufferChange* change, ParallelLogica
      * Catalog tuple without data, emitted while catalog was
      * in the process of being rewritten.
      */
-    if (change->data.tp.newtuple == NULL && change->data.tp.oldtuple == NULL) {
-        /*
-         * The parser thread polls and puts tuples into the decoder queue in LSN order.
-         * When there is a log that does not need to be parsed, the empty logical log should
-         * also be inserted into the queue to ensure that the order is preserved when the slicer
-         * polls to obtain the logical log.
-         */
-        logChange = GetLogicalLog(worker);
-        return logChange;
-    } else if (reloid == InvalidOid) {
+    if (reloid == InvalidOid) {
         /*
          * description:
          * When we try to decode a table who is already dropped.

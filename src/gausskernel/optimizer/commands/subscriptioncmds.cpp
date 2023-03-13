@@ -30,7 +30,7 @@
 
 #include "commands/defrem.h"
 #include "commands/subscriptioncmds.h"
-
+#include "commands/event_trigger.h"
 #include "nodes/makefuncs.h"
 
 #include "replication/logicallauncher.h"
@@ -1093,6 +1093,7 @@ void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
     myself.classId = SubscriptionRelationId;
     myself.objectId = subid;
     myself.objectSubId = 0;
+    EventTriggerSQLDropAddObject(&myself, true, true);
 
     /* Remove the tuple from catalog. */
     simple_heap_delete(rel, &tup->t_self);

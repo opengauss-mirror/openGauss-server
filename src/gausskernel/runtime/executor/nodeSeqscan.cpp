@@ -210,13 +210,28 @@ void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDi
     if (tuple != NULL) {
          Assert(slot != NULL);
          Assert(slot->tts_tupleDescriptor != NULL);
-         slot->tts_tupslotTableAm = type;
+         slot->tts_tam_ops = GetTableAmRoutine(type);
          if (type == TAM_USTORE) {
              UHeapSlotStoreUHeapTuple((UHeapTuple)tuple, slot, false, false);
          } else {
              HeapTuple htup = (HeapTuple)tuple;
              heap_slot_store_heap_tuple(htup, slot, scan->rs_cbuf, false, false);
          }
+    } else {
+         ExecClearTuple(slot);
+    }
+}
+
+void seq_scan_getnext(TableScanDesc scan,  TupleTableSlot* slot, ScanDirection direction, 
+        bool* has_cur_xact_write)
+{
+    Tuple tuple;
+    tuple =  (Tuple)heap_getnext(scan, direction, has_cur_xact_write);
+    if (tuple != NULL) {
+         Assert(slot != NULL);
+         Assert(slot->tts_tupleDescriptor != NULL);
+         slot->tts_tam_ops = GetTableAmRoutine(TAM_HEAP);
+         heap_slot_store_heap_tuple((HeapTuple)tuple, slot, scan->rs_cbuf, false, false);
     } else {
          ExecClearTuple(slot);
     }
@@ -347,7 +362,7 @@ static ScanBatchResult *SeqNextBatchMode(SeqScanState *node)
     scanDesc->rs_maxScanRows = node->scanBatchState->scanTupleSlotMaxNum;
     node->scanBatchState->scanfinished = tableam_scan_gettuplebatchmode(scanDesc, direction);
 
-    if (slot[0]->tts_tupslotTableAm == TAM_USTORE) {
+    if (TTS_TABLEAM_IS_USTORE(slot[0])) {
         ExecStoreTupleBatchMode<TAM_USTORE>(scanDesc, slot);
     } else {
         ExecStoreTupleBatchMode<TAM_HEAP>(scanDesc, slot);
@@ -554,8 +569,8 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &node->ps, current_relation->rd_tam_type);
-    ExecInitScanTupleSlot(estate, node, current_relation->rd_tam_type);
+    ExecInitResultTupleSlot(estate, &node->ps, current_relation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, node, current_relation->rd_tam_ops);
 
     if (((Scan*)node->ps.plan)->tablesample && node->sampleScanInfo.tsm_state == NULL) {
         if (isUstoreRel) {
@@ -605,32 +620,41 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
             Partition part = NULL;
             PruningResult* resultPlan = GetPartitionPruningResultInInitScanRelation(plan, estate, current_relation);
 
-            ListCell* cell = NULL;
+            ListCell* cell1 = NULL;
+            ListCell* cell2 = NULL;
             List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
+            List* partitionnos = resultPlan->ls_selectedPartitionnos;
+            Assert(list_length(part_seqs) == list_length(partitionnos));
 
-            foreach (cell, part_seqs) {
+            forboth (cell1, part_seqs, cell2, partitionnos) {
                 Oid tablepartitionid = InvalidOid;
-                int partSeq = lfirst_int(cell);
+                int partSeq = lfirst_int(cell1);
+                int partitionno = lfirst_int(cell2);
                 List* subpartition = NIL;
 
-                tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, plan->pruningInfo->partMap);
-                part = partitionOpen(current_relation, tablepartitionid, lockmode);
+                tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, partitionno);
+                part = PartitionOpenWithPartitionno(current_relation, tablepartitionid, partitionno, lockmode);
                 node->partitions = lappend(node->partitions, part);
                 if (resultPlan->ls_selectedSubPartitions != NIL) {
                     Relation partRelation = partitionGetRelation(current_relation, part);
                     SubPartitionPruningResult *subPartPruningResult =
-                        GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq);
+                        GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq, partitionno);
                     if (subPartPruningResult == NULL) {
                         continue;
                     }
                     List *subpart_seqs = subPartPruningResult->ls_selectedSubPartitions;
-                    ListCell *lc = NULL;
-                    foreach (lc, subpart_seqs) {
+                    List *subpartitionnos = subPartPruningResult->ls_selectedSubPartitionnos;
+                    Assert(list_length(subpart_seqs) == list_length(subpartitionnos));
+                    ListCell *lc1 = NULL;
+                    ListCell *lc2 = NULL;
+                    forboth (lc1, subpart_seqs, lc2, subpartitionnos) {
                         Oid subpartitionid = InvalidOid;
-                        int subpartSeq = lfirst_int(lc);
+                        int subpartSeq = lfirst_int(lc1);
+                        int subpartitionno = lfirst_int(lc2);
 
-                        subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq);
-                        Partition subpart = partitionOpen(partRelation, subpartitionid, lockmode);
+                        subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq, subpartitionno);
+                        Partition subpart =
+                            PartitionOpenWithPartitionno(partRelation, subpartitionid, subpartitionno, lockmode);
                         subpartition = lappend(subpartition, subpart);
                     }
                     releaseDummyRelation(&(partRelation));
@@ -743,7 +767,7 @@ static SeqScanState *ExecInitSeqScanBatchMode(SeqScan *node, SeqScanState* scans
         scanstate->scanBatchState = scanBatchState;
         scanstate->ps.subPlan = NULL;
 
-        if (scanstate->ss_currentRelation->rd_tam_type == TAM_HEAP) {
+        if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap) {
             HeapScanDesc heapDesc = (HeapScanDesc)(scanstate->ss_currentScanDesc);
             heapDesc->rs_ctupBatch = (HeapTupleData*)palloc(sizeof(HeapTupleData) * BatchMaxSize);
         } else {
@@ -755,7 +779,7 @@ static SeqScanState *ExecInitSeqScanBatchMode(SeqScan *node, SeqScanState* scans
             (TupleTableSlot**)palloc(sizeof(TupleTableSlot*) * BatchMaxSize);
         for (i = 0; i < BatchMaxSize; i++) {
             TupleTableSlot* slot = ExecAllocTableSlot(&estate->es_tupleTable,
-                                                      scanstate->ss_currentRelation->rd_tam_type);
+                                                      scanstate->ss_currentRelation->rd_tam_ops);
             ExecSetSlotDescriptor(slot, scanstate->ss_ScanTupleSlot->tts_tupleDescriptor);
             scanBatchState->scanBatch.scanTupleSlotInBatch[i] = slot;
         }
@@ -802,13 +826,13 @@ static inline void InitSeqNextMtd(SeqScan* node, SeqScanState* scanstate)
     if (!node->tablesample) {
         scanstate->ScanNextMtd = SeqNext;
         if(RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {
-            if(scanstate->ss_currentRelation->rd_tam_type == TAM_HEAP)
+            if(scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
                 scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, true>;
             else
                 scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, true>;
         } else {
-            if(scanstate->ss_currentRelation->rd_tam_type == TAM_HEAP)
-                scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, false>;
+            if(scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
+                scanstate->fillNextSlotFunc = seq_scan_getnext;
             else
                 scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, false>;
         }
@@ -1011,7 +1035,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &scanstate->ps,
-            scanstate->ss_currentRelation->rd_tam_type);
+            scanstate->ss_currentRelation->rd_tam_ops);
 
     ExecAssignScanProjectionInfo(scanstate);
 
@@ -1027,7 +1051,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
 
     /* if partial sequential scan is disabled by GUC, or table is not ustore, or partition table, skip */
     if ((!u_sess->attr.attr_storage.enable_ustore_partial_seqscan) ||
-        (scanstate->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_USTORE) ||
+        (scanstate->ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops != TableAmUstore) ||
         (scanstate->ss_currentScanDesc == NULL) || (scanstate->ss_currentScanDesc->rs_rd == NULL) ||
         (!RelationIsNonpartitioned(scanstate->ss_currentScanDesc->rs_rd)) ||
         (RelationIsPartition(scanstate->ss_currentScanDesc->rs_rd))) {
@@ -1236,7 +1260,7 @@ void ExecReScanSeqScan(SeqScanState* node)
         scan_handler_tbl_rescan(scan, NULL, node->ss_currentRelation);
     }
 
-    if ((scan != NULL) && (scan->rs_rd->rd_tam_type == TAM_USTORE)) {
+    if ((scan != NULL) && (scan->rs_rd->rd_tam_ops == TableAmUstore)) {
         scan->lastVar = -1;
         scan->boolArr = NULL;
     }
@@ -1344,7 +1368,7 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node)
     }
 
     if (node->scanBatchMode) {
-        if (node->ss_currentRelation->rd_tam_type == TAM_HEAP) {
+        if (node->ss_currentRelation->rd_tam_ops == TableAmHeap) {
             HeapScanDesc heapDesc = (HeapScanDesc)node->ss_currentScanDesc;
             heapDesc->rs_ctupBatch = (HeapTupleData*)palloc(sizeof(HeapTupleData) * BatchMaxSize);
         } else {

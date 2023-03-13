@@ -100,7 +100,7 @@
 
 #include "access/ustore/knl_utuple.h"
 
-static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool skip_junk, bool mark_dropped = false, TableAmType tam = TAM_HEAP);
+static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool skip_junk, bool mark_dropped, const TableAmRoutine* tam_ops);
 
 /* ----------------------------------------------------------------
  *				  tuple table create/delete functions
@@ -112,18 +112,15 @@ static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool sk
  *		Basic routine to make an empty TupleTableSlot.
  * --------------------------------
  */
-TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt, TableAmType tupslotTableAm)
+TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt, const TableAmRoutine* tam_ops)
 {
     TupleTableSlot* slot = makeNode(TupleTableSlot);
-    Assert(tupslotTableAm == TAM_HEAP || tupslotTableAm == TAM_USTORE);
+    Assert(tam_ops == TableAmHeap || tam_ops == TableAmUstore);
 
-    slot->tts_isempty = true;
-    slot->tts_shouldFree = false;
-    slot->tts_shouldFreeMin = false;
+    slot->tts_flags |= TTS_FLAG_EMPTY;
     slot->tts_tuple = NULL;
     slot->tts_tupleDescriptor = NULL;
 #ifdef PGXC
-    slot->tts_shouldFreeRow = false;
     slot->tts_dataRow = NULL;
     slot->tts_dataLen = -1;
     slot->tts_attinmeta = NULL;
@@ -141,7 +138,7 @@ TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt, TableAmType tupslotTable
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE) : NULL;
 #endif
-    slot->tts_tupslotTableAm = tupslotTableAm;
+    slot->tts_tam_ops = tam_ops;
 
     return slot;
 }
@@ -152,7 +149,7 @@ TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt, TableAmType tupslotTable
  *		Create a tuple table slot within a tuple table (which is just a List).
  * --------------------------------
  */
-TupleTableSlot* ExecAllocTableSlot(List** tuple_table, TableAmType tupslotTableAm)
+TupleTableSlot* ExecAllocTableSlot(List** tuple_table, const TableAmRoutine* tam_ops)
 {
     TupleTableSlot* slot;
 
@@ -160,7 +157,7 @@ TupleTableSlot* ExecAllocTableSlot(List** tuple_table, TableAmType tupslotTableA
 
     *tuple_table = lappend(*tuple_table, slot);
 
-    slot->tts_tupslotTableAm = tupslotTableAm;
+    slot->tts_tam_ops = tam_ops;
 
     return slot;
 }
@@ -208,7 +205,8 @@ void ExecResetTupleTable(List* tuple_table, /* tuple table */
     }
 }
 
-TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot* slot, TableAmType tableAm)
+TupleTableSlot *ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot *slot,
+                                  const TableAmRoutine *tam_ops)
 {
     if (unlikely(RELATION_CREATE_BUCKET(tableScan->rs_rd))) {
         tableScan = ((HBktTblScanDesc)tableScan)->currBktScan;
@@ -216,7 +214,7 @@ TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTab
 
     if (tuple != NULL) {
         Assert(tableScan != NULL);
-        slot->tts_tupslotTableAm = tableAm;
+        slot->tts_tam_ops = tam_ops;
         return ExecStoreTuple(tuple, /* tuple to store */
             slot, /* slot to store in */
             tableScan->rs_cbuf, /* buffer associated with this tuple */
@@ -235,9 +233,9 @@ TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTab
  *		to use the given tuple descriptor.
  * --------------------------------
  */
-TupleTableSlot* MakeSingleTupleTableSlot(TupleDesc tup_desc, bool allocSlotCxt, TableAmType tupslotTableAm)
+TupleTableSlot* MakeSingleTupleTableSlot(TupleDesc tup_desc, bool allocSlotCxt, const TableAmRoutine* tam_ops)
 {
-    TupleTableSlot* slot = MakeTupleTableSlot(allocSlotCxt, tupslotTableAm);
+    TupleTableSlot* slot = MakeTupleTableSlot(allocSlotCxt, tam_ops);
     ExecSetSlotDescriptor(slot, tup_desc);
     return slot;
 }
@@ -377,9 +375,9 @@ TupleTableSlot* ExecStoreTuple(Tuple tuple, TupleTableSlot* slot, Buffer buffer,
     Assert(slot->tts_tupleDescriptor != NULL);
 
     HeapTuple htup = (HeapTuple)tuple;
-    if (slot->tts_tupslotTableAm == TAM_USTORE && htup->tupTableType == HEAP_TUPLE) {
+    if (TTS_TABLEAM_IS_USTORE(slot) && htup->tupTableType == HEAP_TUPLE) {
         tuple = (Tuple)HeapToUHeap(slot->tts_tupleDescriptor, (HeapTuple)tuple);
-    } else if (slot->tts_tupslotTableAm == TAM_HEAP && htup->tupTableType == UHEAP_TUPLE) {
+    } else if (TTS_TABLEAM_IS_HEAP(slot) && htup->tupTableType == UHEAP_TUPLE) {
         tuple = (Tuple)UHeapToHeap(slot->tts_tupleDescriptor, (UHeapTuple)tuple);
     }
 
@@ -431,7 +429,7 @@ TupleTableSlot* ExecClearTuple(TupleTableSlot* slot) /* return: slot passed slot
     /*
      * clear the physical tuple or minimal tuple if present via TableAm.
      */
-    if (slot->tts_shouldFree || slot->tts_shouldFreeMin) {
+    if (TTS_SHOULDFREE(slot) || TTS_SHOULDFREEMIN(slot)) {
     	Assert(slot->tts_tupleDescriptor != NULL);
     	tableam_tslot_clear(slot);
     }
@@ -441,14 +439,14 @@ TupleTableSlot* ExecClearTuple(TupleTableSlot* slot) /* return: slot passed slot
      */
     slot->tts_tuple = NULL;
     slot->tts_mintuple = NULL;
-    slot->tts_shouldFree = false;
-    slot->tts_shouldFreeMin = false;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREEMIN;
 
 #ifdef ENABLE_MULTIPLE_NODES
-    if (slot->tts_shouldFreeRow) {
+    if (TTS_SHOULDFREE_ROW(slot)) {
         pfree_ext(slot->tts_dataRow);
     }
-    slot->tts_shouldFreeRow = false;
+    slot->tts_flags = false;
     slot->tts_dataRow = NULL;
     slot->tts_dataLen = -1;
     slot->tts_xcnodeoid = 0;
@@ -465,7 +463,7 @@ TupleTableSlot* ExecClearTuple(TupleTableSlot* slot) /* return: slot passed slot
     /*
      * Mark it empty.
      */
-    slot->tts_isempty = true;
+    slot->tts_flags |= TTS_FLAG_EMPTY;
     slot->tts_nvalid = 0;
 
     // Row uncompression use slot->tts_per_tuple_mcxt in some case, So we need
@@ -503,9 +501,9 @@ TupleTableSlot* ExecStoreVirtualTuple(TupleTableSlot* slot)
      */
     Assert(slot != NULL);
     Assert(slot->tts_tupleDescriptor != NULL);
-    Assert(slot->tts_isempty);
+    Assert(TTS_EMPTY(slot));
 
-    slot->tts_isempty = false;
+    slot->tts_flags &= ~TTS_FLAG_EMPTY;
     slot->tts_nvalid = slot->tts_tupleDescriptor->natts;
 
     return slot;
@@ -565,7 +563,7 @@ HeapTuple ExecCopySlotTuple(TupleTableSlot* slot)
      * sanity checks
      */
     Assert(slot != NULL);
-    Assert(!slot->tts_isempty);
+    Assert(!TTS_EMPTY(slot));
 
     return tableam_tslot_copy_heap_tuple(slot);
 }
@@ -583,7 +581,7 @@ MinimalTuple ExecCopySlotMinimalTuple(TupleTableSlot* slot, bool need_transform_
      * sanity checks
      */
     Assert(slot != NULL);
-    Assert(!slot->tts_isempty);
+    Assert(!TTS_EMPTY(slot));
 
     return tableam_tslot_copy_minimal_tuple(slot);
 }
@@ -609,7 +607,7 @@ HeapTuple ExecFetchSlotTuple(TupleTableSlot* slot)
      * sanity checks
      */
     Assert(slot != NULL);
-    Assert(!slot->tts_isempty);
+    Assert(!TTS_EMPTY(slot));
 
     return tableam_tslot_get_heap_tuple(slot);
 }
@@ -676,15 +674,27 @@ Datum ExecFetchSlotTupleDatum(TupleTableSlot* slot)
  *		to scribble on.
  * --------------------------------
  */
-HeapTuple ExecMaterializeSlot(TupleTableSlot* slot)
+static FORCE_INLINE HeapTuple ExecMaterializeSlot_impl(TupleTableSlot *slot)
 {
     /*
      * sanity checks
      */
     Assert(slot != NULL);
-    Assert(!slot->tts_isempty);
+    Assert(!TTS_EMPTY(slot));
 
     return tableam_tslot_materialize(slot);
+}
+
+HeapTuple ExecMaterializeSlot(TupleTableSlot* slot)
+{
+    return ExecMaterializeSlot_impl(slot);
+}
+
+Tuple heap_slot_get_tuple_from_slot(TupleTableSlot* slot)
+{
+    HeapTuple tuple = ExecMaterializeSlot_impl(slot);
+    tuple->tupInfo = 0;
+    return (Tuple) tuple;
 }
 
 /* --------------------------------
@@ -730,27 +740,27 @@ TupleTableSlot* ExecCopySlot(TupleTableSlot* dst_slot, TupleTableSlot* src_slot)
  *		ExecInitResultTupleSlot
  * ----------------
  */
-void ExecInitResultTupleSlot(EState* estate, PlanState* plan_state, TableAmType tam)
+void ExecInitResultTupleSlot(EState* estate, PlanState* plan_state, const TableAmRoutine* tam_ops)
 {
-    plan_state->ps_ResultTupleSlot = ExecAllocTableSlot(&estate->es_tupleTable, tam);
+    plan_state->ps_ResultTupleSlot = ExecAllocTableSlot(&estate->es_tupleTable, tam_ops);
 }
 
 /* ----------------
  *		ExecInitScanTupleSlot
  * ----------------
  */
-void ExecInitScanTupleSlot(EState* estate, ScanState* scan_state, TableAmType tam)
+void ExecInitScanTupleSlot(EState* estate, ScanState* scan_state, const TableAmRoutine* tam_ops)
 {
-    scan_state->ss_ScanTupleSlot = ExecAllocTableSlot(&estate->es_tupleTable, tam);
+    scan_state->ss_ScanTupleSlot = ExecAllocTableSlot(&estate->es_tupleTable, tam_ops);
 }
 
 /* ----------------
  *		ExecInitExtraTupleSlot
  * ----------------
  */
-TupleTableSlot* ExecInitExtraTupleSlot(EState* estate, TableAmType tam)
+TupleTableSlot* ExecInitExtraTupleSlot(EState* estate, const TableAmRoutine* tam_ops)
 {
-    return ExecAllocTableSlot(&estate->es_tupleTable, tam);
+    return ExecAllocTableSlot(&estate->es_tupleTable, tam_ops);
 }
 
 /* ----------------
@@ -782,9 +792,9 @@ TupleTableSlot* ExecInitNullTupleSlot(EState* estate, TupleDesc tup_type)
  *		be rewritten to call BuildDesc().
  * ----------------------------------------------------------------
  */
-TupleDesc ExecTypeFromTL(List* target_list, bool has_oid, bool mark_dropped, TableAmType tam)
+TupleDesc ExecTypeFromTL(List* target_list, bool has_oid, bool mark_dropped, const TableAmRoutine* tam_ops)
 {
-    return ExecTypeFromTLInternal(target_list, has_oid, false, mark_dropped, tam);
+    return ExecTypeFromTLInternal(target_list, has_oid, false, mark_dropped, tam_ops);
 }
 
 /* ----------------------------------------------------------------
@@ -793,12 +803,12 @@ TupleDesc ExecTypeFromTL(List* target_list, bool has_oid, bool mark_dropped, Tab
  *		Same as above, but resjunk columns are omitted from the result.
  * ----------------------------------------------------------------
  */
-TupleDesc ExecCleanTypeFromTL(List* target_list, bool has_oid, TableAmType tam)
+TupleDesc ExecCleanTypeFromTL(List* target_list, bool has_oid, const TableAmRoutine* tam_ops)
 {
-    return ExecTypeFromTLInternal(target_list, has_oid, true, false, tam);
+    return ExecTypeFromTLInternal(target_list, has_oid, true, false, tam_ops);
 }
 
-static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool skip_junk, bool mark_dropped,  TableAmType tam)
+static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool skip_junk, bool mark_dropped, const TableAmRoutine* tam_ops)
 {
     TupleDesc type_info;
     ListCell* l = NULL;
@@ -809,7 +819,7 @@ static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool sk
         len = ExecCleanTargetListLength(target_list);
     else
         len = ExecTargetListLength(target_list);
-    type_info = CreateTemplateTupleDesc(len, has_oid, tam);
+    type_info = CreateTemplateTupleDesc(len, has_oid, tam_ops);
 
     foreach (l, target_list) {
         TargetEntry* tle = (TargetEntry*)lfirst(l);
@@ -823,7 +833,7 @@ static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool sk
 
         /* mark dropped column, maybe we can find another way some day */
         if (mark_dropped && strstr(tle->resname, "........pg.dropped.")) {
-            type_info->attrs[cur_resno - 1]->attisdropped = true;
+            type_info->attrs[cur_resno - 1].attisdropped = true;
         }
 
         cur_resno++;
@@ -837,7 +847,7 @@ static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool sk
  *
  * Caller must also supply a list of field names (String nodes).
  */
-TupleDesc ExecTypeFromExprList(List* expr_list, List* names_list,  TableAmType tam)
+TupleDesc ExecTypeFromExprList(List* expr_list, List* names_list, const TableAmRoutine* tam_ops)
 {
     TupleDesc type_info;
     ListCell* le = NULL;
@@ -846,7 +856,7 @@ TupleDesc ExecTypeFromExprList(List* expr_list, List* names_list,  TableAmType t
 
     Assert(list_length(expr_list) == list_length(names_list));
 
-    type_info = CreateTemplateTupleDesc(list_length(expr_list), false, tam);
+    type_info = CreateTemplateTupleDesc(list_length(expr_list), false, tam_ops);
 
     forboth(le, expr_list, ln, names_list)
     {
@@ -928,11 +938,11 @@ AttInMetadata* TupleDescGetAttInMetadata(TupleDesc tup_desc)
 
     for (i = 0; i < natts; i++) {
         /* Ignore dropped attributes */
-        if (!tup_desc->attrs[i]->attisdropped) {
-            att_type_id = tup_desc->attrs[i]->atttypid;
+        if (!tup_desc->attrs[i].attisdropped) {
+            att_type_id = tup_desc->attrs[i].atttypid;
             getTypeInputInfo(att_type_id, &att_in_func_id, &att_io_params[i]);
             fmgr_info(att_in_func_id, &att_in_func_info[i]);
-            att_typ_mods[i] = tup_desc->attrs[i]->atttypmod;
+            att_typ_mods[i] = tup_desc->attrs[i].atttypmod;
         }
     }
     att_in_meta->attinfuncs = att_in_func_info;
@@ -961,7 +971,7 @@ HeapTuple BuildTupleFromCStrings(AttInMetadata* att_in_meta, char** values)
 
     /* Call the "in" function for each non-dropped attribute */
     for (i = 0; i < natts; i++) {
-        if (!tup_desc->attrs[i]->attisdropped) {
+        if (!tup_desc->attrs[i].attisdropped) {
             /* Non-dropped attributes */
             d_values[i] = InputFunctionCall(
                 &att_in_meta->attinfuncs[i], values[i], att_in_meta->attioparams[i], att_in_meta->atttypmods[i]);
@@ -977,7 +987,7 @@ HeapTuple BuildTupleFromCStrings(AttInMetadata* att_in_meta, char** values)
     /*
      * Form a tuple
      */
-    tuple = (HeapTuple)tableam_tops_form_tuple(tup_desc, d_values, nulls, HEAP_TUPLE);
+    tuple = (HeapTuple)tableam_tops_form_tuple(tup_desc, d_values, nulls);
 
     /*
      * Release locally palloc'd space.  XXX would probably be good to pfree
@@ -1104,12 +1114,12 @@ TupleTableSlot* ExecStoreDataRowTuple(char* msg, size_t len, Oid msgnode_oid, Tu
     /*
      * Free any old physical tuple belonging to the slot.
      */
-    if (slot->tts_shouldFree && (HeapTuple)slot->tts_tuple != NULL) {
+    if (TTS_SHOULDFREE(slot) && (HeapTuple)slot->tts_tuple != NULL) {
         heap_freetuple((HeapTuple)slot->tts_tuple);
         slot->tts_tuple = NULL;
-        slot->tts_shouldFree = false;
+        slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
     }
-    if (slot->tts_shouldFreeMin) {
+    if (TTS_SHOULDFREEMIN(slot)) {
         heap_free_minimal_tuple(slot->tts_mintuple);
     }
     /*
@@ -1118,9 +1128,9 @@ TupleTableSlot* ExecStoreDataRowTuple(char* msg, size_t len, Oid msgnode_oid, Tu
      * to reset shouldFreeRow, since it will be overwritten just below.
      */
     if (msg == slot->tts_dataRow) {
-        slot->tts_shouldFreeRow = false;
+        slot->tts_flags &= ~TTS_FLAG_SHOULDFREE_ROW;
     }
-    if (slot->tts_shouldFreeRow) {
+    if (TTS_SHOULDFREE_ROW(slot)) {
         pfree_ext(slot->tts_dataRow);
     }
     ResetSlotPerTupleContext(slot);
@@ -1136,10 +1146,14 @@ TupleTableSlot* ExecStoreDataRowTuple(char* msg, size_t len, Oid msgnode_oid, Tu
     /*
      * Store the new tuple into the specified slot.
      */
-    slot->tts_isempty = false;
-    slot->tts_shouldFree = false;
-    slot->tts_shouldFreeMin = false;
-    slot->tts_shouldFreeRow = should_free;
+    slot->tts_flags &= ~TTS_FLAG_EMPTY;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
+    slot->tts_flags &= ~TTS_FLAG_SHOULDFREEMIN;
+    if (should_free) {
+        slot->tts_flags |= TTS_FLAG_SHOULDFREE_ROW;
+    } else {
+        slot->tts_flags &= ~TTS_FLAG_SHOULDFREE_ROW;
+    }
     slot->tts_tuple = NULL;
     slot->tts_mintuple = NULL;
     slot->tts_dataRow = msg;

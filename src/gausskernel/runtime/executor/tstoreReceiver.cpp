@@ -45,17 +45,17 @@ static void tstoreStartupReceiver(DestReceiver *self, int operation, TupleDesc t
 {
     TStoreState *my_stat = (TStoreState *)self;
     bool need_toast = false;
-    Form_pg_attribute *attrs = typeinfo->attrs;
+    FormData_pg_attribute *attrs = typeinfo->attrs;
     int natts = typeinfo->natts;
     int i;
 
     /* Check if any columns require detoast work */
     if (my_stat->detoast) {
         for (i = 0; i < natts; i++) {
-            if (attrs[i]->attisdropped) {
+            if (attrs[i].attisdropped) {
                 continue;
             }
-            if (attrs[i]->attlen == -1) {
+            if (attrs[i].attlen == -1) {
                 need_toast = true;
                 break;
             }
@@ -93,7 +93,7 @@ static void tstoreReceiveSlot_detoast(TupleTableSlot *slot, DestReceiver *self)
 {
     TStoreState *my_stat = (TStoreState *)self;
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
-    Form_pg_attribute *attrs = typeinfo->attrs;
+    FormData_pg_attribute *attrs = typeinfo->attrs;
     int natts = typeinfo->natts;
     int nfree;
     int i;
@@ -115,7 +115,7 @@ static void tstoreReceiveSlot_detoast(TupleTableSlot *slot, DestReceiver *self)
     for (i = 0; i < natts; i++) {
         Datum val = slot->tts_values[i];
 
-        if (!attrs[i]->attisdropped && attrs[i]->attlen == -1 && !slot->tts_isnull[i]) {
+        if (!attrs[i].attisdropped && attrs[i].attlen == -1 && !slot->tts_isnull[i]) {
             if (VARATT_IS_EXTERNAL(DatumGetPointer(val))) {
                 val = PointerGetDatum(heap_tuple_fetch_attr((struct varlena *)DatumGetPointer(val)));
                 my_stat->tofree[nfree++] = val;

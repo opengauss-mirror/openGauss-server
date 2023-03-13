@@ -31,6 +31,7 @@
 #define PG_SYNONYM_H
 
 #include "catalog/genbki.h"
+#include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
 
 /* ----------------------------------------------------------------
@@ -85,7 +86,7 @@ typedef FormData_pg_synonym *Form_pg_synonym;
  */
 extern void CreateSynonym(CreateSynonymStmt *stmt);
 extern void DropSynonym(DropSynonymStmt *stmt);
-extern void AlterSynonymOwner(List *name, Oid newOwnerId);
+extern ObjectAddress AlterSynonymOwner(List *name, Oid newOwnerId);
 extern void RemoveSynonymById(Oid synonymOid);
 extern RangeVar* SearchReferencedObject(const char *synName, Oid synNamespace);
 extern RangeVar* ReplaceReferencedObject(const RangeVar *relation);

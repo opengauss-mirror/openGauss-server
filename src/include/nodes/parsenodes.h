@@ -1315,6 +1315,7 @@ typedef struct FetchStmt {
  */
 typedef struct IndexStmt {
     NodeTag type;
+    bool missing_ok;            /* just do nothing if it already exists? */
     char* schemaname;           /* namespace of new index, or NULL for default */
     char* idxname;              /* name of new index, or NULL for default */
     RangeVar* relation;         /* relation to build index on */
@@ -1992,6 +1993,8 @@ typedef struct AlterSchemaStmt {
     char *schemaname; /* the name of the schema to create */
     char *authid;      /* the owner of the created schema */
     bool hasBlockChain;  /* whether this schema has blockchain */
+    int charset;
+    char *collate;
 } AlterSchemaStmt;
 
 /*
@@ -2157,6 +2160,7 @@ typedef struct LockStmt {
     bool nowait;     /* no wait mode */
     bool cancelable; /* send term to lock holder */
     int waitSec;      /* WAIT time Sec */
+    bool isLockTables; /* lock tables flag */
 } LockStmt;
 
 /* ----------------------
@@ -2245,10 +2249,19 @@ typedef struct AlterTSDictionaryStmt {
 /*
  * TS Configuration stmts: DefineStmt, RenameStmt and DropStmt are default
  */
+ typedef enum AlterTSConfigType
+ {
+    ALTER_TSCONFIG_ADD_MAPPING,
+    ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN,
+    ALTER_TSCONFIG_REPLACE_DICT,
+    ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN,
+    ALTER_TSCONFIG_DROP_MAPPING
+ } AlterTSConfigType;
+ 
 typedef struct AlterTSConfigurationStmt {
     NodeTag type;
     List* cfgname; /* qualified name (list of Value strings) */
-
+    AlterTSConfigType kind;   /* ALTER_TSCONFIG_ADD_MAPPING, etc */
     /*
      * dicts will be non-NIL if ADD/ALTER MAPPING was specified. If dicts is
      * NIL, but tokentype isn't, DROP MAPPING was specified.

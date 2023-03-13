@@ -68,6 +68,13 @@ typedef enum OptCompress {
     COMPRESS_HIGH,
 } OptCompress;
 
+/* How to handle rows that duplicate unique key values */
+typedef enum OnDuplicateAction {
+    DUPLICATE_ERROR = 0,
+    DUPLICATE_IGNORE,
+    DUPLICATE_REPLACE
+} OnDuplicate;
+
 /*
  * RangeVar - range variable, used in FROM clauses
  *
@@ -99,6 +106,7 @@ typedef struct RangeVar {
 #endif
     bool withVerExpr;
     List* partitionNameList; /* for FROM table PARTITION (p1, subp2, ...) clause */
+    List* indexhints;        /* a list of b mode index hint indexHintDefinition members */
 } RangeVar;
 
 /*
@@ -118,10 +126,16 @@ typedef struct IntoClause {
     bool ivm;                /* true for WITH IVM */
     char relkind;            /* RELKIND_RELATION or RELKIND_MATVIEW */
     List* userVarList;       /* user define variables list */
+    List* copyOption;        /* copyOption for select...into statement */
+    char* filename;          /* filename for select...into statement */
+    bool is_outfile;         /* true for outfile */
 #ifdef PGXC
     struct DistributeBy* distributeby; /* distribution to use, or NULL */
     struct PGXCSubCluster* subcluster; /* subcluster node members */
 #endif
+    List* tableElts;         /* column definitions(list of ColumnDef) */
+    Node *autoIncStart; /* DefElem for AUTO_INCREMENT = value*/
+    OnDuplicateAction onduplicate;     /* how to handle rows that duplicate unique key values */
 } IntoClause;
 
 /* ----------------------------------------------------------------
@@ -843,6 +857,7 @@ typedef struct CaseExpr {
     List* args;      /* the arguments (list of WHEN clauses) */
     Expr* defresult; /* the default result (ELSE clause) */
     int location;    /* token location, or -1 if unknown */
+    bool fromDecode; /* whether is parsed from decode expr, no need to (de-)serialize */
 } CaseExpr;
 
 /*
@@ -1177,10 +1192,7 @@ typedef struct CurrentOfExpr {
     int cursor_param;  /* refcursor parameter number, or 0 */
 } CurrentOfExpr;
 
-/* 
- * SetVariableExpr used for getting guc variable's value
- * only support while dbcompability is B and enable_set_variable_b_format is on
- */
+/* SetVariableExpr used for getting guc variable's value */
 typedef struct {
     Expr xpr;
     char* name;

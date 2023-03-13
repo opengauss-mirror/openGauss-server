@@ -27,6 +27,7 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/gs_package.h"
 #include "commands/dbcommands.h"
+#include "commands/event_trigger.h"
 #include "commands/schemacmds.h"
 #include "miscadmin.h"
 #include "parser/parse_utilcmd.h"
@@ -87,9 +88,9 @@ static bool IsReservedSchemaName(const char* name)
  */
 
 #ifdef PGXC
-void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString, bool sentToRemote)
+Oid CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString, bool sentToRemote)
 #else
-void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
+Oid CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 #endif
 {
     const char* schemaName = stmt->schemaname;
@@ -104,6 +105,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     int save_sec_context;
     AclResult aclresult;
     char* queryStringwithinfo = (char*)queryString;
+    Oid coll_oid = InvalidOid;
     ObjectAddress address;
 
     GetUserIdAndSecContext(&saved_uid, &save_sec_context);
@@ -232,12 +234,16 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 
             /* OK to skip */
             ereport(NOTICE, (errmsg("schema \"%s\" already exists,skipping", schemaName)));
-            return;
+            return InvalidOid;
 	}
     } 
 
+    if (stmt->collate || stmt->charset != PG_INVALID_ENCODING) {
+        coll_oid = transform_default_collation(stmt->collate, stmt->charset);
+    }
+
     /* Create the schema's namespace */
-    namespaceId = NamespaceCreate(schemaName, owner_uid, false, hasBlockChain);
+    namespaceId = NamespaceCreate(schemaName, owner_uid, false, hasBlockChain, coll_oid);
 
     /* Advance cmd counter to make the namespace visible */
     CommandCounterIncrement();
@@ -260,6 +266,16 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     /* XXX should we clear overridePath->useTemp? */
     PushOverrideSearchPath(overridePath);
 
+    /*
+     * Report the new schema to possibly interested event triggers.  Note we
+     * must do this here and not in ProcessUtilitySlow because otherwise the
+     * objects created below are reported before the schema, which would be
+     * wrong.
+     */
+    ObjectAddressSet(address, NamespaceRelationId, namespaceId);
+    EventTriggerCollectSimpleCommand(address, InvalidObjectAddress,
+                                     (Node *) stmt);
+    
     /*
      * Examine the list of commands embedded in the CREATE SCHEMA command, and
      * reorganize them into a sequentially executable order with no forward
@@ -340,7 +356,8 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 #ifdef PGXC
             true,
 #endif /* PGXC */
-            NULL);
+            NULL,
+            PROCESS_UTILITY_SUBCOMMAND);
         /* make sure later steps can see the object created here */
         CommandCounterIncrement();
     }
@@ -352,6 +369,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     SetUserIdAndSecContext(saved_uid, save_sec_context);
 
     list_free(parsetree_list);
+    return namespaceId;
 }
 
 void AlterSchemaCommand(AlterSchemaStmt* stmt)
@@ -360,6 +378,8 @@ void AlterSchemaCommand(AlterSchemaStmt* stmt)
     Assert(nspName != NULL);
     bool withBlockchain = stmt->hasBlockChain;
     bool nspIsBlockchain = false;
+    Oid colloid = InvalidOid;
+    Oid nspcollation = InvalidOid;
     HeapTuple tup;
     Relation rel;
     AclResult aclresult;
@@ -398,45 +418,67 @@ void AlterSchemaCommand(AlterSchemaStmt* stmt)
         ereport(ERROR,
             (errcode(ERRCODE_RESERVED_NAME),
                 errmsg("The system schema \"%s\" doesn't allow to alter to blockchain schema", nspName)));
-    /*
-     * If the any table exists in the schema, do not change to ledger schema.
-     */
-    StringInfo existTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_ANY);
-    if (existTbl->len != 0) {
-        if (withBlockchain) {
-            ereport(ERROR,
-                (errcode(ERRCODE_RESERVED_NAME),
-                    errmsg("It is not supported to change \"%s\" to blockchain schema which includes tables.",
-                        nspName)));
+
+    Datum new_record[Natts_pg_namespace] = {0};
+    bool new_record_nulls[Natts_pg_namespace] = {false};
+    bool new_record_repl[Natts_pg_namespace] = {false};
+
+    Datum datum;
+    bool is_null = true;
+    /* For B format, the default collation of a schema can be changed. */
+    if (stmt->collate || stmt->charset != PG_INVALID_ENCODING) {
+        colloid = transform_default_collation(stmt->collate, stmt->charset);
+        datum = SysCacheGetAttr(NAMESPACENAME, tup, Anum_pg_namespace_nspcollation, &is_null);
+        if (!is_null) {
+            nspcollation = ObjectIdGetDatum(datum);
+        }
+        if (nspcollation != colloid) {
+            new_record[Anum_pg_namespace_nspcollation - 1] = ObjectIdGetDatum(colloid);
+            new_record_repl[Anum_pg_namespace_nspcollation - 1] = true;
         } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_RESERVED_NAME),
-                    errmsg("It is not supported to change \"%s\" to normal schema which includes tables.",
-                        nspName)));
+            heap_close(rel, NoLock);
+            tableam_tops_free_tuple(tup);
+            return;
+        }
+    } else {
+        /*
+        * If the any table exists in the schema, do not change to ledger schema.
+        */
+        StringInfo existTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_ANY);
+        if (existTbl->len != 0) {
+            if (withBlockchain) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_RESERVED_NAME),
+                        errmsg("It is not supported to change \"%s\" to blockchain schema which includes tables.",
+                            nspName)));
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_RESERVED_NAME),
+                        errmsg("It is not supported to change \"%s\" to normal schema which includes tables.",
+                            nspName)));
+            }
         }
 
+        /* modify nspblockchain attribute */
+        datum = SysCacheGetAttr(NAMESPACENAME, tup, Anum_pg_namespace_nspblockchain, &is_null);
+        if (!is_null) {
+            nspIsBlockchain = DatumGetBool(datum);
+        }
+        if (nspIsBlockchain != withBlockchain) {
+            new_record[Anum_pg_namespace_nspblockchain - 1] = BoolGetDatum(withBlockchain);
+            new_record_repl[Anum_pg_namespace_nspblockchain - 1] = true;
+        } else {
+            heap_close(rel, NoLock);
+            tableam_tops_free_tuple(tup);
+            return;
+        }
     }
 
-    /* modify nspblockchain attribute */
-    bool is_null = true;
-    Datum datum = SysCacheGetAttr(NAMESPACENAME, tup, Anum_pg_namespace_nspblockchain, &is_null);
-    if (!is_null) {
-        nspIsBlockchain = DatumGetBool(datum);
-    }
-    if (nspIsBlockchain != withBlockchain) {
-        Datum new_record[Natts_pg_namespace] = {0};
-        bool new_record_nulls[Natts_pg_namespace] = {false};
-        bool new_record_repl[Natts_pg_namespace] = {false};
-
-        new_record[Anum_pg_namespace_nspblockchain - 1] = BoolGetDatum(withBlockchain);
-        new_record_repl[Anum_pg_namespace_nspblockchain - 1] = true;
-
-        HeapTuple new_tuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel),
-            new_record, new_record_nulls, new_record_repl);
-        simple_heap_update(rel, &tup->t_self, new_tuple);
-        /* Update indexes */
-        CatalogUpdateIndexes(rel, new_tuple);
-    }
+    HeapTuple new_tuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel),
+        new_record, new_record_nulls, new_record_repl);
+    simple_heap_update(rel, &tup->t_self, new_tuple);
+    /* Update indexes */
+    CatalogUpdateIndexes(rel, new_tuple);
 
     heap_close(rel, NoLock);
     tableam_tops_free_tuple(tup);
@@ -478,11 +520,13 @@ void RemoveSchemaById(Oid schemaOid)
 /*
  * Rename schema
  */
-void RenameSchema(const char* oldname, const char* newname)
+ObjectAddress RenameSchema(const char* oldname, const char* newname)
 {
+    Oid       nspOid;    
     HeapTuple tup;
     Relation rel;
     AclResult aclresult;
+    ObjectAddress address;
     bool is_nspblockchain = false;
 
     if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
@@ -497,6 +541,7 @@ void RenameSchema(const char* oldname, const char* newname)
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema \"%s\" does not exist", oldname)));
 
+    nspOid = HeapTupleGetOid(tup);
     /* make sure the new name doesn't exist */
     if (OidIsValid(get_namespace_oid(newname, true)))
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_SCHEMA), errmsg("schema \"%s\" already exists", newname)));
@@ -564,8 +609,10 @@ void RenameSchema(const char* oldname, const char* newname)
     simple_heap_update(rel, &tup->t_self, tup);
     CatalogUpdateIndexes(rel, tup);
 
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
     heap_close(rel, NoLock);
     tableam_tops_free_tuple(tup);
+    return address;
 }
 
 /*
@@ -632,10 +679,12 @@ void AlterSchemaOwner_oid(Oid oid, Oid newOwnerId)
 /*
  * Change schema owner
  */
-void AlterSchemaOwner(const char* name, Oid newOwnerId)
+ObjectAddress AlterSchemaOwner(const char* name, Oid newOwnerId)
 {
+    Oid       nspOid;    
     HeapTuple tup;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(NamespaceRelationId, RowExclusiveLock);
 
@@ -643,11 +692,14 @@ void AlterSchemaOwner(const char* name, Oid newOwnerId)
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema \"%s\" does not exist", name)));
 
+    nspOid = HeapTupleGetOid(tup);
     AlterSchemaOwner_internal(tup, rel, newOwnerId);
-
+    
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
     ReleaseSysCache(tup);
 
     heap_close(rel, RowExclusiveLock);
+    return address;
 }
 
 static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerId)

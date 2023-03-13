@@ -25,7 +25,10 @@
 #include "libpq-int.h"
 #include "securec.h"
 
-colFullName::colFullName() {}
+colFullName::colFullName()
+{
+    m_col_name = {{0}};
+}
 
 colFullName::colFullName(const char *catalog_name, const char *schema_name, const char *rel_name, const char *colname)
     : tableFullName(catalog_name, schema_name, rel_name)

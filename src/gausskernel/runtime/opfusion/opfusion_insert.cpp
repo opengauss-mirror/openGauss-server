@@ -25,6 +25,7 @@
 #include "opfusion/opfusion_insert.h"
 
 #include "access/tableam.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/storage_gtt.h"
 #include "commands/matview.h"
 #include "commands/sequence.h"
@@ -48,6 +49,7 @@ void InsertFusion::InitGlobals()
     m_global->m_natts = RelationGetDescr(rel)->natts;
     m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
     m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
+    m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
     heap_close(rel, AccessShareLock);
 
     /* init param func const */
@@ -111,7 +113,7 @@ void InsertFusion::InitLocals(ParamListInfo params)
     m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
     if (m_global->m_table_type == TAM_USTORE) {
-        m_local.m_reslot->tts_tupslotTableAm = TAM_USTORE;
+        m_local.m_reslot->tts_tam_ops = TableAmUstore;
     }
     m_local.m_values = (Datum*)palloc0(m_global->m_natts * sizeof(Datum));
     m_local.m_isnull = (bool*)palloc0(m_global->m_natts * sizeof(bool));
@@ -231,7 +233,7 @@ Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
     if (tmpRel->partMap->type == PART_TYPE_RANGE)
         boundary = ((RangePartitionMap*)(tmpRel->partMap))->rangeElements[0].boundary;
     else if (tmpRel->partMap->type == PART_TYPE_LIST)
-        boundary = ((ListPartitionMap*)(tmpRel->partMap))->listElements[0].boundary;
+        boundary = ((ListPartitionMap*)(tmpRel->partMap))->listElements[0].boundary[0].values;
     else if (tmpRel->partMap->type == PART_TYPE_HASH)
         boundary = ((HashPartitionMap*)(tmpRel->partMap))->hashElements[0].boundary;
     else
@@ -281,17 +283,19 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
      * step 2: begin insert *
      ************************/
     Tuple tuple = tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values,
-        m_local.m_isnull, tableam_tops_get_tuple_type(rel));
+        m_local.m_isnull, rel->rd_tam_ops);
     Assert(tuple != NULL);
     if (RELATION_IS_PARTITIONED(rel)) {
         m_c_local.m_estate->esfRelations = NULL;
-        partOid = heapTupleGetPartitionId(rel, tuple, false, m_c_local.m_estate->es_plannedstmt->hasIgnore);
+        int partitionno = INVALID_PARTITION_NO;
+        partOid =
+            heapTupleGetPartitionId(rel, tuple, &partitionno, false, m_c_local.m_estate->es_plannedstmt->hasIgnore);
         if (m_c_local.m_estate->es_plannedstmt->hasIgnore && partOid == InvalidOid) {
             ExecReleaseResource(tuple, m_local.m_reslot, result_rel_info, m_c_local.m_estate, bucket_rel, rel, part,
                                 partRel);
             return 0;
         }
-        part = partitionOpen(rel, partOid, RowExclusiveLock);
+        part = PartitionOpenWithPartitionno(rel, partOid, partitionno, RowExclusiveLock);
         partRel = partitionGetRelation(rel, part);
     }
 
@@ -340,7 +344,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
     if (rel_isblockchain && (!RelationIsUstoreFormat(rel))) {
         HeapTuple tmp_tuple = (HeapTuple)tuple;
         MemoryContext old_context = MemoryContextSwitchTo(m_local.m_tmpContext);
-        tuple = set_user_tuple_hash(tmp_tuple, target_rel);
+        tuple = set_user_tuple_hash(tmp_tuple, target_rel, NULL);
         (void)ExecStoreTuple(tuple, m_local.m_reslot, InvalidBuffer, false);
         m_local.m_ledger_hash_exist = hist_table_record_insert(target_rel, (HeapTuple)tuple, &m_local.m_ledger_relhash);
         (void)MemoryContextSwitchTo(old_context);
@@ -368,7 +372,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
         if (rel != NULL && rel->rd_mlogoid != InvalidOid) {
             /* judge whether need to insert into mlog-table */
             HeapTuple htuple = NULL;
-            if (rel->rd_tam_type == TAM_USTORE) {
+            if (rel->rd_tam_ops == TableAmUstore) {
                 htuple = UHeapToHeap(rel->rd_att, (UHeapTuple)tuple);
                 insert_into_mlog_table(rel, rel->rd_mlogoid, htuple, &htuple->t_self,
                     GetCurrentTransactionId(), 'I');

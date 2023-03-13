@@ -772,7 +772,7 @@ static List* extractVecSubplan(Expr* node, List* resSubplan, List* subplans)
         } break;
         case T_RowExpr: {
             RowExpr* rowexpr = (RowExpr*)node;
-            Form_pg_attribute* attrs = NULL;
+            FormData_pg_attribute* attrs = NULL;
             ListCell* l = NULL;
             int i;
             TupleDesc tupdesc = NULL;
@@ -802,19 +802,19 @@ static List* extractVecSubplan(Expr* node, List* resSubplan, List* subplans)
             foreach (l, rowexpr->args) {
                 Expr* e = (Expr*)lfirst(l);
 
-                if (!attrs[i]->attisdropped) {
+                if (!attrs[i].attisdropped) {
                     /*
                      * Guard against ALTER COLUMN TYPE on rowtype since
                      * the RowExpr was created.  XXX should we check
                      * typmod too?	Not sure we can be sure it'll be the
                      * same.
                      */
-                    if (exprType((Node*)e) != attrs[i]->atttypid) {
+                    if (exprType((Node*)e) != attrs[i].atttypid) {
                         ereport(ERROR,
                             (errcode(ERRCODE_DATATYPE_MISMATCH),
                                 errmsg("ROW() column has type %s instead of type %s",
                                     format_type_be(exprType((Node*)e)),
-                                    format_type_be(attrs[i]->atttypid))));
+                                    format_type_be(attrs[i].atttypid))));
                     }
                 } else {
                     /*
@@ -967,7 +967,7 @@ static List* extractSubplan(Expr* node, List* resSubplan, List* subplans)
         } break;
         case T_RowExpr: {
             RowExpr* rowexpr = (RowExpr*)node;
-            Form_pg_attribute* attrs = NULL;
+            FormData_pg_attribute* attrs = NULL;
             ListCell* l = NULL;
             int i;
             TupleDesc tupdesc = NULL;
@@ -987,19 +987,19 @@ static List* extractSubplan(Expr* node, List* resSubplan, List* subplans)
 
             foreach (l, rowexpr->args) {
                 Expr* e = (Expr*)lfirst(l);
-                if (!attrs[i]->attisdropped) {
+                if (!attrs[i].attisdropped) {
                     /*
                      * Guard against ALTER COLUMN TYPE on rowtype since
                      * the RowExpr was created.  XXX should we check
                      * typmod too?	Not sure we can be sure it'll be the
                      * same.
                      */
-                    if (exprType((Node*)e) != attrs[i]->atttypid)
+                    if (exprType((Node*)e) != attrs[i].atttypid)
                         ereport(ERROR,
                             (errcode(ERRCODE_DATATYPE_MISMATCH),
                                 errmsg("ROW() column has type %s instead of type %s",
                                     format_type_be(exprType((Node*)e)),
-                                    format_type_be(attrs[i]->atttypid))));
+                                    format_type_be(attrs[i].atttypid))));
                 } else {
                     /*
                      * Ignore original expression and insert a NULL. We

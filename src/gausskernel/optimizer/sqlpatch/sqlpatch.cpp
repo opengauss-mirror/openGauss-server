@@ -379,7 +379,7 @@ Datum show_sql_patch(PG_FUNCTION_ARGS)
     HeapTuple resTup = NULL;
     TupleDesc tupdesc = NULL;
     int SQL_PATCH_INFO_ATTR_NUM = 4;
-    tupdesc = CreateTemplateTupleDesc(SQL_PATCH_INFO_ATTR_NUM, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(SQL_PATCH_INFO_ATTR_NUM, false, TableAmHeap);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "unique_sql_id", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "enable", BOOLOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "abort", BOOLOID, -1, 0);

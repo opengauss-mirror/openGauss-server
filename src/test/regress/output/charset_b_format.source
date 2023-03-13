@@ -1,0 +1,1019 @@
+-- in A format, should report error.
+create database d_charset dbcompatibility 'A';
+\c d_charset;
+create schema s_charset_1  charset   utf8mb4 collate   utf8mb4_unicode_ci;
+ERROR:  specifying character sets and collations is supported only in B-format database
+create table t_charset_1 (c1 varchar(20)) charset   utf8mb4 collate   utf8mb4_unicode_ci;
+ERROR:  specifying character sets and collations is supported only in B-format database
+create table a_charset_1 (a1 varchar(20) charset utf8mb4 collate utf8mb4_general_ci);
+ERROR:  specifying character sets and collations is supported only in B-format database
+create table t_charset_2 (c1 varchar(20)) with(collate = 1537); -- error
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change "collate" in non-B format
+\c regression;
+drop database d_charset;
+create database d_charset dbcompatibility 'B';
+create database d_charset_bak dbcompatibility 'B';
+\c d_charset;
+create table t_charset_0 (c1 varchar(20));
+select pg_get_tabledef('t_charset_0');
+             pg_get_tabledef             
+-----------------------------------------
+ SET search_path = public;              +
+ CREATE TABLE t_charset_0 (             +
+     c1 character varying(20)           +
+ )                                      +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+set b_format_behavior_compat_options = 'default_collation';
+-- schema level charset and collate
+create schema s_charset_1  charset   utf8mb4 collate   utf8mb4_unicode_ci;
+create schema s_charset_2  charset = utf8mb4 collate = utf8mb4_unicode_ci;
+create schema s_charset_3  charset = utf8mb4 collate = utf8mb4_general_ci;
+create schema s_charset_4  charset = utf8mb4;
+create schema s_charset_5  charset = utf8;
+create schema s_charset_6  charset = gbk; -- error
+ERROR:  default collation for encoding "GBK" does not exist
+create schema s_charset_6;
+create schema s_charset_7  default charset = utf8mb4 default collate = utf8mb4_unicode_ci;
+create schema s_charset_8  charset = "binary";
+create schema s_charset_9  character set = utf8mb4;
+create schema s_charset_10 collate = utf8mb4_general_ci;
+create schema s_charset_11 collate = utf8mb4_bin;
+create schema s_charset_12 collate = binary;
+create schema s_charset_13 collate = "binary";
+create schema s_charset_14  charset = binary;
+create schema s_charset_16 charset = gbk collate = utf8mb4_general_ci; -- error
+ERROR:  collation "utf8mb4_general_ci" for encoding "GBK" does not exist
+create schema s_charset_16 default charset utf8mb4 default collate utf8mb4_unicode_ci;
+create schema s_charset_17 CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+create schema s_charset_18 collate = utf8mb4_unicode_ci charset = utf8mb4;
+create schema s_charset_19 collate = utf8mb4_unicode_ci collate = utf8mb4_general_ci;
+create schema s_charset_20 charset = gbk charset = utf8mb4;
+create schema s_charset_21 collate = utf8mb4_unicode_ci charset = utf8mb4 collate = utf8mb4_general_ci;
+create schema s_charset_22 collate = "zh_CN.gbk" charset = utf8mb4 collate = utf8mb4_general_ci;
+create schema s_charset_23 charset utf8mb4 collate "aa_DJ.utf8"; -- error
+ERROR:  this collation only cannot be specified here
+create schema s_charset_23 collate "aa_DJ"; -- error
+ERROR:  there is more than one collation "aa_DJ" with the same name
+select * from pg_namespace where nspname like 's_charset_%' order by 1;
+   nspname    | nspowner | nsptimeline | nspacl | in_redistribution | nspblockchain | nspcollation 
+--------------+----------+-------------+--------+-------------------+---------------+--------------
+ s_charset_1  |       10 |           0 |        | n                 | f             |         1538
+ s_charset_10 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_11 |       10 |           0 |        | n                 | f             |         1539
+ s_charset_12 |       10 |           0 |        | n                 | f             |         1026
+ s_charset_13 |       10 |           0 |        | n                 | f             |         1026
+ s_charset_14 |       10 |           0 |        | n                 | f             |         1026
+ s_charset_16 |       10 |           0 |        | n                 | f             |         1538
+ s_charset_17 |       10 |           0 |        | n                 | f             |         1538
+ s_charset_18 |       10 |           0 |        | n                 | f             |         1538
+ s_charset_19 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_2  |       10 |           0 |        | n                 | f             |         1538
+ s_charset_20 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_21 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_22 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_3  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_4  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_5  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_6  |       10 |           0 |        | n                 | f             |             
+ s_charset_7  |       10 |           0 |        | n                 | f             |         1538
+ s_charset_8  |       10 |           0 |        | n                 | f             |         1026
+ s_charset_9  |       10 |           0 |        | n                 | f             |         1537
+(21 rows)
+
+create schema s_charset_14 collate = "zh_CN.gbk"; -- error
+ERROR:  this collation only cannot be specified here
+create schema s_charset_15 charset = gbk collate = "zh_CN.gbk"; -- error
+ERROR:  this collation only cannot be specified here
+alter schema s_charset_1 charset utf8mb4 collate utf8mb4_general_ci;
+alter schema s_charset_2 charset = utf8mb4 collate = utf8mb4_general_ci;
+alter schema s_charset_3 collate = utf8mb4_unicode_ci;
+alter schema s_charset_5 charset = gbk; -- error
+ERROR:  default collation for encoding "GBK" does not exist
+alter schema s_charset_5 charset = gbk collate = "zh_CN.gbk"; -- error
+ERROR:  this collation only cannot be specified here
+alter schema s_charset_9 character set = utf8 collate = utf8mb4_unicode_ci;
+select * from pg_namespace where nspname like 's_charset_%' order by 1;
+   nspname    | nspowner | nsptimeline | nspacl | in_redistribution | nspblockchain | nspcollation 
+--------------+----------+-------------+--------+-------------------+---------------+--------------
+ s_charset_1  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_10 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_11 |       10 |           0 |        | n                 | f             |         1539
+ s_charset_12 |       10 |           0 |        | n                 | f             |         1026
+ s_charset_13 |       10 |           0 |        | n                 | f             |         1026
+ s_charset_14 |       10 |           0 |        | n                 | f             |         1026
+ s_charset_16 |       10 |           0 |        | n                 | f             |         1538
+ s_charset_17 |       10 |           0 |        | n                 | f             |         1538
+ s_charset_18 |       10 |           0 |        | n                 | f             |         1538
+ s_charset_19 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_2  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_20 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_21 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_22 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_3  |       10 |           0 |        | n                 | f             |         1538
+ s_charset_4  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_5  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_6  |       10 |           0 |        | n                 | f             |             
+ s_charset_7  |       10 |           0 |        | n                 | f             |         1538
+ s_charset_8  |       10 |           0 |        | n                 | f             |         1026
+ s_charset_9  |       10 |           0 |        | n                 | f             |         1538
+(21 rows)
+
+-- relation level charset and collate
+create table t_charset_1 (c1 varchar(20)) charset   utf8mb4 collate   utf8mb4_unicode_ci;
+create table t_charset_2 (c1 varchar(20)) charset = utf8mb4 collate = utf8mb4_unicode_ci;
+create table t_charset_3 (c1 varchar(20)) charset = utf8mb4 collate = utf8mb4_general_ci;
+create table t_charset_4 (c1 varchar(20)) charset = utf8mb4;
+create table t_charset_5 (c1 varchar(20)) charset = utf8;
+create table t_charset_6 (c1 varchar(20)) charset = gbk; -- error
+ERROR:  default collation for encoding "GBK" does not exist
+create table t_charset_6 (c1 varchar(20));
+create table t_charset_7 (c1 varchar(20)) default charset = utf8mb4 default collate = utf8mb4_unicode_ci;
+create table t_charset_8 (c1 varchar(20)) charset = binary; -- error
+ERROR:  Un-support feature
+DETAIL:  type varchar cannot be set to binary collation currently
+create table t_charset_8 (c1 text) charset = binary;
+select pg_get_tabledef('t_charset_8');
+                pg_get_tabledef                 
+------------------------------------------------
+ SET search_path = public;                     +
+ CREATE TABLE t_charset_8 (                    +
+     c1 blob                                   +
+ )                                             +
+ CHARACTER SET = "SQL_ASCII" COLLATE = "binary"+
+ WITH (orientation=row, compression=no);
+(1 row)
+
+create table t_charset_9 (c1 varchar(20)) character set = utf8mb4;
+create table t_charset_10(c1 varchar(20)) collate = utf8mb4_general_ci;
+create table t_charset_11(c1 varchar(20)) collate = utf8mb4_bin;
+create table t_charset_12(c1 varchar(20)) collate = binary;
+ERROR:  Un-support feature
+DETAIL:  type varchar cannot be set to binary collation currently
+create table t_charset_12(c1 varchar(20)) default charset utf8mb4 default collate utf8mb4_unicode_ci;
+create table t_charset_13(c1 varchar(20)) collate = "binary";
+ERROR:  Un-support feature
+DETAIL:  type varchar cannot be set to binary collation currently
+create table t_charset_16(c1 varchar(20)) charset = gbk collate = utf8mb4_general_ci; -- error
+ERROR:  collation "utf8mb4_general_ci" for encoding "GBK" does not exist
+create table t_charset_17(c1 varchar(20)) CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+create table t_charset_18(c1 varchar(20)) collate = utf8mb4_unicode_ci charset = utf8mb4;
+create table t_charset_19(c1 varchar(20)) collate = utf8mb4_unicode_ci collate = utf8mb4_general_ci;
+create table t_charset_20(c1 varchar(20)) charset = gbk charset = utf8mb4;
+create table t_charset_21(c1 varchar(20)) collate = utf8mb4_unicode_ci charset = utf8mb4 collate = utf8mb4_general_ci;
+create table t_charset_22(c1 varchar(20)) collate = "zh_CN.gbk" charset = utf8mb4 collate = utf8mb4_general_ci;
+create table t_charset_23(like t_charset_22);
+select r.relname,r.reloptions,a.attcollation from pg_class r,pg_attribute a where r.oid=a.attrelid and r.relname='t_charset_23';
+   relname    |                  reloptions                   | attcollation 
+--------------+-----------------------------------------------+--------------
+ t_charset_23 | {orientation=row,compression=no,collate=1537} |            0
+ t_charset_23 | {orientation=row,compression=no,collate=1537} |            0
+ t_charset_23 | {orientation=row,compression=no,collate=1537} |            0
+ t_charset_23 | {orientation=row,compression=no,collate=1537} |            0
+ t_charset_23 | {orientation=row,compression=no,collate=1537} |            0
+ t_charset_23 | {orientation=row,compression=no,collate=1537} |            0
+ t_charset_23 | {orientation=row,compression=no,collate=1537} |            0
+ t_charset_23 | {orientation=row,compression=no,collate=1537} |         1537
+(8 rows)
+
+create table t_charset_24(c1 varchar(20) character set binary); -- error
+ERROR:  Un-support feature
+DETAIL:  type varchar cannot be set to binary collation currently
+create table t_charset_24(c1 varchar(20) character set "binary"); -- error
+ERROR:  Un-support feature
+DETAIL:  type varchar cannot be set to binary collation currently
+create table t_charset_25(c1 varchar(20)) with(collate = 7);
+ERROR:  this collation only cannot be specified here
+create table t_charset_26(c1 varchar(20)) charset utf8mb4 collate "aa_DJ.utf8"; -- error
+ERROR:  this collation only cannot be specified here
+create table t_charset_26(c1 varchar(20)) collate "aa_DJ"; -- error
+ERROR:  there is more than one collation "aa_DJ" with the same name
+select relname, reloptions from pg_class where relname like 't_charset_%' order by 1;
+   relname    |                  reloptions                   
+--------------+-----------------------------------------------
+ t_charset_0  | {orientation=row,compression=no}
+ t_charset_1  | {orientation=row,compression=no,collate=1538}
+ t_charset_10 | {orientation=row,compression=no,collate=1537}
+ t_charset_11 | {orientation=row,compression=no,collate=1539}
+ t_charset_12 | {orientation=row,compression=no,collate=1538}
+ t_charset_17 | {orientation=row,compression=no,collate=1538}
+ t_charset_18 | {orientation=row,compression=no,collate=1538}
+ t_charset_19 | {orientation=row,compression=no,collate=1537}
+ t_charset_2  | {orientation=row,compression=no,collate=1538}
+ t_charset_20 | {orientation=row,compression=no,collate=1537}
+ t_charset_21 | {orientation=row,compression=no,collate=1537}
+ t_charset_22 | {orientation=row,compression=no,collate=1537}
+ t_charset_23 | {orientation=row,compression=no,collate=1537}
+ t_charset_3  | {orientation=row,compression=no,collate=1537}
+ t_charset_4  | {orientation=row,compression=no,collate=1537}
+ t_charset_5  | {orientation=row,compression=no,collate=1537}
+ t_charset_6  | {orientation=row,compression=no,collate=1537}
+ t_charset_7  | {orientation=row,compression=no,collate=1538}
+ t_charset_8  | {orientation=row,compression=no,collate=1026}
+ t_charset_9  | {orientation=row,compression=no,collate=1537}
+(20 rows)
+
+alter table t_charset_1 convert to charset binary; -- error
+ERROR:  Un-support feature
+DETAIL:  type varchar cannot be set to binary collation currently
+alter table t_charset_1 convert to charset utf8mb4;
+alter table t_charset_1 convert to character set utf8mb4;
+alter table t_charset_1 convert to character set utf8mb4 collate utf8mb4_general_ci;
+select relname, reloptions from pg_class where relname = 't_charset_1';
+   relname   |                  reloptions                   
+-------------+-----------------------------------------------
+ t_charset_1 | {orientation=row,compression=no,collate=1537}
+(1 row)
+
+alter table t_charset_1 convert to character set default collate utf8mb4_unicode_ci;
+select relname, reloptions from pg_class where relname = 't_charset_1';
+   relname   |                  reloptions                   
+-------------+-----------------------------------------------
+ t_charset_1 | {orientation=row,compression=no,collate=1538}
+(1 row)
+
+alter table t_charset_1 charset utf8mb4;
+alter table t_charset_1 character set utf8mb4;
+alter table t_charset_1 character set utf8mb4 collate utf8mb4_bin;
+select relname, reloptions from pg_class where relname = 't_charset_1';
+   relname   |                  reloptions                   
+-------------+-----------------------------------------------
+ t_charset_1 | {orientation=row,compression=no,collate=1539}
+(1 row)
+
+alter table t_charset_1 collate utf8mb4_unicode_ci;
+select relname, reloptions from pg_class where relname = 't_charset_1';
+   relname   |                  reloptions                   
+-------------+-----------------------------------------------
+ t_charset_1 | {orientation=row,compression=no,collate=1538}
+(1 row)
+
+alter table t_charset_1 change c1 c2 varchar(30) charset gbk collate utf8mb4_bin; -- error
+ERROR:  collation "utf8mb4_bin" for encoding "GBK" does not exist
+alter table t_charset_1 change c1 c2 varchar(30) charset utf8mb4 collate utf8mb4_bin;
+select pg_get_tabledef('t_charset_1');
+                            pg_get_tabledef                            
+-----------------------------------------------------------------------
+ SET search_path = public;                                            +
+ CREATE TABLE t_charset_1 (                                           +
+     c2 character varying(30) CHARACTER SET "UTF8" COLLATE utf8mb4_bin+
+ )                                                                    +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_unicode_ci"                +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+-- attribute level charset and collate
+create table a_charset_1 (
+a1 varchar(20) charset utf8mb4 collate utf8mb4_general_ci,
+a2 varchar(20) charset utf8mb4 collate utf8mb4_unicode_ci,
+a3 varchar(20) charset utf8mb4 collate utf8mb4_bin
+)
+charset utf8mb4 collate utf8mb4_general_ci;
+insert into a_charset_1 values('中国','中国','中国');
+insert into a_charset_1 select a2,a1 from a_charset_1;
+select *,rawtohex(a1),rawtohex(a2),length(a1),length(a2),length(a3),lengthb(a1),lengthb(a2),lengthb(a3) from a_charset_1;
+  a1  |  a2  |  a3  |   rawtohex   |   rawtohex   | length | length | length | lengthb | lengthb | lengthb 
+------+------+------+--------------+--------------+--------+--------+--------+---------+---------+---------
+ 中国 | 中国 | 中国 | e4b8ade59bbd | e4b8ade59bbd |      2 |      2 |      2 |       6 |       6 |       6
+ 中国 | 中国 |      | e4b8ade59bbd | e4b8ade59bbd |      2 |      2 |        |       6 |       6 |        
+(2 rows)
+
+alter table a_charset_1 convert to charset gbk collate "zh_CN.gbk";
+ERROR:  this collation only cannot be specified here
+select rawtohex(a1),rawtohex(a2),rawtohex(a3) from a_charset_1;
+   rawtohex   |   rawtohex   |   rawtohex   
+--------------+--------------+--------------
+ e4b8ade59bbd | e4b8ade59bbd | e4b8ade59bbd
+ e4b8ade59bbd | e4b8ade59bbd | 
+(2 rows)
+
+alter table a_charset_1 convert to charset utf8mb4;
+select rawtohex(a1),rawtohex(a2),rawtohex(a3) from a_charset_1;
+   rawtohex   |   rawtohex   |   rawtohex   
+--------------+--------------+--------------
+ e4b8ade59bbd | e4b8ade59bbd | e4b8ade59bbd
+ e4b8ade59bbd | e4b8ade59bbd | 
+(2 rows)
+
+create table a_charset_2(
+a1 character(20) charset utf8mb4 collate utf8mb4_general_ci,
+a2 char(20) charset utf8mb4 collate utf8mb4_general_ci,
+a3 nchar(20) charset utf8mb4 collate utf8mb4_general_ci,
+a4 varchar(20) charset utf8mb4 collate utf8mb4_general_ci,
+a5 character varying(20) charset utf8mb4 collate utf8mb4_general_ci,
+a6 varchar2(20) charset utf8mb4 collate utf8mb4_general_ci,
+a7 nvarchar2(20) charset utf8mb4 collate utf8mb4_general_ci,
+a8 text,
+a9 blob
+) charset binary;
+alter table a_charset_2 add a8 varchar(20) charset utf8mb4;
+ERROR:  column "a8" of relation "a_charset_2" already exists
+alter table a_charset_2 add a9 varchar(20) character set utf8mb4;
+ERROR:  column "a9" of relation "a_charset_2" already exists
+alter table a_charset_2 add a10 varchar(20) character set utf8mb4 collate utf8mb4_unicode_ci;
+alter table a_charset_2 add a11 varchar(20) collate utf8mb4_bin;
+alter table a_charset_2 add a12 varchar(20);
+ERROR:  Un-support feature
+DETAIL:  type varchar cannot be set to binary collation currently
+alter table a_charset_2 add a13 int;
+alter table a_charset_2 add a14 varchar(20) charset utf8mb4 collate "aa_DJ.utf8";
+alter table a_charset_2 add a15 varchar(20) collate "aa_DJ.utf8";
+alter table a_charset_2 add a16 varchar(20) collate "aa_DJ";
+alter table a_charset_2 add a17 text charset utf8mb4 collate utf8mb4_general_ci;
+alter table a_charset_2 add a18 clob charset utf8mb4 collate utf8mb4_general_ci; -- error
+ERROR:  type clob not support set charset
+alter table a_charset_2 add a19 name charset utf8mb4 collate utf8mb4_general_ci; -- error
+ERROR:  type name not support set charset
+alter table a_charset_2 add a20 "char" charset utf8mb4 collate utf8mb4_general_ci; -- error
+ERROR:  type "char" not support set charset
+alter table a_charset_2 add a21 BLOB charset utf8mb4 collate utf8mb4_general_ci; -- error
+ERROR:  type blob not support set charset
+alter table a_charset_2 add a22 RAW charset utf8mb4 collate utf8mb4_general_ci; -- error
+ERROR:  type raw not support set charset
+alter table a_charset_2 add a23 BYTEA charset utf8mb4 collate utf8mb4_general_ci; -- error
+ERROR:  type bytea not support set charset
+alter table a_charset_2 add a24 varchar(20) collate "zh_CN.gbk"; -- error;
+ERROR:  difference between the charset and the database encoding has not supported
+select pg_get_tabledef('a_charset_2');
+                                pg_get_tabledef                                 
+--------------------------------------------------------------------------------
+ SET search_path = public;                                                     +
+ CREATE TABLE a_charset_2 (                                                    +
+     a1 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a2 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a3 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a4 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a8 blob,                                                                  +
+     a9 blob,                                                                  +
+     a10 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
+     a11 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_bin,       +
+     a13 integer,                                                              +
+     a14 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a15 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a16 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ",           +
+     a17 text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci                  +
+ )                                                                             +
+ CHARACTER SET = "SQL_ASCII" COLLATE = "binary"                                +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+alter table a_charset_2 add a8 varchar(20) charset utf8mb4 charset utf8mb4; -- error
+ERROR:  syntax error at or near "charset"
+LINE 1: ...le a_charset_2 add a8 varchar(20) charset utf8mb4 charset ut...
+                                                             ^
+alter table a_charset_2 modify a1 int;
+alter table a_charset_2 modify a9 varchar(20) character set gbk; -- error
+ERROR:  default collation for encoding "GBK" does not exist
+alter table a_charset_2 modify a10 varchar(20);
+ERROR:  Un-support feature
+DETAIL:  type varchar cannot be set to binary collation currently
+alter table a_charset_2 modify a11 varchar(20) collate utf8mb4_unicode_ci;
+alter table a_charset_2 modify a12 varchar(20) charset utf8mb4;
+ERROR:  column "a12" of relation "a_charset_2" does not exist
+select pg_get_tabledef('a_charset_2');
+                                pg_get_tabledef                                 
+--------------------------------------------------------------------------------
+ SET search_path = public;                                                     +
+ CREATE TABLE a_charset_2 (                                                    +
+     a1 integer,                                                               +
+     a2 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a3 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a4 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a8 blob,                                                                  +
+     a9 blob,                                                                  +
+     a10 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
+     a11 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
+     a13 integer,                                                              +
+     a14 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a15 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a16 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ",           +
+     a17 text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci                  +
+ )                                                                             +
+ CHARACTER SET = "SQL_ASCII" COLLATE = "binary"                                +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+create table a_charset_3(
+a1 varchar(20) collate "C",
+a2 varchar(20) collate "default",
+a3 varchar(20) collate "POSIX"
+);
+create table a_charset_4(a1 blob);
+-- divergence test
+\h create schema;
+Command:     CREATE SCHEMA
+Description: define a new schema
+Syntax:
+CREATE SCHEMA [ IF NOT EXISTS ] schema_name
+    [ AUTHORIZATION user_name ] [WITH BLOCKCHAIN] [ schema_element [ ... ] ];
+CREATE SCHEMA schema_name
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ];
+NOTICE: '[ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]' is only available in CENTRALIZED mode and B-format database!
+
+\h alter schema;
+Command:     ALTER SCHEMA
+Description: change the definition of a schema
+Syntax:
+ALTER SCHEMA schema_name
+    RENAME TO new_name;
+ALTER SCHEMA schema_name
+    OWNER TO new_owner;
+ALTER SCHEMA schema_name {WITH | WITHOUT} BLOCKCHAIN;
+ALTER SCHEMA schema_name
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ];
+NOTICE: '[ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]' is only available in CENTRALIZED mode and B-format database!
+
+\h create table;
+Command:     CREATE TABLE
+Description: define a new table
+Syntax:
+CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] table_name
+  ( { column_name data_type [ CHARACTER SET | CHARSET charset ]
+    [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | table_constraint
+    | LIKE source_table [ like_option [...] ] }
+    [, ... ])
+    [ AUTO_INCREMENT [ = ] value ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]
+    [ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
+    [ COMPRESS | NOCOMPRESS ]
+    [ TABLESPACE tablespace_name ];
+
+where column_constraint can be:
+[ CONSTRAINT constraint_name ]
+{ NOT NULL |
+  NULL |
+  CHECK ( expression ) |
+  DEFAULT default_expr |
+  GENERATED ALWAYS AS ( generation_expr ) [STORED] |
+  AUTO_INCREMENT |
+  UNIQUE [KEY] index_parameters |
+  PRIMARY KEY index_parameters |
+  ENCRYPTED WITH ( COLUMN_ENCRYPTION_KEY = column_encryption_key, ENCRYPTION_TYPE = encryption_type_value ) |
+  REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
+    [ ON DELETE action ] [ ON UPDATE action ] }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
+where table_constraint can be:
+[ CONSTRAINT [ constraint_name ] ]
+{ CHECK ( expression ) |
+  UNIQUE [ index_name ] [ USING method ] ( { { column_name | ( expression ) } [ ASC | DESC ] } [, ... ] ) index_parameters [ VISIBLE | INVISIBLE ] |
+  PRIMARY KEY [ USING method ] ( { column_name [ ASC | DESC ] } [, ... ] ) index_parameters [ VISIBLE | INVISIBLE ] |
+  PARTIAL CLUSTER KEY ( column_name [, ... ] ) |
+  FOREIGN KEY [ index_name ] ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
+    [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE action ] [ ON UPDATE action ] }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where compress_mode can be:
+{ DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
+where like_option can be:
+{ INCLUDING | EXCLUDING } { DEFAULTS | GENERATED | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | PARTITION | RELOPTIONS | DISTRIBUTION | ALL }
+where index_parameters can be:
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ USING INDEX TABLESPACE tablespace_name ]
+where range_distribution_rules can be:
+[ ( SLICE name VALUES LESS THAN (expression | MAXVALUE [, ... ]) [DATANODE datanode_name]
+ [, ... ] ) |
+  ( SLICE name START (expression) END (expression) EVERY (expression) [DATANODE datanode_name]
+ [, ... ] ) |
+  SLICE REFERENCES table_name
+]
+where list_distribution_rules can be:
+[ ( SLICE name VALUES (expression [, ... ]) [DATANODE datanode_name]
+ [, ... ] ) |
+  ( SLICE name VALUES (DEFAULT) [DATANODE datanode_name] ) |
+  SLICE REFERENCES table_name
+]
+
+NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
+NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '( expression )' in 'UNIQUE' clause of table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ VISIBLE | INVISIBLE ]' is only avaliable in CENTRALIZED mode and B-format database!
+
+\h create table partition;
+Command:     CREATE TABLE PARTITION
+Description: define a new table partition
+Syntax:
+CREATE TABLE [ IF NOT EXISTS ] partition_table_name 
+( [
+  { column_name data_type [ CHARACTER SET | CHARSET charset ]
+    [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | table_constraint 
+    | LIKE source_table [ like_option [...] ] }
+    [, ... ]
+] )
+    [ AUTO_INCREMENT [ = ] value ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ][ [ DEFAULT ] COLLATE [ = ] default_collation ]
+    [ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ COMPRESS | NOCOMPRESS ]
+    [ TABLESPACE tablespace_name ]
+    [ DISTRIBUTE BY { REPLICATION | { [ HASH ] ( column_name ) } } ]
+    NOTICE: DISTRIBUTE BY is only avaliable in DISTRIBUTED mode!
+    [ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
+    PARTITION BY { 
+        {VALUES (partition_key)} | 
+        {RANGE [ COLUMNS ] (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ...] ) ] ] [ PARTITIONS integer ] ( partition_less_than_item [, ... ] )} |
+        {RANGE [ COLUMNS ] (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ...] ) ] ] [ PARTITIONS integer ] ( partition_start_end_item [, ... ] )} |
+        {{{LIST [ COLUMNS ]} | HASH | KEY} (partition_key) [ PARTITIONS integer ] (PARTITION partition_name [ VALUES [ IN ] (list_values_clause) ] opt_table_space ) }
+    } [ { ENABLE | DISABLE } ROW MOVEMENT ];
+
+NOTICE: [ COLUMNS ] is only available in B-format database!
+NOTICE: [ PARTITIONS integer ] in RANGE/LIST partition is only available in B-format database!
+NOTICE: [ IN ] is only available in B-format database!
+NOTICE: KEY is only available in B-format database!
+
+where column_constraint can be:
+[ CONSTRAINT constraint_name ]
+{ NOT NULL |
+  NULL |
+  CHECK ( expression ) |
+  DEFAULT default_expr |
+  GENERATED ALWAYS AS ( generation_expr ) [STORED] |
+  AUTO_INCREMENT |
+  UNIQUE [KEY] index_parameters |
+  PRIMARY KEY index_parameters |
+  REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
+    [ ON DELETE action ] [ ON UPDATE action ] }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
+where table_constraint can be:
+[ CONSTRAINT [ constraint_name ] ]
+{ CHECK ( expression ) |
+  UNIQUE [ index_name ] [ USING method ] ( { column_name [ ASC | DESC ] } [, ... ] ) index_parameters |
+  PRIMARY KEY [ USING method ] ( { column_name [ ASC | DESC ] } [, ... ] ) index_parameters |
+  FOREIGN KEY [ index_name ] ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
+    [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE action ] [ ON UPDATE action ] }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where index_parameters can be:
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ USING INDEX TABLESPACE tablespace_name ]
+where like_option can be:
+{ INCLUDING | EXCLUDING } { DEFAULTS | GENERATED | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | RELOPTIONS | DISTRIBUTION | ALL }
+where partition_less_than_item can be:
+PARTITION partition_name VALUES LESS THAN { ( { partition_value | MAXVALUE } [, ... ] ) | MAXVALUE } [TABLESPACE [=] tablespace_name]
+NOTICE: MAXVALUE without parentheses is only available in B-format database!
+where partition_start_end_item can be:
+PARTITION partition_name {
+	{START(partition_value) END (partition_value) EVERY (interval_value)} |
+	{START(partition_value) END ({partition_value | MAXVALUE})} |
+	{START(partition_value)} |
+	{END({partition_value | MAXVALUE})}
+} [TABLESPACE tablespace_name]
+
+NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
+NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
+
+\h create table subpartition;
+Command:     CREATE TABLE SUBPARTITION
+Description: define a new table subpartition
+Syntax:
+CREATE TABLE [ IF NOT EXISTS ] subpartition_table_name
+( { column_name data_type [ CHARACTER SET | CHARSET charset ]
+    [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | table_constraint
+    | LIKE source_table [ like_option [...] ] }
+    [, ... ]
+)
+    [ AUTO_INCREMENT [ = ] value ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ][ [ DEFAULT ] COLLATE [ = ] default_collation ]
+    [ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ COMPRESS | NOCOMPRESS ]
+    [ TABLESPACE tablespace_name ]
+    PARTITION BY {RANGE [ COLUMNS ] | LIST [ COLUMNS ] | HASH | KEY} (partition_key) [ PARTITIONS integer ] SUBPARTITION BY {RANGE | LIST | HASH | KEY} (subpartition_key) [ SUBPARTITIONS integer ]
+    (
+      PARTITION partition_name1 [ VALUES LESS THAN { (val1 | MAXVALUE) | MAXVALUE } | VALUES [ IN ] (val1[, ...]) ] [ TABLESPACE [=] tablespace ]
+      (
+        { SUBPARTITION subpartition_name1 [ VALUES LESS THAN (val1_1) | VALUES (val1_1[, ...])]  [ TABLESPACE [=] tablespace ] } [, ...]
+      )
+      [, ...]
+    ) [ { ENABLE | DISABLE } ROW MOVEMENT ];
+NOTICE: [ COLUMNS ] is only available in B-format database!
+NOTICE: [ PARTITIONS integer ] in RANGE/LIST partition is only available in B-format database!
+NOTICE: [ IN ] is only available in B-format database!
+NOTICE: KEY is only available in B-format database!
+NOTICE: MAXVALUE without parentheses is only available in B-format database!
+
+where column_constraint can be:
+[ CONSTRAINT constraint_name ]
+{ NOT NULL |
+  NULL |
+  CHECK ( expression ) |
+  DEFAULT default_expr |
+  GENERATED ALWAYS AS ( generation_expr ) [STORED] |
+  AUTO_INCREMENT |
+  UNIQUE [KEY] index_parameters |
+  PRIMARY KEY index_parameters |
+  REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
+    [ ON DELETE action ] [ ON UPDATE action ] }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
+where table_constraint can be:
+[ CONSTRAINT [ constraint_name ] ]
+{ CHECK ( expression ) |
+  UNIQUE [ index_name ] [ USING method ] ( { column_name [ ASC | DESC ] } [, ... ] ) index_parameters |
+  PRIMARY KEY [ USING method ] ( { column_name [ ASC | DESC ] } [, ... ] ) index_parameters |
+  FOREIGN KEY [ index_name ] ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
+    [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE action ] [ ON UPDATE action ] }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where like_option can be:
+{ INCLUDING | EXCLUDING } { DEFAULTS | GENERATED | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | RELOPTIONS | ALL }
+where index_parameters can be:
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ USING INDEX TABLESPACE tablespace_name ]
+
+NOTICE: 'CREATE TABLE SUBPARTITION' is only available in CENTRALIZED mode!
+NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
+NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
+
+\h alter table;
+Command:     ALTER TABLE
+Description: change the definition of a table
+Syntax:
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    action [, ... ];
+ALTER TABLE [ IF EXISTS ] table_name
+    ADD ( { column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]} [, ...] );
+ALTER TABLE [ IF EXISTS ] table_name
+    MODIFY ( { column_name data_type | column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ] | column_name [ CONSTRAINT constraint_name ] NULL } [, ...] );
+ALTER TABLE [ IF EXISTS ] table_name
+    RENAME TO new_table_name;
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    RENAME [ COLUMN ] column_name TO new_column_name;
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    RENAME CONSTRAINT constraint_name TO new_constraint_name;
+ALTER TABLE [ IF EXISTS ] table_name
+    SET SCHEMA new_schema;
+
+where action can be:
+column_clause 
+    | ADD table_constraint [ NOT VALID ]
+    | ADD table_constraint_using_index
+    | VALIDATE CONSTRAINT constraint_name
+    | DROP CONSTRAINT [ IF EXISTS ]  constraint_name [ RESTRICT | CASCADE ]
+    | CLUSTER ON index_name
+    | SET WITHOUT CLUSTER
+    | SET ( {storage_parameter = value} [, ... ] )
+    | RESET ( storage_parameter [, ... ] )
+    | OWNER TO new_owner
+    | SET TABLESPACE new_tablespace
+    | SET {COMPRESS|NOCOMPRESS}
+    | TO { GROUP groupname | NODE ( nodename [, ... ] ) }
+    | ADD NODE ( nodename [, ... ] )
+    | DELETE NODE ( nodename [, ... ] )
+    | UPDATE SLICE LIKE table_name
+    | DISABLE TRIGGER [ trigger_name | ALL | USER ]
+    | ENABLE TRIGGER [ trigger_name | ALL | USER ]
+    | ENABLE REPLICA TRIGGER trigger_name
+    | ENABLE ALWAYS TRIGGER trigger_name
+    | ENABLE ROW LEVEL SECURITY
+    | DISABLE ROW LEVEL SECURITY
+    | FORCE ROW LEVEL SECURITY
+    | NO FORCE ROW LEVEL SECURITY
+    | ENCRYPTION KEY ROTATION
+    | AUTO_INCREMENT [ = ] value
+    | ALTER INDEX index_name [ VISBLE | INVISIBLE ]
+    | [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]
+    | CONVERT TO CHARACTER SET | CHARSET charset [ COLLATE collation ]
+NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ COLLATE ]' is only available in CENTRALIZED mode and B-format database!
+where column_clause can be:
+ADD [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ] [ FIRST | AFTER column_name ]
+    | MODIFY column_name data_type
+    | MODIFY column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ]
+    | MODIFY column_name [ CONSTRAINT constraint_name ] NULL
+    | MODIFY [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
+    | CHANGE [ COLUMN ] column_name new_column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
+    | DROP [ COLUMN ] [ IF EXISTS ] column_name [ RESTRICT | CASCADE ]
+    | ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ USING expression ]
+    | ALTER [ COLUMN ] column_name { SET DEFAULT expression | DROP DEFAULT }
+    | ALTER [ COLUMN ] column_name { SET | DROP } NOT NULL
+    | ALTER [ COLUMN ] column_name SET STATISTICS [PERCENT] integer
+    | ADD STATISTICS (( column_1_name, column_2_name [, ...] ))
+    | DELETE STATISTICS (( column_1_name, column_2_name [, ...] ))
+    | ALTER [ COLUMN ] column_name SET ( {attribute_option = value} [, ... ] )
+    | ALTER [ COLUMN ] column_name RESET ( attribute_option [, ... ] )
+    | ALTER [ COLUMN ] column_name SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN }
+NOTICE: 'MODIFY [ COLUMN ] ...' action is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'CHANGE [ COLUMN ] ...' action is only available in CENTRALIZED mode and B-format database!
+where column_constraint can be:
+[ CONSTRAINT constraint_name ]
+    { NOT NULL |
+      NULL |
+      CHECK ( expression ) |
+      DEFAULT default_expr |
+      GENERATED ALWAYS AS ( generation_expr ) [STORED] |
+      AUTO_INCREMENT |
+      UNIQUE [KEY] index_parameters |
+      PRIMARY KEY index_parameters |
+      ENCRYPTED WITH ( COLUMN_ENCRYPTION_KEY = column_encryption_key, ENCRYPTION_TYPE = encryption_type_value ) |
+      REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
+        [ ON DELETE action ] [ ON UPDATE action ] }
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
+where compress_mode can be:
+{ DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
+where table_constraint can be:
+[ CONSTRAINT [ constraint_name ] ]
+    { CHECK ( expression ) |
+      UNIQUE [ idx_name ] [ USING method ] ( { { column_name | ( expression ) } [ ASC | DESC ] } [, ... ] ) index_parameters [ VISIBLE | INVISIBLE ] |
+      PRIMARY KEY [ USING method ] ( { column_name [ ASC | DESC ] }[, ... ] ) index_parameters [ VISIBLE | INVISIBLE ] |
+      PARTIAL CLUSTER KEY ( column_name [, ... ] ) |
+      FOREIGN KEY [ idx_name ] ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
+        [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE action ] [ ON UPDATE action ] }
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where index_parameters can be:
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ USING INDEX TABLESPACE tablespace_name ]
+where table_constraint_using_index can be:
+[ CONSTRAINT constraint_name ]
+    { UNIQUE | PRIMARY KEY } USING INDEX index_name
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+
+NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
+NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '( expression )' in 'UNIQUE' clause of table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ FIRST | AFTER column_name ]' clause is only available in CENTRALIZED mode!
+NOTICE: '[ FIRST | AFTER column_name ]' in 'MODIFY | CHANGE [ COLUMN ] ...' clause is only available in B-format database!
+NOTICE: '[ CHARACTER SET | CHARSET charset ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ VISIBLE | INVISIBLE ]' is only avaliable in CENTRALIZED mode and B-format database!
+
+alter session set current_schema = s_charset_1;
+create table s_t_charset_1(s1 varchar(20));
+select pg_get_tabledef('s_t_charset_1');
+                               pg_get_tabledef                                
+------------------------------------------------------------------------------
+ SET search_path = s_charset_1;                                              +
+ CREATE TABLE s_t_charset_1 (                                                +
+     s1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                           +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"                       +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+create table s_t_charset_2(s1 varchar(20));
+select pg_get_tabledef('s_t_charset_2');
+                               pg_get_tabledef                                
+------------------------------------------------------------------------------
+ SET search_path = s_charset_1;                                              +
+ CREATE TABLE s_t_charset_2 (                                                +
+     s1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                           +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"                       +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+create table s_t_charset_3 (like s_t_charset_1);
+select pg_get_tabledef('s_t_charset_3');
+                               pg_get_tabledef                                
+------------------------------------------------------------------------------
+ SET search_path = s_charset_1;                                              +
+ CREATE TABLE s_t_charset_3 (                                                +
+     s1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                           +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"                       +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+create table s_t_charset_4(s1 varchar(20) charset utf8mb4 collate "aa_DJ");
+create table s_t_charset_5(s1 varchar(20) collate "aa_DJ");
+create table s_t_charset_6(s1 int);
+alter table s_t_charset_6 charset binary;
+alter table s_t_charset_6 convert to charset default collate binary; -- error
+ERROR:  collation "binary" for encoding "UTF8" does not exist
+alter table s_t_charset_6 convert to charset default collate utf8mb4_bin;
+select pg_get_tabledef('s_t_charset_6');
+                pg_get_tabledef                 
+------------------------------------------------
+ SET search_path = s_charset_1;                +
+ CREATE TABLE s_t_charset_6 (                  +
+     s1 integer                                +
+ )                                             +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_bin"+
+ WITH (orientation=row, compression=no);
+(1 row)
+
+create table s_t_charset_7 as table s_t_charset_1;
+\d+ s_t_charset_7;
+                                  Table "s_charset_1.s_t_charset_7"
+ Column |         Type          |         Modifiers          | Storage  | Stats target | Description 
+--------+-----------------------+----------------------------+----------+--------------+-------------
+ s1     | character varying(20) | collate utf8mb4_general_ci | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, collate=1537
+
+create table s_t_charset_8 as select '123';
+\d+ s_t_charset_8;
+                  Table "s_charset_1.s_t_charset_8"
+  Column  | Type | Modifiers | Storage  | Stats target | Description 
+----------+------+-----------+----------+--------------+-------------
+ ?column? | text |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, collate=1537
+
+alter session set current_schema = s_charset_12;
+create table s_t_charset_9(s1 varchar(20) charset utf8mb4);
+alter table s_t_charset_9 convert to charset default collate utf8mb4_bin; -- error
+ERROR:  collation "utf8mb4_bin" for encoding "SQL_ASCII" does not exist
+alter session set current_schema = s_charset_1;
+-- partition table
+create table p_charset_1(c1 varchar(20),c2 varchar(20),c3 int)
+character set = utf8mb4 collate = utf8mb4_general_ci
+partition by hash(c1)
+(
+partition p1,
+partition p2
+);
+select * from pg_get_tabledef('p_charset_1');
+                                pg_get_tabledef                                
+-------------------------------------------------------------------------------
+ SET search_path = s_charset_1;                                               +
+ CREATE TABLE p_charset_1 (                                                   +
+     c1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     c2 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     c3 integer                                                               +
+ )                                                                            +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"                        +
+ WITH (orientation=row, compression=no)                                       +
+ PARTITION BY HASH (c1)                                                       +
+ (                                                                            +
+     PARTITION p1 TABLESPACE pg_default,                                      +
+     PARTITION p2 TABLESPACE pg_default                                       +
+ )                                                                            +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+alter table p_charset_1 convert to character set utf8mb4;
+alter table p_charset_1 collate utf8mb4_unicode_ci;
+insert into p_charset_1 values('a中国a');
+select * from p_charset_1;
+   c1   | c2 | c3 
+--------+----+----
+ a中国a |    |   
+(1 row)
+
+\d+ p_charset_1;
+                                   Table "s_charset_1.p_charset_1"
+ Column |         Type          |         Modifiers          | Storage  | Stats target | Description 
+--------+-----------------------+----------------------------+----------+--------------+-------------
+ c1     | character varying(20) | collate utf8mb4_general_ci | extended |              | 
+ c2     | character varying(20) | collate utf8mb4_general_ci | extended |              | 
+ c3     | integer               |                            | plain    |              | 
+Partition By HASH(c1)
+Number of partitions: 2 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no, collate=1538
+
+-- temporary table
+create temporary table tem_charset_1(c1 varchar(20),c2 varchar(20),c3 int) character set = utf8mb4;
+select r.relname,r.reloptions,a.attcollation from pg_class r,pg_attribute a where r.oid=a.attrelid and r.relname='tem_charset_1';
+    relname    |                  reloptions                   | attcollation 
+---------------+-----------------------------------------------+--------------
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |         1537
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |         1537
+ tem_charset_1 | {orientation=row,compression=no,collate=1537} |            0
+(10 rows)
+
+alter table tem_charset_1 convert to character set utf8mb4;
+alter table tem_charset_1 collate utf8mb4_unicode_ci;
+insert into tem_charset_1 values('a中国a');
+select r.relname,r.reloptions,a.attcollation from pg_class r,pg_attribute a where r.oid=a.attrelid and r.relname='tem_charset_1';
+    relname    |                  reloptions                   | attcollation 
+---------------+-----------------------------------------------+--------------
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |            0
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |         1537
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |         1537
+ tem_charset_1 | {orientation=row,compression=no,collate=1538} |            0
+(10 rows)
+
+\! @abs_bindir@/gs_dump d_charset -p @portstring@ -f @abs_bindir@/d_charset.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d d_charset_bak -p @portstring@ @abs_bindir@/d_charset.tar >/dev/null 2>&1; echo $?
+0
+\c d_charset_bak;
+select * from pg_namespace where nspname like 's_charset_%' order by 1;
+   nspname    | nspowner | nsptimeline | nspacl | in_redistribution | nspblockchain | nspcollation 
+--------------+----------+-------------+--------+-------------------+---------------+--------------
+ s_charset_1  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_10 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_11 |       10 |           0 |        | n                 | f             |         1539
+ s_charset_12 |       10 |           0 |        | n                 | f             |         1026
+ s_charset_13 |       10 |           0 |        | n                 | f             |         1026
+ s_charset_14 |       10 |           0 |        | n                 | f             |         1026
+ s_charset_16 |       10 |           0 |        | n                 | f             |         1538
+ s_charset_17 |       10 |           0 |        | n                 | f             |         1538
+ s_charset_18 |       10 |           0 |        | n                 | f             |         1538
+ s_charset_19 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_2  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_20 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_21 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_22 |       10 |           0 |        | n                 | f             |         1537
+ s_charset_3  |       10 |           0 |        | n                 | f             |         1538
+ s_charset_4  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_5  |       10 |           0 |        | n                 | f             |         1537
+ s_charset_6  |       10 |           0 |        | n                 | f             |             
+ s_charset_7  |       10 |           0 |        | n                 | f             |         1538
+ s_charset_8  |       10 |           0 |        | n                 | f             |         1026
+ s_charset_9  |       10 |           0 |        | n                 | f             |         1538
+(21 rows)
+
+select relname, reloptions from pg_class where relname like 't_charset_%' order by 1;
+   relname    |                  reloptions                   
+--------------+-----------------------------------------------
+ t_charset_0  | {orientation=row,compression=no}
+ t_charset_1  | {orientation=row,compression=no,collate=1538}
+ t_charset_10 | {orientation=row,compression=no,collate=1537}
+ t_charset_11 | {orientation=row,compression=no,collate=1539}
+ t_charset_12 | {orientation=row,compression=no,collate=1538}
+ t_charset_17 | {orientation=row,compression=no,collate=1538}
+ t_charset_18 | {orientation=row,compression=no,collate=1538}
+ t_charset_19 | {orientation=row,compression=no,collate=1537}
+ t_charset_2  | {orientation=row,compression=no,collate=1538}
+ t_charset_20 | {orientation=row,compression=no,collate=1537}
+ t_charset_21 | {orientation=row,compression=no,collate=1537}
+ t_charset_22 | {orientation=row,compression=no,collate=1537}
+ t_charset_23 | {orientation=row,compression=no,collate=1537}
+ t_charset_3  | {orientation=row,compression=no,collate=1537}
+ t_charset_4  | {orientation=row,compression=no,collate=1537}
+ t_charset_5  | {orientation=row,compression=no,collate=1537}
+ t_charset_6  | {orientation=row,compression=no,collate=1537}
+ t_charset_7  | {orientation=row,compression=no,collate=1538}
+ t_charset_8  | {orientation=row,compression=no,collate=1026}
+ t_charset_9  | {orientation=row,compression=no,collate=1537}
+(20 rows)
+
+select *,rawtohex(a1),rawtohex(a2),length(a1),length(a2),lengthb(a1),lengthb(a2) from a_charset_1;
+  a1  |  a2  |  a3  |   rawtohex   |   rawtohex   | length | length | lengthb | lengthb 
+------+------+------+--------------+--------------+--------+--------+---------+---------
+ 中国 | 中国 | 中国 | e4b8ade59bbd | e4b8ade59bbd |      2 |      2 |       6 |       6
+ 中国 | 中国 |      | e4b8ade59bbd | e4b8ade59bbd |      2 |      2 |       6 |       6
+(2 rows)
+
+select pg_get_tabledef('a_charset_2');
+                                pg_get_tabledef                                 
+--------------------------------------------------------------------------------
+ SET search_path = public;                                                     +
+ CREATE TABLE a_charset_2 (                                                    +
+     a1 integer,                                                               +
+     a2 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a3 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a4 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a8 blob,                                                                  +
+     a9 blob,                                                                  +
+     a10 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
+     a11 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
+     a13 integer,                                                              +
+     a14 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a15 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a16 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ",           +
+     a17 text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci                  +
+ )                                                                             +
+ CHARACTER SET = "SQL_ASCII" COLLATE = "binary"                                +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+set b_format_behavior_compat_options = '';
+\c regression
+drop database if exists d_charset_bak;
+drop database if exists d_charset;

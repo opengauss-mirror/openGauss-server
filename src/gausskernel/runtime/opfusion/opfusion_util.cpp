@@ -963,15 +963,15 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
     Relation rel = heap_open(relid, AccessShareLock);
 
     for (int i = 0; i < rel->rd_att->natts; i++) {
-        if (rel->rd_att->attrs[i]->attisdropped) {
+        if (rel->rd_att->attrs[i].attisdropped) {
             continue;
         }
         /* check whether the attrs of */
-        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(rel->rd_att->attrs[i]->atttypid));
+        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(rel->rd_att->attrs[i].atttypid));
         if (!HeapTupleIsValid(tuple)) {
             /* should not happen */
             ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmsg("cache lookup failed for type %u", rel->rd_att->attrs[i]->atttypid)));
+                errmsg("cache lookup failed for type %u", rel->rd_att->attrs[i].atttypid)));
         }
         Form_pg_type type_form = (Form_pg_type)GETSTRUCT(tuple);
         ReleaseSysCache(tuple);
@@ -1243,12 +1243,12 @@ Oid GetRelOidForPartitionTable(Scan scan, const Relation rel, ParamListInfo para
     Oid relOid = InvalidOid;
     if (params != NULL) {
         Param* paramArg = scan.pruningInfo->paramArg;
-        PartitionMap *partmap = scan.pruningInfo->partMap ? scan.pruningInfo->partMap : rel->partMap;
-        relOid = GetPartitionOidByParam(partmap, paramArg, &(params->params[paramArg->paramid - 1]));
+        relOid = GetPartitionOidByParam(rel->partMap, paramArg, &(params->params[paramArg->paramid - 1]));
     } else {
         Assert((list_length(scan.pruningInfo->ls_rangeSelectedPartitions) != 0));
-        int partId = lfirst_int(list_head(scan.pruningInfo->ls_rangeSelectedPartitions));
-        relOid = getPartitionOidFromSequence(rel, partId, scan.pruningInfo->partMap);
+        int partId = linitial_int(scan.pruningInfo->ls_rangeSelectedPartitions);
+        int partitionno = linitial_int(scan.pruningInfo->ls_selectedPartitionnos);
+        relOid = getPartitionOidFromSequence(rel, partId, partitionno);
     }
     return relOid;
 }

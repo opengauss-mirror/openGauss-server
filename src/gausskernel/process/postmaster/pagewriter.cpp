@@ -467,7 +467,7 @@ bool push_pending_flush_queue(Buffer buffer)
     BufferDesc* buf_desc = GetBufferDescriptor(buffer - 1);
     bool push_finish = false;
 
-    Assert(XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->rec_lsn)));
+    Assert(XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->extra->rec_lsn)));
 #if defined(__x86_64__) || defined(__aarch64__)
     push_finish = atomic_push_pending_flush_queue(&queue_head_lsn, &new_tail_loc);
     if (!push_finish) {
@@ -486,9 +486,9 @@ bool push_pending_flush_queue(Buffer buffer)
     SpinLockRelease(&g_instance.ckpt_cxt_ctl->queue_lock);
 #endif
 
-    pg_atomic_write_u64(&buf_desc->rec_lsn, queue_head_lsn);
+    pg_atomic_write_u64(&buf_desc->extra->rec_lsn, queue_head_lsn);
     actual_loc = new_tail_loc % g_instance.ckpt_cxt_ctl->dirty_page_queue_size;
-    buf_desc->dirty_queue_loc = actual_loc;
+    buf_desc->extra->dirty_queue_loc = actual_loc;
     g_instance.ckpt_cxt_ctl->dirty_page_queue[actual_loc].buffer = buffer;
     pg_memory_barrier();
     pg_atomic_write_u32(&g_instance.ckpt_cxt_ctl->dirty_page_queue[actual_loc].slot_state, (SLOT_VALID));
@@ -498,10 +498,10 @@ bool push_pending_flush_queue(Buffer buffer)
 
 void remove_dirty_page_from_queue(BufferDesc* buf)
 {
-    Assert(buf->dirty_queue_loc != PG_UINT64_MAX);
-    g_instance.ckpt_cxt_ctl->dirty_page_queue[buf->dirty_queue_loc].buffer = 0;
-    pg_atomic_write_u64(&buf->rec_lsn, InvalidXLogRecPtr);
-    buf->dirty_queue_loc = PG_UINT64_MAX;
+    Assert(buf->extra->dirty_queue_loc != PG_UINT64_MAX);
+    g_instance.ckpt_cxt_ctl->dirty_page_queue[buf->extra->dirty_queue_loc].buffer = 0;
+    pg_atomic_write_u64(&buf->extra->rec_lsn, InvalidXLogRecPtr);
+    buf->extra->dirty_queue_loc = PG_UINT64_MAX;
     (void)pg_atomic_fetch_sub_u32(&g_instance.ckpt_cxt_ctl->actual_dirty_page_num, 1);
 }
 
@@ -820,7 +820,7 @@ uint64 get_loc_for_lsn(XLogRecPtr target_lsn)
             continue;
         }
         buf_desc = GetBufferDescriptor(buffer - 1);
-        page_rec_lsn = pg_atomic_read_u64(&buf_desc->rec_lsn);
+        page_rec_lsn = pg_atomic_read_u64(&buf_desc->extra->rec_lsn);
         if (!BufferIsInvalid(slot->buffer) && XLByteLE(target_lsn, page_rec_lsn)) {
             last_loc = queue_loc - 1;
             break;
@@ -859,7 +859,7 @@ static uint32 get_page_num_for_lsn(XLogRecPtr target_lsn, uint32 max_num)
             continue; /* this tempLoc maybe set 0 when remove dirty page */
         }
         buf_desc = GetBufferDescriptor(buffer - 1);
-        page_rec_lsn = pg_atomic_read_u64(&buf_desc->rec_lsn);
+        page_rec_lsn = pg_atomic_read_u64(&buf_desc->extra->rec_lsn);
         if (!BufferIsInvalid(slot->buffer) && XLByteLE(target_lsn, page_rec_lsn)) {
             break;
         }
@@ -1647,7 +1647,7 @@ static void incre_ckpt_aio_callback(struct io_event *event)
         _exit(0);
     }
 
-    buf_desc->aio_in_progress = false;
+    buf_desc->extra->aio_in_progress = false;
     UnpinBuffer(buf_desc, true);
 }
 
@@ -1930,7 +1930,7 @@ static void ckpt_try_prune_dirty_page_queue()
                 continue;
             }
             move_slot->buffer = slot->buffer;
-            bufhdr->dirty_queue_loc = move_loc;
+            bufhdr->extra->dirty_queue_loc = move_loc;
             slot->buffer = 0;
             pg_write_barrier();
             UnlockBufHdr(bufhdr, buf_state);
@@ -2150,10 +2150,11 @@ static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
     Block tmpBlock = BufHdrGetBlock(buf_desc);
     uint32 local_buf_state = pg_atomic_read_u32(&buf_desc->state);
     bool check_lsn_not_match = (local_buf_state & BM_VALID) && !(local_buf_state & BM_DIRTY) &&
-        XLByteLT(buf_desc->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress() && !segment_buf;
+        XLByteLT(buf_desc->extra->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress() && !segment_buf;
 
     if (ENABLE_DMS && check_lsn_not_match &&
-        (XLogRecPtrIsInvalid(buf_desc->lsn_on_disk) || GetDmsBufCtrl(buf_desc->buf_id)->state & BUF_DIRTY_NEED_FLUSH)) {
+        (XLogRecPtrIsInvalid(buf_desc->extra->lsn_on_disk) ||
+         GetDmsBufCtrl(buf_desc->buf_id)->state & BUF_DIRTY_NEED_FLUSH)) {
         return false;
     }
 
@@ -2163,7 +2164,7 @@ static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
             pg_memory_barrier();
             local_buf_state = pg_atomic_read_u32(&buf_desc->state);
             check_lsn_not_match = (local_buf_state & BM_VALID) && !(local_buf_state & BM_DIRTY) &&
-                XLByteLT(buf_desc->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress();
+                XLByteLT(buf_desc->extra->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress();
             if (check_lsn_not_match) {
                 MarkBufferDirty(BufferDescriptorGetBuffer(buf_desc));
                 LWLockRelease(buf_desc->content_lock);
@@ -2171,7 +2172,7 @@ static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
                 const uint32 shiftSize = 32;
                 ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
                     errmsg("check lsn is not matched on disk:%X/%X on page %X/%X, relnode info:%u/%u/%u %u %u stat:%u",
-                        (uint32)(buf_desc->lsn_on_disk >> shiftSize), (uint32)(buf_desc->lsn_on_disk),
+                        (uint32)(buf_desc->extra->lsn_on_disk >> shiftSize), (uint32)(buf_desc->extra->lsn_on_disk),
                         (uint32)(PageGetLSN(tmpBlock) >> shiftSize), (uint32)(PageGetLSN(tmpBlock)),
                         buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
                         buf_desc->tag.blockNum, buf_desc->tag.forkNum, local_buf_state)));

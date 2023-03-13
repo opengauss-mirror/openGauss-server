@@ -372,7 +372,6 @@ loop:
         } else {
             csn = SSTransactionIdGetCommitSeqNo(xid, true, true, false, snapshot, NULL);
         }
-
     } else {
         csn = TransactionIdGetCommitSeqNo(xid, true, true, false, snapshot);
     }
@@ -1055,6 +1054,8 @@ static void SnapshotResetXmin(void)
 {
     if (u_sess->utils_cxt.RegisteredSnapshots == 0 && u_sess->utils_cxt.ActiveSnapshot == NULL) {
         t_thrd.pgxact->xmin = InvalidTransactionId;
+        t_thrd.proc->snapXmax = InvalidTransactionId;
+        t_thrd.proc->snapCSN = InvalidCommitSeqNo;
         t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
         t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     }
@@ -1424,7 +1425,7 @@ Datum pg_export_snapshot_and_csn(PG_FUNCTION_ARGS)
      * Construct a tuple descriptor for the result row.  This must match this
      * function's pg_proc entry!
      */
-    tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(tupdesc, (AttrNumber) 1, "snapshot_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) 2, "CSN", TEXTOID, -1, 0);
     tupdesc = BlessTupleDesc(tupdesc);

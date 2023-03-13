@@ -3931,6 +3931,16 @@ unsigned char* PQescapeBytea(const unsigned char* from, size_t from_length, size
     return PQescapeByteaInternal(NULL, from, from_length, to_length, static_std_strings, false /* can't use hex */);
 }
 
+#ifdef HAVE_CE
+unsigned char *PQescapeByteaCe(PGconn *conn, const unsigned char *from, size_t fromlen, size_t *tolen, bool addquote)
+{
+    if (conn == NULL) {
+        return NULL;
+    }
+    return PQescapeByteaInternal(conn, from, fromlen, tolen, conn->std_strings, true, addquote);
+}
+#endif
+
 #define ISFIRSTOCTDIGIT(CH) ((CH) >= '0' && (CH) <= '3')
 #define ISOCTDIGIT(CH) ((CH) >= '0' && (CH) <= '7')
 #define OCTVAL(CH) ((CH) - '0')

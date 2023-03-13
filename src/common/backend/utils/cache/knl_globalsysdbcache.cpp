@@ -1291,7 +1291,7 @@ int rd_att_to_datum(Datum *values, TupleDesc rd_att)
             appendStringInfoString(&strinfo, ",");
         }
         appendStringInfoString(&strinfo, "'");
-        appendStringInfoString(&strinfo, rd_att->attrs[i]->attname.data);
+        appendStringInfoString(&strinfo, rd_att->attrs[i].attname.data);
         appendStringInfoString(&strinfo, "'");
     }
     values[attrno++] = CStringGetTextDatum(strinfo.data);

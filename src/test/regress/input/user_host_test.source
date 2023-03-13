@@ -1,0 +1,63 @@
+show sql_compatibility;
+create user 'test_user_host'@'%' password 'test123@';
+create user 'test_user_host'@'127.%' password 'test123@';
+create user 'test_user_host'@'127.0.0.%' password 'test123@';
+create user 'test_user_host'@'127.0.%' password 'test123@';
+create user 'test_user_host%' password 'test123@';
+create user 'test_user_host'@'127.0.0.1' password 'test123@';
+create database user_host_db dbcompatibility 'B';
+\c user_host_db;
+set test_user_host = off;
+create user 'test_user_host'@'%' password 'test123@';
+create user 'test_user_host'@'127.%' password 'test123@';
+create user 'test_user_host'@'127.0.0.%' password 'test123@';
+create user 'test_user_host'@'127.0.%' password 'test123@';
+create user 'test_user_host%' password 'test123@';
+create user 'test_user_host'@'127.0.0.1' password 'test123@';
+set test_user_host = on;
+create user if not exists 'test_user_host'@'%' password 'test123@';
+alter user 'test_user_host'@'%' with account lock;
+alter user 'test_user_host'@'%' password 'test1234@';
+alter user 'test_user_host'@'%' with account unlock;
+create user 'test_user_host'@'127.%' password 'test123@';
+create user 'test_user_host'@'127.0.0.%' password 'test123@';
+create user 'test_user_host'@'127.0.%' password 'test123@';
+create user 'test_user_host%' password 'test123@';
+create user 'test_user_host'@'127.0.0.1' password 'test123@';
+create user 'test_user_host1@127.0.0.1' password 'test123@';
+create user test_user_host1@127.0.0.1 password 'test123@';
+create user test_user_host1@127.0.0. password 'test123@';
+create user test_user_host2@localhost password 'test123@';
+create user 'test_user_host3'@'localhost' password 'test123@';
+create user test_user_host1@127.0.0.% password 'test123@';
+select usename from pg_user where usename like 'test_user_host%' order by usename;
+create table test1(a int);
+alter table test1 owner to 'test_user_host'@'%';
+GRANT ALL PRIVILEGES TO 'test_user_host'@'%';
+REVOKE ALL PRIVILEGES FROM 'test_user_host'@'%';
+ALTER USER 'test_user_host'@'%' RENAME TO 'test_user_host'@'1%';
+CREATE  DEFINER='test_user_host'@'127.0.%' FUNCTION test_func(integer, integer) RETURNS integer SECURITY INVOKER
+AS 'select $1 + $2;'
+LANGUAGE SQL
+IMMUTABLE
+RETURNS NULL ON NULL INPUT;
+create table test2(a int);
+insert into test2 values(1);
+grant select on test2 to 'test_user_host'@'127.0.%';
+grant insert on test2 to 'test_user_host'@'127.0.%';
+revoke insert on test2 from 'test_user_host'@'127.0.%';
+\! echo 'test_user_host = on' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*#host  all  all  all  sha256#g' @abs_srcdir@/tmp_check/datanode1/pg_hba.conf
+\! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gsql -p @portstring@ -h 127.0.0.1 -d regression -r -U test_user_host -W 'test123@'
+\! @abs_bindir@/gsql -p @portstring@ -h 127.0.0.1 -d user_host_db -r -U test_user_host -W 'test123@' -c "select current_user";
+\! @abs_bindir@/gsql -p @portstring@ -d user_host_db -r  -c "drop user if exists 'test_user_host'@'127.0.0.1'";
+\! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gsql -p @portstring@ -h 127.0.0.1 -d user_host_db -r -U test_user_host -W 'test123@' -c "select current_user";
+\! @abs_bindir@/gsql -p @portstring@ -d user_host_db -r  -c "drop user 'test_user_host'@'127.0.0.%'";
+\! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gsql -p @portstring@ -h 127.0.0.1 -d user_host_db -r -U test_user_host -W 'test123@' -c "select current_user";
+\! @abs_bindir@/gsql -p @portstring@ -h 127.0.0.1 -d user_host_db -r -U test_user_host -W 'test123@' -c "select * from test2";

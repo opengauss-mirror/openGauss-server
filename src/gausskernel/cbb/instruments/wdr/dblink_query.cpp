@@ -464,7 +464,7 @@ void DBlink::procResultSuccess(ReturnSetInfo* rsinfo, PGresult* res)
      * need a tuple descriptor representing one TEXT column to return
      * the command status string as our result tuple
      */
-    tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(1, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "status", TEXTOID, -1, 0);
     attinmeta = TupleDescGetAttInMetadata(tupdesc);
 

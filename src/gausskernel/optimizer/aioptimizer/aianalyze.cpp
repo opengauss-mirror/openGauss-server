@@ -294,7 +294,7 @@ typedef struct {
 static ArrayBuildState* spi_get_result_array_sample(int attrno, MemoryContext memory_context)
 {
     ArrayBuildState* result = NULL;
-    Form_pg_attribute attribute = SPI_tuptable->tupdesc->attrs[attrno];
+    Form_pg_attribute attribute = &SPI_tuptable->tupdesc->attrs[attrno];
 
     AssertEreport(attribute, MOD_OPT, "");
 
@@ -409,9 +409,9 @@ static void prepare_samplerows(
      * is the same with local attribute for analyzed or not.
      */
     if (spec->stats->num_attrs == 1 && result.spi_tupDesc &&
-        (result.spi_tupDesc->attrs[0]->atttypid != spec->stats->attrs[0]->atttypid ||
-            result.spi_tupDesc->attrs[0]->atttypmod != spec->stats->attrs[0]->atttypmod ||
-            result.spi_tupDesc->attrs[0]->attlen != spec->stats->attrs[0]->attlen)) {
+        (result.spi_tupDesc->attrs[0].atttypid != spec->stats->attrs[0]->atttypid ||
+            result.spi_tupDesc->attrs[0].atttypmod != spec->stats->attrs[0]->atttypmod ||
+            result.spi_tupDesc->attrs[0].attlen != spec->stats->attrs[0]->attlen)) {
         ereport(WARNING,
             (errmsg("The tupleDesc analyzed on %s is different from tupleDesc which received from datanode "
                     "when computing data counts.",
@@ -419,7 +419,7 @@ static void prepare_samplerows(
              errdetail("Attribute \"%s\" of type %s does not match corresponding attribute of type %s.",
                        NameStr(spec->stats->attrs[0]->attname),
                        format_type_be(spec->stats->attrs[0]->atttypid),
-                       format_type_be(result.spi_tupDesc->attrs[0]->atttypid))));
+                       format_type_be(result.spi_tupDesc->attrs[0].atttypid))));
         FreeTupleDesc(result.spi_tupDesc);
         DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "Load samples from table %s failed.", tableName);
         pfree_ext(spiResult);
@@ -479,10 +479,10 @@ bool analyze_compute_bayesnet(int *slot_idx, Relation onerel, AnalyzeMode analyz
         return false;
     }
     for (uint32_t i = 0; i < spec->stats->num_attrs; i++) {
-        if (!isSupport(tupdesc->attrs[i]->atttypid)) {
+        if (!isSupport(tupdesc->attrs[i].atttypid)) {
             ereport(WARNING,
                 (errmsg("[AI Stats] Unsupported attribute types %d.\n (Support only %s)",
-                    tupdesc->attrs[i]->atttypid, supported_typed_readable)));
+                    tupdesc->attrs[i].atttypid, supported_typed_readable)));
             return false;
         }
     }
@@ -534,6 +534,7 @@ bool analyze_compute_bayesnet(int *slot_idx, Relation onerel, AnalyzeMode analyz
     spec->stats->staop[*slot_idx] = 0;
     (*slot_idx)++;
     pfree_ext(model_name.data);
+    tss.delete_tuple();
     return true;
 }
 

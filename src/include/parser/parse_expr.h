@@ -16,13 +16,16 @@
 #include "parser/parse_node.h"
 #include "utils/plpgsql.h"
 
-extern Node* transformExpr(ParseState* pstate, Node* expr);
+extern Node* transformExpr(ParseState* pstate, Node* expr, ParseExprKind exprKind);
+extern Node* transformExprRecurse(ParseState* pstate, Node* expr);
 extern Expr* make_distinct_op(ParseState* pstate, List* opname, Node* ltree, Node* rtree, int location);
 extern Oid getMultiFuncInfo(char* fun_expr, PLpgSQL_expr* expr, bool isoutparamcheck = false);
 extern void CheckOutParamIsConst(PLpgSQL_expr* expr);
 
 extern void lockSeqForNextvalFunc(Node* node);
 extern Node* transformSetVariableExpr(SetVariableExpr* set);
+
+extern const char *ParseExprKindName(ParseExprKind exprKind);
 
 /* start with ... connect by related output routines */
 extern bool IsPseudoReturnColumn(const char *colname);

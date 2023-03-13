@@ -15,6 +15,7 @@
 #define TABLESPACE_H
 
 #include "access/xloginsert.h"
+#include "catalog/objectaddress.h"
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 #include "workload/workload.h"
@@ -100,11 +101,11 @@ typedef struct TableSpaceOpts {
             relation->rd_rel->relowner, requestSize, RelationUsesSpaceType(relation->rd_rel->relpersistence)); \
     }
 
-extern void CreateTableSpace(CreateTableSpaceStmt* stmt);
+extern Oid CreateTableSpace(CreateTableSpaceStmt* stmt);
 extern void DropTableSpace(DropTableSpaceStmt* stmt);
-extern void RenameTableSpace(const char* oldname, const char* newname);
-extern void AlterTableSpaceOwner(const char* name, Oid newOwnerId);
-extern void AlterTableSpaceOptions(AlterTableSpaceOptionsStmt* stmt);
+extern ObjectAddress RenameTableSpace(const char* oldname, const char* newname);
+extern ObjectAddress AlterTableSpaceOwner(const char* name, Oid newOwnerId);
+extern Oid AlterTableSpaceOptions(AlterTableSpaceOptionsStmt* stmt);
 extern bool IsSpecifiedTblspc(Oid spcOid, const char* specifedTblspc);
 
 extern void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo);

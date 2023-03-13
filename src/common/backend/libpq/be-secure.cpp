@@ -84,6 +84,9 @@
 #include "workload/workload.h"
 #include "communication/commproxy_interface.h"
 
+#include "storage/latch.h"
+#include "storage/proc.h"
+
 #ifdef USE_SSL
 typedef enum DHKeyLength {
     DHKey768 = 1,
@@ -218,10 +221,46 @@ void secure_close(Port* port)
 #endif
 }
 
+ssize_t logic_read(Port* port, void *ptr, size_t len)
+{
+    ssize_t n = 0;
+    prepare_for_logic_conn_read();
+    int producer;
+retry:
+    NetWorkTimePollStart(t_thrd.pgxc_cxt.GlobalNetInstr);
+    n = gs_wait_poll(&(port->gs_sock), 1, &producer, -1, false);
+    NetWorkTimePollEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
+    /* no data but wake up, retry */
+    if (n == 0) {
+        logic_conn_read_check_ended();
+        goto retry;
+    }
+
+    if (n > 0) {
+        n = gs_recv(&(port->gs_sock), ptr, len);
+        LIBCOMM_DEBUG_LOG("secure_read to node %s[nid:%d,sid:%d] with msg:%c, len:%d.",
+                            port->remote_hostname,
+                            port->gs_sock.idx,
+                            port->gs_sock.sid,
+                            ((char*)ptr)[0],
+                            (int)len);
+    }
+    logic_conn_read_check_ended();
+    return n;
+}
+
+ssize_t secure_read_ord(Port* port, void *ptr, size_t len)
+{
+    ssize_t n = 0;
+
+    /* CommProxy Interface Support */
+    n = comm_recv(port->sock, ptr, len, 0);
+    return n;
+}
 /*
  *  Read data from a secure connection.
  */
-ssize_t secure_read(Port* port, void* ptr, size_t len)
+ssize_t old_secure_read(Port* port, void* ptr, size_t len)
 {
     ssize_t n;
 
@@ -279,29 +318,7 @@ ssize_t secure_read(Port* port, void* ptr, size_t len)
 #endif
     {
         if (port->is_logic_conn) {
-            prepare_for_logic_conn_read();
-
-            int producer;
-        retry:
-            NetWorkTimePollStart(t_thrd.pgxc_cxt.GlobalNetInstr);
-            n = gs_wait_poll(&(port->gs_sock), 1, &producer, -1, false);
-            NetWorkTimePollEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
-            /* no data but wake up, retry */
-            if (n == 0) {
-                logic_conn_read_check_ended();
-                goto retry;
-            }
-
-            if (n > 0) {
-                n = gs_recv(&(port->gs_sock), ptr, len);
-                LIBCOMM_DEBUG_LOG("secure_read to node %s[nid:%d,sid:%d] with msg:%c, len:%d.",
-                                  port->remote_hostname,
-                                  port->gs_sock.idx,
-                                  port->gs_sock.sid,
-                                  ((char*)ptr)[0],
-                                  (int)len);
-            }
-            logic_conn_read_check_ended();
+            n = logic_read(port, ptr, len);
         } else {
             prepare_for_client_read();
             PGSTAT_INIT_TIME_RECORD();
@@ -320,9 +337,150 @@ ssize_t secure_read(Port* port, void* ptr, size_t len)
 }
 
 /*
+ * Read data from a secure connection
+ */
+ssize_t light_secure_read(Port* port, void* ptr, size_t len)
+{
+    ssize_t n;
+    int waitfor = 0;
+readloop:
+#ifdef USE_SSL
+    if (port->ssl != NULL) {
+        int err;
+        errno = 0;
+        ERR_clear_error();
+        n = SSL_read(port->ssl, ptr, len);
+        err = SSL_get_error(port->ssl, n);
+        switch (err) {
+            case SSL_ERROR_NONE:
+                port->count += n;
+                break;
+            case SSL_ERROR_WANT_READ:
+                waitfor = WL_SOCKET_READABLE;
+		errno = EWOULDBLOCK;
+		n = -1;
+		break;
+            case SSL_ERROR_WANT_WRITE:
+                waitfor = WL_SOCKET_WRITEABLE;
+                errno = EWOULDBLOCK;
+                n = -1;
+                break;
+            case SSL_ERROR_SYSCALL:
+                /* leave it to caller to ereport the value of errno */
+                if (n != -1) {
+                    errno = ECONNRESET;
+                    n = -1;
+                }
+                break;
+            case SSL_ERROR_SSL:
+                ereport(COMMERROR,
+                        (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                         errmsg("SSL error: %s, remote nodename %s", SSLerrmessage(), port->remote_hostname)));
+                /* fall through */
+            case SSL_ERROR_ZERO_RETURN:
+                errno = ECONNRESET;
+                n = -1;
+                break;
+            default:
+                ereport(COMMERROR,
+                        (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                         errmsg("unrecognized SSL error code: %d, remote nodename %s",
+                                err, port->remote_hostname)));
+                n = -1;
+                break;
+        }
+    } else
+#endif
+    {
+        if (port->is_logic_conn) {
+            n = logic_read(port, ptr, len);
+        } else {
+            n = secure_read_ord(port, ptr, len);
+            waitfor = WL_SOCKET_READABLE;
+        }
+    }
+
+    /* In blocking mode, wait until the socket is ready */
+    if (!port->is_logic_conn && n < 0 && !port->noblock && (errno == EWOULDBLOCK || errno == EAGAIN) && t_thrd.proc) {
+        int w;
+        if (!waitfor)
+        {
+            ereport(COMMERROR, (errmsg("wait event should not be zero")));
+            /* for log printing, dn receive message */
+            IPC_PERFORMANCE_LOG_COLLECT(port->msgLog, ptr, n, port->remote_hostname, &port->gs_sock, SECURE_READ);
+            return n;
+        }
+
+        w = WaitLatchOrSocket(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_POSTMASTER_DEATH | waitfor, port->sock, 0);
+        /*
+         * If the postmaster has died, no new connections can be accepted.
+         */
+        if (w & WL_POSTMASTER_DEATH)
+            ereport(FATAL,
+                (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating connection due to unexpected postmaster exit")));
+        if (w & WL_LATCH_SET) {
+            /* Handle interrupt */
+            ResetLatch(&t_thrd.proc->procLatch);
+            process_client_read_interrupt(true);
+
+            /*
+             * Retry the read. Wait for the socket to become ready again.
+             */
+        }
+        goto readloop;
+    }
+#ifdef USE_SSL
+    if (!port->is_logic_conn && n < 0 && !port->noblock && (errno == EWOULDBLOCK || errno == EAGAIN) && !t_thrd.proc) {
+        goto readloop;
+    }
+#endif
+
+    /*  
+     * Process interrupts that happened while (or before) receiving.
+     */
+    process_client_read_interrupt(false);
+
+    /* for log printing, dn receive message */
+    IPC_PERFORMANCE_LOG_COLLECT(port->msgLog, ptr, n, port->remote_hostname, &port->gs_sock, SECURE_READ);
+    return n;
+}
+
+ssize_t secure_read(Port *port, void *ptr, size_t len)
+{
+    ssize_t n = 0;
+    if (u_sess->attr.attr_common.light_comm == TRUE) {
+        n = light_secure_read(port, ptr, len);
+    } else {
+        n = old_secure_read(port, ptr, len);
+    }
+    return n;
+}
+
+ssize_t logic_write(Port *port, void *ptr, size_t len)
+{
+    ssize_t n;
+    n = gs_send(&(port->gs_sock), (char *)ptr, len, -1, TRUE);
+    LIBCOMM_DEBUG_LOG("secure_write to node[nid:%d,sid:%d] with msg:%c, len:%d.", port->gs_sock.idx, port->gs_sock.sid,
+        ((char *)ptr)[0], (int)len);
+
+    /* for log printing, send message */
+    IPC_PERFORMANCE_LOG_COLLECT(port->msgLog, ptr, n, port->remote_hostname, &port->gs_sock, SECURE_WRITE);
+    return n;
+}
+
+ssize_t secure_write_ord(Port *port, void *ptr, size_t len)
+{
+    ssize_t n = 0;
+    /* CommProxy Interface Support */
+    n = send(port->sock, ptr, len, 0);
+    IPC_PERFORMANCE_LOG_COLLECT(port->msgLog, ptr, n, port->remote_hostname, NULL, SECURE_WRITE);
+    return n;
+}
+
+/*
  *  Write data to a secure connection.
  */
-ssize_t secure_write(Port* port, void* ptr, size_t len)
+ssize_t old_secure_write(Port* port, void* ptr, size_t len)
 {
     ssize_t n;
     StreamTimeSendStart(t_thrd.pgxc_cxt.GlobalNetInstr);
@@ -396,15 +554,7 @@ ssize_t secure_write(Port* port, void* ptr, size_t len)
      * as only one connection needed to send.
      */
     else if (port->is_logic_conn) {
-        n = gs_send(&(port->gs_sock), (char*)ptr, len, -1, TRUE);
-        LIBCOMM_DEBUG_LOG("secure_write to node[nid:%d,sid:%d] with msg:%c, len:%d.",
-            port->gs_sock.idx,
-            port->gs_sock.sid,
-            ((char*)ptr)[0],
-            (int)len);
-
-        /* for log printing, send message */
-        IPC_PERFORMANCE_LOG_COLLECT(port->msgLog, ptr, n, port->remote_hostname, &port->gs_sock, SECURE_WRITE);
+        n = logic_write(port, ptr, len);
     } else {
         PGSTAT_INIT_TIME_RECORD();
         PGSTAT_START_TIME_RECORD();
@@ -420,6 +570,137 @@ ssize_t secure_write(Port* port, void* ptr, size_t len)
 
     StreamTimeSendEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
 
+    return n;
+}
+
+ssize_t light_secure_write(Port* port, void* ptr, size_t len)
+{
+    ssize_t n;
+    int waitfor = 0;
+    StreamTimeSendStart(t_thrd.pgxc_cxt.GlobalNetInstr);
+retry:
+#ifdef USE_SSL
+    if (port->ssl != NULL) {
+        int err;
+        errno = 0;
+        ERR_clear_error();
+        n = SSL_write(port->ssl, ptr, len);
+
+        err = SSL_get_error(port->ssl, n);
+        switch (err) {
+            case SSL_ERROR_NONE:
+                port->count += n;
+                break;
+            case SSL_ERROR_WANT_READ:
+                waitfor = WL_SOCKET_READABLE;
+                errno = EWOULDBLOCK;
+                n = -1;
+                break;
+            case SSL_ERROR_WANT_WRITE:
+                waitfor = WL_SOCKET_WRITEABLE;
+                errno = EWOULDBLOCK;
+                n = -1;
+                break;
+            case SSL_ERROR_SYSCALL:
+                /* leave it to caller to ereport the value of errno */
+                if (n != -1) {
+                    errno = ECONNRESET;
+                    n = -1;
+                }
+                break;
+            case SSL_ERROR_SSL:
+                ereport(COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("SSL error: %s", SSLerrmessage())));
+                /* fall through */
+            case SSL_ERROR_ZERO_RETURN:
+                errno = ECONNRESET;
+                n = -1;
+                break;
+            default:
+                ereport(
+                    COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unrecognized SSL error code: %d", err)));
+                n = -1;
+                break;
+        }
+    } else
+#endif
+        /*
+         * for stream connection, when send msgs
+         * to multiple connections(broadcasting),
+         * gs_broadcast_send is called
+         * in this function the remaining connections
+         * will not be blocked when one connection is waitting quota.
+         */
+        if (StreamThreadAmI()) {
+            if(port->libcomm_addrinfo->parallel_send_mode) {
+                n = gs_broadcast_send(port->libcomm_addrinfo, (char*)ptr, len, -1);
+                IPC_PERFORMANCE_LOG_COLLECT(port->msgLog, ptr, n, "all datanodes", NULL, SECURE_WRITE);
+            } else {
+                n = gs_send(&(port->libcomm_addrinfo->gs_sock), (char*)ptr, len, -1, TRUE);
+                IPC_PERFORMANCE_LOG_COLLECT(port->msgLog, ptr, n, port->libcomm_addrinfo->nodename,
+                    &(port->libcomm_addrinfo->gs_sock), SECURE_WRITE);
+            }
+    }
+    /*
+     * for logic connection, gs_send is called
+     * as only one connection needed to send.
+     */
+    else if (port->is_logic_conn) {
+        n = logic_write(port, ptr, len);
+    } else {
+        n = secure_write_ord(port, ptr, len);
+        waitfor = WL_SOCKET_WRITEABLE;
+    }
+    if (!StreamThreadAmI() && !port->is_logic_conn && n < 0 && !port->noblock &&
+        (errno == EWOULDBLOCK || errno == EAGAIN) && t_thrd.proc) {
+        int w;
+        if (!waitfor) {   
+            StreamTimeSendEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
+            ereport(COMMERROR, (errmsg("wait event should not be zero")));
+            return n;
+        }
+
+        w = WaitLatchOrSocket(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_POSTMASTER_DEATH | waitfor, port->sock, 0);
+        /* See comments in secure_read. */
+        if (w & WL_POSTMASTER_DEATH)
+            ereport(FATAL,
+                (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating connection due to unexpected postmaster exit")));
+        if (w & WL_LATCH_SET) {
+            /* Handle interrupt. */
+            ResetLatch(&t_thrd.proc->procLatch);
+            process_client_write_interrupt(true);
+
+            /*
+             * Retry the write. Wait for the socket to become ready again.
+             */
+        }
+        goto retry;
+    }
+#ifdef USE_SSL
+    if (!StreamThreadAmI() && !port->is_logic_conn && n <0 && !port->noblock && 
+        (errno == EWOULDBLOCK || errno == EAGAIN) && !t_thrd.proc) {
+        goto retry;
+    }
+#endif
+
+    /*  
+     * Process interrupts that happened while (or before) sending. Note that
+     * we signal that we're not blocking, which will prevent some types of
+     * interrupts from being processed.
+     */
+    process_client_write_interrupt(false);
+    StreamTimeSendEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
+
+    return n;
+}
+
+ssize_t secure_write(Port *port, void *ptr, size_t len)
+{
+    ssize_t n = 0;
+    if (u_sess->attr.attr_common.light_comm == TRUE) {
+        n = light_secure_write(port, ptr, len);
+    } else {
+        n = old_secure_write(port, ptr, len);
+    }
     return n;
 }
 

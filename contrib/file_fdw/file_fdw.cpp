@@ -375,7 +375,7 @@ static List* get_file_fdw_attribute_options(Oid relid)
 
     /* Retrieve FDW options for all user-defined attributes. */
     for (attnum = 1; attnum <= natts; attnum++) {
-        Form_pg_attribute attr = tupleDesc->attrs[attnum - 1];
+        Form_pg_attribute attr = &tupleDesc->attrs[attnum - 1];
         List* options = NIL;
         ListCell* lc = NULL;
 
@@ -712,7 +712,7 @@ static void estimate_size(PlannerInfo* root, RelOptInfo* baserel, FileFdwPlanSta
          */
         int tuple_width;
 
-        tuple_width = MAXALIGN(baserel->width) + MAXALIGN(sizeof(HeapTupleHeaderData));
+        tuple_width = MAXALIGN(baserel->reltarget->width) + MAXALIGN(sizeof(HeapTupleHeaderData));
         ntuples = clamp_row_est((double)stat_buf.st_size / (double)tuple_width);
 
         baserel->tuples = ntuples;

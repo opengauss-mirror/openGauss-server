@@ -1,0 +1,62 @@
+create database test_select_into_file dbcompatibility 'b';
+\c test_select_into_file;
+CREATE TYPE my_enum AS enum('ENUM1','ENUM2');
+create table t(id int, a char(2), b text, c my_enum, d blob, e raw, f bytea);
+insert into t values(1, 'c1', 'text1', 'ENUM1', '01', HEXTORAW('DEADBEEF'), E'\\xDEADBEEF');
+insert into t values(2, 'c2', 'text2', 'ENUM2', '11', HEXTORAW('DEADBEEE'), E'\\xDEADBEEE');
+select * from t;
+ id | a  |   b   |   c   | d  |    e     |     f      
+----+----+-------+-------+----+----------+------------
+  1 | c1 | text1 | ENUM1 | 01 | DEADBEEF | \xdeadbeef
+  2 | c2 | text2 | ENUM2 | 11 | DEADBEEE | \xdeadbeee
+(2 rows)
+
+select * from t into outfile '@abs_srcdir@/data/select_into_file.data';
+\! cat @abs_srcdir@/data/select_into_file.data
+1	c1	text1	ENUM1	01	DEADBEEF	\\xdeadbeef
+2	c2	text2	ENUM2	11	DEADBEEE	\\xdeadbeee
+select * from t into outfile '@abs_srcdir@/data/select_into_file.data' FIELDS TERMINATED BY '~~';
+\! cat @abs_srcdir@/data/select_into_file.data
+1~~c1~~text1~~ENUM1~~01~~DEADBEEF~~\\xdeadbeef
+2~~c2~~text2~~ENUM2~~11~~DEADBEEE~~\\xdeadbeee
+select * from t into outfile '@abs_srcdir@/data/select_into_file.data' FIELDS ENCLOSED BY '^';
+\! cat @abs_srcdir@/data/select_into_file.data
+^1^	^c1^	^text1^	^ENUM1^	^01^	^DEADBEEF^	^\xdeadbeef^
+^2^	^c2^	^text2^	^ENUM2^	^11^	^DEADBEEE^	^\xdeadbeee^
+select * from t into outfile '@abs_srcdir@/data/select_into_file.data' FIELDS OPTIONALLY ENCLOSED BY '^';
+\! cat @abs_srcdir@/data/select_into_file.data
+1	^c1^	^text1^	^ENUM1^	^01^	^DEADBEEF^	\xdeadbeef
+2	^c2^	^text2^	^ENUM2^	^11^	^DEADBEEE^	\xdeadbeee
+select * from t into outfile '@abs_srcdir@/data/select_into_file.data' FIELDS ENCLOSED BY 't' ESCAPED BY '^';
+\! cat @abs_srcdir@/data/select_into_file.data
+t1t	tc1t	t^tex^t1t	tENUM1t	t01t	tDEADBEEFt	t\xdeadbeeft
+t2t	tc2t	t^tex^t2t	tENUM2t	t11t	tDEADBEEEt	t\xdeadbeeet
+select * from t into outfile '@abs_srcdir@/data/select_into_file.data' LINES STARTING BY '$';
+\! cat @abs_srcdir@/data/select_into_file.data
+$1	c1	text1	ENUM1	01	DEADBEEF	\\xdeadbeef
+$2	c2	text2	ENUM2	11	DEADBEEE	\\xdeadbeee
+select * from t into outfile '@abs_srcdir@/data/select_into_file.data' LINES TERMINATED BY '&\n';
+\! cat @abs_srcdir@/data/select_into_file.data
+1	c1	text1	ENUM1	01	DEADBEEF	\\xdeadbeef&
+2	c2	text2	ENUM2	11	DEADBEEE	\\xdeadbeee&
+select * from t into outfile '@abs_srcdir@/data/select_into_file.data' FIELDS TERMINATED BY '~' ENCLOSED BY 't' ESCAPED BY '^' LINES STARTING BY '$' TERMINATED BY '&\n';
+\! cat @abs_srcdir@/data/select_into_file.data
+$t1t~tc1t~t^tex^t1t~tENUM1t~t01t~tDEADBEEFt~t\xdeadbeeft&
+$t2t~tc2t~t^tex^t2t~tENUM2t~t11t~tDEADBEEEt~t\xdeadbeeet&
+--error dumpfile more than one row
+select * from t into dumpfile '@abs_srcdir@/data/select_into_file.data';
+ERROR:  Result consisted of more than one row
+select * from t limit 1 into dumpfile '@abs_srcdir@/data/select_into_file.data';
+\! cat @abs_srcdir@/data/select_into_file.data
+1c1text1ENUM101DEADBEEF\\xdeadbeefcreate table test_null(a int, b int, c int);
+insert into test_null values(null,null,null);
+select * from test_null;
+ a | b | c 
+---+---+---
+   |   |  
+(1 row)
+
+select * from test_null into dumpfile '@abs_srcdir@/data/select_into_file.data';
+\c regression;
+drop database test_select_into_file;
+\! rm @abs_srcdir@/data/select_into_file.data

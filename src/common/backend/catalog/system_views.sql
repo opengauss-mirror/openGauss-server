@@ -690,6 +690,19 @@ WHERE
 	l.objsubid = 0
 UNION ALL
 SELECT
+    l.objoid, l.classoid, l.objsubid,
+    'event trigger'::text AS objtype,
+    NULL::oid AS objnamespace,
+    quote_ident(evt.evtname) AS objname,
+    l.provider, l.label
+FROM
+    pg_seclabel l
+    JOIN pg_event_trigger evt ON l.classoid = evt.tableoid
+        AND l.objoid = evt.oid
+WHERE
+    l.objsubid = 0
+UNION ALL
+SELECT
 	l.objoid, l.classoid, 0::int4 AS objsubid,
 	'database'::text AS objtype,
 	NULL::oid AS objnamespace,
@@ -3473,7 +3486,8 @@ CREATE unlogged table statement_history(
     lwlock_wait_time bigint,
     details bytea,
     is_slow_sql bool,
-    trace_id text
+    trace_id text,
+    advise text
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);

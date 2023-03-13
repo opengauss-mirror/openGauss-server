@@ -246,7 +246,7 @@ void SyncPostCheckpoint(void)
      * 2. full checkpoint mode, call ProcessSyncRequests, can remove the entry from pendingOps.
      */
     if (ENABLE_INCRE_CKPT) {
-        hash_destroy(u_sess->storage_cxt.pendingOps);
+        hash_remove(u_sess->storage_cxt.pendingOps);
         InitPendingOps();
     }
 }

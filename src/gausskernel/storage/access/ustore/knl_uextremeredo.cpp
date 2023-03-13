@@ -489,7 +489,7 @@ static char *ReachXlUndoHeaderEnd(XlUndoHeader *xlundohdr)
 {
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
-        currLogPtr += sizeof(bool); 
+        currLogPtr += sizeof(bool);
     }
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         currLogPtr += sizeof(UndoRecPtr);
@@ -579,6 +579,7 @@ void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size 
     RowPtr *rp;
     XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete);
     char *currLogPtr = ReachXlUndoHeaderEnd(xlundohdr);
+    Size shiftSize = currLogPtr - (char *)xlrec;
     XlogUndoMeta *xlundometa = (XlogUndoMeta *)((char *)currLogPtr);
     UndoRecPtr urecptr = xlundohdr->urecptr;
 
@@ -589,8 +590,8 @@ void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size 
      * If the WAL stream contains undo tuple, then replace it with the
      * explicitly stored tuple.
      */
-    Size datalen = recordlen - SizeOfXLUndoHeader - SizeOfUHeapDelete - undoMetaSize - SizeOfUHeapHeader;
-    char *data = (char *)xlrec + SizeOfUHeapDelete + SizeOfXLUndoHeader + undoMetaSize;
+    Size datalen = recordlen - shiftSize - undoMetaSize - SizeOfUHeapHeader;
+    char *data = currLogPtr + undoMetaSize;
 
     /*
      * If the WAL stream contains undo tuple, then replace it with the

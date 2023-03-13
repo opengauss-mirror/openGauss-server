@@ -1,4 +1,4 @@
-# -----------------------------------------------------------------------------
+﻿# -----------------------------------------------------------------------------
 #
 # postgresql_distribute.conf.sample
 #      Configuration file for distributed environment
@@ -79,7 +79,7 @@ max_connections = 200			# (change requires restart)
 #unix_socket_group = ''			# (change requires restart)
 #unix_socket_permissions = 0700		# begin with 0 to use octal notation
 					# (change requires restart)
-
+#light_comm = off			# whether use light commnucation with nonblock mode or latch
 # - Security and Authentication -
 
 #authentication_timeout = 1min		# 1s-600s
@@ -820,6 +820,9 @@ audit_enabled = on
 #audit_set_parameter = 1		# whether audit set parameter operation
 #audit_xid_info = 0 			# whether record xid info in audit log
 #audit_thread_num = 1
+#no_audit_client = ""
+#full_audit_users = ""
+#audit_system_function_exec = 0
 
 #Choose which style to print the explain info, normal,pretty,summary,run
 #explain_perf_mode = normal

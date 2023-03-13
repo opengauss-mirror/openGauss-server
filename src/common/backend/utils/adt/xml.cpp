@@ -526,7 +526,6 @@ xmltype* xmlelement(XmlExprState* xmlExpr, ExprContext* econtext)
     xmltype* result = NULL;
     List* named_arg_strings = NIL;
     List* arg_strings = NIL;
-    int i;
     ListCell* arg = NULL;
     ListCell* narg = NULL;
     PgXmlErrorContext* xmlerrcxt = NULL;
@@ -540,7 +539,6 @@ xmltype* xmlelement(XmlExprState* xmlExpr, ExprContext* econtext)
      * terms.
      */
     named_arg_strings = NIL;
-    i = 0;
     foreach (arg, xmlExpr->named_args) {
         ExprState* e = (ExprState*)lfirst(arg);
         Datum value;
@@ -553,7 +551,6 @@ xmltype* xmlelement(XmlExprState* xmlExpr, ExprContext* econtext)
         else
             str = map_sql_value_to_xml_value(value, exprType((Node*)e->expr), false);
         named_arg_strings = lappend(named_arg_strings, str);
-        i++;
     }
 
     arg_strings = NIL;
@@ -826,7 +823,7 @@ void pg_xml_init_library(void)
          */
         if (sizeof(char) != sizeof(xmlChar))
             ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("could not initialize XML library"),
-                            errdetail("libxml2 has incompatible char type: sizeof(char)=%u, sizeof(xmlChar)=%u.",
+                            errdetail("libxml2 has incompatible char type: sizeof(char)=%d, sizeof(xmlChar)=%d.",
                                       (int)sizeof(char), (int)sizeof(xmlChar))));
 
 #ifdef USE_LIBXMLCONTEXT
@@ -2944,12 +2941,12 @@ static const char* map_sql_table_to_xmlschema(
         rowtypename);
 
     for (i = 0; i < tupdesc->natts; i++) {
-        if (tupdesc->attrs[i]->attisdropped)
+        if (tupdesc->attrs[i].attisdropped)
             continue;
         appendStringInfo(&result,
             "    <xsd:element name=\"%s\" type=\"%s\"%s></xsd:element>\n",
-            map_sql_identifier_to_xml_name(NameStr(tupdesc->attrs[i]->attname), true, false),
-            map_sql_type_to_xml_name(tupdesc->attrs[i]->atttypid, -1),
+            map_sql_identifier_to_xml_name(NameStr(tupdesc->attrs[i].attname), true, false),
+            map_sql_type_to_xml_name(tupdesc->attrs[i].atttypid, -1),
             nulls ? " nillable=\"true\"" : " minOccurs=\"0\"");
     }
 
@@ -3200,9 +3197,9 @@ static const char* map_sql_typecoll_to_xmlschema_types(List* tupdesc_list)
         TupleDesc tupdesc = (TupleDesc)lfirst(cell0);
 
         for (i = 0; i < tupdesc->natts; i++) {
-            if (tupdesc->attrs[i]->attisdropped)
+            if (tupdesc->attrs[i].attisdropped)
                 continue;
-            uniquetypes = list_append_unique_oid(uniquetypes, tupdesc->attrs[i]->atttypid);
+            uniquetypes = list_append_unique_oid(uniquetypes, tupdesc->attrs[i].atttypid);
         }
     }
 

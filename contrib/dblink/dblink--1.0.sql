@@ -221,3 +221,8 @@ CREATE FUNCTION dblink_get_notify(
 RETURNS setof record
 AS 'MODULE_PATHNAME', 'dblink_get_notify'
 LANGUAGE C STRICT;
+
+CREATE FUNCTION dblink_get_drivername()
+RETURNS text
+AS 'MODULE_PATHNAME', 'dblink_get_drivername'
+LANGUAGE C STRICT;

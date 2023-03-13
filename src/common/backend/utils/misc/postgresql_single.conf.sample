@@ -79,6 +79,7 @@ max_connections = 200			# (change requires restart)
 #unix_socket_group = ''			# (change requires restart)
 #unix_socket_permissions = 0700		# begin with 0 to use octal notation
 					# (change requires restart)
+#light_comm = off			# whether use light commnucation with nonblock mode or latch
 
 # - Security and Authentication -
 
@@ -386,7 +387,10 @@ enable_kill_query = off			# optional: [on, off], default: off
 					# JOIN clauses
 #plan_mode_seed = 0         # range -1-0x7fffffff
 #check_implicit_conversions = off
+#enable_expr_fusion = off
 #enable_functional_dependency = off
+#enable_indexscan_optimization = off
+#enable_inner_unique_opt = off
 
 #------------------------------------------------------------------------------
 # ERROR REPORTING AND LOGGING
@@ -763,6 +767,9 @@ audit_enabled = on
 #audit_set_parameter = 1		# whether audit set parameter operation
 #audit_xid_info = 0 			# whether record xid info in audit log
 #audit_thread_num = 1
+#no_audit_client = ""
+#full_audit_users = ""
+#audit_system_function_exec = 0
 
 #Choose which style to print the explain info, normal,pretty,summary,run
 #explain_perf_mode = normal

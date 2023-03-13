@@ -69,8 +69,8 @@ insert into list_hash values('201903', '5', '1', 1);
 select * from list_hash;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201902     | 2         | 1       |         1
  201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
  201903     | 4         | 1       |         1
  201903     | 5         | 1       |         1
 (4 rows)
@@ -140,11 +140,11 @@ insert into hash_list values('201903', '1', '1', 1);
 select * from hash_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
 (5 rows)
 
 drop table hash_list;
@@ -176,11 +176,11 @@ insert into hash_hash values('201903', '1', '1', 1);
 select * from hash_hash;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 2         | 1       |         1
- 201903     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
- 201901     | 1         | 1       |         1
- 201901     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
 (5 rows)
 
 drop table hash_hash;
@@ -212,11 +212,11 @@ insert into hash_range values('201903', '1', '1', 1);
 select * from hash_range;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
 (5 rows)
 
 drop table hash_range;
@@ -726,29 +726,6 @@ PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
 );
 drop table list_list;
 --1.4 subpartition key check
--- 一级分区和二级分区分区键是同一列
-CREATE TABLE list_list
-(
-    month_code VARCHAR2 ( 30 ) NOT NULL ,
-    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
-    user_no    VARCHAR2 ( 30 ) NOT NULL ,
-    sales_amt  int
-) WITH (STORAGE_TYPE=USTORE)
-PARTITION BY LIST (month_code) SUBPARTITION BY LIST (month_code)
-(
-  PARTITION p_201901 VALUES ( '201902' )
-  (
-    SUBPARTITION p_201901_a VALUES ( '1' ),
-    SUBPARTITION p_201901_b VALUES ( '2' )
-  ),
-  PARTITION p_201902 VALUES ( '201903' )
-  (
-    SUBPARTITION p_201902_a VALUES ( '1' ),
-    SUBPARTITION p_201902_b VALUES ( '2' )
-  )
-);
-ERROR:  The two partition keys of a subpartition partition table are the same.
-DETAIL:  N/A
 --二级分区的键值一样
 CREATE TABLE list_list
 (

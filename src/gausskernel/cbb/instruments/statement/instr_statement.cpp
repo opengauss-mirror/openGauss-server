@@ -75,7 +75,7 @@
 
 #define STATEMENT_DETAILS_HEAD_SIZE (1)     /* [VERSION] */
 #define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
-#define INSTR_STATEMENT_ATTRNUM 52
+#define INSTR_STATEMENT_ATTRNUM 53
 
 /* support different areas in stmt detail column */
 #define STATEMENT_DETAIL_TYPE_LEN (1)
@@ -181,7 +181,7 @@ static void StartStbyStmtHistory()
 
 static void ShutdownStbyStmtHistory()
 {
-    if (!STBYSTMTHIST_IS_READY) {
+    if (!STBYSTMTHIST_IS_READY || u_sess->attr.attr_storage.DefaultXactReadOnly) {
         return;
     }
 
@@ -450,6 +450,31 @@ static void set_stmt_lock_summary(const LockSummaryStat *lock_summary, Datum val
     values[(*i)++] = Int64GetDatum(lock_summary->lwlock_wait_time);
 }
 
+static void set_stmt_advise(StatementStatContext* statementInfo, Datum values[], bool nulls[], int* i)
+{
+    if (statementInfo->cause_type == 0)
+        nulls[(*i)++] = true;
+    else {
+        errno_t rc;
+        char causeInfo[STRING_MAX_LEN];
+        rc = memset_s(causeInfo, sizeof(causeInfo), 0, sizeof(causeInfo));
+        securec_check(rc, "\0", "\0");
+        if (statementInfo->cause_type & NUM_F_TYPECASTING) {
+            rc = strcat_s(causeInfo, sizeof(causeInfo), "Cast Function Cause Index Miss. ");
+            securec_check(rc, "\0", "\0");
+        }
+        if (statementInfo->cause_type & NUM_F_LIMIT) {
+            rc = strcat_s(causeInfo, sizeof(causeInfo), "Limit too much rows.");
+            securec_check(rc, "\0", "\0");
+        }
+        if (statementInfo->cause_type & NUM_F_LEAKPROOF) {
+            rc = strcat_s(causeInfo, sizeof(causeInfo), "Proleakproof of function is false.");
+            securec_check(rc, "\0", "\0");
+        }
+        values[(*i)++] = CStringGetTextDatum(causeInfo);
+    }
+}
+
 static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statementInfo,
     const knl_u_statement_context* statementCxt, bool* isSlow = NULL)
 {
@@ -524,6 +549,7 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     }
 
     SET_TEXT_VALUES(statementInfo->trace_id, i++);
+    set_stmt_advise(statementInfo, values, nulls, &i);
     Assert(INSTR_STATEMENT_ATTRNUM == i);
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }
@@ -863,10 +889,24 @@ static void StatementFlush()
 {
     const int flush_usleep_interval = 100000;
     int count = 0;
+    bool is_readonly_log_needed = false;
 
     while (!t_thrd.statement_cxt.need_exit && ENABLE_STATEMENT_TRACK) {
         ReloadInfo();
-        ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] start to flush statemnts.")));
+        if (u_sess->attr.attr_storage.DefaultXactReadOnly) {
+            if (!is_readonly_log_needed) {
+                is_readonly_log_needed = true;
+                ereport(WARNING, (errmodule(MOD_INSTR),
+                    errmsg("[Statement] cannot flush suspend list to statement_history in a read-only transaction")));
+            }
+            pg_usleep(flush_usleep_interval);
+            continue;
+        }
+        if (is_readonly_log_needed) {
+            is_readonly_log_needed = false;
+        }
+
+        ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] start to flush statements.")));
         StartCleanWorker(&count);
 
         HOLD_INTERRUPTS();
@@ -875,7 +915,7 @@ static void StatementFlush()
         RESUME_INTERRUPTS();
 
         count++;
-        ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] flush statemnts finished.")));
+        ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] flush statements finished.")));
         /* report statement_history state to pgstat */
         if (OidIsValid(u_sess->proc_cxt.MyDatabaseId))
             pgstat_report_stat(true);
@@ -950,6 +990,7 @@ static void SetupSignal(void)
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
+    (void)gspqsignal(SIGURG, print_stack);
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -2282,13 +2323,9 @@ static void instr_stmt_set_wait_events_in_handle_bms(int32 bms_event_idx)
         PG_CATCH();
         {
             (void)MemoryContextSwitchTo(oldcontext);
-            ErrorData* edata = NULL;
-            edata = CopyErrorData();
             FlushErrorState();
             ereport(LOG, (errmodule(MOD_INSTR),
-                errmsg("[Statement] bms handle event failed - bms event idx: %d, msg: %s", bms_event_idx,
-                edata->message)));
-            FreeErrorData(edata);
+                errmsg("[Statement] bms handle event failed - bms event idx: %d, msg: OOM", bms_event_idx)));
         }
         PG_END_TRY();
         (void)MemoryContextSwitchTo(oldcontext);
@@ -2381,7 +2418,7 @@ static void get_wait_events_full_info(StatementStatContext *statement_stat, Stri
             event_idx = virt_event_idx - wait_event_io_event_max_index;
             event_str = pgstat_get_wait_dms(WaitEventDMS(event_idx + PG_WAIT_DMS));
             event_type = STATEMENT_EVENT_TYPE_DMS;
-        }else if (virt_event_idx < wait_event_lock_event_max_index) {
+        } else if (virt_event_idx < wait_event_lock_event_max_index) {
             event_idx = virt_event_idx - wait_event_dms_event_max_index;
             event_str = GetLockNameFromTagType(event_idx);
             event_type = STATEMENT_EVENT_TYPE_LOCK;
@@ -2619,6 +2656,31 @@ void instr_stmt_dynamic_change_level()
         u_sess->unique_sql_cxt.unique_sql_id, CURRENT_STMT_METRIC_HANDLE->level - 1)));
 }
 
+void instr_stmt_report_cause_type(uint32 type)
+{
+    CHECK_STMT_HANDLE();
+ 
+    if (type & NUM_F_TYPECASTING)
+        CURRENT_STMT_METRIC_HANDLE->cause_type |= NUM_F_TYPECASTING;
+    if (type & NUM_F_LIMIT)
+        CURRENT_STMT_METRIC_HANDLE->cause_type |= NUM_F_LIMIT;
+    if (type & NUM_F_LEAKPROOF)
+        CURRENT_STMT_METRIC_HANDLE->cause_type |= NUM_F_LEAKPROOF;
+}
+ 
+bool instr_stmt_plan_need_report_cause_type()
+{
+    if (CURRENT_STMT_METRIC_HANDLE == NULL || CURRENT_STMT_METRIC_HANDLE->cause_type == 0)
+        return false;
+ 
+    return true;
+}
+ 
+uint32 instr_stmt_plan_get_cause_type()
+{
+    return CURRENT_STMT_METRIC_HANDLE->cause_type;
+}
+
 
 /* **********************************************************************************************
  * STANDBY STATEMENG HISTORY FUNCTIONS
@@ -2815,10 +2877,10 @@ static TupleDesc create_sstmthist_tuple_entry(FunctionCallInfo fcinfo)
         ereport(ERROR, (errmsg("function standby_statement_history does not match relation statement_history.")));
     }
 
-    TupleDesc tmpDesc = CreateTemplateTupleDesc(desc->natts, false, TAM_HEAP);
+    TupleDesc tmpDesc = CreateTemplateTupleDesc(desc->natts, false, TableAmHeap);
     for (int i = 0; i < desc->natts; i++) {
         TupleDescInitEntry(tmpDesc, (AttrNumber)(i + 1), 
-            NameStr(desc->attrs[i]->attname), desc->attrs[i]->atttypid, -1, 0);
+            NameStr(desc->attrs[i].attname), desc->attrs[i].atttypid, -1, 0);
     }
 
     heap_close(rel, AccessShareLock);

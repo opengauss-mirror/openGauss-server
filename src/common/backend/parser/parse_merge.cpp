@@ -289,7 +289,7 @@ static Node* build_equal_expr(
     RangeSubselect* range_subselect = (RangeSubselect*)stmt->source_relation;
     char* target_aliasname = stmt->relation->alias->aliasname;
     int attrno = index_info->ii_KeyAttrNumbers[index];
-    char* attname = pstrdup(NameStr(target_relation->rd_att->attrs[attrno - 1]->attname));
+    char* attname = pstrdup(NameStr(target_relation->rd_att->attrs[attrno - 1].attname));
     char* source_aliasname = range_subselect->alias->aliasname;
 
     /* build the left expr of the equal expr, which comes from the target relation's index */
@@ -678,7 +678,7 @@ static List* transformUpdateTargetList(ParseState* pstate, List* origTlist)
     ListCell* tl = NULL;
     Relation targetrel = (Relation)linitial(pstate->p_target_relation);
 
-    tlist = transformTargetList(pstate, origTlist);
+    tlist = transformTargetList(pstate, origTlist, EXPR_KIND_UPDATE_SOURCE);
 
     /* Prepare to assign non-conflicting resnos to resjunk attributes */
     if (pstate->p_next_resno <= RelationGetNumberOfAttributes(targetrel)) {
@@ -1183,7 +1183,7 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                  * are evaluated separately during execution to decide which of the
                  * WHEN MATCHED or WHEN NOT MATCHED actions to execute.
                  */
-                action->qual = transformWhereClause(pstate, mergeWhenClause->condition, "WHEN");
+                action->qual = transformWhereClause(pstate, mergeWhenClause->condition, EXPR_KIND_MERGE_WHEN, "WHEN");
                 pstate->p_varnamespace = save_varnamespace;
 
                 pstate->p_is_insert = true;
@@ -1221,7 +1221,7 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                      * Do basic expression transformation (same as a ROW()
                      * expr, but allow SetToDefault at top level)
                      */
-                    exprList = transformExpressionList(pstate, mergeWhenClause->values);
+                    exprList = transformExpressionList(pstate, mergeWhenClause->values, EXPR_KIND_VALUES_SINGLE);
 
                     /*
                      * If td_compatible_truncation equal true and no foreign table found,
@@ -1287,9 +1287,10 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                  * are evaluated separately during execution to decide which of the
                  * WHEN MATCHED or WHEN NOT MATCHED actions to execute.
                  */
-                action->qual = transformWhereClause(pstate, mergeWhenClause->condition, "WHEN");
+                action->qual = transformWhereClause(pstate, mergeWhenClause->condition, EXPR_KIND_MERGE_WHEN, "WHEN");
                 pstate->p_varnamespace = save_varnamespace;
                 pstate->use_level = false;
+                UpdateParseCheck(pstate, (Node*)action);
 
                 fixResTargetListWithTableNameRef(targetrel, stmt->relation, set_clause_list_copy);
                 mergeWhenClause->targetList = set_clause_list_copy;
@@ -1319,6 +1320,7 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
 
     qry->mergeActionList = mergeActionList;
     qry->returningList = NULL;
+    qry->hasTargetSRFs = false;
     qry->hasSubLinks = pstate->p_hasSubLinks;
     assign_query_collations(pstate, qry);
 
@@ -1649,7 +1651,7 @@ static void check_target_table_columns(ParseState* pstate, bool is_insert_update
                            "with column (%s) of unstable default value.",
                         is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO",
                         RelationGetRelationName(target_relation),
-                        NameStr(target_relation->rd_att->attrs[attrno - 1]->attname))));
+                        NameStr(target_relation->rd_att->attrs[attrno - 1].attname))));
         }
     }
     list_free_deep(rel_valid_cols);
@@ -1812,7 +1814,7 @@ static Bitmapset* get_relation_default_attno_bitmap(Relation relation)
     Bitmapset* bitmap = NULL;
     Form_pg_attribute attr = NULL;
     for (int i = 0; i < RelationGetNumberOfAttributes(relation); i++) {
-        attr = relation->rd_att->attrs[i];
+        attr = &relation->rd_att->attrs[i];
 
         if (attr->atthasdef && !attr->attisdropped) {
             bitmap = bms_add_member(bitmap, attr->attnum);

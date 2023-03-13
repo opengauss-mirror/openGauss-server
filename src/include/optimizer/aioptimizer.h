@@ -112,9 +112,9 @@ public:
         datumTuple.typlen = (int16 *)palloc0(sizeof(int16) * sample->num_attrs);
         datumTuple.nattrs = sample->num_attrs;
         for (int i = 0; i < datumTuple.nattrs; i++) {
-            datumTuple.typid[i] = attDesc->attrs[i]->atttypid;
-            datumTuple.typbyval[i] = attDesc->attrs[i]->attbyval;
-            datumTuple.typlen[i] = attDesc->attrs[i]->attlen;
+            datumTuple.typid[i] = attDesc->attrs[i].atttypid;
+            datumTuple.typbyval[i] = attDesc->attrs[i].attbyval;
+            datumTuple.typlen[i] = attDesc->attrs[i].attlen;
         }
         values = sample->values;
         freqs = sample->freqs;
@@ -122,7 +122,9 @@ public:
         loc = 0;
     };
 
-    ~TableScannerSample2()
+    ~TableScannerSample2(){};
+
+    void delete_tuple()
     {
         pfree(datumTuple.values);
         pfree(datumTuple.typid);

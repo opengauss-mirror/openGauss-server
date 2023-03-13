@@ -24,6 +24,9 @@
 #include "executor/executor.h"
 #include "executor/node/nodeLimit.h"
 #include "nodes/nodeFuncs.h"
+#include "instruments/instr_statement.h"
+
+#define REPORT_LIMIT_THRESHOLD 5000 /* report cause_type's threshold for limit */
 
 static TupleTableSlot* ExecLimit(PlanState* state);
 static void pass_down_bound(LimitState* node, PlanState* child_node);
@@ -270,6 +273,12 @@ void recompute_limits(LimitState* node)
         node->noCount = true;
     }
 
+    /*
+     * Check whether there are risks caused by limit to much rows.
+     */
+    if (!node->noCount && node->count >= REPORT_LIMIT_THRESHOLD)
+        instr_stmt_report_cause_type(NUM_F_LIMIT);
+
     /* Reset position to start-of-scan */
     node->position = 0;
     node->subSlot = NULL;
@@ -390,7 +399,7 @@ LimitState* ExecInitLimit(Limit* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &limit_state->ps,
-            ExecGetResultType(outerPlanState(limit_state))->tdTableAmType);
+            ExecGetResultType(outerPlanState(limit_state))->td_tam_ops);
 
     limit_state->ps.ps_ProjInfo = NULL;
 

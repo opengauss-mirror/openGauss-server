@@ -67,7 +67,7 @@ bool VectorizeOneTuple(_in_ VectorBatch* pBatch, _in_ TupleTableSlot* slot, _in_
     j = pBatch->m_rows;
     for (i = 0; i < slot->tts_nvalid; i++) {
         int type_len;
-        Form_pg_attribute attr = slot->tts_tupleDescriptor->attrs[i];
+        Form_pg_attribute attr = &slot->tts_tupleDescriptor->attrs[i];
 
         if (slot->tts_isnull[i] == false) {
             type_len = attr->attlen;
@@ -241,7 +241,7 @@ void VectorizeTupleBatchMode(VectorBatch *pBatch, TupleTableSlot **slots,
     for (i = 0; i < scanstate->colNum; i++) {
         if ((lateRead && scanstate->lateRead[i]) || (!lateRead && !scanstate->lateRead[i])) {
             colidx = scanstate->colId[i];
-            Form_pg_attribute attr = slots[0]->tts_tupleDescriptor->attrs[colidx];
+            Form_pg_attribute attr = &slots[0]->tts_tupleDescriptor->attrs[colidx];
             if (scanstate->nullflag[colidx]) {
                 TransformScalarVector<true>(attr, &pBatch->m_arr[colidx], rows);
             } else {
@@ -546,7 +546,7 @@ RowToVecState* ExecInitRowToVec(RowToVec* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &state->ps,
-            ExecGetResultType(outerPlanState(state))->tdTableAmType);
+            ExecGetResultType(outerPlanState(state))->td_tam_ops);
 
     TupleDesc res_desc = state->ps.ps_ResultTupleSlot->tts_tupleDescriptor;
     state->m_pCurrentBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, res_desc);

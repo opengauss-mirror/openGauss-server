@@ -2300,6 +2300,9 @@ end;
 end pck3;
 /
 
+create user package_user password 'gauss@123';
+alter package pck3 owner to package_user;
+
 drop package pck1;
 drop package pck2;
 drop package pck3;
@@ -2310,3 +2313,4 @@ reset behavior_compat_options;
 drop package autonomous_pkg_tmp;
 drop package abort;
 drop schema pkgsch059 cascade;
+drop user package_user;

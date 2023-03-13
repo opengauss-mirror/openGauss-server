@@ -1,0 +1,897 @@
+drop database if exists event_b;
+NOTICE:  database "event_b" does not exist, skipping
+create database event_b with dbcompatibility  'b';
+\c event_b
+create user event_a sysadmin password 'event_123';
+create user event_b sysadmin password 'event_123';
+--CREATE EVENT 
+--Schedule Parameter Test 
+--CHECK Schedule AT .. situation 
+create event IF NOT EXISTS ee11 on schedule at '2022-12-09 17:24:11' disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at sysdate disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at CURRENT_DATE disable do insert into t values(0);
+ERROR:  syntax error at or near "CURRENT_DATE"
+LINE 1: create event IF NOT EXISTS ee11 on schedule at CURRENT_DATE ...
+                                                       ^
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+(0 rows)
+
+drop event if exists ee11;
+NOTICE:  event "ee11" is not exists, skipping
+create event IF NOT EXISTS ee11 on schedule at CURRENT_TIME disable do insert into t values(0);
+ERROR:  syntax error at or near "CURRENT_TIME"
+LINE 1: create event IF NOT EXISTS ee11 on schedule at CURRENT_TIME ...
+                                                       ^
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+(0 rows)
+
+drop event if exists ee11;
+NOTICE:  event "ee11" is not exists, skipping
+create event IF NOT EXISTS ee11 on schedule at CURRENT_TIME (1) disable do insert into t values(0);
+ERROR:  syntax error at or near "CURRENT_TIME"
+LINE 1: create event IF NOT EXISTS ee11 on schedule at CURRENT_TIME ...
+                                                       ^
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+(0 rows)
+
+drop event if exists ee11;
+NOTICE:  event "ee11" is not exists, skipping
+create event IF NOT EXISTS ee11 on schedule at CURRENT_TIMESTAMP disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at CURRENT_TIMESTAMP (1) disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at LOCALTIME disable do insert into t values(0);
+ERROR:  syntax error at or near "LOCALTIME"
+LINE 1: create event IF NOT EXISTS ee11 on schedule at LOCALTIME dis...
+                                                       ^
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+(0 rows)
+
+drop event if exists ee11;
+NOTICE:  event "ee11" is not exists, skipping
+create event IF NOT EXISTS ee11 on schedule at LOCALTIME (1) disable do insert into t values(0);
+ERROR:  syntax error at or near "LOCALTIME"
+LINE 1: create event IF NOT EXISTS ee11 on schedule at LOCALTIME (1)...
+                                                       ^
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+(0 rows)
+
+drop event if exists ee11;
+NOTICE:  event "ee11" is not exists, skipping
+create event IF NOT EXISTS ee11 on schedule at LOCALTIMESTAMP disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at LOCALTIMESTAMP (1) disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at LOCALTIMESTAMP (1) disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at now() disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at CURRENT_TIMESTAMP + interval 1 minute disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at SYSDATE + interval 10 second disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at SYSDATE + interval 0.5 second disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at now() + interval 1 hour disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at LOCALTIMESTAMP + interval '00:00' minute to second disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at now() + interval 1 year + interval '00:00' minute to second disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at now() + interval 666666666666666666666666666667 year + interval '00:00' minute to second disable do insert into t values(0);
+ERROR:  interval field value out of range: "666666666666666666666666666667 day"
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+(0 rows)
+
+drop event if exists ee11;
+NOTICE:  event "ee11" is not exists, skipping
+create event IF NOT EXISTS ee11 on schedule at sysdate + interval 1234567890 second + interval 1234567890 minute disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+create event IF NOT EXISTS ee11 on schedule at sysdate + interval 1.5 second + interval 1.33 minute disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ ee11     | public
+(1 row)
+
+drop event if exists ee11;
+--CHECK Schedule EVERY ..situation 
+create event IF NOT EXISTS evtest on schedule every 1 minute disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ evtest   | public
+(1 row)
+
+drop event if exists evtest;
+create event IF NOT EXISTS evtest on schedule every '00:30' minute to second disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ evtest   | public
+(1 row)
+
+drop event if exists evtest;
+create event IF NOT EXISTS evtest on schedule every 1 minute starts sysdate disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ evtest   | public
+(1 row)
+
+drop event if exists evtest;
+create event IF NOT EXISTS evtest on schedule every 1 minute ends sysdate + interval 1 hour disable do insert into t values(0);
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ evtest   | public
+(1 row)
+
+drop event if exists evtest;
+create event IF NOT EXISTS evtest on schedule every 1 minute starts sysdate + interval 1 day ends now() + interval 1 year disable do insert into t values(0);
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ evtest   | public
+(1 row)
+
+drop event if exists evtest;
+create event IF NOT EXISTS evtest on schedule every 1 minute starts sysdate + interval 1 day + interval '00:99' minute to second disable do insert into t values(0);
+ERROR:  interval field value out of range: "00:99"
+LINE 1: ...minute starts sysdate + interval 1 day + interval '00:99' mi...
+                                                             ^
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+(0 rows)
+
+drop event if exists evtest;
+NOTICE:  event "evtest" is not exists, skipping
+--if not exists 
+create event e on schedule every 1 month disable do select 1;
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+create event e on schedule at sysdate disable do select 1;
+ERROR:  event "e" already exists
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+create event if not exists e on schedule at sysdate disable do select 1;
+NOTICE:  event "e" already exists, skipping
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+drop event e;
+--auto_drop 
+drop event e;
+ERROR:  event "e" is not exists
+create event e on schedule at sysdate disable do select 1;
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+drop event e;
+create event e on schedule at sysdate on completion not preserve disable do select 1;
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+drop event e;
+create event e on schedule at sysdate on completion preserve disable do select 1;
+drop event e;
+--job_status 
+create event e on schedule every 1 hour do select 1;
+drop event e;
+create event e on schedule every 1 hour enable do select 1;
+drop event e;
+create event e on schedule every 1 hour disable do select 1;
+drop event e;
+create event e on schedule every 1 hour disable on slave do select 1;
+drop event e;
+--comment 
+create event e on schedule at sysdate disable do select 1;
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+drop event e;
+create event e on schedule at sysdate disable comment '======' do select 1;
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+drop event e;
+create event e on schedule at sysdate disable comment 'fsdfjksadfhkjsfafkjsdfhjkahfdsknvxhguiyeurfbsdbccguyaHUFAWEFKSJBFCNJNDAgudagsHJBHDSBHJFBSAHBkjbhjbhjBHJBUbhbhBYGUIOInkb' do select 1;
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+drop event e;
+create event e on schedule at now() disable
+comment '=================================================================================================
+==========================================================================================================
+==========================================================================================================
+==========================================================================================================
+==========================================================================================================
+'
+do  select 1;
+select pg_sleep(0.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+drop event e;
+--sql body 
+--abort
+CREATE TABLE customer_demographics_t1
+(
+    CD_DEMO_SK                INTEGER               NOT NULL,
+    CD_GENDER                 CHAR(1)                       ,
+    CD_MARITAL_STATUS         CHAR(1)                       ,
+    CD_EDUCATION_STATUS       CHAR(20)                      ,
+    CD_PURCHASE_ESTIMATE      INTEGER                       ,
+    CD_CREDIT_RATING          CHAR(10)                      ,
+    CD_DEP_COUNT              INTEGER                       ,
+    CD_DEP_EMPLOYED_COUNT     INTEGER                       ,
+    CD_DEP_COLLEGE_COUNT      INTEGER
+)
+WITH (ORIENTATION = COLUMN,COMPRESSION=MIDDLE)
+;
+INSERT INTO customer_demographics_t1 VALUES(1920801,'M', 'U', 'DOCTOR DEGREE', 200, 'GOOD', 1, 0,0);
+SELECT * FROM customer_demographics_t1 WHERE cd_demo_sk = 1920801;
+ cd_demo_sk | cd_gender | cd_marital_status | cd_education_status  | cd_purchase_estimate | cd_credit_rating | cd_dep_count | cd_dep_employed_count | cd_dep_college_count 
+------------+-----------+-------------------+----------------------+----------------------+------------------+--------------+-----------------------+----------------------
+    1920801 | M         | U                 | DOCTOR DEGREE        |                  200 | GOOD             |            1 |                     0 |                    0
+(1 row)
+
+START TRANSACTION;
+UPDATE customer_demographics_t1 SET cd_education_status= 'Unknown';
+SELECT * FROM customer_demographics_t1 WHERE cd_demo_sk = 1920801;
+ cd_demo_sk | cd_gender | cd_marital_status | cd_education_status  | cd_purchase_estimate | cd_credit_rating | cd_dep_count | cd_dep_employed_count | cd_dep_college_count 
+------------+-----------+-------------------+----------------------+----------------------+------------------+--------------+-----------------------+----------------------
+    1920801 | M         | U                 | Unknown              |                  200 | GOOD             |            1 |                     0 |                    0
+(1 row)
+
+create event e on schedule at sysdate do ABORT; 
+SELECT * FROM customer_demographics_t1 WHERE cd_demo_sk = 1920801;
+ cd_demo_sk | cd_gender | cd_marital_status | cd_education_status  | cd_purchase_estimate | cd_credit_rating | cd_dep_count | cd_dep_employed_count | cd_dep_college_count 
+------------+-----------+-------------------+----------------------+----------------------+------------------+--------------+-----------------------+----------------------
+    1920801 | M         | U                 | Unknown              |                  200 | GOOD             |            1 |                     0 |                    0
+(1 row)
+
+DROP TABLE customer_demographics_t1;
+ABORT;
+--CALL
+CREATE FUNCTION func_add_sql(num1 integer, num2 integer) RETURN integer
+AS
+BEGIN
+RETURN num1 + num2;
+END;
+/
+create event e on schedule at sysdate disable do CALL func_add_sql(1, 3);
+DROP FUNCTION func_add_sql;
+drop event e;
+--ALTER EVENT 
+--alter schedule 
+\c event_b
+drop event e;
+ERROR:  event "e" is not exists
+create definer=event_a event e on schedule at '2023-01-16 21:05:40' disable do select 1;
+show events where job_name='e';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e        | public      | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+alter definer=event_a event e on schedule at '2023-01-16 21:05:40' + interval 1 year;
+show events where job_name='e';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e        | public      | event_a  | event_a   | s          | Tue Jan 16 21:05:40 2024 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+alter definer=event_a event e on schedule every 1 year;
+show events where job_name='e';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        |      interval      |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+--------------------+--------------------------+--------+-------------
+ e        | public      | event_a  | event_a   | s          | Tue Jan 16 21:05:40 2024 | interval '1'  year | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+alter definer=event_a event e on schedule every 0.5 minute starts '2023-01-16 21:05:40' + interval '00:50' minute to second;
+show events where job_name='e';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        |        interval        |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+------------------------+--------------------------+--------+-------------
+ e        | public      | event_a  | event_a   | s          | Mon Jan 16 21:06:30 2023 | interval '0.5'  minute | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+alter definer=event_a event e on schedule at '2023-01-16 21:05:40' + interval 500 second;
+show events where job_name='e';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e        | public      | event_a  | event_a   | s          | Mon Jan 16 21:14:00 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+drop event e;
+--alter auto_drop 
+drop event e;
+ERROR:  event "e" is not exists
+create definer=event_a event e on schedule at '2023-01-16 21:05:40' disable do select 1;
+show events where job_name='e';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e        | public      | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+select * from gs_job_attribute where job_name='e' and attribute_name='auto_drop';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+ e        | auto_drop      | true
+(1 row)
+
+drop event e;
+create definer=event_a event e on schedule at '2023-01-16 21:05:40' on completion preserve disable do select 1;
+show events where job_name='e';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e        | public      | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+select * from gs_job_attribute where job_name='e' and attribute_name='auto_drop';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+ e        | auto_drop      | false
+(1 row)
+
+alter definer=event_a event e on completion not preserve;
+show events where job_name='e';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e        | public      | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+select * from gs_job_attribute where job_name='e' and attribute_name='auto_drop';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+ e        | auto_drop      | true
+(1 row)
+
+alter definer=event_a event e on completion preserve;
+show events where job_name='e';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e        | public      | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+select * from gs_job_attribute where job_name='e' and attribute_name='auto_drop';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+ e        | auto_drop      | false
+(1 row)
+
+drop event e;
+--alter event_name 
+drop event e;
+ERROR:  event "e" is not exists
+create event e on schedule at '2023-01-16 21:05:40' disable do select 1;
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ e        | public
+(1 row)
+
+alter event e rename to e_new;
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ e_new    | public
+(1 row)
+
+select what,job_name from pg_job_proc where job_name='e_new';
+    what    | job_name 
+------------+----------
+  select 1; | e_new
+(1 row)
+
+alter event e_new rename to e;
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ e        | public
+(1 row)
+
+select what,job_name from pg_job_proc where job_name='e';
+    what    | job_name 
+------------+----------
+  select 1; | e
+(1 row)
+
+drop event e;
+--alter status 
+drop table if exists a;
+NOTICE:  table "a" does not exist, skipping
+create table a(a int);
+create event e on schedule at '2023-01-16 21:05:40' disable do insert into a values(0);
+select * from a;
+ a 
+---
+(0 rows)
+
+alter event e on schedule every 1 year enable do insert into a values(0);
+select * from a;
+ a 
+---
+(0 rows)
+
+truncate table a;
+alter event e disable;
+select * from a;
+ a 
+---
+(0 rows)
+
+drop event e;
+create event e on schedule every 1 minute starts '3000-01-16 21:05:40' do select 1;
+select enable from pg_job where job_name='e';
+ enable 
+--------
+ t
+(1 row)
+
+alter event e disable;
+select enable from pg_job where job_name='e';
+ enable 
+--------
+ f
+(1 row)
+
+alter event e enable;
+select enable from pg_job where job_name='e';
+ enable 
+--------
+ t
+(1 row)
+
+drop event e;
+--Alter event combination test. 
+drop event e;
+ERROR:  event "e" is not exists
+create event e on schedule at '2023-01-16 21:05:40' disable do select 1;
+alter definer=event_b event e on schedule every 1 year ends '2023-01-16 21:05:40' + interval 1 year;
+alter event e disable;
+alter event e do select 2;
+alter event e rename to ee comment 'test ee' do select sysdate;
+alter event ee comment '========test=========';
+alter event ee on schedule at '2023-01-16 21:05:40' + interval 1 year on completion preserve rename to test_e;
+drop event if exists test_e;
+--Test owner
+create user evtest_owner password 'event_123';
+create event e on schedule at sysdate disable do select 1;
+alter definer=evtest_owner event e;
+select log_user, priv_user from pg_job where job_name='e';
+   log_user   |  priv_user   
+--------------+--------------
+ evtest_owner | evtest_owner
+(1 row)
+
+alter event e rename to ee;
+alter definer=evtest_owner event ee rename to e;
+select log_user, priv_user from pg_job where job_name='e';
+   log_user   |  priv_user   
+--------------+--------------
+ evtest_owner | evtest_owner
+(1 row)
+
+create definer=evtest_owner event e_a on schedule at sysdate disable do select 1;
+select log_user, priv_user from pg_job where job_name='e_a';
+   log_user   |  priv_user   
+--------------+--------------
+ evtest_owner | evtest_owner
+(1 row)
+
+alter event e_a rename to ea;
+alter definer=evtest_owner event ea rename to e_a;
+select log_user, priv_user from pg_job where job_name='e_a';
+   log_user   |  priv_user   
+--------------+--------------
+ evtest_owner | evtest_owner
+(1 row)
+
+select log_user, priv_user from pg_job where dbname='event_b';
+   log_user   |  priv_user   
+--------------+--------------
+ evtest_owner | evtest_owner
+ evtest_owner | evtest_owner
+(2 rows)
+
+drop user evtest_owner;
+select log_user, priv_user from pg_job where dbname='event_b';
+ log_user | priv_user 
+----------+-----------
+(0 rows)
+
+select * from gs_job_attribute where job_name='e' or job_name='e_a';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+
+--SHOW EVENTS
+drop event if exists e1;
+NOTICE:  event "e1" is not exists, skipping
+create definer=event_a event e1 on schedule at '2023-01-16 21:05:40' disable do select 1;
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+ e1       | public
+(1 row)
+
+show events in a;
+ job_name | schema_name | log_user | priv_user | job_status | start_date | interval | end_date | enable | failure_msg 
+----------+-------------+----------+-----------+------------+------------+----------+----------+--------+-------------
+(0 rows)
+
+show events from a;
+ job_name | schema_name | log_user | priv_user | job_status | start_date | interval | end_date | enable | failure_msg 
+----------+-------------+----------+-----------+------------+------------+----------+----------+--------+-------------
+(0 rows)
+
+show events like 'e';
+ job_name | schema_name | log_user | priv_user | job_status | start_date | interval | end_date | enable | failure_msg 
+----------+-------------+----------+-----------+------------+------------+----------+----------+--------+-------------
+(0 rows)
+
+show events like 'e%';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e1       | public      | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+show events like 'e_';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e1       | public      | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+show events where job_name='e1';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e1       | public      | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+drop event if exists e1;
+--security check
+drop user if exists event_se_a cascade;
+NOTICE:  role "event_se_a" does not exist, skipping
+drop user if exists event_se_b cascade;
+NOTICE:  role "event_se_b" does not exist, skipping
+drop user if exists event_se_c cascade;
+NOTICE:  role "event_se_c" does not exist, skipping
+drop user if exists event_se_d cascade;
+NOTICE:  role "event_se_d" does not exist, skipping
+create user event_se_a with MONADMIN password 'event_123';
+create user event_se_b with OPRADMIN password 'event_123';
+create user event_se_c with INDEPENDENT password 'event_123';
+WARNING:  Please carefully use independent user as it need more self-management.
+HINT:  Self-management include logical backup, password manage and so on.
+create user event_se_d with SYSADMIN  password 'event_123';
+drop event if exists e;
+NOTICE:  event "e" is not exists, skipping
+create definer=event_se_a event e on schedule at sysdate do select 1;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+create definer=event_se_b event e on schedule at sysdate do select 1;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+create definer=event_se_c event e on schedule at sysdate do select 1;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+create definer=event_se_d event e on schedule at sysdate do select 1;
+drop event if exists e;
+create event e on schedule at sysdate disable do select 1;
+alter definer=event_se_a event e;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+alter definer=event_se_b event e;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+alter definer=event_se_c event e;
+ERROR:  definer_name cannot be specified as a private user, operator admin, or monitoradmin.
+alter definer=event_se_d event e;
+drop event if exists e;
+\c event_b
+drop user if exists event_se_a cascade;
+drop user if exists event_se_b cascade;
+drop user if exists event_se_c cascade;
+drop user if exists event_se_d cascade;
+--test sql help
+drop table if exists event_a.a;
+NOTICE:  table "a" does not exist, skipping
+drop table if exists event_b.t;
+NOTICE:  table "t" does not exist, skipping
+drop schema if exists event_a;
+drop schema if exists event_b;
+drop user if exists event_a;
+drop user if exists event_b;
+\c regression
+drop database if exists event_b;

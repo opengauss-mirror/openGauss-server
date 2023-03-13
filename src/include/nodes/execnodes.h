@@ -758,6 +758,7 @@ typedef struct TupleHashTableData {
     int64 width;               /* records total width in memory */
     bool add_width;            /* if width should be added */
     bool causedBySysRes;       /* the batch increase caused by system resources limit? */
+    Oid *tab_collations;       /* collations for hash and comparison */
 } TupleHashTableData;
 
 typedef HASH_SEQ_STATUS TupleHashIterator;
@@ -863,7 +864,7 @@ typedef struct FuncExprState {
     /*
      * Function manager's lookup info for the target function.  If func.fn_oid
      * is InvalidOid, we haven't initialized it yet (nor any of the following
-     * fields).
+     * fields, except funcReturnsSet).
      */
     FmgrInfo func;
 
@@ -882,6 +883,12 @@ typedef struct FuncExprState {
     TupleDesc funcResultDesc;
     bool funcReturnsTuple; /* valid when funcResultDesc isn't
                             * NULL */
+
+    /*
+     * Remember whether the function is declared to return a set.  This is set
+     * by ExecInitExpr, and is valid even before the FmgrInfo is set up.
+     */
+    bool funcReturnsSet;
 
     /*
      * setArgsValid is true when we are evaluating a set-returning function
@@ -986,6 +993,7 @@ typedef struct SubPlanState {
     VectorBatch* aggExprBatch;           /* a batch for only one row to store the para data for vector expr */
     ScalarVector* tempvector;            /* a temp vector for vector expression */
     MemoryContext ecxt_per_batch_memory; /* memory contexts for one batch */
+    Oid *tab_collations;                 /* collations for hash and comparison */
 } SubPlanState;
 
 /* ----------------
@@ -1395,6 +1403,17 @@ typedef struct UpsertState
     TupleTableSlot  *us_updateproj;         /* slot to update */
     List            *us_updateWhere;        /* state for the upsert where clause */
 } UpsertState;
+
+/* ----------------
+ *	 ProjectSetState information
+ * ----------------
+ */
+typedef struct ProjectSetState {
+    PlanState ps;            /* its first field is NodeTag */
+    ExprDoneCond *elemdone;  /* array of per-SRF is-done states */
+    int nelems;              /* length of elemdone[] array */
+    bool pending_srf_tuples; /* still evaluating srfs in tlist? */
+} ProjectSetState;
 
 /* ----------------
  *	 ModifyTableState information
@@ -1966,7 +1985,8 @@ typedef struct FunctionScanState {
  *
  *		rowcontext			per-expression-list context
  *		exprlists			array of expression lists being evaluated
- *		array_len			size of array
+ *		exprstatelists		array of expression state lists, for subplans only
+ *		array_len			size of above array
  *		curr_idx			current array index (0-based)
  *		marked_idx			marked position (for mark/restore)
  *
@@ -1975,13 +1995,20 @@ typedef struct FunctionScanState {
  *	rowcontext, in which to build the executor expression state for each
  *	Values sublist.  Resetting this context lets us get rid of expression
  *	state for each row, avoiding major memory leakage over a long values list.
+ *  However, that doesn't work for sublists containing SubPlans, because a
+ *	SubPlan has to be connected up to the outer plan tree to work properly.
+ *	Therefore, for only those sublists containing SubPlans, we do expression
+ *	state construction at executor start, and store those pointers in
+ *	exprstatelists[].  NULL entries in that array correspond to simple
+ *	subexpressions that are handled as described above.
  * ----------------
  */
 typedef struct ValuesScanState {
     ScanState ss; /* its first field is NodeTag */
     ExprContext* rowcontext;
     List** exprlists;
-    int array_len;
+    List** exprstatelists; /* array of expression state lists, for subplans only */
+    int array_len;  /* size of above array */
     int curr_idx;
     int marked_idx;
 } ValuesScanState;
@@ -2087,6 +2114,7 @@ typedef struct ExtensiblePlanState {
 typedef struct JoinState {
     PlanState ps;
     JoinType jointype;
+    bool single_match;
     List* joinqual; /* JOIN quals (in addition to ps.qual) */
     List* nulleqqual;
 } JoinState;
@@ -2113,6 +2141,7 @@ typedef struct NestLoopState {
  *		NumClauses		   number of mergejoinable join clauses
  *		Clauses			   info for each mergejoinable clause
  *		JoinState		   current state of ExecMergeJoin state machine
+ *		SkipMarkRestore    true if we may skip Mark and Restore operations
  *		ExtraMarks		   true to issue extra Mark operations on inner scan
  *		ConstFalseJoin	   true if we have a constant-false joinqual
  *		FillOuter		   true if should emit unjoined outer tuples anyway
@@ -2136,6 +2165,7 @@ typedef struct MergeJoinState {
     int mj_NumClauses;
     MergeJoinClause mj_Clauses; /* array of length mj_NumClauses */
     int mj_JoinState;
+    bool mj_SkipMarkRestore;
     bool mj_ExtraMarks;
     bool mj_ConstFalseJoin;
     bool mj_FillOuter;
@@ -2279,6 +2309,7 @@ typedef struct HashJoinState {
     bool hj_OuterNotEmpty;
     bool hj_streamBothSides;
     bool hj_rebuildHashtable;
+    List* hj_hashCollations; /* list of collations OIDs */
 } HashJoinState;
 
 /* ----------------------------------------------------------------
@@ -2388,6 +2419,10 @@ typedef struct AggState {
 #endif             /* PGXC */
     void* aggTempFileControl;
     FmgrInfo* eqfunctions; /* per-grouping-field equality fns */
+    /* support for evaluation of agg inputs */
+    TupleTableSlot *evalslot;	/* slot for agg inputs */
+    ProjectionInfo *evalproj;	/* projection machinery */
+    TupleDesc	evaldesc;      /* descriptor of input tuples */
 } AggState;
 
 /* ----------------
@@ -2595,6 +2630,10 @@ typedef struct RownumState {
     PlanState* ps;   /* the value of ROWNUM depends on its parent PlanState */
 } RownumState;
 
+typedef struct UserSetElemState {
+    ExprState xprstate;
+    UserSetElem* use;
+} UserSetElemState;
 /* ----------------
  *		GroupingFuncExprState node
  *
@@ -2647,7 +2686,7 @@ typedef struct GroupingIdExprState {
         }                                                       \
     } while (0)
 
-extern TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot* slot, TableAmType tableAm);
+extern TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot* slot, const TableAmRoutine* tam_ops);
 
 /*
  * When the global partition index is used for bitmap scanning,

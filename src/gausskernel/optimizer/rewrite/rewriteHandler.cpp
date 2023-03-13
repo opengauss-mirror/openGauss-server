@@ -34,6 +34,7 @@
 #include "parser/parse_coerce.h"
 #include "parser/parsetree.h"
 #include "parser/parse_merge.h"
+#include "parser/parse_hint.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteManip.h"
@@ -86,6 +87,7 @@ static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength str
 static List* matchLocks(CmdType event, RuleLock* rulelocks, int varno, Query* parsetree);
 static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePushedDown);
 static Bitmapset* adjust_view_column_set(Bitmapset* cols, List* targetlist);
+static bool findAttrByName(const char* attributeName, List* tableElts, int maxlen);
 
 #ifdef PGXC
 typedef struct pull_qual_vars_context {
@@ -677,7 +679,7 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
                 ereport(ERROR,
                     (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("bogus resno %d in targetlist", attrno)));
             }
-            att_tup = target_relation->rd_att->attrs[attrno - 1];
+            att_tup = &target_relation->rd_att->attrs[attrno - 1];
 
             /* put attrno into attrno_list even if it's dropped */
             if (attrno_list != NULL && IsA(old_tle->expr, Var))
@@ -714,7 +716,7 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
         bool applyDefault = false;
         bool generateCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
 
-        att_tup = target_relation->rd_att->attrs[attrno - 1];
+        att_tup = &target_relation->rd_att->attrs[attrno - 1];
 
         /* We can (and must) ignore deleted attributes */
         if (att_tup->attisdropped)
@@ -856,7 +858,7 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
                         (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("bogus resno %d in targetlist",
                                                                                attrno)));
                 }
-                att_tup = target_relation->rd_att->attrs[attrno - 1];
+                att_tup = &target_relation->rd_att->attrs[attrno - 1];
 
                 /* We can (and must) ignore deleted attributes */
                 if (att_tup->attisdropped) {
@@ -891,7 +893,7 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
             bool applyDefault = new_tle != NULL && new_tle->expr != NULL && IsA(new_tle->expr, SetToDefault);
             bool generateCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
 
-            att_tup = target_relation->rd_att->attrs[attrno - 1];
+            att_tup = &target_relation->rd_att->attrs[attrno - 1];
 
             /* We can (and must) ignore deleted attributes */
             if (att_tup->attisdropped)
@@ -1150,7 +1152,7 @@ static bool check_sequence_return_numeric_walker(Node *node, int *ret)
 Node* build_column_default(Relation rel, int attrno, bool isInsertCmd, bool needOnUpdate)
 {
     TupleDesc rd_att = rel->rd_att;
-    Form_pg_attribute att_tup = rd_att->attrs[attrno - 1];
+    Form_pg_attribute att_tup = &rd_att->attrs[attrno - 1];
     Oid atttype = att_tup->atttypid;
     int32 atttypmod = att_tup->atttypmod;
     Node* expr = NULL;
@@ -1283,7 +1285,7 @@ static void checkGenDefault(RangeTblEntry* rte, Relation target_relation, List* 
         forboth (lc2, sublist, lc3, attrnos) {
             Node* col = (Node*)lfirst(lc2);
             int attrno = lfirst_int(lc3);
-            Form_pg_attribute att_tup = target_relation->rd_att->attrs[attrno - 1];
+            Form_pg_attribute att_tup = &target_relation->rd_att->attrs[attrno - 1];
             bool generatedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
             bool applyDefault = IsA(col, SetToDefault);
 
@@ -1402,7 +1404,7 @@ static bool rewriteValuesRTE(Query* parsetree, RangeTblEntry* rte, Relation targ
         {
             Node *col = (Node *)lfirst(lc2);
             int attrno = lfirst_int(lc3);
-            Form_pg_attribute att_tup = target_relation->rd_att->attrs[attrno - 1];
+            Form_pg_attribute att_tup = &target_relation->rd_att->attrs[attrno - 1];
             bool generatedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
             bool applyDefault = IsA(col, SetToDefault);
 
@@ -1576,7 +1578,7 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
             continue;
         }
 
-        att_tup = target_relation->rd_att->attrs[var->varattno - 1];
+        att_tup = &target_relation->rd_att->attrs[var->varattno - 1];
         tle = makeTargetEntry(
             (Expr*)var, list_length(parsetree->targetList) + 1, pstrdup(NameStr(att_tup->attname)), true);
         tle->rtindex = rtindex;
@@ -1604,7 +1606,7 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
             TargetEntry* new_tle = NULL;
 
             if (att_no > 0) {
-                att_tup = target_relation->rd_att->attrs[att_no - 1];
+                att_tup = &target_relation->rd_att->attrs[att_no - 1];
             } else {
                 heaptuple =
                     SearchSysCache2(ATTNUM, ObjectIdGetDatum(RelationGetRelid(target_relation)), Int16GetDatum(att_no));
@@ -1863,6 +1865,7 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
     RangeTblEntry* rte = NULL;
     RangeTblEntry* subrte = NULL;
     RowMarkClause* rc = NULL;
+    bool is_flt_frame = parsetree->is_flt_frame;
 
     if (list_length(rule->actions) != 1) {
         ereport(ERROR, (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("expected just one rule action")));
@@ -1969,6 +1972,9 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
         markQueryForLocking(rule_action, (Node*)rule_action->jointree, rc->strength, rc->waitPolicy, true,
                             rc->waitSec);
 
+    /* Pass the is_flt_frame from parsetree to rule_action */
+    rule_action->is_flt_frame = is_flt_frame;
+
     /*
      * Recursively expand any view references inside the view.
      *
@@ -1979,6 +1985,27 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
      * routine).
      */
     rule_action = fireRIRrules(rule_action, activeRIRs, forUpdatePushedDown);
+
+    /*
+     * Refresh view SRFs
+     *
+     * If we create a view when enable_expr_fusion is off, SRFs will not be identified, everything will be okay.
+     * If user set the guc on later, we get an old rule_action, but actually we have the ability to identify
+     * SRFs and resolve them.  We travel the tule_action to fix hasTargetSRFs in Query.
+     *
+     * More detail:
+     *  rule_action
+     *      hasTargetSRFs true
+     *          parsetree->is_flt_frame true, it's ok
+     *          parsetree->is_flt_frame false, modify hasTargetSRFs to false
+     *      hasTargetSRFs false
+     *          parsetree->is_flt_frame, walk and check if it has SRFs
+     *          parsetree->is_flt_frame, it's ok
+     */
+    if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        /* adjust the Query */
+        query_check_srf(rule_action);
+    }
 
     /*
      * Now, plug the view query in as a subselect, replacing the relation's
@@ -2455,7 +2482,7 @@ static List* rewriteTargetListMergeInto(
                 ereport(ERROR, (errcode(ERRCODE_AMBIGUOUS_COLUMN), errmsg("bogus resno %d in targetlist", attrno)));
             }
 
-            att_tup = target_relation->rd_att->attrs[attrno - 1];
+            att_tup = &target_relation->rd_att->attrs[attrno - 1];
 
             /* put attrno into attrno_list even if it's dropped */
             if (attrno_list != NULL)
@@ -2490,7 +2517,7 @@ static List* rewriteTargetListMergeInto(
         TargetEntry* new_tle = new_tles[attrno - 1];
         bool apply_default = false;
 
-        att_tup = target_relation->rd_att->attrs[attrno - 1];
+        att_tup = &target_relation->rd_att->attrs[attrno - 1];
 
         /* We can (and must) ignore deleted attributes */
         if (att_tup->attisdropped)
@@ -4405,13 +4432,37 @@ char* GetCreateViewStmt(Query* parsetree, CreateTableAsStmt* stmt)
     return cquery->data;
 }
 
+static bool findAttrByName(const char* attributeName, List* tableElts, int maxlen)
+{
+    ListCell* lc = NULL;
+    int i = 0;
+    foreach (lc, tableElts) {
+        if (i >= maxlen) {
+            return false;
+        }
+        Node* node = (Node*)lfirst(lc);
+        if (IsA(node, ColumnDef)) {
+            ColumnDef* def = (ColumnDef*)node;
+            if (pg_strcasecmp(attributeName, def->colname) == 0)
+                return true;
+        }
+        ++i;
+    }
+    return false;
+}
+
 char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
 {
     /* Start building a CreateStmt for creating the target table */
     CreateStmt* create_stmt = makeNode(CreateStmt);
     create_stmt->relation = stmt->into->rel;
+    create_stmt->charset = PG_INVALID_ENCODING;
     IntoClause* into = stmt->into;
     List* tableElts = NIL;
+
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+        tableElts = stmt->into->tableElts;
+    int initlen = list_length(tableElts);
 
     /* Obtain the target list of new table */
     AssertEreport(IsA(stmt->query, Query), MOD_OPT, "");
@@ -4453,6 +4504,10 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
         if (tle->resjunk)
             continue;
 
+        if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && findAttrByName(tle->resname, tableElts, initlen)) {
+            continue;
+        }
+
         coldef = makeNode(ColumnDef);
         tpname = makeNode(TypeName);
     
@@ -4475,6 +4530,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
         coldef->cooked_default = NULL;
         coldef->update_default = NULL;
         coldef->constraints = NIL;
+        coldef->collOid = exprCollation((Node*)tle->expr);
 
         /*
          * Set typeOid and typemod. The name of the type is derived while
@@ -4482,6 +4538,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
          */
         tpname->typeOid = exprType((Node*)tle->expr);
         tpname->typemod = exprTypmod((Node*)tle->expr);
+        tpname->charset = exprCharset((Node*)tle->expr);
 
         /* 
          * If the column of source relation is encrypted
@@ -4524,6 +4581,9 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
     create_stmt->options = stmt->into->options;
     create_stmt->ivm = stmt->into->ivm;
     create_stmt->relkind = stmt->relkind == OBJECT_MATVIEW ? RELKIND_MATVIEW : RELKIND_RELATION;
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        create_stmt->autoIncStart = stmt->into->autoIncStart;
+    }
     /*
      * Check consistency of arguments
      */
@@ -4557,7 +4617,8 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
 
     StringInfo cquery = makeStringInfo();
 
-    deparse_query(parsetree, cquery, NIL, false, false);
+    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || initlen <= 0)
+        deparse_query(parsetree, cquery, NIL, false, false);
 
     return cquery->data;
 }
@@ -4570,7 +4631,33 @@ static bool selectNeedRecovery(Query* query)
     return strcasestr(query->sql_statement, "CONNECT") != NULL;
 }
 
-char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
+/*
+ * @Description: copy(shallow) hints which needs to be displayed in top.
+*                (e.g. pull "select HINT..."  to "Insert HINT INTO XXX SELECT HINT..." )
+ * @in src: hint state.
+ * @out dest: hint state.
+ */
+static void _copy_top_HintState(HintState *dest, HintState *src)
+{
+    if (dest == NULL || src == NULL) {
+        return;
+    }
+
+    dest->stream_hint = src->stream_hint;
+    dest->gather_hint = src->gather_hint;
+    dest->cache_plan_hint = src->cache_plan_hint;
+    dest->set_hint = src->set_hint;
+    dest->no_gpc_hint = src->no_gpc_hint;
+    dest->multi_node_hint = src->multi_node_hint;
+    dest->skew_hint = src->skew_hint;
+    dest->predpush_hint = src->predpush_hint;
+    dest->predpush_same_level_hint = src->predpush_same_level_hint;
+    dest->rewrite_hint = src->rewrite_hint;
+    dest->no_expand_hint = src->no_expand_hint;
+}
+
+char* GetInsertIntoStmt(CreateTableAsStmt* stmt, bool hasNewColumn)
+
 {
     /* Get the SELECT query string */
     /*
@@ -4602,14 +4689,33 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
 
     appendStringInfo(cquery, "INSERT ");
 
-    HintState *hintState = ((Query*)stmt->query)->hintState;
-    get_hint_string(hintState, cquery);
-
+    HintState *top_hintState = HintStateCreate();
+    _copy_top_HintState(top_hintState, ((Query *)stmt->query)->hintState);
+    get_hint_string(top_hintState, cquery);
+    if (top_hintState)
+        pfree((void *)top_hintState);
     if (relation->schemaname)
         appendStringInfo(
             cquery, " INTO %s.%s", quote_identifier(relation->schemaname), quote_identifier(relation->relname));
     else
         appendStringInfo(cquery, " INTO %s", quote_identifier(relation->relname));
+
+    /* if has new column and have data to insert */
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && hasNewColumn && !stmt->into->skipData) {
+        appendStringInfoString(cquery, " (");
+        ListCell* lc = NULL;
+        const char* delimiter = "";
+        foreach (lc, select_query->targetList) {
+            TargetEntry* tle = (TargetEntry*)lfirst(lc);
+            /* ignore junk column*/
+            if (tle->resjunk)
+                continue;
+            appendStringInfoString(cquery, delimiter);
+            delimiter = ", ";
+            appendStringInfo(cquery, "%s", quote_identifier(tle->resname));
+        }
+        appendStringInfoString(cquery, ")");
+    }
 
     /*
      * If the original sql contains "WITH NO DATA", just create
@@ -4620,6 +4726,33 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
     else
         appendStringInfo(cquery, " %s", selectstr);
 
+    /* If there is a new column, there may be a uniqueness conflict */
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && hasNewColumn && !stmt->into->skipData) {
+        switch (stmt->into->onduplicate) {
+            case DUPLICATE_ERROR:
+                break;
+            case DUPLICATE_IGNORE:
+                appendStringInfoString(cquery, " ON DUPLICATE KEY UPDATE NOTHING");
+                break;
+            case DUPLICATE_REPLACE: {
+                appendStringInfoString(cquery, " ON DUPLICATE KEY UPDATE ");
+                ListCell* lc = NULL;
+                const char* delimiter = "";
+                foreach (lc, select_query->targetList) {
+                    TargetEntry* tle = (TargetEntry*)lfirst(lc);
+                    /* ignore junk column*/
+                    if (tle->resjunk)
+                        continue;
+                    appendStringInfoString(cquery, delimiter);
+                    delimiter = ", ";
+                    appendStringInfo(cquery, "%s = VALUES(%s)", quote_identifier(tle->resname), quote_identifier(tle->resname));
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
     return cquery->data;
 }
 
@@ -4681,7 +4814,8 @@ List *query_rewrite_set_stmt(Query *query)
     List* querytree_list = NIL;
     VariableSetStmt *stmt = (VariableSetStmt *)query->utilityStmt;
 
-    if(DB_IS_CMPT(B_FORMAT) && stmt->kind == VAR_SET_VALUE && u_sess->attr.attr_common.enable_set_variable_b_format) {
+    if(DB_IS_CMPT(B_FORMAT) && stmt->kind == VAR_SET_VALUE &&
+       (u_sess->attr.attr_common.enable_set_variable_b_format || ENABLE_SET_VARIABLES)) {
         List *resultlist = NIL;
         ListCell *l = NULL;
 
@@ -4854,7 +4988,10 @@ List* QueryRewriteCTAS(Query* parsetree)
 
     /* CREATE TABLE AS */
     Query* cparsetree = (Query*)copyObject(parsetree);
+    bool hasNewColumn = stmt->into->tableElts != NULL;
     char* create_sql = GetCreateTableStmt(cparsetree, stmt);
+    /* move stmt->into->tableElts to create_stmt->tableElts */
+    stmt->into->tableElts = NULL;
 
     if (stmt->relkind == OBJECT_MATVIEW) {
         zparsetree = (Query*)copyObject(cparsetree);
@@ -4873,7 +5010,7 @@ List* QueryRewriteCTAS(Query* parsetree)
         proutility_cxt.readOnlyTree = false;
         proutility_cxt.params = NULL;
         proutility_cxt.is_top_level = true;
-        ProcessUtility(&proutility_cxt, NULL, false, NULL);
+        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED);
     }
 
     /* CREATE MATILIZED VIEW AS*/
@@ -4886,7 +5023,7 @@ List* QueryRewriteCTAS(Query* parsetree)
         proutility_cxt.readOnlyTree = false;
         proutility_cxt.params = NULL;
         proutility_cxt.is_top_level = true;
-        ProcessUtility(&proutility_cxt, NULL, false, NULL);
+        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED);
 
         create_matview_meta(query, stmt->into->rel, stmt->into->ivm);
 
@@ -4906,7 +5043,13 @@ List* QueryRewriteCTAS(Query* parsetree)
         */
     parsetree->utilityStmt = NULL;
 
-    char* insert_into_sqlstr = GetInsertIntoStmt(stmt);
+    /*
+        * Now fold the CTAS statement into an INSERT INTO statement. The
+        * utility is no more required.
+        */
+    parsetree->utilityStmt = NULL;
+
+    char* insert_into_sqlstr = GetInsertIntoStmt(stmt, hasNewColumn);
 
     raw_parsetree_list = pg_parse_query(insert_into_sqlstr);
 
@@ -5041,11 +5184,7 @@ List* QueryRewriteSelectIntoVarList(Node *node)
     List *resList = NIL;
     int res_len = parsetree->targetList->length;
 
-    StringInfo select_sql = makeStringInfo();
-    deparse_query(parsetree, select_sql, NIL, false, false);
-
-    StmtResult *result = execute_stmt(select_sql->data, true);
-    DestroyStringInfo(select_sql);
+    StmtResult *result = execute_select_into_varlist(parsetree);
 
     if (result->tuples == NULL) {
         for (int i = 0; i < res_len; i++) {

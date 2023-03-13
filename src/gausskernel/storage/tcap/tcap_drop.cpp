@@ -64,6 +64,7 @@
 #include "catalog/pg_ts_template.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/storage.h"
+#include "client_logic/client_logic.h"
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "commands/directory.h"
@@ -1174,6 +1175,17 @@ static void TrTagDependentObjects(Relation depRel, ObjectAddresses *targetObject
     return;
 }
 
+static bool NeedTrFullEncryptedRel(Oid relid)
+{
+    Relation rel = relation_open(relid, NoLock);
+    if (is_full_encrypted_rel(rel)) {
+        relation_close(rel, NoLock);
+        return false;
+    }
+    relation_close(rel, NoLock);
+    return true;
+}
+
 bool TrCheckRecyclebinDrop(const DropStmt *stmt, ObjectAddresses *objects)
 {
     Relation depRel;
@@ -1197,6 +1209,9 @@ bool TrCheckRecyclebinDrop(const DropStmt *stmt, ObjectAddresses *objects)
     }
 
     if (!NeedTrComm(objects->refs->objectId)) {
+        return false;
+    }
+    if (!NeedTrFullEncryptedRel(objects->refs->objectId)) {
         return false;
     }
 
@@ -1320,7 +1335,7 @@ void TrRestoreDrop(const TimeCapsuleStmt *stmt)
     if (desc.relid != 0 && (desc.type == RB_OBJ_TABLE)) {
         stmt->relation->relname = desc.name;
         rel = heap_openrv(stmt->relation, AccessExclusiveLock);
-        if (rel->rd_tam_type == TAM_HEAP) {
+        if (rel->rd_tam_ops == TableAmHeap) {
             heap_close(rel, NoLock);
             elog(ERROR, "timecapsule does not support astore yet");
             return;

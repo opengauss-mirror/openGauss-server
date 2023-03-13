@@ -240,10 +240,12 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
         case CMD_MERGE:
             /* OK */
             break;
-        default:
-	    if (IsA(query->utilityStmt, VariableMultiSetStmt)) {
+        case CMD_UTILITY:
+            if (IsA(query->utilityStmt, VariableMultiSetStmt) ||
+                IsA(query->utilityStmt, CopyStmt)) {
                 break;
             }
+        default:
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PSTATEMENT_DEFINITION), errmsg("utility statements cannot be prepared")));
             break;
@@ -518,7 +520,7 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
         Oid expected_type_id = param_types[i];
         Oid given_type_id;
 
-        expr = transformExpr(pstate, expr);
+        expr = transformExpr(pstate, expr, EXPR_KIND_EXECUTE_PARAMETER);
 
         /* Cannot contain subselects or aggregates */
         if (pstate->p_hasSubLinks)
@@ -1408,7 +1410,7 @@ Datum pg_prepared_statement(PG_FUNCTION_ARGS)
      * build tupdesc for result tuples. This must match the definition of the
      * pg_prepared_statements view in system_views.sql
      */
-    tupdesc = CreateTemplateTupleDesc(5, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(5, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "statement", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "prepare_time", TIMESTAMPTZOID, -1, 0);

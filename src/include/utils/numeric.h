@@ -196,6 +196,7 @@ extern char* numeric_out_sci(Numeric num, int scale);
 extern Datum numtodsinterval(PG_FUNCTION_ARGS);
 extern int cmp_numerics(Numeric num1, Numeric num2);
 extern int128 numeric_int16_internal(Numeric num);
+extern char* output_numeric_out(Numeric num);
 
 //
 // Numeric Compression Codes Area
@@ -350,5 +351,10 @@ extern bool numericvar_to_int64(const NumericVar* var, int64* result, bool can_i
 extern void int64_to_numericvar(int64 val, NumericVar *var);
 extern void add_var(NumericVar *var1, NumericVar *var2, NumericVar *result);
 extern char *numeric_normalize(Numeric num);
+
+bool numeric_agg_trans_initvalisnull(Oid transfn_oid, bool initvalisnull);
+void numeric_transfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype);
+void numeric_finalfn_info_change(Oid aggdn_oid, Oid *finalfn_oid);
+void numeric_aggfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype, Oid *finalfn_oid);
 
 #endif /* _PG_NUMERIC_H_ */

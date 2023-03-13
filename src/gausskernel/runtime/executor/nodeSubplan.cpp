@@ -329,7 +329,7 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
 
             found = true;
             /* stash away current value */
-            Assert(sub_plan->firstColType == tdesc->attrs[0]->atttypid);
+            Assert(sub_plan->firstColType == tdesc->attrs[0].atttypid);
             dvalue = tableam_tslot_getattr(slot, 1, &disnull);
             astate = accumArrayResult(astate, dvalue, disnull, sub_plan->firstColType, oldcontext);
             /* keep scanning subplan to collect all values */
@@ -462,7 +462,8 @@ void buildSubPlanHash(SubPlanState* node, ExprContext* econtext)
         sizeof(TupleHashEntryData),
         node->hashtablecxt,
         node->hashtempcxt,
-        u_sess->attr.attr_memory.work_mem);
+        u_sess->attr.attr_memory.work_mem,
+        node->tab_collations);
 
     if (!subplan->unknownEqFalse) {
         if (ncols == 1) {
@@ -481,7 +482,8 @@ void buildSubPlanHash(SubPlanState* node, ExprContext* econtext)
             sizeof(TupleHashEntryData),
             node->hashtablecxt,
             node->hashtempcxt,
-            u_sess->attr.attr_memory.work_mem);
+            u_sess->attr.attr_memory.work_mem,
+            node->tab_collations);
     }
 
     /*
@@ -573,11 +575,11 @@ bool findPartialMatch(TupleHashTable hashtable, TupleTableSlot* slot, FmgrInfo* 
 
     InitTupleHashIterator(hashtable, &hashiter);
     while ((entry = ScanTupleHashTable(&hashiter)) != NULL) {
-
         CHECK_FOR_INTERRUPTS();
-        
+
         ExecStoreMinimalTuple(entry->firstTuple, hashtable->tableslot, false);
-        if (!execTuplesUnequal(slot, hashtable->tableslot, num_cols, key_col_idx, eqfunctions, hashtable->tempcxt)) {
+        if (!execTuplesUnequal(slot, hashtable->tableslot, num_cols, key_col_idx, eqfunctions,
+                hashtable->tempcxt, hashtable->tab_collations)) {
             TermTupleHashIterator(&hashiter);
             return true;
         }
@@ -832,13 +834,13 @@ SubPlanState* ExecInitSubPlan(SubPlan* subplan, PlanState* parent)
          * own innerecontext.
          */
         // slot contains virtual tuple, so set the default tableAm type to HEAP
-        tup_desc = ExecTypeFromTL(leftptlist, false, false, TAM_HEAP);
+        tup_desc = ExecTypeFromTL(leftptlist, false, false, TableAmHeap);
         slot = ExecInitExtraTupleSlot(estate);
         ExecSetSlotDescriptor(slot, tup_desc);
         sstate->projLeft = ExecBuildProjectionInfo(lefttlist, NULL, slot, NULL);
 
         // slot contains virtual tuple, so set the default tableAm type to HEAP
-        tup_desc = ExecTypeFromTL(rightptlist, false, false, TAM_HEAP);
+        tup_desc = ExecTypeFromTL(rightptlist, false, false, TableAmHeap);
         slot = ExecInitExtraTupleSlot(estate);
         ExecSetSlotDescriptor(slot, tup_desc);
         sstate->projRight = ExecBuildProjectionInfo(righttlist, sstate->innerecontext, slot, NULL);
@@ -925,7 +927,7 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
 
             found = true;
             /* stash away current value */
-            Assert(subplan->firstColType == tdesc->attrs[0]->atttypid);
+            Assert(subplan->firstColType == tdesc->attrs[0].atttypid);
             dvalue = tableam_tslot_getattr(slot, 1, &disnull);
             astate = accumArrayResult(astate, dvalue, disnull, subplan->firstColType, oldcontext);
             /* keep scanning subplan to collect all values */

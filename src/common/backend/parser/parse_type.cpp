@@ -34,6 +34,8 @@
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "utils/pl_package.h"
+#include "catalog/gs_utf8_collation.h"
+#include "parser/parse_utilcmd.h"
 
 static int32 typenameTypeMod(ParseState* pstate, const TypeName* typname, Type typ);
 
@@ -652,6 +654,48 @@ Oid LookupCollation(ParseState* pstate, List* collnames, int location)
     return colloid;
 }
 
+static Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation,
+    bool is_bin_type, Oid rel_coll_oid)
+{
+    if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid)) {
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("type %s not support set charset", format_type_be(typeOid))));
+    }
+
+    Oid result = InvalidOid;
+    if (!OidIsValid(typcollation) && !is_bin_type) {
+        return InvalidOid;
+    } else if (OidIsValid(coldef->collOid)) {
+        /* Precooked collation spec, use that */
+        return coldef->collOid;
+    }
+
+    char* schemaname = NULL;
+    char* collate = NULL;
+    if (coldef->collClause) {
+        DeconstructQualifiedName(coldef->collClause->collname, &schemaname, &collate);
+        if (schemaname != NULL && strcmp(schemaname, "pg_catalog") != 0) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA),
+                    errmsg("error schema name for collate")));
+        }
+    }
+    /* For binary type, if the table's default collation is not "binary", the rel_coll_oid is not inherited. */
+    if (is_bin_type) {
+        rel_coll_oid = InvalidOid;
+    }
+    result = transform_default_collation(collate, coldef->typname->charset, rel_coll_oid, true);
+    if (!OidIsValid(result)) {
+        if (!USE_DEFAULT_COLLATION) {
+            result = typcollation;
+        } else if (is_bin_type) {
+            result = BINARY_COLLATION_OID;
+        } else {
+            result = get_default_collation_by_charset(GetDatabaseEncoding());
+        }
+    }
+    return result;
+}
+
 /*
  * GetColumnDefCollation
  *
@@ -660,13 +704,16 @@ Oid LookupCollation(ParseState* pstate, List* collnames, int location)
  *
  * pstate is only used for error location purposes, and can be NULL.
  */
-Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid)
+Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid, Oid rel_coll_oid)
 {
     Oid result;
     Oid typcollation = get_typcollation(typeOid);
     int location = -1;
+    bool is_bin_type = IsBinaryType(typeOid);
 
-    if (coldef->collClause) {
+    if (DB_IS_CMPT(B_FORMAT)) {
+        result = get_column_def_collation_b_format(coldef, typeOid, typcollation, is_bin_type, rel_coll_oid);
+    } else if (coldef->collClause) {
         /* We have a raw COLLATE clause, so look up the collation */
         location = coldef->collClause->location;
         result = LookupCollation(pstate, coldef->collClause->collname, location);
@@ -678,8 +725,11 @@ Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid)
         result = typcollation;
     }
 
+    if (coldef->collClause) {
+        check_binary_collation(result, typeOid);
+    }
     /* Complain if COLLATE is applied to an uncollatable type */
-    if (OidIsValid(result) && !OidIsValid(typcollation)) {
+    if (OidIsValid(result) && !OidIsValid(typcollation) && !is_bin_type) {
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("collations are not supported by type %s", format_type_be(typeOid)),
@@ -841,6 +891,7 @@ static void pts_error_callback(void* arg)
 void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p)
 {
     StringInfoData buf;
+    buf.data = NULL;
     List* raw_parsetree_list = NIL;
     SelectStmt* stmt = NULL;
     ResTarget* restarget = NULL;
@@ -908,8 +959,90 @@ void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p)
     return;
 
 fail:
+    pfree_ext(buf.data);
     InsertErrorMessage("invalid type name", u_sess->plsql_cxt.plpgsql_yylloc);
     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid type name \"%s\"", str)));
+}
+
+/*
+ * Given a string that is supposed to be a SQL-compatible type declaration,
+ * such as "int4" or "integer" or "character varying(32)", parse
+ * the string and return the result as a TypeName.
+ * If the string cannot be parsed as a type, an error is raised.
+ */
+TypeName * typeStringToTypeName(const char *str)
+{
+    StringInfoData buf;
+    buf.data = NULL;
+    List* raw_parsetree_list = NIL;
+    SelectStmt* stmt = NULL;
+    ResTarget* restarget = NULL;
+    TypeCast* typecast = NULL;
+    TypeName* typname = NULL;
+    ErrorContextCallback ptserrcontext;
+
+    /* make sure we give useful error for empty input */
+    if (strspn(str, " \t\n\r\f") == strlen(str)) {
+        goto fail;
+    }
+
+    initStringInfo(&buf);
+    appendStringInfo(&buf, "SELECT NULL::%s", str);
+
+    /*
+     * Setup error traceback support in case of ereport() during parse
+     */
+    ptserrcontext.callback = pts_error_callback;
+    ptserrcontext.arg = (void*)str;
+    ptserrcontext.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &ptserrcontext;
+
+    raw_parsetree_list = raw_parser(buf.data);
+
+    t_thrd.log_cxt.error_context_stack = ptserrcontext.previous;
+
+    /*
+     * Make sure we got back exactly what we expected and no more; paranoia is
+     * justified since the string might contain anything.
+     */
+    if (list_length(raw_parsetree_list) != 1)
+        goto fail;
+    stmt = (SelectStmt*)linitial(raw_parsetree_list);
+    if (stmt == NULL || !IsA(stmt, SelectStmt) || stmt->distinctClause != NIL || stmt->intoClause != NULL ||
+        stmt->fromClause != NIL || stmt->whereClause != NULL || stmt->groupClause != NIL ||
+        stmt->havingClause != NULL || stmt->windowClause != NIL || stmt->withClause != NULL ||
+        stmt->valuesLists != NIL || stmt->sortClause != NIL || stmt->limitOffset != NULL || stmt->limitCount != NULL ||
+        stmt->lockingClause != NIL || stmt->op != SETOP_NONE) {
+        goto fail;
+    }
+    if (list_length(stmt->targetList) != 1) {
+        goto fail;
+    }
+    restarget = (ResTarget*)linitial(stmt->targetList);
+    if (restarget == NULL || !IsA(restarget, ResTarget) || restarget->name != NULL || restarget->indirection != NIL) {
+        goto fail;
+    }
+    typecast = (TypeCast*)restarget->val;
+    if (typecast == NULL || !IsA(typecast, TypeCast) || typecast->arg == NULL || !IsA(typecast->arg, A_Const)) {
+        goto fail;
+    }
+    typname = typecast->typname;
+    if (typname == NULL || !IsA(typname, TypeName)) {
+        goto fail;
+    }
+    if (typname->setof) {
+        goto fail;
+    }
+    pfree_ext(buf.data);
+ 
+    return typname;
+ 
+fail:
+    pfree_ext(buf.data);
+    ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+             errmsg("invalid type name \"%s\"", str)));
+    return NULL;
 }
 
 /*

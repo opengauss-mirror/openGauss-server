@@ -95,17 +95,19 @@
  */
 #define NUMERIC_DSCALE_MASK 0x3FFF
 
-#define NUMERIC_SIGN(n)                                                                                           \
-    (NUMERIC_HEADER_IS_SHORT(n) ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS) \
-                         : NUMERIC_FLAGBITS(n))
-#define NUMERIC_DSCALE(n)                                                                                             \
-    (NUMERIC_HEADER_IS_SHORT((n)) ? ((n)->choice.n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT \
-                           : ((n)->choice.n_long.n_sign_dscale & NUMERIC_DSCALE_MASK))
-#define NUMERIC_WEIGHT(n)                                                                                         \
-    (NUMERIC_HEADER_IS_SHORT((n))                                                                                        \
-            ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_SIGN_MASK ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) | \
-                  ((n)->choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK))                                     \
-            : ((n)->choice.n_long.n_weight))
+#define NUMERIC_SIGN(n)                                                                           \
+    (NUMERIC_HEADER_IS_SHORT(n)                                                                   \
+         ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS) \
+         : NUMERIC_FLAGBITS(n))
+#define NUMERIC_DSCALE(n)                                                                           \
+    (NUMERIC_HEADER_IS_SHORT((n))                                                                   \
+         ? ((n)->choice.n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT \
+         : ((n)->choice.n_long.n_sign_dscale & NUMERIC_DSCALE_MASK))
+#define NUMERIC_WEIGHT(n)                                                                                      \
+    (NUMERIC_HEADER_IS_SHORT((n))                                                                              \
+         ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_SIGN_MASK ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) | \
+            ((n)->choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK))                                        \
+         : ((n)->choice.n_long.n_weight))
 #define NUMERIC_DIGITS(num) (NUMERIC_HEADER_IS_SHORT(num) ? (num)->choice.n_short.n_data : (num)->choice.n_long.n_data)
 #define NUMERIC_NDIGITS(num) ((VARSIZE(num) - NUMERIC_HEADER_SIZE(num)) / sizeof(NumericDigit))
 

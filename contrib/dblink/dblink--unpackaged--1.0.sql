@@ -44,3 +44,4 @@ ALTER EXTENSION dblink ADD function dblink_cancel_query(text);
 ALTER EXTENSION dblink ADD function dblink_error_message(text);
 ALTER EXTENSION dblink ADD function dblink_get_notify();
 ALTER EXTENSION dblink ADD function dblink_get_notify(text);
+ALTER EXTENSION dblink ADD function dblink_get_drivername();

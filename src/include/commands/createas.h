@@ -14,11 +14,12 @@
 #ifndef CREATEAS_H
 #define CREATEAS_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/params.h"
 #include "nodes/parsenodes.h"
 #include "tcop/dest.h"
 
-extern void ExecCreateTableAs(
+extern ObjectAddress ExecCreateTableAs(
     CreateTableAsStmt* stmt, const char* queryString, ParamListInfo params, char* completionTag);
 
 extern int GetIntoRelEFlags(IntoClause* intoClause);

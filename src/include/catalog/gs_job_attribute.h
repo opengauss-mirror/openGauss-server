@@ -153,6 +153,14 @@ inline Datum TimeStampTzToText(Datum value)
     return res;
 }
 
+inline Datum TimeStampToText(Datum value)
+{
+    char *str = DatumGetCString(DirectFunctionCall1(timestamp_out, value));
+    Datum res = CStringGetTextDatum(str);
+    pfree_ext(str);
+    return res;
+}
+
 inline Datum TextToTimeStampTz(Datum value)
 {
     if (!PointerIsValid(value)) {
@@ -287,6 +295,11 @@ extern void enable_single_force(Datum object_name, Datum enable_value, bool forc
 extern void enable_program(Datum program_name, Datum enable_value);
 extern void set_job_attribute(const Datum job_name, const Datum attribute_name, const Datum attribute_value);
 extern bool execute_backend_scheduler_job(Datum job_name, StringInfoData *buf);
+extern HeapTuple search_from_pg_job_proc(Relation rel, Datum name);
+extern void get_program_info(Datum program_name, Datum *job_type, Datum *job_action, Datum *num_of_args,
+                             Datum *enabled);
+extern Datum get_priv_user(Datum program_name, Datum job_intype);
+ 
 
 /* prefix for inlined object */
 #define INLINE_JOB_SCHEDULE_PREFIX "inline_schedule_"

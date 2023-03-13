@@ -146,7 +146,7 @@ bool AggFusion::execute(long max_rows, char *completionTag)
         }
     }
 
-    HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, values, isnull, HEAP_TUPLE);
+    HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, values, isnull);
     (void)ExecStoreTuple(tmptup, reslot, InvalidBuffer, false);
 
     tableam_tslot_getsomeattrs(reslot, m_global->m_tupDesc->natts);

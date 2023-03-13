@@ -30,6 +30,7 @@
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
 #include "storage/cucache_mgr.h"
@@ -305,7 +306,7 @@ void CStoreDelete::InitDeleteSortStateForTable(TupleDesc sortTupDesc, int /* par
     TypeCacheEntry* typeEntry = lookup_type_cache(TIDOID, TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
 
     attNums[0] = ctidAttNo;
-    sortCollations[0] = sortTupDesc->attrs[ctidAttNo - 1]->attcollation;
+    sortCollations[0] = sortTupDesc->attrs[ctidAttNo - 1].attcollation;
     nullsFirstFlags[0] = false;
 
     SortMem = m_DelMemInfo->MemSort > 0 ? m_DelMemInfo->MemSort : u_sess->attr.attr_storage.psort_work_mem;
@@ -337,8 +338,8 @@ void CStoreDelete::InitDeleteSortStateForPartition(TupleDesc sortTupDesc, int pa
     typeEntry = lookup_type_cache(TIDOID, TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
     sortOperators[1] = typeEntry->lt_opr;
 
-    sortCollations[0] = sortTupDesc->attrs[partidAttNo - 1]->attcollation;
-    sortCollations[1] = sortTupDesc->attrs[ctidAttNo - 1]->attcollation;
+    sortCollations[0] = sortTupDesc->attrs[partidAttNo - 1].attcollation;
+    sortCollations[1] = sortTupDesc->attrs[ctidAttNo - 1].attcollation;
 
     nullsFirstFlags[0] = false;
     nullsFirstFlags[1] = false;
@@ -604,6 +605,7 @@ uint64 CStoreDelete::ExecDeleteForPartition()
                                                  m_estate->es_query_cxt,
                                                  m_relation,
                                                  curPartID,
+                                                 INVALID_PARTITION_NO,
                                                  partFakeRel,
                                                  partition,
                                                  RowExclusiveLock);
@@ -627,6 +629,7 @@ uint64 CStoreDelete::ExecDeleteForPartition()
                                                  m_estate->es_query_cxt,
                                                  m_relation,
                                                  curPartID,
+                                                 INVALID_PARTITION_NO,
                                                  partFakeRel,
                                                  partition,
                                                  RowExclusiveLock);

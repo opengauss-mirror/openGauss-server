@@ -230,6 +230,7 @@ static bool unsupported_filter_walker(Node *node, Node *context_node)
  *   - ExecStartWithOp()
  *   - ExecEndStartWithOp()
  *   - ExecReScanStartWithOp()
+ *   - ResetRecursiveInner()
  */
 StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int eflags)
 {
@@ -291,7 +292,7 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
      * no relations are involved in nodeResult, set the default
      * tableAm type to HEAP
      */
-    ExecAssignResultTypeFromTL(&state->ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&state->ps);
 
     ExecAssignProjectionInfo(&state->ps, NULL);
 
@@ -338,7 +339,7 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
                             false, false, u_sess->attr.attr_memory.work_mem);
 
     /* create the working TupleTableslot */
-    state->sw_workingSlot = ExecAllocTableSlot(&estate->es_tupleTable, TAM_HEAP);
+    state->sw_workingSlot = ExecAllocTableSlot(&estate->es_tupleTable, TableAmHeap);
     ExecSetSlotDescriptor(state->sw_workingSlot, ExecTypeFromTL(targetlist, false));
 
     int natts = list_length(node->plan.targetlist);
@@ -418,6 +419,30 @@ bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot)
     return incycle;
 }
 
+/*
+ * This function is called during executing recursive part(inner plan) of recursive union,
+ * so it would be enough to rescan(reset) only inner_plan of RecursiveUnionState to refresh
+ * last working state including working table.
+ */
+void ResetRecursiveInner(RecursiveUnionState *node)
+{
+    PlanState *outerPlanState = outerPlanState(node);
+    PlanState *innerPlanState = innerPlanState(node);
+    RecursiveUnion *ruPlan = (RecursiveUnion*)node->ps.plan;
+
+    /*
+     * Set recursive term's chgParam to tell it that we'll modify the working
+     * table and therefore it has to rescan.
+     */
+    innerPlanState->chgParam = bms_add_member(innerPlanState->chgParam, ruPlan->wtParam);
+    if (outerPlanState->chgParam == NULL) {
+        ExecReScan(innerPlanState);
+    }
+
+    node->intermediate_empty = true;
+    tuplestore_clear(node->working_table);
+    tuplestore_clear(node->intermediate_table);
+}
 
 /*
  * Peeking a tuple's connectable descendants for exactly one level.
@@ -435,8 +460,8 @@ static List* peekNextLevel(TupleTableSlot* startSlot, PlanState* outerNode, int 
     List* queue = NULL;
     RecursiveUnionState* rus = (RecursiveUnionState*) outerNode;
     StartWithOpState *swnode = rus->swstate;
-    /* clean up RU's old working table */
-    ExecReScan(outerNode);
+    /* ReSet RU's inner plan, inlcuding re-scan inner and free its working table */
+    ResetRecursiveInner(rus);
     /* pushing the depth-first tuple into RU's working table */
     rus->recursing = true;
     tuplestore_puttupleslot(rus->working_table, startSlot);
@@ -1844,7 +1869,7 @@ static const char *GetKeyEntryArrayStr(RecursiveUnionState *state, TupleTableSlo
                  */
                 elog(WARNING, "The internal key column[%d]:%s with NULL value.",
                             te->resno,
-                            scanSlot->tts_tupleDescriptor->attrs[i]->attname.data);
+                            scanSlot->tts_tupleDescriptor->attrs[i].attname.data);
             }
 
             if (i == 0) {
@@ -1873,7 +1898,7 @@ static const char *GetCurrentValue(TupleTableSlot *slot, AttrNumber attnum)
     TupleDesc tupDesc = slot->tts_tupleDescriptor;
     HeapTuple tup = ExecFetchSlotTuple(slot);
     bool isnull = true;
-    Oid atttypid = tupDesc->attrs[attnum - 1]->atttypid;
+    Oid atttypid = tupDesc->attrs[attnum - 1].atttypid;
     Datum d = heap_getattr(tup, attnum, tupDesc, &isnull);
     char *value_str = NULL;
 
@@ -1983,7 +2008,7 @@ static const char *GetCurrentValue(TupleTableSlot *slot, AttrNumber attnum)
             break;
         default: {
             elog(ERROR, "unspported type for attname:%s (typid:%u typname:%s)",
-                tupDesc->attrs[attnum - 1]->attname.data,
+                tupDesc->attrs[attnum - 1].attname.data,
                 atttypid, get_typename(atttypid));
         }
     }

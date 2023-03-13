@@ -37,6 +37,11 @@ extern void CatalogIndexInsert(CatalogIndexState indstate,
 				   HeapTuple heapTuple);
 extern void CatalogUpdateIndexes(Relation heapRel, HeapTuple heapTuple);
 
+extern void CatalogTupleUpdate(Relation heapRel, ItemPointer otid, HeapTuple tup);
+
+extern Oid CatalogTupleInsert(Relation heapRel, HeapTuple tup);
+
+extern void CatalogTupleDelete(Relation heapRel, ItemPointer tid);
 
 /*
  * These macros are just to keep the C compiler from spitting up on the
@@ -119,6 +124,8 @@ DECLARE_UNIQUE_INDEX(pg_class_relname_nsp_index, 2663, on pg_class using btree(r
 #define ClassNameNspIndexId  2663
 DECLARE_INDEX(pg_class_tblspc_relfilenode_index, 9981, on pg_class using btree(reltablespace oid_ops, relfilenode oid_ops));
 #define ClassTblspcRelfilenodeIndexId  9981
+DECLARE_UNIQUE_INDEX(pg_collation_enc_def_index, 3147, on pg_collation using btree(collencoding int4_ops, collisdef bool_ops));
+#define CollationEncDefIndexId 3147
 DECLARE_UNIQUE_INDEX(pg_collation_name_enc_nsp_index, 3164, on pg_collation using btree(collname name_ops, collencoding int4_ops, collnamespace oid_ops));
 #define CollationNameEncNspIndexId 3164
 DECLARE_UNIQUE_INDEX(pg_collation_oid_index, 3085, on pg_collation using btree(oid oid_ops));
@@ -668,6 +675,10 @@ DECLARE_INDEX(gs_sql_patch_unique_sql_id_index, 9054, on gs_sql_patch using btre
 
 DECLARE_UNIQUE_INDEX(pg_subscription_rel_srrelid_srsubid_index, 6138, on pg_subscription_rel using btree(srrelid oid_ops, srsubid oid_ops));
 #define SubscriptionRelSrrelidSrsubidIndexId 6138
+DECLARE_UNIQUE_INDEX(pg_event_trigger_evtname_index, 3486, on pg_event_trigger using btree(evtname name_ops));
+#define EventTriggerNameIndexId  3486
+DECLARE_UNIQUE_INDEX(pg_event_trigger_oid_index, 3487, on pg_event_trigger using btree(oid oid_ops));
+#define EventTriggerOidIndexId  3487
 
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES

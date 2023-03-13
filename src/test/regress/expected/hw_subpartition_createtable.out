@@ -73,9 +73,9 @@ insert into list_hash values('201903', '6', '1', 1);
 select * from list_hash;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
  201902     | 3         | 1       |         1
- 201902     | 1         | 1       |         1
  201903     | 4         | 1       |         1
  201903     | 5         | 1       |         1
  201903     | 6         | 1       |         1
@@ -187,12 +187,12 @@ insert into range_hash values('201903', '2', '1', 1);
 select * from range_hash;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 drop table range_hash;
@@ -263,12 +263,12 @@ insert into hash_list values('201903', '2', '1', 1);
 select * from hash_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 drop table hash_list;
@@ -301,12 +301,12 @@ insert into hash_hash values('201903', '2', '1', 1);
 select * from hash_hash;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
- 201901     | 1         | 1       |         1
- 201901     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 drop table hash_hash;
@@ -339,12 +339,12 @@ insert into hash_range values('201903', '2', '1', 1);
 select * from hash_range;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 drop table hash_range;
@@ -854,29 +854,6 @@ PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
 );
 drop table list_list;
 --1.4 subpartition key check
--- 一级分区和二级分区分区键是同一列
-CREATE TABLE list_list
-(
-    month_code VARCHAR2 ( 30 ) NOT NULL ,
-    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
-    user_no    VARCHAR2 ( 30 ) NOT NULL ,
-    sales_amt  int
-)
-PARTITION BY LIST (month_code) SUBPARTITION BY LIST (month_code)
-(
-  PARTITION p_201901 VALUES ( '201902' )
-  (
-    SUBPARTITION p_201901_a VALUES ( '1' ),
-    SUBPARTITION p_201901_b VALUES ( '2' )
-  ),
-  PARTITION p_201902 VALUES ( '201903' )
-  (
-    SUBPARTITION p_201902_a VALUES ( '1' ),
-    SUBPARTITION p_201902_b VALUES ( '2' )
-  )
-);
-ERROR:  The two partition keys of a subpartition partition table are the same.
-DETAIL:  N/A
 --二级分区的键值一样
 CREATE TABLE list_list
 (
@@ -1746,6 +1723,560 @@ create table t1(like range_list including partition);
 ERROR:  Un-support feature
 DETAIL:  Create Table like with subpartition only support range strategy.
 drop table range_list;
+-- test the key of partition and subpartition is same column
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (month_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '201902' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+ERROR:  inserted partition key does not map to any table partition
+insert into list_list values('2', '2', '1', 1);
+ERROR:  inserted partition key does not map to any table partition
+EXPLAIN (costs false)
+SELECT * FROM list_list SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Sort Key: month_code, dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on list_list
+               Selected Partitions:  1
+               Selected Subpartitions:  1:1
+(7 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM list_list WHERE month_code = '201902' ORDER BY 1,2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on list_list
+               Filter: ((month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  1:1
+(8 rows)
+
+drop table list_list;
+CREATE TABLE list_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY HASH (month_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+insert into list_hash values('201902', '1', '1', 1);
+insert into list_hash values('201902', '2', '1', 1);
+insert into list_hash values('201903', '5', '1', 1);
+insert into list_hash values('201903', '6', '1', 1);
+SELECT * FROM list_hash SUBPARTITION (p_201901_a) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+SELECT * FROM list_hash SUBPARTITION (p_201901_b) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(2 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM list_hash SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Sort Key: month_code, dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on list_hash
+               Selected Partitions:  1
+               Selected Subpartitions:  1:1
+(7 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM list_hash WHERE month_code = '201903' ORDER BY 1,2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on list_hash
+               Filter: ((month_code)::text = '201903'::text)
+               Selected Partitions:  2
+               Selected Subpartitions:  2:1
+(8 rows)
+
+drop table list_hash;
+CREATE TABLE list_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY RANGE (month_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a values less than ('1'),
+    SUBPARTITION p_201901_b values less than ('2')
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a values less than ('3'),
+    SUBPARTITION p_201902_b values less than ('4')
+  )
+);
+insert into list_range values('201902', '1', '1', 1);
+ERROR:  inserted partition key does not map to any table partition
+insert into list_range values('201903', '2', '1', 1);
+SELECT * FROM list_range SUBPARTITION (p_201902_a) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+(1 row)
+
+EXPLAIN (costs false)
+SELECT * FROM list_range SUBPARTITION FOR ('201903','201903') ORDER BY 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: month_code, dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on list_range
+               Selected Partitions:  2
+               Selected Subpartitions:  2:1
+(7 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM list_range WHERE month_code = '201903' ORDER BY 1,2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on list_range
+               Filter: ((month_code)::text = '201903'::text)
+               Selected Partitions:  2
+               Selected Subpartitions:  2:1
+(8 rows)
+
+drop table list_range;
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (month_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('201901'),
+    SUBPARTITION p_201901_b values ('201902')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a values ('201903'),
+    SUBPARTITION p_201902_b values ('201904')
+  )
+);
+insert into range_list values('201901', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+insert into range_list values('201903', '1', '1', 1);
+insert into range_list values('201904', '2', '1', 1);
+ERROR:  inserted partition key does not map to any table partition
+EXPLAIN (costs false)
+SELECT * FROM range_list SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: month_code, dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on range_list
+               Selected Partitions:  1
+               Selected Subpartitions:  1:1
+(7 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM range_list WHERE month_code = '201903' ORDER BY 1,2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on range_list
+               Filter: ((month_code)::text = '201903'::text)
+               Selected Partitions:  2
+               Selected Subpartitions:  2:1
+(8 rows)
+
+drop table range_list;
+CREATE TABLE range_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY RANGE (month_code) SUBPARTITION BY HASH (month_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+insert into range_hash values('201901', '1', '1', 1);
+insert into range_hash values('201902', '2', '1', 1);
+insert into range_hash values('201903', '2', '1', 1);
+insert into range_hash values('20190322', '1', '1', 1);
+SELECT * FROM range_hash SUBPARTITION (p_201901_a) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201901     | 1         | 1       |         1
+(1 row)
+
+SELECT * FROM range_hash SUBPARTITION (p_201901_b) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+(1 row)
+
+EXPLAIN (costs false)
+SELECT * FROM range_hash SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: month_code, dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on range_hash
+               Selected Partitions:  1
+               Selected Subpartitions:  1:1
+(7 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM range_hash WHERE month_code = '201903' ORDER BY 1,2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on range_hash
+               Filter: ((month_code)::text = '201903'::text)
+               Selected Partitions:  2
+               Selected Subpartitions:  2:1
+(8 rows)
+
+drop table range_hash;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (month_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '20190220' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( '20190230' )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '20190320' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '20190330' )
+  )
+);
+insert into range_range values('201902', '1', '1', 1);
+insert into range_range values('20190222', '2', '1', 1);
+insert into range_range values('201903', '2', '1', 1);
+insert into range_range values('20190322', '1', '1', 1);
+insert into range_range values('20190333', '2', '1', 1);
+ERROR:  inserted partition key does not map to any table partition
+EXPLAIN (costs false)
+SELECT * FROM range_range SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Sort
+   Sort Key: month_code, dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on range_range
+               Selected Partitions:  1
+               Selected Subpartitions:  1:1
+(7 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM range_range WHERE month_code = '201903' ORDER BY 1,2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on range_range
+               Filter: ((month_code)::text = '201903'::text)
+               Selected Partitions:  2
+               Selected Subpartitions:  2:1
+(8 rows)
+
+drop table range_range;
+CREATE TABLE hash_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY hash (month_code) SUBPARTITION BY LIST (month_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a VALUES ( '201901' ),
+    SUBPARTITION p_201901_b VALUES ( '201902' )
+  ),
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a VALUES ( '201901' ),
+    SUBPARTITION p_201902_b VALUES ( '201902' )
+  )
+);
+insert into hash_list values('201901', '1', '1', 1);
+insert into hash_list values('201901', '2', '1', 1);
+insert into hash_list values('201902', '1', '1', 1);
+insert into hash_list values('201902', '2', '1', 1);
+insert into hash_list values('201903', '2', '1', 1);
+ERROR:  inserted partition key does not map to any table partition
+SELECT * FROM hash_list SUBPARTITION (p_201901_a) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201901     | 1         | 1       |         1
+ 201901     | 2         | 1       |         1
+(2 rows)
+
+SELECT * FROM hash_list SUBPARTITION (p_201901_b) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+SELECT * FROM hash_list SUBPARTITION (p_201902_a) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+SELECT * FROM hash_list SUBPARTITION (p_201902_b) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(2 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM hash_list SUBPARTITION FOR ('201902','201902') ORDER BY 1,2;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Sort Key: month_code, dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on hash_list
+               Selected Partitions:  2
+               Selected Subpartitions:  2:1
+(7 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM hash_list WHERE month_code = '201901' ORDER BY 1,2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on hash_list
+               Filter: ((month_code)::text = '201901'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  1:1
+(8 rows)
+
+drop table hash_list;
+CREATE TABLE hash_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY hash (month_code) SUBPARTITION BY hash (month_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+insert into hash_hash values('201901', '1', '1', 1);
+insert into hash_hash values('201901', '2', '1', 1);
+insert into hash_hash values('201903', '1', '1', 1);
+insert into hash_hash values('201903', '2', '1', 1);
+EXPLAIN (costs false)
+SELECT * FROM hash_hash SUBPARTITION FOR ('201901','201901') ORDER BY 1,2;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Sort Key: month_code, dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on hash_hash
+               Selected Partitions:  1
+               Selected Subpartitions:  1:1
+(7 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM hash_hash WHERE month_code = '201903' ORDER BY 1,2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on hash_hash
+               Filter: ((month_code)::text = '201903'::text)
+               Selected Partitions:  2
+               Selected Subpartitions:  2:1
+(8 rows)
+
+drop table hash_hash;
+CREATE TABLE hash_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY hash (month_code) SUBPARTITION BY range (month_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN ( '201902' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN ( '201903' )
+  ),
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN ( '201902' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN ( '201903' )
+  )
+);
+insert into hash_range values('201901', '1', '1', 1);
+insert into hash_range values('201901', '2', '1', 1);
+insert into hash_range values('201902', '1', '1', 1);
+insert into hash_range values('201902', '2', '1', 1);
+insert into hash_range values('201903', '2', '1', 1);
+ERROR:  inserted partition key does not map to any table partition
+SELECT * FROM hash_range SUBPARTITION (p_201901_a) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201901     | 1         | 1       |         1
+ 201901     | 2         | 1       |         1
+(2 rows)
+
+SELECT * FROM hash_range SUBPARTITION (p_201901_b) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+SELECT * FROM hash_range SUBPARTITION (p_201902_a) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+SELECT * FROM hash_range SUBPARTITION (p_201902_b) ORDER BY 1,2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(2 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM hash_range SUBPARTITION FOR ('201901','201901') ORDER BY 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: month_code, dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on hash_range
+               Selected Partitions:  1
+               Selected Subpartitions:  1:1
+(7 rows)
+
+EXPLAIN (costs false)
+SELECT * FROM hash_range WHERE month_code = '201902' ORDER BY 1,2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: dept_code
+   ->  Partition Iterator
+         Iterations: 1, Sub Iterations: 1
+         ->  Partitioned Seq Scan on hash_range
+               Filter: ((month_code)::text = '201902'::text)
+               Selected Partitions:  2
+               Selected Subpartitions:  2:1
+(8 rows)
+
+drop table hash_range;
 --clean
 DROP SCHEMA subpartition_createtable CASCADE;
 NOTICE:  drop cascades to table range_range_02
@@ -1754,23 +2285,30 @@ Command:     CREATE TABLE SUBPARTITION
 Description: define a new table subpartition
 Syntax:
 CREATE TABLE [ IF NOT EXISTS ] subpartition_table_name
-( { column_name data_type [ COLLATE collation ] [ column_constraint [ ... ] ]
+( { column_name data_type [ CHARACTER SET | CHARSET charset ]
+    [ COLLATE collation ] [ column_constraint [ ... ] ]
     | table_constraint
     | LIKE source_table [ like_option [...] ] }
     [, ... ]
 )
     [ AUTO_INCREMENT [ = ] value ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ][ [ DEFAULT ] COLLATE [ = ] default_collation ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]
-    PARTITION BY {RANGE | LIST | HASH} (partition_key) SUBPARTITION BY {RANGE | LIST | HASH} (subpartition_key)
+    PARTITION BY {RANGE [ COLUMNS ] | LIST [ COLUMNS ] | HASH | KEY} (partition_key) [ PARTITIONS integer ] SUBPARTITION BY {RANGE | LIST | HASH | KEY} (subpartition_key) [ SUBPARTITIONS integer ]
     (
-      PARTITION partition_name1 [ VALUES LESS THAN (val1) | VALUES (val1[, ...]) ] [ TABLESPACE tablespace ]
+      PARTITION partition_name1 [ VALUES LESS THAN { (val1 | MAXVALUE) | MAXVALUE } | VALUES [ IN ] (val1[, ...]) ] [ TABLESPACE [=] tablespace ]
       (
-        { SUBPARTITION subpartition_name1 [ VALUES LESS THAN (val1_1) | VALUES (val1_1[, ...])]  [ TABLESPACE tablespace ] } [, ...]
+        { SUBPARTITION subpartition_name1 [ VALUES LESS THAN (val1_1) | VALUES (val1_1[, ...])]  [ TABLESPACE [=] tablespace ] } [, ...]
       )
       [, ...]
     ) [ { ENABLE | DISABLE } ROW MOVEMENT ];
+NOTICE: [ COLUMNS ] is only available in B-format database!
+NOTICE: [ PARTITIONS integer ] in RANGE/LIST partition is only available in B-format database!
+NOTICE: [ IN ] is only available in B-format database!
+NOTICE: KEY is only available in B-format database!
+NOTICE: MAXVALUE without parentheses is only available in B-format database!
 
 where column_constraint can be:
 [ CONSTRAINT constraint_name ]
@@ -1778,13 +2316,14 @@ where column_constraint can be:
   NULL |
   CHECK ( expression ) |
   DEFAULT default_expr |
-  GENERATED ALWAYS AS ( generation_expr ) STORED |
+  GENERATED ALWAYS AS ( generation_expr ) [STORED] |
   AUTO_INCREMENT |
-  UNIQUE index_parameters |
+  UNIQUE [KEY] index_parameters |
   PRIMARY KEY index_parameters |
   REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
     [ ON DELETE action ] [ ON UPDATE action ] }
 [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
 where table_constraint can be:
 [ CONSTRAINT [ constraint_name ] ]
 { CHECK ( expression ) |
@@ -1799,10 +2338,12 @@ where index_parameters can be:
 [ WITH ( {storage_parameter = value} [, ... ] ) ]
 [ USING INDEX TABLESPACE tablespace_name ]
 
-NOTICE: 'CREATE TABLE SUBPARTITION' is only avaliable in CENTRALIZED mode!
+NOTICE: 'CREATE TABLE SUBPARTITION' is only available in CENTRALIZED mode!
 NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
-NOTICE: '[ index_name ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ USING method ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ ASC | DESC ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: 'AUTO_INCREMENT' is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
 

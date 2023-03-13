@@ -684,7 +684,7 @@ Datum pg_xlogfile_name_offset(PG_FUNCTION_ARGS)
      * Construct a tuple descriptor for the result row.  This must match this
      * function's pg_proc entry!
      */
-    resultTupleDesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+    resultTupleDesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, "file_name", TEXTOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)2, "file_offset", INT4OID, -1, 0);
 
@@ -971,7 +971,7 @@ Datum pg_disable_delay_ddl_recycle(PG_FUNCTION_ARGS)
     /*
      * Construct a tuple descriptor for the result row.
      */
-    resultTupleDesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+    resultTupleDesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, "ddl_delay_start_lsn", TEXTOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)2, "ddl_delay_end_lsn", TEXTOID, -1, 0);
 
@@ -1037,7 +1037,7 @@ Datum gs_roach_disable_delay_ddl_recycle(PG_FUNCTION_ARGS)
     securec_check_ss(rc, "\0", "\0");
 
     /* Construct a tuple descriptor for the result row. */
-    resultTupleDesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+    resultTupleDesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, "ddl_delay_start_lsn", TEXTOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)2, "ddl_delay_end_lsn", TEXTOID, -1, 0);
 
@@ -1106,7 +1106,7 @@ Datum pg_resume_bkp_flag(PG_FUNCTION_ARGS)
     /*
      * Construct a tuple descriptor for the result row.
      */
-    resultTupleDesc = CreateTemplateTupleDesc(4, false, TAM_HEAP);
+    resultTupleDesc = CreateTemplateTupleDesc(4, false);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, "start_backup_flag", BOOLOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)2, "to_delay", BOOLOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)3, "ddl_delay_recycle_ptr", TEXTOID, -1, 0);
@@ -1360,7 +1360,7 @@ Datum gs_get_global_barrier_status(PG_FUNCTION_ARGS)
     /*
      * Construct a tuple descriptor for the result row.
      */
-    resultTupleDesc = CreateTemplateTupleDesc(PG_GET_GLOBAL_BARRIER_STATUS_COLS, false, TAM_HEAP);
+    resultTupleDesc = CreateTemplateTupleDesc(PG_GET_GLOBAL_BARRIER_STATUS_COLS, false);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, "global_barrier_id", TEXTOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)2, "global_achive_barrier_id", TEXTOID, -1, 0);
     resultTupleDesc = BlessTupleDesc(resultTupleDesc);
@@ -1558,7 +1558,7 @@ Datum gs_get_local_barrier_status(PG_FUNCTION_ARGS)
     /*
      * Construct a tuple descriptor for the result row.
      */
-    resultTupleDesc = CreateTemplateTupleDesc(PG_GET_LOCAL_BARRIER_STATUS_COLS, false, TAM_HEAP);
+    resultTupleDesc = CreateTemplateTupleDesc(PG_GET_LOCAL_BARRIER_STATUS_COLS, false);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, "barrier_id", TEXTOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)2, "barrier_lsn", TEXTOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)3, "archive_lsn", TEXTOID, -1, 0);
@@ -2470,7 +2470,7 @@ Datum gs_get_standby_cluster_barrier_status(PG_FUNCTION_ARGS)
     /*
      * Construct a tuple descriptor for the result row.
      */
-    resultTupleDesc = CreateTemplateTupleDesc(PG_GET_STANDBY_BARRIER_STATUS_COLS, false, TAM_HEAP);
+    resultTupleDesc = CreateTemplateTupleDesc(PG_GET_STANDBY_BARRIER_STATUS_COLS, false);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, "latest_id", TEXTOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)2, "barrier_lsn", TEXTOID, -1, 0);
     TupleDescInitEntry(resultTupleDesc, (AttrNumber)3, "recovery_id", TEXTOID, -1, 0);

@@ -301,12 +301,12 @@ static inline int8 get_indexsplit_from_reloptions(bytea *reloptions, Oid amoid)
 #define RelationIsUstoreFormat(relation) \
     ((RELKIND_RELATION == relation->rd_rel->relkind || \
       RELKIND_TOASTVALUE == relation->rd_rel->relkind) && \
-        relation->rd_tam_type == TAM_USTORE)
+        relation->rd_tam_ops == TableAmUstore)
 
 #define RelationIsAstoreFormat(relation) \
     ((RELKIND_RELATION == relation->rd_rel->relkind || \
       RELKIND_TOASTVALUE == relation->rd_rel->relkind) && \
-        relation->rd_tam_type == TAM_HEAP)
+        relation->rd_tam_ops == TableAmHeap)
 
 #define RelationIsUBTree(relation) (relation->rd_rel->relam == UBTREE_AM_OID)
 #define RelationIsUstoreIndex(relation) (RelationIsUBTree(relation))
@@ -391,8 +391,8 @@ static inline RedisHtlAction RelationGetAppendMode(Relation rel)
         pg_strcasecmp(RelationGetOrientation(relation), ORIENTATION_TIMESERIES) == 0)
 
 #define TsRelWithImplDistColumn(attribute, pos)     \
-    (((attribute)[pos]->attkvtype == ATT_KV_HIDE) &&  \
-        namestrcmp(&((attribute)[pos]->attname), TS_PSEUDO_DIST_COLUMN) == 0)
+    (((attribute)[pos].attkvtype == ATT_KV_HIDE) &&  \
+        namestrcmp(&((attribute)[pos].attname), TS_PSEUDO_DIST_COLUMN) == 0)
 
 // Helper Macro Defination
 //
@@ -654,6 +654,9 @@ extern void PartitionDecrementReferenceCount(Partition part);
     ((PARTTYPE_PARTITIONED_RELATION == (relation)->rd_rel->parttype ||     \
       PARTTYPE_SUBPARTITIONED_RELATION == (relation)->rd_rel->parttype) && \
      (RELKIND_RELATION == (relation)->rd_rel->relkind))
+
+#define RELATION_IS_INTERVAL_PARTITIONED(relation)                                     \
+    (RELATION_IS_PARTITIONED(relation) && PartitionMapIsInterval((relation)->partMap))
 
 #define RELATION_IS_VALUE_PARTITIONED(relation)                               \
     ((PARTTYPE_VALUE_PARTITIONED_RELATION == (relation)->rd_rel->parttype) && \

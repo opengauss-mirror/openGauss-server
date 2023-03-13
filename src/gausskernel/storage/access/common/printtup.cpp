@@ -25,6 +25,7 @@
 #include "libpq/pqformat.h"
 #include "tcop/pquery.h"
 #include "utils/lsyscache.h"
+#include "utils/numeric.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #ifdef PGXC
@@ -67,6 +68,7 @@ static void printHybridBatch(VectorBatch *batch, DestReceiver *self);
 static void finalizeLocalStream(DestReceiver *self);
 
 inline void AddCheckInfo(StringInfo buf);
+
 /* ----------------------------------------------------------------
  *		printtup / debugtup support
  * ----------------------------------------------------------------
@@ -518,7 +520,7 @@ void SendRowDescriptionMessage(StringInfo buf, TupleDesc typeinfo, List *targetl
  */
 static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *targetlist, int16 *formats)
 {
-    Form_pg_attribute *attrs = typeinfo->attrs;
+    FormData_pg_attribute *attrs = typeinfo->attrs;
     int natts = typeinfo->natts;
     int i;
     ListCell *tlist_item = list_head(targetlist);
@@ -546,13 +548,13 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
                             ) * natts);
 
     for (i = 0; i < natts; ++i) {
-        Oid atttypid = attrs[i]->atttypid;
-        int32 atttypmod = attrs[i]->atttypmod;
+        Oid atttypid = attrs[i].atttypid;
+        int32 atttypmod = attrs[i].atttypmod;
         if (IsClientLogicType(atttypid) && atttypmod == -1) {
             elog(DEBUG1, "client logic without original type is sent to client");
         }
 
-        writeString(buf, NameStr(attrs[i]->attname), true);
+        writeString(buf, NameStr(attrs[i].attname), true);
 
 #ifdef PGXC
         /*
@@ -560,7 +562,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
          * if we encounter droped columns, we should send it to CN. but atttypid of dropped column
          * is invalid in pg_attribute, it will generate error, so we should do special process for the reason.
          */
-        if (IsConnFromCoord() && attrs[i]->attisdropped)
+        if (IsConnFromCoord() && attrs[i].attisdropped)
             atttypid = UNKNOWNOID;
 #endif
 
@@ -587,7 +589,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
         /* If column is a domain, send the base type and typmod instead */
         atttypid = getBaseTypeAndTypmod(atttypid, &atttypmod);
         pq_writeint32(buf, atttypid);
-        pq_writeint16(buf, attrs[i]->attlen);
+        pq_writeint16(buf, attrs[i].attlen);
         /* typmod appears in protocol 2.0 and up */
         pq_writeint32(buf, atttypmod);
 
@@ -615,15 +617,15 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
  */
 static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List *targetlist, int16 *formats)
 {
-    Form_pg_attribute *attrs = typeinfo->attrs;
+    FormData_pg_attribute *attrs = typeinfo->attrs;
     int natts = typeinfo->natts;
     int i;
 
     for (i = 0; i < natts; ++i) {
-        Oid atttypid = attrs[i]->atttypid;
-        int32 atttypmod = attrs[i]->atttypmod;
+        Oid atttypid = attrs[i].atttypid;
+        int32 atttypmod = attrs[i].atttypmod;
 
-        writeString(buf, NameStr(attrs[i]->attname), false);
+        writeString(buf, NameStr(attrs[i].attname), false);
 
 #ifdef PGXC
         /*
@@ -631,14 +633,14 @@ static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List *t
          * if we encounter droped columns, we should send it to CN. but atttypid of dropped column
          * is invalid in pg_attribute, it will generate error, so we should do special process for the reason.
          */
-        if (IsConnFromCoord() && attrs[i]->attisdropped)
+        if (IsConnFromCoord() && attrs[i].attisdropped)
             atttypid = UNKNOWNOID;
 #endif
 
         /* If column is a domain, send the base type and typmod instead */
         atttypid = getBaseTypeAndTypmod(atttypid, &atttypmod);
         pq_sendint32(buf, atttypid);
-        pq_sendint16(buf, attrs[i]->attlen);
+        pq_sendint16(buf, attrs[i].attlen);
         /* typmod appears in protocol 2.0 and up */
         pq_sendint32(buf, atttypmod);
 
@@ -757,16 +759,16 @@ static void printtup_prepare_info(DR_printtup *myState, TupleDesc typeinfo, int 
          * if we encounter droped columns, we should send it to CN. but atttypid of dropped column
          * is invalid in pg_attribute, it will generate error, so we should do special process for the reason.
          */
-        if (typeinfo->attrs[i]->attisdropped) {
-            typeinfo->attrs[i]->atttypid = UNKNOWNOID;
+        if (typeinfo->attrs[i].attisdropped) {
+            typeinfo->attrs[i].atttypid = UNKNOWNOID;
         }
 
         thisState->format = format;
         if (format == 0) {
-            getTypeOutputInfo(typeinfo->attrs[i]->atttypid, &thisState->typoutput, &thisState->typisvarlena);
+            getTypeOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typoutput, &thisState->typisvarlena);
             fmgr_info(thisState->typoutput, &thisState->finfo);
         } else if (format == 1) {
-            getTypeBinaryOutputInfo(typeinfo->attrs[i]->atttypid, &thisState->typsend, &thisState->typisvarlena);
+            getTypeBinaryOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typsend, &thisState->typisvarlena);
             fmgr_info(thisState->typsend, &thisState->finfo);
         } else {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unsupported format code: %d", format)));
@@ -800,7 +802,7 @@ static void printtup_prepare_info_for_stream(DR_printtup *myState, TupleDesc typ
     for (i = 0; i < numAttrs; i++) {
         PrinttupAttrInfo *thisState = myState->myinfo + i;
         thisState->format = 0;
-        getTypeOutputInfo(typeinfo->attrs[i]->atttypid, &thisState->typoutput, &thisState->typisvarlena);
+        getTypeOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typoutput, &thisState->typisvarlena);
         fmgr_info(thisState->typoutput, &thisState->finfo);
     }
 }
@@ -1009,6 +1011,14 @@ void printBatch(VectorBatch *batch, DestReceiver *self)
     pq_endmessage_reuse(buf);
 }
 
+static inline bool check_need_free_varchar_output(const char* str)
+{
+    return ((char*)str == u_sess->utils_cxt.varcharoutput_buffer);
+}
+static inline bool check_need_free_numeric_output(const char* str)
+{
+    return ((char*)str == u_sess->utils_cxt.numericoutput_buffer);
+}
 /* ----------------
  *		printtup --- print a tuple in protocol 3.0
  * ----------------
@@ -1020,11 +1030,11 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
     StringInfo buf = &myState->buf;
     int natts = typeinfo->natts;
     int i;
+    bool need_free = false;
     bool binary = false;
     /* just as we define in backend/commands/analyze.cpp */
 #define WIDTH_THRESHOLD 1024
 
-    StreamTimeSerilizeStart(t_thrd.pgxc_cxt.GlobalNetInstr);
     /* Set or update my derived attribute info, if needed */
     if (myState->attrinfo != typeinfo || myState->nattrs != natts)
         printtup_prepare_info(myState, typeinfo, natts);
@@ -1054,7 +1064,6 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
         appendBinaryStringInfo(buf, slot->tts_dataRow, slot->tts_dataLen);
         AddCheckInfo(buf);
         pq_endmessage_reuse(buf);
-        StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
         return;
     }
 #endif
@@ -1075,48 +1084,60 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
      */
     for (i = 0; i < natts; ++i) {
         PrinttupAttrInfo *thisState = myState->myinfo + i;
-        Datum origattr = slot->tts_values[i];
-        Datum attr = static_cast<uintptr_t>(0);
+        Datum attr = slot->tts_values[i];
 
         /*
          * skip null value attribute,
          * we need to skip the droped columns for analyze global stats.
          */
-        if (slot->tts_isnull[i] || typeinfo->attrs[i]->attisdropped) {
+        if (slot->tts_isnull[i] || typeinfo->attrs[i].attisdropped) {
             pq_sendint32(buf, (uint32)-1);
             continue;
         }
 
-        if (typeinfo->attrs[i]->atttypid == ANYARRAYOID && slot->tts_dataRow != NULL) {
+        if (typeinfo->attrs[i].atttypid == ANYARRAYOID && slot->tts_dataRow != NULL) {
             /*
              * For ANYARRAY type, the not null DataRow-based tuple indicates the value in
-             * origattr had been converted to CSTRING type previously by using anyarray_out.
+             * attr had been converted to CSTRING type previously by using anyarray_out.
              * just send over the DataRow message as we received it.
              */
-            pq_sendcountedtext(buf, (char *)origattr, strlen((char *)origattr), false);
+            pq_sendcountedtext_printtup(buf, (char *)attr, strlen((char *)attr));
         } else {
-            /*
-             * If we have a toasted datum, forcibly detoast it here to avoid
-             * memory leakage inside the type's output routine.
-             */
-            if (thisState->typisvarlena)
-                attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
-            else
-                attr = origattr;
-
             if (thisState->format == 0) {
                 /* Text output */
                 char *outputstr = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
                 t_thrd.xact_cxt.callPrint = true;
 #endif
-                outputstr = OutputFunctionCall(&thisState->finfo, attr);
+                need_free = false;
+                switch (thisState->typoutput) {
+                    case F_INT4OUT: 
+                        outputstr = output_int32_to_cstring(DatumGetInt32(attr));
+                        break;
+                    case F_INT8OUT:
+                        outputstr = output_int64_to_cstring(DatumGetInt64(attr));
+                        break;
+                    case F_BPCHAROUT: 
+                    case F_VARCHAROUT: 
+                        outputstr = output_text_to_cstring((text*)DatumGetPointer(attr));
+                        need_free = !check_need_free_varchar_output(outputstr);
+                        break;
+                    case F_NUMERIC_OUT: 
+                        outputstr = output_numeric_out(DatumGetNumeric(attr));
+                        need_free = !check_need_free_numeric_output(outputstr);
+                        break;
+                    default:
+                        outputstr = OutputFunctionCall(&thisState->finfo, attr);
+                        need_free = true;
+                        break;
+                }
+#ifdef ENABLE_MULTIPLE_NODES
                 if (thisState->typisvarlena && self->forAnalyzeSampleTuple &&
-                    (typeinfo->attrs[i]->atttypid == BYTEAOID || typeinfo->attrs[i]->atttypid == CHAROID ||
-                     typeinfo->attrs[i]->atttypid == TEXTOID || typeinfo->attrs[i]->atttypid == BLOBOID ||
-                     typeinfo->attrs[i]->atttypid == CLOBOID || typeinfo->attrs[i]->atttypid == RAWOID ||
-                     typeinfo->attrs[i]->atttypid == BPCHAROID || typeinfo->attrs[i]->atttypid == VARCHAROID ||
-                     typeinfo->attrs[i]->atttypid == NVARCHAR2OID) &&
+                    (typeinfo->attrs[i].atttypid == BYTEAOID || typeinfo->attrs[i].atttypid == CHAROID ||
+                     typeinfo->attrs[i].atttypid == TEXTOID || typeinfo->attrs[i].atttypid == BLOBOID ||
+                     typeinfo->attrs[i].atttypid == CLOBOID || typeinfo->attrs[i].atttypid == RAWOID ||
+                     typeinfo->attrs[i].atttypid == BPCHAROID || typeinfo->attrs[i].atttypid == VARCHAROID ||
+                     typeinfo->attrs[i].atttypid == NVARCHAR2OID) &&
                     strlen(outputstr) > WIDTH_THRESHOLD * 2) {
                     /*
                      * in compute_scalar_stats, we just skip detoast value if value size is
@@ -1130,7 +1151,10 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                     text *result = NULL;
 
                     txt = cstring_to_text(outputstr);
-                    pfree(outputstr);
+                    if (need_free) {
+                        pfree(outputstr);
+                    }
+                    need_free = true;
 
                     str = DirectFunctionCall3(substrb_with_lenth, PointerGetDatum(txt), Int32GetDatum(0),
                                               Int32GetDatum(length));
@@ -1141,11 +1165,14 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                     outputstr = TextDatumGetCString(str);
                     pfree(result);
                 }
+#endif
 #ifndef ENABLE_MULTIPLE_NODES
                 t_thrd.xact_cxt.callPrint = false;
 #endif
-                pq_sendcountedtext(buf, outputstr, strlen(outputstr), false);
-                pfree(outputstr);
+                pq_sendcountedtext_printtup(buf, outputstr, strlen(outputstr));
+                if (need_free) {
+                    pfree(outputstr);
+                }
             } else {
                 /* Binary output */
                 bytea *outputbytes = NULL;
@@ -1155,15 +1182,10 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                 pq_sendbytes(buf, VARDATA(outputbytes), VARSIZE(outputbytes) - VARHDRSZ);
                 pfree(outputbytes);
             }
-
-            /* Clean up detoasted copy, if any */
-            if (DatumGetPointer(attr) != DatumGetPointer(origattr))
-                pfree(DatumGetPointer(attr));
         }
     }
 
     (void)MemoryContextSwitchTo(old_context);
-    StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
 
     AddCheckInfo(buf);
     pq_endmessage_reuse(buf);
@@ -1293,14 +1315,14 @@ static void printatt(unsigned attributeId, Form_pg_attribute attributeP, const c
 void debugStartup(DestReceiver *self, int operation, TupleDesc typeinfo)
 {
     int natts = typeinfo->natts;
-    Form_pg_attribute *attinfo = typeinfo->attrs;
+    FormData_pg_attribute *attinfo = typeinfo->attrs;
     int i;
 
     /*
      * show the return type of the tuples
      */
     for (i = 0; i < natts; ++i)
-        printatt((unsigned)i + 1, attinfo[i], NULL);
+        printatt((unsigned)i + 1, &attinfo[i], NULL);
     printf("\t----\n");
 }
 
@@ -1313,38 +1335,24 @@ void debugtup(TupleTableSlot *slot, DestReceiver *self)
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
     int natts = typeinfo->natts;
     int i;
-    Datum origattr, attr;
+    Datum attr = 0;
     char *value = NULL;
     bool isnull = false;
     Oid typoutput;
     bool typisvarlena = false;
 
     for (i = 0; i < natts; ++i) {
-        origattr = tableam_tslot_getattr(slot, i + 1, &isnull);
+        attr = tableam_tslot_getattr(slot, i + 1, &isnull);
         if (isnull) {
             continue;
         }
-        getTypeOutputInfo(typeinfo->attrs[i]->atttypid, &typoutput, &typisvarlena);
-
-        /*
-         * If we have a toasted datum, forcibly detoast it here to avoid
-         * memory leakage inside the type's output routine.
-         */
-        if (typisvarlena) {
-            attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
-        } else {
-            attr = origattr;
-        }
+        getTypeOutputInfo(typeinfo->attrs[i].atttypid, &typoutput, &typisvarlena);
 
         value = OidOutputFunctionCall(typoutput, attr);
 
-        printatt((unsigned)i + 1, typeinfo->attrs[i], value);
-
-        pfree(value);
-
-        /* Clean up detoasted copy, if any */
-        if (DatumGetPointer(attr) != DatumGetPointer(origattr)) {
-            pfree(DatumGetPointer(attr));
+        printatt((unsigned)i + 1, &typeinfo->attrs[i], value);
+        if (value != NULL) {
+            pfree(value);
         }
     }
     printf("\t----\n");
@@ -1403,8 +1411,7 @@ static void printtup_internal_20(TupleTableSlot *slot, DestReceiver *self)
      */
     for (i = 0; i < natts; ++i) {
         PrinttupAttrInfo *thisState = myState->myinfo + i;
-        Datum origattr = slot->tts_values[i];
-        Datum attr = static_cast<uintptr_t>(0);
+        Datum attr = slot->tts_values[i];
         bytea *outputbytes = NULL;
 
         if (slot->tts_isnull[i])
@@ -1412,24 +1419,10 @@ static void printtup_internal_20(TupleTableSlot *slot, DestReceiver *self)
 
         Assert(thisState->format == 1);
 
-        /*
-         * If we have a toasted datum, forcibly detoast it here to avoid
-         * memory leakage inside the type's output routine.
-         */
-        if (thisState->typisvarlena)
-            attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
-        else
-            attr = origattr;
-
         outputbytes = SendFunctionCall(&thisState->finfo, attr);
-        /* We assume the result will not have been toasted */
         pq_sendint32(buf, VARSIZE(outputbytes) - VARHDRSZ);
         pq_sendbytes(buf, VARDATA(outputbytes), VARSIZE(outputbytes) - VARHDRSZ);
         pfree(outputbytes);
-
-        /* Clean up detoasted copy, if any */
-        if (DatumGetPointer(attr) != DatumGetPointer(origattr))
-            pfree(DatumGetPointer(attr));
     }
 
     pq_endmessage_reuse(buf);

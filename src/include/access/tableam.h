@@ -201,7 +201,7 @@ typedef struct TableAmRoutine {
      * @param attnum: index of the atribute to be extracted.
      * @param isnull: set to true, if the attribute is NULL.
      */
-    Datum (*tslot_getattr)(TupleTableSlot *slot, int attnum, bool *isnull);
+    Datum (*tslot_getattr)(TupleTableSlot *slot, int attnum, bool *isnull, bool need_transform_anyarray);
 
     /*
      * This function forces all the entries of slot's Datum/isnull array to be valid
@@ -210,7 +210,7 @@ typedef struct TableAmRoutine {
      *
      * @param slot: TableTuple slot from this attributes are extracted
      */
-    void (*tslot_getallattrs)(TupleTableSlot *slot);
+    void (*tslot_getallattrs)(TupleTableSlot *slot,  bool need_transform_anyarray);
 
     /*
      * Detects if specified attribute is null without actually fetching it.
@@ -503,39 +503,185 @@ extern void HeapamScanIndexFetchEnd(IndexFetchTableData *scan);
 extern void heapam_index_fetch_reset(IndexFetchTableData *scan);
 extern IndexFetchTableData *HeapamScanIndexFetchBegin(Relation rel);
 
-extern const TableAmRoutine *GetTableAmRoutine(TableAmType type);
-extern void tableam_tslot_clear(TupleTableSlot *slot);
-extern HeapTuple tableam_tslot_materialize(TupleTableSlot *slot);
-extern MinimalTuple tableam_tslot_get_minimal_tuple(TupleTableSlot *slot);
-extern MinimalTuple tableam_tslot_copy_minimal_tuple(TupleTableSlot *slot);
-extern void tableam_tslot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree);
-extern HeapTuple tableam_tslot_get_heap_tuple(TupleTableSlot *slot);
-extern HeapTuple tableam_tslot_copy_heap_tuple(TupleTableSlot *slot);
-extern void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode);
-extern void tableam_tslot_getsomeattrs(TupleTableSlot *slot, int natts);
-extern Datum tableam_tslot_getattr(TupleTableSlot *slot, int attnum, bool *isnull);
-extern void tableam_tslot_getallattrs(TupleTableSlot *slot);
-extern void tableam_tslot_formbatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows,  int natts);
-extern bool tableam_tslot_attisnull(TupleTableSlot *slot, int attnum);
-extern Tuple tableam_tslot_get_tuple_from_slot(Relation relation, TupleTableSlot *slot);
-extern Datum tableam_tops_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool *isnull,
-    Buffer buf = InvalidBuffer);
-extern MinimalTuple tableam_tops_form_minimal_tuple(TupleDesc tuple_descriptor, Datum *values,
-    const bool *isnull, MinimalTuple in_tuple, uint32 tupTableType);
-extern Tuple tableam_tops_form_tuple(TupleDesc tuple_descriptor, Datum *values, bool *isnull,
-    uint32 tupTableType);
-extern Tuple tableam_tops_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData *cmprs_info,
-    uint32 tupTableType);
-extern void tableam_tops_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull);
-extern void tableam_tops_deform_tuple2(Tuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer);
-extern void tableam_tops_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull,
-    char *cmprs_info);
-extern void tableam_tops_fill_tuple(TupleDesc tuple_desc, Datum *values, const bool *isnull, char *data,
-    Size data_size, uint16 *infomask, bits8 *bit);
-extern Tuple tableam_tops_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *repl_values,
-    const bool *repl_isnull, const bool *do_replace);
-extern Tuple tableam_tops_opfusion_modify_tuple(Tuple tuple, TupleDesc tuple_desc,
-    Datum* repl_values, bool* repl_isnull, UpdateFusion* opf);
+static inline const TableAmRoutine* GetTableAmRoutine(TableAmType type)
+{
+    Assert(type == TAM_HEAP || type == TAM_USTORE);
+    return type == TAM_HEAP ? TableAmHeap : TableAmUstore;
+}
+
+static inline TableAmType GetTableAmType(const TableAmRoutine* ops)
+{
+    Assert(ops == TableAmHeap || ops == TableAmUstore);
+    return ops == TableAmHeap ? TAM_HEAP : TAM_USTORE;
+}
+
+/* ------------------------------------------------------------------------
+ * HEAP TABLE SLOT AM APIs
+ * ------------------------------------------------------------------------
+ */
+
+static inline Tuple tableam_tslot_get_tuple_from_slot(Relation relation, TupleTableSlot *slot)
+{
+    slot->tts_tupleDescriptor->tdhasuids = RELATION_HAS_UIDS(relation);
+    return relation->rd_tam_ops->tslot_get_tuple_from_slot(slot);
+}
+
+/*
+ * Clears the contents of the table slot that contains heap table tuple data.
+ */
+static inline void tableam_tslot_clear(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_clear(slot);
+}
+
+static inline HeapTuple tableam_tslot_materialize(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_materialize(slot);
+}
+
+static inline MinimalTuple tableam_tslot_get_minimal_tuple(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_get_minimal_tuple(slot);
+}
+
+static inline MinimalTuple tableam_tslot_copy_minimal_tuple(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_copy_minimal_tuple(slot);
+}
+
+static inline void tableam_tslot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree)
+{
+    slot->tts_tam_ops->tslot_store_minimal_tuple(mtup, slot, shouldFree);
+}
+
+static inline HeapTuple tableam_tslot_get_heap_tuple(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_get_heap_tuple(slot);
+}
+
+static inline HeapTuple tableam_tslot_copy_heap_tuple(TupleTableSlot *slot)
+{
+    return slot->tts_tam_ops->tslot_copy_heap_tuple(slot);
+}
+
+static inline void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode)
+{
+    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == slot->tts_tam_ops);
+    slot->tts_tam_ops->tslot_store_tuple(tuple, slot, buffer, shouldFree, batchMode);
+}
+
+
+static inline void tableam_tslot_getsomeattrs(TupleTableSlot *slot, int natts)
+{
+    slot->tts_tam_ops->tslot_getsomeattrs(slot, natts);
+}
+
+static inline void tableam_tslot_formbatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows, int natts)
+{
+    slot->tts_tam_ops->tslot_formbatch(slot, batch, cur_rows, natts);
+}
+
+static inline Datum tableam_tslot_getattr(TupleTableSlot *slot, int attnum, bool *isnull,
+                                          bool need_transform_anyarray = false)
+{
+    return slot->tts_tam_ops->tslot_getattr(slot, attnum, isnull, need_transform_anyarray);
+}
+
+static inline void tableam_tslot_getallattrs(TupleTableSlot *slot, bool need_transform_anyarray = false)
+{
+    return slot->tts_tam_ops->tslot_getallattrs(slot, need_transform_anyarray);
+}
+
+static inline bool tableam_tslot_attisnull(TupleTableSlot *slot, int attnum)
+{
+    return slot->tts_tam_ops->tslot_attisnull(slot, attnum);
+}
+
+/* ------------------------------------------------------------------------
+ * TABLE TUPLE AM APIs
+ * ------------------------------------------------------------------------
+ */
+
+static inline Datum tableam_tops_getsysattr(Tuple tuple, int attnum, TupleDesc tuple_desc, bool *isnull,
+    Buffer buf = InvalidBuffer)
+{
+    AssertValidTuple(tuple);
+    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
+    return tuple_desc->td_tam_ops->tops_getsysattr(tuple, attnum, tuple_desc, isnull, buf);
+}
+
+static inline MinimalTuple tableam_tops_form_minimal_tuple(TupleDesc tuple_descriptor, Datum *values,
+    const bool *isnull, MinimalTuple in_tuple, const TableAmRoutine* tam_ops = TableAmHeap)
+{
+    return tam_ops->tops_form_minimal_tuple(tuple_descriptor, values, isnull,
+        in_tuple);
+}
+
+static inline Tuple tableam_tops_form_tuple(TupleDesc tuple_descriptor, Datum *values, bool *isnull,
+    const TableAmRoutine* tam_ops = TableAmHeap)
+{
+    return tam_ops->tops_form_tuple(tuple_descriptor, values, isnull);
+}
+
+static inline Tuple tableam_tops_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData *cmprs_info,
+    const TableAmRoutine* tam_ops = TableAmHeap)
+{
+    return tam_ops->tops_form_cmprs_tuple(tuple_descriptor, cmprs_info);
+}
+
+static inline void tableam_tops_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull)
+{
+    AssertValidTuple(tuple);
+    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
+    return tuple_desc->td_tam_ops->tops_deform_tuple(tuple, tuple_desc, values, isnull);
+}
+
+static inline void tableam_tops_deform_tuple2(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull,
+                                              Buffer buffer)
+{
+    AssertValidTuple(tuple);
+    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
+    return tuple_desc->td_tam_ops->tops_deform_tuple2(tuple, tuple_desc, values, isnull, buffer);
+}
+
+static inline void tableam_tops_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull,
+    char *cmprs_info)
+{
+    AssertValidTuple(tuple);
+    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
+    return tuple_desc->td_tam_ops->tops_deform_cmprs_tuple(tuple, tuple_desc, values, isnull,
+        cmprs_info);
+}
+
+
+static inline void tableam_tops_fill_tuple(TupleDesc tuple_desc, Datum *values, const bool *isnull, char *data,
+    Size data_size, uint16 *infomask, bits8 *bit)
+{
+    return tuple_desc->td_tam_ops->tops_fill_tuple(tuple_desc, values, isnull, data, data_size,
+        infomask, bit);
+}
+
+/*
+ * there is no uheapam_tops_modify_tuple
+ * but this is done for completeness
+ */
+static inline Tuple tableam_tops_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *repl_values,
+    const bool *repl_isnull, const bool *do_replace)
+{
+    AssertValidTuple(tuple);
+    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
+    return tuple_desc->td_tam_ops->tops_modify_tuple(tuple, tuple_desc, repl_values,
+        repl_isnull, do_replace);
+}
+
+static inline Tuple tableam_tops_opfusion_modify_tuple(Tuple tuple, TupleDesc tuple_desc,
+    Datum* repl_values, bool* repl_isnull, UpdateFusion* opf)
+{
+    AssertValidTuple(tuple);
+    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
+    return tuple_desc->td_tam_ops->tops_opfusion_modify_tuple(tuple, tuple_desc,
+        repl_values, repl_isnull, opf);
+}
 
 #define tableam_tops_free_tuple(tup) \
     do {                                    \
@@ -548,60 +694,213 @@ extern Tuple tableam_tops_opfusion_modify_tuple(Tuple tuple, TupleDesc tuple_des
         }                                                          \
     } while (0)
 
-extern Datum tableam_tops_tuple_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null);
-extern Datum tableam_tops_tuple_fast_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null);
-extern bool tableam_tops_tuple_attisnull(Tuple tuple, int attnum, TupleDesc tuple_desc);
-extern Tuple tableam_tops_copy_tuple(Tuple tuple);
-extern MinimalTuple tableam_tops_copy_minimal_tuple(MinimalTuple mtup);
-extern void tableam_tops_free_minimal_tuple(MinimalTuple mtup);
-extern Tuple tableam_tops_new_tuple(Relation relation, ItemPointer tid);
-extern TransactionId tableam_tops_get_conflictXid(Relation relation, Tuple tup);
-extern void tableam_tops_destroy_tuple(Relation relation, Tuple tuple);
-extern void tableam_tops_add_to_bulk_insert_select(Relation relation, CopyFromBulk bulk, Tuple tup,
-    bool needCopy);
-extern void tableam_tops_add_to_bulk(Relation relation,
-                                                CopyFromBulk bulk, Tuple tup, bool needCopy);
-extern ItemPointer tableam_tops_get_t_self(Relation relation, Tuple tup);
-extern void tableam_tops_exec_delete_index_tuples(TupleTableSlot *slot, Relation relation,
+static inline Datum tableam_tops_tuple_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null)
+{
+    AssertValidTuple(tuple);
+    return GetTableAmRoutine((TableAmType)(GetTabelAmIndexTuple(tuple)))->tops_tuple_getattr(tuple, att_num,
+        tuple_desc, is_null);
+}
+
+static inline Datum tableam_tops_tuple_fast_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null)
+{
+    AssertValidTuple(tuple);
+    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
+    return tuple_desc->td_tam_ops->tops_tuple_fast_getattr(tuple, att_num,
+        tuple_desc, is_null);
+}
+
+static inline bool tableam_tops_tuple_attisnull(Tuple tuple, int attnum, TupleDesc tuple_desc)
+{
+    /*
+     * We allow a NULL tupledesc for relations not expected to have missing
+     * values, such as catalog relations and indexes.
+     */
+    return GetTableAmRoutine((TableAmType)(GetTabelAmIndexTuple(tuple)))
+        ->tops_tuple_attisnull(tuple, attnum, tuple_desc);
+}
+
+static inline Tuple tableam_tops_copy_tuple(Tuple tuple)
+{
+    AssertValidTuple(tuple);
+    return GetTableAmRoutine((TableAmType)(GetTabelAmIndexTuple(tuple)))->tops_copy_tuple(tuple);
+}
+
+static inline MinimalTuple tableam_tops_copy_minimal_tuple(MinimalTuple mtup)
+{
+    return heap_copy_minimal_tuple(mtup);
+}
+
+static inline void tableam_tops_free_minimal_tuple(MinimalTuple mtup)
+{
+    heap_free_minimal_tuple(mtup);
+}
+
+static inline Tuple tableam_tops_new_tuple(Relation relation, ItemPointer tid)
+{
+    return relation->rd_tam_ops->tops_new_tuple(relation, tid);
+}
+
+static inline TransactionId tableam_tops_get_conflictXid(Relation relation, Tuple tup)
+{
+    return relation->rd_tam_ops->tops_get_conflictXid(tup);
+}
+
+static inline void tableam_tops_destroy_tuple(Relation relation, Tuple tuple)
+{
+    relation->rd_tam_ops->tops_destroy_tuple(tuple);
+}
+
+static inline void tableam_tops_add_to_bulk_insert_select(Relation relation, CopyFromBulk bulk, Tuple tup,
+    bool needCopy)
+{
+    relation->rd_tam_ops->tops_add_to_bulk_insert_select(bulk, tup, needCopy);
+}
+
+static inline void tableam_tops_add_to_bulk(Relation relation,
+                                                CopyFromBulk bulk, Tuple tup, bool needCopy)
+{
+    relation->rd_tam_ops->tops_add_to_bulk(bulk, tup, needCopy);
+}
+
+static inline ItemPointer tableam_tops_get_t_self(Relation relation, Tuple tup)
+{
+    return relation->rd_tam_ops->tops_get_t_self(tup);
+}
+
+static inline void tableam_tops_exec_delete_index_tuples(TupleTableSlot *slot, Relation relation,
     ModifyTableState *node, ItemPointer tupleid, ExecIndexTuplesState exec_index_tuples_state,
-    Bitmapset *modifiedIdxAttrs);
-extern List *tableam_tops_exec_update_index_tuples(TupleTableSlot *slot, TupleTableSlot *oldslot,
+    Bitmapset *modifiedIdxAttrs)
+{
+    relation->rd_tam_ops->tops_exec_delete_index_tuples(slot, relation, node, tupleid,
+        exec_index_tuples_state, modifiedIdxAttrs);
+}
+
+static inline List *tableam_tops_exec_update_index_tuples(TupleTableSlot *slot, TupleTableSlot *oldslot,
     Relation relation, ModifyTableState *node, Tuple tuple, ItemPointer tupleid,
-    ExecIndexTuplesState exec_index_tuples_state, int2 bucketid, Bitmapset *modifiedIdxAttrs);
-extern uint32 tableam_tops_get_tuple_type(Relation relation);
-extern void tableam_tops_copy_from_insert_batch(Relation rel, EState* estate, CommandId mycid, int hiOptions,
+    ExecIndexTuplesState exec_index_tuples_state, int2 bucketid, Bitmapset *modifiedIdxAttrs)
+{
+    return relation->rd_tam_ops->tops_exec_update_index_tuples(slot, oldslot, relation, node,
+        tuple, tupleid, exec_index_tuples_state, bucketid, modifiedIdxAttrs);
+}
+
+static inline uint32 tableam_tops_get_tuple_type(Relation relation)
+{
+    return relation->rd_tam_ops->tops_get_tuple_type();
+}
+
+static inline void tableam_tops_copy_from_insert_batch(Relation rel, EState* estate, CommandId mycid, int hiOptions,
         ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, BulkInsertState bistate, int nBufferedTuples,
-        Tuple* bufferedTuples, Partition partition, int2 bucketId);
-extern bool tableam_tops_page_get_item(Relation rel, Tuple tuple, Page page,
-    OffsetNumber tupleNo, BlockNumber destBlocks);
-extern OffsetNumber tableam_tops_page_get_max_offsetnumber(Relation rel, Page page);
-extern Size tableam_tops_page_get_freespace(Relation rel, Page page);
-extern bool tableam_tops_tuple_fetch_row_version(TidScanState* node, Relation relation, ItemPointer tid,
-        Snapshot snapshot, TupleTableSlot *slot);
-extern void tableam_tops_update_tuple_with_oid(Relation relation, Tuple tup, TupleTableSlot *slot);
-extern bool tableam_tuple_fetch(Relation relation, Snapshot snapshot, HeapTuple tuple, Buffer *userbuf,
-    bool keep_buf, Relation stats_relation);
-extern bool tableam_tuple_satisfies_snapshot(Relation relation, HeapTuple tuple, Snapshot snapshot,
-    Buffer buffer);
-extern void tableam_tuple_get_latest_tid(Relation relation, Snapshot snapshot, ItemPointer tid);
-extern Oid tableam_tuple_insert(Relation relation, Tuple tup, CommandId cid, int options,
-    struct BulkInsertStateData *bistate);
-extern int tableam_tuple_multi_insert(Relation relation, Relation parent, Tuple *tuples, int ntuples,
-    CommandId cid, int options, struct BulkInsertStateData *bistate, HeapMultiInsertExtraArgs *args);
-extern TM_Result tableam_tuple_delete(Relation relation, ItemPointer tid, CommandId cid, Snapshot crosscheck,
-    Snapshot snapshot, bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd, bool allow_delete_self = false);
-extern TM_Result tableam_tuple_update(Relation relation, Relation parentRelation, ItemPointer otid, Tuple newtup,
+        Tuple* bufferedTuples, Partition partition, int2 bucketId)
+{
+    rel->rd_tam_ops->tops_copy_from_insert_batch(rel, estate, mycid, hiOptions, resultRelInfo,
+        myslot, bistate, nBufferedTuples, bufferedTuples, partition, bucketId);
+}
+
+static inline bool tableam_tops_page_get_item(Relation rel, Tuple tuple, Page page,
+    OffsetNumber tupleNo, BlockNumber destBlocks)
+{
+    return rel->rd_tam_ops->tops_page_get_item(rel, tuple, page, tupleNo, destBlocks);
+}
+
+static inline OffsetNumber tableam_tops_page_get_max_offsetnumber(Relation rel, Page page)
+{
+    return rel->rd_tam_ops->tops_page_get_max_offsetnumber(page);
+}
+
+static inline Size tableam_tops_page_get_freespace(Relation rel, Page page)
+{
+    return rel->rd_tam_ops->tops_page_get_freespace(page);
+}
+
+static inline bool tableam_tops_tuple_fetch_row_version(TidScanState* node, Relation relation, ItemPointer tid,
+        Snapshot snapshot, TupleTableSlot *slot)
+{
+    return relation->rd_tam_ops->tops_tuple_fetch_row_version(node, relation, tid, snapshot, slot);
+}
+
+static inline void tableam_tops_update_tuple_with_oid(Relation relation, Tuple tup, TupleTableSlot *slot)
+{
+    relation->rd_tam_ops->tops_update_tuple_with_oid(relation, tup, slot);
+}
+
+/* ------------------------------------------------------------------------
+ * DQL AM APIs
+ * ------------------------------------------------------------------------
+ */
+static inline bool tableam_tuple_fetch(Relation relation, Snapshot snapshot, HeapTuple tuple, Buffer *userbuf,
+    bool keep_buf, Relation stats_relation)
+{
+    return relation->rd_tam_ops->tuple_fetch(relation, snapshot, tuple, userbuf, keep_buf,
+        stats_relation);
+}
+
+static inline bool tableam_tuple_satisfies_snapshot(Relation relation, HeapTuple tuple, Snapshot snapshot,
+    Buffer buffer)
+{
+    return relation->rd_tam_ops->tuple_satisfies_snapshot(relation, tuple, snapshot, buffer);
+}
+
+static inline void tableam_tuple_get_latest_tid(Relation relation, Snapshot snapshot, ItemPointer tid)
+{
+    return relation->rd_tam_ops->tuple_get_latest_tid(relation, snapshot, tid);
+}
+
+static inline Oid tableam_tuple_insert(Relation relation, Tuple tup, CommandId cid, int options,
+    struct BulkInsertStateData *bistate)
+{
+    return relation->rd_tam_ops->tuple_insert(relation, tup, cid, options, bistate);
+}
+
+static inline int tableam_tuple_multi_insert(Relation relation, Relation parent, Tuple *tuples, int ntuples,
+    CommandId cid, int options, struct BulkInsertStateData *bistate, HeapMultiInsertExtraArgs *args)
+{
+    return relation->rd_tam_ops->tuple_multi_insert(relation, parent, tuples, ntuples, cid,
+        options, bistate, args);
+}
+
+static inline TM_Result tableam_tuple_delete(Relation relation, ItemPointer tid, CommandId cid, Snapshot crosscheck,
+    Snapshot snapshot, bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd, bool allow_delete_self = false)
+{
+    return relation->rd_tam_ops->tuple_delete(relation, tid, cid, crosscheck, snapshot, wait,
+        oldslot, tmfd, allow_delete_self);
+}
+
+static inline TM_Result tableam_tuple_update(Relation relation, Relation parentRelation, ItemPointer otid, Tuple newtup,
     CommandId cid, Snapshot crosscheck, Snapshot snapshot, bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd,
     bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self = false,
-    bool allow_inplace_update = true, LockTupleMode *lockmode = NULL);
-extern TM_Result tableam_tuple_lock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid,
-    LockTupleMode mode, LockWaitPolicy waitPolicy, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
+    bool allow_inplace_update = true, LockTupleMode *lockmode = NULL)
+{
+    return relation->rd_tam_ops->tuple_update(relation, parentRelation, otid, newtup, cid,
+        crosscheck, snapshot, wait, oldslot, tmfd, lockmode, update_indexes, modifiedIdxAttrs, allow_update_self,
+        allow_inplace_update);
+}
+
+static inline TM_Result tableam_tuple_lock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid,
+    LockTupleMode mode, LockWaitPolicy nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
     Snapshot snapshot, ItemPointer tid, bool isSelectForUpdate, bool isUpsert = false, 
-    TransactionId conflictXid = InvalidTransactionId, int waitSec = 0);
-extern Tuple tableam_tuple_lock_updated(CommandId cid, Relation relation, int lockmode, ItemPointer tid,
-    TransactionId priorXmax, Snapshot snapshot = NULL, bool isSelectForUpdate = false);
-extern void tableam_tuple_check_visible(Relation relation, Snapshot snapshot, Tuple tuple, Buffer buffer);
-extern void tableam_tuple_abort_speculative(Relation relation, Tuple tuple);
+    TransactionId conflictXid = InvalidTransactionId, int waitSec = 0)
+{
+    return relation->rd_tam_ops->tuple_lock(relation, tuple, buffer, cid, mode, nowait, tmfd,
+        allow_lock_self, follow_updates, eval, snapshot, tid, isSelectForUpdate, isUpsert, conflictXid,
+        waitSec);
+}
+
+static inline Tuple tableam_tuple_lock_updated(CommandId cid, Relation relation, int lockmode, ItemPointer tid,
+    TransactionId priorXmax, Snapshot snapshot = NULL, bool isSelectForUpdate = false)
+{
+    return (Tuple)relation->rd_tam_ops->tuple_lock_updated(cid, relation, lockmode, tid, priorXmax,
+        snapshot, isSelectForUpdate);
+}
+
+static inline void tableam_tuple_check_visible(Relation relation, Snapshot snapshot, Tuple tuple, Buffer buffer)
+{
+    relation->rd_tam_ops->tuple_check_visible(snapshot, tuple, buffer);
+}
+
+static inline void tableam_tuple_abort_speculative(Relation relation, Tuple tuple)
+{
+    relation->rd_tam_ops->tuple_abort_speculative(relation, tuple);
+}
 
 /* -----------------------------------------------------------------------
  * SCAN AM APIS FOR HEAP
@@ -609,52 +908,150 @@ extern void tableam_tuple_abort_speculative(Relation relation, Tuple tuple);
  */
 
 extern IndexFetchTableData *tableam_scan_index_fetch_begin(Relation rel);
-extern void tableam_scan_index_fetch_reset(IndexFetchTableData *scan);
+
+static inline void tableam_scan_index_fetch_reset(IndexFetchTableData *scan)
+{
+    heapam_index_fetch_reset(scan);
+}
+
 extern void tableam_scan_index_fetch_end(IndexFetchTableData *scan);
-extern Tuple tableam_scan_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write = NULL);
-extern TableScanDesc tableam_scan_begin(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
-    RangeScanInRedis rangeScanInRedis = { false, 0, 0 });
-extern TableScanDesc tableam_scan_begin_bm(Relation relation, Snapshot snapshot, int nkeys, ScanKey key);
-extern TableScanDesc tableam_scan_begin_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
-    bool allow_strat, bool allow_sync, RangeScanInRedis rangeScanInRedis = { false, 0, 0 });
-extern TableScanDesc tableam_scan_begin_parallel(Relation relation, ParallelHeapScanDesc parallel_scan);
-extern Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write = NULL);
-extern bool tableam_scan_gettuplebatchmode(TableScanDesc sscan, ScanDirection direction);
-extern void tableam_scan_getpage(TableScanDesc sscan, BlockNumber page);
-extern Tuple tableam_scan_gettuple_for_verify(TableScanDesc sscan, ScanDirection direction, bool isValidRelationPage);
-extern void tableam_scan_end(TableScanDesc sscan);
-extern void tableam_scan_rescan(TableScanDesc sscan, ScanKey key);
-extern void tableam_scan_restrpos(TableScanDesc sscan);
-extern void tableam_scan_markpos(TableScanDesc sscan);
-extern void tableam_scan_init_parallel_seqscan(TableScanDesc sscan, int32 dop, ScanDirection dir);
-extern double tableam_index_build_scan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
-    bool allow_sync, IndexBuildCallback callback, void *callback_state, TableScanDesc scan);
-extern void tableam_index_validate_scan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
-    Snapshot snapshot, v_i_state *state);
-extern double tableam_relation_copy_for_cluster(Relation OldHeap, Relation OldIndex, Relation NewHeap,
-    TransactionId OldestXmin, TransactionId FreezeXid, bool verbose, bool use_sort, AdaptMem *memUsage);
+
+static inline Tuple tableam_scan_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write = NULL)
+{
+    return scan->heapRelation->rd_tam_ops->scan_index_fetch_tuple(scan, all_dead, has_cur_xact_write);
+}
+
+static inline TableScanDesc tableam_scan_begin(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
+    RangeScanInRedis rangeScanInRedis = { false, 0, 0 })
+{
+    return relation->rd_tam_ops->scan_begin(relation, snapshot, nkeys, key, rangeScanInRedis);
+}
+
+static inline TableScanDesc tableam_scan_begin_bm(Relation relation, Snapshot snapshot, int nkeys, ScanKey key)
+{
+    return relation->rd_tam_ops->scan_begin_bm(relation, snapshot, nkeys, key);
+}
+
+static inline TableScanDesc tableam_scan_begin_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
+                                                        bool allow_strat, bool allow_sync,
+                                                        RangeScanInRedis rangeScanInRedis = {false, 0, 0})
+{
+    return relation->rd_tam_ops->scan_begin_sampling(relation, snapshot, nkeys, key, allow_strat, allow_sync,
+                                                     rangeScanInRedis);
+}
+
+static inline TableScanDesc tableam_scan_begin_parallel(Relation relation, ParallelHeapScanDesc parallel_scan)
+{
+    return relation->rd_tam_ops->scan_begin_parallel(relation, parallel_scan);
+}
+
+static inline Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction,
+                                              bool *has_cur_xact_write = NULL)
+{
+    return sscan->rs_rd->rd_tam_ops->scan_getnexttuple(sscan, direction, has_cur_xact_write);
+}
+
+static inline bool tableam_scan_gettuplebatchmode(TableScanDesc sscan, ScanDirection direction)
+{
+    return sscan->rs_rd->rd_tam_ops->scan_GetNextBatch(sscan, direction);
+}
+
+static inline void tableam_scan_getpage(TableScanDesc sscan, BlockNumber page)
+{
+    return sscan->rs_rd->rd_tam_ops->scan_getpage(sscan, page);
+}
+
+static inline Tuple tableam_scan_gettuple_for_verify(TableScanDesc sscan, ScanDirection direction,
+                                                     bool isValidRelationPage)
+{
+    return sscan->rs_rd->rd_tam_ops->scan_gettuple_for_verify(sscan, direction, isValidRelationPage);
+}
+
+static inline void tableam_scan_end(TableScanDesc sscan)
+{
+    return sscan->rs_rd->rd_tam_ops->scan_end(sscan);
+}
+
+static inline void tableam_scan_rescan(TableScanDesc sscan, ScanKey key)
+{
+    return sscan->rs_rd->rd_tam_ops->scan_rescan(sscan, key);
+}
+
+static inline void tableam_scan_restrpos(TableScanDesc sscan)
+{
+    return sscan->rs_rd->rd_tam_ops->scan_restrpos(sscan);
+}
+
+static inline void tableam_scan_markpos(TableScanDesc sscan)
+{
+    return sscan->rs_rd->rd_tam_ops->scan_markpos(sscan);
+}
+
+static inline void tableam_scan_init_parallel_seqscan(TableScanDesc sscan, int32 dop, ScanDirection dir)
+{
+    return sscan->rs_rd->rd_tam_ops->scan_init_parallel_seqscan(sscan, dop, dir);
+}
+
+static inline double tableam_index_build_scan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
+    bool allow_sync, IndexBuildCallback callback, void *callback_state, TableScanDesc scan)
+{
+    return heapRelation->rd_tam_ops->index_build_scan(heapRelation, indexRelation, indexInfo,
+        allow_sync, callback, callback_state, scan);
+}
+
+static inline void tableam_index_validate_scan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
+    Snapshot snapshot, v_i_state *state)
+{
+    return heapRelation->rd_tam_ops->index_validate_scan(heapRelation, indexRelation, indexInfo,
+        snapshot, state);
+}
+
+static inline double tableam_relation_copy_for_cluster(Relation OldHeap, Relation OldIndex, Relation NewHeap,
+    TransactionId OldestXmin, TransactionId FreezeXid, bool verbose, bool use_sort, AdaptMem *memUsage)
+{
+    return OldHeap->rd_tam_ops->relation_copy_for_cluster(OldHeap, OldIndex, NewHeap, OldestXmin,
+        FreezeXid, verbose, use_sort, memUsage);
+}
+
 static inline void tableam_tcap_promote_lock(Relation relation, LOCKMODE *lockmode)
 {
-    return g_tableam_routines[relation->rd_tam_type]->tcap_promote_lock(relation, lockmode);
+    return relation->rd_tam_ops->tcap_promote_lock(relation, lockmode);
 }
 
 static inline bool tableam_tcap_validate_snap(Relation relation, Snapshot snap)
 {
-    return g_tableam_routines[relation->rd_tam_type]->tcap_validate_snap(relation, snap);
+    return relation->rd_tam_ops->tcap_validate_snap(relation, snap);
 }
 
 static inline void tableam_tcap_delete_delta(Relation relation, Snapshot snap)
 {
-    return g_tableam_routines[relation->rd_tam_type]->tcap_delete_delta(relation, snap);
+    return relation->rd_tam_ops->tcap_delete_delta(relation, snap);
 }
 
 static inline void tableam_tcap_insert_lost(Relation relation, Snapshot snap)
 {
-    return g_tableam_routines[relation->rd_tam_type]->tcap_insert_lost(relation, snap);
+    return relation->rd_tam_ops->tcap_insert_lost(relation, snap);
 }
 
 extern TM_Result HeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPointer otid, Tuple newtup,
     CommandId cid, Snapshot crosscheck, Snapshot snapshot, bool wait, TM_FailureData *tmfd, bool *update_indexes,
     Bitmapset **modifiedIdxAttrs, bool allow_update_self = false, bool allow_inplace_update = true);
+
+/* ------------------------------------------------------------------------
+ * HEAP AM APIs
+ * ------------------------------------------------------------------------
+ */
+extern Tuple heap_slot_get_tuple_from_slot(TupleTableSlot *slot);
+extern Datum heapam_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool *isnull, Buffer buff);
+extern Tuple heapam_form_tuple(TupleDesc tuple_descriptor, Datum *values, bool *isnull);
+extern void heapam_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull);
+extern void heapam_deform_tuple2(Tuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer);
+extern void heapam_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull, char *cmprs_info);
+extern void heapam_fill_tuple(TupleDesc tuple_desc, Datum *values, const bool *isnull, char *data, Size data_size,
+                              uint16 *infomask, bits8 *bit);
+extern Tuple heapam_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *repl_values, const bool *repl_isnull,
+                                 const bool *do_replace);
+extern bool heapam_attisnull(Tuple tup, int attnum, TupleDesc tuple_desc);
+extern Tuple heapam_copytuple(Tuple tuple);
 
 #endif /* TABLEAM_H */

@@ -2679,6 +2679,9 @@ static void _doSetFixedOutputState(ArchiveHandle* AH)
     /* Make sure function checking is disabled */
     (void)ahprintf(AH, "SET check_function_bodies = false;\n");
 
+    /* Make sure trigger checking is disabled */
+    (void)ahprintf(AH, "SET session_replication_role = replica;\n");
+
     /* Avoid annoying notices etc */
     (void)ahprintf(AH, "SET client_min_messages = warning;\n");
     if (!AH->publicArc.std_strings)

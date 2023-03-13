@@ -33,8 +33,8 @@
 #include "storage/lmgr.h"
 #include "workload/statctl.h"
 #include "instruments/instr_statement.h"
-#include "instruments/instr_waitevent.h"
 #include "ddes/dms/ss_dms.h"
+#include "instruments/instr_waitevent.h"
 
 const int MASK_CLASS_ID = 0xFF000000;
 const int MASK_EVENT_ID = 0x00FFFFFF;
@@ -402,8 +402,10 @@ static void set_dms_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, 
     values[++i] = CStringGetTextDatum("DMS_EVENT");
     values[++i] = CStringGetTextDatum(pgstat_get_wait_dms(WaitEventDMS(eventId + PG_WAIT_DMS)));
     unsigned long long cnt = 0;
-    unsigned long long time = 0; 
-    dms_get_event(dms_wait_event_t(eventId), &cnt, &time);
+    unsigned long long time = 0;
+    if (g_instance.dms_cxt.dmsInited) {
+        dms_get_event(dms_wait_event_t(eventId), &cnt, &time);
+    }
     values[++i] = Int64GetDatum(cnt);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.dms_info[eventId].failed_counter);
     values[++i] = Int64GetDatum(time);
@@ -480,7 +482,7 @@ Datum get_instr_wait_event(PG_FUNCTION_ARGS)
 
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(INSTR_WAITEVENT_ATTRUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(INSTR_WAITEVENT_ATTRUM, false);
 
         create_tuple_entry(tupdesc);
 

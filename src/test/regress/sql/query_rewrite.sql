@@ -170,5 +170,22 @@ create table customer(c_birth_month int);
 -- Scenario:3
 select 1 from  customer where c_birth_month not in (with  tmp1 as (select 1  from now()) select * from tmp1);
 
+--fix bug: Error hint: TableScan(seq_t0), relation name "seq_t0" is not found.
+drop table if exists seq_t0;
+drop table if exists seq_t1;
+create table seq_t0(a int, b int8 );
+create table seq_t1(a int, b int8 );
+explain (costs off) select /*+ tablescan(seq_t0) */ b from seq_t0 union all select /*+ tablescan(seq_t1) */ b from seq_t1;
+--test pulling up sublinks: in orclause.
+drop table if exists t1;
+drop table if exists t2;
+create table t1(c1 int, c2 int, c3 int);
+create table t2(c1 int, c2 int, c3 int);
+insert into t1 values(1,0),(2,0),(1,0),(2,1),(1,1),(1,0),(2,0),(1,0),(2,1),(1,1),(2,3),(2,1),(1,2);
+insert into t2 values(1,0,1),(2,0,2),(1,0,1),(2,1,1),(1,1,0),(1,0,1),(2,0,2),(1,0,1),(2,1,1),(1,1,0),(0,0,1);
+explain  (verbose, costs off) select * from t2 where t2.c1 in (select t1.c1 from t1 group by t1.c1, t1.c2) or t2.c2 = 1;
+drop table if exists t1;
+drop table if exists t2;
+
 drop schema query_rewrite cascade;
 reset current_schema;

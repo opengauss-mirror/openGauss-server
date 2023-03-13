@@ -731,5 +731,419 @@ select timestampdiff(microsecond, '2018-01-01 01:01:01.000001', b) from timestam
 (1 row)
 
 drop table timestamp;
+--test uservar
+show enable_set_variable_b_format;
+ enable_set_variable_b_format 
+------------------------------
+ off
+(1 row)
+
+set enable_set_variable_b_format = on;
+set @var_t_1 = 10;
+select @var_t_1;
+ @var_t_1 
+----------
+       10
+(1 row)
+
+select @var_t_1 := @var_t_1 + 2;
+ ?column? 
+----------
+       12
+(1 row)
+
+select @var_t_1 = 2 = 2;
+ ?column? 
+----------
+ f
+(1 row)
+
+select @var_t_1;
+ @var_t_1 
+----------
+       12
+(1 row)
+
+create table test_var (col1 text, col2 text);
+insert into test_var values('abc','def');
+insert into test_var values('abc2','def3');
+select * from test_var;
+ col1 | col2 
+------+------
+ abc  | def
+ abc2 | def3
+(2 rows)
+
+select @var_row := @var_row + 1 as row , t.* from (select @var_row := 0) r, test_var t;
+ row | col1 | col2 
+-----+------+------
+   1 | abc  | def
+   2 | abc2 | def3
+(2 rows)
+
+-- test var_name
+set @v1 := 1;
+set @1a_b.2$3 := 2;
+set @a_b.2$3 := 3;
+set @_ab.2$3 := 4;
+set @.ab_2$3 := 5;
+set @$ab.2_3 := 6;
+select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3;
+ @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 
+-----+-----------+----------+----------+----------+----------
+   1 |         2 |        3 |        4 |        5 |        6
+(1 row)
+
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1 (f1 int,f2 int,f3 text);
+-- insertStmt
+set @v2 := 'insert into test1 values(1, 2, 123)';
+prepare stmt2 as @v2;
+execute stmt2;
+select * from test1;
+ f1 | f2 | f3  
+----+----+-----
+  1 |  2 | 123
+(1 row)
+
+-- updateStmt
+set @vx := 2, @vy := 'world';
+set @v3 := 'update test1 set f3 = left(@vy, (@vx) :: int)';
+prepare stmt3 as @v3;
+execute stmt3;
+select * from test1;
+ f1 | f2 | f3 
+----+----+----
+  1 |  2 | wo
+(1 row)
+
+-- deleteStmt
+set @v4 := 'delete from test1 where f1 = 1';
+prepare stmt4 as @v4;
+execute stmt4;
+select * from test1;
+ f1 | f2 | f3 
+----+----+----
+(0 rows)
+
+--plpgsql
+create table t_plg(a int);
+insert into t_plg values(1),(2),(3);
+set @plg = 1;
+DO $$
+begin
+perform @plg := @plg + 1 from t_plg;
+end;
+$$;
+--test in where 
+CREATE TABLE employee (
+   id int ,
+   salary int not null
+);
+INSERT INTO employee VALUES(1, 100);
+INSERT INTO employee VALUES(2, 200);
+INSERT INTO employee VALUES(3, 300);
+SELECT salary, (@rowno := @rowno + 1) AS rowno FROM employee, (SELECT @rowno := 0) r;
+ salary | rowno 
+--------+-------
+    100 |     1
+    200 |     2
+    300 |     3
+(3 rows)
+
+SELECT salary, rowno
+FROM (
+    SELECT salary, (@rowno := @rowno + 1) AS rowno
+    FROM employee, (SELECT @rowno := 0) r
+) m
+WHERE rowno = 2;
+ salary | rowno 
+--------+-------
+    200 |     2
+(1 row)
+
+--test in error
+SELECT salary, (@rowno := salary) AS rowno FROM employee ;
+ERROR:  bogus varno: 1
+CONTEXT:  referenced column: rowno
+SELECT salary, (@rowno := salary + 1) AS rowno FROM employee ;
+ERROR:  bogus varno: 1
+CONTEXT:  referenced column: rowno
+--test in order by 
+set @rowno = 0;
+SELECT salary, (@rowno := @rowno + 1) AS rowno FROM employee order by  @rowno;
+ salary | rowno 
+--------+-------
+    100 |     1
+    200 |     2
+    300 |     3
+(3 rows)
+
+set @rowno = 0;
+SELECT salary, (@rowno := @rowno + 1) AS rowno FROM employee order by  @rowno desc;
+ salary | rowno 
+--------+-------
+    100 |     1
+    200 |     2
+    300 |     3
+(3 rows)
+
+set @rowno = 0;
+SELECT salary, @rowno AS rowno FROM employee order by  (@rowno := @rowno + 1) desc;
+ salary | rowno 
+--------+-------
+    300 |     2
+    200 |     1
+    100 |     0
+(3 rows)
+
+--test in update
+set @rowno = 0;
+update employee set salary = 999 where (@rowno := @rowno + 1) < 2;
+select @rowno;
+ @rowno 
+--------
+      3
+(1 row)
+
+select * from employee;
+ id | salary 
+----+--------
+  2 |    200
+  3 |    300
+  1 |    999
+(3 rows)
+
+--test in delete
+set @rowno = 0;
+delete from employee where (@rowno := @rowno + 1) < 2;
+select @rowno;
+ @rowno 
+--------
+      3
+(1 row)
+
+select * from employee;
+ id | salary 
+----+--------
+  3 |    300
+  1 |    999
+(2 rows)
+
+--test in const
+set @rowno = 0;
+SELECT (@rowno := sin(1));
+     ?column?     
+------------------
+ .841470984807897
+(1 row)
+
+select @rowno;
+      @rowno      
+------------------
+ .841470984807897
+(1 row)
+
+set @rowno = 0;
+SELECT (@rowno := 1+2+3+4);
+ ?column? 
+----------
+       10
+(1 row)
+
+select @rowno;
+ @rowno 
+--------
+     10
+(1 row)
+
+create table test_con (a int);
+insert into test_con values(1);
+set @rowno = 0;
+select (@rowno := (select a+10086 from test_con limit 1));
+ ?column? 
+----------
+    10087
+(1 row)
+
+select @rowno;
+ @rowno 
+--------
+  10087
+(1 row)
+
+-- test insert select 
+create table t1 (a int);
+insert into t1 values(1),(10);
+set @num := 0;
+create table t2(b int);
+insert into t2 select @num + 10 from t1;
+select * from t2;
+ b  
+----
+ 10
+ 10
+(2 rows)
+
+select @num;
+ @num 
+------
+    0
+(1 row)
+
+--test as function parameter
+set @num := 1;
+select sin(@num := @num + 1) from t1;
+       sin        
+------------------
+ .909297426825682
+ .141120008059867
+(2 rows)
+
+-- procedure
+set enable_set_variable_b_format = on;
+set @v1 := 10, @v2 := 'abc';
+drop table if exists test_pro;
+NOTICE:  table "test_pro" does not exist, skipping
+create table test_pro(f1 int, f2 varchar(20));
+create or replace procedure pro_insert()
+as
+begin
+    perform @v1 := @v1 +1;
+    insert into test_pro values(@v1, @v2);
+end;
+/
+call pro_insert();
+ pro_insert 
+------------
+ 
+(1 row)
+
+select * from test_pro;
+ f1 | f2  
+----+-----
+ 11 | abc
+(1 row)
+
+select @v1;
+ @v1 
+-----
+  11
+(1 row)
+
+set @v1 := 14, @v2 := 'xxx';
+call pro_insert();
+ pro_insert 
+------------
+ 
+(1 row)
+
+select * from test_pro;
+ f1 | f2  
+----+-----
+ 11 | abc
+ 15 | xxx
+(2 rows)
+
+select @v1;
+ @v1 
+-----
+  15
+(1 row)
+
+set enable_set_variable_b_format = on;
+set @v1 = 1;
+set @v1 = 1;
+create or replace function func_add_sql(num1 bigint, num2 bigint) return bigint
+as
+begin
+    return @v1 := 2 + @v1 ;
+end;
+/
+call func_add_sql(-2, -5);
+ func_add_sql 
+--------------
+            3
+(1 row)
+
+select @v1;
+ @v1 
+-----
+   3
+(1 row)
+
+set @a = 0;
+create table test_set(c1 int);
+insert into test_set values(1),(2),(3),(4);
+select c1 from test_set where (c1 > @a := 1000) or (c1 < @a := 2 + @a);
+ c1 
+----
+  1
+  2
+  3
+  4
+(4 rows)
+
+select @a;
+  @a  
+------
+ 1002
+(1 row)
+
+explain (costs off) select c1 from test_set where (c1 > @a := 1000) or (c1 < @a := 2 + @a);
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on test_set
+   Filter: ((c1 > @var := 1000) OR (c1 < @var := (2 + @a)))
+(2 rows)
+
+--test trig
+drop table if exists test_trigger_des_tbl;
+NOTICE:  table "test_trigger_des_tbl" does not exist, skipping
+drop table if exists test_trigger_src_tbl;
+NOTICE:  table "test_trigger_src_tbl" does not exist, skipping
+CREATE TABLE test_trigger_src_tbl(id1 INT, id2 INT, id3 INT);
+CREATE TABLE test_trigger_des_tbl(id1 INT, id2 INT, id3 INT);
+set @va = 1;
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+    perform @va := @va + 100;
+    INSERT INTO test_trigger_des_tbl VALUES(NEW.id1, NEW.id2, NEW.id3);
+  RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+		   
+CREATE TRIGGER insert_trigger
+           BEFORE INSERT ON test_trigger_src_tbl
+           FOR EACH ROW
+           EXECUTE PROCEDURE tri_insert_func();
+		   
+INSERT INTO test_trigger_src_tbl VALUES(100);
+select @va;
+ @va 
+-----
+ 101
+(1 row)
+
+select * from test_trigger_src_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 |     |    
+(1 row)
+
+select * from test_trigger_des_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 |     |    
+(1 row)
+
+set enable_set_variable_b_format = 0;
+select @var_t_1 := 2;
+ERROR:  syntax error at or near ":="
+LINE 1: select @var_t_1 := 2;
+                        ^
 \c regression
 drop database B_db;

@@ -33,6 +33,7 @@
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_type.h"
 #include "client_logic/client_logic_proc.h"
+#include "client_logic/client_logic.h"
 #include "commands/defrem.h"
 #include "commands/user.h"
 #include "commands/trigger.h"
@@ -1036,7 +1037,7 @@ static bool user_define_func_check(Oid languageId, const char* probin, char** ab
  * not "ArrayType *", to avoid importing array.h into pg_proc_fn.h.
  * ----------------------------------------------------------------
  */
-Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackageid, bool isOraStyle, bool replace, bool returnsSet,
+ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackageid, bool isOraStyle, bool replace, bool returnsSet,
     Oid returnType, Oid proowner, Oid languageObjectId, Oid languageValidator, const char* prosrc, const char* probin,
     bool isAgg, bool isWindowFunc, bool security_definer, bool isLeakProof, bool isStrict, char volatility,
     oidvector* parameterTypes, Datum allParameterTypes, Datum parameterModes, Datum parameterNames,
@@ -1054,6 +1055,8 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
     bool anyrangeOutParam = false;
     bool internalInParam = false;
     bool internalOutParam = false;
+    bool fullEncryptedInParam = false;
+    bool fullEncryptedOutParam = false;
     Oid variadicType = InvalidOid;
     Acl* proacl = NULL;
     Relation rel;
@@ -1151,6 +1154,12 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
             case INTERNALOID:
                 internalInParam = true;
                 break;
+            case BYTEAWITHOUTORDERWITHEQUALCOLOID:
+            case BYTEAWITHOUTORDERCOLOID:
+            case BYTEAWITHOUTORDERWITHEQUALCOLARRAYOID:
+            case BYTEAWITHOUTORDERCOLARRAYOID:
+                fullEncryptedInParam = true;
+                break;
             default:
                 break;
         }
@@ -1179,6 +1188,12 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
                 case INTERNALOID:
                     internalOutParam = true;
                     break;
+                case BYTEAWITHOUTORDERWITHEQUALCOLOID:
+                case BYTEAWITHOUTORDERCOLOID:
+                case BYTEAWITHOUTORDERWITHEQUALCOLARRAYOID:
+                case BYTEAWITHOUTORDERCOLARRAYOID:
+                    fullEncryptedOutParam = true;
+                    break;
                 default:
                     break;
             }
@@ -1194,6 +1209,11 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
      *
      * But when we are in inplace-upgrade, we can create function with polymorphic return type
      */
+    if (!u_sess->attr.attr_common.enable_full_encryption && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        (fullEncryptedInParam || fullEncryptedOutParam || is_enc_type(returnType))) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION), errmsg("cannot create function"),
+            errdetail("function does not support full encrypted type parameter when client encryption is disabled.")));
+    }
     if ((IsPolymorphicType(returnType) || genericOutParam) && !u_sess->attr.attr_common.IsInplaceUpgrade &&
         !genericInParam)
         ereport(ERROR,
@@ -1763,7 +1783,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
     }
 
     pfree_ext(final_file_name);
-    return retval;
+    return myself;
 }
 
 /*
@@ -2303,7 +2323,6 @@ void delete_file_handle(const char* library_path)
 
     AutoMutexLock libraryLock(&file_list_lock);
     libraryLock.lock();
-
 
     char* fullname = expand_dynamic_library_name(library_path);
     for (file_scanner = file_list; file_scanner != NULL; file_scanner = file_scanner->next) {

@@ -81,9 +81,10 @@ static TupleTableSlot* ExecUnique(PlanState* state) /* return: a tuple or NULL *
          * If so then we loop back and fetch another new tuple from the
          * subplan.
          */
-        if (!execTuplesMatch(
-                slot, result_tuple_slot, plan_node->numCols, plan_node->uniqColIdx, node->eqfunctions, node->tempContext))
+        if (!execTuplesMatch(slot, result_tuple_slot, plan_node->numCols, plan_node->uniqColIdx, node->eqfunctions,
+                             node->tempContext, plan_node->uniq_collations)) {
             break;
+        }
     }
 
     /*
@@ -142,7 +143,7 @@ UniqueState* ExecInitUnique(Unique* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &unique_state->ps,
-            ExecGetResultType(outerPlanState(unique_state))->tdTableAmType);
+            ExecGetResultType(outerPlanState(unique_state))->td_tam_ops);
 
     unique_state->ps.ps_ProjInfo = NULL;
 

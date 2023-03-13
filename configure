@@ -3718,9 +3718,8 @@ case ${wal_segsize} in
  128) ;;
  256) ;;
  512) ;;
- 1024) ;;
-  *) { { $as_echo "$as_me:$LINENO: error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64,128,256,512,1024." >&5
-$as_echo "$as_me: error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64,128,256,512,1024." >&2;}
+  *) { { $as_echo "$as_me:$LINENO: error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64,128,256,512." >&5
+$as_echo "$as_me: error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64,128,256,512." >&2;}
    { (exit 1); exit 1; }; }
 esac
 { $as_echo "$as_me:$LINENO: result: ${wal_segsize}MB" >&5
@@ -3732,9 +3731,9 @@ cat >>confdefs.h <<_ACEOF
 _ACEOF
 
 # Set number of MAX_ALLOC_SEGNUM in extreme_rto
-if test "${wal_segsize}" -lt 512; then
+if test "${wal_segsize}" -lt 256; then
   MAX_ALLOC_SEGNUM=4
-elif test "${wal_segsize}" -ge 512 -a "${wal_segsize}" -lt 1024; then
+elif test "${wal_segsize}" -ge 256 -a "${wal_segsize}" -lt 512; then
   MAX_ALLOC_SEGNUM=2
 else
   MAX_ALLOC_SEGNUM=1
@@ -18227,9 +18226,47 @@ fi
 
 # On PPC, check if assembler supports LWARX instruction's mutex hint bit
 case $host_cpu in
+  x86_64)
+    # On x86_64, check if we can compile a popcntq instruction
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether assembler supports x86_64 popcntq" >&5
+$as_echo_n "checking whether assembler supports x86_64 popcntq... " >&6; }
+if ${pgac_cv_have_x86_64_popcntq+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+long long x = 1; long long r;
+	 __asm__ __volatile__ (" popcntq %1,%0\n" : "=q"(r) : "rm"(x));
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  pgac_cv_have_x86_64_popcntq=yes
+else
+  pgac_cv_have_x86_64_popcntq=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv_have_x86_64_popcntq" >&5
+$as_echo "$pgac_cv_have_x86_64_popcntq" >&6; }
+    if test x"$pgac_cv_have_x86_64_popcntq" = xyes ; then
+
+$as_echo "#define HAVE_X86_64_POPCNTQ 1" >>confdefs.h
+
+    fi
+  ;;
+  
   ppc*|powerpc*)
     { $as_echo "$as_me:$LINENO: checking whether assembler supports lwarx hint bit" >&5
 $as_echo_n "checking whether assembler supports lwarx hint bit... " >&6; }
+if ${pgac_cv_have_ppc_mutex_hint+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
     cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -18273,6 +18310,7 @@ sed 's/^/| /' conftest.$ac_ext >&5
 fi
 
 rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
     { $as_echo "$as_me:$LINENO: result: $pgac_cv_have_ppc_mutex_hint" >&5
 $as_echo "$pgac_cv_have_ppc_mutex_hint" >&6; }
     if test x"$pgac_cv_have_ppc_mutex_hint" = xyes ; then
@@ -24851,6 +24889,237 @@ $as_echo "$ac_cv_sizeof_void_p" >&6; }
 cat >>confdefs.h <<_ACEOF
 #define SIZEOF_VOID_P $ac_cv_sizeof_void_p
 _ACEOF
+
+# These typically are compiler builtins, for which AC_CHECK_FUNCS fails.
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for __builtin_bswap16" >&5
+$as_echo_n "checking for __builtin_bswap16... " >&6; }
+if ${pgac_cv__builtin_bswap16+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+call__builtin_bswap16(int x)
+{
+    return __builtin_bswap16(x);
+}
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv__builtin_bswap16=yes
+else
+  pgac_cv__builtin_bswap16=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv__builtin_bswap16" >&5
+$as_echo "$pgac_cv__builtin_bswap16" >&6; }
+if test x"${pgac_cv__builtin_bswap16}" = xyes ; then
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE__BUILTIN_BSWAP16 1
+_ACEOF
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for __builtin_bswap32" >&5
+$as_echo_n "checking for __builtin_bswap32... " >&6; }
+if ${pgac_cv__builtin_bswap32+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+call__builtin_bswap32(int x)
+{
+    return __builtin_bswap32(x);
+}
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv__builtin_bswap32=yes
+else
+  pgac_cv__builtin_bswap32=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv__builtin_bswap32" >&5
+$as_echo "$pgac_cv__builtin_bswap32" >&6; }
+if test x"${pgac_cv__builtin_bswap32}" = xyes ; then
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE__BUILTIN_BSWAP32 1
+_ACEOF
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for __builtin_bswap64" >&5
+$as_echo_n "checking for __builtin_bswap64... " >&6; }
+if ${pgac_cv__builtin_bswap64+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+call__builtin_bswap64(long int x)
+{
+    return __builtin_bswap64(x);
+}
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv__builtin_bswap64=yes
+else
+  pgac_cv__builtin_bswap64=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv__builtin_bswap64" >&5
+$as_echo "$pgac_cv__builtin_bswap64" >&6; }
+if test x"${pgac_cv__builtin_bswap64}" = xyes ; then
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE__BUILTIN_BSWAP64 1
+_ACEOF
+
+fi
+# We assume that we needn't test all widths of these explicitly:
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for __builtin_clz" >&5
+$as_echo_n "checking for __builtin_clz... " >&6; }
+if ${pgac_cv__builtin_clz+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+call__builtin_clz(unsigned int x)
+{
+    return __builtin_clz(x);
+}
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv__builtin_clz=yes
+else
+  pgac_cv__builtin_clz=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv__builtin_clz" >&5
+$as_echo "$pgac_cv__builtin_clz" >&6; }
+if test x"${pgac_cv__builtin_clz}" = xyes ; then
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE__BUILTIN_CLZ 1
+_ACEOF
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for __builtin_ctz" >&5
+$as_echo_n "checking for __builtin_ctz... " >&6; }
+if ${pgac_cv__builtin_ctz+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+call__builtin_ctz(unsigned int x)
+{
+    return __builtin_ctz(x);
+}
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv__builtin_ctz=yes
+else
+  pgac_cv__builtin_ctz=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv__builtin_ctz" >&5
+$as_echo "$pgac_cv__builtin_ctz" >&6; }
+if test x"${pgac_cv__builtin_ctz}" = xyes ; then
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE__BUILTIN_CTZ 1
+_ACEOF
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for __builtin_popcount" >&5
+$as_echo_n "checking for __builtin_popcount... " >&6; }
+if ${pgac_cv__builtin_popcount+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+call__builtin_popcount(unsigned int x)
+{
+    return __builtin_popcount(x);
+}
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv__builtin_popcount=yes
+else
+  pgac_cv__builtin_popcount=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv__builtin_popcount" >&5
+$as_echo "$pgac_cv__builtin_popcount" >&6; }
+if test x"${pgac_cv__builtin_popcount}" = xyes ; then
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE__BUILTIN_POPCOUNT 1
+_ACEOF
+
+fi
 
 
 # The cast to long int works around a bug in the HP C Compiler

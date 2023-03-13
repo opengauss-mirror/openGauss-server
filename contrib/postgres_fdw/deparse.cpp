@@ -1158,7 +1158,7 @@ List *build_tlist_to_deparse(RelOptInfo *foreignrel)
      * We require columns specified in foreignrel->reltarget->exprs and those
      * required for evaluating the local conditions.
      */
-    tlist = add_to_flat_tlist(tlist, pull_var_clause((Node *)foreignrel->reltargetlist, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS));
+    tlist = add_to_flat_tlist(tlist, pull_var_clause((Node *)foreignrel->reltarget->exprs, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS));
     foreach (lc, fpinfo->local_conds) {
         RestrictInfo *rinfo = (RestrictInfo *)lfirst_node(RestrictInfo, lc);
 
@@ -1548,7 +1548,7 @@ static void deparseSubqueryTargetList(deparse_expr_cxt *context)
     Assert(IS_SIMPLE_REL(foreignrel) || IS_JOIN_REL(foreignrel));
 
     first = true;
-    foreach (lc, foreignrel->reltargetlist) {
+    foreach (lc, foreignrel->reltarget->exprs) {
         Node *node = (Node *)lfirst(lc);
 
         if (!first) {
@@ -1821,7 +1821,7 @@ static void deparseRangeTblRef(StringInfo buf, PlannerInfo *root, RelOptInfo *fo
          * expressions specified in the relation's reltarget (see
          * deparseSubqueryTargetList).
          */
-        ncols = list_length(foreignrel->reltargetlist);
+        ncols = list_length(foreignrel->reltarget->exprs);
         if (ncols > 0) {
             int i;
 
@@ -2030,7 +2030,7 @@ void deparseAnalyzeSql(StringInfo buf, Relation rel, List **retrieved_attrs)
     appendStringInfoString(buf, "SELECT ");
     for (i = 0; i < tupdesc->natts; i++) {
         /* Ignore dropped columns. */
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i].attisdropped) {
             continue;
         }
 
@@ -2040,7 +2040,7 @@ void deparseAnalyzeSql(StringInfo buf, Relation rel, List **retrieved_attrs)
         first = false;
 
         /* Use attribute name or column_name option. */
-        char *colname = NameStr(tupdesc->attrs[i]->attname);
+        char *colname = NameStr(tupdesc->attrs[i].attname);
         List *options = GetForeignColumnOptions(relid, i + 1);
 
         foreach (lc, options) {
@@ -3398,7 +3398,7 @@ static void get_relation_column_alias_ids(Var *node, RelOptInfo *foreignrel, int
 
     /* Get the column alias ID */
     i = 1;
-    foreach (lc, foreignrel->reltargetlist) {
+    foreach (lc, foreignrel->reltarget->exprs) {
         if (equal(lfirst(lc), (Node *)node)) {
             *colno = i;
             return;

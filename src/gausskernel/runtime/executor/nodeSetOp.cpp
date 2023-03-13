@@ -144,7 +144,8 @@ static void build_hash_table(SetOpState* setopstate)
         sizeof(SetOpHashEntryData),
         setopstate->tableContext,
         setopstate->tempContext,
-        work_mem);
+        work_mem,
+        node->dup_collations);
 }
 
 /*
@@ -281,7 +282,7 @@ static TupleTableSlot* setop_retrieve_direct(SetOpState* setopstate)
              * Check whether we've crossed a group boundary.
              */
             if (!execTuplesMatch(result_tuple_slot, outer_slot, node->numCols, node->dupColIdx, setopstate->eqfunctions,
-                                 setopstate->tempContext)) {
+                                 setopstate->tempContext, node->dup_collations)) {
                 /*
                  * Save the first input tuple of the next group.
                  */
@@ -647,7 +648,7 @@ SetOpState* ExecInitSetOp(SetOp* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &setopstate->ps,
-            ExecGetResultType(outerPlanState(setopstate))->tdTableAmType);
+            ExecGetResultType(outerPlanState(setopstate))->td_tam_ops);
 
     setopstate->ps.ps_ProjInfo = NULL;
 

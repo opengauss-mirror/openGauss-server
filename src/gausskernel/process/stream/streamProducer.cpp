@@ -222,7 +222,16 @@ void StreamProducer::init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo
     m_sliceBoundary = m_consumerNodes->boundaries;
     m_parentPlanNodeId = parentPlanNodeId;
     m_desc = CreateTupleDescCopyConstr(desc);
+#ifdef ENABLE_MULTIPLE_NODES
     m_params = params;
+#else
+    /* smp in producer should copy paramlist to avoid main thread exit that memory not available. */
+    if (u_sess->SPI_cxt._connected >= 0) {
+        m_params = copyParamList(params);
+    } else {
+        m_params = params;
+    }
+#endif
 
     m_streamTxnCxt = txnCxt;
     m_streamTxnCxt.CurrentTransactionState =
@@ -261,7 +270,7 @@ void StreamProducer::init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo
         redistributeStreamInitType(m_desc, m_colsType);
 
         for (int i = 0; i < m_desc->natts; i++) {
-            if (m_desc->attrs[i]->atttypid == NUMERICOID)
+            if (m_desc->attrs[i].atttypid == NUMERICOID)
                 numericCols++;
         }
 
@@ -557,7 +566,7 @@ void StreamProducer::BindingRedisFunction()
     Oid dataType;
     m_hashFun = (hashFun*)palloc0(sizeof(hashFun) * len);
     for (int i = 0; i < len; i++) {
-        dataType = m_desc->attrs[m_distributeIdx[i]]->atttypid;
+        dataType = m_desc->attrs[m_distributeIdx[i]].atttypid;
         switch (dataType) {
             case INT8OID:
                 m_hashFun[i] = &computeHashT<INT8OID, LOCATOR_TYPE_HASH, vectorized>;
@@ -1153,7 +1162,7 @@ void StreamProducer::redistributeBatchChannelForSlice(VectorBatch* batch)
             pDistributeVec = &batch->m_arr[m_distributeIdx[j]];
             data = pDistributeVec->m_vals[i];
             keyNulls[j] = pDistributeVec->IsNull(i);
-            KeyAttrs[j] = m_desc->attrs[m_distributeIdx[j]]->atttypid;
+            KeyAttrs[j] = m_desc->attrs[m_distributeIdx[j]].atttypid;
             keyValues[j] = data;
             colMap[j] = j;
 
@@ -1278,7 +1287,7 @@ void StreamProducer::redistributeTupleChannelForSlice(TupleTableSlot* tuple)
     for (int i = 0; i < keyNum; i++) {
         colMap[i] = i;
         keyValues[i] = tableam_tslot_getattr(tuple, m_distributeIdx[i] + 1, &keyNulls[i]);
-        keyAttrs[i] = m_desc->attrs[m_distributeIdx[i]]->atttypid;
+        keyAttrs[i] = m_desc->attrs[m_distributeIdx[i]].atttypid;
     }
     ConstructConstFromValues(keyValues, keyNulls, keyAttrs, colMap, keyNum, consts, constPointers);
 

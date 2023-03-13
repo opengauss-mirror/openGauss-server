@@ -813,7 +813,7 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
 
                     pstmt = (PlannedStmt*)PortalGetPrimaryStmt(portal);
                     AssertEreport(IsA(pstmt, PlannedStmt), MOD_EXECUTOR, "pstmt is not a PlannedStmt");
-                    portal->tupDesc = ExecCleanTypeFromTL(pstmt->planTree->targetlist, false, TAM_HEAP);
+                    portal->tupDesc = ExecCleanTypeFromTL(pstmt->planTree->targetlist, false);
                 }
 
                 /*
@@ -839,7 +839,7 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
 
                     if (portal->tupDesc != NULL)
                     {
-                        portal->tupDesc->tdTableAmType = TAM_HEAP;
+                        portal->tupDesc->td_tam_ops = TableAmHeap;
                     }
                 }
 
@@ -1725,7 +1725,13 @@ static void PortalRunUtility(Portal portal, Node* utilityStmt, bool isTopLevel, 
 #ifdef PGXC
         false,
 #endif /* PGXC */
-        completionTag);
+        completionTag,
+			isTopLevel ? PROCESS_UTILITY_TOPLEVEL : PROCESS_UTILITY_QUERY);
+        
+
+    if (proutility_cxt.parse_tree != NULL && nodeTag(proutility_cxt.parse_tree) == T_ExplainStmt && ((ExplainStmt*)proutility_cxt.parse_tree)->planinfo != NULL) {
+        ((ExplainStmt*)utilityStmt)->planinfo = ((ExplainStmt*)proutility_cxt.parse_tree)->planinfo;
+    }
 
     /* Some utility statements may change context on us */
     MemoryContextSwitchTo(PortalGetHeapMemory(portal));

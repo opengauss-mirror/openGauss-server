@@ -304,6 +304,7 @@ void PercentileSpace::calculatePercentileOfSingleNode(void)
     {
         (void)MemoryContextSwitchTo(oldcxt);
         pfree_ext(sqlRT);
+        LWLockReleaseAll();
         FlushErrorState();
         elog(WARNING, "Percentile job failed");
     }
@@ -323,6 +324,7 @@ void PercentileSpace::calculatePercentileOfMultiNode(void)
         /* free all handles */
         release_pgxc_handles(t_thrd.percentile_cxt.pgxc_all_handles);
         t_thrd.percentile_cxt.pgxc_all_handles = NULL;
+        LWLockReleaseAll();
         FlushErrorState();
         elog(WARNING, "Percentile job failed");
     }
@@ -679,7 +681,7 @@ Datum get_instr_rt_percentile(PG_FUNCTION_ARGS)
 
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(NUM_PERCENTILE_COUNT, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(NUM_PERCENTILE_COUNT, false);
         if (!(PercentileSpace::CheckQueryPercentile())) {
             MemoryContextSwitchTo(oldcontext);
             SRF_RETURN_DONE(funcctx);

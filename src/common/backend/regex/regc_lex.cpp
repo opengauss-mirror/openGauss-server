@@ -891,6 +891,7 @@ static int lexescape(struct vars* v)
             break;
     }
     Assert(NOTREACHED);
+    FAILW(REG_EESCAPE);
 }
 
 /*

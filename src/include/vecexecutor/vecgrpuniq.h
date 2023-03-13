@@ -186,13 +186,13 @@ static void BindingFp(T* node)
 }
 
 template <typename T>
-static void ReplaceGrpUniqEqfunc(Encap* cap, Form_pg_attribute* attrs)
+static void ReplaceGrpUniqEqfunc(Encap* cap, FormData_pg_attribute* attrs)
 {
     AttrNumber* colIdx = cap->colIdx;
     FmgrInfo* eqfunctions = cap->eqfunctions;
 
     for (int i = 0; i < cap->cols; i++) {
-        switch (attrs[colIdx[i] - 1]->atttypid) {
+        switch (attrs[colIdx[i] - 1].atttypid) {
             case TIMETZOID:
                 eqfunctions[i].fn_addr = timetz_eq_withhead;
                 break;
@@ -228,10 +228,10 @@ void InitGrpUniq(T* state, int cols, AttrNumber* colIdx)
     cap->outerCols = outDesc->natts;
     cap->colIdx = colIdx;
     cap->eqfunctions = state->eqfunctions;
-    Form_pg_attribute* attrs = outDesc->attrs;
+    FormData_pg_attribute* attrs = outDesc->attrs;
 
     for (i = 0; i < cap->outerCols; i++) {
-        if (COL_IS_ENCODE(attrs[i]->atttypid)) {
+        if (COL_IS_ENCODE(attrs[i].atttypid)) {
             state->keySimple = false;
             break;
         }

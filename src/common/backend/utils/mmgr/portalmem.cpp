@@ -101,6 +101,20 @@ typedef struct portalhashent {
         }                                                                                                          \
     } while (0)
 
+inline void ReleaseStreamGroup(Portal portal)
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!StreamThreadAmI()) {
+        portal->streamInfo.AttachToSession();
+        StreamNodeGroup::ReleaseStreamGroup(true);
+        portal->streamInfo.Reset();
+    }
+#else
+    /* multinode do nothing */
+    return;
+#endif
+}
+
 /* -------------------portal_mem_cxt---------------------------------
  *				   public portal interface functions
  * ----------------------------------------------------------------
@@ -605,12 +619,7 @@ void PortalDrop(Portal portal, bool isTopCommit)
         portal->holdStore = NULL;
     }
 
-#ifndef ENABLE_MULTIPLE_NODES
-    if (!StreamThreadAmI()) {
-        portal->streamInfo.AttachToSession();
-        StreamNodeGroup::ReleaseStreamGroup(true);
-    }
-#endif
+    ReleaseStreamGroup(portal);
 
     /* delete tuplestore storage, if any */
 #ifndef ENABLE_MULTIPLE_NODES
@@ -892,6 +901,17 @@ void AtAbort_Portals(bool STP_rollback)
          * commit and rollback patch.
          */
         if(portal->status != PORTAL_ACTIVE) {
+#ifndef ENABLE_MULTIPLE_NODES
+            /*
+             * estate is under the queryDesc, and stream threads use it.
+             * we should wait all stream threads exit to cleanup queryDesc.
+             */
+            if (!StreamThreadAmI()) {
+                portal->streamInfo.AttachToSession();
+                StreamNodeGroup::ReleaseStreamGroup(true, STREAM_ERROR);
+                portal->streamInfo.Reset();
+            }
+#endif
             MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
         }
     }
@@ -1104,7 +1124,9 @@ void AtSubAbort_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
              * upcoming transaction-wide cleanup; they will be gone before we run
              * PortalDrop.
              */
-             portal->resowner = NULL;
+            portal->resowner = NULL;
+
+            ReleaseStreamGroup(portal);
 
             /*
              * Although we can't delete the portal data structure proper, we can
@@ -1124,6 +1146,7 @@ void AtSubAbort_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
              * don't destory its memory context.
              */
             if (portal->status != PORTAL_ACTIVE) {
+                ReleaseStreamGroup(portal);
                 MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
             }
         }
@@ -1210,7 +1233,7 @@ Datum pg_cursor(PG_FUNCTION_ARGS)
      * build tupdesc for result tuples. This must match the definition of the
      * pg_cursors view in system_views.sql
      */
-    tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(6, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "statement", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "is_holdable", BOOLOID, -1, 0);

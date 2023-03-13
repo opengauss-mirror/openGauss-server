@@ -1152,6 +1152,21 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 #endif
+
+#ifndef ENABLE_MULTIPLE_NODES
+        {{"enable_availablezone",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            AUDIT_OPTIONS,
+            gettext_noop("enable identifying available zone during cascade standby connection"),
+            NULL},
+            &g_instance.attr.attr_storage.enable_availablezone,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
+
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -3534,7 +3549,7 @@ static void InitStorageConfigureNamesInt()
             &g_instance.attr.attr_storage.dms_attr.sslog_backup_file_count,
             10,
             0,
-            128,
+            1024,
             NULL,
             assign_ss_log_backup_file_count,
             NULL},
@@ -4887,8 +4902,6 @@ static int IsReplConnInfoChanged(const char* replConnInfo, const char* newval)
     char* temptok = NULL;
     char* toker = NULL;
     char* temp = NULL;
-    char* token = NULL;
-    char* tmpToken = NULL;
     char* oldReplStr = NULL;
     char* newReplStr = NULL;
     int repl_length = 0;
@@ -4969,8 +4982,11 @@ static int IsReplConnInfoChanged(const char* replConnInfo, const char* newval)
         if (temptok == NULL) {
             /* Modify the replication info message,
             the new message does not carry disaster recovery information */
-            token = strtok_r(oldReplStr, "d", &tmpToken);
-            if (strncasecmp(token, newReplStr, strlen(newReplStr)) == 0) {
+            if (strcmp(newReplStr, "") == 0) {
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return REMOVE_DISASTER_RECOVERY_INFO;
+            } else if (strncasecmp(oldReplStr, newReplStr, strlen(newReplStr)) == 0) {
                 pfree_ext(oldReplStr);
                 pfree_ext(newReplStr);
                 return NO_CHANGE;

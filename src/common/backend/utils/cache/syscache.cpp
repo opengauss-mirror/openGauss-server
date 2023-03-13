@@ -54,6 +54,7 @@
 #include "catalog/pg_description.h"
 #include "catalog/pg_directory.h"
 #include "catalog/pg_enum.h"
+#include "catalog/pg_event_trigger.h"
 #include "catalog/pg_foreign_data_wrapper.h"
 #include "catalog/pg_foreign_server.h"
 #include "catalog/pg_foreign_table.h"
@@ -649,6 +650,7 @@ const cachedesc cacheinfo[] = {
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         STREAMING_CONT_QUERY_OID_INDEX_ID_NBUCKETS},
+#ifdef ENABLE_MULTIPLE_NODES
     {StreamingContQueryRelationId, /* STREAMCQRELID */
         StreamingContQueryRelidIndexId,
         1,
@@ -659,6 +661,31 @@ const cachedesc cacheinfo[] = {
         2,
         {Anum_streaming_cont_query_matrelid, Anum_streaming_cont_query_active, 0, 0},
         STREAMING_CONT_QUERY_SCHEMA_CHANGE_INDEX_ID_NBUCKETS},
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+    {EventTriggerRelationId,            /* EVENTTRIGGERNAME */
+        EventTriggerNameIndexId,
+        1,
+        {
+            Anum_pg_event_trigger_evtname,
+            0,
+            0,
+            0
+        },
+        8
+    },
+    {EventTriggerRelationId,            /* EVENTTRIGGEROID */
+        EventTriggerOidIndexId,
+        1,
+        {
+            ObjectIdAttributeNumber,
+            0,
+            0,
+            0
+        },
+        8
+    },    
+#endif
     {StreamingStreamRelationId, /* STREAMOID */
         StreamingStreamOidIndexId,
         1,

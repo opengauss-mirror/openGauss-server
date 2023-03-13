@@ -173,6 +173,8 @@ static bool check_fencedUDFMemoryLimit(int* newval, void** extra, GucSource sour
 static bool check_udf_memory_limit(int* newval, void** extra, GucSource source);
 static bool check_inlist2joininfo(char** newval, void** extra, GucSource source);
 static void assign_inlist2joininfo(const char* newval, void* extra);
+static bool check_b_format_behavior_compat_options(char **newval, void **extra, GucSource source);
+static void assign_b_format_behavior_compat_options(const char *newval, void *extra);
 static bool check_behavior_compat_options(char** newval, void** extra, GucSource source);
 static void assign_behavior_compat_options(const char* newval, void* extra);
 static bool check_plsql_compile_behavior_compat_options(char** newval, void** extra, GucSource source);
@@ -195,6 +197,7 @@ static void InitSqlConfigureNamesReal();
 static void InitSqlConfigureNamesString();
 static void InitSqlConfigureNamesEnum();
 #define FORBID_GUC_NUM 3
+#define B_FORMAT_FORBID_GUC_NUM 2
 /*
  * Although only "on", "off", and "safe_encoding" are documented, we
  * accept all the likely variants of "on" and "off".
@@ -241,6 +244,7 @@ static const struct config_enum_entry rewrite_options[] = {
     {"predpushnormal", PRED_PUSH_NORMAL, false},
     {"predpushforce", PRED_PUSH_FORCE, false},
     {"disable_pullup_expr_sublink", SUBLINK_PULLUP_DISABLE_EXPR, false},
+    {"enable_sublink_pullup_enhanced", SUBLINK_PULLUP_ENHANCED, false},
     {NULL, 0, false}
 };
 
@@ -332,6 +336,17 @@ static const struct config_enum_entry multi_stats_options[] = {
     {NULL, 0, false}
 };
 
+typedef struct b_format_behavior_compat_entry {
+    const char *name; /* name of behavior compat entry */
+    int flag;         /* bit flag position */
+} b_format_behavior_compat_entry;
+ 
+static const struct b_format_behavior_compat_entry b_format_behavior_compat_options[B_FORMAT_OPT_MAX] = {
+    {"set_session_transaction", B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION},
+    {"enable_set_variables", B_FORMAT_OPT_ENABLE_SET_VARIABLES},
+    {"enable_modify_column", B_FORMAT_OPT_ENABLE_MODIFY_COLUMN},
+    {"default_collation", B_FORMAT_OPT_DEFAULT_COLLATION}
+};
 
 typedef struct behavior_compat_entry {
     const char* name; /* name of behavior compat entry */
@@ -364,7 +379,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"char_coerce_compat", OPT_CHAR_COERCE_COMPAT},
     {"pgformat_substr", OPT_PGFORMAT_SUBSTR},
     {"truncate_numeric_tail_zero", OPT_TRUNC_NUMERIC_TAIL_ZERO},
-    {"allow_orderby_undistinct_column", OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN}
+    {"allow_orderby_undistinct_column", OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN},
+    {"select_into_return_null", OPT_SELECT_INTO_RETURN_NULL}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
@@ -1379,7 +1395,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-
+        {{"enable_indexscan_optimization",
+            PGC_USERSET,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Enables indexscan optimization."),
+            NULL},
+            &u_sess->attr.attr_common.enable_indexscan_optimization,
+            false,
+            NULL,
+            NULL,
+            NULL},
 #ifndef ENABLE_MULTIPLE_NODES
         {{"enable_beta_opfusion",
             PGC_USERSET,
@@ -1415,6 +1441,18 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL},
 #endif
+
+        {{"enable_inner_unique_opt",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables the inner unique optimization for JOIN."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_inner_unique_opt,
+            false,
+            NULL,
+            NULL,
+            NULL},
 
         {{"enable_partition_opfusion",
             PGC_USERSET,
@@ -2726,7 +2764,18 @@ static void InitSqlConfigureNamesString()
             check_inlist2joininfo,
             assign_inlist2joininfo,
             NULL},
-
+        {{"b_format_behavior_compat_options",
+            PGC_USERSET,
+            NODE_ALL,
+            COMPAT_OPTIONS,
+            gettext_noop("b format compatibility options"),
+            NULL,
+            GUC_LIST_INPUT | GUC_REPORT},
+            &u_sess->attr.attr_sql.b_format_behavior_compat_string,
+            "",
+            check_b_format_behavior_compat_options,
+            assign_b_format_behavior_compat_options,
+            NULL},
         {{"behavior_compat_options",
             PGC_USERSET,
             NODE_ALL,
@@ -3143,6 +3192,13 @@ static void AssignQueryDop(int newval, void* extra)
 
         u_sess->opt_cxt.max_query_dop = abs(newval);
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    /* do not reset backend threads tag */
+    if (u_sess->opt_cxt.query_dop > 1 &&
+        (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
+        u_sess->opt_cxt.smp_enabled = true;
+    }
+#endif
 }
 
 /*
@@ -3166,7 +3222,7 @@ static bool check_statement_max_mem(int* newval, void** extra, GucSource source)
     if ((*newval < 0) || (*newval > 0 && *newval < SIMPLE_THRESHOLD)) {
         if (source != PGC_S_FILE)
             ereport(WARNING,
-                (errmsg("query max mem can not be set lower than %dMB, so the guc variable is not avaiable.",
+                (errmsg("query max mem can not be set lower than %dMB, so the guc variable is not available.",
                     MEM_THRESHOLD)));
         *newval = 0;
     }
@@ -3180,7 +3236,7 @@ static bool check_statement_mem(int* newval, void** extra, GucSource source)
         if (source != PGC_S_FILE)
             ereport(WARNING,
                 (errmsg(
-                    "query mem can not be set lower than %dMB, so the guc variable is not avaiable.", MEM_THRESHOLD)));
+                    "query mem can not be set lower than %dMB, so the guc variable is not available.", MEM_THRESHOLD)));
         *newval = 0;
     }
 
@@ -3271,6 +3327,110 @@ static void assign_inlist2joininfo(const char* newval, void* extra)
             u_sess->opt_cxt.qrw_inlist2join_optmode = threshold;
         }
     }
+}
+#ifdef ENABLE_MULTIPLE_NODES
+static bool b_format_forbid_distribute_parameter(const char *elem)
+{
+    const char *forbidList[] = {
+        "set_session_transaction",
+        "enable_set_variables",
+        "enable_modify_column"
+    };
+    for (int i = 0; i < B_FORMAT_FORBID_GUC_NUM; i++) {
+        if (strcmp(forbidList[i], elem) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+/*
+ * check_b_format_behavior_compat_options: GUC check_hook for behavior compat options
+ */
+static bool check_b_format_behavior_compat_options(char **newval, void **extra, GucSource source)
+{
+    char *rawstring = NULL;
+    List *elemlist = NULL;
+    ListCell *cell = NULL;
+    int start = 0;
+ 
+    /* Need a modifiable copy of string */
+    rawstring = pstrdup(*newval);
+    /* Parse string into list of identifiers */
+    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
+        /* syntax error in list */
+        GUC_check_errdetail("invalid paramater for behavior compat information.");
+        pfree(rawstring);
+        list_free(elemlist);
+ 
+        return false;
+    }
+ 
+    foreach(cell, elemlist)
+    {
+        const char *item = (const char *)lfirst(cell);
+        bool nfound = true;
+ 
+        for (start = 0; start < B_FORMAT_OPT_MAX; start++) {
+#ifdef ENABLE_MULTIPLE_NODES
+            if (b_format_forbid_distribute_parameter(item)) {
+                GUC_check_errdetail("behavior compat option %s can not use"
+                    " in distributed database system",
+                    item);
+                pfree(rawstring);
+                list_free(elemlist);
+                return false;
+            }
+#endif
+            if (strcmp(item, b_format_behavior_compat_options[start].name) == 0) {
+                nfound = false;
+                break;
+            }
+        }
+        if (nfound) {
+            GUC_check_errdetail("invalid behavior compat option \"%s\"", item);
+            pfree(rawstring);
+            list_free(elemlist);
+            return false;
+        }
+    }
+ 
+    pfree(rawstring);
+    list_free(elemlist);
+ 
+    return true;
+}
+ 
+/*
+ * assign_b_format_behavior_compat_options: GUC assign_hook for distribute_test_param
+ */
+static void assign_b_format_behavior_compat_options(const char *newval, void *extra)
+{
+    char *rawstring = NULL;
+    List *elemlist = NULL;
+    ListCell *cell = NULL;
+    int start = 0;
+    int result = 0;
+ 
+    rawstring = pstrdup(newval);
+    (void)SplitIdentifierString(rawstring, ',', &elemlist);
+ 
+    u_sess->utils_cxt.b_format_behavior_compat_flags = 0;
+    foreach(cell, elemlist)
+    {
+        for (start = 0; start < B_FORMAT_OPT_MAX; start++) {
+            const char *item = (const char *)lfirst(cell);
+ 
+            if (strcmp(item, b_format_behavior_compat_options[start].name) == 0 &&
+                !(result & b_format_behavior_compat_options[start].flag))
+                    result += b_format_behavior_compat_options[start].flag;
+        }
+    }
+ 
+    pfree(rawstring);
+    list_free(elemlist);
+ 
+    u_sess->utils_cxt.b_format_behavior_compat_flags = result;
 }
 #ifdef ENABLE_MULTIPLE_NODES
 static bool ForbidDistributeParameter(const char* elem)

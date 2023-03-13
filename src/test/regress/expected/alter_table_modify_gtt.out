@@ -1,0 +1,1194 @@
+create database atbdb_gtt WITH ENCODING 'UTF-8' dbcompatibility 'B';
+\c atbdb_gtt
+CREATE SCHEMA atbdb_gtt_schema;
+SET CURRENT_SCHEMA TO atbdb_gtt_schema;
+-- test modify column without data
+CREATE GLOBAL TEMPORARY TABLE test_at_modify(
+    a int,
+    b int NOT NULL
+);
+ALTER TABLE test_at_modify MODIFY b varchar(8) NULL;
+\d+ test_at_modify;
+                      Table "atbdb_gtt_schema.test_at_modify"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ a      | integer              |           | plain    |              | 
+ b      | character varying(8) |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_modify MODIFY b varchar(8) DEFAULT '0';
+\d+ test_at_modify;
+                                Table "atbdb_gtt_schema.test_at_modify"
+ Column |         Type         |           Modifiers            | Storage  | Stats target | Description 
+--------+----------------------+--------------------------------+----------+--------------+-------------
+ a      | integer              |                                | plain    |              | 
+ b      | character varying(8) | default '0'::character varying | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_modify MODIFY b int AUTO_INCREMENT PRIMARY KEY INITIALLY DEFERRED;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_b_seq" for serial column "test_at_modify.b"
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_modify_pkey" for table "test_at_modify"
+\d+ test_at_modify;
+                      Table "atbdb_gtt_schema.test_at_modify"
+ Column |  Type   |        Modifiers        | Storage | Stats target | Description 
+--------+---------+-------------------------+---------+--------------+-------------
+ a      | integer |                         | plain   |              | 
+ b      | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "test_at_modify_pkey" PRIMARY KEY, btree (b) TABLESPACE pg_default DEFERRABLE INITIALLY DEFERRED
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_modify MODIFY b varchar(8) UNIQUE DEFERRABLE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_b_key" for table "test_at_modify"
+\d+ test_at_modify;
+                      Table "atbdb_gtt_schema.test_at_modify"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ a      | integer              |           | plain    |              | 
+ b      | character varying(8) | not null  | extended |              | 
+Indexes:
+    "test_at_modify_pkey" PRIMARY KEY, btree (b) TABLESPACE pg_default DEFERRABLE INITIALLY DEFERRED
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, btree (b) TABLESPACE pg_default DEFERRABLE
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_modify MODIFY b varchar(8) CHECK (b < 'a');
+\d+ test_at_modify;
+                      Table "atbdb_gtt_schema.test_at_modify"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ a      | integer              |           | plain    |              | 
+ b      | character varying(8) | not null  | extended |              | 
+Indexes:
+    "test_at_modify_pkey" PRIMARY KEY, btree (b) TABLESPACE pg_default DEFERRABLE INITIALLY DEFERRED
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, btree (b) TABLESPACE pg_default DEFERRABLE
+Check constraints:
+    "test_at_modify_b_check" CHECK (b::text < 'a'::text)
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_modify MODIFY b varchar(8) COLLATE "POSIX";
+\d+ test_at_modify;
+                            Table "atbdb_gtt_schema.test_at_modify"
+ Column |         Type         |       Modifiers        | Storage  | Stats target | Description 
+--------+----------------------+------------------------+----------+--------------+-------------
+ a      | integer              |                        | plain    |              | 
+ b      | character varying(8) | collate POSIX not null | extended |              | 
+Indexes:
+    "test_at_modify_pkey" PRIMARY KEY, btree (b) TABLESPACE pg_default DEFERRABLE INITIALLY DEFERRED
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, btree (b) TABLESPACE pg_default DEFERRABLE
+Check constraints:
+    "test_at_modify_b_check" CHECK (b::text < 'a'::text)
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_modify MODIFY b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+\d+ test_at_modify;
+                                        Table "atbdb_gtt_schema.test_at_modify"
+ Column |         Type         |                   Modifiers                   | Storage  | Stats target | Description 
+--------+----------------------+-----------------------------------------------+----------+--------------+-------------
+ a      | integer              |                                               | plain    |              | 
+ b      | character varying(8) | not null generated always as ((a + 1)) stored | extended |              | 
+Indexes:
+    "test_at_modify_pkey" PRIMARY KEY, btree (b) TABLESPACE pg_default DEFERRABLE INITIALLY DEFERRED
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, btree (b) TABLESPACE pg_default DEFERRABLE
+Check constraints:
+    "test_at_modify_b_check" CHECK (b::text < 'a'::text)
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_modify MODIFY b int NOT NULL;
+\d+ test_at_modify;
+               Table "atbdb_gtt_schema.test_at_modify"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer | not null  | plain   |              | 
+Indexes:
+    "test_at_modify_pkey" PRIMARY KEY, btree (b) TABLESPACE pg_default DEFERRABLE INITIALLY DEFERRED
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, btree (b) TABLESPACE pg_default DEFERRABLE
+Check constraints:
+    "test_at_modify_b_check" CHECK (b::text < 'a'::text)
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+select pg_get_tabledef('test_at_modify'::regclass);
+                                                                     pg_get_tabledef                                                                     
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = atbdb_gtt_schema;                                                                                                                    +
+ CREATE GLOBAL TEMPORARY TABLE test_at_modify (                                                                                                         +
+     a integer,                                                                                                                                         +
+     b integer NOT NULL,                                                                                                                                +
+     CONSTRAINT test_at_modify_b_check CHECK (((b)::text < 'a'::text))                                                                                  +
+ )                                                                                                                                                      +
+ WITH (orientation=row, compression=no, on_commit_delete_rows=false);                                                                                   +
+ ALTER TABLE test_at_modify ADD CONSTRAINT test_at_modify_b_key UNIQUE USING btree (b) DEFERRABLE DEFERRABLE;                                           +
+ ALTER TABLE test_at_modify ADD CONSTRAINT test_at_modify_pkey PRIMARY KEY USING btree  (b) DEFERRABLE INITIALLY DEFERRED DEFERRABLE INITIALLY DEFERRED;
+(1 row)
+
+INSERT INTO test_at_modify VALUES(1,1);
+DROP TABLE test_at_modify;
+-- test modify column datatype
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_modify_type VALUES(1,1);
+INSERT INTO test_at_modify_type VALUES(2,2);
+INSERT INTO test_at_modify_type VALUES(3,3);
+ALTER TABLE test_at_modify_type MODIFY COLUMN b varchar(8);
+SELECT * FROM test_at_modify_type where b = '3';
+ a | b 
+---+---
+ 3 | 3
+(1 row)
+
+ALTER TABLE test_at_modify_type MODIFY COLUMN b DATE; -- ERROR
+ERROR:  invalid input syntax for type date: "1"
+ALTER TABLE test_at_modify_type MODIFY COLUMN b RAW;
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+ a | b  
+---+----
+ 1 | 01
+ 2 | 02
+ 3 | 03
+(3 rows)
+
+DROP TABLE test_at_modify_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b serial NOT NULL
+);
+NOTICE:  CREATE TABLE will create implicit sequence "test_at_modify_type_b_seq" for serial column "test_at_modify_type.b"
+INSERT INTO test_at_modify_type VALUES(1,1);
+INSERT INTO test_at_modify_type VALUES(2,2);
+INSERT INTO test_at_modify_type VALUES(3,3);
+ALTER TABLE test_at_modify_type MODIFY COLUMN b int;
+ALTER TABLE test_at_modify_type MODIFY COLUMN b int[]; -- ERROR
+ERROR:  column "b" cannot be cast automatically to type integer[]
+HINT:  Specify a USING expression to perform the conversion.
+ALTER TABLE test_at_modify_type MODIFY COLUMN b int16;
+ALTER TABLE test_at_modify_type MODIFY COLUMN b serial; -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  cannot modify or change column to type 'serial'
+ALTER TABLE test_at_modify_type MODIFY COLUMN b DECIMAL(4,2);
+SELECT * FROM test_at_modify_type where b = 3;
+ a |  b   
+---+------
+ 3 | 3.00
+(1 row)
+
+ALTER TABLE test_at_modify_type MODIFY COLUMN b BOOLEAN;
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+ a | b 
+---+---
+ 1 | t
+ 2 | t
+ 3 | t
+(3 rows)
+
+DROP TABLE test_at_modify_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b text
+);
+INSERT INTO test_at_modify_type VALUES(1,'beijing');
+INSERT INTO test_at_modify_type VALUES(2,'shanghai');
+INSERT INTO test_at_modify_type VALUES(3,'guangzhou');
+ALTER TABLE test_at_modify_type MODIFY COLUMN b SET('beijing','shanghai','nanjing','wuhan'); -- ERROR
+NOTICE:  ALTER TABLE will create implicit set "test_at_modify_type_b_set" for column "test_at_modify_type.b"
+ERROR:  invalid input value for set test_at_modify_type_b_set: 'guangzhou'
+ALTER TABLE test_at_modify_type MODIFY COLUMN b SET('beijing','shanghai','nanjing','guangzhou');
+NOTICE:  ALTER TABLE will create implicit set "test_at_modify_type_b_set" for column "test_at_modify_type.b"
+ALTER TABLE test_at_modify_type MODIFY COLUMN b SET('beijing','shanghai','guangzhou','wuhan'); -- ERROR
+ERROR:  can not alter column type to another set
+select pg_get_tabledef('test_at_modify_type'::regclass);
+                           pg_get_tabledef                            
+----------------------------------------------------------------------
+ SET search_path = atbdb_gtt_schema;                                 +
+ CREATE GLOBAL TEMPORARY TABLE test_at_modify_type (                 +
+     a integer,                                                      +
+     b SET('beijing', 'shanghai', 'nanjing', 'guangzhou')            +
+ )                                                                   +
+ WITH (orientation=row, compression=no, on_commit_delete_rows=false);
+(1 row)
+
+DROP TABLE test_at_modify_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b varchar(32)
+);
+INSERT INTO test_at_modify_type VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_modify_type VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_modify_type VALUES(3,'2022-11-24 12:00:00');
+ALTER TABLE test_at_modify_type MODIFY COLUMN b varchar(10); -- ERROR
+ERROR:  value too long for type character varying(10)
+ALTER TABLE test_at_modify_type MODIFY COLUMN b DATE;
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+ a |     b      
+---+------------
+ 1 | 11-22-2022
+ 2 | 11-23-2022
+ 3 | 11-24-2022
+(3 rows)
+
+DROP TABLE test_at_modify_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b int[] NOT NULL
+);
+INSERT INTO test_at_modify_type VALUES(1,ARRAY[1,1]);
+INSERT INTO test_at_modify_type VALUES(2,ARRAY[2,2]);
+INSERT INTO test_at_modify_type VALUES(3,ARRAY[3,3]);
+ALTER TABLE test_at_modify_type MODIFY COLUMN b float4[];
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+ a |   b   
+---+-------
+ 1 | {1,1}
+ 2 | {2,2}
+ 3 | {3,3}
+(3 rows)
+
+DROP TABLE test_at_modify_type;
+-- test modify column constraint
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_constr(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_modify_constr VALUES(1,1);
+INSERT INTO test_at_modify_constr VALUES(2,2);
+INSERT INTO test_at_modify_constr VALUES(3,3);
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) NOT NULL NULL; -- ERROR
+ERROR:  conflicting NULL/NOT NULL declarations for column "b" of table "test_at_modify_constr"
+LINE 1: ...BLE test_at_modify_constr MODIFY b varchar(8) NOT NULL NULL;
+                                                                  ^
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) UNIQUE KEY NULL;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_constr_b_key" for table "test_at_modify_constr"
+INSERT INTO test_at_modify_constr VALUES(3,3); -- ERROR
+ERROR:  duplicate key value violates unique constraint "test_at_modify_constr_b_key"
+DETAIL:  Key (b)=(3) already exists.
+INSERT INTO test_at_modify_constr VALUES(4,NULL);
+ALTER TABLE test_at_modify_constr MODIFY b int NULL PRIMARY KEY; -- ERROR
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_modify_constr_pkey" for table "test_at_modify_constr"
+ERROR:  column "b" contains null values
+DELETE FROM test_at_modify_constr WHERE b IS NULL;
+ALTER TABLE test_at_modify_constr MODIFY b int NULL PRIMARY KEY;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_modify_constr_pkey" for table "test_at_modify_constr"
+INSERT INTO test_at_modify_constr VALUES(4,NULL); -- ERROR
+ERROR:  null value in column "b" violates not-null constraint
+DETAIL:  Failing row contains (4, null).
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check CHECK (b < 3); -- ERROR
+ERROR:  check constraint "t_at_m_check" is violated by some row
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check CHECK (b < 5);
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check CHECK (b = a); -- ERROR
+ERROR:  constraint "t_at_m_check" for relation "test_at_modify_constr" already exists
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check_1 CHECK (b = a);
+INSERT INTO test_at_modify_constr VALUES(4,4);
+INSERT INTO test_at_modify_constr VALUES(5,5); -- ERROR
+ERROR:  new row for relation "test_at_modify_constr" violates check constraint "t_at_m_check"
+DETAIL:  N/A
+INSERT INTO test_at_modify_constr VALUES(6,'a'); -- ERROR
+ERROR:  new row for relation "test_at_modify_constr" violates check constraint "t_at_m_check_1"
+DETAIL:  N/A
+INSERT INTO test_at_modify_constr VALUES(0,'a');
+ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL PRIMARY KEY; -- ERROR
+ERROR:  multiple primary keys for table "test_at_modify_constr" are not allowed
+ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL;
+INSERT INTO test_at_modify_constr VALUES(5,5); -- ERROR
+ERROR:  new row for relation "test_at_modify_constr" violates check constraint "t_at_m_check"
+DETAIL:  N/A
+SELECT b FROM test_at_modify_constr ORDER BY 1;
+ b 
+---
+ 0
+ 1
+ 2
+ 3
+ 4
+(5 rows)
+
+select pg_get_tabledef('test_at_modify_constr'::regclass);
+                                              pg_get_tabledef                                              
+-----------------------------------------------------------------------------------------------------------
+ SET search_path = atbdb_gtt_schema;                                                                      +
+ CREATE GLOBAL TEMPORARY TABLE test_at_modify_constr (                                                    +
+     a integer,                                                                                           +
+     b integer NOT NULL,                                                                                  +
+     CONSTRAINT t_at_m_check_1 CHECK (((b)::bigint = a)),                                                 +
+     CONSTRAINT t_at_m_check CHECK (((b)::bigint < 5))                                                    +
+ )                                                                                                        +
+ WITH (orientation=row, compression=no, on_commit_delete_rows=false);                                     +
+ ALTER TABLE test_at_modify_constr ADD CONSTRAINT test_at_modify_constr_b_key UNIQUE USING btree (b);     +
+ ALTER TABLE test_at_modify_constr ADD CONSTRAINT test_at_modify_constr_pkey PRIMARY KEY USING btree  (b);
+(1 row)
+
+ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  modify or change column REFERENCES constraint is not supported
+DROP TABLE test_at_modify_constr;
+-- test modify column default
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_default(
+    a int,
+    b int DEFAULT NULL
+);
+INSERT INTO test_at_modify_default VALUES(1,1);
+INSERT INTO test_at_modify_default VALUES(2,2);
+INSERT INTO test_at_modify_default VALUES(3,3);
+ALTER TABLE test_at_modify_default MODIFY b bigint DEFAULT (a+1); -- ERROR
+ERROR:  default value cannot reference to a column
+HINT:  Perhaps the default value is enclosed in double quotes
+ALTER TABLE test_at_modify_default MODIFY b bigint DEFAULT NULL;
+\d+ test_at_modify_default;
+           Table "atbdb_gtt_schema.test_at_modify_default"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | bigint  |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_modify_default MODIFY b varchar(8) DEFAULT 'a' GENERATED ALWAYS AS (a+1) STORED; -- ERROR
+ERROR:  both default and generation expression specified for column "b" of table "test_at_modify_default"
+LINE 1: ...at_modify_default MODIFY b varchar(8) DEFAULT 'a' GENERATED ...
+                                                             ^
+ALTER TABLE test_at_modify_default MODIFY b varchar(8) DEFAULT 'a';
+\d+ test_at_modify_default;
+                            Table "atbdb_gtt_schema.test_at_modify_default"
+ Column |         Type         |           Modifiers            | Storage  | Stats target | Description 
+--------+----------------------+--------------------------------+----------+--------------+-------------
+ a      | integer              |                                | plain    |              | 
+ b      | character varying(8) | default 'a'::character varying | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+INSERT INTO test_at_modify_default VALUES(0,DEFAULT);
+SELECT b FROM test_at_modify_default ORDER BY 1;
+ b 
+---
+ 1
+ 2
+ 3
+ a
+(4 rows)
+
+ALTER TABLE test_at_modify_default MODIFY b int DEFAULT 4 AUTO_INCREMENT; -- ERROR
+ERROR:  multiple default values specified for column "b" of table "test_at_modify_default"
+LINE 1: ...BLE test_at_modify_default MODIFY b int DEFAULT 4 AUTO_INCRE...
+                                                             ^
+ALTER TABLE test_at_modify_default MODIFY b int DEFAULT 4;
+INSERT INTO test_at_modify_default VALUES(4,DEFAULT);
+SELECT b FROM test_at_modify_default ORDER BY 1;
+ b 
+---
+ 0
+ 1
+ 2
+ 3
+ 4
+(5 rows)
+
+ALTER TABLE test_at_modify_default MODIFY b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+SELECT a,b FROM test_at_modify_default ORDER BY 1,2;
+ a | b 
+---+---
+ 0 | 1
+ 1 | 2
+ 2 | 3
+ 3 | 4
+ 4 | 5
+(5 rows)
+
+ALTER TABLE test_at_modify_default MODIFY a varchar(8) DEFAULT 'a';
+INSERT INTO test_at_modify_default VALUES(DEFAULT,DEFAULT);
+SELECT a,b FROM test_at_modify_default ORDER BY 1,2;
+ a | b 
+---+---
+ 0 | 1
+ 1 | 2
+ 2 | 3
+ 3 | 4
+ 4 | 5
+ a | 1
+(6 rows)
+
+\d+ test_at_modify_default;
+                                    Table "atbdb_gtt_schema.test_at_modify_default"
+ Column |         Type         |                   Modifiers                    | Storage  | Stats target | Description 
+--------+----------------------+------------------------------------------------+----------+--------------+-------------
+ a      | character varying(8) | default 'a'::character varying                 | extended |              | 
+ b      | character varying(8) | generated always as (((a)::bigint + 1)) stored | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+DROP TABLE test_at_modify_default;
+-- test modify column depended by generated column
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_generated(
+    a int,
+    b varchar(32),
+    c varchar(32) GENERATED ALWAYS AS (b) STORED
+);
+INSERT INTO test_at_modify_generated(a,b) VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_modify_generated(a,b) VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_modify_generated(a,b) VALUES(3,'2022-11-24 12:00:00');
+SELECT * FROM test_at_modify_generated ORDER BY 1,2;
+ a |          b          |          c          
+---+---------------------+---------------------
+ 1 | 2022-11-22 12:00:00 | 2022-11-22 12:00:00
+ 2 | 2022-11-23 12:00:00 | 2022-11-23 12:00:00
+ 3 | 2022-11-24 12:00:00 | 2022-11-24 12:00:00
+(3 rows)
+
+ALTER TABLE test_at_modify_generated MODIFY COLUMN b DATE;
+SELECT * FROM test_at_modify_generated ORDER BY 1,2;
+ a |     b      |     c      
+---+------------+------------
+ 1 | 11-22-2022 | 11-22-2022
+ 2 | 11-23-2022 | 11-23-2022
+ 3 | 11-24-2022 | 11-24-2022
+(3 rows)
+
+\d+ test_at_modify_generated
+                            Table "atbdb_gtt_schema.test_at_modify_generated"
+ Column |         Type          |           Modifiers            | Storage  | Stats target | Description 
+--------+-----------------------+--------------------------------+----------+--------------+-------------
+ a      | integer               |                                | plain    |              | 
+ b      | date                  |                                | plain    |              | 
+ c      | character varying(32) | generated always as (b) stored | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_modify_generated MODIFY COLUMN b varchar(32);
+SELECT * FROM test_at_modify_generated ORDER BY 1,2;
+ a |     b      |     c      
+---+------------+------------
+ 1 | 11-22-2022 | 11-22-2022
+ 2 | 11-23-2022 | 11-23-2022
+ 3 | 11-24-2022 | 11-24-2022
+(3 rows)
+
+DROP TABLE test_at_modify_generated;
+-- test modify column AUTO_INCREMENT
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_autoinc(
+    a int,
+    b int
+);
+INSERT INTO test_at_modify_autoinc VALUES(1,NULL);
+INSERT INTO test_at_modify_autoinc VALUES(2,0);
+ALTER TABLE test_at_modify_autoinc MODIFY b int2 AUTO_INCREMENT; -- ERROR
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_b_seq" for serial column "test_at_modify_autoinc.b"
+ERROR:  auto_increment column must be defined as a unique or primary key
+ALTER TABLE test_at_modify_autoinc MODIFY b DECIMAL(4,2) AUTO_INCREMENT UNIQUE KEY; -- ERROR
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_b_seq" for serial column "test_at_modify_autoinc.b"
+ERROR:  The datatype of column 'b' does not support auto_increment
+ALTER TABLE test_at_modify_autoinc MODIFY b serial AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  cannot modify or change column to type 'serial'
+ALTER TABLE test_at_modify_autoinc MODIFY b int2 AUTO_INCREMENT NULL UNIQUE KEY;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_b_seq" for serial column "test_at_modify_autoinc.b"
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_autoinc_b_key" for table "test_at_modify_autoinc"
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a | b 
+---+---
+ 1 |  
+ 2 | 2
+(2 rows)
+
+INSERT INTO test_at_modify_autoinc VALUES(3,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a | b 
+---+---
+ 1 |  
+ 2 | 2
+ 3 | 3
+(3 rows)
+
+ALTER TABLE test_at_modify_autoinc MODIFY COLUMN b int;
+INSERT INTO test_at_modify_autoinc VALUES(4,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a | b 
+---+---
+ 1 |  
+ 2 | 2
+ 3 | 3
+ 4 | 0
+(4 rows)
+
+ALTER TABLE test_at_modify_autoinc MODIFY b int AUTO_INCREMENT PRIMARY KEY, AUTO_INCREMENT=100;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_b_seq" for serial column "test_at_modify_autoinc.b"
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_modify_autoinc_pkey" for table "test_at_modify_autoinc"
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b  
+---+-----
+ 1 | 100
+ 2 |   2
+ 3 |   3
+ 4 | 101
+(4 rows)
+
+INSERT INTO test_at_modify_autoinc VALUES(5,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b  
+---+-----
+ 1 | 100
+ 2 |   2
+ 3 |   3
+ 4 | 101
+ 5 | 102
+(5 rows)
+
+ALTER TABLE test_at_modify_autoinc AUTO_INCREMENT=1000;
+ALTER TABLE test_at_modify_autoinc MODIFY b int2 AUTO_INCREMENT;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_b_seq1" for serial column "test_at_modify_autoinc.b"
+INSERT INTO test_at_modify_autoinc VALUES(6,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+(6 rows)
+
+ALTER TABLE test_at_modify_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE, MODIFY  b int2 AUTO_INCREMENT UNIQUE KEY; -- ERROR
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_c_seq" for serial column "test_at_modify_autoinc.c"
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_b_seq" for serial column "test_at_modify_autoinc.b"
+ERROR:  Incorrect table definition, there can be only one auto_increment column
+ALTER TABLE test_at_modify_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE; -- ERROR
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_c_seq" for serial column "test_at_modify_autoinc.c"
+ERROR:  Incorrect column definition, there can be only one auto_increment column
+ALTER TABLE test_at_modify_autoinc MODIFY COLUMN b int;
+ALTER TABLE test_at_modify_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_c_seq" for serial column "test_at_modify_autoinc.c"
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_autoinc_c_key" for table "test_at_modify_autoinc"
+INSERT INTO test_at_modify_autoinc VALUES(7,0,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b   | c 
+---+------+---
+ 1 |  100 | 1
+ 2 |    2 | 2
+ 3 |    3 | 3
+ 4 |  101 | 4
+ 5 |  102 | 5
+ 6 | 1000 | 6
+ 7 |    0 | 7
+(7 rows)
+
+ALTER TABLE test_at_modify_autoinc DROP COLUMN c , MODIFY b int2 AUTO_INCREMENT UNIQUE KEY;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_autoinc_b_seq" for serial column "test_at_modify_autoinc.b"
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_autoinc_b_key1" for table "test_at_modify_autoinc"
+INSERT INTO test_at_modify_autoinc VALUES(8,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+ 7 | 1001
+ 8 | 1002
+(8 rows)
+
+ALTER TABLE test_at_modify_autoinc MODIFY b float4; -- ALTER TYPE ONLY, KEEP AUTO_INCREMENT
+INSERT INTO test_at_modify_autoinc VALUES(9,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+ 7 | 1001
+ 8 | 1002
+ 9 | 1003
+(9 rows)
+
+DROP TABLE test_at_modify_autoinc;
+-- ------------------------------------------------------ test ALTER TABLE CHANGE
+-- test change column without data
+CREATE GLOBAL TEMPORARY TABLE test_at_change(
+    a int,
+    b int NOT NULL
+);
+ALTER TABLE test_at_change CHANGE b b1 varchar(8) NULL;
+\d+ test_at_change;
+                      Table "atbdb_gtt_schema.test_at_change"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ a      | integer              |           | plain    |              | 
+ b1     | character varying(8) |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_change CHANGE b1 b varchar(8) DEFAULT '0';
+\d+ test_at_change;
+                                Table "atbdb_gtt_schema.test_at_change"
+ Column |         Type         |           Modifiers            | Storage  | Stats target | Description 
+--------+----------------------+--------------------------------+----------+--------------+-------------
+ a      | integer              |                                | plain    |              | 
+ b      | character varying(8) | default '0'::character varying | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_change CHANGE b b1 int AUTO_INCREMENT PRIMARY KEY;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_b1_seq" for serial column "test_at_change.b1"
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_change_pkey" for table "test_at_change"
+\d+ test_at_change;
+                      Table "atbdb_gtt_schema.test_at_change"
+ Column |  Type   |        Modifiers        | Storage | Stats target | Description 
+--------+---------+-------------------------+---------+--------------+-------------
+ a      | integer |                         | plain   |              | 
+ b1     | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "test_at_change_pkey" PRIMARY KEY, btree (b1) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_change CHANGE b1 b varchar(8) UNIQUE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_b_key" for table "test_at_change"
+\d+ test_at_change;
+                      Table "atbdb_gtt_schema.test_at_change"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ a      | integer              |           | plain    |              | 
+ b      | character varying(8) | not null  | extended |              | 
+Indexes:
+    "test_at_change_pkey" PRIMARY KEY, btree (b) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, btree (b) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_change CHANGE b b1 varchar(8) CHECK (b1 < 'a');
+\d+ test_at_change;
+                      Table "atbdb_gtt_schema.test_at_change"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ a      | integer              |           | plain    |              | 
+ b1     | character varying(8) | not null  | extended |              | 
+Indexes:
+    "test_at_change_pkey" PRIMARY KEY, btree (b1) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, btree (b1) TABLESPACE pg_default
+Check constraints:
+    "test_at_change_b1_check" CHECK (b1::text < 'a'::text)
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_change CHANGE b1 b varchar(8) COLLATE "POSIX";
+\d+ test_at_change;
+                            Table "atbdb_gtt_schema.test_at_change"
+ Column |         Type         |       Modifiers        | Storage  | Stats target | Description 
+--------+----------------------+------------------------+----------+--------------+-------------
+ a      | integer              |                        | plain    |              | 
+ b      | character varying(8) | collate POSIX not null | extended |              | 
+Indexes:
+    "test_at_change_pkey" PRIMARY KEY, btree (b) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, btree (b) TABLESPACE pg_default
+Check constraints:
+    "test_at_change_b1_check" CHECK (b::text < 'a'::text)
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_change CHANGE b b1 varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+\d+ test_at_change;
+                                        Table "atbdb_gtt_schema.test_at_change"
+ Column |         Type         |                   Modifiers                   | Storage  | Stats target | Description 
+--------+----------------------+-----------------------------------------------+----------+--------------+-------------
+ a      | integer              |                                               | plain    |              | 
+ b1     | character varying(8) | not null generated always as ((a + 1)) stored | extended |              | 
+Indexes:
+    "test_at_change_pkey" PRIMARY KEY, btree (b1) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, btree (b1) TABLESPACE pg_default
+Check constraints:
+    "test_at_change_b1_check" CHECK (b1::text < 'a'::text)
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_change CHANGE b1 b int NOT NULL;
+\d+ test_at_change;
+               Table "atbdb_gtt_schema.test_at_change"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer | not null  | plain   |              | 
+Indexes:
+    "test_at_change_pkey" PRIMARY KEY, btree (b) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, btree (b) TABLESPACE pg_default
+Check constraints:
+    "test_at_change_b1_check" CHECK (b::text < 'a'::text)
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+select pg_get_tabledef('test_at_change'::regclass);
+                                       pg_get_tabledef                                       
+---------------------------------------------------------------------------------------------
+ SET search_path = atbdb_gtt_schema;                                                        +
+ CREATE GLOBAL TEMPORARY TABLE test_at_change (                                             +
+     a integer,                                                                             +
+     b integer NOT NULL,                                                                    +
+     CONSTRAINT test_at_change_b1_check CHECK (((b)::text < 'a'::text))                     +
+ )                                                                                          +
+ WITH (orientation=row, compression=no, on_commit_delete_rows=false);                       +
+ ALTER TABLE test_at_change ADD CONSTRAINT test_at_change_b_key UNIQUE USING btree (b);     +
+ ALTER TABLE test_at_change ADD CONSTRAINT test_at_change_pkey PRIMARY KEY USING btree  (b);
+(1 row)
+
+INSERT INTO test_at_change VALUES(1,1);
+DROP TABLE test_at_change;
+-- test change column datatype
+CREATE GLOBAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_change_type VALUES(1,1);
+INSERT INTO test_at_change_type VALUES(2,2);
+INSERT INTO test_at_change_type VALUES(3,3);
+ALTER TABLE test_at_change_type CHANGE b b1 varchar(8);
+SELECT * FROM test_at_change_type where b1 = '3';
+ a | b1 
+---+----
+ 3 | 3
+(1 row)
+
+ALTER TABLE test_at_change_type CHANGE b1 b DATE; -- ERROR
+ERROR:  invalid input syntax for type date: "1"
+ALTER TABLE test_at_change_type CHANGE b1 b RAW;
+SELECT * FROM test_at_change_type ORDER BY 1,2;
+ a | b  
+---+----
+ 1 | 01
+ 2 | 02
+ 3 | 03
+(3 rows)
+
+DROP TABLE test_at_change_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b serial NOT NULL
+);
+NOTICE:  CREATE TABLE will create implicit sequence "test_at_change_type_b_seq" for serial column "test_at_change_type.b"
+INSERT INTO test_at_change_type VALUES(1,1);
+INSERT INTO test_at_change_type VALUES(2,2);
+INSERT INTO test_at_change_type VALUES(3,3);
+ALTER TABLE test_at_change_type CHANGE b b1 int;
+ALTER TABLE test_at_change_type CHANGE b1 b serial; -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  cannot modify or change column to type 'serial'
+ALTER TABLE test_at_change_type CHANGE b1 b DECIMAL(4,2);
+SELECT * FROM test_at_change_type where b = 3;
+ a |  b   
+---+------
+ 3 | 3.00
+(1 row)
+
+ALTER TABLE test_at_change_type CHANGE b b1 BOOLEAN;
+SELECT * FROM test_at_change_type ORDER BY 1,2;
+ a | b1 
+---+----
+ 1 | t
+ 2 | t
+ 3 | t
+(3 rows)
+
+DROP TABLE test_at_change_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b text
+);
+INSERT INTO test_at_change_type VALUES(1,'beijing');
+INSERT INTO test_at_change_type VALUES(2,'shanghai');
+INSERT INTO test_at_change_type VALUES(3,'guangzhou');
+ALTER TABLE test_at_change_type CHANGE b b1 SET('beijing','shanghai','nanjing','wuhan'); -- ERROR
+NOTICE:  ALTER TABLE will create implicit set "test_at_change_type_b1_set" for column "test_at_change_type.b1"
+ERROR:  invalid input value for set test_at_change_type_b1_set: 'guangzhou'
+ALTER TABLE test_at_change_type CHANGE b b1 SET('beijing','shanghai','nanjing','guangzhou');
+NOTICE:  ALTER TABLE will create implicit set "test_at_change_type_b1_set" for column "test_at_change_type.b1"
+ALTER TABLE test_at_change_type CHANGE b1 b SET('beijing','shanghai','guangzhou','wuhan'); -- ERROR
+ERROR:  can not alter column type to another set
+select pg_get_tabledef('test_at_change_type'::regclass);
+                           pg_get_tabledef                            
+----------------------------------------------------------------------
+ SET search_path = atbdb_gtt_schema;                                 +
+ CREATE GLOBAL TEMPORARY TABLE test_at_change_type (                 +
+     a integer,                                                      +
+     b1 SET('beijing', 'shanghai', 'nanjing', 'guangzhou')           +
+ )                                                                   +
+ WITH (orientation=row, compression=no, on_commit_delete_rows=false);
+(1 row)
+
+DROP TABLE test_at_change_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b varchar(32)
+);
+INSERT INTO test_at_change_type VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_change_type VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_change_type VALUES(3,'2022-11-24 12:00:00');
+ALTER TABLE test_at_change_type CHANGE b b1 varchar(10); -- ERROR
+ERROR:  value too long for type character varying(10)
+ALTER TABLE test_at_change_type CHANGE b b1 DATE;
+SELECT * FROM test_at_change_type ORDER BY 1,2;
+ a |     b1     
+---+------------
+ 1 | 11-22-2022
+ 2 | 11-23-2022
+ 3 | 11-24-2022
+(3 rows)
+
+DROP TABLE test_at_change_type;
+-- test change column constraint
+CREATE GLOBAL TEMPORARY TABLE test_at_change_constr(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_change_constr VALUES(1,1);
+INSERT INTO test_at_change_constr VALUES(2,2);
+INSERT INTO test_at_change_constr VALUES(3,3);
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) NOT NULL NULL; -- ERROR
+ERROR:  conflicting NULL/NOT NULL declarations for column "b1" of table "test_at_change_constr"
+LINE 1: ... test_at_change_constr CHANGE b b1 varchar(8) NOT NULL NULL;
+                                                                  ^
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) UNIQUE KEY NULL;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_constr_b1_key" for table "test_at_change_constr"
+INSERT INTO test_at_change_constr VALUES(3,3); -- ERROR
+ERROR:  duplicate key value violates unique constraint "test_at_change_constr_b1_key"
+DETAIL:  Key (b1)=(3) already exists.
+INSERT INTO test_at_change_constr VALUES(4,NULL);
+ALTER TABLE test_at_change_constr CHANGE b1 b int NULL PRIMARY KEY; -- ERROR
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_change_constr_pkey" for table "test_at_change_constr"
+ERROR:  column "b" contains null values
+DELETE FROM test_at_change_constr WHERE b1 IS NULL;
+ALTER TABLE test_at_change_constr CHANGE b1 b int NULL PRIMARY KEY;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_change_constr_pkey" for table "test_at_change_constr"
+INSERT INTO test_at_change_constr VALUES(4,NULL); -- ERROR
+ERROR:  null value in column "b" violates not-null constraint
+DETAIL:  Failing row contains (4, null).
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) CONSTRAINT t_at_m_check CHECK (b1 < 3); -- ERROR
+ERROR:  check constraint "t_at_m_check" is violated by some row
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) CONSTRAINT t_at_m_check CHECK (b1 < 5);
+ALTER TABLE test_at_change_constr CHANGE b1 b varchar(8) CONSTRAINT t_at_m_check CHECK (b = a); -- ERROR
+ERROR:  constraint "t_at_m_check" for relation "test_at_change_constr" already exists
+ALTER TABLE test_at_change_constr CHANGE b1 b varchar(8) CONSTRAINT t_at_m_check_1 CHECK (b = a);
+INSERT INTO test_at_change_constr VALUES(4,4);
+INSERT INTO test_at_change_constr VALUES(5,5); -- ERROR
+ERROR:  new row for relation "test_at_change_constr" violates check constraint "t_at_m_check"
+DETAIL:  N/A
+INSERT INTO test_at_change_constr VALUES(6,'a'); -- ERROR
+ERROR:  new row for relation "test_at_change_constr" violates check constraint "t_at_m_check_1"
+DETAIL:  N/A
+INSERT INTO test_at_change_constr VALUES(0,'a');
+ALTER TABLE test_at_change_constr CHANGE b b1 int NOT NULL PRIMARY KEY; -- ERROR
+ERROR:  multiple primary keys for table "test_at_change_constr" are not allowed
+ALTER TABLE test_at_change_constr CHANGE b b1 int NOT NULL;
+INSERT INTO test_at_change_constr VALUES(5,5); -- ERROR
+ERROR:  new row for relation "test_at_change_constr" violates check constraint "t_at_m_check"
+DETAIL:  N/A
+SELECT b1 FROM test_at_change_constr ORDER BY 1;
+ b1 
+----
+  0
+  1
+  2
+  3
+  4
+(5 rows)
+
+select pg_get_tabledef('test_at_change_constr'::regclass);
+                                              pg_get_tabledef                                               
+------------------------------------------------------------------------------------------------------------
+ SET search_path = atbdb_gtt_schema;                                                                       +
+ CREATE GLOBAL TEMPORARY TABLE test_at_change_constr (                                                     +
+     a integer,                                                                                            +
+     b1 integer NOT NULL,                                                                                  +
+     CONSTRAINT t_at_m_check_1 CHECK (((b1)::bigint = a)),                                                 +
+     CONSTRAINT t_at_m_check CHECK (((b1)::bigint < 5))                                                    +
+ )                                                                                                         +
+ WITH (orientation=row, compression=no, on_commit_delete_rows=false);                                      +
+ ALTER TABLE test_at_change_constr ADD CONSTRAINT test_at_change_constr_b1_key UNIQUE USING btree (b1);    +
+ ALTER TABLE test_at_change_constr ADD CONSTRAINT test_at_change_constr_pkey PRIMARY KEY USING btree  (b1);
+(1 row)
+
+ALTER TABLE test_at_change_constr CHANGE b1 b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  modify or change column REFERENCES constraint is not supported
+DROP TABLE test_at_change_constr;
+-- test change column default
+CREATE GLOBAL TEMPORARY TABLE test_at_change_default(
+    a int,
+    b int DEFAULT NULL
+);
+INSERT INTO test_at_change_default VALUES(1,1);
+INSERT INTO test_at_change_default VALUES(2,2);
+INSERT INTO test_at_change_default VALUES(3,3);
+ALTER TABLE test_at_change_default CHANGE b b1 bigint DEFAULT (a+1); -- ERROR
+ERROR:  default value cannot reference to a column
+HINT:  Perhaps the default value is enclosed in double quotes
+ALTER TABLE test_at_change_default CHANGE b b1 bigint DEFAULT NULL;
+\d+ test_at_change_default;
+           Table "atbdb_gtt_schema.test_at_change_default"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b1     | bigint  |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_change_default CHANGE b1 b varchar(8) DEFAULT 'a' GENERATED ALWAYS AS (a+1) STORED; -- ERROR
+ERROR:  both default and generation expression specified for column "b" of table "test_at_change_default"
+LINE 1: ...change_default CHANGE b1 b varchar(8) DEFAULT 'a' GENERATED ...
+                                                             ^
+ALTER TABLE test_at_change_default CHANGE b1 b varchar(8) DEFAULT 'a';
+\d+ test_at_change_default;
+                            Table "atbdb_gtt_schema.test_at_change_default"
+ Column |         Type         |           Modifiers            | Storage  | Stats target | Description 
+--------+----------------------+--------------------------------+----------+--------------+-------------
+ a      | integer              |                                | plain    |              | 
+ b      | character varying(8) | default 'a'::character varying | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+INSERT INTO test_at_change_default VALUES(0,DEFAULT);
+SELECT b FROM test_at_change_default ORDER BY 1;
+ b 
+---
+ 1
+ 2
+ 3
+ a
+(4 rows)
+
+ALTER TABLE test_at_change_default CHANGE b b1 int DEFAULT 4 AUTO_INCREMENT; -- ERROR
+ERROR:  multiple default values specified for column "b1" of table "test_at_change_default"
+LINE 1: ... test_at_change_default CHANGE b b1 int DEFAULT 4 AUTO_INCRE...
+                                                             ^
+ALTER TABLE test_at_change_default CHANGE b b1 int DEFAULT 4;
+INSERT INTO test_at_change_default VALUES(4,DEFAULT);
+SELECT b1 FROM test_at_change_default ORDER BY 1;
+ b1 
+----
+  0
+  1
+  2
+  3
+  4
+(5 rows)
+
+ALTER TABLE test_at_change_default CHANGE b1 b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+SELECT a,b FROM test_at_change_default ORDER BY 1,2;
+ a | b 
+---+---
+ 0 | 1
+ 1 | 2
+ 2 | 3
+ 3 | 4
+ 4 | 5
+(5 rows)
+
+ALTER TABLE test_at_change_default CHANGE a a1 varchar(8) DEFAULT 'a';
+INSERT INTO test_at_change_default VALUES(DEFAULT,DEFAULT);
+SELECT * FROM test_at_change_default ORDER BY 1,2;
+ a1 | b 
+----+---
+ 0  | 1
+ 1  | 2
+ 2  | 3
+ 3  | 4
+ 4  | 5
+ a  | 1
+(6 rows)
+
+\d+ test_at_change_default;
+                                     Table "atbdb_gtt_schema.test_at_change_default"
+ Column |         Type         |                    Modifiers                    | Storage  | Stats target | Description 
+--------+----------------------+-------------------------------------------------+----------+--------------+-------------
+ a1     | character varying(8) | default 'a'::character varying                  | extended |              | 
+ b      | character varying(8) | generated always as (((a1)::bigint + 1)) stored | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+DROP TABLE test_at_change_default;
+-- test change column depended by generated column
+CREATE GLOBAL TEMPORARY TABLE test_at_change_generated(
+    a int,
+    b varchar(32),
+    c varchar(32) GENERATED ALWAYS AS (b) STORED
+);
+INSERT INTO test_at_change_generated(a,b) VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_change_generated(a,b) VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_change_generated(a,b) VALUES(3,'2022-11-24 12:00:00');
+SELECT * FROM test_at_change_generated ORDER BY 1,2;
+ a |          b          |          c          
+---+---------------------+---------------------
+ 1 | 2022-11-22 12:00:00 | 2022-11-22 12:00:00
+ 2 | 2022-11-23 12:00:00 | 2022-11-23 12:00:00
+ 3 | 2022-11-24 12:00:00 | 2022-11-24 12:00:00
+(3 rows)
+
+ALTER TABLE test_at_change_generated CHANGE COLUMN b b1 DATE;
+SELECT * FROM test_at_change_generated ORDER BY 1,2;
+ a |     b1     |     c      
+---+------------+------------
+ 1 | 11-22-2022 | 11-22-2022
+ 2 | 11-23-2022 | 11-23-2022
+ 3 | 11-24-2022 | 11-24-2022
+(3 rows)
+
+\d+ test_at_change_generated
+                            Table "atbdb_gtt_schema.test_at_change_generated"
+ Column |         Type          |            Modifiers            | Storage  | Stats target | Description 
+--------+-----------------------+---------------------------------+----------+--------------+-------------
+ a      | integer               |                                 | plain    |              | 
+ b1     | date                  |                                 | plain    |              | 
+ c      | character varying(32) | generated always as (b1) stored | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+ALTER TABLE test_at_change_generated CHANGE COLUMN b1 b varchar(32);
+SELECT * FROM test_at_change_generated ORDER BY 1,2;
+ a |     b      |     c      
+---+------------+------------
+ 1 | 11-22-2022 | 11-22-2022
+ 2 | 11-23-2022 | 11-23-2022
+ 3 | 11-24-2022 | 11-24-2022
+(3 rows)
+
+DROP TABLE test_at_change_generated;
+-- test change column AUTO_INCREMENT
+CREATE GLOBAL TEMPORARY TABLE test_at_change_autoinc(
+    a int,
+    b int
+);
+INSERT INTO test_at_change_autoinc VALUES(1,NULL);
+INSERT INTO test_at_change_autoinc VALUES(2,0);
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int2 AUTO_INCREMENT; -- ERROR
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_b1_seq" for serial column "test_at_change_autoinc.b1"
+ERROR:  auto_increment column must be defined as a unique or primary key
+ALTER TABLE test_at_change_autoinc CHANGE b b1 DECIMAL(4,2) AUTO_INCREMENT UNIQUE KEY; -- ERROR
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_b1_seq" for serial column "test_at_change_autoinc.b1"
+ERROR:  The datatype of column 'b1' does not support auto_increment
+ALTER TABLE test_at_change_autoinc CHANGE b b1 serial AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ERROR:  Invalid modify column operation
+DETAIL:  cannot modify or change column to type 'serial'
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int2 AUTO_INCREMENT NULL UNIQUE KEY;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_b1_seq" for serial column "test_at_change_autoinc.b1"
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_autoinc_b1_key" for table "test_at_change_autoinc"
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b1 
+---+----
+ 1 |   
+ 2 |  2
+(2 rows)
+
+INSERT INTO test_at_change_autoinc VALUES(3,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b1 
+---+----
+ 1 |   
+ 2 |  2
+ 3 |  3
+(3 rows)
+
+ALTER TABLE test_at_change_autoinc CHANGE b1 b int;
+INSERT INTO test_at_change_autoinc VALUES(4,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b 
+---+---
+ 1 |  
+ 2 | 2
+ 3 | 3
+ 4 | 0
+(4 rows)
+
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int AUTO_INCREMENT PRIMARY KEY, AUTO_INCREMENT=100;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_b1_seq" for serial column "test_at_change_autoinc.b1"
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_change_autoinc_pkey" for table "test_at_change_autoinc"
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b1  
+---+-----
+ 1 | 100
+ 2 |   2
+ 3 |   3
+ 4 | 101
+(4 rows)
+
+INSERT INTO test_at_change_autoinc VALUES(5,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a | b1  
+---+-----
+ 1 | 100
+ 2 |   2
+ 3 |   3
+ 4 | 101
+ 5 | 102
+(5 rows)
+
+ALTER TABLE test_at_change_autoinc AUTO_INCREMENT=1000;
+ALTER TABLE test_at_change_autoinc CHANGE b1 b int2 AUTO_INCREMENT;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_b_seq" for serial column "test_at_change_autoinc.b"
+INSERT INTO test_at_change_autoinc VALUES(6,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+(6 rows)
+
+ALTER TABLE test_at_change_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE, CHANGE b b1 int2 AUTO_INCREMENT UNIQUE KEY; -- ERROR
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_c_seq" for serial column "test_at_change_autoinc.c"
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_b1_seq" for serial column "test_at_change_autoinc.b1"
+ERROR:  Incorrect table definition, there can be only one auto_increment column
+ALTER TABLE test_at_change_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE; -- ERROR
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_c_seq" for serial column "test_at_change_autoinc.c"
+ERROR:  Incorrect column definition, there can be only one auto_increment column
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int;
+ALTER TABLE test_at_change_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_c_seq" for serial column "test_at_change_autoinc.c"
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_autoinc_c_key" for table "test_at_change_autoinc"
+INSERT INTO test_at_change_autoinc VALUES(7,0,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a |  b1  | c 
+---+------+---
+ 1 |  100 | 1
+ 2 |    2 | 2
+ 3 |    3 | 3
+ 4 |  101 | 4
+ 5 |  102 | 5
+ 6 | 1000 | 6
+ 7 |    0 | 7
+(7 rows)
+
+ALTER TABLE test_at_change_autoinc DROP COLUMN c , CHANGE b1 b int2 AUTO_INCREMENT UNIQUE KEY;
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_autoinc_b_seq" for serial column "test_at_change_autoinc.b"
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_autoinc_b_key" for table "test_at_change_autoinc"
+INSERT INTO test_at_change_autoinc VALUES(8,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ a |  b   
+---+------
+ 1 |  100
+ 2 |    2
+ 3 |    3
+ 4 |  101
+ 5 |  102
+ 6 | 1000
+ 7 | 1001
+ 8 | 1002
+(8 rows)
+
+DROP TABLE test_at_change_autoinc;
+-- END
+RESET CURRENT_SCHEMA;
+DROP SCHEMA atbdb_gtt_schema CASCADE;
+\c regression
+clean connection to all force for database atbdb_gtt;
+drop database if exists atbdb_gtt;

@@ -627,7 +627,7 @@ void SnapshotNameSpace::GetQueryData(const char* query, bool with_column_name, L
     /* get colname */
     if (with_column_name) {
         for (int32 i = 0; i < SPI_tuptable->tupdesc->natts; i++) {
-            char* strName = pstrdup(SPI_tuptable->tupdesc->attrs[i]->attname.data);
+            char* strName = pstrdup(SPI_tuptable->tupdesc->attrs[i].attname.data);
             colname_cstring = lappend(colname_cstring, strName);
         }
         *cstring_values = lappend(*cstring_values, colname_cstring);

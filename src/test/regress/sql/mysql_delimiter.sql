@@ -19,7 +19,12 @@ select 1//
 delimiter ;//
 
 --Test delimiter length
-delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
+delimiter ""
+delimiter ''
+delimiter aaaaaaaaaaaaaaaa
+delimiter "aaaaaaaaaaaaaaaa"
+delimiter aaaaaaaaaaaaaaa
+delimiter ;
 
 --Test delimiter %
 delimiter %;

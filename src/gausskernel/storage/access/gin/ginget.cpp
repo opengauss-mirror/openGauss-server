@@ -132,10 +132,12 @@ static bool collectMatchBitmap(GinBtreeData *btree, GinBtreeStack *stack, GinSca
 {
     OffsetNumber attnum;
     Form_pg_attribute attr;
+    TBMHandler tbm_handler;
 
     /* Initialize empty bitmap result */
     if (!isColStore) {
-        scanEntry->matchBitmap = TbmCreate(u_sess->attr.attr_memory.work_mem * 1024L);
+        scanEntry->matchBitmap = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L);
+        tbm_handler = tbm_get_handler(scanEntry->matchBitmap);
     }
 
     /* Null query cannot partial-match anything */
@@ -144,7 +146,7 @@ static bool collectMatchBitmap(GinBtreeData *btree, GinBtreeStack *stack, GinSca
 
     /* Locate tupdesc entry for key column (for attbyval/attlen data) */
     attnum = scanEntry->attnum;
-    attr = btree->ginstate->origTupdesc->attrs[attnum - 1];
+    attr = &btree->ginstate->origTupdesc->attrs[attnum - 1];
 
     for (;;) {
         Page page;
@@ -280,7 +282,7 @@ static bool collectMatchBitmap(GinBtreeData *btree, GinBtreeStack *stack, GinSca
             ipd = ginReadTuple(btree->ginstate, scanEntry->attnum, itup, &nipd);
 
             if (!isColStore) {
-                tbm_add_tuples(scanEntry->matchBitmap, ipd, nipd, false);
+                tbm_handler._add_tuples(scanEntry->matchBitmap, ipd, nipd, false, InvalidOid, InvalidBktId);
             } else {
                 if (scanEntry->matchList == NULL) {
                     scanEntry->matchList = (ItemPointer)palloc(nipd * sizeof(ItemPointerData));
@@ -374,7 +376,8 @@ restartScanEntry:
         }
 
         if (!isColStore && entry->matchBitmap && !tbm_is_empty(entry->matchBitmap)) {
-            entry->matchIterator = tbm_begin_iterate(entry->matchBitmap);
+            TBMHandler tbm_handler = tbm_get_handler(entry->matchBitmap);
+            entry->matchIterator = tbm_handler._begin_iterate(entry->matchBitmap);
             entry->isFinished = false;
         }
 
@@ -1569,6 +1572,7 @@ static void scanPendingInsert(IndexScanDesc scan, TIDBitmap *tbm, int64 *ntids)
     pendingPosition pos;
     Buffer metabuffer = ReadBuffer(scan->indexRelation, GIN_METAPAGE_BLKNO);
     BlockNumber blkno;
+    TBMHandler tbm_handler = tbm_get_handler(tbm);
     Oid partHeapOid = IndexScanGetPartHeapOid(scan);
 
     *ntids = 0;
@@ -1628,7 +1632,7 @@ static void scanPendingInsert(IndexScanDesc scan, TIDBitmap *tbm, int64 *ntids)
         MemoryContextReset(so->tempCtx);
 
         if (match) {
-            tbm_add_tuples(tbm, &pos.item, 1, recheck, partHeapOid);
+            tbm_handler._add_tuples(tbm, &pos.item, 1, recheck, partHeapOid, InvalidBktId);
             (*ntids)++;
         }
     }
@@ -1652,6 +1656,7 @@ Datum gingetbitmap(PG_FUNCTION_ARGS)
     int64 ntids;
     ItemPointerData iptr;
     bool recheck = false;
+    TBMHandler tbm_handler = tbm_get_handler(tbm);
     Oid partHeapOid = IndexScanGetPartHeapOid(scan);
 
     /*
@@ -1691,9 +1696,9 @@ Datum gingetbitmap(PG_FUNCTION_ARGS)
             break;
 
         if (ItemPointerIsLossyPage(&iptr))
-            tbm_add_page(tbm, ItemPointerGetBlockNumber(&iptr), partHeapOid);
+            tbm_handler._add_page(tbm, ItemPointerGetBlockNumber(&iptr), partHeapOid, InvalidBktId);
         else
-            tbm_add_tuples(tbm, &iptr, 1, recheck, partHeapOid);
+            tbm_handler._add_tuples(tbm, &iptr, 1, recheck, partHeapOid, InvalidBktId);
         ntids++;
     }
 

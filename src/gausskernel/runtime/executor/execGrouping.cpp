@@ -49,7 +49,7 @@ static int TupleHashTableMatch(const void* key1, const void* key2, Size keysize)
  * NB: evalContext is reset each time!
  */
 bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
-    FmgrInfo* eqfunctions, MemoryContext evalContext)
+    FmgrInfo* eqfunctions, MemoryContext evalContext, Oid *collations)
 {
     MemoryContext oldContext;
     bool result = false;
@@ -87,9 +87,16 @@ bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, 
         }
 
         /* Apply the type-specific equality function */
-        if (!DatumGetBool(FunctionCall2(&eqfunctions[i], attr1, attr2))) {
-            result = false; /* they aren't equal */
-            break;
+        if (DB_IS_CMPT(B_FORMAT) && collations != NULL) {
+            if (!DatumGetBool(FunctionCall2Coll(&eqfunctions[i], collations[i], attr1, attr2))) {
+                result = false; /* they aren't equal */
+                break;
+            }
+        } else {
+            if (!DatumGetBool(FunctionCall2(&eqfunctions[i], attr1, attr2))) {
+                result = false; /* representing not equal */
+                break;
+            }
         }
     }
 
@@ -109,13 +116,13 @@ bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, 
  * Parameters are identical to execTuplesMatch.
  */
 bool execTuplesUnequal(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
-    FmgrInfo* eqfunctions, MemoryContext evalContext)
+    FmgrInfo* eqfunctions, MemoryContext evalContext, Oid *collations)
 {
     MemoryContext oldContext;
     bool result = false;
     int i;
 
-    Assert(slot1->tts_tupleDescriptor->tdTableAmType == slot2->tts_tupleDescriptor->tdTableAmType);
+    Assert(slot1->tts_tupleDescriptor->td_tam_ops == slot2->tts_tupleDescriptor->td_tam_ops);
 
     /* Reset and switch into the temp context. */
     MemoryContextReset(evalContext);
@@ -148,9 +155,17 @@ bool execTuplesUnequal(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols
         }
 
         /* Apply the type-specific equality function */
-        if (!DatumGetBool(FunctionCall2(&eqfunctions[i], attr1, attr2))) {
-            result = true; /* they are unequal */
-            break;
+        if (DB_IS_CMPT(B_FORMAT) && collations != NULL) {
+            if (!DatumGetBool(FunctionCall2Coll(&eqfunctions[i], collations[i], attr1, attr2))) {
+                result = true; /* they aren't equal */
+                break;
+            }
+        } else {
+            if (!DatumGetBool(FunctionCall2(&eqfunctions[i], attr1, attr2))) {
+                /* representing not equal */
+                result = true;
+                break;
+            }
         }
     }
 
@@ -249,7 +264,7 @@ void execTuplesHashPrepare(int numCols, Oid* eqOperators, FmgrInfo** eqFunctions
  * storage that will live as long as the hashtable does.
  */
 TupleHashTable BuildTupleHashTable(int numCols, AttrNumber* keyColIdx, FmgrInfo* eqfunctions, FmgrInfo* hashfunctions,
-    long nbuckets, Size entrysize, MemoryContext tablecxt, MemoryContext tempcxt, int workMem)
+    long nbuckets, Size entrysize, MemoryContext tablecxt, MemoryContext tempcxt, int workMem, Oid *collations)
 {
     TupleHashTable hashtable;
     HASHCTL hash_ctl;
@@ -288,6 +303,7 @@ TupleHashTable BuildTupleHashTable(int numCols, AttrNumber* keyColIdx, FmgrInfo*
     hash_ctl.hcxt = tablecxt;
     hashtable->hashtab =
         hash_create("TupleHashTable", nbuckets, &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_COMPARE | HASH_CONTEXT);
+    hashtable->tab_collations = collations;
 
     return hashtable;
 }
@@ -489,7 +505,11 @@ static uint32 TupleHashTableHash(const void* key, Size keysize)
         /* treat nulls as having hash key 0 */
         if (!isNull) {
             uint32 hkey;
-            hkey = DatumGetUInt32(FunctionCall1(&hashfunctions[i], attr));
+            if (DB_IS_CMPT(B_FORMAT) && hashtable->tab_collations != NULL) {
+                hkey = DatumGetUInt32(FunctionCall1Coll(&hashfunctions[i], hashtable->tab_collations[i], attr));
+            } else {
+                hkey = DatumGetUInt32(FunctionCall1(&hashfunctions[i], attr));
+            }
             hashkey ^= hkey;
         }
     }
@@ -534,9 +554,10 @@ static int TupleHashTableMatch(const void* key1, const void* key2, Size keysize)
     slot2 = hashtable->inputslot;
 
     /* For crosstype comparisons, the inputslot must be first */
-    if (execTuplesMatch(
-            slot2, slot1, hashtable->numCols, hashtable->keyColIdx, hashtable->cur_eq_funcs, hashtable->tempcxt))
+    if (execTuplesMatch(slot2, slot1, hashtable->numCols, hashtable->keyColIdx, hashtable->cur_eq_funcs,
+                        hashtable->tempcxt, hashtable->tab_collations)) {
         return 0;
-    else
+    } else {
         return 1;
+    }
 }

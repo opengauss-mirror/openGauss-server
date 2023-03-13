@@ -411,7 +411,7 @@ static void ReadBinaryFileBlocksFirstCall(PG_FUNCTION_ARGS, int32 startBlockNum,
      * build tupdesc for result tuples. This must match this function's
      * pg_proc entry!
      */
-    TupleDesc tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(6, false, TableAmHeap);
     int i = 1;
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "path", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "blocknum", INT4OID, -1, 0);
@@ -525,7 +525,7 @@ Datum compress_address_details(PG_FUNCTION_ARGS)
         FuncCallContext* fctx = SRF_FIRSTCALL_INIT();
         MemoryContext mctx = MemoryContextSwitchTo(fctx->multi_call_memory_ctx);
 
-        TupleDesc tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
+        TupleDesc tupdesc = CreateTemplateTupleDesc(6, false, TableAmHeap);
         TupleDescInitEntry(tupdesc, (AttrNumber)i++, "extent", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)i++, "extent_block_number", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)i++, "block_number", INT8OID, -1, 0);
@@ -607,7 +607,7 @@ Datum compress_address_header(PG_FUNCTION_ARGS)
         FuncCallContext* fctx = SRF_FIRSTCALL_INIT();
         MemoryContext mctx = MemoryContextSwitchTo(fctx->multi_call_memory_ctx);
 
-        TupleDesc tupdesc = CreateTemplateTupleDesc(5, false, TAM_HEAP);
+        TupleDesc tupdesc = CreateTemplateTupleDesc(5, false, TableAmHeap);
         TupleDescInitEntry(tupdesc, (AttrNumber)i++, "extent", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)i++, "nblocks", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)i++, "alocated_chunks", INT4OID, -1, 0);
@@ -661,7 +661,7 @@ Datum compress_address_header(PG_FUNCTION_ARGS)
 Datum compress_buffer_stat_info(PG_FUNCTION_ARGS)
 {
     int i = 1;
-    TupleDesc tupdesc = CreateTemplateTupleDesc(PCA_BUFFERS_STAT_INFO_COLS, false, TAM_HEAP);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(PCA_BUFFERS_STAT_INFO_COLS, false, TableAmHeap);
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "ctrl_cnt", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "main_cnt", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "free_cnt", INT8OID, -1, 0);
@@ -746,7 +746,7 @@ Datum compress_ratio_info(PG_FUNCTION_ARGS)
     checkPath(path);
 
     // format the tupdesc
-    TupleDesc tupdesc = CreateTemplateTupleDesc(PCA_COMPRESS_RATIO_INFO_COLS, false, TAM_HEAP);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(PCA_COMPRESS_RATIO_INFO_COLS, false, TableAmHeap);
     TupleDescInitEntry(tupdesc, (AttrNumber)j++, "path", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)j++, "is_compress", BOOLOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)j++, "file_count", INT8OID, -1, 0);
@@ -931,7 +931,7 @@ Datum compress_statistic_info(PG_FUNCTION_ARGS)
     }
 
     // format the tupdesc
-    TupleDesc tupdesc = CreateTemplateTupleDesc(PCA_COMPRESS_STATISTIC_INFO_COLS, false, TAM_HEAP);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(PCA_COMPRESS_STATISTIC_INFO_COLS, false, TableAmHeap);
     TupleDescInitEntry(tupdesc, (AttrNumber)j++, "path", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)j++, "extent_count", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)j++, "dispersion_count", INT8OID, -1, 0);
@@ -985,6 +985,16 @@ Datum compress_statistic_info(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
+void item_state_free(CompressAddressItemState *itemState)
+{
+    if (itemState->rbStruct.header != NULL) {
+        MmapFree(&itemState->rbStruct);
+        itemState->rbStruct.header = NULL;
+    }
+    (void)FreeFile(itemState->compressedFd);
+    itemState->compressedFd = NULL;
+}
+
 Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
 {
     int32 startBlockNum = PG_GETARG_INT32(1);
@@ -1023,6 +1033,11 @@ Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
             CfsReadStruct cfsReadStruct{itemState->compressedFd, itemState->rbStruct.header, extentCount};
             len = CfsReadCompressedPage(VARDATA(buf), BLCKSZ, itemState->blkno % CFS_LOGIC_BLOCKS_PER_EXTENT,
                                         &cfsReadStruct, CFS_LOGIC_BLOCKS_PER_FILE * itemState->segmentNo + itemState->blkno);
+            if (len > MIN_COMPRESS_ERROR_RT) {
+                item_state_free(itemState);
+                ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+                                errmsg("can not read actual block %u, error code: %lu,", itemState->blkno, len)));
+            }
         }
         SET_VARSIZE(buf, len + VARHDRSZ);
         Datum values[6];
@@ -1041,10 +1056,7 @@ Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
         itemState->blkno++;
         SRF_RETURN_NEXT(fctx, result);
     } else {
-        if (itemState->rbStruct.header != NULL) {
-            MmapFree(&itemState->rbStruct);
-        }
-        (void)FreeFile(itemState->compressedFd);
+        item_state_free(itemState);
         SRF_RETURN_DONE(fctx);
     }
 }
@@ -1075,7 +1087,7 @@ Datum pg_stat_file(PG_FUNCTION_ARGS)
      * This record type had better match the output parameters declared for me
      * in pg_proc.h.
      */
-    tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(6, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "size", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "access", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "modification", TIMESTAMPTZOID, -1, 0);
@@ -1252,7 +1264,7 @@ Datum pg_stat_file_recursive(PG_FUNCTION_ARGS)
          * This record type had better match the output parameters declared for me
          * in pg_proc.h.
          */
-        tupdesc = CreateTemplateTupleDesc(4, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(4, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "path", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "filename", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "size", INT8OID, -1, 0);

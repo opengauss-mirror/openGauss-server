@@ -107,10 +107,10 @@ typedef IndexAttributeBitMapData* IndexAttributeBitMap;
 #define index_getattr(tup, attnum, tupleDesc, isnull)                                                    \
     (AssertMacro(PointerIsValid(isnull) && (attnum) > 0),                                                \
         *(isnull) = false,                                                                               \
-        !IndexTupleHasNulls(tup) ? ((tupleDesc)->attrs[(attnum)-1]->attcacheoff >= 0                     \
-                                           ? (fetchatt((tupleDesc)->attrs[(attnum)-1],                   \
+        !IndexTupleHasNulls(tup) ? (TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff >= 0             \
+                                           ? (fetchatt(TupleDescAttr((tupleDesc), (attnum)-1),           \
                                                  (char*)(tup) + IndexInfoFindDataOffset((tup)->t_info) + \
-                                                     (tupleDesc)->attrs[(attnum)-1]->attcacheoff))       \
+                                             TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff))       \
                                            : nocache_index_getattr((tup), (attnum), (tupleDesc)))        \
                                  : ((att_isnull((attnum)-1, (char*)(tup) + sizeof(IndexTupleData)))      \
                                            ? (*(isnull) = true, (Datum)NULL)                             \

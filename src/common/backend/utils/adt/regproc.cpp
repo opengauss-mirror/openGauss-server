@@ -44,6 +44,9 @@
 
 static void parseNameAndArgTypes(const char* string, bool allowNone, List** names, int* nargs, Oid* argtypes);
 
+static char *format_operator_internal(Oid operator_oid, bool force_qualify);
+static char *format_procedure_internal(Oid procedure_oid, bool force_qualify);
+
 static Datum regprocin_booststrap(char* procname)
 {
     RegProcedure result = InvalidOid;
@@ -291,6 +294,61 @@ Datum regprocedurein(PG_FUNCTION_ARGS)
  * in other backend modules.  The result is a palloc'd string.
  */
 char* format_procedure(Oid procedure_oid)
+{
+    return format_procedure_internal(procedure_oid, false);
+}
+ 
+char *
+format_procedure_qualified(Oid procedure_oid)
+{
+    return format_procedure_internal(procedure_oid, true);
+}
+ 
+/*
+ * Output an objname/objargs representation for the procedure with the                                                                                         
+ * given OID.  If it doesn't exist, an error is thrown.                                                                                                        
+ *
+ * This can be used to feed get_object_address.                                                                                                                
+ */
+void
+format_procedure_parts(Oid procedure_oid, List **objnames, List **objargs)                                                                                     
+{   
+    HeapTuple   proctup;
+    Form_pg_proc procform;                                                                                                                                     
+    int         nargs;                                                                                                                                         
+    int         i;                                                                                                                                             
+    
+    proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procedure_oid));                                                                                       
+    
+    if (!HeapTupleIsValid(proctup))
+        elog(ERROR, "cache lookup failed for procedure with OID %u", procedure_oid);                                                                           
+    
+    procform = (Form_pg_proc) GETSTRUCT(proctup);                                                                                                              
+    nargs = procform->pronargs;                                                                                                                                
+    
+    *objnames = list_make2(get_namespace_name_or_temp(procform->pronamespace),                                                                                 
+                          pstrdup(NameStr(procform->proname)));                                                                                               
+    *objargs = NIL; 
+    for (i = 0; i < nargs; i++)                                                                                                                                
+    {   
+        Oid         thisargtype = procform->proargtypes.values[i];                                                                                             
+        
+        *objargs = lappend(*objargs, format_type_be_qualified(thisargtype));                                                                                   
+    }                                                                                                                                                          
+    
+    ReleaseSysCache(proctup);                                                                                                                                  
+}                                                                                                                                                              
+
+
+ /*
+  * Routine to produce regprocedure names; see format_procedure above.
+  *
+  * force_qualify says whether to schema-qualify; if true, the name is always
+  * qualified regardless of search_path visibility.  Otherwise the name is only
+  * qualified if the function is not in path.
+  */
+static char *
+format_procedure_internal(Oid procedure_oid, bool force_qualify)
 {
     char* result = NULL;
     HeapTuple proctup;
@@ -601,12 +659,12 @@ Datum regoperatorin(PG_FUNCTION_ARGS)
 }
 
 /*
- * format_operator		- converts operator OID to "opr_name(args)"
+ * format_operator_internal		- converts operator OID to "opr_name(args)"
  *
  * This exports the useful functionality of regoperatorout for use
  * in other backend modules.  The result is a palloc'd string.
  */
-char* format_operator(Oid operator_oid)
+char* format_operator_internal(Oid operator_oid, bool force_qualify)
 {
     char* result = NULL;
     HeapTuple opertup;
@@ -627,7 +685,7 @@ char* format_operator(Oid operator_oid)
          * Would this oper be found (given the right args) by regoperatorin?
          * If not, we need to qualify it.
          */
-        if (!OperatorIsVisible(operator_oid)) {
+        if (force_qualify || !OperatorIsVisible(operator_oid)) {
             nspname = get_namespace_name(operform->oprnamespace);
             appendStringInfo(&buf, "%s.", quote_identifier(nspname));
         }
@@ -635,12 +693,14 @@ char* format_operator(Oid operator_oid)
         appendStringInfo(&buf, "%s(", oprname);
 
         if (operform->oprleft)
-            appendStringInfo(&buf, "%s,", format_type_be(operform->oprleft));
+            appendStringInfo(&buf, "%s,", force_qualify ?
+                            format_type_be_qualified(operform->oprleft):format_type_be(operform->oprleft));
         else
             appendStringInfo(&buf, "NONE,");
 
         if (operform->oprright)
-            appendStringInfo(&buf, "%s)", format_type_be(operform->oprright));
+            appendStringInfo(&buf, "%s)", force_qualify ?
+                            format_type_be_qualified(operform->oprleft):format_type_be(operform->oprright));
         else
             appendStringInfo(&buf, "NONE)");
 
@@ -659,6 +719,18 @@ char* format_operator(Oid operator_oid)
     return result;
 }
 
+char *
+format_operator(Oid operator_oid)
+{
+    return format_operator_internal(operator_oid, false);
+}
+ 
+char *
+format_operator_qualified(Oid operator_oid)
+{
+    return format_operator_internal(operator_oid, true);
+}
+ 
 /*
  * regoperatorout		- converts operator OID to "opr_name(args)"
  */
@@ -691,6 +763,31 @@ Datum regoperatorsend(PG_FUNCTION_ARGS)
 {
     /* Exactly the same as oidsend, so share code */
     return oidsend(fcinfo);
+}
+
+void
+format_operator_parts(Oid operator_oid, List **objnames, List **objargs)
+{
+	HeapTuple	opertup;
+	Form_pg_operator oprForm;
+
+	opertup = SearchSysCache1(OPEROID, ObjectIdGetDatum(operator_oid));
+	if (!HeapTupleIsValid(opertup))
+		elog(ERROR, "cache lookup failed for operator with OID %u",
+			 operator_oid);
+
+	oprForm = (Form_pg_operator) GETSTRUCT(opertup);
+	*objnames = list_make2(get_namespace_name_or_temp(oprForm->oprnamespace),
+						   pstrdup(NameStr(oprForm->oprname)));
+	*objargs = NIL;
+	if (oprForm->oprleft)
+		*objargs = lappend(*objargs,
+						   format_type_be_qualified(oprForm->oprleft));
+	if (oprForm->oprright)
+		*objargs = lappend(*objargs,
+						   format_type_be_qualified(oprForm->oprright));
+
+	ReleaseSysCache(opertup);
 }
 
 /*

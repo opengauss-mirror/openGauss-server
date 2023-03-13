@@ -152,6 +152,34 @@ void pq_sendcountedtext(StringInfo buf, const char* str, int slen, bool countinc
     }
 }
 
+void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen)
+{
+    char* p = (char*)str;
+
+    if (unlikely(u_sess->mb_cxt.DatabaseEncoding->encoding != u_sess->mb_cxt.ClientEncoding->encoding)) {
+        p = pg_server_to_client(str, slen);
+    }
+    if (unlikely(p != str)) { /* actual conversion has been done? */
+        slen = strlen(p);
+        enlargeStringInfo(buf, slen + sizeof(uint32));
+        pq_writeint32(buf, (uint32)slen);
+        errno_t rc = memcpy_s(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), p, (size_t)slen);
+        securec_check(rc, "\0", "\0");
+        buf->len += slen;
+        buf->data[buf->len] = '\0';
+        pfree(p);
+        p = NULL;
+    } else {
+        enlargeStringInfo(buf, slen + sizeof(uint32));
+        pq_writeint32(buf, (uint32)slen);
+        errno_t rc = memcpy_s(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), str, (size_t)slen);
+        securec_check(rc, "\0", "\0");
+        buf->len += slen;
+        buf->data[buf->len] = '\0';
+    }
+}
+
+
 /* --------------------------------
  *		pq_sendtext		- append a text string (with conversion)
  *

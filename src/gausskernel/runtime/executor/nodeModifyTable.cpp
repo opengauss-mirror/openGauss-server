@@ -218,7 +218,7 @@ void ExecCheckPlanOutput(Relation resultRel, List* targetList)
                     errmodule(MOD_EXECUTOR),
                     errmsg("table row type and query-specified row type do not match"),
                     errdetail("Query has too many columns.")));
-        attr = result_desc->attrs[attno++];
+        attr = &result_desc->attrs[attno++];
 
         if (!attr->attisdropped) {
             /* Normal case: demand type match */
@@ -886,11 +886,13 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
 
     RangeTblEntry *rte = exec_rt_fetch(resultRelInfo->ri_RangeTableIndex, estate);
     if (RelationIsPartitioned(resultRelationDesc)) {
-        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+        int partitionno = INVALID_PARTITION_NO;
+        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple, &partitionno);
         bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
             estate->es_query_cxt,
             resultRelationDesc,
             partitionid,
+            partitionno,
             &heaprel,
             &partition,
             RowExclusiveLock);
@@ -900,11 +902,13 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
         CheckPartitionOidForSpecifiedPartition(rte, partitionid);
 
         if (RelationIsSubPartitioned(resultRelationDesc)) {
-            subPartitionId = heapTupleGetPartitionId(heaprel, tuple);
+            int subpartitionno = INVALID_PARTITION_NO;
+            subPartitionId = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno);
             searchFakeReationForPartitionOid(estate->esfRelations,
                 estate->es_query_cxt,
                 heaprel,
                 subPartitionId,
+                subpartitionno,
                 subPartRel,
                 subPart,
                 RowExclusiveLock);
@@ -1019,7 +1023,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     /* try to insert tuple into mlog-table. */
     if (targetrel != NULL && targetrel->rd_mlogoid != InvalidOid) {
         /* judge whether need to insert into mlog-table */
-        if (targetrel->rd_tam_type == TAM_USTORE) {
+        if (targetrel->rd_tam_ops == TableAmUstore) {
             tuple = (Tuple)UHeapToHeap(targetrel->rd_att, (UHeapTuple)tuple);
         }
         insert_into_mlog_table(targetrel, targetrel->rd_mlogoid, (HeapTuple)tuple,
@@ -1099,7 +1103,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
      */
     if (rel_isblockchain) {
         MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-        tuple = set_user_tuple_hash((HeapTuple)tuple, result_relation_desc);
+        tuple = set_user_tuple_hash((HeapTuple)tuple, result_relation_desc, slot);
         (void)MemoryContextSwitchTo(old_context);
     }
 
@@ -1220,7 +1224,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
         } else
 #endif
             if (useHeapMultiInsert) {
-                TupleTableSlot* tmp_slot = MakeSingleTupleTableSlot(slot->tts_tupleDescriptor, false, result_relation_desc->rd_tam_type);
+                TupleTableSlot* tmp_slot = MakeSingleTupleTableSlot(slot->tts_tupleDescriptor, false, result_relation_desc->rd_tam_ops);
 
                 bool is_partition_rel = result_relation_desc->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION;
                 Oid targetOid = InvalidOid;
@@ -1228,7 +1232,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     if (RelationIsSubPartitioned(result_relation_desc)) {
                         targetOid = heapTupleGetSubPartitionId(result_relation_desc, tuple);
                     } else {
-                        targetOid = heapTupleGetPartitionId(result_relation_desc, tuple);
+                        targetOid = heapTupleGetPartitionId(result_relation_desc, tuple, NULL);
                     }
                 } else {
                     targetOid = RelationGetRelid(result_relation_desc);
@@ -1282,10 +1286,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                 tuple = tableam_tops_form_tuple(slot->tts_tupleDescriptor,
                                                 slot->tts_values, 
                                                 slot->tts_isnull, 
-                                                RelationGetTupleType(result_relation_desc));
+                                                result_relation_desc->rd_tam_ops);
                 if (rel_isblockchain) {
                     MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-                    tuple = set_user_tuple_hash((HeapTuple)tuple, result_relation_desc);
+                    tuple = set_user_tuple_hash((HeapTuple)tuple, result_relation_desc, NULL);
                     (void)MemoryContextSwitchTo(old_context);
                 }
                 if (tuple != NULL) {
@@ -1358,10 +1362,13 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     case PARTTYPE_PARTITIONED_RELATION: {
                         /* get partititon oid for insert the record */
                         Datum newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL);
+                        int partitionno = INVALID_PARTITION_NO;
                         if (newval)
-                            partition_id = heapTupleGetPartitionId(result_relation_desc, (void*)newval, false, estate->es_plannedstmt->hasIgnore);
+                            partition_id = heapTupleGetPartitionId(result_relation_desc, (void *)newval, &partitionno,
+                                false, estate->es_plannedstmt->hasIgnore);
                         else
-                            partition_id = heapTupleGetPartitionId(result_relation_desc, tuple, false, estate->es_plannedstmt->hasIgnore);
+                            partition_id = heapTupleGetPartitionId(result_relation_desc, tuple, &partitionno, false,
+                                estate->es_plannedstmt->hasIgnore);
                         /* if cannot find valid partition oid and sql has keyword ignore, return and don't insert */
                         if (estate->es_plannedstmt->hasIgnore && partition_id == InvalidOid) {
                             return NULL;
@@ -1373,7 +1380,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         }
 
                         bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
-                            result_relation_desc, partition_id, &heap_rel, &partition, RowExclusiveLock);
+                            result_relation_desc, partition_id, partitionno, &heap_rel, &partition, RowExclusiveLock);
                         if (!res) {
                             return NULL;
                         }
@@ -1412,6 +1419,8 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     case PARTTYPE_SUBPARTITIONED_RELATION: {
                         Oid partitionId = InvalidOid;
                         Oid subPartitionId = InvalidOid;
+                        int partitionno = INVALID_PARTITION_NO;
+                        int subpartitionno = INVALID_PARTITION_NO;
                         Relation partRel = NULL;
                         Partition part = NULL;
                         Relation subPartRel = NULL;
@@ -1420,9 +1429,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         /* get partititon oid for insert the record */
                         Datum newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL);
                         if (newval)
-                            partitionId = heapTupleGetPartitionId(result_relation_desc, (void*)newval, false, estate->es_plannedstmt->hasIgnore);
+                            partitionId = heapTupleGetPartitionId(result_relation_desc, (void *)newval, &partitionno,
+                                false, estate->es_plannedstmt->hasIgnore);
                         else
-                            partitionId = heapTupleGetPartitionId(result_relation_desc, tuple, false, estate->es_plannedstmt->hasIgnore);
+                            partitionId = heapTupleGetPartitionId(result_relation_desc, tuple, &partitionno, false,
+                                estate->es_plannedstmt->hasIgnore);
                         if (estate->es_plannedstmt->hasIgnore && partitionId == InvalidOid) {
                             return NULL;
                         }
@@ -1433,7 +1444,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         }
 
                         bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
-                            result_relation_desc, partitionId, &partRel, &part, RowExclusiveLock);
+                            result_relation_desc, partitionId, partitionno, &partRel, &part, RowExclusiveLock);
                         if (!res) {
                             return NULL;
                         }
@@ -1441,9 +1452,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         /* get subpartititon oid for insert the record */
                         Datum newsubval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel);
                         if (newsubval)
-                            subPartitionId = heapTupleGetPartitionId(partRel, (void*)newsubval, false, estate->es_plannedstmt->hasIgnore);
+                            subPartitionId = heapTupleGetPartitionId(partRel, (void *)newsubval, &subpartitionno, false,
+                                estate->es_plannedstmt->hasIgnore);
                         else
-                            subPartitionId = heapTupleGetPartitionId(partRel, tuple, false, estate->es_plannedstmt->hasIgnore);
+                            subPartitionId = heapTupleGetPartitionId(partRel, tuple, &subpartitionno, false,
+                                estate->es_plannedstmt->hasIgnore);
                         if (estate->es_plannedstmt->hasIgnore && subPartitionId == InvalidOid) {
                             return NULL;
                         }
@@ -1454,7 +1467,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         }
 
                         res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
-                            partRel, subPartitionId, &subPartRel, &subPart, RowExclusiveLock);
+                            partRel, subPartitionId, subpartitionno, &subPartRel, &subPart, RowExclusiveLock);
                         if (!res) {
                             partitionClose(result_relation_desc, part, RowExclusiveLock);
                             return NULL;
@@ -1569,7 +1582,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
     /* try to insert tuple into mlog-table. */
     if (target_rel != NULL && target_rel->rd_mlogoid != InvalidOid) {
         /* judge whether need to insert into mlog-table */
-        if (target_rel->rd_tam_type == TAM_USTORE) {
+        if (target_rel->rd_tam_ops == TableAmUstore) {
             tuple = (Tuple)UHeapToHeap(target_rel->rd_att, (UHeapTuple)tuple);
         }
         insert_into_mlog_table(target_rel, target_rel->rd_mlogoid, (HeapTuple)tuple,
@@ -1694,7 +1707,7 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
             return NULL;
         }
 
-        if (slot->tts_isempty) {
+        if (TTS_EMPTY(slot)) {
             (void)ExecStoreAllNullTuple(slot);
         }
     } else {
@@ -1725,6 +1738,7 @@ ldelete:
                     estate->es_query_cxt,
                     result_relation_desc,
                     deletePartitionOid,
+                    INVALID_PARTITION_NO,
                     part_relation,
                     partition,
                     RowExclusiveLock);
@@ -1939,9 +1953,9 @@ end:;
                 if (slot->tts_tupleDescriptor != RelationGetDescr(result_relation_desc)) {
                     ExecSetSlotDescriptor(slot, RelationGetDescr(result_relation_desc));
                 }
-                slot->tts_tupslotTableAm =  result_relation_desc->rd_tam_type;
+                slot->tts_tam_ops = result_relation_desc->rd_tam_ops;
                 if (oldtuple != NULL) {
-                    Assert(slot->tts_tupslotTableAm != TAM_USTORE);
+                    Assert(!TTS_TABLEAM_IS_USTORE(slot));
                     del_tuple.t_data = oldtuple;
                     del_tuple.t_len = HeapTupleHeaderGetDatumLength(oldtuple);
                     ItemPointerSetInvalid(&(del_tuple.t_self));
@@ -2019,6 +2033,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     Relation fake_part_rel = NULL;
     Relation parent_relation = NULL;
     Oid new_partId = InvalidOid;
+    int partitionno = INVALID_PARTITION_NO;
     uint64 res_hash;
     uint64 hash_del = 0;
     bool is_record = false;
@@ -2267,7 +2282,7 @@ lreplace:
                     if (result_relation_desc->rd_isblockchain) {
                         MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
                         hash_del = get_user_tupleid_hash(fake_relation, tupleid);
-                        tuple = set_user_tuple_hash((HeapTuple)tuple, fake_relation);
+                        tuple = set_user_tuple_hash((HeapTuple)tuple, fake_relation, slot);
                         (void)MemoryContextSwitchTo(old_context);
                     }
 
@@ -2445,8 +2460,10 @@ lreplace:
 
                     if (u_sess->exec_cxt.route->fileExist) {
                         new_partId = u_sess->exec_cxt.route->partitionId;
+                        partitionno = GetCurrentPartitionNo(new_partId);
                         if (RelationIsSubPartitioned(result_relation_desc)) {
-                            Partition part = partitionOpen(result_relation_desc, new_partId, RowExclusiveLock);
+                            Partition part = PartitionOpenWithPartitionno(result_relation_desc, new_partId,
+                                partitionno, RowExclusiveLock);
                             Relation partRel = partitionGetRelation(result_relation_desc, part);
                             Datum newsubval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel);
                             if (newsubval) {
@@ -2457,6 +2474,7 @@ lreplace:
 
                             if (u_sess->exec_cxt.route->fileExist) {
                                 new_partId = u_sess->exec_cxt.route->partitionId;
+                                partitionno = GetCurrentSubPartitionNo(new_partId);
                             } else {
                                 int level = can_ignore ? WARNING : ERROR;
                                 ereport(level, (errmodule(MOD_EXECUTOR),
@@ -2527,6 +2545,7 @@ lreplace:
                         estate->es_query_cxt,
                         result_relation_desc,
                         new_partId,
+                        partitionno,
                         fake_part_rel,
                         partition,
                         RowExclusiveLock);
@@ -2569,7 +2588,7 @@ lreplace:
                         if (result_relation_desc->rd_isblockchain) {
                             MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
                             hash_del = get_user_tupleid_hash(fake_relation, tupleid);
-                            tuple = set_user_tuple_hash((HeapTuple)tuple, fake_relation);
+                            tuple = set_user_tuple_hash((HeapTuple)tuple, fake_relation, slot);
                             (void)MemoryContextSwitchTo(old_context);
                         }
 
@@ -2735,6 +2754,7 @@ lreplace:
                                                          estate->es_query_cxt,
                                                          result_relation_desc,
                                                          oldPartitionOid,
+                                                         partitionno,
                                                          old_fake_relation,
                                                          old_partition,
                                                          RowExclusiveLock);
@@ -2748,13 +2768,14 @@ lreplace:
                         Relation fake_insert_relation = NULL;
 
                         if (need_create_file) {
-                            new_partId = AddNewIntervalPartition(result_relation_desc, tuple);
+                            new_partId = AddNewIntervalPartition(result_relation_desc, tuple, &partitionno);
                         }
 
                         searchFakeReationForPartitionOid(estate->esfRelations,
                                                          estate->es_query_cxt,
                                                          result_relation_desc,
                                                          new_partId,
+                                                         partitionno,
                                                          fake_part_rel,
                                                          insert_partition,
                                                          RowExclusiveLock);
@@ -2965,15 +2986,15 @@ ldelete:
                         {
                             Partition insert_partition = NULL;
                             Relation fake_insert_relation = NULL;
-
                             if (need_create_file) {
-                                new_partId = AddNewIntervalPartition(result_relation_desc, tuple);
+                                new_partId = AddNewIntervalPartition(result_relation_desc, tuple, &partitionno);
                             }
 
                             bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
                                 estate->es_query_cxt,
                                 result_relation_desc,
                                 new_partId,
+                                partitionno,
                                 &fake_part_rel,
                                 &insert_partition,
                                 RowExclusiveLock);
@@ -2991,7 +3012,7 @@ ldelete:
                             }
                             if (result_relation_desc->rd_isblockchain) {
                                 MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-                                tuple = set_user_tuple_hash((HeapTuple)tuple, fake_insert_relation);
+                                tuple = set_user_tuple_hash((HeapTuple)tuple, fake_insert_relation, slot);
                                 (void)MemoryContextSwitchTo(old_context);
                             }
 
@@ -3027,7 +3048,7 @@ ldelete:
         insert_into_mlog_table(result_relation_desc, result_relation_desc->rd_mlogoid,
                                NULL, tupleid, tmfd.xmin, 'D');
         /* 2. insert new tuple */
-        if (result_relation_desc->rd_tam_type == TAM_USTORE) {
+        if (result_relation_desc->rd_tam_ops == TableAmUstore) {
             tuple = (Tuple)UHeapToHeap(result_relation_desc->rd_att, (UHeapTuple)tuple);
         }
         insert_into_mlog_table(result_relation_desc, result_relation_desc->rd_mlogoid,
@@ -3219,7 +3240,7 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
 
     /* REPLACE INTO not support sequence, check columns to report ERROR */
     for (int attrno=1; attrno<=rel->rd_att->natts; ++attrno) {
-        att_tup = rel->rd_att->attrs[attrno-1];
+        att_tup = &rel->rd_att->attrs[attrno-1];
         errno_t rc;
         char *nspname = get_namespace_name(rel->rd_rel->relnamespace);
         char tableName[NAMEDATALEN*2+2] = {0};
@@ -3262,7 +3283,9 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
         int2 conflictBucketid = InvalidBktId;
         bool isgpi = false;
         Oid partitionid = InvalidOid;
+        int partitionno = INVALID_PARTITION_NO;
         Oid subPartitionId = InvalidOid;
+        int subpartitionno = INVALID_PARTITION_NO;
         Relation targetrel = NULL;
         Relation heaprel = NULL;
         Relation subPartRel = NULL;
@@ -3277,21 +3300,23 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
         heaprel = targetrel;
         tuple = tableam_tslot_get_tuple_from_slot(targetrel, slot);
         if (RelationIsPartitioned(targetrel)) {
-            partitionid = heapTupleGetPartitionId(targetrel, tuple);
+            partitionid = heapTupleGetPartitionId(targetrel, tuple, &partitionno);
             searchFakeReationForPartitionOid(estate->esfRelations,
                                              estate->es_query_cxt,
                                              targetrel,
                                              partitionid,
+                                             partitionno,
                                              heaprel,
                                              partition,
                                              RowExclusiveLock);
 
             if (RelationIsSubPartitioned(targetrel)) {
-                subPartitionId = heapTupleGetPartitionId(heaprel, tuple);
+                subPartitionId = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno);
                 searchFakeReationForPartitionOid(estate->esfRelations,
                                                  estate->es_query_cxt,
                                                  heaprel,
                                                  subPartitionId,
+                                                 subpartitionno,
                                                  subPartRel,
                                                  subPart,
                                                  RowExclusiveLock);
@@ -3531,7 +3556,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
         if (estate->result_rel_index == 0)
             EvalPlanQualSetSlot(&node->mt_epqstate, plan_slot);
         slot = plan_slot;
-        slot->tts_tupleDescriptor->tdTableAmType = result_rel_info->ri_RelationDesc->rd_tam_type;
+        slot->tts_tupleDescriptor->td_tam_ops = result_rel_info->ri_RelationDesc->rd_tam_ops;
 
         if (operation == CMD_MERGE) {
             if (junk_filter == NULL) {
@@ -4055,7 +4080,8 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
          * Initialize result tuple slot and assign its rowtype using the first
          * RETURNING list.	We assume the rest will look the same.
          */
-        tup_desc = ExecTypeFromTL((List*)linitial(node->returningLists), false, false, mt_state->resultRelInfo->ri_RelationDesc->rd_tam_type);
+        tup_desc = ExecTypeFromTL((List *)linitial(node->returningLists), false, false,
+                                  mt_state->resultRelInfo->ri_RelationDesc->rd_tam_ops);
 
         /* Set up a slot for the output of the RETURNING projection(s) */
         ExecInitResultTupleSlot(estate, &mt_state->ps);
@@ -4112,7 +4138,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
 
         /* initialize slot for the existing tuple */
         upsertState->us_existing =
-            ExecInitExtraTupleSlot(mt_state->ps.state, result_rel_info->ri_RelationDesc->rd_tam_type);
+            ExecInitExtraTupleSlot(mt_state->ps.state, result_rel_info->ri_RelationDesc->rd_tam_ops);
         ExecSetSlotDescriptor(upsertState->us_existing, result_rel_info->ri_RelationDesc->rd_att);
 
         upsertState->us_excludedtlist = node->exclRelTlist;
@@ -4120,7 +4146,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         /* create target slot for UPDATE SET projection */
         tupDesc = ExecTypeFromTL((List*)node->updateTlist, result_rel_info->ri_RelationDesc->rd_rel->relhasoids);
         upsertState->us_updateproj =
-            ExecInitExtraTupleSlot(mt_state->ps.state, result_rel_info->ri_RelationDesc->rd_tam_type);
+            ExecInitExtraTupleSlot(mt_state->ps.state, result_rel_info->ri_RelationDesc->rd_tam_ops);
         ExecSetSlotDescriptor(upsertState->us_updateproj, tupDesc);
 
         /* build UPDATE SET expression and projection state */
@@ -4274,7 +4300,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
      */
     if (estate->es_trig_tuple_slot == NULL) {
         result_rel_info = mt_state->resultRelInfo;
-        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_type);
+        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_ops);
     }
 
     /*

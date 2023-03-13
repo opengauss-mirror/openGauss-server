@@ -2233,23 +2233,211 @@ insert into partition_hash values(40,'forty-three',43);
 select rownum,* from partition_hash;
  rownum | id |     name     | age 
 --------+----+--------------+-----
-      1 | 30 | thirty       |  30
-      2 | 30 | Thirty-three |  33
-      3 | 40 | forty        |  40
-      4 | 40 | forty-three  |  43
-      5 | 20 | twenty       |  20
-      6 | 20 | twenty-three |  23
-      7 | 10 | ten          |  10
-      8 | 10 | thirteen     |  13
+      1 | 10 | ten          |  10
+      2 | 10 | thirteen     |  13
+      3 | 20 | twenty       |  20
+      4 | 20 | twenty-three |  23
+      5 | 30 | thirty       |  30
+      6 | 30 | Thirty-three |  33
+      7 | 40 | forty        |  40
+      8 | 40 | forty-three  |  43
 (8 rows)
 
 select * from partition_hash where rownum < 5;
  id |     name     | age 
 ----+--------------+-----
- 30 | thirty       |  30
- 30 | Thirty-three |  33
- 40 | forty        |  40
- 40 | forty-three  |  43
+ 10 | ten          |  10
+ 10 | thirteen     |  13
+ 20 | twenty       |  20
+ 20 | twenty-three |  23
 (4 rows)
 
 drop table partition_hash;
+create table test_rownum_subquery
+(
+  pk integer,
+  no varchar2
+);
+insert into test_rownum_subquery values (1,'1');
+insert into test_rownum_subquery values (2,'2');
+insert into test_rownum_subquery values (3,'3');
+insert into test_rownum_subquery values (4,'4');
+insert into test_rownum_subquery values (5,'5');
+select * from test_rownum_subquery;
+ pk | no 
+----+----
+  1 | 1
+  2 | 2
+  3 | 3
+  4 | 4
+  5 | 5
+(5 rows)
+
+update  test_rownum_subquery t set t.no = to_char(100 - 1 + (
+    select vou_no from (
+        select rownum as vou_no, no from (
+            select distinct no from test_rownum_subquery b order by 1
+        )
+    ) where nvl(no, 0) = nvl(t.no, 0)
+));
+select * from test_rownum_subquery;
+ pk | no  
+----+-----
+  1 | 100
+  2 | 101
+  3 | 102
+  4 | 103
+  5 | 104
+(5 rows)
+
+drop table test_rownum_subquery;
+create table test_rownum_push_qual(id int);
+insert into test_rownum_push_qual values(generate_series(1, 20));
+-- having qual should not be pushed if accompanied by rownum reference
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual group by id,rownum having ROWNUM < 10 and id between 10 and 20 order by 1;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Group
+   Output: id
+   Group By Key: (ROWNUM), test_rownum_push_qual.id
+   Filter: (((ROWNUM) < 10) AND (test_rownum_push_qual.id >= 10) AND (test_rownum_push_qual.id <= 20))
+   ->  Sort
+         Output: (ROWNUM), id
+         Sort Key: (ROWNUM), test_rownum_push_qual.id
+         ->  Seq Scan on public.test_rownum_push_qual
+               Output: ROWNUM, id
+(9 rows)
+
+select rownum, * from test_rownum_push_qual group by id,rownum having ROWNUM < 10 and id between 10 and 20 order by 1; -- expect 0 rows
+ rownum | id 
+--------+----
+(0 rows)
+
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual group by id,rownum having ROWNUM < 10 or id between 10 and 20 order by 1;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Group
+   Output: id
+   Group By Key: (ROWNUM), test_rownum_push_qual.id
+   Filter: (((ROWNUM) < 10) OR ((test_rownum_push_qual.id >= 10) AND (test_rownum_push_qual.id <= 20)))
+   ->  Sort
+         Output: (ROWNUM), id
+         Sort Key: (ROWNUM), test_rownum_push_qual.id
+         ->  Seq Scan on public.test_rownum_push_qual
+               Output: ROWNUM, id
+(9 rows)
+
+select rownum, * from test_rownum_push_qual group by id,rownum having ROWNUM < 10 or id between 10 and 20 order by 1; -- expect 20 rows
+ rownum | id 
+--------+----
+      1 |  1
+      2 |  2
+      3 |  3
+      4 |  4
+      5 |  5
+      6 |  6
+      7 |  7
+      8 |  8
+      9 |  9
+     10 | 10
+     11 | 11
+     12 | 12
+     13 | 13
+     14 | 14
+     15 | 15
+     16 | 16
+     17 | 17
+     18 | 18
+     19 | 19
+     20 | 20
+(20 rows)
+
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual group by id,rownum having case when ROWNUM < 10 then 'true'::boolean else 'false'::boolean end and id between 10 and 20 order by 1;
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Group
+   Output: id
+   Group By Key: (ROWNUM), test_rownum_push_qual.id
+   Filter: (CASE WHEN ((ROWNUM) < 10) THEN true ELSE false END AND (test_rownum_push_qual.id >= 10) AND (test_rownum_push_qual.id <= 20))
+   ->  Sort
+         Output: (ROWNUM), id
+         Sort Key: (ROWNUM), test_rownum_push_qual.id
+         ->  Seq Scan on public.test_rownum_push_qual
+               Output: ROWNUM, id
+(9 rows)
+
+select rownum, * from test_rownum_push_qual group by id,rownum having case when ROWNUM < 10 then 'true'::boolean else 'false'::boolean end and id between 10 and 20 order by 1; -- expect 0 rows
+ rownum | id 
+--------+----
+(0 rows)
+
+-- do not transform rownum op const to limit const -1, if limit clause is stated
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual where rownum < 10 limit 10 offset 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   Output: id
+   ->  Seq Scan on public.test_rownum_push_qual
+         Output: id
+         Filter: (ROWNUM < 10)
+(5 rows)
+
+select rownum, * from test_rownum_push_qual where rownum < 10 limit 10 offset 10; -- expected 0 rows
+ rownum | id 
+--------+----
+(0 rows)
+
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual where rownum > 10 limit 10 offset 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   Output: id
+   ->  Seq Scan on public.test_rownum_push_qual
+         Output: id
+         Filter: (ROWNUM > 10)
+(5 rows)
+
+select rownum, * from test_rownum_push_qual where rownum > 10 limit 10 offset 10; -- expected 0 rows
+ rownum | id 
+--------+----
+(0 rows)
+
+explain (verbose on, costs off) select rownum, * from test_rownum_push_qual where rownum < 15 limit 10 offset 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   Output: id
+   ->  Seq Scan on public.test_rownum_push_qual
+         Output: id
+         Filter: (ROWNUM < 15)
+(5 rows)
+
+select rownum, * from test_rownum_push_qual where rownum < 15 limit 10 offset 10; -- expected 4 rows
+ rownum | id 
+--------+----
+     11 | 11
+     12 | 12
+     13 | 13
+     14 | 14
+(4 rows)
+
+explain (verbose on, costs off) select rownum, * from (select * from test_rownum_push_qual order by 1) where rownum < 10 limit 10 offset 10;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   Output: __unnamed_subquery__.id
+   ->  Subquery Scan on __unnamed_subquery__
+         Output: __unnamed_subquery__.id
+         Filter: (ROWNUM < 10)
+         ->  Sort
+               Output: test_rownum_push_qual.id
+               Sort Key: test_rownum_push_qual.id
+               ->  Seq Scan on public.test_rownum_push_qual
+                     Output: test_rownum_push_qual.id
+(10 rows)
+
+select rownum, * from (select * from test_rownum_push_qual order by 1) where rownum < 10 limit 10 offset 10;  -- expected 0 rows
+ rownum | id 
+--------+----
+(0 rows)
+

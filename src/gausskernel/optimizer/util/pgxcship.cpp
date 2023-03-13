@@ -961,14 +961,14 @@ static List* ts_get_taglist(Oid relid)
 {
     Relation rel = relation_open(relid, AccessShareLock);
     TupleDesc tup_desc = RelationGetDescr(rel);
-    Form_pg_attribute* attr = tup_desc->attrs;
+    FormData_pg_attribute* attr = tup_desc->attrs;
     List* tag_name_list = NIL;
     bool valid_ts_table = false;
     char* str = NULL;
 
     for (int i = 0; i < tup_desc->natts; i++) {
-        if (attr[i]->attkvtype == ATT_KV_TAG && IsTypeDistributable(attr[i]->atttypid)) {
-            str = pstrdup(NameStr(attr[i]->attname));
+        if (attr[i].attkvtype == ATT_KV_TAG && IsTypeDistributable(attr[i].atttypid)) {
+            str = pstrdup(NameStr(attr[i].attname));
             if (str != NULL) {
                 tag_name_list = lappend(tag_name_list, makeString(str));
             } else {
@@ -976,7 +976,7 @@ static List* ts_get_taglist(Oid relid)
                         errmsg("Timeseries relation %u cloud not find tag column %d", relid, i)));
             }
         }
-        if (attr[i]->attkvtype == ATT_KV_HIDE) {
+        if (attr[i].attkvtype == ATT_KV_HIDE) {
             valid_ts_table = true;
         }
     }

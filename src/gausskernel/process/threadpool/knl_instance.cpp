@@ -183,7 +183,6 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.recovery_pause_flag = true;
     dms_cxt->SSRecoveryInfo.failover_triggered = false;
     dms_cxt->SSRecoveryInfo.new_primary_reset_walbuf_flag = false;
-    dms_cxt->SSRecoveryInfo.skip_redo_replay = false;
     dms_cxt->SSRecoveryInfo.ready_to_startup = false;
     dms_cxt->SSRecoveryInfo.startup_reform = true;
     dms_cxt->SSRecoveryInfo.restart_failover_flag = false;
@@ -412,6 +411,12 @@ static void knl_g_conn_init(knl_g_conn_context* conn_cxt)
     conn_cxt->CurCMAConnCount = 0;
     conn_cxt->CurCMAProcCount = 0;
     SpinLockInit(&conn_cxt->ConnCountLock);
+}
+
+static void knl_g_listen_sock_init(knl_g_listen_context* listen_sock_cxt)
+{
+    listen_sock_cxt->reload_fds = false;
+    listen_sock_cxt->is_reloading_listen_socket = 0;
 }
 
 static void knl_g_executor_init(knl_g_executor_context* exec_cxt)
@@ -982,6 +987,7 @@ void knl_instance_init()
 #endif
 
     knl_g_datadir_init(&g_instance.datadir_cxt);
+    knl_g_listen_sock_init(&g_instance.listen_cxt);
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

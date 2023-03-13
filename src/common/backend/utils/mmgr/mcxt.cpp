@@ -1137,6 +1137,67 @@ void* MemoryContextAllocZeroAlignedDebug(MemoryContext context, Size size, const
 
     return ret;
 }
+
+/*
+ * MemoryContextAllocExtended
+ *	  Allocate space within the specified context using the given flags.
+ *   
+ *    This method supports all three memory allocation flags which makes it   
+ *    suitable for almost all circumstances.
+ */
+void* MemoryContextAllocExtendedDebug(MemoryContext context, Size size, int flags, const char* file, int line)
+{
+    void* ret = NULL;
+    bool allocsz_is_valid = false;
+
+	Assert(MemoryContextIsValid(context));
+#ifdef MEMORY_CONTEXT_CHECKING
+    PreventActionOnSealedContext(context);
+#endif
+
+    /* Make sure memory allocation size is valid. */
+	if ((flags & MCXT_ALLOC_HUGE) != 0) {
+        allocsz_is_valid = AllocHugeSizeIsValid(size);
+    } else {
+        allocsz_is_valid = AllocSizeIsValid(size);
+    }
+
+    if (!allocsz_is_valid) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid memory alloc request size %lu in %s:%d", (unsigned long)size, file, line)));
+    }
+
+	context->isReset = false;
+
+    /* Invoke memory allocator */
+    ret = (*context->methods->alloc)(context, 0, size, file, line);
+    if ((flags & MCXT_ALLOC_NO_OOM) != 0) {
+        /* Do nothing */
+    } else if (unlikely(ret == NULL)) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY), errmsg("memory is temporarily unavailable"),
+                        errdetail("Failed on request of size %lu bytes under queryid %lu in %s:%d.",
+                                  (unsigned long)size, u_sess->debug_query_id, file, line)));
+    }
+
+    /* Set aligned if MCXT_ALLOC_ZERO */
+    if ((flags & MCXT_ALLOC_ZERO) != 0) {
+        MemSetAligned(ret, 0, size);
+    }
+
+#ifdef MEMORY_CONTEXT_CHECKING
+    /* check if the memory context is out of control */
+    MemoryContextCheckMaxSize(context, size, file, line);
+#endif
+
+    /* check if the session used memory is beyond the limitation */
+    if (unlikely(STATEMENT_MAX_MEM)) {
+        MemoryContextCheckSessionMemory(context, size, file, line);
+    }
+    InsertMemoryAllocInfo(ret, context, file, line, size);
+
+    return ret;
+}
+
 /*
  * palloc_extended
  *    palloc with flags, it will return NULL while OOM happend.

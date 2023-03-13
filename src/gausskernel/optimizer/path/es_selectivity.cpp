@@ -143,6 +143,8 @@ Selectivity ES_SELECTIVITY::calculate_selectivity(PlannerInfo* root_input, List*
                     prob = cal_eqsel_ai(temp);
                     if (prob >= 0) {
                         result *= prob;
+                    } else {
+                        result *= cal_eqsel(temp);
                     }
                 } else {
                     result *= cal_eqsel(temp);

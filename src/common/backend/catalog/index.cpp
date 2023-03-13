@@ -31,6 +31,7 @@
 #include "access/tableam.h"
 #include "access/visibilitymap.h"
 #include "access/xact.h"
+#include "access/amapi.h"
 #include "access/ustore/knl_uscan.h"
 #include "access/ustore/knl_uvisibility.h"
 #include "access/ustore/knl_uheap.h"
@@ -52,6 +53,7 @@
 #include "catalog/pg_description.h"
 #include "catalog/storage.h"
 #include "catalog/storage_gtt.h"
+#include "commands/event_trigger.h"
 #include "commands/tablecmds.h"
 #include "commands/trigger.h"
 #include "commands/vacuum.h"
@@ -203,7 +205,7 @@ static bool relationHasPrimaryKey(Relation rel)
  * Caller had better have at least ShareLock on the table, else the not-null
  * checking isn't trustworthy.
  */
-void index_check_primary_key(Relation heapRel, IndexInfo* indexInfo, bool is_alter_table)
+void index_check_primary_key(Relation heapRel, IndexInfo* indexInfo, bool is_alter_table, IndexStmt *stmt, bool is_modify_primary)
 {
     List* cmds = NIL;
     int i;
@@ -218,6 +220,14 @@ void index_check_primary_key(Relation heapRel, IndexInfo* indexInfo, bool is_alt
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                 errmsg("multiple primary keys for table \"%s\" are not allowed", RelationGetRelationName(heapRel))));
+    }
+
+    /*
+     * if the primary key is modified to other location, AT_SetNotNull has been recorded.
+     * rewrite table data after modifying.
+     */
+    if (is_modify_primary) {
+        return;
     }
 
     /*
@@ -266,8 +276,11 @@ void index_check_primary_key(Relation heapRel, IndexInfo* indexInfo, bool is_alt
      * as to avoid two scans.  But that seems to complicate DefineIndex's API
      * unduly.
      */
-    if (cmds != NULL)
+    if (cmds != NULL) {
+        EventTriggerAlterTableStart((Node *) stmt);
         AlterTableInternal(RelationGetRelid(heapRel), cmds, false);
+        EventTriggerAlterTableEnd();
+    }    
 }
 
 /*
@@ -305,7 +318,7 @@ static TupleDesc ConstructTupleDescriptor(Relation heapRelation, IndexInfo* inde
     /*
      * allocate the new tuple descriptor
      */
-    indexTupDesc = CreateTemplateTupleDesc(numatts, false, TAM_HEAP);
+    indexTupDesc = CreateTemplateTupleDesc(numatts, false);
 
     /*
      * For simple index columns, we copy the pg_attribute row from the parent
@@ -314,7 +327,7 @@ static TupleDesc ConstructTupleDescriptor(Relation heapRelation, IndexInfo* inde
      */
     for (i = 0; i < numatts; i++) {
         AttrNumber atnum = indexInfo->ii_KeyAttrNumbers[i];
-        Form_pg_attribute to = indexTupDesc->attrs[i];
+        Form_pg_attribute to = &indexTupDesc->attrs[i];
         HeapTuple tuple;
         Form_pg_type typeTup;
         Form_pg_opclass opclassTup;
@@ -337,7 +350,7 @@ static TupleDesc ConstructTupleDescriptor(Relation heapRelation, IndexInfo* inde
                 if (atnum > natts) /* safety check */
                     ereport(
                         ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid column number %d", atnum)));
-                from = heapTupDesc->attrs[AttrNumberGetAttrOffset(atnum)];
+                from = &heapTupDesc->attrs[AttrNumberGetAttrOffset(atnum)];
             }
 
             /*
@@ -500,7 +513,7 @@ static void InitializeAttributeOids(Relation indexRelation, int numatts, Oid ind
     tupleDescriptor = RelationGetDescr(indexRelation);
 
     for (i = 0; i < numatts; i += 1)
-        tupleDescriptor->attrs[i]->attrelid = indexoid;
+        tupleDescriptor->attrs[i].attrelid = indexoid;
 }
 
 /* ----------------------------------------------------------------
@@ -531,10 +544,10 @@ static void AppendAttributeTuples(Relation indexRelation, int numatts)
          * There used to be very grotty code here to set these fields, but I
          * think it's unnecessary.  They should be set already.
          */
-        Assert(indexTupDesc->attrs[i]->attnum == i + 1);
-        Assert(indexTupDesc->attrs[i]->attcacheoff == -1);
+        Assert(indexTupDesc->attrs[i].attnum == i + 1);
+        Assert(indexTupDesc->attrs[i].attcacheoff == -1);
 
-        InsertPgAttributeTuple(pg_attribute, indexTupDesc->attrs[i], indstate);
+        InsertPgAttributeTuple(pg_attribute, &indexTupDesc->attrs[i], indstate);
     }
 
     CatalogCloseIndexes(indstate);
@@ -685,7 +698,12 @@ static void index_build_init_fork(Relation heapRelation, Relation indexRelation)
             /* first create INIT_FORKNUM file */
             smgrcreate(indexRelation->rd_smgr, INIT_FORKNUM, false);
             /* then callback will log and sync INIT_FORKNUM file content */
-            OidFunctionCall1(ambuildempty, PointerGetDatum(indexRelation));
+            if (u_sess->attr.attr_common.enable_indexscan_optimization &&
+                indexRelation->rd_rel->relam == BTREE_AM_OID) {
+                indexRelation->rd_amroutine->ambuildempty(indexRelation);                   
+            } else{
+                OidFunctionCall1(ambuildempty, PointerGetDatum(indexRelation));
+            }
         }
     }
 }
@@ -1285,14 +1303,12 @@ Oid partition_index_create(const char* partIndexName, /* the name of partition i
     partitionIndex->pd_part->relallvisible = 0;
     partitionIndex->pd_part->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
 
+    PartitionTupleInfo partTupleInfo = PartitionTupleInfo();
     /* insert into pg_partition */
 #ifndef ENABLE_MULTIPLE_NODES
-    insertPartitionEntry(pg_partition_rel, partitionIndex, partitionIndex->pd_id, NULL, NULL, 0, 0, 0, indexRelOptions,
-                         PART_OBJ_TYPE_INDEX_PARTITION);
-#else
-    insertPartitionEntry(
-        pg_partition_rel, partitionIndex, partitionIndex->pd_id, NULL, NULL, 0, 0, 0, 0, PART_OBJ_TYPE_INDEX_PARTITION);
+    partTupleInfo.reloptions = indexRelOptions;
 #endif
+    insertPartitionEntry(pg_partition_rel, partitionIndex, partitionIndex->pd_id, &partTupleInfo);
     /* Make the above change visible */
     CommandCounterIncrement();
 
@@ -2073,7 +2089,8 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
 /*
  * index_constraint_create
  *
- * Set up a constraint associated with an index
+ * Set up a constraint associated with an index.  Return the new constraint's
+ * address.
  *
  * heapRelation: table owning the index (must be suitably locked by caller)
  * indexRelationId: OID of the index
@@ -2089,7 +2106,7 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
  *		on table's columns
  * allow_system_table_mods: allow table to be a system catalog
  */
-void index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo* indexInfo,
+ObjectAddress index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo* indexInfo,
     const char* constraintName, char constraintType, bool deferrable, bool initdeferred, bool mark_as_primary,
     bool update_pgindex, bool remove_old_dependencies, bool allow_system_table_mods)
 {
@@ -2268,6 +2285,7 @@ void index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexIn
         heap_freetuple(indexTuple);
         heap_close(pg_index, RowExclusiveLock);
     }
+    return referenced;
 }
 
 #ifdef ENABLE_MOT
@@ -3214,12 +3232,18 @@ static void partition_index_update_stats(
 }
 
 static IndexBuildResult* index_build_storage(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo)
-{
+{   
+    IndexBuildResult* stats;
     RegProcedure procedure = indexRelation->rd_am->ambuild;
     Assert(RegProcedureIsValid(procedure));
 
-    IndexBuildResult* stats = (IndexBuildResult*)DatumGetPointer(OidFunctionCall3(
-        procedure, PointerGetDatum(heapRelation), PointerGetDatum(indexRelation), PointerGetDatum(indexInfo)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && indexRelation->rd_rel->relam == BTREE_AM_OID) {
+        stats = indexRelation->rd_amroutine->ambuild(heapRelation, indexRelation, indexInfo);
+    } else {
+        stats = (IndexBuildResult *)DatumGetPointer(OidFunctionCall3(
+            procedure, PointerGetDatum(heapRelation), PointerGetDatum(indexRelation), PointerGetDatum(indexInfo)));
+    }
+
     Assert(PointerIsValid(stats));
     if (RELPERSISTENCE_UNLOGGED == heapRelation->rd_rel->relpersistence) {
         index_build_init_fork(heapRelation, indexRelation);
@@ -4210,7 +4234,7 @@ double IndexBuildUHeapScan(Relation heapRelation, Relation indexRelation, IndexI
      */
     estate = CreateExecutorState();
     econtext = GetPerTupleExprContext(estate);
-    slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation), false, TAM_USTORE);
+    slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation), false, heapRelation->rd_tam_ops);
 
     /* Arrange for econtext's scan tuple to be the tuple under test */
     econtext->ecxt_scantuple = slot;
@@ -6320,7 +6344,7 @@ void ScanHeapInsertCBI(Relation parentRel, Relation heapRel, Relation idxRel, Oi
     tupleDesc = heapRel->rd_att;
     estate = CreateExecutorState();
     econtext = GetPerTupleExprContext(estate);
-    slot = MakeSingleTupleTableSlot(RelationGetDescr(parentRel), false, parentRel->rd_tam_type);
+    slot = MakeSingleTupleTableSlot(RelationGetDescr(parentRel), false, parentRel->rd_tam_ops);
     econtext->ecxt_scantuple = slot;
     /* Set up execution state for predicate, if any. */
     predicate = (List*)ExecPrepareExpr((Expr*)idxInfo->ii_Predicate, estate);
@@ -6548,7 +6572,7 @@ void ScanPartitionInsertIndex(Relation partTableRel, Relation partRel, const Lis
 
     if (PointerIsValid(indexRelList)) {
         estate = CreateExecutorState();
-        slot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel), false, partTableRel->rd_tam_type);
+        slot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel), false, partTableRel->rd_tam_ops);
     }
 
     scan = scan_handler_tbl_beginscan(partRel, SnapshotNow, 0, NULL);
@@ -6768,7 +6792,7 @@ void ScanPartitionDeleteGPITuples(Relation partTableRel, Relation partRel, const
 
     if (PointerIsValid(indexRelList)) {
         estate = CreateExecutorState();
-        slot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel), false, partTableRel->rd_tam_type);
+        slot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel), false, partTableRel->rd_tam_ops);
     }
 
     scan = scan_handler_tbl_beginscan(partRel, SnapshotNow, 0, NULL);
@@ -6989,10 +7013,12 @@ void mergeBTreeIndexes(List* mergingBtreeIndexes, List* srcPartMergeOffset, int2
     procedure = targetIndexRelation->rd_am->ammerge;
     Assert(RegProcedureIsValid(procedure));
 
-    DatumGetPointer(OidFunctionCall3(procedure,
-        PointerGetDatum(targetIndexRelation),
-        PointerGetDatum(mergeBTScanList),
-        PointerGetDatum(srcPartMergeOffset)));
+    if (u_sess->attr.attr_common.enable_indexscan_optimization && targetIndexRelation->rd_rel->relam == BTREE_AM_OID) {
+        targetIndexRelation->rd_amroutine->ammerge(targetIndexRelation, mergeBTScanList, srcPartMergeOffset);
+    } else {
+        DatumGetPointer(OidFunctionCall3(procedure, PointerGetDatum(targetIndexRelation),
+                                         PointerGetDatum(mergeBTScanList), PointerGetDatum(srcPartMergeOffset)));
+    }
 
     // step 3: end the src index relation scan
     foreach (cell, mergeBTScanList) {
@@ -7061,7 +7087,7 @@ TupleDesc GetPsortTupleDesc(TupleDesc indexTupDesc)
 
     /* Add key columns */
     for (int i = 0; i < numatts - 1; i++) {
-        Form_pg_attribute from = indexTupDesc->attrs[i];
+        Form_pg_attribute from = &indexTupDesc->attrs[i];
 
         AttrNumber attId = i + 1;
         TupleDescInitEntry(psortTupDesc, attId, from->attname.data, from->atttypid, from->atttypmod, from->attndims);

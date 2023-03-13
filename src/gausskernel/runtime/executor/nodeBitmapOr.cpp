@@ -126,15 +126,11 @@ Node* MultiExecBitmapOr(BitmapOrState* node)
             /* first subplan */
             if (result == NULL) {
                 /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
-                result = TbmCreate(u_sess->attr.attr_memory.work_mem * 1024L, isUstore);
-                /* If bitmapscan uses global partition index, set tbm to global. */
-                if (RelationIsGlobalIndex(((BitmapIndexScanState*)subnode)->biss_RelationDesc)) {
-                    tbm_set_global(result, true);
-                }
-                /* If bitmapscan uses crossbucket index, set tbm to crossbucket. */
-                if (RelationIsCrossBucketIndex(((BitmapIndexScanState*)subnode)->biss_RelationDesc)) {
-                    tbm_set_crossbucket(result, true);
-                }
+                long maxbytes = u_sess->attr.attr_memory.work_mem * 1024L;
+                result = tbm_create(maxbytes,
+                                    RelationIsGlobalIndex(((BitmapIndexScanState *)subnode)->biss_RelationDesc),
+                                    RelationIsCrossBucketIndex(((BitmapIndexScanState *)subnode)->biss_RelationDesc),
+                                    isUstore);
             }
 
             ((BitmapIndexScanState*)subnode)->biss_result = result;
@@ -157,13 +153,14 @@ Node* MultiExecBitmapOr(BitmapOrState* node)
             if (result == NULL) {
                 result = subresult; /* first subplan */
             } else {
+                TBMHandler tbm_handler = tbm_get_handler(result);
                 if (tbm_is_global(result) != tbm_is_global(subresult)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                             errmsg(
                                 "do not support bitmap index scan for global index and local index simultaneously.")));
                 }
-                tbm_union(result, subresult);
+                tbm_handler._union(result, subresult);
                 tbm_free(subresult);
             }
         }

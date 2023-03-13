@@ -318,7 +318,7 @@ VecSortState* ExecInitVecSort(Sort* node, EState* estate, int eflags)
 
     ExecAssignResultTypeFromTL(
             &sort_stat->ss.ps,
-            sort_stat->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            sort_stat->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     sort_stat->ss.ps.ps_ProjInfo = NULL;
 

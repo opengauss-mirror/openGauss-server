@@ -952,7 +952,7 @@ static void ts_setup_firstcall(FunctionCallInfo fcinfo, FuncCallContext* funcctx
         }
     Assert(stat->stackpos <= stat->maxdepth);
 
-    tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(3, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "word", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "ndoc", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "nentry", INT4OID, -1, 0);

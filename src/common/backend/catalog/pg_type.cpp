@@ -51,7 +51,7 @@
  *		with correct ones, and "typisdefined" will be set to true.
  * ----------------------------------------------------------------
  */
-Oid TypeShellMake(const char* typname, Oid typeNamespace, Oid ownerId)
+ObjectAddress TypeShellMake(const char* typname, Oid typeNamespace, Oid ownerId)
 {
     Relation pg_type_desc;
     TupleDesc tupDesc;
@@ -61,6 +61,7 @@ Oid TypeShellMake(const char* typname, Oid typeNamespace, Oid ownerId)
     bool nulls[Natts_pg_type];
     Oid typoid;
     NameData name;
+    ObjectAddress address;
 
     Assert(PointerIsValid(typname));
 
@@ -166,6 +167,7 @@ Oid TypeShellMake(const char* typname, Oid typeNamespace, Oid ownerId)
 
     /* Post creation hook for new shell type */
     InvokeObjectAccessHook(OAT_POST_CREATE, TypeRelationId, typoid, 0, NULL);
+    ObjectAddressSet(address, TypeRelationId, typoid);
 
     /*
      * clean up and return the type-oid
@@ -173,7 +175,7 @@ Oid TypeShellMake(const char* typname, Oid typeNamespace, Oid ownerId)
     heap_freetuple_ext(tup);
     heap_close(pg_type_desc, RowExclusiveLock);
 
-    return typoid;
+    return address;
 }
 
 /* ----------------------------------------------------------------
@@ -186,7 +188,7 @@ Oid TypeShellMake(const char* typname, Oid typeNamespace, Oid ownerId)
  *		use exactly that OID.
  * ----------------------------------------------------------------
  */
-Oid TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace, Oid relationOid, /* only for relation rowtypes */
+ObjectAddress TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace, Oid relationOid, /* only for relation rowtypes */
     char relationKind,                                                                  /* ditto */
     Oid ownerId, int16 internalSize, char typeType, char typeCategory, bool typePreferred, char typDelim,
     Oid inputProcedure, Oid outputProcedure, Oid receiveProcedure, Oid sendProcedure, Oid typmodinProcedure,
@@ -206,6 +208,7 @@ Oid TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace, Oid relat
     NameData name;
     int i;
     Acl* typacl = NULL;
+    ObjectAddress address;
 
     /*
      * We assume that the caller validated the arguments individually, but did
@@ -454,13 +457,13 @@ Oid TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace, Oid relat
 
     /* Post creation hook for new type */
     InvokeObjectAccessHook(OAT_POST_CREATE, TypeRelationId, typeObjectId, 0, NULL);
-
+    ObjectAddressSet(address, TypeRelationId, typeObjectId);
     /*
      * finish up
      */
     heap_close(pg_type_desc, RowExclusiveLock);
 
-    return typeObjectId;
+    return address;
 }
 
 /*

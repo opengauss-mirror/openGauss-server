@@ -58,7 +58,7 @@ extern List* untransformPartitionBoundary(Datum options);
  * return value	: None-
  * Note			:
  */
-extern void CheckValuePartitionKeyType(Form_pg_attribute* attrs, List* pos);
+extern void CheckValuePartitionKeyType(FormData_pg_attribute* attrs, List* pos);
 
 extern bool GetPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
 extern bool GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
@@ -113,3 +113,9 @@ extern void GetPartitionOidListForRTE(RangeTblEntry *rte, RangeVar *relation);
     } while (0)
 
 #endif
+
+#define constIsNull(x) ((x)->constisnull)
+#define constIsMaxValue(x) ((x)->ismaxvalue)
+
+int ConstCompareWithNull(Const *c1, Const *c2);
+int ListPartKeyCompare(PartitionKey* k1, PartitionKey* k2);

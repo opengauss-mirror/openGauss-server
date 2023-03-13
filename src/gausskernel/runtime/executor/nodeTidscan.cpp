@@ -625,8 +625,8 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &tidstate->ss.ps, current_relation->rd_tam_type);
-    ExecInitScanTupleSlot(estate, &tidstate->ss, current_relation->rd_tam_type);
+    ExecInitResultTupleSlot(estate, &tidstate->ss.ps, current_relation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, &tidstate->ss, current_relation->rd_tam_ops);
 
     /* deal with partitioned table branch */
     if (node->scan.isPartTbl) {
@@ -655,7 +655,8 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
                         scan_handler_tbl_begin_tidscan(currentSubPartitionRel, (ScanState *)tidstate);
                 } else {
                     tidstate->ss.ss_currentPartition = partitiontrel;
-                    tidstate->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(partitiontrel, (ScanState *)tidstate);
+                    tidstate->ss.ss_currentScanDesc =
+                        scan_handler_tbl_begin_tidscan(partitiontrel, (ScanState *)tidstate);
                 }
             }
         }
@@ -673,11 +674,11 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
      */
     ExecAssignResultTypeFromTL(
             &tidstate->ss.ps,
-            tidstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            tidstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     ExecAssignScanProjectionInfo(&tidstate->ss);
 
-    Assert(tidstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(tidstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * all done.
@@ -768,53 +769,59 @@ static void ExecInitPartitionForTidScan(TidScanState* tidstate, EState* estate)
         LOCKMODE lock = NoLock;
         Partition table_partition = NULL;
         bool relistarget = false;
-        ListCell* cell = NULL;
-        PruningResult* resultPlan = NULL;
-        List* part_seqs = NULL;
-
-        /* PBE: Recalculate partitions to be scanned according to parameters */
-        if (plan->scan.pruningInfo->expr != NULL) {
-            resultPlan = GetPartitionInfo(plan->scan.pruningInfo, estate, current_relation);
-        } else {
-            resultPlan = plan->scan.pruningInfo;
-        }
-        part_seqs = resultPlan->ls_rangeSelectedPartitions;
 
         relistarget = ExecRelationIsTargetRelation(estate, plan->scan.scanrelid);
         lock = (relistarget ? RowExclusiveLock : AccessShareLock);
         tidstate->ss.lockMode = lock;
 
-        if (resultPlan->ls_rangeSelectedPartitions != NULL) {
-            plan->scan.itrs = resultPlan->ls_rangeSelectedPartitions->length;
+        PruningResult* pruningResult = NULL;
+        if (plan->scan.pruningInfo->expr != NULL) {
+            pruningResult = GetPartitionInfo(plan->scan.pruningInfo, estate, current_relation);
         } else {
-            plan->scan.itrs = 0;
+            pruningResult = plan->scan.pruningInfo;
         }
-        tidstate->ss.part_id = plan->scan.itrs;
+        if (pruningResult->ls_rangeSelectedPartitions != NULL) {
+            tidstate->ss.part_id = pruningResult->ls_rangeSelectedPartitions->length;
+        } else {
+            tidstate->ss.part_id = 0;
+        }
 
-        foreach (cell, part_seqs) {
+        ListCell* cell1 = NULL;
+        ListCell* cell2 = NULL;
+        List* part_seqs = pruningResult->ls_rangeSelectedPartitions;
+        List* partitionnos = pruningResult->ls_selectedPartitionnos;
+        Assert(list_length(part_seqs) == list_length(partitionnos));
+
+        forboth (cell1, part_seqs, cell2, partitionnos) {
             Oid table_partitionid = InvalidOid;
-            int part_seq = lfirst_int(cell);
+            int part_seq = lfirst_int(cell1);
+            int partitionno = lfirst_int(cell2);
             /* add table partition to list */
             table_partitionid =
-                getPartitionOidFromSequence(current_relation, part_seq, plan->scan.pruningInfo->partMap);
-            table_partition = partitionOpen(current_relation, table_partitionid, lock);
+                getPartitionOidFromSequence(current_relation, part_seq, partitionno);
+            table_partition = PartitionOpenWithPartitionno(current_relation, table_partitionid, partitionno, lock);
             tidstate->ss.partitions = lappend(tidstate->ss.partitions, table_partition);
-            if (resultPlan->ls_selectedSubPartitions != NIL) {
+            if (pruningResult->ls_selectedSubPartitions != NIL) {
                 Relation partRelation = partitionGetRelation(current_relation, table_partition);
                 SubPartitionPruningResult* subPartPruningResult =
-                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, part_seq);
+                    GetSubPartitionPruningResult(pruningResult->ls_selectedSubPartitions, part_seq, partitionno);
                 if (subPartPruningResult == NULL) {
                     continue;
                 }
                 List *subpartSeqs = subPartPruningResult->ls_selectedSubPartitions;
+                List *subpartitionnos = subPartPruningResult->ls_selectedSubPartitionnos;
+                Assert(list_length(subpartSeqs) == list_length(subpartitionnos));
                 List *subpartition = NIL;
-                ListCell *lc = NULL;
-                foreach (lc, subpartSeqs) {
+                ListCell *lc1 = NULL;
+                ListCell *lc2 = NULL;
+                forboth (lc1, subpartSeqs, lc2, subpartitionnos) {
                     Oid subpartitionid = InvalidOid;
-                    int subpartSeq = lfirst_int(lc);
+                    int subpartSeq = lfirst_int(lc1);
+                    int subpartitionno = lfirst_int(lc2);
 
-                    subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq);
-                    Partition subpart = partitionOpen(partRelation, subpartitionid, lock);
+                    subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq, subpartitionno);
+                    Partition subpart =
+                        PartitionOpenWithPartitionno(partRelation, subpartitionid, subpartitionno, lock);
                     subpartition = lappend(subpartition, subpart);
                 }
                 releaseDummyRelation(&(partRelation));

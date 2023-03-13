@@ -57,7 +57,7 @@
 #define MAX_SAMPLE_ROWS 10000    /* sampling range for executing a query */
 #define CARDINALITY_THRESHOLD 30 /* the threshold of index selection */
 
-#define RelAttrName(__tupdesc, __attridx) (NameStr((__tupdesc)->attrs[(__attridx)]->attname))
+#define RelAttrName(__tupdesc, __attridx) (NameStr((__tupdesc)->attrs[(__attridx)].attname))
 #define IsSameRel(_schema1, _table1, _schema2, _table2) \
     ((!_schema1 || !_schema2 || strcasecmp(_schema1, _schema2) == 0) && strcasecmp(_table1, _table2) == 0)
 
@@ -652,6 +652,7 @@ StmtResult *execute_stmt(const char *query_string, bool need_result)
     List *parsetree_list = NULL;
     ListCell *parsetree_item = NULL;
     bool snapshot_set = false;
+    DestReceiver *receiver = NULL;
     parsetree_list = pg_parse_query(query_string, NULL);
 
     Assert(list_length(parsetree_list) == 1); // ought to be one query
@@ -660,37 +661,84 @@ StmtResult *execute_stmt(const char *query_string, bool need_result)
     AutoDopControl dopControl;
     dopControl.CloseSmp();
 #endif
-    Portal portal = NULL;
+    PG_TRY();
+    {
+        Portal portal = NULL;
+
+        List *querytree_list = NULL;
+        List *plantree_list = NULL;
+        Node *parsetree = (Node *)lfirst(parsetree_item);
+        const char *commandTag = CreateCommandTag(parsetree);
+
+        if (u_sess->utils_cxt.ActiveSnapshot == NULL && analyze_requires_snapshot(parsetree)) {
+            PushActiveSnapshot(GetTransactionSnapshot());
+            snapshot_set = true;
+        }
+
+        querytree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
+        plantree_list = pg_plan_queries(querytree_list, 0, NULL);
+
+        if (snapshot_set) {
+            PopActiveSnapshot();
+        }
+
+        portal = CreatePortal(query_string, true, true);
+        portal->visible = false;
+        PortalDefineQuery(portal, NULL, query_string, commandTag, plantree_list, NULL);
+        if (need_result)
+            receiver = create_stmt_receiver();
+        else
+            receiver = CreateDestReceiver(DestNone);
+
+        PortalStart(portal, NULL, 0, NULL);
+        PortalSetResultFormat(portal, 1, &format);
+        (void)PortalRun(portal, FETCH_ALL, true, receiver, receiver, NULL);
+        PortalDrop(portal, false);
+    }
+    PG_CATCH();
+    {
+#ifndef ENABLE_MULTIPLE_NODES
+        dopControl.ResetSmp();
+#endif
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    return (StmtResult *)receiver;
+}
+
+StmtResult *execute_select_into_varlist(Query *parsetree)
+{
+    int16 format = 0;
     DestReceiver *receiver = NULL;
-    List *querytree_list = NULL;
-    List *plantree_list = NULL;
-    Node *parsetree = (Node *)lfirst(parsetree_item);
-    const char *commandTag = CreateCommandTag(parsetree);
 
-    if (u_sess->utils_cxt.ActiveSnapshot == NULL && analyze_requires_snapshot(parsetree)) {
-        PushActiveSnapshot(GetTransactionSnapshot());
-        snapshot_set = true;
-    }
+    PG_TRY();
+    {
+        Portal portal = NULL;
 
-    querytree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
-    plantree_list = pg_plan_queries(querytree_list, 0, NULL);
+        List *querytree_list = NULL;
+        List *plantree_list = NULL;
 
-    if (snapshot_set) {
-        PopActiveSnapshot();
-    }
+        const char *commandTag = CreateCommandTag((Node *)parsetree);
 
-    portal = CreatePortal(query_string, true, true);
-    portal->visible = false;
-    PortalDefineQuery(portal, NULL, query_string, commandTag, plantree_list, NULL);
-    if (need_result)
+        querytree_list = pg_rewrite_query(parsetree);
+        plantree_list = pg_plan_queries(querytree_list, 0, NULL);
+
+        portal = CreatePortal("SELECT_INTO_STMT", true, true);
+        portal->visible = false;
+        PortalDefineQuery(portal, NULL, "SELECT_INTO_STMT", commandTag, plantree_list, NULL);
         receiver = create_stmt_receiver();
-    else
-        receiver = CreateDestReceiver(DestNone);
 
-    PortalStart(portal, NULL, 0, NULL);
-    PortalSetResultFormat(portal, 1, &format);
-    (void)PortalRun(portal, FETCH_ALL, true, receiver, receiver, NULL);
-    PortalDrop(portal, false);
+        PortalStart(portal, NULL, 0, NULL);
+        PortalSetResultFormat(portal, 1, &format);
+        (void)PortalRun(portal, FETCH_ALL, true, receiver, receiver, NULL);
+        PortalDrop(portal, false);
+    }
+    PG_CATCH();
+    {
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     return (StmtResult *)receiver;
 }
@@ -748,7 +796,7 @@ void receive(TupleTableSlot *slot, DestReceiver *self)
         }
         
         result->isnulls[i] = false;
-        getTypeOutputInfo(typeinfo->attrs[i]->atttypid, &typoutput, &typisvarlena);
+        getTypeOutputInfo(typeinfo->attrs[i].atttypid, &typoutput, &typisvarlena);
 
         if (typisvarlena) {
             attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
@@ -758,7 +806,7 @@ void receive(TupleTableSlot *slot, DestReceiver *self)
 
         value = OidOutputFunctionCall(typoutput, attr);
         values = lappend(values, value);
-        result->atttypids[i] = typeinfo->attrs[i]->atttypid;
+        result->atttypids[i] = typeinfo->attrs[i].atttypid;
 
         /* Clean up detoasted copy, if any */
         if (DatumGetPointer(attr) != DatumGetPointer(origattr)) {

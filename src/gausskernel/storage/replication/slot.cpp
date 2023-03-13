@@ -226,6 +226,7 @@ void slot_reset_for_backup(ReplicationSlotPersistency persistency, bool isDummyS
     SET_SLOT_PERSISTENCY(slot->data, persistency);
     slot->data.xmin = InvalidTransactionId;
     slot->effective_xmin = InvalidTransactionId;
+    slot->effective_catalog_xmin = InvalidTransactionId;
     slot->data.database = databaseId;
     slot->data.restart_lsn = restart_lsn;
     slot->data.isDummyStandby = isDummyStandby;
@@ -414,6 +415,7 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
     SET_SLOT_PERSISTENCY(slot->data, persistency);
     slot->data.xmin = InvalidTransactionId;
     slot->effective_xmin = InvalidTransactionId;
+    slot->effective_catalog_xmin = InvalidTransactionId;
     rc = strncpy_s(NameStr(slot->data.name), NAMEDATALEN, name, NAMEDATALEN - 1);
     securec_check(rc, "\0", "\0");
     NameStr(slot->data.name)[NAMEDATALEN - 1] = '\0';
@@ -964,6 +966,10 @@ void ReplicationSlotsComputeRequiredXmin(bool already_locked)
         if (TransactionIdIsValid(effective_xmin) &&
             (!TransactionIdIsValid(agg_xmin) || TransactionIdPrecedes(effective_xmin, agg_xmin)))
             agg_xmin = effective_xmin;
+
+        if (s->data.database == InvalidOid) {
+            continue;
+        }
         /* check the catalog xmin */
         if (TransactionIdIsValid(effective_catalog_xmin) &&
             (!TransactionIdIsValid(agg_catalog_xmin) ||

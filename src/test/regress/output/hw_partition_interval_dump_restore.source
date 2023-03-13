@@ -66,6 +66,7 @@ SET
 SET
 SET
 SET
+SET
 CREATE TABLE
 ALTER TABLE
 CREATE INDEX
@@ -133,6 +134,7 @@ end;
 drop table t_part_auto;
 -- restore data
 \! @abs_bindir@/gsql -p @portstring@ -d interval_db -f @abs_bindir@/backup.sql
+SET
 SET
 SET
 SET
@@ -228,6 +230,7 @@ Number of partitions: 4 (View pg_partition to check each partition range.)
 drop table sales;
 -- restore data
 \! @abs_bindir@/gsql -p @portstring@ -d interval_db -f @abs_bindir@/backup.sql
+SET
 SET
 SET
 SET

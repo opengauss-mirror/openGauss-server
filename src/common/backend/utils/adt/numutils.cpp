@@ -15,6 +15,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "port/pg_bitutils.h"
 
 #include <math.h>
 #include <limits.h>

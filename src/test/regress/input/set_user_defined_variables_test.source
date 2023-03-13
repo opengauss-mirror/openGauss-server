@@ -585,6 +585,50 @@ set enable_set_variable_b_format = on;
 set @v1 := 1, @v2 := 2, @v3 := @v4 := 3;
 select @v1, @v2, @v3, @v4;
 
+\c test_set
+set @v2 := 'aaa';
+set @V4 :=(SELECT @v2 + 1);
+select @v2, @v4;
+set @aa = 10;
+set @bb = (select sha(@aa));
+select @aa, @bb;
+
+\c test_set
+set b_format_behavior_compat_options="enable_set_variables";
+drop table if exists t2;
+create table t2(a int, b int);
+insert into t2 values(1,2);
+
+create or replace procedure test(a int, b int) as
+declare
+    num3 int := a;
+    num4 int := b;
+    pragma autonomous_transaction;
+
+begin
+    set b_format_behavior_compat_options="enable_set_variables";
+    set @v1 := num3, @v2 := num4;
+    insert into t2 values(@v1, @v2);
+    rollback;
+    set b_format_behavior_compat_options="enable_set_variables";
+    insert into t2 values(@v1-1, @v2+1);
+end;
+/
+
+call test(1,1);
+
+\c test_set
+set @a := 1, @b := @a;
+select @a, @b;
+set @a := @c := 2, @b := @d := @a;
+select @a, @b, @c, @d;
+
+\c test_set
+set @a := 1, @b := @a;
+select @a, @b;
+set @a := @c := 2, @b := @d := @a, @@session_timeout = 700, @e := @f := @a;
+select @a, @b, @c, @d, @e, @f, @@session_timeout;
+
 \c regression
 drop database if exists test_set;
 

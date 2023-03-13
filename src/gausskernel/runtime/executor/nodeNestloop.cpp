@@ -282,12 +282,9 @@ static TupleTableSlot* ExecNestLoop(PlanState* state)
                 continue; /* return to top of loop */
             }
 
-            /*
-             * In a semijoin, we'll consider returning the first match, but
-             * after that we're done with this outer tuple.
-             */
-            if (node->js.jointype == JOIN_SEMI)
+            if (node->js.single_match) {
                 node->nl_NeedNewOuter = true;
+            }
 
             if (otherqual == NIL || ExecQual(otherqual, econtext, false)) {
                 /*
@@ -383,6 +380,8 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
      */
     ExecInitResultTupleSlot(estate, &nlstate->js.ps);
 
+    nlstate->js.single_match = (node->join.inner_unique || node->join.jointype == JOIN_SEMI);
+
     switch (node->join.jointype) {
         case JOIN_INNER:
         case JOIN_SEMI:
@@ -403,7 +402,7 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
      * initialize tuple type and projection info
      * the result in this case would hold only virtual data.
      */
-    ExecAssignResultTypeFromTL(&nlstate->js.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&nlstate->js.ps, TableAmHeap);
     ExecAssignProjectionInfo(&nlstate->js.ps, NULL);
 
     /*

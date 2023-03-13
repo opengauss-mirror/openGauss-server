@@ -41,6 +41,7 @@
 #include "access/ustore/knl_utuple.h"
 #include "access/ustore/knl_utuptoaster.h"
 #include "access/ustore/knl_whitebox_test.h"
+#include "access/tableam.h"
 #include <stdlib.h>
 
 static Bitmapset *UHeapDetermineModifiedColumns(Relation relation, Bitmapset *interesting_cols, UHeapTuple oldtup,
@@ -401,18 +402,20 @@ Datum UHeapFastGetAttr(UHeapTuple tup, int attnum, TupleDesc tupleDesc, bool *is
      * See comments in att_align_pointer()
      */
     char *tp = (char *)(tup)->disk_tuple + (tup)->disk_tuple->t_hoff;
-    char *dp = ((tupleDesc)->attrs[0]->attlen >= 0) ?
-        tp :
-        (char *)att_align_pointer(tp, (tupleDesc)->attrs[(attnum)-1]->attalign, -1, tp);
+    char *dp = ((tupleDesc)->attrs[0].attlen >= 0)
+                   ? tp
+                   : (char *)att_align_pointer(tp, (tupleDesc)->attrs[(attnum)-1].attalign, -1, tp);
 
-    return ((attnum) > 0 ? ((*(isnull) = false), UHeapDiskTupNoNulls(tup->disk_tuple) ?
-        ((tupleDesc)->attrs[(attnum)-1]->attcacheoff >= 0 ?
-        (fetchatt((tupleDesc)->attrs[(attnum)-1], (dp + (tupleDesc)->attrs[(attnum)-1]->attcacheoff))
-            ) :
-        (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc)))) :
-        (att_isnull((attnum)-1, (tup)->disk_tuple->data) ? ((*(isnull) = true), (Datum)NULL) :
-                                                           (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc))))) :
-                           ((Datum)NULL));
+    return ((attnum) > 0 ? ((*(isnull) = false),
+                            UHeapDiskTupNoNulls(tup->disk_tuple)
+                                ? (TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff >= 0
+                                       ? (fetchatt(TupleDescAttr((tupleDesc), (attnum)-1),
+                                                   (dp + TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff)))
+                                       : (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc))))
+                                : (att_isnull((attnum)-1, (tup)->disk_tuple->data)
+                                       ? ((*(isnull) = true), (Datum)NULL)
+                                       : (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc)))))
+                         : ((Datum)NULL));
 }
 
 enum UHeapDMLType {
@@ -1825,7 +1828,7 @@ bool TableFetchAndStore(Relation scanRelation, Snapshot snapshot, Tuple tuple, B
  */
 static UHeapTuple UHeapToastFlattenTuple(UHeapTuple tup, TupleDesc tupDesc)
 {
-    Form_pg_attribute *att = tupDesc->attrs;
+    FormData_pg_attribute *att = tupDesc->attrs;
     int numAttrs = tupDesc->natts;
     Datum toastValues[MaxTupleAttributeNumber];
     bool toastIsnull[MaxTupleAttributeNumber];
@@ -1844,7 +1847,7 @@ static UHeapTuple UHeapToastFlattenTuple(UHeapTuple tup, TupleDesc tupDesc)
         /*
          * Look at non-null varlena attributes
          */
-        if (!toastIsnull[i] && att[i]->attlen == -1) {
+        if (!toastIsnull[i] && att[i].attlen == -1) {
             struct varlena *newValue = (struct varlena *)DatumGetPointer(toastValues[i]);
             checkHugeToastPointer(newValue);
             if (VARATT_IS_EXTERNAL(newValue)) {
@@ -2156,7 +2159,7 @@ check_tup_satisfies_update:
 
     /* create the old tuple for caller */
     if (oldslot) {
-        *oldslot = MakeSingleTupleTableSlot(relation->rd_att, false, TAM_USTORE);
+        *oldslot = MakeSingleTupleTableSlot(relation->rd_att, false, TableAmUstore);
         TupleDesc rowDesc = (*oldslot)->tts_tupleDescriptor;
 
         UHeapTuple oldtupCopy = UHeapCopyTuple(&utuple);
@@ -2964,7 +2967,7 @@ check_tup_satisfies_update:
 
     /* Till now, we know whether we will delete the old index */
     if (oldslot && (*modifiedIdxAttrs != NULL || !useInplaceUpdate)) {
-        *oldslot = MakeSingleTupleTableSlot(relation->rd_att, false, TAM_USTORE);
+        *oldslot = MakeSingleTupleTableSlot(relation->rd_att, false, TableAmUstore);
         TupleDesc rowDesc = (*oldslot)->tts_tupleDescriptor;
 
         UHeapTuple oldtupCopy = UHeapCopyTuple(&oldtup);
@@ -3673,13 +3676,13 @@ static void TtsUHeapMaterialize(TupleTableSlot *slot)
 {
     MemoryContext oldContext;
 
-    Assert(!slot->tts_isempty);
+    Assert(!TTS_EMPTY(slot));
 
     /* If already materialized nothing to do. */
-    if (slot->tts_shouldFree)
+    if (TTS_SHOULDFREE(slot))
         return;
 
-    slot->tts_shouldFree = true;
+    slot->tts_flags |= TTS_FLAG_SHOULDFREE;
 
     oldContext = MemoryContextSwitchTo(slot->tts_mcxt);
 
@@ -3691,7 +3694,7 @@ static void TtsUHeapMaterialize(TupleTableSlot *slot)
     slot->tts_tuple = UHeapFormTuple(slot->tts_tupleDescriptor, slot->tts_values, slot->tts_isnull);
 
     /* Let the caller know this contains a UHeap tuple now */
-    slot->tts_tupslotTableAm = TAM_USTORE;
+    slot->tts_tam_ops = TableAmUstore;
 
     MemoryContextSwitchTo(oldContext);
 

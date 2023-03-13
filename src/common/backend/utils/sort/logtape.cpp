@@ -144,6 +144,7 @@ typedef struct LogicalTape {
     int max_size;    /* highest useful, safe buffer_size */
     int pos;         /* next read/write position in buffer */
     int nbytes;      /* total # of valid bytes in buffer */
+    int read_buffer_size;
 } LogicalTape;
 
 /*
@@ -978,4 +979,28 @@ void LogicalTapeTell(LogicalTapeSet *lts, int tapenum, long *blocknum, int *offs
 long LogicalTapeSetBlocks(LogicalTapeSet *lts)
 {
     return lts->nBlocksAllocated - lts->nHoleBlocks;
+}
+
+/*
+ * Set buffer size to use, when reading from given tape.
+ */
+void LogicalTapeAssignReadBufferSize(LogicalTapeSet *lts, int tapenum, size_t avail_mem)
+{
+    LogicalTape *lt;
+
+    Assert(tapenum >= 0 && tapenum < lts->nTapes);
+    lt = &lts->tapes[tapenum];
+
+    /*
+     * The buffer size must be a multiple of BLCKSZ in size, so round the
+     * given value down to nearest BLCKSZ.  Make sure we have at least one
+     * page. Also, don't go above MaxAllocSize, to avoid erroring out.  A
+     * multi-gigabyte buffer is unlikely to be helpful, anyway.
+     */
+    if (avail_mem < BLCKSZ)
+        avail_mem = BLCKSZ;
+    if (avail_mem > MaxAllocSize)
+        avail_mem = MaxAllocSize;
+    avail_mem -= avail_mem % BLCKSZ;
+    lt->read_buffer_size = avail_mem;
 }

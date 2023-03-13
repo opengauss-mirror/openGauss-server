@@ -605,6 +605,12 @@ bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc, bool* hasGe
         return true;
     }
 
+    /* If enable_expr_fusion or query_dop alreadly change, need build plan again. */
+    if (psrc->cq_is_flt_frame !=
+        (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1)) {
+        return true;
+    }
+
 #ifndef ENABLE_MULTIPLE_NODES
     if (CheckRecreateCachePlanBySqlPatch(psrc)) {
         return true;

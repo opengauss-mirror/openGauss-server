@@ -981,7 +981,7 @@ CatCache* InitCatCache(int id, Oid reloid, Oid indexoid, int nkeys, const int* k
                     i + 1,                                                                                             \
                     cache->cc_nkeys,                                                                                   \
                     cache->cc_keyno[i],                                                                                \
-                    tupdesc->attrs[cache->cc_keyno[i] - 1]->atttypid)));                                               \
+                    tupdesc->attrs[cache->cc_keyno[i] - 1].atttypid)));                                               \
         } else {                                                                                                       \
             ereport(DEBUG2,                                                                                            \
                 (errmsg("CatalogCacheInitializeCache: load %d/%d w/%d", i + 1, cache->cc_nkeys, cache->cc_keyno[i]))); \
@@ -1056,14 +1056,18 @@ static void CatalogCacheInitializeCache(CatCache* cache)
         CatalogCacheInitializeCache_DEBUG2;
 
         if (cache->cc_keyno[i] > 0)
-            keytype = tupdesc->attrs[cache->cc_keyno[i] - 1]->atttypid;
+            keytype = tupdesc->attrs[cache->cc_keyno[i] - 1].atttypid;
         else {
             if (cache->cc_keyno[i] != ObjectIdAttributeNumber)
                 ereport(FATAL, (errmsg("only sys attr supported in caches is OID")));
             keytype = OIDOID;
         }
 
-        GetCCHashEqFuncs(keytype, &cache->cc_hashfunc[i], &eqfunc, &cache->cc_fastequal[i]);
+        if (u_sess->hook_cxt.pluginCCHashEqFuncs == NULL ||
+            !((pluginCCHashEqFuncs)(u_sess->hook_cxt.pluginCCHashEqFuncs))(keytype, &cache->cc_hashfunc[i], &eqfunc,
+                &cache->cc_fastequal[i], cache->id)) {
+            GetCCHashEqFuncs(keytype, &cache->cc_hashfunc[i], &eqfunc, &cache->cc_fastequal[i]);
+        }
 
         /*
          * Do equality-function lookup (we assume this won't need a catalog
@@ -1580,7 +1584,7 @@ static HeapTuple SearchCatCacheMiss(
 {
     ScanKeyData cur_skey[CATCACHE_MAXKEYS];
     Relation relation;
-    SysScanDesc scandesc;
+    SysScanDesc scandesc = NULL;
     HeapTuple ntp;
     CatCTup* ct = NULL;
     Datum arguments[CATCACHE_MAXKEYS];
@@ -1652,16 +1656,27 @@ static HeapTuple SearchCatCacheMiss(
 
         ereport(DEBUG1, (errmsg("cache->cc_reloid - %d", cache->cc_reloid)));
 
-        scandesc = systable_beginscan(
-            relation, cache->cc_indexoid, IndexScanOK(cache->id), NULL, nkeys, cur_skey);
+        if (u_sess->hook_cxt.pluginSearchCatHook != NULL) {
+            if (HeapTupleIsValid(ntp = ((searchCatFunc)(u_sess->hook_cxt.pluginSearchCatHook))(relation,
+                cache->cc_indexoid, cache->id, nkeys, cur_skey, &scandesc))) {
+                ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
+                /* immediately set the refcount to 1 */
+                ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+                ct->refcount++;
+                ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
+            }
+        } else {
+            scandesc = systable_beginscan(
+                relation, cache->cc_indexoid, IndexScanOK(cache->id), NULL, nkeys, cur_skey);
 
-        while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
-            ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
-            /* immediately set the refcount to 1 */
-            ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
-            ct->refcount++;
-            ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
-            break; /* assume only one match */
+            while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
+                ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
+                /* immediately set the refcount to 1 */
+                ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+                ct->refcount++;
+                ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
+                break; /* assume only one match */
+            }
         }
 
         systable_endscan(scandesc);
@@ -2390,7 +2405,7 @@ List* SearchBuiltinProcCacheList(CatCache* cache, int nkey, Datum* arguments, Li
 
 TupleDesc CreateTupDesc4BuiltinFuncWithOid()
 {
-    TupleDesc tupdesc = CreateTemplateTupleDesc(40, false, TAM_HEAP);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(40, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "proname", NAMEOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "pronamespace", OIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "proowner", OIDOID, -1, 0);
@@ -2971,7 +2986,7 @@ void CatCacheFreeKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* ke
             continue;
         Assert(attnum > 0);
 
-        if (!tupdesc->attrs[attnum - 1]->attbyval) {
+        if (!tupdesc->attrs[attnum - 1].attbyval) {
             void *ptr = DatumGetPointer(keys[i]);
             pfree_ext(ptr);
             keys[i] = (Datum)NULL;
@@ -2999,7 +3014,7 @@ void CatCacheCopyKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* sr
         if (attnum == ObjectIdAttributeNumber) {
             dstkeys[i] = srckeys[i];
         } else {
-            Form_pg_attribute att = tupdesc->attrs[(attnum - 1)];
+            Form_pg_attribute att = &tupdesc->attrs[(attnum - 1)];
             Datum src = srckeys[i];
             NameData srcname;
 

@@ -36,14 +36,14 @@ END;
 $$
 ;
 call decode_area_proc('mppdb_decoding');
-                                                                                                                                                      decode_area_proc                                                                                                                                                      
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?.*
+--?.*
  {"table_name":"public.area_example1","op_type":"INSERT","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["1","1","'1'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
  {"table_name":"public.area_example1","op_type":"INSERT","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["2","1","'2'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
- {"table_name":"public.area_example1","op_type":"UPDATE","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["1","10","'1'"],"old_keys_name":["id","somedata","text"],"old_keys_type":["integer","integer","character varying"],"old_keys_val":["1","1","'1'"]}
- {"table_name":"public.area_example1","op_type":"UPDATE","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["2","10","'2'"],"old_keys_name":["id","somedata","text"],"old_keys_type":["integer","integer","character varying"],"old_keys_val":["2","1","'2'"]}
- {"table_name":"public.area_example1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["id","somedata","text"],"old_keys_type":["integer","integer","character varying"],"old_keys_val":["1","10","'1'"]}
- {"table_name":"public.area_example1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["id","somedata","text"],"old_keys_type":["integer","integer","character varying"],"old_keys_val":["2","10","'2'"]}
+ {"table_name":"public.area_example1","op_type":"UPDATE","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["1","10","'1'"],"old_keys_name":["id"],"old_keys_type":["integer"],"old_keys_val":["1"]}
+ {"table_name":"public.area_example1","op_type":"UPDATE","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["2","10","'2'"],"old_keys_name":["id"],"old_keys_type":["integer"],"old_keys_val":["2"]}
+ {"table_name":"public.area_example1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["id"],"old_keys_type":["integer"],"old_keys_val":["1"]}
+ {"table_name":"public.area_example1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["id"],"old_keys_type":["integer"],"old_keys_val":["2"]}
  {"table_name":"public.area_example2","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","integer","integer"],"columns_val":["1","1","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
  {"table_name":"public.area_example2","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","integer","integer"],"columns_val":["2","2","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
  {"table_name":"public.area_example2","op_type":"UPDATE","columns_name":["a","b","c"],"columns_type":["integer","integer","integer"],"columns_val":["1","10","1"],"old_keys_name":["a"],"old_keys_type":["integer"],"old_keys_val":["1"]}
@@ -55,14 +55,14 @@ call decode_area_proc('mppdb_decoding');
 (14 rows)
 
 call decode_area_proc('sql_decoding');
-                                                          decode_area_proc                                                           
--------------------------------------------------------------------------------------------------------------------------------------
+--?.*
+--?.*
  insert into public.area_example1 values (3, 1, '1');
  insert into public.area_example1 values (4, 1, '2');
- delete from public.area_example1 where id = 3 and somedata = 1 and text = '1';insert into public.area_example1 values (3, 10, '1');
- delete from public.area_example1 where id = 4 and somedata = 1 and text = '2';insert into public.area_example1 values (4, 10, '2');
- delete from public.area_example1 where id = 3 and somedata = 10 and text = '1';
- delete from public.area_example1 where id = 4 and somedata = 10 and text = '2';
+ delete from public.area_example1 where id = 3;insert into public.area_example1 values (3, 10, '1');
+ delete from public.area_example1 where id = 4;insert into public.area_example1 values (4, 10, '2');
+ delete from public.area_example1 where id = 3;
+ delete from public.area_example1 where id = 4;
  insert into public.area_example2 values (1, 1, 1);
  insert into public.area_example2 values (2, 2, 2);
  delete from public.area_example2 where a = 1;insert into public.area_example2 values (1, 10, 1);

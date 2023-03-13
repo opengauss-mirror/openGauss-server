@@ -189,7 +189,7 @@ HeapTuple search_from_pg_job_proc_no_exception(Relation rel, Datum job_name)
  * @param name
  * @return HeapTuple
  */
-static HeapTuple search_from_pg_job_proc(Relation rel, Datum name)
+HeapTuple search_from_pg_job_proc(Relation rel, Datum name)
 {
     HeapTuple tuple = search_from_pg_job_proc_no_exception(rel, name);
     if (!HeapTupleIsValid(tuple)) {

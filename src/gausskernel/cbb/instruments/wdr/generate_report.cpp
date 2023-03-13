@@ -1011,9 +1011,9 @@ void GenReport::get_query_data(char* query, bool with_column_name, List** cstrin
     /* get colname */
     if (with_column_name) {
         for (int32 i = 0; i < SPI_tuptable->tupdesc->natts; i++) {
-            size_t maxSize = strlen(SPI_tuptable->tupdesc->attrs[i]->attname.data) + 1;
+            size_t maxSize = strlen(SPI_tuptable->tupdesc->attrs[i].attname.data) + 1;
             char* strName = (char*)palloc(maxSize * sizeof(char));
-            errno_t rc = strncpy_s(strName, maxSize, SPI_tuptable->tupdesc->attrs[i]->attname.data, maxSize - 1);
+            errno_t rc = strncpy_s(strName, maxSize, SPI_tuptable->tupdesc->attrs[i].attname.data, maxSize - 1);
             securec_check(rc, "\0", "\0");
             colname_cstring = lappend(colname_cstring, strName);
         }

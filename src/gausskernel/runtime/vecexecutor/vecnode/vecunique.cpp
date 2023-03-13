@@ -118,7 +118,7 @@ VecUniqueState* ExecInitVecUnique(VecUnique* node, EState* estate, int eflags)
     // node appropriately
     ExecAssignResultTypeFromTL(
             &uniquestate->ps,
-            ExecGetResultType(outerPlanState(uniquestate))->tdTableAmType);
+            ExecGetResultType(outerPlanState(uniquestate))->td_tam_ops);
 
     uniquestate->ps.ps_ProjInfo = NULL;
 

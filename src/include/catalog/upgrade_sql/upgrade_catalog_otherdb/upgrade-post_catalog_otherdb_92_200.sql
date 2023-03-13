@@ -5035,7 +5035,7 @@ DECLARE
   BEGIN
     query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'select * from get_node_stat_reset_time()';
+      query_str := 'select * from pg_catalog.get_node_stat_reset_time()';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         reset_time := row_data.get_node_stat_reset_time;

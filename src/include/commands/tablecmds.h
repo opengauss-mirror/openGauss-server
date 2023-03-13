@@ -17,6 +17,7 @@
 
 #include "access/htup.h"
 #include "catalog/dependency.h"
+#include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
 #include "nodes/plannodes.h"
 #include "rewrite/rewriteRlsPolicy.h"
@@ -39,7 +40,7 @@
         (cmd) == AT_SetStatistics || (cmd) == AT_AlterColumnType || (cmd) == AT_AlterColumnGenericOptions ||       \
         (cmd) == AT_AddIndex || (cmd) == AT_DropConstraint || (cmd) == AT_UpdateSliceLike)
 
-extern Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS = false);
+extern ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, ObjectAddress* typaddress, bool isCTAS = false);
 
 extern void RemoveRelationsonMainExecCN(DropStmt* drop, ObjectAddresses* objects);
 
@@ -65,7 +66,7 @@ extern void ATExecChangeOwner(Oid relationOid, Oid newOwnerId, bool recursing, L
 
 extern void AlterTableInternal(Oid relid, List* cmds, bool recurse);
 
-extern void AlterTableNamespace(AlterObjectSchemaStmt* stmt);
+extern ObjectAddress AlterTableNamespace(AlterObjectSchemaStmt* stmt, Oid *oldschema);
 
 extern void AlterTableNamespaceInternal(Relation rel, Oid oldNspOid, Oid nspOid, ObjectAddresses* objsMoved);
 
@@ -82,11 +83,11 @@ extern void ExecuteTruncate(TruncateStmt* stmt);
 
 extern void SetRelationHasSubclass(Oid relationId, bool relhassubclass);
 
-extern void renameatt(RenameStmt* stmt);
+extern ObjectAddress renameatt(RenameStmt* stmt);
 
-extern void RenameConstraint(RenameStmt* stmt);
+extern ObjectAddress RenameConstraint(RenameStmt* stmt);
 
-extern void RenameRelation(RenameStmt* stmt);
+extern ObjectAddress RenameRelation(RenameStmt* stmt);
 
 extern void RenameRelationInternal(Oid myrelid, const char* newrelname);
 
@@ -115,13 +116,13 @@ extern void RangeVarCallbackOwnsTable(
 extern void RangeVarCallbackOwnsRelation(
     const RangeVar* relation, Oid relId, Oid oldRelId, bool target_is_partition, void* noCatalogs);
 extern void checkPartNotInUse(Partition part, const char* stmt);
-extern List* transformConstIntoTargetType(Form_pg_attribute* attrs, int2vector* partitionKey, List* boundary);
-extern List* transformIntoTargetType(Form_pg_attribute* attrs, int2 pos, List* boundary);
+extern List* transformConstIntoTargetType(FormData_pg_attribute* attrs, int2vector* partitionKey, List* boundary);
+extern List* transformIntoTargetType(FormData_pg_attribute* attrs, int2 pos, List* boundary);
 
 extern void RenameDistributedTable(Oid distributedTableOid, const char* distributedTableNewName);
 extern void renamePartitionedTable(Oid partitionedTableOid, const char* partitionedTableNewName);
-extern void renamePartition(RenameStmt* stmt);
-extern void renamePartitionIndex(RenameStmt* stmt);
+extern ObjectAddress renamePartition(RenameStmt* stmt);
+extern ObjectAddress renamePartitionIndex(RenameStmt* stmt);
 extern void renamePartitionInternal(Oid partitionedTableOid, Oid partitionOid, const char* partitionNewName);
 
 extern Oid addPartitionBySN(Relation rel, int seqnum);
@@ -131,12 +132,14 @@ extern bool checkPartitionLocalIndexesUsable(Oid partitionOid);
 extern bool checkRelationLocalIndexesUsable(Relation relation);
 extern List* GetPartitionkeyPos(List* partitionkeys, List* schema, bool* partkeyIsFunc = NULL);
 
-extern void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, List *partitionList, bool isPartition = true, bool partkeyIsFunc = false);
-extern void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partitionList, bool partkeyIsFunc = false);
+extern void ComparePartitionValue(List* pos, FormData_pg_attribute* attrs, List *partitionList, bool isPartition = true, bool partkeyIsFunc = false);
+extern void CompareListValue(const List* pos, FormData_pg_attribute* attrs, List *partitionList, bool partkeyIsFunc = false);
 extern void clearAttrInitDefVal(Oid relid);
 
 extern void ATMatviewGroup(List* stmts, Oid mvid, LOCKMODE lockmode);
 extern void AlterCreateChainTables(Oid relOid, Datum reloptions, CreateStmt *mainTblStmt);
+
+extern void CheckAutoIncrementDatatype(Oid typid, const char* colname);
 
 /**
  * @Description: Whether judge the column is partition column.
@@ -145,7 +148,7 @@ extern void AlterCreateChainTables(Oid relOid, Datum reloptions, CreateStmt *mai
  * @return If the the column is partition column, return true, otherwise return false.
  */
 extern bool is_partition_column(Relation rel, AttrNumber att_no);
-extern Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool isinterval, bool isPartition, bool partkeyIsFunc = false);
+extern Const* GetPartitionValue(List* pos, FormData_pg_attribute* attrs, List* value, bool isinterval, bool isPartition, bool partkeyIsFunc = false);
 extern Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval, bool partkeyIsFunc = false);
 extern void ATExecEnableDisableRls(Relation rel, RelationRlsStatus changeType, LOCKMODE lockmode);
 extern bool isQueryUsingTempRelation(Query *query);

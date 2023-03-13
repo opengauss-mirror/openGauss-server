@@ -149,7 +149,7 @@ VecWindowAggState* ExecInitVecWindowAgg(VecWindowAgg* node, EState* estate, int 
      * Initialize result tuple type and projection info.
      * result Tuple Table Slot contains virtual tuple, default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&winstate->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&winstate->ss.ps);
 
     {
         PlanState* planstate = &winstate->ss.ps;
@@ -547,8 +547,27 @@ VecWinAggRuntime::VecWinAggRuntime(VecWindowAggState* runtime) : BaseAggRunner()
         WindowStatePerFunc perfuncstate = &(m_winruntime->perfunc[winfuncno]);
         DispatchAggFunction(peraggstate, perfuncstate, &runtime->windowAggInfo[i]);
 
-        if (m_sortKey > 0)
+        if (m_sortKey > 0) {
             m_cellvar_encoded[i] = CheckAggEncoded(peraggstate->transfn.fn_rettype);
+#ifndef ENABLE_MULTIPLE_NODES
+            /* 
+             * fix some case that row agg function has both transfn and finnal
+             * but vec agg function only have transfn
+             */
+            if (OidIsValid(peraggstate->finalfn.fn_oid) && 
+                 runtime->windowAggInfo[i].vec_final_function.flinfo == NULL) {
+                m_cellvar_encoded[i] = CheckAggEncoded(peraggstate->finalfn.fn_rettype);
+            }
+            /* 
+             * in some case, vec agg function has its own rettyp 
+             * XXX: hard code here
+             */
+            if (perfuncstate->flinfo.fn_oid == 2100 || perfuncstate->flinfo.fn_oid == 2103
+                || perfuncstate->flinfo.fn_oid == 2717 || perfuncstate->flinfo.fn_oid == 2159) {
+                m_cellvar_encoded[i] = true;
+            }
+#endif
+        }
     }
 
     /* agg start from here */
@@ -643,7 +662,11 @@ void VecWinAggRuntime::DispatchWindowFunction(WindowStatePerFunc perfuncstate, i
     entry = (VecFuncCacheEntry*)hash_search(g_instance.vec_func_hash, &funcoid, HASH_FIND, &found);
 
     if (found) {
+#ifdef ENABLE_MULTIPLE_NODES
         InitFunctionCallInfoData(m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation, NULL, NULL);
+#else
+        InitFunctionCallInfoData(m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation, (Node *)m_winruntime, NULL);
+#endif
 
         if (m_aggNum == 0 || m_sortKey == 0)
             m_windowFunc[i].flinfo->vec_fn_addr = entry->vec_fn_cache[0];
@@ -680,17 +703,28 @@ void VecWinAggRuntime::DispatchAggFunction(
     entry = (VecFuncCacheEntry*)hash_search(g_instance.vec_func_hash, &transfn_oid, HASH_FIND, &found);
 
     if (found) {
+#ifdef ENABLE_MULTIPLE_NODES
         InitFunctionCallInfoData(
             aggInfo->vec_agg_function, &peraggState->transfn, 2, perfuncstate->winCollation, NULL, NULL);
+#else
+        InitFunctionCallInfoData(
+            aggInfo->vec_agg_function, &peraggState->transfn, 2, perfuncstate->winCollation, (Node*)m_winruntime, NULL);
+#endif
 
         aggInfo->vec_agg_cache = &entry->vec_agg_cache[0];
         aggInfo->vec_agg_final = &entry->vec_transform_function[0];
 
         aggInfo->vec_agg_function.flinfo->vec_fn_addr = aggInfo->vec_agg_cache[0];
 
+#ifdef ENABLE_MULTIPLE_NODES
         if (OidIsValid(peraggState->finalfn_oid)) {
             InitFunctionCallInfoData(
                 aggInfo->vec_final_function, &peraggState->finalfn, 2, perfuncstate->winCollation, NULL, NULL);
+#else
+        if (OidIsValid(peraggState->finalfn_oid) && aggInfo->vec_agg_final[0]) {
+            InitFunctionCallInfoData(
+                aggInfo->vec_final_function, &peraggState->finalfn, 2, perfuncstate->winCollation, (Node*)m_winruntime, NULL);
+#endif
             aggInfo->vec_final_function.flinfo->fn_addr = aggInfo->vec_agg_final[0];
         }
     } else {

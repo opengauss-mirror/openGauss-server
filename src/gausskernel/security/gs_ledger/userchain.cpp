@@ -233,7 +233,7 @@ int user_hash_attrno(const TupleDesc rd_att)
     int hash_natt = -1;
     Form_pg_attribute rel_attr = NULL;
     for (int i = rd_att->natts - 1; i >= 0; i--) {
-        rel_attr = rd_att->attrs[i];
+        rel_attr = &rd_att->attrs[i];
         if (strcmp(rel_attr->attname.data, "hash") == 0) {
             hash_natt = i;
             break;
@@ -263,7 +263,7 @@ static void hash_combine_tuple_data(char *buf, int buf_size, TupleDesc tabledesc
             continue;
         }
 
-        uint64 col_hash = compute_hash(tabledesc->attrs[i]->atttypid, values[i], LOCATOR_TYPE_HASH);
+        uint64 col_hash = compute_hash(tabledesc->attrs[i].atttypid, values[i], LOCATOR_TYPE_HASH);
         rc = snprintf_s(hash_str, UINT64STRSIZE + 1, UINT64STRSIZE, "%lu", col_hash);
         securec_check_ss(rc, "", "");
         rc = snprintf_s(buf + buflen, buf_size - buflen, buf_size - buflen - 1, "%s", hash_str);
@@ -329,7 +329,7 @@ static uint64 gen_user_tuple_hash(Relation rel, HeapTuple tuple)
  * Note: if hash_exists is true, we should recompute
  * tuple hash and compare with tuplehash of itself.
  */
-HeapTuple set_user_tuple_hash(HeapTuple tup, Relation rel, bool hash_exists)
+HeapTuple set_user_tuple_hash(HeapTuple tup, Relation rel, TupleTableSlot *slot, bool hash_exists)
 {
     uint64 row_hash = gen_user_tuple_hash(rel, tup);
     int hash_attrno = user_hash_attrno(rel->rd_att);
@@ -352,6 +352,10 @@ HeapTuple set_user_tuple_hash(HeapTuple tup, Relation rel, bool hash_exists)
     values[hash_attrno] = UInt64GetDatum(row_hash);
     replaces[hash_attrno] = true;
     HeapTuple newtup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);
+
+    if (slot) {
+        ExecStoreTuple((Tuple)newtup, slot, InvalidBuffer, false);
+    }
 
     pfree_ext(values);
     pfree_ext(nulls);

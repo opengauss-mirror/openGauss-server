@@ -51,6 +51,8 @@
 #include "pgxc/pgxc.h"
 #include "utils/fmgroids.h"
 #include "funcapi.h"
+#include "postgres_ext.h"
+#include "catalog/pg_proc.h"
 
 const size_t ENCRYPTED_VALUE_MIN_LENGTH = 170;
 const size_t ENCRYPTED_VALUE_MAX_LENGTH = 1024;
@@ -1283,6 +1285,65 @@ bool is_enc_type(const char *type_name)
     return false;
 }
 
+bool IsFullEncryptedRel(char* objSchema, char* objName)
+{
+    bool is_encrypted = false;
+    Oid namespaceId = get_namespace_oid((const char*)objSchema, false);
+    Oid relnameId = get_relname_relid((const char*)objName, namespaceId);
+    CatCList *catlist = SearchSysCacheList1(CERELIDCOUMNNAME, ObjectIdGetDatum(relnameId));
+    if (catlist != NULL && catlist->n_members > 0) {
+        is_encrypted = true;
+    }
+    ReleaseSysCacheList(catlist);
+    return is_encrypted;
+}
+ 
+bool IsFuncProcOnEncryptedRel(char* objSchema, char* objName)
+{
+    bool is_encrypted = false;
+    CatCList* catlist_funcs = NULL;
+    catlist_funcs = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(objName));
+    Oid namespaceId = get_namespace_oid((const char*)objSchema, false);
+    for (int i = 0; i < catlist_funcs->n_members; i++) {
+        if (is_encrypted) {
+            break;
+        }
+        HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist_funcs, i);
+        if (HeapTupleIsValid(proctup)) {
+            Form_pg_proc pform = (Form_pg_proc)GETSTRUCT(proctup);
+            Oid oldTupleOid = HeapTupleGetOid(proctup);
+            /* compare function's namespace */
+            if (pform->pronamespace != namespaceId) {
+                continue;
+            }
+            HeapTuple gs_oldtup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(oldTupleOid));
+            if (!HeapTupleIsValid(gs_oldtup)) {
+                continue;
+            }
+            if (gs_oldtup->t_len > 0) {
+                is_encrypted = true;
+            }
+            ReleaseSysCache(gs_oldtup);
+        }
+    }
+    ReleaseSysCacheList(catlist_funcs);
+    return is_encrypted;
+}
+
+bool is_full_encrypted_rel(Relation rel)
+{
+    if (rel == NULL || rel->rd_att == NULL || rel->rd_rel->relkind != RELKIND_RELATION) {
+        return false;
+    }
+    TupleDesc tup_desc = rel->rd_att;
+    for (int i = 0; i < tup_desc->natts; i++) {
+        if (is_enc_type(tup_desc->attrs[i].atttypid)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /*
  * if a column is encrypted, we will rewrite its type and
  *  (1) store its source col_type in catalog 'gs_encrypted_columns'
@@ -1333,7 +1394,7 @@ Datum get_client_info(PG_FUNCTION_ARGS)
     Tuplestorestate* tupstore = NULL;
     const int COLUMN_NUM = 2;
     MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
-    tupdesc = CreateTemplateTupleDesc(COLUMN_NUM, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(COLUMN_NUM, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "sid", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "client_info", TEXTOID, -1, 0);
  
@@ -1349,4 +1410,24 @@ Datum get_client_info(PG_FUNCTION_ARGS)
  
     tuplestore_donestoring(rsinfo->setResult);
     return (Datum)0;
+}
+
+const char *get_typename_by_id(Oid typeOid)
+{
+    if (typeOid == BYTEAWITHOUTORDERWITHEQUALCOLOID) {
+        return "byteawithoutorderwithequal";
+    } else if (typeOid == BYTEAWITHOUTORDERCOLOID) {
+        return "byteawithoutorder";
+    }
+    return NULL;
+}
+
+const char *get_encryption_type_name(EncryptionType algorithm_type)
+{
+    if (algorithm_type == EncryptionType::DETERMINISTIC_TYPE) {
+        return "DETERMINISTIC";
+    } else if (algorithm_type == EncryptionType::RANDOMIZED_TYPE) {
+        return "RANDOMIZED";
+    }
+    return NULL;
 }

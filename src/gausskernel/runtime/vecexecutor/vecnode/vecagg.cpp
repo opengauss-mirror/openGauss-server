@@ -216,7 +216,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
      * Result tuple slot of Aggregation always contains a virtual tuple,
      * Default tableAMtype for this slot is Heap.
      */
-    ExecAssignResultTypeFromTL(&aggstate->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&aggstate->ss.ps);
 
     aggstate->ss.ps.ps_ProjInfo = ExecBuildVecProjectionInfo(aggstate->ss.ps.targetlist,
         node->plan.qual,
@@ -439,8 +439,13 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
         if (aclresult != ACLCHECK_OK)
             aclcheck_error(aclresult, ACL_KIND_PROC, get_func_name(aggref->aggfnoid));
 
-        peraggstate->transfn_oid = transfn_oid = aggform->aggtransfn;
-        peraggstate->finalfn_oid = finalfn_oid = aggform->aggfinalfn;
+        transfn_oid = aggform->aggtransfn;
+        finalfn_oid = aggform->aggfinalfn;
+#ifndef ENABLE_MULTIPLE_NODES
+        numeric_aggfn_info_change(aggref->aggfnoid, &transfn_oid, &aggtranstype, &transfn_oid);
+#endif
+        peraggstate->transfn_oid = transfn_oid;
+        peraggstate->finalfn_oid = finalfn_oid;
 
 #ifdef PGXC
         peraggstate->collectfn_oid = aggform->aggcollectfn;
@@ -516,7 +521,9 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
          * field. Must do it the hard way with SysCacheGetAttr.
          */
         text_init_val = SysCacheGetAttr(AGGFNOID, agg_tuple, Anum_pg_aggregate_agginitval, &peraggstate->initValueIsNull);
-
+#ifndef ENABLE_MULTIPLE_NODES
+        peraggstate->initValueIsNull = numeric_agg_trans_initvalisnull(peraggstate->transfn_oid, peraggstate->initValueIsNull);
+#endif
         if (peraggstate->initValueIsNull)
             peraggstate->initValue = (Datum)0;
         else
@@ -675,8 +682,12 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
                 aggstate->aggInfo[idx].vec_agg_function.flinfo->vec_fn_addr = aggstate->aggInfo[idx].vec_agg_cache[0];
             else
                 aggstate->aggInfo[idx].vec_agg_function.flinfo->vec_fn_addr = aggstate->aggInfo[idx].vec_agg_cache[1];
-
+#ifdef ENABLE_MULTIPLE_NODES
             if (OidIsValid(peraggstate->finalfn_oid)) {
+#else
+            if (OidIsValid(peraggstate->finalfn_oid) && aggstate->aggInfo[idx].vec_agg_cache[0] && 
+                aggstate->aggInfo[idx].vec_agg_final[0]) {
+#endif
                 InitFunctionCallInfoData(aggstate->aggInfo[idx].vec_final_function,
                     &peraggstate->finalfn,
                     2,
@@ -998,8 +1009,8 @@ void BaseAggRunner::build_batch()
     TupleDesc out_desc = outerPlanState(m_runtime)->ps_ResultTupleSlot->tts_tupleDescriptor;
 
     for (i = 0; i < m_cellVarLen; i++) {
-        type_arr[i].typeId = out_desc->attrs[m_cellBatchMap[i]]->atttypid;
-        type_arr[i].typeMod = out_desc->attrs[m_cellBatchMap[i]]->atttypmod;
+        type_arr[i].typeId = out_desc->attrs[m_cellBatchMap[i]].atttypid;
+        type_arr[i].typeMod = out_desc->attrs[m_cellBatchMap[i]].atttypmod;
         type_arr[i].encoded = COL_IS_ENCODE(type_arr[i].typeId);
         if (type_arr[i].encoded) {
             m_keySimple = false;

@@ -245,6 +245,7 @@ typedef enum AclObjectKind {
     ACL_KIND_PACKAGE,         /* pg_package */
     ACL_KIND_PUBLICATION,     /* pg_publication */
     ACL_KIND_SUBSCRIPTION,    /* pg_subscription */
+    ACL_KIND_EVENT_TRIGGER,   /* pg_event_trigger */   
     MAX_ACL_KIND              /* MUST BE LAST */
 } AclObjectKind;
 
@@ -404,4 +405,5 @@ extern bool pg_publication_ownercheck(Oid pub_oid, Oid roleid);
 extern bool pg_subscription_ownercheck(Oid sub_oid, Oid roleid);
 extern void ExecGrant_Relation(InternalGrant* grantStmt);
 
+extern bool pg_event_trigger_ownercheck(Oid et_oid, Oid roleid);
 #endif /* ACL_H */

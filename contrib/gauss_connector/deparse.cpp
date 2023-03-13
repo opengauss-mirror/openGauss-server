@@ -745,7 +745,7 @@ List* build_tlist_to_deparse(RelOptInfo* foreignrel)
      * We require columns specified in foreignrel->reltarget->exprs and those
      * required for evaluating the local conditions.
      */
-    tlist = foreignrel->reltargetlist;
+    tlist = foreignrel->reltarget->exprs;
 
     foreach (lc, fpinfo->local_conds) {
         RestrictInfo* rinfo = lfirst_node(RestrictInfo, lc);
@@ -929,7 +929,7 @@ static void gcdeparseTargetList(StringInfo buf, PlannerInfo* root, Index rtindex
     have_wholerow = bms_is_member(0 - FirstLowInvalidHeapAttributeNumber, attrs_used);
 
     for (i = 1; i <= tupdesc->natts; i++) {
-        Form_pg_attribute attr = tupdesc->attrs[i - 1];
+        Form_pg_attribute attr = &tupdesc->attrs[i - 1];
 
         /* Ignore dropped attributes. */
         if (attr->attisdropped)
@@ -1122,7 +1122,7 @@ static void gcDeparseSubqueryTargetList(deparse_expr_cxt* context)
     /* Should only be called in these cases. */
     Assert(IS_SIMPLE_REL(foreignrel) || IS_JOIN_REL(foreignrel));
 
-    foreach (lc, foreignrel->reltargetlist) {
+    foreach (lc, foreignrel->reltarget->exprs) {
         Node* node = (Node*)lfirst(lc);
 
         if (!first)
@@ -2213,7 +2213,7 @@ static void get_relation_column_alias_ids(Var* node, RelOptInfo* foreignrel, int
 
     /* Get the column alias ID */
     i = 1;
-    foreach (lc, foreignrel->reltargetlist) {
+    foreach (lc, foreignrel->reltarget->exprs) {
         if (equal(lfirst(lc), (Node*)node)) {
             *colno = i;
             return;

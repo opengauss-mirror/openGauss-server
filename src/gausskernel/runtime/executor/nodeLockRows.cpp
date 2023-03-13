@@ -23,6 +23,7 @@
 
 #include "access/xact.h"
 #include "access/ustore/knl_uheap.h"
+#include "catalog/pg_partition_fn.h"
 #include "executor/executor.h"
 #include "executor/node/nodeLockRows.h"
 #ifdef PGXC
@@ -161,7 +162,7 @@ lnext:
             /* if it is a partition */
             if (tblid != erm->relation->rd_id) {
                 searchFakeReationForPartitionOid(estate->esfRelations,
-                    estate->es_query_cxt, erm->relation, tblid, target_rel,
+                    estate->es_query_cxt, erm->relation, tblid, INVALID_PARTITION_NO, target_rel,
                     target_part, RowShareLock);
                 Assert(tblid == target_rel->rd_id);
             }
@@ -362,6 +363,7 @@ lnext:
                         estate->es_query_cxt,
                         erm->relation,
                         tblid,
+                        INVALID_PARTITION_NO,
                         target_rel,
                         target_part,
                         RowShareLock);
@@ -468,11 +470,11 @@ LockRowsState* ExecInitLockRows(LockRows* node, EState* estate, int eflags)
      * this node appropriately
      */
     TupleDesc resultDesc = ExecGetResultType(outerPlanState(lrstate));
-    ExecAssignResultTypeFromTL(&lrstate->ps, resultDesc->tdTableAmType);
+    ExecAssignResultTypeFromTL(&lrstate->ps, resultDesc->td_tam_ops);
 
     lrstate->ps.ps_ProjInfo = NULL;
 
-    Assert(lrstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(lrstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * Locate the ExecRowMark(s) that this node is responsible for, and

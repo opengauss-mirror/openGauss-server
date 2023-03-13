@@ -66,6 +66,16 @@ CREATE OR REPLACE VIEW viewtest AS
 CREATE OR REPLACE VIEW viewtest AS
 	SELECT a, b, 0 AS c FROM viewtest_tbl;
 
+DROP SCHEMA IF EXISTS test_schema CASCADE;
+CREATE SCHEMA test_schema;
+CREATE OPERATOR test_schema.-(rightarg = int1, procedure = int1um);
+CREATE OPERATOR test_schema.~(leftarg = int1, procedure = int1up);
+set current_schema to 'test_schema';
+CREATE VIEW test as select -(1::tinyint) as "arg1", (1::tinyint)~ as "arg2";
+SELECT * FROM test;
+RESET current_schema;
+DROP SCHEMA IF EXISTS test_schema CASCADE;
+
 -- test error message
 DROP TABLE viewtest;
 

@@ -123,14 +123,13 @@ void PathGen::addPath(Path* new_path)
  * @param[IN] required_outer: the set of required outer rels.
  */
 JoinPathGenBase::JoinPathGenBase(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, List* joinclauses, List* restrictinfo,
+    JoinPathExtraData* extra, List* joinclauses, List* restrictinfo,
     Path* outer_path, Path* inner_path, Relids required_outer)
     : PathGen(root, joinrel),
       m_jointype(jointype),
       m_saveJointype(save_jointype),
       m_workspace(NULL),
-      m_sjinfo(sjinfo),
-      m_semifactors(semifactors),
+      m_extra(extra),
       m_joinClauses(joinclauses),
       m_joinRestrictinfo(restrictinfo),
       m_pathkeys(NIL),
@@ -193,8 +192,6 @@ JoinPathGenBase::~JoinPathGenBase()
     m_resourceOwner = NULL;
     m_rrinfoInner = NIL;
     m_rrinfoOuter = NIL;
-    m_semifactors = NULL;
-    m_sjinfo = NULL;
     m_streamInfoList = NIL;
     m_streamInfoPair = NULL;
     m_targetDistribution = NULL;
@@ -357,7 +354,7 @@ List* JoinPathGenBase::getOthersideKey(bool stream_outer)
 
     ListCell *lc1 = NULL, *lc2 = NULL, *lc3 = NULL;
     List* key_list = NULL;
-    List* targetlist = otherside_rel->reltargetlist;
+    List* targetlist = otherside_rel->reltarget->exprs;
     Node* match_var = NULL;
     ListCell* cell = NULL;
 
@@ -817,9 +814,9 @@ void JoinPathGenBase::parallelLocalRedistribute(bool* inner_can_local_distribute
     Path* outer_tmp = m_outerPath;
 
     *inner_can_local_distribute =
-        check_dsitribute_key_in_targetlist(m_root, m_distributeKeysInner, m_innerRel->reltargetlist);
+        check_dsitribute_key_in_targetlist(m_root, m_distributeKeysInner, m_innerRel->reltarget->exprs);
     *outer_can_local_distribute =
-        check_dsitribute_key_in_targetlist(m_root, m_distributeKeysOuter, m_outerRel->reltargetlist);
+        check_dsitribute_key_in_targetlist(m_root, m_distributeKeysOuter, m_outerRel->reltarget->exprs);
 
     if (IS_DUMMY_UNIQUE(inner_tmp))
         inner_tmp = ((UniquePath*)inner_tmp)->subpath;
@@ -1023,9 +1020,9 @@ Path* JoinPathGenBase::makeJoinSkewUniquePath(bool stream_outer, List* pathkeys)
  * @param[IN] required_outer: the set of required outer rels.
  */
 HashJoinPathGen::HashJoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path, Path* inner_path, List* restrictlist,
+    JoinPathExtraData* extra, Path* outer_path, Path* inner_path, List* restrictlist,
     Relids required_outer, List* hashclauses)
-    : JoinPathGen(root, joinrel, jointype, save_jointype, sjinfo, semifactors, hashclauses, restrictlist, outer_path,
+    : JoinPathGen(root, joinrel, jointype, save_jointype, extra, hashclauses, restrictlist, outer_path,
           inner_path, required_outer),
       m_hashClauses(hashclauses)
 {
@@ -1101,8 +1098,9 @@ Path* HashJoinPathGen::createHashJoinPath()
 
     pathnode->jpath.path.pathtype = T_HashJoin;
     pathnode->jpath.path.parent = m_rel;
+    pathnode->jpath.path.pathtarget = m_rel->reltarget;
     pathnode->jpath.path.param_info = get_joinrel_parampathinfo(
-        m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_sjinfo, m_requiredOuter, &m_joinRestrictinfo);
+        m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_extra->sjinfo, m_requiredOuter, &m_joinRestrictinfo);
 
     /*
      * A hashjoin never has pathkeys, since its output ordering is
@@ -1170,8 +1168,7 @@ void HashJoinPathGen::initialCostHashjoin()
         m_hashClauses,
         m_outerStreamPath,
         m_innerStreamPath,
-        m_sjinfo,
-        m_semifactors,
+        m_extra,
         m_dop);
 }
 
@@ -1186,7 +1183,7 @@ void HashJoinPathGen::initialCostHashjoin()
  */
 void HashJoinPathGen::finalCostHashjoin(HashPath* path, bool hasalternative)
 {
-    final_cost_hashjoin(m_root, path, m_workspace, m_sjinfo, m_semifactors, hasalternative, path->jpath.path.dop);
+    final_cost_hashjoin(m_root, path, m_workspace, m_extra, hasalternative, path->jpath.path.dop);
 }
 
 /*
@@ -1205,9 +1202,9 @@ void HashJoinPathGen::finalCostHashjoin(HashPath* path, bool hasalternative)
  * @param[IN] required_outer: the set of required outer rels.
  */
 NestLoopPathGen::NestLoopPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path, Path* inner_path, List* restrictlist,
+    JoinPathExtraData* extra, Path* outer_path, Path* inner_path, List* restrictlist,
     List* pathkeys, Relids required_outer)
-    : JoinPathGen(root, joinrel, jointype, save_jointype, sjinfo, semifactors, restrictlist, restrictlist, outer_path,
+    : JoinPathGen(root, joinrel, jointype, save_jointype, extra, restrictlist, restrictlist, outer_path,
           inner_path, required_outer)
 {
     m_joinmethod = T_NestLoop;
@@ -1287,7 +1284,7 @@ void NestLoopPathGen::addNestloopPathToList()
 void NestLoopPathGen::initialCostNestloop()
 {
     initial_cost_nestloop(
-        m_root, m_workspace, m_jointype, m_outerStreamPath, m_innerStreamPath, m_sjinfo, m_semifactors, m_dop);
+        m_root, m_workspace, m_jointype, m_outerStreamPath, m_innerStreamPath, m_extra, m_dop);
 }
 
 /*
@@ -1297,7 +1294,7 @@ void NestLoopPathGen::initialCostNestloop()
  */
 void NestLoopPathGen::finalCostNestloop(NestPath* path, bool hasalternative)
 {
-    final_cost_nestloop(m_root, path, m_workspace, m_sjinfo, m_semifactors, hasalternative, m_dop);
+    final_cost_nestloop(m_root, path, m_workspace, m_extra, hasalternative, m_dop);
 }
 
 /*
@@ -1357,9 +1354,10 @@ Path* NestLoopPathGen::createNestloopPath()
 
     pathnode->path.pathtype = T_NestLoop;
     pathnode->path.parent = m_rel;
+    pathnode->path.pathtarget = m_rel->reltarget;
     if (m_root != NULL) {
         pathnode->path.param_info = get_joinrel_parampathinfo(
-            m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_sjinfo, m_requiredOuter, &m_joinClauses);
+            m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_extra->sjinfo, m_requiredOuter, &m_joinClauses);
     }
     pathnode->path.pathkeys = m_pathkeys;
     if (IsA(m_outerStreamPath, StreamPath) && NIL == m_outerStreamPath->pathkeys) {
@@ -1411,10 +1409,10 @@ Path* NestLoopPathGen::createNestloopPath()
  * @param[IN] required_outer: the set of required outer rels.
  */
 MergeJoinPathGen::MergeJoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path, Path* inner_path,
+    JoinPathExtraData* extra, Path* outer_path, Path* inner_path,
     List* restrict_clauses, List* pathkeys, Relids required_outer, List* mergeclauses, List* outersortkeys,
     List* innersortkeys)
-    : JoinPathGen(root, joinrel, jointype, save_jointype, sjinfo, semifactors, restrict_clauses, restrict_clauses,
+    : JoinPathGen(root, joinrel, jointype, save_jointype, extra, restrict_clauses, restrict_clauses,
           outer_path, inner_path, required_outer)
 {
     m_joinmethod = T_MergeJoin;
@@ -1509,7 +1507,7 @@ void MergeJoinPathGen::initialCostMergejoin()
         m_innerStreamPath,
         m_outerSortKeys,
         m_innerSortKeys,
-        m_sjinfo);
+        m_extra);
 }
 
 /*
@@ -1530,7 +1528,7 @@ void MergeJoinPathGen::initialCostMergejoin()
  */
 void MergeJoinPathGen::finalCostMergejoin(MergePath* path, bool hasalternative)
 {
-    final_cost_mergejoin(m_root, path, m_workspace, m_sjinfo, hasalternative);
+    final_cost_mergejoin(m_root, path, m_workspace, m_extra, hasalternative);
 }
 
 /*
@@ -1549,8 +1547,9 @@ Path* MergeJoinPathGen::createMergejoinPath()
 
     pathnode->jpath.path.pathtype = T_MergeJoin;
     pathnode->jpath.path.parent = m_rel;
+    pathnode->jpath.path.pathtarget = m_rel->reltarget;
     pathnode->jpath.path.param_info = get_joinrel_parampathinfo(
-        m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_sjinfo, m_requiredOuter, &m_joinRestrictinfo);
+        m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_extra->sjinfo, m_requiredOuter, &m_joinRestrictinfo);
     pathnode->jpath.path.pathkeys = m_pathkeys;
     pathnode->jpath.jointype = m_jointype;
     pathnode->jpath.outerjoinpath = m_outerStreamPath;

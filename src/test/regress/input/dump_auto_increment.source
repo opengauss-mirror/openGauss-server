@@ -22,9 +22,6 @@ INSERT INTO test_dump_autoinc_gtmp VALUES(0,0);
 CREATE UNLOGGED TABLE test_dump_autoinc_unlog(col1 int auto_increment NULL UNIQUE, col2 int) AUTO_INCREMENT = 100000;
 INSERT INTO test_dump_autoinc_unlog VALUES(0,0);
 INSERT INTO test_dump_autoinc_unlog VALUES(0,0);
-CREATE TABLE test_dump_autoinc_pk_gencol(col1 int auto_increment PRIMARY KEY, col2 int generated always as(2*col1) stored) AUTO_INCREMENT = 1000000;
-INSERT INTO test_dump_autoinc_pk_gencol VALUES(0);
-INSERT INTO test_dump_autoinc_pk_gencol VALUES(0);
 CREATE TABLE test_dump_autoinc_range_list
 (
     col_1 int  auto_increment primary key,
@@ -101,10 +98,6 @@ select col1,col2 from test_dump_autoinc_gtmp order by 1,2;
 \d+ test_dump_autoinc_unlog
 INSERT INTO test_dump_autoinc_unlog VALUES(0,0);
 select col1,col2 from test_dump_autoinc_unlog order by 1,2;
-
-\d+ test_dump_autoinc_pk_gencol
-INSERT INTO test_dump_autoinc_pk_gencol VALUES(0);
-select col1,col2 from test_dump_autoinc_pk_gencol order by 1,2;
 
 \d+ test_dump_autoinc_range_list
 INSERT INTO test_dump_autoinc_range_list VALUES(0,16,'16');

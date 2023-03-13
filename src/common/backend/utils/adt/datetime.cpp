@@ -4129,7 +4129,7 @@ Datum pg_timezone_abbrevs(PG_FUNCTION_ARGS)
          * build tupdesc for result tuples. This must match this function's
          * pg_proc entry!
          */
-        tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(3, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "abbrev", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "utc_offset", INTERVALOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "is_dst", BOOLOID, -1, 0);
@@ -4220,7 +4220,7 @@ Datum pg_timezone_names(PG_FUNCTION_ARGS)
          * build tupdesc for result tuples. This must match this function's
          * pg_proc entry!
          */
-        tupdesc = CreateTemplateTupleDesc(4, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(4, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "abbrev", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "utc_offset", INTERVALOID, -1, 0);

@@ -461,7 +461,7 @@ Datum pg_get_xidlimit(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* build tupdesc for result tuples */
-        tupdesc = CreateTemplateTupleDesc(7, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(7, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "nextXid", XIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "oldestXid", XIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "xidVacLimit", XIDOID, -1, 0);
@@ -530,7 +530,7 @@ Datum pg_get_variable_info(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* Build tupdesc for result tuples */
-        tupdesc = CreateTemplateTupleDesc(VARIABLE_INFO_ATTRS, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(VARIABLE_INFO_ATTRS, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "nodeName", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "nextOid", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "nextXid", XIDOID, -1, 0);
@@ -593,7 +593,7 @@ const unsigned NODE_XID_CSN_VIEW_COL_NUM = 3;
 TupleDesc get_xid_csn_view_frist_row()
 {
     TupleDesc tupdesc = NULL;
-    tupdesc = CreateTemplateTupleDesc(NODE_XID_CSN_VIEW_COL_NUM, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(NODE_XID_CSN_VIEW_COL_NUM, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "next_xid", XIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "next_csn", XIDOID, -1, 0);

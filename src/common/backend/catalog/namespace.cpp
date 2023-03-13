@@ -80,6 +80,7 @@
 #include "c.h"
 #include "pgstat.h"
 #include "catalog/pg_proc_fn.h"
+#include "catalog/gs_utf8_collation.h"
 
 #ifdef ENABLE_MULTIPLE_NODES
 #include "streaming/planner.h"
@@ -3097,6 +3098,7 @@ void DeconstructQualifiedName(const List* names, char** nspname_p, char** objnam
                 if (OidIsValid(PackageNameGetOid(pkgname, nspoid))) {
                     schemaname = strVal(linitial(names));
                     objname = pkgname;
+                    pkgname = NULL;
                 } else {
                     pkgname = NULL;
                 }
@@ -3413,20 +3415,14 @@ void CheckSetNamespace(Oid oldNspOid, Oid nspOid, Oid classid, Oid objid)
         ereport(
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into or out of TOAST schema")));
 
-    /*disallow set into cstore schema*/
-    if (nspOid == CSTORE_NAMESPACE)
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into CSTORE schema")));
-
     if (nspOid == PG_CATALOG_NAMESPACE)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into system schema")));
 
-    /* disallow set into dbe_perf schema */
-    if (nspOid == PG_DBEPERF_NAMESPACE)
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into dbe_perf schema")));
-    
-    /* disallow set into snapshot schema */
-    if (nspOid == PG_SNAPSHOT_NAMESPACE)
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into snapshot schema")));
+    /* disallow user to set table into system schema */
+    if (IsSysSchema(nspOid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot move objects into %s schema", get_namespace_name(nspOid))));
+    }
 }
 
 /*
@@ -4070,6 +4066,29 @@ void RemoveTmpNspFromSearchPath(Oid tmpnspId)
     MemoryContextSwitchTo(oldcxt);
 }
 
+/* If the collate string is in uppercase, change to lowercase and search it again */
+Oid get_collation_oid_with_lower_name(const char* collation_name, int charset)
+{
+    Oid colloid = InvalidOid;
+    char* lower_coll_name = pstrdup(collation_name);
+    lower_coll_name = pg_strtolower(lower_coll_name);
+    if (charset == PG_INVALID_ENCODING) {
+        CatCList* list = NULL;
+        HeapTuple coll_tup;
+        list = SearchSysCacheList1(COLLNAMEENCNSP, PointerGetDatum(lower_coll_name));
+        if (list->n_members == 1) {
+            coll_tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(list, 0);
+            colloid = HeapTupleGetOid(coll_tup);
+        }
+        ReleaseSysCacheList(list);
+    } else {
+        colloid = GetSysCacheOid3(COLLNAMEENCNSP, PointerGetDatum(lower_coll_name),
+            Int32GetDatum(charset), ObjectIdGetDatum(PG_CATALOG_NAMESPACE));
+    }
+
+    return colloid;
+}
+
 /*
  * get_collation_oid - find a collation by possibly qualified name
  */
@@ -4092,11 +4111,11 @@ Oid get_collation_oid(List* name, bool missing_ok)
         /* first try for encoding-specific entry, then any-encoding */
         colloid = GetSysCacheOid3(
             COLLNAMEENCNSP, PointerGetDatum(collation_name), Int32GetDatum(dbencoding), ObjectIdGetDatum(namespaceId));
-        if (OidIsValid(colloid))
+        if (OidIsValid(colloid) && is_support_b_format_collation(colloid))
             return colloid;
         colloid = GetSysCacheOid3(
             COLLNAMEENCNSP, PointerGetDatum(collation_name), Int32GetDatum(-1), ObjectIdGetDatum(namespaceId));
-        if (OidIsValid(colloid))
+        if (OidIsValid(colloid) && is_support_b_format_collation(colloid))
             return colloid;
     } else {
         /* search for it in search path */
@@ -4116,14 +4135,14 @@ Oid get_collation_oid(List* name, bool missing_ok)
                 PointerGetDatum(collation_name),
                 Int32GetDatum(dbencoding),
                 ObjectIdGetDatum(namespaceId));
-            if (OidIsValid(colloid)) {
+            if (OidIsValid(colloid) && is_support_b_format_collation(colloid)) {
                 list_free_ext(tempActiveSearchPath);
                 return colloid;
             }
 
             colloid = GetSysCacheOid3(
                 COLLNAMEENCNSP, PointerGetDatum(collation_name), Int32GetDatum(-1), ObjectIdGetDatum(namespaceId));
-            if (OidIsValid(colloid)) {
+            if (OidIsValid(colloid) && is_support_b_format_collation(colloid)) {
                 list_free_ext(tempActiveSearchPath);
                 return colloid;
             }
@@ -4132,6 +4151,12 @@ Oid get_collation_oid(List* name, bool missing_ok)
         list_free_ext(tempActiveSearchPath);
     }
 
+    if (DB_IS_CMPT(B_FORMAT)) {
+        colloid = get_collation_oid_with_lower_name(collation_name, dbencoding);
+        if (OidIsValid(colloid) && is_support_b_format_collation(colloid)) {
+            return colloid;
+        }
+    }
     /* Not found in path */
     if (!missing_ok)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -4544,6 +4569,7 @@ static void InitTempTableNamespace(void)
     create_stmt->schemaElts = NULL;
     create_stmt->schemaname = namespaceName;
     create_stmt->temptype = Temp_Rel;
+    create_stmt->charset = PG_INVALID_ENCODING;
     ret = snprintf_s(
         str, sizeof(str), sizeof(str) - 1, "CREATE SCHEMA %s AUTHORIZATION \"%s\"", namespaceName, bootstrap_username);
     securec_check_ss(ret, "\0", "\0");
@@ -4554,7 +4580,7 @@ static void InitTempTableNamespace(void)
     proutility_cxt.readOnlyTree = false;
     proutility_cxt.params = NULL;
     proutility_cxt.is_top_level = false;
-    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL, PROCESS_UTILITY_GENERATED);
 
     if (IS_PGXC_COORDINATOR)
         if (PoolManagerSetCommand(POOL_CMD_TEMP, namespaceName) < 0)
@@ -4598,6 +4624,7 @@ static void InitTempTableNamespace(void)
     create_stmt->schemaElts = NULL;
     create_stmt->schemaname = toastNamespaceName;
     create_stmt->temptype = Temp_Toast;
+    create_stmt->charset = PG_INVALID_ENCODING;
     rc = memset_s(str, sizeof(str), 0, sizeof(str));
     securec_check(rc, "", "");
     ret = snprintf_s(str,
@@ -4613,7 +4640,7 @@ static void InitTempTableNamespace(void)
     proutility_cxt.readOnlyTree = false;
     proutility_cxt.params = NULL;
     proutility_cxt.is_top_level = false;
-    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL, PROCESS_UTILITY_GENERATED);
 
     /* Advance command counter to make namespace visible */
     CommandCounterIncrement();
@@ -5466,7 +5493,7 @@ dropExistTempNamespace(char *namespaceName)
     proutility_cxt.readOnlyTree = false;
     proutility_cxt.params = NULL;
     proutility_cxt.is_top_level = false;
-    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL, PROCESS_UTILITY_GENERATED);
     CommandCounterIncrement();
 }
 

@@ -1394,18 +1394,18 @@ SELECT * FROM ft1 t1 WHERE t1.c1 === t1.c2 order by t1.c2 limit 1;
 
 -- case when expr
 explain (verbose, costs off) select * from ft1 where case c1 when 1 then 0 end = 0;
-                                                                                      QUERY PLAN                                                                                      
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on public.ft1
    Output: c1, c2, c3, c4, c5, c6, c7, c8
    Node ID: 1
-   Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (((CASE "C 1" WHEN 1 THEN 0::numeric ELSE NULL::numeric END) = 0::numeric))
+   Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (((CASE "C 1" WHEN 1 THEN 0 ELSE NULL::integer END) = 0))
  
  FDW remote plans:
- Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (((CASE "C 1" WHEN 1 THEN 0::numeric ELSE NULL::numeric END) = 0::numeric)) 
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (((CASE "C 1" WHEN 1 THEN 0 ELSE NULL::integer END) = 0)) 
    Seq Scan on "S 1"."T 1"
      Output: "C 1", c2, c3, c4, c5, c6, c7, c8
-     Filter: (CASE "T 1"."C 1" WHEN 1 THEN 0::numeric ELSE NULL::numeric END = 0::numeric)
+     Filter: (CASE "T 1"."C 1" WHEN 1 THEN 0 ELSE NULL::integer END = 0)
  
 (11 rows)
 
@@ -4698,7 +4698,6 @@ create operator public.>^ (
  procedure = int4gt
 );
 create operator family my_op_family using btree;
-ERROR:  user defined operator is not yet supported.
 create function my_op_cmp(a int, b int) returns int as
   $$begin return btint4cmp(a, b); end $$ language plpgsql;
 create operator class my_op_class for type int using btree family my_op_family as
@@ -4706,23 +4705,34 @@ create operator class my_op_class for type int using btree family my_op_family a
  operator 3 public.=^,
  operator 5 public.>^,
  function 1 my_op_cmp(int, int);
-ERROR:  operator family "my_op_family" does not exist for access method "btree"
 -- NOTICES: 
 -- openGauss not support create operator class.  remove the case. If you want to restore the test case later, refer to README in the file header.
 -- This will not be pushed as sort operator is now removed from the extension.
 explain (verbose, costs off)
 select array_agg(c1 order by c1 using operator(public.<^)) from ft2 where c2 = 6 and c1 < 100 group by c2;
-ERROR:  operator <^ is not a valid ordering operator
-LINE 2: select array_agg(c1 order by c1 using operator(public.<^)) f...
-                                              ^
-HINT:  Ordering operators must be "<" or ">" members of btree operator families.
-CONTEXT:  referenced column: array_agg
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: array_agg(c1 ORDER BY c1 USING <^ NULLS LAST), c2
+   Group By Key: ft2.c2
+   ->  Foreign Scan on public.ft2
+         Output: c2, c1
+         Node ID: 1
+         Remote SQL: SELECT "C 1", c2 FROM "S 1"."T 1" WHERE (("C 1" < 100)) AND ((c2 = 6))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT "C 1", c2 FROM "S 1"."T 1" WHERE (("C 1" < 100)) AND ((c2 = 6)) 
+   Index Scan using t1_pkey on "S 1"."T 1"
+     Output: "C 1", c2
+     Index Cond: ("T 1"."C 1" < 100)
+     Filter: ("T 1".c2 = 6)
+ 
+(15 rows)
+
 -- Cleanup
 drop operator class my_op_class using btree;
-ERROR:  operator class "my_op_class" does not exist for access method "btree"
 drop function my_op_cmp(a int, b int);
 drop operator family my_op_family using btree;
-ERROR:  operator family "my_op_family" does not exist for access method "btree"
 drop operator public.>^(int, int);
 drop operator public.=^(int, int);
 drop operator public.<^(int, int);

@@ -478,7 +478,7 @@ extern bool fio_is_remote_simple(fio_location location);
 extern void get_header_errormsg(Page page, char **errormsg);
 extern void get_checksum_errormsg(Page page, char **errormsg,
                                   BlockNumber absolute_blkno);
-extern void unlink_lock_atexit(void);
+extern void unlink_lock_atexit(bool fatal, void *userdata);
 
 extern bool
 datapagemap_is_set(datapagemap_t *map, BlockNumber blkno);

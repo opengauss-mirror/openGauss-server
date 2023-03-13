@@ -75,13 +75,14 @@ void AbortSegBufferIO(void)
 static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
 {
     uint32 buf_state;
+    bool dms_need_flush = false; // used in dms
 
     SegmentCheck(!InProgressBuf);
 
     while (true) {
         LWLockAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE);
 
-        if (buf->aio_in_progress) {
+        if (buf->extra->aio_in_progress) {
             LWLockRelease(buf->io_in_progress_lock);
             pg_usleep(1000L);
             continue;
@@ -98,7 +99,14 @@ static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
         WaitIO(buf);
     }
 
-    if (forInput ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY)) {
+    if (ENABLE_DMS) {
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf->buf_id);
+        if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+            dms_need_flush = true;
+        }
+    }
+
+    if (forInput ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY) && !dms_need_flush) {
         /* IO finished */
         UnlockBufHdr(buf, buf_state);
         LWLockRelease(buf->io_in_progress_lock);
@@ -126,8 +134,25 @@ void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bit
     buf_state &= ~(BM_IO_IN_PROGRESS | BM_IO_ERROR);
     if (clear_dirty) {
         if (ENABLE_INCRE_CKPT) {
-            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->rec_lsn))) {
+            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->extra->rec_lsn))) {
                 remove_dirty_page_from_queue(buf);
+            } else if (ENABLE_DMS) {
+                dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf->buf_id);
+                if (!(buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
+                    ereport(PANIC, (errmodule(MOD_INCRE_CKPT), errcode(ERRCODE_INVALID_BUFFER),
+                        (errmsg("buffer is dirty but not in dirty page queue in SegTerminateBufferIO"))));
+                }
+                buf_ctrl->state &= ~BUF_DIRTY_NEED_FLUSH;
+                XLogRecPtr pagelsn = BufferGetLSN(buf);
+                bool in_flush_copy = SS_IN_FLUSHCOPY;
+                bool in_recovery = !g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag;
+                ereport(LOG,
+                    (errmsg("[SS flush copy] finish seg flush buffer with need flush, "
+                    "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u, reform phase "
+                    "is in flush_copy:%d, in recovery:%d",
+                    buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode, buf->tag.rnode.bucketNode,
+                    buf->tag.forkNum, buf->tag.blockNum, (unsigned long long)pagelsn, 
+                    (unsigned int)buf->extra->seg_fileno, buf->extra->seg_blockno, in_flush_copy, in_recovery)));
             } else {
                 ereport(PANIC, (errmodule(MOD_INCRE_CKPT), errcode(ERRCODE_INVALID_BUFFER),
                                 (errmsg("buffer is dirty but not in dirty page queue in TerminateBufferIO_common"))));
@@ -289,7 +314,7 @@ void SegMarkBufferDirty(Buffer buf)
     if (ENABLE_INCRE_CKPT) {
         for (;;) {
             buf_state = old_buf_state | (BM_DIRTY | BM_JUST_DIRTIED);
-            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&bufHdr->rec_lsn))) {
+            if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&bufHdr->extra->rec_lsn))) {
                 break;
             }
 
@@ -404,13 +429,13 @@ void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
                 (int)buf->tag.rnode.opt, buf->tag.forkNum, buf->tag.blockNum)));
         }
 
-        if (buf->aio_in_progress) {
+        if (buf->extra->aio_in_progress) {
             ereport(PANIC, (errmsg("buffer is already in aio progress, buffer: %d/%d/%d/%d/%d %d-%u",
                 buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode, (int)buf->tag.rnode.bucketNode,
                 (int)buf->tag.rnode.opt, buf->tag.forkNum, buf->tag.blockNum)));
         }
 
-        buf->aio_in_progress = true;
+        buf->extra->aio_in_progress = true;
         t_thrd.dms_cxt.buf_in_aio = true;
         /* should be after io_prep_pwrite, because io_prep_pwrite will memset iocb struct */
         iocb_ptr->data = (void *)buf;
@@ -541,7 +566,7 @@ Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
         }
     }
 
-    bufHdr->lsn_on_disk = PageGetLSN(bufBlock);
+    bufHdr->extra->lsn_on_disk = PageGetLSN(bufBlock);
 #ifdef USE_ASSERT_CHECKING
     bufHdr->lsn_dirty = InvalidXLogRecPtr;
 #endif
@@ -632,7 +657,7 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                                 blockNum, relpathperm(rnode, forkNum), PageGetPageLayoutVersion(bufBlock))));
             }
         }
-        bufHdr->lsn_on_disk = PageGetLSN(bufBlock);
+        bufHdr->extra->lsn_on_disk = PageGetLSN(bufBlock);
 #ifdef USE_ASSERT_CHECKING
         bufHdr->lsn_dirty = InvalidXLogRecPtr;
 #endif
@@ -704,7 +729,7 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
 
         SegPinBufferLocked(buf, &new_tag);
 
-        if (!SSPageCheckIfCanEliminate(buf)) {
+        if (!SSHelpFlushBufferIfNeed(buf)) {
             SegUnpinBuffer(buf);
             continue;
         }

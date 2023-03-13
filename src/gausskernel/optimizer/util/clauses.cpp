@@ -137,6 +137,7 @@ static bool is_exec_external_param_const(PlannerInfo* root, Node* node);
 static bool is_operator_pushdown(Oid opno);
 static bool contain_var_unsubstitutable_functions_walker(Node* node, void* context);
 static bool is_accurate_estimatable_func(Oid funcId);
+static void optbase_eval_user_var_in_opexpr(List *args);
 
 /*****************************************************************************
  *		OPERATOR clause functions
@@ -690,6 +691,35 @@ static void count_agg_clauses_walker_isa(Node* node, count_agg_clauses_context* 
         costs->transitionSpace += avgwidth + 2 * sizeof(void*);
         costs->aggWidth += avgwidth;
     } else if (aggtranstype == INTERNALOID) {
+#ifndef ENABLE_MULTIPLE_NODES
+        /* 
+         * XXX: we apply the pg commit 69c8fbac201652282e18b0e2e301d4ada991fbde
+         * but the difference of pg_aggregate bwtween pg and og
+         * we have to do some hard code here(og's pg_aggregate doesn't have the column aggtransspace)
+         */
+        switch (aggtransfn) {
+            case 5439: /* int8_avg_accum_numeric */
+                costs->transitionSpace +=48;
+                costs->aggWidth += 48;
+                break;
+            case 5440: /* numeric_accum_numeric */
+            case 5442: /* numeric_avg_accum_numeric */
+                costs->transitionSpace += 128;
+                costs->aggWidth += 128;
+                break;
+            default:
+                /*
+                * INTERNAL transition type is a special case: although INTERNAL
+                * is pass-by-value, it's almost certainly being used as a pointer
+                * to some large data structure.  We assume usage of
+                * ALLOCSET_DEFAULT_INITSIZE, which is a good guess if the data is
+                * being kept in a private memory context, as is done by
+                * array_agg() for instance.
+                */
+                costs->transitionSpace += ALLOCSET_DEFAULT_INITSIZE;
+                costs->aggWidth += ALLOCSET_DEFAULT_INITSIZE;
+        }
+#else
         /*
             * INTERNAL transition type is a special case: although INTERNAL
             * is pass-by-value, it's almost certainly being used as a pointer
@@ -700,6 +730,7 @@ static void count_agg_clauses_walker_isa(Node* node, count_agg_clauses_context* 
             */
         costs->transitionSpace += ALLOCSET_DEFAULT_INITSIZE;
         costs->aggWidth += ALLOCSET_DEFAULT_INITSIZE;
+#endif
     } else {
         costs->aggWidth += get_typavgwidth(aggtranstype, -1);
     }
@@ -828,20 +859,39 @@ static bool find_window_functions_walker(Node* node, WindowLists* lists)
 /*
  * expression_returns_set_rows
  *	  Estimate the number of rows returned by a set-returning expression.
- *	  The result is 1 if there are no set-returning functions.
+ *	  The result is 1 if it's not a set-returning expression.
  *
- * We use the product of the rowcount estimates of all the functions in
- * the given tree (this corresponds to the behavior of ExecMakeFunctionResult
- * for nested set-returning functions).
+ * We should only examine the top-level function or operator; it used to be
+ * appropriate to recurse, but not anymore.  (Even if there are more SRFs in
+ * the function's inputs, their multipliers are accounted for separately.)
  *
  * Note: keep this in sync with expression_returns_set() in nodes/nodeFuncs.c.
  */
 double expression_returns_set_rows(Node* clause)
 {
-    double result = 1;
+    if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        if (clause == NULL)
+            return 1.0;
+        if (IsA(clause, FuncExpr)) {
+            FuncExpr *expr = (FuncExpr *)clause;
 
-    (void)expression_returns_set_rows_walker(clause, &result);
-    return clamp_row_est(result);
+            if (expr->funcretset)
+                return clamp_row_est(get_func_rows(expr->funcid));
+        }
+        if (IsA(clause, OpExpr)) {
+            OpExpr *expr = (OpExpr *)clause;
+            if (expr->opretset) {
+                set_opfuncid(expr);
+                return clamp_row_est(get_func_rows(expr->opfuncid));
+            }
+        }
+        return 1.0;
+    } else {
+        double result = 1;
+
+        (void)expression_returns_set_rows_walker(clause, &result);
+        return clamp_row_est(result);
+    }
 }
 
 static void expression_returns_set_rows_walker_isa(Node* node, double* count)
@@ -2161,7 +2211,7 @@ static bool rowtype_field_matches(
         ReleaseTupleDesc(tupdesc);
         return false;
     }
-    attr = tupdesc->attrs[fieldnum - 1];
+    attr = &tupdesc->attrs[fieldnum - 1];
     if (attr->attisdropped || attr->atttypid != expectedtype || attr->atttypmod != expectedtypmod ||
         attr->attcollation != expectedcollation) {
         ReleaseTupleDesc(tupdesc);
@@ -2392,7 +2442,7 @@ Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate)
 }
 
 /* --------------------
- * simplify_subselect_expression
+ * simplify_select_into_expression
  *
  * Only for select ... into varlist statement.
  *
@@ -2401,7 +2451,7 @@ Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate)
  * for the following process to calculate the value.
  * --------------------
  */
-Node* simplify_subselect_expression(Node* node, ParamListInfo boundParams)
+Node* simplify_select_into_expression(Node* node, ParamListInfo boundParams)
 {
     eval_const_expressions_context context;
 
@@ -2431,17 +2481,37 @@ Node* simplify_subselect_expression(Node* node, ParamListInfo boundParams)
     foreach (lc, qt->targetList) {
         TargetEntry *te = (TargetEntry *)lfirst(lc);
         Node *tn = (Node *)te->expr;
-        if(IsA(tn, Param) || IsA(tn, OpExpr)) {
-            tn = eval_const_expressions_mutator(tn, &context);
-            te = makeTargetEntry((Expr *)tn, attno++, te->resname, false);
-            newTargetList = lappend(newTargetList, te);
+        if (IsA(tn, OpExpr)) {
+            /* If the user-defined variable has been defined,
+             * then find the existed value.
+             */
+            optbase_eval_user_var_in_opexpr(((OpExpr *)tn)->args);        
         }
-    }
-    if (newTargetList != NIL) {
-        qt->targetList = newTargetList;
+        tn = eval_const_expressions_mutator(tn, &context);
+        te = makeTargetEntry((Expr *)tn, attno++, te->resname, false);
+        newTargetList = lappend(newTargetList, te);
     }
 
+    qt->targetList = newTargetList;
     return node;
+}
+
+static void optbase_eval_user_var_in_opexpr(List *args)
+{
+    ListCell *argcell = NULL;
+    foreach (argcell, args) {
+        if (IsA(lfirst(argcell), UserVar)) {
+            bool found = false;
+            GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(
+                u_sess->utils_cxt.set_user_params_htab,
+                ((UserVar *)lfirst(argcell))->name,
+                HASH_ENTER,
+                &found);
+            if (found) {
+                ((UserVar *)lfirst(argcell))->value = (Expr *)copyObject(entry->value);
+            }
+        }
+    }
 }
 
 Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context* context)
@@ -4400,6 +4470,7 @@ static Expr* inline_function(Oid funcid, Oid result_type, Oid result_collid, Oid
         querytree->cteList || querytree->rtable || querytree->jointree->fromlist || querytree->jointree->quals ||
         querytree->groupClause || querytree->havingQual || querytree->windowClause || querytree->distinctClause ||
         querytree->sortClause || querytree->limitOffset || querytree->limitCount || querytree->setOperations ||
+        (querytree->is_flt_frame && querytree->hasTargetSRFs) ||
         list_length(querytree->targetList) != 1)
         goto fail;
 
@@ -4425,16 +4496,17 @@ static Expr* inline_function(Oid funcid, Oid result_type, Oid result_collid, Oid
     AssertEreport(!modifyTargetList, MOD_OPT, "");
 
     /*
-     * Additional validity checks on the expression.  It mustn't return a set,
-     * and it mustn't be more volatile than the surrounding function (this is
-     * to avoid breaking hacks that involve pretending a function is immutable
-     * when it really ain't).  If the surrounding function is declared strict,
-     * then the expression must contain only strict constructs and must use
-     * all of the function parameters (this is overkill, but an exact analysis
-     * is hard).
+     * Additional validity checks on the expression.  It mustn't be more
+     * volatile than the surrounding function (this is to avoid breaking hacks
+     * that involve pretending a function is immutable when it really ain't).
+     * If the surrounding function is declared strict, then the expression
+     * must contain only strict constructs and must use all of the function
+     * parameters (this is overkill, but an exact analysis is hard).
      */
-    if (expression_returns_set(newexpr))
-        goto fail;
+    if (!querytree->is_flt_frame) {
+        if (expression_returns_set(newexpr))
+            goto fail;
+    }
 
     if (funcform->provolatile == PROVOLATILE_IMMUTABLE && contain_mutable_functions(newexpr))
         goto fail;

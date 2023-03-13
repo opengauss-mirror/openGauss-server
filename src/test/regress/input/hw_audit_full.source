@@ -1,0 +1,129 @@
+CREATE DATABASE db_audit_full;
+\c db_audit_full
+
+-- close all the audit options
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_login_logout=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_database_process=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_database_process=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_user_locked=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_user_violation=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_grant_revoke=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_copy_exec=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_function_exec=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_process_set_parameter=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state_select=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_copy_server_files=1" > /dev/null 2>&1
+\! users="user_audit1, test_user_audit2, user_audit2_test test_user_audit2_test , user_audit3 , $USER, user_audit4 user5" && cmd="full_audit_users='$users'" && @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "$cmd" > /dev/null 2>&1
+\! sleep 1
+
+-- clear audit log
+SELECT pg_delete_audit(current_date, current_date + interval '24 hours');
+ 
+-- superuser, create table
+CREATE TABLE t_audit_super (id INTEGER, col1 VARCHAR(20));
+DO $$DECLARE i record; 
+BEGIN 
+    FOR i IN 1..100 
+    LOOP 
+    execute 'INSERT INTO t_audit_super VALUES (' || i || ', ''audit'');';
+    END LOOP;
+END$$;
+
+-- superuser, create user
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP USER IF EXISTS user_audit1 CASCADE; CREATE USER user_audit1 identified by 'audit@2023'; GRANT ALL PRIVILEGES TO user_audit1;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP USER IF EXISTS user_audit2 CASCADE; CREATE USER user_audit2 identified by 'audit@2023'; GRANT ALL PRIVILEGES TO user_audit2;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP USER IF EXISTS user_audit3 CASCADE; CREATE USER user_audit3 identified by 'audit@2023';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP USER IF EXISTS user_audit4 CASCADE; CREATE USER user_audit4 identified by 'audit@2023'; GRANT ALL PRIVILEGES TO user_audit4;" > /dev/null 2>&1
+ 
+-- user1, do sql execution
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -U user_audit1 -W audit@2023 -C -f @abs_srcdir@/data/audit_full_execute.sql > /dev/null 2>&1
+ 
+-- user_audit2, do sql execution
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -U user_audit2 -W audit@2023 -C -f @abs_srcdir@/data/audit_full_execute.sql > /dev/null 2>&1
+
+-- user_audit4, do sql execution
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -U user_audit4 -W audit@2023 -C -f @abs_srcdir@/data/audit_full_execute.sql > /dev/null 2>&1
+
+-- 用户登录、注销审计 audit_login_logout
+-- login_success
+-- user_logout
+-- user_audit3, login_failed
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_audit3 -W audit@2022 -c "CREATE TABLE t_audit_login (id INTEGER, col1 VARCHAR(20));"
+ 
+-- 用户访问越权审计 audit_user_violation
+-- user_audit3, user_violation
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_audit3 -W audit@2023 -c "select * from pg_query_audit(current_date,current_date + interval '24 hours');"
+ 
+-- superuser only, ddl_directory
+CREATE OR REPLACE DIRECTORY dir as '/tmp/';
+ 
+-- superuser only, ddl_globalconfig 
+ALTER GLOBAL CONFIGURATION with(audit_xid_info=1);
+ALTER GLOBAL CONFIGURATION with(audit_xid_info=0);
+
+-- COPY审计 audit_copy_exec
+-- superuser only, copy_to
+COPY t_audit_super TO '@abs_srcdir@/data/t_audit.data';
+-- superuser only, copy_from
+CREATE TABLE t_audit_super_copy (id INTEGER, col1 VARCHAR(20));
+COPY t_audit_super_copy FROM '@abs_srcdir@/data/t_audit.data';
+
+-- 数据库启动、停止、恢复和切换审计 audit_database_process superuser only
+-- null user, system_stop
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1/ > /dev/null 2>&1
+-- null user, system_start
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1/ > /dev/null 2>&1
+-- null user, system_recover
+-- null user, system_switch
+--\! @abs_bindir@/gs_ctl switchover -f -m fast
+ 
+-- superuser, create query function and scale
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -f @abs_srcdir@/data/audit_full_superuser.sql > /dev/null 2>&1
+
+-- audit query
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "SELECT func_count_audit(content, 'user_audit1', 49) AS is_audit_type_exist_user_audit1 FROM t_audit_type WHERE id = 1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "SELECT func_count_audit(content, 'user_audit2', 49) AS is_audit_type_exist_user_audit2 FROM t_audit_type WHERE id = 1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "SELECT func_count_audit(content, 'user_audit4', 49) AS is_audit_type_exist_user_audit4 FROM t_audit_type WHERE id = 1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "SELECT func_count_audit(content, 'user_audit3', 2) AS is_audit_type_exist_user_audit3 FROM t_audit_type WHERE id = 2;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "SELECT func_count_audit(content, (select current_user), 11) AS is_audit_type_exist_superuser FROM t_audit_type WHERE id = 3;"
+
+-- rename user_audit1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "ALTER USER user_audit1 RENAME TO user_audit1_new"
+
+-- user_audit1_new do sql execution
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -U user_audit1_new -W audit@2023 -C -f @abs_srcdir@/data/audit_full_execute.sql > /dev/null 2>&1
+
+-- audit query
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "SELECT func_count_audit(content, 'user_audit1_new', 49) AS is_audit_type_exist_user_audit1_new FROM t_audit_type WHERE id = 1;"
+
+--reset guc parameter
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_login_logout" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_database_process" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_database_process" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_user_locked" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_user_violation=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_grant_revoke" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_copy_exec" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_function_exec" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_process_set_parameter=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state_select" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_copy_server_files" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "full_audit_users" > /dev/null 2>&1
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP USER IF EXISTS user_audit1 CASCADE;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP USER IF EXISTS user_audit1_new CASCADE;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP USER IF EXISTS user_audit2 CASCADE;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP USER IF EXISTS user_audit3 CASCADE;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP USER IF EXISTS user_audit4 CASCADE;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP TABLE IF EXISTS t_audit_type;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP TABLE IF EXISTS t_audit_super;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP TABLE IF EXISTS t_audit_super_copy;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_full -C -c "DROP FUNCTION IF EXISTS func_count_audit;" > /dev/null 2>&1
+
+\c regression
+CLEAN CONNECTION TO ALL FORCE FOR DATABASE db_audit_full;
+DROP DATABASE db_audit_full;

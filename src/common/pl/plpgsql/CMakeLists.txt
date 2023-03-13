@@ -19,6 +19,16 @@ execute_process(
     OUTPUT_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/plerrcodes.h 
 )
 
+execute_process(
+    COMMAND perl -I ${PROJECT_SRC_DIR}/tools/ ${PROJECT_SRC_DIR}/tools/gen_keywordlist.pl --varname ReservedPLKeywords ${CMAKE_CURRENT_SOURCE_DIR}/src/pl_reserved_kwlist.h
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+execute_process(
+    COMMAND perl -I ${PROJECT_SRC_DIR}/tools/ ${PROJECT_SRC_DIR}/tools/gen_keywordlist.pl --varname UnreservedPLKeywords ${CMAKE_CURRENT_SOURCE_DIR}/src/pl_unreserved_kwlist.h
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 set(TGT_plpgsql_SRC 
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pl_gram.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pl_comp.cpp

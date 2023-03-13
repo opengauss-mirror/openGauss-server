@@ -357,8 +357,9 @@ Datum hashgetbitmap(PG_FUNCTION_ARGS)
 
         /* Save tuple ID, and continue scanning */
         if (add_tuple) {
+            TBMHandler tbm_handler = tbm_get_handler(tbm);
             /* Note we mark the tuple ID as requiring recheck */
-            tbm_add_tuples(tbm, &(so->hashso_heappos), 1, true, partHeapOid);
+            tbm_handler._add_tuples(tbm, &(so->hashso_heappos), 1, true, partHeapOid, InvalidBktId);
             ntids++;
         }
 

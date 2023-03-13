@@ -103,6 +103,7 @@ static const int newObjectTypePriority[] = {
     30, /* DO_FK_CONSTRAINT */
     2,  /* DO_PROCLANG */
     10, /* DO_CAST */
+    23, /* DO_PACKAGE */
     23, /* DO_TABLE_DATA */
     19, /* DO_DUMMY_TYPE */
     12, /* DO_TSPARSER */
@@ -120,7 +121,9 @@ static const int newObjectTypePriority[] = {
     33, /* DO_RLSPOLICY */
     34, /* DO_PUBLICATION */
     35, /* DO_PUBLICATION_REL */
-    36  /* DO_SUBSCRIPTION */
+    36, /* DO_SUBSCRIPTION */
+    18,  /* DO_EVENT */
+    37  /* DO_EVENT_TRIGGER */
 };
 
 static DumpId postDataBoundId;
@@ -1011,6 +1014,13 @@ static void describeDumpableObject(DumpableObject* obj, char* buf, int bufsize)
                 buf, bufsize, bufsize - 1, "SCHEMA %s  (ID %d OID %u)", obj->name, obj->dumpId, obj->catId.oid);
             securec_check_ss_c(nRet, "\0", "\0");
             return;
+
+        case DO_EVENT_TRIGGER:
+            nRet = snprintf_s(
+                buf, bufsize, bufsize - 1, "EVENT TRIGGER %s (ID %d OID %u)", obj->name, obj->dumpId, obj->catId.oid);
+            securec_check_ss_c(nRet, "\0", "\0");
+            return;
+            
         case DO_EXTENSION:
             if (true == include_extensions) {
                 nRet = snprintf_s(
@@ -1098,6 +1108,11 @@ static void describeDumpableObject(DumpableObject* obj, char* buf, int bufsize)
         case DO_TRIGGER:
             nRet = snprintf_s(
                 buf, bufsize, bufsize - 1, "TRIGGER %s  (ID %d OID %u)", obj->name, obj->dumpId, obj->catId.oid);
+            securec_check_ss_c(nRet, "\0", "\0");
+            return;
+        case DO_EVENT:
+            nRet = snprintf_s(
+                buf, bufsize, bufsize - 1, "EVENT %s  (ID %d OID %u)", obj->name, obj->dumpId, obj->catId.oid);
             securec_check_ss_c(nRet, "\0", "\0");
             return;
         case DO_CONSTRAINT:

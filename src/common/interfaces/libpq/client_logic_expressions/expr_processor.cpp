@@ -234,7 +234,15 @@ bool exprProcessor::expand_expr(const Node * const expr, StatementData *statemen
                                         expr_parts.param_ref = NULL;
                                         expr_parts.operators = a_expr->name;
                                         expr_parts_list->add(&expr_parts);
-                                    } 
+                                    } else if (IsA(lfirst(fl), ParamRef)) {
+                                        ExprParts expr_parts;
+                                        param_ref = (ParamRef *)lfirst(fl);
+                                        expr_parts.column_ref = column_ref;
+                                        expr_parts.aconst = NULL;
+                                        expr_parts.param_ref = param_ref;
+                                        expr_parts.operators = a_expr->name;
+                                        expr_parts_list->add(&expr_parts);
+                                    }
                                 }
                             }
                         }

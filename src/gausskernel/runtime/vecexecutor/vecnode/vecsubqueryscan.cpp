@@ -145,7 +145,7 @@ VecSubqueryScanState* ExecInitVecSubqueryScan(VecSubqueryScan* node, EState* est
      */
     ExecAssignResultTypeFromTL(
             &vecsubquerystate->ss.ps,
-            vecsubquerystate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            vecsubquerystate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     ExecAssignVecScanProjectionInfo(&vecsubquerystate->ss);
 

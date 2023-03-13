@@ -30,6 +30,7 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "securec_check.h"
 #include "miscadmin.h"
+#include "access/double_write.h"
 
 void InitDmsBufCtrl(void)
 {
@@ -89,8 +90,8 @@ static void CalcSegDmsPhysicalLoc(BufferDesc* buf_desc, Buffer buffer, bool chec
         SegPageLocation loc = seg_get_physical_location(buf_desc->tag.rnode, buf_desc->tag.forkNum,
             buf_desc->tag.blockNum, check_standby);
         SegmentCheck(loc.blocknum != InvalidBlockNumber);
-        buf_desc->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE((int)loc.extent_size);
-        buf_desc->seg_blockno = loc.blocknum;
+        buf_desc->extra->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE((int)loc.extent_size);
+        buf_desc->extra->seg_blockno = loc.blocknum;
     }
 }
 
@@ -212,7 +213,7 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
     /*
      * prerequisite is that the page that initialized to zero in memory should be flush to disk
      */
-    if (ENABLE_VERIFY_PAGE_VERSION && (buf_desc->seg_fileno != EXTENT_INVALID ||
+    if (ENABLE_VERIFY_PAGE_VERSION && (buf_desc->extra->seg_fileno != EXTENT_INVALID ||
         IsSegmentBufferID(buf_desc->buf_id)) && (read_mode == RBM_NORMAL)) {
         char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
         char *temp_buf = (char *)BUFFERALIGN(origin_buf);
@@ -220,10 +221,11 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
         SMGR_READ_STATUS rdStatus;
         if (pblk != NULL) {
             rdStatus = SmgrNetPageCheckRead(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, pblk->relNode,
-                            buf_desc->tag.forkNum, pblk->block, (char *)temp_buf);
-        } else if (buf_desc->seg_fileno != EXTENT_INVALID) {
+                                            buf_desc->tag.forkNum, pblk->block, (char *)temp_buf);
+        } else if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
             rdStatus = SmgrNetPageCheckRead(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
-                            buf_desc->seg_fileno, buf_desc->tag.forkNum, buf_desc->seg_blockno, (char *)temp_buf);
+                                            buf_desc->extra->seg_fileno, buf_desc->tag.forkNum,
+                                            buf_desc->extra->seg_blockno, (char *)temp_buf);
         } else {
             rdStatus = smgrread(smgr, buf_desc->tag.forkNum, buf_desc->tag.blockNum, (char *)temp_buf);
         }
@@ -280,7 +282,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
         buffer = BufferDescriptorGetBuffer(buf_desc);
         if ((!RecoveryInProgress() || g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) &&
-            buf_desc->seg_fileno == EXTENT_INVALID) {
+            buf_desc->extra->seg_fileno == EXTENT_INVALID) {
             CalcSegDmsPhysicalLoc(buf_desc, buffer, !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy);
         }
     }
@@ -701,7 +703,7 @@ bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc)
         return true;
     }
 
-    if (ENABLE_DSS_AIO && buf_desc->aio_in_progress) {
+    if (ENABLE_DSS_AIO && buf_desc->extra->aio_in_progress) {
         return false;
     }
 
@@ -728,7 +730,7 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
     BufferDesc *buf_desc = BufferGetBufferDescriptor(buf);
     bool ret = false;
 
-    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) && buf_desc->seg_fileno != EXTENT_INVALID) {
+    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) && buf_desc->extra->seg_fileno != EXTENT_INVALID) {
         SMGR_READ_STATUS rdStatus;
         if (reln->seg_space == NULL) {
             reln->seg_space = spc_open(reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode, false);
@@ -738,13 +740,13 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
         RelFileNode fakenode = {
             .spcNode = reln->smgr_rnode.node.spcNode,
             .dbNode = reln->smgr_rnode.node.dbNode,
-            .relNode = buf_desc->seg_fileno,
+            .relNode = buf_desc->extra->seg_fileno,
             .bucketNode = SegmentBktId,
             .opt = 0
         };
 
-        seg_physical_read(reln->seg_space, fakenode, forknum, buf_desc->seg_blockno, (char *)buffer);
-        if (PageIsVerified((Page)buffer, buf_desc->seg_blockno)) {
+        seg_physical_read(reln->seg_space, fakenode, forknum, buf_desc->extra->seg_blockno, (char *)buffer);
+        if (PageIsVerified((Page)buffer, buf_desc->extra->seg_blockno)) {
             rdStatus = SMGR_RD_OK;
         } else {
             rdStatus = SMGR_RD_CRC_ERROR;
@@ -764,4 +766,99 @@ bool DmsCheckBufAccessible()
         return true;
     }
     return false;
+}
+
+bool SSTryFlushBuffer(BufferDesc *buf)
+{
+    //copy from BufferAlloc
+    if (!backend_can_flush_dirty_page()) {
+        return false;
+    }
+
+    if (LWLockConditionalAcquire(buf->content_lock, LW_SHARED)) {
+        if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
+            if (!free_space_enough(buf->buf_id)) {
+                LWLockRelease(buf->content_lock);
+                return false;
+            }
+            uint32 pos = 0;
+            pos = first_version_dw_single_flush(buf);
+            t_thrd.proc->dw_pos = pos;
+            FlushBuffer(buf, NULL);
+            g_instance.dw_single_cxt.single_flush_state[pos] = true;
+            t_thrd.proc->dw_pos = -1;
+        } else {
+            FlushBuffer(buf, NULL);
+        }
+        LWLockRelease(buf->content_lock);
+        ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
+        return true;    
+    }
+    return false;
+}
+
+bool SSTrySegFlushBuffer(BufferDesc* buf)
+{
+    //copy from SegBufferAlloc
+    if (!backend_can_flush_dirty_page()) {
+        return false;
+    }
+
+    if (LWLockConditionalAcquire(buf->content_lock, LW_SHARED)) {
+        FlushOneSegmentBuffer(buf->buf_id + 1);
+        LWLockRelease(buf->content_lock);
+        ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
+        return true;
+    } 
+    return false;
+}
+
+/** true :1)this buffer dms think need flush, and flush success
+*         2) no need flush 
+*   false: this flush dms think need flush, but cannot flush 
+*/ 
+bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
+{
+    if (!ENABLE_DMS) {
+        return true;
+    }
+
+    if (IsInitdb) {
+        return true;
+    }
+
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+        // wait dw_init finish
+        while (!g_instance.dms_cxt.dw_init) {
+            pg_usleep(1000L);
+        }
+
+        XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
+        if (!SS_IN_REFORM) {
+            ereport(PANIC,
+                (errmsg("[SS] this buffer should not exist with BUF_DIRTY_NEED_FLUSH but not in reform, "
+                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u",
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
+                buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, 
+                (unsigned long long)pagelsn, (unsigned int)buf_desc->extra->seg_fileno,
+                buf_desc->extra->seg_blockno)));
+        }
+        bool in_flush_copy = SS_IN_FLUSHCOPY;
+        bool in_recovery = !g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag;
+        ereport(LOG,
+            (errmsg("[SS flush copy] ready to flush buffer with need flush, "
+            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u, reform phase "
+            "is in flush_copy:%d, in recovery:%d",
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
+            buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, 
+            (unsigned long long)pagelsn, (unsigned int)buf_desc->extra->seg_fileno, buf_desc->extra->seg_blockno,
+            in_flush_copy, in_recovery)));
+        if (IsSegmentBufferID(buf_desc->buf_id)) {
+            return SSTrySegFlushBuffer(buf_desc);
+        } else {
+            return SSTryFlushBuffer(buf_desc);
+        }
+    }
+    return true;
 }

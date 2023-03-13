@@ -89,7 +89,6 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
     // we should change abs_idx_getnext to call IdxScanAm(scan)->idx_getnext and channge .idx_getnext in g_HeapIdxAm to
     // IndexGetnextSlot
     while (true) {
-        
         CHECK_FOR_INTERRUPTS();
 
         IndexScanDesc indexScan = GetIndexScanDesc(scandesc);
@@ -163,7 +162,7 @@ static bool IndexRecheck(IndexScanState* node, TupleTableSlot* slot)
  *		ExecIndexScan(node)
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecIndexScan(PlanState* state)
+static TupleTableSlot* ExecIndexScan(PlanState* state)
 {
     IndexScanState* node = castNode(IndexScanState, state);
     /*
@@ -693,26 +692,26 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &index_state->ss.ps, current_relation->rd_tam_type);
-    ExecInitScanTupleSlot(estate, &index_state->ss, current_relation->rd_tam_type);
+    ExecInitResultTupleSlot(estate, &index_state->ss.ps, current_relation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, &index_state->ss, current_relation->rd_tam_ops);
 
     /*
      * get the scan type from the relation descriptor.
      */
     ExecAssignScanType(&index_state->ss, CreateTupleDescCopy(RelationGetDescr(current_relation)));
-    index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = current_relation->rd_tam_type;
+    index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops = current_relation->rd_tam_ops;
 
     /*
      * Initialize result tuple type and projection info.
      */
     ExecAssignResultTypeFromTL(&index_state->ss.ps);
 
-    index_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType =
-            index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType;
+    index_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops =
+            index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops;
 
     ExecAssignScanProjectionInfo(&index_state->ss);
 
-    Assert(index_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(index_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * If we are just doing EXPLAIN (ie, aren't going to run the plan), stop
@@ -1456,36 +1455,51 @@ void ExecInitPartitionForIndexScan(IndexScanState* index_state, EState* estate)
             index_state->ss.part_id = 0;
         }
 
-        ListCell* cell = NULL;
+        ListCell* cell1 = NULL;
+        ListCell* cell2 = NULL;
         List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
-        foreach (cell, part_seqs) {
+        List* partitionnos = resultPlan->ls_selectedPartitionnos;
+        Assert(list_length(part_seqs) == list_length(partitionnos));
+        StringInfo partNameInfo = makeStringInfo();
+        StringInfo partOidInfo = makeStringInfo();
+
+        forboth (cell1, part_seqs, cell2, partitionnos) {
             Oid tablepartitionid = InvalidOid;
             Oid indexpartitionid = InvalidOid;
             List* partitionIndexOidList = NIL;
-            int partSeq = lfirst_int(cell);
+            int partSeq = lfirst_int(cell1);
+            int partitionno = lfirst_int(cell2);
 
             /* get table partition and add it to a list for following scan */
-            tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, plan->scan.pruningInfo->partMap);
-            table_partition = partitionOpen(current_relation, tablepartitionid, lock);
+            tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, partitionno);
+            table_partition = PartitionOpenWithPartitionno(current_relation, tablepartitionid, partitionno, lock);
             index_state->ss.partitions = lappend(index_state->ss.partitions, table_partition);
 
+            appendStringInfo(partNameInfo, "%s ", table_partition->pd_part->relname.data);
+            appendStringInfo(partOidInfo, "%u ", tablepartitionid);
+
             if (RelationIsSubPartitioned(current_relation)) {
-                ListCell *lc = NULL;
+                ListCell *lc1 = NULL;
+                ListCell *lc2 = NULL;
                 SubPartitionPruningResult* subPartPruningResult =
-                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq);
+                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq, partitionno);
                 if (subPartPruningResult == NULL) {
                     continue;
                 }
                 List *subpartList = subPartPruningResult->ls_selectedSubPartitions;
+                List *subpartitionnos = subPartPruningResult->ls_selectedSubPartitionnos;
+                Assert(list_length(subpartList) == list_length(subpartitionnos));
                 List *subIndexList = NULL;
                 List *subRelationList = NULL;
 
-                foreach (lc, subpartList)
+                forboth (lc1, subpartList, lc2, subpartitionnos)
                 {
-                    int subpartSeq = lfirst_int(lc);
+                    int subpartSeq = lfirst_int(lc1);
+                    int subpartitionno = lfirst_int(lc2);
                     Relation tablepartrel = partitionGetRelation(current_relation, table_partition);
-                    Oid subpartitionid = getPartitionOidFromSequence(tablepartrel, subpartSeq);
-                    Partition subpart = partitionOpen(tablepartrel, subpartitionid, AccessShareLock);
+                    Oid subpartitionid = getPartitionOidFromSequence(tablepartrel, subpartSeq, subpartitionno);
+                    Partition subpart =
+                        PartitionOpenWithPartitionno(tablepartrel, subpartitionid, subpartitionno, AccessShareLock);
 
                     partitionIndexOidList = PartitionGetPartIndexList(subpart);
 

@@ -196,7 +196,7 @@ Boot_CreateStmt:
 
 					do_start();
 
-					tupdesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr, !($6), t_thrd.bootstrap_cxt.attrtypes, TAM_HEAP);
+					tupdesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr, !($6), t_thrd.bootstrap_cxt.attrtypes);
 
 					shared_relation = $5;
 
@@ -276,6 +276,7 @@ Boot_CreateStmt:
 													  NULL, // partTableState add by data partition
 													  REL_CMPRS_NOT_SUPPORT,
                                                                                                           NULL,
+													  NULL,
 													  NULL);
 						if (id == DescriptionRelationId) {
 							 InsertBuiltinFuncDescInBootstrap();

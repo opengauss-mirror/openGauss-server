@@ -256,6 +256,32 @@ Datum trigger_out(PG_FUNCTION_ARGS)
 }
 
 /*
+ * event_trigger_in    - input routine for pseudo-type event_trigger.
+ */
+Datum
+event_trigger_in(PG_FUNCTION_ARGS)
+{
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("cannot accept a value of type event_trigger")));
+ 
+    PG_RETURN_VOID();           /* keep compiler quiet */
+}
+ 
+/*
+ * event_trigger_out - output routine for pseudo-type event_trigger.
+ */
+Datum
+event_trigger_out(PG_FUNCTION_ARGS)
+{
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("cannot display a value of type event_trigger")));
+ 
+    PG_RETURN_VOID();           /* keep compiler quiet */
+}
+ 
+/*
  * language_handler_in		- input routine for pseudo-type LANGUAGE_HANDLER.
  */
 Datum language_handler_in(PG_FUNCTION_ARGS)
@@ -445,6 +471,67 @@ Datum pg_node_tree_recv(PG_FUNCTION_ARGS)
 Datum pg_node_tree_send(PG_FUNCTION_ARGS)
 {
     return textsend(fcinfo);
+}
+ 
+/*
+ * pg_ddl_command_in   - input routine for type PG_DDL_COMMAND.
+ *
+ * Like pg_node_tree, pg_ddl_command isn't really a pseudotype; it's here for
+ * the same reasons as that one.
+ */
+Datum
+pg_ddl_command_in(PG_FUNCTION_ARGS)
+{
+    /*
+     * Disallow input of pg_ddl_command value.
+     */
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("cannot accept a value of type %s", "pg_ddl_command")));
+ 
+    PG_RETURN_VOID();           /* keep compiler quiet */
+}
+ 
+/*
+ * pg_ddl_command_out      - output routine for type PG_DDL_COMMAND.
+ *
+ * We don't have any good way to output this type directly, so punt.
+ */
+Datum
+pg_ddl_command_out(PG_FUNCTION_ARGS)
+{
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("cannot output a value of type %s", "pg_ddl_command")));
+ 
+    PG_RETURN_VOID();
+}
+ 
+ 
+/*
+ * pg_ddl_command_recv     - binary input routine for type PG_DDL_COMMAND.
+ */
+Datum
+pg_ddl_command_recv(PG_FUNCTION_ARGS)
+{
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("cannot accept a value of type %s", "pg_ddl_command")));
+    
+    PG_RETURN_VOID();
+}
+ 
+/*
+ * pg_ddl_command_send     - binary output routine for type PG_DDL_COMMAND.
+ */
+Datum
+pg_ddl_command_send(PG_FUNCTION_ARGS)
+{
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("cannot output a value of type %s", "pg_ddl_command")));
+ 
+    PG_RETURN_VOID();
 }
 
 /*

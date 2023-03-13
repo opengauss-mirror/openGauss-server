@@ -1,4 +1,4 @@
-/* -------------------------------------------------------------------------
+﻿/* -------------------------------------------------------------------------
  *
  * pqcomm.c
  *	  Communication functions between the Frontend and the Backend
@@ -455,6 +455,20 @@ void pq_init(void)
     pq_disk_reset_tempfile_contextinfo();
 
     on_proc_exit(pq_close, 0);
+
+    /*
+     * For light comm, initially, set the underlying socket in nonblocking mode
+     * and use latches to implement blocking semantics if needed.
+     * (e.g., WAL will assume that the standy node has exited, if no information is received)
+     *
+     * should always use COMMERROR on failure during communication
+     */
+#ifndef WIN32
+    if (u_sess->attr.attr_common.light_comm == TRUE &&
+        u_sess->proc_cxt.MyProcPort->sock != PGINVALID_SOCKET && !pg_set_noblock(u_sess->proc_cxt.MyProcPort->sock)){
+        ereport(COMMERROR, (errmsg("could not set socket to nonblocking mode: %m")));
+    }
+#endif
 }
 
 /* --------------------------------
@@ -564,7 +578,7 @@ static void StreamDoUnlink(int code, Datum arg)
  */
 int StreamServerPort(int family, char* hostName, unsigned short portNumber, const char* unixSocketName,
     pgsocket ListenSocket[], int MaxListen, bool add_localaddr_flag,
-    bool is_create_psql_sock, bool is_create_libcomm_sock, 
+    bool is_create_psql_sock, bool is_create_libcomm_sock, ListenChanelType listen_channel,
     ProtocolExtensionConfig* protocol_config) {
 #define RETRY_SLEEP_TIME 1000000L
     pgsocket fd = PGINVALID_SOCKET;
@@ -816,19 +830,23 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
                 result = inet_net_ntop(AF_INET6,
                     &((struct sockaddr_in6*)sinp)->sin6_addr,
                     128,
-                    g_instance.listen_cxt.LocalAddrList[g_instance.listen_cxt.LocalIpNum],
+                    t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum],
                     IP_LEN);
             } else if (addr->ai_family == AF_INET) {
                 result = inet_net_ntop(AF_INET,
                     &((struct sockaddr_in*)sinp)->sin_addr,
                     32,
-                    g_instance.listen_cxt.LocalAddrList[g_instance.listen_cxt.LocalIpNum],
+                    t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum],
                     IP_LEN);
             }
             if (result == NULL) {
                 ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
             } else {
-                g_instance.listen_cxt.LocalIpNum++;
+                ereport(DEBUG5, (errmodule(MOD_COMM_FRAMEWORK),
+                    errmsg("[reload listen IP]set LocalIpNum[%d] %s",
+                    t_thrd.postmaster_cxt.LocalIpNum,
+                    t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum])));
+                t_thrd.postmaster_cxt.LocalIpNum++;
             }
         }
         if (is_create_psql_sock) {
@@ -836,6 +854,20 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
         } else {
             g_instance.listen_cxt.listen_sock_type[listen_index] = HA_LISTEN_SOCKET;
         }
+
+        /*
+         * note:
+         * NORMAL_LISTEN_CHANEL include : listen_address or libcomm_bind_addr.
+         * REPL_LISTEN_CHANEL include : replication_info
+         * EXT_LISTEN_CHANEL include : listen_address_ext
+         */
+        g_instance.listen_cxt.listen_chanel_type[listen_index] = listen_channel;
+
+        /* for debug info */
+        rc = strcpy_s(g_instance.listen_cxt.all_listen_addr_list[listen_index], IP_LEN,
+            (hostName == NULL) ? ((addr->ai_family == AF_UNIX) ? "unix domain" : "*") : hostName);
+        securec_check(rc, "", "");
+        g_instance.listen_cxt.all_listen_port_list[listen_index] = portNumber;
 
         continue;
 
@@ -1017,12 +1049,15 @@ int StreamConnection(pgsocket server_fd, Port* port)
         int opval = 0;
         on = 1;
 
+#ifndef USE_LIBNET
+        /* libnet not support SO_PROTOCOL in lwip */
         socklen_t oplen = sizeof(opval);
         /* CommProxy Support */
         if (comm_getsockopt(port->sock, SOL_SOCKET, SO_PROTOCOL, &opval, &oplen) < 0) {
             ereport(LOG, (errmsg("comm_getsockopt(SO_PROTOCOL) failed: %m")));
             return STATUS_ERROR;
         }
+#endif
 
         /* CommProxy Support */
         if (comm_setsockopt(port->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on)) < 0) {
@@ -1137,29 +1172,37 @@ void TouchSocketFile(void)
  */
 void pq_set_nonblocking(bool nonblocking)
 {
-    if (u_sess->proc_cxt.MyProcPort->noblock == nonblocking) {
-        return;
-    }
+    if (u_sess->attr.attr_common.light_comm == FALSE) {
+        if (u_sess->proc_cxt.MyProcPort->noblock == nonblocking) {
+            return;
+        }
 
 #ifdef WIN32
-    pgwin32_noblock = nonblocking ? 1 : 0;
+        pgwin32_noblock = nonblocking ? 1 : 0;
 #else
 
-    /*
-     * Use COMMERROR on failure, because ERROR would try to send the error to
-     * the client, which might require changing the mode again, leading to
-     * infinite recursion.
-     */
-    if (nonblocking) {
-        if (!pg_set_noblock(u_sess->proc_cxt.MyProcPort->sock)) {
-            ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to non-blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
+        /*
+         * Use COMMERROR on failure, because ERROR would try to send the error to
+         * the client, which might require changing the mode again, leading to
+         * infinite recursion.
+         */
+        if (nonblocking) {
+            if (!pg_set_noblock(u_sess->proc_cxt.MyProcPort->sock)) {
+                ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to non-blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
+            }
+        } else {
+            if (!pg_set_block(u_sess->proc_cxt.MyProcPort->sock)) {
+                ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
+            }
         }
-    } else {
-        if (!pg_set_block(u_sess->proc_cxt.MyProcPort->sock)) {
-            ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
-        }
-    }
 #endif
+    }
+    /*
+     * For light_comm, we set socket to nonblocked mode initially (see pq_init()).
+     * During the whole process of database communication, socket is not set to blocked mode any more.
+     * Here, we just set the global variable to blocked if needed, without actually operating the socket,
+     * For blocked semantics, use latch.
+     */
     u_sess->proc_cxt.MyProcPort->noblock = nonblocking;
 }
 

@@ -15,13 +15,14 @@
 #ifndef CONVERSIONCMDS_H
 #define CONVERSIONCMDS_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
 
-extern void CreateConversionCommand(CreateConversionStmt* parsetree);
+extern ObjectAddress CreateConversionCommand(CreateConversionStmt* parsetree);
 extern void RenameConversion(List* name, const char* newname);
-extern void AlterConversionOwner(List* name, Oid newOwnerId);
+extern ObjectAddress AlterConversionOwner(List* name, Oid newOwnerId);
 extern void AlterConversionOwner_oid(Oid conversionOid, Oid newOwnerId);
-extern void AlterConversionNamespace(List* name, const char* newschema);
+extern ObjectAddress AlterConversionNamespace(List* name, const char* newschema);
 extern Oid AlterConversionNamespace_oid(Oid convOid, Oid newNspOid);
 
 #endif /* CONVERSIONCMDS_H */

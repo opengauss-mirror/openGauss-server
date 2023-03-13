@@ -26,34 +26,6 @@
 #include "utils/sortsupport.h"
 
 /*
- * Array giving the position of the left-most set bit for each possible
- * byte value.  We count the right-most position as the 0th bit, and the
- * left-most the 7th bit.  The 0th entry of the array should not be used.
- *
- * Note: this is not used by the functions in pg_bitutils.h when
- * HAVE__BUILTIN_CLZ is defined, but we provide it anyway, so that
- * extensions possibly compiled with a different compiler can use it.
- */
-const uint8 pg_leftmost_one_pos[256] = {
-	0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
-	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
-};
-
-/*
  *		Defined in adt/
  */
 
@@ -784,6 +756,9 @@ extern Datum pgxc_unlock_for_transfer(PG_FUNCTION_ARGS);
 #endif
 extern Datum trigger_in(PG_FUNCTION_ARGS);
 extern Datum trigger_out(PG_FUNCTION_ARGS);
+extern Datum event_trigger_in(PG_FUNCTION_ARGS);
+extern Datum event_trigger_out(PG_FUNCTION_ARGS);
+
 extern Datum language_handler_in(PG_FUNCTION_ARGS);
 extern Datum language_handler_out(PG_FUNCTION_ARGS);
 extern Datum fdw_handler_in(PG_FUNCTION_ARGS);
@@ -876,6 +851,9 @@ extern Datum text_regclass(PG_FUNCTION_ARGS);
 extern List* stringToQualifiedNameList(const char* string);
 extern char* format_procedure(Oid procedure_oid);
 extern char* format_operator(Oid operator_oid);
+extern char *format_procedure_qualified(Oid procedure_oid);
+extern char *format_operator_qualified(Oid operator_oid);
+extern void format_procedure_parts(Oid procedure_oid, List **objnames, List **objargs);
 
 /* rowtypes.c */
 extern Datum record_in(PG_FUNCTION_ARGS);
@@ -898,6 +876,7 @@ extern Datum pg_get_viewdef_ext(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_wrap(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_name(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_name_ext(PG_FUNCTION_ARGS);
+extern char* pg_get_viewdef_string(Oid viewid);
 extern Datum pg_get_indexdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_indexdef_for_dump(PG_FUNCTION_ARGS);
 extern Datum pg_get_indexdef_ext(PG_FUNCTION_ARGS);
@@ -905,6 +884,7 @@ extern char* pg_get_indexdef_string(Oid indexrelid);
 extern char* pg_get_indexdef_columns(Oid indexrelid, bool pretty);
 extern Datum pg_get_triggerdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_triggerdef_ext(PG_FUNCTION_ARGS);
+extern char* pg_get_triggerdef_string(Oid trigid);
 extern Datum pg_get_constraintdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_constraintdef_ext(PG_FUNCTION_ARGS);
 extern char* pg_get_constraintdef_string(Oid constraintId);
@@ -918,6 +898,12 @@ extern Datum pg_get_function_identity_arguments(PG_FUNCTION_ARGS);
 extern Datum pg_get_function_result(PG_FUNCTION_ARGS);
 extern char* deparse_expression(
     Node* expr, List* dpcontext, bool forceprefix, bool showimplicit, bool no_alias = false);
+extern void get_query_def(Query* query, StringInfo buf, List* parentnamespace, TupleDesc resultDesc, int prettyFlags,
+    int wrapColumn, int startIndent,
+#ifdef PGXC
+    bool finalise_aggregates, bool sortgroup_colno, void* parserArg = NULL,
+#endif /* PGXC */
+    bool qrw_phase = false, bool viewdef = false, bool is_fqs = false);
 extern char* deparse_create_sequence(Node* stmt, bool owned_by_none = false);
 extern char* deparse_alter_sequence(Node* stmt, bool owned_by_none = false);
 
@@ -1011,6 +997,10 @@ extern text* cstring_to_text_with_len(const char* s, size_t len);
 extern bytea *cstring_to_bytea_with_len(const char *s, int len);
 extern BpChar* cstring_to_bpchar_with_len(const char* s, int len);
 extern char* text_to_cstring(const text* t);
+extern char* output_text_to_cstring(const text* t);
+extern char* output_int32_to_cstring(int32 value);
+extern char* output_int64_to_cstring(int64 value);
+extern char* output_int128_to_cstring(int128 value);
 extern void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len);
 extern int text_instr_3args(text* textStr, text* textStrToSearch, int32 beginIndex);
 extern int text_instr_4args(text* textStr, text* textStrToSearch, int32 beginIndex, int occurTimes);
@@ -1364,6 +1354,17 @@ extern Datum int8_avg_accum(PG_FUNCTION_ARGS);
 #ifdef PGXC
 extern Datum numeric_avg_collect(PG_FUNCTION_ARGS);
 #endif
+#ifndef ENABLE_MULTIPLE_NODES
+extern Datum int8_avg_accum_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_sum(PG_FUNCTION_ARGS);
+extern Datum numeric_accum_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_avg_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_avg_accum_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_var_pop_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_var_samp_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_stddev_pop_numeric(PG_FUNCTION_ARGS);
+extern Datum numeric_stddev_samp_numeric(PG_FUNCTION_ARGS);
+#endif
 extern Datum numeric_avg(PG_FUNCTION_ARGS);
 extern Datum numeric_var_pop(PG_FUNCTION_ARGS);
 extern Datum numeric_var_samp(PG_FUNCTION_ARGS);
@@ -1429,6 +1430,7 @@ extern char* format_type_be(Oid type_oid);
 extern char* format_type_with_typemod(Oid type_oid, int32 typemod);
 extern Datum oidvectortypes(PG_FUNCTION_ARGS);
 extern int32 type_maximum_size(Oid type_oid, int32 typemod);
+extern char *format_type_be_qualified(Oid type_oid);
 
 /* quote.c */
 extern Datum quote_ident(PG_FUNCTION_ARGS);
@@ -1568,6 +1570,7 @@ extern Datum pg_get_variable_info(PG_FUNCTION_ARGS);
 
 /* catalogs/dependency.c */
 extern Datum pg_describe_object(PG_FUNCTION_ARGS);
+extern Datum pg_identify_object(PG_FUNCTION_ARGS);
 
 /* commands/constraint.c */
 extern Datum unique_key_recheck(PG_FUNCTION_ARGS);
@@ -1679,10 +1682,8 @@ extern Datum text_timestamp(PG_FUNCTION_ARGS);
 extern void encryptOBS(char* srcplaintext, char destciphertext[], uint32 destcipherlength);
 extern void decryptOBS(
     const char* srcciphertext, char destplaintext[], uint32 destplainlength, const char* obskey = NULL);
-extern void encryptECString(char* src_plain_text, char* dest_cipher_text,
-                                 uint32 dest_cipher_length, int mode);
-extern bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
-                                 uint32 dest_plain_length, int mode);
+extern char *encryptECString(char* src_plain_text, int mode);
+extern bool decryptECString(const char* src_cipher_text, char** dest_plain_text, int mode);
 extern bool IsECEncryptedString(const char* src_cipher_text);
 extern void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray,
                                          int arrayLength, int mode);
@@ -1709,6 +1710,7 @@ extern Datum pg_lsn_in(PG_FUNCTION_ARGS);
 
 /* nlssort.cpp */
 extern Datum nlssort(PG_FUNCTION_ARGS);
+extern char *remove_trailing_spaces(const char *src_str);
 
 // template function implementation
 //
@@ -1836,59 +1838,8 @@ extern Datum compress_statistic_info(PG_FUNCTION_ARGS);
 extern Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS);
 
 #else
-/*
- * Array giving the position of the left-most set bit for each possible
- * byte value.  We count the right-most position as the 0th bit, and the
- * left-most the 7th bit.  The 0th entry of the array should not be used.
- *
- * Note: this is not used by the functions in pg_bitutils.h when
- * HAVE__BUILTIN_CLZ is defined, but we provide it anyway, so that
- * extensions possibly compiled with a different compiler can use it.
- */
-PGDLLIMPORT const uint8 pg_leftmost_one_pos[256] = {
-	0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
-	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
-};
 #endif
 extern char *pg_ultostr(char *str, uint32 value);
 extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
-
-
-/*
- * pg_leftmost_one_pos32
- *		Returns the position of the most significant set bit in "word",
- *		measured from the least significant bit.  word must not be 0.
- */
-static inline int pg_leftmost_one_pos32(uint32 word)
-{
-#ifdef HAVE__BUILTIN_CLZ
-    Assert(word != 0);
-
-    return 31 - __builtin_clz(word);
-#else
-    int shift = 32 - 8;
-
-    Assert(word != 0);
-
-    while ((word >> shift) == 0)
-        shift -= 8;
-
-    return shift + pg_leftmost_one_pos[(word >> shift) & 255];
-#endif /* HAVE__BUILTIN_CLZ */
-}
 
 #endif /* BUILTINS_H */

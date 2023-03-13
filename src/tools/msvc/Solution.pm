@@ -52,7 +52,7 @@ sub _new
 	$options->{wal_segsize} = 16
 	  unless $options->{wal_segsize};      # undef or 0 means default
 	die "Bad wal_segsize $options->{wal_segsize}"
-	  unless grep { $_ == $options->{wal_segsize} } (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024);
+	  unless grep { $_ == $options->{wal_segsize} } (1, 2, 4, 8, 16, 32, 64, 128, 256, 512);
 
 	$self->DeterminePlatform();
 
@@ -269,6 +269,42 @@ s{PG_VERSION_STR "[^"]+"}{__STRINGIFY(x) #x\n#define __STRINGIFY2(z) __STRINGIFY
 		chdir('..\..\..\..');
 	}
 
+	if (IsNewer(
+			'src/include/parser/kwlist_d.h',
+			'src/include/parser/kwlist.h'))
+	{
+		print "Generating kwlist_d.h...\n";
+		system('perl -I src/tools src/tools/gen_keywordlist.pl --extern -o src/include/parser src/include/parser/kwlist.h');
+	}
+
+	if (IsNewer(
+			'src/pl/plpgsql/src/pl_reserved_kwlist_d.h',
+			'src/pl/plpgsql/src/pl_reserved_kwlist.h')
+		|| IsNewer(
+			'src/pl/plpgsql/src/pl_unreserved_kwlist_d.h',
+			'src/pl/plpgsql/src/pl_unreserved_kwlist.h'))
+	{
+		print "Generating pl_reserved_kwlist_d.h and pl_unreserved_kwlist_d.h...\n";
+		chdir('src/pl/plpgsql/src');
+		system('perl -I ../../../tools ../../../tools/gen_keywordlist.pl --varname ReservedPLKeywords pl_reserved_kwlist.h');
+		system('perl -I ../../../tools ../../../tools/gen_keywordlist.pl --varname UnreservedPLKeywords pl_unreserved_kwlist.h');
+		chdir('../../../..');
+	}
+
+	if (IsNewer(
+			'src/interfaces/ecpg/preproc/c_kwlist_d.h',
+			'src/interfaces/ecpg/preproc/c_kwlist.h')
+		|| IsNewer(
+			'src/interfaces/ecpg/preproc/ecpg_kwlist_d.h',
+			'src/interfaces/ecpg/preproc/ecpg_kwlist.h'))
+	{
+		print "Generating c_kwlist_d.h and ecpg_kwlist_d.h...\n";
+		chdir('src/interfaces/ecpg/preproc');
+		system('perl -I ../../../tools ../../../tools/gen_keywordlist.pl --varname ScanCKeywords --no-case-fold c_kwlist.h');
+		system('perl -I ../../../tools ../../../tools/gen_keywordlist.pl --varname ScanECPGKeywords ecpg_kwlist.h');
+		chdir('../../../..');
+	}
+
 	if (IsNewer('src\include\utils\fmgroids.h', 'src\common\backend\utils\fmgroids.h'))
 	{
 		copyFile('src\common\backend\utils\fmgroids.h',
@@ -313,16 +349,6 @@ s{PG_VERSION_STR "[^"]+"}{__STRINGIFY(x) #x\n#define __STRINGIFY2(z) __STRINGIFY
 		print "Generating plerrcodes.h...\n";
 		system(
 'perl src\common\pl\plpgsql\src\generate-plerrcodes.pl src\common\backend\utils\errcodes.txt > src\common\pl\plpgsql\src\plerrcodes.h'
-		);
-	}
-
-	if (IsNewer(
-			'src\common\backend\utils\sort\qsort_tuple.c',
-			'src\common\backend\utils\sort\gen_qsort_tuple.pl'))
-	{
-		print "Generating qsort_tuple.c...\n";
-		system(
-'perl src\common\backend\utils\sort\gen_qsort_tuple.pl > src\common\backend\utils\sort\qsort_tuple.c'
 		);
 	}
 

@@ -1,0 +1,23 @@
+<refentry id="SQL-CREATEEVENTTRIGGER">
+<refmeta>
+<refentrytitle>CREATE EVENT TRIGGER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE EVENT TRIGGER</refname>
+<refpurpose>define a new event trigger</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<indexterm zone="sql-createeventtrigger">
+<primary>CREATE EVENT TRIGGER</primary>
+</indexterm>
+<refsynopsisdiv>
+<synopsis>
+CREATE EVENT TRIGGER name
+    ON event
+    [ WHEN filter_variable IN (filter_value [, ... ]) [ AND ... ] ]
+    EXECUTE PROCEDURE function name()
+</synopsis>
+</refsynopsisdiv>
+</refentry>

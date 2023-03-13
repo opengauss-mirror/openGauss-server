@@ -260,7 +260,7 @@ WorkTableScanState* ExecInitWorkTableScan(WorkTableScan* node, EState* estate, i
     /*
      * Initialize result tuple type, but not yet projection info.
      */
-    ExecAssignResultTypeFromTL(&scan_state->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&scan_state->ss.ps);
 
     scan_state->ss.ps.ps_TupFromTlist = false;
 

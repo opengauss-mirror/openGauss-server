@@ -903,6 +903,7 @@ Path* create_stream_path(PlannerInfo* root, RelOptInfo* rel, StreamType type, Li
     StreamPath* pathnode = makeNode(StreamPath);
     pathnode->path.pathtype = T_Stream;
     pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.pathkeys = pathkeys;
     pathnode->type = type;
     pathnode->path.distribute_keys = distribute_keys;
@@ -970,7 +971,7 @@ Path* create_stream_path(PlannerInfo* root, RelOptInfo* rel, StreamType type, Li
     }
 #endif
 
-    cost_stream(pathnode, rel->width, true);
+    cost_stream(pathnode, rel->reltarget->width, true);
 
     if (IsA(subpath, MaterialPath)) {
         Cost rescan_startup_cost, rescan_total_cost;

@@ -94,6 +94,12 @@ char* format_type_be(Oid type_oid)
     return format_type_internal(type_oid, -1, false, false);
 }
 
+char *
+format_type_be_qualified(Oid type_oid)
+{
+   return format_type_internal(type_oid, -1, false, false, true);
+}
+
 /*
  * This version is for use within send PARSE message with specified
  * statement/plan down to the Datanode
@@ -330,9 +336,9 @@ static char* format_type_internal(
 
             /* get namespace string if we foce to deparse namespace name */
             if (include_nspname && PG_CATALOG_NAMESPACE != typeform->typnamespace)
-                nspname = get_namespace_name(typeform->typnamespace);
+                nspname = get_namespace_name_or_temp(typeform->typnamespace);
         } else {
-            nspname = get_namespace_name(typeform->typnamespace);
+            nspname = get_namespace_name_or_temp(typeform->typnamespace);
         }
 
         typname = NameStr(typeform->typname);

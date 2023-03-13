@@ -350,10 +350,12 @@ void RemoveDataSourceById(Oid src_Id)
  * @IN newname: new name
  * @RETURN : void
  */
-void RenameDataSource(const char* oldname, const char* newname)
+ObjectAddress RenameDataSource(const char* oldname, const char* newname)
 {
     HeapTuple tup;
     Relation rel;
+    Oid DSOid;
+    ObjectAddress address;
 
     rel = heap_open(DataSourceRelationId, RowExclusiveLock);
 
@@ -365,6 +367,7 @@ void RenameDataSource(const char* oldname, const char* newname)
                 errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("data source \"%s\" does not exist", oldname)));
 
+    DSOid = HeapTupleGetOid(tup);
     /* make sure the new name doesn't exist */
     if (SearchSysCacheExists1(DATASOURCENAME, CStringGetDatum(newname)))
         ereport(ERROR,
@@ -373,7 +376,7 @@ void RenameDataSource(const char* oldname, const char* newname)
                 errmsg("data source \"%s\" already exists", newname)));
 
     /* must be owner of server */
-    if (!pg_extension_data_source_ownercheck(HeapTupleGetOid(tup), GetUserId()))
+    if (!pg_extension_data_source_ownercheck(DSOid, GetUserId()))
         aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATA_SOURCE, oldname);
 
     /* rename */
@@ -383,6 +386,9 @@ void RenameDataSource(const char* oldname, const char* newname)
 
     tableam_tops_free_tuple(tup);
     heap_close(rel, RowExclusiveLock);
+
+    ObjectAddressSet(address, DataSourceRelationId, DSOid);
+    return address;
 }
 
 /*
@@ -437,10 +443,12 @@ static void AlterDataSourceOwner_Internal(Relation rel, HeapTuple tup, Oid newOw
  * @IN newOwnerId: new owner's Oid
  * @RETURN: void
  */
-void AlterDataSourceOwner(const char* name, Oid newOwnerId)
+ObjectAddress AlterDataSourceOwner(const char* name, Oid newOwnerId)
 {
     HeapTuple tup;
     Relation rel;
+    Oid dsId;
+    ObjectAddress address;
 
     rel = heap_open(DataSourceRelationId, RowExclusiveLock);
     tup = SearchSysCacheCopy1(DATASOURCENAME, CStringGetDatum(name));
@@ -448,7 +456,10 @@ void AlterDataSourceOwner(const char* name, Oid newOwnerId)
         ereport(ERROR,
             (errmodule(MOD_EC), errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("data source \"%s\" does not exist", name)));
 
+    dsId = HeapTupleGetOid(tup);
     AlterDataSourceOwner_Internal(rel, tup, newOwnerId);
     tableam_tops_free_tuple(tup);
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, DataSourceRelationId, dsId);
+    return address;
 }

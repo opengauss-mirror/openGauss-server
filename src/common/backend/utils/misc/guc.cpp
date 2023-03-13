@@ -45,6 +45,8 @@
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
+#include "catalog/pg_db_role_setting.h"
+#include "catalog/pg_database.h"
 #include "commands/async.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "commands/copy.h"
@@ -52,6 +54,7 @@
 #include "commands/prepare.h"
 #include "commands/vacuum.h"
 #include "commands/variable.h"
+#include "commands/dbcommands.h"
 #include "commands/tablespace.h"
 #include "commands/trigger.h"
 #include "funcapi.h"
@@ -149,6 +152,7 @@
 #include "utils/memutils.h"
 #include "utils/pg_locale.h"
 #include "utils/plancache.h"
+#include "utils/fmgroids.h"
 #include "utils/portal.h"
 #include "utils/ps_status.h"
 #include "utils/rel_gs.h"
@@ -219,6 +223,7 @@
 #define S_PER_D (60 * 60 * 24)
 #define MS_PER_D (1000 * 60 * 60 * 24)
 #define H_PER_D 24
+#define NUM_KEYS 2
 #define AUDITFILE_THRESHOLD_LOWER_BOUND 100
 const uint32 AUDIT_THRESHOLD_VERSION_NUM = 92735;
 
@@ -340,6 +345,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "enable_hdfs_predicate_pushdown",
     "enable_hadoop_env",
     "behavior_compat_options",
+    "b_format_behavior_compat_options",
 #ifndef ENABLE_MULTIPLE_NODES
     "plsql_compile_check_options",
 #endif
@@ -452,6 +458,8 @@ static bool check_client_min_messages(int* newval, void** extra, GucSource sourc
 static bool check_default_transaction_isolation(int* newval, void** extra, GucSource source);
 static bool check_enable_stmt_track(bool* newval, void** extra, GucSource source);
 static bool check_debug_assertions(bool* newval, void** extra, GucSource source);
+static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSetStmt* setstmt);
+static VariableSetStmt* process_set_global_trans_args(ListCell* lcell);
 #ifdef USE_BONJOUR
 static bool check_bonjour(bool* newval, void** extra, GucSource source);
 #endif
@@ -1179,6 +1187,17 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"test_user_host",
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("test_user_host"),
+            NULL},
+            &u_sess->attr.attr_common.test_user_host,
+            false,
+            NULL,
+            NULL,
+            NULL},
         /* Not for general use --- used by SET SESSION AUTHORIZATION */
         {{"is_sysadmin",
             PGC_INTERNAL,
@@ -1847,6 +1866,19 @@ static void InitConfigureNamesBool()
             NULL
         },
 #endif
+        {{"enable_expr_fusion",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING,
+            gettext_noop("Enable expr fusion"),
+            NULL},
+            &u_sess->attr.attr_common.enable_expr_fusion,
+            false,
+            NULL,
+            NULL,
+            NULL,
+            NULL
+        },
         {{"ts_adaptive_threads",
             PGC_SIGHUP, 
             NODE_DISTRIBUTE,
@@ -1941,6 +1973,19 @@ static void InitConfigureNamesBool()
             NULL,
             },
             &g_instance.attr.attr_sql.enableRemoteExcute,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
+        {{"light_comm",
+            PGC_BACKEND,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("Enable to use light connection"),
+            NULL,
+            },
+            &u_sess->attr.attr_common.light_comm,
             false,
             NULL,
             NULL,
@@ -8538,6 +8583,7 @@ static void CheckAlterSystemSetPrivilege(const char* name)
         "unix_socket_directory", "unix_socket_group", "unix_socket_permissions",
         "krb_caseins_users", "krb_server_keyfile", "krb_srvname", "allow_system_table_mods", "enableSeparationOfDuty",
         "modify_initial_password", "password_encryption_type", "password_policy", "audit_xid_info",
+        "no_audit_client", "full_audit_users", "audit_system_function_exec",
         "allow_create_sysobject",
         NULL
     };
@@ -8925,9 +8971,17 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                     DefElem* item = (DefElem*)lfirst(head);
 
                     if (strcmp(item->defname, "transaction_isolation") == 0)
-                        SetPGVariable("transaction_isolation", list_make1(item->arg), stmt->is_local);
+                        if (!stmt->is_local && ENABLE_SET_SESSION_TRANSACTION) {
+                            SetPGVariable("default_transaction_isolation", list_make1(item->arg), stmt->is_local);
+                        } else {
+                            SetPGVariable("transaction_isolation", list_make1(item->arg), stmt->is_local);
+                        }
                     else if (strcmp(item->defname, "transaction_read_only") == 0)
-                        SetPGVariable("transaction_read_only", list_make1(item->arg), stmt->is_local);
+                        if (!stmt->is_local && ENABLE_SET_SESSION_TRANSACTION) {
+                            SetPGVariable("default_transaction_read_only", list_make1(item->arg), stmt->is_local);
+                        } else {
+                            SetPGVariable("transaction_read_only", list_make1(item->arg), stmt->is_local);
+                        }
                     else if (strcmp(item->defname, "transaction_deferrable") == 0)
                         SetPGVariable("transaction_deferrable", list_make1(item->arg), stmt->is_local);
                     else
@@ -8935,6 +8989,8 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                             (errcode(ERRCODE_INVALID_OPERATION),
                                 errmsg("unexpected SET TRANSACTION element: %s", item->defname)));
                 }
+            } else if (strcmp(stmt->name, "GLOBAL TRANSACTION") == 0) {
+                process_set_global_transation(u_sess->proc_cxt.MyDatabaseId, InvalidOid, stmt);
             } else if (strcmp(stmt->name, "SESSION CHARACTERISTICS") == 0) {
                 ListCell* head = NULL;
 
@@ -9064,6 +9120,7 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
         case VAR_SET_DEFINED:
             if (strcmp(stmt->name, "USER DEFINED VARIABLE") == 0) {
                 ListCell *head = NULL;
+                List *resultlist = NIL;
 
                 foreach (head, stmt->defined_args) {
                     UserSetElem *elem = (UserSetElem *)lfirst(head);
@@ -9078,13 +9135,20 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                         elem->val = (Expr *)const_expression_to_const(QueryRewriteNonConstant(node));
                     }
 
+                    resultlist = lappend(resultlist, (Node *)elem);
+                }
+
+                ListCell* l = NULL;
+                foreach (l, resultlist) {
+                    UserSetElem *elem = (UserSetElem *)lfirst(l);
                     check_set_user_message(elem);
                 }
+                list_free(resultlist);
             } else if (strcmp(stmt->name, "SELECT INTO VARLIST") == 0) {
                 ListCell *head = list_head(stmt->defined_args);
                 UserSetElem *elem = (UserSetElem *)lfirst(head);
                 Node *node = (Node *)copyObject(((SelectIntoVarList *)elem->val)->sublink);
-                node = simplify_subselect_expression(node, paramInfo);
+                node = simplify_select_into_expression(node, paramInfo);
                 List *val_list = QueryRewriteSelectIntoVarList(node);
 
                 ListCell *name_cur = NULL;
@@ -9548,17 +9612,17 @@ TupleDesc GetPGVariableResultDesc(const char* name)
 
     if (guc_name_compare(name, "all") == 0) {
         /* need a tuple descriptor representing three TEXT columns */
-        tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(3, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "setting", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "description", TEXTOID, -1, 0);
     } else if (guc_name_compare(name, "show_warnings") == 0 || guc_name_compare(name, "show_errors") == 0) {
-        tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);
     } else if (guc_name_compare(name, "show_warnings_count") == 0 || guc_name_compare(name, "show_errors_count") == 0) {
-        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(1, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "count", INT4OID, -1, 0);
     } else {
         const char* varname = NULL;
@@ -9567,7 +9631,7 @@ TupleDesc GetPGVariableResultDesc(const char* name)
         (void)GetConfigOptionByName(name, &varname);
 
         /* need a tuple descriptor representing a single TEXT column */
-        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(1, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, varname, TEXTOID, -1, 0);
     }
 
@@ -9588,7 +9652,7 @@ static void ShowGUCConfigOption(const char* name, DestReceiver* dest)
     value = GetConfigOptionByName(name, &varname);
 
     /* need a tuple descriptor representing a single TEXT column */
-    tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(1, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, varname, TEXTOID, -1, 0);
 
     /* prepare for projection of tuples */
@@ -9613,7 +9677,7 @@ static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
     bool isnull[3] = {false, false, false};
 
     /* need a tuple descriptor representing three TEXT columns */
-    tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(3, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "setting", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "description", TEXTOID, -1, 0);
@@ -10069,7 +10133,7 @@ Datum show_all_settings(PG_FUNCTION_ARGS)
          * need a tuple descriptor representing NUM_PG_SETTINGS_ATTS columns
          * of the appropriate types
          */
-        tupdesc = CreateTemplateTupleDesc(NUM_PG_SETTINGS_ATTS, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(NUM_PG_SETTINGS_ATTS, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "setting", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "unit", TEXTOID, -1, 0);
@@ -11347,6 +11411,122 @@ static bool check_bonjour(bool* newval, void** extra, GucSource source)
 }
 #endif
 
+static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSetStmt* setstmt)
+{
+    const char* dbname = get_database_name(databaseid);
+    /*
+     * Obtain a lock on the database and make sure it didn't go away in the
+     * meantime.
+     */
+    shdepLockAndCheckObject(DatabaseRelationId, databaseid);
+ 
+    /* Permission check. */
+    AlterDatabasePermissionCheck(databaseid, dbname);
+ 
+    char* valuestr = NULL;
+    HeapTuple tuple = NULL;
+    Relation rel = NULL;
+    ScanKeyData scankey[2];
+    SysScanDesc scan = NULL;
+    errno_t rc = EOK;
+ 
+    /* Get the old tuple, if any. */
+    rel = heap_open(DbRoleSettingRelationId, RowExclusiveLock);
+    ScanKeyInit(
+        &scankey[0], Anum_pg_db_role_setting_setdatabase, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(databaseid));
+    ScanKeyInit(
+        &scankey[1], Anum_pg_db_role_setting_setrole, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(roleid));
+    scan = systable_beginscan(rel, DbRoleSettingDatidRolidIndexId, true, NULL, NUM_KEYS, scankey);
+    tuple = systable_getnext(scan);
+ 
+    if (tuple == NULL) {
+        /* non-null valuestr means it's not RESET, so insert a new tuple */
+        HeapTuple newtuple = NULL;
+        Datum values[Natts_pg_db_role_setting];
+        bool nulls[Natts_pg_db_role_setting];
+        ListCell *head = NULL;
+        ArrayType *a = NULL;
+ 
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "", "");
+        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+        securec_check(rc, "", "");
+ 
+        values[Anum_pg_db_role_setting_setdatabase - 1] = ObjectIdGetDatum(databaseid);
+        values[Anum_pg_db_role_setting_setrole - 1] = ObjectIdGetDatum(roleid);
+        foreach(head, setstmt->args)
+        {
+            VariableSetStmt* vss = process_set_global_trans_args(head);
+            valuestr = ExtractSetVariableArgs(vss);
+            a = GUCArrayAdd(a, vss->name, valuestr);
+        }
+        values[Anum_pg_db_role_setting_setconfig - 1] = PointerGetDatum(a);
+        newtuple = heap_form_tuple(RelationGetDescr(rel), values, nulls);
+        (void)simple_heap_insert(rel, newtuple);
+ 
+        /* Update indexes */
+        CatalogUpdateIndexes(rel, newtuple);
+    } else {
+        Datum repl_val[Natts_pg_db_role_setting];
+        bool repl_null[Natts_pg_db_role_setting];
+        bool repl_repl[Natts_pg_db_role_setting];
+        HeapTuple newtuple = NULL;
+        bool isnull = false;
+        ArrayType *a = NULL;
+        ListCell *head = NULL;
+ 
+        rc = memset_s(repl_val, sizeof(repl_val), 0, sizeof(repl_val));
+        securec_check(rc, "", "");
+        rc = memset_s(repl_null, sizeof(repl_null), 0, sizeof(repl_null));
+        securec_check(rc, "", "");
+        rc = memset_s(repl_repl, sizeof(repl_repl), 0, sizeof(repl_repl));
+        securec_check(rc, "", "");
+ 
+        repl_repl[Anum_pg_db_role_setting_setconfig - 1] = true;
+        repl_null[Anum_pg_db_role_setting_setconfig - 1] = false;
+        
+        /* Extract old value of setconfig */
+        Datum datum = heap_getattr(tuple, Anum_pg_db_role_setting_setconfig, RelationGetDescr(rel), &isnull);
+        a = isnull ? NULL : DatumGetArrayTypeP(datum);
+        
+        foreach (head, setstmt->args)
+        {
+            VariableSetStmt* vss = process_set_global_trans_args(head);
+            valuestr = ExtractSetVariableArgs(vss);
+            a = GUCArrayAdd(a, vss->name, valuestr);
+        }
+        repl_val[Anum_pg_db_role_setting_setconfig - 1] = PointerGetDatum(a);
+        newtuple = heap_modify_tuple(tuple, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+        simple_heap_update(rel, &tuple->t_self, newtuple);
+ 
+        /* Update indexes */
+        CatalogUpdateIndexes(rel, newtuple);
+    }
+ 
+    systable_endscan(scan);
+
+    /* Close pg_db_role_setting, but keep lock till commit */
+    heap_close(rel, NoLock);
+    UnlockSharedObject(DatabaseRelationId, databaseid, 0, AccessShareLock);
+}
+ 
+static VariableSetStmt* process_set_global_trans_args(ListCell* lcell)
+{
+    DefElem *item = (DefElem *)lfirst(lcell);
+    VariableSetStmt *vss = makeNode(VariableSetStmt);
+    vss->args = list_make1(item->arg);
+    vss->kind = VAR_SET_VALUE;
+    vss->is_local = false;
+    if (strcmp(item->defname, "transaction_isolation") == 0) {
+        vss->name = "default_transaction_isolation";
+    } else if (strcmp(item->defname, "transaction_read_only") == 0) {
+        vss->name = "default_transaction_read_only";
+    } else
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("unexpected SET GLOBAL TRANSACTION element.")));
+    return vss;
+}
 
 static bool check_gpc_syscache_threshold(bool* newval, void** extra, GucSource source)
 {
@@ -11815,7 +11995,7 @@ bool check_double_parameter(double* newval, void** extra, GucSource source)
  * Check permission for SET ROLE and SET SESSION AUTHORIZATION
  */
 static void check_setrole_permission(const char* rolename, char* passwd, bool IsSetRole) {
-    HeapTuple roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename));
+    HeapTuple roleTup = SearchUserHostName(rolename, NULL);
     if (!HeapTupleIsValid(roleTup)) {
         str_reset(passwd);
         if (IsSetRole) {
@@ -11901,7 +12081,7 @@ static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSet
     /* AccessShareLock is enough for SELECT*/
     pg_authid_rel = heap_open(AuthIdRelationId, AccessShareLock);
     pg_authid_dsc = RelationGetDescr(pg_authid_rel);
-    tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename));
+    tuple = SearchUserHostName(rolename, NULL);
 
     if (!HeapTupleIsValid(tuple)) {
         str_reset(passwd);
@@ -12966,15 +13146,20 @@ void check_variable_value_info(const char* var_name, const Expr* var_expr)
 {
     bool found = false;
 
-    if (nodeTag(var_expr) != T_Const) {
+    if (!IsA(var_expr, Const)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OPERATION), errmsg("The value of user_defined variable must be a const")));
     }
 
     /* no hash table, we can only choose appending mode */
-    if (u_sess->utils_cxt.set_user_params_htab == NULL || !StringIsValid(var_name)) {
+    if (u_sess->utils_cxt.set_user_params_htab == NULL) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid name or hash table is null.")));
+            (errcode(ERRCODE_INVALID_OPERATION), errmsg("hash table is null for user_defined varibales.")));
+    }
+
+    if (!StringIsValid(var_name)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid user_defined name.")));
     }
 
     GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab,

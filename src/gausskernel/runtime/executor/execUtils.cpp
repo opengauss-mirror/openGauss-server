@@ -468,7 +468,7 @@ void ExecAssignResultType(PlanState* planstate, TupleDesc tupDesc)
  *		ExecAssignResultTypeFromTL
  * ----------------
  */
-void ExecAssignResultTypeFromTL(PlanState* planstate, TableAmType tam)
+void ExecAssignResultTypeFromTL(PlanState* planstate, const TableAmRoutine* tam_ops)
 {
     bool hasoid = false;
     TupleDesc tupDesc;
@@ -485,7 +485,7 @@ void ExecAssignResultTypeFromTL(PlanState* planstate, TableAmType tam)
      * list of ExprStates.	This is good because some plan nodes don't bother
      * to set up planstate->targetlist ...
      */
-    tupDesc = ExecTypeFromTL(planstate->plan->targetlist, hasoid, false, tam);
+    tupDesc = ExecTypeFromTL(planstate->plan->targetlist, hasoid, false, tam_ops);
     ExecAssignResultType(planstate, tupDesc);
 }
 
@@ -675,7 +675,7 @@ ProjectionInfo* ExecBuildVecProjectionInfo(
             else if (variable->varattno <= inputDesc->natts) {
                 Form_pg_attribute attr;
 
-                attr = inputDesc->attrs[variable->varattno - 1];
+                attr = &inputDesc->attrs[variable->varattno - 1];
                 if (!attr->attisdropped && variable->vartype == attr->atttypid)
                     isSimpleVar = true;
             }
@@ -830,7 +830,7 @@ ProjectionInfo* ExecBuildProjectionInfo(
             else if (variable->varattno <= inputDesc->natts) {
                 Form_pg_attribute attr;
 
-                attr = inputDesc->attrs[variable->varattno - 1];
+                attr = &inputDesc->attrs[variable->varattno - 1];
                 if (!attr->attisdropped && variable->vartype == attr->atttypid)
                     isSimpleVar = true;
             }
@@ -1338,6 +1338,8 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
     if (!RelationIsUstoreFormat(heapRelation))
         return;
 
+    AcceptInvalidationMessages();
+
     /*
      * for each index, form and insert the index tuple
      */
@@ -1358,6 +1360,10 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
         /* If the index is marked as read-only, ignore it */
         /* XXXX: ???? */
         if (!indexInfo->ii_ReadyForInserts) {
+            continue;
+        }
+
+        if (!IndexIsUsable(indexRelation->rd_index)) {
             continue;
         }
 
@@ -1390,6 +1396,7 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
                                              estate->es_query_cxt,
                                              indexRelation,
                                              indexpartitionid,
+                                             INVALID_PARTITION_NO,
                                              actualindex,
                                              indexpartition,
                                              RowExclusiveLock);
@@ -1460,22 +1467,6 @@ void ExecUHeapDeleteIndexTuplesGuts(
     }
 }
 
-static inline int128 datum2autoinc(ConstrAutoInc *cons_autoinc, Datum datum)
-{
-    if (cons_autoinc->datum2autoinc_func != NULL) {
-        return DatumGetInt128(DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->datum2autoinc_func, datum));
-    }
-    return DatumGetInt128(datum);
-}
-
-static inline Datum autoinc2datum(ConstrAutoInc *cons_autoinc, int128 autoinc)
-{
-    if (cons_autoinc->autoinc2datum_func != NULL) {
-        return DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->autoinc2datum_func, Int128GetDatum(autoinc));
-    }
-    return Int128GetDatum(autoinc);
-}
-
 static Tuple autoinc_modify_tuple(TupleDesc desc, EState* estate, TupleTableSlot* slot, Tuple tuple, int128 autoinc)
 {
     uint32 natts = (uint32)desc->natts;
@@ -1512,7 +1503,7 @@ Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tupl
 
     if (is_null) {
         autoinc = 0;
-        modify_tuple = rel->rd_att->attrs[attnum - 1]->attnotnull;
+        modify_tuple = rel->rd_att->attrs[attnum - 1].attnotnull;
     } else {
         autoinc = datum2autoinc(cons_autoinc, datum);
         modify_tuple = (autoinc == 0);
@@ -1734,6 +1725,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
                 estate->es_query_cxt,
                 indexRelation,
                 indexpartitionid,
+                INVALID_PARTITION_NO,
                 actualIndex,
                 indexpartition,
                 RowExclusiveLock);
@@ -1917,6 +1909,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                 estate->es_query_cxt,
                 indexRelation,
                 indexpartitionid,
+                INVALID_PARTITION_NO,
                 actualindex,
                 indexpartition,
                 RowExclusiveLock);
@@ -2138,7 +2131,7 @@ bool check_violation(Relation heap, Relation index, IndexInfo *indexInfo, ItemPo
      * to this slot.  Be sure to save and restore caller's value for
      * scantuple.
      */
-    existing_slot = MakeSingleTupleTableSlot(RelationGetDescr(heap), false, heap->rd_tam_type);
+    existing_slot = MakeSingleTupleTableSlot(RelationGetDescr(heap), false, heap->rd_tam_ops);
     econtext = GetPerTupleExprContext(estate);
     save_scantuple = econtext->ecxt_scantuple;
     econtext->ecxt_scantuple = existing_slot;
@@ -2723,7 +2716,7 @@ Datum GetTypeZeroValue(Form_pg_attribute att_tup)
             Type targetType = typeidType(att_tup->atttypid);
             result = stringTypeDatum(targetType, "", att_tup->atttypmod, true);
             ReleaseSysCache(targetType);
-            break;            
+            break;
         }
         default: {
             bool typeIsVarlena = (!att_tup->attbyval) && (att_tup->attlen == -1);
@@ -2760,8 +2753,8 @@ Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
 
     int attrChk;
     for (attrChk = 1; attrChk <= natts; attrChk++) {
-        if (tupleDesc->attrs[attrChk - 1]->attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
-            values[attrChk - 1] = GetTypeZeroValue(tupleDesc->attrs[attrChk - 1]);
+        if (tupleDesc->attrs[attrChk - 1].attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
+            values[attrChk - 1] = GetTypeZeroValue(&tupleDesc->attrs[attrChk - 1]);
             replaces[attrChk - 1] = true;
         }
     }

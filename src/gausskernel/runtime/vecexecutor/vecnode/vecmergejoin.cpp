@@ -1873,7 +1873,7 @@ VecMergeJoinState* ExecInitVecMergeJoin(VecMergeJoin* node, EState* estate, int 
      * result table tuple slot for merge join contains virtual tuple, so the
      * default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&mergestate->js.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&mergestate->js.ps);
 
     PlanState* planstate = &mergestate->js.ps;
 

@@ -127,7 +127,7 @@ static int   	yylex_outparam(char** fieldnames,
                                bool overload = false);
 
 static bool is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNameList = NULL);
-static bool is_unreservedkeywordfunction(ScanKeyword* keyword, bool no_parenthesis, const char *name);
+static bool is_unreservedkeywordfunction(int kwnum, bool no_parenthesis, const char *name);
 static bool is_paren_friendly_datatype(TypeName *name);
 static void 	plpgsql_parser_funcname(const char *s, char **output,
                                         int numidents);
@@ -181,7 +181,7 @@ static	char			*NameOfDatum(PLwdatum *wdatum);
 static  char                    *CopyNameOfDatum(PLwdatum *wdatum);
 static	void			 check_assignable(PLpgSQL_datum *datum, int location);
 static	bool			 read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row,
-                                          bool *strict, bool bulk_collect);
+                                          bool *strict, int firsttoken, bool bulk_collect);
 static	PLpgSQL_row		*read_into_scalar_list(char *initial_name,
                                                PLpgSQL_datum *initial_datum,
                                                int initial_dno,
@@ -334,6 +334,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
         PLpgSQL_diag_item		*diagitem;
         PLpgSQL_stmt_fetch		*fetch;
         PLpgSQL_case_when		*casewhen;
+        PLpgSQL_declare_handler declare_handler_type;
         PLpgSQL_rec_attr	*recattr;
         Node                            *plnode;
         DefElem             *def;
@@ -378,10 +379,11 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <stmt>	stmt_commit stmt_rollback stmt_savepoint
 %type <stmt>	stmt_case stmt_foreach_a
 
-%type <list>	proc_exceptions
-%type <exception_block> exception_sect
-%type <exception>	proc_exception
-%type <condition>	proc_conditions proc_condition
+%type <list>	proc_exceptions declare_stmts
+%type <exception_block> exception_sect declare_sect_b
+%type <exception>	proc_exception declare_stmt 
+%type <condition>	proc_conditions proc_condition cond_list cond_element
+%type <declare_handler_type>    handler_type
 
 %type <casewhen>	case_when
 %type <list>	case_when_list opt_case_else
@@ -446,6 +448,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token				T_CURSOR_ROWCOUNT
 %token				T_DECLARE_CURSOR
 %token				T_DECLARE_CONDITION
+%token				T_DECLARE_HANDLER
 
 /*
  * Keyword tokens.  Some of these are reserved and some are not;
@@ -499,10 +502,12 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_FORALL
 %token <keyword>	K_FOREACH
 %token <keyword>	K_FORWARD
+%token <keyword>	K_FOUND
 %token <keyword>	K_FROM
 %token <keyword>	K_FUNCTION
 %token <keyword>	K_GET
 %token <keyword>	K_GOTO
+%token <keyword>	K_HANDLER
 %token <keyword>	K_HINT
 %token <keyword>	K_IF
 %token <keyword>	K_IMMEDIATE
@@ -564,7 +569,9 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_SELECT
 %token <keyword>	K_SCROLL
 %token <keyword>	K_SLICE
+%token <keyword>	K_SQLEXCEPTION
 %token <keyword>	K_SQLSTATE
+%token <keyword>	K_SQLWARNING
 %token <keyword>	K_STACKED
 %token <keyword>	K_STRICT
 %token <keyword>	K_SYS_REFCURSOR
@@ -668,7 +675,7 @@ opt_semi		:
                 | ';'
                 ;
 
-pl_block		: decl_sect K_BEGIN declare_sect proc_sect exception_sect K_END opt_label
+pl_block		: decl_sect K_BEGIN declare_sect_b proc_sect exception_sect K_END opt_label
                     {
                         PLpgSQL_stmt_block *newp;
 
@@ -682,7 +689,21 @@ pl_block		: decl_sect K_BEGIN declare_sect proc_sect exception_sect K_END opt_la
                         newp->n_initvars = $1.n_initvars;
                         newp->initvarnos = $1.initvarnos;
                         newp->body		= $4;
-                        newp->exceptions	= $5;
+                        if ($3 != NULL) {
+                            if ($5 != NULL) {
+                                const char* message = "declare handler and exception cannot be used at the same time";
+                                InsertErrorMessage(message, plpgsql_yylloc);
+                                ereport(errstate,
+                                        (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                        errmsg("declare handler and exception cannot be used at the same time")));
+                            } else {
+                                newp->exceptions	= $3;
+                                newp->isDeclareHandlerStmt  = true;
+                            }
+                        } else {
+                            newp->exceptions	= $5;
+                            newp->isDeclareHandlerStmt  = false;
+                        }
 
                         check_labels($1.label, $7, @7);
                         plpgsql_ns_pop();
@@ -694,23 +715,42 @@ pl_block		: decl_sect K_BEGIN declare_sect proc_sect exception_sect K_END opt_la
                     }
                 ;
 
-declare_sect    : 
-                        {
-                            /* done with decls, so resume identifier lookup */
-                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+declare_sect_b  :
+                    {
+                        /* done with decls, so resume identifier lookup */
+                        u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                        $$ = NULL; 
+                    }
+                | declare_stmts
+                    {
+                        /* done with decls, so resume identifier lookup */
+                        u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                        if ($1 == NULL) {
+                            $$ = NULL;
+                        } else {
+                            PLpgSQL_exception_block *newp = (PLpgSQL_exception_block *)palloc(sizeof(PLpgSQL_exception_block));
+                            newp->exc_list = $1;
+
+                            $$ = newp;
                         }
-                    | { SetErrorState(); 
-                        u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_DECLARE;
-                    } declare_stmts
-                        {
-                            /* done with decls, so resume identifier lookup */
-                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
-                            u_sess->plsql_cxt.pragma_autonomous = false;
-                        }
-                    ;
+                    }
+                ;
 
 declare_stmts   : declare_stmts declare_stmt
+                    {
+                        if ($2 == NULL)
+                            $$ = $1;
+                        else
+                            $$ = lappend($1, $2);
+                    }
                 | declare_stmt
+                    {
+                        if ($1 == NULL) {
+                            $$ = NULL;
+                        } else {
+                            $$ = list_make1($1);
+                        }
+                    }
                 ;
 
 declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable 
@@ -748,6 +788,7 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                             InvalidOid : createCompositeTypeForCursor(newp, $8);
                         pfree_ext($2->name);
                         pfree($2);
+                        $$ = NULL;
                     }
                 | T_DECLARE_CONDITION decl_varname K_CONDITION K_FOR condition_value ';'
                     {
@@ -767,11 +808,57 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                         var->customCondition = $5;
                         pfree_ext($2->name);
                         pfree($2);
+                        $$ = NULL;
+                    }
+                | T_DECLARE_HANDLER handler_type K_HANDLER K_FOR cond_list proc_stmt
+                    {
+                        int tok = -1;
+                        plpgsql_peek(&tok);
+                        if (tok != K_DECLARE) {
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                        }
+                        PLpgSQL_exception *newp;
+
+                        newp = (PLpgSQL_exception *)palloc0(sizeof(PLpgSQL_exception));
+                        newp->lineno     = plpgsql_location_to_lineno(@1);
+                        newp->handler_type = $2;
+                        newp->conditions = $5;
+                        newp->action	 = list_make1($6);
+
+                        $$ = newp;
                     }
                 ;
 
-condition_value	: K_SQLSTATE
+handler_type	: K_EXIT
+                    { $$ = PLpgSQL_declare_handler::DECLARE_HANDLER_EXIT; }
+                | K_CONTINUE
+                    { $$ = PLpgSQL_declare_handler::DECLARE_HANDLER_CONTINUE; }
+                ;
+cond_list		: cond_list ',' cond_element
                     {
+                        PLpgSQL_condition	*old;
+
+                        for (old = $1; old->next != NULL; old = old->next)
+                                /* skip */ ;
+                        old->next = $3;
+                        $$ = $1;
+                    }
+                | cond_element
+                    {
+                        $$ = $1;
+                    }
+                ;
+
+cond_element	: any_identifier
+                    {
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        $$ = plpgsql_parse_err_condition_b($1);
+                    }
+                | K_SQLSTATE
+                    {
+                        PLpgSQL_condition *newp;
+                        newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
+                        /* next token should be a string literal */
                         char   *sqlstatestr;
                         yylex();
                         if (strcmp(yylval.str, "value") ==0) {
@@ -791,12 +878,75 @@ condition_value	: K_SQLSTATE
                                         errmsg("bad SQLSTATE '%s'",sqlstatestr)));
                         }
 
-                        $$ = MAKE_SQLSTATE(sqlstatestr[0],
-                                          sqlstatestr[1],
-                                          sqlstatestr[2],
-                                          sqlstatestr[3],
-                                          sqlstatestr[4]);
+                        newp->sqlerrstate = MAKE_SQLSTATE(sqlstatestr[0],
+                                                          sqlstatestr[1],
+                                                          sqlstatestr[2],
+                                                          sqlstatestr[3],
+                                                          sqlstatestr[4]);
+                        newp->condname = sqlstatestr;
+                        newp->next = NULL;
+                        $$ = newp;
+                    }
+                | K_SQLWARNING
+                    {
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        $$ = plpgsql_parse_err_condition_b("k_sqlwarning");
+                    }
+                | K_NOT K_FOUND
+                    {
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        $$ = plpgsql_parse_err_condition_b("not_found");
+                    }
+                | K_SQLEXCEPTION
+                    {
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        $$ = plpgsql_parse_err_condition_b("k_sqlexception");
+                    }
+                | ICONST
+                    {
+                        if ($1 == 0){
+                            const char* message = "Incorrect CONDITION value: '0'";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                                        errmsg("Incorrect CONDITION value: '0'")));
+                        }
+                        int num = $1;
+                        char sqlstatestr[5] = {};
+                        for (int i= 4; i >= 0; i--) {
+                            sqlstatestr[i] = num % 10 + '0';
+                            num /= 10;
+                        }
+                        if (num != 0) {
+                            $$ = NULL;
+                        }
 
+                        if ($1 > 3) {
+                            PLpgSQL_condition *newp;
+                            newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
+                            newp->sqlerrstate = MAKE_SQLSTATE(sqlstatestr[0],
+                                              sqlstatestr[1],
+                                              sqlstatestr[2],
+                                              sqlstatestr[3],
+                                              sqlstatestr[4]);
+                            newp->condname = NULL;
+                            newp->next = NULL;
+                            $$ = newp;
+                        } else {
+                            $$ = NULL;
+                        }
+                    }
+                ;
+
+
+condition_value	: K_SQLSTATE
+                    {
+                        /* next token should be a string literal */
+                        char   *sqlstatestr;
+                        yylex();
+                        if (strcmp(yylval.str, "value") ==0) {
+                            yylex();
+                        }
                         sqlstatestr = yylval.str;
                         
                         if (strlen(sqlstatestr) != 5)
@@ -811,11 +961,11 @@ condition_value	: K_SQLSTATE
                                         errmsg("bad SQLSTATE '%s'",sqlstatestr)));
                         }
 
-                        $$ = MAKE_SQLSTATE(sqlstatestr[0],
-                                          sqlstatestr[1],
-                                          sqlstatestr[2],
-                                          sqlstatestr[3],
-                                          sqlstatestr[4]);
+                        $$ =  MAKE_SQLSTATE(sqlstatestr[0],
+                                            sqlstatestr[1],
+                                            sqlstatestr[2],
+                                            sqlstatestr[3],
+                                            sqlstatestr[4]);
                     }
                 | ICONST
                     {
@@ -993,8 +1143,16 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             {
                                 if (var->dtype == PLPGSQL_DTYPE_VAR)
                                     ((PLpgSQL_var *) var)->default_val = $6;
-                                else {
+                                else if (var->dtype == PLPGSQL_DTYPE_ROW || var->dtype == PLPGSQL_DTYPE_RECORD) {
                                     ((PLpgSQL_row *) var)->default_val = $6;
+                                } 
+                                else {
+                                    const char* message = "default value for rec variable is not supported";
+                                    InsertErrorMessage(message, plpgsql_yylloc);
+                                    ereport(errstate,
+                                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                            errmsg("default value for rec variable is not supported"),
+                                            parser_errposition(@5)));
                                 }
                             }
                             }
@@ -3356,11 +3514,17 @@ for_control		: for_variable K_IN
                             newp->argquery = read_cursor_args(cursor,
                                                              K_LOOP,
                                                              "LOOP");
+                            TupleDesc tupleDesc = NULL;
+                            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK &&
+                                cursor->cursor_explicit_expr->query != NULL) {
+                                tupleDesc = getCursorTupleDesc(cursor->cursor_explicit_expr, false);
+                            }
 
                             /* create loop's private RECORD variable */
                             newp->rec = plpgsql_build_record($1.name,
                                                             $1.lineno,
-                                                            true);
+                                                            true,
+                                                            tupleDesc);
 
                             $$ = (PLpgSQL_stmt *) newp;
                         }
@@ -4896,7 +5060,7 @@ stmt_dynexecute : K_EXECUTE
                             if (newp->into)			/* multiple INTO */
                                 yyerror("syntax error");
                             newp->into = true;
-                            read_into_target(&newp->rec, &newp->row, &newp->strict, false);
+                            (void)read_into_target(&newp->rec, &newp->row, &newp->strict, K_EXECUTE, false);
                             endtoken = yylex();
                         }
                         /* If we found "USING", collect the argument */
@@ -5045,7 +5209,7 @@ stmt_fetch		: K_FETCH opt_fetch_direction cursor_variable K_INTO
                         PLpgSQL_row	   *row;
 
                         /* We have already parsed everything through the INTO keyword */
-                        read_into_target(&rec, &row, NULL, false);
+                        (void)read_into_target(&rec, &row, NULL, -1, false);
 
                         if (yylex() != ';')
                             yyerror("syntax error");
@@ -5144,7 +5308,7 @@ fetch_into_target :
                         PLpgSQL_datum *datum = NULL;
                         PLpgSQL_rec *rec;
                         PLpgSQL_row *row;
-                        read_into_target(&rec, &row, NULL, true);
+                        (void)read_into_target(&rec, &row, NULL, -1, true);
 
                         if (rec != NULL) {
                             datum = (PLpgSQL_datum *)rec;
@@ -6891,7 +7055,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         PLpgSQL_execstate *estate = (PLpgSQL_execstate*)palloc(sizeof(PLpgSQL_execstate));
         expr->func = (PLpgSQL_function *) palloc0(sizeof(PLpgSQL_function));
         function = expr->func;
-        function->fn_is_trigger = false;
+        function->fn_is_trigger = PLPGSQL_NOT_TRIGGER;
         function->fn_input_collation = InvalidOid;
         function->out_param_varno = -1;		/* set up for no OUT param */
         function->resolve_option = GetResolveOption();
@@ -7187,9 +7351,9 @@ is_unreserved_keyword_func(const char *name)
  * Notes                : 
  */
 static bool
-is_unreservedkeywordfunction(ScanKeyword* keyword, bool no_parenthesis, const char *name)
+is_unreservedkeywordfunction(int kwnum, bool no_parenthesis, const char *name)
 {
-    if (keyword && no_parenthesis && UNRESERVED_KEYWORD == keyword->category && !is_unreserved_keyword_func(name))
+    if (kwnum >= 0 && no_parenthesis && ScanKeywordCategories[kwnum] == UNRESERVED_KEYWORD && !is_unreserved_keyword_func(name))
         return false;
     else
         return true;
@@ -7207,7 +7371,6 @@ is_unreservedkeywordfunction(ScanKeyword* keyword, bool no_parenthesis, const ch
 static bool 
 is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNameList)
 {
-    ScanKeyword * keyword = NULL;
     List *funcname = NIL;
     FuncCandidateList clist = NULL;
     bool have_outargs = false;
@@ -7242,12 +7405,12 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
             pg_strcasecmp("ts_debug", cp[0]) == 0)
             return false;
 
-        keyword = (ScanKeyword *)ScanKeywordLookup(cp[0], ScanKeywords, NumScanKeywords);
+        int kwnum = ScanKeywordLookup(cp[0], &ScanKeywords);
         /* function name can not be reserved keyword */
-        if (keyword && RESERVED_KEYWORD == keyword->category)
+        if (kwnum >= 0 && ScanKeywordCategories[kwnum] == RESERVED_KEYWORD)
             return false;
         /* function name can not be unreserved keyword when no-parenthesis function is called. except log function*/
-        if (!is_unreservedkeywordfunction(keyword, no_parenthesis, cp[0]))
+        if (!is_unreservedkeywordfunction(kwnum, no_parenthesis, cp[0]))
 	{
             return false;
         }
@@ -9225,7 +9388,7 @@ make_execsql_stmt(int firsttoken, int location)
                 into_start_loc = yylloc;
             }
             u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
-	    is_user_var = read_into_target(&rec, &row, &have_strict, have_bulk_collect);
+            is_user_var = read_into_target(&rec, &row, &have_strict, firsttoken, have_bulk_collect);
             if (is_user_var) {
                 u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = save_IdentifierLookup;
                 have_into = false;
@@ -9606,7 +9769,7 @@ make_execsql_stmt(int firsttoken, int location)
         } else {
             int nattr = rec_data->tupdesc->natts;
             for (int i = 0; i < nattr; i++) {
-               Form_pg_attribute pg_att_form = rec_data->tupdesc->attrs[i];
+               Form_pg_attribute pg_att_form = TupleDescAttr(rec_data->tupdesc, i);
                appendStringInfo(&ds, "%s.%s", rec_data->refname, NameStr(pg_att_form->attname));
                if (i != (nattr - 1)) {
                    appendStringInfoString(&ds, ",");
@@ -10438,7 +10601,7 @@ static AttrNumber get_assign_attrno(PLpgSQL_datum* target,  char* attrname)
 
 	/* search the matched attribute */
     for (int i = 0; i < elemtupledesc->natts; i++) {
-        if (namestrcmp(&(elemtupledesc->attrs[i]->attname), attrname) == 0) {
+        if (namestrcmp(&(elemtupledesc->attrs[i].attname), attrname) == 0) {
             attrno = i;
             break;
         }
@@ -10607,17 +10770,26 @@ read_into_using_add_tableelem(char **fieldnames, int *varnos, int *nfields, int 
  * INTO keyword. If it is into_user_defined_variable_list_clause return true.
  */
 static bool
-read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, bool bulk_collect)
+read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, int firsttoken, bool bulk_collect)
 {
     int			tok;
 
     /* Set default results */
     *rec = NULL;
     *row = NULL;
+    if (strict) {
+        if (DB_IS_CMPT(PG_FORMAT | B_FORMAT) && firsttoken == K_SELECT && SELECT_INTO_RETURN_NULL) {
+            *strict = false;
+        } else {
+            *strict = true;
+        }
+    }
+#ifdef ENABLE_MULTIPLE_NODES
     if (strict)
         *strict = true;
+#endif
     tok = yylex();
-    if (tok == SET_USER_IDENT) {
+    if (tok == '@' || tok == SET_USER_IDENT) {
         return true;
     }
     if (strict && tok == K_STRICT)
@@ -11594,9 +11766,9 @@ static bool checkDuplicateAttrName(TupleDesc tupleDesc)
 {
     int attrnum = tupleDesc->natts;
     for (int i = 0; i < attrnum; i++) {
-        Form_pg_attribute attr1 = tupleDesc->attrs[i];
+        Form_pg_attribute attr1 = &tupleDesc->attrs[i];
         for (int j = i + 1; j < attrnum; j++) {
-            Form_pg_attribute attr2 = tupleDesc->attrs[j];
+            Form_pg_attribute attr2 = &tupleDesc->attrs[j];
             if (strcmp(NameStr(attr1->attname), NameStr(attr2->attname)) == 0) {
                 return true;
             }
@@ -11609,7 +11781,7 @@ static bool checkAllAttrName(TupleDesc tupleDesc)
 {
     int attrnum = tupleDesc->natts;
     for (int i = 0; i < attrnum; i++) {
-        Form_pg_attribute pg_att_form = tupleDesc->attrs[i];
+        Form_pg_attribute pg_att_form = &tupleDesc->attrs[i];
         char* att_name = NameStr(pg_att_form->attname);
         if (strcmp(att_name, "?column?") != 0) {
             return false;
@@ -11654,7 +11826,7 @@ static Oid createCompositeTypeForCursor(PLpgSQL_var* var, PLpgSQL_expr* expr)
         int attrnum = tupleDesc->natts;
         for (int i = 0; i < attrnum; i++) {
             ColumnDef *n = makeNode(ColumnDef);
-            Form_pg_attribute attr = tupleDesc->attrs[i];
+            Form_pg_attribute attr = &tupleDesc->attrs[i];
             n->colname = pstrdup(NameStr(attr->attname));
             n->typname = makeTypeNameFromOid(attr->atttypid, attr->atttypmod);
             n->inhcount = 0;
@@ -11931,6 +12103,8 @@ static Oid plpgsql_build_package_record_type(const char* typname, List* list, bo
 static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid, char arraytype)
 {
     char typtyp;
+    ObjectAddress myself, referenced;
+
     char* casttypename = CastPackageTypeName(typname, u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid, true,
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->is_spec_compiling);
     if (strlen(casttypename) >= NAMEDATALEN ) {
@@ -11978,7 +12152,7 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
         ownerId = GetUserId();
     }
 
-    Oid typoid = TypeCreate(InvalidOid, /* force the type's OID to this */
+    referenced = TypeCreate(InvalidOid, /* force the type's OID to this */
         casttypename,               /* Array type name */
         pkgNamespaceOid,               /* Same namespace as parent */
         InvalidOid,                 /* Not composite, no relationOid */
@@ -12013,13 +12187,9 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
     CommandCounterIncrement();
 
     /* build dependency on created composite type. */
-    ObjectAddress myself, referenced;
     myself.classId = PackageRelationId;
     myself.objectId = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
     myself.objectSubId = 0;
-    referenced.classId = TypeRelationId;
-    referenced.objectId = typoid;
-    referenced.objectSubId = 0;
     recordDependencyOn(&referenced, &myself, DEPENDENCY_AUTO);
     CommandCounterIncrement();
     pfree_ext(casttypename);

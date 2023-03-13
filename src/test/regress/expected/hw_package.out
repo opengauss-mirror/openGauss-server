@@ -2751,6 +2751,8 @@ begin
 end;
 end pck3;
 /
+create user package_user password 'gauss@123';
+alter package pck3 owner to package_user;
 drop package pck1;
 NOTICE:  drop cascades to function pkgsch059.f1(integer,test_tb)
 drop package pck2;
@@ -2779,3 +2781,4 @@ drop cascades to function pkgsch059.func059_2(integer)
 drop cascades to function package_func_overload(integer)
 drop cascades to table test_tb
 drop cascades to function f_1(character varying)
+drop user package_user;

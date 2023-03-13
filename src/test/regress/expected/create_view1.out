@@ -70,6 +70,25 @@ ERROR:  cannot change data type of view column "b" from integer to numeric
 -- should work
 CREATE OR REPLACE VIEW viewtest AS
 	SELECT a, b, 0 AS c FROM viewtest_tbl;
+DROP SCHEMA IF EXISTS test_schema CASCADE;
+NOTICE:  schema "test_schema" does not exist, skipping
+CREATE SCHEMA test_schema;
+CREATE OPERATOR test_schema.-(rightarg = int1, procedure = int1um);
+CREATE OPERATOR test_schema.~(leftarg = int1, procedure = int1up);
+set current_schema to 'test_schema';
+CREATE VIEW test as select -(1::tinyint) as "arg1", (1::tinyint)~ as "arg2";
+SELECT * FROM test;
+ arg1 | arg2 
+------+------
+   -1 | 1
+(1 row)
+
+RESET current_schema;
+DROP SCHEMA IF EXISTS test_schema CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to operator test_schema.-(NONE,tinyint)
+drop cascades to operator test_schema.~(tinyint,NONE)
+drop cascades to view test_schema.test
 -- test error message
 DROP TABLE viewtest;
 ERROR:  "viewtest" is not a table

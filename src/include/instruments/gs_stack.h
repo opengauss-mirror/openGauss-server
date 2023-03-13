@@ -36,6 +36,7 @@ extern void print_stack(SIGNAL_ARGS);
 void InitGsStack();
 void get_stack_and_write_result();
 void check_and_process_gs_stack();
+void get_stack_according_to_tid(ThreadId tid, StringInfoData* call_stack);
 NON_EXEC_STATIC void stack_perf_main();
 #endif
 

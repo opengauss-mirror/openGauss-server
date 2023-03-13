@@ -194,7 +194,7 @@ VecResultState* ExecInitVecResult(VecResult* node, EState* estate, int eflags)
      * no relations are involved in nodeResult, set the default
      * tableAm type to HEAP
      */
-    ExecAssignResultTypeFromTL(&res_state->ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&res_state->ps);
     res_state->ps.ps_ProjInfo = ExecBuildVecProjectionInfo(
         res_state->ps.targetlist, node->plan.qual, res_state->ps.ps_ExprContext, res_state->ps.ps_ResultTupleSlot, NULL);
 

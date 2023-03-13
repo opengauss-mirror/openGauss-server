@@ -357,11 +357,11 @@ MaterialState* ExecInitMaterial(Material* node, EState* estate, int eflags)
 
     ExecAssignResultTypeFromTL(
             &mat_state->ss.ps,
-            mat_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            mat_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     mat_state->ss.ps.ps_ProjInfo = NULL;
 
-    Assert(mat_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(mat_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * Lastly, if this Material node is under subplan and used for materializing

@@ -178,6 +178,10 @@ typedef struct knl_u_executor_context {
     bool isExecTrunc;
 
     bool isLockRows;
+    /* add event trigger cache and memconext */
+    HTAB *EventTriggerCache;
+    MemoryContext EventTriggerCacheContext;
+    void *EventTriggerState; 
 
     bool isFlashBack;
 } knl_u_executor_context;
@@ -536,6 +540,7 @@ typedef struct knl_u_utils_context {
 
     int GUCNestLevel; /* 1 when in main transaction */
 
+    unsigned int b_format_behavior_compat_flags;
     unsigned int behavior_compat_flags;
     unsigned int plsql_compile_behavior_compat_flags;
 
@@ -660,6 +665,13 @@ typedef struct knl_u_utils_context {
 #endif
 
     bool enable_memory_context_control;
+
+    /* printtup output buffer instead of functioncall */
+    char* int4output_buffer;
+    char* int8output_buffer;
+    char* int16output_buffer;
+    char* varcharoutput_buffer;
+    char* numericoutput_buffer;
 
     syscalllock deleMemContextMutex;
 
@@ -996,6 +1008,7 @@ typedef struct knl_u_plancache_context {
      * exploration.
      */
     void *explored_plan_info;
+    bool is_plan_exploration;
     HTAB *generic_roots;
 } knl_u_plancache_context;
 
@@ -1191,10 +1204,14 @@ typedef struct knl_u_proc_context {
     bool clientIsGsroach;         /* gs_roach tool check flag */
     bool clientIsGsRestore;       /* gs_restore tool check flag */
     bool clientIsSubscription;    /* subscription client check flag */
+    bool clientIsCMAgent;         /* CM agent check flag */
     bool IsBinaryUpgrade;
     bool IsWLMWhiteList;          /* this proc will not be controled by WLM */
     bool gsRewindAddCount;
     bool PassConnLimit;
+    bool clientIsGsql;            /* gsql tool check flag */
+    /* We allow gsql to copy snapshot from other threads, but set a limit number */
+    int gsqlRemainCopyNum;
 
     char applicationName[NAMEDATALEN];        /* receive application name in ProcessStartupPacket */
 
@@ -1643,6 +1660,7 @@ typedef struct knl_u_plpgsql_context {
     bool pragma_autonomous; /* save autonomous flag */
     char* debug_query_string;
     bool is_insert_gs_source; /* is doing insert gs_source? */
+    bool b_warning_handler;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
@@ -1848,7 +1866,7 @@ typedef struct knl_u_storage_context {
     /* Pointers to shared state */
     // struct BufferStrategyControl* StrategyControl;
     int NLocBuffer; /* until buffers are initialized */
-    struct BufferDesc* LocalBufferDescriptors;
+    union BufferDescPadded* LocalBufferDescriptors;
     Block* LocalBufferBlockPointers;
     int32* LocalRefCount;
     int nextFreeLocalBuf;
@@ -1858,6 +1876,8 @@ typedef struct knl_u_storage_context {
     int num_bufs_in_block;
     int total_bufs_allocated;
     MemoryContext LocalBufferContext;
+    List *partition_dml_oids; /* list of partitioned table's oid which is on dml operations */
+    List *partition_ddl_oids; /* list of partitioned table's oid which is on ddl operations */
 } knl_u_storage_context;
 
 
@@ -2714,6 +2734,9 @@ typedef struct knl_u_hook_context {
     void *aggIsSupportedHook;
     void *searchFuncHook;
     void *plannerHook;
+    void *pluginSearchCatHook;
+    void *pluginCCHashEqFuncs;
+    void *plpgsqlParserSetHook;
 } knl_u_hook_context;
 /* PBE message flag */
 typedef enum {

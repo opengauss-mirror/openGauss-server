@@ -250,4 +250,28 @@ partition  p81  values  (	81	),
 partition  p82  values  (	82	)
 );
 drop table test_list;
+
+create table test_listkey_datatype
+(
+col_2   INT2,
+col_3   INT4,
+col_4   INT4,
+col_5   INT4,
+col_6   INT4,
+col_32   NUMERIC,
+col_33   VARCHAR(10),
+col_34   CHAR,
+col_35   BPCHAR,
+col_36  TIMESTAMP WITHOUT TIME ZONE,
+col_37  DATE
+) partition by list(col_5,col_4,col_6,col_37)
+(
+    partition p1 values ((2,1,2,'2022-02-03'),(6,3,6,'2022-02-07')), 
+    partition p2 values ((5,4,5,'2022-02-08')),
+    partition p3 values ((7,6,7,'2022-02-09')),
+    partition p7 values (default) 
+);
+insert into test_listkey_datatype(col_5,col_4,col_6,col_37) values(6,3,6,'2022-02-07');
+select col_5 from test_listkey_datatype partition (p1);
+drop table test_listkey_datatype;
 drop schema FVT_COMPRESS_QWER cascade;

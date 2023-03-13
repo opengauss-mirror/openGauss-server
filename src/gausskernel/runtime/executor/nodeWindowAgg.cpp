@@ -628,7 +628,7 @@ static void spool_tuples(WindowAggState* winstate, int64 pos)
         if (node->partNumCols > 0) {
             /* Check if this tuple still belongs to the current partition */
             if (!execTuplesMatch(winstate->first_part_slot, outer_slot, node->partNumCols, node->partColIdx,
-                winstate->partEqfunctions, winstate->tmpcontext->ecxt_per_tuple_memory)) {
+                winstate->partEqfunctions, winstate->tmpcontext->ecxt_per_tuple_memory, node->ord_collations)) {
                 /*
                  * end of partition; copy the tuple for the next cycle.
                  */
@@ -1231,7 +1231,7 @@ WindowAggState* ExecInitWindowAgg(WindowAgg* node, EState* estate, int eflags)
      * Initialize result tuple type and projection info.
      * result Tuple Table Slot contains virtual tuple, default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&winstate->ss.ps, TAM_HEAP);
+    ExecAssignResultTypeFromTL(&winstate->ss.ps);
 
     ExecAssignProjectionInfo(&winstate->ss.ps, NULL);
 
@@ -1591,7 +1591,8 @@ static bool are_peers(WindowAggState* winstate, TupleTableSlot* slot1, TupleTabl
         node->ordNumCols,
         node->ordColIdx,
         winstate->ordEqfunctions,
-        winstate->tmpcontext->ecxt_per_tuple_memory);
+        winstate->tmpcontext->ecxt_per_tuple_memory,
+        node->ord_collations);
 }
 
 /*

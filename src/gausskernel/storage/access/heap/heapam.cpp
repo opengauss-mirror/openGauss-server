@@ -383,6 +383,11 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write
             HeapTupleData loctup;
             bool valid = false;
 
+            if (likely(all_visible && (!IsSerializableXact()))) {
+                scan->rs_base.rs_vistuples[ntup++] = line_off;
+                continue;
+            }
+
             loctup.t_tableOid = RelationGetRelid(scan->rs_base.rs_rd);
             loctup.t_bucketId = RelationGetBktid(scan->rs_base.rs_rd);
             loctup.t_data = (HeapTupleHeader)PageGetItem((Page)dp, lpp);
@@ -1374,9 +1379,9 @@ Datum fastgetattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool* isnull)
 
     *isnull = false;
     if (HeapTupleNoNulls(tup)) {
-        if (tupleDesc->attrs[attnum - 1]->attcacheoff >= 0) {
-            return fetchatt(tupleDesc->attrs[attnum - 1],
-                (char *)tup->t_data + tup->t_data->t_hoff + tupleDesc->attrs[attnum - 1]->attcacheoff);
+        if (tupleDesc->attrs[attnum - 1].attcacheoff >= 0) {
+            return fetchatt(&tupleDesc->attrs[attnum - 1],
+                (char *)tup->t_data + tup->t_data->t_hoff + tupleDesc->attrs[attnum - 1].attcacheoff);
         }
         return nocachegetattr(tup, attnum, tupleDesc);
     } else {
@@ -4129,7 +4134,7 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
             /* try to insert tuple into mlog-table. */
             if (relation != NULL && relation->rd_mlogoid != InvalidOid) {
                 /* judge whether need to insert into mlog-table */
-                if (relation->rd_tam_type == TAM_USTORE) {
+                if (relation->rd_tam_ops == TableAmUstore) {
                     heaptup = UHeapToHeap(relation->rd_att, (UHeapTuple)heaptup);
                 }
                 insert_into_mlog_table(relation, relation->rd_mlogoid,
@@ -5947,7 +5952,7 @@ static bool heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum, HeapTuple tup
         return (DatumGetObjectId(value1) == DatumGetObjectId(value2));
     } else {
         Assert(attrnum <= tupdesc->natts);
-        att = tupdesc->attrs[attrnum - 1];
+        att = &tupdesc->attrs[attrnum - 1];
         return datumIsEqual(value1, value2, att->attbyval, att->attlen);
     }
 }
@@ -9656,7 +9661,10 @@ Partition partitionOpenWithRetry(Relation relation, Oid partition_id, LOCKMODE l
 
     Oid parentid = partid_get_parentid(partition_id);
     if (!OidIsValid(parentid)) {
-        ReportPartitionOpenError(relation, partition_id);
+        ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR),
+                        errmsg("partition %u does not exist on relation \"%s\" when find parent oid with retry mod",
+                               partition_id, RelationGetRelationName(relation)),
+                        errdetail("this partition may have already been dropped")));
     }
 
     if (RelationIsSubPartitioned(relation) && relation->rd_id != parentid) {
@@ -9741,26 +9749,32 @@ Partition partitionOpenWithRetry(Relation relation, Oid partition_id, LOCKMODE l
  *			: on the partiiton already.)
  * Notes		:
  */
-Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, int2 bucket_id)
+Partition partitionOpen(Relation relation, Oid partitionOid, LOCKMODE lockmode, int2 bucket_id)
 {
     Partition p;
 
-    if (!OidIsValid(partition_id)) {
-        ereport(ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("partition %u is invalid", partition_id)));
+    if (!OidIsValid(partitionOid)) {
+        ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR),
+                        errmsg("Partition oid %u is invalid when opening partition", partitionOid),
+                        errdetail("There is a partition may have already been dropped on relation/partition \"%s\"",
+                                  RelationGetRelationName(relation))));
     }
 
     Assert(lockmode >= NoLock && lockmode < MAX_LOCKMODES);
     Assert(PointerIsValid(relation));
     Assert(bucket_id < SegmentBktId);
 
-    Oid parentid = partid_get_parentid(partition_id);
-    if (!OidIsValid(parentid)) {
-        ReportPartitionOpenError(relation, partition_id);
+    Oid parentOid = partid_get_parentid(partitionOid);
+    if (!OidIsValid(parentOid)) {
+        ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR),
+                        errmsg("partition %u does not exist on relation \"%s\" when find parent oid", partitionOid,
+                               RelationGetRelationName(relation)),
+                        errdetail("this partition may have already been dropped")));
     }
 
-    if (RelationIsSubPartitioned(relation) && relation->rd_id != parentid) {
-        /* partition_id is subpartition oid */
-        p = SubPartitionOidGetPartition(relation, partition_id, lockmode);
+    if (RelationIsSubPartitioned(relation) && relation->rd_id != parentOid) {
+        /* partitionOid is subpartition oid */
+        p = SubPartitionOidGetPartition(relation, partitionOid, lockmode);
         Assert(relation->rd_id == partid_get_parentid(p->pd_part->parentid));
         return p;
     }
@@ -9778,27 +9792,27 @@ Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, 
              * assume the partition is in PART_AREA_RANGE, if we support interval partition,
              * we have to find a quick way to find the area it belongs to.
              */
-            LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
+            LockPartition(relation->rd_id, partitionOid, lockmode, PARTITION_LOCK);
         } else if (relation->rd_rel->relkind == RELKIND_INDEX) {
-            LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
+            LockPartition(relation->rd_id, partitionOid, lockmode, PARTITION_LOCK);
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_RELATION_OPEN_ERROR),
                     errmsg("openning partition %u, but relation %s %u is neither table nor index",
-                        partition_id,
+                        partitionOid,
                         RelationGetRelationName(relation),
                         RelationGetRelid(relation))));
         }
     }
 
     /* The partcache does all the real work... */
-    p = PartitionIdGetPartition(partition_id, RelationGetStorageType(relation));
+    p = PartitionIdGetPartition(partitionOid, RelationGetStorageType(relation));
 
     if (!PartitionIsValid(p)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_RELATION_OPEN_ERROR),
-            errmsg("partition %u does not exist", partition_id),
-            errdetail("this partition may have already been dropped")));
+        ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR),
+                        errmsg("partition %u does not exist on relation \"%s\" when get the partcache", partitionOid,
+                               RelationGetRelationName(relation)),
+                        errdetail("this partition may have already been dropped")));
     }
 
     if (p->xmin_csn != InvalidCommitSeqNo && ActiveSnapshotSet()) {
@@ -9806,7 +9820,7 @@ Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, 
         if (p->xmin_csn > snapshot->snapshotcsn) {
             ereport(ERROR,
             (errcode(ERRCODE_SNAPSHOT_INVALID),
-                    errmsg("current snapshot is invalid for this partition : %u.", partition_id)));
+                    errmsg("current snapshot is invalid for this partition : %u.", partitionOid)));
         }
 
     }
@@ -9981,6 +9995,41 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
 #endif
 
     return p;
+}
+
+/*
+ * Search the partition with partitionno retry.
+ * If the partition entry has already been removed by DDL operations, we use partitionno to research the new entry.
+ * Must make sure the partitionno is of the old partition entry, otherwise a wrong entry may be found!
+ * If the partitionno is invalid, this function is degenerated into partitionOpen.
+ */
+Partition PartitionOpenWithPartitionno(Relation relation, Oid partition_id, int partitionno, LOCKMODE lockmode)
+{
+    Partition part = NULL;
+    bool issubpartition = false;
+    char parttype;
+    Oid newpartOid = InvalidOid;
+
+    /* first try open the partition */
+    part = tryPartitionOpen(relation, partition_id, lockmode);
+    if (likely(PartitionIsValid(part))) {
+        return part;
+    }
+
+    if (!PARTITIONNO_IS_VALID(partitionno)) {
+        ReportPartitionOpenError(relation, partition_id);
+    }
+
+    PARTITION_LOG(
+        "partition %u does not exist on relation \"%s\", we will try to use partitionno %d to search the new partition",
+        partition_id, RelationGetRelationName(relation), partitionno);
+
+    /* if not found, search the new partition with partitionno */
+    issubpartition = RelationIsPartitionOfSubPartitionTable(relation);
+    parttype = issubpartition ? PART_OBJ_TYPE_TABLE_SUB_PARTITION : PART_OBJ_TYPE_TABLE_PARTITION;
+    newpartOid = GetPartOidWithPartitionno(RelationGetRelid(relation), partitionno, parttype);
+
+    return partitionOpen(relation, newpartOid, lockmode);
 }
 
 /*

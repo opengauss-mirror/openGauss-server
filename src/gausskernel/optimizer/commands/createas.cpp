@@ -39,6 +39,7 @@
 #include "optimizer/planner.h"
 #include "parser/analyze.h"
 #include "parser/parse_clause.h"
+#include "parser/parse_utilcmd.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/smgr/smgr.h"
 #include "tcop/tcopprot.h"
@@ -55,6 +56,7 @@ typedef struct {
     /* These fields are filled by intorel_startup: */
     Relation rel;            /* relation to write to */
     CommandId output_cid;    /* cmin to insert in output tuples */
+    ObjectAddress reladdr;      /* address of rel, for ExecCreateTableAs */
     int hi_options;          /* heap_insert performance options */
     BulkInsertState bistate; /* bulk insert state */
 } DR_intorel;
@@ -119,7 +121,7 @@ SetupForCreateTableAs(Query *query, IntoClause *into, const char *queryString,
 /*
  * ExecCreateTableAs -- execute a CREATE TABLE AS command
  */
-void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamListInfo params, char* completionTag)
+ObjectAddress ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamListInfo params, char* completionTag)
 {
     Query* query = (Query*)stmt->query;
     IntoClause* into = stmt->into;
@@ -127,7 +129,8 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
     PlannedStmt* plan = NULL;
     QueryDesc* queryDesc = NULL;
     ScanDirection dir;
-
+    ObjectAddress address;
+    
     if (stmt->into->ivm) {
         return ExecCreateMatViewInc(stmt, queryString, params);
     }
@@ -147,7 +150,10 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
 
         ExecuteQuery(estmt, into, queryString, params, dest, completionTag);
 
-        return;
+        /* get object address that intorel_startup saved for us */
+        address = ((DR_intorel *) dest)->reladdr;
+
+        return address;
     }
 
     query = SetupForCreateTableAs(query, into, queryString, params, dest);
@@ -229,6 +235,9 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
         securec_check_ss(rc, "\0", "\0");
     }
 
+    /* get object address that intorel_startup saved for us */
+    address = ((DR_intorel *) dest)->reladdr;
+
     /* and clean up */
     ExecutorFinish(queryDesc);
     ExecutorEnd(queryDesc);
@@ -236,6 +245,7 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
     FreeQueryDesc(queryDesc);
 
     PopActiveSnapshot();
+    return address;
 }
 
 /*
@@ -297,6 +307,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
     IntoClause* into = myState->into;
     CreateStmt* create = NULL;
     Oid intoRelationId;
+    ObjectAddress intoRelationAddr;
     Relation intoRelationDesc;
     RangeTblEntry* rte = NULL;
     Datum toast_options;
@@ -321,6 +332,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
     create->row_compress = into->row_compress;
     create->tablespacename = into->tableSpaceName;
     create->if_not_exists = false;
+    create->charset = PG_INVALID_ENCODING;
 
     /* Using Materialized view only */
     create->ivm = into->ivm;
@@ -333,7 +345,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
      */
     lc = list_head(into->colNames);
     for (attnum = 0; attnum < typeinfo->natts; attnum++) {
-        Form_pg_attribute attribute = typeinfo->attrs[attnum];
+        Form_pg_attribute attribute = &typeinfo->attrs[attnum];
         ColumnDef* col = makeNode(ColumnDef);
         TypeName* coltype = makeNode(TypeName);
 
@@ -368,6 +380,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
         coltype->arrayBounds = NIL;
         coltype->location = -1;
         coltype->pct_rowtype = false;
+        coltype->charset = get_charset_by_collation(attribute->attcollation);
 
         /*
          * It's possible that the column is of a collatable type but the
@@ -410,8 +423,8 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
     /*
      * Actually create the target table
      */
-    intoRelationId = DefineRelation(create, into->relkind, InvalidOid);
-
+    intoRelationAddr = DefineRelation(create, into->relkind, InvalidOid, NULL);
+    intoRelationId = intoRelationAddr.objectId;
     /*
      * If necessary, create a TOAST table for the target table.  Note that
      * AlterTableCreateToastTable ends with CommandCounterIncrement(), so that
@@ -479,7 +492,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
      */
     myState->rel = intoRelationDesc;
     myState->output_cid = GetCurrentCommandId(true);
-
+    myState->reladdr = intoRelationAddr;
     /*
      * We can skip WAL-logging the insertions, unless PITR or streaming
      * replication is in use. We can skip the FSM in any case.

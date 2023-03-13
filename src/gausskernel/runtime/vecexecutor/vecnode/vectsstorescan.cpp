@@ -114,15 +114,19 @@ static void init_tsstore_relation(TsStoreScanState* node, EState* estate)
             resultPlan = plan->pruningInfo;
         }
 
-        ListCell* cell = NULL;
+        ListCell* cell1 = NULL;
+        ListCell* cell2 = NULL;
         List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
+        List* partitionnos = resultPlan->ls_selectedPartitionnos;
+        Assert(list_length(part_seqs) == list_length(partitionnos));
         /* partitions info is initialized */
-        foreach (cell, part_seqs) {
+        forboth (cell1, part_seqs, cell2, partitionnos) {
             Oid tablepartitionid = InvalidOid;
-            int partSeq = lfirst_int(cell);
+            int partSeq = lfirst_int(cell1);
+            int partitionno = lfirst_int(cell2);
 
-            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq, plan->pruningInfo->partMap);
-            part = partitionOpen(currentRelation, tablepartitionid, lockmode);
+            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq, partitionno);
+            part = PartitionOpenWithPartitionno(currentRelation, tablepartitionid, partitionno, lockmode);
             node->partitions = lappend(node->partitions, part);
         }
 
@@ -329,8 +333,8 @@ static void opt_orderby(TsStoreScan* node, TsStoreScanState* scanstate)
     att_target = (TargetEntry*)list_nth(target_list, scanstate->sort_by_time_colidx - 1);
 
     for(int i = 0; i < tuple_desc->natts; i++) {
-        if (IsA(att_target->expr, Var) && tuple_desc->attrs[i]->attkvtype == ATT_KV_TIMETAG &&
-            ((Var*)(att_target->expr))->varattno == tuple_desc->attrs[i]->attnum) {
+        if (IsA(att_target->expr, Var) && tuple_desc->attrs[i].attkvtype == ATT_KV_TIMETAG &&
+            ((Var*)(att_target->expr))->varattno == tuple_desc->attrs[i].attnum) {
             scanstate->early_stop = true;
         }
     }

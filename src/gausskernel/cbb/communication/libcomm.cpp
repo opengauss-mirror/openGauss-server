@@ -1177,7 +1177,7 @@ void gs_r_release_comm_memory()
             cmailbox = &C_MAILBOX(nid, sid);
             LIBCOMM_PTHREAD_MUTEX_LOCK(&cmailbox->sinfo_lock);
 
-            if (cmailbox->buff_q->u_size <= 0) {
+            if (cmailbox->buff_q->u_size == 0) {
                 LIBCOMM_PTHREAD_MUTEX_UNLOCK(&cmailbox->sinfo_lock);
                 continue;
             }

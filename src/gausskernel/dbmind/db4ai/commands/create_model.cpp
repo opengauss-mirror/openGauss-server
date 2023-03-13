@@ -166,10 +166,22 @@ PlannedStmt *plan_create_model(CreateModelStmt *stmt, const char *query_string, 
     query = setup_for_create_model(query, query_string, params);
 #ifndef ENABLE_MULTIPLE_NODES
     AutoDopControl dopControl;
-    dopControl.CloseSmp();
-#endif
+    PG_TRY();
+    {
+        dopControl.CloseSmp();
+        /* plan the query */
+        plan = pg_plan_query(query, 0, params);
+    }
+    PG_CATCH();
+    {
+        dopControl.ResetSmp();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+#else
     /* plan the query */
     plan = pg_plan_query(query, 0, params);
+#endif
     
     // Inject the GradientDescent node at the root of the plan
     DestReceiverTrainModel *dest_train_model = (DestReceiverTrainModel *)dest;

@@ -47,6 +47,8 @@
 #include "utils/syscache.h"
 #include "miscadmin.h"
 #include "tcop/tcopprot.h"
+#include "commands/event_trigger.h"
+
 
 /* functions reference other modules */
 extern THR_LOCAL List* baseSearchPath;
@@ -566,7 +568,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     PLpgSQL_func_hashkey* hashkey, bool for_validator)
 {
     Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
-    bool is_trigger = CALLED_AS_TRIGGER(fcinfo);
+    bool is_dml_trigger = CALLED_AS_TRIGGER(fcinfo);
+    bool is_event_trigger = CALLED_AS_EVENT_TRIGGER(fcinfo);
     Datum proisprivatedatum;
     bool isnull = false;
     HeapTuple type_tup = NULL;
@@ -723,7 +726,6 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     func->fn_oid = fcinfo->flinfo->fn_oid;
     func->fn_xmin = HeapTupleGetRawXmin(proc_tup);
     func->fn_tid = proc_tup->t_self;
-    func->fn_is_trigger = is_trigger;
     func->fn_input_collation = fcinfo->fncollation;
     func->fn_cxt = curr_compile->compile_cxt;
     func->out_param_varno = -1; /* set up for no OUT param */
@@ -736,6 +738,14 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     func->fn_searchpath->addCatalog = true;
     func->fn_searchpath->addTemp = true;
     func->ns_top = curr_compile->ns_top;
+
+    if (is_dml_trigger)
+        func->fn_is_trigger = PLPGSQL_DML_TRIGGER;
+    else if (is_event_trigger)
+        func->fn_is_trigger = PLPGSQL_EVENT_TRIGGER;
+    else
+        func->fn_is_trigger = PLPGSQL_NOT_TRIGGER;
+
     if (proc_struct->pronamespace == PG_CATALOG_NAMESPACE || proc_struct->pronamespace == PG_DB4AI_NAMESPACE) {
         current_searchpath = fetch_search_path(false);
         if (current_searchpath == NIL) {
@@ -823,8 +833,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     Oid base_oid = InvalidOid;
     bool isHaveTableOfIndexArgs = false;
     bool isHaveOutRefCursorArgs = false;
-    switch ((int)is_trigger) {
-        case false:
+    switch (func->fn_is_trigger) {        
+        case PLPGSQL_NOT_TRIGGER:
 
             /*
              * Fetch info about the procedure's parameters. Allocations aren't
@@ -994,7 +1004,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
             if (type_struct->typtype == TYPTYPE_PSEUDO) {
                 if (rettypeid == VOIDOID || rettypeid == RECORDOID) {
                     /* okay */;
-                } else if (rettypeid == TRIGGEROID) {
+                } else if (rettypeid == TRIGGEROID || rettypeid == EVTTRIGGEROID) {
                     ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("trigger functions can only be called as triggers")));
                 } else {
@@ -1024,7 +1034,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
             ReleaseSysCache(type_tup);
             break;
 
-        case true:
+        case PLPGSQL_DML_TRIGGER:    
             /* Trigger procedure's return type is unknown yet */
             func->fn_rettype = InvalidOid;
             func->fn_retbyval = false;
@@ -1038,11 +1048,11 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                         errhint("The arguments of the trigger can be accessed through TG_NARGS and TG_ARGV instead.")));
             }
             /* Add the record for referencing NEW */
-            rec = plpgsql_build_record("new", 0, true);
+            rec = plpgsql_build_record("new", 0, true, NULL);
             func->new_varno = rec->dno;
 
             /* Add the record for referencing OLD */
-            rec = plpgsql_build_record("old", 0, true);
+            rec = plpgsql_build_record("old", 0, true, NULL);
             func->old_varno = rec->dno;
 
             /* Add the variable tg_name */
@@ -1090,10 +1100,39 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
             func->tg_argv_varno = var->dno;
 
             break;
+        case PLPGSQL_EVENT_TRIGGER:
+            func->fn_rettype = VOIDOID;
+            func->fn_retbyval = false;
+            func->fn_retistuple = true;
+            func->fn_retset = false;
+ 
+            /* shouldn't be any declared arguments */
+            if (proc_struct->pronargs != 0)
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                         errmsg("event trigger functions cannot have declared arguments")));
+                                     
+            /* Add the variable tg_event */
+            var = plpgsql_build_variable("tg_event", 0,
+                                         plpgsql_build_datatype(TEXTOID,
+                                                                -1,
+                                               func->fn_input_collation),
+                                         true);
+            func->tg_event_varno = var->dno;
+ 
+            /* Add the variable tg_tag */
+            var = plpgsql_build_variable("tg_tag", 0,
+                                         plpgsql_build_datatype(TEXTOID,
+                                                                -1,
+                                               func->fn_input_collation),
+                                         true);
+            func->tg_tag_varno = var->dno;
+ 
+            break;  
 
         default:
             ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmsg("unrecognized function typecode: %d", (int)is_trigger),
+                    errmsg("unrecognized function typecode: %d", (int)func->fn_is_trigger),
                     errhint("This node type is expected to be a function or trigger.")));
             break;
     }
@@ -1179,7 +1218,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     }
     func->action = curr_compile->plpgsql_parse_result;
 
-    if (is_trigger && func->action->isAutonomous) {
+    if (is_dml_trigger && func->action->isAutonomous) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1377,7 +1416,7 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
     curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(curr_compile->compile_cxt);
 
     func->fn_signature = pstrdup(func_name);
-    func->fn_is_trigger = false;
+    func->fn_is_trigger = PLPGSQL_NOT_TRIGGER;
     func->fn_input_collation = InvalidOid;
     func->fn_cxt = curr_compile->compile_cxt;
     func->out_param_varno = -1; /* set up for no OUT param */
@@ -3497,7 +3536,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             /* "record" type -- build a record variable */
             PLpgSQL_rec* rec = NULL;
 
-            rec = plpgsql_build_record(refname, lineno, add2namespace);
+            rec = plpgsql_build_record(refname, lineno, add2namespace, NULL);
             rec->addNamespace = add2namespace;
             rec->varname = varname == NULL ? NULL : pstrdup(varname);
             result = (PLpgSQL_variable*)rec;
@@ -3617,7 +3656,7 @@ PLpgSQL_variable* plpgsql_build_tableType(const char* refname, int lineno, PLpgS
 /*
  * Build empty named record variable, and optionally add it to namespace
  */
-PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace)
+PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace, TupleDesc tupleDesc)
 {
     PLpgSQL_rec* rec = NULL;
     int varno;
@@ -3627,7 +3666,8 @@ PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2name
     rec->refname = pstrdup(refname);
     rec->lineno = lineno;
     rec->tup = NULL;
-    rec->tupdesc = NULL;
+    rec->tupdesc = tupleDesc;
+    rec->freetupdesc = (tupleDesc != NULL) ? true : false;
     rec->freetup = false;
     varno = plpgsql_adddatum((PLpgSQL_datum*)rec);
     char* pkgname = NULL;
@@ -3730,7 +3770,7 @@ PLpgSQL_row* build_row_from_class(Oid class_oid)
         /*
          * Get the attribute and check for dropped column
          */
-        attr_struct = row->rowtupdesc->attrs[i];
+        attr_struct = &row->rowtupdesc->attrs[i];
 
         if (!attr_struct->attisdropped) {
             char* attname = NULL;
@@ -3840,7 +3880,7 @@ PLpgSQL_row* build_row_from_tuple_desc(const char* rowname, int lineno, TupleDes
     row->default_val = NULL;
 
     for (int i = 0; i < desc->natts; i++) {
-        Form_pg_attribute pg_att_form = desc->attrs[i];
+        Form_pg_attribute pg_att_form = &desc->attrs[i];
         char* att_name = NameStr(pg_att_form->attname);
         if (att_name == NULL || strcmp(att_name, "?column?") == 0) {
             ereport(ERROR,
@@ -4292,6 +4332,86 @@ PLpgSQL_condition* plpgsql_parse_err_condition(char* condname)
     return prev;
 }
 
+/*
+ * plpgsql_parse_err_condition_b
+ *              Mysql Generate PLpgSQL_condition entry(s) for an exception condition name
+ *
+ * This has to be able to return a list because there are some duplicate
+ * names in the table of error code names.
+ */
+PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname)
+{
+    PLpgSQL_condition* newm = NULL;
+    PLpgSQL_condition* prev = NULL;
+
+    /*
+     * XXX Eventually we will want to look for user-defined exception names
+     * here.
+     */
+
+    if (strcmp(condname, "k_sqlwarning") == 0) {
+        newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
+        newm->sqlerrstate = 1;
+        newm->condname = pstrdup(condname);
+        newm->next = NULL;
+        return newm;
+    }
+
+    if (strcmp(condname, "not_found") == 0) {
+        newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
+        newm->sqlerrstate = 2;
+        newm->condname = pstrdup(condname);
+        newm->next = NULL;
+        return newm;
+    }
+
+    if (strcmp(condname, "k_sqlexception") == 0) {
+        newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
+        newm->sqlerrstate = 3;
+        newm->condname = pstrdup(condname);
+        newm->next = NULL;\
+        return newm;
+    }
+
+    prev = NULL;
+    for (int i = 0; exception_label_map[i].label != NULL; i++) {
+        if (strcmp(condname, exception_label_map[i].label) == 0) {
+            newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
+            newm->sqlerrstate = exception_label_map[i].sqlerrstate;
+            newm->condname = pstrdup(condname);
+            newm->next = prev;
+            prev = newm;
+        }
+    }
+
+    if (prev == NULL) {
+        PLpgSQL_nsitem* ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, condname, NULL, NULL, NULL);
+        if (ns != NULL) {
+            PLpgSQL_var* var = NULL;
+
+            var = (PLpgSQL_var*)(u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno]);
+            if (var->customCondition != 0) {
+                newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
+                newm->sqlerrstate = var->customCondition;
+                newm->condname = pstrdup(condname);
+                newm->next = prev;
+                prev = newm;
+            }
+        }
+        if (prev == NULL) {
+            char message[MAXSTRLEN]; 
+            errno_t rc = 0;
+            rc = sprintf_s(message, MAXSTRLEN, "unrecognized exception condition \"%s\"", condname);
+            securec_check_ss(rc, "", "");
+            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL),
+                    errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("unrecognized exception condition \"%s\"", condname)));
+        }
+    }
+    return prev;
+}
 
 /*
  * Compute the hashkey for a given function invocation
@@ -4314,6 +4434,7 @@ static void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo
     hashkey->packageOid = packageOid;
     /* get call context */
     hashkey->isTrigger = CALLED_AS_TRIGGER(fcinfo);
+    hashkey->isEventTrigger = CALLED_AS_EVENT_TRIGGER(fcinfo);
 
     /*
      * if trigger, get relation OID.  In validation mode we do not know what
@@ -4439,7 +4560,7 @@ void plpgsql_HashTableInit(void)
     ctl.hash = tag_hash;
     ctl.hcxt = u_sess->cache_mem_cxt;
     u_sess->plsql_cxt.plpgsql_pkg_HashTable =
-        hash_create("PLpgSQL package cache", PKGS_PER_USER, &ctl, HASH_ELEM | HASH_PACKAGE | HASH_CONTEXT);
+        hash_create("PLpgSQL package cache", PKGS_PER_USER, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
 static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key)
@@ -4775,7 +4896,8 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
         expr->func->fn_cxt = CurrentMemoryContext;
     } else {
         expr->func = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile;
-        if (expr->func->fn_is_trigger) {
+        /* if trigger or event trigger return NULL */
+        if (expr->func->fn_is_trigger != PLPGSQL_NOT_TRIGGER) {
             return NULL;
         }
     }
@@ -4788,6 +4910,10 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
     PG_TRY();
     {
         List* parsetreeList = pg_parse_query(expr->query);
+        if (parsetreeList == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("unexpected null parsetree list")));
+        }
         ListCell* cell = NULL;
         List* queryList = NIL;
         foreach(cell, parsetreeList) {
@@ -4816,6 +4942,10 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
             }
             queryList = pg_analyze_and_rewrite_params(parsetree, expr->query, 
                 (ParserSetupHook)plpgsql_parser_setup, (void*)expr);
+        }
+        if (queryList == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("unexpected null query list")));
         }
         Query* query = (Query*)linitial(queryList);
         Assert(IsA(query, Query));

@@ -342,7 +342,7 @@ Datum get_instr_user_login(PG_FUNCTION_ARGS)
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(INSTRUMENTS_USER_ATTRNUM, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(INSTRUMENTS_USER_ATTRNUM, false);
         create_instr_user_tuple(tupdesc, &i);
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);

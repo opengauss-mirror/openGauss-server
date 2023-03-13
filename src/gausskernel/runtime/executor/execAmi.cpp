@@ -53,6 +53,7 @@
 #include "executor/node/nodeValuesscan.h"
 #include "executor/node/nodeWindowAgg.h"
 #include "executor/node/nodeWorktablescan.h"
+#include "executor/node/nodeProjectSet.h"
 #include "nodes/nodeFuncs.h"
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecnodevectorow.h"
@@ -101,6 +102,10 @@ void ExecReScanByType(PlanState* node)
     switch (nodeTag(node)) {
         case T_ResultState:
             ExecReScanResult((ResultState*)node);
+            break;
+
+        case T_ProjectSetState:
+            ExecReScanProjectSet((ProjectSetState*)node);
             break;
 
         case T_ModifyTableState:
@@ -480,6 +485,10 @@ bool ExecSupportsMarkRestore(Path *pathnode)
              * always say "false", because this routine is not asked about
              * gating Result plans, only base-case Results.
              */
+            if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+                if (IsA(pathnode, ProjectionPath))
+                    return ExecSupportsMarkRestore(((ProjectionPath *) pathnode)->subpath);
+            }
             return false;
 
         case T_ExtensiblePlan:

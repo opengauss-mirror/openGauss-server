@@ -156,6 +156,9 @@ void knl_u_executor_init(knl_u_executor_context* exec_cxt)
     exec_cxt->isExecTrunc = false;
 
     exec_cxt->isLockRows = false;
+    exec_cxt->EventTriggerCache = NULL;
+    exec_cxt->EventTriggerCacheContext = NULL;
+    exec_cxt->EventTriggerState = NULL;
     exec_cxt->isFlashBack = false;
 }
 
@@ -462,6 +465,13 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->memory_context_limited_white_list = NULL;
     utils_cxt->enable_memory_context_control = false;
     utils_cxt->sql_ignore_strategy_val = 0;
+
+    utils_cxt->int4output_buffer = (char*)palloc0(32);
+    utils_cxt->int8output_buffer = (char*)palloc0(64);
+    utils_cxt->int16output_buffer = (char*)palloc0(128);
+    utils_cxt->varcharoutput_buffer = (char*)palloc0(256);
+    utils_cxt->numericoutput_buffer = (char*)palloc0(64);
+
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
 
     utils_cxt->spi_printtupDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
@@ -521,6 +531,7 @@ static void knl_u_plancache_init(knl_u_plancache_context* pcache_cxt)
     pcache_cxt->gpc_in_batch = false;
     pcache_cxt->action = NULL;
     pcache_cxt->explored_plan_info = NULL;
+    pcache_cxt->is_plan_exploration = false;
     pcache_cxt->generic_roots = NULL;
 }
 
@@ -587,6 +598,7 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->clientIsGsdump = false;
     proc_cxt->clientIsGsCtl = false;
     proc_cxt->clientIsGsroach = false;
+    proc_cxt->clientIsCMAgent = false;
     proc_cxt->IsBinaryUpgrade = false;
     proc_cxt->IsWLMWhiteList = false;
     proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;
@@ -595,6 +607,8 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->registerAbortBackupHandlerdone = false;
     proc_cxt->gsRewindAddCount = false;
     proc_cxt->PassConnLimit = false;
+    proc_cxt->clientIsGsql = false;
+    proc_cxt->gsqlRemainCopyNum = 0;
     proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;
     proc_cxt->registerExclusiveHandlerdone = false;
 }
@@ -962,6 +976,8 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
     storage_cxt->num_bufs_in_block = 0;
     storage_cxt->total_bufs_allocated = 0;
     storage_cxt->LocalBufferContext = NULL;
+    storage_cxt->partition_dml_oids = NIL;
+    storage_cxt->partition_ddl_oids = NIL;
 }
 
 static void knl_u_libpq_init(knl_u_libpq_context* libpq_cxt)

@@ -115,6 +115,7 @@ static void GetSlotIds(XLogReaderState *record);
 static void GetUndoSlotIds(XLogReaderState *record);
 STATIC LogDispatcher *CreateDispatcher();
 static void DestroyRecoveryWorkers();
+static void SSDestroyRecoveryWorkers();
 
 static void DispatchRecordWithPages(XLogReaderState *, List *);
 static void DispatchRecordWithoutPage(XLogReaderState *, List *);
@@ -353,6 +354,45 @@ void AllocRecordReadBuffer(XLogReaderState *xlogreader, uint32 privateLen)
 #endif
 }
 
+void SSAllocRecordReadBuffer(XLogReaderState *xlogreader, uint32 privateLen)
+{
+    XLogReaderState *initreader;
+    errno_t errorno = EOK;
+
+    initreader = GetXlogReader(xlogreader);
+    initreader->isPRProcess = true;
+    g_dispatcher->rtoXlogBufState.readWorkerState = WORKER_STATE_STOP;
+    g_dispatcher->rtoXlogBufState.readPageWorkerState = WORKER_STATE_STOP;
+    g_dispatcher->rtoXlogBufState.readSource = 0;
+    g_dispatcher->rtoXlogBufState.failSource = 0;
+    g_dispatcher->rtoXlogBufState.xlogReadManagerState = READ_MANAGER_RUN;
+    g_dispatcher->rtoXlogBufState.targetRecPtr = InvalidXLogRecPtr;
+    g_dispatcher->rtoXlogBufState.expectLsn = InvalidXLogRecPtr;
+    g_dispatcher->rtoXlogBufState.waitRedoDone = 0;
+    g_dispatcher->rtoXlogBufState.readBuf = (char *)palloc0(XLOG_BLCKSZ);
+    g_dispatcher->rtoXlogBufState.readprivate = (void *)palloc0(MAXALIGN(privateLen));
+    errorno = memset_s(g_dispatcher->rtoXlogBufState.readprivate, MAXALIGN(privateLen), 0, MAXALIGN(privateLen));
+    securec_check(errorno, "", "");
+
+    g_dispatcher->rtoXlogBufState.errormsg_buf = (char *)palloc0(MAX_ERRORMSG_LEN + 1);
+    g_dispatcher->rtoXlogBufState.errormsg_buf[0] = '\0';
+
+    initreader->readBuf = g_dispatcher->rtoXlogBufState.readBuf;
+    errorno = memcpy_s(initreader->readBuf, XLOG_BLCKSZ, xlogreader->readBuf, xlogreader->readLen);
+    securec_check(errorno, "", "");
+    initreader->errormsg_buf = g_dispatcher->rtoXlogBufState.errormsg_buf;
+    initreader->private_data = g_dispatcher->rtoXlogBufState.readprivate;
+    CopyDataFromOldReader(initreader, xlogreader);
+    g_dispatcher->rtoXlogBufState.initreader = initreader;
+
+    g_recordbuffer = &g_dispatcher->rtoXlogBufState;
+    g_startupTriggerState = TRIGGER_NORMAL;
+    g_readManagerTriggerFlag = TRIGGER_NORMAL;
+#ifdef USE_ASSERT_CHECKING
+    InitLsnCheckCtl(xlogreader->ReadRecPtr);
+#endif
+}
+
 void HandleStartupInterruptsForExtremeRto()
 {
     Assert(AmStartupProcess());
@@ -400,7 +440,11 @@ void StartRecoveryWorkers(XLogReaderState *xlogreader, uint32 privateLen)
         g_dispatcher->maxItemNum = (get_batch_redo_num() + 4) * PAGE_WORK_QUEUE_SIZE *
                                    ITEM_QUQUE_SIZE_RATIO;  // 4: a startup, readmanager, txnmanager, txnworker
         /* alloc for record readbuf */
-        AllocRecordReadBuffer(xlogreader, privateLen);
+        if (ENABLE_DMS && ENABLE_DSS) {
+            SSAllocRecordReadBuffer(xlogreader, privateLen);
+        } else {
+            AllocRecordReadBuffer(xlogreader, privateLen);
+        }
         StartPageRedoWorkers(get_real_recovery_parallelism());
 
         ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
@@ -620,7 +664,11 @@ static void StopRecoveryWorkers(int code, Datum arg)
     pg_atomic_write_u32(&g_dispatcher->rtoXlogBufState.readWorkerState, WORKER_STATE_EXIT);
     ShutdownWalRcv();
     FreeAllocatedRedoItem();
-    DestroyRecoveryWorkers();
+    if (ENABLE_DSS && ENABLE_DMS) {
+        SSDestroyRecoveryWorkers();
+    } else {
+        DestroyRecoveryWorkers();
+    }
     g_startupTriggerState = TRIGGER_NORMAL;
     g_readManagerTriggerFlag = TRIGGER_NORMAL;
     ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("parallel redo(startup) thread exit")));
@@ -647,6 +695,45 @@ static void DestroyRecoveryWorkers()
         DestroyPageRedoWorker(g_dispatcher->readLine.managerThd);
         DestroyPageRedoWorker(g_dispatcher->readLine.readThd);
         pfree(g_dispatcher->rtoXlogBufState.readsegbuf);
+        pfree(g_dispatcher->rtoXlogBufState.readBuf);
+        pfree(g_dispatcher->rtoXlogBufState.errormsg_buf);
+        pfree(g_dispatcher->rtoXlogBufState.readprivate);
+#ifdef USE_ASSERT_CHECKING
+        if (g_dispatcher->originLsnCheckAddr != NULL) {
+            pfree(g_dispatcher->originLsnCheckAddr);
+            g_dispatcher->originLsnCheckAddr = NULL;
+            g_dispatcher->lsnCheckCtl = NULL;
+        }
+#endif
+        if (get_real_recovery_parallelism() > 1) {
+            (void)MemoryContextSwitchTo(g_dispatcher->oldCtx);
+            MemoryContextDelete(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
+            g_instance.comm_cxt.predo_cxt.parallelRedoCtx = NULL;
+        }
+        g_dispatcher = NULL;
+        SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
+    }
+}
+
+static void SSDestroyRecoveryWorkers()
+{
+    if (g_dispatcher != NULL) {
+        SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
+        for (uint32 i = 0; i < g_dispatcher->pageLineNum; i++) {
+            DestroyPageRedoWorker(g_dispatcher->pageLines[i].batchThd);
+            DestroyPageRedoWorker(g_dispatcher->pageLines[i].managerThd);
+            for (uint32 j = 0; j < g_dispatcher->pageLines[i].redoThdNum; j++) {
+                DestroyPageRedoWorker(g_dispatcher->pageLines[i].redoThd[j]);
+            }
+            if (g_dispatcher->pageLines[i].chosedRTIds != NULL) {
+                pfree(g_dispatcher->pageLines[i].chosedRTIds);
+            }
+        }
+        DestroyPageRedoWorker(g_dispatcher->trxnLine.managerThd);
+        DestroyPageRedoWorker(g_dispatcher->trxnLine.redoThd);
+
+        DestroyPageRedoWorker(g_dispatcher->readLine.managerThd);
+        DestroyPageRedoWorker(g_dispatcher->readLine.readThd);
         pfree(g_dispatcher->rtoXlogBufState.readBuf);
         pfree(g_dispatcher->rtoXlogBufState.errormsg_buf);
         pfree(g_dispatcher->rtoXlogBufState.readprivate);
@@ -1680,6 +1767,8 @@ void InitReaderStateByOld(XLogReaderState *newState, XLogReaderState *oldState, 
     newState->currRecPtr = oldState->currRecPtr;
     newState->readBuf = oldState->readBuf;
     newState->readLen = oldState->readLen;
+    newState->preReadStartPtr = oldState->preReadStartPtr;
+    newState->preReadBuf = oldState->preReadBuf;
 
     newState->decoded_record = NULL;
     newState->main_data = NULL;

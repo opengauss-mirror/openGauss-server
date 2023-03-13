@@ -81,7 +81,7 @@ TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
     nincols = noutcols = 0; /* these count non-dropped attributes */
     same = true;
     for (i = 0; i < n; i++) {
-        Form_pg_attribute att = outdesc->attrs[i];
+        Form_pg_attribute att = &outdesc->attrs[i];
         Oid atttypid;
         int32 atttypmod;
 
@@ -91,7 +91,7 @@ TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
         atttypid = att->atttypid;
         atttypmod = att->atttypmod;
         for (; j < indesc->natts; j++) {
-            att = indesc->attrs[j];
+            att = &indesc->attrs[j];
             if (att->attisdropped)
                 continue;
             nincols++;
@@ -112,7 +112,7 @@ TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
 
     /* Check for unused input columns */
     for (; j < indesc->natts; j++) {
-        if (indesc->attrs[j]->attisdropped)
+        if (indesc->attrs[j].attisdropped)
             continue;
         nincols++;
         same = false; /* we'll complain below */
@@ -140,9 +140,9 @@ TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
              * also dropped, we needn't convert.  However, attlen and attalign
              * must agree.
              */
-            if (attrMap[i] == 0 && indesc->attrs[i]->attisdropped &&
-                indesc->attrs[i]->attlen == outdesc->attrs[i]->attlen &&
-                indesc->attrs[i]->attalign == outdesc->attrs[i]->attalign)
+            if (attrMap[i] == 0 && indesc->attrs[i].attisdropped &&
+                indesc->attrs[i].attlen == outdesc->attrs[i].attlen &&
+                indesc->attrs[i].attalign == outdesc->attrs[i].attalign)
                 continue;
 
             same = false;
@@ -193,7 +193,7 @@ TupleConversionMap *convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, 
     n = outdesc->natts;
     attrMap = (AttrNumber *)palloc0(n * sizeof(AttrNumber));
     for (i = 0; i < n; i++) {
-        Form_pg_attribute att = outdesc->attrs[i];
+        Form_pg_attribute att = &outdesc->attrs[i];
         char *attname = NULL;
         Oid atttypid;
         int32 atttypmod;
@@ -205,7 +205,7 @@ TupleConversionMap *convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, 
         atttypid = att->atttypid;
         atttypmod = att->atttypmod;
         for (j = 0; j < indesc->natts; j++) {
-            att = indesc->attrs[j];
+            att = &indesc->attrs[j];
             if (att->attisdropped)
                 continue;
             if (strcmp(attname, NameStr(att->attname)) == 0) {
@@ -241,9 +241,9 @@ TupleConversionMap *convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, 
              * also dropped, we needn't convert.  However, attlen and attalign
              * must agree.
              */
-            if (attrMap[i] == 0 && indesc->attrs[i]->attisdropped &&
-                indesc->attrs[i]->attlen == outdesc->attrs[i]->attlen &&
-                indesc->attrs[i]->attalign == outdesc->attrs[i]->attalign)
+            if (attrMap[i] == 0 && indesc->attrs[i].attisdropped &&
+                indesc->attrs[i].attlen == outdesc->attrs[i].attlen &&
+                indesc->attrs[i].attalign == outdesc->attrs[i].attalign)
                 continue;
 
             same = false;
@@ -308,7 +308,7 @@ HeapTuple do_convert_tuple(HeapTuple tuple, TupleConversionMap *map)
     /*
      * Now form the new tuple.
      */
-    return (HeapTuple)tableam_tops_form_tuple(map->outdesc, outvalues, outisnull, HEAP_TUPLE);
+    return (HeapTuple)tableam_tops_form_tuple(map->outdesc, outvalues, outisnull);
 }
 
 /*

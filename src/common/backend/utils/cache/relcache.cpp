@@ -36,12 +36,14 @@
 #include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/heap.h"
 #include "catalog/catversion.h"
+#include "catalog/gs_sql_patch.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -213,6 +215,7 @@
 #include "utils/knl_localtabdefcache.h"
 #include "utils/fmgrtab.h"
 #include "parser/parse_coerce.h"
+#include "access/amapi.h"
 
 /*
  *		name of relcache init file(s), used to speed up backend startup
@@ -342,6 +345,7 @@ static const FormData_pg_attribute Desc_pg_replication_origin[Natts_pg_replicati
     Schema_pg_replication_origin
 };
 static const FormData_pg_attribute Desc_pg_subscription_rel[Natts_pg_subscription_rel] = {Schema_pg_subscription_rel};
+static const FormData_pg_attribute Desc_gs_sql_patch_origin[Natts_gs_sql_patch] = {Schema_gs_sql_patch};
 
 /* Please add to the array in ascending order of oid value */
 static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{DefaultAclRelationId,
@@ -1072,6 +1076,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         Desc_gs_job_argument,
         false,
         true},
+    {GsSqlPatchRelationId, /* 9050 */
+        "gs_sql_patch",
+        GsSqlPatchRelationId_Rowtype_Id,
+        false,
+        false,
+        Natts_gs_sql_patch,
+        Desc_gs_sql_patch_origin,
+        false,
+        true},
     {GsGlobalConfigRelationId,
         "gs_global_config",
         GsGlobalConfigRelationId_Rowtype_Id,
@@ -1303,6 +1316,8 @@ static void IndexSupportInitialize(Relation relation, oidvector* indclass, Strat
 static OpClassCacheEnt* LookupOpclassInfo(Relation relation, Oid operatorClassOid, StrategyNumber numSupport);
 static void RelationCacheInitFileRemoveInDir(const char* tblspcpath);
 static void unlink_initfile(const char* initfilename);
+static void meta_rel_init_index_amroutine(Relation relation);
+
 /*
  *		ScanPgRelation
  *
@@ -1433,15 +1448,30 @@ static Relation AllocateRelationDesc(Form_pg_class relp)
     relation->rd_rel = relationForm;
 
     /* and allocate attribute tuple form storage */
-    relation->rd_att = CreateTemplateTupleDesc(relationForm->relnatts, relationForm->relhasoids, TAM_INVALID);
+    relation->rd_att = CreateTemplateTupleDesc(relationForm->relnatts, relationForm->relhasoids);
     //TODO:this should be TAM_invalid when merge ustore
-    relation->rd_tam_type = TAM_HEAP;
+    relation->rd_tam_ops = TableAmHeap;
     /* which we mark as a reference-counted tupdesc */
     relation->rd_att->tdrefcount = 1;
 
     (void)MemoryContextSwitchTo(oldcxt);
 
     return relation;
+}
+
+static void meta_rel_init_index_amroutine(Relation relation)
+{
+    IndexAmRoutine *tmp, *cached;
+
+    tmp = get_index_amroutine_for_nbtree();
+
+    cached = (IndexAmRoutine*)MemoryContextAlloc(relation->rd_indexcxt, sizeof(IndexAmRoutine));
+
+    errno_t rc = memcpy_s(cached, sizeof(IndexAmRoutine), tmp, sizeof(IndexAmRoutine));
+    securec_check(rc, "", "");
+    relation->rd_amroutine = cached;
+
+    pfree_ext(tmp);
 }
 
 /*
@@ -1493,6 +1523,32 @@ static void RelationParseRelOptions(Relation relation, HeapTuple tuple)
     }
 }
 
+static void GetInitdvals(Relation rel, HeapTuple tuple, TupInitDefVal* initdvals, int index, bool *hasInitDefval)
+{
+    bool is_null = false;
+    Datum dval;
+ 
+    dval = fastgetattr(tuple, Anum_pg_attribute_attinitdefval, rel->rd_att, &is_null);
+        
+    if (is_null) {
+        initdvals[index].isNull = true;
+        initdvals[index].datum = NULL;
+        initdvals[index].dataLen = 0;
+    } else {
+        /* fetch and copy the default value. */
+        bytea* val = DatumGetByteaP(dval);
+        int len = VARSIZE(val) - VARHDRSZ;
+        char* buf = (char*)MemoryContextAlloc(LocalMyDBCacheMemCxt(), len);
+        errno_t rc = memcpy_s(buf, len, VARDATA(val), len);
+        securec_check(rc, "", "");
+ 
+        initdvals[index].isNull = false;
+        initdvals[index].datum = (Datum*)buf;
+        initdvals[index].dataLen = len;
+        *hasInitDefval = true;
+    }
+}
+
 /*
  *		RelationBuildTupleDesc
  *
@@ -1514,8 +1570,6 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
     int ndef = 0;
 
     /* alter table instantly */
-    Datum dval;
-    bool isNull = false;
     bool hasInitDefval = false;
     TupInitDefVal* initdvals = NULL;
 
@@ -1600,36 +1654,18 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
              * Since relation->rd_att->atts palloc0 in function CreateTemplateTupleDesc,
              * its attnum should be zero, use it to check if above scenario happened.
              */
-            if (relation->rd_att->attrs[attp->attnum - 1]->attnum != 0) {
+            if (relation->rd_att->attrs[attp->attnum - 1].attnum != 0) {
                 /* Panic if we hit here many times, plus 2 make sure it has enough room in err stack */
                 int eLevel = ((t_thrd.log_cxt.errordata_stack_depth + 2) < ERRORDATA_STACK_SIZE) ? ERROR : PANIC;
                 ereport(eLevel,(errmsg("Catalog attribute %d for relation \"%s\" has been updated concurrently",
                     attp->attnum, RelationGetRelationName(relation))));
             }
             errno_t rc = memcpy_s(
-                relation->rd_att->attrs[attp->attnum - 1], ATTRIBUTE_FIXED_PART_SIZE, attp, ATTRIBUTE_FIXED_PART_SIZE);
+                &relation->rd_att->attrs[attp->attnum - 1], ATTRIBUTE_FIXED_PART_SIZE, attp, ATTRIBUTE_FIXED_PART_SIZE);
             securec_check(rc, "\0", "\0");
         }
         if (initdvals != NULL) {
-            dval = fastgetattr(pg_attribute_tuple, Anum_pg_attribute_attinitdefval, pg_attribute_desc->rd_att, &isNull);
-
-            if (isNull) {
-                initdvals[attp->attnum - 1].isNull = true;
-                initdvals[attp->attnum - 1].datum = NULL;
-                initdvals[attp->attnum - 1].dataLen = 0;
-            } else {
-                /* fetch and copy the default value. */
-                bytea* val = DatumGetByteaP(dval);
-                int len = VARSIZE(val) - VARHDRSZ;
-                char* buf = (char*)MemoryContextAlloc(LocalMyDBCacheMemCxt(), len);
-                errno_t rc = memcpy_s(buf, len, VARDATA(val), len);
-                securec_check(rc, "", "");
-
-                initdvals[attp->attnum - 1].isNull = false;
-                initdvals[attp->attnum - 1].datum = (Datum*)buf;
-                initdvals[attp->attnum - 1].dataLen = len;
-                hasInitDefval = true;
-            }
+            GetInitdvals(pg_attribute_desc, pg_attribute_tuple, initdvals, attp->attnum - 1, &hasInitDefval);
         }
 
         /* Update constraint/default info */
@@ -1654,6 +1690,46 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
         }
     }
 
+    if (DB_IS_CMPT(B_FORMAT) && need == 1) {
+        Form_pg_attribute attp;
+ 
+        pg_attribute_tuple = SearchSysCache2(ATTNUM, ObjectIdGetDatum(RelationGetRelid(relation)), Int16GetDatum(0));
+        attp = (Form_pg_attribute)GETSTRUCT(pg_attribute_tuple);
+        if (HeapTupleIsValid(pg_attribute_tuple)) {
+            for (int i = 0; i < relation->rd_att->natts; i++) {
+                if (relation->rd_att->attrs[i].attnum == 0) {
+                    errno_t rc = memcpy_s(&relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE,
+                        attp, ATTRIBUTE_FIXED_PART_SIZE);
+                    securec_check(rc, "\0", "\0");
+ 
+                    if (initdvals != NULL) {
+                        GetInitdvals(pg_attribute_desc, pg_attribute_tuple, initdvals, i, &hasInitDefval);
+                    }
+ 
+                    if (attp->attnotnull && !onlyLoadInitDefVal) {
+                        constr->has_not_null = true;
+                    }
+ 
+                    if (attp->atthasdef && !onlyLoadInitDefVal) {
+                        if (attrdef == NULL) {
+                            attrdef = (AttrDefault*)MemoryContextAllocZero(
+                                LocalMyDBCacheMemCxt(),
+                                RelationGetNumberOfAttributes(relation) * sizeof(AttrDefault));
+                        }
+                
+                        attrdef[ndef].adnum = i + 1;
+                        attrdef[ndef].adbin = NULL;
+                        ndef++;
+                    }
+                    break;
+ 
+                }
+            }
+            need--;
+        }
+        ReleaseSysCache(pg_attribute_tuple);
+    }
+
     /*
      * end the scan and close the attribute relation
      */
@@ -1664,7 +1740,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
         /* find all missed attributes, and print them */
         StringInfo missing_attnums = makeStringInfo();
         for (int i = 0; i <  RelationGetNumberOfAttributes(relation); i++) {
-            if (0 == relation->rd_att->attrs[i]->attnum) {
+            if (0 == relation->rd_att->attrs[i].attnum) {
                 appendStringInfo(missing_attnums, "%d ", (i + 1));
             }
         }
@@ -1707,7 +1783,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
         int i;
 
         for (i = 0; i < RelationGetNumberOfAttributes(relation); i++)
-            Assert(relation->rd_att->attrs[i]->attcacheoff == -1);
+            Assert(relation->rd_att->attrs[i].attcacheoff == -1);
     }
 #endif
 
@@ -1717,7 +1793,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
      * for attnum=1 that used to exist in fastgetattr() and index_getattr().
      */
     if (!RelationIsUstoreFormat(relation) && RelationGetNumberOfAttributes(relation) > 0)
-        relation->rd_att->attrs[0]->attcacheoff = 0;
+        relation->rd_att->attrs[0].attcacheoff = 0;
 
     /*
      * Set up constraint/default info
@@ -2012,8 +2088,8 @@ static Relation CatalogRelationBuildDesc(const char* relationName, Oid relationR
     relation->rd_rel->relhasoids = hasoids;
     relation->rd_rel->relnatts = (int16)natts;
     // Catalog tables are heap table type.
-    relation->rd_tam_type = TAM_HEAP;
-    relation->rd_att = CreateTemplateTupleDesc(natts, hasoids, TAM_HEAP);
+    relation->rd_tam_ops = TableAmHeap;
+    relation->rd_att = CreateTemplateTupleDesc(natts, hasoids, TableAmHeap);
     relation->rd_att->tdrefcount = 1; /* mark as refcounted */
     relation->rd_att->tdtypeid = relationReltype;
     relation->rd_att->tdtypmod = -1;
@@ -2022,15 +2098,15 @@ static Relation CatalogRelationBuildDesc(const char* relationName, Oid relationR
     has_not_null = false;
     for (i = 0; i < natts; i++) {
         errno_t rc = EOK;
-        rc = memcpy_s(relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        rc = memcpy_s(&relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "\0", "\0");
         has_not_null = has_not_null || attrs[i].attnotnull;
         /* make sure attcacheoff is valid */
-        relation->rd_att->attrs[i]->attcacheoff = -1;
+        relation->rd_att->attrs[i].attcacheoff = -1;
     }
 
     /* initialize first attribute's attcacheoff, cf RelationBuildTupleDesc */
-    relation->rd_att->attrs[0]->attcacheoff = 0;
+    relation->rd_att->attrs[0].attcacheoff = 0;
 
     /* mark not-null status */
     if (has_not_null) {
@@ -2043,7 +2119,7 @@ static Relation CatalogRelationBuildDesc(const char* relationName, Oid relationR
     /*
      * initialize relation id from info in att array (my, this is ugly)
      */
-    RelationGetRelid(relation) = relation->rd_att->attrs[0]->attrelid;
+    RelationGetRelid(relation) = relation->rd_att->attrs[0].attrelid;
 
     (void)MemoryContextSwitchTo(oldcxt);
 
@@ -2241,9 +2317,9 @@ Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
 
     /*  get the table access method type from reloptions
      * and populate them in relation and tuple descriptor */
-    relation->rd_tam_type =
-        get_tableam_from_reloptions(relation->rd_options, relation->rd_rel->relkind, relation->rd_rel->relam);
-    relation->rd_att->tdTableAmType = relation->rd_tam_type;
+    relation->rd_tam_ops = GetTableAmRoutine(
+        get_tableam_from_reloptions(relation->rd_options, relation->rd_rel->relkind, relation->rd_rel->relam));
+    relation->rd_att->td_tam_ops = relation->rd_tam_ops;
 
     relation->rd_indexsplit = get_indexsplit_from_reloptions(relation->rd_options, relation->rd_rel->relam);
 
@@ -2427,7 +2503,7 @@ RelationInitBucketKey(Relation relation, HeapTuple tuple)
     Oid        *bkeytype = NULL;
     int16      *attNum = NULL;
     int         nColumn;
-    Form_pg_attribute *rel_attrs = RelationGetDescr(relation)->attrs;
+    FormData_pg_attribute *rel_attrs = RelationGetDescr(relation)->attrs;
 
     if (!RelationIsRelation(relation) ||
         !OidIsValid(relation->rd_bucketoid)) {
@@ -2455,8 +2531,8 @@ RelationInitBucketKey(Relation relation, HeapTuple tuple)
     for (int i = 0; i < nColumn; i++) {
         bkey->values[i] = attNum[i];
         for (int j = 0; j < RelationGetDescr(relation)->natts; j++) {
-            if (attNum[i] == rel_attrs[j]->attnum) {
-                bkeytype[i] = rel_attrs[j]->atttypid;
+            if (attNum[i] == rel_attrs[j].attnum) {
+                bkeytype[i] = rel_attrs[j].atttypid;
                 break;
             }
         }
@@ -2659,6 +2735,11 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
         ALLOCSET_SMALL_MAXSIZE);
 
     relation->rd_indexcxt = indexcxt;
+
+    /*
+     * initialize an amroutine struct for relation.
+     */
+    meta_rel_init_index_amroutine(relation);
 
     /*
      * Allocate arrays to hold data. Opclasses are not used for included
@@ -3033,8 +3114,8 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
      * Below Catalog tables are heap table type.
        pg_database, pg_authid, pg_auth_members,  pg_class, pg_attribute, pg_proc, and pg_type 
     */
-    relation->rd_att = CreateTemplateTupleDesc(natts, hasoids, TAM_HEAP);
-    relation->rd_tam_type = TAM_HEAP;
+    relation->rd_att = CreateTemplateTupleDesc(natts, hasoids);
+    relation->rd_tam_ops = TableAmHeap;
     relation->rd_att->tdrefcount = 1; /* mark as refcounted */
 
     relation->rd_att->tdtypeid = relationReltype;
@@ -3045,17 +3126,17 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
      */
     has_not_null = false;
     for (i = 0; i < natts; i++) {
-        errno_t rc = memcpy_s(relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE,
+        errno_t rc = memcpy_s(&relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE,
             &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "", "");
         has_not_null = has_not_null || attrs[i].attnotnull;
         /* make sure attcacheoff is valid */
-        relation->rd_att->attrs[i]->attcacheoff = -1;
+        relation->rd_att->attrs[i].attcacheoff = -1;
     }
 
     /* initialize first attribute's attcacheoff, cf RelationBuildTupleDesc */
     if (!RelationIsUstoreFormat(relation))
-        relation->rd_att->attrs[0]->attcacheoff = 0;
+        relation->rd_att->attrs[0].attcacheoff = 0;
 
     /* mark not-null status */
     if (has_not_null) {
@@ -3068,7 +3149,7 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
     /*
      * initialize relation id from info in att array (my, this is ugly)
      */
-    RelationGetRelid(relation) = relation->rd_att->attrs[0]->attrelid;
+    RelationGetRelid(relation) = relation->rd_att->attrs[0].attrelid;
 
     /*
      * All relations made with formrdesc are mapped.  This is necessarily so
@@ -3149,7 +3230,7 @@ Relation RelationIdGetRelation(Oid relationId)
     if (EnableLocalSysCache()) {
         Relation rel = t_thrd.lsc_cxt.lsc->tabdefcache.RelationIdGetRelation(relationId);
         if (rel != NULL) {
-            rel->rd_att->tdTableAmType = rel->rd_tam_type;
+            rel->rd_att->td_tam_ops = rel->rd_tam_ops;
         }
         return rel;
     }
@@ -3183,7 +3264,7 @@ Relation RelationIdGetRelation(Oid relationId)
         if (rd->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
             (void)checkGroup(relationId, RELATION_IS_OTHER_TEMP(rd));
 
-        rd->rd_att->tdTableAmType = rd->rd_tam_type;
+        rd->rd_att->td_tam_ops = rd->rd_tam_ops;
         return rd;
     }
 
@@ -3201,7 +3282,7 @@ Relation RelationIdGetRelation(Oid relationId)
     }
 
     if (rd != NULL) {
-        rd->rd_att->tdTableAmType = rd->rd_tam_type;
+        rd->rd_att->td_tam_ops = rd->rd_tam_ops;
     }
     return rd;
 }
@@ -3509,6 +3590,7 @@ void RelationDestroyRelation(Relation relation, bool remember_tupdesc)
     pfree_ext(relation->rd_options);
     pfree_ext(relation->rd_indextuple);
     pfree_ext(relation->rd_am);
+    pfree_ext(relation->rd_amroutine);
     RelationDestroyIndex(relation);
     RelationDestroyRule(relation);
     pfree_ext(relation->rd_fdwroutine);
@@ -3759,6 +3841,16 @@ void RelationClearRelation(Relation relation, bool rebuild)
         errno_t rc = memcpy_s(relation->rd_rel, CLASS_TUPLE_SIZE, newrel->rd_rel, CLASS_TUPLE_SIZE);
         securec_check(rc, "", "");
         if (newrel->partMap) {
+            /*
+             * The old partMap pointer has be used by a opened relation.
+             * Therefore, we need to ensure that the memory pointed to by the old partMap pointer cannot be freed
+             * and that the value in the memory pointed to by the old partMap pointer is new.
+             * 1. When the old and new partMaps are equal, keep old partMap pointer by SWAPFIELD.
+             *    Then new partMap will be destoryed later.
+             * 2. When the old and new partMaps are not equal, keep old partMap pointer by SWAPFIELD
+             *    and swap the memory that two partMap pointers point to in partition_rebuild_partmap.
+             *    The new partMap pointer and the memory it points to are then destroyed later.
+             */
             if (!keep_partmap) {
                 RebuildPartitonMap(newrel->partMap, relation->partMap);
             }
@@ -4430,6 +4522,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     int i;
     bool has_not_null = false;
     bool nailit = false;
+    const TableAmRoutine* tam_ops = GetTableAmRoutine(tam_type);
 
     AssertArg(natts >= 0);
 
@@ -4505,14 +4598,14 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
      * catalogs.  We can copy attnotnull constraints here, however.
      */
     rel->rd_att = CreateTupleDescCopy(tupDesc);
-    rel->rd_tam_type = tam_type;
+    rel->rd_tam_ops = tam_ops;
     rel->rd_indexsplit = relindexsplit;
-    rel->rd_att->tdTableAmType = tam_type;
+    rel->rd_att->td_tam_ops = tam_ops;
     rel->rd_att->tdrefcount = 1; /* mark as refcounted */
     has_not_null = false;
     for (i = 0; i < natts; i++) {
-        rel->rd_att->attrs[i]->attnotnull = tupDesc->attrs[i]->attnotnull;
-        has_not_null = has_not_null || tupDesc->attrs[i]->attnotnull;
+        rel->rd_att->attrs[i].attnotnull = tupDesc->attrs[i].attnotnull;
+        has_not_null = has_not_null || tupDesc->attrs[i].attnotnull;
     }
 
     if (has_not_null) {
@@ -4576,7 +4669,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     RelationGetRelid(rel) = relid;
 
     for (i = 0; i < natts; i++)
-        rel->rd_att->attrs[i]->attrelid = relid;
+        rel->rd_att->attrs[i].attrelid = relid;
 
     rel->rd_rel->reltablespace = reltablespace;
 
@@ -5529,19 +5622,19 @@ TupleDesc BuildHardcodedDescriptor(int natts, const FormData_pg_attribute* attrs
 {
     TupleDesc result;
     int i;
-    result = CreateTemplateTupleDesc(natts, hasoids, TAM_HEAP);
+    result = CreateTemplateTupleDesc(natts, hasoids);
     result->tdtypeid = RECORDOID; /* not right, but we don't care */
     result->tdtypmod = -1;
 
     for (i = 0; i < natts; i++) {
-        errno_t rc = memcpy_s(result->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        errno_t rc = memcpy_s(&result->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "", "");
         /* make sure attcacheoff is valid */
-        result->attrs[i]->attcacheoff = -1;
+        result->attrs[i].attcacheoff = -1;
     }
 
     /* initialize first attribute's attcacheoff, cf RelationBuildTupleDesc */
-    result->attrs[0]->attcacheoff = 0;
+    result->attrs[0].attcacheoff = 0;
 
     /* Note: we don't bother to set up a TupleConstr entry */
 
@@ -5609,48 +5702,69 @@ static void GeneratedColFetch(TupleConstr *constr, HeapTuple htup, Relation adre
             generatedCol = DatumGetChar(val);
         }
     }
-    attrdef[attrdefIndex].generatedCol = generatedCol;
-    genCols[attrdef[attrdefIndex].adnum - 1] = generatedCol;
+
     if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
+        attrdef[attrdefIndex].generatedCol = generatedCol;
+        genCols[attrdef[attrdefIndex].adnum - 1] = generatedCol;
         constr->has_generated_stored = true;
     }
 }
 
-static void AttrAutoIncrementFetch(Relation relation, AttrNumber attnum, char* adbin)
+static void AttrAutoIncrementFetch(Relation relation, AttrNumber attnum, char* adbin, const char* adsrc)
 {
-    ConstrAutoInc* cons_autoinc = NULL;
-    AutoIncrement* autoinc = NULL;
-    const FmgrBuiltin* castfunc = NULL;
-    Node *adexpr = (Node*)stringToNode_skip_extern_fields(adbin);
-    Assert(adexpr != NULL);
-    if (!IsA(adexpr, AutoIncrement)) {
+    if (adsrc == NULL || strcmp(adsrc, "AUTO_INCREMENT") != 0) {
         return;
     }
 
-    autoinc = (AutoIncrement*)adexpr;
-    cons_autoinc = (ConstrAutoInc*)MemoryContextAllocZero(LocalMyDBCacheMemCxt(), sizeof(ConstrAutoInc));
-    cons_autoinc->attnum = attnum;
-    if (relation->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
-        cons_autoinc->next = find_tmptable_cache_autoinc(relation->rd_rel->relfilenode);
-        cons_autoinc->seqoid = InvalidOid;
-    } else {
-        cons_autoinc->next = NULL;
-        find_nextval_seqoid_walker(adexpr, &cons_autoinc->seqoid);
-    }
+    ConstrAutoInc* cons_autoinc = NULL;
+    Node *adexpr = NULL;
+    AutoIncrement* autoinc = NULL;
+    const FmgrBuiltin* castfunc = NULL;
+    MemoryContext tmp_cxt;
+    MemoryContext old_cxt;
+ 
+    /* We cannot free Node *adexpr. So we use tmp_cxt to prevent memory leaks. */
+    tmp_cxt = AllocSetContextCreate(CurrentMemoryContext, "auto_increment temporary cxt",
+        ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE);
+ 
+    PG_TRY();
+    {
+        old_cxt = MemoryContextSwitchTo(tmp_cxt);
+        adexpr = (Node*)stringToNode_skip_extern_fields(adbin);
+        (void)MemoryContextSwitchTo(old_cxt);
+        Assert(IsA(adexpr, AutoIncrement));
+        autoinc = (AutoIncrement*)adexpr;
+        cons_autoinc = (ConstrAutoInc*)MemoryContextAllocZero(LocalMyDBCacheMemCxt(), sizeof(ConstrAutoInc));
+        cons_autoinc->attnum = attnum;
+        if (relation->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+            cons_autoinc->next = find_tmptable_cache_autoinc(relation->rd_rel->relfilenode);
+            cons_autoinc->seqoid = InvalidOid;
+        } else {
+            cons_autoinc->next = NULL;
+            find_nextval_seqoid_walker(adexpr, &cons_autoinc->seqoid);
+        }
 
-    castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincin_funcid);
-    cons_autoinc->datum2autoinc_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
-    if (cons_autoinc->datum2autoinc_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
-       PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincin_funcid);
-        cons_autoinc->datum2autoinc_func = castFunc2 ?  (void*)(uintptr_t)castFunc2 : NULL;
+        castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincin_funcid);
+        cons_autoinc->datum2autoinc_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
+        if (cons_autoinc->datum2autoinc_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
+            PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincin_funcid);
+            cons_autoinc->datum2autoinc_func = castFunc2 ?  (void*)(uintptr_t)castFunc2 : NULL;
+        }
+        castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincout_funcid);
+        cons_autoinc->autoinc2datum_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
+        if (cons_autoinc->autoinc2datum_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
+            PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincout_funcid);
+            cons_autoinc->autoinc2datum_func = castFunc2 ? (void*)(uintptr_t)castFunc2 : NULL;
+        }
+        relation->rd_att->constr->cons_autoinc = cons_autoinc;
     }
-    castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincout_funcid);
-    cons_autoinc->autoinc2datum_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
-    if (cons_autoinc->autoinc2datum_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
-        PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincout_funcid);
-        cons_autoinc->autoinc2datum_func = castFunc2 ? (void*)(uintptr_t)castFunc2 : NULL;
+    PG_CATCH();
+    {
+        MemoryContextDelete(tmp_cxt);
+        PG_RE_THROW();
     }
-    relation->rd_att->constr->cons_autoinc = cons_autoinc;
+    PG_END_TRY();
+    MemoryContextDelete(tmp_cxt);
 }
 
 /*
@@ -5663,16 +5777,54 @@ static void UpdatedColFetch(TupleConstr *constr, HeapTuple htup, Relation adrel,
     bool updatedCol = false;
     if (HeapTupleHeaderGetNatts(htup->t_data, adrel->rd_att) >= Anum_pg_attrdef_adsrc_on_update) {
         bool isnull = false;
-        Datum val;
-        val = fastgetattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel->rd_att, &isnull);
-        if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
+        Datum val = fastgetattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel->rd_att, &isnull);
+        char* adsrc_str = isnull ? NULL : TextDatumGetCString(val);
+        if (adsrc_str && pg_strcasecmp(adsrc_str, "") != 0) {
             updatedCol = true;
         } else {
             updatedCol = false;
         }
+        pfree_ext(adsrc_str);
     }
     attrdef[attrdefIndex].has_on_update = updatedCol;
     on_update[attrdef[attrdefIndex].adnum - 1] = updatedCol;
+}
+
+static void GetDefaultAttr(Relation relation, Relation adrel, HeapTuple htup, int attrdef_index, int attnum)
+{
+    Datum val;
+    bool isnull = false;
+    AttrDefault *attrdef =  relation->rd_att->constr->defval;
+
+    if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
+        GeneratedColFetch(relation->rd_att->constr, htup, adrel, attrdef_index);
+    }
+
+    UpdatedColFetch(relation->rd_att->constr, htup, adrel, attrdef_index);
+
+    val = fastgetattr(htup, Anum_pg_attrdef_adbin, adrel->rd_att, &isnull);
+    if (isnull) {
+        ereport(WARNING, (errmsg("null adbin for attr %s of rel %s",
+            NameStr(relation->rd_att->attrs[attnum - 1].attname), RelationGetRelationName(relation))));
+    } else {
+        char* adsrc_str = NULL;
+        char* adbin_str = TextDatumGetCString(val);
+        attrdef[attrdef_index].adbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), adbin_str);
+        val = fastgetattr(htup, Anum_pg_attrdef_adsrc, adrel->rd_att, &isnull);
+        adsrc_str  = (isnull) ? NULL : TextDatumGetCString(val);
+        if (!attrdef[attrdef_index].has_on_update) {
+            AttrAutoIncrementFetch(relation, attnum, adbin_str, adsrc_str);
+        }
+        pfree(adbin_str);
+        pfree_ext(adsrc_str);
+    }
+
+    val = fastgetattr(htup, Anum_pg_attrdef_adbin_on_update, adrel->rd_att, &isnull);
+    if (!isnull) {
+        char* adbin_str = TextDatumGetCString(val);
+        attrdef[attrdef_index].adbin_on_update = MemoryContextStrdup(LocalMyDBCacheMemCxt(), adbin_str);
+        pfree(adbin_str);
+    }
 }
 
 /*
@@ -5684,8 +5836,6 @@ static void AttrDefaultFetch(Relation relation)
     int ndef = relation->rd_att->constr->num_defval;
     ScanKeyData skey;
     HeapTuple htup;
-    Datum val;
-    bool isnull = false;
     int i;
     int found = 0;
 
@@ -5696,6 +5846,14 @@ static void AttrDefaultFetch(Relation relation)
 
     while (HeapTupleIsValid(htup = systable_getnext(adscan))) {
         Form_pg_attrdef adform = (Form_pg_attrdef)GETSTRUCT(htup);
+        if (DB_IS_CMPT(B_FORMAT)) {
+            if (adform->adnum == 0) {
+                found++;
+ 
+                GetDefaultAttr(relation, adrel, htup, ndef - 1, attrdef[ndef - 1].adnum);
+                continue;
+            }
+        }
 
         for (i = 0; i < ndef; i++) {
             if (adform->adnum != attrdef[i].adnum)
@@ -5703,30 +5861,11 @@ static void AttrDefaultFetch(Relation relation)
 
             if (attrdef[i].adbin != NULL)
                 ereport(WARNING, (errmsg("multiple attrdef records found for attr %s of rel %s",
-                    NameStr(relation->rd_att->attrs[adform->adnum - 1]->attname), RelationGetRelationName(relation))));
+                    NameStr(relation->rd_att->attrs[adform->adnum - 1].attname), RelationGetRelationName(relation))));
             else
                 found++;
 
-            if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
-                GeneratedColFetch(relation->rd_att->constr, htup, adrel, i);
-            }
-
-            UpdatedColFetch(relation->rd_att->constr, htup, adrel, i);
-
-            val = fastgetattr(htup, Anum_pg_attrdef_adbin, adrel->rd_att, &isnull);
-            if (isnull) {
-                ereport(WARNING, (errmsg("null adbin for attr %s of rel %s",
-                    NameStr(relation->rd_att->attrs[adform->adnum - 1]->attname), RelationGetRelationName(relation))));
-            } else {
-                attrdef[i].adbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
-                if (!attrdef[i].has_on_update) {
-                    AttrAutoIncrementFetch(relation, adform->adnum, attrdef[i].adbin);
-                }
-            }
-
-            val = fastgetattr(htup, Anum_pg_attrdef_adbin_on_update, adrel->rd_att, &isnull);
-            if (!isnull)
-                attrdef[i].adbin_on_update = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+            GetDefaultAttr(relation, adrel, htup, i, adform->adnum);
             break;
         }
 
@@ -5770,6 +5909,7 @@ static void CheckConstraintFetch(Relation relation)
 
     while (HeapTupleIsValid(htup = systable_getnext(conscan))) {
         Form_pg_constraint conform = (Form_pg_constraint)GETSTRUCT(htup);
+        char* ccbin_str = NULL;
 
         /* We want check constraints only */
         if (conform->contype != CONSTRAINT_CHECK)
@@ -5790,8 +5930,9 @@ static void CheckConstraintFetch(Relation relation)
             ereport(ERROR,
                 (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                     errmsg("null conbin for rel %s", RelationGetRelationName(relation))));
-
-        check[found].ccbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+        ccbin_str = TextDatumGetCString(val);
+        check[found].ccbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), ccbin_str);
+        pfree(ccbin_str);
         found++;
     }
 
@@ -7280,7 +7421,7 @@ static bool load_relcache_init_file(bool shared)
 
         /* initialize attribute tuple forms */
         //XXTAM:
-        rel->rd_att = CreateTemplateTupleDesc(relform->relnatts, relform->relhasoids, TAM_HEAP);
+        rel->rd_att = CreateTemplateTupleDesc(relform->relnatts, relform->relhasoids);
         rel->rd_att->tdrefcount = 1; /* mark as refcounted */
 
         rel->rd_att->tdtypeid = relform->reltype;
@@ -7294,12 +7435,12 @@ static bool load_relcache_init_file(bool shared)
                 goto read_failed;
             if (len != ATTRIBUTE_FIXED_PART_SIZE)
                 goto read_failed;
-            if (fread_wrap(rel->rd_att->attrs[i], 1, len, fp) != len)
+            if (fread_wrap(&rel->rd_att->attrs[i], 1, len, fp) != len)
                 goto read_failed;
 
-            has_not_null = has_not_null || rel->rd_att->attrs[i]->attnotnull;
+            has_not_null = has_not_null || rel->rd_att->attrs[i].attnotnull;
 
-            if (rel->rd_att->attrs[i]->atthasdef) {
+            if (rel->rd_att->attrs[i].atthasdef) {
                 /*
                  * Caution! For autovacuum, catchup and walsender thread, they will return before
                  * calling RelationCacheInitializePhase3, so they cannot load default vaules of adding
@@ -7390,6 +7531,8 @@ static bool load_relcache_init_file(bool shared)
                 ALLOCSET_SMALL_MAXSIZE);
             rel->rd_indexcxt = indexcxt;
 
+            meta_rel_init_index_amroutine(rel);
+
             /* next, read the vector of opfamily OIDs */
             if (fread_wrap(&len, 1, sizeof(len), fp) != sizeof(len))
                 goto read_failed;
@@ -7463,6 +7606,7 @@ static bool load_relcache_init_file(bool shared)
             Assert(rel->rd_index == NULL);
             Assert(rel->rd_indextuple == NULL);
             Assert(rel->rd_am == NULL);
+            Assert(rel->rd_amroutine == NULL);
             Assert(rel->rd_indexcxt == NULL);
             Assert(rel->rd_aminfo == NULL);
             Assert(rel->rd_opfamily == NULL);
@@ -7706,7 +7850,7 @@ static void write_relcache_init_file(bool shared)
 
         /* next, do all the attribute tuple form data entries */
         for (i = 0; i < relform->relnatts; i++) {
-            write_item(rel->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, fp);
+            write_item(&rel->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, fp);
         }
 
         /* next, do the access method specific field */
@@ -8292,24 +8436,24 @@ RelationMetaData* make_relmeta(Relation rel)
     for (int i = 0; i < rel->rd_att->natts; i++) {
         AttrMetaData* attr = makeNode(AttrMetaData);
 
-        attr->attalign = rel->rd_att->attrs[i]->attalign;
-        attr->attbyval = rel->rd_att->attrs[i]->attbyval;
-        attr->attkvtype = rel->rd_att->attrs[i]->attkvtype;
-        attr->attcmprmode = rel->rd_att->attrs[i]->attcmprmode;
-        attr->attcollation = rel->rd_att->attrs[i]->attcollation;
-        attr->atthasdef = rel->rd_att->attrs[i]->atthasdef;
-        attr->attinhcount = rel->rd_att->attrs[i]->attinhcount;
-        attr->attisdropped = rel->rd_att->attrs[i]->attisdropped;
-        attr->attislocal = rel->rd_att->attrs[i]->attislocal;
-        attr->attnotnull = rel->rd_att->attrs[i]->attnotnull;
-        attr->attlen = rel->rd_att->attrs[i]->attlen;
-        attr->attnum = rel->rd_att->attrs[i]->attnum;
-        attr->attstorage = rel->rd_att->attrs[i]->attstorage;
-        attr->atttypid = rel->rd_att->attrs[i]->atttypid;
-        attr->atttypmod = rel->rd_att->attrs[i]->atttypmod;
+        attr->attalign = rel->rd_att->attrs[i].attalign;
+        attr->attbyval = rel->rd_att->attrs[i].attbyval;
+        attr->attkvtype = rel->rd_att->attrs[i].attkvtype;
+        attr->attcmprmode = rel->rd_att->attrs[i].attcmprmode;
+        attr->attcollation = rel->rd_att->attrs[i].attcollation;
+        attr->atthasdef = rel->rd_att->attrs[i].atthasdef;
+        attr->attinhcount = rel->rd_att->attrs[i].attinhcount;
+        attr->attisdropped = rel->rd_att->attrs[i].attisdropped;
+        attr->attislocal = rel->rd_att->attrs[i].attislocal;
+        attr->attnotnull = rel->rd_att->attrs[i].attnotnull;
+        attr->attlen = rel->rd_att->attrs[i].attlen;
+        attr->attnum = rel->rd_att->attrs[i].attnum;
+        attr->attstorage = rel->rd_att->attrs[i].attstorage;
+        attr->atttypid = rel->rd_att->attrs[i].atttypid;
+        attr->atttypmod = rel->rd_att->attrs[i].atttypmod;
 
         attr->attname = (char*)palloc0(NAMEDATALEN);
-        err = memcpy_s(attr->attname, NAMEDATALEN, rel->rd_att->attrs[i]->attname.data, NAMEDATALEN);
+        err = memcpy_s(attr->attname, NAMEDATALEN, rel->rd_att->attrs[i].attname.data, NAMEDATALEN);
         securec_check_c(err, "\0", "\0");
 
         node->attrs = lappend(node->attrs, attr);
@@ -8358,23 +8502,23 @@ Relation get_rel_from_meta(RelationMetaData* node)
     for (int i = 0; i < rel->rd_att->natts; i++) {
         AttrMetaData* attr = (AttrMetaData*)list_nth(node->attrs, i);
 
-        rel->rd_att->attrs[i]->attalign = attr->attalign;
-        rel->rd_att->attrs[i]->attbyval = attr->attbyval;
-        rel->rd_att->attrs[i]->attkvtype = attr->attkvtype;
-        rel->rd_att->attrs[i]->attcmprmode = attr->attcmprmode;
-        rel->rd_att->attrs[i]->attcollation = attr->attcollation;
-        rel->rd_att->attrs[i]->atthasdef = attr->atthasdef;
-        rel->rd_att->attrs[i]->attinhcount = attr->attinhcount;
-        rel->rd_att->attrs[i]->attisdropped = attr->attisdropped;
-        rel->rd_att->attrs[i]->attislocal = attr->attislocal;
-        rel->rd_att->attrs[i]->attnotnull = attr->attnotnull;
-        rel->rd_att->attrs[i]->attlen = attr->attlen;
-        rel->rd_att->attrs[i]->attnum = attr->attnum;
-        rel->rd_att->attrs[i]->attstorage = attr->attstorage;
-        rel->rd_att->attrs[i]->atttypid = attr->atttypid;
-        rel->rd_att->attrs[i]->atttypmod = attr->atttypmod;
+        rel->rd_att->attrs[i].attalign = attr->attalign;
+        rel->rd_att->attrs[i].attbyval = attr->attbyval;
+        rel->rd_att->attrs[i].attkvtype = attr->attkvtype;
+        rel->rd_att->attrs[i].attcmprmode = attr->attcmprmode;
+        rel->rd_att->attrs[i].attcollation = attr->attcollation;
+        rel->rd_att->attrs[i].atthasdef = attr->atthasdef;
+        rel->rd_att->attrs[i].attinhcount = attr->attinhcount;
+        rel->rd_att->attrs[i].attisdropped = attr->attisdropped;
+        rel->rd_att->attrs[i].attislocal = attr->attislocal;
+        rel->rd_att->attrs[i].attnotnull = attr->attnotnull;
+        rel->rd_att->attrs[i].attlen = attr->attlen;
+        rel->rd_att->attrs[i].attnum = attr->attnum;
+        rel->rd_att->attrs[i].attstorage = attr->attstorage;
+        rel->rd_att->attrs[i].atttypid = attr->atttypid;
+        rel->rd_att->attrs[i].atttypmod = attr->atttypmod;
 
-        rc = memcpy_s(rel->rd_att->attrs[i]->attname.data, NAMEDATALEN, attr->attname, strlen(attr->attname));
+        rc = memcpy_s(rel->rd_att->attrs[i].attname.data, NAMEDATALEN, attr->attname, strlen(attr->attname));
         securec_check(rc, "", "");
     }
 
@@ -8570,5 +8714,27 @@ char RelationGetRelReplident(Relation r)
     ReleaseSysCache(tuple);
 
     return relreplident;
+}
+
+bool IsRelationReplidentKey(Relation r, int attno)
+{
+    if (RelationGetRelReplident(r) == REPLICA_IDENTITY_FULL)
+        return true;
+
+    Oid replidindex = RelationGetReplicaIndex(r);
+    if (!OidIsValid(replidindex))
+        return true;
+
+    Relation idx_rel = RelationIdGetRelation(replidindex);
+
+    for (int natt = 0; natt < IndexRelationGetNumberOfKeyAttributes(idx_rel); natt++) {
+        if (idx_rel->rd_index->indkey.values[natt] == attno) {
+            RelationClose(idx_rel);
+            return true;
+        }
+    }
+
+    RelationClose(idx_rel);
+    return false;
 }
 

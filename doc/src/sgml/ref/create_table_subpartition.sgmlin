@@ -11,23 +11,30 @@
 <refsynopsisdiv>
 <synopsis>
 CREATE TABLE [ IF NOT EXISTS ] subpartition_table_name
-( { column_name data_type [ COLLATE collation ] [ column_constraint [ ... ] ]
+( { column_name data_type [ CHARACTER SET | CHARSET charset ]
+    [ COLLATE collation ] [ column_constraint [ ... ] ]
     | table_constraint
     | LIKE source_table [ like_option [...] ] }
     [, ... ]
 )
     [ AUTO_INCREMENT [ = ] value ]
+    [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ][ [ DEFAULT ] COLLATE [ = ] default_collation ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]
-    PARTITION BY {RANGE | LIST | HASH} (partition_key) SUBPARTITION BY {RANGE | LIST | HASH} (subpartition_key)
+    PARTITION BY {RANGE [ COLUMNS ] | LIST [ COLUMNS ] | HASH | KEY} (partition_key) [ PARTITIONS integer ] SUBPARTITION BY {RANGE | LIST | HASH | KEY} (subpartition_key) [ SUBPARTITIONS integer ]
     (
-      PARTITION partition_name1 [ VALUES LESS THAN (val1) | VALUES (val1[, ...]) ] [ TABLESPACE tablespace ]
+      PARTITION partition_name1 [ VALUES LESS THAN { (val1 | MAXVALUE) | MAXVALUE } | VALUES [ IN ] (val1[, ...]) ] [ TABLESPACE [=] tablespace ]
       (
-        { SUBPARTITION subpartition_name1 [ VALUES LESS THAN (val1_1) | VALUES (val1_1[, ...])]  [ TABLESPACE tablespace ] } [, ...]
+        { SUBPARTITION subpartition_name1 [ VALUES LESS THAN (val1_1) | VALUES (val1_1[, ...])]  [ TABLESPACE [=] tablespace ] } [, ...]
       )
       [, ...]
     ) [ { ENABLE | DISABLE } ROW MOVEMENT ];
+NOTICE: [ COLUMNS ] is only available in B-format database!
+NOTICE: [ PARTITIONS integer ] in RANGE/LIST partition is only available in B-format database!
+NOTICE: [ IN ] is only available in B-format database!
+NOTICE: KEY is only available in B-format database!
+NOTICE: MAXVALUE without parentheses is only available in B-format database!
 
 where column_constraint can be:
 [ CONSTRAINT constraint_name ]
@@ -35,13 +42,14 @@ where column_constraint can be:
   NULL |
   CHECK ( expression ) |
   DEFAULT default_expr |
-  GENERATED ALWAYS AS ( generation_expr ) STORED |
+  GENERATED ALWAYS AS ( generation_expr ) [STORED] |
   AUTO_INCREMENT |
-  UNIQUE index_parameters |
+  UNIQUE [KEY] index_parameters |
   PRIMARY KEY index_parameters |
   REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
     [ ON DELETE action ] [ ON UPDATE action ] }
 [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
 where table_constraint can be:
 [ CONSTRAINT [ constraint_name ] ]
 { CHECK ( expression ) |
@@ -56,12 +64,14 @@ where index_parameters can be:
 [ WITH ( {storage_parameter = value} [, ... ] ) ]
 [ USING INDEX TABLESPACE tablespace_name ]
 
-NOTICE: 'CREATE TABLE SUBPARTITION' is only avaliable in CENTRALIZED mode!
+NOTICE: 'CREATE TABLE SUBPARTITION' is only available in CENTRALIZED mode!
 NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
-NOTICE: '[ index_name ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ USING method ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ ASC | DESC ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: 'AUTO_INCREMENT' is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ COLLATE [ = ] collation ]' is only available in CENTRALIZED mode and B-format database!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

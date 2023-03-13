@@ -258,6 +258,7 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
     ExprContext* econtext = NULL;
     TableScanDesc scan = NULL;
     TIDBitmap* tbm = NULL;
+    TBMHandler tbm_handler;
     TBMIterator* tbmiterator = NULL;
     TBMIterateResult* tbmres = NULL;
     HBktTblScanDesc hpscan = NULL;
@@ -301,6 +302,7 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
      */
     if (tbm == NULL) {
         tbm = (TIDBitmap*)MultiExecProcNode(outerPlanState(node));
+        tbm_handler = tbm_get_handler(tbm);
 
         if (tbm == NULL || !IsA(tbm, TIDBitmap)) {
             ereport(ERROR,
@@ -310,12 +312,12 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
         }
 
         node->tbm = tbm;
-        node->tbmiterator = tbmiterator = tbm_begin_iterate(tbm);
+        node->tbmiterator = tbmiterator = tbm_handler._begin_iterate(tbm);
         node->tbmres = tbmres = NULL;
 
 #ifdef USE_PREFETCH
         if (u_sess->storage_cxt.target_prefetch_pages > 0) {
-            node->prefetch_iterator = prefetch_iterator = tbm_begin_iterate(tbm);
+            node->prefetch_iterator = prefetch_iterator = tbm_handler._begin_iterate(tbm);
             node->prefetch_pages = 0;
             node->prefetch_target = -1;
         }
@@ -807,8 +809,8 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
     /*
      * tuple table initialization
      */
-    ExecInitResultTupleSlot(estate, &scanstate->ss.ps, currentRelation->rd_tam_type);
-    ExecInitScanTupleSlot(estate, &scanstate->ss, currentRelation->rd_tam_type);
+    ExecInitResultTupleSlot(estate, &scanstate->ss.ps, currentRelation->rd_tam_ops);
+    ExecInitScanTupleSlot(estate, &scanstate->ss, currentRelation->rd_tam_ops);
 
     InitBitmapHeapScanNextMtd(scanstate);
 
@@ -898,11 +900,11 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
      */
     ExecAssignResultTypeFromTL(
             &scanstate->ss.ps,
-            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     ExecAssignScanProjectionInfo(&scanstate->ss);
 
-    Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
+    Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     /*
      * initialize child nodes
@@ -1031,36 +1033,45 @@ static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, E
             scanstate->ss.part_id = 0;
         }
 
-        ListCell* cell = NULL;
+        ListCell* cell1 = NULL;
+        ListCell* cell2 = NULL;
         List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
+        List* partitionnos = resultPlan->ls_selectedPartitionnos;
+        Assert(list_length(part_seqs) == list_length(partitionnos));
         relistarget = ExecRelationIsTargetRelation(estate, plan->scan.scanrelid);
         lock = (relistarget ? RowExclusiveLock : AccessShareLock);
         scanstate->ss.lockMode = lock;
 
-        foreach (cell, part_seqs) {
+        forboth (cell1, part_seqs, cell2, partitionnos) {
             Oid tablepartitionid = InvalidOid;
-            int partSeq = lfirst_int(cell);
+            int partSeq = lfirst_int(cell1);
+            int partitionno = lfirst_int(cell2);
             /* add table partition to list */
-            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq, plan->scan.pruningInfo->partMap);
-            tablepartition = partitionOpen(currentRelation, tablepartitionid, lock);
+            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq, partitionno);
+            tablepartition = PartitionOpenWithPartitionno(currentRelation, tablepartitionid, partitionno, lock);
             scanstate->ss.partitions = lappend(scanstate->ss.partitions, tablepartition);
 
             if (resultPlan->ls_selectedSubPartitions != NIL) {
                 Relation partRelation = partitionGetRelation(currentRelation, tablepartition);
                 SubPartitionPruningResult* subPartPruningResult =
-                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq);
+                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq, partitionno);
                 if (subPartPruningResult == NULL) {
                     continue;
                 }
                 List *subpart_seqs = subPartPruningResult->ls_selectedSubPartitions;
+                List *subpartitionnos = subPartPruningResult->ls_selectedSubPartitionnos;
+                Assert(list_length(subpart_seqs) == list_length(subpartitionnos));
                 List *subpartition = NULL;
-                ListCell *lc = NULL;
-                foreach (lc, subpart_seqs) {
+                ListCell *lc1 = NULL;
+                ListCell *lc2 = NULL;
+                forboth (lc1, subpart_seqs, lc2, subpartitionnos) {
                     Oid subpartitionid = InvalidOid;
-                    int subpartSeq = lfirst_int(lc);
+                    int subpartSeq = lfirst_int(lc1);
+                    int subpartitionno = lfirst_int(lc2);
 
-                    subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq);
-                    Partition subpart = partitionOpen(partRelation, subpartitionid, lock);
+                    subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq, subpartitionno);
+                    Partition subpart =
+                        PartitionOpenWithPartitionno(partRelation, subpartitionid, subpartitionno, lock);
                     subpartition = lappend(subpartition, subpart);
                 }
                 releaseDummyRelation(&(partRelation));

@@ -65,7 +65,7 @@ function test_1()
 
   #start logical decoding on standby
   echo "begin to decode"
-  nohup pg_recvlogical -d $db -p $dn1_standby_port -o include-xids=false -o include-timestamp=true -o skip-empty-xacts=true -o only-local=true -o white-table-list='public.*' -o parallel-decode-num=2 -o parallel-queue-size=256 -o sender_timeout='60s' -o standby-connection=false -o decode-style='j' -S slot1 --start -s 2 -f $scripts_dir/data/test1.log &
+  nohup pg_recvlogical -d $db -p $dn1_standby_port -o include-xids=false -o include-timestamp=true -o skip-empty-xacts=true -o only-local=true -o white-table-list='public.*' -o parallel-decode-num=2 -o parallel-queue-size=256 -o sender-timeout='60s' -o standby-connection=false -o decode-style='j' -S slot1 --start -s 2 -f $scripts_dir/data/test1.log &
   if [ $? -eq 0 ]; then
     echo "parallel decoding with type \'j\' start on standby success"
   else

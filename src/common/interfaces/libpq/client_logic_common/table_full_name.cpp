@@ -25,7 +25,12 @@
 #include "libpq-int.h"
 #include "securec.h"
 
-tableFullName::tableFullName() {}
+tableFullName::tableFullName()
+{
+    m_catalog_name = {{0}};
+    m_schema_name = {{0}};
+    m_table_name = {{0}};
+}
 
 tableFullName::~tableFullName() {}
 

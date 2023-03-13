@@ -730,7 +730,7 @@ bool NeedTrComm(Oid relid)
         /* table is non ordinary table, or */
         classForm->relkind != RELKIND_RELATION ||
         /* is non heap table, or */
-        rel->rd_tam_type == TAM_HEAP ||
+        rel->rd_tam_ops == TableAmHeap ||
         /* is non regular table, or */
         classForm->relpersistence != RELPERSISTENCE_PERMANENT ||
         /* is shared table across databases, or */

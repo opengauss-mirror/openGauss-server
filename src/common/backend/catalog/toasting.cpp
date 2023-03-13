@@ -205,9 +205,9 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
      * toast :-(.  This is essential for chunk_data because type bytea is
      * toastable; hit the other two just to be sure.
      */
-    tupdesc->attrs[0]->attstorage = 'p';
-    tupdesc->attrs[1]->attstorage = 'p';
-    tupdesc->attrs[2]->attstorage = 'p';
+    tupdesc->attrs[0].attstorage = 'p';
+    tupdesc->attrs[1].attstorage = 'p';
+    tupdesc->attrs[2].attstorage = 'p';
 
     /*
      * Toast tables for regular relations go in pg_toast; those for temp
@@ -441,7 +441,7 @@ bool CreateToastTableForSubPartition(Relation partRel, Oid subPartOid, Datum rel
         create_toast_table(subPartRel, InvalidOid, InvalidOid, reloptions, true, (partLockMode == AccessShareLock));
 
     releaseDummyRelation(&subPartRel);
-    partitionClose(partRel, partition, partLockMode);
+    partitionClose(partRel, partition, NoLock);
 
     return result;
 }
@@ -450,7 +450,8 @@ bool CreateToastTableForPartitioneOfSubpartTable(Relation rel, Oid partOid, Datu
 {
     bool result = false;
     ListCell *cell = NULL;
-    Partition part = partitionOpen(rel, partOid, partLockMode);
+    LOCKMODE partlock = partLockMode > ShareUpdateExclusiveLock ? ShareUpdateExclusiveLock : partLockMode;
+    Partition part = partitionOpen(rel, partOid, partlock);
     Relation partRel = partitionGetRelation(rel, part);
 
     List *partitionList = relationGetPartitionOidList(partRel);
@@ -460,7 +461,7 @@ bool CreateToastTableForPartitioneOfSubpartTable(Relation rel, Oid partOid, Datu
     }
 
     releaseDummyRelation(&partRel);
-    partitionClose(rel, part, partLockMode);
+    partitionClose(rel, part, NoLock);
 
     return result;
 }
@@ -525,7 +526,7 @@ static bool needs_toast_table(Relation rel)
     bool maxlength_unknown = false;
     bool has_toastable_attrs = false;
     TupleDesc tupdesc;
-    Form_pg_attribute* att = NULL;
+    FormData_pg_attribute* att = NULL;
     int32 tuple_length;
     int i;
 
@@ -548,19 +549,19 @@ static bool needs_toast_table(Relation rel)
     att = tupdesc->attrs;
 
     for (i = 0; i < tupdesc->natts; i++) {
-        if (att[i]->attisdropped)
+        if (att[i].attisdropped)
             continue;
-        data_length = att_align_nominal(data_length, att[i]->attalign);
-        if (att[i]->attlen > 0) {
+        data_length = att_align_nominal(data_length, att[i].attalign);
+        if (att[i].attlen > 0) {
             /* Fixed-length types are never toastable */
-            data_length += att[i]->attlen;
+            data_length += att[i].attlen;
         } else {
-            int32 maxlen = type_maximum_size(att[i]->atttypid, att[i]->atttypmod);
+            int32 maxlen = type_maximum_size(att[i].atttypid, att[i].atttypmod);
             if (maxlen < 0)
                 maxlength_unknown = true;
             else
                 data_length += maxlen;
-            if (att[i]->attstorage != 'p')
+            if (att[i].attstorage != 'p')
                 has_toastable_attrs = true;
         }
     }
@@ -736,6 +737,7 @@ static void InitLobTempToastNamespace(void)
     create_stmt->schemaElts = NULL;
     create_stmt->schemaname = toastNamespaceName;
     create_stmt->temptype = Temp_Lob_Toast;
+    create_stmt->charset = PG_INVALID_ENCODING;
     rc = memset_s(str, sizeof(str), 0, sizeof(str));
     securec_check(rc, "", "");
     ret = snprintf_s(str,
@@ -752,7 +754,7 @@ static void InitLobTempToastNamespace(void)
     proutility_cxt.readOnlyTree = false;
     proutility_cxt.params = NULL;
     proutility_cxt.is_top_level = false;
-    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL);
+    ProcessUtility(&proutility_cxt, None_Receiver, false, NULL, PROCESS_UTILITY_GENERATED);
 
     /* Advance command counter to make namespace visible */
     CommandCounterIncrement();
@@ -801,9 +803,9 @@ bool create_toast_by_sid(Oid *toastOid)
      * toast :-(.  This is essential for chunk_data because type bytea is
      * toastable; hit the other two just to be sure.
      */
-    tupdesc->attrs[0]->attstorage = 'p';
-    tupdesc->attrs[1]->attstorage = 'p';
-    tupdesc->attrs[2]->attstorage = 'p';
+    tupdesc->attrs[0].attstorage = 'p';
+    tupdesc->attrs[1].attstorage = 'p';
+    tupdesc->attrs[2].attstorage = 'p';
     if (!OidIsValid(u_sess->catalog_cxt.myLobTempToastNamespace)) {
         InitLobTempToastNamespace();
     }

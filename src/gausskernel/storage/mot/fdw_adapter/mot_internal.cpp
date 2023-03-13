@@ -1861,7 +1861,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
                 DatumToMOTKey(col,
                     expr->resultType,
                     val,
-                    desc->attrs[orgCols[i] - 1]->atttypid,
+                    desc->attrs[orgCols[i] - 1].atttypid,
                     buf + offset,
                     fieldLengths[i],
                     opers[i],
@@ -1943,7 +1943,7 @@ void MOTAdaptor::PackRow(TupleTableSlot* slot, MOT::Table* table, uint8_t* attrs
         Datum value = heap_slot_getattr(slot, j, &isnull);
 
         if (!isnull) {
-            DatumToMOT(table->GetField(j), value, tupdesc->attrs[i]->atttypid, destRow);
+            DatumToMOT(table->GetField(j), value, tupdesc->attrs[i].atttypid, destRow);
         }
     }
 }
@@ -1966,7 +1966,7 @@ void MOTAdaptor::PackUpdateRow(TupleTableSlot* slot, MOT::Table* table, const ui
             Datum value = heap_slot_getattr(slot, j, &isnull);
 
             if (!isnull) {
-                DatumToMOT(table->GetField(j), value, tupdesc->attrs[i]->atttypid, destRow);
+                DatumToMOT(table->GetField(j), value, tupdesc->attrs[i].atttypid, destRow);
                 BITMAP_SET(bits, i);
             } else {
                 BITMAP_CLEAR(bits, i);
@@ -1986,7 +1986,7 @@ void MOTAdaptor::UnpackRow(TupleTableSlot* slot, MOT::Table* table, const uint8_
 
     for (; i < cols; i++) {
         if (BITMAP_GET(attrs_used, i)) {
-            MOTToDatum(table, tupdesc->attrs[i], srcRow, &(slot->tts_values[i]), &(slot->tts_isnull[i]));
+            MOTToDatum(table, &tupdesc->attrs[i], srcRow, &(slot->tts_values[i]), &(slot->tts_isnull[i]));
         } else {
             slot->tts_isnull[i] = true;
             slot->tts_values[i] = PointerGetDatum(nullptr);

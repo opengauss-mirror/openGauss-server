@@ -32,10 +32,6 @@
 #include "gauss_sft.h"
 #endif
 
-/* Globals from keywords.c */
-extern ScanKeyword FEScanKeywords[];
-extern int NumFEScanKeywords;
-
 /* Globals exported by this file */
 int quote_all_identifiers = 0;
 const char* progname = NULL;
@@ -153,9 +149,9 @@ const char* fmtId(const char* rawid)
          * Note: ScanKeywordLookup() does case-insensitive comparison, but
          * that's fine, since we already know we have all-lower-case.
          */
-        const ScanKeyword* keyword = ScanKeywordLookup(rawid, FEScanKeywords, NumFEScanKeywords);
+        int kwnum = ScanKeywordLookup(rawid, &ScanKeywords);
 
-        if (keyword != NULL && keyword->category != UNRESERVED_KEYWORD)
+        if (kwnum >= 0 && ScanKeywordCategories[kwnum] != UNRESERVED_KEYWORD)
             need_quotes = true;
     }
 

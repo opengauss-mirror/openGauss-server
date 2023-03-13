@@ -133,7 +133,7 @@ static void estimate_size(PlannerInfo *root, RelOptInfo *baserel, DistImportPlan
          */
         double tuple_width;
 
-        tuple_width = MAXALIGN((intptr_t)baserel->width) + MAXALIGN(sizeof(HeapTupleHeaderData));
+        tuple_width = MAXALIGN((intptr_t)baserel->reltarget->width) + MAXALIGN(sizeof(HeapTupleHeaderData));
         ntuples = clamp_row_est((double)stat_buf.st_size / (double)tuple_width);
         baserel->tuples = ntuples;
     }
@@ -1612,7 +1612,7 @@ retry:
         /*
          * Optimize foreign scan by using informational constraint.
          */
-        if (((ForeignScan *)node->ss.ps.plan)->scan.predicate_pushdown_optimized && false == slot->tts_isempty) {
+        if (((ForeignScan *)node->ss.ps.plan)->scan.predicate_pushdown_optimized && !TTS_EMPTY(slot)) {
             /*
              * If we find a suitable tuple, set is_scan_end value is true.
              * It means that we do not find suitable tuple in the next iteration,

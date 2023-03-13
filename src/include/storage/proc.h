@@ -217,12 +217,16 @@ struct PGPROC {
     bool snapshotGroupMember;
     /* next ProcArray group member waiting for snapshot getting */
     pg_atomic_uint32 snapshotGroupNext;
-    Snapshot snapshotGroup;
+    volatile Snapshot snapshotGroup;
     TransactionId xminGroup;
     TransactionId xmaxGroup;
     TransactionId globalxminGroup;
     volatile TransactionId replicationSlotXminGroup;
     volatile TransactionId replicationSlotCatalogXminGroup;
+
+    TransactionId snapXmax;     /* maximal running XID as it was when we were
+                             * getting our snapshot. */
+    CommitSeqNo snapCSN;    /* csn as it was when we were getting our snapshot. */
 
     /* commit sequence number send down */
     CommitSeqNo commitCSN;
@@ -349,6 +353,9 @@ typedef struct PGXACT {
 /* the offset of the last padding if exists*/
 #define PROC_HDR_PAD_OFFSET 112
 
+/* max number of CMA's connections */
+#define NUM_CMAGENT_PROCS (10)
+
 /*
  * There is one ProcGlobal struct for the whole database cluster.
  */
@@ -369,6 +376,8 @@ typedef struct PROC_HDR {
     PGPROC* autovacFreeProcs;
     /* Head of list of cm agent's free PGPROC structures */
     PGPROC* cmAgentFreeProcs;
+    /* Head of list of cm agent's all PGPROC structures */
+    PGPROC* cmAgentAllProcs[NUM_CMAGENT_PROCS];
     /* Head of list of pg_job's free PGPROC structures */
     PGPROC* pgjobfreeProcs;
 	/* Head of list of bgworker free PGPROC structures */
@@ -431,8 +440,6 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
 
 #define NUM_AUXILIARY_PROCS (NUM_SINGLE_AUX_PROC + NUM_MULTI_AUX_PROC) 
 
-/* max number of CMA's connections */
-#define NUM_CMAGENT_PROCS (10)
 /* buffer length of information when no free proc available for cm_agent */
 #define CONNINFOLEN (64)
 

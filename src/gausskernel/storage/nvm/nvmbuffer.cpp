@@ -440,9 +440,9 @@ restart:
                                         BufferGetBlock(nvmBuf->buf_id + 1), BLCKSZ);
                                     securec_check(rc, "\0", "\0");
                                     buf->tag = nvmBuf->tag;
-                                    buf->seg_fileno = nvmBuf->seg_fileno;
-                                    buf->seg_blockno = nvmBuf->seg_blockno;
-                                    buf->lsn_on_disk = nvmBuf->lsn_on_disk;
+                                    buf->extra->seg_fileno = nvmBuf->extra->seg_fileno;
+                                    buf->extra->seg_blockno = nvmBuf->extra->seg_blockno;
+                                    buf->extra->lsn_on_disk = nvmBuf->extra->lsn_on_disk;
 
                                     /* Assert nvmBuf is not dirty \ cas without buffer header lock */
                                     nvm_buf_state &= ~(BM_TAG_VALID);
@@ -475,9 +475,9 @@ restart:
                                     BufferGetBlock(nvmBuf->buf_id + 1), BLCKSZ);
                                 securec_check(rc, "\0", "\0");
                                 buf->tag = nvmBuf->tag;
-                                buf->seg_fileno = nvmBuf->seg_fileno;
-                                buf->seg_blockno = nvmBuf->seg_blockno;
-                                buf->lsn_on_disk = nvmBuf->lsn_on_disk;
+                                buf->extra->seg_fileno = nvmBuf->extra->seg_fileno;
+                                buf->extra->seg_blockno = nvmBuf->extra->seg_blockno;
+                                buf->extra->lsn_on_disk = nvmBuf->extra->lsn_on_disk;
 
                                 // Assert nvmBuf is not dirty
                                 nvm_buf_state &= ~(BM_TAG_VALID);
@@ -761,11 +761,11 @@ restart:
     /* set Physical segment file. */
     if (pblk != NULL) {
         Assert(PhyBlockIsValid(*pblk));
-        buf->seg_fileno = pblk->relNode;
-        buf->seg_blockno = pblk->block;
+        buf->extra->seg_fileno = pblk->relNode;
+        buf->extra->seg_blockno = pblk->block;
     } else {
-        buf->seg_fileno = EXTENT_INVALID;
-        buf->seg_blockno = InvalidBlockNumber;
+        buf->extra->seg_fileno = EXTENT_INVALID;
+        buf->extra->seg_blockno = InvalidBlockNumber;
     }
     LWLockRelease(new_partition_lock);
 

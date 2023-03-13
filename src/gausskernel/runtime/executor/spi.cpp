@@ -1289,7 +1289,7 @@ int SPI_fnumber(TupleDesc tupdesc, const char *fname)
     Form_pg_attribute sys_att;
 
     for (res = 0; res < tupdesc->natts; res++) {
-        if (namestrcmp(&tupdesc->attrs[res]->attname, fname) == 0) {
+        if (namestrcmp(&tupdesc->attrs[res].attname, fname) == 0) {
             return res + 1;
         }
     }
@@ -1314,7 +1314,7 @@ char *SPI_fname(TupleDesc tupdesc, int fnumber)
     }
 
     if (fnumber > 0) {
-        attr = tupdesc->attrs[fnumber - 1];
+        attr = &tupdesc->attrs[fnumber - 1];
     } else {
         attr = SystemAttributeDefinition(fnumber, true, false, false);
     }
@@ -1324,8 +1324,7 @@ char *SPI_fname(TupleDesc tupdesc, int fnumber)
 
 char *SPI_getvalue(HeapTuple tuple, TupleDesc tupdesc, int fnumber)
 {
-    char *result = NULL;
-    Datum orig_val, val;
+    Datum val;
     bool is_null = false;
     Oid typoid, foutoid;
     bool typo_is_varlen = false;
@@ -1337,38 +1336,21 @@ char *SPI_getvalue(HeapTuple tuple, TupleDesc tupdesc, int fnumber)
         return NULL;
     }
 
-    orig_val = tableam_tops_tuple_getattr(tuple, (unsigned int)fnumber, tupdesc, &is_null);
+    val = tableam_tops_tuple_getattr(tuple, (unsigned int)fnumber, tupdesc, &is_null);
 
     if (is_null) {
         return NULL;
     }
 
     if (fnumber > 0) {
-        typoid = tupdesc->attrs[fnumber - 1]->atttypid;
+        typoid = tupdesc->attrs[fnumber - 1].atttypid;
     } else {
         typoid = (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
     }
 
     getTypeOutputInfo(typoid, &foutoid, &typo_is_varlen);
 
-    /*
-     * If we have a toasted datum, forcibly detoast it here to avoid memory
-     * leakage inside the type's output routine.
-     */
-    if (typo_is_varlen) {
-        val = PointerGetDatum(PG_DETOAST_DATUM(orig_val));
-    } else {
-        val = orig_val;
-    }
-
-    result = OidOutputFunctionCall(foutoid, val);
-
-    /* Clean up detoasted copy, if any */
-    if (val != orig_val) {
-        pfree(DatumGetPointer(val));
-    }
-
-    return result;
+    return OidOutputFunctionCall(foutoid, val);
 }
 
 Datum SPI_getbinval(HeapTuple tuple, TupleDesc tupdesc, int fnumber, bool *isnull)
@@ -1397,7 +1379,7 @@ char *SPI_gettype(TupleDesc tupdesc, int fnumber)
     }
 
     if (fnumber > 0) {
-        typoid = tupdesc->attrs[fnumber - 1]->atttypid;
+        typoid = tupdesc->attrs[fnumber - 1].atttypid;
     } else {
         typoid = (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
     }
@@ -1423,7 +1405,7 @@ Oid SPI_gettypeid(TupleDesc tupdesc, int fnumber)
     }
 
     if (fnumber > 0) {
-        return tupdesc->attrs[fnumber - 1]->atttypid;
+        return tupdesc->attrs[fnumber - 1].atttypid;
     } else {
         return (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
     }
@@ -2835,7 +2817,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
 #ifdef PGXC
                     false,
 #endif /* PGXC */
-                    completionTag);
+                    completionTag, PROCESS_UTILITY_QUERY);
 
                 /* Update "processed" if stmt returned tuples */
                 if (u_sess->SPI_cxt._current->tuptable) {

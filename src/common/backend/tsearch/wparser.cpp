@@ -47,7 +47,7 @@ static void tt_setup_firstcall(FuncCallContext* funcctx, Oid prsid)
     st->list = (LexDescr*)DatumGetPointer(OidFunctionCall1(prs->lextypeOid, (Datum)0));
     funcctx->user_fctx = (void*)st;
 
-    tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(3, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "tokid", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "alias", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "description", TEXTOID, -1, 0);
@@ -185,7 +185,7 @@ static void prs_setup_firstcall(FuncCallContext* funcctx, Oid prsid, text* txt)
     st->cur = 0;
 
     funcctx->user_fctx = (void*)st;
-    tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "tokid", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "token", TEXTOID, -1, 0);
 

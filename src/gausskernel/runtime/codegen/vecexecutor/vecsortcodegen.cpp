@@ -59,7 +59,7 @@ bool VecSortCodeGen::JittableCompareMultiColumn(VecSortState* node)
 
     for (i = 0; i < plannode->numCols; i++) {
         colIdx = plannode->sortColIdx[i] - 1;
-        Form_pg_attribute attr = tupDesc->attrs[colIdx];
+        Form_pg_attribute attr = &tupDesc->attrs[colIdx];
         Oid typeOid = attr->atttypid;
         Oid opno = plannode->sortOperators[i];
         switch (typeOid) {
@@ -135,7 +135,7 @@ bool VecSortCodeGen::JittableSortAggMatchKey(VecAggState* node)
 
     for (i = 0; i < plannode->numCols; i++) {
         colIdx = plannode->grpColIdx[i] - 1;
-        Form_pg_attribute attr = tupDesc->attrs[colIdx];
+        Form_pg_attribute attr = &tupDesc->attrs[colIdx];
         Oid opoid = plannode->grpOperators[i];
         switch (opoid) {
             case INT4EQOID:
@@ -275,7 +275,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
         Oid opno = plannode->sortOperators[i];
 
         colIdx = plannode->sortColIdx[i] - 1;
-        Form_pg_attribute attr = tupDesc->attrs[colIdx];
+        Form_pg_attribute attr = &tupDesc->attrs[colIdx];
         Oid typeOid = attr->atttypid;
 
         builder.SetInsertPoint(bb_keys1[i]);
@@ -327,7 +327,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
             if (i < numKeys - 1) {
                 /* prefetch the next key if it is BPCHAR or NUMERIC data */
                 int next_colIdx = plannode->sortColIdx[i + 1] - 1;
-                Form_pg_attribute next_attr = tupDesc->attrs[next_colIdx];
+                Form_pg_attribute next_attr = &tupDesc->attrs[next_colIdx];
                 if (next_attr->atttypid == VARCHAROID || next_attr->atttypid == TEXTOID ||
                     next_attr->atttypid == BPCHAROID || next_attr->atttypid == NUMERICOID) {
                     llvm::Value* next_val_colIdx = llvmCodeGen->getIntConstant(INT8OID, next_colIdx);
@@ -622,7 +622,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
         /* reverse order for TopN */
         nullsFirst = !nullsFirst;
         colIdx = plannode->sortColIdx[i] - 1;
-        Form_pg_attribute attr = tupDesc->attrs[colIdx];
+        Form_pg_attribute attr = &tupDesc->attrs[colIdx];
         Oid typeOid = attr->atttypid;
 
         builder.SetInsertPoint(bb_keys1[i]);
@@ -664,7 +664,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
             /* prefetch the next key if it is bpchar or numeric data */
             if (i < numKeys - 1) {
                 int next_colIdx = plannode->sortColIdx[i + 1] - 1;
-                Form_pg_attribute next_attr = tupDesc->attrs[next_colIdx];
+                Form_pg_attribute next_attr = &tupDesc->attrs[next_colIdx];
                 if (next_attr->atttypid == VARCHAROID || next_attr->atttypid == TEXTOID ||
                     next_attr->atttypid == BPCHAROID || next_attr->atttypid == NUMERICOID) {
                     llvm::Value* next_val_colIdx = llvmCodeGen->getIntConstant(INT8OID, next_colIdx);
@@ -3673,7 +3673,7 @@ llvm::Function* VecSortCodeGen::SortAggMatchKeyCodeGen(VecAggState* node)
     /* Codegen for each key comparison */
     for (i = 0; i < numKeys; i++) {
         int val_keyIdx = plannode->grpColIdx[i] - 1;
-        Form_pg_attribute attr = tupDesc->attrs[val_keyIdx];
+        Form_pg_attribute attr = &tupDesc->attrs[val_keyIdx];
         Oid opno = plannode->grpOperators[i];
 
         builder.SetInsertPoint(bb_keyStart[i]);

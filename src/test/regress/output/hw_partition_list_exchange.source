@@ -652,7 +652,7 @@ partition by list(a)
 insert into test_exchange_validation_ord values (1), (10);
 --ERROR
 alter table test_exchange_validation_lt exchange partition (p1) with table test_exchange_validation_ord;
-ERROR:  some rows in table do not qualify for specified partition
+ERROR:  Can't find list partition oid when checking tuple is in the partition.
 drop table test_exchange_validation_ord;
 drop table test_exchange_validation_lt;
 --b.with validation
@@ -666,7 +666,7 @@ partition by list(a)
 insert into test_exchange_validation_ord values (1), (10);
 --ERROR
 alter table test_exchange_validation_lt exchange partition (p1) with table test_exchange_validation_ord with validation;
-ERROR:  some rows in table do not qualify for specified partition
+ERROR:  Can't find list partition oid when checking tuple is in the partition.
 drop table test_exchange_validation_ord;
 drop table test_exchange_validation_lt;
 --c.without validation
@@ -1014,7 +1014,7 @@ insert into test_exchange_verbose_ord values(generate_series(1, 6));
 insert into test_exchange_verbose_ord values(7);
 --ERROR
 alter table test_exchange_verbose_lt exchange partition (test_exchange_verbose_lt_p1) with table test_exchange_verbose_ord verbose;
-ERROR:  inserted partition key does not map to any table partition
+ERROR:  Can't find list partition oid when checking tuple is in the partition.
 drop table test_exchange_verbose_ord;
 drop table test_exchange_verbose_lt;
 -- c.index

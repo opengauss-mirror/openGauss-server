@@ -33,9 +33,14 @@
 #include "parser/parse_expr.h"
 #endif /* FRONTEND_PARSER */
 #include "storage/tcap.h"
+#include "parser/parse_utilcmd.h"
 
+static bool query_check_no_flt_walker(Node* node, void* context);
+static bool query_check_srf_walker(Node* node, void* context);
 static bool expression_returns_set_walker(Node* node, void* context);
+static bool expression_rownum_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
+Oid userSetElemTypeCollInfo(const Node* expr, Oid (*exprFunc)(const Node*));
 
 /*
  *	exprType -
@@ -70,7 +75,7 @@ Oid exprType(const Node* expr)
             type = ((const Const*)expr)->consttype;
             break;
         case T_UserVar:
-            type = ((const Const*)(((UserVar*)expr)->value))->consttype;
+            type = exprType((const Node*)(((UserVar*)expr)->value));
             break;
         case T_Param:
             type = ((const Param*)expr)->paramtype;
@@ -236,10 +241,7 @@ Oid exprType(const Node* expr)
             type = ((const Const*)(((SetVariableExpr*)expr)->value))->consttype;
             break;
         case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
-            type = InvalidOid; /* keep compiler quiet */
+            type = userSetElemTypeCollInfo(expr, exprType);
             break;
         default:
             ereport(ERROR,
@@ -671,8 +673,101 @@ static bool expression_returns_set_walker(Node* node, void* context)
     if (IsA(node, XmlExpr)) {
         return false;
     }
+    if (IsA(node, UserSetElem)) {
+        return false;
+    }
 
     return expression_tree_walker(node, (bool (*)())expression_returns_set_walker, context);
+}
+
+/*
+ * node_query_check_no_flt
+ *
+ * It will check if we need a revert.
+ */
+bool query_check_no_flt(Query* qry)
+{
+    if (IsA(qry, Query)) {
+        /* if we find a query need execute as old expression framework, return true imediately */
+        if (!qry->is_flt_frame) {
+            return true;
+        }
+    }
+    return query_or_expression_tree_walker((Node*)qry, (bool (*)())query_check_no_flt_walker, (void*)NULL, 0);
+}
+
+static bool query_check_no_flt_walker(Node* node, void* context)
+{
+    if (node == NULL)
+        return false;
+    if (IsA(node, Query)) {
+        Query* qry = (Query*)node;
+        /* if we find a query need execute as old expression framework, return true imediately */
+        if (!qry->is_flt_frame) {
+            return true;
+        }
+        return query_tree_walker((Query*)node, (bool (*)())query_check_no_flt_walker, (void*)NULL, 0);
+    }
+    return expression_tree_walker(node, (bool (*)())query_check_no_flt_walker, (void*)NULL);
+}
+
+/*
+ * query_check_srf
+ *
+ * query_check_srf will try to check SRFs in qry->targetList bt
+ * function query_check_srf_walker
+ */
+void query_check_srf(Query* qry)
+{
+    qry->hasTargetSRFs = expression_returns_set((Node*)qry->targetList);
+    /* if the rule_action has SRFs we need revert to old expression framework */
+    if (qry->hasTargetSRFs) {
+        qry->is_flt_frame = false;
+    }
+    query_or_expression_tree_walker((Node*)qry, (bool (*)())query_check_srf_walker, (void*)NULL, 0);
+    return;
+}
+
+static bool query_check_srf_walker(Node* node, void* context)
+{
+    if (node == NULL)
+        return false;
+    if (IsA(node, Query)) {
+        Query* qry = (Query*)node;
+        qry->hasTargetSRFs = expression_returns_set((Node*)qry->targetList);
+        /* if the rule_action has SRFs we need revert to old expression framework */
+        if (qry->hasTargetSRFs) {
+            qry->is_flt_frame = false;
+        }
+        return query_tree_walker((Query*)node, (bool (*)())query_check_srf_walker, (void*)NULL, 0);
+    }
+    return expression_tree_walker(node, (bool (*)())query_check_srf_walker, (void*)NULL);
+}
+
+/*
+ * expression_contains_rownum
+ *	  Test whether an expression contains rownum.
+ *
+ * Because we use expression_tree_walker(), this can also be applied to
+ * whole targetlists; it'll produce TRUE if any one of the tlist items
+ * contain rownum.
+ */
+bool expression_contains_rownum(Node* node)
+{
+    return expression_rownum_walker(node, NULL);
+}
+
+static bool expression_rownum_walker(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, Rownum)) {
+        return true;
+    }
+
+    return expression_tree_walker(node, (bool (*)())expression_rownum_walker, context);
 }
 
 /*
@@ -870,10 +965,7 @@ Oid exprCollation(const Node* expr)
             coll = ((const Const*)(((SetVariableExpr*)expr)->value))->constcollid;
             break;
         case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
-            coll = InvalidOid; /* keep compiler quiet */
+            coll = userSetElemTypeCollInfo(expr, exprCollation); 
             break;
         default:
             ereport(
@@ -882,6 +974,15 @@ Oid exprCollation(const Node* expr)
             break;
     }
     return coll;
+}
+
+/*
+ *	exprCharset -
+ *	  returns the character set of the expression's result.
+ */
+int exprCharset(const Node* expr)
+{
+    return get_charset_by_collation(exprCollation(expr));
 }
 
 /*
@@ -1081,9 +1182,6 @@ void exprSetCollation(Node* expr, Oid collation)
             ((Const*)(((SetVariableExpr*)expr)->value))->constcollid = collation;
             break;
         case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
             break;
         default:
             ereport(
@@ -1926,10 +2024,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_PrefixKey:
             return p2walker(((PrefixKey*)node)->arg, context);
         case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
-            break;
+            return true;
         default:
             ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                             errmsg("expression_tree_walker:unrecognized node type: %d", (int)nodeTag(node))));
@@ -2688,11 +2783,12 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             MUTATE(newnode->value, oldnode->value, Expr*);
             return (Node*)newnode;
         } break;
-        case T_UserSetElem:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
-            break;
+        case T_UserSetElem: {
+            UserSetElem* use = (UserSetElem*)node;
+            UserSetElem* newnode = NULL;
+            FLATCOPY(newnode, use, UserSetElem, isCopy);
+            return (Node*)newnode;
+        } break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
@@ -3319,6 +3415,8 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             return p2walker(((UpsertClause*)node)->targetList, context);
         case T_CommonTableExpr:
             return p2walker(((CommonTableExpr*)node)->ctequery, context);
+        case T_AutoIncrement:
+            return p2walker(((AutoIncrement*)node)->expr, context);
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
@@ -3346,4 +3444,19 @@ void find_nextval_seqoid_walker(Node* node, Oid* seqoid)
         }
     }
     (void)expression_tree_walker(node, (bool (*)())find_nextval_seqoid_walker, (void*)seqoid);
+}
+
+Oid userSetElemTypeCollInfo(const Node* expr, Oid (*exprFunc)(const Node*))
+{
+    Oid coll = InvalidOid;
+    UserSetElem* use_node = (UserSetElem*)expr;
+    UserVar* uv = (UserVar*)linitial(use_node->name);
+    if (uv != NULL) {
+        if (uv->value != NULL) {
+            coll = exprFunc((Node*)uv->value);
+        } else if (use_node->val != NULL) {
+            coll = exprFunc((Node*)use_node->val);
+        }
+    }
+    return coll;
 }

@@ -389,7 +389,7 @@ static Node* sql_fn_post_column_ref(ParseState* p_state, ColumnRef* c_ref, Node*
          * ParseFuncOrColumn will return NULL, and we'll fail back at the
          * caller.
          */
-        param = ParseFuncOrColumn(p_state, list_make1(sub_field), list_make1(param), NULL, c_ref->location);
+        param = ParseFuncOrColumn(p_state, list_make1(sub_field), list_make1(param), p_state->p_last_srf, NULL, c_ref->location);
     }
 
     return param;
@@ -839,7 +839,8 @@ static bool postquel_getnext(execution_state* es, SQLFunctionCachePtr fcache)
 #ifdef PGXC
             false,
 #endif /* PGXC */
-            NULL);
+            NULL,
+            PROCESS_UTILITY_QUERY);
         result = true; /* never stops early */
     } else {
         /* Run regular commands to completion unless lazyEval */
@@ -1270,8 +1271,8 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
 
         if (IsClientLogicType(fcache->rettype)) {
             for (int i = 0; i < rsi->expectedDesc->natts; i++) {
-                if (IsClientLogicType(rsi->expectedDesc->attrs[i]->atttypid)) {
-                    rsi->expectedDesc->attrs[i]->atttypmod = fcache->rettype_orig;
+                if (IsClientLogicType(rsi->expectedDesc->attrs[i].atttypid)) {
+                    rsi->expectedDesc->attrs[i].atttypmod = fcache->rettype_orig;
                 }
             }
         }
@@ -1531,6 +1532,28 @@ static void ShutdownSQLFunction(Datum arg)
 }
 
 /*
+ * check_if_exist_client_logic_type()
+ * check if return value of a list exist client encryption type. if exist, report error.
+ */
+void check_if_exist_client_logic_type(List *tlist, Oid ret_type)
+{
+    if (ret_type != RECORDOID) {
+        return;
+    }
+    ListCell* lc = NULL;
+    foreach (lc, tlist) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        Oid tle_type = exprType((Node*)tle->expr);
+        if (IsClientLogicType(tle_type)) {
+            ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Un-support to RETURN RECORD or RETURN SETOF RECORD when return client encryption columns."),
+                errhint("You possibly can use RETURN table(column_name column_type[,...]) instead of RETURN RECORD.")));
+        }
+    }
+    return;
+}
+
+/*
  * check_sql_fn_retval() -- check return value of a list of sql parse trees.
  *
  * The return value of a sql function is the value returned by the last
@@ -1692,7 +1715,7 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
 
         /* Set up junk filter if needed */
         if (junk_filter != NULL)
-            *junk_filter = ExecInitJunkFilter(tlist, false, NULL);
+            *junk_filter = ExecInitJunkFilter(tlist, false, NULL, TableAmHeap);
     } else if (fn_type == TYPTYPE_COMPOSITE || ret_type == RECORDOID) {
         /* Returns a rowtype */
         TupleDesc tup_desc;
@@ -1730,19 +1753,20 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
                 }
                 /* Set up junk filter if needed */
                 if (junk_filter != NULL)
-                    *junk_filter = ExecInitJunkFilter(tlist, false, NULL);
+                    *junk_filter = ExecInitJunkFilter(tlist, false, NULL, TableAmHeap);
                 return false; /* NOT returning whole tuple */
             }
         }
 
         /* Is the rowtype fixed, or determined only at runtime? */
         if (get_func_result_type(func_id, NULL, &tup_desc) != TYPEFUNC_COMPOSITE) {
+            check_if_exist_client_logic_type(tlist, ret_type);
             /*
              * Assume we are returning the whole tuple. Crosschecking against
              * what the caller expects will happen at runtime.
              */
             if (junk_filter != NULL)
-                *junk_filter = ExecInitJunkFilter(tlist, false, NULL);
+                *junk_filter = ExecInitJunkFilter(tlist, false, NULL, TableAmHeap);
             return true;
         }
         Assert(tup_desc);
@@ -1778,7 +1802,7 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
                         (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                             errmsg("return type mismatch in function declared to return %s", format_type_be(ret_type)),
                             errdetail("Final statement returns too many columns.")));
-                attr = tup_desc->attrs[col_index - 1];
+                attr = &tup_desc->attrs[col_index - 1];
                 if (attr->attisdropped && modify_target_list) {
                     Expr* null_expr = NULL;
 
@@ -1831,7 +1855,7 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
 
                     for (int j = 0; j < col_index - 1; j++) {
                         all_types_orig[j] = -1;
-                        all_types[j] = ObjectIdGetDatum(tup_desc->attrs[j]->atttypid);
+                        all_types[j] = ObjectIdGetDatum(tup_desc->attrs[j].atttypid);
                     }
                 }
                 all_types_orig[col_index - 1] = ObjectIdGetDatum(att_type);
@@ -1869,7 +1893,7 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
 
         /* remaining columns in tupdesc had better all be dropped */
         for (col_index++; col_index <= tup_natts; col_index++) {
-            if (!tup_desc->attrs[col_index - 1]->attisdropped)
+            if (!tup_desc->attrs[col_index - 1].attisdropped)
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                         errmsg("return type mismatch in function declared to return %s", format_type_be(ret_type)),

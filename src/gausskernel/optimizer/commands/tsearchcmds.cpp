@@ -38,6 +38,7 @@
 #include "catalog/pg_type.h"
 #include "commands/alter.h"
 #include "commands/defrem.h"
+#include "commands/event_trigger.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "parser/parse_func.h"
@@ -122,7 +123,7 @@ static Datum get_ts_parser_func(DefElem* defel, int attnum)
 /*
  * make pg_depend entries for a new pg_ts_parser entry
  */
-static void makeParserDependencies(HeapTuple tuple)
+static ObjectAddress makeParserDependencies(HeapTuple tuple)
 {
     Form_pg_ts_parser prs = (Form_pg_ts_parser)GETSTRUCT(tuple);
     ObjectAddress myself, referenced;
@@ -160,12 +161,13 @@ static void makeParserDependencies(HeapTuple tuple)
         referenced.objectId = prs->prsheadline;
         recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
     }
+    return myself;
 }
 
 /*
  * CREATE TEXT SEARCH PARSER
  */
-void DefineTSParser(List* names, List* parameters)
+ObjectAddress DefineTSParser(List* names, List* parameters)
 {
     char* prsname = NULL;
     ListCell* pl = NULL;
@@ -176,6 +178,7 @@ void DefineTSParser(List* names, List* parameters)
     NameData pname;
     Oid prsOid;
     Oid namespaceoid;
+    ObjectAddress address;
 
     if (!superuser())
         ereport(ERROR,
@@ -246,7 +249,7 @@ void DefineTSParser(List* names, List* parameters)
 
     CatalogUpdateIndexes(prsRel, tup);
 
-    makeParserDependencies(tup);
+    address = makeParserDependencies(tup);
 
     /* Post creation hook for new text search parser */
     InvokeObjectAccessHook(OAT_POST_CREATE, TSParserRelationId, prsOid, 0, NULL);
@@ -254,6 +257,7 @@ void DefineTSParser(List* names, List* parameters)
     tableam_tops_free_tuple(tup);
 
     heap_close(prsRel, RowExclusiveLock);
+    return address;
 }
 
 /*
@@ -280,46 +284,13 @@ void RemoveTSParserById(Oid prsId)
 }
 
 /*
- * ALTER TEXT SEARCH PARSER RENAME
- */
-void RenameTSParser(List* oldname, const char* newname)
-{
-    HeapTuple tup;
-    Relation rel;
-    Oid prsId;
-    Oid namespaceOid;
-
-    if (!superuser())
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to rename text search parsers")));
-
-    rel = heap_open(TSParserRelationId, RowExclusiveLock);
-    prsId = get_ts_parser_oid(oldname, false);
-    tup = SearchSysCacheCopy1(TSPARSEROID, ObjectIdGetDatum(prsId));
-
-    if (!HeapTupleIsValid(tup)) /* should not happen */
-        ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for text search parser %u", prsId)));
-    namespaceOid = ((Form_pg_ts_parser)GETSTRUCT(tup))->prsnamespace;
-    if (SearchSysCacheExists2(TSPARSERNAMENSP, PointerGetDatum(newname), ObjectIdGetDatum(namespaceOid)))
-        ereport(
-            ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("text search parser \"%s\" already exists", newname)));
-
-    (void)namestrcpy(&(((Form_pg_ts_parser)GETSTRUCT(tup))->prsname), newname);
-    simple_heap_update(rel, &tup->t_self, tup);
-    CatalogUpdateIndexes(rel, tup);
-
-    heap_close(rel, NoLock);
-    tableam_tops_free_tuple(tup);
-}
-
-/*
  * ALTER TEXT SEARCH PARSER any_name SET SCHEMA name
  */
-void AlterTSParserNamespace(List* name, const char* newschema)
+ObjectAddress AlterTSParserNamespace(List* name, const char* newschema)
 {
     Oid prsId, nspOid;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(TSParserRelationId, RowExclusiveLock);
 
@@ -339,6 +310,8 @@ void AlterTSParserNamespace(List* name, const char* newschema)
         (AclObjectKind)-1);
 
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
+    return address;
 }
 
 Oid AlterTSParserNamespace_oid(Oid prsId, Oid newNspOid)
@@ -367,7 +340,7 @@ Oid AlterTSParserNamespace_oid(Oid prsId, Oid newNspOid)
 /*
  * make pg_depend entries for a new pg_ts_dict entry
  */
-static void makeDictionaryDependencies(HeapTuple tuple, const char* dictPrefix)
+static ObjectAddress makeDictionaryDependencies(HeapTuple tuple, const char* dictPrefix)
 {
     Form_pg_ts_dict dict = (Form_pg_ts_dict)GETSTRUCT(tuple);
     ObjectAddress myself, referenced;
@@ -403,6 +376,7 @@ static void makeDictionaryDependencies(HeapTuple tuple, const char* dictPrefix)
     referenced.objectId = dict->dicttemplate;
     referenced.objectSubId = 0;
     recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+    return myself;
 }
 
 /*
@@ -489,7 +463,7 @@ void copy_tsfiles(List* userFiles, const char* dictPrefix)
 /*
  * CREATE TEXT SEARCH DICTIONARY
  */
-void DefineTSDictionary(List* names, List* parameters)
+ObjectAddress DefineTSDictionary(List* names, List* parameters)
 {
     ListCell* pl = NULL;
     Relation dictRel;
@@ -507,6 +481,7 @@ void DefineTSDictionary(List* names, List* parameters)
     List* userfiles = NIL;
     /* internal dictionary file name prefix */
     char* dictprefix = NULL;
+    ObjectAddress address;
 
     /* For now only user with sysadmin can create dictionary */
     if (!superuser())
@@ -577,7 +552,7 @@ void DefineTSDictionary(List* names, List* parameters)
     dictOid = simple_heap_insert(dictRel, tup);
 
     CatalogUpdateIndexes(dictRel, tup);
-    makeDictionaryDependencies(tup, dictprefix);
+    address = makeDictionaryDependencies(tup, dictprefix);
     /* Post creation hook for new text search dictionary */
     InvokeObjectAccessHook(OAT_POST_CREATE, TSDictionaryRelationId, dictOid, 0, NULL);
     tableam_tops_free_tuple(tup);
@@ -592,6 +567,8 @@ void DefineTSDictionary(List* names, List* parameters)
     /* Clean up */
     if (userfiles != NIL)
         list_free_deep(userfiles);
+
+    return address;
 }
 
 /*
@@ -646,10 +623,11 @@ void RenameTSDictionary(List* oldname, const char* newname)
 /*
  * ALTER TEXT SEARCH DICTIONARY any_name SET SCHEMA name
  */
-void AlterTSDictionaryNamespace(List* name, const char* newschema)
+ObjectAddress AlterTSDictionaryNamespace(List* name, const char* newschema)
 {
     Oid dictId, nspOid;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(TSDictionaryRelationId, RowExclusiveLock);
 
@@ -673,6 +651,8 @@ void AlterTSDictionaryNamespace(List* name, const char* newschema)
         ACL_KIND_TSDICTIONARY);
 
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
+    return address;
 }
 
 Oid AlterTSDictionaryNamespace_oid(Oid dictId, Oid newNspOid)
@@ -732,7 +712,7 @@ void RemoveTSDictionaryById(Oid dictId)
 /*
  * ALTER TEXT SEARCH DICTIONARY
  */
-void AlterTSDictionary(AlterTSDictionaryStmt* stmt)
+ObjectAddress AlterTSDictionary(AlterTSDictionaryStmt* stmt)
 {
     HeapTuple tup, newtup;
     Relation rel;
@@ -744,6 +724,7 @@ void AlterTSDictionary(AlterTSDictionaryStmt* stmt)
     Datum repl_val[Natts_pg_ts_dict];
     bool repl_null[Natts_pg_ts_dict];
     bool repl_repl[Natts_pg_ts_dict];
+    ObjectAddress address;
 
     /* record first N option old */
     int oldnum = 0;
@@ -860,6 +841,7 @@ void AlterTSDictionary(AlterTSDictionaryStmt* stmt)
     } else
         changeDependencyOnObjfile(dictId, dictowner, NULL);
 
+    ObjectAddressSet(address, TSDictionaryRelationId, dictId);
     /*
      * NOTE: because we only support altering the options, not the template,
      * there is no need to update dependencies.  This might have to change if
@@ -878,6 +860,8 @@ void AlterTSDictionary(AlterTSDictionaryStmt* stmt)
     /* Clean up */
     if (userfiles != NIL)
         list_free_deep(userfiles);
+
+    return address;
 }
 
 /*
@@ -953,10 +937,11 @@ void AlterTSDictionaryOwner_oid(Oid dictId, Oid newOwnerId)
 /*
  * ALTER TEXT SEARCH DICTIONARY OWNER
  */
-void AlterTSDictionaryOwner(List* name, Oid newOwnerId)
+ObjectAddress AlterTSDictionaryOwner(List* name, Oid newOwnerId)
 {
     Relation rel;
     Oid dictId;
+    ObjectAddress address;
 
     rel = heap_open(TSDictionaryRelationId, RowExclusiveLock);
     dictId = get_ts_dict_oid(name, false);
@@ -967,6 +952,8 @@ void AlterTSDictionaryOwner(List* name, Oid newOwnerId)
 
     AlterTSDictionaryOwner_internal(rel, dictId, newOwnerId);
     heap_close(rel, NoLock);
+    ObjectAddressSet(address, TSDictionaryRelationId, dictId);
+    return address;
 }
 
 /* ---------------------- TS Template commands ----------------------- */
@@ -1017,7 +1004,7 @@ static Datum get_ts_template_func(DefElem* defel, int attnum)
 /*
  * make pg_depend entries for a new pg_ts_template entry
  */
-static void makeTSTemplateDependencies(HeapTuple tuple)
+static ObjectAddress makeTSTemplateDependencies(HeapTuple tuple)
 {
     Form_pg_ts_template tmpl = (Form_pg_ts_template)GETSTRUCT(tuple);
     ObjectAddress myself, referenced;
@@ -1045,12 +1032,13 @@ static void makeTSTemplateDependencies(HeapTuple tuple)
         referenced.objectId = tmpl->tmplinit;
         recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
     }
+    return myself;
 }
 
 /*
  * CREATE TEXT SEARCH TEMPLATE
  */
-void DefineTSTemplate(List* names, List* parameters)
+ObjectAddress DefineTSTemplate(List* names, List* parameters)
 {
     ListCell* pl = NULL;
     Relation tmplRel;
@@ -1062,6 +1050,7 @@ void DefineTSTemplate(List* names, List* parameters)
     Oid dictOid;
     Oid namespaceoid;
     char* tmplname = NULL;
+    ObjectAddress address;
 
     if (!superuser())
         ereport(ERROR,
@@ -1112,54 +1101,23 @@ void DefineTSTemplate(List* names, List* parameters)
     dictOid = simple_heap_insert(tmplRel, tup);
 
     CatalogUpdateIndexes(tmplRel, tup);
-    makeTSTemplateDependencies(tup);
+    address = makeTSTemplateDependencies(tup);
     /* Post creation hook for new text search template */
     InvokeObjectAccessHook(OAT_POST_CREATE, TSTemplateRelationId, dictOid, 0, NULL);
     tableam_tops_free_tuple(tup);
     heap_close(tmplRel, RowExclusiveLock);
-}
 
-/*
- * ALTER TEXT SEARCH TEMPLATE RENAME
- */
-void RenameTSTemplate(List* oldname, const char* newname)
-{
-    HeapTuple tup;
-    Relation rel;
-    Oid tmplId;
-    Oid namespaceOid;
-
-    if (!superuser())
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to rename text search templates")));
-
-    rel = heap_open(TSTemplateRelationId, RowExclusiveLock);
-    tmplId = get_ts_template_oid(oldname, false);
-    tup = SearchSysCacheCopy1(TSTEMPLATEOID, ObjectIdGetDatum(tmplId));
-    if (!HeapTupleIsValid(tup)) /* should not happen */
-        ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for text search template %u", tmplId)));
-
-    namespaceOid = ((Form_pg_ts_template)GETSTRUCT(tup))->tmplnamespace;
-    if (SearchSysCacheExists2(TSTEMPLATENAMENSP, PointerGetDatum(newname), ObjectIdGetDatum(namespaceOid)))
-        ereport(
-            ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("text search template \"%s\" already exists", newname)));
-
-    (void)namestrcpy(&(((Form_pg_ts_template)GETSTRUCT(tup))->tmplname), newname);
-    simple_heap_update(rel, &tup->t_self, tup);
-    CatalogUpdateIndexes(rel, tup);
-
-    heap_close(rel, NoLock);
-    tableam_tops_free_tuple(tup);
+    return address;
 }
 
 /*
  * ALTER TEXT SEARCH TEMPLATE any_name SET SCHEMA name
  */
-void AlterTSTemplateNamespace(List* name, const char* newschema)
+ObjectAddress AlterTSTemplateNamespace(List* name, const char* newschema)
 {
     Oid tmplId, nspOid;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(TSTemplateRelationId, RowExclusiveLock);
     tmplId = get_ts_template_oid(name, false);
@@ -1177,6 +1135,8 @@ void AlterTSTemplateNamespace(List* name, const char* newschema)
         (AclObjectKind)-1);
 
     heap_close(rel, RowExclusiveLock);
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
+    return address;
 }
 
 Oid AlterTSTemplateNamespace_oid(Oid tmplId, Oid newNspOid)
@@ -1249,7 +1209,7 @@ static HeapTuple GetTSConfigTuple(List* names)
  * Pass opened pg_ts_config_map relation if there might be any config map
  * entries for the config.
  */
-static void makeConfigurationDependencies(HeapTuple tuple, bool removeOld, Relation mapRel)
+static ObjectAddress makeConfigurationDependencies(HeapTuple tuple, bool removeOld, Relation mapRel)
 {
     Form_pg_ts_config cfg = (Form_pg_ts_config)GETSTRUCT(tuple);
     ObjectAddresses* addrs = NULL;
@@ -1312,12 +1272,13 @@ static void makeConfigurationDependencies(HeapTuple tuple, bool removeOld, Relat
     /* Record 'em (this includes duplicate elimination) */
     record_object_address_dependencies(&myself, addrs, DEPENDENCY_NORMAL);
     free_object_addresses(addrs);
+    return myself;
 }
 
 /*
  * CREATE TEXT SEARCH CONFIGURATION
  */
-void DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
+ObjectAddress DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
 {
     Relation cfgRel;
     Relation mapRel = NULL;
@@ -1333,6 +1294,7 @@ void DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
     Oid cfgOid;
     ListCell* pl = NULL;
     Datum newOptions;
+    ObjectAddress address;
 
     /* Convert list of names to a name and namespace */
     namespaceoid = QualifiedNameGetCreationNamespace(names, &cfgname);
@@ -1470,7 +1432,7 @@ void DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
         systable_endscan(scan);
     }
 
-    makeConfigurationDependencies(tup, false, mapRel);
+    address = makeConfigurationDependencies(tup, false, mapRel);
 
     /* Post creation hook for new text search configuration */
     InvokeObjectAccessHook(OAT_POST_CREATE, TSConfigRelationId, cfgOid, 0, NULL);
@@ -1480,57 +1442,18 @@ void DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
     if (mapRel)
         heap_close(mapRel, RowExclusiveLock);
     heap_close(cfgRel, RowExclusiveLock);
-}
 
-/*
- * ALTER TEXT SEARCH CONFIGURATION RENAME
- */
-void RenameTSConfiguration(List* oldname, const char* newname)
-{
-    HeapTuple tup;
-    Relation rel;
-    Oid cfgId;
-    AclResult aclresult;
-    Oid namespaceOid;
-
-    rel = heap_open(TSConfigRelationId, RowExclusiveLock);
-    cfgId = get_ts_config_oid(oldname, false);
-    tup = SearchSysCacheCopy1(TSCONFIGOID, ObjectIdGetDatum(cfgId));
-
-    if (!HeapTupleIsValid(tup)) /* should not happen */
-        ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmsg("cache lookup failed for text search configuration %u", cfgId)));
-
-    namespaceOid = ((Form_pg_ts_config)GETSTRUCT(tup))->cfgnamespace;
-
-    if (SearchSysCacheExists2(TSCONFIGNAMENSP, PointerGetDatum(newname), ObjectIdGetDatum(namespaceOid)))
-        ereport(ERROR,
-            (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("text search configuration \"%s\" already exists", newname)));
-
-    /* must be owner */
-    if (!pg_ts_config_ownercheck(cfgId, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_TSCONFIGURATION, NameListToString(oldname));
-
-    /* must have CREATE privilege on namespace */
-    aclresult = pg_namespace_aclcheck(namespaceOid, GetUserId(), ACL_CREATE);
-    aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
-
-    (void)namestrcpy(&(((Form_pg_ts_config)GETSTRUCT(tup))->cfgname), newname);
-    simple_heap_update(rel, &tup->t_self, tup);
-    CatalogUpdateIndexes(rel, tup);
-
-    heap_close(rel, NoLock);
-    tableam_tops_free_tuple(tup);
+    return address;
 }
 
 /*
  * ALTER TEXT SEARCH CONFIGURATION any_name SET SCHEMA name
  */
-void AlterTSConfigurationNamespace(List* name, const char* newschema)
+ObjectAddress AlterTSConfigurationNamespace(List* name, const char* newschema)
 {
     Oid cfgId, nspOid;
     Relation rel;
+    ObjectAddress address;
 
     rel = heap_open(TSConfigRelationId, RowExclusiveLock);
     cfgId = get_ts_config_oid(name, false);
@@ -1547,7 +1470,9 @@ void AlterTSConfigurationNamespace(List* name, const char* newschema)
         Anum_pg_ts_config_cfgowner,
         ACL_KIND_TSCONFIGURATION);
 
+    ObjectAddressSet(address, NamespaceRelationId, nspOid);
     heap_close(rel, RowExclusiveLock);
+    return address;
 }
 
 Oid AlterTSConfigurationNamespace_oid(Oid cfgId, Oid newNspOid)
@@ -1611,7 +1536,7 @@ void RemoveTSConfigurationById(Oid cfgId)
 /*
  * ALTER TEXT SEARCH CONFIGURATION OWNER
  */
-void AlterTSConfigurationOwner(List* name, Oid newOwnerId)
+ObjectAddress AlterTSConfigurationOwner(List* name, Oid newOwnerId)
 {
     HeapTuple tup;
     Relation rel;
@@ -1619,6 +1544,7 @@ void AlterTSConfigurationOwner(List* name, Oid newOwnerId)
     AclResult aclresult;
     Oid namespaceOid;
     Form_pg_ts_config form;
+    ObjectAddress address;
 
     rel = heap_open(TSConfigRelationId, RowExclusiveLock);
     cfgId = get_ts_config_oid(name, false);
@@ -1657,15 +1583,19 @@ void AlterTSConfigurationOwner(List* name, Oid newOwnerId)
 
     heap_close(rel, NoLock);
     tableam_tops_free_tuple(tup);
+    ObjectAddressSet(address, TSConfigMapRelationId, cfgId);
+    return address;
 }
 
 /*
  * ALTER TEXT SEARCH CONFIGURATION - main entry point
  */
-void AlterTSConfiguration(AlterTSConfigurationStmt* stmt)
+ObjectAddress  AlterTSConfiguration(AlterTSConfigurationStmt* stmt)
 {
     HeapTuple tup;
     Relation relMap;
+    Oid      cfgId;
+    ObjectAddress address;
 
     /* Find the configuration */
     tup = GetTSConfigTuple(stmt->cfgname);
@@ -1674,6 +1604,7 @@ void AlterTSConfiguration(AlterTSConfigurationStmt* stmt)
             (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("text search configuration \"%s\" does not exist", NameListToString(stmt->cfgname))));
 
+    cfgId = HeapTupleGetOid(tup);
     if (TSConfigurationHasDependentObjects(HeapTupleGetOid(tup))) {
         ReleaseSysCache(tup);
         ereport(ERROR,
@@ -1698,9 +1629,11 @@ void AlterTSConfiguration(AlterTSConfigurationStmt* stmt)
 
     /* Update dependencies */
     makeConfigurationDependencies(tup, true, relMap);
-
+    
+    ObjectAddressSet(address, TSConfigRelationId, cfgId);
     heap_close(relMap, RowExclusiveLock);
     ReleaseSysCache(tup);
+    return address;
 }
 
 /*
@@ -1940,6 +1873,7 @@ static void MakeConfigurationMapping(AlterTSConfigurationStmt* stmt, HeapTuple t
             }
         }
     }
+    EventTriggerCollectAlterTSConfig(stmt, cfgId, dictIds, ndict);
 }
 
 /*
@@ -1990,6 +1924,7 @@ static void DropConfigurationMapping(AlterTSConfigurationStmt* stmt, HeapTuple t
 
         i++;
     }
+    EventTriggerCollectAlterTSConfig(stmt, cfgId, NULL, 0);
 }
 
 /*

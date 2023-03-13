@@ -578,9 +578,9 @@ static vacuum_object *GetVacuumObjectOfSubpartition(VacuumStmt* vacstmt, Oid rel
     MemoryContext oldcontext = NULL;
     vacuum_object* vacObj = NULL;
 
-    subpartitionid = partitionNameGetPartitionOid(relationid,
+    subpartitionid = SubPartitionNameGetSubPartitionOid(relationid,
         vacstmt->relation->subpartitionname,
-        PART_OBJ_TYPE_TABLE_SUB_PARTITION,
+        AccessShareLock,
         AccessShareLock,
         true,
         false,
@@ -732,7 +732,7 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
         /* 1.a partition */
         if (PointerIsValid(vacstmt->relation->partitionname)) {
 
-            partitionid = partitionNameGetPartitionOid(relationid,
+            partitionid = PartitionNameGetPartitionOid(relationid,
                 vacstmt->relation->partitionname,
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 AccessShareLock,
@@ -2743,6 +2743,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         pgstat_report_waitstatus_relname(STATE_VACUUM_FULL, get_nsp_relname(relid));
         GpiVacuumFullMainPartiton(relid);
         CBIVacuumFullMainPartiton(relid);
+        RelationResetPartitionno(relid, AccessExclusiveLock);
         pgstat_report_vacuum(relid, InvalidOid, false, 0);
 
         /* Record changecsn when VACUUM FULL occur */
@@ -3199,6 +3200,101 @@ void vac_close_part_indexes(
     pfree_ext(Irel);
 }
 
+static void CalculateSubPartitionedRelStats(_in_ Relation partitionRel, _in_ Relation partRel,
+    _out_ BlockNumber *totalPages, _out_ BlockNumber *totalVisiblePages, _out_ double *totalTuples,
+    _out_ TransactionId *minFrozenXid, _out_ MultiXactId *minMultiXid)
+{
+    Assert(RelationIsSubPartitioned(partitionRel));
+
+    BlockNumber pages = 0;
+    BlockNumber allVisiblePages = 0;
+    double tuples = 0;
+    ScanKeyData partKey[2];
+    SysScanDesc partScan = NULL;
+    HeapTuple partTuple = NULL;
+    ScanKeyData subpartKey[2];
+    SysScanDesc subpartScan = NULL;
+    HeapTuple subpartTuple = NULL;
+    Form_pg_partition partForm;
+    /* we set xid to max as an initial value, then we find the min xid in all subpartitions */
+    TransactionId frozenXid = MaxTransactionId;
+    MultiXactId multiXid = MaxMultiXactId;
+    bool isNull = false;
+
+    ScanKeyInit(&partKey[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
+        CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION));
+    ScanKeyInit(&partKey[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(RelationGetRelid(partitionRel)));
+    partScan = systable_beginscan(partRel, PartitionParentOidIndexId, true, NULL, 2, partKey);
+
+    while (HeapTupleIsValid(partTuple = systable_getnext(partScan))) {
+        ScanKeyInit(&subpartKey[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
+            CharGetDatum(PART_OBJ_TYPE_TABLE_SUB_PARTITION));
+        ScanKeyInit(&subpartKey[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ,
+            ObjectIdGetDatum(HeapTupleGetOid(partTuple)));
+        subpartScan = systable_beginscan(partRel, PartitionParentOidIndexId, true, NULL, 2, subpartKey);
+
+        while (HeapTupleIsValid(subpartTuple = systable_getnext(subpartScan))) {
+            partForm = (Form_pg_partition)GETSTRUCT(subpartTuple);
+            Datum xid64datum = tableam_tops_tuple_getattr(subpartTuple, Anum_pg_partition_relfrozenxid64,
+                RelationGetDescr(partRel), &isNull);
+            TransactionId relfrozenxid;
+            if (isNull) {
+                relfrozenxid = partForm->relfrozenxid;
+                if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, relfrozenxid) ||
+                    !TransactionIdIsNormal(relfrozenxid))
+                    relfrozenxid = FirstNormalTransactionId;
+            } else {
+                relfrozenxid = DatumGetTransactionId(xid64datum);
+            }
+            if (TransactionIdPrecedes(relfrozenxid, frozenXid)) {
+                frozenXid = relfrozenxid;
+            }
+
+#ifndef ENABLE_MULTIPLE_NODES
+            Datum mxid64datum = tableam_tops_tuple_getattr(subpartTuple, Anum_pg_partition_relminmxid,
+                RelationGetDescr(partRel), &isNull);
+            MultiXactId relminmxid = isNull ? FirstMultiXactId : DatumGetTransactionId(mxid64datum);
+            if (TransactionIdPrecedes(relminmxid, multiXid)) {
+                multiXid = relminmxid;
+            }
+#endif
+
+            /* calculate pages and tuples from all the subpartitioned. */
+            pages += (uint32) partForm->relpages;
+            allVisiblePages += partForm->relallvisible;
+            tuples += partForm->reltuples;
+
+        }
+        systable_endscan(subpartScan);
+    }
+    systable_endscan(partScan);
+
+    /* if xid is maxvalue, means no subpartitions found, then we set it invalid */
+    if (frozenXid == MaxTransactionId) {
+        frozenXid = InvalidTransactionId;
+    }
+    if (multiXid == MaxMultiXactId) {
+        multiXid = InvalidMultiXactId;
+    }
+
+    if (totalPages != NULL) {
+        *totalPages = pages;
+    }
+    if (totalVisiblePages != NULL) {
+        *totalVisiblePages = allVisiblePages;
+    }
+    if (totalTuples != NULL) {
+        *totalTuples = tuples;
+    }
+    if (minFrozenXid != NULL) {
+        *minFrozenXid = frozenXid;
+    }
+    if (minMultiXid != NULL) {
+        *minMultiXid = multiXid;
+    }
+}
+
 /* Scan pg_partition to get all the partitions of the partitioned table,
  * calculate all the pages, tuples, and the min frozenXid, multiXid
  */
@@ -3217,13 +3313,13 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
     Assert(partitionRel->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION ||
            partitionRel->rd_rel->parttype == PARTTYPE_SUBPARTITIONED_RELATION);
 
-    if (partitionRel->rd_rel->parttype == PARTTYPE_SUBPARTITIONED_RELATION) {
-        ScanKeyInit(&partKey[0],
-            Anum_pg_partition_parttype,
-            BTEqualStrategyNumber,
-            F_CHAREQ,
-            CharGetDatum(PART_OBJ_TYPE_TABLE_SUB_PARTITION));
-    } else if (partitionRel->rd_rel->relkind == RELKIND_RELATION) {
+    if (RelationIsSubPartitioned(partitionRel)) {
+        CalculateSubPartitionedRelStats(partitionRel, partRel, totalPages, totalVisiblePages, totalTuples, minFrozenXid,
+            minMultiXid);
+        return;
+    }
+
+    if (partitionRel->rd_rel->relkind == RELKIND_RELATION) {
         ScanKeyInit(&partKey[0],
             Anum_pg_partition_parttype,
             BTEqualStrategyNumber,
@@ -4031,6 +4127,7 @@ static void UstoreVacuumMainPartitionGPIs(Relation onerel, const VacuumStmt* vac
 {
     OidRBTree* invisibleParts = CreateOidRBTree();
     Oid parentOid = RelationGetRelid(onerel);
+    bool lockInterval = false;
 
     if (vacstmt->options & VACOPT_VERBOSE) {
         elevel = VERBOSEMESSAGE;
@@ -4039,11 +4136,13 @@ static void UstoreVacuumMainPartitionGPIs(Relation onerel, const VacuumStmt* vac
     }
 
     /* Get invisable parts */
-    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+    if (!RELATION_IS_INTERVAL_PARTITIONED(onerel)) {
         PartitionGetAllInvisibleParts(parentOid, &invisibleParts);
-        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else if (ConditionalLockPartitionObject(onerel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK)) {
+        PartitionGetAllInvisibleParts(parentOid, &invisibleParts);
+        lockInterval = true;
     }
-    
+
     /* In rbtree, rb_leftmost will return NULL if rbtree is empty. */
     if (rb_leftmost(invisibleParts) == NULL) {
         DestroyOidRBTree(&invisibleParts);
@@ -4076,17 +4175,19 @@ static void UstoreVacuumMainPartitionGPIs(Relation onerel, const VacuumStmt* vac
     heap_close(classRel, RowExclusiveLock);
 
     /*
-     * Before clearing the global partition index of a partition table,
-     * acquire a AccessShareLock on ADD_PARTITION_ACTION, and make sure that the interval partition
-     * creation process will not be performed concurrently.
+     * Before clearing the global partition index of a partition table, acquire a AccessShareLock on
+     * INTERVAL_PARTITION_LOCK_SDEQUENCE, and make sure that the interval partition creation process will not be
+     * performed concurrently.
      */
     OidRBTree* cleanedParts = CreateOidRBTree();
     OidRBTreeUnionOids(cleanedParts, invisibleParts);
-    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+    if (!RELATION_IS_INTERVAL_PARTITIONED(onerel)) {
         PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, true);
-        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else if (lockInterval) {
+        PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, true);
+        UnlockPartitionObject(onerel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK);
     } else {
-        /* Updates reloptions of cleanedParts in pg_partition after GPI vacuum is executed */
+        /* Updates reloptions of cleanedParts in pg_partition after gpi lazy_vacuum is executed */
         PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, false);
     }
 
@@ -4104,6 +4205,7 @@ static void GPIVacuumMainPartition(
     OidRBTree* cleanedParts = CreateOidRBTree();
     OidRBTree* invisibleParts = CreateOidRBTree();
     Oid parentOid = RelationGetRelid(onerel);
+    bool lockInterval = false;
 
     if (vacstmt->options & VACOPT_VERBOSE) {
         elevel = VERBOSEMESSAGE;
@@ -4112,13 +4214,15 @@ static void GPIVacuumMainPartition(
     }
 
     /*
-     * Before clearing the global partition index of a partition table,
-     * acquire a AccessShareLock on ADD_PARTITION_ACTION, and make sure that the interval partition
-     * creation process will not be performed concurrently.
+     * Before clearing the global partition index of a partition table, acquire a AccessShareLock on
+     * INTERVAL_PARTITION_LOCK_SDEQUENCE, and make sure that the interval partition creation process will not be
+     * performed concurrently.
      */
-    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+    if (!RELATION_IS_INTERVAL_PARTITIONED(onerel)) {
         PartitionGetAllInvisibleParts(parentOid, &invisibleParts);
-        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else if (ConditionalLockPartitionObject(onerel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK)) {
+        PartitionGetAllInvisibleParts(parentOid, &invisibleParts);
+        lockInterval = true;
     }
 
     vac_strategy = bstrategy;
@@ -4144,9 +4248,11 @@ static void GPIVacuumMainPartition(
      * acquire a AccessShareLock on ADD_PARTITION_ACTION, and make sure that the interval partition
      * creation process will not be performed concurrently.
      */
-    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+    if (!RELATION_IS_INTERVAL_PARTITIONED(onerel)) {
         PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, true);
-        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else if (lockInterval) {
+        PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, true);
+        UnlockPartitionObject(onerel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK);
     } else {
         /* Updates reloptions of cleanedParts in pg_partition after gpi lazy_vacuum is executed */
         PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, false);

@@ -2016,7 +2016,7 @@ static void ReorderBufferCheckSerializeTXN(LogicalDecodingContext *ctx, ReorderB
     if (txn->nentries_mem >= (unsigned)g_instance.attr.attr_common.max_changes_in_memory ||
         (data != NULL && data->max_txn_in_memory > 0 && txn->size >= (Size)data->max_txn_in_memory * sizeMB) ||
         (data != NULL && data->max_reorderbuffer_in_memory > 0 &&
-        txn->size >= (Size)data->max_reorderbuffer_in_memory * sizeGB)) {
+        ctx->reorder->size >= (Size)data->max_reorderbuffer_in_memory * sizeGB)) {
         ReorderBufferSerializeTXN(ctx->reorder, txn);
         Assert(txn->size == 0);
         Assert(txn->nentries_mem == 0);
@@ -2693,7 +2693,7 @@ static void ReorderBufferFillAttributes(ReorderBufferTXN *txn, TupleDesc desc, T
     errno_t rc = 0;
     const int toast_index = 3; /* toast index in tuple is 3 */
     for (int natt = 0; natt < desc->natts; natt++) {
-        Form_pg_attribute attr = desc->attrs[natt];
+        Form_pg_attribute attr = &desc->attrs[natt];
         ReorderBufferToastEnt *ent = NULL;
         struct varlena *varlena = NULL;
 
@@ -3020,6 +3020,7 @@ static void ApplyLogicalMappingFile(HTAB *tuplecid_data, Oid relid, const char *
             new_ent->combocid = ent->combocid;
         }
     }
+    (void)CloseTransientFile(fd);
 }
 
 /*

@@ -570,12 +570,12 @@ bool BatchRedoDistributeItems(void **eleArry, uint32 eleNum)
             RedoItem *item = (RedoItem *)eleArry[i];
             UpdateRecordGlobals(item, g_redoWorker->standbyState);
             CountAndGetRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_3],
-                g_redoWorker->timeCostList[TIME_COST_STEP_6]);
+                g_redoWorker->timeCostList[TIME_COST_STEP_4]);
             do {
                 parsecomplete = BatchRedoParseItemAndDispatch(item);
                 RedoInterruptCallBack();
             } while (parsecomplete);
-            CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_6]);
+            CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
             DereferenceRedoItem(item);
         }
     }
@@ -1894,29 +1894,35 @@ void XLogForceFinish(XLogReaderState *xlogreader, TermFileData *term_file)
             (errcode(ERRCODE_LOG), errmsg("[ForceFinish]ArchiveXlogForForceFinishRedo in extremeRTO is over")));
 }
 
+static void DoCleanUpReadPageWorkerQueue(SPSCBlockingQueue *queue)
+{
+    while (!SPSCBlockingQueueIsEmpty(queue)) {
+        XLogReaderState *xlogreader = reinterpret_cast<XLogReaderState *>(SPSCBlockingQueueTake(queue));
+        if (xlogreader == reinterpret_cast<XLogReaderState *>(&(g_redoEndMark.record)) || 
+            xlogreader == reinterpret_cast<XLogReaderState *>(&(g_GlobalLsnForwarder.record)) ||
+            xlogreader == reinterpret_cast<XLogReaderState *>(&(g_cleanupMark.record))) {
+            if (xlogreader == reinterpret_cast<XLogReaderState *>(&(g_GlobalLsnForwarder.record))) {
+                pg_atomic_write_u32(&g_GlobalLsnForwarder.record.refcount, 0);
+            }
+            continue;
+        }
+    
+        RedoItem *item = GetRedoItemPtr(xlogreader);
+        FreeRedoItem(item);
+    }
+}
+
 void CleanUpReadPageWorkerQueue()
 {
     SPSCBlockingQueue *queue = g_dispatcher->readLine.readPageThd->queue;
     uint32 state;
     do {
-        while (!SPSCBlockingQueueIsEmpty(queue)) {
-            XLogReaderState *xlogreader = reinterpret_cast<XLogReaderState *>(SPSCBlockingQueueTake(queue));
-            if (xlogreader == reinterpret_cast<XLogReaderState *>(&(g_redoEndMark.record)) || 
-                xlogreader == reinterpret_cast<XLogReaderState *>(&(g_GlobalLsnForwarder.record)) ||
-                xlogreader == reinterpret_cast<XLogReaderState *>(&(g_cleanupMark.record))) {
-                if (xlogreader == reinterpret_cast<XLogReaderState *>(&(g_GlobalLsnForwarder.record))) {
-                    pg_atomic_write_u32(&g_GlobalLsnForwarder.record.refcount, 0);
-                }
-                continue;
-            }
-
-            RedoItem *item = GetRedoItemPtr(xlogreader);
-            FreeRedoItem(item);
-        }
-        
+        DoCleanUpReadPageWorkerQueue(queue);
         RedoInterruptCallBack();
         state = pg_atomic_read_u32(&extreme_rto::g_dispatcher->rtoXlogBufState.readPageWorkerState);
     } while (state != WORKER_STATE_EXIT);
+    /* Processing the state change after the queue is cleared */
+    DoCleanUpReadPageWorkerQueue(queue);
 }
 
 void ExtremeRtoStopHere()
@@ -2588,6 +2594,7 @@ static void InitGlobals()
     t_thrd.xlog_cxt.InRecovery = g_redoWorker->InRecovery;
     t_thrd.xlog_cxt.ArchiveRestoreRequested = g_redoWorker->ArchiveRestoreRequested;
     t_thrd.xlog_cxt.minRecoveryPoint = g_redoWorker->minRecoveryPoint;
+    t_thrd.xlog_cxt.curFileTLI = t_thrd.xlog_cxt.ThisTimeLineID;
 }
 
 void WaitRedoWorkersQueueEmpty()
@@ -2782,7 +2789,7 @@ void RepairPageAndRecoveryXLog(BadBlockRecEnt* page_info, const char *page)
 
     MarkBufferDirty(buffer.buf);
     bufDesc = GetBufferDescriptor(buffer.buf - 1);
-    bufDesc->lsn_on_disk = PageGetLSN(buffer.pageinfo.page);
+    bufDesc->extra->lsn_on_disk = PageGetLSN(buffer.pageinfo.page);
     UnlockReleaseBuffer(buffer.buf);
 
     /* recovery the page xlog */

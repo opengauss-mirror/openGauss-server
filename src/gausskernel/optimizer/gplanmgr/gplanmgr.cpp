@@ -36,6 +36,7 @@ typedef struct indexUsageWalkerCxt {
     MethodPlanWalkerContext mpwc;
     List *usage_list; /* The list of IdxQual */
     Index varelid;
+    List* paramValList;
 } indexUsageWalkerCxt;
 
 typedef struct PlanIndexUasge {
@@ -61,19 +62,34 @@ const int8 MIN_EVAL_TIMES = 3;
 static void SetPlanMemoryContext(CachedPlanSource *plansource, CachedPlan *plan);
 static void AcquireManagerLock(PMGRAction *action, LWLockMode mode);
 static void ReleaseManagerLock(PMGRAction *action);
-static void UpdatePlanCIs(CachedPlanInfo *pinfo, List *relCis, List *indexCis);
-static bool FallIntoCI(CondInterval *ci, double selectivity);
-static List *GetPlanIndexesUsages(List *stmt_list);
+static List *GenerateIndexCIs(indexUsageWalkerCxt context, bool *hasPartial);
 static void StoreStmtRoot(const char *stmt_name, PlannerInfo *root, const char *qstr, MemoryContext cxt);
 static StatementRoot *FetchStmtRoot(const char *stmt_name);
 static PlannerInfo *InitGenericRoot(PlannerInfo *pinfo, ParamListInfo boundParams);
-static bool SetClausesVarNo(Node *node, void *context);
+static Node *CacheIndexQual(Node *node, indexUsageWalkerCxt *context);
 static List *GetBaseRelSelectivity(PlannerInfo *root);
 static List *GenerateRelCIs(List *selectivities);
-static List *GenerateIndexCIs(List *indexes_info, bool *hasPartial);
-
 static inline void NextAction(PMGRAction *action, PMGRActionType acttype, PMGRStatCollectType statstype);
 static void ClearGenericRootCache(PlannerInfo *pinfo, bool onlyPossionCache);
+static bool ExtractPlanIndexesUsages(Node *plan, void *context);
+
+/*
+ * ReleaseCustomPlan: release a CachedPlanSource's custom plan, if any.
+ */
+void
+ReleaseCustomPlan(CachedPlanSource *plansource)
+{
+    /* Be paranoid about the possibility that ReleaseCachedPlan fails */
+    if (plansource->cplan) {
+        CachedPlan *plan = plansource->cplan;
+
+        Assert(plan->magic == CACHEDPLAN_MAGIC && !plan->is_candidate);
+        plansource->cplan = NULL;
+
+        /* release the plan */
+        ReleaseCachedPlan(plan, false);
+    }
+}
 
 GplanSelectionMethod
 GetHintSelectionMethod(const CachedPlanSource* plansource)
@@ -131,7 +147,8 @@ ChooseAdaptivePlan(CachedPlanSource *plansource, ParamListInfo boundParams)
         return false;
     }
 
-    if (boundParams == NULL) {
+    // limit number of params to avoid the huge memory consumption
+    if (boundParams == NULL || boundParams->numParams >= 50) {
         return false;
     }
 
@@ -143,7 +160,8 @@ ChooseAdaptivePlan(CachedPlanSource *plansource, ParamListInfo boundParams)
         return false;
     }
 
-    if(plansource->hasSubQuery || !selec_gplan_by_hint(plansource)){
+    // subquery is not supported by our plan selection method.
+    if (plansource->hasSubQuery || !selec_gplan_by_hint(plansource)) {
         PMGR_ReleasePlanManager(plansource);
         return false;
     }
@@ -225,6 +243,8 @@ GetDefaultGenericPlan(CachedPlanSource *plansource,
              */
             *mode = true;
             *qlist = NIL;
+            ReleaseGenericPlan(plansource);
+
             return NULL;
         }
     }
@@ -233,14 +253,59 @@ GetDefaultGenericPlan(CachedPlanSource *plansource,
     return plan;
 }
 
-static uint32
-GenerateIndexHashKey(List *quals)
+/*
+ * UpdateCI - make a embrace X
+ */
+static void
+UpdateCI(CondInterval *tar, double val, double dampfactor)
 {
-    uint32 val = 0;
-    char *key = NULL;
-    key = nodeToString(quals);
-    val = DatumGetUInt32(hash_any((const unsigned char *)key, strlen(key) + 1));
-    return val;
+    if(tar == NULL){
+        return;
+    }
+
+    /* Expand the lowerboud of CI.*/
+    if (val < tar->lowerbound) {
+        /* leanring rate is used to avoid the aggressive expandsion. */
+        tar->lowerbound -= Min(dampfactor, (tar->lowerbound - val) * 1.1);
+    }
+
+    /* Expand the upperbound of CI.*/
+    if (val > tar->upperbound) {
+        tar->upperbound += Min(dampfactor, (val - tar->upperbound) * 1.1);
+    }
+}
+
+static void
+UpdateOffsetCI(CachedPlanInfo *pinfo, int64 offset)
+{
+    if (pinfo->offsetCi == NULL) {
+        return;
+    }
+
+    CondInterval *ci = (CondInterval *)pinfo->offsetCi;
+
+    /* Expand the lowerboud of CI. */
+    if (ci->lowerbound > offset) {
+        /* Here, the leanring rate is used to avoid the aggressive expandsion. */
+        ci->lowerbound -= (ci->lowerbound - offset);
+    }
+    /* Expand the upperbound of CI. */
+    if (ci->upperbound < offset) {
+        ci->upperbound += (offset - ci->upperbound);
+    }
+}
+
+/*
+ * FallIntoCI: is the given selectivity fall in ci?
+ */
+static bool
+FallIntoCI(CondInterval *ci, double selectivity)
+{
+    if (ci->lowerbound <= selectivity && \
+        ci->upperbound >= selectivity) {
+        return true;
+    }
+    return false;
 }
 
 /*
@@ -379,12 +444,15 @@ PMGR_ExplorePlan(CachedPlanSource *plansource,
         boundParams->params_lazy_bind = true;
     }
 
+    u_sess->pcache_cxt.is_plan_exploration = true;
     /* explore the query plan by planner. */
     plan = BuildCachedPlan(plansource, *qlist, boundParams, false);
 
-    /* close the lazy bind labels to avoid the binding failure in executor. */
-    boundParams->uParamInfo = DEFUALT_INFO;
     boundParams->params_lazy_bind = false;
+    u_sess->pcache_cxt.is_plan_exploration = false;
+
+    plan->cost = cached_plan_cost(plan);
+
     ereport(DEBUG2, (errmodule(MOD_OPT),
                   errmsg("Explore a plan; ThreadId: %d, query: \"%s\"", gettid(), plansource->query_string)));
 
@@ -435,52 +503,72 @@ InsertPlan(CachedPlanSource *plansource,
               CachedPlan *plan,
               uint32 planHashkey)
 {
-    CachedPlanInfo *cpinfo = NULL;
+    if(!plansource->is_saved){
+        ereport(DEBUG2, (errmodule(MOD_OPT),
+                      errmsg("skip to cache plan into an unsaved plansource; ThreadId: %d, query: \"%s\"",
+                      gettid(), plansource->query_string)));
+        return;
+    }
 
+    CachedPlanInfo *cpinfo = NULL;
     PlanManager *planMgr = plansource->planManager;
     PlannerInfo *expRoot = (PlannerInfo *)u_sess->pcache_cxt.explored_plan_info;
     Query *query = (Query *)linitial(plansource->query_list);
 
-    if (plansource->is_saved) {
-        MemoryContext oldcxt = MemoryContextSwitchTo(plan->context);
-        int64 offset = -1;
+    PlannedStmt *stmt = (PlannedStmt *)linitial(plan->stmt_list);
+    indexUsageWalkerCxt used_indexes_cxt;
 
-        cpinfo = makeNode(CachedPlanInfo);
-        cpinfo->learningRate = LREANINGRATE;
-        cpinfo->plan = plan;
-        cpinfo->planHashkey = planHashkey;
-        cpinfo->sample_exec_costs = 0;
-        cpinfo->sample_times = 0;
-        cpinfo->verification_times = 1;
-        cpinfo->status = ADPT_PLAN_UNCHECKED;
-        plan->is_candidate = true;
-        /* collect the plan selectivities and generate CI for selection. */
+    errno_t rc = 0;
+    size_t cxt_size = sizeof(indexUsageWalkerCxt);
+    rc = memset_s(&used_indexes_cxt, cxt_size, 0, cxt_size);
+    securec_check(rc, "\0", "\0");
 
-        offset = GetLimitValue(query, boundParams);
-        if (offset > 0) {
-            CondInterval *offsetCi = makeNode(CondInterval);
-            offsetCi->relid = 0;
-            offsetCi->lowerbound = offset;
-            offsetCi->upperbound = offset;
-            cpinfo->offsetCi = (void *)offsetCi;
-        }
-        cpinfo->relCis = GenerateRelCIs(GetBaseRelSelectivity(expRoot));
-        cpinfo->indexCis = GenerateIndexCIs(GetPlanIndexesUsages(plan->stmt_list), &cpinfo->usePartIdx);
-        if (plansource->gpc.status.InShareTable()) {
-            pg_atomic_fetch_add_u32((volatile uint32 *)&plan->global_refcount, 1);
-            plan->is_share = true;
-            Assert(plan->context->is_shared);
-            MemoryContextSeal(plan->context);
-        } else {
-            plan->refcount++;
-        }
-        plan->is_saved = true;
-        plan->cpi = cpinfo;
+    exec_init_plan_tree_base(&used_indexes_cxt.mpwc.base, stmt);
 
-        (void)MemoryContextSwitchTo(planMgr->context);
-        planMgr->candidatePlans = lappend(planMgr->candidatePlans, plan);
-        (void)MemoryContextSwitchTo(oldcxt);
+    /*
+     * Get the usages of indexes by traversing the plan tree.
+     */
+    ExtractPlanIndexesUsages((Node *)stmt->planTree, &used_indexes_cxt);
+
+    /* collect the plan selectivities and generate CI for selection. */
+    MemoryContext oldcxt = MemoryContextSwitchTo(plan->context);
+    int64 offset = -1;
+
+    cpinfo = makeNode(CachedPlanInfo);
+    cpinfo->learningRate = LREANINGRATE;
+    cpinfo->plan = plan;
+    cpinfo->planHashkey = planHashkey;
+    cpinfo->sample_exec_costs = 0;
+    cpinfo->sample_times = 0;
+    cpinfo->verification_times = 1;
+    cpinfo->status = ADPT_PLAN_UNCHECKED;
+    plan->is_candidate = true;
+
+    offset = GetLimitValue(query, boundParams);
+    if (offset > 0) {
+        CondInterval *offsetCi = makeNode(CondInterval);
+        offsetCi->relid = 0;
+        offsetCi->lowerbound = offset;
+        offsetCi->upperbound = offset;
+        cpinfo->offsetCi = (void *)offsetCi;
     }
+    cpinfo->relCis = GenerateRelCIs(GetBaseRelSelectivity(expRoot));
+    cpinfo->indexCis = GenerateIndexCIs(used_indexes_cxt, &cpinfo->usePartIdx);
+    if (plansource->gpc.status.InShareTable()) {
+        pg_atomic_fetch_add_u32((volatile uint32 *)&plan->global_refcount, 1);
+        plan->is_share = true;
+        Assert(plan->context->is_shared);
+        MemoryContextSeal(plan->context);
+    } else {
+        plan->refcount++;
+    }
+    plan->is_saved = true;
+    plan->cpi = cpinfo;
+
+    (void)MemoryContextSwitchTo(planMgr->context);
+    planMgr->candidatePlans = lappend(planMgr->candidatePlans, plan);
+    (void)MemoryContextSwitchTo(oldcxt);
+
 }
 
 CachedPlan*
@@ -505,6 +593,8 @@ MakeValuedRestrictinfos(PlannerInfo *queryRoot, List *quals)
 {
     ListCell *cell;
     List *rst = NIL;
+
+    queryRoot->glob->boundParams->params_lazy_bind =false;
 
     foreach(cell, quals){
         Node *qual = (Node *)lfirst(cell);
@@ -562,7 +652,8 @@ IsMatchedPlan(PlannerInfo *queryRoot, List *query_rel_sels,
         return false;
     }
 
-    Assert(cpinfo->relCis->length == query_rel_sels->length);
+    Assert((cpinfo->relCis == NIL && query_rel_sels == NIL) ||
+           cpinfo->relCis->length == query_rel_sels->length);
 
     /* check whether query can fall into baserel CIs of any candidate plan. */
     ListCell *c1;
@@ -610,11 +701,11 @@ IsMatchedPlan(PlannerInfo *queryRoot, List *query_rel_sels,
          * These invaild information would lead to an incorrect result,
          * if we do not clear them up before a new selectivity computation.
          */
-        ClearGenericRootCache(queryRoot, true);
+        ClearGenericRootCache(queryRoot, false);
         /* get index Selectivity */
         double query_idx_selec = clauselist_selectivity(queryRoot,
                                                         clauses,
-                                                        0,
+                                                        idxci->ci.relid,
                                                         JOIN_INNER,
                                                         NULL,
                                                         false);
@@ -627,11 +718,65 @@ IsMatchedPlan(PlannerInfo *queryRoot, List *query_rel_sels,
     return true;
 }
 
+bool
+MakePlanMatchQuery(PlannerInfo *queryRoot, List *query_rel_sels, CachedPlanInfo *cpinfo)
+{
+    int64 queryOffset = -1;
+
+    /* check whether offset values are matched */
+    queryOffset = GetLimitValue(queryRoot->parse, queryRoot->glob->boundParams);
+    UpdateOffsetCI(cpinfo, queryOffset);
+
+    /* Update baserel CI for matching. */
+    ListCell *c1;
+    ListCell *c2;
+    forboth(c1, cpinfo->relCis, c2, query_rel_sels) {
+        RelCI *relCI = (RelCI *)lfirst(c1);
+        RelSelec *qRelSelec = (RelSelec *)lfirst(c2);
+
+        UpdateCI(&relCI->ci, qRelSelec->selectivity, cpinfo->learningRate);
+    }
+
+    /* Update index CI for matching. */
+    ListCell *cell;
+    List *clauses = NIL;
+    foreach (cell, cpinfo->indexCis) {
+        IndexCI *idxci = (IndexCI *)lfirst(cell);
+
+        /*
+         * bind parameters and organize evalated indexquals as a RestrictInfo
+         * list. Note that, 'clauses' just is a copy of cached 'indexquals'.
+         */
+        clauses = MakeValuedRestrictinfos(queryRoot, idxci->indexquals);
+
+        /*
+         * At each invocation, 'clauselist_selectivity' would cache one-shot
+         * selectivity information, 'varratio, varEqRatio', into 'queryRoot'.
+         * These invaild information would lead to an incorrect result,
+         * if we do not clear them up before a new selectivity computation.
+         */
+        ClearGenericRootCache(queryRoot, false);
+
+        /* get index Selectivity */
+        double query_idx_selec = clauselist_selectivity(queryRoot,
+                                                        clauses,
+                                                        idxci->ci.relid,
+                                                        JOIN_INNER,
+                                                        NULL,
+                                                        false);
+
+        UpdateCI(&idxci->ci, query_idx_selec, cpinfo->learningRate);
+    }
+
+    return true;
+}
+
 static CachedPlan*
-FindMatchedPlan(PlanManager *manager, PlannerInfo *queryRoot)
+FindMatchedPlan(PlanManager *manager,     PMGRAction *action)
 {
     ListCell *cl;
     bool usePartIdx = false;
+    PlannerInfo *queryRoot = action->genericRoot;
 
     if (queryRoot->glob->boundParams == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -639,15 +784,17 @@ FindMatchedPlan(PlanManager *manager, PlannerInfo *queryRoot)
     }
 
     queryRoot->glob->boundParams->uParamInfo = PARAM_VAL_SELECTIVITY_INFO;
+    Assert(queryRoot->glob->boundParams->params_lazy_bind == false);
+
     /* Do a quick baserel-selectivity estimation. */
     set_base_rel_sizes(queryRoot, true);
-    List *query_rel_sels = GetBaseRelSelectivity(queryRoot);
+    action->qRelSelec = GetBaseRelSelectivity(queryRoot);
     usePartIdx = MatchPartIdxQuery(queryRoot);
 
     /* A plan is matched if both types of CIs can dominate */
     foreach (cl,  manager->candidatePlans) {
         CachedPlan *plan = (CachedPlan *)lfirst(cl);
-        if (IsMatchedPlan(queryRoot, query_rel_sels, plan->cpi, usePartIdx)) {
+        if (IsMatchedPlan(queryRoot, action->qRelSelec, plan->cpi, usePartIdx)) {
             return plan;
         }
     }
@@ -659,16 +806,16 @@ FindMatchedPlan(PlanManager *manager, PlannerInfo *queryRoot)
     return NULL;
 }
 
-bool ContainSubQuery(PlannerInfo* root)
+bool
+ContainSubQuery(PlannerInfo *root)
 {
     if (root->glob->subroots != NIL) {
         return true;
     }
 
-    /* 0 for other purpose, so start from 1 */
-    for (int i = 1; i < root->simple_rel_array_size; ++i) {
-        RelOptInfo* rel = root->simple_rel_array[i];
-        if (!rel) {
+    for (int rti = 1; rti < root->simple_rel_array_size; rti++) {
+        RelOptInfo *rel = root->simple_rel_array[rti];
+        if (rel == NULL) {
             continue;
         }
         if (rel->rtekind == RTE_SUBQUERY) {
@@ -722,38 +869,18 @@ CacheGenericRoot(CachedPlanSource *plansource, char *psrc_key)
     u_sess->pcache_cxt.explored_plan_info = NULL;
 }
 
-static void
-UpdateOffsetCI(CachedPlanInfo *pinfo, int64 offset)
-{
-    if (pinfo->offsetCi == NULL) {
-        return;
-    }
-
-    CondInterval *ci = (CondInterval *)pinfo->offsetCi;
-
-    /* Expand the lowerboud of CI. */
-    if (ci->lowerbound > offset) {
-        /* Here, the leanring rate is used to avoid the aggressive expandsion. */
-        ci->lowerbound -= (ci->lowerbound - offset);
-    }
-    /* Expand the upperbound of CI. */
-    if (ci->upperbound < offset) {
-        ci->upperbound += (offset - ci->upperbound);
-    }
-}
-
 CachedPlan*
 PMGR_InsertPlan(CachedPlanSource *plansource,
                     ParamListInfo boundParams,
                     CachedPlan *new_plan,
-                    uint32 new_plan_key)
+                    uint32 new_plan_key,
+                    PMGRAction *action)
 {
     PlanManager *PlanMgr = plansource->planManager;
 
     int num_candidates = list_length(PlanMgr->candidatePlans);
     CachedPlan *cachedplan = SearchCandidatePlan(PlanMgr->candidatePlans, new_plan_key);
     bool alreadyCached = cachedplan != NULL ? true : false;
-    PlannerInfo *expRoot = (PlannerInfo *)u_sess->pcache_cxt.explored_plan_info;
 
     /*
      * if explored plan has been cached, update the stats; otherwise, add it
@@ -761,20 +888,13 @@ PMGR_InsertPlan(CachedPlanSource *plansource,
      */
     if (alreadyCached) {
         ereport(DEBUG2, (errmodule(MOD_OPT),
-                errmsg("Explored plan already has been cached; ThreadId: %d, query: \"%s\"",
+                errmsg("Explored plan already has been cached, try to update planCIs; ThreadId: %d, query: \"%s\"",
                        gettid(), plansource->query_string)));
 
         pg_atomic_fetch_add_u32((volatile uint32 *)&cachedplan->cpi->verification_times, 1);
-
-        /* Update PlanCI (RelCIs and IndexCIs) */
-        List *relCis = GenerateRelCIs(GetBaseRelSelectivity(expRoot));
-        List *indexCis = GenerateIndexCIs(GetPlanIndexesUsages(new_plan->stmt_list), NULL);
-        UpdatePlanCIs(cachedplan->cpi, relCis, indexCis);
-
-        /* Update OffsetCI */
-        Query *query = (Query *)linitial(plansource->query_list);
-        int64 offset = GetLimitValue(query, boundParams);
-        UpdateOffsetCI(cachedplan->cpi, offset);
+        
+        /* Update PlanCI */
+        MakePlanMatchQuery(action->genericRoot, action->qRelSelec, cachedplan->cpi);
 
         /* release new_plan after updates are completed. */
         MemoryContextDelete(new_plan->context);
@@ -829,6 +949,7 @@ CreateAction(CachedPlanSource *plansource)
     action->type = PMGR_START;
     action->psrc = plansource;
     action->selected_plan = NULL;
+    action->qRelSelec = NIL;
     action->valid_plan = false;
     action->statType = PMGR_GET_NONE_STATS;
     action->is_shared = plansource->gpc.status.InShareTable();
@@ -836,6 +957,7 @@ CreateAction(CachedPlanSource *plansource)
     action->is_lock = false;
     action->lockmode = LW_SHARED;
     action->needGenericRoot = false;
+    action->genericRoot = NULL;
     action->step = 0;
     MemoryContextSwitchTo(oldcxt);
 
@@ -888,9 +1010,12 @@ ActionHandle(CachedPlanSource *plansource,
                 /* acquire an exclusive lock to update plan manager. */
                 ManagerLockSwitchTo(action, LW_EXCLUSIVE);
 
-                if (ContainSubQuery((PlannerInfo*)u_sess->pcache_cxt.explored_plan_info)) {
+                if (ContainSubQuery((PlannerInfo *)u_sess->pcache_cxt.explored_plan_info)) {
                     manager->is_valid = false;
-                    plansource->hasSubQuery = true;
+                    plansource->hasSubQuery  = true;
+                    ereport(LOG, (errmodule(MOD_OPT),
+                            errmsg("plan selection can not handle with SQL with subqueries, go to the default mode in the next round; ThreadId: %d, query: \"%s\"",
+                                   gettid(), plansource->query_string)));
                 }
 
                 /*
@@ -902,8 +1027,8 @@ ActionHandle(CachedPlanSource *plansource,
                  * temporary slots. However, it should not be cost too much as the temporary
                  * slots are narrow.
                  */
-                if (!TransactionIdIsValid(plan->saved_xmin)) {
-                    plan = PMGR_InsertPlan(plansource, boundParams, plan, plan_key);
+                if (!TransactionIdIsValid(plan->saved_xmin) && manager->is_valid) {
+                    plan = PMGR_InsertPlan(plansource, boundParams, plan, plan_key, action);
                     if (action->needGenericRoot) {
                         CacheGenericRoot(plansource, psrc_key);
                         action->needGenericRoot = false;
@@ -923,15 +1048,19 @@ ActionHandle(CachedPlanSource *plansource,
              */
             if (plansource->gplan == NULL) {
                 plansource->gplan = plan;
-                if (!plan->is_saved) {
+                if (plan->refcount == 0) {
                     plan->refcount++;
                 }
-                Assert(plansource->gplan->refcount > 0);
                 plansource->generic_cost = cached_plan_cost(plan);
             }
+            Assert(plansource->gplan->refcount > 0);
 
             action->selected_plan = plan;
             action->valid_plan = true;
+
+            /* close the lazy bind labels to avoid the binding failure in executor. */
+            boundParams->uParamInfo = DEFUALT_INFO;
+            boundParams->params_lazy_bind = false;
             NextAction(action, PMGR_FINISH, action->statType);
         } break;
         case PMGR_CHOOSE_BEST_METHOD: {
@@ -970,12 +1099,26 @@ ActionHandle(CachedPlanSource *plansource,
                 Assert(strcmp(plansource->query_string, entry->query_string) == 0);
 
                 /* initialize root's statistics cache and set boundParams */
-                PlannerInfo *groot = InitGenericRoot(entry->generic_root, boundParams);
-                action->selected_plan = FindMatchedPlan(plansource->planManager, groot);
+                action->genericRoot = InitGenericRoot(entry->generic_root, boundParams);
+                action->selected_plan = FindMatchedPlan(plansource->planManager, action);
                 NextAction(action, PMGR_CHECK_PLAN, PMGR_GET_NONE_STATS);
             }
         } break;
         case PMGR_CHECK_PLAN: {
+
+            /*
+             * plansource maybe invalid, as a table update would be ahead of lock
+             * fetching in plan matching process. Therefore revalid plansource,
+             * and invalid the current plan manager and the selected plan.
+             */
+            if (!plansource->is_valid) {
+                (void)RevalidateCachedQuery(plansource);
+                Assert(!plansource->planManager->is_valid);
+                if(action->selected_plan != NULL) {
+                    action->selected_plan->is_valid = false;
+                }
+            }
+
             if (CheckCachedPlan(plansource, action->selected_plan)) {
                 Assert(action->selected_plan->magic == CACHEDPLAN_MAGIC);
                 /* Update soft parse counter for Unique SQL */
@@ -996,7 +1139,7 @@ ActionHandle(CachedPlanSource *plansource,
                     // selected_plan is invaild, reset the pointer as NULL
                     action->selected_plan = NULL;
                     ereport(DEBUG2, (errmodule(MOD_OPT),
-                            errmsg("selected plan is invaild; ThreadId: %d, query: \"%s\"",
+                            errmsg("selected plan is invalid; ThreadId: %d, query: \"%s\"",
                                    gettid(), plansource->query_string)));
                 }
 
@@ -1029,14 +1172,17 @@ ActionHandle(CachedPlanSource *plansource,
 CachedPlan*
 GetAdaptGenericPlan(CachedPlanSource *plansource,
                             ParamListInfo boundParams,
-                            List **qlist)
+                            List **qlist,
+                            bool *mode)
 {
     PMGRAction *action;
     GplanSelectionMethod select_method;
+    double avg_custom_cost;
     
     /* plan management only supports named stmts. */
     Assert(plansource->stmt_name);
 
+   ReleaseCustomPlan(plansource);
    select_method = GetHintSelectionMethod(plansource);
    Assert(select_method == CHOOSE_ADAPTIVE_GPLAN);
 
@@ -1060,17 +1206,20 @@ GetAdaptGenericPlan(CachedPlanSource *plansource,
              plansource->query_string)));
     }
 
-
-
-    /* prepare the selection by initializing the selected-action context. */
-    action = CreateAction(plansource);
     u_sess->pcache_cxt.explored_plan_info = NULL;
+    u_sess->pcache_cxt.is_plan_exploration = false;
 
     if (u_sess->pcache_cxt.action != NULL) {
         pfree(u_sess->pcache_cxt.action);
     }
 
+    /* prepare the selection by initializing the selected-action context. */
+    action = CreateAction(plansource);
     u_sess->pcache_cxt.action = (void *)action;
+
+    ereport(DEBUG2, (errmodule(MOD_OPT),
+            errmsg("begin plan selection. ThreadId: %d, query: \"%s\"",
+                   gettid(), plansource->query_string)));
 
     /* Lock plansource when a selection is beginning. */
     AcquireManagerLock(action, LW_SHARED);
@@ -1118,8 +1267,46 @@ GetAdaptGenericPlan(CachedPlanSource *plansource,
         Assert(action->step < 10);
     } while (action->type != PMGR_FINISH);
 
+    if (boundParams != NULL) {
+        boundParams->uParamInfo = DEFUALT_INFO;
+        boundParams->params_lazy_bind = false;
+    }
+
     /* Selection is finished; unlock plansource */
     ReleaseManagerLock(action);
+
+    ereport(DEBUG2, (errmodule(MOD_OPT),
+            errmsg("End plan selection. ThreadId: %d, query: \"%s\"",
+                   gettid(), plansource->query_string)));
+
+    avg_custom_cost = plansource->total_custom_cost / plansource->num_custom_plans;
+
+    /*
+     * Prefer selected plan if it's less expensive than the average custom plan;
+     * otherwise, return null for repicking a cplan.
+     *
+     * Note that, a knockout plan would not be in candidate list. If so, we release
+     * it to avoid memory leak.
+     */
+    if (action->selected_plan->cost > 1.1 * avg_custom_cost) {
+        Assert(action->selected_plan->cost >= 0);
+        if (!action->selected_plan->is_candidate) {
+            Assert(action->selected_plan->refcount == 0);
+
+            /*
+             * guarantee that refcount equals to 1, and thus we can use
+             * 'ReleaseCachedPlan' to release the plan.
+             */
+            action->selected_plan->refcount = 1;
+            if (plansource->gplan == action->selected_plan) {
+                plansource->gplan = NULL;
+            }
+            ReleaseCachedPlan(action->selected_plan, false);
+        }
+        action->selected_plan = NULL;
+        *mode = true;
+    }
+
 
     return action->selected_plan;
 }
@@ -1134,7 +1321,7 @@ GetCustomPlan(CachedPlanSource *plansource,
 {
     CachedPlan *plan = NULL;
     /* Whenever plan is rebuild, we need to drop the old one */
-    ReleaseGenericPlan(plansource);
+    ReleaseCustomPlan(plansource);
 
     /* Build a custom plan */
     plan = BuildCachedPlan(plansource, *qlist, boundParams, true);
@@ -1272,6 +1459,8 @@ GenerateRelCIs(List *selectivities)
          * by current rel's selectivity.
          */
         relCI->ci.relid = rselec->relid;
+
+        /* expand CI by 10% */
         relCI->ci.lowerbound = rselec->selectivity;
         relCI->ci.upperbound = rselec->selectivity;
         relCI->init_selec = rselec->selectivity;
@@ -1282,140 +1471,47 @@ GenerateRelCIs(List *selectivities)
 }
 
 /*
- * GenerateIndexCIs: convert each element of 'indexes_info' to an IndexCI
- * structure.
- */
-static List*
-GenerateIndexCIs(List *indexes_usages, bool *hasPartial)
-{
-    List *result = NIL;
-    bool partial = false;
-
-    ListCell *lc;
-    foreach (lc, indexes_usages) {
-        PlanIndexUasge *usage = (PlanIndexUasge *)lfirst(lc);
-
-        IndexCI *idxci = makeNode(IndexCI);
-        idxci->ci.relid = usage->scanrelid;
-        idxci->ci.lowerbound = usage->selec;
-        idxci->ci.upperbound = usage->selec;
-        idxci->init_selec = usage->selec;
-        idxci->indexoid = usage->indexoid;
-        idxci->indexquals = (List *)copyObject(usage->indexquals);
-
-        /*
-         * replace pseudo-VarNo (i.e., 65002) by the real rel id. Then,
-         * generate the hashkey of reset-quals as the index key.
-         */
-        (void)SetClausesVarNo((Node *)idxci->indexquals, (void *)&usage->scanrelid);
-        idxci->indexkey = GenerateIndexHashKey(idxci->indexquals);
-        idxci->is_partial = usage->is_partial;
-        partial = usage->is_partial ? usage->is_partial : partial;
-        result = lappend(result, idxci);
-    }
-
-    if(hasPartial != NULL){
-        (*hasPartial) = partial;
-    }
-
-    return result;
-}
-
-
-/*
- * UpdateCI - make a embrace X
- */
-static void
-UpdateCI(CondInterval *a, CondInterval *x, double dampfactor)
-{
-    if(a == NULL){
-        Assert(x == NULL);
-        return;
-    }
-
-    /* Expand the lowerboud of CI.*/
-    if (x->lowerbound < a->lowerbound) {
-        /* leanring rate is used to avoid the aggressive expandsion. */
-        a->lowerbound -= Min(dampfactor, (a->lowerbound - x->lowerbound) * 1.1);
-    }
-    /* Expand the upperbound of CI.*/
-    if (x->upperbound > a->upperbound) {
-        a->upperbound += Min(dampfactor, (x->upperbound - a->upperbound) * 1.1);
-    }
-}
-
-static void
-UpdatePlanCIs(CachedPlanInfo *pinfo, List *relCis, List *indexCis)
-{
-    if (pinfo->relCis == NIL) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("no selectivity information is found.")));
-    }
-
-    Assert(pinfo->relCis->length == relCis->length);
-
-    ListCell *c1;
-    ListCell *c2;
-    forboth(c1, pinfo->relCis, c2, relCis)
-    {
-        RelCI *pRelCI = (RelCI *)lfirst(c1);
-        RelCI *qRelCI = (RelCI *)lfirst(c2);
-        Assert(pRelCI->relid == qRelCI->relid);
-        /* update baserel ci*/
-        UpdateCI(&pRelCI->ci, &qRelCI->ci, pinfo->learningRate);
-    }
-
-    ListCell *cl1;
-    ListCell *cl2;
-    forboth(cl1, pinfo->indexCis, cl2, indexCis)
-    {
-        IndexCI *pIdxCi = (IndexCI *)lfirst(cl1);
-        IndexCI *qIdxCi = (IndexCI *)lfirst(cl2);
-        Assert(pIdxCi->indexkey == qIdxCi->indexkey);
-        /* update index ci*/
-        UpdateCI(&pIdxCi->ci, &qIdxCi->ci, pinfo->learningRate);
-    }
-}
-
-/*
- * FallIntoCI: is the given selectivity fall in ci?
- */
-static bool
-FallIntoCI(CondInterval *ci, double selectivity)
-{
-    Assert(selectivity > 0);
-    if (ci->lowerbound <= selectivity && \
-        ci->upperbound >= selectivity) {
-        return true;
-    }
-    return false;
-}
-
-/*
- * SetClausesVarNo - replace the var number of index scan nodes by real
- * scan IDs.
+ * CacheIndexQual - copy indexqual from plan and replace the var number of index
+ * scan nodes by real scan IDs.
  * 
  * i.e., varno: 65000 => varno: 1
  */
-static bool
-SetClausesVarNo(Node *node, void *context)
+static Node*
+CacheIndexQual(Node *node, indexUsageWalkerCxt *context)
 {
+    Var *newVal = NULL;
+
     if (node == NULL) {
-        return false;
+        return NULL;
     }
-    Assert(!IsA(node, IndexScan));
+    Assert(!IsA(node, Plan) && !IsA(node, RestrictInfo));
+
     if (IsA(node, Var)) {
-        Var *var = (Var *)node;
-        var->varno = *((int *)context);
+        Var *newVal = (Var *)copyObject(node);
+        newVal->varno = newVal->varnoold;
+        newVal->varattno = newVal->varoattno;
+
+        return (Node *)newVal;
     }
 
-    if(IsA(node, RestrictInfo)){
-        RestrictInfo *rinfo = (RestrictInfo *)node;
-        node = (Node *)rinfo->clause;
+    if (IsA(node, Param)) {
+        Param *param = (Param *)node;
+        if (param->paramkind == PARAM_EXEC) {
+            ListCell *lc;
+            foreach (lc, context->paramValList) {
+                NestLoopParam *nlp = (NestLoopParam *)lfirst(lc);
+                if (param->paramid == nlp->paramno) {
+                    newVal = (Var *)copyObject(nlp->paramval);
+                    newVal->varno = newVal->varnoold;
+                    newVal->varattno = newVal->varoattno;
+                    return (Node *)newVal;
+                }
+            }
+        }
     }
-    return expression_tree_walker(node,
-                                  (bool (*)())SetClausesVarNo,
-                                  context);
+    return expression_tree_mutator(node,
+                                  (Node* (*)(Node*, void*))CacheIndexQual,
+                                  context, true);
 }
 
 PlanIndexUasge*
@@ -1446,7 +1542,7 @@ MakePlanIndexUasge(int scanrelid,
  *
  * Returns false when the current plan node are processed end.
  */
-bool
+static bool
 ExtractPlanIndexesUsages(Node *plan, void *context)
 {
     indexUsageWalkerCxt *idxCxt = ((indexUsageWalkerCxt *)context);
@@ -1494,32 +1590,53 @@ ExtractPlanIndexesUsages(Node *plan, void *context)
 
         return false;
     }
+
+    if (IsA(plan, NestLoop)) {
+        NestLoop *nl = (NestLoop *)plan;
+        List *tmpList = (List *)copyObject(nl->nestParams);
+        idxCxt->paramValList = list_concat(idxCxt->paramValList, tmpList);
+    }
+
     return plan_tree_walker(plan, (MethodWalker)ExtractPlanIndexesUsages, context);
 }
 
 /*
- * GetPlanIndexUsage: get indexquals and their selectivities from the plan
- * tree.
+ * GenerateIndexCIs: get indexquals and their selectivities from the plan
+ * tree and generate index CI.
  */
 List*
-GetPlanIndexesUsages(List *stmt_list)
+GenerateIndexCIs(indexUsageWalkerCxt context, bool *hasPartial)
 {
-    PlannedStmt *stmt = (PlannedStmt *)linitial(stmt_list);
-    indexUsageWalkerCxt context;
+    List *result = NIL;
+    bool partial = false;
 
-    errno_t rc = 0;
-    size_t cxt_size = sizeof(indexUsageWalkerCxt);
-    rc = memset_s(&context, cxt_size, 0, cxt_size);
-    securec_check(rc, "\0", "\0");
+    ListCell *lc;
+    foreach (lc, context.usage_list) {
+        PlanIndexUasge *usage = (PlanIndexUasge *)lfirst(lc);
 
-    exec_init_plan_tree_base(&context.mpwc.base, stmt);
+        IndexCI *idxci = makeNode(IndexCI);
+        idxci->ci.relid = usage->scanrelid;
+        idxci->ci.lowerbound = usage->selec;
+        idxci->ci.upperbound = usage->selec;
+        idxci->init_selec = usage->selec;
+        idxci->indexoid = usage->indexoid;
 
-    /*
-     * Get the usages of indexes by traversing the plan tree.
-     */
-    ExtractPlanIndexesUsages((Node *)stmt->planTree, &context);
+        /*
+         * replace pseudo-VarNo (i.e., 65002) by the real rel id. Then,
+         * generate the hashkey of reset-quals as the index key.
+         */
+        context.varelid = usage->scanrelid;
+        idxci->indexquals = (List *)CacheIndexQual((Node *)usage->indexquals, &context);
+        idxci->is_partial = usage->is_partial;
+        partial = usage->is_partial ? usage->is_partial : partial;
+        result = lappend(result, idxci);
+    }
 
-    return context.usage_list;
+    if(hasPartial != NULL){
+        (*hasPartial) = partial;
+    }
+
+    return result;
 }
 
 /*

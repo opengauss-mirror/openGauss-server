@@ -482,7 +482,7 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                     Oid tbl_part_id = InvalidOid;
                     int part_seq = lfirst_int(cell);
 
-                    tbl_part_id = getPartitionOidFromSequence(curr_rel, part_seq, plan->pruningInfo->partMap);
+                    tbl_part_id = getPartitionOidFromSequence(curr_rel, part_seq, INVALID_PARTITION_NO);
                     part = partitionOpen(curr_rel, tbl_part_id, lock_mode);
                     node->partitions = lappend(node->partitions, part);
                 }
@@ -533,7 +533,7 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                     Oid tbl_part_id = InvalidOid;
                     int part_seq = lfirst_int(cell);
 
-                    tbl_part_id = getPartitionOidFromSequence(parent_rel, part_seq, plan->pruningInfo->partMap);
+                    tbl_part_id = getPartitionOidFromSequence(parent_rel, part_seq, INVALID_PARTITION_NO);
                     part = partitionOpen(parent_rel, tbl_part_id, lock_mode);
                     Oid part_idx_oid = getPartitionIndexOid(plan->scanrelid, part->pd_id);
                     Assert(OidIsValid(part_idx_oid));
@@ -714,7 +714,7 @@ CStoreScanState* ExecInitCStoreScan(
      */
     ExecAssignResultTypeFromTL(
             &scan_stat->ps,
-            scan_stat->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+            scan_stat->ss_ScanTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
     if (node->isPartTbl && scan_stat->ss_currentRelation == NULL) {
         // no data ,just return;
@@ -739,7 +739,7 @@ CStoreScanState* ExecInitCStoreScan(
         New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, scan_stat->ss_currentRelation->rd_att);
     for (int vecIndex = 0; vecIndex < scan_stat->m_pScanBatch->m_cols; vecIndex++) {
         FormData_pg_attribute* attr = NULL;
-        attr = scan_stat->ss_currentRelation->rd_att->attrs[vecIndex];
+        attr = &scan_stat->ss_currentRelation->rd_att->attrs[vecIndex];
 
         // Hack!! move me out to update pg_attribute instead
         //

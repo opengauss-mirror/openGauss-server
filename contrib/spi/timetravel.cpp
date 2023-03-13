@@ -312,7 +312,7 @@ Datum /* have to return HeapTuple to Executor */
         snprintf(sql, sizeof(sql), "INSERT INTO %s VALUES (", relname);
         for (i = 1; i <= natts; i++) {
             ctypes[i - 1] = SPI_gettypeid(tupdesc, i);
-            if (!(tupdesc->attrs[i - 1]->attisdropped)) /* skip dropped columns */
+            if (!(tupdesc->attrs[i - 1].attisdropped)) /* skip dropped columns */
             {
                 snprintf(sql + strlen(sql), sizeof(sql) - strlen(sql), "%c$%d", separ, i);
                 separ = ',';

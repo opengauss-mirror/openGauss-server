@@ -231,7 +231,7 @@ void CreatePackageBodyCommand(CreatePackageBodyStmt* stmt, const char* queryStri
 /*
  * Change package owner by name
  */
-void AlterPackageOwner(List* name, Oid newOwnerId)
+ObjectAddress AlterPackageOwner(List* name, Oid newOwnerId)
 {
 #ifdef ENABLE_MULTIPLE_NODES
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -240,6 +240,7 @@ void AlterPackageOwner(List* name, Oid newOwnerId)
     Oid pkgOid = PackageNameListGetOid(name, false);
     Relation rel;
     HeapTuple tup;
+    ObjectAddress address;
     if (IsSystemObjOid(pkgOid)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
@@ -265,7 +266,8 @@ void AlterPackageOwner(List* name, Oid newOwnerId)
         /* Recode time of change the funciton owner. */
         UpdatePgObjectMtime(pkgOid, OBJECT_TYPE_PKGSPEC);
         heap_close(rel, NoLock);
-        return;
+        ObjectAddressSet(address, PackageRelationId, pkgOid);
+        return address;
     }
 
     Datum repl_val[Natts_gs_package];
@@ -331,5 +333,6 @@ void AlterPackageOwner(List* name, Oid newOwnerId)
     /* Recode time of change the funciton owner. */
     UpdatePgObjectMtime(pkgOid, OBJECT_TYPE_PKGSPEC);
     heap_close(rel, NoLock);
-    return;
+    ObjectAddressSet(address, PackageRelationId, pkgOid);
+    return address;
 }

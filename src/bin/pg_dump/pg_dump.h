@@ -92,7 +92,9 @@ typedef enum {
     DO_RLSPOLICY,       /* dump row level security policy of table */
     DO_PUBLICATION,
     DO_PUBLICATION_REL,
-    DO_SUBSCRIPTION
+    DO_SUBSCRIPTION,
+    DO_EVENT,
+    DO_EVENT_TRIGGER
 } DumpableObjectType;
 
 typedef struct _dumpableObject {
@@ -108,11 +110,22 @@ typedef struct _dumpableObject {
     int allocDeps;                  /* allocated size of dependencies[] */
 } DumpableObject;
 
+typedef struct _evttriggerInfo {
+    DumpableObject dobj;
+    char       *evtname;
+    char       *evtevent;
+    char       *evtowner;
+    char       *evttags;
+    char       *evtfname;
+    char        evtenabled;
+} EventTriggerInfo;
+
 typedef struct _namespaceInfo {
     DumpableObject dobj;
     char* rolname; /* name of owner, or empty string */
     char* nspacl;
     bool hasBlockchain;
+    int collate;
 } NamespaceInfo;
 
 typedef struct _extensionInfo {
@@ -362,6 +375,19 @@ typedef struct _triggerInfo {
     char* tgdef;
     bool tgdb;
 } TriggerInfo;
+typedef struct _eventInfo {
+    DumpableObject dobj;
+    char* evdefiner;
+    char* evname;
+    char* nspname;
+    char* starttime;
+    char* endtime;
+    char* intervaltime;
+    bool autodrop;
+    bool evstatus;
+    char* comment;
+    char* evbody;
+}EventInfo;
 
 /*
  * struct ConstraintInfo is used for all constraint types.	However we
@@ -574,6 +600,7 @@ extern void getConstraints(Archive* fout, TableInfo tblinfo[], int numTables);
 extern RuleInfo* getRules(Archive* fout, int* numRules);
 extern void getRlsPolicies(Archive* fout, TableInfo tblinfo[], int numTables);
 extern void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables);
+extern EventInfo *getEvents(Archive *fout, int *numEvents);
 extern ProcLangInfo* getProcLangs(Archive* fout, int* numProcLangs);
 extern CastInfo* getCasts(Archive* fout, int* numCasts);
 extern void getTableAttrs(Archive* fout, TableInfo* tbinfo, int numTables);
@@ -592,6 +619,7 @@ extern uint32 GetVersionNum(Archive* fout);
 extern void getPublications(Archive *fout);
 extern void getPublicationTables(Archive *fout, TableInfo tblinfo[], int numTables);
 extern void getSubscriptions(Archive *fout);
+extern EventTriggerInfo *getEventTriggers(Archive *fout, int *numEventTriggers);
 
 #ifdef GSDUMP_LLT
 void stopLLT();

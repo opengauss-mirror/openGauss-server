@@ -4205,7 +4205,7 @@ int main(int argc, char* argv[])
                 break;
             case 8:
                 FREE_NOT_STATIC_ZERO_STRING(locale);
-                locale = "C";
+                locale = xstrdup("C");
                 break;
             case 9:
                 FREE_NOT_STATIC_ZERO_STRING(pwfilename);

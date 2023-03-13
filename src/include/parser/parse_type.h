@@ -32,7 +32,8 @@ extern char* TypeNameToString(const TypeName* typname);
 extern char* TypeNameListToString(List* typenames);
 
 extern Oid LookupCollation(ParseState* pstate, List* collnames, int location);
-extern Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid);
+extern Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid,
+    Oid rel_coll_oid = InvalidOid);
 
 extern Type typeidType(Oid id);
 
@@ -51,7 +52,7 @@ extern bool CheckTypeSupportRowToVec(List* targetlist, int errLevel);
 extern bool IsTypeSupportedByORCRelation(_in_ Oid typeOid);
 extern bool IsTypeSupportedByTsStore(_in_ int kvtype, _in_ Oid typeOid);
 extern bool IsTypeSupportedByUStore (_in_ Oid typeOid, _in_ int32 typeMod);
-
+extern TypeName *typeStringToTypeName(const char *str);
 extern void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p);
 extern bool IsTypeTableInInstallationGroup(const Type type_tup);
 extern HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32* typmod_p);

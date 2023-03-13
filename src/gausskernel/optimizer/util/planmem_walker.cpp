@@ -195,7 +195,7 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
 
     switch (nodeTag(node)) {
         case T_Plan:
-
+        case T_ProjectSet:
             return walk_plan_node_fields((Plan*)node, walker, context);
 
         case T_BaseResult:

@@ -440,18 +440,18 @@ static void MOTGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid for
 
     if (needWholeRow) {
         for (int i = 0; i < desc->natts; i++) {
-            if (!desc->attrs[i]->attisdropped) {
-                BITMAP_SET(planstate->m_attrsUsed, (desc->attrs[i]->attnum - 1));
+            if (!desc->attrs[i].attisdropped) {
+                BITMAP_SET(planstate->m_attrsUsed, (desc->attrs[i].attnum - 1));
             }
         }
     } else {
         /* Pull "var" clauses to build an appropriate target list */
-        pull_varattnos((Node*)baserel->reltargetlist, baserel->relid, &attrs);
+        pull_varattnos((Node*)baserel->reltarget->exprs, baserel->relid, &attrs);
         if (attrs != NULL) {
             bool all = bms_is_member(-FirstLowInvalidHeapAttributeNumber, attrs);
             for (int i = 0; i < planstate->m_numAttrs; i++) {
-                if (all || bms_is_member(desc->attrs[i]->attnum - FirstLowInvalidHeapAttributeNumber, attrs)) {
-                    BITMAP_SET(planstate->m_attrsUsed, (desc->attrs[i]->attnum - 1));
+                if (all || bms_is_member(desc->attrs[i].attnum - FirstLowInvalidHeapAttributeNumber, attrs)) {
+                    BITMAP_SET(planstate->m_attrsUsed, (desc->attrs[i].attnum - 1));
                 }
             }
         }
@@ -1278,8 +1278,8 @@ static int MOTAcquireSampleRowsFunc(Relation relation, int elevel, HeapTuple* ro
     MOT::Row* row = nullptr;
 
     for (int i = 0; i < desc->natts; i++) {
-        if (!desc->attrs[i]->attisdropped) {
-            BITMAP_SET(attrsUsed, (desc->attrs[i]->attnum - 1));
+        if (!desc->attrs[i].attisdropped) {
+            BITMAP_SET(attrsUsed, (desc->attrs[i].attnum - 1));
         }
     }
 
@@ -1386,17 +1386,17 @@ static void PrepareAttributeList(ModifyTable* plan, RangeTblEntry* rte, Relation
     switch (plan->operation) {
         case CMD_INSERT: {
             for (int i = 0; i < desc->natts; i++) {
-                if (!desc->attrs[i]->attisdropped) {
-                    BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
+                if (!desc->attrs[i].attisdropped) {
+                    BITMAP_SET(ptrAttrsModify, (desc->attrs[i].attnum - 1));
                 }
             }
             break;
         }
         case CMD_UPDATE: {
             for (int i = 0; i < desc->natts; i++) {
-                if (bms_is_member(desc->attrs[i]->attnum - FirstLowInvalidHeapAttributeNumber, rte->updatedCols)) {
-                    if (MOTAdaptor::IsColumnIndexed(desc->attrs[i]->attnum, table)) {
-                        if (table->GetPrimaryIndex()->IsFieldPresent(desc->attrs[i]->attnum)) {
+                if (bms_is_member(desc->attrs[i].attnum - FirstLowInvalidHeapAttributeNumber, rte->updatedCols)) {
+                    if (MOTAdaptor::IsColumnIndexed(desc->attrs[i].attnum, table)) {
+                        if (table->GetPrimaryIndex()->IsFieldPresent(desc->attrs[i].attnum)) {
                             ixUpd = MOT::UpdateIndexColumnType::UPDATE_COLUMN_PRIMARY;
                             ereport(ERROR,
                                 (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED),
@@ -1406,7 +1406,7 @@ static void PrepareAttributeList(ModifyTable* plan, RangeTblEntry* rte, Relation
                             ixUpd = MOT::UpdateIndexColumnType::UPDATE_COLUMN_SECONDARY;
                         }
                     }
-                    BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
+                    BITMAP_SET(ptrAttrsModify, (desc->attrs[i].attnum - 1));
                 }
             }
             if (fdwState != nullptr) {
@@ -1417,8 +1417,8 @@ static void PrepareAttributeList(ModifyTable* plan, RangeTblEntry* rte, Relation
         case CMD_DELETE: {
             if (list_length(plan->returningLists) > 0) {
                 for (int i = 0; i < desc->natts; i++) {
-                    if (!desc->attrs[i]->attisdropped) {
-                        BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
+                    if (!desc->attrs[i].attisdropped) {
+                        BITMAP_SET(ptrAttrsModify, (desc->attrs[i].attnum - 1));
                     }
                 }
             }
