@@ -8732,5 +8732,69 @@ select * from t1;
 (2 rows)
 
 drop table if exists t1 cascade;
+drop table if exists t1 cascade;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(f1 int comment 'f1 is int', f2 varchar(20), f3 timestamp comment 'f3 is timestamp', f4 bit(8), f5 bool comment 'f5 is boolean');
+SELECT pg_get_tabledef('t1');
+                pg_get_tabledef                
+-----------------------------------------------
+ SET search_path = public;                    +
+ CREATE TABLE t1 (                            +
+     f1 integer,                              +
+     f2 character varying(20),                +
+     f3 timestamp without time zone,          +
+     f4 bit(8),                               +
+     f5 boolean                               +
+ )                                            +
+ WITH (orientation=row, compression=no);      +
+ COMMENT ON COLUMN t1.f1 IS 'f1 is int';      +
+ COMMENT ON COLUMN t1.f3 IS 'f3 is timestamp';+
+ COMMENT ON COLUMN t1.f5 IS 'f5 is boolean';
+(1 row)
+
+alter table t1 add f6 int generated always as (f1 * 10) stored, add f7 text default '7' first, add f8 int primary key auto_increment after f2;
+NOTICE:  ALTER TABLE will create implicit sequence "t1_f8_seq" for serial column "t1.f8"
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+SELECT pg_get_tabledef('t1');
+                    pg_get_tabledef                     
+--------------------------------------------------------
+ SET search_path = public;                             +
+ CREATE TABLE t1 (                                     +
+     f7 text DEFAULT '7'::text,                        +
+     f1 integer,                                       +
+     f2 character varying(20),                         +
+     f8 integer AUTO_INCREMENT NOT NULL,               +
+     f3 timestamp without time zone,                   +
+     f4 bit(8),                                        +
+     f5 boolean,                                       +
+     f6 integer GENERATED ALWAYS AS ((f1 * 10)) STORED,+
+     CONSTRAINT t1_pkey PRIMARY KEY (f8)               +
+ ) AUTO_INCREMENT = 1                                  +
+ WITH (orientation=row, compression=no);               +
+ COMMENT ON COLUMN t1.f1 IS 'f1 is int';               +
+ COMMENT ON COLUMN t1.f3 IS 'f3 is timestamp';         +
+ COMMENT ON COLUMN t1.f5 IS 'f5 is boolean';
+(1 row)
+
+alter table t1 modify f1 int after f3, modify f5 bool first, modify f3 timestamp after f4;
+SELECT pg_get_tabledef('t1');
+                    pg_get_tabledef                     
+--------------------------------------------------------
+ SET search_path = public;                             +
+ CREATE TABLE t1 (                                     +
+     f5 boolean,                                       +
+     f7 text DEFAULT '7'::text,                        +
+     f2 character varying(20),                         +
+     f8 integer AUTO_INCREMENT NOT NULL,               +
+     f1 integer,                                       +
+     f4 bit(8),                                        +
+     f3 timestamp without time zone,                   +
+     f6 integer GENERATED ALWAYS AS ((f1 * 10)) STORED,+
+     CONSTRAINT t1_pkey PRIMARY KEY (f8)               +
+ ) AUTO_INCREMENT = 1                                  +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+drop table if exists t1 cascade;
 \c postgres
 drop database test_first_after_B;
