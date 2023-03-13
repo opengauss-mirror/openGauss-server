@@ -3343,6 +3343,7 @@ typedef struct knl_t_dms_context {
     int size; /* aligned buffer size */
     int offset; /* current read/write position in aligned_buf */
     int file_size; /* initialized as pg_internal.init file size, will decrease after read */
+    char msg_backup[24]; // 24 is sizeof mes_message_head_t
 } knl_t_dms_context;
 
 /* thread context. */
