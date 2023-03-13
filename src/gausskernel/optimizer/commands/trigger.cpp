@@ -3399,7 +3399,11 @@ static bool TriggerEnabled(EState* estate, ResultRelInfo* relinfo, Trigger* trig
             ChangeVarNodes(tgqual, PRS2_NEW_VARNO, OUTER_VAR, 0);
             /* ExecQual wants implicit-AND form */
             tgqual = (Node*)make_ands_implicit((Expr*)tgqual);
-            *predicate = (List*)ExecPrepareExpr((Expr*)tgqual, estate);
+            if (estate->es_is_flt_frame){
+                *predicate = (List*)ExecPrepareQualByFlatten((List*)tgqual, estate);
+            } else {
+                *predicate = (List*)ExecPrepareExpr((Expr*)tgqual, estate);
+            }
             (void)MemoryContextSwitchTo(oldContext);
             pfree_ext(tgqual);
         }
@@ -3446,7 +3450,7 @@ static bool TriggerEnabled(EState* estate, ResultRelInfo* relinfo, Trigger* trig
          */
         econtext->ecxt_innertuple = oldslot;
         econtext->ecxt_outertuple = newslot;
-        if (!ExecQual(*predicate, econtext, false))
+        if (!ExecQual(*predicate, econtext))
             return false;
     }
 

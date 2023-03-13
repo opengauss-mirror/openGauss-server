@@ -25,6 +25,8 @@
     errcontext.previous = t_thrd.log_cxt.error_context_stack; \
     t_thrd.log_cxt.error_context_stack = &errcontext;
 
+#define ELOG_FIELD_NAME_UPDATE(fieldname) t_thrd.log_cxt.error_context_stack->arg = (void*)(fieldname);
+
 #define ELOG_FIELD_NAME_END t_thrd.log_cxt.error_context_stack = errcontext.previous;
 
 /* Type categories (see TYPCATEGORY_xxx symbols in catalog/pg_type.h) */

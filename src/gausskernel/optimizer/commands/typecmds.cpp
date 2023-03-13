@@ -2765,7 +2765,7 @@ static void validateDomainConstraint(Oid domainoid, char* ccbin)
                 econtext->domainValue_datum = d;
                 econtext->domainValue_isNull = isNull;
 
-                conResult = ExecEvalExprSwitchContext(exprstate, econtext, &isNull, NULL);
+                conResult = ExecEvalExprSwitchContext(exprstate, econtext, &isNull);
 
                 if (!isNull && !DatumGetBool(conResult))
                     ereport(ERROR,
@@ -3171,6 +3171,8 @@ List* GetDomainConstraints(Oid typeOid)
             check_expr = expression_planner(check_expr);
 
             r = makeNode(DomainConstraintState);
+            r->check_node = check_expr; /* for flattened expression frame */
+
             r->constrainttype = DOM_CONSTRAINT_CHECK;
             r->name = pstrdup(NameStr(c->conname));
             r->check_expr = ExecInitExpr(check_expr, NULL);
@@ -3201,6 +3203,7 @@ List* GetDomainConstraints(Oid typeOid)
         r->constrainttype = DOM_CONSTRAINT_NOTNULL;
         r->name = pstrdup("NOT NULL");
         r->check_expr = NULL;
+        r->check_node = NULL;
 
         /* lcons to apply the nullness check FIRST */
         result = lcons(r, result);

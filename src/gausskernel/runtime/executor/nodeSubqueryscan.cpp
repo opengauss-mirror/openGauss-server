@@ -115,8 +115,12 @@ SubqueryScanState* ExecInitSubqueryScan(SubqueryScan* node, EState* estate, int 
     /*
      * initialize child expressions
      */
-    sub_query_state->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)sub_query_state);
-    sub_query_state->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)sub_query_state);
+    if (estate->es_is_flt_frame) {
+        sub_query_state->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)sub_query_state);
+    } else {
+        sub_query_state->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)sub_query_state);
+        sub_query_state->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)sub_query_state);
+    }
 
     /*
      * tuple table initialization
@@ -129,7 +133,7 @@ SubqueryScanState* ExecInitSubqueryScan(SubqueryScan* node, EState* estate, int 
      */
     sub_query_state->subplan = ExecInitNode(node->subplan, estate, eflags);
 
-    sub_query_state->ss.ps.ps_TupFromTlist = false;
+    sub_query_state->ss.ps.ps_vec_TupFromTlist = false;
 
     /*
      * Initialize scan tuple type (needed by ExecAssignScanProjectionInfo)

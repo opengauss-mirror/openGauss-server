@@ -1247,6 +1247,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
      */
     estate->es_range_table = rangeTable;
     estate->es_plannedstmt = plannedstmt;
+    estate->es_is_flt_frame = plannedstmt->is_flt_frame;
 #ifdef ENABLE_MOT
     estate->mot_jit_context = queryDesc->mot_jit_context;
 #endif
@@ -2493,9 +2494,13 @@ static const char *ExecRelCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *sl
         oldContext = MemoryContextSwitchTo(estate->es_query_cxt);
         resultRelInfo->ri_ConstraintExprs = (List **)palloc(ncheck * sizeof(List *));
         for (i = 0; i < ncheck; i++) {
-            /* ExecQual wants implicit-AND form */
-            qual = make_ands_implicit((Expr *)stringToNode(check[i].ccbin));
-            resultRelInfo->ri_ConstraintExprs[i] = (List *)ExecPrepareExpr((Expr *)qual, estate);
+
+            if (estate->es_is_flt_frame){
+                resultRelInfo->ri_ConstraintExprs[i] = (List*)ExecPrepareExpr((Expr*)stringToNode(check[i].ccbin), estate);
+            } else {
+                qual = make_ands_implicit((Expr*)stringToNode(check[i].ccbin));
+                resultRelInfo->ri_ConstraintExprs[i] = (List*)ExecPrepareExpr((Expr *)qual,estate);
+            }
         }
         (void)MemoryContextSwitchTo(oldContext);
     }
@@ -2518,8 +2523,14 @@ static const char *ExecRelCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *sl
          * expression is not to be treated as a failure.  Therefore, tell
          * ExecQual to return TRUE for NULL.
          */
-        if (!ExecQual(qual, econtext, true)) {
-            return check[i].ccname;
+        if (estate->es_is_flt_frame){
+            if (!ExecCheckByFlatten((ExprState*)qual, econtext)){
+                return check[i].ccname;
+            }
+        } else {
+            if (!ExecQual(qual, econtext, true)){
+                return check[i].ccname;
+            }
         }
     }
 

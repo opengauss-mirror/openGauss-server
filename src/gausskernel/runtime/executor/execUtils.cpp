@@ -60,6 +60,7 @@
 #include "utils/snapmgr.h"
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
+#include "utils/typcache.h"
 #include "optimizer/var.h"
 #include "utils/resowner.h"
 #include "miscadmin.h"
@@ -72,6 +73,10 @@
 #include "utils/xml.h"
 #include "utils/rangetypes.h"
 #include "commands/sequence.h"
+#include "catalog/pg_proc.h"
+#include "catalog/pg_proc_fn.h"
+#include "catalog/pg_proc_fn.h"
+#include "funcapi.h"
 
 static bool get_last_attnums(Node* node, ProjectionInfo* projInfo);
 static bool index_recheck_constraint(
@@ -80,6 +85,7 @@ static bool check_violation(Relation heap, Relation index, IndexInfo *indexInfo,
                             const bool *isnull, EState *estate, bool newIndex, bool errorOK, CheckWaitMode waitMode,
                             ConflictInfoData *conflictInfo, Oid partoid = InvalidOid, int2 bucketid = InvalidBktId,
                             Oid *conflictPartOid = NULL, int2 *conflictBucketid = NULL);
+extern struct varlena *heap_tuple_fetch_and_copy(Relation rel, struct varlena *attr, bool needcheck);
 
 /* ----------------------------------------------------------------
  *				 Executor state and memory management functions
@@ -192,6 +198,7 @@ EState* CreateExecutorState(MemoryContext saveCxt)
 
     estate->pruningResult = NULL;
     estate->first_autoinc = 0;
+    estate->es_is_flt_frame = (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
     /*
      * Return the executor state structure
      */
@@ -726,12 +733,9 @@ ProjectionInfo* ExecBuildVecProjectionInfo(
         projInfo->pi_exprContext->current_row = 0;
     }
 
-    if (exprlist == NIL) {
-        projInfo->pi_itemIsDone = NULL; /* not needed */
-    } else {
-        projInfo->pi_itemIsDone = (ExprDoneCond*)palloc0(len * sizeof(ExprDoneCond));
-
+    if (exprlist != NIL) {
         if (projInfo->pi_exprContext != NULL && projInfo->pi_exprContext->have_vec_set_fun) {
+            projInfo->pi_vec_itemIsDone = (ExprDoneCond*)palloc0(len * sizeof(ExprDoneCond));
             projInfo->pi_setFuncBatch =
                 New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, slot->tts_tupleDescriptor);
             projInfo->pi_exprContext->vec_fun_sel = (bool*)palloc0(BatchMaxSize * sizeof(bool));
@@ -744,12 +748,12 @@ ProjectionInfo* ExecBuildVecProjectionInfo(
     return projInfo;
 }
 
-ProjectionInfo* ExecBuildRightRefProjectionInfo(PlanState* planState, TupleDesc inputDesc) 
+ProjectionInfo* ExecBuildRightRefProjectionInfo(PlanState* planState, TupleDesc inputDesc)
 {
-    List* targetList = planState->targetlist; 
-    ExprContext* econtext = planState->ps_ExprContext; 
+    List* targetList = planState->targetlist;
+    ExprContext* econtext = planState->ps_ExprContext;
     TupleTableSlot* slot = planState->ps_ResultTupleSlot;
-    
+
     ProjectionInfo* projInfo = makeNode(ProjectionInfo);
     int len = ExecTargetListLength(targetList);
 
@@ -759,7 +763,7 @@ ProjectionInfo* ExecBuildRightRefProjectionInfo(PlanState* planState, TupleDesc 
     projInfo->pi_lastInnerVar = 0;
     projInfo->pi_lastOuterVar = 0;
     projInfo->pi_lastScanVar = 0;
-    
+
     projInfo->pi_targetlist = targetList;
     projInfo->pi_numSimpleVars = 0;
     projInfo->pi_directMap = false;
@@ -768,8 +772,70 @@ ProjectionInfo* ExecBuildRightRefProjectionInfo(PlanState* planState, TupleDesc 
     return projInfo;
 }
 
+/*
+ * get_last_attnums: expression walker for ExecBuildProjectionInfo
+ *
+ *	Update the lastXXXVar counts to be at least as large as the largest
+ *	attribute numbers found in the expression
+ */
+static bool get_last_attnums(Node* node, ProjectionInfo* projInfo)
+{
+    if (node == NULL)
+        return false;
+    if (IsA(node, Var)) {
+        Var* variable = (Var*)node;
+        AttrNumber attnum = variable->varattno;
+
+        switch (variable->varno) {
+            case INNER_VAR:
+                if (projInfo->pi_lastInnerVar < attnum)
+                    projInfo->pi_lastInnerVar = attnum;
+                break;
+
+            case OUTER_VAR:
+                if (projInfo->pi_lastOuterVar < attnum)
+                    projInfo->pi_lastOuterVar = attnum;
+                break;
+
+                /* INDEX_VAR is handled by default case */
+            default:
+                if (projInfo->pi_lastScanVar < attnum)
+                    projInfo->pi_lastScanVar = attnum;
+                break;
+        }
+        return false;
+    }
+
+    /*
+     * Don't examine the arguments of Aggrefs or WindowFuncs, because those do
+     * not represent expressions to be evaluated within the overall
+     * overall targetlist's econtext.  GroupingFunc arguments are never
+     * evaluated at all.
+     */
+    if (IsA(node, Aggref) || IsA(node, GroupingFunc))
+        return false;
+    if (IsA(node, WindowFunc))
+        return false;
+    return expression_tree_walker(node, (bool (*)())get_last_attnums, (void*)projInfo);
+}
+
+ProjectionInfo* ExecBuildProjectionInfo(
+    List* targetList, ExprContext* econtext, TupleTableSlot* slot, PlanState *parent, TupleDesc inputDesc)
+{
+    bool is_flt_frame = (parent != NULL) ? parent->state->es_is_flt_frame : false;
+
+    if (is_flt_frame) {
+        return ExecBuildProjectionInfoByFlatten(targetList, econtext, slot, parent, inputDesc);
+    } else {
+        List* targetListState = NULL;
+        targetListState = (List*)ExecInitExprByRecursion((Expr*)targetList, parent);
+        return ExecBuildProjectionInfoByRecursion(targetListState, econtext, slot, inputDesc);
+    }
+
+}
+
 /* ----------------
- *		ExecBuildProjectionInfo
+ *		ExecBuildProjectionInfoByRecursion
  *
  * Build a ProjectionInfo node for evaluating the given tlist in the given
  * econtext, and storing the result into the tuple slot.  (Caller must have
@@ -783,7 +849,7 @@ ProjectionInfo* ExecBuildRightRefProjectionInfo(PlanState* planState, TupleDesc 
  * there is no need to recheck.
  * ----------------
  */
-ProjectionInfo* ExecBuildProjectionInfo(
+ProjectionInfo* ExecBuildProjectionInfoByRecursion(
     List* targetList, ExprContext* econtext, TupleTableSlot* slot, TupleDesc inputDesc)
 {
     ProjectionInfo* projInfo = makeNode(ProjectionInfo);
@@ -808,6 +874,7 @@ ProjectionInfo* ExecBuildProjectionInfo(
     projInfo->pi_lastOuterVar = 0;
     projInfo->pi_lastScanVar = 0;
     projInfo->isUpsertHasRightRef = false;
+    projInfo->pi_state.is_flt_frame = false;
 
     /*
      * We separate the target list elements into simple Var references and
@@ -866,7 +933,7 @@ ProjectionInfo* ExecBuildProjectionInfo(
                     break;
             }
             numSimpleVars++;
-            
+
             if (econtext && IS_ENABLE_RIGHT_REF(econtext->rightRefState)) {
                 exprlist = lappend(exprlist, gstate);
                 get_last_attnums((Node*)variable, projInfo);
@@ -890,53 +957,6 @@ ProjectionInfo* ExecBuildProjectionInfo(
     return projInfo;
 }
 
-/*
- * get_last_attnums: expression walker for ExecBuildProjectionInfo
- *
- *	Update the lastXXXVar counts to be at least as large as the largest
- *	attribute numbers found in the expression
- */
-static bool get_last_attnums(Node* node, ProjectionInfo* projInfo)
-{
-    if (node == NULL)
-        return false;
-    if (IsA(node, Var)) {
-        Var* variable = (Var*)node;
-        AttrNumber attnum = variable->varattno;
-
-        switch (variable->varno) {
-            case INNER_VAR:
-                if (projInfo->pi_lastInnerVar < attnum)
-                    projInfo->pi_lastInnerVar = attnum;
-                break;
-
-            case OUTER_VAR:
-                if (projInfo->pi_lastOuterVar < attnum)
-                    projInfo->pi_lastOuterVar = attnum;
-                break;
-
-                /* INDEX_VAR is handled by default case */
-            default:
-                if (projInfo->pi_lastScanVar < attnum)
-                    projInfo->pi_lastScanVar = attnum;
-                break;
-        }
-        return false;
-    }
-
-    /*
-     * Don't examine the arguments of Aggrefs or WindowFuncs, because those do
-     * not represent expressions to be evaluated within the overall
-     * overall targetlist's econtext.  GroupingFunc arguments are never
-     * evaluated at all.
-     */
-    if (IsA(node, Aggref) || IsA(node, GroupingFunc))
-        return false;
-    if (IsA(node, WindowFunc))
-        return false;
-    return expression_tree_walker(node, (bool (*)())get_last_attnums, (void*)projInfo);
-}
-
 /* ----------------
  *		ExecAssignProjectionInfo
  *
@@ -948,11 +968,16 @@ static bool get_last_attnums(Node* node, ProjectionInfo* projInfo)
  */
 void ExecAssignProjectionInfo(PlanState* planstate, TupleDesc inputDesc)
 {
-    if (planstate->plan && IS_ENABLE_RIGHT_REF(planstate->plan->rightRefState)) {
+    if (planstate->plan && IS_ENABLE_RIGHT_REF(planstate->plan->rightRefState) && !planstate->state->es_is_flt_frame) {
         planstate->ps_ProjInfo = ExecBuildRightRefProjectionInfo(planstate, inputDesc);
     } else {
-        planstate->ps_ProjInfo = ExecBuildProjectionInfo(planstate->targetlist, planstate->ps_ExprContext,
-                                                         planstate->ps_ResultTupleSlot, inputDesc);
+        if (planstate->state->es_is_flt_frame) {
+            planstate->ps_ProjInfo = ExecBuildProjectionInfoByFlatten(planstate->plan->targetlist, planstate->ps_ExprContext,
+                                                                      planstate->ps_ResultTupleSlot, planstate, inputDesc);
+        } else {
+            planstate->ps_ProjInfo = ExecBuildProjectionInfoByRecursion(planstate->targetlist, planstate->ps_ExprContext,
+                                                                        planstate->ps_ResultTupleSlot, inputDesc);
+        }
     }
 }
 
@@ -1419,12 +1444,16 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
              */
             predicate = indexInfo->ii_PredicateState;
             if (predicate == NIL) {
-                predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+                if (estate->es_is_flt_frame) {
+                    predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+                } else {
+                    predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+                }
                 indexInfo->ii_PredicateState = predicate;
             }
 
             /* Skip this index-update if the predicate isn't satisfied */
-            if (!ExecQual(predicate, econtext, false)) {
+            if (!ExecQual(predicate, econtext)) {
                 continue;
             }
         }
@@ -1574,12 +1603,16 @@ static inline bool CheckForPartialIndex(IndexInfo* indexInfo, EState* estate, Ex
          * per-query context)
          */
         if (predicate == NIL) {
-            predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+            if (estate->es_is_flt_frame) {
+                predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+            } else {
+                predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+            }
             indexInfo->ii_PredicateState = predicate;
         }
 
         /* Skip this index-update if the predicate isn't satisfied */
-        if (!ExecQual(predicate, econtext, false)) {
+        if (!ExecQual(predicate, econtext)) {
             return false;
         }
     }
@@ -1934,12 +1967,16 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
              */
             predicate = indexInfo->ii_PredicateState;
             if (predicate == NIL) {
-                predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+                if (estate->es_is_flt_frame) {
+                    predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+                } else {
+                    predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+                }
                 indexInfo->ii_PredicateState = predicate;
             }
 
             /* Skip this index-update if the predicate isn't satisfied */
-            if (!ExecQual(predicate, econtext, false)) {
+            if (!ExecQual(predicate, econtext)) {
                 continue;
             }
         }
@@ -2429,6 +2466,10 @@ void ShutdownExprContext(ExprContext* econtext, bool isCommit)
     MemoryContextSwitchTo(oldcontext);
 }
 
+/* ----------------------------------------------------------------
+ *		ExecEvalOper / ExecEvalFunc support routines
+ * ----------------------------------------------------------------
+ */
 
 int PthreadMutexLock(ResourceOwner owner, pthread_mutex_t* mutex, bool trace)
 {
@@ -2760,7 +2801,7 @@ Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
     }
     Tuple oldTup = slot->tts_tuple;
     Tuple newTup = tableam_tops_modify_tuple(oldTup, tupleDesc, values, nulls, replaces);
-    
+
     /* revise members of slot */
     slot->tts_tuple = newTup;
     for (attrChk = 1; attrChk <= natts; attrChk++) {
@@ -2770,7 +2811,7 @@ Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
         slot->tts_isnull[attrChk - 1] = false;
         slot->tts_values[attrChk - 1] = values[attrChk - 1];
     }
-    
+
     tableam_tops_free_tuple(oldTup);
     return newTup;
 }
@@ -2857,4 +2898,113 @@ void SortTargetListAsArray(RightRefState* refState, List* targetList, GenericExp
             targetArr[index++] = (GenericExprState*)lfirst(lc);
         }
     }
+}
+
+/* this function is only used for getting table of index inout param */
+static bool get_tableofindex_param(Node* node, ExecTableOfIndexInfo* execTableOfIndexInfo)
+{
+    if (node == NULL)
+        return false;
+    if (IsA(node, Param)) {
+        execTableOfIndexInfo->paramid = ((Param*)node)->paramid;
+        execTableOfIndexInfo->paramtype = ((Param*)node)->paramtype;
+        return true;
+    }
+    return false;
+}
+
+bool expr_func_has_refcursor_args(Oid Funcid)
+{
+    HeapTuple proctup = NULL;
+    Form_pg_proc procStruct;
+    int allarg;
+    Oid* p_argtypes = NULL;
+    char** p_argnames = NULL;
+    char* p_argmodes = NULL;
+    bool use_cursor = false;
+
+    proctup = SearchSysCache(PROCOID, ObjectIdGetDatum(Funcid), 0, 0, 0);
+
+    /*
+     * function may be deleted after clist be searched.
+     */
+    if (!HeapTupleIsValid(proctup)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("function doesn't exist ")));
+    }
+
+    /* get the all args informations, only "in" parameters if p_argmodes is null */
+    allarg = get_func_arg_info(proctup, &p_argtypes, &p_argnames, &p_argmodes);
+    procStruct = (Form_pg_proc)GETSTRUCT(proctup);
+
+    if (procStruct->prorettype == REFCURSOROID) {
+        use_cursor = true;
+    }
+    else {
+        for (int i = 0; i < allarg; i++) {
+            if (!(p_argmodes != NULL && (p_argmodes[i] == 'o' || p_argmodes[i] == 'b'))) {
+                if (p_argtypes[i] == REFCURSOROID) {
+                    use_cursor = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    ReleaseSysCache(proctup);
+    return use_cursor;
+}
+
+void check_huge_clob_paramter(FunctionCallInfoData* fcinfo, bool is_have_huge_clob)
+{
+    if (!is_have_huge_clob || IsSystemObjOid(fcinfo->flinfo->fn_oid)) {
+        return;
+    }
+    Oid schema_oid = get_func_namespace(fcinfo->flinfo->fn_oid);
+    if (IsPackageSchemaOid(schema_oid)) {
+        return;
+    }
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("huge clob do not support as function in parameter")));
+}
+
+HeapTuple get_tuple(Relation relation, ItemPointer tid)
+{
+    Buffer user_buf = InvalidBuffer;
+    HeapTuple tuple = NULL;
+    HeapTuple new_tuple = NULL;
+
+    /* alloc mem for old tuple and set tuple id */
+    tuple = (HeapTupleData *)heaptup_alloc(BLCKSZ);
+    tuple->t_data = (HeapTupleHeader)((char *)tuple + HEAPTUPLESIZE);
+    Assert(tid != NULL);
+    tuple->t_self = *tid;
+
+    if (heap_fetch(relation, SnapshotAny, tuple, &user_buf, false, NULL)) {
+        new_tuple = heapCopyTuple((HeapTuple)tuple, relation->rd_att, NULL);
+        ReleaseBuffer(user_buf);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("The tuple is not found"),
+            errdetail("Another user is getting tuple or the datum is NULL")));
+    }
+
+    heap_freetuple(tuple);
+    return new_tuple;
+}
+
+
+void set_result_for_plpgsql_language_function_with_outparam_by_flatten(Datum *result, bool *isNull)
+{
+    HeapTupleHeader td = DatumGetHeapTupleHeader(*result);
+    TupleDesc tupdesc = lookup_rowtype_tupdesc_copy(HeapTupleHeaderGetTypeId(td), HeapTupleHeaderGetTypMod(td));
+    HeapTupleData tup;
+    tup.t_len = HeapTupleHeaderGetDatumLength(td);
+    tup.t_data = td;
+    Datum *values = (Datum *)palloc(sizeof(Datum) * tupdesc->natts);
+    bool *nulls = (bool *)palloc(sizeof(bool) * tupdesc->natts);
+    heap_deform_tuple(&tup, tupdesc, values, nulls);
+    *result = values[0];
+    *isNull = nulls[0];
+    pfree(values);
+    pfree(nulls);
 }

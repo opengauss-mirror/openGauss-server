@@ -8,7 +8,9 @@
 #include "utils/memutils.h"
 #include "nodes/execnodes.h"
 #include "nodes/plannodes.h"
+#include "nodes/nodeFuncs.h"
 #include "vecexecutor/vecnodes.h"
+#include "executor/executor.h"
 
 static TupleTableSlot *ExecProjectSet(PlanState *state);
 static TupleTableSlot *ExecProjectSRF(ProjectSetState *node);
@@ -17,6 +19,8 @@ ProjectSetState *
 ExecInitProjectSet(ProjectSet *node, EState *estate, int eflags)
 {
     ProjectSetState *state;
+    ListCell *lc;
+    int off;
 
     /* check for unsupported flags */
     Assert(!(eflags & (EXEC_FLAG_MARK | EXEC_FLAG_BACKWARD)));
@@ -46,7 +50,11 @@ ExecInitProjectSet(ProjectSet *node, EState *estate, int eflags)
     /*
      * initialize child expressions
      */
-    state->ps.targetlist = (List *)ExecInitExpr((Expr *)node->plan.targetlist, (PlanState *)state);
+    if (estate->es_is_flt_frame) {
+
+    } else {
+        state->ps.targetlist = (List *)ExecInitExpr((Expr *)node->plan.targetlist, (PlanState *)state);
+    }
     Assert(node->plan.qual == NIL);
 
     /*
@@ -64,9 +72,32 @@ ExecInitProjectSet(ProjectSet *node, EState *estate, int eflags)
      */
     ExecAssignResultTypeFromTL(&state->ps);
 
-    /* Create workspace for per-SRF is-done state */
+    /* Create workspace for per-tlist-entry expr state & SRF-is-done state */
     state->nelems = list_length(node->plan.targetlist);
+    state->elems = (Node **)palloc(sizeof(Node *) * state->nelems);
     state->elemdone = (ExprDoneCond *)palloc(sizeof(ExprDoneCond) * state->nelems);
+
+    /*
+     * Build expressions to evaluate targetlist.  We can't use
+     * ExecBuildProjectionInfo here, since that doesn't deal with SRFs.
+     * Instead compile each expression separately, using
+     * ExecInitFunctionResultSet where applicable.
+     */
+    off = 0;
+    foreach (lc, node->plan.targetlist) {
+        TargetEntry *te = (TargetEntry *)lfirst(lc);
+        Expr *expr = te->expr;
+
+        if ((IsA(expr, FuncExpr) && ((FuncExpr *)expr)->funcretset) ||
+            (IsA(expr, OpExpr) && ((OpExpr *)expr)->opretset)) {
+            state->elems[off] = (Node *)ExecInitFunctionResultSet(expr, state->ps.ps_ExprContext, &state->ps);
+        } else {
+            Assert(!expression_returns_set((Node *)expr));
+            state->elems[off] = (Node *)ExecInitExprByFlatten(expr, &state->ps);
+        }
+
+        off++;
+    }
 
     return state;
 }
@@ -135,20 +166,19 @@ static TupleTableSlot *ExecProjectSet(PlanState *state)
 }
 
 static inline Datum 
-execMakeExprResult(ExprState *arg, ExprContext *econtext, bool *isnull, 
+execMakeExprResult(Node *arg, ExprContext *econtext, bool *isnull,
                     ExprDoneCond *isdone, bool *hassrf)
 {
-
     Datum result;
-    if (IsA(arg, FuncExprState) && ((FuncExprState *)arg)->funcReturnsSet) {
+    if (IsA(arg, FuncExprState)) {
         /*
          * Evaluate SRF - possibly continuing previously started output.
          */
-        result = ExecMakeFunctionResultSet((FuncExprState *)arg, econtext, isnull, isdone);
+        result = ExecMakeFunctionResultSet((FuncExprState*)arg, econtext, isnull, isdone);
         *hassrf = true;
     } else {
         /* Non-SRF tlist expression, just evaluate normally. */
-        result = ExecEvalExpr(arg, econtext, isnull, NULL);
+        result = ExecEvalExpr((ExprState *)arg, econtext, isnull);
         *isdone = ExprSingleResult;
     }    
     return result;
@@ -167,14 +197,19 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
 {
     TupleTableSlot *resultSlot = node->ps.ps_ResultTupleSlot;
     ExprContext *econtext = node->ps.ps_ExprContext;
+    MemoryContext oldcontext;
     bool hassrf = false;
     bool hasresult = false;
     bool haveDoneSets = false; /* any exhausted set exprs in tlist? */
     ExprDoneCond isDone = ExprSingleResult;
     int argno;
-    ListCell *lc;
+    ListCell *lc = NULL;
+    char* resname = NULL;
 
     ExecClearTuple(resultSlot);
+
+    /* Call SRFs, as well as plain expressions, in per-tuple context */
+    oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_tuple_memory);
 
     /*
      * Assume no further tuples are produced unless an ExprMultipleResult is
@@ -182,17 +217,24 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
      */
     node->pending_srf_tuples = false;
 
-    argno = 0;
-    foreach (lc, node->ps.targetlist) {
-        GenericExprState *gstate = (GenericExprState *)lfirst(lc);
-        TargetEntry *tle = (TargetEntry *)gstate->xprstate.expr;
+    if (node->ps.plan->targetlist)
+        lc = list_head(node->ps.plan->targetlist);
 
+    for (argno = 0; argno < node->nelems; argno++) {
+        Node *elem = node->elems[argno];
         ExprDoneCond *itemIsDone = &node->elemdone[argno];
         Datum *result = &resultSlot->tts_values[argno];
         bool *isnull = &resultSlot->tts_isnull[argno];
 
-        ELOG_FIELD_NAME_START(tle->resname);
-        *result = execMakeExprResult(gstate->arg, econtext, isnull, itemIsDone, &hassrf);
+        if (lc) {
+            TargetEntry *te = (TargetEntry *)lfirst(lc);
+            resname = te->resname;
+        }
+
+        ELOG_FIELD_NAME_START(resname);
+
+        *result = execMakeExprResult(elem, econtext, isnull, itemIsDone, &hassrf);
+
         ELOG_FIELD_NAME_END;
 
         switch (*itemIsDone) {
@@ -213,7 +255,9 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
                 Assert(false);
                 break;
         }
-        argno++;
+
+        lc = lnext(lc);
+        resname = NULL;
     }
 
     /* ProjectSet should not be used if there's no SRFs */
@@ -224,29 +268,39 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
             /*
              * all sets are done, so report that tlist expansion is complete.
              */
+            MemoryContextSwitchTo(oldcontext);
             return NULL;
         }
+
+        if (node->ps.plan->targetlist)
+            lc = list_head(node->ps.plan->targetlist);
 
         /*
          * We have some done and some undone sets.	Restart the done ones
          * so that we can deliver a tuple (if possible).
          */
-        argno = 0;
-        foreach (lc, node->ps.targetlist) {
-            GenericExprState *gstate = (GenericExprState *)lfirst(lc);
-            TargetEntry *tle = (TargetEntry *)gstate->xprstate.expr;
-
+        for (argno = 0; argno < node->nelems; argno++) {
+            Node *elem = node->elems[argno];
             ExprDoneCond *itemIsDone = &node->elemdone[argno];
             Datum *result = &resultSlot->tts_values[argno];
             bool *isnull = &resultSlot->tts_isnull[argno];
+
             if (*itemIsDone != ExprEndResult) {
-                argno++;
+                lc = lnext(lc);
+                resname = NULL;
                 continue;
             }
 
+            if (lc) {
+                TargetEntry *te = (TargetEntry *)lfirst(lc);
+                resname = te->resname;
+            }
+
+            ELOG_FIELD_NAME_START(resname);
+
             /*restart the done ones*/
-            ELOG_FIELD_NAME_START(tle->resname);
-            *result = execMakeExprResult(gstate->arg, econtext, isnull, itemIsDone, &hassrf);
+            *result = ExecMakeFunctionResultSet((FuncExprState*)elem, econtext, isnull, itemIsDone);
+
             ELOG_FIELD_NAME_END;
 
             Assert(hassrf);
@@ -259,6 +313,7 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
                 isDone = ExprMultipleResult;
                 node->pending_srf_tuples = true;
             }
+
             if (*itemIsDone == ExprEndResult) {
                 /*
                  * Oh dear, this item is returning an empty set. Guess
@@ -267,7 +322,9 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
                 isDone = ExprEndResult;
                 break;
             }
-            argno++;
+
+            lc = lnext(lc);
+            resname = NULL;
         }
 
         /*
@@ -279,26 +336,37 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
          */
         if (isDone == ExprEndResult) {
             hasresult = false;
-            argno = 0;
-            foreach (lc, node->ps.targetlist) {
-                GenericExprState *gstate = (GenericExprState *)lfirst(lc);
-                TargetEntry *tle = (TargetEntry *)gstate->xprstate.expr;
 
+            if (node->ps.plan->targetlist)
+                lc = list_head(node->ps.plan->targetlist);
+
+            for (argno = 0; argno < node->nelems; argno++) {
+                Node *elem = node->elems[argno];
                 ExprDoneCond *itemIsDone = &node->elemdone[argno];
                 Datum *result = &resultSlot->tts_values[argno];
                 bool *isnull = &resultSlot->tts_isnull[argno];
 
+                if (lc) {
+                    TargetEntry *te = (TargetEntry *)lfirst(lc);
+                    resname = te->resname;
+                }
+
+                ELOG_FIELD_NAME_START(resname);
+
                 while (*itemIsDone == ExprMultipleResult) {
-                    ELOG_FIELD_NAME_START(tle->resname);
-                    *result = execMakeExprResult(gstate->arg, econtext, isnull, itemIsDone, &hassrf);
-                    ELOG_FIELD_NAME_END;
+                    *result = ExecMakeFunctionResultSet((FuncExprState*)elem, econtext, isnull, itemIsDone);
                     /* no need for MakeExpandedObjectReadOnly */
                 }
                 
-                argno++;
+                ELOG_FIELD_NAME_END;
+
+                lc = lnext(lc);
+                resname = NULL;
             }
         }
     }
+
+    MemoryContextSwitchTo(oldcontext);
 
     if (hasresult) {
         ExecStoreVirtualTuple(resultSlot);

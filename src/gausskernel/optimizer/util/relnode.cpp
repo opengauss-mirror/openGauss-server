@@ -34,6 +34,7 @@
 #include "access/transam.h"
 #include "utils/selfuncs.h"
 #include "utils/lsyscache.h"
+#include "optimizer/tlist.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"

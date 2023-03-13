@@ -924,7 +924,7 @@ static void finalize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate, A
      */
     foreach (lc, peraggstate->aggrefstate->aggdirectargs) {
         fcinfo.arg[args_pos] =
-            ExecEvalExpr((ExprState*)lfirst(lc), aggstate->ss.ps.ps_ExprContext, &fcinfo.argnull[args_pos], NULL);
+            ExecEvalExpr((ExprState*)lfirst(lc), aggstate->ss.ps.ps_ExprContext, &fcinfo.argnull[args_pos]);
         fcinfo.argTypes[args_pos] = ((ExprState*)lfirst(lc))->resultType;
         if (anynull == true || fcinfo.argnull[args_pos] == true)
             anynull = true;
@@ -1100,7 +1100,7 @@ static TupleTableSlot* project_aggregates(AggState* aggstate)
     /*
      * Check the qual (HAVING clause); if the group does not match, ignore it.
      */
-    if (ExecQual(aggstate->ss.ps.qual, econtext, false)) {
+    if (ExecQual(aggstate->ss.ps.qual, econtext)) {
         /*
          * Form and return or store a projection tuple using the aggregate
          * results and the representative input tuple.
@@ -1111,9 +1111,10 @@ static TupleTableSlot* project_aggregates(AggState* aggstate)
         result = ExecProject(aggstate->ss.ps.ps_ProjInfo, &isDone);
 
         if (isDone != ExprEndResult) {
-            aggstate->ss.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+            aggstate->ss.ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
             return result;
         }
+
     } else
         InstrCountFiltered1(aggstate, 1);
 
@@ -1494,7 +1495,7 @@ static TupleTableSlot* ExecAgg(PlanState* state)
      * tuple (because there is a function-returning-set in the projection
      * expressions).  If so, try to project another one.
      */
-    if (node->ss.ps.ps_TupFromTlist) {
+    if (node->ss.ps.ps_vec_TupFromTlist) {
         TupleTableSlot* result = NULL;
         ExprDoneCond isDone;
 
@@ -1502,13 +1503,11 @@ static TupleTableSlot* ExecAgg(PlanState* state)
         if (isDone == ExprMultipleResult)
             return result;
         /* Done with that source tuple... */
-        node->ss.ps.ps_TupFromTlist = false;
+        node->ss.ps.ps_vec_TupFromTlist = false;
     }
 
     /*
-     * Exit if nothing left to do.	(We must do the ps_TupFromTlist check
-     * first, because in some cases agg_done gets set before we emit the final
-     * aggregate tuple, and we have to finish running SRFs for it.)
+     * Exit if nothing left to do.
      */
     if (node->agg_done)
         return NULL;
@@ -2081,8 +2080,12 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
      * that is true, we don't need to worry about evaluating the aggs in any
      * particular order.
      */
-    aggstate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->plan.targetlist, (PlanState*)aggstate);
-    aggstate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->plan.qual, (PlanState*)aggstate);
+    if (estate->es_is_flt_frame) {
+        aggstate->ss.ps.qual = (List*)ExecInitQualByFlatten(node->plan.qual, (PlanState*)aggstate);
+    } else {
+        aggstate->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->plan.targetlist, (PlanState*)aggstate);
+        aggstate->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->plan.qual, (PlanState*)aggstate);
+    }
 
     /*
      * initialize child nodes
@@ -2112,8 +2115,7 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
     ExecAssignResultTypeFromTL(&aggstate->ss.ps);
     ExecAssignProjectionInfo(&aggstate->ss.ps, NULL);
 
-    aggstate->ss.ps.ps_TupFromTlist = false;
-
+    aggstate->ss.ps.ps_vec_TupFromTlist = false;
     /*
      * get the count of aggregates in targetlist and quals
      */
@@ -2470,7 +2472,7 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
                                  &peraggstate->transfn,
                                  peraggstate->numTransInputs + 1,
                                  peraggstate->aggCollation,
-                                 (Node*)aggstate, 
+                                 (Node*)aggstate,
                                  NULL);
         /* get info zbout relevant datatypes */
         get_typlenbyval(aggref->aggtype, &peraggstate->resulttypeLen, &peraggstate->resulttypeByVal);
@@ -2634,8 +2636,12 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
 
     aggstate->evaldesc = ExecTypeFromTL(combined_inputeval, false);
     aggstate->evalslot = ExecInitExtraTupleSlot(estate);
-    combined_inputeval = (List *)ExecInitExpr((Expr *)combined_inputeval, (PlanState *)aggstate);
-    aggstate->evalproj = ExecBuildProjectionInfo(combined_inputeval, aggstate->tmpcontext, aggstate->evalslot, NULL);
+    if (estate->es_is_flt_frame) {
+        aggstate->evalproj = ExecBuildProjectionInfoByFlatten(combined_inputeval, aggstate->tmpcontext, aggstate->evalslot, &aggstate->ss.ps, NULL);
+    } else {combined_inputeval = (List *)ExecInitExprByRecursion((Expr *)combined_inputeval, (PlanState *)aggstate);
+        aggstate->evalproj = ExecBuildProjectionInfoByRecursion(combined_inputeval, aggstate->tmpcontext, aggstate->evalslot, NULL);
+    }
+
     ExecSetSlotDescriptor(aggstate->evalslot, aggstate->evaldesc);
 
     AggWriteFileControl* TempFilePara = (AggWriteFileControl*)palloc(sizeof(AggWriteFileControl));
@@ -2758,8 +2764,7 @@ void ExecReScanAgg(AggState* node)
     }
 
     node->agg_done = false;
-    node->ss.ps.ps_TupFromTlist = false;
-
+    node->ss.ps.ps_vec_TupFromTlist = false;
     if (aggnode->aggstrategy == AGG_HASHED) {
         /*
          * In the hashed case, if we haven't yet built the hash table then we
@@ -3143,8 +3148,7 @@ void ExecReSetAgg(AggState* node)
     errno_t rc;
 
     node->agg_done = false;
-    node->ss.ps.ps_TupFromTlist = false;
-
+    node->ss.ps.ps_vec_TupFromTlist = false;
     /* Make sure we have closed any open tuplesorts */
     for (aggno = 0; aggno < node->numaggs; aggno++) {
         for (setno = 0; setno < numGroupingSets; setno++) {

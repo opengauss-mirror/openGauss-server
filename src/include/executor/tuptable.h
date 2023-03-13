@@ -163,6 +163,7 @@ typedef struct TupleTableSlot {
     Oid tts_xcnodeoid;                   /* Oid of node from where the datarow is fetched */
     MemoryContext tts_per_tuple_mcxt;
 #endif
+    TableAmType tts_tupslotTableAm;      /* slots's tuple table type */
 } TupleTableSlot;
 
 #define TTS_HAS_PHYSICAL_TUPLE(slot) ((slot)->tts_tuple != NULL && (slot)->tts_tuple != &((slot)->tts_minhdr))

@@ -1488,7 +1488,7 @@ bool SkewInfo::ExecSkewvalExpr(Expr* expr, TupleTableSlot* slot)
     econtext->ecxt_per_tuple_memory = m_context;
     econtext->ecxt_scantuple = slot;
 
-    canpass = ExecEvalExpr(exprstate, econtext, &isNull, NULL);
+    canpass = ExecEvalExpr(exprstate, econtext, &isNull);
 
     return canpass;
 }

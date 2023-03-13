@@ -62,7 +62,7 @@ extern void add_new_column_to_pathtarget(PathTarget *target, Expr *expr);
 extern void add_new_columns_to_pathtarget(PathTarget *target, List *exprs);
 extern bool split_pathtarget_at_srfs(PlannerInfo *root, PathTarget *target, PathTarget *input_target,
                                     List **targets, List **targets_contain_srfs);
-
+                                    
 /* Convenience macro to get a PathTarget with valid cost/width fields */
 #define create_pathtarget(root, tlist) \
     set_pathtarget_cost_width(root, make_pathtarget_from_tlist(tlist))

@@ -49,7 +49,7 @@ static TupleTableSlot* ExecScanFetch(ScanState* node, ExecScanAccessMtd access_m
              * join to the remote side.  The recheck method is responsible not
              * only for rechecking the scan/join quals but also for storing
              * the correct tuple in the slot.
-             * 
+             *
              * currently not support.
              */
             Assert(false);
@@ -138,13 +138,13 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
      * tuple (because there is a function-returning-set in the projection
      * expressions).  If so, try to project another one.
      */
-    if (node->ps.ps_TupFromTlist) {
+    if (node->ps.ps_vec_TupFromTlist) {
         Assert(proj_info); /* can't get here if not projecting */
         result_slot = ExecProject(proj_info, &is_done);
         if (is_done == ExprMultipleResult)
             return result_slot;
         /* Done with that source tuple... */
-        node->ps.ps_TupFromTlist = false;
+        node->ps.ps_vec_TupFromTlist = false;
     }
 
     /*
@@ -158,8 +158,7 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
 
     /*
      * Reset per-tuple memory context to free any expression evaluation
-     * storage allocated in the previous tuple cycle.  Note this can't happen
-     * until we're done projecting out tuples from a scan tuple.
+     * storage allocated in the previous tuple cycle.
      */
     ResetExprContext(econtext);
 
@@ -181,9 +180,12 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
          */
         if (TupIsNull(slot) || unlikely(executorEarlyStop())) {
             if (proj_info != NULL) {
-                return ExecClearTuple(proj_info->pi_slot);
+                if (proj_info->pi_state.is_flt_frame) {
+                    return ExecClearTuple(proj_info->pi_state.resultslot);
+                } else {
+                    return ExecClearTuple(proj_info->pi_slot);
+                }
             } else {
-                /* slot is not used whild early free happen */
                 return NULL;
             }
         }
@@ -200,7 +202,7 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
          * when the qual is nil ... saves only a few cycles, but they add up
          * ...
          */
-        if (qual == NULL || ExecQual(qual, econtext, false)) {
+        if (qual == NULL || ExecQual(qual, econtext)) {
             /*
              * Found a satisfactory scan tuple.
              */
@@ -218,8 +220,9 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
                 /* Copy the xcnodeoid if underlying scanned slot has one */
                 result_slot->tts_xcnodeoid = slot->tts_xcnodeoid;
 #endif /* PGXC */
+
                 if (is_done != ExprEndResult) {
-                    node->ps.ps_TupFromTlist = (is_done == ExprMultipleResult);
+                    node->ps.ps_vec_TupFromTlist = (is_done == ExprMultipleResult);
 
                     /*
                      * @hdfs
@@ -380,7 +383,7 @@ void ExecScanReScan(ScanState* node)
     EState* estate = node->ps.state;
 
     /* Stop projecting any tuples from SRFs in the targetlist */
-    node->ps.ps_TupFromTlist = false;
+    node->ps.ps_vec_TupFromTlist = false;
 
     /* Rescan EvalPlanQual tuple if we're inside an EvalPlanQual recheck */
     if (estate->es_epqScanDone != NULL) {

@@ -493,7 +493,7 @@ static int interactive_getc(void)
         return c;
     } else {
         /*
-         * With light_comm, do not process catchup interrupts or notifications 
+         * With light_comm, do not process catchup interrupts or notifications
          * while reading.
          */
         CHECK_FOR_INTERRUPTS();
@@ -868,7 +868,7 @@ void process_client_write_interrupt (bool blocked)
          }
          CHECK_FOR_INTERRUPTS();
     }
-    
+
     errno = save_errno;
 }
 
@@ -1435,7 +1435,7 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
             plan->planTree->rightRefState = nullptr;
         }
     }
-    
+
     return plan;
 }
 
@@ -8182,7 +8182,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         if (MyProcPort && MyProcPort->protocol_config->fn_comm_reset) {
             MyProcPort->protocol_config->fn_comm_reset();
         }
-            
+
         /* statement retry phase : long jump */
         if (IsStmtRetryEnabled()) {
             bool is_extended_query = u_sess->postgres_cxt.doing_extended_query_message;
@@ -8283,7 +8283,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         }
 
         ReleaseResownerOutOfTransaction();
-        
+
         /* release resource held by lsc */
         AtEOXact_SysDBCache(false);
         /* Notice: at the most time it isn't necessary to call because
@@ -8629,7 +8629,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             }
             template0_locked = true;
         }
-        
+
         if (isRestoreMode && !IsAbortedTransactionBlockState()) {
             ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
 
@@ -9076,7 +9076,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 u_sess->debug_query_id = 0;
                 send_ready_for_query = true;
             } break;
-            
+
             case 'o': {
                 // switch role
                 if (unlikely(!IsConnFromCoord())) {
@@ -9098,7 +9098,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 int save_sec_context = 0;
                 int sec_context = 0;
                 GetUserIdAndSecContext(&save_userid, &save_sec_context);
-                
+
                 if (is_reset) {
                     /* reset to origin role */
                     sec_context = save_sec_context & (~RECEIVER_LOCAL_USERID_CHANGE);

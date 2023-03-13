@@ -60,7 +60,7 @@ static TupleTableSlot* ExecGroup(PlanState* state)
      * tuple (because there is a function-returning-set in the projection
      * expressions).  If so, try to project another one.
      */
-    if (node->ss.ps.ps_TupFromTlist) {
+    if (node->ss.ps.ps_vec_TupFromTlist) {
         TupleTableSlot* result = NULL;
         ExprDoneCond isDone;
 
@@ -68,7 +68,7 @@ static TupleTableSlot* ExecGroup(PlanState* state)
         if (isDone == ExprMultipleResult)
             return result;
         /* Done with that source tuple... */
-        node->ss.ps.ps_TupFromTlist = false;
+        node->ss.ps.ps_vec_TupFromTlist = false;
     }
 
     /*
@@ -114,7 +114,7 @@ static TupleTableSlot* ExecGroup(PlanState* state)
             result = ExecProject(node->ss.ps.ps_ProjInfo, &isDone);
 
             if (isDone != ExprEndResult) {
-                node->ss.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+                node->ss.ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
                 return result;
             }
         } else
@@ -170,7 +170,7 @@ static TupleTableSlot* ExecGroup(PlanState* state)
             result = ExecProject(node->ss.ps.ps_ProjInfo, &isDone);
 
             if (isDone != ExprEndResult) {
-                node->ss.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+                node->ss.ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
                 return result;
             }
         } else
@@ -218,8 +218,12 @@ GroupState* ExecInitGroup(Group* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    grpstate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->plan.targetlist, (PlanState*)grpstate);
-    grpstate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->plan.qual, (PlanState*)grpstate);
+    if (estate->es_is_flt_frame) {
+        grpstate->ss.ps.qual = (List*)ExecInitQualByFlatten(node->plan.qual, (PlanState*)grpstate);
+    } else {
+        grpstate->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->plan.targetlist, (PlanState*)grpstate);
+        grpstate->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->plan.qual, (PlanState*)grpstate);
+    }
 
     /*
      * initialize child nodes
@@ -240,7 +244,7 @@ GroupState* ExecInitGroup(Group* node, EState* estate, int eflags)
 
     ExecAssignProjectionInfo(&grpstate->ss.ps, NULL);
 
-    grpstate->ss.ps.ps_TupFromTlist = false;
+    grpstate->ss.ps.ps_vec_TupFromTlist = false;
 
     /*
      * Precompute fmgr lookup data for inner loop
@@ -271,7 +275,7 @@ void ExecEndGroup(GroupState* node)
 void ExecReScanGroup(GroupState* node)
 {
     node->grp_done = FALSE;
-    node->ss.ps.ps_TupFromTlist = false;
+    node->ss.ps.ps_vec_TupFromTlist = false;
     /* must clear first tuple */
     (void)ExecClearTuple(node->ss.ss_ScanTupleSlot);
 

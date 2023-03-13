@@ -157,7 +157,6 @@ typedef struct OpMemInfo {
 
 /* PSORT_SPREAD_MAXMEM_RATIO can increase 20% for partition table's one part on extended limit. */
 #define PSORT_SPREAD_MAXMEM_RATIO 1.2
-
 /* ----------
  * PlannerGlobal
  *		Global information for planning/optimization
@@ -361,6 +360,12 @@ typedef struct PlannerInfo {
     List* distinct_pathkeys; /* distinctClause pathkeys, if any */
     List* sort_pathkeys;     /* sortClause pathkeys, if any */
 
+    /* Use fetch_upper_rel() to get any particular upper rel */
+    List *upper_rels[UPPERREL_FINAL + 1]; /* upper-rel RelOptInfos */
+
+    /* Result tlists chosen by grouping_planner for upper-stage processing */
+    struct PathTarget *upper_targets[UPPERREL_FINAL + 1];
+    
     List* minmax_aggs; /* List of MinMaxAggInfos */
 
     List* initial_rels; /* RelOptInfos we are now trying to join */

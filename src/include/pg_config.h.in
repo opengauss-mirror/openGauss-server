@@ -119,6 +119,9 @@
 /* Define to 1 if you have the `class' function. */
 #undef HAVE_CLASS
 
+/* Define to 1 if your compiler handles computed gotos. */
+#undef HAVE_COMPUTED_GOTO
+
 /* Define to 1 if you have the <crtdefs.h> header file. */
 #undef HAVE_CRTDEFS_H
 

@@ -450,7 +450,7 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
             econtext->ecxt_scantuple = slot;
             ResetExprContext(econtext);
 
-            if (!ExecQual(node->bitmapqualorig, econtext, false)) {
+            if (!ExecQual(node->bitmapqualorig, econtext)) {
                 /* Fails recheck, so drop it and loop back for another */
                 InstrCountFiltered2(node, 1);
                 (void)ExecClearTuple(slot);
@@ -606,7 +606,7 @@ static bool BitmapHeapRecheck(BitmapHeapScanState* node, TupleTableSlot* slot)
 
     ResetExprContext(econtext);
 
-    return ExecQual(node->bitmapqualorig, econtext, false);
+    return ExecQual(node->bitmapqualorig, econtext);
 }
 
 /* ----------------------------------------------------------------
@@ -787,14 +787,17 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
      */
     ExecAssignExprContext(estate, &scanstate->ss.ps);
 
-    scanstate->ss.ps.ps_TupFromTlist = false;
-
     /*
      * initialize child expressions
      */
-    scanstate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)scanstate);
-    scanstate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)scanstate);
-    scanstate->bitmapqualorig = (List*)ExecInitExpr((Expr*)node->bitmapqualorig, (PlanState*)scanstate);
+    if (estate->es_is_flt_frame) {
+        scanstate->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)scanstate);
+        scanstate->bitmapqualorig = (List*)ExecInitQualByFlatten(node->bitmapqualorig, (PlanState*)scanstate);
+    } else {
+        scanstate->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)scanstate);
+        scanstate->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)scanstate);
+        scanstate->bitmapqualorig = (List*)ExecInitExprByRecursion((Expr*)node->bitmapqualorig, (PlanState*)scanstate);
+    }
 
     /*
      * open the base relation and acquire appropriate lock on it.

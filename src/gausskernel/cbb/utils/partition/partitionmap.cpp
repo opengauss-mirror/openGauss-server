@@ -2804,7 +2804,7 @@ int constCompare_constType(Const* value1, Const* value2)
                 errmsg("failed when making EQUAL expression state for constCompare")));
     }
 
-    result = DatumGetBool(ExecEvalExpr(exprstate, econtext, &isNull, NULL));
+    result = DatumGetBool(ExecEvalExpr(exprstate, econtext, &isNull));
 
     FreeExecutorState(estate);
 
@@ -2821,7 +2821,7 @@ int constCompare_constType(Const* value1, Const* value2)
                     errmsg("failed when making GREATE-THAN expression state for constCompare")));
         }
 
-        result = DatumGetBool(ExecEvalExpr(exprstate, econtext, &isNull, NULL));
+        result = DatumGetBool(ExecEvalExpr(exprstate, econtext, &isNull));
 
         if (result) {
             ret = 1;

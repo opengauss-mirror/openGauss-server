@@ -257,7 +257,7 @@ static void slot_fill_defaults(LogicalRepRelMapEntry *rel, EState *estate, Tuple
     }
 
     for (i = 0; i < num_defaults; i++)
-        slot->tts_values[defmap[i]] = ExecEvalExpr(defexprs[i], econtext, &slot->tts_isnull[defmap[i]], NULL);
+        slot->tts_values[defmap[i]] = ExecEvalExpr(defexprs[i], econtext, &slot->tts_isnull[defmap[i]]);
 }
 
 /*

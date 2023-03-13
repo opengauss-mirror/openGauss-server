@@ -555,7 +555,7 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
     }
 
     /* Prepare the expressions for execution */
-    exprstates = (List*)ExecPrepareExpr((Expr*)params, estate);
+    exprstates = ExecPrepareExprList(params, estate);
 
     paramLI = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + num_params * sizeof(ParamExternData));
     /* we have static list of params, so no hooks needed */
@@ -575,7 +575,7 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
 
         prm->ptype = param_types[i];
         prm->pflags = PARAM_FLAG_CONST;
-        prm->value = ExecEvalExprSwitchContext(n, GetPerTupleExprContext(estate), &prm->isnull, NULL);
+        prm->value = ExecEvalExprSwitchContext(n, GetPerTupleExprContext(estate), &prm->isnull);
         prm->tabInfo = NULL;
 
         i++;

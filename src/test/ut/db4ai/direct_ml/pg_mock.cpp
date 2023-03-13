@@ -161,20 +161,6 @@ static PGFunction mock_get_output_func(Oid functionId)
 }
 
 // overwrite
-void fmgr_info_cxt(Oid functionId, FmgrInfo *finfo, MemoryContext mcxt)
-{
-    // fmgr_info_cxt_security(functionId, finfo, mcxt, false)
-    finfo->fn_oid = functionId;
-    finfo->fn_extra = NULL;
-    finfo->fn_mcxt = mcxt;
-    finfo->fn_expr = NULL; /* caller may set this later */
-    finfo->fn_fenced = false;
-    finfo->fnLibPath = NULL;
-
-    finfo->fn_addr = mock_get_output_func(functionId);
-}
-
-// overwrite
 void get_type_io_data(Oid typid, IOFuncSelector which_func, int16 *typlen, bool *typbyval, char *typalign,
                       char *typdelim, Oid *typioparam, Oid *func)
 {

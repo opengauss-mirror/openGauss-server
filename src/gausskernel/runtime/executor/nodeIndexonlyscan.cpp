@@ -570,7 +570,7 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
      */
     ExecAssignExprContext(estate, &indexstate->ss.ps);
 
-    indexstate->ss.ps.ps_TupFromTlist = false;
+    indexstate->ss.ps.ps_vec_TupFromTlist = false;
 
     /*
      * initialize child expressions
@@ -578,9 +578,14 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
      * Note: we don't initialize all of the indexorderby expression, only the
      * sub-parts corresponding to runtime keys (see below).
      */
-    indexstate->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)indexstate);
-    indexstate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)indexstate);
-    indexstate->indexqual = (List*)ExecInitExpr((Expr*)node->indexqual, (PlanState*)indexstate);
+    if (estate->es_is_flt_frame) {
+        indexstate->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)indexstate);
+        indexstate->indexqual = (List*)ExecInitQualByFlatten(node->indexqual, (PlanState*)indexstate);
+    } else {
+        indexstate->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)indexstate);
+        indexstate->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)indexstate);
+        indexstate->indexqual = (List*)ExecInitExprByRecursion((Expr*)node->indexqual, (PlanState*)indexstate);
+    }
 
 
     /*

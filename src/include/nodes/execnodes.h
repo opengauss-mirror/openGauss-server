@@ -224,7 +224,8 @@ typedef struct ExprContext {
 } ExprContext;
 
 /*
- * Set-result status returned by ExecEvalExpr()
+ * Set-result status used when evaluating functions potentially returning a
+ * set.
  */
 typedef enum {
     ExprSingleResult,   /* expression does not return a set */
@@ -264,76 +265,6 @@ typedef struct ReturnSetInfo {
     Tuplestorestate* setResult; /* holds the complete returned tuple set */
     TupleDesc setDesc;          /* actual descriptor for returned tuples */
 } ReturnSetInfo;
-
-/* ----------------
- *		ProjectionInfo node information
- *
- *		This is all the information needed to perform projections ---
- *		that is, form new tuples by evaluation of targetlist expressions.
- *		Nodes which need to do projections create one of these.
- *
- *		ExecProject() evaluates the tlist, forms a tuple, and stores it
- *		in the given slot.	Note that the result will be a "virtual" tuple
- *		unless ExecMaterializeSlot() is then called to force it to be
- *		converted to a physical tuple.	The slot must have a tupledesc
- *		that matches the output of the tlist!
- *
- *		The planner very often produces tlists that consist entirely of
- *		simple Var references (lower levels of a plan tree almost always
- *		look like that).  And top-level tlists are often mostly Vars too.
- *		We therefore optimize execution of simple-Var tlist entries.
- *		The pi_targetlist list actually contains only the tlist entries that
- *		aren't simple Vars, while those that are Vars are processed using the
- *		varSlotOffsets/varNumbers/varOutputCols arrays.
- *
- *		The lastXXXVar fields are used to optimize fetching of fields from
- *		input tuples: they let us do a slot_getsomeattrs() call to ensure
- *		that all needed attributes are extracted in one pass.
- *
- *		targetlist		target list for projection (non-Var expressions only)
- *		exprContext		expression context in which to evaluate targetlist
- *		slot			slot to place projection result in
- *		itemIsDone		workspace array for ExecProject
- *		directMap		true if varOutputCols[] is an identity map
- *		numSimpleVars	number of simple Vars found in original tlist
- *		varSlotOffsets	array indicating which slot each simple Var is from
- *		varNumbers		array containing input attr numbers of simple Vars
- *		varOutputCols	array containing output attr numbers of simple Vars
- *		lastInnerVar	highest attnum from inner tuple slot (0 if none)
- *		lastOuterVar	highest attnum from outer tuple slot (0 if none)
- *		lastScanVar		highest attnum from scan tuple slot (0 if none)
- *		pi_maxOrmin	column table optimize, indicate if get this column's max or min.
- * ----------------
- */
-typedef bool (*vectarget_func)(ExprContext* econtext, VectorBatch* pBatch);
-typedef struct ProjectionInfo {
-    NodeTag type;
-    List* pi_targetlist;
-    ExprContext* pi_exprContext;
-    TupleTableSlot* pi_slot;
-    ExprDoneCond* pi_itemIsDone;
-    bool pi_directMap;
-    bool pi_topPlan;             /* Whether the outermost layer query */
-    int pi_numSimpleVars;
-    int* pi_varSlotOffsets;
-    int* pi_varNumbers;
-    int* pi_varOutputCols;
-    int pi_lastInnerVar;
-    int pi_lastOuterVar;
-    int pi_lastScanVar;
-    List* pi_acessedVarNumbers;
-    List* pi_sysAttrList;
-    List* pi_lateAceessVarNumbers;
-    List* pi_maxOrmin;
-    List* pi_PackTCopyVars;            /* VarList to record those columns what we need to move */
-    List* pi_PackLateAccessVarNumbers; /*VarList to record those columns what we need to move in late read cstore
-                                          scan.*/
-    bool pi_const;
-    VectorBatch* pi_batch;
-    vectarget_func jitted_vectarget; /* LLVM function pointer to point to the codegened targetlist expr function */
-    VectorBatch* pi_setFuncBatch;
-    bool isUpsertHasRightRef;
-} ProjectionInfo;
 
 /*
  * Function pointer which will be used by LLVM assemble. The created IR functions
@@ -424,17 +355,66 @@ typedef struct MergeState {
  * pointer to the routine to execute to evaluate the node.
  * ----------------
  */
-typedef struct ExprState ExprState;
+struct ExprState;
 
 typedef Datum (*ExprStateEvalFunc)(ExprState* expression, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 typedef ScalarVector* (*VectorExprFun)(
     ExprState* expression, ExprContext* econtext, bool* selVector, ScalarVector* inputVector, ExprDoneCond* isDone);
 
 typedef void* (*exprFakeCodeGenSig)(void*);
+
+/* Bits in ExprState->flags (see also execExpr.h for private flag bits): */
+/* expression is for use with ExecQual() */
+#define EEO_FLAG_IS_QUAL					(1 << 0)
+
 struct ExprState {
-    NodeTag type;
-    Expr* expr;                 /* associated Expr node */
-    ExprStateEvalFunc evalfunc; /* routine to run to execute node */
+    NodeTag     type;
+
+    uint8		flags;			/* bitmask of EEO_FLAG_* bits, see above */
+
+	/*
+	 * Storage for result value of a scalar expression, or for individual
+	 * column results within expressions built by ExecBuildProjectionInfo().
+	 */
+	bool		resnull;
+	Datum		resvalue;
+
+	/*
+	 * If projecting a tuple result, this slot holds the result; else NULL.
+	 */
+	TupleTableSlot *resultslot;
+
+	/*
+	 * Instructions to compute expression's return value.
+	 */
+	struct ExprEvalStep *steps;
+
+	/*
+	 * Function that actually evaluates the expression.  This can be set to
+	 * different values depending on the complexity of the expression.
+	 */
+	ExprStateEvalFunc evalfunc;
+
+	/* original expression tree, for debugging only */
+	Expr	   *expr;
+
+	/*
+	 * XXX: following fields only needed during "compilation" (ExecInitExpr);
+	 * could be thrown away afterwards.
+	 */
+
+	int			steps_len;		/* number of steps currently */
+	int			steps_alloc;	/* allocated length of steps array */
+
+	struct PlanState *parent;	/* parent PlanState node, if any */
+
+	Datum	   *innermost_caseval;
+	bool	   *innermost_casenull;
+
+	Datum	   *innermost_domainval;
+	bool	   *innermost_domainnull;
+
+    ListCell   *current_targetentry;
 
     // vectorized evaluator
     //
@@ -442,10 +422,85 @@ struct ExprState {
 
     exprFakeCodeGenSig exprCodeGen; /* routine to run llvm assembler function */
 
+    bool is_flt_frame;  /*Indicates whether it is a flattened expr frame */
     ScalarVector tmpVector;
 
     Oid resultType;
 };
+
+/* ----------------
+ *		ProjectionInfo node information
+ *
+ *		This is all the information needed to perform projections ---
+ *		that is, form new tuples by evaluation of targetlist expressions.
+ *		Nodes which need to do projections create one of these.
+ *
+ *		ExecProject() evaluates the tlist, forms a tuple, and stores it
+ *		in the given slot.	Note that the result will be a "virtual" tuple
+ *		unless ExecMaterializeSlot() is then called to force it to be
+ *		converted to a physical tuple.	The slot must have a tupledesc
+ *		that matches the output of the tlist!
+ *
+ *		The planner very often produces tlists that consist entirely of
+ *		simple Var references (lower levels of a plan tree almost always
+ *		look like that).  And top-level tlists are often mostly Vars too.
+ *		We therefore optimize execution of simple-Var tlist entries.
+ *		The pi_targetlist list actually contains only the tlist entries that
+ *		aren't simple Vars, while those that are Vars are processed using the
+ *		varSlotOffsets/varNumbers/varOutputCols arrays.
+ *
+ *		The lastXXXVar fields are used to optimize fetching of fields from
+ *		input tuples: they let us do a slot_getsomeattrs() call to ensure
+ *		that all needed attributes are extracted in one pass.
+ *
+ *		targetlist		target list for projection (non-Var expressions only)
+ *		exprContext		expression context in which to evaluate targetlist
+ *		slot			slot to place projection result in
+ *		itemIsDone		workspace array for ExecProject
+ *		directMap		true if varOutputCols[] is an identity map
+ *		numSimpleVars	number of simple Vars found in original tlist
+ *		varSlotOffsets	array indicating which slot each simple Var is from
+ *		varNumbers		array containing input attr numbers of simple Vars
+ *		varOutputCols	array containing output attr numbers of simple Vars
+ *		lastInnerVar	highest attnum from inner tuple slot (0 if none)
+ *		lastOuterVar	highest attnum from outer tuple slot (0 if none)
+ *		lastScanVar		highest attnum from scan tuple slot (0 if none)
+ *		pi_maxOrmin	column table optimize, indicate if get this column's max or min.
+ * ----------------
+ */
+typedef bool (*vectarget_func)(ExprContext* econtext, VectorBatch* pBatch);
+typedef struct ProjectionInfo {
+    NodeTag type;
+    List* pi_targetlist;
+    /* instructions to evaluate projection */
+    ExprState pi_state;
+    /* expression context in which to evaluate expression */
+    ExprContext* pi_exprContext;
+    TupleTableSlot* pi_slot;
+    ExprDoneCond* pi_itemIsDone;
+    bool pi_directMap;
+    bool pi_topPlan;             /* Whether the outermost layer query */
+    int pi_numSimpleVars;
+    int* pi_varSlotOffsets;
+    int* pi_varNumbers;
+    int* pi_varOutputCols;
+    int pi_lastInnerVar;
+    int pi_lastOuterVar;
+    int pi_lastScanVar;
+    List* pi_acessedVarNumbers;
+    List* pi_sysAttrList;
+    List* pi_lateAceessVarNumbers;
+    List* pi_maxOrmin;
+    List* pi_PackTCopyVars;            /* VarList to record those columns what we need to move */
+    List* pi_PackLateAccessVarNumbers; /*VarList to record those columns what we need to move in late read cstore
+                                          scan.*/
+    bool pi_const;
+    ExprDoneCond* pi_vec_itemIsDone;
+    VectorBatch* pi_batch;
+    vectarget_func jitted_vectarget; /* LLVM function pointer to point to the codegened targetlist expr function */
+    VectorBatch* pi_setFuncBatch;
+    bool isUpsertHasRightRef;
+} ProjectionInfo;
 
 /* ----------------
  *	  ResultRelInfo information
@@ -556,6 +611,8 @@ typedef struct EState {
 
     /* If query can insert/delete tuples, the command ID to mark them with */
     CommandId es_output_cid;
+
+    bool es_is_flt_frame;  /*Indicates whether it is a flattened expr frame */
 
     /* Info about target table(s) for insert/update/delete queries: */
     ResultRelInfo* es_result_relations;     /* array of ResultRelInfos */
@@ -805,6 +862,7 @@ typedef struct WholeRowVarExprState {
  */
 typedef struct AggrefExprState {
     ExprState xprstate;
+    Aggref	   *aggref;			/* expression plan node */
     List* aggdirectargs;  /* states of direct-argument expressions */
     List* args;           /* states of argument expressions */
     ExprState* aggfilter; /* state of FILTER expression, if any */
@@ -821,6 +879,7 @@ typedef struct AggrefExprState {
  */
 typedef struct WindowFuncExprState {
     ExprState xprstate;
+    WindowFunc *wfunc;			/* expression plan node */
     List* args;  /* states of argument expressions */
     int wfuncno; /* ID number for wfunc within its plan node */
 
@@ -828,6 +887,7 @@ typedef struct WindowFuncExprState {
     //
     ScalarVector* m_resultVector;
 } WindowFuncExprState;
+
 
 /* ----------------
  *		ArrayRefExprState node
@@ -899,12 +959,11 @@ typedef struct FuncExprState {
      */
     bool setArgsValid;
 
-    /*
-     * Flag to remember whether we found a set-valued argument to the
-     * function. This causes the function result to be a set as well. Valid
-     * only when setArgsValid is true or funcResultStore isn't NULL.
-     */
-    bool setHasSetArg; /* some argument returns a set */
+    bool setHasSetArg;
+
+    bool is_plpgsql_func_with_outparam;
+
+    bool has_refcursor;
 
     /*
      * Flag to remember whether we have registered a shutdown callback for
@@ -922,6 +981,7 @@ typedef struct FuncExprState {
     FunctionCallInfoData fcinfo_data;
 
     ScalarVector* tmpVec;
+    bool vec_setHasSetArg;	/* some argument returns a set */
 } FuncExprState;
 
 /* ----------------
@@ -1002,6 +1062,7 @@ typedef struct SubPlanState {
  */
 typedef struct AlternativeSubPlanState {
     ExprState xprstate;
+    AlternativeSubPlan* subplan;		/* expression plan node */
     List* subplans; /* states of alternative subplans */
     int active;     /* list index of the one we're using */
 } AlternativeSubPlanState;
@@ -1217,7 +1278,8 @@ typedef struct DomainConstraintState {
     NodeTag type;
     DomainConstraintType constrainttype; /* constraint type */
     char* name;                          /* name of constraint (for error msgs) */
-    ExprState* check_expr;               /* for CHECK, a boolean expression */
+    Expr       *check_node;      /* for check, expr node,for flatten*/
+    ExprState	   *check_expr;		/* for CHECK, a boolean expression */
 } DomainConstraintState;
 
 typedef struct HbktScanSlot {
@@ -1288,14 +1350,13 @@ typedef struct PlanState {
      * State for management of parameter-change-driven rescanning
      */
     Bitmapset* chgParam; /* set of IDs of changed Params */
-    
+
     /*
      * Other run-time state needed by most if not all node types.
      */
     TupleTableSlot* ps_ResultTupleSlot; /* slot for my result tuples */
     ExprContext* ps_ExprContext;        /* node's expression-evaluation context */
     ProjectionInfo* ps_ProjInfo;        /* info for doing tuple projection */
-    bool ps_TupFromTlist;               /* state flag for processing set-valued functions in targetlist */
 
     int64 ps_rownum;    /* store current rownum */
     List* targetlist;           /* target list to be computed at this node */
@@ -1410,6 +1471,7 @@ typedef struct UpsertState
  */
 typedef struct ProjectSetState {
     PlanState ps;            /* its first field is NodeTag */
+    Node  **elems;			 /* array of expression states */
     ExprDoneCond *elemdone;  /* array of per-SRF is-done states */
     int nelems;              /* length of elemdone[] array */
     bool pending_srf_tuples; /* still evaluating srfs in tlist? */
@@ -1736,7 +1798,7 @@ typedef struct ScanState {
     bool isSampleScan;               /* identify is it table sample scan or not. */
     bool runTimePredicatesReady;
     bool is_scan_end; /* @hdfs Mark whether iterator is over or not, if the scan uses informational constraint. */
-    
+
     int currentSlot; /* current iteration position */
     int part_id;
     int startPartitionId;            /* start partition id for parallel threads. */
@@ -1927,7 +1989,7 @@ typedef struct BitmapHeapScanState {
  */
 typedef struct TidScanState {
     ScanState ss;       /* its first field is NodeTag */
-    List* tss_tidquals; /* list of ExprState nodes */
+    List* tss_tidexprs;
     bool tss_isCurrentOf;
     Relation tss_CurrentOf_CurrentPartition;
     int tss_NumTids;
@@ -2378,6 +2440,7 @@ typedef struct GroupState {
  */
 /* these structs are private in nodeAgg.c: */
 typedef struct AggStatePerAggData* AggStatePerAgg;
+typedef struct AggStatePerTransData *AggStatePerTrans;
 typedef struct AggStatePerGroupData* AggStatePerGroup;
 typedef struct AggStatePerPhaseData* AggStatePerPhase;
 

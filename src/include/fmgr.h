@@ -144,6 +144,7 @@ typedef struct StartWithFuncEvalInfo
 {
     Node   *sw_econtext;
     Node   *sw_exprstate;
+    bool   sw_is_flt_frame;
 } StartWithFuncEvalInfo;
 
 /*

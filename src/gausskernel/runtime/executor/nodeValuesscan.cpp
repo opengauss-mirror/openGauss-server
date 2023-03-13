@@ -106,7 +106,7 @@ static TupleTableSlot* ValuesNext(ValuesScanState* node)
          * VALUES list should be InitPlans).
          */
         if (expr_state_list == NIL) {
-            expr_state_list = (List*)ExecInitExpr((Expr*)exprlist, NULL);
+            expr_state_list = ExecInitExprList(exprlist, NULL);
         }
 
         /* parser should have checked all sublists are the same length */
@@ -129,12 +129,12 @@ static TupleTableSlot* ValuesNext(ValuesScanState* node)
         SortTargetListAsArray(refState, expr_state_list, targetArr);
 
         InitOutputValues(refState, targetArr, values, is_null, targetCount, hasExecs);
-        
+
         resind = 0;
         foreach (lc, expr_state_list) {
             ExprState* exprState = (ExprState*)lfirst(lc);
 
-            values[resind] = ExecEvalExpr(exprState, econtext, &is_null[resind], NULL);
+            values[resind] = ExecEvalExpr(exprState, econtext, &is_null[resind]);
             if (IS_ENABLE_RIGHT_REF(refState) && resind < refState->colCnt) {
                 hasExecs[resind] = true;
             }
@@ -232,9 +232,12 @@ ValuesScanState* ExecInitValuesScan(ValuesScan* node, EState* estate, int eflags
     /*
      * initialize child expressions
      */
-    scan_state->ss.ps.targetlist = (List*)ExecInitExpr((Expr*)node->scan.plan.targetlist, (PlanState*)scan_state);
-    scan_state->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)scan_state);
-
+    if (estate->es_is_flt_frame) {
+        scan_state->ss.ps.qual = (List*)ExecInitQualByFlatten(node->scan.plan.qual, (PlanState*)scan_state);
+    } else {
+        scan_state->ss.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.targetlist, (PlanState*)scan_state);
+        scan_state->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->scan.plan.qual, (PlanState*)scan_state);
+    }
     /*
      * get info about values list
      * value lists scan, no relation is  involved, default tableAm type is set to HEAP.
@@ -282,7 +285,7 @@ ValuesScanState* ExecInitValuesScan(ValuesScan* node, EState* estate, int eflags
         i++;
     }
 
-    scan_state->ss.ps.ps_TupFromTlist = false;
+    scan_state->ss.ps.ps_vec_TupFromTlist = false;
 
     /*
      * Initialize result tuple type and projection info.

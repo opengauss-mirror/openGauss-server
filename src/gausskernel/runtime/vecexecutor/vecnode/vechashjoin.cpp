@@ -213,7 +213,7 @@ VecHashJoinState* ExecInitVecHashJoin(VecHashJoin* node, EState* estate, int efl
     hash_state->hj_HashOperators = hoperators;
     hash_state->hj_hashCollations = NIL;
     hash_state->eqfunctions = eqfunctions;
-    hash_state->js.ps.ps_TupFromTlist = false;
+    hash_state->js.ps.ps_vec_TupFromTlist = false;
 
     /* Initialize runtime bloomfilter. */
     hash_state->bf_runtime.bf_var_list = hash_state->js.ps.plan->var_list;
@@ -3438,7 +3438,7 @@ VectorBatch* HashJoinTbl::buildResult(VectorBatch* in_batch, VectorBatch* out_ba
     if (m_runtime->js.ps.qual != NULL) {
         has_qual = true;
         econtext->ecxt_scanbatch = m_result;
-        p_vector = ExecVecQual(m_runtime->js.ps.qual, econtext, false);
+        p_vector = ExecVecQual((List*)m_runtime->js.ps.qual, econtext, false);
 
         if (p_vector == NULL) {
             in_batch->Reset();

@@ -806,7 +806,7 @@ static int GetExecBucketId(ExecNodes* exec_nodes, ParamListInfo params)
 
         ExprState* exprstate = ExecInitExpr(expr, NULL);
 
-        Datum partvalue = ExecEvalExpr(exprstate, exprcontext, &isnull, NULL);
+        Datum partvalue = ExecEvalExpr(exprstate, exprcontext, &isnull);
 
         MemoryContextSwitchTo(oldContext);
 

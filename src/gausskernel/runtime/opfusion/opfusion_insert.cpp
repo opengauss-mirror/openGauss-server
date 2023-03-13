@@ -439,7 +439,12 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
 
         foreach(ll, wcoList) {
             WithCheckOption* wco = (WithCheckOption*)lfirst(ll);
-            ExprState* wcoExpr = ExecInitExpr((Expr*)wco->qual, ps);
+            ExprState* wcoExpr = NULL;
+            if (ps->state->es_is_flt_frame) {
+                wcoExpr = ExecInitQualByFlatten((List*)wco->qual, ps);
+            } else {
+                wcoExpr = ExecInitExprByRecursion((Expr*)wco->qual, ps);
+            }
             wcoExprs = lappend(wcoExprs, wcoExpr);
         }
 

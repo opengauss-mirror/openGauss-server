@@ -60,4 +60,6 @@ extern THR_LOCAL PGDLLIMPORT object_access_hook_type object_access_hook;
 								  (objectId),(subId),(arg));		\
 	} while(0)
 
+#define InvokeFunctionExecuteHook(objectId)
+
 #endif   /* OBJECTACCESS_H */

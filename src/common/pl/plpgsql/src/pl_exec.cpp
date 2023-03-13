@@ -70,6 +70,7 @@
 #include "storage/mot/mot_fdw.h"
 #endif
 #include "commands/event_trigger.h"
+#include "executor/executor.h"
 
 extern bool checkRecompileCondition(CachedPlanSource* plansource);
 static const char* const raise_skip_msg = "RAISE";
@@ -3080,7 +3081,7 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
          * Just execute the statements in the block's body
          */
         estate->err_text = NULL;
-        
+
 #ifndef ENABLE_MULTIPLE_NODES
         if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && COMPAT_CURSOR) {
             rc = exec_stmts_savecursor(estate, block->body);
@@ -10275,6 +10276,8 @@ static bool exec_eval_simple_expr(
     if (expr->expr_simple_lxid != curlxid) {
         oldcontext = MemoryContextSwitchTo(u_sess->plsql_cxt.simple_eval_estate->es_query_cxt);
         expr->expr_simple_state = ExecInitExpr(expr->expr_simple_expr, NULL);
+        // expr->expr_simple_state = ExecInitExprForPlSql(expr->expr_simple_expr, econtext->ecxt_param_list_info,
+        //     u_sess->plsql_cxt.simple_eval_estate->es_is_flt_frame);
         expr->expr_simple_in_use = false;
         expr->expr_simple_lxid = curlxid;
         MemoryContextSwitchTo(oldcontext);
@@ -10354,7 +10357,7 @@ static bool exec_eval_simple_expr(
     }
     plpgsql_estate->curr_nested_table_type = InvalidOid;
 
-    *result = ExecEvalExpr(expr->expr_simple_state, econtext, isNull, NULL);
+    *result = ExecEvalExpr(expr->expr_simple_state, econtext, isNull);
     /* for nested table, we need use nested table type as result type */
     if (plpgsql_estate && plpgsql_estate->curr_nested_table_type != InvalidOid) {
         if (expr->expr_simple_state->evalfunc == (ExprStateEvalFunc)ExecEvalArrayRef) {
@@ -10582,7 +10585,7 @@ static bool CheckTypeIsCursor(PLpgSQL_row *row, Oid valtype, int fnum)
     return false;
 }
 
-/* 
+/*
  * get covert map for bulk collect
  * we need to support type cast, so we just match the position
  */
@@ -10648,7 +10651,7 @@ static TupleConversionMap *convert_tuples_for_bulk_collect(TupleDesc indesc, Tup
     map->inisnull = (bool *)palloc(n * sizeof(bool));
     map->invalues[0] = (Datum)0; /* set up the NULL entry */
     map->inisnull[0] = true;
-    
+
     return map;
 }
 

@@ -30,9 +30,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 
-static Datum ExecSubPlan(SubPlanState* node, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
-static Datum ExecAlternativeSubPlan(
-    AlternativeSubPlanState* node, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+Datum ExecAlternativeSubPlan(AlternativeSubPlanState* node, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecHashSubPlan(SubPlanState* node, ExprContext* econtext, bool* isNull);
 static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* isNull);
 
@@ -40,7 +38,7 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
  *		ExecSubPlan
  * ----------------------------------------------------------------
  */
-static Datum ExecSubPlan(SubPlanState* node, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+Datum ExecSubPlan(SubPlanState* node, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
 {
     SubPlan* sub_plan = (SubPlan*)node->xprstate.expr;
     EState* estate = node->planstate->state;
@@ -550,7 +548,11 @@ void buildSubPlanHash(SubPlanState* node, ExprContext* econtext)
      * potential for a double free attempt.  (XXX possibly no longer needed,
      * but can't hurt.)
      */
-    (void)ExecClearTuple(node->projRight->pi_slot);
+    if (node->projRight->pi_state.is_flt_frame) {
+        (void)ExecClearTuple(node->projRight->pi_state.resultslot);
+    } else {
+        (void)ExecClearTuple(node->projRight->pi_slot);
+    }
 
     MemoryContextSwitchTo(oldcontext);
 }
@@ -646,13 +648,14 @@ SubPlanState* ExecInitSubPlan(SubPlan* subplan, PlanState* parent)
 
     sstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecSubPlan;
     sstate->xprstate.expr = (Expr*)subplan;
+    sstate->xprstate.is_flt_frame = estate->es_is_flt_frame;
 
     /* Link the SubPlanState to already-initialized subplan */
     sstate->planstate = (PlanState*)list_nth(estate->es_subplanstates, subplan->plan_id - 1);
 
     /* Initialize subexpressions */
     sstate->testexpr = ExecInitExpr((Expr*)subplan->testexpr, parent);
-    sstate->args = (List*)ExecInitExpr((Expr*)subplan->args, parent);
+    sstate->args = ExecInitExprList(subplan->args, parent);
 
     /*
      * initialize my state
@@ -744,7 +747,93 @@ SubPlanState* ExecInitSubPlan(SubPlan* subplan, PlanState* parent)
          * We also extract the combining operators themselves to initialize
          * the equality and hashing functions for the hash tables.
          */
-        if (IsA(sstate->testexpr->expr, OpExpr)) {
+        if (estate->es_is_flt_frame) {
+                    if (IsA(subplan->testexpr, OpExpr)) {
+            /* single combining operator */
+            oplist = list_make1(subplan->testexpr);
+        } else if (and_clause((Node *) subplan->testexpr)) {
+            /* multiple combining operators */
+            Assert(IsA(subplan->testexpr, BoolExpr));
+            oplist = castNode(BoolExpr, subplan->testexpr)->args;
+        } else {
+            /* shouldn't see anything else in a hashable subplan */
+            ereport(ERROR,
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                    errmsg("unrecognized testexpr type: %d in a hash subplan", (int)nodeTag(subplan->testexpr))));
+
+            oplist = NIL; /* keep compiler quiet */
+        }
+        Assert(list_length(oplist) == ncols);
+
+        lefttlist = righttlist = NIL;
+        sstate->tab_hash_funcs = (FmgrInfo*)palloc(ncols * sizeof(FmgrInfo));
+        sstate->tab_eq_funcs = (FmgrInfo*)palloc(ncols * sizeof(FmgrInfo));
+        sstate->lhs_hash_funcs = (FmgrInfo*)palloc(ncols * sizeof(FmgrInfo));
+        sstate->cur_eq_funcs = (FmgrInfo*)palloc(ncols * sizeof(FmgrInfo));
+        i = 1;
+        foreach (l, oplist) {
+            OpExpr* opexpr = (OpExpr*)lfirst(l);
+            Oid rhs_eq_oper;
+            Oid left_hashfn;
+            Oid right_hashfn;
+
+            Assert(IsA(opexpr, OpExpr));
+            Assert(list_length(opexpr->args) == 2);
+
+            /* Process lefthand argument */
+            Expr* expr = (Expr *) linitial(opexpr->args);
+            TargetEntry* tle = makeTargetEntry(expr, i, NULL, false);
+            lefttlist = lappend(lefttlist, tle);
+
+            /* Process righthand argument */
+            expr = (Expr *) lsecond(opexpr->args);
+            tle = makeTargetEntry(expr, i, NULL, false);
+            righttlist = lappend(righttlist, tle);
+
+            /* Lookup the equality function (potentially cross-type) */
+            fmgr_info(opexpr->opfuncid, &sstate->cur_eq_funcs[i - 1]);
+            fmgr_info_set_expr((Node*)opexpr, &sstate->cur_eq_funcs[i - 1]);
+
+            /* Look up the equality function for the RHS type */
+            if (!get_compatible_hash_operators(opexpr->opno, NULL, &rhs_eq_oper))
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmsg("could not find compatible hash operator for operator %u for subplan", opexpr->opno)));
+            fmgr_info(get_opcode(rhs_eq_oper), &sstate->tab_eq_funcs[i - 1]);
+
+            /* Lookup the associated hash functions */
+            if (!get_op_hash_functions(opexpr->opno, &left_hashfn, &right_hashfn))
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmsg("could not find hash function for hash operator %u for subplan", opexpr->opno)));
+            fmgr_info(left_hashfn, &sstate->lhs_hash_funcs[i - 1]);
+            fmgr_info(right_hashfn, &sstate->tab_hash_funcs[i - 1]);
+
+            i++;
+        }
+
+        /*
+         * Construct tupdescs, slots and projection nodes for left and right
+         * sides.  The lefthand expressions will be evaluated in the parent
+         * plan node's exprcontext, which we don't have access to here.
+         * Fortunately we can just pass NULL for now and fill it in later
+         * (hack alert!).  The righthand expressions will be evaluated in our
+         * own innerecontext.
+         */
+        // slot contains virtual tuple, so set the default tableAm type to HEAP
+        tup_desc = ExecTypeFromTL(lefttlist, false, false);
+        slot = ExecInitExtraTupleSlot(estate);
+        ExecSetSlotDescriptor(slot, tup_desc);
+        sstate->projLeft = ExecBuildProjectionInfo(lefttlist, NULL, slot, parent, NULL);
+
+        // slot contains virtual tuple, so set the default tableAm type to HEAP
+        tup_desc = ExecTypeFromTL(righttlist, false, false);
+        slot = ExecInitExtraTupleSlot(estate);
+        ExecSetSlotDescriptor(slot, tup_desc);
+        sstate->projRight = ExecBuildProjectionInfo(righttlist, sstate->innerecontext, slot, sstate->planstate, NULL);
+        } else {
+            if (IsA(sstate->testexpr->expr, OpExpr)) {
             /* single combining operator */
             oplist = list_make1(sstate->testexpr);
         } else if (and_clause((Node*)sstate->testexpr->expr)) {
@@ -837,13 +926,15 @@ SubPlanState* ExecInitSubPlan(SubPlan* subplan, PlanState* parent)
         tup_desc = ExecTypeFromTL(leftptlist, false, false, TableAmHeap);
         slot = ExecInitExtraTupleSlot(estate);
         ExecSetSlotDescriptor(slot, tup_desc);
-        sstate->projLeft = ExecBuildProjectionInfo(lefttlist, NULL, slot, NULL);
+        sstate->projLeft = ExecBuildProjectionInfoByRecursion(lefttlist, NULL, slot, NULL);
 
         // slot contains virtual tuple, so set the default tableAm type to HEAP
         tup_desc = ExecTypeFromTL(rightptlist, false, false, TableAmHeap);
         slot = ExecInitExtraTupleSlot(estate);
         ExecSetSlotDescriptor(slot, tup_desc);
-        sstate->projRight = ExecBuildProjectionInfo(righttlist, sstate->innerecontext, slot, NULL);
+        sstate->projRight = ExecBuildProjectionInfoByRecursion(righttlist, sstate->innerecontext, slot, NULL);
+        }
+    
     }
 
     return sstate;
@@ -1074,15 +1165,34 @@ AlternativeSubPlanState* ExecInitAlternativeSubPlan(AlternativeSubPlan* asplan, 
     SubPlan* subplan2 = NULL;
     Cost cost1;
     Cost cost2;
+    
 
-    asstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecAlternativeSubPlan;
-    asstate->xprstate.expr = (Expr*)asplan;
+    if (parent->state->es_is_flt_frame) {
+        ListCell   *lc;
+        asstate->xprstate.expr = (Expr *)asplan;
+        asstate->xprstate.is_flt_frame = true;
+        /*
+         * Initialize subplans.  (Can we get away with only initializing the one
+         * we're going to use?)
+         */
+        foreach (lc, asplan->subplans) {
+            SubPlan *sp = castNode(SubPlan, lfirst(lc));
+            SubPlanState *sps = ExecInitSubPlan(sp, parent);
 
-    /*
-     * Initialize subplans.  (Can we get away with only initializing the one
-     * we're going to use?)
-     */
-    asstate->subplans = (List*)ExecInitExpr((Expr*)asplan->subplans, parent);
+            asstate->subplans = lappend(asstate->subplans, sps);
+            parent->subPlan = lappend(parent->subPlan, sps);
+        }
+    } else {
+        asstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecAlternativeSubPlan;
+        asstate->xprstate.expr = (Expr *)asplan;
+        asstate->xprstate.is_flt_frame = false;
+
+        /*
+         * Initialize subplans.  (Can we get away with only initializing the one
+         * we're going to use?)
+         */
+        asstate->subplans = (List *)ExecInitExprByRecursion((Expr *)asplan->subplans, parent);
+    }
 
     /*
      * Select the one to be used.  For this, we need an estimate of the number
@@ -1120,7 +1230,7 @@ AlternativeSubPlanState* ExecInitAlternativeSubPlan(AlternativeSubPlan* asplan, 
  * Note: in future we might consider changing to different subplans on the
  * fly, in case the original rowcount estimate turns out to be way off.
  */
-static Datum ExecAlternativeSubPlan(
+Datum ExecAlternativeSubPlan(
     AlternativeSubPlanState* node, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
 {
     /* Just pass control to the active subplan */

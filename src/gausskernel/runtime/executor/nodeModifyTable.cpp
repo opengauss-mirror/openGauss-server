@@ -155,7 +155,7 @@ static void CheckPlanOutput(Plan* subPlan, Relation resultRel)
         case T_VecToRow:
         case T_RowToVec:
         case T_PartIterator:
-        case T_VecPartIterator: 
+        case T_VecPartIterator:
         case T_Limit:
         case T_VecLimit:
         case T_Sort:
@@ -279,7 +279,7 @@ static TupleTableSlot* ExecProcessReturning(
     econtext->ecxt_outertuple = planSlot;
 
     /* Compute the RETURNING expressions */
-    return ExecProject(projectReturning, NULL);
+    return ExecProject(projectReturning);
 }
 
 static void ExecCheckTIDVisible(Relation        targetrel, EState* estate, Relation rel, ItemPointer tid)
@@ -498,7 +498,7 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     if (resultRelInfo->ri_NumUpdatedNeeded == 0)
         return true;
 
-    /* compare update operator whether the newtuple is equal to the oldtuple, 
+    /* compare update operator whether the newtuple is equal to the oldtuple,
      * if equal, so update don't fix the default column value  */
     Datum* oldvalues = (Datum*)palloc(natts * sizeof(Datum));
     bool* oldnulls = (bool*)palloc(natts * sizeof(bool));
@@ -653,7 +653,7 @@ checktest:
             }
 #endif
             test = tableam_tuple_lock(relation, tuple, &buffer,
-                                      estate->es_output_cid, LockTupleExclusive, LockWaitBlock, &tmfd, 
+                                      estate->es_output_cid, LockTupleExclusive, LockWaitBlock, &tmfd,
                                       true, false, false, estate->es_snapshot, &conflictInfo->conflictTid, 
                                       false, true, conflictInfo->conflictXid);
 
@@ -2258,7 +2258,7 @@ lreplace:
 
                     /*
                      * check constraints first if SQL has keyword IGNORE
-                     * 
+                     *
                      * Note: we need to exclude the case of UPSERT_UPDATE, so that upsert could be successfully finished.
                      */
                     if (node->mt_upsert->us_action != UPSERT_UPDATE && estate->es_plannedstmt &&
@@ -3272,7 +3272,7 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
         if (OidIsValid(seqOid))
             elog(ERROR, "REPLACE can not work on sequence!");
     }
-    
+
     /* set flag to start loop */
     node->isConflict = true;
 
@@ -3383,7 +3383,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
     int resultRelationNum = node->mt_ResultTupleSlots ? list_length(node->mt_ResultTupleSlots) : 1;
 
     CHECK_FOR_INTERRUPTS();
-    
+
     /*
      * This should NOT get called during EvalPlanQual; we should have passed a
      * subplan tree to EvalPlanQual, instead.  Use a runtime test not just
@@ -3769,9 +3769,13 @@ static void InitMultipleModify(ModifyTableState* node, PlanState* subnode, uint3
     if (resultRelationNum == 1) {
         return;
     }
-    
+
     node->mt_ProjInfos = (ProjectionInfo**)palloc0((uint32)resultRelationNum * sizeof(ProjectionInfo*));
-    node->targetlists = (List*)ExecInitExpr((Expr*)targetlists, (PlanState*)node);
+    if (estate->es_is_flt_frame) {
+        node->targetlists = targetlists;
+    } else {
+        node->targetlists = (List*)ExecInitExprByRecursion((Expr*)targetlists, (PlanState*)node);
+    }
 
     int i = 0;
     forboth (l1, node->targetlists, l2, targetlists) {
@@ -3787,8 +3791,13 @@ static void InitMultipleModify(ModifyTableState* node, PlanState* subnode, uint3
         TupleDesc tupDesc = ExecTypeFromTL(targetList, hasoid, false);
         ExecSetSlotDescriptor(slot, tupDesc);
         node->mt_ResultTupleSlots = lappend(node->mt_ResultTupleSlots, slot);
+        ProjectionInfo* projInfo = NULL;
+        if (estate->es_is_flt_frame) {
+            projInfo = ExecBuildProjectionInfoByFlatten(targetExprList, subnode->ps_ExprContext, slot, (PlanState*)node, NULL);
+        } else {
+            projInfo = ExecBuildProjectionInfoByRecursion(targetExprList, subnode->ps_ExprContext, slot, NULL);
+        }
         /* Use the targetlist of the subplan to build mt_ProjInfos. It will be use for FetchMultipleModifySlot. */
-        ProjectionInfo* projInfo = ExecBuildProjectionInfo(targetExprList, subnode->ps_ExprContext, slot, NULL);
         node->mt_ProjInfos[i] = projInfo;
         i++;
     }
@@ -3914,7 +3923,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     foreach (l, node->plans) {
         sub_plan = (Plan*)lfirst(l);
         sub_plan->rightRefState = node->plan.rightRefState;
-        
+
         /*
          * Verify result relation is a valid target for the current operation
          */
@@ -4057,8 +4066,13 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
 
         foreach(ll, (List*)linitial(node->withCheckOptionLists)) {
             WithCheckOption* wco = (WithCheckOption*)lfirst(ll);
+            ExprState* wcoExpr = NULL;
             if (wco->rtindex == result_rel_info->ri_RangeTableIndex) {
-                ExprState* wcoExpr = ExecInitExpr((Expr*)wco->qual, mt_state->mt_plans[i]);
+                if (estate->es_is_flt_frame) {
+                    wcoExpr = ExecInitQualByFlatten((List*)wco->qual, mt_state->mt_plans[i]);
+                } else {
+                    wcoExpr = ExecInitExprByRecursion((Expr*)wco->qual, mt_state->mt_plans[i]);
+                }
                 wcoExprs = lappend(wcoExprs, wcoExpr);
                 wcoList = lappend(wcoList, wco);
             }
@@ -4091,18 +4105,15 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         /* Need an econtext too */
         econtext = CreateExprContext(estate);
         mt_state->ps.ps_ExprContext = econtext;
-
         /*
          * Build a projection for each result rel.
          */
         result_rel_info = mt_state->resultRelInfo;
         foreach (l, node->returningLists) {
             List* rlist = (List*)lfirst(l);
-            List* rliststate = NIL;
 
-            rliststate = (List*)ExecInitExpr((Expr*)rlist, &mt_state->ps);
             result_rel_info->ri_projectReturning =
-                ExecBuildProjectionInfo(rliststate, econtext, slot, result_rel_info->ri_RelationDesc->rd_att);
+                ExecBuildProjectionInfo(rlist, econtext, slot, &mt_state->ps, result_rel_info->ri_RelationDesc->rd_att);
         }
     } else {
         /*
@@ -4150,15 +4161,18 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         ExecSetSlotDescriptor(upsertState->us_updateproj, tupDesc);
 
         /* build UPDATE SET expression and projection state */
-        setexpr = ExecInitExpr((Expr*)node->updateTlist, &mt_state->ps);
         result_rel_info->ri_updateProj =
-        ExecBuildProjectionInfo((List*)setexpr, econtext,
-            upsertState->us_updateproj, result_rel_info->ri_RelationDesc->rd_att);
-        result_rel_info->ri_updateProj->isUpsertHasRightRef = 
+        ExecBuildProjectionInfo(node->updateTlist, econtext,
+            upsertState->us_updateproj, &mt_state->ps, result_rel_info->ri_RelationDesc->rd_att);
+        result_rel_info->ri_updateProj->isUpsertHasRightRef =
                 IS_ENABLE_RIGHT_REF(econtext->rightRefState) && econtext->rightRefState->isUpsertHasRightRef;
         /* initialize expression state to evaluate update where clause if exists */
         if (node->upsertWhere) {
-            upsertState->us_updateWhere = (List*)ExecInitExpr((Expr*)node->upsertWhere, &mt_state->ps);
+            if (estate->es_is_flt_frame) {
+                upsertState->us_updateWhere = (List*)ExecInitQualByFlatten((List*)node->upsertWhere, &mt_state->ps);
+            } else {
+                upsertState->us_updateWhere = (List*)ExecInitExprByRecursion((Expr*)node->upsertWhere, &mt_state->ps);
+            }
         }
     }
 

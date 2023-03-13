@@ -414,7 +414,7 @@ TsStoreScanState* ExecInitTsStoreScan(TsStoreScan* node, Relation parentHeapRel,
     }
     scanstate->time_range = get_time_range(scanstate);
 
-    scanstate->ps.ps_TupFromTlist = false;
+    scanstate->ps.ps_vec_TupFromTlist = false;
    
     if (scanstate->limit > 0 && scanstate->ps.qual == NULL) {
          /* if is simple sort by timestamp limit n , then earlier stop */
@@ -655,7 +655,7 @@ rescan:
         pScanBatch->FixRowCount(); 
         pOutBatch = ts_apply_projection_and_filter(node, pScanBatch, &isDone);
         if (isDone != ExprEndResult) { 
-            node->ps.ps_TupFromTlist = (isDone == ExprMultipleResult); 
+            node->ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult); 
         }
         if (node->early_stop) {
             node->scaned_tuples += pScanBatch->m_rows;

@@ -526,7 +526,7 @@ VecNestLoopState* ExecInitVecNestLoop(VecNestLoop* node, EState* estate, int efl
     /*
      * finally, wipe the current outer tuple clean.
      */
-    nlstate->js.ps.ps_TupFromTlist = false;
+    nlstate->js.ps.ps_vec_TupFromTlist = false;
     nlstate->nl_NeedNewOuter = true;
     nlstate->nl_MatchedOuter = false;
 
@@ -670,7 +670,7 @@ void ExecReScanVecNestLoop(VecNestLoopState* node)
      * re-scanned from here or you'll get troubles from inner index scans when
      * outer Vars are used as run-time keys...
      */
-    node->js.ps.ps_TupFromTlist = false;
+    node->js.ps.ps_vec_TupFromTlist = false;
 
     VecNestLoopRuntime* runtime = (VecNestLoopRuntime*)node->vecNestLoopRuntime;
     runtime->Rescan();

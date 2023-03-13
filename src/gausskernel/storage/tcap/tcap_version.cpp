@@ -54,6 +54,7 @@
 
 #include "storage/tcap.h"
 #include "catalog/pg_constraint.h"
+#include "executor/executor.h"
 
 static bool TvIsContainsForeignKey(Oid relid)
 {
@@ -477,7 +478,7 @@ Snapshot TvChooseScanSnap(Relation relation, Scan *scan, ScanState *ss)
 
         econtext = CreateExprContext(estate);
         val = ExecEvalExprSwitchContext(ExecInitExpr((Expr *)tcc->tvver, &ss->ps), 
-            econtext, &isnull, NULL);
+            econtext, &isnull);
         con = makeConst((tcc->tvtype == TV_VERSION_TIMESTAMP) ? TIMESTAMPTZOID : INT8OID, 
             -1, InvalidOid, 8, val, isnull, true);
 

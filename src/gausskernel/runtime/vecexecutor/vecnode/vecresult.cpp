@@ -41,7 +41,7 @@ VectorBatch* ExecVecResult(VecResultState* node)
     ExprContext* expr_context = NULL;
     VectorBatch* batch = NULL;
     VectorBatch* res_batch = NULL;
-    List* qual = node->ps.qual;
+    List* qual = (List*)node->ps.qual;
 
     expr_context = node->ps.ps_ExprContext;
 
@@ -49,7 +49,7 @@ VectorBatch* ExecVecResult(VecResultState* node)
      * check constant qualifications like (2 > 1), if not already done
      */
     if (node->rs_checkqual) {
-        bool qual_result = ExecQual((List*)node->resconstantqual, expr_context, false);
+        bool qual_result = ExecQual((List*)node->resconstantqual, expr_context);
         node->rs_checkqual = false;
         if (!qual_result) {
             node->rs_done = true;
@@ -62,7 +62,7 @@ VectorBatch* ExecVecResult(VecResultState* node)
         }
     }
 
-    Assert(node->ps.ps_TupFromTlist == false);
+    Assert(node->ps.ps_vec_TupFromTlist == false);
 
     /*
      * Reset per-tuple memory context to free any expression evaluation
@@ -164,7 +164,7 @@ VecResultState* ExecInitVecResult(VecResult* node, EState* estate, int eflags)
      */
     ExecAssignExprContext(estate, &res_state->ps);
 
-    res_state->ps.ps_TupFromTlist = false;
+    res_state->ps.ps_vec_TupFromTlist = false;
 
     /*
      * tuple table initialization
@@ -176,8 +176,11 @@ VecResultState* ExecInitVecResult(VecResult* node, EState* estate, int eflags)
      */
     res_state->ps.targetlist = (List*)ExecInitVecExpr((Expr*)node->plan.targetlist, (PlanState*)res_state);
     res_state->ps.qual = (List*)ExecInitVecExpr((Expr*)node->plan.qual, (PlanState*)res_state);
-
-    res_state->resconstantqual = ExecInitExpr((Expr*)node->resconstantqual, (PlanState*)res_state);
+    if (estate->es_is_flt_frame) {
+        res_state->resconstantqual = ExecInitQualByFlatten((List*)node->resconstantqual, (PlanState*)res_state);
+    } else {
+        res_state->resconstantqual = ExecInitExprByRecursion((Expr*)node->resconstantqual, (PlanState*)res_state);
+    }
 
     /*
      * initialize child nodes
@@ -226,7 +229,7 @@ void ExecEndVecResult(VecResultState* node)
 void ExecReScanVecResult(VecResultState* node)
 {
     node->rs_done = false;
-    node->ps.ps_TupFromTlist = false;
+    node->ps.ps_vec_TupFromTlist = false;
     node->rs_checkqual = (node->resconstantqual == NULL) ? false : true;
 
     /*

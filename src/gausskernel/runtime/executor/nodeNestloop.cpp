@@ -108,14 +108,14 @@ static TupleTableSlot* ExecNestLoop(PlanState* state)
      * tuple (because there is a function-returning-set in the projection
      * expressions).  If so, try to project another one.
      */
-    if (node->js.ps.ps_TupFromTlist) {
+    if (node->js.ps.ps_vec_TupFromTlist) {
         ExprDoneCond is_done;
 
         TupleTableSlot* result = ExecProject(node->js.ps.ps_ProjInfo, &is_done);
         if (is_done == ExprMultipleResult)
             return result;
         /* Done with that source tuple... */
-        node->js.ps.ps_TupFromTlist = false;
+        node->js.ps.ps_vec_TupFromTlist = false;
     }
 
     /*
@@ -250,7 +250,7 @@ static TupleTableSlot* ExecNestLoop(PlanState* state)
                     TupleTableSlot* result = ExecProject(node->js.ps.ps_ProjInfo, &is_done);
 
                     if (is_done != ExprEndResult) {
-                        node->js.ps.ps_TupFromTlist = (is_done == ExprMultipleResult);
+                        node->js.ps.ps_vec_TupFromTlist = (is_done == ExprMultipleResult);
                         return result;
                     }
                 } else
@@ -298,7 +298,7 @@ static TupleTableSlot* ExecNestLoop(PlanState* state)
                 TupleTableSlot* result = ExecProject(node->js.ps.ps_ProjInfo, &is_done);
 
                 if (is_done != ExprEndResult) {
-                    node->js.ps.ps_TupFromTlist = (is_done == ExprMultipleResult);
+                    node->js.ps.ps_vec_TupFromTlist = (is_done == ExprMultipleResult);
                     /*
                      * @hdfs
                      * Optimize plan by informational constraint.
@@ -353,10 +353,17 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    nlstate->js.ps.targetlist = (List*)ExecInitExpr((Expr*)node->join.plan.targetlist, (PlanState*)nlstate);
-    nlstate->js.ps.qual = (List*)ExecInitExpr((Expr*)node->join.plan.qual, (PlanState*)nlstate);
-    nlstate->js.jointype = node->join.jointype;
-    nlstate->js.joinqual = (List*)ExecInitExpr((Expr*)node->join.joinqual, (PlanState*)nlstate);
+    if (estate->es_is_flt_frame) {
+        nlstate->js.ps.qual = (List*)ExecInitQualByFlatten(node->join.plan.qual, (PlanState*)nlstate);
+        nlstate->js.jointype = node->join.jointype;
+        nlstate->js.joinqual = (List*)ExecInitQualByFlatten(node->join.joinqual, (PlanState*)nlstate);
+        Assert(node->join.nulleqqual == NIL);
+    } else {
+        nlstate->js.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->join.plan.targetlist, (PlanState*)nlstate);
+        nlstate->js.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->join.plan.qual, (PlanState*)nlstate);
+        nlstate->js.jointype = node->join.jointype;
+        nlstate->js.joinqual = (List*)ExecInitExprByRecursion((Expr*)node->join.joinqual, (PlanState*)nlstate);
+    }
     Assert(node->join.nulleqqual == NIL);
 
     /*
@@ -408,7 +415,7 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
     /*
      * finally, wipe the current outer tuple clean.
      */
-    nlstate->js.ps.ps_TupFromTlist = false;
+    nlstate->js.ps.ps_vec_TupFromTlist = false;
     nlstate->nl_NeedNewOuter = true;
     nlstate->nl_MatchedOuter = false;
 
@@ -476,7 +483,7 @@ void ExecReScanNestLoop(NestLoopState* node)
      * re-scanned from here or you'll get troubles from inner index scans when
      * outer Vars are used as run-time keys...
      */
-    node->js.ps.ps_TupFromTlist = false;
+    node->js.ps.ps_vec_TupFromTlist = false;
     node->nl_NeedNewOuter = true;
     node->nl_MatchedOuter = false;
 }

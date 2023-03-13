@@ -1,3 +1,4 @@
+
 /* --------------------------------------------------------------------
  * guc.c
  *
@@ -437,7 +438,8 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "track_stmt_stat_level",
     "track_stmt_details_size",
     "sql_note",
-    "max_error_count"
+    "max_error_count",
+    "enable_expr_fusion"
     };
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
@@ -711,7 +713,7 @@ static bool isOptLineCommented(char* optLine)
 
 static const struct config_enum_entry bytea_output_options[] = {
     {"escape", BYTEA_OUTPUT_ESCAPE, false}, {"hex", BYTEA_OUTPUT_HEX, false}, {NULL, 0, false}};
-    
+
 static const struct config_enum_entry block_encryption_mode_options[] = {{"aes-128-cbc", AES_128_CBC, false},
                                                                          {"aes-192-cbc", AES_192_CBC, false},
                                                                          {"aes-256-cbc", AES_256_CBC, false},
@@ -8741,7 +8743,7 @@ static char** LockAndReadConfFile(char* ConfFileName, char* ConfTmpFileName, cha
         file = ConfTmpFileName;
     }
 
-    /* 
+    /*
      * Get the process lock (filelock) first, if success, acquire thread
      * lock (ConfigFileLock) for config file, sleep until get the lock
      */
@@ -8778,19 +8780,19 @@ static char** LockAndReadConfFile(char* ConfFileName, char* ConfTmpFileName, cha
  *
  * In case of an error, we leave the original automatic
  * configuration file (postgresql.conf.bak) intact.
- * 
+ *
  * There are two locks used to ensure changing of config file
  * is multi-thread safe and multi-process safe:
  *   filelock: for multi-process safe
  *   ConfigFileLock: for multi-thread safe
  * Both locks must be acquired before any changes of config file.
- * 
+ *
  * filelock:
  *   is a ConfFileLock, creates a file "postgresql.conf.lock"
- * as a lock for the config file "postgresql.conf", and uses 
- * flock() to ensure modification of config file is 
+ * as a lock for the config file "postgresql.conf", and uses
+ * flock() to ensure modification of config file is
  * multi-process safe for mogdb and gs_guc processes.
- * 
+ *
  * ConfigFileLock:
  *   is a LWLock, defined in lwlocknames.txt. is a global lock
  * in mogdb and guarantees multi-thread safe access of config file.
@@ -11419,17 +11421,17 @@ static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSe
      * meantime.
      */
     shdepLockAndCheckObject(DatabaseRelationId, databaseid);
- 
+
     /* Permission check. */
     AlterDatabasePermissionCheck(databaseid, dbname);
- 
+
     char* valuestr = NULL;
     HeapTuple tuple = NULL;
     Relation rel = NULL;
     ScanKeyData scankey[2];
     SysScanDesc scan = NULL;
     errno_t rc = EOK;
- 
+
     /* Get the old tuple, if any. */
     rel = heap_open(DbRoleSettingRelationId, RowExclusiveLock);
     ScanKeyInit(
@@ -11438,7 +11440,7 @@ static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSe
         &scankey[1], Anum_pg_db_role_setting_setrole, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(roleid));
     scan = systable_beginscan(rel, DbRoleSettingDatidRolidIndexId, true, NULL, NUM_KEYS, scankey);
     tuple = systable_getnext(scan);
- 
+
     if (tuple == NULL) {
         /* non-null valuestr means it's not RESET, so insert a new tuple */
         HeapTuple newtuple = NULL;
@@ -11446,12 +11448,12 @@ static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSe
         bool nulls[Natts_pg_db_role_setting];
         ListCell *head = NULL;
         ArrayType *a = NULL;
- 
+
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "", "");
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "", "");
- 
+
         values[Anum_pg_db_role_setting_setdatabase - 1] = ObjectIdGetDatum(databaseid);
         values[Anum_pg_db_role_setting_setrole - 1] = ObjectIdGetDatum(roleid);
         foreach(head, setstmt->args)
@@ -11463,7 +11465,7 @@ static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSe
         values[Anum_pg_db_role_setting_setconfig - 1] = PointerGetDatum(a);
         newtuple = heap_form_tuple(RelationGetDescr(rel), values, nulls);
         (void)simple_heap_insert(rel, newtuple);
- 
+
         /* Update indexes */
         CatalogUpdateIndexes(rel, newtuple);
     } else {
@@ -11474,21 +11476,21 @@ static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSe
         bool isnull = false;
         ArrayType *a = NULL;
         ListCell *head = NULL;
- 
+
         rc = memset_s(repl_val, sizeof(repl_val), 0, sizeof(repl_val));
         securec_check(rc, "", "");
         rc = memset_s(repl_null, sizeof(repl_null), 0, sizeof(repl_null));
         securec_check(rc, "", "");
         rc = memset_s(repl_repl, sizeof(repl_repl), 0, sizeof(repl_repl));
         securec_check(rc, "", "");
- 
+
         repl_repl[Anum_pg_db_role_setting_setconfig - 1] = true;
         repl_null[Anum_pg_db_role_setting_setconfig - 1] = false;
-        
+
         /* Extract old value of setconfig */
         Datum datum = heap_getattr(tuple, Anum_pg_db_role_setting_setconfig, RelationGetDescr(rel), &isnull);
         a = isnull ? NULL : DatumGetArrayTypeP(datum);
-        
+
         foreach (head, setstmt->args)
         {
             VariableSetStmt* vss = process_set_global_trans_args(head);
@@ -11498,18 +11500,18 @@ static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSe
         repl_val[Anum_pg_db_role_setting_setconfig - 1] = PointerGetDatum(a);
         newtuple = heap_modify_tuple(tuple, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
         simple_heap_update(rel, &tuple->t_self, newtuple);
- 
+
         /* Update indexes */
         CatalogUpdateIndexes(rel, newtuple);
     }
- 
+
     systable_endscan(scan);
 
     /* Close pg_db_role_setting, but keep lock till commit */
     heap_close(rel, NoLock);
     UnlockSharedObject(DatabaseRelationId, databaseid, 0, AccessShareLock);
 }
- 
+
 static VariableSetStmt* process_set_global_trans_args(ListCell* lcell)
 {
     DefElem *item = (DefElem *)lfirst(lcell);

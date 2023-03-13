@@ -263,8 +263,7 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
      */
     ExecAssignExprContext(estate, &state->ps);
 
-    state->ps.ps_TupFromTlist = false;
-
+    state->ps.ps_vec_TupFromTlist = false;
     /*
      * tuple table initialization
      */
@@ -273,9 +272,13 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
     /*
      * initialize child expressions
      */
-    state->ps.targetlist = (List*)ExecInitExpr((Expr*)node->plan.targetlist,
-                (PlanState*)state);
-    state->ps.qual = (List*)ExecInitExpr((Expr*)node->plan.qual, (PlanState*)state);
+    if (estate->es_is_flt_frame) {
+        state->ps.qual = (List*)ExecInitQualByFlatten(node->plan.qual, (PlanState*)state);
+    } else {
+        state->ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->plan.targetlist,
+                                                    (PlanState*)state);
+        state->ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->plan.qual, (PlanState*)state);
+    }
 
     /*
      * initialize child nodes
@@ -1107,6 +1110,7 @@ static List *GetCurrentArrayColArray(const FunctionCallInfo fcinfo,
     TupleTableSlot *slot = NULL;
     Var *variable = NULL;
     *isConstArrayList = false;
+    List *vars = NIL;
 
     ExprContext *econtext = (ExprContext *)fcinfo->swinfo.sw_econtext;
     ExprState   *exprstate = (ExprState *)fcinfo->swinfo.sw_exprstate;
@@ -1119,8 +1123,14 @@ static List *GetCurrentArrayColArray(const FunctionCallInfo fcinfo,
      * specified, so the eval-context's argument only have one argument with *Var*
      * node ported
      */
-    List *vars = pull_var_clause((Node*)exprstate->expr,
-                PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+    if (fcinfo->swinfo.sw_is_flt_frame) {
+        vars = pull_var_clause((Node*)fcinfo->swinfo.sw_exprstate,
+                                       PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+    } else {
+        vars = pull_var_clause((Node*)exprstate->expr,
+                                     PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+    }
+
 
     /* handle case where */
     if (vars == NIL) {

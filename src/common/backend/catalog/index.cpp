@@ -2834,7 +2834,7 @@ void FormIndexDatum(IndexInfo* indexInfo, TupleTableSlot* slot, EState* estate, 
 
     if (indexInfo->ii_Expressions != NIL && indexInfo->ii_ExpressionsState == NIL) {
         /* First time through, set up expression evaluation state */
-        indexInfo->ii_ExpressionsState = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Expressions, estate);
+        indexInfo->ii_ExpressionsState = ExecPrepareExprList(indexInfo->ii_Expressions, estate);
         /* Check caller has set up context correctly */
         Assert(GetPerTupleExprContext(estate)->ecxt_scantuple == slot);
     }
@@ -3843,7 +3843,12 @@ double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexIn
     econtext->ecxt_scantuple = slot;
 
     /* Set up execution state for predicate, if any. */
-    predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+    if (estate->es_is_flt_frame){
+        predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+    } else {
+        predicate = (List*)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
+    }
+    
 
     /*
      * Prepare for scan of the base relation.  In a normal index build, we use
@@ -4136,7 +4141,7 @@ double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexIn
          * predicate.
          */
         if (predicate != NIL) {
-            if (!ExecQual(predicate, econtext, false)) {
+            if (!ExecQual(predicate, econtext)) {
                 continue;
             }
         }
@@ -4240,7 +4245,11 @@ double IndexBuildUHeapScan(Relation heapRelation, Relation indexRelation, IndexI
     econtext->ecxt_scantuple = slot;
 
     /* Set up execution state for predicate, if any. */
-    predicate = (List *)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
+    if (estate->es_is_flt_frame){
+        predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+    } else {
+        predicate = (List*)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
+    }
 
     if (indexInfo->ii_Concurrent) {
         ereport(ERROR,
@@ -4283,7 +4292,7 @@ double IndexBuildUHeapScan(Relation heapRelation, Relation indexRelation, IndexI
          * predicate.
          */
         if (predicate != NIL) {
-            if (!ExecQual(predicate, econtext, false)) {
+            if (!ExecQual(predicate, econtext)) {
                 continue;
             }
         }
@@ -4493,7 +4502,11 @@ double IndexBuildVectorBatchScan(Relation heapRelation, Relation indexRelation, 
     econtext = GetPerTupleExprContext(estate);
     slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation));
     econtext->ecxt_scantuple = slot;
-    predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+    if (estate->es_is_flt_frame){
+        predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+    } else {
+        predicate = (List*)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
+    }
 
     List* vars = pull_var_clause((Node*)indexInfo->ii_Expressions, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
 
@@ -4528,7 +4541,7 @@ double IndexBuildVectorBatchScan(Relation heapRelation, Relation indexRelation, 
         (void)ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
 
         if (predicate != NIL) {
-            if (!ExecQual(predicate, econtext, false)) {
+            if (!ExecQual(predicate, econtext)) {
                 continue;
             }
         }
@@ -4613,7 +4626,11 @@ static void IndexCheckExclusion(Relation heapRelation, Relation indexRelation, I
     econtext->ecxt_scantuple = slot;
 
     /* Set up execution state for predicate, if any. */
-    predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+    if (estate->es_is_flt_frame){
+        predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+    } else {
+        predicate = (List*)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
+    }
 
     /*
      * Scan all live tuples in the base relation.
@@ -4637,7 +4654,7 @@ static void IndexCheckExclusion(Relation heapRelation, Relation indexRelation, I
          * In a partial index, ignore tuples that don't satisfy the predicate.
          */
         if (predicate != NIL) {
-            if (!ExecQual(predicate, econtext, false)) {
+            if (!ExecQual(predicate, econtext)) {
                 continue;
             }
         }
@@ -4889,7 +4906,11 @@ void validate_index_heapscan(
     econtext->ecxt_scantuple = slot;
 
     /* Set up execution state for predicate, if any. */
-    predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+    if (estate->es_is_flt_frame){
+        predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+    } else {
+        predicate = (List*)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
+    }
 
     /*
      * Prepare for scan of the base relation.  We need just those tuples
@@ -4991,7 +5012,7 @@ void validate_index_heapscan(
              * predicate.
              */
             if (predicate != NIL) {
-                if (!ExecQual(predicate, econtext, false)) {
+                if (!ExecQual(predicate, econtext)) {
                     continue;
                 }
             }
@@ -6347,7 +6368,11 @@ void ScanHeapInsertCBI(Relation parentRel, Relation heapRel, Relation idxRel, Oi
     slot = MakeSingleTupleTableSlot(RelationGetDescr(parentRel), false, parentRel->rd_tam_ops);
     econtext->ecxt_scantuple = slot;
     /* Set up execution state for predicate, if any. */
-    predicate = (List*)ExecPrepareExpr((Expr*)idxInfo->ii_Predicate, estate);
+    if (estate->es_is_flt_frame){
+        predicate = (List*)ExecPrepareQualByFlatten(idxInfo->ii_Predicate, estate);
+    } else {
+        predicate = (List*)ExecPrepareExpr((Expr *)idxInfo->ii_Predicate, estate);
+    }
 
     scan = scan_handler_tbl_beginscan(heapRel, SnapshotAny, 0, NULL, NULL, true);
     if (scan == NULL) {
@@ -6503,7 +6528,7 @@ void ScanHeapInsertCBI(Relation parentRel, Relation heapRel, Relation idxRel, Oi
          * predicate.
          */
         if (predicate != NIL) {
-            if (!ExecQual(predicate, econtext, false)) {
+            if (!ExecQual(predicate, econtext)) {
                 continue;
             }
         }

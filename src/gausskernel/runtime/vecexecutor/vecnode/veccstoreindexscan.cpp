@@ -45,6 +45,7 @@
 #include "vecexecutor/vecnodecstoreindexscan.h"
 /* remove it in future */
 #include "nodes/makefuncs.h"
+#include "executor/executor.h"
 
 extern bool CodeGenThreadObjectReady();
 extern bool CodeGenPassThreshold(double rows, int dn_num, int dop);
@@ -182,14 +183,14 @@ VectorBatch* ExecCstoreIndexScan(CStoreIndexScanState* state)
     /*
      * for function-returning-set.
      */
-    if (state->ps.ps_TupFromTlist) {
+    if (state->ps.ps_vec_TupFromTlist) {
         Assert(state->ps.ps_ProjInfo);
         pOutBatch = ExecVecProject(state->ps.ps_ProjInfo, true, &isDone);
         if (pOutBatch->m_rows > 0) {
             return pOutBatch;
         }
 
-        state->ps.ps_TupFromTlist = false;
+        state->ps.ps_vec_TupFromTlist = false;
     }
     state->ps.ps_ProjInfo->pi_exprContext->current_row = 0;
 
@@ -212,7 +213,7 @@ restart:
 
         pOutBatch = ApplyProjectionAndFilter(state, pScanBatch, &isDone);
         if (isDone != ExprEndResult) {
-            state->ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+            state->ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
         }
 
         if (BatchIsNull(pOutBatch))
@@ -229,7 +230,7 @@ restart:
         pOutBatch = ApplyProjectionAndFilter(state, pScanBatch, &isDone);
 
         if (isDone != ExprEndResult) {
-            state->ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+            state->ps.ps_vec_TupFromTlist = (isDone == ExprMultipleResult);
         }
 
         if (BatchIsNull(pOutBatch))
@@ -324,8 +325,11 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
     indexstate->ps.vectorized = true;
     indexstate->ps.type = T_CStoreIndexScanState;
     indexstate->index_only_scan = node->indexonly;
-    indexstate->m_deltaQual = (List*)ExecInitExpr((Expr*)node->indexqualorig, (PlanState*)&indexstate->ps);
-
+    if (estate->es_is_flt_frame) {
+        indexstate->m_deltaQual = (List*)ExecInitQualByFlatten(node->indexqualorig, (PlanState*)&indexstate->ps);
+    } else {
+        indexstate->m_deltaQual = (List*)ExecInitExprByRecursion((Expr*)node->indexqualorig, (PlanState*)&indexstate->ps);
+    }
     // If we are just doing EXPLAIN (ie, aren't going to run the plan), stop
     // here. This allows an index-advisor plugin to EXPLAIN a plan containing
     // references to nonexistent indexes.

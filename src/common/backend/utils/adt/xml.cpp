@@ -629,6 +629,120 @@ xmltype* xmlelement(XmlExprState* xmlExpr, ExprContext* econtext)
 #endif
 }
 
+xmltype* xmlelementByFlatten(XmlExpr *xexpr,
+		   Datum *named_argvalue, bool *named_argnull,
+		   Datum *argvalue, bool *argnull)
+{
+#ifdef USE_LIBXML
+    xmltype* result = NULL;
+    List* named_arg_strings = NIL;
+    List* arg_strings = NIL;
+    int i;
+    ListCell* arg = NULL;
+    ListCell* narg = NULL;
+    PgXmlErrorContext* xmlerrcxt = NULL;
+    volatile xmlBufferPtr buf = NULL;
+    volatile xmlTextWriterPtr writer = NULL;
+
+    /*
+	 * All arguments are already evaluated, and their values are passed in the
+	 * named_argvalue/named_argnull or argvalue/argnull arrays.  This avoids
+	 * issues if one of the arguments involves a call to some other function
+	 * or subsystem that wants to use libxml on its own terms.  We examine the
+	 * original XmlExpr to identify the numbers and types of the arguments.
+ 	 */
+    named_arg_strings = NIL;
+    i = 0;
+    foreach(arg, xexpr->named_args)
+    {
+        Expr *e = (Expr *) lfirst(arg);
+        char* str = NULL;
+
+        if (named_argnull[i])
+            str = NULL;
+        else
+            str = map_sql_value_to_xml_value(named_argvalue[i], exprType((Node *)e), false);
+        named_arg_strings = lappend(named_arg_strings, str);
+        i++;
+    }
+
+    i = 0;
+    arg_strings = NIL;
+    i = 0;
+    foreach(arg, xexpr->args)
+    {
+        Expr *e = (Expr *) lfirst(arg);
+        char* str = NULL;
+
+        /* here we can just forget NULL elements immediately */
+        if (!argnull[i])
+        {
+            str = map_sql_value_to_xml_value(argvalue[i], exprType((Node *)e), true);
+            arg_strings = lappend(arg_strings, str);
+        }
+        i++;
+    }
+
+    xmlerrcxt = pg_xml_init(PG_XML_STRICTNESS_ALL);
+
+    PG_TRY();
+    {
+        buf = xmlBufferCreate();
+        if (buf == NULL || xmlerrcxt->err_occurred)
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_OUT_OF_MEMORY, "could not allocate xmlBuffer");
+        writer = xmlNewTextWriterMemory(buf, 0);
+        if (writer == NULL || xmlerrcxt->err_occurred)
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_OUT_OF_MEMORY, "could not allocate xmlTextWriter");
+
+        xmlTextWriterStartElement(writer, (xmlChar*)xexpr->name);
+
+        forboth(arg, named_arg_strings, narg, xexpr->arg_names)
+        {
+            char* str = (char*)lfirst(arg);
+            char* argname = strVal(lfirst(narg));
+
+            if (str != NULL)
+                xmlTextWriterWriteAttribute(writer, (xmlChar*)argname, (xmlChar*)str);
+        }
+
+        foreach (arg, arg_strings) {
+            char* str = (char*)lfirst(arg);
+
+            xmlTextWriterWriteRaw(writer, (xmlChar*)str);
+        }
+
+        xmlTextWriterEndElement(writer);
+
+        /* we MUST do this now to flush data out to the buffer ... */
+        xmlFreeTextWriter(writer);
+        writer = NULL;
+
+        result = xmlBuffer_to_xmltype(buf);
+    }
+    PG_CATCH();
+    {
+        if (writer)
+            xmlFreeTextWriter(writer);
+        if (buf)
+            xmlBufferFree(buf);
+
+        pg_xml_done(xmlerrcxt, true);
+
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    xmlBufferFree(buf);
+
+    pg_xml_done(xmlerrcxt, false);
+
+    return result;
+#else
+    NO_XML_SUPPORT();
+    return NULL;
+#endif
+}
+
 xmltype* xmlparse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace)
 {
 #ifdef USE_LIBXML

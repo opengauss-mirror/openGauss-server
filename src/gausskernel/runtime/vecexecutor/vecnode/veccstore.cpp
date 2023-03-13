@@ -187,7 +187,7 @@ VectorBatch* ApplyProjectionAndFilter(CStoreScanState* node, VectorBatch* p_scan
 
     VECCSTORE_SCAN_TRACE_START(node, CSTORE_PROJECT);
 
-    qual = node->ps.qual;
+    qual = (List*)node->ps.qual;
     econtext = node->ps.ps_ExprContext;
     p_out_batch = node->m_pCurrentBatch;
     simple_map = node->m_fSimpleMap;
@@ -332,14 +332,14 @@ VectorBatch* ExecCStoreScan(CStoreScanState* node)
     /*
      * for function-returning-set.
      */
-    if (node->ps.ps_TupFromTlist) {
+    if (node->ps.ps_vec_TupFromTlist) {
         Assert(node->ps.ps_ProjInfo);
         p_out_batch = ExecVecProject(node->ps.ps_ProjInfo, true, &done);
         if (p_out_batch->m_rows > 0) {
             return p_out_batch;
         }
 
-        node->ps.ps_TupFromTlist = false;
+        node->ps.ps_vec_TupFromTlist = false;
     }
 
 restart:
@@ -374,7 +374,7 @@ restart:
     p_out_batch = ApplyProjectionAndFilter(node, p_scan_batch, &done);
 
     if (done != ExprEndResult) {
-        node->ps.ps_TupFromTlist = (done == ExprMultipleResult);
+        node->ps.ps_vec_TupFromTlist = (done == ExprMultipleResult);
     }
 
     /* Response to the stop query flag. */
@@ -656,8 +656,8 @@ CStoreScanState* ExecInitCStoreScan(
     scan_stat->ps.targetlist = (List*)ExecInitVecExpr((Expr*)node->plan.targetlist, (PlanState*)scan_stat);
 
     if (node->tablesample) {
-        scan_stat->sampleScanInfo.args = (List*)ExecInitExpr((Expr*)tsc->args, (PlanState*)scan_stat);
-        scan_stat->sampleScanInfo.repeatable = ExecInitExpr(tsc->repeatable, (PlanState*)scan_stat);
+        scan_stat->sampleScanInfo.args = (List*)ExecInitExprByRecursion((Expr*)tsc->args, (PlanState*)scan_stat);
+        scan_stat->sampleScanInfo.repeatable = ExecInitExprByRecursion(tsc->repeatable, (PlanState*)scan_stat);
 
         scan_stat->sampleScanInfo.sampleType = tsc->sampleType;
 
@@ -679,7 +679,7 @@ CStoreScanState* ExecInitCStoreScan(
      * initialize scan relation
      */
     InitCStoreRelation(scan_stat, estate, idx_flag, parent_heap_rel);
-    scan_stat->ps.ps_TupFromTlist = false;
+    scan_stat->ps.ps_vec_TupFromTlist = false;
 
 #ifdef ENABLE_LLVM_COMPILE
     /*
@@ -702,7 +702,7 @@ CStoreScanState* ExecInitCStoreScan(
             CodeGenThreadObjectReady() &&
             CodeGenPassThreshold(((Plan*)node)->plan_rows, estate->es_plannedstmt->num_nodes, ((Plan*)node)->dop);
         if (consider_codegen) {
-            jitted_vecqual = dorado::VecExprCodeGen::QualCodeGen(scan_stat->ps.qual, (PlanState*)scan_stat);
+            jitted_vecqual = dorado::VecExprCodeGen::QualCodeGen((List*)scan_stat->ps.qual, (PlanState*)scan_stat);
             if (jitted_vecqual != NULL)
                 llvm_code_gen->addFunctionToMCJit(jitted_vecqual, reinterpret_cast<void**>(&(scan_stat->jitted_vecqual)));
         }

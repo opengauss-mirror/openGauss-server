@@ -289,8 +289,8 @@ VecLimitState* ExecInitVecLimit(VecLimit* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    limit_state->limitOffset = ExecInitExpr((Expr*)node->limitOffset, (PlanState*)limit_state);
-    limit_state->limitCount = ExecInitExpr((Expr*)node->limitCount, (PlanState*)limit_state);
+    limit_state->limitOffset = ExecInitExprByRecursion((Expr*)node->limitOffset, (PlanState*)limit_state);
+    limit_state->limitCount = ExecInitExprByRecursion((Expr*)node->limitCount, (PlanState*)limit_state);
 
     /*
      * Tuple table initialization (XXX not actually used...)

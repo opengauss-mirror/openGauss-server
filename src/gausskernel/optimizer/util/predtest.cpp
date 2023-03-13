@@ -1372,7 +1372,7 @@ static bool btree_predicate_proof(const Expr* predicate, const Node* clause, boo
     test_exprstate = ExecInitExpr(test_expr, NULL);
 
     /* And execute it. */
-    test_result = ExecEvalExprSwitchContext(test_exprstate, GetPerTupleExprContext(estate), &isNull, NULL);
+    test_result = ExecEvalExprSwitchContext(test_exprstate, GetPerTupleExprContext(estate), &isNull);
 
     /* Get back to outer memory context */
     (void)MemoryContextSwitchTo(oldcontext);

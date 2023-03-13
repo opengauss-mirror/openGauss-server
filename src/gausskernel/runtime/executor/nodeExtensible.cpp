@@ -116,12 +116,14 @@ ExtensiblePlanState* ExecInitExtensiblePlan(ExtensiblePlan* eplan, EState* estat
     /* create expression context for node */
     ExecAssignExprContext(estate, &extensionPlanState->ss.ps);
 
-    extensionPlanState->ss.ps.ps_TupFromTlist = false;
-
     /* initialize child expressions */
-    extensionPlanState->ss.ps.targetlist =
-        (List*)ExecInitExpr((Expr*)eplan->scan.plan.targetlist, (PlanState*)extensionPlanState);
-    extensionPlanState->ss.ps.qual = (List*)ExecInitExpr((Expr*)eplan->scan.plan.qual, (PlanState*)extensionPlanState);
+    if (estate->es_is_flt_frame) {
+        extensionPlanState->ss.ps.qual = (List*)ExecInitQualByFlatten(eplan->scan.plan.qual, (PlanState*)extensionPlanState);
+    } else {
+        extensionPlanState->ss.ps.targetlist =
+            (List*)ExecInitExpr((Expr*)eplan->scan.plan.targetlist, (PlanState*)extensionPlanState);
+    extensionPlanState->ss.ps.qual = (List*)ExecInitExprByRecursion((Expr*)eplan->scan.plan.qual, (PlanState*)extensionPlanState);
+    }
 
     /* tuple table initialization */
     ExecInitScanTupleSlot(estate, &extensionPlanState->ss);

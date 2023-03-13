@@ -67,6 +67,7 @@
 #include "securec_check.h"
 #include "commands/tablespace.h"
 #include "workload/workload.h"
+#include "executor/executor.h"
 
 #ifdef PGXC
     #include "pgxc/pgxc.h"
@@ -4481,7 +4482,7 @@ void ScanDeltaStore(CStoreScanState* node, VectorBatch* outBatch, List* indexqua
             /* If there is index qual, use it to filter the delta rows before */
             if (hasIndexFilter) {
                 econtext->ecxt_scantuple = slot;
-                if (!ExecQual(indexqual, econtext, false)) {
+                if (!ExecQual(indexqual, econtext)) {
                     (void)ExecClearTuple(slot);
                     continue;
                 }

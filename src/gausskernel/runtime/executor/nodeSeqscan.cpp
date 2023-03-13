@@ -448,14 +448,22 @@ RangeScanInRedis reset_scan_qual(Relation curr_heap_rel, ScanState* node, bool i
     if (u_sess->attr.attr_sql.enable_cluster_resize && RelationInRedistribute(curr_heap_rel)) {
         List* new_qual = eval_ctid_funcs(curr_heap_rel, node->ps.plan->qual, &node->rangeScanInRedis);
         if (!node->scanBatchMode) {
-            node->ps.qual = (List*)ExecInitExpr((Expr*)new_qual, (PlanState*)&node->ps);
+            if (node->ps.state->es_is_flt_frame) {
+                node->ps.qual = (List*)ExecInitQualByFlatten(new_qual, (PlanState*)&node->ps);
+            } else {
+                node->ps.qual = (List*)ExecInitExprByRecursion((Expr*)new_qual, (PlanState*)&node->ps);
+            }
         } else {
             node->ps.qual = (List*)ExecInitVecExpr((Expr*)new_qual, (PlanState*)&node->ps);
         }
         node->ps.qual_is_inited = true;
     } else if (!node->ps.qual_is_inited) {
         if (!node->scanBatchMode) {
-            node->ps.qual = (List*)ExecInitExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
+            if (node->ps.state->es_is_flt_frame) {
+                node->ps.qual = (List*)ExecInitQualByFlatten(node->ps.plan->qual, (PlanState*)&node->ps);
+            } else {
+                node->ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
+            }
         } else {
             node->ps.qual = (List*)ExecInitVecExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
         }
@@ -675,7 +683,11 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
             current_part_rel = partitionGetRelation(current_relation, currentPart);
             node->ss_currentPartition = current_part_rel;
             if (((Scan *)node->ps.plan)->partition_iterator_elimination) {
-                node->ps.qual = (List*)ExecInitExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
+                if (node->ps.state->es_is_flt_frame) {
+                    node->ps.qual = (List*)ExecInitQualByFlatten(node->ps.plan->qual, (PlanState*)&node->ps);
+                } else {
+                    node->ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
+                }
             }
 
             /* add qual for redis */
@@ -684,7 +696,11 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
             current_scan_desc = BeginScanRelation(node, current_part_rel, relfrozenxid64, eflags);
         } else {
             node->ss_currentPartition = NULL;
-            node->ps.qual = (List*)ExecInitExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
+            if (node->ps.state->es_is_flt_frame) {
+                node->ps.qual = (List*)ExecInitQualByFlatten(node->ps.plan->qual, (PlanState*)&node->ps);
+            } else {
+                node->ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
+            }
         }
     }
     node->ss_currentRelation = current_relation;
@@ -749,7 +765,7 @@ static SeqScanState *ExecInitSeqScanBatchMode(SeqScan *node, SeqScanState* scans
          * 4. the relaseion is not a hash bucket relation.
          */
         if (node->tablesample ||
-            !CheckColumnsSuportedByBatchMode(scanstate->ps.targetlist, node->plan.qual) ||
+            !CheckColumnsSuportedByBatchMode(scanstate->ps.plan->targetlist, node->plan.qual) ||
             currentRelation->rd_id < FirstNormalObjectId ||
             RELATION_OWN_BUCKET(currentRelation)) {
             node->scanBatchMode = false;
@@ -994,10 +1010,12 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    scanstate->ps.targetlist = (List*)ExecInitExpr((Expr*)node->plan.targetlist, (PlanState*)scanstate);
+    if(!estate->es_is_flt_frame) {
+        scanstate->ps.targetlist = (List*)ExecInitExpr((Expr*)node->plan.targetlist, (PlanState*)scanstate);
+    }
 
     if (node->tablesample) {
-        scanstate->sampleScanInfo.args = (List*)ExecInitExpr((Expr*)tsc->args, (PlanState*)scanstate);
+        scanstate->sampleScanInfo.args = ExecInitExprList(tsc->args, (PlanState*)scanstate);
         scanstate->sampleScanInfo.repeatable = ExecInitExpr(tsc->repeatable, (PlanState*)scanstate);
 
         scanstate->sampleScanInfo.sampleType = tsc->sampleType;
@@ -1028,7 +1046,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
         scanstate->ps.stubType = PST_Scan;
     }
 
-    scanstate->ps.ps_TupFromTlist = false;
+    scanstate->ps.ps_vec_TupFromTlist = false;
 
     /*
      * Initialize result tuple type and projection info.

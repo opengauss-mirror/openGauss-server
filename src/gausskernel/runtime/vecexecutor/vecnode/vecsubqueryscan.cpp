@@ -133,7 +133,7 @@ VecSubqueryScanState* ExecInitVecSubqueryScan(VecSubqueryScan* node, EState* est
      */
     vecsubquerystate->subplan = ExecInitNode(node->subplan, estate, eflags);
 
-    vecsubquerystate->ss.ps.ps_TupFromTlist = false;
+    vecsubquerystate->ss.ps.ps_vec_TupFromTlist = false;
 
     /*
      * Initialize scan tuple type (needed by ExecAssignScanProjectionInfo)

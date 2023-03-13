@@ -102,7 +102,11 @@ TrainModelState* ExecInitTrainModel(TrainModel* pnode, EState* estate, int eflag
     
     // initialize child expressions
     ExecAssignExprContext(estate, &pstate->ss.ps);
-    pstate->ss.ps.targetlist = (List *)ExecInitExpr((Expr *)pnode->plan.targetlist, (PlanState *)pstate);
+    if (!estate->es_is_flt_frame)
+    {
+        pstate->ss.ps.targetlist = (List *)ExecInitExprByRecursion((Expr *)pnode->plan.targetlist, (PlanState *)pstate);
+    }
+    
     
     // initialize outer plan
     PlanState *outer_plan_state = ExecInitNode(outer_plan, estate, eflags);
@@ -112,8 +116,8 @@ TrainModelState* ExecInitTrainModel(TrainModel* pnode, EState* estate, int eflag
     ExecAssignScanTypeFromOuterPlan(&pstate->ss); // input tuples
     ExecAssignResultTypeFromTL(&pstate->ss.ps);  // result tuple
     ExecAssignProjectionInfo(&pstate->ss.ps, NULL);
-    pstate->ss.ps.ps_TupFromTlist = false;
-    
+    pstate->ss.ps.ps_vec_TupFromTlist = false;
+
     // Input tuple initialization
     TupleDesc tupdesc = ExecGetResultType(outer_plan_state);
     pstate->tuple.ncolumns = tupdesc->natts;
@@ -137,7 +141,7 @@ TrainModelState* ExecInitTrainModel(TrainModel* pnode, EState* estate, int eflag
     BlessTupleDesc(tup_desc_out);
     ExecAssignResultType(&pstate->ss.ps, tup_desc_out);
     ExecAssignProjectionInfo(&pstate->ss.ps, nullptr);
-    pstate->ss.ps.ps_TupFromTlist = false;
+    pstate->ss.ps.ps_vec_TupFromTlist = false;
     pstate->ss.ps.ps_ProjInfo = nullptr;
     
     return pstate;
