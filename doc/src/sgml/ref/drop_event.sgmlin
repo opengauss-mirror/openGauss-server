@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_EVENT">
+<refmeta>
+<refentrytitle>DROP EVENT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP EVENT</refname>
+<refpurpose>remove a event</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP EVENT [IF EXISTS] event_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

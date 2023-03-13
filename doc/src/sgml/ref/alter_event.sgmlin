@@ -1,0 +1,24 @@
+<refentry id="SQL-ALTER_EVENT">
+<refmeta>
+<refentrytitle>ALTER EVENT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER EVENT</refname>
+<refpurpose>change a event</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER
+    [DEFINER = user]
+    EVENT event_name
+    [ON SCHEDULE schedule]
+    [ON COMPLETION [NOT] PRESERVE]
+    [RENAME TO new_event_name]
+    [ENABLE | DISABLE | DISABLE ON SLAVE]
+    [COMMENT 'string']
+    [DO event_body];
+</synopsis>
+</refsynopsisdiv>
+</refentry>
