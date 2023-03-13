@@ -22,10 +22,6 @@ ALTER TABLE test_at_modify_syntax MODIFY b int INVISIBLE; -- ERROR
 ERROR:  syntax error at or near "INVISIBLE"
 LINE 1: ALTER TABLE test_at_modify_syntax MODIFY b int INVISIBLE;
                                                        ^
-ALTER TABLE test_at_modify_syntax MODIFY b int COMMENT 'string'; -- ERROR
-ERROR:  syntax error at or near "COMMENT"
-LINE 1: ALTER TABLE test_at_modify_syntax MODIFY b int COMMENT 'stri...
-                                                       ^
 ALTER TABLE test_at_modify_syntax MODIFY b int CHECK (b < 100) NOT ENFORCED; -- ERROR
 ERROR:  syntax error at or near "ENFORCED"
 LINE 1: ..._at_modify_syntax MODIFY b int CHECK (b < 100) NOT ENFORCED;
@@ -105,6 +101,114 @@ Has OIDs: no
 Options: orientation=row, compression=no
 
 DROP TABLE test_at_modify_syntax;
+-- test modify syntax with on update and comment
+CREATE TABLE at_change_comment(col1 timestamp not null comment 'last changed time' default current_timestamp); -- ERROR, comment clause must be after column constraints
+ERROR:  syntax error at or near "default"
+LINE 1: ...l1 timestamp not null comment 'last changed time' default cu...
+                                                             ^
+create table at_modify_comment(col1 timestamp not null default current_timestamp comment 'last changed time');
+\d+ at_modify_comment
+                                         Table "atbdb_schema.at_modify_comment"
+ Column |            Type             |             Modifiers              | Storage | Stats target |    Description    
+--------+-----------------------------+------------------------------------+---------+--------------+-------------------
+ col1   | timestamp without time zone | not null default pg_systimestamp() | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_modify_comment MODIFY col1 comment 'last changed time'; -- ERROR
+ERROR:  syntax error at or near "'last changed time'"
+LINE 1: ALTER TABLE at_modify_comment MODIFY col1 comment 'last chan...
+                                                          ^
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 comment 'last changed time'; -- ERROR
+ERROR:  syntax error at or near "'last changed time'"
+LINE 1: ...ABLE at_modify_comment MODIFY COLUMN col1 comment 'last chan...
+                                                             ^
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp not null comment 'last changed time' default current_timestamp; -- ERROR, comment clause must be after column constraints
+ERROR:  syntax error at or near "default"
+LINE 1: ...l1 timestamp not null comment 'last changed time' default cu...
+                                                             ^
+ALTER TABLE at_modify_comment MODIFY column col1 timestamp not null default current_timestamp on update current_timestamp comment 'last changed time';
+\d+ at_modify_comment
+                                                       Table "atbdb_schema.at_modify_comment"
+ Column |            Type             |                           Modifiers                            | Storage | Stats target |    Description    
+--------+-----------------------------+----------------------------------------------------------------+---------+--------------+-------------------
+ col1   | timestamp without time zone | not null default pg_systimestamp() on update pg_systimestamp() | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_modify_comment MODIFY col1 timestamp on update current_timestamp;
+\d+ at_modify_comment
+                                  Table "atbdb_schema.at_modify_comment"
+ Column |            Type             |          Modifiers          | Storage | Stats target | Description 
+--------+-----------------------------+-----------------------------+---------+--------------+-------------
+ col1   | timestamp without time zone | on update pg_systimestamp() | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_modify_comment MODIFY col1 timestamp comment 'last changed time';
+\d+ at_modify_comment
+                            Table "atbdb_schema.at_modify_comment"
+ Column |            Type             | Modifiers | Storage | Stats target |    Description    
+--------+-----------------------------+-----------+---------+--------------+-------------------
+ col1   | timestamp without time zone |           | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp on update current_timestamp;
+\d+ at_modify_comment
+                                  Table "atbdb_schema.at_modify_comment"
+ Column |            Type             |          Modifiers          | Storage | Stats target | Description 
+--------+-----------------------------+-----------------------------+---------+--------------+-------------
+ col1   | timestamp without time zone | on update pg_systimestamp() | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp comment 'last changed time';
+\d+ at_modify_comment
+                            Table "atbdb_schema.at_modify_comment"
+ Column |            Type             | Modifiers | Storage | Stats target |    Description    
+--------+-----------------------------+-----------+---------+--------------+-------------------
+ col1   | timestamp without time zone |           | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_modify_comment ADD COLUMN id1 int FIRST, MODIFY COLUMN col1 timestamp on update current_timestamp;
+\d+ at_modify_comment
+                                  Table "atbdb_schema.at_modify_comment"
+ Column |            Type             |          Modifiers          | Storage | Stats target | Description 
+--------+-----------------------------+-----------------------------+---------+--------------+-------------
+ id1    | integer                     |                             | plain   |              | 
+ col1   | timestamp without time zone | on update pg_systimestamp() | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp AFTER id1 comment 'last changed time'; -- ERROR
+ERROR:  syntax error at or near "comment"
+LINE 1: ...fy_comment MODIFY COLUMN col1 timestamp AFTER id1 comment 'l...
+                                                             ^
+ALTER TABLE at_modify_comment ADD COLUMN id2 int AFTER id1, MODIFY COLUMN col1 timestamp comment 'last changed time' AFTER id1;
+\d+ at_modify_comment
+                            Table "atbdb_schema.at_modify_comment"
+ Column |            Type             | Modifiers | Storage | Stats target |    Description    
+--------+-----------------------------+-----------+---------+--------------+-------------------
+ id1    | integer                     |           | plain   |              | 
+ id2    | integer                     |           | plain   |              | 
+ col1   | timestamp without time zone |           | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp comment 'last changed time1' comment 'last changed time2' comment 'last changed time3';
+\d+ at_modify_comment
+                             Table "atbdb_schema.at_modify_comment"
+ Column |            Type             | Modifiers | Storage | Stats target |    Description     
+--------+-----------------------------+-----------+---------+--------------+--------------------
+ id1    | integer                     |           | plain   |              | 
+ id2    | integer                     |           | plain   |              | 
+ col1   | timestamp without time zone |           | plain   |              | last changed time3
+Has OIDs: no
+Options: orientation=row, compression=no
+
+DROP TABLE IF EXISTS at_modify_comment;
 -- test modify column without data
 CREATE TABLE test_at_modify(
     a int,
@@ -1157,10 +1261,6 @@ ALTER TABLE test_at_change_syntax CHANGE b b1 int INVISIBLE; -- ERROR
 ERROR:  syntax error at or near "INVISIBLE"
 LINE 1: ALTER TABLE test_at_change_syntax CHANGE b b1 int INVISIBLE;
                                                           ^
-ALTER TABLE test_at_change_syntax CHANGE b b1 int COMMENT 'string'; -- ERROR
-ERROR:  syntax error at or near "COMMENT"
-LINE 1: ALTER TABLE test_at_change_syntax CHANGE b b1 int COMMENT 's...
-                                                          ^
 ALTER TABLE test_at_change_syntax CHANGE b b1 int CHECK (b < 100) NOT ENFORCED; -- ERROR
 ERROR:  syntax error at or near "ENFORCED"
 LINE 1: ..._change_syntax CHANGE b b1 int CHECK (b < 100) NOT ENFORCED;
@@ -1224,6 +1324,102 @@ Has OIDs: no
 Options: orientation=row, compression=no
 
 DROP TABLE test_at_change_syntax;
+-- test modify syntax with on update and comment
+CREATE TABLE at_change_comment(col1 timestamp not null default current_timestamp comment 'last changed time');
+\d+ at_change_comment
+                                         Table "atbdb_schema.at_change_comment"
+ Column |            Type             |             Modifiers              | Storage | Stats target |    Description    
+--------+-----------------------------+------------------------------------+---------+--------------+-------------------
+ col1   | timestamp without time zone | not null default pg_systimestamp() | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_change_comment CHANGE COLUMN col1 col2 timestamp not null comment 'last changed time' default current_timestamp on update current_timestamp; -- ERROR, comment clause must be after column constraints
+ERROR:  syntax error at or near "default"
+LINE 1: ...l2 timestamp not null comment 'last changed time' default cu...
+                                                             ^
+ALTER TABLE at_change_comment CHANGE COLUMN col1 col2 timestamp not null default current_timestamp on update current_timestamp comment 'last changed time';
+\d+ at_change_comment
+                                                       Table "atbdb_schema.at_change_comment"
+ Column |            Type             |                           Modifiers                            | Storage | Stats target |    Description    
+--------+-----------------------------+----------------------------------------------------------------+---------+--------------+-------------------
+ col2   | timestamp without time zone | not null default pg_systimestamp() on update pg_systimestamp() | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_change_comment CHANGE col2 col1 timestamp on update current_timestamp;
+\d+ at_change_comment
+                                  Table "atbdb_schema.at_change_comment"
+ Column |            Type             |          Modifiers          | Storage | Stats target | Description 
+--------+-----------------------------+-----------------------------+---------+--------------+-------------
+ col1   | timestamp without time zone | on update pg_systimestamp() | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_change_comment CHANGE col1 col2 timestamp comment 'last changed time';
+\d+ at_change_comment
+                            Table "atbdb_schema.at_change_comment"
+ Column |            Type             | Modifiers | Storage | Stats target |    Description    
+--------+-----------------------------+-----------+---------+--------------+-------------------
+ col2   | timestamp without time zone |           | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_change_comment CHANGE COLUMN col2 col1 timestamp on update current_timestamp;
+\d+ at_change_comment
+                                  Table "atbdb_schema.at_change_comment"
+ Column |            Type             |          Modifiers          | Storage | Stats target | Description 
+--------+-----------------------------+-----------------------------+---------+--------------+-------------
+ col1   | timestamp without time zone | on update pg_systimestamp() | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_change_comment CHANGE COLUMN col1 col2 timestamp comment 'last changed time';
+\d+ at_change_comment
+                            Table "atbdb_schema.at_change_comment"
+ Column |            Type             | Modifiers | Storage | Stats target |    Description    
+--------+-----------------------------+-----------+---------+--------------+-------------------
+ col2   | timestamp without time zone |           | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_change_comment ADD COLUMN id1 int FIRST, CHANGE COLUMN col2 col1 timestamp on update current_timestamp;
+\d+ at_change_comment
+                                  Table "atbdb_schema.at_change_comment"
+ Column |            Type             |          Modifiers          | Storage | Stats target | Description 
+--------+-----------------------------+-----------------------------+---------+--------------+-------------
+ id1    | integer                     |                             | plain   |              | 
+ col1   | timestamp without time zone | on update pg_systimestamp() | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_change_comment CHANGE COLUMN col1 col2 timestamp AFTER id1 comment 'last changed time'; -- ERROR
+ERROR:  syntax error at or near "comment"
+LINE 1: ...mment CHANGE COLUMN col1 col2 timestamp AFTER id1 comment 'l...
+                                                             ^
+ALTER TABLE at_change_comment ADD COLUMN id2 int AFTER id1, CHANGE COLUMN col1 col2 timestamp comment 'last changed time' AFTER id1;
+\d+ at_change_comment
+                            Table "atbdb_schema.at_change_comment"
+ Column |            Type             | Modifiers | Storage | Stats target |    Description    
+--------+-----------------------------+-----------+---------+--------------+-------------------
+ id1    | integer                     |           | plain   |              | 
+ id2    | integer                     |           | plain   |              | 
+ col2   | timestamp without time zone |           | plain   |              | last changed time
+Has OIDs: no
+Options: orientation=row, compression=no
+
+ALTER TABLE at_change_comment CHANGE COLUMN col2 col1 timestamp comment 'last changed time1' comment 'last changed time2' comment 'last changed time3';
+\d+ at_change_comment
+                             Table "atbdb_schema.at_change_comment"
+ Column |            Type             | Modifiers | Storage | Stats target |    Description     
+--------+-----------------------------+-----------+---------+--------------+--------------------
+ id1    | integer                     |           | plain   |              | 
+ id2    | integer                     |           | plain   |              | 
+ col1   | timestamp without time zone |           | plain   |              | last changed time3
+Has OIDs: no
+Options: orientation=row, compression=no
+
+DROP TABLE IF EXISTS at_change_comment;
 -- test change column without data
 CREATE TABLE test_at_change(
     a int,
