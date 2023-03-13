@@ -53,6 +53,7 @@ typedef struct logicalLog {
     int nsubxacts;
     TransactionId *subXids;
     TimestampTz commitTime;
+    RepOriginId origin_id;
     HTAB* toast_hash;
     ParallelReorderBufferTXN *txn;
     logicalLog *freeNext;
@@ -148,6 +149,7 @@ typedef struct ParallelReorderBufferChange {
     TransactionId * subXids;
     dlist_node node;
     TimestampTz commitTime;
+    RepOriginId origin_id;
 } ParallelReorderBufferChange;
 
 typedef struct ParallelReorderBufferTXN {
