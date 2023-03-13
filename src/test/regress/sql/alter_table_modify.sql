@@ -18,7 +18,6 @@ CREATE TABLE test_at_modify_syntax(
     b int NOT NULL
 );
 ALTER TABLE test_at_modify_syntax MODIFY b int INVISIBLE; -- ERROR
-ALTER TABLE test_at_modify_syntax MODIFY b int COMMENT 'string'; -- ERROR
 ALTER TABLE test_at_modify_syntax MODIFY b int CHECK (b < 100) NOT ENFORCED; -- ERROR
 ALTER TABLE test_at_modify_syntax MODIFY b int GENERATED ALWAYS AS (a+1) VIRTUAL; -- ERROR
 ALTER TABLE test_at_modify_syntax MODIFY b int KEY; -- ERROR
@@ -37,6 +36,32 @@ ALTER TABLE test_at_modify_syntax MODIFY b int UNIQUE KEY;
 ALTER TABLE test_at_modify_syntax MODIFY COLUMN b int PRIMARY KEY;
 \d+ test_at_modify_syntax;
 DROP TABLE test_at_modify_syntax;
+
+-- test modify syntax with on update and comment
+CREATE TABLE at_change_comment(col1 timestamp not null comment 'last changed time' default current_timestamp); -- ERROR, comment clause must be after column constraints
+create table at_modify_comment(col1 timestamp not null default current_timestamp comment 'last changed time');
+\d+ at_modify_comment
+ALTER TABLE at_modify_comment MODIFY col1 comment 'last changed time'; -- ERROR
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 comment 'last changed time'; -- ERROR
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp not null comment 'last changed time' default current_timestamp; -- ERROR, comment clause must be after column constraints
+ALTER TABLE at_modify_comment MODIFY column col1 timestamp not null default current_timestamp on update current_timestamp comment 'last changed time';
+\d+ at_modify_comment
+ALTER TABLE at_modify_comment MODIFY col1 timestamp on update current_timestamp;
+\d+ at_modify_comment
+ALTER TABLE at_modify_comment MODIFY col1 timestamp comment 'last changed time';
+\d+ at_modify_comment
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp on update current_timestamp;
+\d+ at_modify_comment
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp comment 'last changed time';
+\d+ at_modify_comment
+ALTER TABLE at_modify_comment ADD COLUMN id1 int FIRST, MODIFY COLUMN col1 timestamp on update current_timestamp;
+\d+ at_modify_comment
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp AFTER id1 comment 'last changed time'; -- ERROR
+ALTER TABLE at_modify_comment ADD COLUMN id2 int AFTER id1, MODIFY COLUMN col1 timestamp comment 'last changed time' AFTER id1;
+\d+ at_modify_comment
+ALTER TABLE at_modify_comment MODIFY COLUMN col1 timestamp comment 'last changed time1' comment 'last changed time2' comment 'last changed time3';
+\d+ at_modify_comment
+DROP TABLE IF EXISTS at_modify_comment;
 
 -- test modify column without data
 CREATE TABLE test_at_modify(
@@ -461,7 +486,6 @@ CREATE TABLE test_at_change_syntax(
     b int NOT NULL
 );
 ALTER TABLE test_at_change_syntax CHANGE b b1 int INVISIBLE; -- ERROR
-ALTER TABLE test_at_change_syntax CHANGE b b1 int COMMENT 'string'; -- ERROR
 ALTER TABLE test_at_change_syntax CHANGE b b1 int CHECK (b < 100) NOT ENFORCED; -- ERROR
 ALTER TABLE test_at_change_syntax CHANGE b b1 int GENERATED ALWAYS AS (a+1) VIRTUAL; -- ERROR
 ALTER TABLE test_at_change_syntax CHANGE b b1 int KEY; -- ERROR
@@ -475,6 +499,29 @@ ALTER TABLE test_at_change_syntax CHANGE COLUMN b1 b int PRIMARY KEY;
 ALTER TABLE test_at_change_syntax CHANGE COLUMN b b123456789012345678901234567890123456789012345678901234567890123 int UNIQUE KEY;
 \d+ test_at_change_syntax;
 DROP TABLE test_at_change_syntax;
+
+-- test modify syntax with on update and comment
+CREATE TABLE at_change_comment(col1 timestamp not null default current_timestamp comment 'last changed time');
+\d+ at_change_comment
+ALTER TABLE at_change_comment CHANGE COLUMN col1 col2 timestamp not null comment 'last changed time' default current_timestamp on update current_timestamp; -- ERROR, comment clause must be after column constraints
+ALTER TABLE at_change_comment CHANGE COLUMN col1 col2 timestamp not null default current_timestamp on update current_timestamp comment 'last changed time';
+\d+ at_change_comment
+ALTER TABLE at_change_comment CHANGE col2 col1 timestamp on update current_timestamp;
+\d+ at_change_comment
+ALTER TABLE at_change_comment CHANGE col1 col2 timestamp comment 'last changed time';
+\d+ at_change_comment
+ALTER TABLE at_change_comment CHANGE COLUMN col2 col1 timestamp on update current_timestamp;
+\d+ at_change_comment
+ALTER TABLE at_change_comment CHANGE COLUMN col1 col2 timestamp comment 'last changed time';
+\d+ at_change_comment
+ALTER TABLE at_change_comment ADD COLUMN id1 int FIRST, CHANGE COLUMN col2 col1 timestamp on update current_timestamp;
+\d+ at_change_comment
+ALTER TABLE at_change_comment CHANGE COLUMN col1 col2 timestamp AFTER id1 comment 'last changed time'; -- ERROR
+ALTER TABLE at_change_comment ADD COLUMN id2 int AFTER id1, CHANGE COLUMN col1 col2 timestamp comment 'last changed time' AFTER id1;
+\d+ at_change_comment
+ALTER TABLE at_change_comment CHANGE COLUMN col2 col1 timestamp comment 'last changed time1' comment 'last changed time2' comment 'last changed time3';
+\d+ at_change_comment
+DROP TABLE IF EXISTS at_change_comment;
 
 -- test change column without data
 CREATE TABLE test_at_change(

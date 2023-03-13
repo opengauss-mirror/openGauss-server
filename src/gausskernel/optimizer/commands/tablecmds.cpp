@@ -9031,12 +9031,8 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             break;
 #endif
         case AT_COMMENTS:
-            /* Modify Column comment or table comment */
-            if (cmd->def != NULL && IsA(cmd->def, ColumnDef)) {
-                ATCreateColumComments(rel->rd_id, (ColumnDef*)cmd->def);
-            } else {
-                CreateComments(rel->rd_id, RelationRelationId, 0, cmd->name);
-            }
+            /* alter table comment */
+            CreateComments(rel->rd_id, RelationRelationId, 0, cmd->name);
             break;
         default: /* oops */
             ereport(ERROR,
@@ -31948,6 +31944,8 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
         }
     }
 
+    /* drop comment on column */
+    DeleteComments(RelationGetRelid(rel), RelationRelationId, attnum);
     /* Working with objects that depend on the column being modified. */
     ATHandleObjectsDependOnModifiedColumn(tab, rel, pg_attr, attnum, type_changed);
     /* Primary key column must be not null. */
