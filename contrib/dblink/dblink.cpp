@@ -106,7 +106,7 @@ static bool UseODBCLinker(char* connstr);
 #define REMOTE_CONN_HASH (get_session_context()->remoteConnHash)
 /* initial number of connection hashes */
 #define NUMCONN 16
-#define NAX_ERR_MSG_LEN 1000
+#define MAX_ERR_MSG_LEN 1000
 #define MAX_BUF_LEN 100000
 #define MAX_DRIVERNAME_LEN 50
 #define DBLINK_NOTIFY_COLS 3
@@ -572,8 +572,8 @@ ODBCLinker::ODBCLinker(char* connstr_or_name)
     securec_check(rc, "\0", "\0");
 
     if ((error != SQL_SUCCESS) && (error != SQL_SUCCESS_WITH_INFO)) {
-        SQLCHAR sqlcode[NAX_ERR_MSG_LEN];
-        SQLGetDiagField(SQL_HANDLE_DBC, this->connHandle, 1, SQL_DIAG_MESSAGE_TEXT, &sqlcode, NAX_ERR_MSG_LEN, NULL);
+        SQLCHAR sqlcode[MAX_ERR_MSG_LEN];
+        SQLGetDiagField(SQL_HANDLE_DBC, this->connHandle, 1, SQL_DIAG_MESSAGE_TEXT, &sqlcode, MAX_ERR_MSG_LEN, NULL);
         SQLFreeHandle(SQL_HANDLE_DBC, this->connHandle);
         SQLFreeHandle(SQL_HANDLE_ENV, this->envHandle);
         ereport(ERROR,
@@ -635,8 +635,8 @@ char* ODBCLinker::errorMsg()
     if (this->stmt == NULL) {
         return NULL;
     }
-    char* msg = (char*)palloc(sizeof(char) * NAX_ERR_MSG_LEN);
-    SQLGetDiagRec(SQL_HANDLE_STMT, this->stmt, 1, NULL, NULL, (SQLCHAR*)msg, NAX_ERR_MSG_LEN, NULL);
+    char* msg = (char*)palloc(sizeof(char) * MAX_ERR_MSG_LEN);
+    SQLError(this->envHandle, this->connHandle, this->stmt, NULL, NULL, (SQLCHAR*)msg, MAX_ERR_MSG_LEN, NULL);
     return msg;
 }
 
@@ -2949,14 +2949,14 @@ static void GetDrivername(char* connstr_or_name, LinkInfo* linfo)
     char* p;
     p = strtok(connstr_or_name, " ");
     while(p != NULL) {
-        if(strstr(p,"drivername=")){
+        if(strstr(p, "drivername=")){
             linfo->drivername = (SQLCHAR*)(p + 11);
-        } else if(strstr(p,"user=")) {
+        } else if(strstr(p, "user=")) {
             linfo->username = (SQLCHAR*)(p + 5);
-        } else if(strstr(p,"password=")) {
+        } else if(strstr(p, "password=")) {
             linfo->password = (SQLCHAR*)(p + 9);
         }
-        p = strtok(NULL," ");
+        p = strtok(NULL, " ");
     }
 
     if (linfo->username == NULL || linfo->password == NULL) {
