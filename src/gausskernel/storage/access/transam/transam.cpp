@@ -393,8 +393,14 @@ Datum pgxc_get_csn(PG_FUNCTION_ARGS)
  */
 bool TransactionIdDidCommit(TransactionId transactionId) /* true if given transaction committed */
 {
-    if (SS_STANDBY_MODE) {
-        return SSTransactionIdDidCommit(transactionId);
+    if (ENABLE_DMS) {
+        /* fetch TXN info locally if either reformer, original primary, or normal primary */
+        bool local_fetch = SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY;
+        if (!local_fetch) {
+            bool didCommit;
+            SSTransactionIdDidCommit(transactionId, &didCommit);
+            return didCommit;
+        }
     }
 
     CLogXidStatus xidstatus;

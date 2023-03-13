@@ -341,6 +341,8 @@ void heartbeat_main(void)
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
 
+    pgstat_report_appname("Heartbeat");
+    pgstat_report_activity(STATE_IDLE, NULL);
     ereport(LOG, (errmsg("heartbeat thread started")));
     proc_exit(server_loop());
 }

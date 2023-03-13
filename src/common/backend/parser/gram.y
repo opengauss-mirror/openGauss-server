@@ -258,7 +258,7 @@ static void FilterStartWithUseCases(SelectStmt* stmt, List* locking_clause, core
 static FuncCall* MakePriorAsFunc();
 
 /* B Compatibility Check */
-static void BCompatibilityOptionSupportCheck();
+static void BCompatibilityOptionSupportCheck(const char* keyword);
 
 #ifndef ENABLE_MULTIPLE_NODES
 static bool CheckWhetherInColList(char *colname, List *col_list);
@@ -859,7 +859,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
 
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER INTERNAL
-	INTERSECT INTERVAL INTO INVOKER IP IS ISNULL ISOLATION
+	INTERSECT INTERVAL INTO INVISIBLE INVOKER IP IS ISNULL ISOLATION
 
 	JOIN
 
@@ -907,7 +907,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	UNTIL UNUSABLE UPDATE USEEOF USER USING
 
 	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIABLES VARIADIC VARRAY VARYING VCGROUP
-	VERBOSE VERIFY VERSION_P VIEW VOLATILE
+	VERBOSE VERIFY VERSION_P VIEW VISIBLE VOLATILE
 
 	WAIT WARNINGS WEAK WHEN WHERE WHILE_P WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
 
@@ -940,6 +940,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 			END_OF_INPUT
 			END_OF_INPUT_COLON
 			END_OF_PROC
+			NOT_IN NOT_BETWEEN NOT_LIKE NOT_ILIKE NOT_SIMILAR
 
 /* Precedence: lowest to highest */
 %nonassoc   COMMENT
@@ -956,12 +957,14 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %right		NOT
 %right		'=' CmpNullOp COLON_EQUALS
 %nonassoc	'<' '>' CmpOp
-%nonassoc	LIKE ILIKE SIMILAR
+%nonassoc	LIKE ILIKE SIMILAR NOT_LIKE NOT_ILIKE NOT_SIMILAR
 %nonassoc	ESCAPE
 %nonassoc	OVERLAPS
-%nonassoc	BETWEEN
-%nonassoc	IN_P
+%nonassoc	BETWEEN NOT_BETWEEN
+%nonassoc	IN_P NOT_IN
 %left		POSTFIXOP		/* dummy for postfix Op rules */
+%nonassoc   lower_than_index
+%nonassoc   INDEX
 /*
  * To support target_el without AS, we must give IDENT an explicit priority
  * between POSTFIXOP and Op.  We can safely assign the same priority to
@@ -4344,6 +4347,24 @@ alter_table_cmd:
 					$$ = (Node *)n;
 				}
 			|
+			ALTER INDEX index_name INVISIBLE
+				{
+					BCompatibilityOptionSupportCheck($4);
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_InvisibleIndex;
+					n->name = $3;
+					$$ = (Node *)n;
+				}
+			|
+			ALTER INDEX index_name VISIBLE
+				{
+					BCompatibilityOptionSupportCheck($4);
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_VisibleIndex;
+					n->name = $3;
+					$$ = (Node *)n;
+				}
+			|
 			/*ALTER INDEX index_name REBUILD*/
 			REBUILD
 				{
@@ -4867,7 +4888,7 @@ alter_table_cmd:
 /* table comments start */
             | COMMENT opt_equal Sconst
             {
-            		BCompatibilityOptionSupportCheck();
+                    BCompatibilityOptionSupportCheck($1);
                     AlterTableCmd *n = makeNode(AlterTableCmd);
                     n->subtype = AT_COMMENTS;
                     n->name = $3;
@@ -4951,7 +4972,6 @@ opt_index_options:
 index_options:
 			 index_option
 			 {
-					BCompatibilityOptionSupportCheck();
 					$$ = list_make1($1);
 			 }
 			 | index_options index_option
@@ -4962,6 +4982,7 @@ index_options:
 index_option:
 			 COMMENT opt_equal Sconst
 			 {
+					BCompatibilityOptionSupportCheck($1);
 					CommentStmt *n = makeNode(CommentStmt);
 					n->objtype = OBJECT_INDEX;
 					n->objname = NIL;
@@ -4978,7 +4999,6 @@ opt_table_index_options:
 table_index_options:
 			 table_index_option
 			 {
-					BCompatibilityOptionSupportCheck();
 					$$ = list_make1($1);
 			 }
 			 | table_index_options table_index_option
@@ -4989,6 +5009,7 @@ table_index_options:
 table_index_option:
 			 COMMENT opt_equal Sconst
 			 {
+					BCompatibilityOptionSupportCheck($1);
 					CommentStmt *n = makeNode(CommentStmt);
 					n->objtype = OBJECT_INDEX;
 					n->objname = NIL;
@@ -4998,7 +5019,20 @@ table_index_option:
 			 }
 			 | USING IDENT
 			 {
+					BCompatibilityOptionSupportCheck($1);
 					$$ = makeStringConst($2, -1);
+			 }
+			 | INVISIBLE
+			 {
+					BCompatibilityOptionSupportCheck($1);
+					Value *n = makeString("invisible");
+					$$ = (Node*)n;
+			 }
+			 | VISIBLE
+			 {
+					BCompatibilityOptionSupportCheck($1);
+					Value *n = makeString("visible");
+					$$ = (Node*)n;
 			 }
 		;
 
@@ -5009,7 +5043,6 @@ opt_table_options:
 table_options:
 			 table_option
 			 {
-					BCompatibilityOptionSupportCheck();
 					$$ = list_make1($1);
 			 }
 			 | table_options opt_comma table_option
@@ -5020,6 +5053,7 @@ table_options:
 table_option:
 			 COMMENT opt_equal Sconst
 			 {
+					BCompatibilityOptionSupportCheck($1);
 					CommentStmt *n = makeNode(CommentStmt);
 					n->objtype = OBJECT_TABLE;
 					n->objname = NIL;
@@ -5041,7 +5075,6 @@ opt_column_options:
 column_options:
 			 column_option
 			 {
-					BCompatibilityOptionSupportCheck();
 					$$ = list_make1($1);
 			 }
 			 | column_options column_option
@@ -5052,6 +5085,7 @@ column_options:
 column_option:
 			 COMMENT Sconst
 			 {
+					BCompatibilityOptionSupportCheck($1);
 					CommentStmt *n = makeNode(CommentStmt);
 					n->objtype = OBJECT_COLUMN;
 					n->objname = NIL;
@@ -5069,7 +5103,6 @@ opt_part_options:
 part_options:
 			 part_option
 			 {
-					BCompatibilityOptionSupportCheck();
 					$$ = NULL;
 			 }
 			 | part_options part_option
@@ -5080,6 +5113,7 @@ part_options:
 part_option:
 			 COMMENT opt_equal Sconst
 			 {
+					BCompatibilityOptionSupportCheck($1);
 					u_sess->parser_cxt.hasPartitionComment = true;
 					$$ = (Node*)NULL;
 			 }
@@ -13424,7 +13458,7 @@ defacl_privilege_target:
 
 IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 			ON qualified_name access_method_clause '(' index_params ')'
-			opt_include opt_reloptions OptPartitionElement opt_index_options where_clause
+			opt_include opt_reloptions OptPartitionElement opt_table_index_options where_clause
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
@@ -13454,7 +13488,7 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 				}
 				| CREATE opt_unique INDEX opt_concurrently opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
-					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace opt_index_options
+					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace opt_table_index_options
 				{
 
 					IndexStmt *n = makeNode(IndexStmt);
@@ -13485,7 +13519,7 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 				}
 				| CREATE opt_unique INDEX opt_concurrently opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
-					GLOBAL opt_include opt_reloptions OptTableSpace opt_index_options
+					GLOBAL opt_include opt_reloptions OptTableSpace opt_table_index_options
 				{
 
 					IndexStmt *n = makeNode(IndexStmt);
@@ -14804,7 +14838,7 @@ common_func_opt_item:
 				}
 			| COMMENT Sconst
 			    {
-					BCompatibilityOptionSupportCheck();
+					BCompatibilityOptionSupportCheck($1);
 					$$ = makeDefElem("comment", (Node *)makeString($2));
 			    }
 		;
@@ -16180,7 +16214,7 @@ rename_clause:
 	;
 
 opt_column: COLUMN									{ $$ = COLUMN; }
-			| /*EMPTY*/								{ $$ = 0; }
+			| /*EMPTY*/		%prec lower_than_index	{ $$ = 0; }
 		;
 
 opt_set_data: SET DATA_P							{ $$ = 1; }
@@ -17112,13 +17146,6 @@ TransactionStmt:
 				}
 			| PREPARE TRANSACTION Sconst
 				{   
-					if (ENABLE_DMS) {
-			            const char* message = "PREPARE TRANSACTION is not supported while DMS and DSS enabled";
-			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-				                errmsg("PREPARE TRANSACTION is not supported while DMS and DSS enabled")));
-					}
-
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_PREPARE;
 					n->gid = $3;
@@ -17126,13 +17153,6 @@ TransactionStmt:
 				}
 			| COMMIT PREPARED Sconst
 				{   
-					if (ENABLE_DMS) {
-			            const char* message = "COMMIT TRANSACTION is not supported while DMS and DSS enabled";
-			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-				                errmsg("COMMIT TRANSACTION is not supported while DMS and DSS enabled")));
-					}
-
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT_PREPARED;
 					n->gid = $3;
@@ -17141,13 +17161,6 @@ TransactionStmt:
 				}
 			| COMMIT PREPARED Sconst WITH Sconst
 				{   
-					if (ENABLE_DMS) {
-			            const char* message = "COMMIT TRANSACTION is not supported while DMS and DSS enabled";
-			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-				                errmsg("COMMIT TRANSACTION is not supported while DMS and DSS enabled")));
-					}
-
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT_PREPARED;
 					n->gid = $3;
@@ -17156,13 +17169,6 @@ TransactionStmt:
 				}
 			| ROLLBACK PREPARED Sconst
 				{   
-					if (ENABLE_DMS) {
-			            const char* message = "ROLLBACK TRANSACTION is not supported while DMS and DSS enabled";
-			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-				                errmsg("ROLLBACK TRANSACTION is not supported while DMS and DSS enabled")));
-					}
-
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_ROLLBACK_PREPARED;
 					n->gid = $3;
@@ -23560,13 +23566,13 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->call_func = false;
 					$$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "~~", $1, (Node *) n, @2);
 				}
-			| a_expr NOT LIKE a_expr
-				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~~", $1, $4, @2); }
-			| a_expr NOT LIKE a_expr ESCAPE a_expr
+			| a_expr NOT_LIKE a_expr	%prec NOT_LIKE
+				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~~", $1, $3, @2); }
+			| a_expr NOT_LIKE a_expr ESCAPE a_expr		%prec NOT_LIKE
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("like_escape");
-					n->args = list_make2($4, $6);
+					n->args = list_make2($3, $5);
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
@@ -23592,13 +23598,13 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->call_func = false;
 					$$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "~~*", $1, (Node *) n, @2);
 				}
-			| a_expr NOT ILIKE a_expr
-				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~~*", $1, $4, @2); }
-			| a_expr NOT ILIKE a_expr ESCAPE a_expr
+			| a_expr NOT_ILIKE a_expr	%prec NOT_ILIKE
+				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~~*", $1, $3, @2); }
+			| a_expr NOT_ILIKE a_expr ESCAPE a_expr		%prec NOT_ILIKE
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("like_escape");
-					n->args = list_make2($4, $6);
+					n->args = list_make2($3, $5);
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
@@ -23637,11 +23643,11 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->call_func = false;
 					$$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "~", $1, (Node *) n, @2);
 				}
-			| a_expr NOT SIMILAR TO a_expr			%prec SIMILAR
+			| a_expr NOT_SIMILAR TO a_expr			%prec NOT_SIMILAR
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("similar_escape");
-					n->args = list_make2($5, makeNullAConst(-1));
+					n->args = list_make2($4, makeNullAConst(-1));
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
@@ -23651,11 +23657,11 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->call_func = false;
 					$$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "!~", $1, (Node *) n, @2);
 				}
-			| a_expr NOT SIMILAR TO a_expr ESCAPE a_expr
+			| a_expr NOT_SIMILAR TO a_expr ESCAPE a_expr	%prec NOT_SIMILAR
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("similar_escape");
-					n->args = list_make2($5, $7);
+					n->args = list_make2($4, $6);
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
@@ -23809,11 +23815,11 @@ a_expr:		c_expr									{ $$ = $1; }
 						(Node *) makeSimpleA_Expr(AEXPR_OP, "<=", $1, $6, @2),
 											 @2);
 				}
-			| a_expr NOT BETWEEN opt_asymmetric b_expr AND b_expr	%prec BETWEEN
+			| a_expr NOT_BETWEEN opt_asymmetric b_expr AND b_expr	%prec NOT_BETWEEN
 				{
 					$$ = (Node *) makeA_Expr(AEXPR_OR, NIL,
-						(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $5, @2),
-						(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $7, @2),
+						(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $4, @2),
+						(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $6, @2),
 											 @2);
 				}
 			| a_expr BETWEEN SYMMETRIC b_expr AND b_expr			%prec BETWEEN
@@ -23829,16 +23835,16 @@ a_expr:		c_expr									{ $$ = $1; }
 											@2),
 											 @2);
 				}
-			| a_expr NOT BETWEEN SYMMETRIC b_expr AND b_expr		%prec BETWEEN
+			| a_expr NOT_BETWEEN SYMMETRIC b_expr AND b_expr		%prec NOT_BETWEEN
 				{
 					$$ = (Node *) makeA_Expr(AEXPR_AND, NIL,
 						(Node *) makeA_Expr(AEXPR_OR, NIL,
-							(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $5, @2),
-							(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $7, @2),
+							(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $4, @2),
+							(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $6, @2),
 											@2),
 						(Node *) makeA_Expr(AEXPR_OR, NIL,
-							(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $7, @2),
-							(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $5, @2),
+							(Node *) makeSimpleA_Expr(AEXPR_OP, "<", $1, $6, @2),
+							(Node *) makeSimpleA_Expr(AEXPR_OP, ">", $1, $4, @2),
 											@2),
 											 @2);
 				}
@@ -23861,25 +23867,25 @@ a_expr:		c_expr									{ $$ = $1; }
 						$$ = (Node *) makeSimpleA_Expr(AEXPR_IN, "=", $1, $3, @2);
 					}
 				}
-			| a_expr NOT IN_P in_expr
+			| a_expr NOT_IN in_expr		%prec NOT_IN
 				{
 					/* in_expr returns a SubLink or a list of a_exprs */
-					if (IsA($4, SubLink))
+					if (IsA($3, SubLink))
 					{
 						/* generate NOT (foo = ANY (subquery)) */
 						/* Make an = ANY node */
-						SubLink *n = (SubLink *) $4;
+						SubLink *n = (SubLink *) $3;
 						n->subLinkType = ANY_SUBLINK;
 						n->testexpr = $1;
 						n->operName = list_make1(makeString("="));
-						n->location = @3;
+						n->location = @2;
 						/* Stick a NOT on top */
 						$$ = (Node *) makeA_Expr(AEXPR_NOT, NIL, NULL, (Node *) n, @2);
 					}
 					else
 					{
 						/* generate scalar NOT IN expression */
-						$$ = (Node *) makeSimpleA_Expr(AEXPR_IN, "<>", $1, $4, @2);
+						$$ = (Node *) makeSimpleA_Expr(AEXPR_IN, "<>", $1, $3, @2);
 					}
 				}
 			| a_expr subquery_Op sub_type select_with_parens	%prec Op
@@ -25639,11 +25645,11 @@ subquery_Op:
 					{ $$ = $3; }
 			| LIKE
 					{ $$ = list_make1(makeString("~~")); }
-			| NOT LIKE
+			| NOT_LIKE	%prec NOT_LIKE
 					{ $$ = list_make1(makeString("!~~")); }
 			| ILIKE
 					{ $$ = list_make1(makeString("~~*")); }
-			| NOT ILIKE
+			| NOT_ILIKE	%prec NOT_ILIKE
 					{ $$ = list_make1(makeString("!~~*")); }
 /* cannot put SIMILAR TO here, because SIMILAR TO is a hack.
  * the regular expression is preprocessed by a function (similar_escape),
@@ -26703,6 +26709,7 @@ unreserved_keyword:
 			| INSERT
 			| INSTEAD
 			| INTERNAL
+			| INVISIBLE
 			| INVOKER
 			| IP
 			| ISNULL
@@ -26952,6 +26959,7 @@ unreserved_keyword:
 			| VCGROUP
 			| VERSION_P
 			| VIEW
+			| VISIBLE
 			| VOLATILE
 			| WAIT
 			| WEAK
@@ -29217,15 +29225,16 @@ static bool CheckWhetherInColList(char *colname, List *col_list)
 }
 #endif
 
-static void BCompatibilityOptionSupportCheck()
+static void BCompatibilityOptionSupportCheck(const char* keyword)
 {
 #ifdef ENABLE_MULTIPLE_NODES
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Comment is not yet supported.")));
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("%s is not yet supported.", keyword)));
 #endif
     if (DB_IS_CMPT(B_FORMAT)) {
         return;
     }
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Comment is supported only in B compatible database.")));
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        errmsg("%s is supported only in B compatible database.", keyword)));
 }
 
 static int GetFillerColIndex(char *filler_col_name, List *col_list)

@@ -967,8 +967,6 @@ Path* JoinPathGenBase::streamSidePath(bool stream_outer)
             smpDesc,
             ssinfo);
     }
-
-    return NULL;
 }
 
 /*

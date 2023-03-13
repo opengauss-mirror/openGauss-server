@@ -317,6 +317,7 @@ typedef struct _indxInfo {
     bool indisclustered;
     bool indisusable;
     bool indisreplident;
+    bool indisvisible;
     /* if there is an associated constraint object, its dumpId: */
     DumpId indexconstraint;
 } IndxInfo;
@@ -359,6 +360,7 @@ typedef struct _triggerInfo {
     bool tgdeferrable;
     bool tginitdeferred;
     char* tgdef;
+    bool tgdb;
 } TriggerInfo;
 
 /*

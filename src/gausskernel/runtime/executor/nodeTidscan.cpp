@@ -44,6 +44,7 @@
     ((node) != NULL && IsA((node), Var) && ((Var*)(node))->varattno == SelfItemPointerAttributeNumber && \
         ((Var*)(node))->varlevelsup == 0)
 
+static TupleTableSlot* ExecTidScan(PlanState* state);
 static void TidListCreate(TidScanState* tidstate, bool isBucket);
 static int ItemptrComparator(const void* a, const void* b);
 static TupleTableSlot* TidNext(TidScanState* node);
@@ -293,6 +294,8 @@ static TupleTableSlot* HbktTidFetchTuple(TidScanState* node, bool bBackward)
 
         /* Reset the tidPtr */
         node->tss_TidPtr = -1;
+
+        CHECK_FOR_INTERRUPTS();
     }
 
     return ExecClearTuple(slot);
@@ -466,8 +469,9 @@ static bool TidRecheck(TidScanState* node, TupleTableSlot* slot)
  *		  -- tidPtr is -1.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecTidScan(TidScanState* node)
+static TupleTableSlot* ExecTidScan(PlanState* state)
 {
+    TidScanState* node = castNode(TidScanState, state);
     return ExecScan(&node->ss, (ExecScanAccessMtd)TidNext, (ExecScanRecheckMtd)TidRecheck);
 }
 
@@ -583,6 +587,7 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     tidstate->ss.isPartTbl = node->scan.isPartTbl;
     tidstate->ss.currentSlot = 0;
     tidstate->ss.partScanDirection = node->scan.partScanDirection;
+    tidstate->ss.ps.ExecProcNode = ExecTidScan;
 	
     tidstate->tss_htup.tupTableType = HEAP_TUPLE;
     /*

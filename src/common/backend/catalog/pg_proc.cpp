@@ -30,6 +30,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/pg_proc_fn.h"
+#include "catalog/pg_synonym.h"
 #include "catalog/pg_type.h"
 #include "client_logic/client_logic_proc.h"
 #include "commands/defrem.h"
@@ -1078,6 +1079,15 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
     /* sanity checks */
     Assert(PointerIsValid(prosrc));
 
+    /* 
+     * Check function name to ensure that it doesn't conflict with existing synonym.
+     */
+    if (!IsInitdb && GetSynonymOid(procedureName, procNamespace, true) != InvalidOid) {
+        ereport(ERROR,
+                (errmsg("function name is already used by an existing synonym in schema \"%s\"",
+                    get_namespace_name(procNamespace))));
+    }
+
     parameterCount = parameterTypes->dim1;
     if (parameterCount < 0 || parameterCount > FUNC_MAX_ARGS)
         ereport(ERROR,
@@ -1344,7 +1354,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
             values[Anum_pg_proc_allargtypes - 1] = PointerGetDatum(dummy);
             values[Anum_pg_proc_allargtypesext - 1] = PointerGetDatum(allParameterTypes);
         }
-    } else if (parameterTypes != PointerGetDatum(NULL)) {
+    } else if (parameterTypes != NULL) {
         values[Anum_pg_proc_allargtypes - 1] = values[Anum_pg_proc_proargtypes - 1];
         values[Anum_pg_proc_allargtypesext - 1] = values[Anum_pg_proc_proargtypesext - 1];
         nulls[Anum_pg_proc_allargtypesext - 1] = nulls[Anum_pg_proc_proargtypesext - 1];
@@ -2291,6 +2301,10 @@ void delete_file_handle(const char* library_path)
     DynamicFileList* file_scanner = NULL;
     DynamicFileList* pre_file_scanner = file_list;
 
+    AutoMutexLock libraryLock(&file_list_lock);
+    libraryLock.lock();
+
+
     char* fullname = expand_dynamic_library_name(library_path);
     for (file_scanner = file_list; file_scanner != NULL; file_scanner = file_scanner->next) {
         if (strncmp(fullname, file_scanner->filename, strlen(fullname) + 1) == 0) {
@@ -2313,6 +2327,8 @@ void delete_file_handle(const char* library_path)
             pre_file_scanner = file_scanner;
         }
     }
+
+    libraryLock.unLock();
 }
 
 /*

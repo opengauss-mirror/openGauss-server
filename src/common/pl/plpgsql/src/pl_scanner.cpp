@@ -669,6 +669,16 @@ void plpgsql_peek2(int* tok1_p, int* tok2_p, int* tok1_loc, int* tok2_loc)
     push_back_token(tok1, &aux1);
 }
 
+void plpgsql_peek(int* tok1_p)
+{
+    int tok1;
+    TokenAuxData aux1;
+
+    tok1 = internal_yylex(&aux1);
+
+    *tok1_p = tok1;
+    push_back_token(tok1, &aux1);
+}
 /*
  * plpgsql_scanner_errposition
  *		Report an error cursor position, if possible.

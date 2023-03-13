@@ -1689,6 +1689,19 @@ static void knl_t_sql_patch_init(knl_t_sql_patch_context* sql_patch_cxt)
     sql_patch_cxt->sql_patch_prev_post_parse_analyze_hook = NULL;
 }
 
+static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
+{
+    dms_cxt->msgContext = NULL;
+    dms_cxt->buf_in_aio = false;
+    dms_cxt->is_reform_proc = false;
+    dms_cxt->CloseAllSessionsFailed = false;
+    dms_cxt->origin_buf = NULL;
+    dms_cxt->aligned_buf = NULL;
+    dms_cxt->offset = 0;
+    dms_cxt->size = 0;
+    dms_cxt->file_size = 0;
+}
+
 #ifdef ENABLE_MOT
 static void knl_t_mot_init(knl_t_mot_context* mot_cxt)
 {
@@ -1870,6 +1883,7 @@ void knl_thread_init(knl_thread_role role)
     knl_t_bgworker_init(&t_thrd.bgworker_cxt);
     knl_index_advisor_init(&t_thrd.index_advisor_cxt);
     knl_t_sql_patch_init(&t_thrd.sql_patch_cxt);
+    knl_t_dms_context_init(&t_thrd.dms_cxt);
     KnlTApplyLauncherInit(&t_thrd.applylauncher_cxt);
     KnlTApplyWorkerInit(&t_thrd.applyworker_cxt);
     KnlTPublicationInit(&t_thrd.publication_cxt);

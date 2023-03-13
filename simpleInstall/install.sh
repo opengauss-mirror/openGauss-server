@@ -88,11 +88,19 @@ function check_install_env() {
     fi
 
     # check pid port and lock file
-    port_occupied=$(netstat -ntul | grep $port)
-    if [ X"$port_occupied" != X"" ]; then
-        error "Error: The port $port has been occupied, please use -p to set a new port."
-        exit 1
-    fi
+    portlist=($(netstat -nutl | grep $port))
+    i=3
+    while ((i < ${#portlist[*]}))
+    do
+        listen_addr=${portlist[((i))]}
+        p=${listen_addr##*:}
+        echo $p
+        if [ X"$p" == X"$port" ]; then
+            error "Error: The port $port has been occupied, please use -p to set a new port."
+            exit 1
+        fi
+        ((i += 6))
+    done
 
     local delete_slave_lock=""
     local delete_master_lock=""

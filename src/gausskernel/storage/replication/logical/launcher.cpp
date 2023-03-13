@@ -702,6 +702,7 @@ void ApplyLauncherMain()
     t_thrd.proc_cxt.PostInit->InitApplyLauncher();
 
     SetProcessingMode(NormalProcessing);
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     /*
      * If an exception is encountered, processing resumes here.

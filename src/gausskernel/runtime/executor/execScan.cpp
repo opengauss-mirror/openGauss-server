@@ -170,8 +170,6 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
     for (;;) {
         TupleTableSlot* slot = NULL;
 
-        CHECK_FOR_INTERRUPTS();
-
         slot = ExecScanFetch(node, access_mtd, recheck_mtd);
         /* refresh qual every loop */
         qual = node->ps.qual;

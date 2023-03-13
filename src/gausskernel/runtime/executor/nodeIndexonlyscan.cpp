@@ -44,6 +44,7 @@
 #include "optimizer/pruning.h"
 
 
+static TupleTableSlot* ExecIndexOnlyScan(PlanState* state);
 static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node);
 static void ExecInitNextIndexPartitionForIndexScanOnly(IndexOnlyScanState* node);
 
@@ -146,6 +147,8 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     while ((tid = scan_handler_idx_getnext_tid(scandesc, direction)) != NULL) {
         HeapTuple tuple = NULL;
         IndexScanDesc indexScan = GetIndexScanDesc(scandesc);
+
+        CHECK_FOR_INTERRUPTS();
 
         /*
          * We can skip the heap fetch if the TID references a heap page on
@@ -319,8 +322,9 @@ static bool IndexOnlyRecheck(IndexOnlyScanState* node, TupleTableSlot* slot)
  *		ExecIndexOnlyScan(node)
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecIndexOnlyScan(IndexOnlyScanState* node)
+static TupleTableSlot* ExecIndexOnlyScan(PlanState* state)
 {
+    IndexOnlyScanState* node = castNode(IndexOnlyScanState, state);
     /*
      * If we have runtime keys and they've not already been set up, do it now.
      */
@@ -552,6 +556,7 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
     indexstate->ss.isPartTbl = node->scan.isPartTbl;
     indexstate->ss.partScanDirection = node->indexorderdir;
     indexstate->ss.currentSlot = 0;
+    indexstate->ss.ps.ExecProcNode = ExecIndexOnlyScan;
 
     /*
      * Miscellaneous initialization

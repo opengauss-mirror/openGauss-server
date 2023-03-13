@@ -442,6 +442,7 @@ function install_gaussdb()
     export BUILD_TUPLE=${PLATFORM_ARCH}
     export THIRD_BIN_PATH="${binarylibs_path}"
     export PREFIX_HOME="${BUILD_DIR}"
+    export ENABLE_LITE_MODE=ON
 
     if [ "$version_mode"x == "release"x ]; then
     	CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_LITE_MODE=ON"

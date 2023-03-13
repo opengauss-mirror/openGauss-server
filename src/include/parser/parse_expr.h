@@ -34,5 +34,6 @@ extern void AddStartWithTargetRelInfo(ParseState* pstate, Node* relNode,
 extern void AdaptSWSelectStmt(ParseState *pstate, SelectStmt *stmt);
 extern bool IsQuerySWCBRewrite(Query *query);
 extern bool IsSWCBRewriteRTE(RangeTblEntry *rte);
+extern Datum GetTypeZeroValue(Form_pg_attribute att_tup);
 
 #endif /* PARSE_EXPR_H */

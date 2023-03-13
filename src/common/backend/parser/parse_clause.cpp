@@ -86,6 +86,7 @@ static Node* transformGroupingSet(List** flatresult, ParseState* pstate, Groupin
 
 static Index transformGroupClauseExpr(List** flatresult, Bitmapset* seen_local, ParseState* pstate, Node* gexpr,
     List** targetlist, List* sortClause, bool useSQL99, bool toplevel);
+static void CheckOrderbyColumns(ParseState* pstate, List* targetList, bool isAggregate);
 
 /*
  * @Description: append from clause item to the left tree
@@ -2329,6 +2330,11 @@ List* transformDistinctClause(ParseState* pstate, List** targetlist, List* sortC
     List* result = NIL;
     ListCell* slitem = NULL;
     ListCell* tlitem = NULL;
+    bool allowOrderbyExpr = !IsInitdb && DB_IS_CMPT(B_FORMAT);
+
+    if (pstate->orderbyCols) {
+        CheckOrderbyColumns(pstate, *targetlist, is_agg);
+    }
 
     /*
      * The distinctClause should consist of all ORDER BY items followed by all
@@ -2350,11 +2356,15 @@ List* transformDistinctClause(ParseState* pstate, List** targetlist, List* sortC
         TargetEntry* tle = get_sortgroupclause_tle(scl, *targetlist);
 
         if (tle != NULL && tle->resjunk) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-                    is_agg ? errmsg("in an aggregate with DISTINCT, ORDER BY expressions must appear in argument list")
-                            : errmsg("for SELECT DISTINCT, ORDER BY expressions must appear in select list"),
-                    parser_errposition(pstate, exprLocation((Node*)tle->expr))));
+            if (allowOrderbyExpr) {
+                continue;
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                        is_agg ? errmsg("in an aggregate with DISTINCT, ORDER BY expressions must appear in argument list")
+                                : errmsg("for SELECT DISTINCT, ORDER BY expressions must appear in select list"),
+                        parser_errposition(pstate, exprLocation((Node*)tle->expr))));
+            }
         }
         result = lappend(result, copyObject(scl));
     }
@@ -2372,14 +2382,62 @@ List* transformDistinctClause(ParseState* pstate, List** targetlist, List* sortC
 
         if (tle != NULL) {
             result = addTargetToGroupList(pstate, tle, result, *targetlist, exprLocation((Node*)tle->expr), true);
-        }
-        else{
+        } else {
             ereport(ERROR,
                 (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("invalid tle value")));
         }
     }
 
     return result;
+}
+
+/*
+ * CheckOrderbyColumns -
+ *	  check ORDER BY column references if the statement has DISTINCT clause.
+ */
+static void CheckOrderbyColumns(ParseState* pstate, List* targetList, bool isAggregate)
+{
+    ListCell* colRefCell = nullptr;
+
+    foreach(colRefCell, pstate->orderbyCols) {
+        ColumnRef* colRef = (ColumnRef*)lfirst(colRefCell);
+        bool isFound = false;
+
+        if (!isAggregate && list_length(colRef->fields) == 1 &&
+            IsA(linitial((colRef)->fields), String)) {
+            char* refName = strVal(linitial(colRef->fields));
+
+            ListCell* tcell = nullptr;
+            foreach(tcell, targetList) {
+                TargetEntry* entry = (TargetEntry*)lfirst(tcell);
+                if (!entry->resjunk && entry->resname && strcmp(entry->resname, refName) == 0) {
+                    isFound = true;
+                    break;
+                }
+            }
+        } else {
+            Node* refExpr = transformExpr(pstate, (Node*)colRef);
+            ListCell* tcell = nullptr;
+            foreach(tcell, targetList) {
+                TargetEntry* entry = (TargetEntry*)lfirst(tcell);
+                Node* texpr = strip_implicit_coercions((Node*)entry->expr);
+                if (!entry->resjunk && equal(refExpr, texpr)) {
+                    isFound = true;
+                    break;
+                }
+            }
+        }
+
+        if (!isFound) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                    isAggregate ? errmsg("in an aggregate with DISTINCT, ORDER BY expressions must appear in argument list")
+                                : errmsg("for SELECT DISTINCT, ORDER BY expressions must appear in select list"),
+                    parser_errposition(pstate, colRef->location)));
+        }
+    }
+
+    list_free_ext(pstate->orderbyCols);
 }
 
 /*

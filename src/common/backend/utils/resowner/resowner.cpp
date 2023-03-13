@@ -1799,7 +1799,7 @@ void PrintResourceOwnerLeakWarning()
         ereport(WARNING, (errmsg("resource owner \"%s\" may leak", IsolatedResourceOwner->name)));
 }
 
-void ResourceOwnerReleasePthreadMutex()
+void ResourceOwnerReleaseAllXactPthreadMutex()
 {
     ResourceOwner owner = t_thrd.utils_cxt.TopTransactionResourceOwner;
     ResourceOwner child;
@@ -2012,6 +2012,23 @@ void ResourceOwnerForgetPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRW
             errmsg("pthread rwlock is not owned by resource owner %s", owner->name)));
 }
 
+int ResourceOwnerForgetIfExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex, bool trace)
+{
+    pthread_mutex_t** mutexs = owner->pThdMutexs;
+    int ns1 = owner->nPthreadMutex - 1;
+ 
+    if (!owner->valid) {
+        return 0;
+    }
+ 
+    for (int i = ns1; i >= 0; i--) {
+        if (mutexs[i] == pMutex) {
+            return PthreadMutexUnlock(owner, pMutex, trace);
+        }
+    }
+    return 0;
+}
+
 void ResourceOwnerEnlargeLocalCatCList(ResourceOwner owner)
 {
     int newmax;
@@ -2222,6 +2239,17 @@ void ResourceOwnerForgetGlobalBaseEntry(ResourceOwner owner, GlobalBaseEntry* en
     ereport(ERROR,
         (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
             errmsg("the global base entry is not owned by resource owner %s", owner->name)));
+}
+
+void ResourceOwnerReleasePthreadMutex(ResourceOwner owner, bool isCommit)
+{
+    while (owner->nPthreadMutex > 0) {
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "MutexLock");
+        }
+        /* unlock do -- */
+        PthreadMutexUnlock(owner, owner->pThdMutexs[owner->nPthreadMutex - 1]);
+    }
 }
 
 void ResourceOwnerReleaseRWLock(ResourceOwner owner, bool isCommit)

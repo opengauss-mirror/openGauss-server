@@ -1439,6 +1439,7 @@ static char* get_drop_seq_query_string(AlterTableStmt* stmt, Oid rel_id)
  *
  *	parse_tree: the parse tree for the utility statement
  *	query_string: original source text of command
+ *	readOnlyTree: if true, pstmt's node tree must not be modified
  *	params: parameters to use during execution
  *	is_top_level: true if executing a "top level" (interactively issued) command
  *	dest: where to send results
@@ -1453,7 +1454,8 @@ static char* get_drop_seq_query_string(AlterTableStmt* stmt, Oid rel_id)
  *
  * completion_tag may be NULL if caller doesn't want a status string.
  */
-void ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo params, bool is_top_level, DestReceiver* dest,
+void ProcessUtility(processutility_context* processutility_cxt,
+    DestReceiver* dest,
 #ifdef PGXC
     bool sent_to_remote,
 #endif /* PGXC */
@@ -1461,7 +1463,7 @@ void ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo pa
     bool isCTAS)
 {
     /* required as of 8.4 */
-    AssertEreport(query_string != NULL, MOD_EXECUTOR, "query string is NULL");
+    AssertEreport(processutility_cxt->query_string != NULL, MOD_EXECUTOR, "query string is NULL");
 
     /*
      * We provide a function hook variable that lets loadable plugins get
@@ -1470,10 +1472,7 @@ void ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo pa
      * it's unsafe to deal with plugins hooks as dynamic lib may be released
      */
     if (ProcessUtility_hook && !(g_instance.status > NoShutdown))
-        (*ProcessUtility_hook)(parse_tree,
-            query_string,
-            params,
-            is_top_level,
+        (*ProcessUtility_hook)(processutility_cxt,
             dest,
 #ifdef PGXC
             sent_to_remote,
@@ -1481,10 +1480,7 @@ void ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo pa
             completion_tag,
             isCTAS);
     else
-        standard_ProcessUtility(parse_tree,
-            query_string,
-            params,
-            is_top_level,
+        standard_ProcessUtility(processutility_cxt,
             dest,
 #ifdef PGXC
             sent_to_remote,
@@ -1496,7 +1492,7 @@ void ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo pa
      * Record the number of rows affected into the session, but only support 
      * DML statement now, for DDL statement, always set to 0
      */
-    if(nodeTag(parse_tree) != T_ExecuteStmt) {
+    if(nodeTag(processutility_cxt->parse_tree) != T_ExecuteStmt) {
         u_sess->statement_cxt.current_row_count = 0;
         u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
         /* If it is an EXECUTE statement here, the PortalRun function will be
@@ -2222,10 +2218,13 @@ void CreateCommand(CreateStmt *parse_tree, const char *query_string, ParamListIn
                 ((AlterTableStmt*)stmt)->fromCreate = true;
 
             /* Recurse for anything else */
-            ProcessUtility(stmt,
-                query_string_with_info,
-                params,
-                false,
+            processutility_context proutility_cxt;
+            proutility_cxt.parse_tree = stmt;
+            proutility_cxt.query_string = query_string_with_info;
+            proutility_cxt.readOnlyTree = false;
+            proutility_cxt.params = params;
+            proutility_cxt.is_top_level = false;
+            ProcessUtility(&proutility_cxt,
                 None_Receiver,
 #ifdef PGXC
                 true,
@@ -2455,7 +2454,7 @@ void ExecShrinkRealtionChunkStmt(Node* parse_tree, const char* query_string, boo
 #endif
 }
 
-void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo params, bool is_top_level,
+void standard_ProcessUtility(processutility_context* processutility_cxt,
     DestReceiver* dest,
 #ifdef PGXC
     bool sent_to_remote,
@@ -2465,12 +2464,20 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 {
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     if (u_sess->hook_cxt.standardProcessUtilityHook) {
-        return ((ProcessUtility_hook_type)(u_sess->hook_cxt.standardProcessUtilityHook))(parse_tree, query_string,
-            params, is_top_level, dest, sent_to_remote, completion_tag, isCTAS);
+        return ((ProcessUtility_hook_type)(u_sess->hook_cxt.standardProcessUtilityHook))(processutility_cxt,
+            dest, sent_to_remote, completion_tag, isCTAS);
     }
 #endif
     /* This can recurse, so check for excessive recursion */
     check_stack_depth();
+
+    if (processutility_cxt->readOnlyTree) {
+        processutility_cxt->parse_tree = (Node*)copyObject(processutility_cxt->parse_tree);
+    }
+    Node* parse_tree = processutility_cxt->parse_tree;
+    const char* query_string = processutility_cxt->query_string;
+    ParamListInfo params = processutility_cxt->params;
+    bool is_top_level = processutility_cxt->is_top_level;
 
 #ifdef ENABLE_MULTIPLE_NODES
     /*
@@ -4167,10 +4174,13 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                         AlterTable(rel_id, lockmode, (AlterTableStmt*)stmt);
                     } else {
                         /* Recurse for anything else */
-                        ProcessUtility(stmt,
-                            query_string,
-                            params,
-                            false,
+                        processutility_context proutility_cxt;
+                        proutility_cxt.parse_tree = stmt;
+                        proutility_cxt.query_string = query_string;
+                        proutility_cxt.readOnlyTree = false;
+                        proutility_cxt.params = params;
+                        proutility_cxt.is_top_level = false;
+                        ProcessUtility(&proutility_cxt,
                             None_Receiver,
 #ifdef PGXC
                             true,
@@ -5762,10 +5772,13 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             foreach (l, stmts) {
                 Node* stmt = (Node*)lfirst(l);
 
-                ProcessUtility(stmt,
-                            query_string,
-                            params,
-                            false,
+                processutility_context proutility_cxt;
+                proutility_cxt.parse_tree = stmt;
+                proutility_cxt.query_string = query_string;
+                proutility_cxt.readOnlyTree = false;
+                proutility_cxt.params = params;
+                proutility_cxt.is_top_level = false;
+                ProcessUtility(&proutility_cxt,
                             None_Receiver,
                             true,
                             NULL);
@@ -7298,7 +7311,6 @@ static bool is_stmt_allowed_in_locked_mode(Node* parse_tree, const char* query_s
         default:
             return DISALLOW;
     }
-    return DISALLOW;
 }
 
 /*

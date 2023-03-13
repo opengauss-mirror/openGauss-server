@@ -2136,6 +2136,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     if (stmt->returningList) {
         pstate->p_relnamespace = NIL;
         pstate->p_varnamespace = NIL;
+        pstate->rightRefState = nullptr;
         addRTEtoQuery(pstate, rte, false, true, true);
         qry->returningList = transformReturningList(pstate, stmt->returningList);
         if (qry->returningList != NIL && RelationIsColStore(targetrel)) {
@@ -2721,6 +2722,10 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
      */
     qry->havingQual = transformWhereClause(pstate, stmt->havingClause, "HAVING");
 
+    pstate->shouldCheckOrderbyCol = (!ALLOW_ORDERBY_UNDISTINCT_COLUMN &&
+                                    stmt->distinctClause && linitial(stmt->distinctClause) == NULL &&
+                                    !IsInitdb && DB_IS_CMPT(B_FORMAT));
+
     /*
      * Transform sorting/grouping stuff.  Do ORDER BY first because both
      * transformGroupClause and transformDistinctClause need the results. Note
@@ -2729,6 +2734,8 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
      */
     qry->sortClause = transformSortClause(
         pstate, stmt->sortClause, &qry->targetList, true /* fix unknowns */, false /* allow SQL92 rules */);
+
+    pstate->shouldCheckOrderbyCol = false;
 
     /*
      * Transform A_const to columnref type in group by clause, So that repeated group column

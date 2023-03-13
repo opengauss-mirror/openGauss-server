@@ -1229,6 +1229,18 @@ typedef enum {
 	PST_Scan = 2
 } PlanStubType;
 
+struct PlanState;
+
+/* ----------------
+ *	 ExecProcNodeMtd
+ *
+ * This is the method called by ExecProcNode to return the next tuple
+ * from an executor node.  It returns NULL, or an empty TupleTableSlot,
+ * if no more tuples are available.
+ * ----------------
+ */
+typedef TupleTableSlot *(*ExecProcNodeMtd)(struct PlanState *pstate);
+
 /* ----------------
  *		PlanState node
  *
@@ -1245,14 +1257,19 @@ typedef struct PlanState {
                     * nodes point to one EState for the whole
                     * top-level plan */
 
+    ExecProcNodeMtd ExecProcNode;     /* function to return next tuple */
+    ExecProcNodeMtd ExecProcNodeReal; /* actual function, if above is a
+                                       * wrapper */
+
     Instrumentation* instrument; /* Optional runtime stats for this node */
+
+    MemoryContext nodeContext; /* Memory Context for this Node (only if enable_memory_limit) */
 
     /*
      * Common structural data for all Plan types.  These links to subsidiary
      * state trees parallel links in the associated plan tree (except for the
      * subPlan list, which does not exist in the plan tree).
      */
-    List* targetlist;           /* target list to be computed at this node */
     List* qual;                 /* implicitly-ANDed qual conditions */
     struct PlanState* lefttree; /* input plan tree(s) */
     struct PlanState* righttree;
@@ -1263,8 +1280,7 @@ typedef struct PlanState {
      * State for management of parameter-change-driven rescanning
      */
     Bitmapset* chgParam; /* set of IDs of changed Params */
-    HbktScanSlot hbktScanSlot;
-
+    
     /*
      * Other run-time state needed by most if not all node types.
      */
@@ -1273,12 +1289,18 @@ typedef struct PlanState {
     ProjectionInfo* ps_ProjInfo;        /* info for doing tuple projection */
     bool ps_TupFromTlist;               /* state flag for processing set-valued functions in targetlist */
 
+    int64 ps_rownum;    /* store current rownum */
+    List* targetlist;           /* target list to be computed at this node */
+    HbktScanSlot hbktScanSlot;
     bool vectorized;  // is vectorized?
-
-    MemoryContext nodeContext; /* Memory Context for this Node */
 
     bool earlyFreed;                 /* node memory already freed? */
     uint8  stubType;                 /* node stub execution type, see @PlanStubType */
+    bool recursive_reset; /* node already reset? */
+    bool qual_is_inited;
+
+    bool do_not_reset_rownum;
+    bool ps_vec_TupFromTlist; /* state flag for processing set-valued functions in targetlist */
     vectarget_func jitted_vectarget; /* LLVM IR function pointer to point to the codegened targetlist expr. */
 
     /*
@@ -1286,11 +1308,6 @@ typedef struct PlanState {
      * of data skew and inaccurate e-rows
      */
     List* plan_issues;
-    bool recursive_reset; /* node already reset? */
-    bool qual_is_inited;
-
-    bool do_not_reset_rownum;
-    int64 ps_rownum;    /* store current rownum */
 } PlanState;
 
 static inline bool planstate_need_stub(PlanState* ps)
@@ -1690,28 +1707,33 @@ typedef struct ScanState {
     Relation ss_currentRelation;
     TableScanDesc ss_currentScanDesc;
     TupleTableSlot* ss_ScanTupleSlot;
-    bool ss_ReScan;
-    Relation ss_currentPartition;
-    bool isPartTbl;
-    int currentSlot; /* current iteration position */
-    ScanDirection partScanDirection;
-    List* partitions; /* list of Partition */
-    List* subpartitions; /* list of SubPartition */
-    LOCKMODE lockMode;
-    List* runTimeParamPredicates;
-    bool runTimePredicatesReady;
-    bool is_scan_end; /* @hdfs Mark whether iterator is over or not, if the scan uses informational constraint. */
-    SeqScanAccessor* ss_scanaccessor; /* prefetch related */
-    int part_id;
-    List* subPartLengthList;
-    int startPartitionId;            /* start partition id for parallel threads. */
-    int endPartitionId;              /* end partition id for parallel threads. */
-    RangeScanInRedis rangeScanInRedis;         /* if it is a range scan in redistribution time */
-    bool isSampleScan;               /* identify is it table sample scan or not. */
-    SampleScanParams sampleScanInfo; /* TABLESAMPLE params include type/seed/repeatable. */
+
     SeqScanGetNextMtd  fillNextSlotFunc;
     ExecScanAccessMtd ScanNextMtd;
+
     bool scanBatchMode;
+    bool ss_ReScan;
+    bool isPartTbl;
+    bool isSampleScan;               /* identify is it table sample scan or not. */
+    bool runTimePredicatesReady;
+    bool is_scan_end; /* @hdfs Mark whether iterator is over or not, if the scan uses informational constraint. */
+    
+    int currentSlot; /* current iteration position */
+    int part_id;
+    int startPartitionId;            /* start partition id for parallel threads. */
+    int endPartitionId;              /* end partition id for parallel threads. */
+
+    LOCKMODE lockMode;
+    ScanDirection partScanDirection;
+
+    Relation ss_currentPartition;
+    List* partitions; /* list of Partition */
+    List* subpartitions; /* list of SubPartition */
+    List* runTimeParamPredicates;
+    SeqScanAccessor* ss_scanaccessor; /* prefetch related */
+    List* subPartLengthList;
+    RangeScanInRedis rangeScanInRedis;         /* if it is a range scan in redistribution time */
+    SampleScanParams sampleScanInfo; /* TABLESAMPLE params include type/seed/repeatable. */
     ScanBatchState* scanBatchState;
     Snapshot timecapsuleSnapshot;    /* timecapusule snap info */
 } ScanState;

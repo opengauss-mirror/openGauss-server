@@ -49,7 +49,7 @@ static char* pgaudit_get_function_name(List* funcnamelist);
 static void pgaudit_ExecutorEnd(QueryDesc* queryDesc);
 static void pgaudit_store_auditstat(
     AuditType audittype, AuditResult auditresult, const char* objectname, const char* detailsinfo);
-static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel,
+static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
     DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,
@@ -1334,7 +1334,7 @@ static char* pgaudit_get_function_name(List* funcnamelist)
                                    bool isTopLevel,DestReceiver *dest, char *completionTag)
 * Description	: ProcessUtility hook
 */
-static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel,
+static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
     DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,
@@ -1345,10 +1345,7 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
     char* object_name_pointer = NULL;
 
     if (prev_ProcessUtility)
-        prev_ProcessUtility(parsetree,
-            queryString,
-            params,
-            isTopLevel,
+        prev_ProcessUtility(processutility_cxt,
             dest,
 #ifdef PGXC
             sentToRemote,
@@ -1356,16 +1353,16 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             completionTag,
             isCTAS);
     else
-        standard_ProcessUtility(parsetree,
-            queryString,
-            params,
-            isTopLevel,
+        standard_ProcessUtility(processutility_cxt,
             dest,
 #ifdef PGXC
             sentToRemote,
 #endif /* PGXC */
             completionTag,
             isCTAS);
+
+    Node* parsetree = processutility_cxt->parse_tree;
+    const char* queryString = processutility_cxt->query_string;
     switch (nodeTag(parsetree)) {
         case T_CreateStmt: {
             CreateStmt* createtablestmt = (CreateStmt*)(parsetree); /* Audit create table */

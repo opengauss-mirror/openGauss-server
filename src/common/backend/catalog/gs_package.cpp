@@ -1748,15 +1748,17 @@ bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
         if (inArgNum1 != inArgNum2) {
             return false;
         } else if (inArgNum1 == inArgNum2 && length1 != length2) {
-            char message[MAXSTRLEN];
-            errno_t rc = sprintf_s(message, MAXSTRLEN, "can not override out param:%s", stmt1->funcname);
+            char message[MAXSTRLEN], funcname[MAXSTRLEN];
+            char *p = NameListToString(stmt1->funcname);
+            strcpy_s(funcname, MAXSTRLEN, p);
+            pfree(p);
+            errno_t rc = sprintf_s(message, MAXSTRLEN, "can not override out param:%s", funcname);
             securec_check_ss(rc, "", "");
             InsertErrorMessage(message, stmt1->startLineNumber);
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
                     errmodule(MOD_PLSQL),
-                    errmsg("can not override out param:%s",
-                    NameListToString(stmt1->funcname))));
+                    errmsg("can not override out param:%s", funcname)));
         }
     } else {
         if (length1 != length2) {

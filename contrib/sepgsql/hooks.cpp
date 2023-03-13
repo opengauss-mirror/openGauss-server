@@ -242,7 +242,7 @@ static void sepgsql_executor_start(QueryDesc* queryDesc, int eflags)
  * It tries to rough-grained control on utility commands; some of them can
  * break whole of the things if nefarious user would use.
  */
-static void sepgsql_utility_command(Node* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel,
+static void sepgsql_utility_command(processutility_context* processutility_cxt,
     DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,
@@ -251,6 +251,7 @@ static void sepgsql_utility_command(Node* parsetree, const char* queryString, Pa
 {
     sepgsql_context_info_t saved_context_info = sepgsql_context_info;
     ListCell* cell = NULL;
+    Node* parsetree = processutility_cxt->parse_tree;
 
     PG_TRY();
     {
@@ -300,20 +301,14 @@ static void sepgsql_utility_command(Node* parsetree, const char* queryString, Pa
         }
 
         if (next_ProcessUtility_hook)
-            (*next_ProcessUtility_hook)(parsetree,
-                queryString,
-                params,
-                isTopLevel,
+            (*next_ProcessUtility_hook)(processutility_cxt,
                 dest,
 #ifdef PGXC
                 sentToRemote,
 #endif
                 completionTag);
         else
-            standard_ProcessUtility(parsetree,
-                queryString,
-                params,
-                isTopLevel,
+            standard_ProcessUtility(processutility_cxt,
                 dest,
 #ifdef PGXC
                 sentToRemote,

@@ -31,7 +31,6 @@
  * General executor code
  */
 extern ExtensiblePlanState* ExecInitExtensiblePlan(ExtensiblePlan* eplan, EState* estate, int eflags);
-extern TupleTableSlot* ExecExtensiblePlan(ExtensiblePlanState* node);
 extern void ExecEndExtensiblePlan(ExtensiblePlanState* node);
 
 extern void ExecReScanExtensiblePlan(ExtensiblePlanState* node);

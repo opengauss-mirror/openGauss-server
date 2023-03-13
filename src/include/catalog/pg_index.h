@@ -59,6 +59,7 @@ CATALOG(pg_index,2610) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
                                     * index; else NULL */
     bool        indisreplident; /* is this index the identity for replication? */
     int2        indnkeyatts;     /* number of key columns in index */
+    bool        indisvisible;    /* is this index visible? */
 #endif
 } FormData_pg_index;
 
@@ -73,7 +74,7 @@ typedef FormData_pg_index *Form_pg_index;
  *        compiler constants for pg_index
  * ----------------
  */
-#define Natts_pg_index                    20
+#define Natts_pg_index                    21
 #define Anum_pg_index_indexrelid          1
 #define Anum_pg_index_indrelid            2
 #define Anum_pg_index_indnatts            3
@@ -94,6 +95,7 @@ typedef FormData_pg_index *Form_pg_index;
 #define Anum_pg_index_indpred             18
 #define Anum_pg_index_indisreplident      19
 #define Anum_pg_index_indnkeyatts         20
+#define Anum_pg_index_indisvisible        21
 
 /*
  * Index AMs that support ordered scans must support these two indoption

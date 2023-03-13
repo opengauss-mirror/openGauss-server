@@ -513,7 +513,14 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
         }
     }
 
+    /*
+     * Build the new pg_trigger tuple.
+     */
+    errno_t rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "", "");
+    
     if (stmt->funcSource != NULL && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        values[Anum_pg_trigger_tgfbody -1] = CStringGetTextDatum(stmt->funcSource->bodySrc);
         CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
         n->isOraStyle = false;
         n->isPrivate = false;
@@ -556,6 +563,8 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
         CreateFunction(n, queryString, InvalidOid);
         stmt->funcname = n->funcname;
         is_inline_procedural_func = true;
+    } else {
+        nulls[Anum_pg_trigger_tgfbody - 1] = true;
     }
     /*
      * Find and validate the trigger function.
@@ -647,11 +656,6 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
             NULL); /* @hdfs informational constraint */
     }
 
-    /*
-     * Build the new pg_trigger tuple.
-     */
-    errno_t rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
-    securec_check(rc, "", "");
 
     values[Anum_pg_trigger_tgrelid - 1] = ObjectIdGetDatum(RelationGetRelid(rel));
     values[Anum_pg_trigger_tgname - 1] = DirectFunctionCall1(namein, CStringGetDatum(trigname));
@@ -1189,10 +1193,13 @@ static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid)
         fkcon->initially_valid = true;
 
         /* ... and execute it */
-        ProcessUtility((Node*)atstmt,
-            "(generated ALTER TABLE ADD FOREIGN KEY command)",
-            NULL,
-            false,
+        processutility_context proutility_cxt;
+        proutility_cxt.parse_tree = (Node*)atstmt;
+        proutility_cxt.query_string = "(generated ALTER TABLE ADD FOREIGN KEY command)";
+        proutility_cxt.readOnlyTree = false;
+        proutility_cxt.params = NULL;
+        proutility_cxt.is_top_level = false;
+        ProcessUtility(&proutility_cxt,
             None_Receiver,
 #ifdef PGXC
             false,

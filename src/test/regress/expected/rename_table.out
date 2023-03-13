@@ -53,6 +53,15 @@ rename table tang01 to tang02;
 ERROR:  relation tang01 is temporary table, Rename table don't support.
 rename table b1 to b1;
 ERROR:  relation "public.b1" already exists
+drop table if exists test1,test2;
+NOTICE:  table "test1" does not exist, skipping
+NOTICE:  table "test2" does not exist, skipping
+create table test1(a int,b int);
+create table test2(a int,b int);
+rename table test1 to test2;
+ERROR:  relation "public.test2" already exists
+rename table test1 to test1;
+ERROR:  relation "public.test1" already exists
 \c regression
 drop database mysql;
 create schema test; create schema tbinfo;

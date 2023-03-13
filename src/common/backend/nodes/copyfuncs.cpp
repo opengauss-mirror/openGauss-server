@@ -111,6 +111,8 @@ static ReplicaIdentityStmt* _copyReplicaIdentityStmt(const ReplicaIdentityStmt* 
 static AlterSystemStmt* _copyAlterSystemStmt(const AlterSystemStmt* from);
 #endif
 static void CopyCursorFields(const Cursor_Data* from, Cursor_Data* newnode);
+static RightRefState* CopyRightRefState(const RightRefState* from);
+
 /* ****************************************************************
  *                      plannodes.h copy functions
  * ****************************************************************
@@ -237,6 +239,8 @@ static void CopyPlanFields(const Plan* from, Plan* newnode)
     COPY_SCALAR_FIELD(pred_startup_time);
     COPY_SCALAR_FIELD(pred_total_time);
     COPY_SCALAR_FIELD(pred_max_memory);
+
+    newnode->rightRefState = CopyRightRefState(from->rightRefState);
 }
 
 /*
@@ -4643,6 +4647,45 @@ static Query* _copyQuery(const Query* from)
         COPY_SCALAR_FIELD(isReplace);
     }
 
+    newnode->rightRefState = CopyRightRefState(from->rightRefState);
+
+    return newnode;
+}
+
+static RightRefState* CopyRightRefState(const RightRefState* from)
+{
+    if (!from) {
+        return nullptr;
+    }
+    RightRefState* newnode = (RightRefState*)palloc0(sizeof(RightRefState));
+    
+    COPY_SCALAR_FIELD(isSupported);
+    COPY_SCALAR_FIELD(isInsertHasRightRef);
+    COPY_SCALAR_FIELD(explicitAttrLen);
+    if (from->explicitAttrLen > 0) {
+        COPY_POINTER_FIELD(explicitAttrNos, from->explicitAttrLen * sizeof(int));
+    }
+
+    if (from->constValues && from->colCnt > 0) {
+        newnode->constValues = (Const**)palloc0(sizeof(Const*) * from->colCnt);
+        for (int i = 0; i < from->colCnt; ++i) {
+            if (from->constValues[i]) {
+                newnode->constValues[i] = _copyConst(from->constValues[i]);
+            }
+        }
+    }
+
+    COPY_SCALAR_FIELD(colCnt);
+
+    /* ignore values, hasExecs, isNulls */
+    
+    COPY_SCALAR_FIELD(isUpsert);
+    COPY_SCALAR_FIELD(isUpsertHasRightRef);
+    COPY_SCALAR_FIELD(usExplicitAttrLen);
+    if (from->usExplicitAttrLen > 0) {
+        COPY_POINTER_FIELD(usExplicitAttrNos, from->usExplicitAttrLen * sizeof(int));
+    }
+    
     return newnode;
 }
 
@@ -6325,9 +6368,11 @@ static AlterTSConfigurationStmt* _copyAlterTSConfigurationStmt(const AlterTSConf
     COPY_NODE_FIELD(cfgname);
     COPY_NODE_FIELD(tokentype);
     COPY_NODE_FIELD(dicts);
+    COPY_NODE_FIELD(cfoptions);
     COPY_SCALAR_FIELD(override);
     COPY_SCALAR_FIELD(replace);
     COPY_SCALAR_FIELD(missing_ok);
+    COPY_SCALAR_FIELD(is_reset);
 
     return newnode;
 }

@@ -239,6 +239,7 @@ const uint32 USTORE_UPGRADE_VERSION = 92368;
 const uint32 PACKAGE_ENHANCEMENT = 92444;
 const uint32 SUBSCRIPTION_VERSION = 92580;
 const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92656;
+const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -7569,6 +7570,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
     int i_options = 0;
     int ntups = 0;
     int i_indisreplident = 0;
+    int i_indisvisible = 0;
     ArchiveHandle* AH = (ArchiveHandle*)fout;
 
     for (i = 0; i < numTables; i++) {
@@ -7621,6 +7623,11 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
                 appendPQExpBuffer(query, "i.indisreplident, ");
             } else {
                 appendPQExpBuffer(query, "false AS indisreplident, ");
+            }
+            if (is_column_exists(AH->connection, IndexRelationId, "indisvisible")) {
+                appendPQExpBuffer(query, "i.indisvisible, ");
+            } else {
+                appendPQExpBuffer(query, "true AS indisvisible, ");
             }
             appendPQExpBuffer(query,
                 "c.contype, c.conname, "
@@ -7783,6 +7790,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
         i_indnkeys = PQfnumber(res, "indnkeys");
         i_indkey = PQfnumber(res, "indkey");
         i_indisclustered = PQfnumber(res, "indisclustered");
+        i_indisvisible = PQfnumber(res, "indisvisible");
         i_indisusable = PQfnumber(res, "indisusable");
         i_indisreplident = PQfnumber(res, "indisreplident");
         i_contype = PQfnumber(res, "contype");
@@ -7830,6 +7838,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
             indxinfo[j].indisclustered = (PQgetvalue(res, j, i_indisclustered)[0] == 't');
             indxinfo[j].indisusable = (PQgetvalue(res, j, i_indisusable)[0] == 't');
             indxinfo[j].indisreplident = (PQgetvalue(res, j, i_indisreplident)[0] == 't');
+            indxinfo[j].indisvisible = (PQgetvalue(res, j, i_indisvisible)[0] == 't');
 
             if (contype == 'p' || contype == 'u' || contype == 'x') {
                 /*
@@ -8535,6 +8544,7 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
     int i_tgdeferrable = 0;
     int i_tginitdeferred = 0;
     int i_tgdef = 0;
+    int i_tgdb = 0;
     int ntups = 0;
 
     for (i = 0; i < numTables; i++) {
@@ -8560,15 +8570,27 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
              * could result in non-forward-compatible dumps of WHEN clauses
              * due to under-parenthesization.
              */
-            appendPQExpBuffer(query,
-                "SELECT tgname, "
-                "tgfoid::pg_catalog.regproc AS tgfname, "
-                "pg_catalog.pg_get_triggerdef(oid, false) AS tgdef, "
-                "tgenabled, tableoid, oid "
-                "FROM pg_catalog.pg_trigger t "
-                "WHERE tgrelid = '%u'::pg_catalog.oid "
-                "AND NOT tgisinternal",
-                tbinfo->dobj.catId.oid);
+            if (GetVersionNum(fout) >= B_DUMP_TRIGGER_VERSION_NUM) {
+                appendPQExpBuffer(query,
+                    "SELECT tgname, tgfbody, "
+                    "tgfoid::pg_catalog.regproc AS tgfname, "
+                    "pg_catalog.pg_get_triggerdef(oid, false) AS tgdef, "
+                    "tgenabled, tableoid, oid "
+                    "FROM pg_catalog.pg_trigger t "
+                    "WHERE tgrelid = '%u'::pg_catalog.oid "
+                    "AND NOT tgisinternal",
+                    tbinfo->dobj.catId.oid);
+            } else {
+                appendPQExpBuffer(query,
+                    "SELECT tgname, "
+                    "tgfoid::pg_catalog.regproc AS tgfname, "
+                    "pg_catalog.pg_get_triggerdef(oid, false) AS tgdef, "
+                    "tgenabled, tableoid, oid "
+                    "FROM pg_catalog.pg_trigger t "
+                    "WHERE tgrelid = '%u'::pg_catalog.oid "
+                    "AND NOT tgisinternal",
+                    tbinfo->dobj.catId.oid);
+            }
         } else if (fout->remoteVersion >= 80300) {
             /*
              * We ignore triggers that are tied to a foreign-key constraint
@@ -8653,6 +8675,7 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
         i_tgdeferrable = PQfnumber(res, "tgdeferrable");
         i_tginitdeferred = PQfnumber(res, "tginitdeferred");
         i_tgdef = PQfnumber(res, "tgdef");
+        i_tgdb = PQfnumber(res, "tgfbody");
 
         tginfo = (TriggerInfo*)pg_malloc(ntups * sizeof(TriggerInfo));
 
@@ -8665,11 +8688,16 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
             tginfo[j].dobj.nmspace = tbinfo->dobj.nmspace;
             tginfo[j].tgtable = tbinfo;
             tginfo[j].tgenabled = *(PQgetvalue(res, j, i_tgenabled));
+            tginfo[j].tgfname = gs_strdup(PQgetvalue(res, j, i_tgfname));
+            if (!PQgetisnull(res, j, i_tgdb)) {
+                tginfo[j].tgdb = true;
+            } else {
+                tginfo[j].tgdb = false;
+            }
             if (i_tgdef >= 0) {
                 tginfo[j].tgdef = gs_strdup(PQgetvalue(res, j, i_tgdef));
 
                 /* remaining fields are not valid if we have tgdef */
-                tginfo[j].tgfname = NULL;
                 tginfo[j].tgtype = 0;
                 tginfo[j].tgnargs = 0;
                 tginfo[j].tgargs = NULL;
@@ -8682,7 +8710,6 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
             } else {
                 tginfo[j].tgdef = NULL;
 
-                tginfo[j].tgfname = gs_strdup(PQgetvalue(res, j, i_tgfname));
                 tginfo[j].tgtype = atoi(PQgetvalue(res, j, i_tgtype));
                 tginfo[j].tgnargs = atoi(PQgetvalue(res, j, i_tgnargs));
                 tginfo[j].tgargs = gs_strdup(PQgetvalue(res, j, i_tgargs));
@@ -21290,7 +21317,17 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
     appendPQExpBuffer(delqry, "%s;\n", fmtId(tbinfo->dobj.name));
 
     if (NULL != tginfo->tgdef) {
-        appendPQExpBuffer(query, "%s;\n", tginfo->tgdef);
+        if (tginfo->tgdb) {
+            appendPQExpBuffer(query, "DROP FUNCTION %s ;\n", tginfo->tgfname);
+            appendPQExpBuffer(query, "%s", tginfo->tgdef);
+            if (*format == 'p') {
+                appendPQExpBuffer(query, "\n/\n");
+            } else {
+                appendPQExpBuffer(query, ";\n");
+            }
+        } else {
+            appendPQExpBuffer(query, "%s;\n", tginfo->tgdef);
+        }
     } else {
         if (tginfo->tgisconstraint) {
             appendPQExpBuffer(query, "CREATE CONSTRAINT TRIGGER ");
@@ -22821,6 +22858,10 @@ static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxI
 
     if ((indxinfo->options != NULL) && strlen(indxinfo->options) > 0)
         appendPQExpBuffer(buf, " WITH (%s)", indxinfo->options);
+
+    if (!indxinfo->indisvisible) {
+        appendPQExpBuffer(buf, " INVISIBLE");
+    }
 
     if (coninfo->condeferrable) {
         appendPQExpBuffer(buf, " DEFERRABLE");

@@ -470,6 +470,36 @@ SELECT 1-2::bool;
         0
 (1 row)
 
+select true >= 'ss' not in (md5('ss'));
+ ?column? 
+----------
+ t
+(1 row)
+
+select false >= 'ss' not between 'ss' and 'ss';
+ ?column? 
+----------
+ t
+(1 row)
+
+select false >= 'ss' not like 'ss';
+ ?column? 
+----------
+ t
+(1 row)
+
+select false >= 'ss' not ilike 'ss';
+ ?column? 
+----------
+ t
+(1 row)
+
+select false >= 'ss' not similar to 'ss';
+ ?column? 
+----------
+ t
+(1 row)
+
 --
 -- Clean up
 -- Many tables are retained by the regression test, but these do not seem

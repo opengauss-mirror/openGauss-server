@@ -6749,16 +6749,17 @@ void XLOGShmemInit(void)
         t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks =
             t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[t_thrd.proc->nodeno];
 
-        if ((((SS_STANDBY_PROMOTING && t_thrd.role == STARTUP) || SS_PRIMARY_DEMOTED) &&
+        /* Reset walbuffer only before startup thread init, in which StartupXLOG pushes LSN */
+        if (ENABLE_DMS && t_thrd.role == STARTUP && (((SS_STANDBY_PROMOTING || SS_PRIMARY_DEMOTED) &&
             g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag == true) ||
-            SSFAILOVER_TRIGGER) {
+            SSFAILOVER_TRIGGER)) {
             g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag = false;
             errorno = memset_s(t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks,
                 sizeof(XLogRecPtr) * g_instance.attr.attr_storage.XLOGbuffers, 0,
                 sizeof(XLogRecPtr) * g_instance.attr.attr_storage.XLOGbuffers);
             securec_check(errorno, "", "");
-            ereport(LOG, (errmsg("[SS switchover] Successfully reset xlblocks when thrd:%lu with role:%d started",
-                t_thrd.proc->pid, (int)t_thrd.role)));
+            ereport(LOG, (errmsg("[SS %s] Successfully reset xlblocks when thrd:%lu with role:%d started",
+                SS_PERFORMING_SWITCHOVER ? "switchover" : "failover", t_thrd.proc->pid, (int)t_thrd.role)));
         }
         return;
     }
@@ -9683,7 +9684,7 @@ void StartupXLOG(void)
      * in SS Switchover, skip dw init since we didn't do ShutdownXLOG
      */
 
-    if ((ENABLE_REFORM && SS_REFORM_REFORMER && !SSFAILOVER_TRIGGER && !SS_PRIMARY_DEMOTED) ||
+    if ((ENABLE_REFORM && SS_REFORM_REFORMER && !SSFAILOVER_TRIGGER && !SS_PERFORMING_SWITCHOVER) ||
         !ENABLE_DMS || !ENABLE_REFORM) {
         /* process assist file of chunk recycling */
         dw_ext_init();
@@ -9693,7 +9694,7 @@ void StartupXLOG(void)
         }
     }
 
-    if (SS_REFORM_PARTNER && SS_STANDBY_PROMOTING) {
+    if (SS_REFORM_REFORMER && SS_STANDBY_PROMOTING) {
         ss_switchover_promoting_dw_init();
     }
 
@@ -11872,7 +11873,7 @@ void CreateCheckPoint(int flags)
     }
 
     /* allow standby do checkpoint only after it has promoted AND has finished recovery. */
-    if (ENABLE_DMS && SS_STANDBY_MODE && !(SS_STANDBY_PROMOTING && !RecoveryInProgress())) {
+    if (ENABLE_DMS && SS_STANDBY_MODE) {
         return;
     } else if (SSFAILOVER_TRIGGER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do not do CreateCheckpoint during failover")));

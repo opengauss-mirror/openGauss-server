@@ -87,6 +87,7 @@
 %token K_LABEL
 %token K_PROGRESS
 %token K_FAST
+%token K_WAIT
 %token K_NOWAIT
 %token K_BUILDSTANDBY
 %token K_OBSMODE
@@ -407,8 +408,17 @@ advance_catalog_xmin:
  					DropReplicationSlotCmd *cmd;
  					cmd = makeNode(DropReplicationSlotCmd);
  					cmd->slotname = $2;
+					cmd->wait = false;
  					$$ = (Node *) cmd;
  				}
+			| K_DROP_REPLICATION_SLOT IDENT K_WAIT
+				{
+					DropReplicationSlotCmd *cmd;
+					cmd = makeNode(DropReplicationSlotCmd);
+					cmd->slotname = $2;
+					cmd->wait = true;
+					$$ = (Node *) cmd;
+				}
  			;
 
 

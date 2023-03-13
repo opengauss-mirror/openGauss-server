@@ -319,6 +319,8 @@ NON_EXEC_STATIC void CfsShrinkerMain()
     t_thrd.proc_cxt.PostInit->InitCfsShrinker();
 
     SetProcessingMode(NormalProcessing);
+    pgstat_report_appname("CfsShrinker");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so

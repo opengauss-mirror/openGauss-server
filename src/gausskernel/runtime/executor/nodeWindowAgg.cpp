@@ -52,6 +52,7 @@
 #include "utils/syscache.h"
 #include "windowapi.h"
 
+static TupleTableSlot* ExecWindowAgg(PlanState* state);
 static void initialize_windowaggregate(
     WindowAggState* winstate, WindowStatePerFunc perfuncstate, WindowStatePerAgg peraggstate);
 static void advance_windowaggregate(
@@ -951,14 +952,17 @@ static void update_frametailpos(WindowObject winobj, TupleTableSlot* slot)
  *	(ignoring the case of SRFs in the targetlist, that is).
  * -----------------
  */
-TupleTableSlot* ExecWindowAgg(WindowAggState* winstate)
+static TupleTableSlot* ExecWindowAgg(PlanState* state)
 {
+    WindowAggState* winstate = castNode(WindowAggState, state);
     TupleTableSlot* result = NULL;
     ExprDoneCond is_done;
     ExprContext* econtext = NULL;
     int i;
     int numfuncs;
 
+    CHECK_FOR_INTERRUPTS();
+    
     if (winstate->all_done)
         return NULL;
 
@@ -1157,6 +1161,7 @@ WindowAggState* ExecInitWindowAgg(WindowAgg* node, EState* estate, int eflags)
     WindowAggState* winstate = makeNode(WindowAggState);
     winstate->ss.ps.plan = (Plan*)node;
     winstate->ss.ps.state = estate;
+    winstate->ss.ps.ExecProcNode = ExecWindowAgg;
 
     int64 operator_mem = SET_NODEMEM(((Plan*)node)->operatorMemKB[0], ((Plan*)node)->dop);
     AllocSetContext* set = (AllocSetContext*)(estate->es_query_cxt);

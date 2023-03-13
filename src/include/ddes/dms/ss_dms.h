@@ -54,6 +54,7 @@ typedef struct st_ss_dms_func {
     int (*dms_register_thread_init)(dms_thread_init_t thrd_init);
     int (*dms_release_owner)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned char *released);
     int (*dms_wait_reform)(unsigned int *has_offline);
+    void (*dms_get_event)(dms_wait_event_t event_type, unsigned long long *event_cnt, unsigned long long *event_time);
     int (*dms_buf_res_rebuild_drc)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
                                    unsigned char is_dirty);
     int (*dms_is_recovery_session)(unsigned int sid);
@@ -99,6 +100,7 @@ int dms_request_opengauss_txn_snapshot(dms_context_t *dms_ctx,
 int dms_register_thread_init(dms_thread_init_t thrd_init);
 int dms_release_owner(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned char *released);
 int dms_wait_reform(unsigned int *has_offline);
+void dms_get_event(dms_wait_event_t event_type, unsigned long long *event_cnt, unsigned long long *event_time);
 int dms_buf_res_rebuild_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
                             unsigned char is_dirty);
 int dms_is_recovery_session(unsigned int sid);

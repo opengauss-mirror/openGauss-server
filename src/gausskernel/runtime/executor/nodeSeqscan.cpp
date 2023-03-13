@@ -51,6 +51,7 @@
 #include "optimizer/var.h"
 #include "optimizer/tlist.h"
 
+static TupleTableSlot* ExecSeqScan(PlanState* state);
 extern void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, int* quantity, int* trigger);
 /* ----------------------------------------------------------------
  *		prefetch_pages
@@ -374,9 +375,10 @@ static ScanBatchResult *SeqNextBatchMode(SeqScanState *node)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecSeqScan(SeqScanState* node)
+static TupleTableSlot* ExecSeqScan(PlanState* state)
 {
-    if (node->scanBatchMode) {
+    SeqScanState* node = castNode(SeqScanState, state);
+    if (unlikely(node->scanBatchMode)) {
         return (TupleTableSlot *)SeqNextBatchMode(node);
     } else {
         return ExecScan((ScanState *) node, node->ScanNextMtd, (ExecScanRecheckMtd) SeqRecheck);
@@ -827,8 +829,8 @@ static inline void FlatTLtoBool(const List* targetList, bool* boolArr, AttrNumbe
 {
     ListCell* tl = NULL;
     foreach (tl, targetList) {
-        GenericExprState* gstate = (GenericExprState*)lfirst(tl);
-        Var* variable = (Var*)gstate->xprstate.expr;
+        TargetEntry* tle = (TargetEntry*)lfirst(tl);
+        Var* variable = (Var*)tle->expr;
         Assert(variable != NULL); /* if this happens we've messed up */
         if ((variable->varoattno > 0) && (variable->varoattno <= natts)) {
             boolArr[variable->varoattno - 1] = false; /* sometimes varattno in parent is different */
@@ -948,6 +950,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
     scanstate->currentSlot = 0;
     scanstate->partScanDirection = node->partScanDirection;
     scanstate->rangeScanInRedis = {false,0,0};
+    scanstate->ps.ExecProcNode = ExecSeqScan;
 
     if (!node->tablesample) {
         scanstate->isSampleScan = false;
@@ -1049,7 +1052,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
         FlatTLtoBool(scanstate->ps.plan->flatList, isNullProj, natts);
         if (scanstate->ps.plan->targetlist->length < natts)
             if (scanstate->ps.plan->targetlist->length > scanstate->ps.plan->flatList->length) {
-                FlatTLtoBool(scanstate->ps.plan->targetlist, isNullProj, natts); /* parent unaware of 'HAVING' clause */
+                TLtoBool(scanstate->ps.plan->targetlist, isNullProj, natts); /* parent unaware of 'HAVING' clause */
             }
 
         if ((scanstate->ps.plan->qual != NULL) && (scanstate->ps.plan->qual->length > 0)) /* query has qualifications */

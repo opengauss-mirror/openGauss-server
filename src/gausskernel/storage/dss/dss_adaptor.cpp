@@ -125,7 +125,7 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_lstat", (void **)&device_op.dss_lstat));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_fstat", (void **)&device_op.dss_fstat));
     SS_RETURN_IFERR(
-        dss_load_symbol(device_op.handle, "dss_set_server_status", (void **)&device_op.dss_set_server_status));
+        dss_load_symbol(device_op.handle, "dss_set_main_inst", (void **)&device_op.dss_set_main_inst));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_set_svr_path", (void **)&device_op.dss_set_svr_path));
     SS_RETURN_IFERR(
         dss_load_symbol(device_op.handle, "dss_register_log_callback", (void **)&device_op.dss_register_log_callback));

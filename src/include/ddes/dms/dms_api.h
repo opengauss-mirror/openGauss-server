@@ -284,6 +284,8 @@ typedef struct st_dms_buf_ctrl {
     unsigned int pblk_relno;
     unsigned int pblk_blkno;
     unsigned long long  pblk_lsn;
+    unsigned char seg_fileno;
+    unsigned int seg_blockno;
 #endif
 }dms_buf_ctrl_t;
 
@@ -418,6 +420,12 @@ typedef enum en_dms_wait_event {
     DMS_EVT_DEAD_LOCK_ITL,
     DMS_EVT_BROADCAST_BTREE_SPLIT,
     DMS_EVT_BROADCAST_ROOT_PAGE,
+    DMS_EVT_QUERY_OWNER_ID,
+    DMS_EVT_LATCH_X,
+    DMS_EVT_LATCH_S,
+    DMS_EVT_LATCH_X_REMOTE,
+    DMS_EVT_LATCH_S_REMOTE,
+
 
     DMS_EVT_COUNT,
 } dms_wait_event_t;
@@ -566,6 +574,7 @@ typedef void (*dms_set_switchover_result)(void *db_handle, int result);
 typedef void (*dms_set_db_standby)(void *db_handle);
 typedef int (*dms_mount_to_recovery)(void *db_handle, unsigned int *has_offline);
 typedef int(*dms_get_open_status)(void *db_handle);
+typedef void (*dms_reform_set_dms_role)(void *db_handle, unsigned int reformer_id);
 
 // for openGauss
 typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
@@ -626,6 +635,7 @@ typedef struct st_dms_callback {
     dms_opengauss_recovery_standby opengauss_recovery_standby;
     dms_opengauss_recovery_primary opengauss_recovery_primary;
     dms_reform_start_notify reform_start_notify;
+    dms_reform_set_dms_role reform_set_dms_role;
 
     dms_get_page_hash_val get_page_hash_val;
     dms_get_page_lsn get_page_lsn;
@@ -735,6 +745,7 @@ typedef struct st_dms_profile {
     unsigned short mfc_max_wait_ticket_time; // max time to wait for ticket while sending a message
     unsigned int page_size;
     unsigned long long recv_msg_buf_size;
+    unsigned int log_level;
 
     dms_conn_mode_t pipe_type;    // Inter-instance communication mode. Currently, only TCP and RDMA are supported.
     unsigned int inst_cnt;        // Number of cluster instances
@@ -755,7 +766,7 @@ typedef struct st_dms_profile {
     //ock scrlock configs
     unsigned char enable_scrlock;
     unsigned int primary_inst_id;
-    unsigned char enable_scrlock_secure_mode;   // enable ssl
+    unsigned char enable_ssl;
     unsigned int scrlock_log_level;
     unsigned char enable_scrlock_worker_bind_core;
     unsigned int scrlock_worker_cnt;
@@ -782,7 +793,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           45
+#define DMS_LOCAL_VERSION           51
 
 #ifdef __cplusplus
 }

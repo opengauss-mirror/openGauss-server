@@ -1313,6 +1313,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
 
     // initialize thread
     WLMmonitor_init();
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     // main loop of the thread
     WLMmonitor_MainLoop();
@@ -1640,6 +1641,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     ereport(LOG, (errmsg("WLMarbiter thread is starting up.")));
 
     // main loop of the thread
+    pgstat_report_activity(STATE_IDLE, NULL);
     WLMarbiter_MainLoop();
 
     /* If transaction has started, we must commit it here. */

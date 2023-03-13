@@ -34,13 +34,16 @@
 #include "utils/snapmgr.h"
 #include "access/tableam.h"
 
+static TupleTableSlot* ExecLockRows(PlanState* state);
+
 /* ----------------------------------------------------------------
  * ExecLockRows
  * return: a tuple or NULL
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecLockRows(LockRowsState* node)
+static TupleTableSlot* ExecLockRows(PlanState* state)
 {
+    LockRowsState* node = castNode(LockRowsState, state);
     TupleTableSlot* slot = NULL;
     EState* estate = NULL;
     PlanState* outer_plan = NULL;
@@ -52,6 +55,8 @@ TupleTableSlot* ExecLockRows(LockRowsState* node)
     Relation bucket_rel = NULL;
     bool orig_early_free = false;
     bool orig_early_deinit = false;
+
+    CHECK_FOR_INTERRUPTS();
 
     /*
      * get information from the node
@@ -438,6 +443,7 @@ LockRowsState* ExecInitLockRows(LockRows* node, EState* estate, int eflags)
 
     lrstate->ps.plan = (Plan*)node;
     lrstate->ps.state = estate;
+    lrstate->ps.ExecProcNode = ExecLockRows;
 
     /*
      * Miscellaneous initialization

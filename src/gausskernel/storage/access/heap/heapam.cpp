@@ -7794,9 +7794,14 @@ static void GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask, uint
  */
 TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2)
 {
-    if (SS_STANDBY_MODE) {
-        return SSMultiXactIdGetUpdateXid(xmax, t_infomask, t_infomask2);
+    if (ENABLE_DMS) {
+        /* fetch TXN info locally if either reformer, original primary, or normal primary */
+        bool local_fetch = SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY;
+        if (!local_fetch) {
+            return SSMultiXactIdGetUpdateXid(xmax, t_infomask, t_infomask2);
+        }
     }
+
     TransactionId updateXact = InvalidTransactionId;
     MultiXactMember *members = NULL;
     int nmembers;

@@ -252,16 +252,55 @@ extern void EvalPlanQualBegin(EPQState* epqstate, EState* parentestate, bool isU
 extern void EvalPlanQualEnd(EPQState* epqstate);
 
 /*
- * prototypes from functions in execProcnode.c
+ * functions in execProcnode.c
  */
 extern PlanState* ExecInitNode(Plan* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecProcNode(PlanState* node);
 extern Node* MultiExecProcNode(PlanState* node);
 extern void ExecEndNode(PlanState* node);
 extern bool NeedStubExecution(Plan* plan);
 extern TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos);
 
 extern long ExecGetPlanMemCost(Plan* node);
+
+/* ----------------------------------------------------------------
+ *		ExecProcNode
+ *
+ *		Execute the given node to return a(nother) tuple.
+ * ----------------------------------------------------------------
+ */
+#ifndef FRONTEND
+#ifndef ENABLE_MULTIPLE_NODES
+
+static inline TupleTableSlot *ExecProcNode(PlanState *node)
+{
+    TupleTableSlot* result;
+    Assert(node->ExecProcNode);
+    if (unlikely(node->nodeContext)) {
+        MemoryContext old_context = MemoryContextSwitchTo(node->nodeContext); /* Switch to Node Level Memory Context */
+        if (node->chgParam != NULL) /* something changed? */
+            ExecReScan(node);       /* let ReScan handle this */
+        result = node->ExecProcNode(node);
+        MemoryContextSwitchTo(old_context);
+    } else {
+        if (node->chgParam != NULL) /* something changed? */
+            ExecReScan(node);
+        result = node->ExecProcNode(node);
+    }
+    node->ps_rownum++;
+    return result;
+}
+#else  /*ENABLE_MULTIPLE_NODES*/
+
+static inline TupleTableSlot *ExecProcNode(PlanState *node)
+{
+    //TODO: FIX ENABLE_MULTIPLE_NODES
+    return NULL;
+}
+
+#endif /*ENABLE_MULTIPLE_NODES*/
+
+#endif /*FRONTEND*/
+
 
 /*
  * prototypes from functions in execQual.c
@@ -483,6 +522,7 @@ extern Datum GetTypeZeroValue(Form_pg_attribute att_tup);
 extern Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot* slot);
 
 extern Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+extern int ResourceOwnerForgetIfExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex, bool trace);
 
 // AutoMutexLock
 //		Auto object for non-recursive pthread_mutex_t lock
@@ -491,7 +531,11 @@ class AutoMutexLock {
 public:
     AutoMutexLock(pthread_mutex_t* mutex, bool trace = true)
         : m_mutex(mutex), m_fLocked(false), m_trace(trace), m_owner(t_thrd.utils_cxt.CurrentResourceOwner)
-    {}
+    {
+        if (mutex == &file_list_lock) {
+            m_owner = t_thrd.lsc_cxt.local_sysdb_resowner;
+        }
+    }
 
     ~AutoMutexLock()
     {
@@ -538,10 +582,11 @@ public:
         if (m_fLocked) {
             int ret = 0;
 
-            if (t_thrd.utils_cxt.CurrentResourceOwner == NULL)
-                m_owner = NULL;
-
-            ret = PthreadMutexUnlock(m_owner, m_mutex, m_trace);
+            if (m_mutex == &file_list_lock) {
+                ret = ResourceOwnerForgetIfExistPthreadMutex(m_owner, m_mutex, m_trace);
+            } else {
+                ret = PthreadMutexUnlock(m_owner, m_mutex, m_trace);
+            }
             m_fLocked = (ret == 0 ? false : true);
             if (m_fLocked) {
                 /* this should never happen, system may be completely in a mess */

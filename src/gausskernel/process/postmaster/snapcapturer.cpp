@@ -459,6 +459,8 @@ NON_EXEC_STATIC void TxnSnapWorkerMain()
     t_thrd.proc_cxt.PostInit->InitTxnSnapWorker();
 
     SetProcessingMode(NormalProcessing);
+    pgstat_report_appname("TxnSnapWorker");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -797,6 +799,8 @@ NON_EXEC_STATIC void TxnSnapCapturerMain()
     t_thrd.proc_cxt.PostInit->InitTxnSnapCapturer();
 
     SetProcessingMode(NormalProcessing);
+    pgstat_report_appname("TxnSnapCapturer");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so

@@ -668,7 +668,7 @@ opt_semi		:
                 | ';'
                 ;
 
-pl_block		: decl_sect begin_decl proc_sect exception_sect K_END opt_label
+pl_block		: decl_sect K_BEGIN declare_sect proc_sect exception_sect K_END opt_label
                     {
                         PLpgSQL_stmt_block *newp;
 
@@ -681,10 +681,10 @@ pl_block		: decl_sect begin_decl proc_sect exception_sect K_END opt_label
                         newp->isAutonomous = $1.isAutonomous;
                         newp->n_initvars = $1.n_initvars;
                         newp->initvarnos = $1.initvarnos;
-                        newp->body		= $3;
-                        newp->exceptions	= $4;
+                        newp->body		= $4;
+                        newp->exceptions	= $5;
 
-                        check_labels($1.label, $6, @6);
+                        check_labels($1.label, $7, @7);
                         plpgsql_ns_pop();
 
                         $$ = (PLpgSQL_stmt *)newp;
@@ -694,9 +694,20 @@ pl_block		: decl_sect begin_decl proc_sect exception_sect K_END opt_label
                     }
                 ;
 
-begin_decl      : K_BEGIN 
-                | K_BEGIN declare_stmts
-                ;
+declare_sect    : 
+                        {
+                            /* done with decls, so resume identifier lookup */
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                        }
+                    | { SetErrorState(); 
+                        u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_DECLARE;
+                    } declare_stmts
+                        {
+                            /* done with decls, so resume identifier lookup */
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                            u_sess->plsql_cxt.pragma_autonomous = false;
+                        }
+                    ;
 
 declare_stmts   : declare_stmts declare_stmt
                 | declare_stmt
@@ -709,6 +720,11 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                     }
                     decl_cursor_args decl_is_for decl_cursor_query
                     {
+                        int tok = -1;
+                        plpgsql_peek(&tok);
+                        if (tok != K_DECLARE) {
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                        }
                         PLpgSQL_var *newp;
 
                         /* pop local namespace for cursor args */
@@ -735,6 +751,11 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                     }
                 | T_DECLARE_CONDITION decl_varname K_CONDITION K_FOR condition_value ';'
                     {
+                        int tok = -1;
+                        plpgsql_peek(&tok);
+                        if (tok != K_DECLARE) {
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+                        }
                         IsInPublicNamespace($2->name);
                         PLpgSQL_var	*var;
 
@@ -749,35 +770,52 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                     }
                 ;
 
-condition_value	: any_identifier
+condition_value	: K_SQLSTATE
                     {
-                        if (strcmp($1, "sqlstate") == 0) {
-                            /* next token should be a string literal */
-                            char   *sqlstatestr;
-                            if (yylex() != SCONST)
-                                yyerror("syntax error");
-                            sqlstatestr = yylval.str;
-                        
-                            if (strlen(sqlstatestr) != 5)
-                                yyerror("invalid SQLSTATE code");
-                            if (strspn(sqlstatestr, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") != 5)
-                                yyerror("invalid SQLSTATE code");
-                            if (strncmp(sqlstatestr, "00", 2) == 0) {
-                                const char* message = "bad SQLSTATE";
-                                InsertErrorMessage(message, plpgsql_yylloc);
-                                ereport(ERROR,
-                                        (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
-                                            errmsg("bad SQLSTATE '%s'",sqlstatestr)));
-                            }
-
-                            $$ = MAKE_SQLSTATE(sqlstatestr[0],
-                                              sqlstatestr[1],
-                                              sqlstatestr[2],
-                                              sqlstatestr[3],
-                                              sqlstatestr[4]);
-                        } else {
-                            yyerror("syntax error");
+                        char   *sqlstatestr;
+                        yylex();
+                        if (strcmp(yylval.str, "value") ==0) {
+                            yylex();
                         }
+                        sqlstatestr = yylval.str;
+                        
+                        if (strlen(sqlstatestr) != 5)
+                            yyerror("invalid SQLSTATE code");
+                        if (strspn(sqlstatestr, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") != 5)
+                            yyerror("invalid SQLSTATE code");
+                        if (strncmp(sqlstatestr, "00", 2) == 0) {
+                            const char* message = "bad SQLSTATE";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                                        errmsg("bad SQLSTATE '%s'",sqlstatestr)));
+                        }
+
+                        $$ = MAKE_SQLSTATE(sqlstatestr[0],
+                                          sqlstatestr[1],
+                                          sqlstatestr[2],
+                                          sqlstatestr[3],
+                                          sqlstatestr[4]);
+
+                        sqlstatestr = yylval.str;
+                        
+                        if (strlen(sqlstatestr) != 5)
+                            yyerror("invalid SQLSTATE code");
+                        if (strspn(sqlstatestr, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") != 5)
+                            yyerror("invalid SQLSTATE code");
+                        if (strncmp(sqlstatestr, "00", 2) == 0) {
+                            const char* message = "bad SQLSTATE";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                                        errmsg("bad SQLSTATE '%s'",sqlstatestr)));
+                        }
+
+                        $$ = MAKE_SQLSTATE(sqlstatestr[0],
+                                          sqlstatestr[1],
+                                          sqlstatestr[2],
+                                          sqlstatestr[3],
+                                          sqlstatestr[4]);
                     }
                 | ICONST
                     {
@@ -7438,6 +7476,9 @@ static inline void init_array_parse_context(ArrayParseContext *context)
  */
 static inline void push_array_parse_stack(ArrayParseContext *context, int parenlevel, int state)
 {
+    if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+        return;
+    }
     if (likely(parenlevel >= 0)) {
         context->list_left_bracket = lcons_int(parenlevel, context->list_left_bracket);
         context->list_right_bracket = lcons_int(parenlevel, context->list_right_bracket);
@@ -9227,15 +9268,23 @@ make_execsql_stmt(int firsttoken, int location)
                         char*  name = NULL;
                         errno_t rc = 0;
 
-                        name = (char*)palloc(lb.len-count+1);
-                        rc = strncpy_s(name, lb.len-count+1, lb.data, lb.len-count);
+                        int len = Min(NAMEDATALEN, lb.len - count + 1);
+                        name = (char*)palloc(len);
+                        rc = strncpy_s(name, len, lb.data, len - 1);
                         securec_check_c(rc, "\0", "\0");
+
                         plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(name));
                         pfree(name);
                     }
                     else
-                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(lb.data));
+                    {
+                        if(lb.len >= NAMEDATALEN)
+                        {
+                            lb.data[NAMEDATALEN - 1] = '\0';
+                        }
 
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(lb.data));
+                    }
                     pfree_ext(lb.data);
                     break;
                 }

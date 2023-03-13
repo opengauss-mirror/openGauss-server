@@ -29,7 +29,6 @@
 #include "vecexecutor/vectorbatch.h"
 
 extern VecToRowState* ExecInitVecToRow(VecToRow* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecVecToRow(VecToRowState* node);
 extern void ExecEndVecToRow(VecToRowState* node);
 extern void ExecReScanVecToRow(VecToRowState* node);
 

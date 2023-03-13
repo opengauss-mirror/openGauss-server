@@ -126,6 +126,10 @@ typedef struct HashJoinTableData {
     struct HashJoinTupleData** buckets;
     /* buckets array is per-batch storage, as are all the tuples */
 
+    int nbuckets_original;     /* # buckets when starting the first hash */
+    int nbuckets_optimal;      /* optimal # buckets (per batch) */
+    int log2_nbuckets_optimal; /* same as log2_nbuckets optimal */
+
     bool keepNulls; /* true to store unmatchable NULL tuples */
 
     bool skewEnabled;            /* are we using skew optimization? */
@@ -143,6 +147,7 @@ typedef struct HashJoinTableData {
     bool growEnabled; /* flag to shut off nbatch increases */
 
     double totalTuples; /* # tuples obtained from inner plan */
+    double skewTuples; /* # tuples inserted into skew tuples */
 
     /*
      * These arrays are allocated for the life of the hash join, but only if

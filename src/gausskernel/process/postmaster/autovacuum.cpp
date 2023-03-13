@@ -1352,6 +1352,9 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
         dopControl.CloseSmp();
 #endif
         SetProcessingMode(NormalProcessing);
+        pgstat_report_appname("AutoVacWorker");
+        pgstat_report_activity(STATE_IDLE, NULL);
+
         set_ps_display(dbname, false);
         ereport(GetVacuumLogLevel(), (errmsg("start autovacuum on database \"%s\"", dbname)));
 

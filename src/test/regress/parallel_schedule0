@@ -45,7 +45,7 @@ test: select_into_user_defined_variables
 
 test: set_system_variables_test
 
-test: gs_dump_package
+test: gs_dump_package trigger_dump
 test: out_param_func
 #test: sqlcode_cursor
 test: gs_dump_tableconstraint
@@ -53,7 +53,7 @@ test: gs_dump_tableconstraint
 # test AI4DB
 test: plpgsql_override_out
 test: plpgsql_sql_with_proc_keyword
-test: plsql_show_all_error
+test: plsql_show_all_error b_pg_plsql_show_all_error
 test: pldeveloper_gs_source
 test: index_advisor
 test: pl_debugger_server pl_debugger_client
@@ -203,7 +203,7 @@ test: single_node_random transactions_test autocommit_test
 #test: single_node_arrays 
 #test: single_node_btree_index single_node_hash_index single_node_update 
 
-test: prefixkey_index
+test: prefixkey_index invisible_index
 test: hash_index_001
 test: hash_index_002
 test: single_node_update 
@@ -236,6 +236,7 @@ test: single_node_bitmapops single_node_combocid
 #single_node_window
 #test: single_node_xmlmap 
 #test: single_node_functional_deps single_node_advisory_lock single_node_json single_node_equivclass
+test: xml
 
 # ----------
 # Another group of parallel tests
@@ -262,6 +263,7 @@ test: single_node_triggers
 
 # Synonym tests
 #test: single_node_synonym
+test: synonym_conflict_test
 
 # unsupported view tests
 test: single_node_unsupported_view
@@ -274,7 +276,7 @@ test: single_node_produce_commit_rollback
 test: single_node_function_commit_rollback
 
 test: instr_unique_sql
-test: auto_explain
+test: auto_explain plan_table_for_anonymous_block
 test: shutdown
 
 # List/Hash table exchange
@@ -804,7 +806,7 @@ test: disable_vector_engine
 test: hybrid_row_column
 test: retry
 test: hw_replication_slots
-test: insert insert_right_ref
+test: insert insert_right_ref rules
 test: copy2 temp
 test: truncate
 #test: temp_table
@@ -994,7 +996,7 @@ test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
 test: gs_dump_encrypt substr
-test: composite_datum_record mysql_function b_comments mysql_syntax mysql_delimiter
+test: composite_datum_record mysql_function b_comments mysql_syntax mysql_delimiter mysql_delimiter_fix
 
 test: join_test_alias alter_ctable_compress
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition ignore/ignore_invalid_input
@@ -1046,3 +1048,4 @@ test: show_warnings
 # partition expression key
 test: partition_expr_key
 test: alter_foreign_schema
+

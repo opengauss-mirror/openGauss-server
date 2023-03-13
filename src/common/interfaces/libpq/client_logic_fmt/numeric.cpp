@@ -37,25 +37,27 @@
 #define VEC_TO_CHOICE(res) ((NumericChoice *)(res))
 #define NUMERIC_FLAGBITS(n) ((n)->choice.n_header & NUMERIC_SIGN_MASK)
 
+#define NUMERIC_HEADER_IS_SHORT(n)	(((n)->choice.n_header & 0x8000) != 0)
+#define NUMERIC_HEADER_SIZE(n) (VARHDRSZ + sizeof(uint16) + (NUMERIC_HEADER_IS_SHORT(n) ? 0 : sizeof(int16)))
 #define NUMERIC_IS_SHORT(n) (NUMERIC_FLAGBITS(n) == NUMERIC_SHORT)
 #define NUMERIC_SHORT_SIGN_MASK 0x2000
 #define NUMERIC_DSCALE_MASK 0x3FFF
 #define NUMERIC_SIGN(n)                                                                                             \
-    (NUMERIC_IS_SHORT(n) ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS) : \
+    (NUMERIC_HEADER_IS_SHORT(n) ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS) : \
                             NUMERIC_FLAGBITS(n))
 #define NUMERIC_DSCALE(n)                                                                          \
-    (NUMERIC_IS_SHORT((n)) ?                                                                       \
+    (NUMERIC_HEADER_IS_SHORT((n)) ?                                                                       \
         ((n)->choice.n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT : \
         ((n)->choice.n_long.n_sign_dscale & NUMERIC_DSCALE_MASK))
 
 
 #define NUMERIC_WEIGHT(n)                                                                                   \
-    (NUMERIC_IS_SHORT((n)) ?                                                                                \
+    (NUMERIC_HEADER_IS_SHORT((n)) ?                                                                                \
         (((n)->choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_SIGN_MASK ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) | \
         ((n)->choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK)) :                                       \
         ((n)->choice.n_long.n_weight))
 
-#define NUMERIC_DIGITS(num) (NUMERIC_IS_SHORT(num) ? (num)->choice.n_short.n_data : (num)->choice.n_long.n_data)
+#define NUMERIC_DIGITS(num) (NUMERIC_HEADER_IS_SHORT(num) ? (num)->choice.n_short.n_data : (num)->choice.n_long.n_data)
 #define NUMERIC_64 0xD000
 #define NUMERIC_64VALUE(n) (*((int64 *)((n)->choice.n_bi.n_data)))
 #define NUMERIC_SHORT_DSCALE_MASK 0x1F80

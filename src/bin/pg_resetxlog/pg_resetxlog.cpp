@@ -66,7 +66,7 @@ static XLogSegNo newXlogSegNo;      /* XLogSegNo of new XLOG segment */
 static bool guessed = false;        /* T if we had to guess at any values */
 static const char* progname;
 
-static void DssInit(void);
+static void DssParaInit(void);
 static void SetGlobalDssParam(void);
 static int  ReadNonDssControlFile(int *fd, char * buffer);
 static int  ReadDssControlFile(int *fd, char *buffer);
@@ -123,7 +123,7 @@ int main(int argc, char* argv[])
         {NULL, 0, NULL, 0}};
 
     /* init DSS parameters */
-    DssInit();
+    DssParaInit();
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_resetxlog"));
 
@@ -302,15 +302,15 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-    /* set DSS connect parameters */
-    if (dss.enable_dss)
-        SetGlobalDssParam();
-
     /* register for dssapi */
     if (dss_device_init(dss.socketpath, dss.enable_dss) != DSS_SUCCESS) {
         fprintf(stderr, _("%s: fail to init dss device\n"), progname);
         exit(1);
     }
+
+    /* set DSS connect parameters */
+    if (dss.enable_dss)
+        SetGlobalDssParam();
 
     initDataPathStruct(dss.enable_dss);
 
@@ -456,7 +456,7 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-static void DssInit(void)
+static void DssParaInit(void)
 {
     dss.enable_dss = false;
     dss.socketpath = NULL;
@@ -469,6 +469,13 @@ static void SetGlobalDssParam(void)
     errno_t rc = strcpy_s(g_datadir.dss_data, strlen(dss.vgname) + 1, dss.vgname);
     securec_check_c(rc, "\0", "\0");
     XLogSegmentSize = DSS_XLOG_SEG_SIZE;
+    /* Check dss connect */
+    if (!dss_exist_dir(g_datadir.dss_data)) {
+        fprintf(stderr, _("Could not connect dssserver, vgname: \"%s\", socketpath: \"%s\", \n"
+            "please check that whether the dssserver is manually started and retry later.\n"),
+            dss.vgname, dss.socketpath);
+        exit(1);
+    }
 }
 
 /*
@@ -585,8 +592,8 @@ static bool ReadControlFile(void)
         if (!dss.enable_dss && errno == ENOENT)
             fprintf(stderr,
                 _("If you are sure the data directory path is correct, execute\n"
-                  "  touch %s\n"
-                  "and try again.\n"),
+                "  touch %s\n"
+                "and try again.\n"),
                 T_XLOG_CONTROL_FILE);
         exit(1);
     }

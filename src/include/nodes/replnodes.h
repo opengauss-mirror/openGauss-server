@@ -82,6 +82,7 @@ typedef struct CreateReplicationSlotCmd {
 typedef struct DropReplicationSlotCmd {
     NodeTag type;
     char* slotname;
+    bool wait;
 } DropReplicationSlotCmd;
 
 /* ----------------------

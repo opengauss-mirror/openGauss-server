@@ -41,7 +41,6 @@
 #include "replication/walsender_private.h"
 #include "replication/walreceiver.h"
 #include "ddes/dms/ss_switchover.h"
-#include "ddes/dms/ss_dms_log_output.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/file/fio_device.h"
@@ -255,7 +254,7 @@ static int CBSwitchoverDemote(void *db_handle)
         return DMS_SUCCESS;
     }
     Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_NORMAL);
-    Assert(SS_MY_INST_IS_MASTER);
+    Assert(SS_OFFICIAL_PRIMARY);
 
     t_thrd.walsender_cxt.WalSndCtl->demotion = demote_mode;
     g_instance.dms_cxt.SSClusterState = NODESTATE_PRIMARY_DEMOTING;
@@ -274,15 +273,6 @@ static int CBSwitchoverDemote(void *db_handle)
             SpinLockAcquire(&t_thrd.walsender_cxt.WalSndCtl->mutex);
             t_thrd.walsender_cxt.WalSndCtl->demotion = NoDemote;
             SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
-
-            if (dss_set_server_status_wrapper(false) != GS_SUCCESS) {
-                ereport(PANIC,
-                    (errmodule(MOD_DMS),
-                        errmsg("[SS switchover] set dssserver standby failed, vgname: \"%s\", socketpath: \"%s\"",
-                            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                            g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                        errhint("Check vgname and socketpath and restart later.")));
-            }
             ereport(LOG,
                 (errmodule(MOD_DMS), errmsg("[SS switchover] Success in %s primary demote, running as standby,"
                     " waiting for reformer setting new role.", DemoteModeDesc(demote_mode))));
@@ -318,14 +308,6 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
     t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
     pg_memory_barrier();
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover] Starting to promote standby.")));
-
-    /* since original primary must have demoted, it is safe to allow promting standby write */
-    if (dss_set_server_status_wrapper(true) != GS_SUCCESS) {
-        ereport(PANIC, (errmodule(MOD_DMS), errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
-            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-            g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-            errhint("Check vgname and socketpath and restart later.")));
-    }
 
     SSNotifySwitchoverPromote();
 
@@ -545,6 +527,9 @@ static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl
             (void)LWLockAcquire(buf_desc->content_lock, content_mode);
             *buf_ctrl = GetDmsBufCtrl(buf_id);
             Assert(buf_id >= 0);
+            Assert((*buf_ctrl)->lock_mode != DMS_LOCK_NULL);
+            (*buf_ctrl)->seg_fileno = buf_desc->seg_fileno;
+            (*buf_ctrl)->seg_blockno = buf_desc->seg_blockno;
         } while (0);
     }
     PG_CATCH();
@@ -680,6 +665,17 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
     }
 
     BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
+
+    if (buf_desc->seg_fileno == EXTENT_INVALID) {
+        buf_desc->seg_fileno = buf_ctrl->seg_fileno;
+        buf_desc->seg_blockno = buf_ctrl->seg_blockno;
+    } else if (buf_desc->seg_fileno != buf_ctrl->seg_fileno || buf_desc->seg_blockno != buf_ctrl->seg_blockno) {
+        ereport(PANIC, (errmsg("[%u/%u/%u/%d/%d %d-%u] location mismatch, seg_fileno:%d, seg_blockno:%u",
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            buf_desc->tag.rnode.bucketNode, buf_desc->tag.rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+            buf_desc->seg_fileno, buf_desc->seg_blockno)));
+    }
+
     /* page content is not valid */
     if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) == 0) {
         return;
@@ -1101,6 +1097,7 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
             *is_valid = (pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0;
             *ret_buf_desc = buf_desc;
         } else {
+            LWLockRelease(partition_lock);
             *ret_buf_desc = NULL;
         }
     }
@@ -1315,13 +1312,6 @@ static int CBFlushCopy(void *db_handle, char *pageid)
     LockBuffer(buffer, BUFFER_LOCK_SHARE);
     BufferDesc* buf_desc = GetBufferDescriptor(buffer - 1);
     XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
-#ifdef USE_ASSERT_CHECKING
-    if (IsSegmentPhysicalRelNode(buf_desc->tag.rnode)) {
-        SegNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, spc);
-    } else {
-        SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
-    }
-#endif
 
     if (XLByteLT(g_instance.dms_cxt.ckptRedo, pagelsn)) {
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
@@ -1383,6 +1373,26 @@ static int CBGetDBPrimaryId(void *db_handle, unsigned int *primary_id)
     return GS_SUCCESS;
 }
 
+/* Currently only used in SS switchover */
+static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
+{
+    ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+    reform_info->dms_role = reformer_id == (unsigned int)SS_MY_INST_ID ? DMS_ROLE_REFORMER : DMS_ROLE_PARTNER;
+    if (reform_info->dms_role == DMS_ROLE_REFORMER) {
+        /* since original primary must have demoted, it is safe to allow promting standby write */
+        if (dss_set_server_status_wrapper() != GS_SUCCESS) {
+            ereport(PANIC, (errmodule(MOD_DMS),
+                errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
+                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
+                errhint("Check vgname and socketpath and restart later.")));
+        }
+    }
+    ereport(LOG, (errmodule(MOD_DMS),
+        errmsg("[SS switchover]switching, updated inst:%d with role:%d success",
+            SS_MY_INST_ID, reform_info->dms_role)));
+}
+
 static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type)
 {
     SSReformType ss_reform_type = (SSReformType)reform_type;
@@ -1412,12 +1422,8 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform] dms reform start, role:%d, reform type:%d", role, (int)ss_reform_type)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
-        if (dss_set_server_status_wrapper(true) != GS_SUCCESS) {
+        if (dss_set_server_status_wrapper() != GS_SUCCESS) {
             ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS reform] Could not set dssserver flag=read_write")));
-        }
-    } else {
-        if (dss_set_server_status_wrapper(false) != GS_SUCCESS) {
-            ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS reform] Could not set dssserver flag=read_only")));
         }
     }
 
@@ -1539,6 +1545,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->get_db_primary_id = CBGetDBPrimaryId;
     callback->failover_promote_opengauss = CBFailoverPromote;
     callback->reform_start_notify = CBReformStartNotify;
+    callback->reform_set_dms_role = CBReformSetDmsRole;
 
     callback->get_page_hash_val = CBPageHashCode;
     callback->read_local_page4transfer = CBEnterLocalPage;

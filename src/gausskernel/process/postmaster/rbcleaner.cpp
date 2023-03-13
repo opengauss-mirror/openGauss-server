@@ -867,6 +867,8 @@ NON_EXEC_STATIC void RbCleanerMain()
     t_thrd.proc_cxt.PostInit->InitRbCleaner();
 
     SetProcessingMode(NormalProcessing);
+    pgstat_report_appname("RbCleaner");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     MemoryContext workMxt = AllocSetContextCreate(
         t_thrd.top_mem_cxt,
@@ -1108,6 +1110,8 @@ NON_EXEC_STATIC void RbWorkerMain()
     t_thrd.proc_cxt.PostInit->InitRbWorker();
 
     SetProcessingMode(NormalProcessing);
+    pgstat_report_appname("RbWorker");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     MemoryContext workMxt = AllocSetContextCreate(
         t_thrd.top_mem_cxt,

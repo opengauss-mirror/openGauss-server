@@ -785,6 +785,12 @@ select bit_length(a),bit_length(b) from char_test;
           8 |          8
 (8 rows)
 
+select 'ni啊shaeskeeee'::char(3);
+ bpchar 
+--------
+ ni啊
+(1 row)
+
 create index a on char_test(a);
 create index b on char_test(b);
 set enable_seqscan to off;
@@ -1199,8 +1205,60 @@ call labeltest(9);
          9
 (1 row)
 
+--success
+create or replace procedure proc_label(n int)
+as
+BEGIN
+label11111111111111111111111111111111111111111111111111111111112: loop
+n:=n-1;
+IF n<5 then
+LEAVE label11111111111111111111111111111111111111111111111111111111112;
+END IF;
+raise info 'number is %.',n;
+END loop;
+END;
+/
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+CONTEXT:  compilation of PL/pgSQL function "proc_label" near line 1
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+CONTEXT:  compilation of PL/pgSQL function "proc_label" near line 4
+--success
+create or replace procedure proc_label1(n int)
+as
+BEGIN
+label11111111111111111111111111111111111111111111111111111111112    : loop
+n:=n-1;
+IF n<5 then
+LEAVE label11111111111111111111111111111111111111111111111111111111112;
+END IF;
+raise info 'number is %.',n;
+END loop;
+END;
+/
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+CONTEXT:  compilation of PL/pgSQL function "proc_label1" near line 1
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+CONTEXT:  compilation of PL/pgSQL function "proc_label1" near line 4
+call proc_label(5);
+ proc_label 
+------------
+ 
+(1 row)
+
+call proc_label1(5);
+ proc_label1 
+-------------
+ 
+(1 row)
+
 drop procedure if exists doiterate;
 drop function if exists labeltest;
+drop function if exists proc_label;
+drop function if exists proc_label1;
 \c regression
 create or replace procedure func_zzm(num1 in int, num2 inout int, res out int)
 as begin

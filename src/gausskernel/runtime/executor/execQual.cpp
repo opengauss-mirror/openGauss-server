@@ -628,8 +628,8 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
 
     RightRefState* refState = econtext->rightRefState;
     int index = attnum - 1;
-    if (IS_ENABLE_INSERT_RIGHT_REF(refState) ||
-       (IS_ENABLE_UPSERT_RIGHT_REF(refState) && refState->hasExecs[index] && index < refState->colCnt)) {
+   if (refState && refState->values && (IS_ENABLE_INSERT_RIGHT_REF(refState) ||
+        (IS_ENABLE_UPSERT_RIGHT_REF(refState) && refState->hasExecs[index] && index < refState->colCnt))) {
         *isNull = refState->isNulls[index];
         return refState->values[index];
     }

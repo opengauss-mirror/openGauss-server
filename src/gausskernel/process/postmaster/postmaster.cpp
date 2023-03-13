@@ -2418,7 +2418,7 @@ int PostmasterMain(int argc, char* argv[])
             g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
         Assert(src_id >= 0 && src_id <= DMS_MAX_INSTANCE - 1);
 
-        if (!SS_MY_INST_IS_MASTER && g_instance.attr.attr_storage.dms_attr.enable_reform) {
+        if (!SS_OFFICIAL_PRIMARY && g_instance.attr.attr_storage.dms_attr.enable_reform) {
             const long SLEEP_ONE_SEC = 1000000L;
             while (g_instance.dms_cxt.SSReformerControl.list_stable == 0) {
                 pg_usleep(SLEEP_ONE_SEC);
@@ -2432,21 +2432,13 @@ int PostmasterMain(int argc, char* argv[])
     }
 
     if (SS_PRIMARY_MODE) {
-        if (dss_set_server_status_wrapper(true) != GS_SUCCESS) {
+        if (dss_set_server_status_wrapper() != GS_SUCCESS) {
             ereport(FATAL, (errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
                 g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
                 g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
                 errhint("Check vgname and socketpath and restart later.")));
         }
         ereport(LOG, (errmsg("set dss server status as primary")));
-    } else if (SS_STANDBY_MODE) {
-        if (dss_set_server_status_wrapper(false) != GS_SUCCESS) {
-            ereport(FATAL, (errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
-                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                errhint("Check vgname and socketpath and restart later.")));
-        }
-        ereport(LOG, (errmsg("set dss server status as standby")));
     }
 
     /*
@@ -2454,6 +2446,9 @@ int PostmasterMain(int argc, char* argv[])
      * the saved backend variables will be restored in
      * DCF call back thread share memory init function.
      */
+    if (ENABLE_DSS) {
+        DSSInitLogger();
+    }
     if (g_instance.attr.attr_storage.dcf_attr.enable_dcf || g_instance.attr.attr_storage.dms_attr.enable_dms) {
         int ss_rc = memset_s(&port, sizeof(port), 0, sizeof(port));
         securec_check(ss_rc, "\0", "\0");
@@ -2467,9 +2462,7 @@ int PostmasterMain(int argc, char* argv[])
         }
     }
 
-    if (ENABLE_DSS) {
-        DSSInitLogger();
-    }
+    
 
     /*
      * We're ready to rock and roll...
@@ -3484,15 +3477,15 @@ static int ServerLoop(void)
         }
         /* if workload manager is off, we still use this thread to build user hash table */
         if ((ENABLE_WORKLOAD_CONTROL || !WLMIsInfoInit()) && g_instance.pid_cxt.WLMCollectPID == 0 &&
-            pmState == PM_RUN && !dummyStandbyMode && !SS_IN_REFORM)
+            pmState == PM_RUN && !dummyStandbyMode && !SS_STANDBY_MODE && !SS_IN_REFORM)
             g_instance.pid_cxt.WLMCollectPID = initialize_util_thread(WLM_WORKER);
 
         if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMMonitorPID == 0) && (pmState == PM_RUN) &&
-            !dummyStandbyMode && !SS_IN_REFORM)
+            !dummyStandbyMode && !SS_STANDBY_MODE && !SS_IN_REFORM)
             g_instance.pid_cxt.WLMMonitorPID = initialize_util_thread(WLM_MONITOR);
 
         if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMArbiterPID == 0) && (pmState == PM_RUN) &&
-            !dummyStandbyMode && !SS_IN_REFORM)
+            !dummyStandbyMode && !SS_STANDBY_MODE && !SS_IN_REFORM)
             g_instance.pid_cxt.WLMArbiterPID = initialize_util_thread(WLM_ARBITER);
 
         if (IS_PGXC_COORDINATOR && g_instance.attr.attr_sql.max_resource_package &&
@@ -6318,17 +6311,19 @@ static void reaper(SIGNAL_ARGS)
 
             /* if workload manager is off, we still use this thread to build user hash table */
             if ((ENABLE_WORKLOAD_CONTROL || !WLMIsInfoInit()) && g_instance.pid_cxt.WLMCollectPID == 0 &&
-                !dummyStandbyMode && !SS_IN_REFORM) {
+                !dummyStandbyMode && !SS_STANDBY_MODE && !SS_IN_REFORM) {
                 /* DN need rebuild hash when upgrade to primary */
                 if (IS_PGXC_DATANODE)
                     g_instance.wlm_cxt->stat_manager.infoinit = 0;
                 g_instance.pid_cxt.WLMCollectPID = initialize_util_thread(WLM_WORKER);
             }
 
-            if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMMonitorPID == 0) && !dummyStandbyMode)
+            if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMMonitorPID == 0) && !dummyStandbyMode &&
+                !SS_STANDBY_MODE && !SS_IN_REFORM)
                 g_instance.pid_cxt.WLMMonitorPID = initialize_util_thread(WLM_MONITOR);
 
-            if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMArbiterPID == 0) && !dummyStandbyMode)
+            if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMArbiterPID == 0) && !dummyStandbyMode &&
+                !SS_STANDBY_MODE && !SS_IN_REFORM)
                 g_instance.pid_cxt.WLMArbiterPID = initialize_util_thread(WLM_ARBITER);
 
             if (IS_PGXC_COORDINATOR && g_instance.attr.attr_sql.max_resource_package &&
@@ -8451,6 +8446,10 @@ void PortInitialize(Port* port, knl_thread_arg* arg)
         /* read variables from arg */
         read_backend_variables(arg->save_para, port);
 
+        if (port->protocol_config == nullptr) {
+            port->protocol_config = &default_protocol_config;
+        }
+
         /* fix thread pool workers and some background threads creation_time
          * in pg_os_threads view not correct issue.
          */
@@ -9342,9 +9341,13 @@ static void sigusr1_handler(SIGNAL_ARGS)
         PostmasterStateMachine();
     }
 
-    if (SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && pmState == PM_RUN &&
-        (mode = CheckSwitchoverSignal())) {
-        SSDoSwitchover();
+    if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
+        if (SS_NORMAL_STANDBY && pmState == PM_RUN) {
+            SSDoSwitchover();
+        } else {
+            ereport(LOG, (errmsg("Current mode is not NORMAL STANDBY, SS switchover command ignored.")));
+        }
+        
     }
 
     if ((mode = CheckSwitchoverSignal()) != 0 && WalRcvIsOnline() && DataRcvIsOnline() &&
@@ -11796,7 +11799,7 @@ const char* wal_get_db_state_string(DbState db_state)
 static ServerMode get_cur_mode(void)
 {
     if (ENABLE_DMS) {
-        return SS_STANDBY_MODE ? STANDBY_MODE : PRIMARY_MODE;
+        return !SS_OFFICIAL_PRIMARY ? STANDBY_MODE : PRIMARY_MODE;
     }
     return t_thrd.postmaster_cxt.HaShmData->current_mode;
 }
@@ -14046,11 +14049,11 @@ void InitShmemForDmsCallBack()
 
 const char *GetSSServerMode()
 {
-    if (SS_STANDBY_MODE) {
+    if (!SS_OFFICIAL_PRIMARY) {
         return "Standby";
     }
  
-    if (SS_PRIMARY_MODE) {
+    if (SS_OFFICIAL_PRIMARY) {
         return "Primary";
     }
  

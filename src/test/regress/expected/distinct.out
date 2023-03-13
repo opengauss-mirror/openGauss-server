@@ -809,3 +809,289 @@ DROP SCHEMA GROUP_SORT CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table group_sort.table_group_b5000_000
 drop cascades to function group_sort.func_insert_tbl_group_b5000_000()
+-- test  distinct+orderby allows expressions and implicit columns
+-- 1. A database should not support
+create table dob_student(
+    name varchar(100),
+    pinyin varchar(100),
+    id int,
+    age int
+);
+insert into dob_student values('小明', 'xiaoming', 1, 10);
+insert into dob_student values('小明', 'xiaoming', 11, 33);
+select distinct name from dob_student order by name, id;
+ERROR:  for SELECT DISTINCT, ORDER BY expressions must appear in select list
+LINE 1: select distinct name from dob_student order by name, id;
+                                                             ^
+select distinct name from dob_student order by nlssort(name, 'NLS_SORT=SCHINESE_PINYIN_M') asc;
+ERROR:  for SELECT DISTINCT, ORDER BY expressions must appear in select list
+LINE 1: select distinct name from dob_student order by nlssort(name,...
+                                                       ^
+drop table dob_student;
+-- test on B database
+create database dob_bdb with dbcompatibility 'b';
+\c dob_bdb
+create table dob_student(
+    name varchar(100),
+    pinyin varchar(100),
+    id int,
+    age int
+);
+insert into dob_student values('小明', 'xiaoming', 1, 10);
+insert into dob_student values('小明', 'xiaoming', 11, 33);
+insert into dob_student values('张三', 'zhangsan', 3, 10);
+insert into dob_student values('张三', 'zhangsan', 3, 10);
+insert into dob_student values('小红', 'xiaohong', 2, 12);
+insert into dob_student values('小红', 'xiaohong', 2, 12);
+insert into dob_student values('张三', 'xiaohong', 2, 12);
+select distinct name from dob_student order by name;
+ name 
+------
+ 小明
+ 小红
+ 张三
+(3 rows)
+
+-- 2. test expresions on B database on default settings
+select distinct name from dob_student order by nlssort(name, 'NLS_SORT=SCHINESE_PINYIN_M') asc;
+ name 
+------
+ 小红
+ 小明
+ 张三
+(3 rows)
+
+select distinct name from dob_student order by convert_to(name, 'GBK') desc;
+ name 
+------
+ 张三
+ 小明
+ 小红
+(3 rows)
+
+select name from (select distinct name from dob_student) order by nlssort(name, 'NLS_SORT=SCHINESE_PINYIN_M') asc;
+ name 
+------
+ 小红
+ 小明
+ 张三
+(3 rows)
+
+-- 3. implicit column should error on default settings
+select distinct name from dob_student order by convert_to(name, 'GBK'), id asc;
+ERROR:  for SELECT DISTINCT, ORDER BY expressions must appear in select list
+LINE 1: ...e from dob_student order by convert_to(name, 'GBK'), id asc;
+                                                                ^
+select distinct name from dob_student order by id desc, age;
+ERROR:  for SELECT DISTINCT, ORDER BY expressions must appear in select list
+LINE 1: select distinct name from dob_student order by id desc, age;
+                                                       ^
+select distinct t.name, t.pinyin as py, 1 + 10 as c from dob_student t order by py, t.id, t.age * 2 + 1;
+ERROR:  for SELECT DISTINCT, ORDER BY expressions must appear in select list
+LINE 1: ...s py, 1 + 10 as c from dob_student t order by py, t.id, t.ag...
+                                                             ^
+select distinct t.name, t.pinyin as py, 1 + 10 as c from dob_student t order by c, py, t.age * 2 + 1;
+ERROR:  for SELECT DISTINCT, ORDER BY expressions must appear in select list
+LINE 1: ...y, 1 + 10 as c from dob_student t order by c, py, t.age * 2 ...
+                                                             ^
+-- test on set behavior_compat_options='allow_orderby_undistinct_column'
+set behavior_compat_options='allow_orderby_undistinct_column';
+-- 4. test implicit columns
+select distinct name from dob_student order by convert_to(name, 'GBK'), id asc;
+ name 
+------
+ 小红
+ 小明
+ 张三
+(3 rows)
+
+select distinct name from dob_student order by id desc, age;
+ name 
+------
+ 小明
+ 张三
+ 小红
+(3 rows)
+
+-- 5. test nesting
+select name from (select distinct name from dob_student order by id desc, age) order by nlssort(name, 'NLS_SORT=SCHINESE_PINYIN_M') asc;
+ name 
+------
+ 小红
+ 小明
+ 张三
+(3 rows)
+
+-- 6. test with functions, when case
+create table dob_func_t(a int, b int, c int, d int);
+insert into dob_func_t values(generate_series(1, 10), generate_series(1, 10), generate_series(1, 10),  generate_series(1, 10));
+insert into dob_func_t values(generate_series(1, 10), generate_series(1, 10), generate_series(1, 10),  generate_series(1, 10));
+select distinct a, b, c from dob_func_t where a > 1 order by random() * 10 + a, d;
+ a  | b  | c  
+----+----+----
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(9 rows)
+
+select distinct a, b, c from dob_func_t order by case when a = 10 then 1 else 100 end,  d asc, c desc;
+ a  | b  | c  
+----+----+----
+ 10 | 10 | 10
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+  5 |  5 |  5
+  6 |  6 |  6
+  7 |  7 |  7
+  8 |  8 |  8
+  9 |  9 |  9
+(10 rows)
+
+-- 7. test with group by
+select distinct a, b, c from dob_func_t group by a, b, c order by d, c; -- should error
+ERROR:  column "dob_func_t.d" must appear in the GROUP BY clause or be used in an aggregate function
+LINE 1: ...inct a, b, c from dob_func_t group by a, b, c order by d, c;
+                                                                  ^
+select distinct a, b, c from dob_func_t group by a, b, c order by c;
+ a  | b  | c  
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+  5 |  5 |  5
+  6 |  6 |  6
+  7 |  7 |  7
+  8 |  8 |  8
+  9 |  9 |  9
+ 10 | 10 | 10
+(10 rows)
+
+-- 8. test alias
+create table dob_alias(a int, b int, c varchar(30), d varchar(30));
+insert into dob_alias values(generate_series(1, 10), generate_series(1, 10), 'hello', 'world');
+insert into dob_alias values(generate_series(1, 10), generate_series(1, 10), 'hello', 'world');
+select distinct a, b + 10 as balias, c from dob_alias order by a, balias, concat(c, ' concat');
+ a  | balias |   c   
+----+--------+-------
+  1 |     11 | hello
+  2 |     12 | hello
+  3 |     13 | hello
+  4 |     14 | hello
+  5 |     15 | hello
+  6 |     16 | hello
+  7 |     17 | hello
+  8 |     18 | hello
+  9 |     19 | hello
+ 10 |     20 | hello
+(10 rows)
+
+select distinct a, b, c, a + 1.1 * 10 as k from dob_alias order by k;
+ a  | b  |   c   |  k   
+----+----+-------+------
+  1 |  1 | hello | 12.0
+  2 |  2 | hello | 13.0
+  3 |  3 | hello | 14.0
+  4 |  4 | hello | 15.0
+  5 |  5 | hello | 16.0
+  6 |  6 | hello | 17.0
+  7 |  7 | hello | 18.0
+  8 |  8 | hello | 19.0
+  9 |  9 | hello | 20.0
+ 10 | 10 | hello | 21.0
+(10 rows)
+
+select distinct a, b, 1 + 10 as c from dob_alias order by c, c * 2 + 1, b;
+ a  | b  | c  
+----+----+----
+  1 |  1 | 11
+  2 |  2 | 11
+  3 |  3 | 11
+  4 |  4 | 11
+  5 |  5 | 11
+  6 |  6 | 11
+  7 |  7 | 11
+  8 |  8 | 11
+  9 |  9 | 11
+ 10 | 10 | 11
+(10 rows)
+
+select distinct t.a, t.b, 1 + 10 as c from dob_alias t order by c * 2 + 1, t.b, t.d;
+ a  | b  | c  
+----+----+----
+  1 |  1 | 11
+  2 |  2 | 11
+  3 |  3 | 11
+  4 |  4 | 11
+  5 |  5 | 11
+  6 |  6 | 11
+  7 |  7 | 11
+  8 |  8 | 11
+  9 |  9 | 11
+ 10 | 10 | 11
+(10 rows)
+
+-- 9. test with join clause
+select distinct s.name, s.id, a.a, a.b, a.c from dob_student s 
+	left join dob_alias a 
+	on s.id=a.a 
+	order by nlssort(name, 'NLS_SORT=SCHINESE_PINYIN_M'), s.age desc, a.d asc;
+ name | id | a | b |   c   
+------+----+---+---+-------
+ 小红 |  2 | 2 | 2 | hello
+ 小明 | 11 |   |   | 
+ 小明 |  1 | 1 | 1 | hello
+ 张三 |  2 | 2 | 2 | hello
+ 张三 |  3 | 3 | 3 | hello
+(5 rows)
+
+select distinct * from 
+	(select distinct s.name, s.id, a.a, a.b, a.c from dob_student s 
+		inner join dob_alias a 
+		on s.id=a.a 
+		order by s.age desc, a.d asc) t
+	order by nlssort(t.name, 'NLS_SORT=SCHINESE_PINYIN_M');
+ name | id | a | b |   c   
+------+----+---+---+-------
+ 小红 |  2 | 2 | 2 | hello
+ 小明 |  1 | 1 | 1 | hello
+ 张三 |  3 | 3 | 3 | hello
+ 张三 |  2 | 2 | 2 | hello
+(4 rows)
+
+-- 10. test group_concat
+insert into dob_func_t values(generate_series(1, 10), generate_series(1, 10), generate_series(21, 30),  generate_series(2, 30));
+set group_concat_max_len to 1024;
+select a, min(b), group_concat(distinct c order by d) as order_not_in_distinct from dob_func_t group by a order by a;
+ a  | min | order_not_in_distinct 
+----+-----+-----------------------
+  1 |   1 | 1,21
+  2 |   2 | 2,22
+  3 |   3 | 3,23
+  4 |   4 | 4,24
+  5 |   5 | 5,25
+  6 |   6 | 6,26
+  7 |   7 | 7,27
+  8 |   8 | 8,28
+  9 |   9 | 9,29
+ 10 |  10 | 10,30
+(10 rows)
+
+reset behavior_compat_options;
+-- 11. test group_concat should error
+select a, min(b), group_concat(distinct c order by d) as order_not_in_distinct from dob_func_t group by a order by a;
+ERROR:  in an aggregate with DISTINCT, ORDER BY expressions must appear in argument list
+LINE 1: ...elect a, min(b), group_concat(distinct c order by d) as orde...
+                                                             ^
+CONTEXT:  referenced column: order_not_in_distinct
+reset group_concat_max_len;
+\c postgres
+drop database dob_bdb;

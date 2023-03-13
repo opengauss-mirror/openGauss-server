@@ -157,7 +157,6 @@ extern int DataNodeCopyInBinaryForAll(const char* msg_buf, int len, PGXCNodeHand
 
 extern int ExecCountSlotsRemoteQuery(RemoteQuery* node);
 extern RemoteQueryState* ExecInitRemoteQuery(RemoteQuery* node, EState* estate, int eflags, bool row_plan = true);
-extern TupleTableSlot* ExecRemoteQuery(RemoteQueryState* step);
 extern void ExecEndRemoteQuery(RemoteQueryState* step, bool pre_end = false);
 extern void FreeParallelFunctionState(ParallelFunctionState* state);
 extern void StrategyFuncSum(ParallelFunctionState* state);

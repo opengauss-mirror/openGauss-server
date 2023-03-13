@@ -32,9 +32,17 @@
         } \
     } while(0) \
 
+typedef struct processutility_context {
+    Node* parse_tree;             /* the parse tree for the utility statement */
+    const char* query_string;     /* original source text of command */
+    bool readOnlyTree;            /* if true, pstmt's node tree must not be modified */
+    ParamListInfo params;         /* parameters to use during execution */
+    bool is_top_level;            /* true if executing a "top level" (interactively issued) command */
+} processutility_context;
+
 /* Hook for plugins to get control in ProcessUtility() */
-typedef void (*ProcessUtility_hook_type)(Node* parsetree, const char* queryString, ParamListInfo params,
-    bool isTopLevel, DestReceiver* dest,
+typedef void (*ProcessUtility_hook_type)(processutility_context* processutility_cxt, 
+    DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
@@ -42,14 +50,14 @@ typedef void (*ProcessUtility_hook_type)(Node* parsetree, const char* queryStrin
     bool isCTAS);
 extern THR_LOCAL PGDLLIMPORT ProcessUtility_hook_type ProcessUtility_hook;
 
-extern void ProcessUtility(Node* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel,
+extern void ProcessUtility(processutility_context* processutility_cxt,
     DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
     char* completionTag,
     bool isCTAS = false);
-extern void standard_ProcessUtility(Node* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel,
+extern void standard_ProcessUtility(processutility_context* processutility_cxt,
     DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,

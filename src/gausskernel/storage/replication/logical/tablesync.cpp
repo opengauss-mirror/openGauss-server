@@ -696,6 +696,8 @@ static void fetch_remote_table_info(char *nspname, char *relname, LogicalRepRela
         "       ON (i.indexrelid = pg_get_replica_identity_index(%u))"
         " WHERE a.attnum > 0::pg_catalog.int2"
         "   AND NOT a.attisdropped"
+        "   AND NOT EXISTS (SELECT * FROM pg_attrdef b WHERE b.adrelid = a.attrelid AND b.adnum = a.attnum"
+        " AND b.adgencol = 's')"
         "   AND a.attrelid = %u"
         " ORDER BY a.attnum",
         lrel->remoteid, lrel->remoteid);

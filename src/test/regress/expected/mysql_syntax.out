@@ -248,6 +248,54 @@ NOTICE:  oracle : usa : 2
  
 (1 row)
 
+create or replace procedure test_cursor_1 
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+begin 
+    declare c1_all cursor is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+    declare c1_all cursor is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+    if not c1_all%isopen then
+        open c1_all;
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        exit when c1_all%notfound;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        close c1_all;
+    end if;
+end;
+/
+ERROR:  duplicate declaration at or near "c1_all"
+LINE 8:     declare c1_all cursor is --cursor without args 
+                    ^
+QUERY:   DECLARE  company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+begin 
+    declare c1_all cursor is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+    declare c1_all cursor is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+    if not c1_all%isopen then
+        open c1_all;
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        exit when c1_all%notfound;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        close c1_all;
+    end if;
+end
 -- test declare condition
 create or replace procedure test_condition_1 as
 declare
@@ -306,7 +354,7 @@ exception
     END;
 END;
 /
-ERROR:  syntax error at or near "DIVISION_ZERO"
+ERROR:  duplicate declaration at or near "DIVISION_ZERO"
 LINE 6:     declare DIVISION_ZERO condition for SQLSTATE '22005';
                     ^
 QUERY:  
@@ -354,6 +402,46 @@ END;
 /
 ERROR:  bad SQLSTATE '00000'
 CONTEXT:  compilation of PL/pgSQL function "test_condition_6" near line 3
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE value '22012';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_1();
+NOTICE:  SQLSTATE = 22012, SQLERRM = division by zero
+ test_condition_1 
+------------------
+ 
+(1 row)
+
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE "22012";
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_1();
+NOTICE:  SQLSTATE = 22012, SQLERRM = division by zero
+ test_condition_1 
+------------------
+ 
+(1 row)
+
 \c regression
 drop trigger animal_trigger1;
 ERROR:  drop trigger without table name only support in B-format database

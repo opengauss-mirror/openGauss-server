@@ -100,7 +100,7 @@ static TupleDesc ConstructTupleDescriptor(Relation heapRelation, IndexInfo* inde
 static void InitializeAttributeOids(Relation indexRelation, int numatts, Oid indexoid);
 static void AppendAttributeTuples(Relation indexRelation, int numatts);
 static void UpdateIndexRelation(Oid indexoid, Oid heapoid, IndexInfo* indexInfo, Oid* collationOids, Oid* classOids,
-    int16* coloptions, bool primary, bool isexclusion, bool immediate, bool isvalid);
+    int16* coloptions, bool primary, bool isexclusion, bool immediate, bool isvalid, bool visible);
 static void IndexCheckExclusion(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo);
 static void IndexCheckExclusionForBucket(Relation heapRelation, Partition heapPartition, Relation indexRelation,
     Partition indexPartition, IndexInfo* indexInfo);
@@ -549,7 +549,7 @@ static void AppendAttributeTuples(Relation indexRelation, int numatts)
  * ----------------------------------------------------------------
  */
 static void UpdateIndexRelation(Oid indexoid, Oid heapoid, IndexInfo* indexInfo, Oid* collationOids, Oid* classOids,
-    int16* coloptions, bool primary, bool isexclusion, bool immediate, bool isvalid)
+    int16* coloptions, bool primary, bool isexclusion, bool immediate, bool isvalid, bool visible)
 {
     int2vector* indkey = NULL;
     oidvector* indcollation = NULL;
@@ -637,6 +637,7 @@ static void UpdateIndexRelation(Oid indexoid, Oid heapoid, IndexInfo* indexInfo,
 
     values[Anum_pg_index_indisreplident - 1] = BoolGetDatum(false);
     values[Anum_pg_index_indnkeyatts - 1] = Int16GetDatum(indexInfo->ii_NumIndexKeyAttrs);
+    values[Anum_pg_index_indisvisible - 1] = BoolGetDatum(visible);
     tuple = heap_form_tuple(RelationGetDescr(pg_index), values, nulls);
 
     /*
@@ -724,7 +725,7 @@ Oid index_create(Relation heapRelation, const char *indexRelationName, Oid index
     IndexInfo *indexInfo, List *indexColNames, Oid accessMethodObjectId, Oid tableSpaceId, Oid *collationObjectId,
     Oid *classObjectId, int16 *coloptions, Datum reloptions, bool isprimary, bool isconstraint, bool deferrable,
     bool initdeferred, bool allow_system_table_mods, bool skip_build, bool concurrent, IndexCreateExtraArgs *extra,
-    bool useLowLockLevel, int8 relindexsplit)
+    bool useLowLockLevel, int8 relindexsplit, bool visible)
 {
     Oid heapRelationId = RelationGetRelid(heapRelation);
     Relation pg_class;
@@ -992,7 +993,8 @@ Oid index_create(Relation heapRelation, const char *indexRelationName, Oid index
         isprimary,
         is_exclusion,
         !deferrable,
-        !concurrent);
+        !concurrent,
+        visible);
 
     /*
      * Register constraint and dependencies for the index.

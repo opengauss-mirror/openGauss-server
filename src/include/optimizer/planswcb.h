@@ -100,6 +100,7 @@ extern bool IsCteScanProcessForStartWith(CteScan *ctescan);
 extern void ProcessStartWithOpMixWork(PlannerInfo *root, Plan *topplan,
                                       PlannerInfo *subroot, StartWithOp *swplan);
 extern List *FixSwTargetlistResname(PlannerInfo *root, RangeTblEntry *curRte, List *tlist);
+extern List *pullUpConnectByFuncExprs(Node* node);
 typedef struct StartWithCTEPseudoReturnColumns {
     char    *colname;
     Oid      coltype;

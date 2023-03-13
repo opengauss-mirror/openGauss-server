@@ -544,4 +544,5 @@ static void syscall_lock_init(void)
     syscalllockInit(&dlerror_lock);
     syscalllockInit(&kerberos_conn_lock);
     syscalllockInit(&read_cipher_lock);
+    syscalllockInit(&file_list_lock);
 }

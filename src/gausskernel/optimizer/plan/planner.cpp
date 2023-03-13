@@ -52,6 +52,7 @@
 #include "optimizer/prep.h"
 #include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
+#include "optimizer/planswcb.h"
 #include "parser/analyze.h"
 #include "optimizer/gtmfree.h"
 #include "parser/parsetree.h"
@@ -4191,42 +4192,61 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
              * is true.
              */
             rebuild_pathkey_for_groupingSet<distinct_pathkey>(root, tlist, NULL, collectiveGroupExpr);
+            rebuild_pathkey_for_groupingSet<sort_pathkey>(root, tlist, NULL, collectiveGroupExpr);
 
-            /*
-             * Use a Unique node to implement DISTINCT.  Add an explicit sort
-             * if we couldn't make the path come out the way the Unique node
-             * needs it.  If we do have to sort, always sort by the more
-             * rigorous of DISTINCT and ORDER BY, to avoid a second sort
-             * below.  However, for regular DISTINCT, don't sort now if we
-             * don't have to --- sorting afterwards will likely be cheaper,
-             * and also has the possibility of optimizing via LIMIT.  But for
-             * DISTINCT ON, we *must* force the final sort now, else it won't
-             * have the desired behavior.
-             */
-            List* needed_pathkeys = NIL;
+            if (likely(parse->hasDistinctOn ||
+                pathkeys_contained_in(root->sort_pathkeys, root->distinct_pathkeys))) {
+                /*
+                * Use a Unique node to implement DISTINCT.  Add an explicit sort
+                * if we couldn't make the path come out the way the Unique node
+                * needs it.  If we do have to sort, always sort by the more
+                * rigorous of DISTINCT and ORDER BY, to avoid a second sort
+                * below.  However, for regular DISTINCT, don't sort now if we
+                * don't have to --- sorting afterwards will likely be cheaper,
+                * and also has the possibility of optimizing via LIMIT.  But for
+                * DISTINCT ON, we *must* force the final sort now, else it won't
+                * have the desired behavior.
+                */
+                List* needed_pathkeys = NIL;
 
-            if (parse->hasDistinctOn && list_length(root->distinct_pathkeys) < list_length(root->sort_pathkeys))
-                needed_pathkeys = root->sort_pathkeys;
-            else
-                needed_pathkeys = root->distinct_pathkeys;
-
-            /* we also need to add sort if the sub node is parallized. */
-            if (!pathkeys_contained_in(needed_pathkeys, current_pathkeys) ||
-                (result_plan->dop > 1 && needed_pathkeys)) {
-                if (list_length(root->distinct_pathkeys) >= list_length(root->sort_pathkeys))
-                    current_pathkeys = root->distinct_pathkeys;
-                else {
-                    current_pathkeys = root->sort_pathkeys;
-                    /* AssertEreport checks that parser didn't mess up... */
-                    AssertEreport(pathkeys_contained_in(root->distinct_pathkeys, current_pathkeys),
-                        MOD_OPT,
-                        "the parser does not mess up when adding sort for pathkeys.");
+                if (parse->hasDistinctOn && list_length(root->distinct_pathkeys) < list_length(root->sort_pathkeys)) {
+                    needed_pathkeys = root->sort_pathkeys;
+                } else {
+                    needed_pathkeys = root->distinct_pathkeys;
                 }
 
-                result_plan = (Plan*)make_sort_from_pathkeys(root, result_plan, current_pathkeys, -1.0);
+                /* we also need to add sort if the sub node is parallized. */
+                if (!pathkeys_contained_in(needed_pathkeys, current_pathkeys) ||
+                    (result_plan->dop > 1 && needed_pathkeys)) {
+                    if (list_length(root->distinct_pathkeys) >= list_length(root->sort_pathkeys)) {
+                        current_pathkeys = root->distinct_pathkeys;
+                    } else {
+                        current_pathkeys = root->sort_pathkeys;
+                        /* AssertEreport checks that parser didn't mess up... */
+                        AssertEreport(pathkeys_contained_in(root->distinct_pathkeys, current_pathkeys),
+                            MOD_OPT,
+                            "the parser does not mess up when adding sort for pathkeys.");
+                    }
+
+                    result_plan = (Plan*)make_sort_from_pathkeys(root, result_plan, current_pathkeys, -1.0);
+                }
+
+                result_plan = (Plan*)make_unique(result_plan, parse->distinctClause);
+            } else {
+                if (!pathkeys_contained_in(root->distinct_pathkeys, current_pathkeys) ||
+                    (result_plan->dop > 1 && root->distinct_pathkeys)) {
+                    result_plan = (Plan*)make_sort_from_pathkeys(root, result_plan, root->distinct_pathkeys, -1.0);
+                    current_pathkeys = root->distinct_pathkeys;
+                }
+                result_plan = (Plan*)make_unique(result_plan, parse->distinctClause);
+
+                if (!pathkeys_contained_in(root->sort_pathkeys, current_pathkeys) ||
+                    (result_plan->dop > 1 && root->sort_pathkeys)) {
+                    result_plan = (Plan*)make_sort_from_pathkeys(root, result_plan, root->sort_pathkeys, -1.0);
+                    current_pathkeys = root->sort_pathkeys;
+                }
             }
 
-            result_plan = (Plan*)make_unique(result_plan, parse->distinctClause);
             set_plan_rows(
                 result_plan, get_global_rows(dNumDistinctRows[0], 1.0, ng_get_dest_num_data_nodes(result_plan)));
 
@@ -6922,6 +6942,14 @@ static List* make_subplanTargetList(PlannerInfo* root, List* tlist, AttrNumber**
     }
 
     /*
+     * Pull out all the connect-by funcs such as SYS_CONNECT_BY_PATH, and
+     * add them to the result tlist if not already present, so the internal
+     * pseudo columns could be found in subplan nodes.
+     */
+    List* funcExprs = pullUpConnectByFuncExprs((Node*)non_group_cols);
+    sub_tlist = add_to_flat_tlist(sub_tlist, funcExprs);
+
+    /*
      * Pull out all the Vars mentioned in non-group cols (plus HAVING), and
      * add them to the result tlist if not already present.  (A Var used
      * directly as a GROUP BY item will be present already.)  Note this
@@ -6935,6 +6963,7 @@ static List* make_subplanTargetList(PlannerInfo* root, List* tlist, AttrNumber**
     /* clean up cruft */
     list_free_ext(non_group_vars);
     list_free_ext(non_group_cols);
+    list_free_ext(funcExprs);
 
     return sub_tlist;
 }

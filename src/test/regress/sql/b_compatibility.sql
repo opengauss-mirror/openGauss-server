@@ -204,6 +204,7 @@ insert into char_test values('0','0');
 select length(a),length(b) from char_test;
 select lengthb(a),lengthb(b) from char_test;
 select bit_length(a),bit_length(b) from char_test;
+select 'ni啊shaeskeeee'::char(3);
 
 create index a on char_test(a);
 create index b on char_test(b);
@@ -529,8 +530,41 @@ end;
 /
 
 call labeltest(9);
+
+--success
+create or replace procedure proc_label(n int)
+as
+BEGIN
+label11111111111111111111111111111111111111111111111111111111112: loop
+n:=n-1;
+IF n<5 then
+LEAVE label11111111111111111111111111111111111111111111111111111111112;
+END IF;
+raise info 'number is %.',n;
+END loop;
+END;
+/
+
+--success
+create or replace procedure proc_label1(n int)
+as
+BEGIN
+label11111111111111111111111111111111111111111111111111111111112    : loop
+n:=n-1;
+IF n<5 then
+LEAVE label11111111111111111111111111111111111111111111111111111111112;
+END IF;
+raise info 'number is %.',n;
+END loop;
+END;
+/
+
+call proc_label(5);
+call proc_label1(5);
 drop procedure if exists doiterate;
 drop function if exists labeltest;
+drop function if exists proc_label;
+drop function if exists proc_label1;
 
 \c regression
 

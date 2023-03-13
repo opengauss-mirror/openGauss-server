@@ -56,8 +56,8 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode);
 void ClearReadHint(int buf_id, bool buf_deleted = false);
 Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk);
 Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc = NULL);
-Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode);
-Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode);
+Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool *with_io);
+Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool *with_io);
 bool DmsReleaseOwner(BufferTag buf_tag, int buf_id);
 int32 CheckBuf4Rebuild(BufferDesc* buf_desc);
 int SSLockAcquire(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock, bool dontWait,
@@ -72,7 +72,10 @@ void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag);
 void CheckPageNeedSkipInRecovery(Buffer buf);
 void SmgrNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk);
 void SegNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, SegSpace *spc);
-unsigned int DMSGetProcType4RequestPage();
+dms_session_e DMSGetProcType4RequestPage();
 void BufValidateDrc(BufferDesc *buf_desc);
+bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc);
+bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer);
+bool DmsCheckBufAccessible();
 
 #endif

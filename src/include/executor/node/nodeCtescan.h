@@ -18,7 +18,6 @@
 #include "nodes/execnodes.h"
 
 extern CteScanState* ExecInitCteScan(CteScan* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecCteScan(CteScanState* node);
 extern void ExecEndCteScan(CteScanState* node);
 extern void ExecReScanCteScan(CteScanState* node);
 
@@ -38,7 +37,6 @@ typedef struct StartWithFuncEvalState
 } StartWithFuncEvalState;
 
 extern StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int eflags);
-extern TupleTableSlot* ExecStartWithOp(StartWithOpState *node);
 extern void ExecEndStartWithOp(StartWithOpState *node);
 extern void ExecReScanStartWithOp(StartWithOpState *node);
 

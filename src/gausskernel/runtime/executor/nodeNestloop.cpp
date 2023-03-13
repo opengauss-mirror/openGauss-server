@@ -28,6 +28,7 @@
 #include "utils/memutils.h"
 #include "executor/node/nodeHashjoin.h"
 
+static TupleTableSlot* ExecNestLoop(PlanState* state);
 static void MaterialAll(PlanState* node)
 {
     if (IsA(node, MaterialState)) {
@@ -81,8 +82,9 @@ static void MaterialAll(PlanState* node)
  *			   are prepared to return the first tuple.
  * ----------------------------------------------------------------
  */
-TupleTableSlot* ExecNestLoop(NestLoopState* node)
+static TupleTableSlot* ExecNestLoop(PlanState* state)
 {
+    NestLoopState* node = castNode(NestLoopState, state);
     TupleTableSlot* outer_tuple_slot = NULL;
     TupleTableSlot* inner_tuple_slot = NULL;
     ListCell* lc = NULL;
@@ -99,6 +101,8 @@ TupleTableSlot* ExecNestLoop(NestLoopState* node)
     PlanState* inner_plan = innerPlanState(node);
     ExprContext* econtext = node->js.ps.ps_ExprContext;
 
+    CHECK_FOR_INTERRUPTS();
+    
     /*
      * Check to see if we're still projecting out tuples from a previous join
      * tuple (because there is a function-returning-set in the projection
@@ -340,6 +344,7 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
     nlstate->js.ps.plan = (Plan*)node;
     nlstate->js.ps.state = estate;
     nlstate->nl_MaterialAll = node->materialAll;
+    nlstate->js.ps.ExecProcNode = ExecNestLoop;
 
     /*
      * Miscellaneous initialization

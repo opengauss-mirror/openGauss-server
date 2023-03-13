@@ -1257,6 +1257,7 @@ typedef enum WaitStatePhase {
 #define PG_WAIT_IO 0x0A000000U
 #define PG_WAIT_SQL 0x0B000000U
 #define PG_WAIT_STATE 0x0C000000U
+#define PG_WAIT_DMS 0x0D000000U
 
 /* ----------
  * Wait Events - IO
@@ -1343,8 +1344,49 @@ typedef enum WaitEventIO {
     WAIT_EVENT_LOGICAL_SYNC_DATA,
     WAIT_EVENT_LOGICAL_SYNC_STATE_CHANGE,
     WAIT_EVENT_REPLICATION_ORIGIN_DROP,
+    WAIT_EVENT_REPLICATION_SLOT_DROP,
     IO_EVENT_NUM = WAIT_EVENT_LOGCTRL_SLEEP - WAIT_EVENT_BUFFILE_READ + 1  // MUST be last, DO NOT use this value.
 } WaitEventIO;
+
+typedef enum WaitEventDMS {
+    WAIT_EVENT_IDLE_WAIT = PG_WAIT_DMS,
+
+    WAIT_EVENT_GC_BUFFER_BUSY,
+    WAIT_EVENT_DCS_REQ_MASTER4PAGE_1WAY,
+    WAIT_EVENT_DCS_REQ_MASTER4PAGE_2WAY,
+    WAIT_EVENT_DCS_REQ_MASTER4PAGE_3WAY,
+    WAIT_EVENT_DCS_REQ_MASTER4PAGE_TRY,
+    WAIT_EVENT_DCS_REQ_OWNER4PAGE,
+    WAIT_EVENT_DCS_CLAIM_OWNER,
+    WAIT_EVENT_DCS_RELEASE_OWNER,
+    WAIT_EVENT_DCS_INVLDT_SHARE_COPY_REQ,
+    WAIT_EVENT_DCS_INVLDT_SHARE_COPY_PROCESS,
+    WAIT_EVENT_DCS_TRANSFER_PAGE_LATCH,
+    WAIT_EVENT_DCS_TRANSFER_PAGE_READONLY2X,
+    WAIT_EVENT_DCS_TRANSFER_PAGE_FLUSHLOG,
+    WAIT_EVENT_DCS_TRANSFER_PAGE,
+    WAIT_EVENT_PCR_REQ_BTREE_PAGE,
+    WAIT_EVENT_PCR_REQ_HEAP_PAGE,
+    WAIT_EVENT_PCR_REQ_MASTER,
+    WAIT_EVENT_PCR_REQ_OWNER,
+    WAIT_EVENT_PCR_CHECK_CURR_VISIBLE,
+    WAIT_EVENT_TXN_REQ_INFO,
+    WAIT_EVENT_TXN_REQ_SNAPSHOT,
+    WAIT_EVENT_DLS_REQ_LOCK,
+    WAIT_EVENT_DLS_REQ_TABLE,
+    WAIT_EVENT_DLS_WAIT_TXN,
+    WAIT_EVENT_DEAD_LOCK_TXN,
+    WAIT_EVENT_DEAD_LOCK_TABLE,
+    WAIT_EVENT_DEAD_LOCK_ITL,
+    WAIT_EVENT_BROADCAST_BTREE_SPLIT,
+    WAIT_EVENT_BROADCAST_ROOT_PAGE,
+    WAIT_EVENT_QUERY_OWNER_ID,
+    WAIT_EVENT_LATCH_X,
+    WAIT_EVENT_LATCH_S,
+    WAIT_EVENT_LATCH_X_REMOTE,
+    WAIT_EVENT_LATCH_S_REMOTE,
+    DMS_EVENT_NUM = WAIT_EVENT_LATCH_S_REMOTE - WAIT_EVENT_IDLE_WAIT + 1  // MUST be last, DO NOT use this value.
+} WaitEventDMS;
 
 /* ----------
  * Wait Events - SQL
@@ -1478,6 +1520,7 @@ typedef struct WaitEventInfo {
     int64 start_time;  // current wait starttime
     int64 duration;    // current wait duration
     WaitStatisticsInfo io_info[IO_EVENT_NUM];
+    WaitStatisticsInfo dms_info[DMS_EVENT_NUM];
     WaitStatisticsInfo lock_info[LOCK_EVENT_NUM];
     WaitStatisticsInfo lwlock_info[LWLOCK_EVENT_NUM];
 } WaitEventInfo;
@@ -1746,6 +1789,7 @@ extern void pgstat_couple_decouple_session(bool is_couple);
 extern void pgstat_beshutdown_session(int ctrl_index);
 
 extern const char* pgstat_get_wait_io(WaitEventIO w);
+extern const char* pgstat_get_wait_dms(WaitEventDMS w);
 extern void pgstat_report_activity(BackendState state, const char* cmd_str);
 extern void pgstat_report_tempfile(size_t filesize);
 extern void pgstat_report_memReserved(int4 memReserved, int reserve_or_release);

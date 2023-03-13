@@ -363,7 +363,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"compat_cursor", OPT_COMPAT_CURSOR},
     {"char_coerce_compat", OPT_CHAR_COERCE_COMPAT},
     {"pgformat_substr", OPT_PGFORMAT_SUBSTR},
-    {"truncate_numeric_tail_zero", OPT_TRUNC_NUMERIC_TAIL_ZERO}
+    {"truncate_numeric_tail_zero", OPT_TRUNC_NUMERIC_TAIL_ZERO},
+    {"allow_orderby_undistinct_column", OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
@@ -3888,10 +3889,10 @@ static void AssignUStoreAttr(const char* newval, void* extra)
         if (!IS_NULL_STR(ptoken)) {
             if (strcasecmp(ptoken, "enable_ustore_partial_seqscan") == 0) {
                 ParseUStoreBool(&u_sess->attr.attr_storage.enable_ustore_partial_seqscan, ptoken, pdelimiter, psave);
-                status[ENABLE_USTORE_PARTIAL_SEQSCAN_IDX] = true;
+                status[ENABLE_USTORE_PARTIAL_SEQSCAN_IDX] = false;
             } else if (strcasecmp(ptoken, "enable_candidate_buf_usage_count") == 0) {
                 ParseUStoreBool(&u_sess->attr.attr_storage.enable_candidate_buf_usage_count, ptoken, pdelimiter, psave);
-                status[ENABLE_CANDIATATE_BUF_USAGE_IDX] = true;
+                status[ENABLE_CANDIATATE_BUF_USAGE_IDX] = false;
             } else if (strcasecmp(ptoken, "ustats_tracker_naptime") == 0) {
                 ParseUStoreInt(&u_sess->attr.attr_storage.ustats_tracker_naptime, ptoken, pdelimiter, psave,
                     MIN_USTATS_TRACKER_NAPTIME, MAX_USTATS_TRACKER_NAPTIME);

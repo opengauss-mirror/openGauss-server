@@ -62,7 +62,6 @@ typedef int (*dss_read_device_link)(const char *path, char *buf, int bufsize);
 typedef int (*dss_stat_device)(const char *path, dss_stat_info_t item);
 typedef int (*dss_lstat_device)(const char *path, dss_stat_info_t item);
 typedef int (*dss_fstat_device)(int handle, dss_stat_info_t item);
-typedef int (*dss_set_status)(dss_server_status_t status);
 typedef void (*dss_device_size)(const char *fname, long *fsize);
 typedef void (*dss_error_info)(int *errorcode, const char **errormsg);
 typedef void (*dss_svr_path)(const char *conn_path);
@@ -72,6 +71,7 @@ typedef int (*dss_aio_prep_pwrite_device)(void *iocb, int handle, void *buf, siz
 typedef int (*dss_aio_prep_pread_device)(void *iocb, int handle, void *buf, size_t count, long long offset);
 typedef int (*dss_init_logger_t)(char *log_home, unsigned int log_level, unsigned int log_backup_file_count, unsigned long long log_max_file_size);
 typedef void (*dss_refresh_logger_t)(char *log_field, unsigned long long *value);
+typedef int (*dss_set_main)(void);
 typedef struct st_dss_device_op_t {
     bool inited;
     void *handle;
@@ -105,7 +105,6 @@ typedef struct st_dss_device_op_t {
     dss_stat_device dss_stat;
     dss_lstat_device dss_lstat;
     dss_fstat_device dss_fstat;
-    dss_set_status dss_set_server_status;
     dss_svr_path dss_set_svr_path;
     dss_log_callback dss_register_log_callback;
     dss_version dss_get_version;
@@ -113,6 +112,7 @@ typedef struct st_dss_device_op_t {
     dss_aio_prep_pread_device dss_aio_pread;
     dss_init_logger_t dss_init_logger;
     dss_refresh_logger_t dss_refresh_logger;
+    dss_set_main dss_set_main_inst;
 } dss_device_op_t;
 
 void dss_register_log_callback(dss_log_output cb_log_output);

@@ -76,7 +76,7 @@ int dss_stat_file(const char *path, struct stat *buf);
 int dss_lstat_file(const char *path, struct stat *buf);
 int dss_fstat_file(int handle, struct stat *buf);
 int dss_chmod_file(const char* path, mode_t mode);
-int dss_set_server_status_wrapper(bool is_master);
+int dss_set_server_status_wrapper();
 int dss_remove_dev(const char *name);
 
 int dss_aio_prep_pwrite(void *iocb, int fd, void *buf, size_t count, long long offset);

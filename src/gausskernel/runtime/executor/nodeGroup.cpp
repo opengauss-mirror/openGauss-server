@@ -26,18 +26,23 @@
 #include "executor/executor.h"
 #include "executor/node/nodeGroup.h"
 
+static TupleTableSlot* ExecGroup(PlanState* state);
+
 /*
  *	 ExecGroup -
  *
  *		Return one tuple for each group of matching input tuples.
  */
-TupleTableSlot* ExecGroup(GroupState* node)
+static TupleTableSlot* ExecGroup(PlanState* state)
 {
+    GroupState* node = castNode(GroupState, state);
     ExprContext* econtext = NULL;
     int numCols;
     AttrNumber* grpColIdx = NULL;
     TupleTableSlot* firsttupleslot = NULL;
     TupleTableSlot* outerslot = NULL;
+
+    CHECK_FOR_INTERRUPTS();
 
     /*
      * get state info from node
@@ -194,6 +199,7 @@ GroupState* ExecInitGroup(Group* node, EState* estate, int eflags)
     grpstate->ss.ps.plan = (Plan*)node;
     grpstate->ss.ps.state = estate;
     grpstate->grp_done = FALSE;
+    grpstate->ss.ps.ExecProcNode = ExecGroup;
 
     /*
      * create expression context

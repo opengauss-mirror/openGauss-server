@@ -1,15 +1,15 @@
 -- error
 select 10 into @aa;
-ERROR:  syntax error at or near "into @"
+ERROR:  syntax error at or near "@"
 LINE 1: select 10 into @aa;
-                  ^
+                       ^
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
 \! sleep 1
 -- error
 select 10 into @aa;
-ERROR:  syntax error at or near "into @"
+ERROR:  syntax error at or near "@"
 LINE 1: select 10 into @aa;
-                  ^
+                       ^
 create database test dbcompatibility 'b';
 \c test
 show enable_set_variable_b_format;

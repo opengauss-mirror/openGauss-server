@@ -120,6 +120,10 @@ typedef struct PullUpConnectByFuncVarContext {
     StartWithOp *swplan;
 } PullUpConnectByFuncVarContext;
 
+typedef struct PullUpConnectByFuncExprContext {
+    List *pullupFuncs;
+} PullUpConnectByFuncExprContext;
+
 static List *GetPRCTargetEntryList(PlannerInfo *root, RangeTblEntry *rte, StartWithOp *swplan);
 static int GetVarPRCType(List *prcList, const Var* var);
 static void MarkPRCNotSkip(StartWithOp *swplan, int prcType);
@@ -1165,6 +1169,41 @@ static void CheckInvalidConnectByfuncArgs(CteScan *cteplan, Oid funcid, List *ar
             elog(ERROR, "unknown functions funid:%u in ConnectByFuncArg check.", funcid);
         }
     }
+}
+
+static bool PullUpConnectByFuncExprWalker(Node *node, PullUpConnectByFuncExprContext *context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    /* FuncExpr we do connect-by func validation check */
+    if (IsA(node, FuncExpr)) {
+        FuncExpr *func = (FuncExpr *)node;
+
+        /* Only handle start with hierachocal query's function cases */
+        if (IsHierarchicalQueryFuncOid(func->funcid)) {
+            context->pullupFuncs = list_append_unique(context->pullupFuncs, func);
+        }
+    }
+
+    return expression_tree_walker(node,
+                (bool (*)())PullUpConnectByFuncExprWalker, (void*)context);
+}
+
+List *pullUpConnectByFuncExprs(Node* node)
+{
+    errno_t rc = 0;
+    PullUpConnectByFuncExprContext context;
+    rc = memset_s(&context,
+                  sizeof(PullUpConnectByFuncExprContext),
+                  0,
+                  sizeof(PullUpConnectByFuncExprContext));
+    securec_check(rc, "\0", "\0");
+
+    (void)PullUpConnectByFuncExprWalker(node, &context);
+
+    return context.pullupFuncs;
 }
 
 /*

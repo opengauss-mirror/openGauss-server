@@ -39,6 +39,9 @@
 #include "vecexecutor/vecexecutor.h"
 #include "storage/item/itemptr.h"
 
+
+static TupleTableSlot* ExecVecToRow(PlanState* pstate);
+
 /* Convert one column of the entire batch from vector store to row store.
  * typid in template is the OID of the column data type. */
 template <int typid>
@@ -140,8 +143,9 @@ void DevectorizeOneBatch(VecToRowState* state)
     return;
 }
 
-TupleTableSlot* ExecVecToRow(VecToRowState* state) /* return: a tuple or NULL */
+static TupleTableSlot* ExecVecToRow(PlanState* pstate) /* return: a tuple or NULL */
 {
+    VecToRowState* state = castNode(VecToRowState, pstate);
     PlanState* outer_plan = NULL;
     TupleTableSlot* tuple = state->tts;
     VectorBatch* current_batch = NULL;
@@ -220,6 +224,7 @@ VecToRowState* ExecInitVecToRow(VecToRow* node, EState* estate, int eflags)
     state->ps.plan = (Plan*)node;
     state->ps.state = estate;
     state->ps.vectorized = false;
+    state->ps.ExecProcNode = ExecVecToRow;
 
     /*
      * tuple table initialization

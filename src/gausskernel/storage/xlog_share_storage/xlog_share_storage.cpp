@@ -630,6 +630,7 @@ void SharedStorageXlogCopyBackendMain(void)
     Assert(t_thrd.xlog_cxt.ThisTimeLineID != 0);
 
     uint64 checkLockCount = 0;
+    pgstat_report_appname("xlog copy");
     pgstat_report_activity(STATE_IDLE, NULL);
     for (;;) {
         ResetLatch(&t_thrd.proc->procLatch);

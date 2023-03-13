@@ -1,0 +1,452 @@
+create database rightref with dbcompatibility 'B';
+\c rightref
+
+-- test fields order
+create table test_order_t(n1 int default 100, n2 int default 100, s int);
+insert into test_order_t values(1000, 1000, n1 + n2);
+insert into test_order_t(s, n1, n2) values(n1 + n2, 300,  300);
+select * from test_order_t;
+drop table test_order_t;
+
+-- test non-idempotent function
+create table non_idempotent_t(c1 float, c2 float, c3 float);
+insert into non_idempotent_t values(random(), c1, c1);
+select c1 = c2 as f1, c1 = c3 as f2 from non_idempotent_t;
+drop table non_idempotent_t;
+
+-- test auto increment
+create table auto_increment_t(n int, c1 int primary key auto_increment, c2 int, c3 int);
+insert into auto_increment_t values(1, c1, c1, c1);
+insert into auto_increment_t values(2, 0, c1, c1);
+insert into auto_increment_t values(3, 0, c1, c1);
+insert into auto_increment_t values(4, -1, c1, c1);
+insert into auto_increment_t(n, c2, c3, c1) values(5, c1, c1, 1000);
+insert into auto_increment_t values(5, c1, c1, c1);
+select * from auto_increment_t order by n;
+drop table auto_increment_t;
+
+-- test series
+create table test_series_t(c1 int, c2 int, c3 int);
+insert into test_series_t values(c2 + 10, generate_series(1, 10), c2 * 2);
+select * from test_series_t;
+drop table test_series_t;
+
+-- test upsert
+-- 1
+create table upser(c1 int, c2 int, c3 int);
+create unique index idx_upser_c1 on upser(c1);
+insert into upser values (1, 10, 10), (2, 10, 10), (3, 10, 10), (4, 10, 10), (5, 10, 10), (6, 10, 10), (7, 10, 10),
+                         (8, 10, 10), (9, 10, 10), (10, 10, 10);
+insert into upser values (5, 100, 100), (6, 100, 100), (7, 100, 100), (8, 100, 100), (9, 100, 100), (10, 100, 100),
+                         (11, 100, 100), (12, 100, 100), (13, 100, 100), (14, 100, 100), (15, 100, 100)
+    on duplicate key update c2 = 2000, c3 = 2000;
+select * from upser order by c1;
+
+-- 2
+truncate upser;
+insert into upser values (1, 10, 10), (2, 10, 10), (3, 10, 10), (4, 10, 10), (5, 10, 10), (6, 10, 10), (7, 10, 10),
+                         (8, 10, 10), (9, 10, 10), (10, 10, 10);
+insert into upser values (5, 100, 100), (6, 100, 100), (7, 100, 100), (8, 100, 100), (9, 100, 100), (10, 100, 100),
+                         (11, 100, 100), (12, 100, 100), (13, 100, 100), (14, 100, 100), (15, 100, 100)
+                         on duplicate key update c2 = c1 + c2, c3 = c2 + c3;
+select * from upser order by c1;
+
+-- 3
+truncate upser;
+insert into upser values (1, 10, 10), (2, 10, 10), (3, 10, 10), (4, 10, 10), (5, 10, 10), (6, 10, 10),
+                         (7, 10, 10), (8, 10, 10), (9, 10, 10), (10, 10, 10);
+
+insert into upser values (5, c1 + 100, 100), (6, c1 + 100, 100), (7, c1 + 100, 100), (8, c1 + 100, 100),
+                         (9, c1 + 100, 100), (10, c1 + 100, 100), (11, c1 + 100, 100), (12, c1 + 100, 100),
+                         (13, c1 + 100, 100), (14, c1 + 100, 100), (15, c1 + 100, c1 + c2)
+                         on duplicate key update c2 = c1 + c2, c3 = c2 + c3;
+
+select * from upser order by c1;
+
+drop table upser;
+
+-- test var
+create table with_var(a int default 999);
+create function with_var_func() return int as
+declare 
+    a int := 666;
+begin
+    insert into with_var values(a);
+    return a;
+end;
+/
+
+call with_var_func();
+select * from with_var;
+
+drop function with_var_func;
+drop table with_var;
+
+-- test num type
+create table num_default_t (
+    n serial,
+    c1 int default 1,
+    c2 int,
+    c3 tinyint default 3,
+    c4 tinyint,
+    c5 smallint default 5,
+    c6 smallint,
+    c7 integer default 7,
+    c8 integer,
+    c9 binary_integer default 9,
+    c10 bigint default 10,
+    c11 bigint,
+    c12 boolean default true,
+    c13 boolean,
+    c14 numeric default 14.,
+    c15 numeric(10, 3) default 15.,
+    c16 decimal default 16,
+    c17 decimal(10, 2) default 17,
+    c18 double precision default 18,
+    c19 float8,
+    c20 float default 100 / 10,
+    c21 float default 20 * (100 + 2) - 3,
+    c22 float default random(),
+    c23 float default random() * 100,
+    c24 float
+);
+
+insert into num_default_t values(1);
+insert into num_default_t values(2, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10,
+                                 c11, c12, c13, c14, c15, c16, c17, c18, c19, c20,
+                                 c21, c22, c23, c24);
+insert into num_default_t values(3, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10,
+                                 c11, c12, c13, c14, c15, c16, c17, c18, c19, c20,
+                                 c21, c22, c23, c20);
+insert into num_default_t(n, c23, c24) values(4, default, c23);
+
+select 3, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10,
+       c11, c12, c13, c14, c15, c16, c17, c18, c19, c20, c21 
+from num_default_t;
+
+select (c23 = c24) as equal from num_default_t where n = 4;
+select (c22 is null) as c22_is_null, (c23 is null) as c23_is_null from num_default_t where n = 2 or n = 3;
+select (c22 is not null) as c22_is_not_null, (c23 is not null) as c23_is_not_null from num_default_t where n = 1;
+
+
+-- test char type
+create table char_default_t(
+    n serial,
+    c1 char(10) default 'char20',
+    c2 char(10),
+    c3 varchar(10) default 'vc3',
+    c4 varchar(20),
+    c5 varchar2(10) default 'vc210',
+    c6 varchar2(20),
+    c7 nchar(5) default 'c31',
+    c8 nchar(5),
+    c9 nvarchar2(5) default 'c33',
+    c10 nvarchar(5) default 'c34',
+    c11 varchar(20) default concat('hello', ' world'),
+    c12 varchar(20)
+);
+
+insert into char_default_t values(1);
+insert into char_default_t values(2, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12);
+insert into char_default_t values(3, c1, c2, c3, concat(c3, ' vc4'), c5, c6, c7, c8, c9, c10, default, c11);
+
+select * from char_default_t;
+
+-- test time type
+create table time_default_t(
+   n serial,
+   c1 timestamp  default '2022-12-12 22:22:22',
+   c2 timestamp,
+   c3 date default '2022-12-12',
+   c4 date,
+   c5 time default '22:22:22',
+   c6 date default current_date,
+   c7 date,
+   c8 timestamp default current_timestamp,
+   c9 timestamp,
+   c10 time default current_time,
+   c11 time,
+   c12 time with time zone default current_time,
+   c13 time
+);
+
+insert into time_default_t values(1);
+insert into time_default_t values(2, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13);
+insert into time_default_t values(3, default, c1,  default, c3, default, default, c6,
+                                  default, c8, default, c10, default, c12);
+
+select n, c1, c2, c3, c4, c5 from time_default_t;
+
+select (c6 is not null) as c6_is_not_null,
+       (c8 is not null) as c8_is_not_null,
+       (c10 is not null) as c10_is_not_null,
+       (c12 is not null) as c12_is_not_null
+from time_default_t where n = 1 or n = 3;
+
+select (c6 is not null) c6_is_not_null,
+       (c8 is null) as c8_is_null,
+       (c10 is null) as c10_is_null,
+       (c12 is null) as c12_is_null
+from time_default_t where n = 2;
+
+select (c1=c2) as c1c2,
+       (c3=c4) as c3c4,
+       (c6=c7) as c6c7,
+       (c8=c9) as c8c9,
+       (c10=c11) as c10c11,
+       (c12=c13) as c12c13
+from time_default_t where n = 3;
+
+-- test num type not null
+create table num_notnull_t (
+    n serial not null,
+    c1 int not null,
+    c2 int not null,
+    c3 tinyint not null,
+    c4 tinyint not null,
+    c5 smallint not null,
+    c6 smallint not null,
+    c7 integer not null,
+    c8 integer not null,
+    c9 binary_integer not null,
+    c10 bigint not null,
+    c11 bigint not null,
+    c12 boolean not null,
+    c13 boolean not null,
+    c14 numeric not null,
+    c15 numeric(10, 3) not null,
+    c16 decimal not null,
+    c17 dec(21, 6) not null,
+    c18 double precision not null,
+    c19 float8 not null,
+    c20 float not null,
+    c21 float(10) not null,
+    c22 float(9) not null,
+    c23 float(53) not null,
+    c24 float(1) not null
+);
+
+insert into num_notnull_t values(n,c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,c17,c18,c19,c20,c21,c22,c23,c24);
+insert into num_notnull_t values(n,c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,c17,c18,c19,c20,c21,c22,c23,c24);
+select * from num_notnull_t;
+
+-- test char type not null
+create table char_notnull_t(
+   c1 char(10) not null,
+   c2 char(10),
+   c3 varchar(20) not null,
+   c4 varchar(20),
+   c5 varchar2(20) not null,
+   c6 varchar2(20),
+   c7 nchar(20) not null,
+   c8 nchar(20),
+   c9 nvarchar2(20) not null,
+   c10 nvarchar(20),
+   c11 varchar(20) not null,
+   c12 varchar(20)
+);
+insert into char_notnull_t values(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11, concat(c11, 'display'));
+insert into char_notnull_t values(c1 + 66,
+                                  c2 + 88,
+                                  concat(c3, 'display'),
+                                  concat(c4, 'not display'),
+                                  concat(c5, 'display'),
+                                  concat(c6, 'not display'),
+                                  concat(c7, 'display'),
+                                  concat(c8, 'not display'),
+                                  concat(c5, ' display'), -- ref after
+                                  concat(c10, 'not display'),
+                                  concat(c5, ' display'),
+                                  concat(c2, ' not display')); -- ref before
+select * from char_notnull_t;
+
+-- test time type not null
+create table time_notnull_t(
+   c1 date not null,
+   c2 time(6) without time zone not null,
+   c3 time with time zone not null,
+   c4 time(5) with time zone not null,
+   c5 timestamp not null,
+   c6 timestamp without time zone not null,
+   c7 timestamp(4) without time zone not null,
+   c8 timestamp with time zone not null,
+   c9 timestamp(3) with time zone not null,
+   c10 smalldatetime not null,
+   c11 interval year not null,
+   c12 interval month (6) not null,
+   c13 interval day (5) not null,
+   c14 interval hour (4) not null,
+   c15 interval minute (3) not null,
+   c16 interval second (2) not null,
+   c17 interval day (2) to second (2) not null,
+   c18 interval day to hour not null,
+   c19 interval day to minute not null,
+   c20 interval hour to minute not null,
+   c21 interval hour to second not null,
+   c22 interval minute to second not null,
+   c23 reltime not null,
+   c24 abstime not null
+);
+
+insert into time_notnull_t values(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,
+                                  c16,c17,c18,c19, c20, c21, c22, c23, c24);
+select * from time_notnull_t;
+
+-- test custom types
+create type TestEnum as enum ('ok', 'ook','ruok');
+create type TestEnum2 as enum ('ok2', 'ook2','ruok2');
+create type TestEnum3 as enum ();
+create type TestCom as (c1 int, c2 date[], c3 point);
+create type TestCom2 as (c1 int, c2 date[], c3 point);
+
+create table enum_set_notnull_t(
+    c1 TestEnum  not null,
+    c2 TestEnum2 not null,
+    c3 set('666') not null,
+    c4 set('hello', 'world') not null
+);
+insert into enum_set_notnull_t values(c1, c2, c3, c4);
+select * from enum_set_notnull_t;
+
+-- test empty enu, other custom types should fail
+create table custom_notnull_t(
+    c0 TestEnum3 not null,    
+    c1 TestEnum not null,
+    c2 TestEnum2 not null,
+    c3 TestCom not null,
+    c4 TestCom2 not null,
+    c5 int[] not null,
+    c6 blob[][] not null
+);
+insert into custom_notnull_t values(c0, c1, c2, c3, c4, c5, c6);
+select * from custom_notnull_t;
+
+-- test rest other types not null
+create table other_notnull_t(
+    c1 money not null,
+    c2 int4range not null,
+    c3 BLOB not null,
+    c4 RAW not null,
+    c5 BYTEA not null,
+    c6 point not null,
+    c7 lseg not null,
+    c8 box not null,
+    c9 path not null,
+    c10 polygon not null,
+    c11 circle not null,
+    c12 cidr not null,
+    c13 inet not null,
+    c14 macaddr not null,
+    c15 BIT(3) not null,
+    c16 BIT VARYING(5) not null,
+    c17 UUID not null,
+    c18 json not null,
+    c19 jsonb not null,
+    c20 int8range not null,
+    c21 numrange not null,
+    c22 tsrange not null,
+    c23 tstzrange not null,
+    c24 daterange not null,
+    c25 hll not null,
+    c26 hll(12, 4) not null,
+    c27 SET('beijing','shanghai','nanjing','wuhan') not null,
+    c28 tsvector not null,
+    c29 tsquery not null,
+    c30 HASH16 not null,
+    c31 HASH32 not null,
+    c32 SET('66') not null
+);
+insert into other_notnull_t values(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,
+                                   c16,c17,c18,c19, c20, c21, c22, c23, c24, c25, c26,
+                                   c27, c28, c29, c30, c31, c32);
+insert into other_notnull_t values(c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,
+                                   c16,c17,c18,c19, c20, c21, c22, c23, c24, c25, c26,
+                                   concat(c27 ,'beijing'), c28, c29, c30, c31, c32);
+select * from other_notnull_t;
+
+-- test returning
+CREATE TABLE t_replica_batch (
+     i_id_batch serial NOT NULL,
+     i_id_source bigint NOT NULL,
+     t_binlog_name text,
+     v_log_table character varying DEFAULT 't_log_replica'::character varying NOT NULL,
+     i_binlog_position bigint,
+     t_gtid_set text,
+     b_started boolean DEFAULT false NOT NULL,
+     b_processed boolean DEFAULT false NOT NULL,
+     b_replayed boolean DEFAULT false NOT NULL,
+     ts_created timestamp without time zone DEFAULT clock_timestamp() NOT NULL,
+     ts_processed timestamp without time zone,
+     ts_replayed timestamp without time zone,
+     i_replayed bigint,
+     i_skipped bigint,
+     i_ddl bigint)
+WITH (orientation=row, compression=no);
+
+CREATE UNIQUE INDEX idx_t_replica_batch_ts_created ON t_replica_batch USING btree (i_id_source, ts_created) TABLESPACE pg_default;                                
+              CREATE UNIQUE INDEX idx_t_replica_batch_binlog_name_position ON t_replica_batch USING btree (i_id_source, t_binlog_name, i_binlog_position) TABLESPACE pg_default;
+ALTER TABLE t_replica_batch ADD CONSTRAINT pk_t_batch PRIMARY KEY USING btree  (i_id_batch);
+
+INSERT INTO t_replica_batch
+(
+    i_id_source,
+    t_binlog_name,
+    i_binlog_position,
+    t_gtid_set,
+    v_log_table
+)
+VALUES
+(
+    1,
+    'on.000153',
+    11432,
+    '57e77afd-510a-11ed-b66a-fa163e34abbc:1-101658',
+    't_log_replica_mysql_2'
+) RETURNING i_id_batch;
+
+INSERT INTO t_replica_batch
+(
+    i_id_source,
+    t_binlog_name,
+    i_binlog_position,
+    t_gtid_set,
+    v_log_table
+)
+VALUES
+(
+    i_id_source,
+    'on.000153',
+    11432,
+    '57e77afd-510a-11ed-b66a-fa163e34abbc:1-101658',
+    't_log_replica_mysql_2'
+) RETURNING i_id_batch;
+
+INSERT INTO t_replica_batch
+(
+    i_id_source,
+    t_binlog_name,
+    i_binlog_position,
+    t_gtid_set,
+    v_log_table
+)
+VALUES
+(
+    i_id_source + 2,
+    'on.000153',
+    i_binlog_position,
+    '57e77afd-510a-11ed-b66a-fa163e34abbc:1-101658',
+    't_log_replica_mysql_2'
+) RETURNING i_id_batch;
+
+-- jdbc case
+DROP USER IF EXISTS rightref CASCADE;
+CREATE USER rightref WITH PASSWORD 'rightref@123';
+SET ROLE rightref PASSWORD 'rightref@123';
+\! chmod -R 700 @abs_bindir@/../jre
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_test/gsjdbc400.jar:@abs_builddir@/jdbc_test/insert_right_ref/. InsertRightRefTest localhost @portstring@ rightref rightref rightref@123
+RESET ROLE;
+DROP USER IF EXISTS rightref CASCADE;
+
+\c postgres
+
+drop database rightref;
