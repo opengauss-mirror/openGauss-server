@@ -2443,7 +2443,7 @@ HeapTuple SearchUserHostName(const char* userName, Oid* oid)
         bool isBFormat = false;
         char* dbCompatibility = GetDatabaseCompatibility(u_sess->proc_cxt.MyProcPort->database_name);
         if (dbCompatibility)
-            isBFormat = (strcmp(dbCompatibility, "B") == 0);
+            isBFormat = (pg_strcasecmp(dbCompatibility, "B") == 0);
         if (isBFormat) {
             userHostName = GenUserHostName(u_sess->proc_cxt.MyProcPort, userName);
             roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(userHostName));
