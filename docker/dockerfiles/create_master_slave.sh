@@ -64,8 +64,8 @@ read -p "Please input SLAVE_NODENAME [opengauss_slave1]: " SLAVE_NODENAME
 SLAVE_NODENAME=${SLAVE_NODENAME:-opengauss_slave1}
 echo "SLAVE_NODENAME set $SLAVE_NODENAME"
 
-read -p "Please input openGauss VERSION [1.0.1]: " VERSION
-VERSION=${VERSION:-1.0.1}
+read -p "Please input openGauss VERSION [5.0.0]: " VERSION
+VERSION=${VERSION:-5.0.0}
 echo "openGauss VERSION set $VERSION"
 
 echo "starting  "
