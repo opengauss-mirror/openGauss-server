@@ -1118,6 +1118,12 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                         outputstr = output_int64_to_cstring(DatumGetInt64(attr));
                         break;
                     case F_BPCHAROUT: 
+                        /* support dolphin customizing bpcharout */
+                        if (u_sess->attr.attr_sql.dolphin) {
+                            outputstr = OutputFunctionCall(&thisState->finfo, attr);
+                            need_free = true;
+                            break;
+                        }
                     case F_VARCHAROUT: 
                         outputstr = output_text_to_cstring((text*)DatumGetPointer(attr));
                         need_free = !check_need_free_varchar_output(outputstr);
