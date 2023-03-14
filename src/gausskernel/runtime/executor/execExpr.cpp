@@ -2233,7 +2233,14 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
 	foreach(lc, args)
 	{
 		Expr	   *arg = (Expr *) lfirst(lc);
-		ExecInitExprRec(arg, state, &fcinfo->arg[argno], &fcinfo->argnull[argno], node);
+        if (IsA(arg, Const) && !(scratch->d.func.flag & (FUNC_EXPR_FLAG_HAS_REFCURSOR | FUNC_EXPR_FLAG_HAS_CURSOR_RETURN)))
+        {
+            Const *con = (Const *) arg;
+            fcinfo->arg[argno] = con->constvalue;
+            fcinfo->argnull[argno] = con->constisnull;
+        } else {
+            ExecInitExprRec(arg, state, &fcinfo->arg[argno], &fcinfo->argnull[argno], node);
+        }
 		fcinfo->argTypes[argno] = exprType((Node*)arg);
 		argno++;
 	}
