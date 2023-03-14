@@ -437,6 +437,7 @@ typedef enum en_dms_wait_event {
     DMS_EVT_LATCH_X_REMOTE,
     DMS_EVT_LATCH_S_REMOTE,
 
+
     DMS_EVT_COUNT,
 } dms_wait_event_t;
 
@@ -527,6 +528,7 @@ typedef void(*dms_get_pageid)(dms_buf_ctrl_t *buf_ctrl, char **pageid, unsigned 
 typedef char *(*dms_get_page)(dms_buf_ctrl_t *buf_ctrl);
 typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned int ver);
 typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index);
+typedef void (*dms_release_db_handle)(void *db_handle);
 typedef void *(*dms_stack_push_cr_cursor)(void *db_handle);
 typedef void (*dms_stack_pop_cr_cursor)(void *db_handle);
 typedef void(*dms_init_cr_cursor)(void *cr_cursor, char pageid[DMS_PAGEID_SIZE], char xid[DMS_XID_SIZE],
@@ -673,6 +675,7 @@ typedef struct st_dms_callback {
     dms_get_page get_page;
     dms_invalidate_page invld_share_copy;
     dms_get_db_handle get_db_handle;
+    dms_release_db_handle release_db_handle;
     dms_stack_push_cr_cursor stack_push_cr_cursor;
     dms_stack_pop_cr_cursor stack_pop_cr_cursor;
     dms_init_cr_cursor init_heap_cr_cursor;
@@ -811,7 +814,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           54
+#define DMS_LOCAL_VERSION           55
 
 #ifdef __cplusplus
 }
