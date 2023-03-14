@@ -3673,7 +3673,7 @@ static void doDCFOptionDesHelp(void)
 
 static void do_help(void)
 {
-    printf(_("%s is a utility to initialize, start, stop, or control a openGauss server.\n\n"), progname);
+    printf(_("%s is a utility to initialize, start, stop, or control an openGauss server.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s init[db]               [-D DATADIR] [-s] [-o \"OPTIONS\"]\n"), progname);
 #ifdef ENABLE_MULTIPLE_NODES

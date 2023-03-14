@@ -39,7 +39,7 @@ static bool enable_dss = false;
 
 static void usage(const char* prog_name)
 {
-    printf(_("%s displays control information of a openGauss database cluster.\n\n"), prog_name);
+    printf(_("%s displays control information of an openGauss database cluster.\n\n"), prog_name);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION] [DATADIR]\n"), prog_name);
     printf(_("\nOptions:\n"));

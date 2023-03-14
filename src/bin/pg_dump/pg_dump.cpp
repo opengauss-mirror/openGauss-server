@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * pg_dump.c
- *	  pg_dump is a utility for dumping out a openGauss database
+ *	  pg_dump is a utility for dumping out an openGauss database
  *	  into a script file.
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

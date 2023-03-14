@@ -87,7 +87,7 @@ uint32 pg_checksum_block(char* data, uint32 size)
 }
 
 /*
- * Compute the checksum for a openGauss page.  The page must be aligned on a
+ * Compute the checksum for an openGauss page.  The page must be aligned on a
  * 4-byte boundary.
  *
  * The checksum includes the block number (to detect the case where a page is
