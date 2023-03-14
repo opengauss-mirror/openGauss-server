@@ -31,6 +31,7 @@
 #include "securec_check.h"
 #include "miscadmin.h"
 #include "access/double_write.h"
+#include "access/multi_redo_api.h"
 
 void InitDmsBufCtrl(void)
 {
@@ -625,6 +626,10 @@ void SSLockAcquireAll()
 
 void SSCheckBufferIfNeedMarkDirty(Buffer buf)
 {
+    if (IsExtremeRedo()) {
+        return;
+    }
+
     dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(buf - 1);
     if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
         MarkBufferDirty(buf);
@@ -856,4 +861,21 @@ bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
         }
     }
     return true;
+}
+
+void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo)
+{
+    if (!ENABLE_DMS || bufferinfo->pageinfo.page == NULL) {
+        return;
+    }
+
+    /* For buffer need flush, we need to mark dirty here */
+    dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(bufferinfo->buf - 1);
+    if (buf_ctrl->state & (BUF_DIRTY_NEED_FLUSH | BUF_ERTO_NEED_MARK_DIRTY)) {
+        if (!IsRedoBufferDirty(bufferinfo)) {
+            MakeRedoBufferDirty(bufferinfo);
+        }
+    } else {
+        buf_ctrl->state |= BUF_ERTO_NEED_MARK_DIRTY;
+    }
 }
