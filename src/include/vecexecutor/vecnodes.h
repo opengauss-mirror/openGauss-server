@@ -92,8 +92,13 @@ typedef struct VecAggInfo {
     PGFunction* vec_agg_final;
 } VecAggInfo;
 
+typedef AggStatePerAggData VecAggStatePerAggData;
+typedef VecAggStatePerAggData* VecAggStatePerAgg;
+
 typedef struct VecAggState : public AggState {
     void* aggRun;
+
+    VecAggStatePerAgg pervecagg;
 
     VecAggInfo* aggInfo;
     char* jitted_hashing;         /* LLVM function pointer to point to

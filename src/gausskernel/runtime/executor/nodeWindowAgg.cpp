@@ -1507,22 +1507,24 @@ WindowStatePerAggData* initialize_peragg(WindowAggState* winstate, WindowFunc* w
     /* resolve actual type of transition state, if polymorphic */
     agg_trans_type = resolve_aggregate_transtype(wfunc->winfnoid, aggform->aggtranstype, input_types, num_arguments);
 
-    /* build expression trees using actual argument & result types */
-    build_trans_aggregate_fnexprs(num_arguments,
-        0, /* no ordered-set window functions yet */
-        false,
-        false, /* no variadic window functions yet */
-        agg_trans_type,
-        input_types,
-        wfunc->wintype,
-        wfunc->inputcollid,
-        transfn_oid,
-        finalfn_oid,
-        &transfnexpr,
-        &finalfnexpr);
+    if (winstate->ss.ps.state->es_is_flt_frame) {
+        build_aggregate_transfn_expr(input_types, num_arguments, 0, false, wfunc->wintype, wfunc->inputcollid,
+                                     transfn_oid, &transfnexpr);
+    } else {
+        /* build expression trees using actual argument & result types */
+        build_trans_aggregate_fnexprs(num_arguments, 0, false, false, agg_trans_type, input_types, wfunc->wintype,
+                                      wfunc->inputcollid, transfn_oid, finalfn_oid, &transfnexpr, &finalfnexpr);
+    }
 
     fmgr_info(transfn_oid, &peraggstate->transfn);
     fmgr_info_set_expr((Node*)transfnexpr, &peraggstate->transfn);
+
+    if (winstate->ss.ps.state->es_is_flt_frame) {
+        if (OidIsValid(finalfn_oid)) {
+            build_aggregate_finalfn_expr(input_types, 1, agg_trans_type, wfunc->wintype, wfunc->inputcollid,
+                                         finalfn_oid, &finalfnexpr);
+        }
+    }
 
     if (OidIsValid(finalfn_oid)) {
         fmgr_info(finalfn_oid, &peraggstate->finalfn);

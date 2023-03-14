@@ -2440,7 +2440,8 @@ typedef struct GroupState {
  */
 /* these structs are private in nodeAgg.c: */
 typedef struct AggStatePerAggData* AggStatePerAgg;
-typedef struct AggStatePerTransData *AggStatePerTrans;
+typedef struct AggStatePerAggForFlattenedExprData* AggStatePerAggForFlattenedExpr;
+typedef struct AggStatePerTransData* AggStatePerTrans;
 typedef struct AggStatePerGroupData* AggStatePerGroup;
 typedef struct AggStatePerPhaseData* AggStatePerPhase;
 
@@ -2486,6 +2487,16 @@ typedef struct AggState {
     TupleTableSlot *evalslot;	/* slot for agg inputs */
     ProjectionInfo *evalproj;	/* projection machinery */
     TupleDesc	evaldesc;      /* descriptor of input tuples */
+
+    int numtrans;                                    /* number of pertrans items */
+    AggStrategy aggstrategy;                         /* strategy mode */
+    AggStatePerAggForFlattenedExpr peragg_flattened; /* per-Aggref information for flattened expression*/
+    AggStatePerTrans pertrans;                       /* per-Trans state information */
+    MemoryContext curaggcontext;                     /* currently active aggcontext */
+    AggStatePerTrans curpertrans;                    /* currently active trans state */
+    int num_hashes;
+    AggStatePerGroup hash_pergroup; /* grouping set indexed array of* per-group pointers */
+    AggStatePerGroup all_pergroups; /* array of first ->pergroups, than * ->hash_pergroup */
 } AggState;
 
 /* ----------------
