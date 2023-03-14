@@ -22966,6 +22966,41 @@ select_no_parens:
 										yyscanner);
 					$$ = $2;
 				}
+			| with_clause select_clause siblings_clause
+                                {
+                                        SelectStmt* stmt = (SelectStmt *) $2;
+					insertSelectOptions((SelectStmt *) $2, NIL, NIL,
+										NULL, NULL, $1,
+										yyscanner);
+                                        StartWithClause* swc = (StartWithClause*) stmt->startWithClause;
+                                        if (swc == NULL) {
+                                            ereport(errstate,
+                                                    (errcode(ERRCODE_SYNTAX_ERROR),
+                                                     errmsg("order siblings by clause can only be used on start-with qualifed relations"),
+                                                     parser_errposition(@2)));
+                                        } else {
+                                            swc->siblingsOrderBy = $3;
+                                        }
+                                        $$ = $2;
+                                }
+
+			| with_clause select_clause siblings_clause sort_clause
+                                {
+                                        SelectStmt* stmt = (SelectStmt *) $2;
+                                        insertSelectOptions((SelectStmt *) $2, $4, NIL,
+                                        NULL, NULL, $1,
+                                        yyscanner);
+                                        StartWithClause* swc = (StartWithClause*) stmt->startWithClause;
+                                        if (swc == NULL) {
+                                            ereport(errstate,
+                                                    (errcode(ERRCODE_SYNTAX_ERROR),
+                                                     errmsg("order siblings by clause can only be used on start-with qualifed relations"),
+                                                     parser_errposition(@2)));
+                                        } else {
+                                            swc->siblingsOrderBy = $3;
+                                        }
+                                        $$ = $2;
+                                }
 			| with_clause select_clause opt_sort_clause for_locking_clause opt_select_limit opt_into_clause
 				{
 					FilterStartWithUseCases((SelectStmt *) $2, $4, yyscanner, @4);

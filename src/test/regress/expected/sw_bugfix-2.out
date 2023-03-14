@@ -580,6 +580,14 @@ select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1
   1 |    |  1 |                  0
 (3 rows)
 
+with cte1 as (select * from t1) select *, connect_by_iscycle from cte1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls last;
+ c1 | c2 | c3 | connect_by_iscycle 
+----+----+----+--------------------
+  1 |  1 |  1 |                  0
+  1 |  1 |  1 |                  0
+  1 |    |  1 |                  0
+(3 rows)
+
 delete from t1 where c2 is null;
 select *, connect_by_iscycle from t1 start with c1<3 connect by nocycle prior c1<c2 order siblings by NLSSORT (c1, ' NLS_SORT = generic_m_ci ');
  c1 | c2 | c3 | connect_by_iscycle 

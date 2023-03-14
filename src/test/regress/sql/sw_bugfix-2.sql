@@ -228,6 +228,7 @@ select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1
 insert into t1 values(1,NULL,1);
 select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls first;
 select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls last;
+with cte1 as (select * from t1) select *, connect_by_iscycle from cte1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls last;
 delete from t1 where c2 is null;
 
 select *, connect_by_iscycle from t1 start with c1<3 connect by nocycle prior c1<c2 order siblings by NLSSORT (c1, ' NLS_SORT = generic_m_ci ');
