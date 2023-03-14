@@ -3704,10 +3704,10 @@ modify_column_cmds:
 			| modify_column_cmds ',' modify_column_cmd	{ $$ = lappend($$, $3); }
 			;
 modify_column_cmd:
-			ColId Typename opt_charset ColQualList add_column_first_after
+			ColId Typename opt_charset ColQualList opt_column_options add_column_first_after
 				{
-					AlterTableCmd *n = (AlterTableCmd *)$5;
-					if ($4 == NULL && n->is_first == false && n->after_name == NULL && !ENABLE_MODIFY_COLUMN) {
+					AlterTableCmd *n = (AlterTableCmd *)$6;
+					if ($4 == NULL && $5 == NULL && n->is_first == false && n->after_name == NULL && !ENABLE_MODIFY_COLUMN) {
 						ColumnDef *def = makeNode(ColumnDef);
 						n->subtype = AT_AlterColumnType;
 						n->name = $1;
@@ -3740,6 +3740,7 @@ modify_column_cmd:
 						def->colname = $1;
 						def->typname = $2;
 						def->typname->charset = $3;
+						def->columnOptions = $5;
 						def->kvtype = ATT_KV_UNDEFINED;
 						def->inhcount = 0;
 						def->is_local = true;
@@ -3801,31 +3802,6 @@ modify_column_cmd:
 					cons->location = @2;
 					$$ = (Node *)n;
 				}
-			/* modify column comments start */
-			| COLUMN ColId column_options
-				{
-					AlterTableCmd *n = makeNode(AlterTableCmd);
-					ColumnDef *def = makeNode(ColumnDef);
-					def->columnOptions = $3;
-					def->colname = $2;
-					n->subtype = AT_COMMENTS;
-					n->def = (Node *) def;
-					n->name = NULL;
-					$$ = (Node *)n;
-				}
-			;
-			| ColId column_options
-				{
-					AlterTableCmd *n = makeNode(AlterTableCmd);
-					ColumnDef *def = makeNode(ColumnDef);
-					def->columnOptions = $2;
-					def->colname = $1;
-					n->subtype = AT_COMMENTS;
-					n->def = (Node *) def;
-					n->name = NULL;
-					$$ = (Node *)n;
-				}
-			/* modify column comments end */
 			;
 opt_enable:	ENABLE_P		{}
 			| /* empty */	{}
@@ -4730,7 +4706,7 @@ alter_table_cmd:
 				{
 					$$ = $2;
 				}
-			| MODIFY_P COLUMN ColId Typename opt_charset ColQualList add_column_first_after
+			| MODIFY_P COLUMN ColId Typename opt_charset ColQualList opt_column_options add_column_first_after
 				{
 #ifdef ENABLE_MULTIPLE_NODES
 					const char* message = "Un-support feature";
@@ -4751,6 +4727,7 @@ alter_table_cmd:
 					def->colname = $3;
 					def->typname = $4;
 					def->typname->charset = $5;
+					def->columnOptions = $7;
 					def->kvtype = ATT_KV_UNDEFINED;
 					def->inhcount = 0;
 					def->is_local = true;
@@ -4764,13 +4741,13 @@ alter_table_cmd:
 					def->collOid = InvalidOid;
 					def->fdwoptions = NULL;
 					SplitColQualList($6, &def->constraints, &def->collClause, &def->clientLogicColumnRef, yyscanner);
-					AlterTableCmd *n = (AlterTableCmd *)$7;
+					AlterTableCmd *n = (AlterTableCmd *)$8;
 					n->subtype = AT_ModifyColumn;
 					n->name = $3;
 					n->def = (Node *)def;
 					$$ = (Node *)n;
 				}
-			| CHANGE opt_column ColId ColId Typename opt_charset ColQualList add_column_first_after
+			| CHANGE opt_column ColId ColId Typename opt_charset ColQualList opt_column_options add_column_first_after
 				{
 #ifdef ENABLE_MULTIPLE_NODES
 					const char* message = "Un-support feature";
@@ -4791,6 +4768,7 @@ alter_table_cmd:
 					def->colname = $4;
 					def->typname = $5;
 					def->typname->charset = $6;
+					def->columnOptions = $8;
 					def->kvtype = ATT_KV_UNDEFINED;
 					def->inhcount = 0;
 					def->is_local = true;
@@ -4804,7 +4782,7 @@ alter_table_cmd:
 					def->collOid = InvalidOid;
 					def->fdwoptions = NULL;
 					SplitColQualList($7, &def->constraints, &def->collClause, &def->clientLogicColumnRef, yyscanner);
-					AlterTableCmd *n = (AlterTableCmd *)$8;
+					AlterTableCmd *n = (AlterTableCmd *)$9;
 					n->subtype = AT_ModifyColumn;
 					n->name = $3;
 					n->def = (Node *)def;

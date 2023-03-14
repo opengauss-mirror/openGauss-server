@@ -885,6 +885,58 @@ drop user if exists event_se_b cascade;
 drop user if exists event_se_c cascade;
 drop user if exists event_se_d cascade;
 --test sql help
+\h CREATE EVENT
+Command:     CREATE EVENT
+Description: create a new event
+Syntax:
+CREATE
+    [DEFINER = user]
+    EVENT
+    [IF NOT EXISTS]
+    event_name_str
+    ON SCHEDULE schedule_expr
+    [ON COMPLETION [NOT] PRESERVE]
+    [ENABLE | DISABLE | DISABLE ON SLAVE]
+    [COMMENT 'string']
+    DO event_body;
+schedule_expr: {
+    AT timestamp_expr [+ INTERVAL interval_expr] ...
+  | EVERY interval_expr
+    [STARTS timestamp_expr [+ INTERVAL interval_expr] ...]
+    [ENDS timestamp_expr [+ INTERVAL interval_expr] ...]
+interval_expr:
+    quantity {YEAR | MONTH | DAY | HOUR | MINUTE |
+              SECOND | YEAR_MONTH | DAY_HOUR | DAY_MINUTE |
+              DAY TO SECOND | HOUR TO MINUTE | HOUR TO SECOND | MINUTE TO SECOND}
+
+\h ALTER EVENT
+Command:     ALTER EVENT
+Description: change a event
+Syntax:
+ALTER
+    [DEFINER = user]
+    EVENT event_name
+    [ON SCHEDULE schedule]
+    [ON COMPLETION [NOT] PRESERVE]
+    [RENAME TO new_event_name]
+    [ENABLE | DISABLE | DISABLE ON SLAVE]
+    [COMMENT 'string']
+    [DO event_body];
+
+\h DROP EVENT
+Command:     DROP EVENT
+Description: remove a event
+Syntax:
+DROP EVENT [IF EXISTS] event_name;
+
+\h SHOW EVENTS
+Command:     SHOW EVENTS
+Description: show the info of the events
+Syntax:
+SHOW EVENTS
+    [{FROM | IN} schema_name]
+    [LIKE 'pattern' | WHERE expr];
+
 drop table if exists event_a.a;
 NOTICE:  table "a" does not exist, skipping
 drop table if exists event_b.t;

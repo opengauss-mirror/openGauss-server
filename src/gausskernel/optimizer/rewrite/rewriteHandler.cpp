@@ -5178,13 +5178,16 @@ Node* QueryRewriteNonConstant(Node *node)
     return res;
 }
 
-List* QueryRewriteSelectIntoVarList(Node *node)
+List* QueryRewriteSelectIntoVarList(Node *node, int res_len)
 {
     Query *parsetree = (Query *)((SubLink *)node)->subselect;
     List *resList = NIL;
-    int res_len = parsetree->targetList->length;
 
-    StmtResult *result = execute_select_into_varlist(parsetree);
+    StringInfo select_sql = makeStringInfo();
+    deparse_query(parsetree, select_sql, NIL, false, false);
+
+    StmtResult *result = execute_stmt(select_sql->data, true);
+    DestroyStringInfo(select_sql);
 
     if (result->tuples == NULL) {
         for (int i = 0; i < res_len; i++) {
