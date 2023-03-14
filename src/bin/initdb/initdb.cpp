@@ -3787,7 +3787,7 @@ static int CreateRestrictedProcess(char* cmd, PROCESS_INFORMATION* processInfo)
  */
 static void usage(const char* prog_name)
 {
-    printf(_("%s initializes a openGauss database cluster.\n\n"), prog_name);
+    printf(_("%s initializes an openGauss database cluster.\n\n"), prog_name);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... [DATADIR]\n"), prog_name);
     printf(_("\nOptions:\n"));
