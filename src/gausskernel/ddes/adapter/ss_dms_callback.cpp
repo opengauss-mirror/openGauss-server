@@ -1560,6 +1560,24 @@ static int CBXLogWaitFlush(void *db_handle, unsigned long long lsn)
     return GS_SUCCESS;
 }
 
+static int CBDBCheckLock(void *db_handle)
+{
+    if (t_thrd.storage_cxt.num_held_lwlocks > 0) {
+        ereport(PANIC, (errmsg("hold lock, lock address:%p, lock mode:%u",
+            t_thrd.storage_cxt.held_lwlocks[0].lock, t_thrd.storage_cxt.held_lwlocks[0].mode)));
+        return GS_ERROR;
+    }
+    return GS_SUCCESS;
+}
+
+static int CBCacheMsg(void *db_handle, char* msg)
+{
+    errno_t rc = memcpy_s(t_thrd.dms_cxt.msg_backup, sizeof(t_thrd.dms_cxt.msg_backup), msg, 
+                        sizeof(t_thrd.dms_cxt.msg_backup));
+    securec_check(rc, "\0", "\0");
+    return GS_SUCCESS;
+}
+
 void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
 {
     IsUnderPostmaster = true;
@@ -1670,4 +1688,6 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->reform_done_notify = CBReformDoneNotify;
     callback->log_wait_flush = CBXLogWaitFlush;
     callback->drc_validate = CBDrcBufValidate;
+    callback->db_check_lock = CBDBCheckLock;
+    callback->cache_msg = CBCacheMsg;
 }
