@@ -1078,6 +1078,7 @@ typedef struct CreateTrigStmt {
     char* trgordername; /* mysql compatibility trigger order {follows|precedes}*/
     bool is_follows; 
     bool if_not_exists;
+    char* schemaname;  /* mysql compatibility schema of new trigger, or NULL for default */
 } CreateTrigStmt;
 
 
