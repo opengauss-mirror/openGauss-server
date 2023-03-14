@@ -1,4 +1,6 @@
 show sql_compatibility;
+select short_desc from pg_settings where name = 'test_user_host';
+select extra_desc from pg_settings where name = 'test_user_host';
 create user 'test_user_host'@'%' password 'test123@';
 create user 'test_user_host'@'127.%' password 'test123@';
 create user 'test_user_host'@'127.0.0.%' password 'test123@';
