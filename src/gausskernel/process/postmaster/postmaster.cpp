@@ -1884,6 +1884,7 @@ int PostmasterMain(int argc, char* argv[])
      */
     InitializeGUCOptions();
 
+
     /*
      *Initialize Callback function type of cb_for_getlc
      */
@@ -3346,6 +3347,57 @@ static void CheckRecoveryParaConflict()
 	}
 }
 
+#if ((defined(USE_SSL)) && (defined(USE_TASSL)))
+static void CheckSSLConflict()
+{
+    char *sslciphers = NULL;
+    char* token = NULL;
+    bool find_sm_ciphers_in_list = false;
+    int sm_index = 6;
+    char* ptok = NULL;
+    const char* ssl_ciphers_list[] = {
+        "ECDHE-RSA-AES128-GCM-SHA256",
+        "ECDHE-RSA-AES256-GCM-SHA384",
+        "ECDHE-ECDSA-AES128-GCM-SHA256",
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "DHE-RSA-AES128-GCM-SHA256",
+        "DHE-RSA-AES256-GCM-SHA384",
+        "ECDHE-SM4-SM3", //6
+        "ECDHE-SM4-GCM-SM3", //7
+        "ECC-SM4-SM3",//8
+        "ECC-SM4-GCM-SM3"//9
+    };
+    if(!g_instance.attr.attr_security.ssl_use_tlcp || !g_instance.attr.attr_security.EnableSSL
+    || strcasecmp(g_instance.attr.attr_security.SSLCipherSuites, "ALL") == 0) {
+        return;
+    }
+
+    sslciphers = pstrdup(g_instance.attr.attr_security.SSLCipherSuites);
+    if (sslciphers == NULL) {
+        ereport(ERROR, (errmsg("sslciphers can not be null")));
+    } else {
+        token = strtok_r(sslciphers, ";", &ptok);
+        while (token != NULL) {
+            for (int j = sm_index; ssl_ciphers_list[j] != NULL; j++) {
+                if (strlen(ssl_ciphers_list[j]) == strlen(token) &&
+                    strncmp(ssl_ciphers_list[j], token, strlen(token)) == 0) {
+                    find_sm_ciphers_in_list = true;
+                    break;
+                }
+            }
+            if(find_sm_ciphers_in_list)
+                break;
+            token = strtok_r(NULL, ";", &ptok);
+        }
+        if (!find_sm_ciphers_in_list) {
+                pfree(sslciphers);
+                ereport(ERROR, (errmsg("SM cipher suite is not included in ssl_ciphers"),
+                        errhint("Please add sm cipher suite in ssl_ciphers when ssl&ssl_use_tlcp is on")));
+        }
+    }
+}
+#endif 
+
 static void CheckGUCConflictsMaxConnections()
 {
     if (g_instance.attr.attr_network.ReservedBackends >= g_instance.attr.attr_network.MaxConnections) {
@@ -3445,6 +3497,9 @@ static void CheckGUCConflicts(void)
     }
     CheckExtremeRtoGUCConflicts();
     CheckShareStorageConfigConflicts();
+#if ((defined(USE_SSL)) && (defined(USE_TASSL))) 
+    CheckSSLConflict();
+#endif
 }
 
 static bool save_backend_variables_for_callback_thread()

@@ -703,6 +703,7 @@ with_zlib
 with_system_tzdata
 with_libxslt
 with_libxml
+with_tassl
 XML2_CONFIG
 with_ossp_uuid
 with_selinux
@@ -819,6 +820,7 @@ SHELL'
 ac_subst_files=''
 ac_user_opts='
 with_3rdpartydir
+with_tassl
 enable_option_checking
 with_template
 with_includes
@@ -920,6 +922,7 @@ verbose=
 x_includes=NONE
 x_libraries=NONE
 with_3rdpartydir=NONE
+
 # Installation directory options.
 # These are left unexpanded so users can "make install exec_prefix=/foo"
 # and all the variables that are supposed to be based on exec_prefix
@@ -1603,6 +1606,7 @@ Optional Packages:
                           use system time zone data in DIR
   --without-zlib          do not use Zlib
   --with-gnu-ld           assume the C compiler uses GNU ld [default=no]
+  --with-tassl            build with tassl support
 
 Some influential environment variables:
   CC          C compiler command
@@ -6338,6 +6342,7 @@ cat >>confdefs.h <<\_ACEOF
 #define USE_SSL 1
 _ACEOF
 
+
 #
 # SELinux
 #
@@ -6573,7 +6578,35 @@ done
   fi
 fi
 
+#
+# TASSL
+#
 
+# Check whether --with-tassl was given.
+if test "${with_tassl+set}" = set; then
+  withval=$with_tassl;
+  case $withval in
+    yes)
+
+cat >>confdefs.h <<\_ACEOF
+#define USE_TASSL 1
+_ACEOF
+
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --with-tassl option" >&5
+$as_echo "$as_me: error: no argument expected for --with-tassl option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  with_tassl=no
+
+fi
 
 #
 # XSLT

@@ -28,6 +28,7 @@ function print_help()
     -mc|--make_check       this values of paramenter is on or off, the default value is on.
     -s|--symbol_mode       whether separate symbol in debug mode, the default value is on.
     -co|--cmake_opt        more cmake options
+    -T|--tassl             build with tassl
 "
 }
 
@@ -118,6 +119,10 @@ while [ $# -gt 0 ]; do
             fi
             extra_config_opt=$2
             shift 2
+            ;;
+        -T|--tassl)
+            build_with_tassl="YES"
+            shift 1
             ;;
          *)
             echo "Internal Error: option processing error: $1" 1>&2

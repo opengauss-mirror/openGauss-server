@@ -1364,8 +1364,12 @@ static void DeleteSubDataDir(const char* dirname)
                     strcmp(de->d_name, "disc_readonly_test") == 0 || strcmp(de->d_name, ssl_cert_file) == 0 ||
                     strcmp(de->d_name, ssl_key_file) == 0 || strcmp(de->d_name, ssl_ca_file) == 0 ||
                     strcmp(de->d_name, ssl_crl_file) == 0 || strcmp(de->d_name, ssl_cipher_file) == 0 ||
-                    strcmp(de->d_name, ssl_rand_file) == 0 || strcmp(de->d_name, "rewind_lable") == 0 ||
-                    strcmp(de->d_name, "gs_gazelle.conf") == 0 ||
+                    strcmp(de->d_name, ssl_rand_file) == 0 || 
+#ifdef USE_TASSL
+                    strcmp(de->d_name, ssl_enc_cert_file) == 0 || strcmp(de->d_name, ssl_enc_key_file) == 0 ||
+                    strcmp(de->d_name, ssl_enc_cipher_file) == 0 || strcmp(de->d_name, ssl_enc_rand_file) == 0 ||
+#endif 
+                    strcmp(de->d_name, "rewind_lable") == 0 || strcmp(de->d_name, "gs_gazelle.conf") == 0 ||
                     (g_is_obsmode && strcmp(de->d_name, "base.tar.gz") == 0) ||
                     (g_is_obsmode && strcmp(de->d_name, "pg_hba.conf") == 0)||
                     (g_is_obsmode && strcmp(de->d_name, "pg_ident.conf") == 0) ||

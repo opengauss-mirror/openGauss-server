@@ -1388,7 +1388,14 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_key_file) == 0 ||
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_ca_file) == 0 ||
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_crl_file) == 0 ||
-                strcmp(de->d_name, ssl_cipher_file) == 0 || strcmp(de->d_name, ssl_rand_file) == 0) {
+                strcmp(de->d_name, ssl_cipher_file) == 0 || strcmp(de->d_name, ssl_rand_file) == 0 
+ #ifdef USE_TASSL              
+                || strcmp(de->d_name, g_instance.attr.attr_security.ssl_enc_cert_file) == 0 ||
+                strcmp(de->d_name, g_instance.attr.attr_security.ssl_enc_key_file) == 0 ||
+                strcmp(de->d_name, ssl_enc_cipher_file) == 0 || strcmp(de->d_name, ssl_enc_rand_file) == 0
+#endif
+                ) 
+            {
                 continue;
             }
 

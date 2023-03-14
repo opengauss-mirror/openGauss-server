@@ -444,6 +444,8 @@ function install_gaussdb()
     export PREFIX_HOME="${BUILD_DIR}"
     export ENABLE_LITE_MODE=ON
 
+    export WITH_TASSL="${build_with_tassl}"
+
     if [ "$version_mode"x == "release"x ]; then
     	CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_LITE_MODE=ON"
     	export DEBUG_TYPE=release

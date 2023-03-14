@@ -32,10 +32,18 @@
 
 extern char ssl_cert_file[];
 extern char ssl_key_file[];
+
 extern char ssl_ca_file[];
 extern char ssl_crl_file[];
 extern char* ssl_cipher_file;
 extern char* ssl_rand_file;
+#ifdef USE_TASSL
+extern char ssl_enc_cert_file[];
+extern char ssl_enc_key_file[];
+extern char* ssl_enc_cipher_file;
+extern char* ssl_enc_rand_file;
+#endif 
+
 
 extern char pgxcnodename[];
 /* global variables for con */

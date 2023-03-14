@@ -124,6 +124,10 @@ const char *g_reserve_param[] = {
     "ssl_ciphers",
     "ssl_crl_file",
     "ssl_key_file",
+ #ifdef USE_TASSL
+    "ssl_enc_cert_file",
+    "ssl_enc_key_file",
+ #endif
     "ssl_renegotiation_limit",
     "ssl_cert_notify_time",
     "synchronous_standby_names",
