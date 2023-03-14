@@ -1765,13 +1765,6 @@ void KnlLscContextInit(knl_t_lsc_context *lsc_cxt)
         ResourceOwnerCreate(NULL, "InitLocalSysCache", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
 }
 
-static void knl_t_libsw_init(knl_t_libsw_context* libsw_cxt)
-{
-    libsw_cxt->streamConn = NULL;
-    libsw_cxt->commandTag = NULL;
-    libsw_cxt->redirect_manager = New(CurrentMemoryContext) RedirectManager();
- }
-
 void knl_thread_init(knl_thread_role role)
 {
     t_thrd.role = role;
@@ -1908,7 +1901,6 @@ void knl_thread_init(knl_thread_role role)
 #endif
     KnlDcfContextInit(&t_thrd.dcf_cxt);
     knl_t_page_compression_init(&t_thrd.page_compression_cxt);
-    knl_t_libsw_init(&t_thrd.libsw_cxt);
     knl_t_rc_init(&t_thrd.rc_cxt);
 }
 
