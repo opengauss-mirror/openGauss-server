@@ -308,13 +308,8 @@ docker_temp_server_start() {
                 shift
         fi
 
-        # internal start of server in order to allow setup using gsql client
-        # does not listen on external TCP/IP and waits until start finishes
-        set -- "$@" -c "listen_addresses='*'" -p "${PGPORT:-5432}"
-
         PGUSER="${PGUSER:-$GS_USER}" \
         gs_ctl -D "$PGDATA" \
-                -o "$(printf '%q ' "$@")" \
                 -w start
 }
 
