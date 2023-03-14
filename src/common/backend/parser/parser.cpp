@@ -475,7 +475,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             yyextra->lookahead_yylloc[1] = *llocp;
 
             /* 
-             * get the second token after DECLARE. If it is cursor grammer, we are sure that this is a cursr stmt
+             * get the second token after DECLARE. If it is cursor grammar, we are sure that this is a cursr stmt
              * in fact we don't have any lookahead_token here for sure, cause MAX_LOOKAHEAD_NUM is 2.
              * but maybe someday MAX_LOOKAHEAD_NUM increase, so we still use GET_NEXT_TOKEN_WITHOUT_SET_CURYY
              */
@@ -671,14 +671,14 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
 /*
  * @Description: Check whether its a empty query with only comments and semicolon.
  * @Param query_string: the query need check.
- * @retrun:true or false.
+ * @return:true or false.
  */
 static bool is_empty_query(char* query_string)
 {
     char begin_comment[3] = "/*";
     char end_comment[3] = "*/";
     char empty_query[2] = ";";
-    char* end_comment_postion = NULL;
+    char* end_comment_position = NULL;
 
     /* Trim all the spaces at the begin of the string. */
     while (isspace((unsigned char)*query_string)) {
@@ -689,10 +689,10 @@ static bool is_empty_query(char* query_string)
     while (strncmp(query_string, begin_comment, 2) == 0) {
         /*
          * As query_string have been through parser, whenever it contain the begin_comment
-         * it will comtain the end_comment and end_comment_postion can't be null here.
+         * it will contain the end_comment and end_comment_position can't be null here.
          */
-        end_comment_postion = strstr(query_string, end_comment);
-        query_string = end_comment_postion + 2;
+        end_comment_position = strstr(query_string, end_comment);
+        query_string = end_comment_position + 2;
         while (isspace((unsigned char)*query_string)) {
             query_string++;
         }
@@ -707,12 +707,12 @@ static bool is_empty_query(char* query_string)
 }
 
 /*
- * @Description: split the query_string to distinct single querys.
- * @Param [IN] query_string_single: store the splited single querys.
+ * @Description: split the query_string to distinct single queries.
+ * @Param [IN] query_string_single: store the splited single queries.
  * @Param [IN] query_string: initial query string which contain multi statements.
  * @Param [IN] query_string_locationList: record single query terminator-semicolon locations which get from lexer.
  * @Param [IN] stmt_num: show this is the n-ths single query of the multi query.
- * @return [IN/OUT] query_string_single: store the point arrary of single query.
+ * @return [IN/OUT] query_string_single: store the point array of single query.
  * @NOTICE:The caller is responsible for freeing the storage palloced here.
  */
 char** get_next_snippet(
@@ -732,12 +732,12 @@ char** get_next_snippet(
 
     /*
      * Get the snippet of multi_query until we get a non-empty query as the empty query string
-     * needn't be dealed with.
+     * needn't be dealt with.
      */
     for (; *stmt_num < stmt_count;) {
         /*
-         * Notice : The locationlist only store the end postion of each single query but not any
-         * start postion.
+         * Notice : The locationlist only store the end position of each single query but not any
+         * start position.
          */
         if (*stmt_num == 0) {
             query_string_location_start = 0;
