@@ -62,8 +62,8 @@ ADD [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ compr
     | MODIFY column_name data_type
     | MODIFY column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ]
     | MODIFY column_name [ CONSTRAINT constraint_name ] NULL
-    | MODIFY [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
-    | CHANGE [ COLUMN ] column_name new_column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
+    | MODIFY [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [COMMENT 'string'] [FIRST | AFTER column_name]
+    | CHANGE [ COLUMN ] column_name new_column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [COMMENT 'string'] [FIRST | AFTER column_name]
     | DROP [ COLUMN ] [ IF EXISTS ] column_name [ RESTRICT | CASCADE ]
     | ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ USING expression ]
     | ALTER [ COLUMN ] column_name { SET DEFAULT expression | DROP DEFAULT }

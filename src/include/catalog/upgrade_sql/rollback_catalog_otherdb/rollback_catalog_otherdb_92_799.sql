@@ -109,6 +109,7 @@ END$DO$;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_meta_dump_zone(int4, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_meta_dump_spaces(int4, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_meta_dump_slot(int4, boolean) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.gs_undo_translot_dump_slot(int4, int4) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_translot_dump_slot(int4, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_translot_dump_xid(xid, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_dump_record(bigint) CASCADE;

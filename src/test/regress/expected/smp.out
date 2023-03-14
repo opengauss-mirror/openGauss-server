@@ -114,25 +114,23 @@ select t1.a,t2.b from t1, t2 where t1.a = t2.a order by 1,2;
 set enable_nestloop=off;
 set enable_hashjoin=on;
 explain (costs off) select t1.a,t2.b,t3.c from t1, t2, t3 where t1.a = t2.a and t1.b = t3.c order by 1,2,3;
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
  Sort
    Sort Key: t1.a, t2.b, t3.c
    ->  Streaming(type: LOCAL GATHER dop: 1/2)
          ->  Hash Join
                Hash Cond: (t3.c = t1.b)
-               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
-                     ->  Seq Scan on t3
+               ->  Seq Scan on t3
                ->  Hash
-                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     ->  Streaming(type: BROADCAST dop: 2/2)
                            ->  Hash Join
                                  Hash Cond: (t1.a = t2.a)
-                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
-                                       ->  Seq Scan on t1
+                                 ->  Seq Scan on t1
                                  ->  Hash
-                                       ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       ->  Streaming(type: BROADCAST dop: 2/2)
                                              ->  Seq Scan on t2
-(16 rows)
+(14 rows)
 
 select t1.a,t2.b,t3.c from t1, t2, t3 where t1.a = t2.a and t1.b = t3.c order by 1,2,3;
  a  | b  | c  
@@ -709,29 +707,27 @@ select distinct b from t1 union all select distinct a from t2 order by 1;
 (20 rows)
 
 explain (costs off) select * from t1 where t1.a in (select t2.a from t2, t3 where t2.b = t3.c) order by 1,2,3;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
  Sort
    Sort Key: t1.a, t1.b, t1.c
    ->  Streaming(type: LOCAL GATHER dop: 1/2)
          ->  Hash Join
                Hash Cond: (t1.a = t2.a)
-               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
-                     ->  Seq Scan on t1
+               ->  Seq Scan on t1
                ->  Hash
                      ->  HashAggregate
                            Group By Key: t2.a
-                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           ->  Streaming(type: BROADCAST dop: 2/2)
                                  ->  HashAggregate
                                        Group By Key: t2.a
                                        ->  Hash Join
                                              Hash Cond: (t3.c = t2.b)
-                                             ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
-                                                   ->  Seq Scan on t3
+                                             ->  Seq Scan on t3
                                              ->  Hash
-                                                   ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                                   ->  Streaming(type: BROADCAST dop: 2/2)
                                                          ->  Seq Scan on t2
-(20 rows)
+(18 rows)
 
 select * from t1 where t1.a in (select t2.a from t2, t3 where t2.b = t3.c) order by 1,2,3;
  a  | b  | c | d  
@@ -749,25 +745,23 @@ select * from t1 where t1.a in (select t2.a from t2, t3 where t2.b = t3.c) order
 (10 rows)
 
 explain (costs off) with s1 as (select t1.a as a, t3.b as b from t1,t3 where t1.b=t3.c) select * from t2, s1 where t2.b=s1.a order by 1,2,3,4;
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
  Sort
    Sort Key: t2.a, t2.b, t3.b
    ->  Streaming(type: LOCAL GATHER dop: 1/2)
          ->  Hash Join
                Hash Cond: (t3.c = t1.b)
-               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
-                     ->  Seq Scan on t3
+               ->  Seq Scan on t3
                ->  Hash
-                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     ->  Streaming(type: BROADCAST dop: 2/2)
                            ->  Hash Join
                                  Hash Cond: (t1.a = t2.b)
-                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
-                                       ->  Seq Scan on t1
+                                 ->  Seq Scan on t1
                                  ->  Hash
-                                       ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       ->  Streaming(type: BROADCAST dop: 2/2)
                                              ->  Seq Scan on t2
-(16 rows)
+(14 rows)
 
 with s1 as (select t1.a as a, t3.b as b from t1,t3 where t1.b=t3.c) select * from t2, s1 where t2.b=s1.a order by 1,2,3,4;
  a  | b  | a  |  b  

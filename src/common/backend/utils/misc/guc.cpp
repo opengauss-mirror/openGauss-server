@@ -9150,8 +9150,15 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                 ListCell *head = list_head(stmt->defined_args);
                 UserSetElem *elem = (UserSetElem *)lfirst(head);
                 Node *node = (Node *)copyObject(((SelectIntoVarList *)elem->val)->sublink);
-                node = simplify_select_into_expression(node, paramInfo);
-                List *val_list = QueryRewriteSelectIntoVarList(node);
+
+                int real_targetlist_len = 0;
+                node = simplify_select_into_expression(node, paramInfo, &real_targetlist_len);
+                if (real_targetlist_len != list_length(elem->name)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("number of variables must equal the number of columns")));
+                }
+                List *val_list = QueryRewriteSelectIntoVarList(node, real_targetlist_len);
 
                 ListCell *name_cur = NULL;
                 ListCell *val_cur = NULL;

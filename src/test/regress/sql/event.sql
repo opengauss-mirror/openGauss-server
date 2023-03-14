@@ -348,6 +348,10 @@ drop user if exists event_se_c cascade;
 drop user if exists event_se_d cascade;
 
 --test sql help
+\h CREATE EVENT
+\h ALTER EVENT
+\h DROP EVENT
+\h SHOW EVENTS
 
 drop table if exists event_a.a;
 drop table if exists event_b.t;
