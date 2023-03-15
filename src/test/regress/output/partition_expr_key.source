@@ -604,6 +604,161 @@ select * from b_bug_2 partition(p3);
  50 | 30 | 3
 (1 row)
 
+--test some bug fix
+create table subpart_range_add (col1 int, col2 int) partition by range( abs(col2) )
+subpartition by hash( abs(col1) )
+(
+    partition p1 values less than (2000)
+    (
+        SUBPARTITION p1sub1,
+        SUBPARTITION p1sub2
+    ),
+    partition p2 values less than (3000)
+    (
+        SUBPARTITION p2sub1,
+        SUBPARTITION p2sub2
+    )
+);
+select pg_get_tabledef('subpart_range_add');
+                         pg_get_tabledef                         
+-----------------------------------------------------------------
+ SET search_path = public;                                      +
+ CREATE TABLE subpart_range_add (                               +
+     col1 integer,                                              +
+     col2 integer                                               +
+ )                                                              +
+ WITH (orientation=row, compression=no)                         +
+ PARTITION BY RANGE (abs(col2)) SUBPARTITION BY HASH (abs(col1))+
+ (                                                              +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default +
+     (                                                          +
+         SUBPARTITION p1sub1 TABLESPACE pg_default,             +
+         SUBPARTITION p1sub2 TABLESPACE pg_default              +
+     ),                                                         +
+     PARTITION p2 VALUES LESS THAN (3000) TABLESPACE pg_default +
+     (                                                          +
+         SUBPARTITION p2sub1 TABLESPACE pg_default,             +
+         SUBPARTITION p2sub2 TABLESPACE pg_default              +
+     )                                                          +
+ )                                                              +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+alter table subpart_range_add add partition p3 values less than(4000);
+select pg_get_tabledef('subpart_range_add');
+                         pg_get_tabledef                         
+-----------------------------------------------------------------
+ SET search_path = public;                                      +
+ CREATE TABLE subpart_range_add (                               +
+     col1 integer,                                              +
+     col2 integer                                               +
+ )                                                              +
+ WITH (orientation=row, compression=no)                         +
+ PARTITION BY RANGE (abs(col2)) SUBPARTITION BY HASH (abs(col1))+
+ (                                                              +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default +
+     (                                                          +
+         SUBPARTITION p1sub1 TABLESPACE pg_default,             +
+         SUBPARTITION p1sub2 TABLESPACE pg_default              +
+     ),                                                         +
+     PARTITION p2 VALUES LESS THAN (3000) TABLESPACE pg_default +
+     (                                                          +
+         SUBPARTITION p2sub1 TABLESPACE pg_default,             +
+         SUBPARTITION p2sub2 TABLESPACE pg_default              +
+     ),                                                         +
+     PARTITION p3 VALUES LESS THAN (4000) TABLESPACE pg_default +
+     (                                                          +
+         SUBPARTITION p3_subpartdefault1 TABLESPACE pg_default  +
+     )                                                          +
+ )                                                              +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'subpart_range_add'));
+                                                                                                                                        partkeyexpr                                                                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 110}) :location 106 :refSynOid 0}
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 110}) :location 106 :refSynOid 0}
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 110}) :location 106 :refSynOid 0}
+(3 rows)
+
+create table subpart_list_add (col1 int, col2 int) partition by list( abs(col2) )
+subpartition by hash( abs(col1) )
+(
+    partition p1 values(2000)
+    (
+        SUBPARTITION p1sub1,
+        SUBPARTITION p1sub2
+    ),
+    partition p2 values(3000)
+    (
+        SUBPARTITION p2sub1,
+        SUBPARTITION p2sub2
+    )
+);
+select pg_get_tabledef('subpart_list_add');
+                        pg_get_tabledef                         
+----------------------------------------------------------------
+ SET search_path = public;                                     +
+ CREATE TABLE subpart_list_add (                               +
+     col1 integer,                                             +
+     col2 integer                                              +
+ )                                                             +
+ WITH (orientation=row, compression=no)                        +
+ PARTITION BY LIST (abs(col2)) SUBPARTITION BY HASH (abs(col1))+
+ (                                                             +
+     PARTITION p1 VALUES (2000) TABLESPACE pg_default          +
+     (                                                         +
+         SUBPARTITION p1sub1 TABLESPACE pg_default,            +
+         SUBPARTITION p1sub2 TABLESPACE pg_default             +
+     ),                                                        +
+     PARTITION p2 VALUES (3000) TABLESPACE pg_default          +
+     (                                                         +
+         SUBPARTITION p2sub1 TABLESPACE pg_default,            +
+         SUBPARTITION p2sub2 TABLESPACE pg_default             +
+     )                                                         +
+ )                                                             +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+alter table subpart_list_add add partition p3 values(4000);
+select pg_get_tabledef('subpart_list_add');
+                        pg_get_tabledef                         
+----------------------------------------------------------------
+ SET search_path = public;                                     +
+ CREATE TABLE subpart_list_add (                               +
+     col1 integer,                                             +
+     col2 integer                                              +
+ )                                                             +
+ WITH (orientation=row, compression=no)                        +
+ PARTITION BY LIST (abs(col2)) SUBPARTITION BY HASH (abs(col1))+
+ (                                                             +
+     PARTITION p1 VALUES (2000) TABLESPACE pg_default          +
+     (                                                         +
+         SUBPARTITION p1sub1 TABLESPACE pg_default,            +
+         SUBPARTITION p1sub2 TABLESPACE pg_default             +
+     ),                                                        +
+     PARTITION p2 VALUES (3000) TABLESPACE pg_default          +
+     (                                                         +
+         SUBPARTITION p2sub1 TABLESPACE pg_default,            +
+         SUBPARTITION p2sub2 TABLESPACE pg_default             +
+     ),                                                        +
+     PARTITION p3 VALUES (4000) TABLESPACE pg_default          +
+     (                                                         +
+         SUBPARTITION p3_subpartdefault1 TABLESPACE pg_default +
+     )                                                         +
+ )                                                             +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'subpart_list_add'));
+                                                                                                                                        partkeyexpr                                                                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 108}) :location 104 :refSynOid 0}
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 108}) :location 104 :refSynOid 0}
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 108}) :location 104 :refSynOid 0}
+(3 rows)
+
 --test pg_get_tabledef and pg_dump
 create table testnormalsubpart(a int, b int) partition by range(a) subpartition by range(b)
 (
