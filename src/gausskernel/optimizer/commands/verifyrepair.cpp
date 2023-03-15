@@ -1278,7 +1278,11 @@ List* getTableBadFiles(List* badFileItems, Oid relOid, Form_pg_class classForm, 
     
     struct stat statBuf;
     if (stat(openFilePath, &statBuf) < 0) {
-        badFileItems = appendBadFileItems(badFileItems, relOid, classForm->relname.data, openFilePath);
+        /* Skip to appendBadFileItems where pmState in archive recovery mode or hot standby mode */
+        if((pmState != PM_RECOVERY && pmState != PM_HOT_STANDBY)
+            || (classForm->relpersistence != RELPERSISTENCE_UNLOGGED)) {
+            badFileItems = appendBadFileItems(badFileItems, relOid, classForm->relname.data, openFilePath);
+        }
     }
 
     if (classForm->relpersistence == RELPERSISTENCE_UNLOGGED) {
