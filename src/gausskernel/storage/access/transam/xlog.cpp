@@ -9469,7 +9469,6 @@ void StartupXLOG(void)
             SSCSNLOGShmemClear();
             SSCLOGShmemClear();
             SSMultiXactShmemClear();
-            SSClearSegCache();
         } else {
             xlogreader = SSXLogReaderAllocate(&XLogPageRead, &readprivate, ALIGNOF_BUFFER);
         }

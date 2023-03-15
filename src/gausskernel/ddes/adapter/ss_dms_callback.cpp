@@ -1424,6 +1424,8 @@ static int CBFailoverPromote(void *db_handle)
             pg_usleep(REFORM_WAIT_TIME);
             wait_time += REFORM_WAIT_TIME;
         }
+
+        SSClearSegCache();
         SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_STARTUP);
     }
 
