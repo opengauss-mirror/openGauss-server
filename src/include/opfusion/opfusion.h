@@ -46,6 +46,7 @@ extern void ExecCheckXactReadOnly(PlannedStmt* plannedstmt);
 extern bool IsRightRefState(List* plantreeList);
 EState* CreateExecutorStateForOpfusion(MemoryContext saveCxt, MemoryContext tmpCxt);
 void FreeExecutorStateForOpfusion(EState* estate);
+extern void AtEOXact_OpfusionReuse();
 
 /*
  * The variables in OpFusion is always in two parts: global's variables and local's variables.
@@ -161,6 +162,12 @@ public:
             psrc->cplan == NULL && psrc->is_checked_opfusion == false &&
             !IsRightRefState(stmtList));
     }
+
+    virtual bool ResetReuseFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
+    {
+        return false;
+    }
+
 
 public:
     struct ConstLoc {

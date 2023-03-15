@@ -32,35 +32,7 @@
 #include "executor/node/nodeModifyTable.h"
 #include "parser/parse_coerce.h"
 
-void InsertFusion::InitGlobals()
-{
-    m_c_global = (InsertFusionGlobalVariable*)palloc0(sizeof(InsertFusionGlobalVariable));
-
-    m_global->m_reloid = getrelid(linitial_int((List*)linitial(m_global->m_planstmt->resultRelations)),
-                                  m_global->m_planstmt->rtable);
-    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
-    BaseResult* baseresult = (BaseResult*)linitial(node->plans);
-    List* targetList = baseresult->plan.targetlist;
-
-    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
-    m_global->m_table_type = RelationIsUstoreFormat(rel) ? TAM_USTORE : TAM_HEAP;
-    m_global->m_exec_func_ptr = (OpFusionExecfuncType)&InsertFusion::ExecInsert;
-
-    m_global->m_natts = RelationGetDescr(rel)->natts;
-    m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
-    m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
-    m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
-    heap_close(rel, AccessShareLock);
-
-    /* init param func const */
-    m_global->m_paramNum = 0;
-    m_global->m_paramLoc = (ParamLoc*)palloc0(m_global->m_natts * sizeof(ParamLoc));
-    m_c_global->m_targetParamNum = 0;
-    m_c_global->m_targetFuncNum = 0;
-    m_c_global->m_targetFuncNodes = (FuncExprInfo*)palloc0(m_global->m_natts * sizeof(FuncExprInfo));
-    m_c_global->m_targetConstNum = 0;
-    m_c_global->m_targetConstLoc = (ConstLoc*)palloc0(m_global->m_natts * sizeof(ConstLoc));
-
+void InsertFusion::InitBaseParam(List* targetList) {
     ListCell* lc = NULL;
     int i = 0;
     FuncExpr* func = NULL;
@@ -104,6 +76,38 @@ void InsertFusion::InitGlobals()
         i++;
     }
     m_c_global->m_targetConstNum = i;
+}
+
+void InsertFusion::InitGlobals()
+{
+    m_c_global = (InsertFusionGlobalVariable*)palloc0(sizeof(InsertFusionGlobalVariable));
+
+    m_global->m_reloid = getrelid(linitial_int((List*)linitial(m_global->m_planstmt->resultRelations)),
+                                  m_global->m_planstmt->rtable);
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
+    BaseResult* baseresult = (BaseResult*)linitial(node->plans);
+    List* targetList = baseresult->plan.targetlist;
+
+    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
+    m_global->m_table_type = RelationIsUstoreFormat(rel) ? TAM_USTORE : TAM_HEAP;
+    m_global->m_exec_func_ptr = (OpFusionExecfuncType)&InsertFusion::ExecInsert;
+
+    m_global->m_natts = RelationGetDescr(rel)->natts;
+    m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
+    m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
+    m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
+    heap_close(rel, AccessShareLock);
+
+    /* init param func const */
+    m_global->m_paramNum = 0;
+    m_global->m_paramLoc = (ParamLoc*)palloc0(m_global->m_natts * sizeof(ParamLoc));
+    m_c_global->m_targetParamNum = 0;
+    m_c_global->m_targetFuncNum = 0;
+    m_c_global->m_targetFuncNodes = (FuncExprInfo*)palloc0(m_global->m_natts * sizeof(FuncExprInfo));
+    m_c_global->m_targetConstNum = 0;
+    m_c_global->m_targetConstLoc = (ConstLoc*)palloc0(m_global->m_natts * sizeof(ConstLoc));
+
+    InitBaseParam(targetList);
 
 }
 void InsertFusion::InitLocals(ParamListInfo params)
@@ -476,4 +480,34 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     u_sess->statement_cxt.current_row_count = nprocessed;
     u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
     return success;
+}
+
+/*
+ * reset InsertFusion for reuse：
+ * such as
+ * insert into t values (1, 'a');
+ * insert into t values (2, 'b');
+ * only need to replace the planstmt
+ */ 
+bool InsertFusion::ResetReuseFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
+{
+    PlannedStmt *curr_plan = (PlannedStmt *)linitial(plantree_list);
+    m_global->m_planstmt = curr_plan;
+
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
+    BaseResult* baseresult = (BaseResult*)linitial(node->plans);
+    List* targetList = baseresult->plan.targetlist;
+
+    m_c_global->m_targetFuncNum = 0;
+    m_c_global->m_targetParamNum = 0;
+
+    InitBaseParam(targetList);
+
+    // local
+    m_c_local.m_estate->es_range_table = NIL;
+    m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
+    m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
+    initParams(params);
+
+    return true;
 }
