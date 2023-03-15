@@ -154,12 +154,18 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
         values[Anum_pg_partition_relminmxid - 1] = InvalidMultiXactId;
 #endif
     }
-    if (partTupleInfo->partkeyexprIsNull) {
+    if (partTupleInfo->partexprkeyinfo.partkeyexprIsNull) {
         nulls[Anum_pg_partition_partkeyexpr - 1] = true;
-    } else if (partTupleInfo->partkeyIsFunc) {
-        values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("partkeyisfunc");
+    } else if (partTupleInfo->partexprkeyinfo.partkeyIsFunc) {
+        if (partTupleInfo->partexprkeyinfo.partExprKeyStr)
+            values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum(partTupleInfo->partexprkeyinfo.partExprKeyStr);
+        else
+            values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("partkeyisfunc");
     } else {
-        values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("");
+        if (partTupleInfo->partexprkeyinfo.partExprKeyStr)
+            values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum(partTupleInfo->partexprkeyinfo.partExprKeyStr);
+        else
+            values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("");
     }
 
     if (partTupleInfo->partitionno != INVALID_PARTITION_NO) {
