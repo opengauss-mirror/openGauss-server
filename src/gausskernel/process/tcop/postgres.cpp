@@ -7559,8 +7559,6 @@ void RemoveTempNamespace()
 #define INITIAL_USER_ID 10
 void LoadSqlPlugin()
 {
-    if (strcmp(u_sess->attr.attr_common.application_name, "gs_clean") == 0)
-        return;
     if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && IsFileExisted(DOLPHIN)) {
         if (!u_sess->attr.attr_sql.dolphin && !u_sess->attr.attr_common.IsInplaceUpgrade) {
             Oid userId = GetUserId();
