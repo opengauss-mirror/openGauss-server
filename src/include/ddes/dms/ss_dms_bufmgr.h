@@ -70,7 +70,7 @@ void MarkReadPblk(int buf_id, const XLogPhyBlock *pblk);
 void SSCheckBufferIfNeedMarkDirty(Buffer buf);
 void SSRecheckBufferPool();
 void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag);
-void CheckPageNeedSkipInRecovery(Buffer buf);
+bool CheckPageNeedSkipInRecovery(Buffer buf);
 void SmgrNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk);
 void SegNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, SegSpace *spc);
 dms_session_e DMSGetProcType4RequestPage();
