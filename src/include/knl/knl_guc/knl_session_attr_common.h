@@ -240,7 +240,6 @@ typedef struct knl_session_attr_common {
     int threadpool_reset_percent_list[2];
     bool enable_indexscan_optimization;
     char* delimiter_name;
-    bool light_comm;
     bool test_user_host;
 } knl_session_attr_common;
 
