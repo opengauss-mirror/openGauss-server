@@ -192,10 +192,11 @@ void FreeBackendStatusNodeMemory(PgBackendStatusNode* node)
 
 bool gs_stat_encap_status_info(PgBackendStatus* localentry, PgBackendStatus* beentry)
 {
-    char* appnameStr = (char*)palloc(NAMEDATALEN);
-    char* clienthostnameStr = (char*)palloc(NAMEDATALEN);
-    char* conninfoStr = (char*)palloc(CONNECTIONINFO_LEN);
-    char* activityStr = (char*)palloc((Size)(g_instance.attr.attr_common.pgstat_track_activity_query_size));
+#define NVL(a,b) (((a) == NULL)?(b):(a))
+    char* appnameStr = NVL(localentry->st_appname, (char*)palloc(NAMEDATALEN));
+    char* clienthostnameStr = NVL(localentry->st_clienthostname, (char*)palloc(NAMEDATALEN));
+    char* conninfoStr = NVL(localentry->st_conninfo, (char*)palloc(CONNECTIONINFO_LEN));
+    char* activityStr = NVL(localentry->st_activity, (char*)palloc((Size)(g_instance.attr.attr_common.pgstat_track_activity_query_size)));
     errno_t rc = EOK;
 
     for (;;) {
@@ -241,18 +242,14 @@ bool gs_stat_encap_status_info(PgBackendStatus* localentry, PgBackendStatus* bee
         CHECK_FOR_INTERRUPTS();
     }
 
-    /* Only valid entries get included into the local array */
+    localentry->st_appname = appnameStr;
+    localentry->st_clienthostname = clienthostnameStr;
+    localentry->st_conninfo = conninfoStr;
+    localentry->st_activity = activityStr;
+
     if (localentry->st_procpid > 0 || localentry->st_sessionid > 0) {
-        localentry->st_appname = appnameStr;
-        localentry->st_clienthostname = clienthostnameStr;
-        localentry->st_conninfo = conninfoStr;
-        localentry->st_activity = activityStr;
         return true;
     } else {
-        pfree(appnameStr);
-        pfree(clienthostnameStr);
-        pfree(conninfoStr);
-        pfree(activityStr);
         return false;
     }
 }
@@ -269,6 +266,7 @@ PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls)
     PgBackendStatus* beentry = NULL;
     PgBackendStatusNode* localtable = NULL;
     MemoryContext memcontext, oldContext;
+    PgBackendStatus* localentry = NULL;
 
     pgstat_setup_memcxt();
     memcontext = (u_sess->stat_cxt.pgStatRunningInCollector) ? u_sess->stat_cxt.pgStatCollectThdStatusContext
@@ -298,7 +296,9 @@ PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls)
          * the source backend is between increment steps.)	We use a volatile
          * pointer here to ensure the compiler doesn't try to get cute.
          */
-        PgBackendStatus* localentry = (PgBackendStatus*)palloc(sizeof(PgBackendStatus));
+        if (localentry == NULL) {
+            localentry = (PgBackendStatus*)palloc0(sizeof(PgBackendStatus));
+        }
         if (gs_stat_encap_status_info(localentry, beentry)) {
             PgBackendStatusNode* entry_node = (PgBackendStatusNode*)palloc(sizeof(PgBackendStatusNode));
             entry_node->data = localentry;
@@ -308,12 +308,18 @@ PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls)
             if (maxCalls != NULL) {
                 (*maxCalls)++;
             }
-        } else {
-            pfree(localentry);
+            localentry = NULL;
         }
         beentry--;
     }
-
+    if (localentry != NULL) {
+        pfree_ext(localentry->st_appname);
+        pfree_ext(localentry->st_clienthostname);
+        pfree_ext(localentry->st_conninfo);
+        pfree_ext(localentry->st_activity);
+        pfree_ext(localentry);
+        localentry = NULL;
+    }
     (void)MemoryContextSwitchTo(oldContext);
     return localtable->next;
 }
@@ -324,7 +330,7 @@ uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc,
 {
     PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + BackendStatusArray_size - 1;
 
-    PgBackendStatus *localentry = (PgBackendStatus *) palloc(sizeof(PgBackendStatus));
+    PgBackendStatus *localentry = (PgBackendStatus *) palloc0(sizeof(PgBackendStatus));
 
     uint32 maxCalls = 0;
     /*
@@ -350,10 +356,6 @@ uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc,
                 maxCalls++;
                 flag = true;
             }
-            pfree(localentry->st_appname);
-            pfree(localentry->st_clienthostname);
-            pfree(localentry->st_conninfo);
-            pfree(localentry->st_activity);
             // Find only items with the same thread ID.
             if (hasTID && flag) {
                 break;
@@ -361,7 +363,12 @@ uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc,
         }
         beentry--;
     }
-    pfree(localentry);
+
+    pfree_ext(localentry->st_appname);
+    pfree_ext(localentry->st_clienthostname);
+    pfree_ext(localentry->st_conninfo);
+    pfree_ext(localentry->st_activity);
+    pfree_ext(localentry);
     return maxCalls;
 }
 
