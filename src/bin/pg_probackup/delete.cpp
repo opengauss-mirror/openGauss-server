@@ -322,6 +322,18 @@ void get_keep_list(parray *backup_list, parray *to_keep_list, parray *to_purge_l
         }
     }
 }
+/*
+ * Get local timezone
+ */
+static int getZone() {
+    time_t time_utc = 0;
+    struct tm *p_tm_time;
+    int time_zone = 0;
+
+    p_tm_time = localtime(&time_utc);
+    time_zone = (p_tm_time->tm_hour > 12) ? (p_tm_time->tm_hour -= 24) : p_tm_time->tm_hour;
+    return time_zone;
+}
 
 /* Evaluate every backup by retention policies and populate purge and keep lists.
  * Also for every backup print its status ('Active' or 'Expired') according
@@ -374,8 +386,8 @@ do_retention_internal(parray *backup_list, parray *to_keep_list, parray *to_purg
 
     if (instance_config.retention_window > 0)
     {
-        days_threshold = current_time -
-        (instance_config.retention_window * 60 * 60 * 24);
+        days_threshold = current_time - (current_time % (24 * 60 * 60)) - (getZone() * 60 * 60) -
+                ((instance_config.retention_window - 1) * 60 * 60 * 24);
     }
 
     elog(INFO, "Evaluate backups by retention");
@@ -415,7 +427,8 @@ do_retention_internal(parray *backup_list, parray *to_keep_list, parray *to_purg
         if (backup->recovery_time == 0)
             actual_window = 0;
         else
-            actual_window = (current_time - backup->recovery_time)/(3600 * 24);
+            actual_window = (current_time - (current_time % (24 * 60 * 60)) - (getZone() * 60 * 60) + (24 * 60 * 60)
+                    - backup->recovery_time)/(3600 * 24);
 
         /* For pinned backups show expire date */
         if (backup->expire_time > 0 && backup->expire_time > backup->recovery_time)
