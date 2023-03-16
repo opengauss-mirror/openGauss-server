@@ -329,6 +329,19 @@ select pg_get_tabledef('testrangesubpart');
 select pg_get_tabledef('testlistsubpart');
 select pg_get_tabledef('testhashsubpart');
 select pg_get_tabledef('testnormalsubpart');
+\d testrangepart;
+\d testlistpart;
+\d testhashpart;
+\d testrangesubpart;
+\d testlistsubpart;
+\d testhashsubpart;
+\d testnormalsubpart;
+create table "testrangesubPART"(a int, b int) partition by range(a-b) subpartition by range(a+b)
+(
+    partition p0 values less than(1000)(subpartition p00 values less than(100)),
+    partition p1 values less than(2000)(subpartition p10 values less than(200))
+);
+\d "testrangesubPART"
 create database part_expr_key_db1 dbcompatibility 'B';
 \c part_expr_key_db1;
 create table t1(c1 int not null, c2 int)

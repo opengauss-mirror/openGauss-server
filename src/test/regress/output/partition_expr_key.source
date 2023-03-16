@@ -1109,6 +1109,88 @@ select pg_get_tabledef('testnormalsubpart');
  ENABLE ROW MOVEMENT;
 (1 row)
 
+\d testrangepart;
+ Table "public.testrangepart"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+Partition By RANGE(abs((a * 2)))
+Number of partitions: 2 (View pg_partition to check each partition range.)
+
+\d testlistpart;
+ Table "public.testlistpart"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+Partition By LIST(abs((a * 2)))
+Number of partitions: 2 (View pg_partition to check each partition range.)
+
+\d testhashpart;
+ Table "public.testhashpart"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+Partition By HASH(abs((a * 2)))
+Number of partitions: 2 (View pg_partition to check each partition range.)
+
+\d testrangesubpart;
+Table "public.testrangesubpart"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+Partition By RANGE((a + b)) Subpartition By RANGE((a - b))
+Number of partitions: 2 (View pg_partition to check each partition range.)
+Number of subpartitions: 2 (View pg_partition to check each subpartition range.)
+
+\d testlistsubpart;
+Table "public.testlistsubpart"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+Partition By RANGE(abs((a * 2))) Subpartition By LIST(abs((b * 2)))
+Number of partitions: 2 (View pg_partition to check each partition range.)
+Number of subpartitions: 2 (View pg_partition to check each subpartition range.)
+
+\d testhashsubpart;
+Table "public.testhashsubpart"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+Partition By RANGE(a) Subpartition By HASH(abs((b * 2)))
+Number of partitions: 2 (View pg_partition to check each partition range.)
+Number of subpartitions: 4 (View pg_partition to check each subpartition range.)
+
+\d testnormalsubpart;
+Table "public.testnormalsubpart"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+Partition By RANGE(a) Subpartition By RANGE(b)
+Number of partitions: 2 (View pg_partition to check each partition range.)
+Number of subpartitions: 2 (View pg_partition to check each subpartition range.)
+
+create table "testrangesubPART"(a int, b int) partition by range(a-b) subpartition by range(a+b)
+(
+    partition p0 values less than(1000)(subpartition p00 values less than(100)),
+    partition p1 values less than(2000)(subpartition p10 values less than(200))
+);
+\d "testrangesubPART"
+Table "public.testrangesubPART"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+Partition By RANGE((a - b)) Subpartition By RANGE((a + b))
+Number of partitions: 2 (View pg_partition to check each partition range.)
+Number of subpartitions: 2 (View pg_partition to check each subpartition range.)
+
 create database part_expr_key_db1 dbcompatibility 'B';
 \c part_expr_key_db1;
 create table t1(c1 int not null, c2 int)
