@@ -278,3 +278,34 @@ select 'xyz' ~ '((.)){0}(\2){0}' as t;
  t
 (1 row)
 
+-- test similar with regex
+SELECT 'abc' SIMILAR TO '我%(b|d)%' escape '我' AS RESULT;
+ result 
+--------
+ f
+(1 row)
+
+SELECT '%abc' SIMILAR TO '我%abc' escape '我' AS RESULT;
+ result 
+--------
+ t
+(1 row)
+
+SELECT 'abc' SIMILAR TO '你%(b|d)%' escape '你' AS RESULT;
+ result 
+--------
+ f
+(1 row)
+
+SELECT '%abc' SIMILAR TO '你%abc' escape '你' AS RESULT;
+ result 
+--------
+ t
+(1 row)
+
+SELECT '%abc' SIMILAR TO '\%abc' escape '\' AS RESULT;
+ result 
+--------
+ t
+(1 row)
+
