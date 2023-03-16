@@ -70,3 +70,10 @@ select 'a' ~ '()+\1';
 
 -- test {0}
 select 'xyz' ~ '((.)){0}(\2){0}' as t;
+
+-- test similar with regex
+SELECT 'abc' SIMILAR TO '我%(b|d)%' escape '我' AS RESULT;
+SELECT '%abc' SIMILAR TO '我%abc' escape '我' AS RESULT;
+SELECT 'abc' SIMILAR TO '你%(b|d)%' escape '你' AS RESULT;
+SELECT '%abc' SIMILAR TO '你%abc' escape '你' AS RESULT;
+SELECT '%abc' SIMILAR TO '\%abc' escape '\' AS RESULT;
