@@ -1336,18 +1336,18 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
                 address.classId = TriggerRelationId;
                 address.objectId = get_trigger_oid(reloid, depname, missing_ok);
                 address.objectSubId = 0;
-                break;
-            case OBJECT_TABCONSTRAINT:
-                address.classId = ConstraintRelationId;
-                address.objectId = get_relation_constraint_oid(reloid, depname, missing_ok);
-                address.objectSubId = 0;
                 /* TODO: comments*/
-                if (schemaname != NULL) {
+                if (OidIsValid(address.objectId) && schemaname != NULL) {
                     Oid relNamespaceId = RelationGetNamespace(relation);
                     if (relNamespaceId != get_namespace_oid(schemaname, false)) {
                         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
                     }
                 }
+                break;
+            case OBJECT_TABCONSTRAINT:
+                address.classId = ConstraintRelationId;
+                address.objectId = get_relation_constraint_oid(reloid, depname, missing_ok);
+                address.objectSubId = 0;
                 break;
             case OBJECT_RLSPOLICY:
                 address.classId = RlsPolicyRelationId;
