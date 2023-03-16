@@ -888,8 +888,6 @@ static bool DropTempNamespace()
                 NULL, NULL, curDatabase->databaseName, PGXC_CLEAN, "auto");
 
             if (conn == NULL) {
-                PQfinish(conn);
-                conn = NULL;
                 ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                                (errmsg("Could not connect to the database %s.",
                                        curDatabase->databaseName))));
