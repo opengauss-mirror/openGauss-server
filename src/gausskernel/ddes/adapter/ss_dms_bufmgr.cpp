@@ -232,10 +232,11 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
         }
 
         if (rdStatus == SMGR_RD_CRC_ERROR) {
-            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] read from disk error, maybe buffer in flush",
+            ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] read from disk error, maybe buffer in flush",
                 buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
                 (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
                 buf_desc->tag.blockNum)));
+            return;
         }
         XLogRecPtr lsn_on_disk = PageGetLSN(temp_buf);
         XLogRecPtr lsn_on_mem = PageGetLSN(BufHdrGetBlock(buf_desc));
@@ -820,12 +821,12 @@ bool SSTrySegFlushBuffer(BufferDesc* buf)
 */ 
 bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
 {
-    if (!ENABLE_DMS) {
+    if (!ENABLE_DMS || IsInitdb) {
         return true;
     }
 
-    if (IsInitdb) {
-        return true;
+    if (ENABLE_DSS_AIO && buf_desc->extra->aio_in_progress) {
+        return false;
     }
 
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
