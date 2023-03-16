@@ -2238,6 +2238,10 @@ void PostgresInitializer::InitStreamSession()
     InitExtensionVariable();
 
     FinishInit();
+
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    LoadSqlPlugin();
+#endif
 }
 
 void PostgresInitializer::InitSysCache()
