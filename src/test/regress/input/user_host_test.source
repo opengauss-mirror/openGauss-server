@@ -37,6 +37,7 @@ create table test1(a int);
 alter table test1 owner to 'test_user_host'@'%';
 GRANT ALL PRIVILEGES TO 'test_user_host'@'%';
 REVOKE ALL PRIVILEGES FROM 'test_user_host'@'%';
+ALTER USER 'test_user_host'@'%' password 'test@123';
 ALTER USER 'test_user_host'@'%' RENAME TO 'test_user_host'@'1%';
 CREATE  DEFINER='test_user_host'@'127.0.%' FUNCTION test_func(integer, integer) RETURNS integer SECURITY INVOKER
 AS 'select $1 + $2;'
