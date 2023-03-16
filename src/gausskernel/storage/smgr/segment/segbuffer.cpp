@@ -482,9 +482,10 @@ void ReadSegBufferForCheck(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
 
     seg_physical_read(spc, bufHdr->tag.rnode, bufHdr->tag.forkNum, bufHdr->tag.blockNum, (char *)bufBlock);
     if (!PageIsVerified((char *)bufBlock, bufHdr->tag.blockNum)) {
-        ereport(PANIC, (errmsg("[%d/%d/%d/%d %d-%d] verified failed",
+        ereport(WARNING, (errmsg("[%d/%d/%d/%d %d-%d] verified failed",
             bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode, bufHdr->tag.rnode.relNode,
             bufHdr->tag.rnode.bucketNode, bufHdr->tag.forkNum, bufHdr->tag.blockNum)));
+        return;
     }
 
     if (!PageIsSegmentVersion(bufBlock) && !PageIsNew(bufBlock)) {
