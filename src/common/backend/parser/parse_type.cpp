@@ -657,7 +657,7 @@ Oid LookupCollation(ParseState* pstate, List* collnames, int location)
 static Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation,
     bool is_bin_type, Oid rel_coll_oid)
 {
-    if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid)) {
+    if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid) && !type_is_enum(typeOid)) {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("type %s not support set charset", format_type_be(typeOid))));
     }
@@ -1590,4 +1590,9 @@ Oid LookupTypeInPackage(List* typeNames, const char* typeName, Oid pkgOid, Oid n
     return typOid;
 
 
+}
+
+bool IsBinaryType(Oid typid)
+{
+    return (typid == BLOBOID) ? true : false;
 }

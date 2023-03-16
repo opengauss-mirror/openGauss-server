@@ -56,6 +56,15 @@ select pg_catalog.Insert_pg_collation_temp('utf8mb4_unicode_ci', 11, 10, 7, 'utf
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 1539;
 select pg_catalog.Insert_pg_collation_temp('utf8mb4_bin', 11, 10, 7, 'utf8mb4_bin', 'utf8mb4_bin', 'PAD SPACE', null);
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 1551;
+select pg_catalog.Insert_pg_collation_temp('utf8_general_ci', 11, 10, 7, 'utf8_general_ci', 'utf8_general_ci', 'PAD SPACE', null);
+ 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 1552;
+select pg_catalog.Insert_pg_collation_temp('utf8_unicode_ci', 11, 10, 7, 'utf8_unicode_ci', 'utf8_unicode_ci', 'PAD SPACE', null);
+ 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 1553;
+select pg_catalog.Insert_pg_collation_temp('utf8_bin', 11, 10, 7, 'utf8_bin', 'utf8_bin', 'PAD SPACE', null);
+
 DROP FUNCTION pg_catalog.Insert_pg_collation_temp;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 3147;
