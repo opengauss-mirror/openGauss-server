@@ -668,23 +668,24 @@ void SSRecheckBufferPool()
     }
 }
 
-void CheckPageNeedSkipInRecovery(Buffer buf)
+bool CheckPageNeedSkipInRecovery(Buffer buf)
 {
+    bool skip = false;
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf - 1);
     if (buf_ctrl->lock_mode == DMS_LOCK_EXCLUSIVE || !(buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
-        return;
+        return skip;
     }
 
     BufferDesc* buf_desc = GetBufferDescriptor(buf - 1);
     char pageid[DMS_PAGEID_SIZE];
     errno_t err = memcpy_s(pageid, DMS_PAGEID_SIZE, &(buf_desc->tag), sizeof(BufferTag));
     securec_check(err, "\0", "\0");
-    bool skip = false;
     int ret = dms_recovery_page_need_skip(pageid, (unsigned char *)&skip);
     if (ret != DMS_SUCCESS) {
         ereport(PANIC, (errmsg("DMS Internal error happened during recovery, errno %d", ret)));
     }
-    Assert(!skip);
+
+    return skip;
 }
 
 dms_session_e DMSGetProcType4RequestPage()
@@ -870,12 +871,15 @@ void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo)
     }
 
     /* For buffer need flush, we need to mark dirty here */
-    dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(bufferinfo->buf - 1);
-    if (buf_ctrl->state & (BUF_DIRTY_NEED_FLUSH | BUF_ERTO_NEED_MARK_DIRTY)) {
-        if (!IsRedoBufferDirty(bufferinfo)) {
+    if (!IsRedoBufferDirty(bufferinfo)) {
+        dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(bufferinfo->buf - 1);
+        BufferDesc *bufDesc = GetBufferDescriptor(bufferinfo->buf - 1);
+        if (buf_ctrl->state & BUF_ERTO_NEED_MARK_DIRTY) {
+            MakeRedoBufferDirty(bufferinfo);
+        } else if ((buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) || CheckPageNeedSkipInRecovery(bufferinfo->buf) ||
+                XLogRecPtrIsInvalid(bufDesc->extra->lsn_on_disk)) {
+            buf_ctrl->state |= BUF_ERTO_NEED_MARK_DIRTY;
             MakeRedoBufferDirty(bufferinfo);
         }
-    } else {
-        buf_ctrl->state |= BUF_ERTO_NEED_MARK_DIRTY;
     }
 }
