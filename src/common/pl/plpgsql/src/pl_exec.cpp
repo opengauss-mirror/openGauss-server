@@ -1244,7 +1244,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
     char *argmodes = NULL;
     HeapTuple procTup = NULL;
     Datum proArgModes = 0;
-    if (func->fn_nargs != fcinfo->nargs && !enable_out_param_override()) {
+    if (func->fn_nargs != fcinfo->nargs && !enable_out_param_override() && !estate.is_flt_frame) {
         ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
                 errmodule(MOD_PLSQL),
@@ -5692,6 +5692,8 @@ void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, Ret
     estate->stack_entry_start = u_sess->plsql_cxt.nextStackEntryId + 1;
     estate->curr_nested_table_type = InvalidOid;
     estate->is_exception = false;
+
+    estate->is_flt_frame = (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
 
     /*
      * Create an EState and ExprContext for evaluation of simple expressions.

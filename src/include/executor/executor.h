@@ -306,6 +306,7 @@ extern ExprState* ExecInitExpr(Expr* node, PlanState* parent);
 extern ExprState *ExecInitQual(List *qual, PlanState *parent);
 extern ExprState *ExecInitCheck(List *qual, PlanState *parent);
 extern List *ExecInitExprList(List *nodes, PlanState *parent);
+extern ExprState* ExecBuildAggTrans(AggState* aggstate, struct AggStatePerPhaseData *phase, bool doSort, bool doHash);
 extern ProjectionInfo* ExecBuildProjectionInfo(List *targetList,
     ExprContext *econtext, TupleTableSlot *slot, PlanState *parent, TupleDesc inputDesc);
 extern ExprState* ExecPrepareExpr(Expr* node, EState* estate);

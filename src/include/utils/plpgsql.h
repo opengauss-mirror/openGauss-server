@@ -1084,6 +1084,7 @@ typedef struct PLpgSQL_execstate { /* Runtime execution data	*/
 
     Datum retval;
     bool retisnull;
+    bool is_flt_frame; /* Indicates whether it is a flattened expr frame */
     Oid rettype; /* type of current retval */
     Datum paramval;
     bool paramisnull;
