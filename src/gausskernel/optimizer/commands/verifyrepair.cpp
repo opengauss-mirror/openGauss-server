@@ -1280,7 +1280,7 @@ List* getTableBadFiles(List* badFileItems, Oid relOid, Form_pg_class classForm, 
     if (stat(openFilePath, &statBuf) < 0) {
         /* Skip to appendBadFileItems where pmState in archive recovery mode or hot standby mode */
         if((pmState != PM_RECOVERY && pmState != PM_HOT_STANDBY)
-            || (classForm->relpersistence != RELPERSISTENCE_UNLOGGED)) {
+            || (classForm->relpersistence != RELPERSISTENCE_UNLOGGED) || IS_SHARED_STORAGE_MODE) {
             badFileItems = appendBadFileItems(badFileItems, relOid, classForm->relname.data, openFilePath);
         }
     }
