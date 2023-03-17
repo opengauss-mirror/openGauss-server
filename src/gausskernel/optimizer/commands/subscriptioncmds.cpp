@@ -1370,51 +1370,6 @@ void AlterSubscriptionOwner_oid(Oid subid, Oid newOwnerId)
 }
 
 /*
- * Internal workhorse for rename a Subscription
- */
-static void RenameSubscriptionInternal(Relation rel, HeapTuple tup, const char *newname)
-{
-    Form_pg_subscription form = (Form_pg_subscription)GETSTRUCT(tup);
-
-    if (!pg_subscription_ownercheck(HeapTupleGetOid(tup), GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_SUBSCRIPTION, NameStr(form->subname));
-
-    namestrcpy(&(form->subname), newname);
-    simple_heap_update(rel, &tup->t_self, tup);
-    CatalogUpdateIndexes(rel, tup);
-}
-
-/*
- * Rename Subscription
- */
-void RenameSubscription(List *oldname, const char *newname)
-{
-    HeapTuple tup;
-    HeapTuple newtup;
-    Relation rel;
-    const char *subname = strVal(linitial(oldname));
-
-    rel = heap_open(SubscriptionRelationId, RowExclusiveLock);
-
-    tup = SearchSysCacheCopy2(SUBSCRIPTIONNAME, u_sess->proc_cxt.MyDatabaseId, CStringGetDatum(subname));
-    if (!HeapTupleIsValid(tup)) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Subscription \"%s\" does not exist", subname)));
-    }
-
-    newtup = SearchSysCacheCopy2(SUBSCRIPTIONNAME, u_sess->proc_cxt.MyDatabaseId, CStringGetDatum(newname));
-    if (HeapTupleIsValid(newtup)) {
-        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("Subscription \"%s\" has already exists", newname)));
-    }
-
-    RenameSubscriptionInternal(rel, tup, newname);
-
-    heap_freetuple(tup);
-    heap_close(rel, RowExclusiveLock);
-
-    return;
-}
-
-/*
  * Parse the host or port string into a string array,
  * where host and port are separated by ",".
  * input: conn --- host or port string separated by ","
