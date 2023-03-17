@@ -232,7 +232,10 @@ static int DecodeTextArrayToCString(Datum array, char ***cstringp)
  */
 static void InvalidateEventCacheCallback(Datum arg, int cacheid, uint32 hashvalue)
 {
-    MemoryContextReset(u_sess->exec_cxt.EventTriggerCacheContext);
-    u_sess->exec_cxt.EventTriggerCache = NULL;
+    /*Avoid repeated cache release,especially while rebuilding evtcache*/
+    if (u_sess->exec_cxt.EventTriggerCache != NULL) {
+        MemoryContextReset(u_sess->exec_cxt.EventTriggerCacheContext);
+        u_sess->exec_cxt.EventTriggerCache = NULL;
+    }
 }
 
