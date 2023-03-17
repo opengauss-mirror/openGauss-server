@@ -2993,89 +2993,75 @@ ExprState *ExecBuildAggTrans(AggState *aggstate, AggStatePerPhase phase, bool do
     return state;
 }
 
-/*
- * Build transition/combine function invocation for a single transition
- * value. This is separated from ExecBuildAggTrans() because there are
- * multiple callsites (hash and sort in some grouping set cases).
- */
-static void ExecBuildAggTransCall(ExprState *state, AggState *aggstate, ExprEvalStep *scratch, FunctionCallInfo fcinfo,
-                                  AggStatePerTrans pertrans, int transno, int setno, int setoff, bool ishash,
-                                  bool iscollect)
+static ExprEvalOp ExecBuildAggTransOpcodeInit(AggStatePerTrans pertrans, FunctionCallInfo fcinfo)
 {
-    int adjust_init_jumpnull = -1;
-    int adjust_strict_jumpnull = -1;
+    /* trans by val */
+    if (pertrans->transtypeByVal) {
+        if (fcinfo->flinfo->fn_strict && pertrans->initValueIsNull) {
+            return EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL;
+        } else if (fcinfo->flinfo->fn_strict) {
+            return EEOP_AGG_PLAIN_TRANS_STRICT_BYVAL;
+        } else {
+            return EEOP_AGG_PLAIN_TRANS_BYVAL;
+        }
+    }
+
+    /* trans by ref */
+    if (fcinfo->flinfo->fn_strict && pertrans->initValueIsNull) {
+        return EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYREF;
+    } else if (fcinfo->flinfo->fn_strict) {
+        return EEOP_AGG_PLAIN_TRANS_STRICT_BYREF;
+    } else {
+        return EEOP_AGG_PLAIN_TRANS_BYREF;
+    }
+}
+
+static ExprEvalOp ExecBuildAggCollectOpcodeInit(AggStatePerTrans pertrans, FunctionCallInfo fcinfo)
+{
+    /* collect by val */
+    if (pertrans->transtypeByVal) {
+        if (fcinfo->flinfo->fn_strict && pertrans->initCollectValueIsNull) {
+            return EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYVAL;
+        } else if (fcinfo->flinfo->fn_strict) {
+            return EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYVAL;
+        } else {
+            return EEOP_AGG_COLLECT_PLAIN_TRANS_BYVAL;
+        }
+    }
+
+    /* collect by ref */
+    if (fcinfo->flinfo->fn_strict && pertrans->initCollectValueIsNull) {
+        return EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYREF;
+    } else if (fcinfo->flinfo->fn_strict) {
+        return EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYREF;
+    } else {
+        return EEOP_AGG_COLLECT_PLAIN_TRANS_BYREF;
+    }
+}
+
+static void ExecBuildAggTransCall(ExprState *state, AggState *aggstate, ExprEvalStep *scratch, FunctionCallInfo fcinfo, 
+    AggStatePerTrans pertrans, int transno, int setno, int setoff, bool ishash, bool iscollect)
+{
     MemoryContext aggcontext;
 
     aggcontext = aggstate->aggcontexts[setno];
 
-    /*
-     * If the initial value for the transition state doesn't exist in the
-     * pg_aggregate table then we will let the first non-NULL value returned
-     * from the outer procNode become the initial value. (This is useful for
-     * aggregates like max() and min().) The noTransValue flag signals that we
-     * still need to do this.
-     */
-    if (pertrans->numSortCols == 0 && fcinfo->flinfo->fn_strict && pertrans->initValueIsNull) {
-        scratch->opcode = iscollect ? EEOP_AGG_COLLECT_INIT_TRANS : EEOP_AGG_INIT_TRANS;
-        scratch->d.agg_init_trans.aggstate = aggstate;
-        scratch->d.agg_init_trans.pertrans = pertrans;
-        scratch->d.agg_init_trans.setno = setno;
-        scratch->d.agg_init_trans.setoff = setoff;
-        scratch->d.agg_init_trans.transno = transno;
-        scratch->d.agg_init_trans.aggcontext = aggcontext;
-        scratch->d.agg_init_trans.jumpnull = -1; /* adjust later */
-        ExprEvalPushStep(state, scratch);
-
-        /* see comment about jumping out below */
-        adjust_init_jumpnull = state->steps_len - 1;
-    }
-
-    if (pertrans->numSortCols == 0 && fcinfo->flinfo->fn_strict) {
-        scratch->opcode = iscollect ? EEOP_AGG_COLLECT_STRICT_TRANS_CHECK : EEOP_AGG_STRICT_TRANS_CHECK;
-        scratch->d.agg_strict_trans_check.aggstate = aggstate;
-        scratch->d.agg_strict_trans_check.setno = setno;
-        scratch->d.agg_strict_trans_check.setoff = setoff;
-        scratch->d.agg_strict_trans_check.transno = transno;
-        scratch->d.agg_strict_trans_check.jumpnull = -1; /* adjust later */
-        ExprEvalPushStep(state, scratch);
-
-        /*
-         * Note, we don't push into adjust_bailout here - those jump to the
-         * end of all transition value computations. Here a single transition
-         * value is NULL, so just skip processing the individual value.
-         */
-        adjust_strict_jumpnull = state->steps_len - 1;
-    }
-
-    /* invoke appropriate transition implementation */
-    if (pertrans->numSortCols == 0 && pertrans->transtypeByVal)
-        scratch->opcode = iscollect ? EEOP_AGG_COLLECT_PLAIN_TRANS_BYVAL : EEOP_AGG_PLAIN_TRANS_BYVAL;
-    else if (pertrans->numSortCols == 0)
-        scratch->opcode = iscollect ? EEOP_AGG_COLLECT_PLAIN_TRANS : EEOP_AGG_PLAIN_TRANS;
-    else if (pertrans->numInputs == 1)
+    if (pertrans->numSortCols == 0) {
+        if (iscollect) {
+            scratch->opcode = ExecBuildAggCollectOpcodeInit(pertrans, fcinfo);
+        } else {
+            scratch->opcode = ExecBuildAggTransOpcodeInit(pertrans, fcinfo);
+        }
+    } else if (pertrans->numInputs == 1) {
         scratch->opcode = EEOP_AGG_ORDERED_TRANS_DATUM;
-    else
+    } else {
         scratch->opcode = EEOP_AGG_ORDERED_TRANS_TUPLE;
+    }
 
-    scratch->d.agg_trans.aggstate = aggstate;
     scratch->d.agg_trans.pertrans = pertrans;
     scratch->d.agg_trans.setno = setno;
     scratch->d.agg_trans.setoff = setoff;
     scratch->d.agg_trans.transno = transno;
     scratch->d.agg_trans.aggcontext = aggcontext;
     ExprEvalPushStep(state, scratch);
-
-    /* adjust jumps so they jump till after transition invocation */
-    if (adjust_init_jumpnull != -1) {
-        ExprEvalStep *as = &state->steps[adjust_init_jumpnull];
-
-        Assert(as->d.agg_init_trans.jumpnull == -1);
-        as->d.agg_init_trans.jumpnull = state->steps_len;
-    }
-    if (adjust_strict_jumpnull != -1) {
-        ExprEvalStep *as = &state->steps[adjust_strict_jumpnull];
-
-        Assert(as->d.agg_strict_trans_check.jumpnull == -1);
-        as->d.agg_strict_trans_check.jumpnull = state->steps_len;
-    }
 }

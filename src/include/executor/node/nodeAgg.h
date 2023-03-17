@@ -387,6 +387,7 @@ typedef struct AggStatePerAggForFlattenedExprData {
     bool resulttypeByVal;
 #ifdef PGXC
     bool is_avg;
+    Oid collectfn_oid;
 #endif /* PGXC */
 
 } AggStatePerAggForFlattenedExprData;
