@@ -35,9 +35,27 @@ function test_1() {
 	# Specifying non-existent publication along with set publication.
 	exec_sql $case_db $sub_node1_port "ALTER SUBSCRIPTION mysub SET PUBLICATION non_existent_pub" 2> exec.out
 	if [ "$(cat exec.out)" = "ERROR:  There are some publications not exist on the publisher." ]; then
-		echo "check alter subscription set publication throws warning for non-existent publications success"
+		echo "check alter subscription set publication throws error for non-existent publications success"
 	else
-		echo "$failed_keyword when check alter subscription set publication throws warning for non-existent publications"
+		echo "$failed_keyword when check alter subscription set publication throws error for non-existent publications"
+		exit 1
+	fi
+	rm exec.out
+
+	exec_sql $case_db $sub_node1_port "ALTER SUBSCRIPTION mysub RENAME to mysub" 2> exec.out
+	if [ "$(cat exec.out)" = "ERROR:  subscription \"mysub\" already exists" ]; then
+		echo "check alter subscription rename throws error for existent name success"
+	else
+		echo "$failed_keyword when check alter subscription rename throws error for existent name"
+		exit 1
+	fi
+	rm exec.out
+
+	exec_sql $case_db $pub_node1_port "ALTER PUBLICATION mypub RENAME to mypub" 2> exec.out
+	if [ "$(cat exec.out)" = "ERROR:  publication \"mypub\" already exists" ]; then
+		echo "check alter publication rename throws error for existent name success"
+	else
+		echo "$failed_keyword when check alter publication rename throws error for existent name"
 		exit 1
 	fi
 	rm exec.out
