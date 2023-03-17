@@ -4187,7 +4187,7 @@ CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-00773: "could not find cast from %u to %u"
+GAUSS-00773: "could not find cast from %s to %s"
 SQLSTATE: XX000
 CAUSE: "invalid"
 ACTION: "invalid"

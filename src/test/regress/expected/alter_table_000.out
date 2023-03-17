@@ -2863,3 +2863,8 @@ Options: orientation=row, compression=no
 
 drop table test_unique;
 \c postgres
+create table t_alter_type(c0 int4range Unique, foreign key(c0) references t_alter_type(c0));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_alter_type_c0_key" for table "t_alter_type"
+alter table t_alter_type alter c0 set data type int4range;
+ERROR:  could not find cast from int4range to anyrange
+drop table t_alter_type;
