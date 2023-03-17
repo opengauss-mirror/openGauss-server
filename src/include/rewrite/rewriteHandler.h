@@ -36,5 +36,6 @@ extern List* QueryRewriteRefresh(Query *parsetree);
 extern List* QueryRewritePrepareStmt(Query *parsetree);
 extern Node* QueryRewriteNonConstant(Node *node);
 extern List* QueryRewriteSelectIntoVarList(Node *node, int res_len);
+extern Const* processResToConst(char* value, Oid atttypid);
 
 #endif /* REWRITEHANDLER_H */
