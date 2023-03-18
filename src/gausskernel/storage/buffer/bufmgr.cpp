@@ -5858,6 +5858,7 @@ void LockBuffer(Buffer buffer, int mode)
 {
     volatile BufferDesc *buf = NULL;
     bool need_update_lockid = false;
+    int dms_retry_times = 0;
 
     Assert(BufferIsValid(buffer));
     if (BufferIsLocal(buffer)) {
@@ -5912,7 +5913,8 @@ retry:
             
             LWLockRelease(buf->content_lock);
 
-            pg_usleep(5000L);
+            dms_retry_times++;
+            pg_usleep(SSGetBufSleepTime(dms_retry_times));
             goto retry;
         }
     }
@@ -5984,6 +5986,7 @@ bool TryLockBuffer(Buffer buffer, int mode, bool must_wait)
 bool ConditionalLockBuffer(Buffer buffer)
 {
     volatile BufferDesc *buf = NULL;
+    int dms_retry_times = 0;
 
     Assert(BufferIsValid(buffer));
     if (BufferIsLocal(buffer)) {
@@ -6015,7 +6018,8 @@ retry:
             }
             LWLockRelease(buf->content_lock);
 
-            pg_usleep(5000L);
+            dms_retry_times++;
+            pg_usleep(SSGetBufSleepTime(dms_retry_times));
             goto retry;
         }
     }

@@ -80,5 +80,6 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer);
 bool DmsCheckBufAccessible();
 bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc);
 void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo);
+long SSGetBufSleepTime(int retry_times);
 
 #endif
