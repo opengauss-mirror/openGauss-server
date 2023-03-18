@@ -1511,6 +1511,9 @@ void ApplyWorkerMain()
     t_thrd.proc_cxt.PostInit->InitApplyWorker();
     pgstat_report_appname("ApplyWorker");
     pgstat_report_activity(STATE_IDLE, NULL);
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    LoadSqlPlugin();
+#endif
 
     /* Load the subscription into persistent memory context. */
     t_thrd.applyworker_cxt.applyContext =
