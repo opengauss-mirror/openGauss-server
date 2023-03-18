@@ -37,6 +37,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_largeobject.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_publication.h"
 #include "catalog/pg_subscription.h"
 #include "catalog/pg_synonym.h"
 #include "commands/alter.h"
@@ -87,6 +88,12 @@ report_name_conflict(Oid classId, const char *name)
             break;
         case LanguageRelationId:
             msgfmt = gettext_noop("language \"%s\" already exists");
+            break;
+        case PublicationRelationId:
+            msgfmt = gettext_noop("publication \"%s\" already exists");
+            break;
+        case SubscriptionRelationId:
+            msgfmt = gettext_noop("subscription \"%s\" already exists");
             break;
         default:
             elog(ERROR, "unsupported object class %u", classId);
