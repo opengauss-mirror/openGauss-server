@@ -28,7 +28,6 @@ extern void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel);
 
 extern ObjectAddress AlterSubscriptionOwner(const char *name, Oid newOwnerId);
 extern void AlterSubscriptionOwner_oid(Oid subid, Oid newOwnerId);
-extern void RenameSubscription(List* oldname, const char* newname);
 extern void AddStandbysInfo(char* standbysInfo);
 extern void DropStandbysInfo(char* standbysInfo);
 
