@@ -943,6 +943,8 @@ static void ParseDecodingOption(ParallelDecodeOption *data, ListCell *option)
         }
     } else if (strncmp(elem->defname, "sender-timeout", sizeof("sender-timeout")) == 0 && elem->arg != NULL) {
         SetConfigOption("logical_sender_timeout", strVal(elem->arg), PGC_USERSET, PGC_S_OVERRIDE);
+    } else if (strncmp(elem->defname, "include-originid", sizeof("include-originid")) == 0) {
+        CheckBooleanOption(elem, &data->include_originid, false);
     } else if (strncmp(elem->defname, "parallel-decode-num", sizeof("parallel-decode-num")) != 0) {
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("option \"%s\" = \"%s\" is unknown", elem->defname, elem->arg ? strVal(elem->arg) : "(null)"),
@@ -972,6 +974,7 @@ static void initParallelDecodeOption(ParallelDecodeOption *pOptions, int paralle
     pOptions->sending_batch = 0;
     pOptions->decode_change = parallel_decode_change_to_bin;
     pOptions->parallel_queue_size = DEFAULT_PARALLEL_QUEUE_SIZE;
+    pOptions->include_originid = false;
 
     /* GUC */
     DecodeOptionsDefault *defaultOption = LogicalDecodeGetOptionsDefault();

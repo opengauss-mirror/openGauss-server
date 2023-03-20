@@ -104,6 +104,7 @@ static void pg_decode_startup(LogicalDecodingContext* ctx, OutputPluginOptions* 
     data->skip_empty_xacts = false;
     data->only_local = true;
     data->tableWhiteList = NIL;
+    data->include_originid = false;
 
     /* read default option from GUC */
     DecodeOptionsDefault *defaultOption = LogicalDecodeGetOptionsDefault();
@@ -150,6 +151,8 @@ static void pg_output_begin(LogicalDecodingContext* ctx, PluginTestDecodingData*
         appendStringInfo(ctx->out, "BEGIN %lu", txn->xid);
     else
         appendStringInfoString(ctx->out, "BEGIN");
+    if (data->include_originid)
+        appendStringInfo(ctx->out, " ORIGIN_ID %d", txn->origin_id);
     OutputPluginWrite(ctx, last_write);
 }
 
