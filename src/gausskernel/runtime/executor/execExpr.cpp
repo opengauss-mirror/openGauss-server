@@ -744,7 +744,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 				if (!state->parent 
 					|| (!IsA(state->parent, AggState) && !IsA(state->parent, VecAggState)) 
-					|| !IsA(state->parent->plan, Agg) && !IsA(state->parent->plan, VecAgg))
+					|| (!IsA(state->parent->plan, Agg) && !IsA(state->parent->plan, VecAgg)))
 					elog(ERROR, "GroupingFunc found in non-Agg plan node");
 
 				scratch.opcode = EEOP_GROUPING_FUNC;

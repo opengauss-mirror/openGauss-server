@@ -2900,19 +2900,6 @@ void SortTargetListAsArray(RightRefState* refState, List* targetList, GenericExp
     }
 }
 
-/* this function is only used for getting table of index inout param */
-static bool get_tableofindex_param(Node* node, ExecTableOfIndexInfo* execTableOfIndexInfo)
-{
-    if (node == NULL)
-        return false;
-    if (IsA(node, Param)) {
-        execTableOfIndexInfo->paramid = ((Param*)node)->paramid;
-        execTableOfIndexInfo->paramtype = ((Param*)node)->paramtype;
-        return true;
-    }
-    return false;
-}
-
 bool expr_func_has_refcursor_args(Oid Funcid)
 {
     HeapTuple proctup = NULL;

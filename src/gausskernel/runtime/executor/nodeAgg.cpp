@@ -3075,10 +3075,8 @@ static void advance_transition_function_flattened(AggState *aggstate, AggStatePe
                                                   AggStatePerGroup pergroupstate)
 {
     FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
-    int numTransInputs = pertrans->numTransInputs;
     MemoryContext oldContext;
     Datum newVal;
-    int i;
 
     if (pertrans->transfn.fn_strict) {
         int numTransInputs = pertrans->numTransInputs;

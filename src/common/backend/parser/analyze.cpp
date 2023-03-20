@@ -608,7 +608,7 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
     /* Mark whether synonym object is in rtables or not. */
     result->hasSynonyms = pstate->p_hasSynonyms;
 
-    result->is_flt_frame = pstate->p_is_flt_frame;
+    result->is_flt_frame = pstate->p_is_flt_frame && !IS_ENABLE_RIGHT_REF(pstate->rightRefState);
 
     if (nodeTag(parseTree) != T_InsertStmt) {
         result->rightRefState = nullptr;

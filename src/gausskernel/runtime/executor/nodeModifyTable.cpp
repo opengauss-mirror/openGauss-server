@@ -4134,7 +4134,6 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     result_rel_info = mt_state->resultRelInfo;
     if (node->upsertAction == UPSERT_UPDATE ||node->isReplace) {
         ExprContext* econtext = NULL;
-        ExprState* setexpr = NULL;
         TupleDesc tupDesc;
 
         /* insert may only have one plan, inheritance is not expanded */

@@ -36,9 +36,6 @@
 #include "access/tableam.h"
 
 /* static function decls */
-static void init_sexpr(Oid foid, Oid input_collation, FuncExprState *sexpr, MemoryContext sexprCxt, bool allowSRF,
-                       bool needDescForSRF);
-static void ShutdownSetExpr(Datum arg);
 template <bool has_refcursor>
 static ExprDoneCond ExecEvalFuncArgs(
     FunctionCallInfo fcinfo, List* argList, ExprContext* econtext, int* plpgsql_var_dno = NULL);
@@ -83,53 +80,6 @@ ExecInitTableFunctionResult(Expr *expr,
 
 
 	return state;
-}
-
-/*
- * Find the real function return type based on the actual func args' types.
- * @inPara arg_num: the number of func's args.
- * @inPara actual_arg_types: the type array of actual func args'.
- * @inPara fcache: the FuncExprState of this functin.
- * @return Oid: the real func return type.
- */
-static Oid getRealFuncRetype(int arg_num, Oid* actual_arg_types, FuncExprState* fcache)
-{
-    Oid funcid = fcache->func.fn_oid;
-    Oid rettype = fcache->func.fn_rettype;
-
-    /* Find the declared arg types in PROCOID by funcid. */
-    HeapTuple proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
-    if (!HeapTupleIsValid(proctup))
-        ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmodule(MOD_EXECUTOR),
-                errmsg("cache lookup failed for function %u", funcid)));
-
-    oidvector* proargs = ProcedureGetArgTypes(proctup);
-    Oid* declared_arg_types = proargs->values;
-
-    /* Find the real return type based on the declared arg types and actual arg types.*/
-    rettype = enforce_generic_type_consistency(actual_arg_types, declared_arg_types, arg_num, rettype, false);
-
-    ReleaseSysCache(proctup);
-    return rettype;
-}
-
-/*
- * Check whether the function is a set function supported by the vector engine.
- */
-static bool isVectorEngineSupportSetFunc(Oid funcid)
-{
-    switch (funcid) {
-        case OID_REGEXP_SPLIT_TO_TABLE:                // regexp_split_to_table
-        case OID_REGEXP_SPLIT_TO_TABLE_NO_FLAG:        // regexp_split_to_table
-        case OID_ARRAY_UNNEST:                         // unnest
-            return true;
-            break;
-        default:
-            return false;
-            break;
-    }
 }
 
 /*
@@ -190,114 +140,6 @@ static ExprDoneCond ExecEvalFuncArgs(
 }
 
 /*
- * init_sexpr - initialize a FuncExprState node during first use
- */
-static void init_sexpr(Oid foid, Oid input_collation, FuncExprState *sexpr, MemoryContext sexprCxt, bool allowSRF,
-                       bool needDescForSRF)
-{
-    AclResult aclresult;
-
-    /* Check permission to call function */
-    aclresult = pg_proc_aclcheck(foid, GetUserId(), ACL_EXECUTE);
-    if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_PROC, get_func_name(foid));
-    InvokeFunctionExecuteHook(foid);
-
-    /*
-     * Safety check on nargs.  Under normal circumstances this should never
-     * fail, as parser should check sooner.  But possibly it might fail if
-     * server has been compiled with FUNC_MAX_ARGS smaller than some functions
-     * declared in pg_proc?
-     */
-    if (list_length(sexpr->args) > FUNC_MAX_ARGS)
-        ereport(ERROR,
-                (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
-                 errmsg_plural("cannot pass more than %d argument to a function",
-                               "cannot pass more than %d arguments to a function", FUNC_MAX_ARGS, FUNC_MAX_ARGS)));
-
-    /* Set up the primary fmgr lookup information */
-    fmgr_info_cxt(foid, &(sexpr->func), sexprCxt);
-    fmgr_info_set_expr((Node *)sexpr->xprstate.expr, &(sexpr->func));
-
-    /* Initialize the function call parameter struct as well */
-    InitFunctionCallInfoData(sexpr->fcinfo_data, &(sexpr->func), list_length(sexpr->args), input_collation, NULL, NULL);
-
-    /* If function returns set, check if that's allowed by caller */
-    if (sexpr->func.fn_retset && !allowSRF)
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("set-valued function called in context that cannot accept a set")));
-
-    /* Otherwise, caller should have marked the sexpr correctly */
-    Assert(sexpr->func.fn_retset == sexpr->funcReturnsSet);
-
-    /* If function returns set, prepare expected tuple descriptor */
-    if (sexpr->func.fn_retset && needDescForSRF) {
-        TypeFuncClass functypclass;
-        Oid funcrettype;
-        TupleDesc tupdesc;
-        MemoryContext oldcontext;
-
-        functypclass = get_expr_result_type(sexpr->func.fn_expr, &funcrettype, &tupdesc);
-
-        /* Must save tupdesc in sexpr's context */
-        oldcontext = MemoryContextSwitchTo(sexprCxt);
-
-        if (functypclass == TYPEFUNC_COMPOSITE) {
-            /* Composite data type, e.g. a table's row type */
-            Assert(tupdesc);
-            /* Must copy it out of typcache for safety */
-            sexpr->funcResultDesc = CreateTupleDescCopy(tupdesc);
-            sexpr->funcReturnsTuple = true;
-        } else if (functypclass == TYPEFUNC_SCALAR) {
-            /* Base data type, i.e. scalar */
-            tupdesc = CreateTemplateTupleDesc(1, false);
-            TupleDescInitEntry(tupdesc, (AttrNumber)1, NULL, funcrettype, -1, 0);
-            sexpr->funcResultDesc = tupdesc;
-            sexpr->funcReturnsTuple = false;
-        } else if (functypclass == TYPEFUNC_RECORD) {
-            /* This will work if function doesn't need an expectedDesc */
-            sexpr->funcResultDesc = NULL;
-            sexpr->funcReturnsTuple = true;
-        } else {
-            /* Else, we will fail if function needs an expectedDesc */
-            sexpr->funcResultDesc = NULL;
-        }
-
-        MemoryContextSwitchTo(oldcontext);
-    } else
-        sexpr->funcResultDesc = NULL;
-
-    /* Initialize additional state */
-    sexpr->funcResultStore = NULL;
-    sexpr->funcResultSlot = NULL;
-    sexpr->shutdown_reg = false;
-}
-
-/*
- * callback function in case a FuncExprState needs to be shut down before it
- * has been run to completion
- */
-static void ShutdownSetExpr(Datum arg)
-{
-    FuncExprState *sexpr = castNode(FuncExprState, DatumGetPointer(arg));
-
-    /* If we have a slot, make sure it's let go of any tuplestore pointer */
-    if (sexpr->funcResultSlot)
-        ExecClearTuple(sexpr->funcResultSlot);
-
-    /* Release any open tuplestore */
-    if (sexpr->funcResultStore)
-        tuplestore_end(sexpr->funcResultStore);
-    sexpr->funcResultStore = NULL;
-
-    /* Clear any active set-argument state */
-    sexpr->setArgsValid = false;
-
-    /* execUtils will deregister the callback... */
-    sexpr->shutdown_reg = false;
-}
-
-/*
  * Prepare targetlist SRF function call for execution.
  *
  * This is used by nodeProjectSet.c.
@@ -334,4 +176,249 @@ FuncExprState *ExecInitFunctionResultSet(Expr *expr, ExprContext *econtext, Plan
     state->has_refcursor = func_has_refcursor_args(state->func.fn_oid, &state->fcinfo_data);
     
     return state;
+}
+
+/*
+ *		ExecMakeFunctionResultSet
+ *
+ * Evaluate the arguments to a set-returning function and then call the
+ * function itself.  The argument expressions may not contain set-returning
+ * functions (the planner is supposed to have separated evaluation for those).
+ *
+ * This is used by nodeProjectSet.c.
+ */
+Datum ExecMakeFunctionResultSet(FuncExprState *fcache, ExprContext *econtext, bool *isNull, ExprDoneCond *isDone)
+{
+    List	   *arguments;
+    Datum		result;
+    FunctionCallInfo fcinfo;
+    PgStat_FunctionCallUsage fcusage;
+    ReturnSetInfo rsinfo;
+    bool		callit;
+    int			i;
+    int* var_dno = NULL;
+    bool has_refcursor = fcache->has_refcursor;
+    int has_cursor_return = fcache->fcinfo_data.refcursor_data.return_number;
+
+    econtext->plpgsql_estate = plpgsql_estate;
+    plpgsql_estate = NULL;
+
+restart:
+
+    /* Guard against stack overflow due to overly complex expressions */
+    check_stack_depth();
+
+    /*
+	 * If a previous call of the function returned a set result in the form of
+	 * a tuplestore, continue reading rows from the tuplestore until it's
+	 * empty.
+     */
+    if (fcache->funcResultStore)
+    {
+        econtext->hasSetResultStore = true;
+        if (tuplestore_gettupleslot(fcache->funcResultStore, true, false, fcache->funcResultSlot)) {
+            *isDone = ExprMultipleResult;
+            if (fcache->funcReturnsTuple) {
+                /* We must return the whole tuple as a Datum. */
+                *isNull = false;
+                return ExecFetchSlotTupleDatum(fcache->funcResultSlot);
+            } else {
+                /* Extract the first column and return it as a scalar. */
+                Assert(fcache->funcResultSlot != NULL);
+                /* Get the Table Accessor Method*/
+                return tableam_tslot_getattr(fcache->funcResultSlot, 1, isNull);
+            }
+        }
+
+        /* Exhausted the tuplestore, so clean up */
+        tuplestore_end(fcache->funcResultStore);
+        fcache->funcResultStore = NULL;
+        *isDone = ExprEndResult;
+        *isNull = true;
+        return (Datum) 0;
+    }
+
+    /*
+	 * arguments is a list of expressions to evaluate before passing to the
+	 * function manager.  We skip the evaluation if it was already done in the
+	 * previous call (ie, we are continuing the evaluation of a set-valued
+	 * function).  Otherwise, collect the current argument values into fcinfo.
+     */
+    fcinfo = &fcache->fcinfo_data;
+
+    if (has_cursor_return) {
+        /* init returnCursor to store out-args cursor info on ExprContext*/
+        fcinfo->refcursor_data.returnCursor =
+            (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->refcursor_data.return_number);
+    } else {
+        fcinfo->refcursor_data.returnCursor = NULL;
+    }
+
+    if (has_refcursor) {
+        /* init argCursor to store in-args cursor info on ExprContext*/
+        fcinfo->refcursor_data.argCursor = (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->nargs);
+        var_dno = (int*)palloc0(sizeof(int) * fcinfo->nargs);
+        for (i = 0; i < fcinfo->nargs; i++) {
+            var_dno[i] = -1;
+        }
+    }
+
+    arguments = fcache->args;
+    if (!fcache->setArgsValid) {
+        if (has_refcursor)
+            ExecEvalFuncArgs<true>(fcinfo, arguments, econtext, var_dno);
+        else
+            ExecEvalFuncArgs<false>(fcinfo, arguments, econtext);
+    } else {
+        /* Reset flag (we may set it again below) */
+        fcache->setArgsValid = false;
+    }
+
+    /*
+	 * Now call the function, passing the evaluated parameter values.
+     */
+
+    /* Prepare a resultinfo node for communication. */
+    fcinfo->resultinfo = (Node *) &rsinfo;
+    rsinfo.type = T_ReturnSetInfo;
+    rsinfo.econtext = econtext;
+    rsinfo.expectedDesc = fcache->funcResultDesc;
+    rsinfo.allowedModes = (int) (SFRM_ValuePerCall | SFRM_Materialize);
+    /* note we do not set SFRM_Materialize_Random or _Preferred */
+    rsinfo.returnMode = SFRM_ValuePerCall;
+    /* isDone is filled below */
+    rsinfo.setResult = NULL;
+    rsinfo.setDesc = NULL;
+
+    /*
+	 * If function is strict, and there are any NULL arguments, skip calling
+	 * the function.
+     */
+    callit = true;
+    if (fcache->func.fn_strict) {
+        for (i = 0; i < fcinfo->nargs; i++) {
+            if (fcinfo->argnull[i]) {
+                callit = false;
+                break;
+            }
+        }
+    }
+
+    if (callit)
+    {
+        pgstat_init_function_usage(fcinfo, &fcusage);
+
+        fcinfo->isnull = false;
+        rsinfo.isDone = ExprSingleResult;
+        result = FunctionCallInvoke(fcinfo);
+        *isNull = fcinfo->isnull;
+        *isDone = rsinfo.isDone;
+
+        pgstat_end_function_usage(&fcusage, rsinfo.isDone != ExprMultipleResult);
+    } else {
+        /* for a strict SRF, result for NULL is an empty set */
+        result = (Datum) 0;
+        *isNull = true;
+        *isDone = ExprEndResult;
+    }
+
+    if (has_refcursor && econtext->plpgsql_estate != NULL) {
+        PLpgSQL_execstate* estate = econtext->plpgsql_estate;
+        /* copy in-args cursor option info */
+        for (i = 0; i < fcinfo->nargs; i++) {
+            if (var_dno[i] >= 0) {
+                int dno = var_dno[i];
+                Cursor_Data* cursor_data = &fcinfo->refcursor_data.argCursor[i];
+#ifdef USE_ASSERT_CHECKING
+                PLpgSQL_datum* datum = estate->datums[dno];
+#endif
+                Assert(datum->dtype == PLPGSQL_DTYPE_VAR);
+                Assert(((PLpgSQL_var*)datum)->datatype->typoid == REFCURSOROID);
+
+                ExecCopyDataToDatum(estate->datums, dno, cursor_data);
+            }
+        }
+
+        if (fcinfo->refcursor_data.return_number > 0) {
+            /* copy function returns cursor option info.
+             * for simple expr in exec_eval_expr, we can not get the result type,
+             * so cursor_return_data mallocs here.
+             */
+            if (estate->cursor_return_data == NULL && estate->tuple_store_cxt != NULL) {
+                MemoryContext oldcontext = MemoryContextSwitchTo(estate->tuple_store_cxt);
+                estate->cursor_return_data =
+                    (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->refcursor_data.return_number);
+                estate->cursor_return_numbers = fcinfo->refcursor_data.return_number;
+                (void)MemoryContextSwitchTo(oldcontext);
+            }
+
+            if (estate->cursor_return_data != NULL) {
+                for (i = 0; i < fcinfo->refcursor_data.return_number; i++) {
+                    int rc = memcpy_s(&estate->cursor_return_data[i], sizeof(Cursor_Data),
+                                      &fcinfo->refcursor_data.returnCursor[i], sizeof(Cursor_Data));
+                    securec_check(rc, "\0", "\0");
+                }
+            }
+        }
+    }
+
+    /* Which protocol does function want to use? */
+    if (rsinfo.returnMode == SFRM_ValuePerCall)
+    {
+        if (*isDone != ExprEndResult)
+        {
+            /*
+			 * Save the current argument values to re-use on the next call.
+             */
+            if (*isDone == ExprMultipleResult)
+            {
+                fcache->setArgsValid = true;
+                /* Register cleanup callback if we didn't already */
+                if (!fcache->shutdown_reg)
+                {
+                    RegisterExprContextCallback(econtext,
+                                                ShutdownFuncExpr,
+                                                PointerGetDatum(fcache));
+                    fcache->shutdown_reg = true;
+                }
+            }
+        }
+    }
+    else if (rsinfo.returnMode == SFRM_Materialize)
+    {
+        /* check we're on the same page as the function author */
+        if (rsinfo.isDone != ExprSingleResult)
+            ereport(ERROR,
+                    (errcode(ERRCODE_E_R_I_E_SRF_PROTOCOL_VIOLATED),
+                     errmsg("table-function protocol for materialize mode was not followed")));
+        if (rsinfo.setResult != NULL)
+        {
+            /* prepare to return values from the tuplestore */
+            ExecPrepareTuplestoreResult(fcache, econtext,
+                                        rsinfo.setResult,
+                                        rsinfo.setDesc);
+            /* loop back to top to start returning from tuplestore */
+            goto restart;
+        }
+        /* if setResult was left null, treat it as empty set */
+        *isDone = ExprEndResult;
+        *isNull = true;
+        result = (Datum) 0;
+    }
+    else
+        ereport(ERROR,
+                (errcode(ERRCODE_E_R_I_E_SRF_PROTOCOL_VIOLATED),
+                 errmsg("unrecognized table-function returnMode: %d",
+                        (int) rsinfo.returnMode)));
+
+    if (has_refcursor) {
+        pfree_ext(fcinfo->refcursor_data.argCursor);
+        pfree_ext(var_dno);
+    }
+
+    if (fcache->is_plpgsql_func_with_outparam) {
+        set_result_for_plpgsql_language_function_with_outparam_by_flatten(&result, isNull);
+    }
+
+    return result;
 }

@@ -338,6 +338,8 @@ Node *transformExprRecurse(ParseState *pstate, Node *expr)
         case T_ColumnRef:
             result = transformColumnRef(pstate, (ColumnRef*)expr);
             if (IS_SUPPORT_RIGHT_REF(pstate->rightRefState) && list_length(((ColumnRef*)expr)->fields) == 1) {
+                pstate->p_hasTargetSRFs = false;
+                pstate->p_is_flt_frame = false;
                 if (pstate->rightRefState->isUpsert) {
                     pstate->rightRefState->isUpsertHasRightRef = true;
                 } else {
