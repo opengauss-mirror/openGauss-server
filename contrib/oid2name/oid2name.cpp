@@ -515,7 +515,7 @@ void sql_exec_encap_query(char* todo, int todoLen, bool iseExtended, char *quali
         "	LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \n"
         "	LEFT JOIN pg_catalog.pg_database d ON d.datname = pg_catalog.current_database(),\n"
         "	pg_catalog.pg_tablespace t \n"
-        "WHERE relkind IN ('r', 'i', 'S', 't') AND \n"
+        "WHERE relkind IN ('r', 'i', 'S', 't', 'm') AND \n"
         "		t.oid = CASE\n"
         "			WHEN reltablespace <> 0 THEN reltablespace\n"
         "			ELSE dattablespace\n"
