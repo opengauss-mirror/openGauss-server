@@ -134,6 +134,7 @@ typedef struct {
     ParallelDecodeChangeCB decode_change;
     List *tableWhiteList;
     int parallel_queue_size;
+    bool include_originid;
 } ParallelDecodeOption;
 
 typedef struct {
@@ -151,6 +152,7 @@ typedef struct {
     int max_txn_in_memory;
     int max_reorderbuffer_in_memory;
     List *tableWhiteList;
+    bool include_originid;
 } PluginTestDecodingData;
 
 typedef struct ParallelLogicalDecodingContext {
