@@ -217,7 +217,7 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
 }
 
 #ifdef USE_ASSERT_CHECKING
-static SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, ForkNumber forkNum,
+SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, ForkNumber forkNum,
     BlockNumber blockNo, char *blockbuf)
 {
     SMGR_READ_STATUS rdStatus;
