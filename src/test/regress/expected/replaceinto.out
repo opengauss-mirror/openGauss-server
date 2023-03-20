@@ -93,6 +93,29 @@ select * from replace_test;
   1 | aaaaa | ddddd
 (4 rows)
 
+replace into replace_test values(3,'ccccc','ccccc'),(3,'ddddd','ccccc'),(3,'eeeee','eeeee');
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  before delete trigger
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name  |  key  
+----+-------+-------
+  2 | bbbbb | bbbbb
+  1 | aaaaa | ddddd
+  3 | eeeee | eeeee
+(3 rows)
+
 explain analyze REPLACE INTO replace_test values(2,'aaaa','bbbb');
 NOTICE:  before delete trigger
 NOTICE:  before insert trigger

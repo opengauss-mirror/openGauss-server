@@ -1766,7 +1766,8 @@ ldelete:
                 estate->es_snapshot,
                 true /* wait for commit */,
                 &oldslot,
-                &tmfd);
+                &tmfd,
+                node->isReplace);
 
             switch (result) {
                 case TM_SelfUpdated:

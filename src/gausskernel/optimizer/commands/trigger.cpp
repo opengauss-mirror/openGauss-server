@@ -3182,7 +3182,7 @@ ltrmark:
                 lockmode,
                 LockWaitBlock,
                 &tmfd,
-                false,       // fake params below are for uheap implementation
+                true,       // fake params below are for uheap implementation
                 false, false, NULL, NULL, false);
             switch (test) {
                 case TM_SelfUpdated:
