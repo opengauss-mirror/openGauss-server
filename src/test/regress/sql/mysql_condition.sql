@@ -238,6 +238,13 @@ END;
 /
 call proc_ex();
 SELECT * FROM declare_handler_t_exit ORDER BY i;
+CREATE OR REPLACE PROCEDURE proc_null()  IS
+BEGIN
+    DECLARE EXIT HANDLER FOR unique_violation
+        RAISE NOTICE 'unique_violation HANDLER: SQLSTATE = %, SQLERRM = %', SQLSTATE, SQLERRM;
+END;
+/
+call proc_null();
 \c regression
 drop database mysql_test;
 drop database td_test;
