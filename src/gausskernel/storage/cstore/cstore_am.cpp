@@ -4009,6 +4009,7 @@ void CStore::UnlinkColDataFile(const RelFileNode& rnode, AttrNumber attrnum, boo
     CFileNode cFileNode(rnode, attrnum, MAIN_FORKNUM);
 
     CStoreAllocator::InvalidColSpaceCache(cFileNode);
+    CUCache->DropRelationCUCache(rnode);
 
     CUStorage cuStorage(cFileNode);
 
