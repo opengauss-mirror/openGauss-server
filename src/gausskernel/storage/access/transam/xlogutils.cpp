@@ -1146,8 +1146,15 @@ Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber fo
          * there should be no other backends that could modify the buffer at
          * the same time.
          */
+        if (ENABLE_DMS) {
+            LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        }
+
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
+            if (ENABLE_DMS) {
+                LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+            }
             ReleaseBuffer(buffer);
             RepairFileKey key;
             key.relfilenode = rnode;
@@ -1157,6 +1164,10 @@ Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber fo
             CheckNeedRecordBadFile(key, lastblock, blkno, pblk);
             log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, pblk);
             return InvalidBuffer;
+        }
+
+        if (ENABLE_DMS) {
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
         }
     }
 
@@ -1206,9 +1217,16 @@ Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber for
 
     if (BufferIsValid(buffer)) {
         Page page = BufferGetPage(buffer);
+        if (ENABLE_DMS) {
+            LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        }
+
         if (mode == RBM_NORMAL) {
             if (PageIsNew(page)) {
                 SegmentCheck(XLogRecPtrIsInvalid(PageGetLSN(page)));
+                if (ENABLE_DMS) {
+                    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+                }
                 SegReleaseBuffer(buffer);
                 RepairFileKey key;
                 key.relfilenode = rnode;
@@ -1223,6 +1241,10 @@ Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber for
         }
         if (t_thrd.xlog_cxt.startup_processing && t_thrd.xlog_cxt.server_mode == STANDBY_MODE && PageIsLogical(page)) {
             PageClearLogical(page);
+        }
+
+        if (ENABLE_DMS) {
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
         }
     } else {
         ereport(ERROR, (errcode_for_file_access(),
