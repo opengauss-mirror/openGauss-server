@@ -81,6 +81,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  bbox_blanklist_items                             | string  |      |           | 
  bbox_dump_count                                  | integer |      | 1         | 20
  bbox_dump_path                                   | string  |      |           | 
+ b_compatibility_user_host_auth                   | bool    |      |           | 
  behavior_compat_options                          | string  |      |           | 
  b_format_behavior_compat_options                 | string  |      |           | 
  bgwriter_delay                                   | integer | ms   | 10        | 10000
@@ -661,7 +662,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  temp_buffers                                     | integer | 8kB  | 100       | 1073741823
  temp_file_limit                                  | integer | kB   | -1        | 2147483647
  temp_tablespaces                                 | string  |      |           | 
- test_user_host                                   | bool    |      |           | 
  thread_pool_attr                                 | string  |      |           | 
  thread_pool_stream_attr                          | string  |      |           | 
  time_to_target_rpo                               | integer |      | 0         | 3600
