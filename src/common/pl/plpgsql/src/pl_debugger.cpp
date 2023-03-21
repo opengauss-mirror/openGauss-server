@@ -1452,6 +1452,7 @@ void WaitSendMsg(int commIdx, bool isClient, char** destBuffer, int* destLen)
 {
     int rc = 0;
     PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[commIdx];
+    bool mutexLocked = true;
     pthread_mutex_lock(&debug_comm->mutex);
     PG_TRY();
     {
@@ -1461,7 +1462,21 @@ void WaitSendMsg(int commIdx, bool isClient, char** destBuffer, int* destLen)
             /* server wait for client msg */
             debug_comm->IsServerWaited = true;
             while (debug_comm->hasClientFlushed == false) {
-                CHECK_FOR_INTERRUPTS();
+                /*
+                 * The PlDebugger Server has acquired the lock while waiting. 
+                 * When it receives the database stop signal, it exits the thread in the processing interrupt. 
+                 * This will call PlDebuggerCleanUp() to clean up, and it will acquire mutex again, 
+                 * which will lead to dead waiting.
+                 * So when need to handle interrupt, need to release the lock before calling CHECK_FOR_INTERRUPTS().
+                 */
+                if (InterruptPending) {
+                    pthread_mutex_unlock(&debug_comm->mutex);
+                    mutexLocked = false;
+                    CHECK_FOR_INTERRUPTS();
+                    pthread_mutex_lock(&debug_comm->mutex);
+                    mutexLocked = true;
+                    continue;
+                }
                 if (cur_time >= u_sess->attr.attr_sql.pldebugger_timeout) {
                     ereport(ERROR,
                         (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_PLDEBUGGER_TIMEOUT),
@@ -1494,7 +1509,14 @@ void WaitSendMsg(int commIdx, bool isClient, char** destBuffer, int* destLen)
             /* client wait for server msg */
             debug_comm->IsClientWaited = true;
             while (debug_comm->hasServerFlushed == false) {
-                CHECK_FOR_INTERRUPTS();
+                if (InterruptPending) {
+                    pthread_mutex_unlock(&debug_comm->mutex);
+                    mutexLocked = false;
+                    CHECK_FOR_INTERRUPTS();
+                    pthread_mutex_lock(&debug_comm->mutex);
+                    mutexLocked = true;
+                    continue;
+                }
                 if (cur_time >= u_sess->attr.attr_sql.pldebugger_timeout) {
                     ereport(ERROR,
                         (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_PLDEBUGGER_TIMEOUT),
@@ -1535,7 +1557,8 @@ void WaitSendMsg(int commIdx, bool isClient, char** destBuffer, int* destLen)
             debug_comm->IsClientWaited = false;
             debug_comm->hasServerFlushed = false;
         }
-        pthread_mutex_unlock(&debug_comm->mutex);
+        if (mutexLocked)
+            pthread_mutex_unlock(&debug_comm->mutex);
 
         PG_RE_THROW();
     }
