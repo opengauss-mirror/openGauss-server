@@ -228,20 +228,24 @@ typedef enum ExprEvalOp
 	EEOP_PREFIX_BTYEA,
 	EEOP_PREFIX_TEXT,
 
-   /* aggregation related nodes */
-   EEOP_AGG_STRICT_DESERIALIZE,
-   EEOP_AGG_DESERIALIZE,
-   EEOP_AGG_STRICT_INPUT_CHECK,
-   EEOP_AGG_INIT_TRANS,
-   EEOP_AGG_COLLECT_INIT_TRANS,
-   EEOP_AGG_STRICT_TRANS_CHECK,
-   EEOP_AGG_COLLECT_STRICT_TRANS_CHECK,
-   EEOP_AGG_PLAIN_TRANS_BYVAL,
-   EEOP_AGG_COLLECT_PLAIN_TRANS_BYVAL,
-   EEOP_AGG_PLAIN_TRANS,
-   EEOP_AGG_COLLECT_PLAIN_TRANS,
-   EEOP_AGG_ORDERED_TRANS_DATUM,
-   EEOP_AGG_ORDERED_TRANS_TUPLE,
+    /* aggregation related nodes */
+    EEOP_AGG_STRICT_DESERIALIZE,
+    EEOP_AGG_DESERIALIZE,
+    EEOP_AGG_STRICT_INPUT_CHECK,
+    EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYVAL,
+    EEOP_AGG_PLAIN_TRANS_STRICT_BYVAL,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYVAL,
+    EEOP_AGG_PLAIN_TRANS_BYVAL,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_BYVAL,
+    EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYREF,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYREF,
+    EEOP_AGG_PLAIN_TRANS_STRICT_BYREF,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYREF,
+    EEOP_AGG_PLAIN_TRANS_BYREF,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_BYREF,
+    EEOP_AGG_ORDERED_TRANS_DATUM,
+    EEOP_AGG_ORDERED_TRANS_TUPLE,
 
 	/* non-existent operation, used e.g. to check array lengths */
 	EEOP_LAST
@@ -646,27 +650,6 @@ typedef struct ExprEvalStep
 
         /* for EEOP_AGG_INIT_TRANS */
         struct {
-            AggState *aggstate;
-            AggStatePerTrans pertrans;
-            MemoryContext aggcontext;
-            int setno;
-            int transno;
-            int setoff;
-            int jumpnull;
-        } agg_init_trans;
-
-        /* for EEOP_AGG_STRICT_TRANS_CHECK */
-        struct {
-            AggState *aggstate;
-            int setno;
-            int transno;
-            int setoff;
-            int jumpnull;
-        } agg_strict_trans_check;
-
-        /* for EEOP_AGG_{PLAIN,ORDERED}_TRANS* */
-        struct {
-            AggState *aggstate;
             AggStatePerTrans pertrans;
             MemoryContext aggcontext;
             int setno;

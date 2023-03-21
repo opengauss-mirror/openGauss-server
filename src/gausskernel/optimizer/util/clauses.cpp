@@ -696,27 +696,32 @@ static void count_agg_clauses_walker_isa(Node* node, count_agg_clauses_context* 
          * but the difference of pg_aggregate bwtween pg and og
          * we have to do some hard code here(og's pg_aggregate doesn't have the column aggtransspace)
          */
-        switch (aggtransfn) {
-            case 5439: /* int8_avg_accum_numeric */
-                costs->transitionSpace +=48;
-                costs->aggWidth += 48;
-                break;
-            case 5440: /* numeric_accum_numeric */
-            case 5442: /* numeric_avg_accum_numeric */
-                costs->transitionSpace += 128;
-                costs->aggWidth += 128;
-                break;
-            default:
-                /*
-                * INTERNAL transition type is a special case: although INTERNAL
-                * is pass-by-value, it's almost certainly being used as a pointer
-                * to some large data structure.  We assume usage of
-                * ALLOCSET_DEFAULT_INITSIZE, which is a good guess if the data is
-                * being kept in a private memory context, as is done by
-                * array_agg() for instance.
-                */
-                costs->transitionSpace += ALLOCSET_DEFAULT_INITSIZE;
-                costs->aggWidth += ALLOCSET_DEFAULT_INITSIZE;
+        if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+            switch (aggtransfn) {
+                case 5439: /* int8_avg_accum_numeric */
+                    costs->transitionSpace +=48;
+                    costs->aggWidth += 48;
+                    break;
+                case 5440: /* numeric_accum_numeric */
+                case 5442: /* numeric_avg_accum_numeric */
+                    costs->transitionSpace += 128;
+                    costs->aggWidth += 128;
+                    break;
+                default:
+                    /*
+                    * INTERNAL transition type is a special case: although INTERNAL
+                    * is pass-by-value, it's almost certainly being used as a pointer
+                    * to some large data structure.  We assume usage of
+                    * ALLOCSET_DEFAULT_INITSIZE, which is a good guess if the data is
+                    * being kept in a private memory context, as is done by
+                    * array_agg() for instance.
+                    */
+                    costs->transitionSpace += ALLOCSET_DEFAULT_INITSIZE;
+                    costs->aggWidth += ALLOCSET_DEFAULT_INITSIZE;
+            }
+        } else {
+            costs->transitionSpace += ALLOCSET_DEFAULT_INITSIZE;
+            costs->aggWidth += ALLOCSET_DEFAULT_INITSIZE;
         }
 #else
         /*

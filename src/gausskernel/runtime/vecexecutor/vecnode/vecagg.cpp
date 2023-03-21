@@ -442,7 +442,9 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
         transfn_oid = aggform->aggtransfn;
         finalfn_oid = aggform->aggfinalfn;
 #ifndef ENABLE_MULTIPLE_NODES
-        numeric_aggfn_info_change(aggref->aggfnoid, &transfn_oid, &aggtranstype, &transfn_oid);
+        if (estate->es_is_flt_frame) {
+            numeric_aggfn_info_change(aggref->aggfnoid, &transfn_oid, &aggtranstype, &transfn_oid);
+        }
 #endif
         peraggstate->transfn_oid = transfn_oid;
         peraggstate->finalfn_oid = finalfn_oid;
@@ -522,7 +524,10 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
          */
         text_init_val = SysCacheGetAttr(AGGFNOID, agg_tuple, Anum_pg_aggregate_agginitval, &peraggstate->initValueIsNull);
 #ifndef ENABLE_MULTIPLE_NODES
-        peraggstate->initValueIsNull = numeric_agg_trans_initvalisnull(peraggstate->transfn_oid, peraggstate->initValueIsNull);
+        if (estate->es_is_flt_frame) {
+            peraggstate->initValueIsNull = numeric_agg_trans_initvalisnull(peraggstate->transfn_oid,
+                peraggstate->initValueIsNull);
+        }
 #endif
         if (peraggstate->initValueIsNull)
             peraggstate->initValue = (Datum)0;

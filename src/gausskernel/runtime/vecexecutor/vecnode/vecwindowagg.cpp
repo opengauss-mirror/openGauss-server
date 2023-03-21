@@ -550,21 +550,23 @@ VecWinAggRuntime::VecWinAggRuntime(VecWindowAggState* runtime) : BaseAggRunner()
         if (m_sortKey > 0) {
             m_cellvar_encoded[i] = CheckAggEncoded(peraggstate->transfn.fn_rettype);
 #ifndef ENABLE_MULTIPLE_NODES
-            /* 
-             * fix some case that row agg function has both transfn and finnal
-             * but vec agg function only have transfn
-             */
-            if (OidIsValid(peraggstate->finalfn.fn_oid) && 
-                 runtime->windowAggInfo[i].vec_final_function.flinfo == NULL) {
-                m_cellvar_encoded[i] = CheckAggEncoded(peraggstate->finalfn.fn_rettype);
-            }
-            /* 
-             * in some case, vec agg function has its own rettyp 
-             * XXX: hard code here
-             */
-            if (perfuncstate->flinfo.fn_oid == 2100 || perfuncstate->flinfo.fn_oid == 2103
-                || perfuncstate->flinfo.fn_oid == 2717 || perfuncstate->flinfo.fn_oid == 2159) {
-                m_cellvar_encoded[i] = true;
+            if (m_winruntime->ss.ps.state->es_is_flt_frame) {
+                /* 
+                * fix some case that row agg function has both transfn and finnal
+                * but vec agg function only have transfn
+                */
+                if (OidIsValid(peraggstate->finalfn.fn_oid) && 
+                    runtime->windowAggInfo[i].vec_final_function.flinfo == NULL) {
+                    m_cellvar_encoded[i] = CheckAggEncoded(peraggstate->finalfn.fn_rettype);
+                }
+                /* 
+                * in some case, vec agg function has its own rettyp 
+                * XXX: hard code here
+                */
+                if (perfuncstate->flinfo.fn_oid == 2100 || perfuncstate->flinfo.fn_oid == 2103
+                    || perfuncstate->flinfo.fn_oid == 2717 || perfuncstate->flinfo.fn_oid == 2159) {
+                    m_cellvar_encoded[i] = true;
+                }
             }
 #endif
         }
@@ -665,7 +667,11 @@ void VecWinAggRuntime::DispatchWindowFunction(WindowStatePerFunc perfuncstate, i
 #ifdef ENABLE_MULTIPLE_NODES
         InitFunctionCallInfoData(m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation, NULL, NULL);
 #else
-        InitFunctionCallInfoData(m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation, (Node *)m_winruntime, NULL);
+        if (m_winruntime->ss.ps.state->es_is_flt_frame) {
+            InitFunctionCallInfoData(m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation, (Node *)m_winruntime, NULL);
+        } else {
+            InitFunctionCallInfoData(m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation, NULL, NULL);
+        }
 #endif
 
         if (m_aggNum == 0 || m_sortKey == 0)
@@ -707,8 +713,13 @@ void VecWinAggRuntime::DispatchAggFunction(
         InitFunctionCallInfoData(
             aggInfo->vec_agg_function, &peraggState->transfn, 2, perfuncstate->winCollation, NULL, NULL);
 #else
-        InitFunctionCallInfoData(
-            aggInfo->vec_agg_function, &peraggState->transfn, 2, perfuncstate->winCollation, (Node*)m_winruntime, NULL);
+        if (m_winruntime->ss.ps.state->es_is_flt_frame) {
+            InitFunctionCallInfoData(aggInfo->vec_agg_function, &peraggState->transfn, 2, perfuncstate->winCollation,
+                (Node*)m_winruntime, NULL);
+        } else {
+            InitFunctionCallInfoData(
+                aggInfo->vec_agg_function, &peraggState->transfn, 2, perfuncstate->winCollation, NULL, NULL);
+        }
 #endif
 
         aggInfo->vec_agg_cache = &entry->vec_agg_cache[0];
@@ -716,14 +727,18 @@ void VecWinAggRuntime::DispatchAggFunction(
 
         aggInfo->vec_agg_function.flinfo->vec_fn_addr = aggInfo->vec_agg_cache[0];
 
-#ifdef ENABLE_MULTIPLE_NODES
         if (OidIsValid(peraggState->finalfn_oid)) {
+#ifdef ENABLE_MULTIPLE_NODES
             InitFunctionCallInfoData(
                 aggInfo->vec_final_function, &peraggState->finalfn, 2, perfuncstate->winCollation, NULL, NULL);
 #else
-        if (OidIsValid(peraggState->finalfn_oid) && aggInfo->vec_agg_final[0]) {
-            InitFunctionCallInfoData(
-                aggInfo->vec_final_function, &peraggState->finalfn, 2, perfuncstate->winCollation, (Node*)m_winruntime, NULL);
+            if (m_winruntime->ss.ps.state->es_is_flt_frame && aggInfo->vec_agg_final[0]) {
+                InitFunctionCallInfoData(aggInfo->vec_final_function, &peraggState->finalfn, 2,
+                    perfuncstate->winCollation, (Node*)m_winruntime, NULL);
+            } else {
+                InitFunctionCallInfoData(
+                    aggInfo->vec_final_function, &peraggState->finalfn, 2, perfuncstate->winCollation, NULL, NULL);
+            }
 #endif
             aggInfo->vec_final_function.flinfo->fn_addr = aggInfo->vec_agg_final[0];
         }
