@@ -1309,7 +1309,6 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
          */
         if (OidIsValid(address.objectId)) {
             relation = heap_open(reloid, AccessShareLock);
-            /* TODO: comments*/
             if (objtype == OBJECT_TRIGGER && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && schemaname != NULL) {
                 Oid relNamespaceId = RelationGetNamespace(relation);
                 if (relNamespaceId != get_namespace_oid(schemaname, false)) {
@@ -1336,7 +1335,6 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
                 address.classId = TriggerRelationId;
                 address.objectId = get_trigger_oid(reloid, depname, missing_ok);
                 address.objectSubId = 0;
-                /* TODO: comments*/
                 if (OidIsValid(address.objectId) && schemaname != NULL) {
                     Oid relNamespaceId = RelationGetNamespace(relation);
                     if (relNamespaceId != get_namespace_oid(schemaname, false)) {
