@@ -2023,8 +2023,10 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
             return p2walker(((AutoIncrement*)node)->expr, context);
         case T_PrefixKey:
             return p2walker(((PrefixKey*)node)->arg, context);
-        case T_UserSetElem:
+        case T_UserSetElem: {
+            p2walker(((UserSetElem*)node)->val, context);
             return true;
+        }
         default:
             ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                             errmsg("expression_tree_walker:unrecognized node type: %d", (int)nodeTag(node))));
@@ -2787,6 +2789,7 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             UserSetElem* use = (UserSetElem*)node;
             UserSetElem* newnode = NULL;
             FLATCOPY(newnode, use, UserSetElem, isCopy);
+            MUTATE(newnode->val, use->val, Expr*);
             return (Node*)newnode;
         } break;
         default:

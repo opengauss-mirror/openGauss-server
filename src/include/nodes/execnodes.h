@@ -2707,6 +2707,7 @@ typedef struct RownumState {
 typedef struct UserSetElemState {
     ExprState xprstate;
     UserSetElem* use;
+    ExprState* instate;
 } UserSetElemState;
 /* ----------------
  *		GroupingFuncExprState node

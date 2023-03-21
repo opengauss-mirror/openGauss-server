@@ -1142,6 +1142,126 @@ static Datum ExecEvalRownum(RownumState* exprstate, ExprContext* econtext, bool*
    }
 }
 
+/*----------------------------------------------------------------
+* find_uservar_in_expr: A recursive function 
+* For UserSetElemnt like @var := sin(@var), already remember root
+* as Sin's exprState, and this function is used to find wheter @var
+* is used in here.
+* if_use : true means this @var is used inside a correct expression
+*/
+static void find_uservar_in_expr(ExprState *root, char *return_name, bool *if_use)
+{
+    if(root == NULL) {
+        return;
+    }
+    switch(root->type) {
+        case T_FuncExprState: {
+        FuncExprState* parent = (FuncExprState*)root;
+        ListCell* arg = NULL;
+            foreach(arg,parent->args) {
+                ExprState* child = (ExprState*)lfirst(arg);
+                find_uservar_in_expr(child, return_name, if_use);
+            }
+        } break;
+        case T_ExprState: {
+            if (root->expr != NULL && root->expr->type == T_UserVar) {
+                UserVar* temp = (UserVar*)root->expr;
+                char* usename = temp->name;
+                if(strcmp(return_name, usename) == 0) {
+                    *if_use = true;
+                }
+            }
+        } break;
+        case T_AggrefExprState: {
+            AggrefExprState* parent = (AggrefExprState*)root;
+            ListCell* arg = NULL;
+            foreach(arg, parent->args) {
+                ExprState* child = (ExprState*)lfirst(arg);
+                find_uservar_in_expr(child, return_name, if_use);
+            }
+        } break;
+        case T_MinMaxExprState: {
+            MinMaxExprState* parent = (MinMaxExprState*)root;
+            ListCell* arg = NULL;
+            foreach(arg, parent->args) {
+                ExprState* child = (ExprState*)lfirst(arg);
+                find_uservar_in_expr(child, return_name, if_use);
+            }
+        } break;
+        case T_GenericExprState: {
+            GenericExprState* parent = (GenericExprState*)root;
+            find_uservar_in_expr(parent->arg, return_name, if_use);
+        } break;
+        case T_CaseExprState: {
+            CaseExprState* parent = (CaseExprState*)root;
+            ListCell* arg = NULL;
+            foreach(arg, parent->args) {
+                ExprState* child = (ExprState*)lfirst(arg);
+                find_uservar_in_expr(child, return_name, if_use);
+            }
+        } break;
+        case T_CaseWhenState: {
+            CaseWhenState* parent = (CaseWhenState*)root;
+            find_uservar_in_expr(parent->expr, return_name, if_use);
+            find_uservar_in_expr(parent->result, return_name, if_use);
+        } break;
+        case T_WindowFuncExprState: {
+            WindowFuncExprState* parent = (WindowFuncExprState*)root;
+            ListCell* arg = NULL;
+            foreach(arg, parent->args) {
+                ExprState* child =(ExprState*)lfirst(arg);
+                find_uservar_in_expr(child, return_name, if_use);
+            }
+        } break;
+        case T_BoolExprState: {
+            BoolExprState* parent = (BoolExprState*)root;
+            ListCell* arg = NULL;
+            foreach(arg, parent->args) {
+                ExprState* child = (ExprState*)lfirst(arg);
+                find_uservar_in_expr(child, return_name, if_use);
+            }
+        } break;
+        case T_CoalesceExprState: {
+            CoalesceExprState* parent = (CoalesceExprState*)root;
+            ListCell* arg = NULL;
+            foreach(arg, parent->args) {
+                ExprState* child = (ExprState*)lfirst(arg);
+                find_uservar_in_expr(child, return_name, if_use);
+            }
+        } break;
+        case T_List: {
+            List* parent = (List*)root;
+            ListCell* arg = NULL;
+            foreach(arg, parent) {
+                ExprState* child = (ExprState*)lfirst(arg);
+                find_uservar_in_expr(child, return_name, if_use);
+            }
+        } break;
+        case T_NullTestState: {
+            NullTestState* parent = (NullTestState*)root;
+            find_uservar_in_expr(parent->arg,return_name, if_use);
+        } break;
+        case T_SubPlanState: 
+            break;
+        default: {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
+                errmsg("Unsupported expr type for select @i:= expr.")));
+        }
+    }
+}
+
+
+static char* CStringFromDatum(Oid typeoid, Datum d) 
+{
+    bool isVarlena;
+    Oid outOid = InvalidOid;
+    getTypeOutputInfo(typeoid, &outOid, &isVarlena);
+    char* outStr = OidOutputFunctionCall(outOid, d);
+    if (outStr == NULL)
+        return "";
+    return outStr;
+}
+
 /* ----------------------------------------------------------------
  * ExecEvalUserSetElm: set and Returns the user_define variable value
  * ----------------------------------------------------------------
@@ -1160,16 +1280,57 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
     Assert(isNull);
     *isNull = false;
 
-    node = eval_const_expression_value(NULL, (Node*)elem->val, NULL);
-    if (nodeTag(node) == T_Const) {
-        elemcopy.val = (Expr*)const_expression_to_const(node);
+    bool is_in_table = false;
+    if (econtext->ecxt_innertuple != NULL || econtext->ecxt_outertuple != NULL ||
+        econtext->ecxt_scantuple != NULL) {
+        is_in_table = true;
+    }
+
+    Const* con = NULL;
+    Node* res = NULL;
+    char* value  =  NULL;
+
+    Datum result = ExecEvalExpr(usestate->instate, econtext, isNull, isDone);
+
+    if (*isNull) {
+        con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, result, true, false);
+        res = (Node*)con;
+        elemcopy.val = (Expr*)const_expression_to_const(res);
     } else {
-        elemcopy.val = (Expr*)const_expression_to_const(QueryRewriteNonConstant(node));
+        bool found = false;
+        GucUserParamsEntry *entry = NULL;
+        if (u_sess->utils_cxt.set_user_params_htab != NULL) {
+            UserVar *uservar = (UserVar*)linitial(elem->name);
+            entry = (GucUserParamsEntry*)hash_search(u_sess->utils_cxt.set_user_params_htab,
+                uservar->name, HASH_FIND, &found);
+            if (found) {
+                Const* expr = entry->value;
+                bool if_use = false;
+                if (expr->consttype != (usestate->xprstate).resultType && is_in_table) {
+                    find_uservar_in_expr(usestate->instate, uservar->name, &if_use);
+                    if (if_use) {  
+                        ereport(ERROR, 
+                            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                                 errmsg("Can not change type of user defined variable when use relations.")));
+                    }
+                }
+            }
+        }
+
+        Oid atttypid = exprType((Node*)elem->val);
+
+        value = CStringFromDatum(atttypid, result);
+        con = processResToConst(value, atttypid);
+        if (atttypid == BOOLOID)
+            res = (Node*)con;
+        else
+            res = type_transfer((Node *)con, atttypid, true);
+        elemcopy.val = (Expr*)const_expression_to_const(res);
     }
 
     check_set_user_message(&elemcopy);
 
-    return ((Const*)elemcopy.val)->constvalue;
+    return result;
 }
 /* ----------------------------------------------------------------
 *		ExecEvalParamExec
@@ -6166,6 +6327,7 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
             usestate->use = useexpr;
             state = (ExprState*)usestate;
             state->evalfunc = (ExprStateEvalFunc)ExecEvalUserSetElm;
+            usestate->instate = ExecInitExpr((Expr *)useexpr->val, parent);
         } break;
         default:
             ereport(ERROR,
