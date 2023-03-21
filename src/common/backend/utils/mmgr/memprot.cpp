@@ -624,8 +624,8 @@ static bool memTracker_ReserveMemChunks(int32 numChunksToReserve, bool needProte
                     (uint32)(backendUsedMemInChunk + processMemInChunks) << (chunkSizeInBits - BITS_IN_MB);
                 uint32 reserveMemMB = (uint32)numChunksToReserve << (chunkSizeInBits - BITS_IN_MB);
                 write_stderr("WARNING: process memory allocation %u MB, pid %lu, "
-                             "thread self memory %ld bytes, new %u bytes allocated, statement(%s).\n",
-                    processMemMB, t_thrd.proc_cxt.MyProcPid, t_thrd.utils_cxt.trackedBytes, reserveMemMB,
+                             "thread self memory %ld bytes, new %ld bytes allocated, statement(%s).\n",
+                    processMemMB, t_thrd.proc_cxt.MyProcPid, t_thrd.utils_cxt.trackedBytes, (int64)reserveMemMB << BITS_IN_MB,
                     (t_thrd.postgres_cxt.debug_query_string != NULL) ? t_thrd.postgres_cxt.debug_query_string : "NULL");
 
                 last_print_timestamp = current;
