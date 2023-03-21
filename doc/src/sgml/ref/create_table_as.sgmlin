@@ -11,7 +11,7 @@
 <refsynopsisdiv>
 <synopsis>
 CREATE [ UNLOGGED ] TABLE table_name
-    [ (column_name [, ...] ) ]
+    [ (column_name [ data_type ]  [, ...] ) ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]
@@ -19,6 +19,7 @@ CREATE [ UNLOGGED ] TABLE table_name
     [ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
     AS query
     [ WITH [ NO ] DATA ];
+NOTICE: [data_type] is only available in CENTRALIZED mode and B-format database.
 </synopsis>
 </refsynopsisdiv>
 </refentry>
