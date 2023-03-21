@@ -64,6 +64,7 @@ typedef struct LinkInfo {
 
 class Linker : public BaseObject {
 public:
+    Linker();
     virtual void finish() = 0;
     virtual text* exec(char* conname, const char* sql, bool fail) = 0;
     virtual char* errorMsg() = 0;
@@ -85,6 +86,7 @@ typedef struct remoteConn {
 typedef struct dblink_session_context {
     remoteConn* pconn;
     HTAB* remoteConnHash;
+    bool needFree;
 } dblink_session_context;
 
 /*
@@ -121,12 +123,12 @@ public:
     void getNotify(ReturnSetInfo* rsinfo);
 };
 
-
 class ODBCLinker : public Linker {
 public:
     SQLHENV       envHandle;        /* Handle ODBC environment */
     SQLHDBC       connHandle;       /* Handle connection */
     SQLHSTMT      stmt;             /* Handle sql */
+    char*         msg;              /* error message */
 public:
     ODBCLinker(char* connstr_or_name);
     void finish();
