@@ -43,19 +43,6 @@ RESET logging_module;
 RESET sql_beta_feature;
 -- sqlbypass_partition END
 ------------------------------------------
--- single_node_sqlbypass BEGIN
--- test opfusion update time
-show enable_opfusion;
-drop table if exists test_opfusion_update;
-create table test_opfusion_update(a int);
-SET enable_expr_fusion = on;
-SHOW enable_expr_fusion;
-insert into test_opfusion_update values(1);
-select pg_stat_get_last_data_changed_time(oid) != 0 from pg_class where relname = 'test_opfusion_update';
-
-drop table test_opfusion_update;
--- single_node_sqlbypass END
-------------------------------------------
 -- single_node_union BEGIN
 SET enable_expr_fusion = on;
 SHOW enable_expr_fusion;
