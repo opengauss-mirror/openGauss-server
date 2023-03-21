@@ -642,12 +642,11 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
         WaitIO(buf_desc);
         if ((!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) ||
             (pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR)) {
-            ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("[%d/%d/%d/%d %d-%d] invalidate page failed, buffer is not valid or io error, state = 0x%x",
+            ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%x",
                 tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                 tag->forkNum, tag->blockNum, buf_desc->state)));
-            DmsReleaseBuffer(buf_desc->buf_id + 1, IsSegmentBufferID(buf_id));
-            ret = DMS_ERROR;
+            ret = DMS_SUCCESS;
             break;
         }
 
