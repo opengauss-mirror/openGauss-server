@@ -154,6 +154,9 @@ typedef unsigned short uint16_t;
 #define UNIQUE_OFFSET 7
 #define PRIMARY_KEY_OFFSET 11
 const int MAX_CMK_STORE_SIZE = 64;
+#define  BEGIN_P_STR      " BEGIN_B_PROC " /* used in dolphin type proc body*/
+#define  BEGIN_P_LEN      14
+#define  BEGIN_N_STR      "    BEGIN     " /* BEGIN_P_STR to same length*/
 
 /* Database Security: Data importing/dumping support AES128. */
 #include "utils/aes.h"
@@ -8759,9 +8762,16 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
             tginfo[j].tgenabled = *(PQgetvalue(res, j, i_tgenabled));
             tginfo[j].tgfname = gs_strdup(PQgetvalue(res, j, i_tgfname));
             if (!PQgetisnull(res, j, i_tgdb)) {
+                char *body =  PQgetvalue(res, j, i_tgdb);
                 tginfo[j].tgdb = true;
+                if (pg_strncasecmp(body, BEGIN_P_STR, BEGIN_P_LEN) == 0 ) {
+                    tginfo[j].tgbodybstyle = true;
+                } else {
+                    tginfo[j].tgbodybstyle = false;
+                }
             } else {
                 tginfo[j].tgdb = false;
+                tginfo[j].tgbodybstyle = false;
             }
             if (i_tgdef >= 0) {
                 tginfo[j].tgdef = gs_strdup(PQgetvalue(res, j, i_tgdef));
@@ -13082,6 +13092,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     bool isProcedure = false;
     bool hasProargsrc = false;
     bool isNullProargsrc = false;
+    bool addDelimiter = false;
     const char *funcKind;
     ArchiveHandle* AH = (ArchiveHandle*)fout;
 
@@ -13163,6 +13174,13 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         definer =  PQgetvalue(defres, 0, PQfnumber(defres, "rolname"));
     }
 
+    /* get is defined using delimiter with mysql format */
+    if (pg_strncasecmp(prosrc, BEGIN_P_STR, BEGIN_P_LEN) == 0 ) {
+        addDelimiter = true;
+        errno_t rc = memcpy_s((char*)prosrc, strlen(prosrc), BEGIN_N_STR, BEGIN_P_LEN);
+        securec_check_c(rc, "\0", "\0");
+    }
+
     if (propackageid != NULL) {
         if (strcmp(propackageid, "0") != 0) {
             PQclear(res);
@@ -13192,7 +13210,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
      * is unused, so the tests below for "-" are probably useless.
      */
     if (probin[0] != '\0' && strcmp(probin, "-") != 0) {
-        appendPQExpBuffer(asPart, "AS ");
+        if (!addDelimiter)
+            appendPQExpBuffer(asPart, "AS ");
         appendStringLiteralAH(asPart, probin, fout);
         if (strcmp(prosrc, "-") != 0) {
             appendPQExpBuffer(asPart, ", ");
@@ -13207,12 +13226,16 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
             } else if (disable_dollar_quoting || (strchr(prosrc, '\'') == NULL && strchr(prosrc, '\\') == NULL)) {
                 appendStringLiteralAH(asPart, prosrc, fout);
             } else {
-                appendStringLiteralDQ(asPart, prosrc, NULL);
+                if (addDelimiter)
+                    appendPQExpBuffer(asPart, "%s", prosrc);
+                else
+                    appendStringLiteralDQ(asPart, prosrc, NULL);
             }
         }
     } else {
         if (strcmp(prosrc, "-") != 0) {
-            appendPQExpBuffer(asPart, "AS ");
+            if (!addDelimiter)
+                appendPQExpBuffer(asPart, "AS ");
 
             /* procedure follows Oracle style, without any quoting */
             if (isProcedure || !isNullProargsrc) {
@@ -13220,7 +13243,10 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
             } else if (disable_dollar_quoting) {
                 appendStringLiteralAH(asPart, prosrc, fout);
             } else {
-                appendStringLiteralDQ(asPart, prosrc, NULL);
+                if (addDelimiter)
+                    appendPQExpBuffer(asPart, "%s", prosrc);
+                else
+                    appendStringLiteralDQ(asPart, prosrc, NULL);
             }
         }
     }
@@ -13287,6 +13313,10 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
      */
     appendPQExpBuffer(delqry, "DROP %s IF EXISTS %s.%s%s;\n", funcKind,
                       fmtId(finfo->dobj.nmspace->dobj.name), funcsig, if_cascade);
+
+    if (addDelimiter) {
+        appendPQExpBuffer(q, "delimiter //\n");
+    }
 
     if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
         appendPQExpBuffer(q, "CREATE DEFINER = \"%s\" %s %s ", definer, funcKind, funcfullsig);
@@ -13400,15 +13430,28 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     /* add slash at the end for a procedure */
     if (!fout->encryptfile && (pg_strcasecmp(format, "plain") == 0 || 
         pg_strcasecmp(format, "p") == 0 || pg_strcasecmp(format, "a") == 0
-        || pg_strcasecmp(format, "append") == 0))
-        appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "/\n" : "");
-    else
-        appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "\n" : "");
+        || pg_strcasecmp(format, "append") == 0)) {
+        if (addDelimiter) {
+            appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, "//\n");
+        } else {
+            appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "/\n" : "");
+        }
+    } else {
+         if (addDelimiter) {
+            appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, "//\n");
+        } else {
+            appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "\n" : "");
+        }
+    }
 
     appendPQExpBuffer(labelq, "%s %s\n", funcKind, funcsig);
 
     if (binary_upgrade)
         binary_upgrade_extension_member(q, &finfo->dobj, labelq->data);
+
+    if (addDelimiter) {
+        appendPQExpBuffer(q, "delimiter ;\n");
+    }
 
     ArchiveEntry(fout,
         finfo->dobj.catId,
@@ -21577,15 +21620,25 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
     if (NULL != tginfo->tgdef) {
         if (tginfo->tgdb) {
             appendPQExpBuffer(query, "DROP FUNCTION %s ;\n", tginfo->tgfname);
+            if (tginfo->tgbodybstyle)
+                appendPQExpBuffer(query, "delimiter //\n");
             appendPQExpBuffer(query, "%s", tginfo->tgdef);
             if (*format == 'p') {
-                appendPQExpBuffer(query, "\n/\n");
+                if (tginfo->tgbodybstyle)
+                    appendPQExpBuffer(query, "\n//\n");
+                else
+                    appendPQExpBuffer(query, "\n/\n");
             } else {
-                appendPQExpBuffer(query, ";\n");
+                if (tginfo->tgbodybstyle)
+                    appendPQExpBuffer(query, "\n//\n");
+                else
+                    appendPQExpBuffer(query, ";\n");
             }
         } else {
             appendPQExpBuffer(query, "%s;\n", tginfo->tgdef);
         }
+        if (tginfo->tgbodybstyle)
+            appendPQExpBuffer(query, "delimiter ;\n");
     } else {
         if (tginfo->tgisconstraint) {
             appendPQExpBuffer(query, "CREATE CONSTRAINT TRIGGER ");
