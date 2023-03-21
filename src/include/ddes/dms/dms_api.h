@@ -818,7 +818,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           56
+#define DMS_LOCAL_VERSION           57
 
 #ifdef __cplusplus
 }
