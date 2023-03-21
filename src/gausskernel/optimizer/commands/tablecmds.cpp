@@ -14812,7 +14812,7 @@ static CoercionPathType findFkeyCast(Oid targetTypeId, Oid sourceTypeId, Oid* fu
             /* A previously-relied-upon cast is now gone. */
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_CHARACTER_VALUE_FOR_CAST),
-                    errmsg("could not find cast from %u to %u", sourceTypeId, targetTypeId)));
+                    errmsg("could not find cast from %s to %s", format_type_be(sourceTypeId), format_type_be(targetTypeId))));
     }
 
     return ret;
