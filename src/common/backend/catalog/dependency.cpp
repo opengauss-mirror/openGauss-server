@@ -18,11 +18,13 @@
 #include "knl/knl_variable.h"
 
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
 #include "catalog/gs_db_privilege.h"
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/gs_matview.h"
+#include "catalog/gs_matview_dependency.h"
 #include "catalog/gs_model.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
@@ -111,6 +113,7 @@
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
+#include "utils/palloc.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 #include "datasource/datasource.h"
@@ -183,6 +186,8 @@ static bool object_address_present_add_flags(const ObjectAddress* object, int fl
 static bool stack_address_present_add_flags(const ObjectAddress* object, int flags, ObjectAddressStack* stack);
 static void getRelationDescription(StringInfo buffer, Oid relid);
 static void getOpFamilyDescription(StringInfo buffer, Oid opfid);
+static void MarkMlogColumnAsInvalidOid(ObjectAddresses* addresses);
+
 extern char* pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn);
 extern char* pg_get_functiondef_worker(Oid funcid, int* headerlines);
 
@@ -218,14 +223,105 @@ static void deleteObjectsInList(ObjectAddresses *targetObjects, Relation *depRel
         }
     }
  
+    MarkMlogColumnAsInvalidOid(targetObjects);
+
     /*
      * Delete all the objects in the proper order.
      */
     for (i = 0; i < targetObjects->numrefs; i++) {
         ObjectAddress *thisobj = targetObjects->refs + i;
- 
-        deleteOneObject(thisobj, depRel, flags);
+        if (thisobj->objectId != InvalidOid) {
+            deleteOneObject(thisobj, depRel, flags);
+        }
     }
+}
+
+static bool IsBaseTableInTargets(ObjectAddresses* addresses, Oid baseTblOid)
+{
+    for (int i = 0; i < addresses->numrefs; i++) {
+        ObjectAddress* addr = addresses->refs + i;
+        if (addr->objectId == baseTblOid &&
+            addr->objectSubId == 0) {
+                return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * In the scenario of cascading deletion of tables, anonymous types will be 
+ * associated with deleting fields from the mlog table, resulting in conflicts
+ * with deleting the mlog table when deleting the materialized view. 
+ * Therefore, the associated field deletion operation is marked as invalid, 
+ * and it will not be deleted separately for subsequent deletions
+ */
+static void MarkMlogColumnAsInvalidOid(ObjectAddresses* addresses)
+{
+    /* at least 3 OIDs: a table, a type, and a materialized view.
+     * otherwise, is's unnecessary to check.
+     */
+    const int checkThreshould = 3;
+    if (!addresses || addresses->numrefs < checkThreshould) {
+        return;
+    }
+
+    ArrayOid mlogOids;
+    mlogOids.count = 0;
+    mlogOids.values = (Oid*)palloc0(addresses->numrefs * sizeof(Oid));
+
+    /* get mlog oids */
+    Relation relation = heap_open(MatviewDependencyId, AccessShareLock);
+    for (int i = 0; i < addresses->numrefs; i++) {
+        ObjectAddress* addr = addresses->refs + i;
+        if (addr->objectSubId != 0 ||
+            get_rel_relkind(addr->objectId) != RELKIND_MATVIEW) {
+            continue;
+        }
+
+        /* find mlog oids */
+        TableScanDesc scan;
+        ScanKeyData scanKey;
+        HeapTuple tup = NULL;
+        ScanKeyInit(&scanKey,
+                    Anum_gs_matview_dep_matviewid,
+                    BTEqualStrategyNumber,
+                    F_OIDEQ,
+                    ObjectIdGetDatum(addr->objectId));
+        scan = tableam_scan_begin(relation, SnapshotNow, 1, &scanKey);
+        tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+        if (tup != NULL) {
+            Form_gs_matview_dependency matviewDepForm = (Form_gs_matview_dependency)GETSTRUCT(tup);
+            if (IsBaseTableInTargets(addresses, matviewDepForm->relid)) {
+                mlogOids.values[mlogOids.count++] = matviewDepForm->mlogid;
+            }
+        }
+
+        tableam_scan_end(scan);
+    }
+    heap_close(relation, NoLock);
+
+    if (mlogOids.count == 0) {
+        pfree(mlogOids.values);
+        return;
+    }
+
+    /* mark mlog table's columns oids */
+    for (int addrIdx = 0; addrIdx < addresses->numrefs; addrIdx++) {
+        ObjectAddress* addr = addresses->refs + addrIdx;
+        if (addr->classId != RelationRelationId ||
+            addr->objectSubId == 0) {
+            continue; /* is not a table's column */
+        }
+
+        for (int mlogIdx = 0; mlogIdx < mlogOids.count; mlogIdx++) {
+            if (addr->objectId == mlogOids.values[mlogIdx]) {
+                addr->objectId = InvalidOid;
+                break;
+            }
+        }
+    }
+
+    pfree(mlogOids.values);
 }
 
 /*
