@@ -2429,14 +2429,29 @@ WARNING:  LINE 1: unsupport distributed hint at ')'
 (3 rows)
 
 explain (costs off) select /*+indexscan(''')*/ 1;
-ERROR:  memory is temporarily unavailable
-DETAIL:  Failed on request of size 1024 bytes under queryid 0 in stringinfo.cpp:58.
+WARNING:  LINE 1: unterminated quoted string at ''
+WARNING:  LINE 1: syntax error at ''
+ QUERY PLAN 
+------------
+ Result
+(1 row)
+
 explain (costs off) select /*+indexscan(""")*/ 1;
-ERROR:  memory is temporarily unavailable
-DETAIL:  Failed on request of size 1024 bytes under queryid 0 in stringinfo.cpp:58.
+WARNING:  LINE 1: unterminated quoted identifier at ''
+WARNING:  LINE 1: syntax error at ''
+ QUERY PLAN 
+------------
+ Result
+(1 row)
+
 explain (costs off) select /*+indexscan($$$)*/ 1;
-ERROR:  memory is temporarily unavailable
-DETAIL:  Failed on request of size 1024 bytes under queryid 0 in stringinfo.cpp:58.
+WARNING:  LINE 1: unterminated dollar-quoted string at ''
+WARNING:  LINE 1: syntax error at ''
+ QUERY PLAN 
+------------
+ Result
+(1 row)
+
 create table subpartition_hash_hash (
     c1 int,
     c2 int,
