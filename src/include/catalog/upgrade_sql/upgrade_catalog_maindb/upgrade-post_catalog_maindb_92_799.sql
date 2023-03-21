@@ -1,3 +1,6 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92608 THEN
 DROP FUNCTION IF EXISTS pg_catalog.get_client_info;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 7732;
 CREATE OR REPLACE FUNCTION pg_catalog.get_client_info()
@@ -51,7 +54,6 @@ comment on function PG_CATALOG.pg_ls_waldir() is 'list of files in the WAL direc
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
 
 ------------------------------------------------------------------------------------------------------------------------------------
-DO $DO$
 DECLARE
 ans boolean;
 BEGIN
@@ -87,9 +89,8 @@ BEGIN
 			 user_id, cn_id, unique_query, locktag, lockmode, block_sessionid, final_block_sessionid, wait_status, global_sessionid, xact_start_time, query_start_time, state FROM tt
 		WHERE level = (SELECT MAX(level) FROM tt t1 WHERE t1.sampleid =  tt.sampleid AND t1.sessionid = tt.sessionid);
   end if;
-END$DO$;
+END;
 
-DO $DO$
 DECLARE
   ans boolean;
   user_name text;
@@ -105,12 +106,11 @@ BEGIN
     GRANT SELECT ON TABLE pg_catalog.gs_asp TO PUBLIC;
 
   end if;
-END$DO$;
+END;
 
 DROP EXTENSION IF EXISTS security_plugin CASCADE;
 
 CREATE EXTENSION IF NOT EXISTS security_plugin;
-DO $DO$
 DECLARE
   ans boolean;
 BEGIN
@@ -379,7 +379,7 @@ BEGIN
           END; $$
         LANGUAGE 'plpgsql' NOT FENCED;
     end if;
-END$DO$;
+END;
 
 
 -- gs_stack_int8
@@ -416,7 +416,6 @@ CREATE OR REPLACE FUNCTION pg_catalog.gs_stack(OUT tid bigint, OUT lwtid bigint,
 AS $function$gs_stack$function$;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
 ------------------------------------------------------------------------------------------------------------------------------------
-DO $DO$
 DECLARE
   ans boolean;
   user_name text;
@@ -504,7 +503,7 @@ END IF;
 GRANT SELECT ON pg_catalog.pg_replication_slots TO PUBLIC;
 
 -----------------------------------------------------------------------------
-END$DO$;
+END;
 DROP VIEW IF EXISTS pg_catalog.gs_session_cpu_statistics cascade;
 CREATE VIEW pg_catalog.gs_session_cpu_statistics AS
 SELECT
@@ -706,3 +705,5 @@ AS $function$gs_block_dw_io$function$;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
 
 DROP EXTENSION IF EXISTS hdfs_fdw;
+END IF;
+END$upgrade$;
