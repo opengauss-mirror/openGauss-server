@@ -222,8 +222,6 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
     bool haveDoneSets = false; /* any exhausted set exprs in tlist? */
     ExprDoneCond isDone = ExprSingleResult;
     int argno;
-    ListCell *lc = NULL;
-    char* resname = NULL;
 
     ExecClearTuple(resultSlot);
 
@@ -236,26 +234,14 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
      */
     node->pending_srf_tuples = false;
 
-    if (node->ps.plan->targetlist)
-        lc = list_head(node->ps.plan->targetlist);
-
     for (argno = 0; argno < node->nelems; argno++) {
         Node *elem = node->elems[argno];
         ExprDoneCond *itemIsDone = &node->elemdone[argno];
         Datum *result = &resultSlot->tts_values[argno];
         bool *isnull = &resultSlot->tts_isnull[argno];
 
-        if (lc) {
-            TargetEntry *te = (TargetEntry *)lfirst(lc);
-            resname = te->resname;
-        }
-
-        ELOG_FIELD_NAME_START(resname);
-
         *result = execMakeExprResult(elem, econtext, node->argcontext,
                                      isnull, itemIsDone, &hassrf);
-
-        ELOG_FIELD_NAME_END;
 
         switch (*itemIsDone) {
             case ExprSingleResult:
@@ -275,9 +261,6 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
                 Assert(false);
                 break;
         }
-
-        lc = lnext(lc);
-        resname = NULL;
     }
 
     /* ProjectSet should not be used if there's no SRFs */
@@ -292,9 +275,6 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
             return NULL;
         }
 
-        if (node->ps.plan->targetlist)
-            lc = list_head(node->ps.plan->targetlist);
-
         /*
          * We have some done and some undone sets.	Restart the done ones
          * so that we can deliver a tuple (if possible).
@@ -306,23 +286,12 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
             bool *isnull = &resultSlot->tts_isnull[argno];
 
             if (*itemIsDone != ExprEndResult) {
-                lc = lnext(lc);
-                resname = NULL;
                 continue;
             }
-
-            if (lc) {
-                TargetEntry *te = (TargetEntry *)lfirst(lc);
-                resname = te->resname;
-            }
-
-            ELOG_FIELD_NAME_START(resname);
 
             /*restart the done ones*/
             *result = ExecMakeFunctionResultSet((FuncExprState*)elem, econtext,
                                                 node->argcontext, isnull, itemIsDone);
-
-            ELOG_FIELD_NAME_END;
 
             Assert(hassrf);
 
@@ -343,9 +312,6 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
                 isDone = ExprEndResult;
                 break;
             }
-
-            lc = lnext(lc);
-            resname = NULL;
         }
 
         /*
@@ -358,32 +324,17 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node)
         if (isDone == ExprEndResult) {
             hasresult = false;
 
-            if (node->ps.plan->targetlist)
-                lc = list_head(node->ps.plan->targetlist);
-
             for (argno = 0; argno < node->nelems; argno++) {
                 Node *elem = node->elems[argno];
                 ExprDoneCond *itemIsDone = &node->elemdone[argno];
                 Datum *result = &resultSlot->tts_values[argno];
                 bool *isnull = &resultSlot->tts_isnull[argno];
 
-                if (lc) {
-                    TargetEntry *te = (TargetEntry *)lfirst(lc);
-                    resname = te->resname;
-                }
-
-                ELOG_FIELD_NAME_START(resname);
-
                 while (*itemIsDone == ExprMultipleResult) {
                     *result = ExecMakeFunctionResultSet((FuncExprState*)elem, econtext,
                                                         node->argcontext, isnull, itemIsDone);
                     /* no need for MakeExpandedObjectReadOnly */
                 }
-                
-                ELOG_FIELD_NAME_END;
-
-                lc = lnext(lc);
-                resname = NULL;
             }
         }
     }
