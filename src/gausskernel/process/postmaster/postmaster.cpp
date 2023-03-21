@@ -3335,6 +3335,21 @@ static void CheckExtremeRtoGUCConflicts(void)
                 errhint("Either turn off extreme rto, or turn off hot_standby.")));
     }
 #endif
+
+#ifdef ENABLE_LITE_MODE
+    int recovery_parse_workers = g_instance.attr.attr_storage.recovery_parse_workers;
+    int recovery_redo_workers = g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker;
+    if (recovery_parse_workers * recovery_redo_workers + recovery_parse_workers + recovery_parse_workers +
+            TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM >=
+        MAX_RECOVERY_THREAD_NUM) {
+        ereport(
+            ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+             errmsg("In lite mode, (recovery_parse_workers * (recovery_redo_workers + 2) + %d) cannot be greater than "
+                    "or equal to %d.",
+                    TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM, MAX_RECOVERY_THREAD_NUM)));
+    }
+#endif
 }
 static void CheckRecoveryParaConflict()
 {
