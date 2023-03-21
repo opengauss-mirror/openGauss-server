@@ -25,3 +25,104 @@ drop Materialized view mvtest_tm;
 create incremental MATERIALIZED VIEW mvtest_inc AS select *from test;
 REFRESH incremental MATERIALIZED VIEW mvtest_tm;
 ERROR:  relation "mvtest_tm" does not exist
+-- test matview with anounymous types
+create database test_imv_db with dbcompatibility 'b';
+\c test_imv_db
+-- case 1: drop type first
+create table imv1_t(a set('ad','asf'), c int);
+NOTICE:  CREATE TABLE will create implicit set "imv1_t_a_set" for column "imv1_t.a"
+create incremental materialized view imv1_v as select * from imv1_t;
+create incremental materialized view imv12_v as select * from imv1_t;
+drop type imv1_t_a_set cascade;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table imv1_t column a
+drop cascades to materialized view imv1_v
+drop cascades to materialized view imv12_v
+drop cascades to materialized view imv1_v column a
+--?.*
+drop cascades to materialized view imv12_v column a
+select oid, relname from pg_class where relname like 'mlog%';
+ oid | relname 
+-----+---------
+(0 rows)
+
+drop table imv1_t cascade;
+select oid, relname from pg_class where relname like 'mlog%';
+ oid | relname 
+-----+---------
+(0 rows)
+
+-- case 2: drop view first
+create table imv1_t(a set('ad','asf'), c int);
+NOTICE:  CREATE TABLE will create implicit set "imv1_t_a_set" for column "imv1_t.a"
+create incremental materialized view imv1_v as select * from imv1_t;
+create incremental materialized view imv12_v as select * from imv1_t;
+drop materialized view imv1_v;
+select oid, relname from pg_class where relname like 'mlog%';
+--?.*
+--?.*
+--?.*
+--?.*
+(2 rows)
+
+drop materialized view imv12_v;
+select oid, relname from pg_class where relname like 'mlog%';
+ oid | relname 
+-----+---------
+(0 rows)
+
+drop table imv1_t cascade;
+-- case 3: drop table directly
+create table imv1_t(a set('ad','asf'), c int);
+NOTICE:  CREATE TABLE will create implicit set "imv1_t_a_set" for column "imv1_t.a"
+create incremental materialized view imv1_v as select * from imv1_t;
+create incremental materialized view imv12_v as select * from imv1_t;
+drop table imv1_t cascade;
+NOTICE:  drop cascades to 3 other objects
+--?.*
+drop cascades to materialized view imv1_v
+drop cascades to materialized view imv12_v
+select oid, relname from pg_class where relname like 'mlog%';
+ oid | relname 
+-----+---------
+(0 rows)
+
+-- case 4: multi columns
+create table imv1_t(a set('ad','asf'), b set('b', 'bb'), c int, d set('b', 'bb'));
+NOTICE:  CREATE TABLE will create implicit set "imv1_t_a_set" for column "imv1_t.a"
+NOTICE:  CREATE TABLE will create implicit set "imv1_t_b_set" for column "imv1_t.b"
+NOTICE:  CREATE TABLE will create implicit set "imv1_t_d_set" for column "imv1_t.d"
+create incremental materialized view imv1_v as select * from imv1_t;
+create incremental materialized view imv12_v as select * from imv1_t;
+create incremental materialized view imv13_v as select * from imv1_t;
+\d
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(4 rows)
+
+drop table imv1_t cascade;
+NOTICE:  drop cascades to 6 other objects
+--?.*
+--?.*
+--?.*
+drop cascades to materialized view imv1_v
+drop cascades to materialized view imv12_v
+drop cascades to materialized view imv13_v
+select oid, relname from pg_class where relname like 'mlog%';
+ oid | relname 
+-----+---------
+(0 rows)
+
+\d
+           List of relations
+ Schema | Name | Type | Owner | Storage 
+--------+------+------+-------+---------
+(0 rows)
+
+\c regression
+drop database test_imv_db;
