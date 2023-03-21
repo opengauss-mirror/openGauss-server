@@ -1431,6 +1431,7 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
 
     if (plan->planTree) {
         if (IS_ENABLE_RIGHT_REF(querytree->rightRefState)) {
+            plan->is_flt_frame = false;
             plan->planTree->rightRefState = querytree->rightRefState;
         } else {
             plan->planTree->rightRefState = nullptr;
@@ -2343,7 +2344,7 @@ bool IsRightRefState(List* plantreeList)
     Node* node = (Node*)lfirst(cell);
     if (node && IsA(node, PlannedStmt)) {
         PlannedStmt* stmt = (PlannedStmt*) node;
-        return stmt->planTree && IS_ENABLE_RIGHT_REF(stmt->planTree->rightRefState);
+        return stmt->planTree && IS_ENABLE_RIGHT_REF(stmt->planTree->rightRefState) && !stmt->is_flt_frame;
     }
 
     return false;

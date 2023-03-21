@@ -97,14 +97,14 @@ static bool isVectorEngineSupportSetFunc(Oid funcid);
 template <bool vectorized>
 void init_fcache(
    Oid foid, Oid input_collation, FuncExprState* fcache, MemoryContext fcacheCxt, bool allowSRF, bool needDescForSets);
-static void ShutdownFuncExpr(Datum arg);
+void ShutdownFuncExpr(Datum arg);
 static TupleDesc get_cached_rowtype(Oid type_id, int32 typmod, TupleDesc* cache_field, ExprContext* econtext);
 static void ShutdownTupleDescRef(Datum arg);
 
 template <bool has_refcursor>
 static ExprDoneCond ExecEvalFuncArgs(
    FunctionCallInfo fcinfo, List* argList, ExprContext* econtext, int* plpgsql_var_dno = NULL);
-static void ExecPrepareTuplestoreResult(
+void ExecPrepareTuplestoreResult(
    FuncExprState* fcache, ExprContext* econtext, Tuplestorestate* resultStore, TupleDesc resultDesc);
 static void tupledesc_match(TupleDesc dst_tupdesc, TupleDesc src_tupdesc);
 
@@ -626,10 +626,10 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
 
     attnum = variable->varattno;
 
-   /* This was checked by ExecInitExpr */
-   Assert(attnum != InvalidAttrNumber);
+    /* This was checked by ExecInitExpr */
+    Assert(attnum != InvalidAttrNumber);
 
-   RightRefState* refState = econtext->rightRefState;
+    RightRefState* refState = econtext->rightRefState;
     int index = attnum - 1;
     if (refState && refState->values &&
         (IS_ENABLE_INSERT_RIGHT_REF(refState) ||
@@ -1577,7 +1577,7 @@ static void init_fcache(
     oldcontext = MemoryContextSwitchTo(fcacheCxt);
 
     /* If function returns set, check if that's allowed by caller */
-    if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+    if (fcache->xprstate.is_flt_frame) {
         if (fcache->func.fn_retset && !allowSRF)
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("set-valued function called in context that cannot accept a set")));
@@ -1760,7 +1760,7 @@ void initVectorFcache(Oid foid, Oid input_collation, FuncExprState* fcache, Memo
 * callback function in case a FuncExpr returning a set needs to be shut down
 * before it has been run to completion
 */
-static void ShutdownFuncExpr(Datum arg)
+extern void ShutdownFuncExpr(Datum arg)
 {
    FuncExprState* fcache = (FuncExprState*)DatumGetPointer(arg);
 
@@ -1901,7 +1901,7 @@ static ExprDoneCond ExecEvalFuncArgs(
 * already done in a previous call cycle) and verify that the function
 * returned the expected tuple descriptor.
 */
-static void ExecPrepareTuplestoreResult(
+extern void ExecPrepareTuplestoreResult(
    FuncExprState* fcache, ExprContext* econtext, Tuplestorestate* resultStore, TupleDesc resultDesc)
 {
    fcache->funcResultStore = resultStore;
@@ -2065,7 +2065,7 @@ restart:
    /* Guard against stack overflow due to overly complex expressions */
    check_stack_depth();
 
-   if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+   if (fcache->xprstate.is_flt_frame) {
         /*
         * Initialize function cache if first time through.  The expression node
         * could be either a FuncExpr or an OpExpr.
@@ -2152,7 +2152,7 @@ restart:
            argDone = ExecEvalFuncArgs<true>(fcinfo, arguments, econtext, var_dno);
        else
            argDone = ExecEvalFuncArgs<false>(fcinfo, arguments, econtext);
-       if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+       if (fcache->xprstate.is_flt_frame) {
             if (argDone != ExprSingleResult) {
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("set-valued function called in context that cannot accept a set")));
@@ -2170,7 +2170,7 @@ restart:
                 return (Datum)0;
             }
         }
-        if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        if (fcache->xprstate.is_flt_frame) {
             hasSetArg = false;
         } else {
             hasSetArg = (argDone != ExprSingleResult);
@@ -2428,39 +2428,6 @@ restart:
    set_result_for_plpgsql_language_function_with_outparam(fcache, &result, isNull);
 
    return result;
-}
-
-/*
- *		ExecMakeFunctionResultSet
- *
- * Evaluate the arguments to a set-returning function and then call the
- * function itself.  The argument expressions may not contain set-returning
- * functions (the planner is supposed to have separated evaluation for those).
- */
-Datum ExecMakeFunctionResultSet(FuncExprState *fcache, ExprContext *econtext, bool *isNull, ExprDoneCond *isDone)
-{
-    FuncExpr* func = (FuncExpr*)fcache->xprstate.expr;
-    bool has_refcursor = func_has_refcursor_args(func->funcid, &fcache->fcinfo_data);
-    int cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
-
-    if (has_refcursor) {
-        if (cursor_return_number > 0) {
-            fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResult<true, true, true>;
-            return ExecMakeFunctionResult<true, true, true>(fcache, econtext, isNull, isDone);
-        } else {
-            fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResult<true, false, true>;
-            return ExecMakeFunctionResult<true, false, true>(fcache, econtext, isNull, isDone);
-        }
-    }
-    else {
-        if (cursor_return_number > 0) {
-            fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResult<false, true, true>;
-            return ExecMakeFunctionResult<false, true, true>(fcache, econtext, isNull, isDone);
-        } else {
-            fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResult<false, false, true>;
-            return ExecMakeFunctionResult<false, false, true>(fcache, econtext, isNull, isDone);
-        }
-    }
 }
 
 /*
@@ -3312,37 +3279,10 @@ static Datum ExecEvalFunc(FuncExprState *fcache, ExprContext *econtext, bool *is
     bool has_refcursor = false;
     int cursor_return_number = 0;
 
-   if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
-       if (fcache->xprstate.is_flt_frame) { init_fcache<false>(func->funcid, func->inputcollid, fcache, econtext->ecxt_per_query_memory, false, false);
-        has_refcursor = func_has_refcursor_args(func->funcid, &fcache->fcinfo_data);
-        cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
-
-        Assert(!fcache->func.fn_retset);
-
-        if (has_refcursor) {
-            if (cursor_return_number > 0) {
-                fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResultNoSets<true, true>;
-                return ExecMakeFunctionResultNoSets<true, true>(fcache, econtext, isNull, isDone);
-            } else {
-                fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResultNoSets<true, false>;
-                return ExecMakeFunctionResultNoSets<true, false>(fcache, econtext, isNull, isDone);
-            }
-        } else {
-            if (cursor_return_number > 0) {
-                fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResultNoSets<false, true>;
-                return ExecMakeFunctionResultNoSets<false, true>(fcache, econtext, isNull, isDone);
-            } else {
-                fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResultNoSets<false, false>;
-                return ExecMakeFunctionResultNoSets<false, false>(fcache, econtext, isNull, isDone);
-            }
-        }
-    }
-
-    /* Initialize function lookup info */
-    init_fcache<false>(func->funcid, func->inputcollid, fcache, econtext->ecxt_per_query_memory, false, true);
-
-    has_refcursor = func_has_refcursor_args(func->funcid, &fcache->fcinfo_data);
-    cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
+    if (fcache->xprstate.is_flt_frame) {
+       init_fcache<false>(func->funcid, func->inputcollid, fcache, econtext->ecxt_per_query_memory, false, false);
+       has_refcursor = func_has_refcursor_args(func->funcid, &fcache->fcinfo_data);
+       cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
 
        Assert(!fcache->func.fn_retset);
 
@@ -3363,12 +3303,43 @@ static Datum ExecEvalFunc(FuncExprState *fcache, ExprContext *econtext, bool *is
                return ExecMakeFunctionResultNoSets<false, false>(fcache, econtext, isNull, isDone);
            }
        }
-   }
+    }
 
-   init_fcache<false>(func->funcid, func->inputcollid, fcache, econtext->ecxt_per_query_memory, false, true);
+    /* Initialize function lookup info */
+    init_fcache<false>(func->funcid, func->inputcollid, fcache, econtext->ecxt_per_query_memory, false, true);
 
-   has_refcursor = func_has_refcursor_args(func->funcid, &fcache->fcinfo_data);
-   cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
+    has_refcursor = func_has_refcursor_args(func->funcid, &fcache->fcinfo_data);
+    cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
+
+    if (func->funcformat == COERCE_EXPLICIT_CAST || func->funcformat == COERCE_IMPLICIT_CAST) {
+        target_type = func->funcresulttype;
+        source_type = fcache->fcinfo_data.argTypes[0];
+
+        HeapTuple proc_tuple = SearchSysCache(PROCOID, ObjectIdGetDatum(func->funcid), 0, 0, 0);
+        if (HeapTupleIsValid(proc_tuple)) {
+            Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tuple);
+            source_type = proc_struct->proargtypes.values[0];
+            ReleaseSysCache(proc_tuple);
+        }
+        HeapTuple cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(source_type),
+                                                ObjectIdGetDatum(target_type));
+
+        if (HeapTupleIsValid(cast_tuple)) {
+            Relation cast_rel = heap_open(CastRelationId, AccessShareLock);
+            int castowner_Anum = Anum_pg_cast_castowner;
+            if (castowner_Anum <= (int)HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
+                bool isnull = true;
+                Datum datum = fastgetattr(cast_tuple, Anum_pg_cast_castowner, cast_rel->rd_att, &isnull);
+                if (!isnull) {
+                    u_sess->exec_cxt.cast_owner = DatumGetObjectId(datum);
+                } else {
+                    u_sess->exec_cxt.cast_owner = InvalidCastOwnerId;
+                }
+            }
+            heap_close(cast_rel, AccessShareLock);
+            ReleaseSysCache(cast_tuple);
+        }
+    }
 
    /*
     * We need to invoke ExecMakeFunctionResult if either the function itself
@@ -3443,7 +3414,7 @@ static Datum ExecEvalOper(FuncExprState* fcache, ExprContext* econtext, bool* is
     OpExpr* op = (OpExpr*)fcache->xprstate.expr;
     bool has_refcursor = false;
     int cursor_return_number = 0;
-   if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+   if (fcache->xprstate.is_flt_frame) {
         init_fcache<false>(op->opfuncid, op->inputcollid, fcache, econtext->ecxt_per_query_memory, false, false);
         has_refcursor = func_has_refcursor_args(op->opfuncid, &fcache->fcinfo_data);
         cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
@@ -3562,7 +3533,7 @@ static Datum ExecEvalDistinct(FuncExprState* fcache, ExprContext* econtext, bool
      */
     if (fcache->func.fn_oid == InvalidOid) {
         DistinctExpr* op = (DistinctExpr*)fcache->xprstate.expr;
-        if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        if (fcache->xprstate.is_flt_frame) {
             init_fcache<false>(op->opfuncid, op->inputcollid, fcache, econtext->ecxt_per_query_memory, false, false);
         } else {
             init_fcache<false>(op->opfuncid, op->inputcollid, fcache, econtext->ecxt_per_query_memory, false, true);
@@ -3632,7 +3603,7 @@ static Datum ExecEvalScalarArrayOp(
     * Initialize function cache if first time through
     */
    if (sstate->fxprstate.func.fn_oid == InvalidOid) {
-       if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+       if (sstate->fxprstate.xprstate.is_flt_frame) {
             init_fcache<false>(opexpr->opfuncid, opexpr->inputcollid, &sstate->fxprstate,
                                econtext->ecxt_per_query_memory, false, false);
         } else {
@@ -4703,7 +4674,7 @@ static Datum ExecEvalNullIf(FuncExprState* nullIfExpr, ExprContext* econtext, bo
      */
     if (nullIfExpr->func.fn_oid == InvalidOid) {
         NullIfExpr* op = (NullIfExpr*)nullIfExpr->xprstate.expr;
-        if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
+        if (nullIfExpr->xprstate.is_flt_frame) {
             init_fcache<false>(op->opfuncid, op->inputcollid, nullIfExpr,
                                econtext->ecxt_per_query_memory, false, false);
         } else {
@@ -5669,11 +5640,7 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
 
            fstate->args = (List*)ExecInitExprByRecursion((Expr*)funcexpr->args, parent);
            fstate->func.fn_oid = InvalidOid; /* not initialized */
-           if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
-                fstate->funcReturnsSet = funcexpr->funcretset;
-            } else {
-                fstate->funcReturnsSet = false;
-            }
+           fstate->funcReturnsSet = false;
            state = (ExprState*)fstate;
        } break;
        case T_OpExpr: {
@@ -5684,11 +5651,7 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
            fstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalOper;
            fstate->args = (List*)ExecInitExprByRecursion((Expr*)opexpr->args, parent);
            fstate->func.fn_oid = InvalidOid; /* not initialized */
-           if (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1) {
-                fstate->funcReturnsSet = opexpr->opretset;
-            } else {
-                fstate->funcReturnsSet = false;
-            }
+           fstate->funcReturnsSet = false;
            state = (ExprState*)fstate;
        } break;
        case T_DistinctExpr: {
@@ -6235,6 +6198,43 @@ List* ExecInitExprList(List *nodes, PlanState *parent)
        Expr	   *e = (Expr*)lfirst(lc);
 
        result = lappend(result, ExecInitExpr(e, parent));
+   }
+
+   return result;
+}
+
+/*
+ * Call ExecInitExpr() on a list of expressions, return a list of ExprStates.
+ */
+List* ExecInitExprListByRecursion(List *nodes, PlanState *parent)
+{
+   List	   *result = NIL;
+   ListCell   *lc;
+
+   foreach(lc, nodes)
+   {
+       Expr	   *e = (Expr*)lfirst(lc);
+
+       result = lappend(result, ExecInitExprByRecursion(e, parent));
+   }
+
+   return result;
+}
+
+
+/*
+ * Call ExecInitExpr() on a list of expressions, return a list of ExprStates.
+ */
+List* ExecInitExprListByFlatten(List *nodes, PlanState *parent)
+{
+   List	   *result = NIL;
+   ListCell   *lc;
+
+   foreach(lc, nodes)
+   {
+       Expr	   *e = (Expr*)lfirst(lc);
+
+       result = lappend(result, ExecInitExprByFlatten(e, parent));
    }
 
    return result;

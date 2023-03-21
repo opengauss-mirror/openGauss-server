@@ -267,10 +267,7 @@ static void accum_sum_final(NumericSumAccum *accum, NumericVar *result);
 static void accum_sum_add(NumericSumAccum *accum, NumericVar *var1);
 static void accum_sum_rescale(NumericSumAccum *accum, NumericVar *val);
 static void accum_sum_carry(NumericSumAccum *accum);
-static void accum_sum_reset(NumericSumAccum *accum);
 static void accum_sum_final(NumericSumAccum *accum, NumericVar *result);
-static void accum_sum_copy(NumericSumAccum *dst, NumericSumAccum *src);
-static void accum_sum_combine(NumericSumAccum *accum, NumericSumAccum *accum2);
 
 /*
  * @Description: call corresponding big integer operator functions.
@@ -20083,23 +20080,6 @@ Datum bool_numeric(PG_FUNCTION_ARGS)
  * ----------------------------------------------------------------------
  */
 
-/*
- * Reset the accumulator's value to zero.  The buffers to hold the digits
- * are not free'd.
- */
-static void
-    accum_sum_reset(NumericSumAccum *accum)
-{
-    int			i;
-
-    accum->dscale = 0;
-    for (i = 0; i < accum->ndigits; i++)
-    {
-        accum->pos_digits[i] = 0;
-        accum->neg_digits[i] = 0;
-    }
-}
-
 static void accum_sum_add(NumericSumAccum *accum, NumericVar *val)
 {
     int32   *accum_digits;
@@ -20372,40 +20352,4 @@ void numeric_aggfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype, 
 {
     numeric_transfn_info_change(aggfn_oid, transfn_oid, transtype);
     numeric_finalfn_info_change(aggfn_oid, finalfn_oid);
-}
-
-/*
- * Copy an accumulator's state.
- *
- * 'dst' is assumed to be uninitialized beforehand.  No attempt is made at
- * freeing old values.
- */
-static void
-    accum_sum_copy(NumericSumAccum *dst, NumericSumAccum *src)
-{
-    dst->pos_digits = (int32*)palloc(src->ndigits * sizeof(int32));
-    dst->neg_digits = (int32*)palloc(src->ndigits * sizeof(int32));
-
-    memcpy(dst->pos_digits, src->pos_digits, src->ndigits * sizeof(int32));
-    memcpy(dst->neg_digits, src->neg_digits, src->ndigits * sizeof(int32));
-    dst->num_uncarried = src->num_uncarried;
-    dst->ndigits = src->ndigits;
-    dst->weight = src->weight;
-    dst->dscale = src->dscale;
-}
-
-/*
- * Add the current value of 'accum2' into 'accum'.
- */
-static void
-    accum_sum_combine(NumericSumAccum *accum, NumericSumAccum *accum2)
-{
-    NumericVar	tmp_var;
-
-    init_var(&tmp_var);
-
-    accum_sum_final(accum2, &tmp_var);
-    accum_sum_add(accum, &tmp_var);
-
-    free_var(&tmp_var);
 }
