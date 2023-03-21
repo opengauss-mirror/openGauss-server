@@ -216,6 +216,45 @@ select * from b_bug_2 partition(p1);
 select * from b_bug_2 partition(p2);
 select * from b_bug_2 partition(p3);
 
+--test some bug fix
+create table subpart_range_add (col1 int, col2 int) partition by range( abs(col2) )
+subpartition by hash( abs(col1) )
+(
+    partition p1 values less than (2000)
+    (
+        SUBPARTITION p1sub1,
+        SUBPARTITION p1sub2
+    ),
+    partition p2 values less than (3000)
+    (
+        SUBPARTITION p2sub1,
+        SUBPARTITION p2sub2
+    )
+);
+select pg_get_tabledef('subpart_range_add');
+alter table subpart_range_add add partition p3 values less than(4000);
+select pg_get_tabledef('subpart_range_add');
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'subpart_range_add'));
+
+create table subpart_list_add (col1 int, col2 int) partition by list( abs(col2) )
+subpartition by hash( abs(col1) )
+(
+    partition p1 values(2000)
+    (
+        SUBPARTITION p1sub1,
+        SUBPARTITION p1sub2
+    ),
+    partition p2 values(3000)
+    (
+        SUBPARTITION p2sub1,
+        SUBPARTITION p2sub2
+    )
+);
+select pg_get_tabledef('subpart_list_add');
+alter table subpart_list_add add partition p3 values(4000);
+select pg_get_tabledef('subpart_list_add');
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'subpart_list_add'));
+
 
 --test pg_get_tabledef and pg_dump
 create table testnormalsubpart(a int, b int) partition by range(a) subpartition by range(b)

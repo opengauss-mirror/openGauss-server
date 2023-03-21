@@ -23379,7 +23379,7 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
     decre_partmap_refcount(rel->partMap);
 }
 
-bool IsPartKeyFunc(Relation rel, bool isPartRel, bool forSubPartition)
+bool IsPartKeyFunc(Relation rel, bool isPartRel, bool forSubPartition, PartitionExprKeyInfo* partExprKeyInfo)
 {
     HeapTuple partTuple = NULL;
     if (forSubPartition) {
@@ -23403,10 +23403,12 @@ bool IsPartKeyFunc(Relation rel, bool isPartRel, bool forSubPartition)
     if (!partTuple)
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The partTuple for oid %d can't be found", rel->rd_id)));
 
-    bool isPartExprKeyNull = false;
+    bool isNull = false;
     Datum datum = 0;
-    datum = SysCacheGetAttr(PARTRELID, partTuple, Anum_pg_partition_partkeyexpr, &isPartExprKeyNull);
-    if (isPartExprKeyNull) {
+    datum = SysCacheGetAttr(PARTRELID, partTuple, Anum_pg_partition_partkeyexpr, &isNull);
+    if (partExprKeyInfo)
+        partExprKeyInfo->partkeyexprIsNull = isNull;
+    if (isNull) {
         if (forSubPartition)
             ReleaseSysCache(partTuple);
         else
@@ -23414,15 +23416,19 @@ bool IsPartKeyFunc(Relation rel, bool isPartRel, bool forSubPartition)
         return false;
     }
 
-    char* partkeystr = TextDatumGetCString(datum);
+    char* partKeyStr = TextDatumGetCString(datum);
     Node* partkeyexpr = NULL;
     if (forSubPartition)
         ReleaseSysCache(partTuple);
     else
         heap_freetuple(partTuple);
 
-    partkeyexpr = (Node*)stringToNode_skip_extern_fields(partkeystr);
-    pfree_ext(partkeystr);
+    partkeyexpr = (Node*)stringToNode_skip_extern_fields(partKeyStr);
+    if (!partExprKeyInfo)
+        pfree_ext(partKeyStr);
+    else
+        partExprKeyInfo->partExprKeyStr = partKeyStr;
+
     if (!partkeyexpr)
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The partkeyexpr can't be NULL")));
 
@@ -23687,6 +23693,9 @@ static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partStat
 
     bucketOid = RelationGetBucketOid(rel);
 
+    PartitionExprKeyInfo partExprKeyInfo = PartitionExprKeyInfo();
+    partExprKeyInfo.partkeyIsFunc = IsPartKeyFunc(rel, false, true, &partExprKeyInfo);
+
     List *partitionNameList =
         list_concat(GetPartitionNameList(partState->partitionList), RelationGetPartitionNameList(rel));
     foreach (cell, partState->partitionList) {
@@ -23715,7 +23724,8 @@ static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partStat
                 isTimestamptz,
                 RelationGetStorageType(rel),
                 subpartitionKey,
-                RelationIsPartitionOfSubPartitionTable(rel));
+                RelationIsPartitionOfSubPartitionTable(rel),
+                &partExprKeyInfo);
         } else {
             newPartOid = heapAddRangePartition(pgPartRel,
                 rel->rd_id,
@@ -23728,7 +23738,8 @@ static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partStat
                 RelationGetStorageType(rel),
                 AccessExclusiveLock,
                 subpartitionKey,
-                RelationIsPartitionOfSubPartitionTable(rel));
+                RelationIsPartitionOfSubPartitionTable(rel),
+                &partExprKeyInfo);
         }
 
         Oid partTablespaceOid =
