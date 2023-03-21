@@ -386,3 +386,11 @@ FROM pg_range p1 JOIN pg_proc p ON p.oid = p1.rngsubdiff
 WHERE pronargs != 2
     OR proargtypes[0] != rngsubtype OR proargtypes[1] != rngsubtype
     OR prorettype != 'pg_catalog.float8'::regtype;
+
+-- pg_proc check--
+-- if the ouput here change, should fix the code expr_func_has_refcursor_args
+-- and func_has_refcursor_args.
+-- you should fix the code like 2925、2928
+select distinct(oid) from 
+(select prorettype as rettype, unnest(proargtypes) as argtype, oid from pg_proc) as qq
+where qq.rettype=1790 or qq.argtype=1790 order by oid;

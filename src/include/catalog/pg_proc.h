@@ -427,6 +427,8 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define JSONAGGFUNCOID 3124
 #define JSONOBJECTAGGFUNCOID 3403
 #define GROUPCONCATFUNCOID 4097
+#define CURSORTOXMLOID 2925
+#define CURSORTOXMLSCHEMAOID 2928
 
 /*
  * Symbolic values for prokind column

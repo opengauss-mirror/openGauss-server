@@ -2910,6 +2910,9 @@ bool expr_func_has_refcursor_args(Oid Funcid)
     char* p_argmodes = NULL;
     bool use_cursor = false;
 
+    if (IsSystemObjOid(Funcid) && Funcid != CURSORTOXMLOID && Funcid != CURSORTOXMLSCHEMAOID) {
+        return false;
+    }
     proctup = SearchSysCache(PROCOID, ObjectIdGetDatum(Funcid), 0, 0, 0);
 
     /*
