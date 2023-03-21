@@ -1189,7 +1189,7 @@ other			.
 {setUserIdentifier}	{
 					SET_YYLLOC();
 					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT &&
-						(u_sess->attr.attr_common.enable_set_variable_b_format || ENABLE_SET_VARIABLES || u_sess->attr.attr_common.test_user_host)) {
+						(u_sess->attr.attr_common.enable_set_variable_b_format || ENABLE_SET_VARIABLES || u_sess->attr.attr_common.b_compatibility_user_host_auth)) {
 						yylval->str = pstrdup(yytext + 1);
 						yyextra->is_hint_str = false;
 						return SET_USER_IDENT;
