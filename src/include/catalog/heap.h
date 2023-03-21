@@ -22,6 +22,7 @@
 #include "catalog/objectaddress.h"
 #include "utils/partcache.h"
 #include "utils/partitionmap.h"
+#include "catalog/pg_partition_fn.h"
 
 #define PSORT_RESERVE_COLUMN	"tid"
 #define CHCHK_PSORT_RESERVE_COLUMN(attname)		(strcmp(PSORT_RESERVE_COLUMN, (attname)) == 0)
@@ -150,17 +151,17 @@ extern void heapDropPartitionList(Relation rel, List* partitionList);
 extern Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid,  Oid partTablespace,
                                  Oid bucketOid, RangePartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
                                  const bool* isTimestamptz, StorageType storage_type, LOCKMODE partLockMode, int2vector* subpartition_key = NULL, bool isSubPartition = false,
-                                 bool partkeyexprIsNull = true, bool partkeyIsFunc = false);
+                                 PartitionExprKeyInfo *partExprKeyInfo = NULL);
 
 extern Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid,  Oid partTablespace,
                                 Oid bucketOid, ListPartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
                                 const bool* isTimestamptz, StorageType storage_type, int2vector* subpartition_key = NULL, bool isSubPartition = false,
-                                bool partkeyexprIsNull = true, bool partkeyIsFunc = false);
+                                PartitionExprKeyInfo *partExprKeyInfo = NULL);
 
 extern Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid,  Oid partTablespace,
                                 Oid bucketOid, HashPartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
                                 const bool* isTimestamptz, StorageType storage_type, int2vector* subpartition_key = NULL, bool isSubPartition = false,
-                                bool partkeyexprIsNull = true, bool partkeyIsFunc = false);
+                                PartitionExprKeyInfo *partExprKeyInfo = NULL);
 extern Node *MakeDefaultSubpartition(PartitionState *partitionState, PartitionDefState *partitionDefState);
 extern List *addNewSubPartitionTuplesForPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespace,
     Oid bucketOid, Oid ownerid, Datum reloptions, const bool *isTimestamptz, StorageType storage_type,
@@ -169,8 +170,7 @@ extern List *addNewSubPartitionTuplesForPartition(Relation pgPartRel, Oid partTa
 extern Oid GetPartTablespaceOidForSubpartition(Oid reltablespace, const char* partTablespacename);
 
 extern void heapDropPartitionIndex(Relation parentIndex, Oid partIndexId);
-extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, int2vector* pkey, oidvector *intablespace,
-    Datum interval, Datum maxValues,  Datum transitionPoint, Datum reloptions, bool partkeyexprIsNull = true, bool partkeyIsFunc = false);
+extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, PartitionTupleInfo *partTupleInfo);
 
 extern void heap_truncate_one_part(Relation rel , Oid partOid);
 extern Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool isDDL = false,
