@@ -1,10 +1,12 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92608 then
 DROP FUNCTION IF EXISTS pg_catalog.get_client_info;
 DROP FUNCTION IF EXISTS pg_catalog.pg_ls_tmpdir() CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.pg_ls_tmpdir(oid) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.pg_ls_waldir() CASCADE;
 
 ------------------------------------------------------------------------------------------------------------------------------------
-DO $DO$
 DECLARE
 ans boolean;
 BEGIN
@@ -41,9 +43,8 @@ SELECT sampleid, sample_time, need_flush_sample, databaseid, thread_id, sessioni
        user_id, cn_id, unique_query, locktag, lockmode, block_sessionid, final_block_sessionid, wait_status, global_sessionid FROM tt
 WHERE level = (SELECT MAX(level) FROM tt t1 WHERE t1.sampleid =  tt.sampleid AND t1.sessionid = tt.sessionid);
 end if;
-END$DO$;
+END;
 
-DO $DO$
 DECLARE
 ans boolean;
   user_name text;
@@ -53,8 +54,6 @@ select case when count(*)=1 then true else false end as ans from (select nspname
 if ans = true then
 SELECT SESSION_USER INTO user_name;
 
-
-
 query_str := 'GRANT INSERT,SELECT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER ON TABLE DBE_PERF.local_active_session TO ' || quote_ident(user_name) || ';';
 EXECUTE IMMEDIATE query_str;
 GRANT SELECT ON TABLE DBE_PERF.local_active_session TO PUBLIC;
@@ -62,10 +61,8 @@ GRANT SELECT ON TABLE DBE_PERF.local_active_session TO PUBLIC;
 GRANT SELECT ON TABLE pg_catalog.gs_asp TO PUBLIC;
 
 end if;
-END$DO$;
+END;
 
-
-DO $DO$
 DECLARE
   ans boolean;
 BEGIN
@@ -334,7 +331,8 @@ BEGIN
           END; $$
         LANGUAGE 'plpgsql' NOT FENCED;
     end if;
-END$DO$;
+END;
+
 DROP FUNCTION IF EXISTS pg_catalog.gs_stack() CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_stack(INT8) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_stack(pid bigint) CASCADE;
@@ -368,7 +366,7 @@ SELECT
 FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_realtime_session_info(NULL) AS T
 WHERE S.sessionid = T.threadid;
 GRANT SELECT ON TABLE pg_catalog.gs_session_cpu_statistics TO PUBLIC;
-do $$DECLARE ans boolean;
+DECLARE ans boolean;
 BEGIN
     for ans in select case when count(*)=1 then true else false end as ans  from (select nspname from pg_namespace where nspname='dbe_sql_util' limit 1)
     LOOP
@@ -382,7 +380,7 @@ BEGIN
         end if;
         exit;
     END LOOP;
-END$$;
+END;
 
 DROP SCHEMA IF EXISTS dbe_sql_util cascade;
 
@@ -482,3 +480,5 @@ BEGIN
 END; $$
 LANGUAGE plpgsql NOT FENCED;DROP FUNCTION IF EXISTS pg_catalog.gs_get_history_memory_detail() cascade;DROP FUNCTION IF EXISTS gs_is_dw_io_blocked() CASCADE;
 DROP FUNCTION IF EXISTS gs_block_dw_io(integer, text) CASCADE;
+END IF;
+END $upgrade$;
