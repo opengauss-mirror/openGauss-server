@@ -185,9 +185,14 @@ FuncExprState *ExecInitFunctionResultSet(Expr *expr, ExprContext *econtext, Plan
  * function itself.  The argument expressions may not contain set-returning
  * functions (the planner is supposed to have separated evaluation for those).
  *
+ * This should be called in a short-lived (per-tuple) context, argContext
+ * needs to live until all rows have been returned (i.e. *isDone set to
+ * ExprEndResult or ExprSingleResult).
+ *
  * This is used by nodeProjectSet.c.
  */
-Datum ExecMakeFunctionResultSet(FuncExprState *fcache, ExprContext *econtext, bool *isNull, ExprDoneCond *isDone)
+Datum ExecMakeFunctionResultSet(FuncExprState *fcache, ExprContext *econtext, MemoryContext argContext,
+                                bool *isNull, ExprDoneCond *isDone)
 {
     List	   *arguments;
     Datum		result;
@@ -215,8 +220,19 @@ restart:
      */
     if (fcache->funcResultStore)
     {
+        TupleTableSlot *slot = fcache->funcResultSlot;
+        MemoryContext oldContext;
+        bool foundTup;
         econtext->hasSetResultStore = true;
-        if (tuplestore_gettupleslot(fcache->funcResultStore, true, false, fcache->funcResultSlot)) {
+        /*
+         * Have to make sure tuple in slot lives long enough, otherwise
+         * clearing the slot could end up trying to free something already
+         * freed.
+         */
+        oldContext = MemoryContextSwitchTo(slot->tts_mcxt);
+        foundTup = tuplestore_gettupleslot(fcache->funcResultStore, true, false, fcache->funcResultSlot);
+        MemoryContextSwitchTo(oldContext);
+        if (foundTup) {
             *isDone = ExprMultipleResult;
             if (fcache->funcReturnsTuple) {
                 /* We must return the whole tuple as a Datum. */
@@ -265,10 +281,12 @@ restart:
 
     arguments = fcache->args;
     if (!fcache->setArgsValid) {
+        MemoryContext oldContext = MemoryContextSwitchTo(argContext);
         if (has_refcursor)
             ExecEvalFuncArgs<true>(fcinfo, arguments, econtext, var_dno);
         else
             ExecEvalFuncArgs<false>(fcinfo, arguments, econtext);
+        MemoryContextSwitchTo(oldContext);
     } else {
         /* Reset flag (we may set it again below) */
         fcache->setArgsValid = false;
