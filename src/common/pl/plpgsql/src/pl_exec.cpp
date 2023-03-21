@@ -3166,6 +3166,16 @@ static int exec_stmt_block_b_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_b
         int rc = -1;
 
         List* stmts = block->body;
+        if (stmts == NIL) {
+            /*
+             * Ensure we do a CHECK_FOR_INTERRUPTS() even though there is no
+             * statement.  This prevents hangup in a tight loop if, for instance,
+             * there is a LOOP construct with an empty body.
+             */
+            CHECK_FOR_INTERRUPTS();
+            return PLPGSQL_RC_OK;
+        }
+
         int num_stmts = list_length(stmts);
         int stmtid = 0;
         bool exception_flag = false;
