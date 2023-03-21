@@ -46,11 +46,11 @@ extern TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, i
 
 extern TupleTableSlot* ExecUpdate(ItemPointer tupleid, Oid oldPartitionOid, int2 bucketid, HeapTupleHeader oldtuple,
     TupleTableSlot* slot, TupleTableSlot* planSlot, EPQState* epqstate, ModifyTableState* node, bool canSetTag,
-    bool partKeyUpdate);
+    bool partKeyUpdate, char* partExprKeyStr = NULL);
 
 template <bool useHeapMultiInsert>
 extern TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, TupleTableSlot* planSlot,
-    EState* estate, bool canSetTag, int options, List** partitionList);
+    EState* estate, bool canSetTag, int options, List** partitionList, char* partExprKeyStr = NULL);
 template <bool useHeapMultiInsert>
 extern TupleTableSlot *
 ExecHBucketInsertT(ModifyTableState* state, TupleTableSlot *slot,

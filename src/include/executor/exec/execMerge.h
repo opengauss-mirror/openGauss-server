@@ -23,7 +23,7 @@
 struct VecModifyTableState;
 
 extern void ExecMerge(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, JunkFilter* junkfilter,
-    ResultRelInfo* resultRelInfo);
+    ResultRelInfo* resultRelInfo, char* partExprKeyStr = NULL);
 
 extern void ExecInitMerge(ModifyTableState* mtstate, EState* estate, ResultRelInfo* resultRelInfo);
 
