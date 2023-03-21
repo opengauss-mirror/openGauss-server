@@ -588,7 +588,9 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
         glob->vectorized = false;
     /* Assume work mem is at least 1/4 of query mem */
     glob->minopmem = Min(available_mem / 4, OPT_MAX_OP_MEM);
-    parse_hint_warning = retrieve_query_hint_warning((Node*)parse);
+    if (u_sess->parser_cxt.has_hintwarning) {
+        parse_hint_warning = retrieve_query_hint_warning((Node*)parse);
+    }
 
     /*
      * Set up default exec_nodes, we fist build re-cursively iterate parse->rtable

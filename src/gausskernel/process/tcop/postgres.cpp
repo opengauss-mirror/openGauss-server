@@ -3040,6 +3040,9 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         WLMSetCollectInfoStatusFinish();
     }
 
+    /* Reset hint flag */
+    u_sess->parser_cxt.has_hintwarning = false;
+
     /*
      * Emit duration logging if appropriate.
      */
@@ -8132,6 +8135,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         gstrace_tryblock_exit(true, oldTryCounter);
         Assert(t_thrd.proc->dw_pos == -1);
 
+        /* Reset hint flag */
+        u_sess->parser_cxt.has_hintwarning = false;
+
         volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
         if ((beentry->st_changecount & 1) != 0) {
             pgstat_increment_changecount_after(beentry);
@@ -11921,7 +11927,10 @@ static void exec_batch_bind_execute(StringInfo input_message)
     }
     /* end batch, reset gpc batch flag */
     u_sess->pcache_cxt.gpc_in_batch = false;
-
+    
+    /* Reset hint flag */
+    u_sess->parser_cxt.has_hintwarning = false;
+    
     /* Done with the snapshot used */
     if (snapshot_set)
         PopActiveSnapshot();

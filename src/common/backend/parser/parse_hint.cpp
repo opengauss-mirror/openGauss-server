@@ -1484,6 +1484,10 @@ HintState* create_hintstate_worker(const char* hint_str)
         hstate->cache_plan_hint = keep_last_hint_cell(hstate->cache_plan_hint);
     }
 
+    if (hstate && hstate->hint_warning != NULL) {
+        u_sess->parser_cxt.has_hintwarning = true;
+    }
+
     return hstate;
 }
 
