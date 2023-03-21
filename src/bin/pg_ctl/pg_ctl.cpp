@@ -4620,8 +4620,8 @@ static void do_full_restore(void)
         "select * from pg_catalog.gs_download_obs_file('%s', '%s/base.tar.gz', 'base.tar.gz')", slotname, key_cn);
     securec_check_ss_c(ret, "\0", "\0");
 
-    ret = snprintf_s(tar_cmd, MAXPGPATH, MAX_PATH_LEN - 1, "tar -zvxf %s/base.tar.gz -C %s --strip-components 1",
-        pg_data, pg_data);
+    ret = snprintf_s(tar_cmd, MAXPGPATH, MAX_PATH_LEN - 1,
+        "tar -zvxf \"%s\"/base.tar.gz -C \"%s\" --strip-components 1", pg_data, pg_data);
     securec_check_ss_c(ret, "\0", "\0");
 
 
