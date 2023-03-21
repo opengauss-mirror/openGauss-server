@@ -1521,6 +1521,7 @@ typedef struct ModifyTableState {
     List* targetlists;                    /* for multiple modifying, targetlist's list for each result relation. */
     List* mt_ResultTupleSlots;            /* for multiple modifying, ResultTupleSlot list for build mt_ProjInfos. */
     ProjectionInfo** mt_ProjInfos;        /* for multiple modifying, projectInfo list array for each result relation. */
+    char** partExprKeyStrArray;           /* for multiple modifying, partition expr key */
 } ModifyTableState;
 
 typedef struct CopyFromManagerData* CopyFromManager;

@@ -35,14 +35,14 @@
 #include "utils/rel.h"
 #include "access/heapam.h"
 
-static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot);
+static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, char* partExprKeyStr = NULL);
 static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, JunkFilter* junkfilter,
-    ItemPointer tupleid, HeapTupleHeader oldtuple, Oid oldPartitionOid, int2 bucketid);
+    ItemPointer tupleid, HeapTupleHeader oldtuple, Oid oldPartitionOid, int2 bucketid, char* partExprKeyStr = NULL);
 /*
  * Perform MERGE.
  */
 void ExecMerge(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, JunkFilter* junkfilter,
-    ResultRelInfo* resultRelInfo)
+    ResultRelInfo* resultRelInfo, char* partExprKeyStr)
 {
     ExprContext* econtext = mtstate->ps.ps_ExprContext;
     ItemPointer tupleid;
@@ -158,7 +158,7 @@ void ExecMerge(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, 
      * livelock.
      */
     if (matched)
-        matched = ExecMergeMatched(mtstate, estate, slot, junkfilter, tupleid, oldtuple, oldPartitionOid, bucketid);
+        matched = ExecMergeMatched(mtstate, estate, slot, junkfilter, tupleid, oldtuple, oldPartitionOid, bucketid, partExprKeyStr);
 
     /*
      * Either we were dealing with a NOT MATCHED tuple or ExecMergeNotMatched()
@@ -166,7 +166,7 @@ void ExecMerge(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, 
      * matching tuple.
      */
     if (!matched)
-        ExecMergeNotMatched(mtstate, estate, slot);
+        ExecMergeNotMatched(mtstate, estate, slot, partExprKeyStr);
 }
 
 /*
@@ -367,7 +367,7 @@ TupleTableSlot* ExecMergeProjQual(ModifyTableState* mtstate, List* mergeMatchedA
  * that a NOT MATCHED action must now be executed for the current source tuple.
  */
 static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, JunkFilter* junkfilter,
-    ItemPointer tupleid, HeapTupleHeader oldtuple, Oid oldPartitionOid, int2 bucketid)
+    ItemPointer tupleid, HeapTupleHeader oldtuple, Oid oldPartitionOid, int2 bucketid, char* partExprKeyStr)
 {
     ExprContext* econtext = mtstate->ps.ps_ExprContext;
     List* mergeMatchedActionStates = NIL;
@@ -403,7 +403,8 @@ static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTab
                              epqstate,
                              mtstate,
                              mtstate->canSetTag,
-                             partKeyUpdated);
+                             partKeyUpdated,
+                             partExprKeyStr);
         }
         if (action->commandType == CMD_UPDATE /* && tuple_updated*/)
             InstrCountFiltered2(&mtstate->ps, 1);
@@ -424,7 +425,7 @@ static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTab
 /*
  * Execute the first qualifying NOT MATCHED action.
  */
-static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot)
+static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, char* partExprKeyStr)
 {
     ExprContext* econtext = mtstate->ps.ps_ExprContext;
     List* mergeNotMatchedActionStates = NIL;
@@ -508,7 +509,7 @@ static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, Tuple
 
             estate->es_result_remoterel = estate->es_result_insert_remoterel;
 
-            (void)ExecInsertT<false>(mtstate, myslot, slot, estate, mtstate->canSetTag, hi_options, NULL);
+            (void)ExecInsertT<false>(mtstate, myslot, slot, estate, mtstate->canSetTag, hi_options, NULL, partExprKeyStr);
 
             InstrCountFiltered1(&mtstate->ps, 1);
         }

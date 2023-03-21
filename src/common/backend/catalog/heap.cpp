@@ -6623,7 +6623,7 @@ Oid AddNewIntervalPartition(Relation rel, void* insertTuple, int *partitionno, b
 
     /* it will accept invalidation messages */
     LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
-    partitionRoutingForTuple(rel, insertTuple, u_sess->catalog_cxt.route, false);
+    partitionRoutingForTuple(rel, insertTuple, u_sess->catalog_cxt.route, false, true);
 
     /* if the partition exists, return partition's oid. This may occur if another session do the same work. */
     if (u_sess->catalog_cxt.route->fileExist) {
@@ -7496,12 +7496,12 @@ int lookupHBucketid(oidvector *buckets, int low, int2 bktId)
  * Description	:
  * Notes		:
  */
-Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool isDDL, bool canIgnore)
+Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool isDDL, bool canIgnore, bool partExprKeyIsNull)
 {
     Oid partitionid = InvalidOid;
 
     /* get routing result */
-    partitionRoutingForTuple(rel, tuple, u_sess->catalog_cxt.route, canIgnore);
+    partitionRoutingForTuple(rel, tuple, u_sess->catalog_cxt.route, canIgnore, partExprKeyIsNull);
 
     /* if the partition exists, return partition's oid */
     if (u_sess->catalog_cxt.route->fileExist) {
