@@ -1983,7 +1983,7 @@ record_attr		: attr_name decl_datatype decl_notnull decl_rec_defval
                     }
 			| attr_name T_REFCURSOR decl_notnull decl_rec_defval
                   {
-                        ereport(errstate,
+                        ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmodule(MOD_PLSQL),
                                 errmsg("ref cursor type nested by record is not supported yet."),
@@ -9629,7 +9629,7 @@ make_execsql_stmt(int firsttoken, int location)
                     continue;
                 }
 
-                yyerror("unsupported insert into table from non record type.");
+                yyerror("unsupported insert into table from non record type.", true);
             } else if (tok == T_VARRAY_VAR || tok == T_TABLE_VAR) {
                 if (yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_VAR) {
                     array_data = (PLpgSQL_var *) yylval.wdatum.datum;
