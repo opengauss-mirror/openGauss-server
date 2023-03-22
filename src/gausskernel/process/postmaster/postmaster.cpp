@@ -9538,6 +9538,18 @@ static void sigusr1_handler(SIGNAL_ARGS)
             ereport(LOG, (errmsg("standby cluster could not do switchover")));
         }
     }
+
+    if (CheckSwitchoverTimeoutSignal()) {
+        if (WalRcvIsOnline()) {
+            g_instance.stat_cxt.switchover_timeout = true;
+        }
+    }
+
+    if (CheckPostmasterSignal(PMSIGNAL_SWITCHOVER_TIMEOUT)) {
+        g_instance.stat_cxt.print_stack_flag = true;
+        g_instance.stat_cxt.stack_perf_start = true;
+    }
+
     if (CheckPostmasterSignal(PMSIGNAL_DEMOTE_PRIMARY)) {
         gs_lock_test_and_set_64(&g_instance.stat_cxt.NodeStatResetTime, GetCurrentTimestamp());
         ProcessDemoteRequest();
