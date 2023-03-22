@@ -35,6 +35,7 @@ typedef enum {
     PMSIGNAL_ADVANCE_STATE_MACHINE,    /* advance postmaster's state machine */
     PMSIGNAL_DEMOTE_PRIMARY,           /* start to demote primary */
     PMSIGNAL_PROMOTE_STANDBY,          /* start to promote standby */
+    PMSIGNAL_SWITCHOVER_TIMEOUT,       /* start to backtrace for switchover */
     PMSIGNAL_UPDATE_WAITING,           /* update waiting status to gaussdb.state */
     PMSIGNAL_UPDATE_PROMOTING,         /* update promoting status to gaussdb.state */
     PMSIGNAL_UPDATE_HAREBUILD_REASON,  /* update ha rebuild reason to gaussdb.state */

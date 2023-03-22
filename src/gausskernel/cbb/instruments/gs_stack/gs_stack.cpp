@@ -650,6 +650,31 @@ void get_stack_and_write_result()
     (void)MemoryContextSwitchTo(oldcontext);
 }
 
+void print_all_stack()
+{
+    StringInfoData result;
+    MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.stat_cxt.GsStackContext);
+    PG_TRY();
+    {
+        initStringInfo(&result);
+        get_stack_according_to_lwtid(0, &result);
+    }
+    PG_CATCH();
+    {
+        /* Must reset elog.c's state */
+        (void)MemoryContextSwitchTo(g_instance.stat_cxt.GsStackContext);
+        ErrorData* edata = CopyErrorData();
+        FlushErrorState();
+        appendStringInfo(&result, "%s", edata->message);
+        /* release edata */
+        FreeErrorData(edata);
+    }
+    PG_END_TRY();
+    ereport(LOG, (errmsg("Print all thread stack \n%s", result.data)));
+    FreeStringInfo(&result);
+    (void)MemoryContextSwitchTo(oldcontext);
+}
+
 void save_all_stack_to_tuple(PG_FUNCTION_ARGS)
 {
     const int attrs = 3;
