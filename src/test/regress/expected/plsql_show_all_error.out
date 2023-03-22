@@ -1788,4 +1788,42 @@ NOTICE:  drop cascades to function public.pro(integer)
 drop package if exists aa;
 truncate DBE_PLDEVELOPER.gs_source;
 truncate DBE_PLDEVELOPER.gs_errors;
+DO
+$$
+BEGIN
+  CREATE TABLE t(c float(0));
+END;
+$$;
+ERROR:  precision for type float must be at least 1 bit
+LINE 4:   CREATE TABLE t(c float(0));
+                                 ^
+DO
+$$
+BEGIN
+  CREATE TABLE t(c float(55));
+END;
+$$;
+ERROR:  precision for type float must be less than 54 bits
+LINE 4:   CREATE TABLE t(c float(55));
+                                 ^
+create or replace package pck1 as
+type t1 is ref cursor;
+type t2 is record(c1 t1,c2 int);
+end pck1;
+/
+ERROR:  ref cursor type nested by record is not supported yet.
+DETAIL:  Define a record type of ref cursor type is not supported yet.
+CONTEXT:  compilation of PL/pgSQL package near line 3
+create or replace function testInsertRecordError1() RETURNS int as $$
+declare
+i int;
+begin
+i = 1;
+insert into insert_table values i;
+return 1;
+end;
+$$ language plpgsql;
+ERROR:  unsupported insert into table from non record type. at or near "i"
+LINE 6: insert into insert_table values i;
+                                        ^
 set plsql_show_all_error to off;

@@ -24779,7 +24779,7 @@ opt_float:	'(' Iconst ')'
 					if ($2 < 1) {
 						const char* message = "precision for type float must be at least 1 bit";
 						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-						ereport(errstate,
+						ereport(ERROR,
 								(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 								 errmsg("precision for type float must be at least 1 bit"),
 								 parser_errposition(@2)));
@@ -24791,7 +24791,7 @@ opt_float:	'(' Iconst ')'
 					else {
 						const char* message = "precision for type float must be less than 54 bits";
 						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-						ereport(errstate,
+						ereport(ERROR,
 								(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 								 errmsg("precision for type float must be less than 54 bits"),
 								 parser_errposition(@2)));
