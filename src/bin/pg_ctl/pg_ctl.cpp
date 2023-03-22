@@ -195,6 +195,7 @@ static char recovery_file[MAXPGPATH];
 static char recovery_done_file[MAXPGPATH];
 static char failover_file[MAXPGPATH];
 static char switchover_file[MAXPGPATH];
+static char switchover_timeout_file[MAXPGPATH];
 static char timeout_file[MAXPGPATH];
 static char switchover_status_file[MAXPGPATH];
 static char setrunmode_status_file[MAXPGPATH];
@@ -2733,7 +2734,20 @@ static void do_switchover(uint32 term)
         pg_log(PG_PRINT, _("\n"));
         if ((origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE && run_mode != MAIN_STANDBY_MODE) ||
             (origin_run_mode == CASCADE_STANDBY_MODE && run_mode != STANDBY_MODE)) {
-            pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status.\n"), wait_seconds);
+            pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status or backtrack log.\n"), wait_seconds);
+
+            if ((sofile = fopen(switchover_timeout_file, "w")) == NULL) {
+                pg_log(
+                    PG_WARNING, _(" could not create switchover timeout signal file \"%s\": %s\n"), switchover_timeout_file, strerror(errno));
+                exit(1);
+            }
+            sig = SIGUSR1;
+            if (kill((pid_t)pid, sig) != 0) {
+                pg_log(PG_WARNING, _(" could not send switchover timeout signal (PID: %ld): %s\n"), pid, strerror(errno));
+                if (unlink(switchover_timeout_file) != 0)
+                    pg_log(PG_WARNING, _(" could not send switchover timeout signal (PID: %ld): %s\n"), pid, strerror(errno));
+                exit(1);
+            }
         } else {
             pg_log(PG_PROGRESS, _("done\n"));
             pg_log(PG_PROGRESS, _("switchover completed (%s)\n"), pg_data);
@@ -6229,6 +6243,8 @@ void SetConfigFilePath()
         ret = snprintf_s(failover_file, MAXPGPATH, MAXPGPATH - 1, "%s/failover", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(switchover_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchover", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(switchover_timeout_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchover_timeout", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(primary_file, MAXPGPATH, MAXPGPATH - 1, "%s/primary", pg_data);
         securec_check_ss_c(ret, "\0", "\0");

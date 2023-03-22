@@ -2525,6 +2525,11 @@ static void ProcessStandbyMessage(void)
         case 'C':
             process_clean_slot_message();
             break;
+            
+        case 'b':
+            SendPostmasterSignal(PMSIGNAL_SWITCHOVER_TIMEOUT);
+            break;
+
         default:
             ereport(COMMERROR,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%d\"", msgtype)));
