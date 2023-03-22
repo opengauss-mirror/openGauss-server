@@ -113,8 +113,8 @@ typedef struct SimpleEcontextStackEntry {
  ************************************************************/
 static void plpgsql_exec_error_callback(void* arg);
 
-static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block);
-static int exec_stmt_block_b_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block);
+static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack=NULL);
+static int exec_stmt_block_b_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack);
 static int exec_stmts(PLpgSQL_execstate* estate, List* stmts);
 static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt);
 static int exec_stmt_assign(PLpgSQL_execstate* estate, PLpgSQL_stmt_assign* stmt);
@@ -194,6 +194,12 @@ static void exec_set_sql_cursor_found(PLpgSQL_execstate* estate, PLpgSQL_state s
 static void exec_set_sql_notfound(PLpgSQL_execstate* estate, PLpgSQL_state state);
 static void exec_set_sql_isopen(PLpgSQL_execstate* estate, bool state);
 static void exec_set_sql_rowcount(PLpgSQL_execstate* estate, int rowcount);
+static int expand_stmts(PLpgSQL_execstate* estate, List* stmts, bool& exception_flag, List* block_ptr_stack);
+static int expand_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* stmt, bool& exception_flag, List* block_ptr_stack);
+static int expand_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bool& exception_flag, List* block_ptr_stack);
+static int expand_stmt_if(PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool& exception_flag, List* block_ptr_stack);
+static int expand_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt, bool& exception_flag, List* block_ptr_stack);
+static int expand_stmt_loop(PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt, bool& exception_flag, List* lock_ptr_stack);
 static void plpgsql_create_econtext(PLpgSQL_execstate *estate, MemoryContext saveCxt = NULL);
 static void free_var(PLpgSQL_var* var);
 static PreparedParamsData* exec_eval_using_params(PLpgSQL_execstate* estate, List* params);
@@ -2858,7 +2864,7 @@ static int exec_exception_handler(PLpgSQL_execstate* estate, PLpgSQL_stmt_block*
  * exec_stmt_block			Execute a block of statements
  * ----------
  */
-static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
+static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack)
 {
     volatile int rc = -1;
     int i;
@@ -2987,7 +2993,13 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
 
     if (block->exceptions != NULL) {
         if (block->isDeclareHandlerStmt == true/* mysql_style_exception */) {
-            rc = exec_stmt_block_b_exception(estate, block);
+            if (block_ptr_stack == NIL) {
+                block_ptr_stack = list_make1(block);
+            } else {
+                block_ptr_stack = lappend(block_ptr_stack, block);
+            }
+            rc = exec_stmt_block_b_exception(estate, block, block_ptr_stack);
+            list_delete_ptr(block_ptr_stack, block);
         } else {
             estate->err_text = gettext_noop("during statement block entry");
 
@@ -3153,130 +3165,406 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
  * exec_stmt_block_b_exception			Execute a block of statements like mysql's exception handling style
  * ----------
  */
-static int exec_stmt_block_b_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
+static int exec_stmt_block_b_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack)
 {
-        estate->err_text = gettext_noop("during statement block entry");
-        bool savedisAllowCommitRollback = u_sess->SPI_cxt.is_allow_commit_rollback;
-        bool savedIsSTP = u_sess->SPI_cxt.is_stp;
-        bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
+    estate->err_text = gettext_noop("during statement block entry");
+    int rc = -1;
 
-        ExceptionContext excptContext;
-        Cursor_Data* saved_cursor_data = estate->cursor_return_data;
-        int saved_cursor_numbers = estate->cursor_return_numbers;
-        int rc = -1;
+    List* stmts = block->body;
 
-        List* stmts = block->body;
-        if (stmts == NIL) {
-            /*
-             * Ensure we do a CHECK_FOR_INTERRUPTS() even though there is no
-             * statement.  This prevents hangup in a tight loop if, for instance,
-             * there is a LOOP construct with an empty body.
-             */
-            CHECK_FOR_INTERRUPTS();
-            return PLPGSQL_RC_OK;
-        }
+    int num_stmts = list_length(stmts);
+    int stmtid = 0;
+    if (stmtid >= num_stmts) {
+        estate->block_level --;
+        return PLPGSQL_RC_OK;
+    }
 
-        int num_stmts = list_length(stmts);
-        int stmtid = 0;
-        bool exception_flag = false;
-        for (;stmtid < num_stmts;) {
-            PLpgSQL_stmt* stmt = (PLpgSQL_stmt*)list_nth(stmts, stmtid);
-            stmtid++;
-            exception_flag = false;
-            exec_exception_begin(estate, &excptContext);
-            PG_TRY();
-            {
-                /*
-                 * We need to run the block's statements with a new eval_econtext
-                 * that belongs to the current subtransaction; if we try to use
-                 * the outer econtext then ExprContext shutdown callbacks will be
-                 * called at the wrong times.
-                 */
-                plpgsql_create_econtext(estate);
-                estate->err_text = NULL;
-                /* check condition value */
-                /* Run the block's statements */
-                rc = exec_stmt(estate, stmt);
-    #ifdef ENABLE_MOT
-                // throws ereport
-                MOTCheckTransactionAborted();
-    #endif
-                estate->err_text = gettext_noop("during statement block exit");
-
-                /*
-                 * If the block ended with RETURN, we may need to copy the return
-                 * value out of the subtransaction eval_context.  This is
-                 * currently only needed for scalar result types --- rowtype
-                 * values will always exist in the function's own memory context.
-                 */
-                if (rc == PLPGSQL_RC_RETURN && !estate->retisset && !estate->retisnull && estate->rettupdesc == NULL) {
-                    int16 resTypLen;
-                    bool resTypByVal = false;
-
-                    get_typlenbyval(estate->rettype, &resTypLen, &resTypByVal);
-                    estate->retval = datumCopy(estate->retval, resTypByVal, resTypLen);
-                }
-
-                exec_exception_end(estate, &excptContext);
-                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
-            }
-            PG_CATCH();
-            {
-                exception_flag = true;
-                if (estate->func->debug) {
-                    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[estate->func->debug->comm->comm_idx];
-                    /* client has error and debug on inner funciton, throw current error */
-                    if (debug_comm->hasClientErrorOccured) {
-                        ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
-                                errmsg("Debug client has some error occured.")));
-                    }
-                }
-                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
-                u_sess->SPI_cxt.is_stp = savedIsSTP;
-                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
-
-                estate->cursor_return_data = saved_cursor_data;
-                estate->cursor_return_numbers = saved_cursor_numbers;
-
-                /* reset stream for-loop flag */
-                u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
-
-                if (u_sess->plsql_cxt.b_warning_handler) {
-                    u_sess->plsql_cxt.b_warning_handler = false;
-                }
-
-                /* gs_signal_handle maybe block sigusr2 when accept SIGINT */
-                gs_signal_unblock_sigusr2();
-
-                estate->err_text = gettext_noop("during exception cleanup");
-
-                exec_exception_cleanup(estate, &excptContext);
-    #ifndef ENABLE_MULTIPLE_NODES
-                AutoDopControl dopControl;
-                dopControl.CloseSmp();
-    #endif
-                estate->err_text = gettext_noop("during exec exception handler");
-                rc = exec_exception_handler(estate, block, &excptContext);
-
-                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
-                u_sess->SPI_cxt.is_stp = savedIsSTP;
-                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
-            }
-            PG_END_TRY();
-            AssertEreport(excptContext.old_edata == estate->cur_error,
-                MOD_PLSQL,
-                "save current error should be same error  as estate current error.");
-            // means exception throw from PG_TRY();
-            if (exception_flag) {
-                if (excptContext.handler_type == PLpgSQL_declare_handler::DECLARE_HANDLER_EXIT) {
-                    break;
-                } else if (excptContext.handler_type == PLpgSQL_declare_handler::DECLARE_HANDLER_CONTINUE) {
-                    continue;
-                }
-            }
-        }
+    bool exception_flag = false;
+    rc = expand_stmts(estate, stmts, exception_flag, block_ptr_stack);
     return rc;
 }
+
+static int expand_stmts(PLpgSQL_execstate* estate, List* stmts, bool& exception_flag, List* block_ptr_stack)
+{
+    int rc = -1;
+    int num_stmts = list_length(stmts);
+    int stmtid = 0;
+    bool early_exit = false;
+    if (stmtid >= num_stmts) {
+        estate->block_level --;
+        return PLPGSQL_RC_OK;
+    }
+
+    while(stmtid < num_stmts && !early_exit) {
+        if (exception_flag) {
+            rc = PLPGSQL_RC_EXIT;
+            break;
+        }
+        PLpgSQL_stmt* stmt = (PLpgSQL_stmt*)list_nth(stmts, stmtid);
+        ExceptionContext excptContext;
+        stmtid++;
+        PLpgSQL_stmt_block* block = (PLpgSQL_stmt_block*)lfirst(list_head(block_ptr_stack));
+        switch((enum PLpgSQL_stmt_types)stmt->cmd_type) {
+            case PLPGSQL_STMT_BLOCK:
+                rc = expand_stmt_block(estate, (PLpgSQL_stmt_block*)stmt, exception_flag, block_ptr_stack);
+                break;
+
+            case PLPGSQL_STMT_IF:
+                rc = expand_stmt_if(estate, (PLpgSQL_stmt_if*)stmt, exception_flag, block_ptr_stack);
+                break;
+
+            case PLPGSQL_STMT_CASE:
+                rc = expand_stmt_case(estate, (PLpgSQL_stmt_case*)stmt, exception_flag, block_ptr_stack);
+                break;
+
+            case PLPGSQL_STMT_LOOP:
+                rc = expand_stmt_loop(estate, (PLpgSQL_stmt_loop*)stmt, exception_flag, block_ptr_stack);
+                break;
+
+            case PLPGSQL_STMT_WHILE:
+                rc = expand_stmt_while(estate, (PLpgSQL_stmt_while*)stmt, exception_flag, block_ptr_stack);
+                break;
+
+            default: {
+                bool savedisAllowCommitRollback = u_sess->SPI_cxt.is_allow_commit_rollback;
+                bool savedIsSTP = u_sess->SPI_cxt.is_stp;
+                bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
+
+                Cursor_Data* saved_cursor_data = estate->cursor_return_data;
+                int saved_cursor_numbers = estate->cursor_return_numbers;
+                exec_exception_begin(estate, &excptContext);
+                PG_TRY();
+                {
+                    /*
+                    * We need to run the block's statements with a new eval_econtext
+                    * that belongs to the current subtransaction; if we try to use
+                    * the outer econtext then ExprContext shutdown callbacks will be
+                    * called at the wrong times.
+                    */
+                    plpgsql_create_econtext(estate);
+
+                    estate->err_text = NULL;
+
+                    /* Run the block's statements */
+                    rc = exec_stmt(estate, stmt);
+                    if (stmt->cmd_type == PLPGSQL_STMT_EXIT && rc == PLPGSQL_RC_EXIT) {
+                        early_exit = true;
+                    }
+                    estate->err_text = gettext_noop("during statement block exit");
+
+                    /*
+                    * If the block ended with RETURN, we may need to copy the return
+                    * value out of the subtransaction eval_context.  This is
+                    * currently only needed for scalar result types --- rowtype
+                    * values will always exist in the function's own memory context.
+                    */
+                    if (rc == PLPGSQL_RC_RETURN && !estate->retisset && !estate->retisnull && estate->rettupdesc == NULL) {
+                        int16 resTypLen;
+                        bool resTypByVal = false;
+
+                        get_typlenbyval(estate->rettype, &resTypLen, &resTypByVal);
+                        estate->retval = datumCopy(estate->retval, resTypByVal, resTypLen);
+                    }
+
+                    exec_exception_end(estate, &excptContext);
+                    stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                }
+                PG_CATCH();
+                {
+                    exception_flag = true;
+                    if (estate->func->debug) {
+                        PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[estate->func->debug->comm->comm_idx];
+                        /* client has error and debug on inner funciton, throw current error */
+                        if (debug_comm->hasClientErrorOccured) {
+                            ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
+                                    errmsg("Debug client has some error occured.")));
+                        }
+                    }
+                    stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                    u_sess->SPI_cxt.is_stp = savedIsSTP;
+                    u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+
+                    estate->cursor_return_data = saved_cursor_data;
+                    estate->cursor_return_numbers = saved_cursor_numbers;
+
+                    /* reset stream for-loop flag */
+                    u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
+
+                    /* gs_signal_handle maybe block sigusr2 when accept SIGINT */
+                    gs_signal_unblock_sigusr2();
+
+                    estate->err_text = gettext_noop("during exception cleanup");
+
+                    exec_exception_cleanup(estate, &excptContext);
+#ifndef ENABLE_MULTIPLE_NODES
+                    AutoDopControl dopControl;
+                    dopControl.CloseSmp();
+#endif
+                    estate->err_text = gettext_noop("during exec exception handler");
+                    rc = exec_exception_handler(estate, block, &excptContext);
+
+                    stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                    u_sess->SPI_cxt.is_stp = savedIsSTP;
+                    u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+                }
+                PG_END_TRY();
+
+                AssertEreport(excptContext.old_edata == estate->cur_error,
+                    MOD_PLSQL,
+                    "save current error should be same error  as estate current error.");
+            }
+        }
+        if (exception_flag) {
+            if(block->isDeclareHandlerStmt == false) {
+                exception_flag = false;
+                break;
+            }
+            if (excptContext.handler_type == PLpgSQL_declare_handler::DECLARE_HANDLER_EXIT) {
+                break;
+            } else if (excptContext.handler_type == PLpgSQL_declare_handler::DECLARE_HANDLER_CONTINUE) {
+                exception_flag = false;
+                continue;
+            }
+        }
+    }
+    return rc;
+}
+
+static int expand_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* stmt, bool& exception_flag, List* block_ptr_stack)
+{
+    int rc = -1;
+    if (stmt->exceptions != NULL) {
+        stmt->exceptions->exc_list = list_concat(stmt->exceptions->exc_list,
+                                     ((PLpgSQL_stmt_block*)lfirst(block_ptr_stack->head))->exceptions->exc_list);
+        lcons(stmt,block_ptr_stack);
+    }
+
+    rc = expand_stmts(estate, stmt->body, exception_flag, block_ptr_stack);
+    if (stmt->exceptions != NULL) {
+        list_delete_ptr(block_ptr_stack, stmt);
+    }
+
+    return rc;
+}
+
+static int expand_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bool& exception_flag, List* block_ptr_stack)
+{
+    PLpgSQL_var* t_var = NULL;
+    bool isnull = false;
+    ListCell* l = NULL;
+
+    if (stmt->t_expr != NULL) {
+        /* simple case */
+        Datum t_val;
+        Oid t_oid;
+
+        t_val = exec_eval_expr(estate, stmt->t_expr, &isnull, &t_oid);
+
+        t_var = (PLpgSQL_var*)estate->datums[stmt->t_varno];
+
+        /*
+         * When expected datatype is different from real, change it. Note that
+         * what we're modifying here is an execution copy of the datum, so
+         * this doesn't affect the originally stored function parse tree.
+         */
+        if (t_var->datatype->typoid != t_oid) {
+            t_var->datatype = plpgsql_build_datatype(t_oid, -1, estate->func->fn_input_collation);
+        }
+
+        /* now we can assign to the variable */
+        exec_assign_value(estate, (PLpgSQL_datum*)t_var, t_val, t_oid, &isnull, NULL, NULL);
+
+        exec_eval_cleanup(estate);
+    }
+
+    /* Now search for a successful WHEN clause */
+    foreach (l, stmt->case_when_list) {
+        PLpgSQL_case_when* cwt = (PLpgSQL_case_when*)lfirst(l);
+        bool value = false;
+
+        value = exec_eval_boolean(estate, cwt->expr, &isnull);
+        exec_eval_cleanup(estate);
+        if (!isnull && value) {
+            /* Found it */
+
+            /* We can now discard any value we had for the temp variable */
+            if (t_var != NULL) {
+                free_var(t_var);
+                t_var->value = (Datum)0;
+                t_var->isnull = true;
+            }
+
+            /* Evaluate the statement(s), and we're done */
+            return expand_stmts(estate, cwt->stmts, exception_flag, block_ptr_stack);
+        }
+    }
+
+    /* We can now discard any value we had for the temp variable */
+    if (t_var != NULL) {
+        free_var(t_var);
+        t_var->value = (Datum)0;
+        t_var->isnull = true;
+    }
+
+    /* SQL2003 mandates this error if there was no ELSE clause */
+    if (!stmt->have_else) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CASE_NOT_FOUND),
+                errmodule(MOD_PLSQL),
+                errmsg("case not found"),
+                errhint("CASE statement is missing ELSE part.")));
+    }
+
+    /* Evaluate the ELSE statements, and we're done */
+    return expand_stmts(estate, stmt->else_stmts, exception_flag, block_ptr_stack);
+}
+
+static int expand_stmt_if(PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool& exception_flag, List* block_ptr_stack)
+{
+    bool value = false;
+    bool isnull = false;
+    ListCell* lc = NULL;
+
+    value = exec_eval_boolean(estate, stmt->cond, &isnull);
+    exec_eval_cleanup(estate);
+    if (!isnull && value) {
+        return expand_stmts(estate, stmt->then_body, exception_flag, block_ptr_stack);
+    }
+
+    foreach (lc, stmt->elsif_list) {
+        PLpgSQL_if_elsif* elif = (PLpgSQL_if_elsif*)lfirst(lc);
+
+        value = exec_eval_boolean(estate, elif->cond, &isnull);
+        exec_eval_cleanup(estate);
+        if (!isnull && value) {
+            return expand_stmts(estate, elif->stmts, exception_flag, block_ptr_stack);
+        }
+    }
+
+    return expand_stmts(estate, stmt->else_body, exception_flag, block_ptr_stack);
+}
+
+static int expand_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt, bool& exception_flag, List* block_ptr_stack)
+{
+    bool condition = stmt->condition;
+    for (;;) {
+        int rc;
+        bool value = false;
+        bool isnull = false;
+
+        value = exec_eval_boolean(estate, stmt->cond, &isnull);
+        exec_eval_cleanup(estate);
+
+        if (isnull || (!value && condition) || (value && !condition)) {
+            break;
+        }
+
+        rc = expand_stmts(estate, stmt->body, exception_flag, block_ptr_stack);
+
+        switch (rc) {
+            case PLPGSQL_RC_OK:
+                break;
+
+            case PLPGSQL_RC_EXIT:
+                if (estate->exitlabel == NULL) {
+                    return PLPGSQL_RC_OK;
+                }
+                if (stmt->label == NULL) {
+                    return PLPGSQL_RC_EXIT;
+                }
+                if (strcmp(stmt->label, estate->exitlabel) != 0) {
+                    return PLPGSQL_RC_EXIT;
+                }
+                estate->exitlabel = NULL;
+                return PLPGSQL_RC_OK;
+
+            case PLPGSQL_RC_CONTINUE:
+                if (estate->exitlabel == NULL) {
+                    /* anonymous continue, so re-run loop */
+                    break;
+                } else if (stmt->label != NULL && strcmp(stmt->label, estate->exitlabel) == 0) {
+                    /* label matches named continue, so re-run loop */
+                    estate->exitlabel = NULL;
+                } else {
+                    /* label doesn't match named continue, propagate upward */
+                    return PLPGSQL_RC_CONTINUE;
+                }
+                break;
+
+            case PLPGSQL_RC_RETURN:
+            /*
+             * GOTO target is not in loop_body just return "PLPGSQL_RC_GOTO_UNRESOLVED",
+             * to let the caller to goto-resolve
+             */
+            case PLPGSQL_RC_GOTO_UNRESOLVED:
+                return rc;
+
+            default:
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmodule(MOD_PLSQL),
+                        errmsg("unrecognized return code: %d in PLSQL WHILE statement.", rc)));
+                break;
+        }
+    }
+
+    return PLPGSQL_RC_OK;
+}
+
+static int expand_stmt_loop(PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt, bool& exception_flag, List* block_ptr_stack)
+{
+    for(;;){
+        int rc = expand_stmts(estate, stmt->body, exception_flag, block_ptr_stack);
+
+        switch (rc) {
+            case PLPGSQL_RC_OK:
+                break;
+
+            case PLPGSQL_RC_EXIT:
+                if (estate->exitlabel == NULL) {
+                    return PLPGSQL_RC_OK;
+                }
+                if (stmt->label == NULL) {
+                    return PLPGSQL_RC_EXIT;
+                }
+                if (strcmp(stmt->label, estate->exitlabel) != 0) {
+                    return PLPGSQL_RC_EXIT;
+                }
+                estate->exitlabel = NULL;
+                return PLPGSQL_RC_OK;
+
+            case PLPGSQL_RC_CONTINUE:
+                if (estate->exitlabel == NULL) {
+                    /* anonymous continue, so re-run the loop */
+                    break;
+                } else if (stmt->label != NULL && strcmp(stmt->label, estate->exitlabel) == 0) {
+                    /* label matches named continue, so re-run loop */
+                    estate->exitlabel = NULL;
+                } else {
+                    /* label doesn't match named continue, so propagate upward */
+                    return PLPGSQL_RC_CONTINUE;
+                }
+                break;
+
+            case PLPGSQL_RC_RETURN:
+            /*
+             * GOTO target is not in loop_body just return "PLPGSQL_RC_GOTO_UNRESOLVED",
+             * to let the caller to goto-resolve
+             */
+            case PLPGSQL_RC_GOTO_UNRESOLVED:
+                return rc;
+
+            default:
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmodule(MOD_PLSQL),
+                        errmsg("unrecognized return code: %d in PLSQL LOOP statement.", rc)));
+                break;
+        }
+    }
+    return PLPGSQL_RC_OK;
+}
+
 /* ----------
  * search_goto_target_global			search goto target statement in global
  *				return the searched PLpgSQL statement.

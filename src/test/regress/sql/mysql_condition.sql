@@ -245,6 +245,106 @@ BEGIN
 END;
 /
 call proc_null();
+CREATE TABLE tb1(
+col1 INT PRIMARY KEY,
+col2 text
+);
+CREATE OR REPLACE PROCEDURE proc1(IN col1 INT, IN col2 text) AS
+DECLARE result VARCHAR;
+declare pragma autonomous_transaction;
+BEGIN
+DECLARE CONTINUE HANDLER FOR 23505
+begin
+RAISE NOTICE 'SQLSTATE = %',SQLSTATE;
+end;
+if col1>10 then  
+INSERT INTO tb1 VALUES(col1,'lili');
+END IF;  
+IF col1 <= 10 THEN
+INSERT INTO tb1(col1,col2) VALUES(col1,col2);
+commit;
+ELSE
+INSERT INTO tb1(col1,col2) VALUES(col1,col2);
+rollback;
+END IF;
+END;
+/
+call proc1(1, 1);
+call proc1(1, 5);
+call proc1(11, 11);
+call proc1(11, 5);
+select * from tb1;
+
+CREATE OR REPLACE PROCEDURE proc1(IN a text) AS
+BEGIN
+if a='22012' then
+raise info 'zero error';
+else
+raise info 'emmm....';
+end if;
+end;
+/
+CREATE OR REPLACE PROCEDURE proc2(IN var1 int,var2 int) AS
+begin
+DECLARE CONTINUE HANDLER FOR sqlstate'22012'
+begin
+RAISE NOTICE 'SQLSTATE = %',SQLSTATE;
+var1=0;
+end;
+var1= var1 / var2;
+RAISE INFO 'result: %', var1;
+END;
+/
+CREATE OR REPLACE PROCEDURE proc3(a1 int,b1 int) AS
+BEGIN
+DECLARE CONTINUE HANDLER FOR sqlstate'22012',sqlstate'0A000'
+begin
+RAISE NOTICE 'SQLSTATE = %',SQLSTATE;
+perform proc1(SQLSTATE);
+end;
+a1=a1/b1;
+IF b1 = 0 THEN
+raise info 'b1 is zero';
+create table tb1();
+perform proc2(b1, a1);
+END IF;
+raise info 'END';
+END;
+/
+CALL proc3(1,0);
+CALL proc3(0,0);
+create table company(name varchar(100), loc varchar(100), no integer PRIMARY KEY);
+insert into company values ('macrosoft',    'usa',          001);
+insert into company values ('oracle',       'usa',          002);
+insert into company values ('backberry',    'canada',       003);
+create or replace procedure test_cursor_handler()
+as
+
+  declare company_name    varchar(100);
+  declare company_loc varchar(100);
+  declare company_no  integer;
+begin
+  DECLARE CONTINUE HANDLER FOR unique_violation 
+  begin 
+    RAISE NOTICE 'SQLSTATE = %',SQLSTATE;
+  end;
+  declare c1_all cursor is --cursor without args 
+      select name, loc, no from company order by 1, 2, 3;
+  if not c1_all%isopen then
+      open c1_all;
+  end if;
+  loop
+      fetch c1_all into company_name, company_loc, company_no;
+      exit when c1_all%notfound;
+      insert into company values (company_name,company_loc,company_no);
+      raise notice '% : % : %',company_name,company_loc,company_no;
+  end loop;
+  if c1_all%isopen then
+      close c1_all;
+  end if;
+end;
+/
+call test_cursor_handler();
 \c regression
 drop database mysql_test;
 drop database td_test;
