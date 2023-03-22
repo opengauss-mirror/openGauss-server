@@ -2068,10 +2068,13 @@ int GetPartitionnoFromSequence(PartitionMap *partmap, int partseq)
     return partitionno;
 }
 
-bool PartExprKeyIsNull(Relation rel, Relation partitionRel)
+bool PartExprKeyIsNull(Relation rel, Relation partitionRel, char** partExprKeyStr)
 {
+    if (!rel)
+        ereport(ERROR,(errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("The relation can't be null here.")));
     Relation pgPartitionRel = partitionRel;
     HeapTuple partTuple = NULL;
+    Datum val = 0;
     if (!partitionRel)
         pgPartitionRel = heap_open(PartitionRelationId, RowExclusiveLock);
     if (OidIsValid(rel->parentId))
@@ -2081,7 +2084,10 @@ bool PartExprKeyIsNull(Relation rel, Relation partitionRel)
     if (!partTuple)
         ereport(ERROR,(errcode(ERRCODE_PARTITION_ERROR),errmsg("The partition can't be found")));
     bool isnull = false;
-    fastgetattr(partTuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pgPartitionRel), &isnull);
+    val = fastgetattr(partTuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pgPartitionRel), &isnull);
+    if (!isnull && partExprKeyStr) {
+        *partExprKeyStr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+    }
     if (OidIsValid(rel->parentId))
         ReleaseSysCache(partTuple);
     else

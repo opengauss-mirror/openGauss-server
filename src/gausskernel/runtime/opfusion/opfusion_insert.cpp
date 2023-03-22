@@ -184,37 +184,18 @@ void InsertFusion::refreshParameterIfNecessary()
 }
 
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
-Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel)
+Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel, char* partExprKeyStr)
 {
     Relation pgPartition = NULL;
     HeapTuple partitionedTuple = NULL;
     bool isnull = false;
-    Datum val = 0;
-    char* partkeystr = "";
+    Datum newval = 0;
     Node* partkeyexpr = NULL;
     Relation tmpRel = NULL;
-    pgPartition = relation_open(PartitionRelationId, AccessShareLock);
-    if (PointerIsValid(partRel))
-        partitionedTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partRel->rd_id));
-    else
-        partitionedTuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, rel->rd_id);
-    val = fastgetattr(partitionedTuple, Anum_pg_partition_partkeyexpr, pgPartition->rd_att, &isnull);
-    if (isnull) {
-        relation_close(pgPartition, AccessShareLock);
-        if (PointerIsValid(partRel))
-            ReleaseSysCache(partitionedTuple);
-        else
-            heap_freetuple(partitionedTuple);
-        return 0;
-    }
-	int2vector* partitionKey = NULL;
-	Oid* partitionKeyDataType = NULL;
-    partitionKey = getPartitionKeyAttrNo(
-        &(partitionKeyDataType), partitionedTuple, RelationGetDescr(pgPartition), RelationGetDescr(rel));
-    partkeystr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
-    relation_close(pgPartition, AccessShareLock);
-    if (pg_strcasecmp(partkeystr, "") != 0) {
-        partkeyexpr = (Node*)stringToNode_skip_extern_fields(partkeystr);                      
+    if (partExprKeyStr && pg_strcasecmp(partExprKeyStr, "") != 0) {
+        partkeyexpr = (Node*)stringToNode_skip_extern_fields(partExprKeyStr);                      
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR), errmsg("The partition expr key can't be null for table %s", NameStr(rel->rd_rel->relname))));
     }
     (void)lockNextvalWalker(partkeyexpr, NULL);
     ExprState *exprstate = ExecPrepareExpr((Expr *)partkeyexpr, estate);
@@ -222,8 +203,7 @@ Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
     econtext = GetPerTupleExprContext(estate);
     econtext->ecxt_scantuple = slot;
     isnull = false;
-    val = 0;
-    val = ExecEvalExpr(exprstate, econtext, &isnull, NULL);
+    newval = ExecEvalExpr(exprstate, econtext, &isnull, NULL);
     Const** boundary = NULL;
     if (PointerIsValid(partRel))
         tmpRel = partRel;
@@ -240,12 +220,8 @@ Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
         ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR), errmsg("Unsupported partition type : %d", tmpRel->partMap->type)));
 
     if (!isnull)
-        val = datumCopy(val, boundary[0]->constbyval, boundary[0]->constlen);
-    if (PointerIsValid(partRel))
-        ReleaseSysCache(partitionedTuple);
-    else
-        heap_freetuple(partitionedTuple);
-    return val;
+        newval = datumCopy(newval, boundary[0]->constbyval, boundary[0]->constlen);
+    return newval;
 }
 
 static void ExecReleaseResource(Tuple tuple, TupleTableSlot *slot, ResultRelInfo *result_rel_info, EState *estate,
