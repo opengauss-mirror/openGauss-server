@@ -1660,7 +1660,6 @@ typedef struct knl_u_plpgsql_context {
     bool pragma_autonomous; /* save autonomous flag */
     char* debug_query_string;
     bool is_insert_gs_source; /* is doing insert gs_source? */
-    bool b_warning_handler;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
