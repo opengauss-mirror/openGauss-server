@@ -281,20 +281,6 @@ ExecReadyInterpretedExpr(ExprState *state)
 	state->evalfunc = ExecInterpExpr;
 }
 
-static inline void
-UpdateElogFieldName(ExprState *state)
-{
-	if (state->expr) {
-		ListCell *lc = lnext(state->current_targetentry);
-		if (lc == NULL)
-			return;
-
-		TargetEntry *te = (TargetEntry*)lfirst(lc);
-		state->current_targetentry = lc;
-		ELOG_FIELD_NAME_UPDATE(te->resname);
-	}
-}
-
 static bool IsTableOfFunc(Oid funcOid)
 {
     const Oid array_function_start_oid = 7881;
@@ -780,8 +766,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			resultslot->tts_values[resultnum] = innerslot->tts_values[attnum];
 			resultslot->tts_isnull[resultnum] = innerslot->tts_isnull[attnum];
 
-			UpdateElogFieldName(state);
-
 			EEO_NEXT();
 		}
 
@@ -798,8 +782,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			Assert(resultnum >= 0 && resultnum < resultslot->tts_tupleDescriptor->natts);
 			resultslot->tts_values[resultnum] = outerslot->tts_values[attnum];
 			resultslot->tts_isnull[resultnum] = outerslot->tts_isnull[attnum];
-
-			UpdateElogFieldName(state);
 
 			EEO_NEXT();
 		}
@@ -818,8 +800,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			resultslot->tts_values[resultnum] = scanslot->tts_values[attnum];
 			resultslot->tts_isnull[resultnum] = scanslot->tts_isnull[attnum];
 
-			UpdateElogFieldName(state);
-
 			EEO_NEXT();
 		}
 
@@ -830,8 +810,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			Assert(resultnum >= 0 && resultnum < resultslot->tts_tupleDescriptor->natts);
 			resultslot->tts_values[resultnum] = state->resvalue;
 			resultslot->tts_isnull[resultnum] = state->resnull;
-
-			UpdateElogFieldName(state);
 
 			EEO_NEXT();
 		}
@@ -847,8 +825,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 					MakeExpandedObjectReadOnlyInternal(state->resvalue);
 			else
 				resultslot->tts_values[resultnum] = state->resvalue;
-
-			UpdateElogFieldName(state);
 
 			EEO_NEXT();
 		}

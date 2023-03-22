@@ -342,6 +342,7 @@ extern FuncExprState *ExecInitTableFunctionResult(Expr *expr, ExprContext *econt
 extern FuncExprState *ExecInitFunctionResultSet(Expr *expr, ExprContext *econtext, PlanState *parent);
 extern Datum ExecMakeFunctionResultSet(FuncExprState *fcache,
                                        ExprContext *econtext,
+                                       MemoryContext argContext,
                                        bool *isNull,
                                        ExprDoneCond *isDone);
 
