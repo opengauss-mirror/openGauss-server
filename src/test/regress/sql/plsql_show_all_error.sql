@@ -1146,4 +1146,35 @@ drop package if exists z_pk2;
 drop package if exists aa;
 truncate DBE_PLDEVELOPER.gs_source;
 truncate DBE_PLDEVELOPER.gs_errors;
+
+DO
+$$
+BEGIN
+  CREATE TABLE t(c float(0));
+END;
+$$;
+
+DO
+$$
+BEGIN
+  CREATE TABLE t(c float(55));
+END;
+$$;
+
+create or replace package pck1 as
+type t1 is ref cursor;
+type t2 is record(c1 t1,c2 int);
+end pck1;
+/
+
+create or replace function testInsertRecordError1() RETURNS int as $$
+declare
+i int;
+begin
+i = 1;
+insert into insert_table values i;
+return 1;
+end;
+$$ language plpgsql;
+
 set plsql_show_all_error to off;
