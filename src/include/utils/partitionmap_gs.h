@@ -141,7 +141,7 @@ typedef struct HashPartitionMap {
         }                                                                              \
     } while (0)
 
-#define partitionRoutingForTuple(rel, tuple, partIdentfier, canIgnore)                                                \
+#define partitionRoutingForTuple(rel, tuple, partIdentfier, canIgnore, partExprKeyIsNull)                             \
     do {                                                                                                              \
         TupleDesc tuple_desc = NULL;                                                                                  \
         int2vector *partkey_column = NULL;                                                                            \
@@ -157,8 +157,7 @@ typedef struct HashPartitionMap {
         tuple_desc = (rel)->rd_att;                                                                                   \
         for (i = 0; i < partkey_column_n; i++) {                                                                      \
             isnull = false;                                                                                           \
-            bool isNull = PartExprKeyIsNull(rel, NULL);                                                               \
-            if (isNull) {                                                                                             \
+            if (partExprKeyIsNull) {                                                                                  \
                 column_raw = (is_ustore)                                                                              \
                             ? UHeapFastGetAttr((UHeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull)   \
                             : fastgetattr((HeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull);        \
