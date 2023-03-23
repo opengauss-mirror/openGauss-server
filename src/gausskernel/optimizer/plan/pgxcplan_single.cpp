@@ -130,11 +130,13 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
 
         re_query = check_shippable(&stream_unsupport, query, &context);
     } else {
-        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-            NOTPLANSHIPPING_LENGTH,
-            "\"enable_stream_operator\" is off");
-        securec_check_ss_c(sprintf_rc, "\0", "\0");
-        output_unshipped_log();
+        if (unlikely(u_sess->attr.attr_sql.enable_unshipping_log)) {
+            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                NOTPLANSHIPPING_LENGTH,
+                "\"enable_stream_operator\" is off");
+            securec_check_ss_c(sprintf_rc, "\0", "\0");
+            output_unshipped_log();
+        }
         set_stream_off();
     }
 

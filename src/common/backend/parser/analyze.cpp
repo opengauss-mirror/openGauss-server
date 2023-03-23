@@ -37,6 +37,7 @@
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 #endif
+#include "catalog/pg_auth_history.h"
 #include "catalog/pg_type.h"
 #include "executor/node/nodeModifyTable.h"
 #include "foreign/foreign.h"
@@ -1708,15 +1709,6 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         }
     }
 
-    /*
-     * Insert into relation pg_auth_history is not allowed.
-     * We update it only when some user's password has been changed.
-     */
-    if (pg_strcasecmp(stmt->relation->relname, "pg_auth_history") == 0) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OPERATION), errmsg("Not allowed to insert into relation pg_auth_history.")));
-    }
-
     /* process the WITH clause independently of all else */
     if (stmt->withClause) {
         qry->hasRecursive = stmt->withClause->recursive;
@@ -1771,6 +1763,15 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     qry->resultRelations = setTargetTables(pstate, list_make1(stmt->relation), false, false, targetPerms);
     targetrel = (Relation)linitial(pstate->p_target_relation);
+    /*
+     * Insert into relation pg_auth_history is not allowed.
+     * We update it only when some user's password has been changed.
+     */
+    if (targetrel != NULL && RelationGetRelid(targetrel) == AuthHistoryRelationId) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION), errmsg("Not allowed to insert into relation pg_auth_history.")));
+    }
+
     if (targetrel != NULL &&
         ((unsigned int)RelationGetInternalMask(targetrel) & INTERNAL_MASK_DINSERT)) {
         ereport(ERROR,
@@ -3953,7 +3954,7 @@ static void CheckUpdateRelation(Relation targetrel)
                 errmsg("Un-support feature"),
                 errdetail("internal relation doesn't allow UPDATE")));
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
     // check if the target relation is being redistributed in read only mode
     if (!u_sess->attr.attr_sql.enable_cluster_resize && targetrel != NULL &&
         RelationInClusterResizingWriteErrorMode(targetrel)) {
@@ -3961,6 +3962,7 @@ static void CheckUpdateRelation(Relation targetrel)
             (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
                 errmsg("%s is redistributing, please retry later.", targetrel->rd_rel->relname.data)));
     }
+#endif
 }
 
 void UpdateParseCheck(ParseState *pstate, Node *qry)

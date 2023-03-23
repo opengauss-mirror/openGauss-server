@@ -652,6 +652,7 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
 
     MemoryContextSwitchTo(old_context);
 
+#ifdef ENABLE_MULTIPLE_NODES
     /* Are there OBS/HDFS ForeignScan node(s) in the plan tree? */
     u_sess->opt_cxt.srvtype = T_INVALID;
     u_sess->opt_cxt.has_obsrel = has_dfs_node(top_plan, glob);
@@ -667,7 +668,7 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
 
         top_plan = try_accelerate_plan(top_plan, root, glob);
     }
-
+#endif
     /*
      * If creating a plan for a scrollable cursor, make sure it can run
      * backwards on demand.  Add a Material node at the top at need.
@@ -703,6 +704,7 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
      */
     top_plan = try_deparse_agg(top_plan, root, glob);
 
+#ifdef ENABLE_MULTIPLE_NODES
     /*
      * just for cooperation analysis on source data cluster,
      * reassign dn list scaned of RemoteQuery node for the request from client cluster.
@@ -723,7 +725,7 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
         }
         materialize_remote_query(top_plan, &materialize, sort_to_store);
     }
-
+#endif
     /*
      * Handle subplan situation.
      * We have to put this under set_plan_references() function,
@@ -958,11 +960,14 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
                     result->query_mem[1])));
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
     /* data redistribution for DFS table. */
     if (u_sess->attr.attr_sql.enable_cluster_resize && root->query_level == 1 &&
         root->parse->commandType == CMD_INSERT) {
         result->dataDestRelIndex = root->dataDestRelIndex;
-    } else {
+    } else
+#endif
+    {
         result->dataDestRelIndex = 0;
     }
 
@@ -1515,6 +1520,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
         separate_rowmarks(root);
 #endif
 
+#ifdef ENABLE_MULTIPLE_NODES
     /*
      * When the SQL dose not support stream mode in coordinator node, must send remotequery
      * to datanode, and need not expand dfs table into dfs main table and delta table.
@@ -1526,7 +1532,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
          */
         expand_dfs_tables(root);
     }
-
+#endif
     /*
      * Expand any rangetable entries that are inheritance sets into "append
      * relations".  This can add entries to the rangetable, but they must be

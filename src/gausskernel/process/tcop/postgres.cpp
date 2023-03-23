@@ -1508,9 +1508,9 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
             output_utility_hint_warning((Node*)query, DEBUG1);
         } else {
             query->boundParamsQ = boundParams;
-
+#ifdef ENABLE_MULTIPLE_NODES
             bool is_insert_multiple_values = is_insert_multiple_values_query_in_gtmfree(query);
-
+#endif
             /* Temporarily apply SET hint using PG_TRY for later recovery */
             int nest_level = apply_set_hint(query);
             PG_TRY();
@@ -1525,7 +1525,7 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
             PG_END_TRY();
         
             recover_set_hint(nest_level);
- 
+#ifdef ENABLE_MULTIPLE_NODES
             /* When insert multiple values query is a generate plan,
              * we don't consider whether it can be executed on a single dn.
              * Because it can be executed on a single DN only in custom plan.
@@ -1536,7 +1536,7 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
                 check_gtm_free_plan((PlannedStmt *)stmt,
                     (u_sess->attr.attr_sql.explain_allow_multinode || ClusterResizingInProgress()) ? WARNING : ERROR);
             }
-
+#endif
             ps = (PlannedStmt*)stmt;
             check_plan_mergeinto_replicate(ps, ERROR);
 
@@ -1549,8 +1549,10 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
 
     t_thrd.time_cxt.is_abstimeout_in = false;
 
-    /* Set warning that no-analyzed relation name to log. */
-    output_noanalyze_rellist_to_log(LOG);
+    if (!u_sess->attr.attr_common.enable_iud_fusion) {
+        /* Set warning that no-analyzed relation name to log. */
+        output_noanalyze_rellist_to_log(LOG);
+    }
 
     return stmt_list;
 }

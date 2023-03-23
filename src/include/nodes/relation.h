@@ -465,6 +465,7 @@ typedef struct PlannerInfo {
     Bitmapset *param_upper;
 	
 	bool hasRownumQual;
+    bool hasRownumCheck;
     List *origin_tlist;
     struct PlannerTargets *planner_targets;
 } PlannerInfo;
