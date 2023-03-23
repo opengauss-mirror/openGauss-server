@@ -94,7 +94,7 @@ typedef struct TableSpaceOpts {
     {                                                                                                          \
         if (RelationIsSegmentTable(relation)) {                                                            \
             TableSpaceUsageManager::IsExceedMaxsize(relation->rd_node.spcNode, 0, true);                       \
-        } else if (relation->rd_id != ClassOidIndexId) {                                                                                               \
+        } else if (relation->rd_id >= FirstBootstrapObjectId) {                                                \
             TableSpaceUsageManager::IsExceedMaxsize(relation->rd_node.spcNode, requestSize, false);            \
         }                                                                                                      \
         perm_space_increase(                                                                                   \
