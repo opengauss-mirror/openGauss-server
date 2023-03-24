@@ -1309,21 +1309,31 @@ static
 #endif
 
 /* Read the client certificate file */
-int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool *have_cert)
+int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool *have_cert, bool enc)
 {
     struct stat buf;
     char fnbuf[MAXPGPATH] = {0};
     char sebuf[256];
     errno_t rc = 0;
     int nRet = 0;
-    
-    if ((conn->sslcert != NULL) && strlen(conn->sslcert) > 0) {
-        rc = strncpy_s(fnbuf, MAXPGPATH, conn->sslcert, strlen(conn->sslcert));
+    char *cert;
+    const char *certfile;
+#ifdef USE_TASSL
+    cert = enc?conn->sslenccert:conn->sslcert;
+    certfile = enc?USER_ENC_CERT_FILE:USER_CERT_FILE;
+#else
+    cert = conn->sslcert;
+    certfile = USER_CERT_FILE;
+#endif
+
+    if ((cert != NULL) && strlen(cert) > 0) {
+        rc = strncpy_s(fnbuf, MAXPGPATH, cert, strlen(cert));
         securec_check_c(rc, "\0", "\0");
         fnbuf[MAXPGPATH - 1] = '\0';
     } else if (have_homedir) {
-        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, USER_CERT_FILE);
+        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, certfile);
         securec_check_ss_c(nRet, "\0", "\0");
+
     } else
         fnbuf[0] = '\0';
     if (fnbuf[0] == '\0') {
@@ -1368,7 +1378,7 @@ int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bo
         }
 #endif
         /* set the default password for certificate/private key loading */
-        if (init_client_ssl_passwd(conn->ssl, fnbuf, conn->pguser, conn, false) != 0) {
+        if (init_client_ssl_passwd(conn->ssl, fnbuf, conn->pguser, conn, enc) != 0) {
 #ifdef ENABLE_THREAD_SAFETY
             (void)pthread_mutex_unlock(&ssl_config_mutex);
 #endif
@@ -1417,7 +1427,7 @@ int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bo
     return 0;
 }
 
-int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool have_cert)
+int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool have_cert, bool enc)
 {
     struct stat buf;
     char fnbuf[MAXPGPATH] = {0};
@@ -1429,189 +1439,23 @@ int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, boo
      * colon in the name. The exception is if the second character is a colon,
      * in which case it can be a Windows filename with drive specification.
      */
-    if (have_cert && (conn->sslkey != NULL) && strlen(conn->sslkey) > 0) {
-        rc = strncpy_s(fnbuf, MAXPGPATH, conn->sslkey, strlen(conn->sslkey));
-        securec_check_c(rc, "\0", "\0");
-        fnbuf[MAXPGPATH - 1] = '\0';
-    } else if (have_homedir) {
-        /* No PGSSLKEY specified, load default file */
-        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, USER_KEY_FILE);
-        securec_check_ss_c(nRet, "\0", "\0");
-    } else
-        fnbuf[0] = '\0';
-
-    if (have_cert && fnbuf[0] != '\0') {
-        /* read the client key from file */
-        if (stat(fnbuf, &buf) != 0) {
-            printfPQExpBuffer(
-                &conn->errorMessage, libpq_gettext("certificate present, but not private key file \"%s\"\n"), fnbuf);
-            return -1;
-        }
-        /* check key file permission */
-#ifndef WIN32
-        if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
-            printfPQExpBuffer(
-                &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600) or less.\n"), fnbuf);
-            return -1;
-        }
-#endif
-        if (SSL_use_PrivateKey_file(conn->ssl, fnbuf, SSL_FILETYPE_PEM) != 1) {
-            char* err = SSLerrmessage();
-
-            printfPQExpBuffer(
-                &conn->errorMessage, libpq_gettext("could not load private key file \"%s\": %s\n"), fnbuf, err);
-            SSLerrfree(err);
-            return -1;
-        }
-    }
-        /* verify that the cert and key go together */
-    if (have_cert && SSL_check_private_key(conn->ssl) != 1) {
-        char* err = SSLerrmessage();
-
-        printfPQExpBuffer(
-            &conn->errorMessage, libpq_gettext("certificate does not match private key file \"%s\": %s\n"), fnbuf, err);
-        SSLerrfree(err);
-        return -1;
-    }
-
-    /* set up the allowed cipher list */
-    if (!set_client_ssl_ciphers()) {
-        char* err = SSLerrmessage();
-        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("SSL_ctxSetCipherList \"%s\": %s\n"), fnbuf, err);
-        SSLerrfree(err);
-        return -1;
-    }
-    return 0;
-}
-
+    char *key;
+    const char *keyfile;
 #ifdef USE_TASSL
-int LoadSslEncCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool *have_cert)
-{
-    struct stat buf;
-    char fnbuf[MAXPGPATH] = {0};
-    char sebuf[256];
-    errno_t rc = 0;
-    int nRet = 0;
-    
-    if ((conn->sslenccert != NULL) && strlen(conn->sslenccert) > 0) {
-        rc = strncpy_s(fnbuf, MAXPGPATH, conn->sslenccert, strlen(conn->sslenccert));
-        securec_check_c(rc, "\0", "\0");
-        fnbuf[MAXPGPATH - 1] = '\0';
-    } else if (have_homedir) {
-        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, USER_ENC_CERT_FILE);
-        securec_check_ss_c(nRet, "\0", "\0");
-    } else
-        fnbuf[0] = '\0';
-    if (fnbuf[0] == '\0') {
-        /* no home directory, proceed without a client cert */
-        *have_cert = false;
-    } else if (stat(fnbuf, &buf) != 0) {
-        /*
-         * If file is not present, just go on without a client cert; server
-         * might or might not accept the connection.  Any other error,
-         * however, is grounds for complaint.
-         */
-        if (errno != ENOENT && errno != ENOTDIR) {
-            printfPQExpBuffer(&conn->errorMessage,
-                libpq_gettext("could not open encryption certificate file \"%s\": %s\n"),
-                fnbuf,
-                pqStrerror(errno, sebuf, sizeof(sebuf)));
-            return -1;
-        }
-        *have_cert = false;
-    } else {
-        /*
-         * Cert file exists, so load it.  Since the ssl lib doesn't provide the
-         * equivalent of "SSL_use_certificate_chain_file", we actually have to
-         * load the file twice.  The first call loads any extra certs after
-         * the first one into chain-cert storage associated with the
-         * SSL_context.  The second call loads the first cert (only) into the
-         * SSL object, where it will be correctly paired with the private key
-         * we load below.  We do it this way so that each connection
-         * understands which subject cert to present, in case different
-         * sslcert settings are used for different connections in the same
-         * process.
-         *
-         * NOTE: This function may also modify our SSL_context and therefore
-         * we have to lock around this call and any places where we use the
-         * SSL_context struct.
-         */
-#ifdef ENABLE_THREAD_SAFETY
-        int rc = 0;
-        if ((rc = pthread_mutex_lock(&ssl_config_mutex))) {
-            printfPQExpBuffer(&conn->errorMessage, libpq_gettext("could not acquire mutex: %s\n"), strerror(rc));
-            return -1;
-        }
+    key = enc?conn->sslenckey:conn->sslkey;
+    keyfile = enc?USER_ENC_KEY_FILE:USER_KEY_FILE;
+#else
+    key = conn->sslkey;
+    keyfile = USER_KEY_FILE;
 #endif
-        /* set the default password for certificate/private key loading */
-        if (init_client_ssl_passwd(conn->ssl, fnbuf, conn->pguser, conn, true) != 0) {
-#ifdef ENABLE_THREAD_SAFETY
-            (void)pthread_mutex_unlock(&ssl_config_mutex);
-#endif
-            return -1;
-        }
-        /* check certificate file permission */
-#ifndef WIN32
-        if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
-#ifdef ENABLE_THREAD_SAFETY
-            (void)pthread_mutex_unlock(&ssl_config_mutex);
-#endif
-            printfPQExpBuffer(
-                &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600) or less.\n"), fnbuf);
-            return -1;
-        }
-#endif
-        if (SSL_CTX_use_certificate_chain_file(SSL_context, fnbuf) != 1) {
-            char* err = SSLerrmessage();
 
-            printfPQExpBuffer(
-                &conn->errorMessage, libpq_gettext("could not read certificate file \"%s\": %s\n"), fnbuf, err);
-            SSLerrfree(err);
-#ifdef ENABLE_THREAD_SAFETY
-            (void)pthread_mutex_unlock(&ssl_config_mutex);
-#endif
-            return -1;
-        }
-        if (SSL_use_certificate_file(conn->ssl, fnbuf, SSL_FILETYPE_PEM) != 1) {
-            char* err = SSLerrmessage();
-
-            printfPQExpBuffer(
-                &conn->errorMessage, libpq_gettext("could not read certificate file \"%s\": %s\n"), fnbuf, err);
-            SSLerrfree(err);
-#ifdef ENABLE_THREAD_SAFETY
-            (void)pthread_mutex_unlock(&ssl_config_mutex);
-#endif
-            return -1;
-        }
-
-        /* need to load the associated private key, too */
-        *have_cert = true;
-#ifdef ENABLE_THREAD_SAFETY
-        (void)pthread_mutex_unlock(&ssl_config_mutex);
-#endif
-    }
-    return 0;
-}
-
-int LoadSslEncKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool have_cert)
-{
-    struct stat buf;
-    char fnbuf[MAXPGPATH] = {0};
-    errno_t rc = 0;
-    int nRet = 0;
-    /*
-     * Read the SSL key. If a key is specified, treat it as an engine:key
-     * combination if there is colon present - we don't support files with
-     * colon in the name. The exception is if the second character is a colon,
-     * in which case it can be a Windows filename with drive specification.
-     */
-    if (have_cert && (conn->sslenckey != NULL) && strlen(conn->sslenckey) > 0) {
-        rc = strncpy_s(fnbuf, MAXPGPATH, conn->sslenckey, strlen(conn->sslenckey));
+    if (have_cert && (key != NULL) && strlen(key) > 0) {
+        rc = strncpy_s(fnbuf, MAXPGPATH, key, strlen(key));
         securec_check_c(rc, "\0", "\0");
         fnbuf[MAXPGPATH - 1] = '\0';
     } else if (have_homedir) {
         /* No PGSSLKEY specified, load default file */
-        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, USER_ENC_KEY_FILE);
+        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, keyfile);
         securec_check_ss_c(nRet, "\0", "\0");
     } else
         fnbuf[0] = '\0';
@@ -1659,7 +1503,7 @@ int LoadSslEncKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, 
     }
     return 0;
 }
-#endif
+
 
 void LoadSslCrlFile(PGconn* conn, bool have_homedir, const PathData *homedir)
 {
@@ -1801,23 +1645,23 @@ int initialize_SSL(PGconn* conn)
     else /* won't need it */
         have_homedir = false;
     
-    retval = LoadSslCertFile(conn, have_homedir, &homedir, &have_cert);
+    retval = LoadSslCertFile(conn, have_homedir, &homedir, &have_cert, false);
     if (retval == -1) {
         return retval;
     }
     g_crl_invalid = false;
-    retval = LoadSslKeyFile(conn, have_homedir, &homedir, have_cert);
+    retval = LoadSslKeyFile(conn, have_homedir, &homedir, have_cert, false);
     if (retval == -1) {
         return retval;
     }
 #ifdef USE_TASSL
     if (conn->ssltlcp) {
-        retval = LoadSslEncCertFile(conn, have_homedir, &homedir, &have_cert);
+        retval = LoadSslCertFile(conn, have_homedir, &homedir, &have_cert, true);
         if (retval == -1) {
             return retval;
         }
         g_crl_invalid = false;
-        retval = LoadSslEncKeyFile(conn, have_homedir, &homedir, have_cert);
+        retval = LoadSslKeyFile(conn, have_homedir, &homedir, have_cert, true);
         if (retval == -1) {
             return retval;
         }
