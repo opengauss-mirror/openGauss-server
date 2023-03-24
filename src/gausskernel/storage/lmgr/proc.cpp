@@ -81,6 +81,7 @@
 #endif   /* ENABLE_MULTIPLE_NODES */
 
 #define MAX_NUMA_NODE 16
+#define BACKEND_TYPE_CMAGENT 0x0020
 
 extern THR_LOCAL uint32 *g_workingVersionNum;
 
@@ -973,6 +974,7 @@ void InitProcess(void)
      * g_instance.proc_base->cmAgentFreeProcs if proc_ext happend.
      */
     if (u_sess->libpq_cxt.IsConnFromCmAgent) {
+        t_thrd.bn->backend_type = BACKEND_TYPE_CMAGENT;
         CheckCMAReservedProc();
     }
 
