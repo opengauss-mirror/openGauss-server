@@ -190,6 +190,7 @@ create table t_charset_26(c1 varchar(20)) charset utf8mb4 collate "aa_DJ.utf8"; 
 ERROR:  this collation only cannot be specified here
 create table t_charset_26(c1 varchar(20)) collate "aa_DJ"; -- error
 ERROR:  there is more than one collation "aa_DJ" with the same name
+create table t_charset_27(like t_charset_18 including reloptions);
 select relname, reloptions from pg_class where relname like 't_charset_%' order by 1;
    relname    |                  reloptions                   
 --------------+-----------------------------------------------
@@ -206,6 +207,7 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_21 | {orientation=row,compression=no,collate=1537}
  t_charset_22 | {orientation=row,compression=no,collate=1537}
  t_charset_23 | {orientation=row,compression=no,collate=1537}
+ t_charset_27 | {orientation=row,compression=no,collate=1538}
  t_charset_3  | {orientation=row,compression=no,collate=1537}
  t_charset_4  | {orientation=row,compression=no,collate=1537}
  t_charset_5  | {orientation=row,compression=no,collate=1537}
@@ -213,7 +215,7 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_7  | {orientation=row,compression=no,collate=1538}
  t_charset_8  | {orientation=row,compression=no,collate=1026}
  t_charset_9  | {orientation=row,compression=no,collate=1537}
-(20 rows)
+(21 rows)
 
 alter table t_charset_1 convert to charset binary; -- error
 ERROR:  Un-support feature
@@ -971,6 +973,7 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_21 | {orientation=row,compression=no,collate=1537}
  t_charset_22 | {orientation=row,compression=no,collate=1537}
  t_charset_23 | {orientation=row,compression=no,collate=1537}
+ t_charset_27 | {orientation=row,compression=no,collate=1538}
  t_charset_3  | {orientation=row,compression=no,collate=1537}
  t_charset_4  | {orientation=row,compression=no,collate=1537}
  t_charset_5  | {orientation=row,compression=no,collate=1537}
@@ -978,7 +981,7 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_7  | {orientation=row,compression=no,collate=1538}
  t_charset_8  | {orientation=row,compression=no,collate=1026}
  t_charset_9  | {orientation=row,compression=no,collate=1537}
-(20 rows)
+(21 rows)
 
 select *,rawtohex(a1),rawtohex(a2),length(a1),length(a2),lengthb(a1),lengthb(a2) from a_charset_1;
   a1  |  a2  |  a3  |   rawtohex   |   rawtohex   | length | length | lengthb | lengthb 

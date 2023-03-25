@@ -5670,7 +5670,7 @@ static Pattern_Prefix_Status like_fixed_prefix(
                     errmsg("case insensitive matching not supported on type bytea")));
 
         /* If case-insensitive, we need locale info */
-        if (lc_ctype_is_c(collation))
+        if (lc_ctype_is_c(collation) || COLLATION_IN_B_FORMAT(collation))
             locale_is_c = true;
         else if (collation != DEFAULT_COLLATION_OID) {
             if (!OidIsValid(collation)) {

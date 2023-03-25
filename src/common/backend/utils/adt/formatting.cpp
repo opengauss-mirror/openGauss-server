@@ -127,7 +127,7 @@
 #define MAX_DECIMAL_LEN 50
 
 /* to improve processing speed, (16 ^ m) * n matrix (0<= m <=31, 0<= n <= 15) is defined. */
-/*static variable 'g_HexToDecMatrix' has size '2048'¡ê? */
+/*static variable 'g_HexToDecMatrix' has size '2048'? */
 const char* g_HexToDecMatrix[MAX_POWER + 1][MAX_CHAR_FOR_HEX] = {
     /*16^31*/
     {/*0*/ "0",
@@ -2333,7 +2333,7 @@ char* str_tolower(const char* buff, size_t nbytes, Oid collid)
         return NULL;
 
     /* C/POSIX collations use this path regardless of database encoding */
-    if (lc_ctype_is_c(collid)) {
+    if (lc_ctype_is_c(collid) || COLLATION_IN_B_FORMAT(collid)) {
         char* p = NULL;
 
         result = pnstrdup(buff, nbytes);
@@ -2446,7 +2446,7 @@ char* str_toupper(const char* buff, size_t nbytes, Oid collid)
         return NULL;
 
     /* C/POSIX collations use this path regardless of database encoding */
-    if (lc_ctype_is_c(collid)) {
+    if (lc_ctype_is_c(collid) || COLLATION_IN_B_FORMAT(collid)) {
         result = str_toupper_c_encode(buff, nbytes);
     }
 #ifdef USE_WIDE_UPPER_LOWER
@@ -2471,7 +2471,7 @@ char* str_toupper_for_raw(const char* buff, size_t nbytes, Oid collid)
         return NULL;
 
     /* C/POSIX collations use this path regardless of database encoding */
-    if (lc_ctype_is_c(collid)) {
+    if (lc_ctype_is_c(collid) || COLLATION_IN_B_FORMAT(collid)) {
         result = str_toupper_c_encode(buff, nbytes);
     } else {
         result = str_toupper_locale_encode(buff, nbytes, collid);
@@ -2599,7 +2599,7 @@ char* str_initcap(const char* buff, size_t nbytes, Oid collid)
         return NULL;
 
     /* C/POSIX collations use this path regardless of database encoding */
-    if (lc_ctype_is_c(collid)) {
+    if (lc_ctype_is_c(collid) || COLLATION_IN_B_FORMAT(collid)) {
         char* p = NULL;
 
         result = pnstrdup(buff, nbytes);

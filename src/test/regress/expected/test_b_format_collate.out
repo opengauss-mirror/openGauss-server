@@ -789,6 +789,94 @@ select f2 from column_collate where f2 like 'A%\'; -- error
 ERROR:  LIKE pattern must not end with escape character
 select f2 from column_collate where f2 like 'A_\';-- error
 ERROR:  LIKE pattern must not end with escape character
+-- test ilike
+select f1 from column_collate where f1 ilike 'A_%';
+   f1   
+--------
+ AaA
+ aAA
+ AAA
+ A1中文
+ a2中文
+ AbcdEf
+ abcdEF
+(7 rows)
+
+select f1 from column_collate where f1 not ilike 'A_%';
+     f1      
+-------------
+ S
+ s
+ ś
+ Š
+ z
+ Z
+ c
+ A
+ C
+ bb
+ Bb
+ dD
+ Cc
+ b1中文
+ B2中文
+ 中文d1
+ 中文C1
+ 中文A3
+ 中文AbCdEFG
+ 中文abcdEFG
+ 中文Ab
+ 中文ab
+(22 rows)
+
+select f1 from column_collate where f1 ilike 'A_%' collate 'utf8mb4_bin';
+   f1   
+--------
+ AaA
+ aAA
+ AAA
+ A1中文
+ a2中文
+ AbcdEf
+ abcdEF
+(7 rows)
+
+select f1 from column_collate where f1 not ilike 'A_%' collate 'utf8mb4_bin';
+     f1      
+-------------
+ S
+ s
+ ś
+ Š
+ z
+ Z
+ c
+ A
+ C
+ bb
+ Bb
+ dD
+ Cc
+ b1中文
+ B2中文
+ 中文d1
+ 中文C1
+ 中文A3
+ 中文AbCdEFG
+ 中文abcdEFG
+ 中文Ab
+ 中文ab
+(22 rows)
+
+select f1 from column_collate where f1 like 'A_%' collate 'utf8mb4_bin';
+   f1   
+--------
+ AaA
+ AAA
+ A1中文
+ AbcdEf
+(4 rows)
+
 -- test notlike
 select f1 from column_collate where f1 not like 'A_%';
      f1      
@@ -1032,18 +1120,18 @@ insert into test_sep_option1 values ('s','s'),('ś','ś'),('Š','Š');
 insert into test_sep_option2 values ('S','S');
 insert into test_sep_option3 values ('s','s'),('ś','ś'),('Š','Š');
 insert into test_sep_option4 values ('S','S');
-select * from test_sep_option1 union select * from test_sep_option2;
+select * from test_sep_option1 union select * from test_sep_option2 order by f1;
  f1 | f2 
 ----+----
  s  | s
 (1 row)
 
-select * from test_sep_option3 union select * from test_sep_option4;
+select * from test_sep_option3 union select * from test_sep_option4 order by f1;
  f1 | f2 
 ----+----
  S  | S
- ś  | ś
  s  | s
+ ś  | ś
  Š  | Š
 (4 rows)
 
@@ -2177,6 +2265,185 @@ select f3 from column_collate where f3 like 'A%f';
  AbcdEf
  abcdEF
 (2 rows)
+
+-- test function
+SELECT substring('foobar' from '(o(.)b)' collate 'utf8mb4_bin');
+ substring 
+-----------
+ oob
+(1 row)
+
+SELECT regexp_like('str' collate 'utf8mb4_bin','[ac]');
+ regexp_like 
+-------------
+ f
+(1 row)
+
+SELECT regexp_substr('foobarbaz' collate 'utf8mb4_bin', 'b(..)', 3, 2) AS RESULT;
+ result 
+--------
+ baz
+(1 row)
+
+SELECT regexp_count('foobarbaz' collate 'utf8mb4_bin','b(..)', 5) AS RESULT;
+ result 
+--------
+      1
+(1 row)
+
+SELECT regexp_instr('foobarbaz' collate 'utf8mb4_bin','b(..)', 1, 1, 0) AS RESULT;
+ result 
+--------
+      4
+(1 row)
+
+SELECT regexp_matches('foobarbequebaz' collate 'utf8mb4_bin', '(bar)(beque)');
+ regexp_matches 
+----------------
+ {bar,beque}
+(1 row)
+
+create table test_func1(c1 text collate 'utf8mb4_bin',c2 text collate 'utf8mb4_general_ci');
+insert into test_func1 values ('abDASaa', 'abDASaa'), ('AaBbCc', 'AaBbCc'), ('SsSSss', 'SsSSss'), ('aAa', 'aAa'), ('12345', '12345'), ('aA中文', 'aA中文');
+select upper(c1) from test_func1;
+  upper  
+---------
+ ABDASAA
+ AABBCC
+ SSSSSS
+ AAA
+ 12345
+ AA中文
+(6 rows)
+
+select upper(c2) from test_func1;
+  upper  
+---------
+ ABDASAA
+ AABBCC
+ SSSSSS
+ AAA
+ 12345
+ AA中文
+(6 rows)
+
+select lower(c1) from test_func1;
+  lower  
+---------
+ abdasaa
+ aabbcc
+ ssssss
+ aaa
+ 12345
+ aa中文
+(6 rows)
+
+select lower(c2) from test_func1;
+  lower  
+---------
+ abdasaa
+ aabbcc
+ ssssss
+ aaa
+ 12345
+ aa中文
+(6 rows)
+
+SELECT substring(c1 from '(a(.))' collate 'utf8mb4_bin') from test_func1;
+ substring 
+-----------
+ ab
+ aB
+ 
+ aA
+ 
+ aA
+(6 rows)
+
+SELECT regexp_like(c1 collate 'utf8mb4_bin','[a]') from test_func1;
+ regexp_like 
+-------------
+ t
+ t
+ f
+ t
+ f
+ t
+(6 rows)
+
+SELECT regexp_substr(c1 collate 'utf8mb4_bin', 'a', 1, 1) AS RESULT from test_func1;
+ result 
+--------
+ a
+ a
+ 
+ a
+ 
+ a
+(6 rows)
+
+SELECT regexp_count(c1 collate 'utf8mb4_bin','a(..)', 2) AS RESULT from test_func1;
+ result 
+--------
+      0
+      1
+      0
+      0
+      0
+      0
+(6 rows)
+
+SELECT regexp_instr(c1 collate 'utf8mb4_bin','a(..)', 1, 1, 0) AS RESULT from test_func1;
+ result 
+--------
+      1
+      2
+      0
+      1
+      0
+      1
+(6 rows)
+
+SELECT regexp_matches(c1 collate 'utf8mb4_bin', '(Aa)(Bb)') from test_func1;
+ regexp_matches 
+----------------
+ {Aa,Bb}
+(1 row)
+
+-- test utf8mb4_bin
+drop table if exists test_utf8mb4_bin;
+NOTICE:  table "test_utf8mb4_bin" does not exist, skipping
+create table test_utf8mb4_bin (c1 int ,c2 text collate 'utf8mb4_bin', c3 char(100) collate 'utf8mb4_bin');
+insert into test_utf8mb4_bin select generate_series(1,100), 'fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR', 'fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR';
+select count(*) from test_utf8mb4_bin where c2 = 'fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR';
+ count 
+-------
+   100
+(1 row)
+
+select count(*) from test_utf8mb4_bin where c3 = 'fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR';
+ count 
+-------
+   100
+(1 row)
+
+select count(*) from test_utf8mb4_bin group by c2, c3;
+ count 
+-------
+   100
+(1 row)
+
+select distinct c2 from test_utf8mb4_bin;
+                               c2                               
+----------------------------------------------------------------
+ fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR
+(1 row)
+
+select distinct c3 from test_utf8mb4_bin;
+                                                  c3                                                  
+------------------------------------------------------------------------------------------------------
+ fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR                                      
+(1 row)
 
 \c regression
 clean connection to all force for database test_collate_A;

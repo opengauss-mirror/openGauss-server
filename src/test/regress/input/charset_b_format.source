@@ -82,6 +82,7 @@ create table t_charset_24(c1 varchar(20) character set "binary"); -- error
 create table t_charset_25(c1 varchar(20)) with(collate = 7);
 create table t_charset_26(c1 varchar(20)) charset utf8mb4 collate "aa_DJ.utf8"; -- error
 create table t_charset_26(c1 varchar(20)) collate "aa_DJ"; -- error
+create table t_charset_27(like t_charset_18 including reloptions);
 select relname, reloptions from pg_class where relname like 't_charset_%' order by 1;
 alter table t_charset_1 convert to charset binary; -- error
 alter table t_charset_1 convert to charset utf8mb4;
