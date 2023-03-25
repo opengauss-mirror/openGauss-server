@@ -2931,16 +2931,19 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                 }
             } break;
             case BPLENFUNCOID: {
-                int current_encoding = GetDatabaseEncoding();
-                llvm::Function* func_bpcahrlen = llvmCodeGen->module()->getFunction("Jitted_bpcharlen");
-                if (func_bpcahrlen == NULL) {
-                    func_bpcahrlen = bpcharlen_codegen(current_encoding);
-                }
+                if (!u_sess->attr.attr_sql.dolphin) {
+                    int current_encoding = GetDatabaseEncoding();
+                    llvm::Function* func_bpcahrlen = llvmCodeGen->module()->getFunction("Jitted_bpcharlen");
+                    if (func_bpcahrlen == NULL) {
+                        func_bpcahrlen = bpcharlen_codegen(current_encoding);
+                    }
 
-                res1 = inner_builder.CreateCall(func_bpcahrlen, inargs[0]);
-                inner_builder.CreateStore(null_false, isNull);
-                inner_builder.CreateBr(ret_bb);
-            } break;
+                    res1 = inner_builder.CreateCall(func_bpcahrlen, inargs[0]);
+                    inner_builder.CreateStore(null_false, isNull);
+                    inner_builder.CreateBr(ret_bb);
+                    break;
+                }
+            }
             default: {
                 /* prepare the parameters used by EvalFuncResult */
                 LLVMFuncCallInfo lfcinfo;
