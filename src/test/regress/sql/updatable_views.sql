@@ -1246,5 +1246,23 @@ alter view rw_view2 as select * from rw_view1 where id < 10 with cascaded check 
 insert into rw_view2 values (0); -- fail
 insert into rw_view2 values (10); -- fail
 
+CREATE TABLE base_tbl (a int primary key, b int DEFAULT 10);
+INSERT INTO base_tbl VALUES (1,2), (2,3);
+CREATE VIEW ro_view1 AS SELECT * FROM base_tbl WHERE a < 10 WITH CHECK OPTION;
+INSERT INTO ro_view1 VALUES(3,4);
+
+explain (costs off) UPDATE ro_view1 SET b = 5 WHERE a = 3;
+UPDATE ro_view1 SET b = 5 WHERE a = 3;
+
+drop table if exists base_tbl cascade;
+CREATE TABLE base_tbl (a int primary key, b int DEFAULT 10);
+INSERT INTO base_tbl VALUES (1,2), (8,2), (9,0);
+CREATE VIEW ro_view1 AS SELECT * FROM base_tbl WHERE a < 10 WITH CHECK OPTION;
+
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain (costs off) UPDATE ro_view1 SET a = a + b;
+UPDATE ro_view1 SET a = a + b;
+
 \c regression
 drop database updatable_views_db;

@@ -554,12 +554,15 @@ lreplace:
             m_local.m_ledger_hash_exist = true;
             m_local.m_ledger_relhash += res_hash;
         }
+
+        /* Check any WITH CHECK OPTION constraints */
+        if (result_rel_info->ri_WithCheckOptions != NIL) {
+            ExecWithCheckOptions(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
+        }
+
         bms_free(modifiedIdxAttrs);
         list_free_ext(recheck_indexes);
     }
-
-    if (result_rel_info->ri_WithCheckOptions != NIL)
-        ExecWithCheckOptions(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
 
     tableam_tops_free_tuple(tup);
 
@@ -607,9 +610,10 @@ bool UpdateFusion::execute(long max_rows, char *completionTag)
     }
 
     ModifyTable* node = (ModifyTable*)(m_global->m_planstmt->planTree);
+    PlanState* ps = NULL;
     if (node->withCheckOptionLists != NIL) {
         Plan* plan = (Plan*)linitial(node->plans);
-        PlanState* ps = ExecInitNode(plan, m_c_local.m_estate, 0);
+        ps = ExecInitNode(plan, m_c_local.m_estate, 0);
         List* wcoList = (List*)linitial(node->withCheckOptionLists);
         List* wcoExprs = NIL;
         ListCell* ll = NULL;
@@ -632,6 +636,9 @@ bool UpdateFusion::execute(long max_rows, char *completionTag)
     /* ***************
      * step 3: done *
      * ************** */
+    if (ps != NULL) {
+        ExecEndNode(ps);
+    }
     success = true;
     if (m_local.m_ledger_hash_exist && !IsConnFromApp()) {
         errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,

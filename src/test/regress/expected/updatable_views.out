@@ -2437,5 +2437,40 @@ DETAIL:  Failing row contains (0, null).
 insert into rw_view2 values (10); -- fail
 ERROR:  new row violates WITH CHECK OPTION for view "rw_view2"
 DETAIL:  Failing row contains (10, null).
+CREATE TABLE base_tbl (a int primary key, b int DEFAULT 10);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "base_tbl_pkey" for table "base_tbl"
+INSERT INTO base_tbl VALUES (1,2), (2,3);
+CREATE VIEW ro_view1 AS SELECT * FROM base_tbl WHERE a < 10 WITH CHECK OPTION;
+INSERT INTO ro_view1 VALUES(3,4);
+explain (costs off) UPDATE ro_view1 SET b = 5 WHERE a = 3;
+                    QUERY PLAN                    
+--------------------------------------------------
+ [Bypass]
+ Update on base_tbl
+   ->  Index Scan using base_tbl_pkey on base_tbl
+         Index Cond: ((a < 10) AND (a = 3))
+(4 rows)
+
+UPDATE ro_view1 SET b = 5 WHERE a = 3;
+drop table if exists base_tbl cascade;
+NOTICE:  drop cascades to view ro_view1
+CREATE TABLE base_tbl (a int primary key, b int DEFAULT 10);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "base_tbl_pkey" for table "base_tbl"
+INSERT INTO base_tbl VALUES (1,2), (8,2), (9,0);
+CREATE VIEW ro_view1 AS SELECT * FROM base_tbl WHERE a < 10 WITH CHECK OPTION;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain (costs off) UPDATE ro_view1 SET a = a + b;
+                    QUERY PLAN                    
+--------------------------------------------------
+ [Bypass]
+ Update on base_tbl
+   ->  Index Scan using base_tbl_pkey on base_tbl
+         Index Cond: (a < 10)
+(4 rows)
+
+UPDATE ro_view1 SET a = a + b;
+ERROR:  new row violates WITH CHECK OPTION for view "ro_view1"
+DETAIL:  Failing row contains (10, 2).
 \c regression
 drop database updatable_views_db;
