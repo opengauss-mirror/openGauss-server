@@ -989,7 +989,7 @@ Datum hashbpchar(PG_FUNCTION_ARGS)
     if (!is_b_format_collation(collid)) {
         result = hash_any((unsigned char*)keydata, keylen);
     } else {
-        result = hash_text_by_builtin_colltions((unsigned char *)VARDATA_ANY(key), VARSIZE_ANY_EXHDR(key), collid);
+        result = hash_text_by_builtin_colltions((unsigned char *)VARDATA_ANY(key), keylen, collid);
     }
 
     /* Avoid leaking memory for toasted inputs */
