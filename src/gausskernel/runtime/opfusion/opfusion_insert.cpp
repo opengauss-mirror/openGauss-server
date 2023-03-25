@@ -406,9 +406,10 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     refreshParameterIfNecessary();
 
     ModifyTable* node = (ModifyTable*)(m_global->m_planstmt->planTree);
+    PlanState* ps = NULL;
     if (node->withCheckOptionLists != NIL) {
         Plan* plan = (Plan*)linitial(node->plans);
-        PlanState* ps = ExecInitNode(plan, m_c_local.m_estate, 0);
+        ps = ExecInitNode(plan, m_c_local.m_estate, 0);
         List* wcoList = (List*)linitial(node->withCheckOptionLists);
         List* wcoExprs = NIL;
         ListCell* ll = NULL;
@@ -438,6 +439,9 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     /****************
      * step 3: done *
      ****************/
+    if (ps != NULL) {
+        ExecEndNode(ps);
+    }
     success = true;
     m_local.m_isCompleted = true;
     if (m_local.m_ledger_hash_exist && !IsConnFromApp()) {
