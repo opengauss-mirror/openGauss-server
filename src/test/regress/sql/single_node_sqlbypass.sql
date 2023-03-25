@@ -78,6 +78,9 @@ show enable_opfusion;
 drop table if exists test_opfusion_update;
 create table test_opfusion_update(a int);
 insert into test_opfusion_update values(1);
+-- use two sleep to make sure stat has been reported
+select pg_sleep(0.5);
+select pg_sleep(0.5);
 select pg_stat_get_last_data_changed_time(oid) != 0 from pg_class where relname = 'test_opfusion_update';
 
 drop table test_opfusion_update;
