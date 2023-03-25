@@ -18543,13 +18543,7 @@ static void dumpViewSchema(
         appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
 
-    /* set definer for CREATE VIEW statement */
-    appendPQExpBuffer(q, "CREATE ");
-    if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0 &&
-        tbinfo->rolname != NULL && strlen(tbinfo->rolname) > 0) {
-        appendPQExpBuffer(q, " DEFINER = \"%s\" ", tbinfo->rolname);
-    }
-    appendPQExpBuffer(q, " VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
+    appendPQExpBuffer(q, "CREATE VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
     if ((tbinfo->reloptions != NULL) && strlen(tbinfo->reloptions) > 0)
         appendPQExpBuffer(q, " WITH (%s)", tbinfo->reloptions);
     appendPQExpBuffer(q, " AS\n    ");

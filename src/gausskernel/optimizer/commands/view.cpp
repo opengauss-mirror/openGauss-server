@@ -222,6 +222,28 @@ static ObjectAddress DefineVirtualRelation(RangeVar* relation, List* tlist, bool
          * set definer by AlterTameCmd
          */
         if (definer != NULL) {
+            /* Get owner to check the permissions. */
+            Oid ownerOid = get_role_oid(definer, false);
+            bool isOwnerChange = false;
+            if (!OidIsValid(ownerOid)) {
+                ownerOid = GetUserId();
+            } else if (ownerOid != GetUserId()) {
+                isOwnerChange = true;
+            }
+            
+            if (isOwnerChange && !is_alter) {
+                /* Check namespace permissions. */
+                AclResult aclresult;
+                Oid namespaceId = RangeVarGetAndCheckCreationNamespace(relation, NoLock, NULL, relkind);
+                aclresult = pg_namespace_aclcheck(namespaceId, ownerOid, ACL_CREATE);
+                bool anyResult = false;
+                if (aclresult != ACLCHECK_OK && !IsSysSchema(namespaceId)) {
+                    anyResult = CheckRelationCreateAnyPrivilege(ownerOid, relkind);
+                }
+                if (aclresult != ACLCHECK_OK && !anyResult) {
+                    aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+                }
+            }
             atcmd = makeNode(AlterTableCmd);
             atcmd->subtype = AT_ChangeOwner;
             atcmd->name = definer;
