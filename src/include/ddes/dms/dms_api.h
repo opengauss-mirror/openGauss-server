@@ -462,7 +462,7 @@ typedef enum en_reform_phase {
     DMS_PHASE_START = 0,
     DMS_PHASE_AFTER_DRC_ACCESS = 1,
     DMS_PHASE_AFTER_RECOVERY = 2,
-    DMS_PHASE_BEFORE_DC_INIT = 3,
+    DMS_PHASE_AFTER_TXN_DEPOSIT = 3,
     DMS_PHASE_BEFORE_ROLLBACK = 4,
     DMS_PHASE_END = 5,
 } reform_phase_t;
@@ -818,7 +818,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           57
+#define DMS_LOCAL_VERSION           58
 
 #ifdef __cplusplus
 }
