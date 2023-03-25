@@ -1670,10 +1670,6 @@ Datum dblink_exec(PG_FUNCTION_ARGS)
         }
         
         sql_cmd_status = linker->exec(conname, sql, fail);
-
-        if (freeconn) {
-            linker->finish();
-        }
     }
     PG_CATCH();
     {
