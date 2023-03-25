@@ -258,7 +258,9 @@ static inline void MOTAppendLogLineV(const char* format, va_list args)
 #if defined(ENABLE_LONG_LOG_LINE) && (LONG_LOG_LINE_MODE == LONG_LOG_LINE_PRINTF)
         MOTFormatToLogSinkV(format, args);
 #elif defined(ENABLE_LONG_LOG_LINE) && (LONG_LOG_LINE_MODE == LONG_LOG_LINE_STRING_BUFFER)
-        StringBufferAppendV(LOG_LINE_BUF, format, args);
+        if (LOG_LINE_BUF != nullptr) {
+            StringBufferAppendV(LOG_LINE_BUF, format, args);
+        }
 #endif
     } else {
         // we haven't overflowed yet, so try to append to log line
@@ -285,12 +287,14 @@ static inline void MOTAppendLogLineV(const char* format, va_list args)
 #elif defined(ENABLE_LONG_LOG_LINE) && (LONG_LOG_LINE_MODE == LONG_LOG_LINE_STRING_BUFFER)
             // log data is too long for log line, so we create an emergency buffer
             LOG_LINE_BUF = (StringBuffer*)malloc(sizeof(StringBuffer));
-            StringBufferInit(
-                LOG_LINE_BUF, MOT_MAX_LOG_LINE_LENGTH, StringBuffer::GROWTH_FACTOR, StringBuffer::MULTIPLY);
+            if (LOG_LINE_BUF != nullptr) {
+                StringBufferInit(
+                    LOG_LINE_BUF, MOT_MAX_LOG_LINE_LENGTH, StringBuffer::GROWTH_FACTOR, StringBuffer::MULTIPLY);
 
-            // copy what was formatted up until this call, and format on string buffer
-            StringBufferAppendN(LOG_LINE_BUF, LOG_LINE, LOG_LINE_POS);
-            StringBufferAppendV(LOG_LINE_BUF, format, args);
+                // copy what was formatted up until this call, and format on string buffer
+                StringBufferAppendN(LOG_LINE_BUF, LOG_LINE, LOG_LINE_POS);
+                StringBufferAppendV(LOG_LINE_BUF, format, args);
+            }
 #else
             // output truncated and line is full, so we put ellipsis at end of line
             errno_t erc = strcpy_s(LOG_LINE + MOT_MAX_LOG_LINE_LENGTH - 5, MOT_MAX_LOG_LINE_LENGTH, "...\n");
@@ -319,10 +323,13 @@ static inline void MOTEndLogLine()
         MOTWriteToLogSink("\n");
 #elif defined(ENABLE_LONG_LOG_LINE) && (LONG_LOG_LINE_MODE == LONG_LOG_LINE_STRING_BUFFER)
         // if we overflowed then we print the string buffer and cleanup
-        StringBufferAppend(LOG_LINE_BUF, "\n");
-        MOTWriteToLogSink(LOG_LINE_BUF->m_buffer, LOG_LINE_BUF->m_pos);
-        StringBufferDestroy(LOG_LINE_BUF);
-        LOG_LINE_BUF = nullptr;
+        if (LOG_LINE_BUF != nullptr) {
+            StringBufferAppend(LOG_LINE_BUF, "\n");
+            MOTWriteToLogSink(LOG_LINE_BUF->m_buffer, LOG_LINE_BUF->m_pos);
+            StringBufferDestroy(LOG_LINE_BUF);
+            free(LOG_LINE_BUF);
+            LOG_LINE_BUF = nullptr;
+        }
 #else
         MOTWriteToLogSink(LOG_LINE, LOG_LINE_POS);
 #endif
