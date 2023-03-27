@@ -9287,7 +9287,9 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 "a.attstattarget, a.attstorage, t.typstorage, "
                 "a.attnotnull, a.atthasdef, a.attisdropped, "
                 "a.attlen, a.attalign, a.attislocal, a.attkvtype, t.oid AS typid, "
-                "CASE WHEN t.typtype <> 's' THEN pg_catalog.format_type(t.oid,a.atttypmod) ELSE 'set(' || (select pg_catalog.string_agg(''''||setlabel||'''', ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid) || ')' END AS atttypname, "
+                "CASE WHEN t.typtype = 's' THEN 'set(' || (select pg_catalog.string_agg(''''||setlabel||'''', ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid) || ')' "
+                "WHEN t.typtype = 'e' THEN 'enum(' || (select pg_catalog.string_agg(''''||enumlabel||'''', ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid) || ')' ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
+                "AS atttypname, "
                 "pg_catalog.array_to_string(a.attoptions, ', ') AS attoptions, "
                 "CASE WHEN a.attcollation <> t.typcollation "
                 "THEN a.attcollation ELSE 0::Oid END AS attcollation, "
@@ -11362,7 +11364,7 @@ static void dumpType(Archive* fout, TypeInfo* tyinfo)
     else if (tyinfo->typtype == TYPTYPE_COMPOSITE)
         dumpCompositeType(fout, tyinfo);
     else if (tyinfo->typtype == TYPTYPE_ENUM)
-        dumpEnumType(fout, tyinfo);
+        return;
     else if (tyinfo->typtype == TYPTYPE_RANGE)
         dumpRangeType(fout, tyinfo);
     else if (tyinfo->typtype == TYPTYPE_TABLEOF)
