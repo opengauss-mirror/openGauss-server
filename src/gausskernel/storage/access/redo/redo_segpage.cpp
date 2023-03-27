@@ -32,7 +32,6 @@
 #include "commands/tablespace.h"
 #include "catalog/storage_xlog.h"
 #include "storage/smgr/fd.h"
-#include "ddes/dms/ss_dms_bufmgr.h"
 
 static XLogRecParseState *segpage_redo_parse_seg_truncate_to_block(XLogReaderState *record, uint32 *blocknum)
 {
@@ -456,8 +455,6 @@ void SegPageRedoNewPage(XLogBlockHead *blockhead, XLogBlockSegNewPage *newPageIn
 
 void MarkSegPageRedoChildPageDirty(RedoBufferInfo *bufferinfo)
 {
-    SSMarkBufferDirtyForERTO(bufferinfo);
-
     BufferDesc *bufDesc = GetBufferDescriptor(bufferinfo->buf - 1);
     if (bufferinfo->dirtyflag || XLByteLT(bufDesc->extra->lsn_on_disk, PageGetLSN(bufferinfo->pageinfo.page))) {
         if (IsSegmentPhysicalRelNode(bufferinfo->blockinfo.rnode)) {
@@ -490,8 +487,6 @@ void MarkSegPageRedoChildPageDirty(RedoBufferInfo *bufferinfo)
     } else {
         UnlockReleaseBuffer(bufferinfo->buf);
     }
-
-    SSMarkBufferDirtyForERTO(bufferinfo);
 }
 
 void SegPageRedoChildState(XLogRecParseState *childStateList)

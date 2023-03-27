@@ -1482,6 +1482,13 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
         XLogRecPtr xlog_rec = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_SEGMENT_EXTEND, SegmentBktId);
         END_CRIT_SECTION();
 
+#ifdef USE_ASSERT_CHECKING
+        if (ENABLE_DMS) {
+            SegNetPageCheckDiskLSN(GetBufferDescriptor(seg_buffer - 1), RBM_NORMAL, NULL);
+            SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
+        }
+#endif
+
         PageSetLSN(BufferGetPage(seg_buffer), xlog_rec);
         PageSetLSN(buffer, xlog_rec);
     }

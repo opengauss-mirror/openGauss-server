@@ -375,9 +375,7 @@ void SSSendSharedInvalidMessages(const SharedInvalidationMessage *msgs, int n)
         SharedInvalidationMessage *msg = (SharedInvalidationMessage *)(msgs + i);
         SSBroadcastSI ssmsg;
         ssmsg.tablespaceid = u_sess->proc_cxt.MyDatabaseTableSpace;
-        if (msg->id == SHAREDINVALRELMAP_ID) {
-            Assert(ssmsg.tablespaceid != InvalidOid);
-        }
+        Assert(ssmsg.tablespaceid != InvalidOid);
         ssmsg.type = BCAST_SI;
         if (msg->id >= SHAREDINVALFUNC_ID) {
             errno_t rc =

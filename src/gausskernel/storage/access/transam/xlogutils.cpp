@@ -700,7 +700,7 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
         } else {
             if (readmethod != WITH_LOCAL_CACHE && mode != RBM_ZERO_AND_LOCK && mode != RBM_ZERO_AND_CLEANUP_LOCK &&
                 ENABLE_DMS) {
-                Assert(!CheckPageNeedSkipInRecovery(buf));
+                CheckPageNeedSkipInRecovery(buf);
                 LockBuffer(buf, BUFFER_LOCK_UNLOCK);
                 if (get_cleanup_lock) {
                     LockBufferForCleanup(buf);
@@ -1146,17 +1146,8 @@ Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber fo
          * there should be no other backends that could modify the buffer at
          * the same time.
          */
-        bool buffer_is_locked = false;
-        if (ENABLE_DMS && (GetDmsBufCtrl(buffer - 1)->lock_mode == DMS_LOCK_NULL)) {
-            buffer_is_locked = true;
-            LockBuffer(buffer, BUFFER_LOCK_SHARE);
-        }
-
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
-            if (ENABLE_DMS && buffer_is_locked) {
-                LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-            }
             ReleaseBuffer(buffer);
             RepairFileKey key;
             key.relfilenode = rnode;
@@ -1166,10 +1157,6 @@ Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber fo
             CheckNeedRecordBadFile(key, lastblock, blkno, pblk);
             log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, pblk);
             return InvalidBuffer;
-        }
-
-        if (ENABLE_DMS && buffer_is_locked) {
-            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
         }
     }
 
@@ -1220,17 +1207,8 @@ Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber for
     if (BufferIsValid(buffer)) {
         Page page = BufferGetPage(buffer);
         if (mode == RBM_NORMAL) {
-            bool buffer_is_locked = false;
-            if (ENABLE_DMS && (GetDmsBufCtrl(buffer - 1)->lock_mode == DMS_LOCK_NULL)) {
-                buffer_is_locked = true;
-                LockBuffer(buffer, BUFFER_LOCK_SHARE);
-            }
-
             if (PageIsNew(page)) {
                 SegmentCheck(XLogRecPtrIsInvalid(PageGetLSN(page)));
-                if (ENABLE_DMS && buffer_is_locked) {
-                    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-                }
                 SegReleaseBuffer(buffer);
                 RepairFileKey key;
                 key.relfilenode = rnode;
@@ -1241,10 +1219,6 @@ Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber for
                 CheckNeedRecordBadFile(key, spc_nblocks, blkno, NULL);
                 log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, NULL);
                 return InvalidBuffer;
-            }
-
-            if (ENABLE_DMS && buffer_is_locked) {
-                LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
             }
         }
         if (t_thrd.xlog_cxt.startup_processing && t_thrd.xlog_cxt.server_mode == STANDBY_MODE && PageIsLogical(page)) {

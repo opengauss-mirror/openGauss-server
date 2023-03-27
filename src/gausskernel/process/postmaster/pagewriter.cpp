@@ -1647,22 +1647,6 @@ static void incre_ckpt_aio_callback(struct io_event *event)
         _exit(0);
     }
 
-#ifdef USE_ASSERT_CHECKING
-    char *write_buf = (char *)(event->obj->u.c.buf);
-    char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
-    char *temp_buf = (char *)BUFFERALIGN(origin_buf);
-    if (IsSegmentBufferID(buf_desc->buf_id)) {
-        SegSpace *spc = spc_open(buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, false);
-        seg_physical_read(spc, buf_desc->tag.rnode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, temp_buf);
-    } else if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
-        SMGR_READ_STATUS rdStatus = SmgrNetPageCheckRead(buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
-                                            buf_desc->extra->seg_fileno, buf_desc->tag.forkNum,
-                                            buf_desc->extra->seg_blockno, (char *)temp_buf);
-    }
-    Assert(memcmp(write_buf, temp_buf, BLCKSZ) == 0);
-    pfree(origin_buf);
-#endif
-
     buf_desc->extra->aio_in_progress = false;
     UnpinBuffer(buf_desc, true);
 }

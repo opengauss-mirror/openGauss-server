@@ -471,10 +471,9 @@ static void DmsReleaseBuffer(int buffer, bool is_seg)
     }
 }
 
-static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl)
+static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl)
 {
     bool is_seg;
-    int ret = DMS_SUCCESS;
     int buf_id = -1;
     uint32 hash;
     LWLock *partition_lock = NULL;
@@ -526,7 +525,6 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
-                ret = DMS_ERROR;
                 break;
             }
 
@@ -536,7 +534,6 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
-                ret = DMS_ERROR;
                 break;
             }
 
@@ -558,18 +555,16 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     {
         t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
         ReleaseResource();
-        ret = DMS_ERROR;
     }
     PG_END_TRY();
-
-    return ret;
 }
 
 static int CBEnterLocalPage(void *db_handle, char pageid[DMS_PAGEID_SIZE], dms_lock_mode_t mode,
     dms_buf_ctrl_t **buf_ctrl)
 {
     BufferTag *tag = (BufferTag *)pageid;
-    return tryEnterLocalPage(tag, mode, buf_ctrl);
+    tryEnterLocalPage(tag, mode, buf_ctrl);
+    return  DMS_SUCCESS;
 }
 
 static unsigned char CBPageDirty(dms_buf_ctrl_t *buf_ctrl)
@@ -1039,31 +1034,6 @@ static void CBSetDmsStatus(void *db_handle, int dms_status)
     g_instance.dms_cxt.dms_status = (dms_status_t)dms_status;
 }
 
-static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint32 buf_state)
-{
-    bool ret = false;
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    if ((buf_state & BM_VALID) && (buf_ctrl->lock_mode != (unsigned char)DMS_LOCK_NULL)) {
-        ret = true;
-    } else if ((buf_state & BM_TAG_VALID) && (buf_ctrl->lock_mode != (unsigned char)DMS_LOCK_NULL)) {
-        if (LWLockConditionalAcquire(buf_desc->io_in_progress_lock, LW_SHARED)) {
-            ret = true;
-        } else {
-            /*
-             * In the condition of (Phase1)readbuffer_common->(Phase2)dms_request_page->(Phase3)seg_read->(Phase4)lock
-             * seg_head buffer, and stuck in Phase4 as reform happened. It will block the request of data pase as the
-             * lock mode of dms_buf_ctrl was already set to DMS_LOCK_EXCLUSIVE and IO is still in process.
-             * In order to get rid of this dilemma, we force set the lock mode back to null and don't rebuild this
-             * page. The stucked process will request the page again when it add content lock and the reformer will
-             * become owner when it request the page.
-             */
-            buf_ctrl->lock_mode = DMS_LOCK_NULL;
-        }
-    }
-
-    return ret;
-}
-
 static int32 CBDrcBufRebuild(void *db_handle)
 {
     /* Load Control File */
@@ -1074,18 +1044,12 @@ static int32 CBDrcBufRebuild(void *db_handle)
     for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         buf_state = LockBufHdr(buf_desc);
-        if (SSCheckBufferIfCanGoRebuild(buf_desc, buf_state)) {
+        if ((buf_state & BM_VALID) || (buf_state & BM_TAG_VALID)) {
             int ret = CheckBuf4Rebuild(buf_desc);
             if (ret != DMS_SUCCESS) {
-                if (LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
-                    LWLockRelease(buf_desc->io_in_progress_lock);
-                }
                 UnlockBufHdr(buf_desc, buf_state);
                 return ret;
             }
-        }
-        if (LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
-            LWLockRelease(buf_desc->io_in_progress_lock);
         }
         UnlockBufHdr(buf_desc, buf_state);
     }
@@ -1424,8 +1388,6 @@ static int CBFailoverPromote(void *db_handle)
             pg_usleep(REFORM_WAIT_TIME);
             wait_time += REFORM_WAIT_TIME;
         }
-
-        SSClearSegCache();
         SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_STARTUP);
     }
 

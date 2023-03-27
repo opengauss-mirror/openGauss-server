@@ -31,7 +31,6 @@
 #include "securec_check.h"
 #include "miscadmin.h"
 #include "access/double_write.h"
-#include "access/multi_redo_api.h"
 
 void InitDmsBufCtrl(void)
 {
@@ -178,7 +177,7 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
 }
 
 #ifdef USE_ASSERT_CHECKING
-SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, ForkNumber forkNum,
+static SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, ForkNumber forkNum,
     BlockNumber blockNo, char *blockbuf)
 {
     SMGR_READ_STATUS rdStatus;
@@ -232,11 +231,10 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
         }
 
         if (rdStatus == SMGR_RD_CRC_ERROR) {
-            ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] read from disk error, maybe buffer in flush",
+            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] read from disk error, maybe buffer in flush",
                 buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
                 (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
                 buf_desc->tag.blockNum)));
-            return;
         }
         XLogRecPtr lsn_on_disk = PageGetLSN(temp_buf);
         XLogRecPtr lsn_on_mem = PageGetLSN(BufHdrGetBlock(buf_desc));
@@ -498,6 +496,15 @@ void BufValidateDrc(BufferDesc *buf_desc)
 
 int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
 {
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    Assert(buf_ctrl != NULL);
+    Assert(buf_ctrl->is_edp != 1);
+    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
+
+    if (buf_ctrl->lock_mode == (unsigned char)DMS_LOCK_NULL) {
+        return DMS_SUCCESS;
+    }
+
 #ifdef USE_ASSERT_CHECKING
     if (IsSegmentPhysicalRelNode(buf_desc->tag.rnode)) {
         SegNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
@@ -506,10 +513,6 @@ int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
     }
 #endif
 
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    Assert(buf_ctrl != NULL);
-    Assert(buf_ctrl->is_edp != 1);
-    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
     bool is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;
@@ -627,10 +630,6 @@ void SSLockAcquireAll()
 
 void SSCheckBufferIfNeedMarkDirty(Buffer buf)
 {
-    if (IsExtremeRedo()) {
-        return;
-    }
-
     dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(buf - 1);
     if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
         MarkBufferDirty(buf);
@@ -669,24 +668,23 @@ void SSRecheckBufferPool()
     }
 }
 
-bool CheckPageNeedSkipInRecovery(Buffer buf)
+void CheckPageNeedSkipInRecovery(Buffer buf)
 {
-    bool skip = false;
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf - 1);
     if (buf_ctrl->lock_mode == DMS_LOCK_EXCLUSIVE || !(buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
-        return skip;
+        return;
     }
 
     BufferDesc* buf_desc = GetBufferDescriptor(buf - 1);
     char pageid[DMS_PAGEID_SIZE];
     errno_t err = memcpy_s(pageid, DMS_PAGEID_SIZE, &(buf_desc->tag), sizeof(BufferTag));
     securec_check(err, "\0", "\0");
+    bool skip = false;
     int ret = dms_recovery_page_need_skip(pageid, (unsigned char *)&skip);
     if (ret != DMS_SUCCESS) {
         ereport(PANIC, (errmsg("DMS Internal error happened during recovery, errno %d", ret)));
     }
-
-    return skip;
+    Assert(!skip);
 }
 
 dms_session_e DMSGetProcType4RequestPage()
@@ -821,12 +819,12 @@ bool SSTrySegFlushBuffer(BufferDesc* buf)
 */ 
 bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
 {
-    if (!ENABLE_DMS || IsInitdb) {
+    if (!ENABLE_DMS) {
         return true;
     }
 
-    if (ENABLE_DSS_AIO && buf_desc->extra->aio_in_progress) {
-        return false;
+    if (IsInitdb) {
+        return true;
     }
 
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -863,24 +861,4 @@ bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
         }
     }
     return true;
-}
-
-void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo)
-{
-    if (!ENABLE_DMS || bufferinfo->pageinfo.page == NULL) {
-        return;
-    }
-
-    /* For buffer need flush, we need to mark dirty here */
-    if (!IsRedoBufferDirty(bufferinfo)) {
-        dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(bufferinfo->buf - 1);
-        BufferDesc *bufDesc = GetBufferDescriptor(bufferinfo->buf - 1);
-        if (buf_ctrl->state & BUF_ERTO_NEED_MARK_DIRTY) {
-            MakeRedoBufferDirty(bufferinfo);
-        } else if ((buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) || CheckPageNeedSkipInRecovery(bufferinfo->buf) ||
-                XLogRecPtrIsInvalid(bufDesc->extra->lsn_on_disk)) {
-            buf_ctrl->state |= BUF_ERTO_NEED_MARK_DIRTY;
-            MakeRedoBufferDirty(bufferinfo);
-        }
-    }
 }

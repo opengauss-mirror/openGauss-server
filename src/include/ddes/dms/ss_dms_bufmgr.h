@@ -26,7 +26,6 @@
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_dms.h"
 #include "storage/buf/buf_internals.h"
-#include "access/xlogproc.h"
 
 #define GetDmsBufCtrl(id) (&t_thrd.storage_cxt.dmsBufCtl[(id)])
 
@@ -70,7 +69,7 @@ void MarkReadPblk(int buf_id, const XLogPhyBlock *pblk);
 void SSCheckBufferIfNeedMarkDirty(Buffer buf);
 void SSRecheckBufferPool();
 void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag);
-bool CheckPageNeedSkipInRecovery(Buffer buf);
+void CheckPageNeedSkipInRecovery(Buffer buf);
 void SmgrNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk);
 void SegNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, SegSpace *spc);
 dms_session_e DMSGetProcType4RequestPage();
@@ -79,7 +78,5 @@ bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc);
 bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer);
 bool DmsCheckBufAccessible();
 bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc);
-void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo);
-SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, ForkNumber forkNum,
-    BlockNumber blockNo, char *blockbuf);
+
 #endif
