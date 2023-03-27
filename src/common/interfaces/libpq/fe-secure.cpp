@@ -1319,8 +1319,8 @@ int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bo
     char *cert;
     const char *certfile;
 #ifdef USE_TASSL
-    cert = enc?conn->sslenccert:conn->sslcert;
-    certfile = enc?USER_ENC_CERT_FILE:USER_CERT_FILE;
+    cert = enc ? conn->sslenccert : conn->sslcert;
+    certfile = enc ? USER_ENC_CERT_FILE : USER_CERT_FILE;
 #else
     cert = conn->sslcert;
     certfile = USER_CERT_FILE;
@@ -1442,14 +1442,14 @@ int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, boo
     char *key;
     const char *keyfile;
 #ifdef USE_TASSL
-    key = enc?conn->sslenckey:conn->sslkey;
-    keyfile = enc?USER_ENC_KEY_FILE:USER_KEY_FILE;
+    key = enc ? conn->sslenckey : conn->sslkey;
+    keyfile = enc ? USER_ENC_KEY_FILE : USER_KEY_FILE;
 #else
     key = conn->sslkey;
     keyfile = USER_KEY_FILE;
 #endif
 
-    if (have_cert && (key != NULL) && strlen(key) > 0) {
+    if (have_cert && key != NULL && strlen(key) > 0) {
         rc = strncpy_s(fnbuf, MAXPGPATH, key, strlen(key));
         securec_check_c(rc, "\0", "\0");
         fnbuf[MAXPGPATH - 1] = '\0';
@@ -1981,7 +1981,7 @@ static
     struct stat st;
     int retval = 0;
 #ifdef USE_TASSL
-    KeyMode mode = enc?CLIENT_ENC_MODE:CLIENT_MODE;
+    KeyMode mode = enc ? CLIENT_ENC_MODE : CLIENT_MODE;
 #else
     KeyMode mode = CLIENT_MODE;
 #endif
@@ -2010,7 +2010,7 @@ static
 
     if(NULL != username) {
 #ifdef USE_TASSL
-        nRet = snprintf_s(CipherFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s%s", CertFilesDir, username, enc?"_enc":"", CIPHER_KEY_FILE);
+        nRet = snprintf_s(CipherFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s%s", CertFilesDir, username, enc ? "_enc" : "", CIPHER_KEY_FILE);
 #else
         nRet = snprintf_s(CipherFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s", CertFilesDir, username, CIPHER_KEY_FILE);
 #endif
@@ -2024,8 +2024,10 @@ static
     }
 
     retval = check_permission_cipher_file(CertFilesDir, conn, uname, enc);
-    if (retval != 1)
+    if (retval != 1) {
         return retval;
+    }
+        
     decode_cipher_files(mode, uname, CertFilesDir, conn->cipher_passwd);
 
     SSL_set_default_passwd_cb_userdata(pstContext, (char*)conn->cipher_passwd);
@@ -2054,14 +2056,14 @@ int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const cha
     int nRet = 0;
 #ifdef USE_TASSL
     if (NULL == username) {
-        nRet = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/client%s%s", parent_dir, enc?"_enc":"", CIPHER_KEY_FILE);
+        nRet = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/client%s%s", parent_dir, enc ? "_enc" : "", CIPHER_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
-        nRet = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/client%s%s", parent_dir, enc?"_enc":"", RAN_KEY_FILE);
+        nRet = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/client%s%s", parent_dir, enc ? "_enc" : "", RAN_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
     } else {
-        nRet = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s%s", parent_dir, username, enc?"_enc":"", CIPHER_KEY_FILE);
+        nRet = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s%s", parent_dir, username, enc ? "_enc" : "", CIPHER_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
-        nRet = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s%s", parent_dir, username, enc?"_enc":"", RAN_KEY_FILE);
+        nRet = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s%s", parent_dir, username, enc ? "_enc" : "", RAN_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
     }
 #else

@@ -1884,7 +1884,6 @@ int PostmasterMain(int argc, char* argv[])
      */
     InitializeGUCOptions();
 
-
     /*
      *Initialize Callback function type of cb_for_getlc
      */
@@ -3350,12 +3349,12 @@ static void CheckRecoveryParaConflict()
 #if ((defined(USE_SSL)) && (defined(USE_TASSL)))
 static bool CheckSSLConflictInternal(const char**ssl_ciphers_list)
 {
-    char* token = NULL;
+    char *token = NULL;
     bool find_ciphers_in_list = false;
-    char* ptok = NULL;
+    char *ptok = NULL;
     char *sslciphers = pstrdup(g_instance.attr.attr_security.SSLCipherSuites);
 
-    if (sslciphers == NULL || ssl_ciphers_list == NULL) {
+    if (sslciphers == NULL) {
         ereport(ERROR, (errmsg("sslciphers or ssl_ciphers_list can not be null")));
     } else {
         token = strtok_r(sslciphers, ";", &ptok);
@@ -3377,7 +3376,7 @@ static bool CheckSSLConflictInternal(const char**ssl_ciphers_list)
 }
 static void CheckSSLConflict()
 {
-    const char* ssl_ciphers_list[] = {
+    const char *ssl_ciphers_list[] = {
         "ECDHE-RSA-AES128-GCM-SHA256",
         "ECDHE-RSA-AES256-GCM-SHA384",
         "ECDHE-ECDSA-AES128-GCM-SHA256",
@@ -3386,7 +3385,7 @@ static void CheckSSLConflict()
         "DHE-RSA-AES256-GCM-SHA384",
         NULL
     };
-    const char* ssl_sm_ciphers_list[] = {
+    const char *ssl_sm_ciphers_list[] = {
         "ECDHE-SM4-SM3",
         "ECDHE-SM4-GCM-SM3",
         "ECC-SM4-SM3",

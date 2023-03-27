@@ -373,8 +373,8 @@ struct pg_conn {
     char* sslkey;              /* client key filename */
     char* sslcert;             /* client certificate filename */
 #ifdef USE_TASSL
-    char* sslenckey;
-    char* sslenccert;
+    char *sslenckey;
+    char *sslenccert;
     bool ssltlcp;
 #endif
     char* sslrootcert;         /* root certificate filename */

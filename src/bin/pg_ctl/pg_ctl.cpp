@@ -261,8 +261,8 @@ char* ssl_rand_file = "server.key.rand";
 #ifdef USE_TASSL
 char ssl_enc_cert_file[MAXPGPATH];
 char ssl_enc_key_file[MAXPGPATH];
-char* ssl_enc_cipher_file = "server_enc.key.cipher";
-char* ssl_enc_rand_file = "server_enc.key.rand";
+char *ssl_enc_cipher_file = "server_enc.key.cipher";
+char *ssl_enc_rand_file = "server_enc.key.rand";
 #endif
 
 char pgxc_node_name[MAXPGPATH];

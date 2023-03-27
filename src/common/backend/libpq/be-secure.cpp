@@ -144,8 +144,8 @@ static const char* ssl_ciphers_map[] = {
 const char* ssl_cipher_file = "server.key.cipher";
 const char* ssl_rand_file = "server.key.rand";
 #ifdef USE_TASSL
-const char* ssl_enc_cipher_file = "server.key.cipher";
-const char* ssl_enc_rand_file = "server.key.rand";
+const char *ssl_enc_cipher_file = "server.key.cipher";
+const char *ssl_enc_rand_file = "server.key.rand";
 #endif
 /* ------------------------------------------------------------ */
 /*                       Hardcoded values                       */
@@ -1083,7 +1083,7 @@ static void initialize_SSL(void)
             init_server_ssl_passwd(u_sess->libpq_cxt.SSL_server_context, true);
             
             if (SSL_CTX_use_certificate_chain_file(
-                    u_sess->libpq_cxt.SSL_server_context, g_instance.attr.attr_security.ssl_enc_cert_file) != 1) {
+                u_sess->libpq_cxt.SSL_server_context, g_instance.attr.attr_security.ssl_enc_cert_file) != 1) {
                 ereport(FATAL,
                     (errcode(ERRCODE_CONFIG_FILE_ERROR),
                         errmsg("could not load server encryption certificate file \"%s\": %s",
@@ -1092,7 +1092,7 @@ static void initialize_SSL(void)
             }
             /* check certificate file permission */
     #if !defined(WIN32) && !defined(__CYGWIN__)
-            if (stat(g_instance.attr.attr_security.ssl_enc_cert_file, &buf) == 0){
+            if (stat(g_instance.attr.attr_security.ssl_enc_cert_file, &buf) == 0) {
                 if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
                     ereport(FATAL,
                         (errcode(ERRCODE_CONFIG_FILE_ERROR),
@@ -1106,8 +1106,8 @@ static void initialize_SSL(void)
             if (stat(g_instance.attr.attr_security.ssl_enc_key_file, &buf) != 0) {
                 ereport(FATAL,
                     (errcode_for_file_access(),
-                        errmsg(
-                            "could not access encryption private key file \"%s\": %m", g_instance.attr.attr_security.ssl_enc_key_file)));
+                        errmsg("could not access encryption private key file \"%s\": %m", 
+                            g_instance.attr.attr_security.ssl_enc_key_file)));
             }
 
             /*
@@ -1129,8 +1129,8 @@ static void initialize_SSL(void)
     #endif
 
             if (SSL_CTX_use_PrivateKey_file(u_sess->libpq_cxt.SSL_server_context,
-                                            g_instance.attr.attr_security.ssl_enc_key_file,
-                                            SSL_FILETYPE_PEM) != 1) {
+                g_instance.attr.attr_security.ssl_enc_key_file,
+                SSL_FILETYPE_PEM) != 1) {
                 ereport(FATAL,
                     (errmsg("could not load encryption private key file \"%s\": %s",
                         g_instance.attr.attr_security.ssl_enc_key_file,
@@ -1397,13 +1397,15 @@ static void init_server_ssl_passwd(SSL_CTX* pstContext, bool enc)
 {
     char* parentdir = NULL;
 #ifdef USE_TASSL
-    KeyMode keymode = enc?SERVER_ENC_MODE:SERVER_MODE;
+    KeyMode keymode = enc ? SERVER_ENC_MODE : SERVER_MODE;
 #else
     KeyMode keymode = SERVER_MODE;
 #endif
     char *keyfile;
+    errno_t rc = 0;
+    rc = memset_s(u_sess->libpq_cxt.server_key, CIPHER_H + 1, 0, CIPHER_H + 1);
+    securec_check(rc, "\0", "\0");
 
-    memset_s(u_sess->libpq_cxt.server_key, CIPHER_H + 1, 0, CIPHER_H + 1);
 #ifdef USE_TASSL
     if(enc) {
         keyfile = g_instance.attr.attr_security.ssl_enc_key_file;
@@ -1436,13 +1438,13 @@ static void check_permission_cipher_file(const char* parent_dir, bool enc)
     struct stat cipherbuf;
     struct stat randbuf;
 #ifdef USE_TASSL
-    int rcs = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s%s", parent_dir, enc?"_enc":"" ,CIPHER_KEY_FILE);
+    int rcs = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s%s", parent_dir, enc ? "_enc" : "" ,CIPHER_KEY_FILE);
 #else
     int rcs = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s", parent_dir, CIPHER_KEY_FILE);
 #endif
     securec_check_ss(rcs, "\0", "\0");
 #ifdef USE_TASSL
-    rcs = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s%s", parent_dir, enc?"_enc":"", RAN_KEY_FILE);
+    rcs = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s%s", parent_dir, enc ? "_enc" : "", RAN_KEY_FILE);
 #else
     rcs = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s", parent_dir, RAN_KEY_FILE);
 #endif

@@ -48,8 +48,8 @@ typedef struct knl_instance_attr_security {
     char* ssl_cert_file;
     char* ssl_key_file;
 #ifdef USE_TASSL
-    char* ssl_enc_cert_file;
-    char* ssl_enc_key_file;
+    char *ssl_enc_cert_file;
+    char *ssl_enc_key_file;
     bool  ssl_use_tlcp;
 #endif
     char* ssl_ca_file;

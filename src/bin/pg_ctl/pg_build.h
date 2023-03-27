@@ -40,8 +40,8 @@ extern char* ssl_rand_file;
 #ifdef USE_TASSL
 extern char ssl_enc_cert_file[];
 extern char ssl_enc_key_file[];
-extern char* ssl_enc_cipher_file;
-extern char* ssl_enc_rand_file;
+extern char *ssl_enc_cipher_file;
+extern char *ssl_enc_rand_file;
 #endif 
 
 
