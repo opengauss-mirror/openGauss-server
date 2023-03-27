@@ -13444,7 +13444,11 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         }
     }
 
-    appendPQExpBuffer(labelq, "%s %s\n", funcKind, funcsig);
+    /*
+     * since COMMENT ON PROCEDURE and ALTER EXTENSION ADD PROCEDURE are not valid in grammar
+     * COMMENT ON/ALTER EXTENSION ADD, we should use FUNCTION instead.
+     */
+    appendPQExpBuffer(labelq, "%s %s\n", "FUNCTION", funcsig);
 
     if (binary_upgrade)
         binary_upgrade_extension_member(q, &finfo->dobj, labelq->data);
