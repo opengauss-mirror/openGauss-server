@@ -17977,9 +17977,9 @@ static void GenerateSubPartitionDetail(PQExpBuffer result, Archive *fout, TableI
     PQExpBuffer subPartDetailQ = createPQExpBuffer();
     PGresult *res = NULL;
 
-    appendPQExpBuffer(subPartDetailQ, "SELECT p.relname AS partName, p.partstrategy AS partstrategy, ");
+    appendPQExpBuffer(subPartDetailQ, "SELECT p.relname AS partname, p.partstrategy AS partstrategy, ");
     for (i = 1; i <= subpartkeynum; i++) {
-        appendPQExpBuffer(subPartDetailQ, "p.boundaries[%d] AS partBoundary_%d, ", i, i);
+        appendPQExpBuffer(subPartDetailQ, "p.boundaries[%d] AS partboundary_%d, ", i, i);
     }
     appendPQExpBuffer(subPartDetailQ,
         "pg_catalog.array_to_string(p.boundaries, ',') as bound, "
@@ -18239,12 +18239,12 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
             /* get table partitions info */
             appendPQExpBuffer(partitionq,
                 "SELECT p.oid as oid, "
-                "p.relname AS partName, "
+                "p.relname AS partname, "
                 "pg_catalog.array_length(partkey, 1) AS subpartkeynum, "
                 "partkey AS subpartkey, ");
 
             for (i = 1; i <= partkeynum; i++)
-                appendPQExpBuffer(partitionq, "p.boundaries[%d] AS partBoundary_%d, ", i, i);
+                appendPQExpBuffer(partitionq, "p.boundaries[%d] AS partboundary_%d, ", i, i);
             appendPQExpBuffer(partitionq,
                 "pg_catalog.array_to_string(p.boundaries, ',') as bound, "
                 "pg_catalog.array_to_string(p.boundaries, ''',''') as boundstr, "
@@ -18267,11 +18267,11 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
         } else {
             appendPQExpBuffer(partitionq,
                 "SELECT /*+ hashjoin(p t) */ p.oid AS oid, "
-                "p.relname AS partName, "
+                "p.relname AS partname, "
                 "pg_catalog.array_length(partkey, 1) AS subpartkeynum, "
                 "partkey AS subpartkey, ");
             for (i = 1; i <= partkeynum; i++) {
-                appendPQExpBuffer(partitionq, "NULL AS partBoundary_%d, ", i);
+                appendPQExpBuffer(partitionq, "NULL AS partboundary_%d, ", i);
             }
             appendPQExpBuffer(partitionq,
                 "p.bound_def AS bound, "
