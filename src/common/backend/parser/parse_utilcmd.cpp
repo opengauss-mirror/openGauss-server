@@ -94,8 +94,8 @@
 #include "client_logic/client_logic.h"
 #include "client_logic/client_logic_enums.h"
 #include "storage/checksum_impl.h"
-#include "catalog/gs_utf8_collation.h"
 
+#include "catalog/gs_utf8_collation.h"
 /* State shared by transformCreateSchemaStmt and its subroutines */
 typedef struct {
     const char* stmtType; /* "CREATE SCHEMA" or "ALTER SCHEMA" */

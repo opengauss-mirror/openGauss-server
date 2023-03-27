@@ -225,7 +225,7 @@ static const unsigned char pg_char_properties[128] = {
  */
 void pg_set_regex_collation(Oid collation)
 {
-    if (lc_ctype_is_c(collation)) {
+    if (lc_ctype_is_c(collation) || COLLATION_IN_B_FORMAT(collation)) {
         /* C/POSIX collations use this path regardless of database encoding */
         u_sess->regex_cxt.pg_regex_strategy = PG_REGEX_LOCALE_C;
         pg_regex_locale = 0;

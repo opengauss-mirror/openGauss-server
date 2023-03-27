@@ -29,8 +29,8 @@
 #include "knl/knl_variable.h"
 
 #include "access/hash.h"
-#include "catalog/gs_utf8_collation.h"
 
+#include "catalog/gs_utf8_collation.h"
 #ifdef PGXC
 #include "catalog/pg_type.h"
 #include "utils/builtins.h"
