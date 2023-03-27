@@ -23,9 +23,9 @@ function print_help()
     -V|--version           show version information.
     -3rd|--binarylib_dir   the directory of third party binarylibs.
     -pkg|--package         provode type of installation packages, values parameter is server.
-    -m|--version_mode      this values of paramenter is debug, release, memcheck, the default value is release.
+    -m|--version_mode      this values of parameter is debug, release, memcheck, the default value is release.
     -pm                    product mode, values parameter is  opengauss.
-    -mc|--make_check       this values of paramenter is on or off, the default value is on.
+    -mc|--make_check       this values of parameter is on or off, the default value is on.
     -s|--symbol_mode       whether separate symbol in debug mode, the default value is on.
     -co|--cmake_opt        more cmake options
 "
@@ -43,7 +43,7 @@ if [ $# = 0 ] ; then
 fi
 
 #########################################################################
-##read command line paramenters
+##read command line parameters
 #######################################################################
 while [ $# -gt 0 ]; do
     case "$1" in
