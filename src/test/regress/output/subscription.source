@@ -189,6 +189,13 @@ ERROR:  Password can't contain more than 999 characters.
 -- fail, set password len with 1000
 ALTER SUBSCRIPTION sub_len_999 CONNECTION 'host=192.16''''8.1.50 port=5432 user=foo dbname=foodb password=xxin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leid';
 ERROR:  Password can't contain more than 999 characters.
+--- permission
+CREATE ROLE normal_user LOGIN PASSWORD 'Abcdef@123';
+SET SESSION AUTHORIZATION 'normal_user' PASSWORD 'Abcdef@123';
+ALTER SUBSCRIPTION testsub_rename rename to testsub;
+ERROR:  must be owner of subscription testsub_rename
+DETAIL:  N/A
+SET SESSION AUTHORIZATION 'regress_subscription_user' PASSWORD 'Abcdef@123';
 --- drop subscription
 DROP SUBSCRIPTION IF EXISTS testsub_rename;
 DROP SUBSCRIPTION IF EXISTS testsub_maskconninfo;
@@ -197,6 +204,7 @@ DROP SUBSCRIPTION IF EXISTS sub_len_999;
 RESET SESSION AUTHORIZATION;
 DROP ROLE regress_subscription_user;
 DROP ROLE regress_subscription_user2;
+DROP ROLE normal_user;
 -- built-in function test
 select pg_replication_origin_create('origin_test');
  pg_replication_origin_create 
