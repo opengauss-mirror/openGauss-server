@@ -1123,6 +1123,12 @@ void ExecEarlyFreeHashJoin(HashJoinState* node)
     if (node->hj_HashTable) {
         ExecHashTableDestroy(node->hj_HashTable);
         node->hj_HashTable = NULL;
+        /*
+         * HashState.hashtable also point to hj_HashTable(check ExecHashJoin),
+         * so set it to null directly to avoid heap-use-after-free
+         */
+        HashState* hash_state = (HashState*)innerPlanState(node);
+        hash_state->hashtable = NULL;
     }
 
     /*
