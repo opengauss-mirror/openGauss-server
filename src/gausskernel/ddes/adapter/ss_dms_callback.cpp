@@ -315,6 +315,7 @@ static int CBDbIsPrimary(void *db_handle)
 
 static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
 {
+    g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
     g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag = true;
     /* allow recovery in switchover to keep LSN in order */
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
