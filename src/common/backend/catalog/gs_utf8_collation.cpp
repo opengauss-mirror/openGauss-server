@@ -589,7 +589,7 @@ Datum hash_text_by_builtin_colltions(const unsigned char *key, size_t len, Oid c
             break;
         case UTF8MB4_BIN_COLLATION_OID:
         case UTF8_BIN_COLLATION_OID:
-            result = hash_utf8mb4_bin_pad_space((unsigned char*)key);
+            result = hash_any((unsigned char*)key, bpchartruelen((char*)key, len));
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -798,16 +798,6 @@ Datum hash_utf8mb4_general_pad_space(const unsigned char *key, size_t len)
         NEXT_WORD_POS(key, key_bytes);
     }
     return UInt32GetDatum(nr1);
-}
-
-/*
-* hash function for collation utf8mb4_bin
-*/
-Datum hash_utf8mb4_bin_pad_space(const unsigned char *key)
-{
-    unsigned char* remove_space_key = (unsigned char*)remove_trailing_spaces((const char*)key);
-
-    return hash_any(remove_space_key, strlen((const char*)remove_space_key));
 }
 
 /*
