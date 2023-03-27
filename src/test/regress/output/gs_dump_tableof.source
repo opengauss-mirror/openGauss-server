@@ -13,6 +13,9 @@ create type s_type_1 is (
 	addr text
 );
 create type dams_arrytype1 is table of s_type_1;
+create procedure comment_test_procedure(int,int) as begin select $1 + $2;end;
+/
+comment on function comment_test_procedure(int,int) is 'test_comment_on';
 \! @abs_bindir@/gs_dump dump_type_db -p @portstring@ -f @abs_bindir@/dump_type.tar -F t >/dev/null 2>&1; echo $?
 0
 drop database if exists restore_type_db;
