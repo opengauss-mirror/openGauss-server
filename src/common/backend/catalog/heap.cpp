@@ -525,7 +525,7 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
     Relation rel;
     bool isbucket = false;
 
-    if (IsInitdb && EnableInitDBSegment) {
+    if ((IsInitdb && EnableInitDBSegment) || (u_sess->attr.attr_common.IsInplaceUpgrade && ENABLE_DMS)) {
         /* store tables in segment storage as all possible while initdb */
         if (relpersistence == RELPERSISTENCE_PERMANENT) {
             storage_type = SEGMENT_PAGE;
@@ -2617,7 +2617,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
     ObjectAddress new_type_addr;
     bool relhasuids = false;
 
-    if (IsInitdb && EnableInitDBSegment) {
+    if ((IsInitdb && EnableInitDBSegment) || (u_sess->attr.attr_common.IsInplaceUpgrade && ENABLE_DMS)) {
         if (relpersistence == RELPERSISTENCE_UNLOGGED) {
             relpersistence = RELPERSISTENCE_PERMANENT;
             ereport(WARNING,

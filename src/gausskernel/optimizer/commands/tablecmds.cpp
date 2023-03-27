@@ -2885,7 +2885,7 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
                 errmsg("The table %s do not support segment storage", stmt->relation->relname)));
     }
 
-    if (ENABLE_DMS) {
+    if (ENABLE_DMS && !u_sess->attr.attr_common.IsInplaceUpgrade) {
         if ((relkind == RELKIND_RELATION && storage_type != SEGMENT_PAGE) ||
             relkind == RELKIND_MATVIEW ||
             pg_strcasecmp(storeChar, ORIENTATION_ROW) != 0 ||

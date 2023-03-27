@@ -153,10 +153,41 @@ void MarkReadHint(int buf_id, char persistence, bool extend, const XLogPhyBlock 
 void ClearReadHint(int buf_id, bool buf_deleted)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
+
+    if (buf_ctrl->state & BUF_BEING_RELEASED) {
+        BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
+        RelFileNode rnode = buf_desc->tag.rnode;
+        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d marked as NOT being" 
+            " released during release owner, old_val:%u", rnode.spcNode, rnode.dbNode, rnode.relNode,
+            rnode.bucketNode, rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+            buf_desc->buf_id, BUF_BEING_RELEASED)));
+    }
+
     buf_ctrl->state &=
-        ~(BUF_NEED_LOAD | BUF_IS_LOADED | BUF_LOAD_FAILED | BUF_NEED_TRANSFER | BUF_IS_EXTEND | BUF_DIRTY_NEED_FLUSH);
+        ~(BUF_NEED_LOAD | BUF_IS_LOADED | BUF_LOAD_FAILED | BUF_NEED_TRANSFER | BUF_IS_EXTEND |
+        BUF_DIRTY_NEED_FLUSH | BUF_BEING_RELEASED);
     if (buf_deleted) {
         buf_ctrl->state = 0;
+    }
+}
+
+/* this function should be called inside header lock */
+void MarkDmsBufBeingReleased(BufferDesc *buf_desc, bool set)
+{
+    RelFileNode rnode = buf_desc->tag.rnode;
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    unsigned int old_val = buf_ctrl->state & BUF_BEING_RELEASED;
+    if (set) {
+        buf_ctrl->state |= BUF_BEING_RELEASED;
+        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d marked as being released during"
+            " release owner, old_val:%u", rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode,
+            rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum, buf_desc->buf_id, old_val)));
+    } else if (!set && old_val) {
+        buf_ctrl->state &= ~BUF_BEING_RELEASED;
+        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d marked as NOT being"
+            " released during release owner, old_val:%u", rnode.spcNode, rnode.dbNode, rnode.relNode,
+            rnode.bucketNode, rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+            buf_desc->buf_id, old_val)));
     }
 }
 
@@ -169,6 +200,14 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     dms_lock_mode_t req_mode = (mode == LW_SHARED) ? DMS_LOCK_SHARE : DMS_LOCK_EXCLUSIVE;
+    RelFileNode rnode = buf_desc->tag.rnode;
+
+    if (buf_ctrl->state & BUF_BEING_RELEASED) {
+        ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] buffer is being released in dms_release_owner",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+        return false;
+    }
 
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
@@ -469,17 +508,15 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
     return TerminateReadPage(buf_desc, read_mode, OidIsValid(buf_ctrl->pblk_relno) ? &pblk : NULL);
 }
 
-bool DmsReleaseOwner(BufferTag buf_tag, int buf_id)
+bool DmsReleaseOwner(BufferTag buf_tag, int buf_id, unsigned char* released)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
     if (buf_ctrl->state & BUF_IS_RELPERSISTENT_TEMP) {
         return true;
     }
-    unsigned char released = 0;
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_tag);
-
-    return ((dms_release_owner(&dms_ctx, buf_ctrl, &released) == DMS_SUCCESS) && (released != 0));
+    return (dms_release_owner(&dms_ctx, buf_ctrl, released) == DMS_SUCCESS);
 }
 
 void BufValidateDrc(BufferDesc *buf_desc)
@@ -883,4 +920,13 @@ void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo)
             MakeRedoBufferDirty(bufferinfo);
         }
     }
+}
+
+const int ss_buf_retry_threshold = 5;
+long SSGetBufSleepTime(int retry_times)
+{
+    if (retry_times < ss_buf_retry_threshold) {
+        return 5000L * retry_times;
+    }
+    return 1000L * 1000 * 60;
 }

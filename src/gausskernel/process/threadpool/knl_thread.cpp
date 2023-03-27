@@ -1702,6 +1702,8 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     dms_cxt->offset = 0;
     dms_cxt->size = 0;
     dms_cxt->file_size = 0;
+    errno_t rc = memset_s(dms_cxt->msg_backup, sizeof(dms_cxt->msg_backup), 0, sizeof(dms_cxt->msg_backup));
+    securec_check(rc, "\0", "\0");
 }
 static void knl_t_rc_init(knl_t_rc_context* rc_cxt)
 {

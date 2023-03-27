@@ -315,6 +315,7 @@ static int CBDbIsPrimary(void *db_handle)
 
 static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
 {
+    g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
     g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag = true;
     /* allow recovery in switchover to keep LSN in order */
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
@@ -642,12 +643,11 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
         WaitIO(buf_desc);
         if ((!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) ||
             (pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR)) {
-            ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("[%d/%d/%d/%d %d-%d] invalidate page failed, buffer is not valid or io error, state = 0x%x",
+            ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%x",
                 tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                 tag->forkNum, tag->blockNum, buf_desc->state)));
-            DmsReleaseBuffer(buf_desc->buf_id + 1, IsSegmentBufferID(buf_id));
-            ret = DMS_ERROR;
+            ret = DMS_SUCCESS;
             break;
         }
 
@@ -1329,14 +1329,14 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
 
 static int CBFlushCopy(void *db_handle, char *pageid)
 {
-    if (SS_REFORM_REFORMER && !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
-        g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = true;
-        smgrcloseall();
-    }
-
     // only 1) primary restart 2) failover need flush_copy
     if (SS_REFORM_REFORMER && g_instance.dms_cxt.dms_status == DMS_STATUS_IN && !SS_STANDBY_FAILOVER) {
         return GS_SUCCESS;
+    }
+
+    if (SS_REFORM_REFORMER && !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
+        g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = true;
+        smgrcloseall();
     }
 
     BufferTag* tag = (BufferTag*)pageid;
@@ -1478,6 +1478,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
+    g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
     g_instance.dms_cxt.resetSyscache = true;
     if (ss_reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
@@ -1544,6 +1545,7 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSReformInfo.in_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
+    Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     ereport(LOG,
             (errmodule(MOD_DMS),
                 errmsg("[SS reform/SS switchover/SS failover] Reform success, instance:%d is running.",
@@ -1557,6 +1559,24 @@ static int CBReformDoneNotify(void *db_handle)
 static int CBXLogWaitFlush(void *db_handle, unsigned long long lsn)
 {
     XLogWaitFlush(lsn);
+    return GS_SUCCESS;
+}
+
+static int CBDBCheckLock(void *db_handle)
+{
+    if (t_thrd.storage_cxt.num_held_lwlocks > 0) {
+        ereport(PANIC, (errmsg("hold lock, lock address:%p, lock mode:%u",
+            t_thrd.storage_cxt.held_lwlocks[0].lock, t_thrd.storage_cxt.held_lwlocks[0].mode)));
+        return GS_ERROR;
+    }
+    return GS_SUCCESS;
+}
+
+static int CBCacheMsg(void *db_handle, char* msg)
+{
+    errno_t rc = memcpy_s(t_thrd.dms_cxt.msg_backup, sizeof(t_thrd.dms_cxt.msg_backup), msg, 
+                        sizeof(t_thrd.dms_cxt.msg_backup));
+    securec_check(rc, "\0", "\0");
     return GS_SUCCESS;
 }
 
@@ -1670,4 +1690,6 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->reform_done_notify = CBReformDoneNotify;
     callback->log_wait_flush = CBXLogWaitFlush;
     callback->drc_validate = CBDrcBufValidate;
+    callback->db_check_lock = CBDBCheckLock;
+    callback->cache_msg = CBCacheMsg;
 }
