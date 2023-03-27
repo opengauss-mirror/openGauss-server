@@ -525,17 +525,17 @@ void RecoveryOps::InsertRow(IRecoveryOpsContext* ctx, uint64_t tableId, uint64_t
     }
     row->CopyData((const uint8_t*)rowData, rowLen);
     row->SetRowId(rowId);
+    if (!sState.UpdateMaxKey(rowId)) {
+        status = RC_ERROR;
+        MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG, "Recovery Manager Insert Row", "Failed to update surrogate state");
+        table->DestroyRow(row);
+        return;
+    }
 
     MOT::Index* ix = nullptr;
     ix = table->GetPrimaryIndex();
     if (ix->IsFakePrimary()) {
         row->SetSurrogateKey();
-        if (!sState.UpdateMaxKey(rowId)) {
-            status = RC_ERROR;
-            MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG, "Recovery Manager Insert Row", "Failed to update surrogate state");
-            table->DestroyRow(row);
-            return;
-        }
     }
     InsItem* insItem = txn->GetNextInsertItem();
     if (insItem == nullptr) {
