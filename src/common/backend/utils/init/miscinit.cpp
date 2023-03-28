@@ -2043,9 +2043,9 @@ void register_backend_version(uint32 backend_version){
  * Check whether the version contains the backend_version parameter.
  */
 bool contain_backend_version(uint32 version_number) {
-    return ((version_number >= V5R1C20_BACKEND_VERSION_NUM &&
-             version_number < V5R2C00_START_VERSION_NUM) ||
-            (version_number >= V5R2C00_BACKEND_VERSION_NUM));
+    return ((version_number >= BACKEND_VERSION_PRE_INCLUDE_NUM &&
+             version_number < BACKEND_VERSION_PRE_END_NUM) ||
+            (version_number >= BACKEND_VERSION_INCLUDE_NUM));
 }
 
 void ss_initdwsubdir(char *dssdir, int instance_id)
