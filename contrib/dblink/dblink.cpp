@@ -157,8 +157,8 @@ static bool UseODBCLinker(char* connstr);
                 PQLinker* plinker = New(SESS_GET_MEM_CXT_GROUP                          \
                     (MEMORY_CONTEXT_COMMUNICATION)) PQLinker(connstr);                  \
                 linker = plinker;                                                       \
-                freeconn = true;                                                        \
             }                                                                           \
+            freeconn = true;                                                            \
         }                                                                               \
     } while (0)
 
@@ -1207,7 +1207,7 @@ static Datum dblink_record_internal(FunctionCallInfo fcinfo, bool is_async)
     PG_CATCH();
     {
         /* if needed, close the connection to the database */
-        if (freeconn) {
+        if (freeconn && linker) {
             linker->finish();
         }
 
@@ -1216,7 +1216,7 @@ static Datum dblink_record_internal(FunctionCallInfo fcinfo, bool is_async)
     PG_END_TRY();
 
     /* if needed, close the connection to the database */
-    if (freeconn) {
+    if (freeconn && linker) {
         linker->finish();
     }
 
@@ -1674,7 +1674,7 @@ Datum dblink_exec(PG_FUNCTION_ARGS)
     PG_CATCH();
     {
         /* if needed, close the connection to the database */
-        if (freeconn) {
+        if (freeconn && linker) {
             linker->finish();
         }
         PG_RE_THROW();
@@ -1682,7 +1682,7 @@ Datum dblink_exec(PG_FUNCTION_ARGS)
     PG_END_TRY();
 
     /* if needed, close the connection to the database */
-    if (freeconn) {
+    if (freeconn && linker) {
         linker->finish();
     }
 
