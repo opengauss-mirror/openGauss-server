@@ -221,13 +221,22 @@ RESET SESSION AUTHORIZATION;
 DROP ROLE regress_publication_user;
 DROP ROLE regress_publication_user2;
 --- permission
+CREATE ROLE regress_publication_user LOGIN SYSADMIN PASSWORD 'Abcdef@123';
+SET SESSION AUTHORIZATION 'regress_publication_user' PASSWORD 'Abcdef@123';
+CREATE PUBLICATION testpub FOR ALL TABLES;
 CREATE ROLE normal_user LOGIN PASSWORD 'Abcdef@123';
 SET SESSION AUTHORIZATION 'normal_user' PASSWORD 'Abcdef@123';
 --- fail permission denied
 create publication p1;
 ERROR:  permission denied for database regression
 DETAIL:  N/A
+ALTER PUBLICATION testpub RENAME TO testpub1;
+ERROR:  must be owner of publication testpub
+DETAIL:  N/A
+SET SESSION AUTHORIZATION 'regress_publication_user' PASSWORD 'Abcdef@123';
+DROP PUBLICATION testpub;
 RESET SESSION AUTHORIZATION;
+DROP ROLE regress_publication_user;
 DROP ROLE normal_user;
 SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_publication_subscription';
          object_name         |                                  detail_info                                  
@@ -251,7 +260,9 @@ SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-1
  testpub_only_tbl1           | DROP PUBLICATION IF EXISTS testpub_only_tbl1;
  testpub_only_insert         | DROP PUBLICATION IF EXISTS testpub_only_insert;
  testpub_multitbls           | DROP PUBLICATION IF EXISTS testpub_multitbls;
-(19 rows)
+ testpub                     | CREATE PUBLICATION testpub FOR ALL TABLES;
+ testpub                     | DROP PUBLICATION testpub;
+(21 rows)
 
 --clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');

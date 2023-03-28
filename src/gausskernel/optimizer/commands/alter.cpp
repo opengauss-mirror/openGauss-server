@@ -256,6 +256,14 @@ AlterObjectRename_internal(Relation rel, Oid objectId, const char *new_name)
                 if (!pg_ts_config_ownercheck(objectId, userId))
                     aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_TSCONFIGURATION, old_name);
                 break;    
+            case OBJECT_PUBLICATION:
+                if (!pg_publication_ownercheck(objectId, userId))
+                    aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PUBLICATION, old_name);
+                break;
+            case OBJECT_SUBSCRIPTION:
+                if (!pg_subscription_ownercheck(objectId, userId))
+                    aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_SUBSCRIPTION, old_name);
+                break;
             default: {
                     ereport(ERROR,
                             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
