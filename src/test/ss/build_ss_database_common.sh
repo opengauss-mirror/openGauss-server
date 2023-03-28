@@ -56,11 +56,15 @@ assign_hatest_parameter()
 {
     for node in $@
     do
-        echo -e "\nss_enable_reform = on" >> ${node}/postgresql.conf
-        echo -e "\nlog_min_messages = log" >> ${node}/postgresql.conf
-        echo -e "\nlogging_module = 'on(ALL)'" >> ${node}/postgresql.conf
-        echo "${node}:"
-        cat ${node}/postgresql.conf | grep ss_enable_dms
+        echo -e "ss_enable_reform = on" >> ${node}/postgresql.conf
+        echo -e "log_min_messages = log" >> ${node}/postgresql.conf
+        echo -e "logging_module = 'on(ALL)'" >> ${node}/postgresql.conf
+        echo -e "ss_log_level = 255" >> ${node}/postgresql.conf
+        echo -e "ss_log_backup_file_count = 100" >> ${node}/postgresql.conf
+        echo -e "ss_log_max_file_size = 1024MB" >> ${node}/postgresql.conf
+        echo -e "enable_bbox_dump = on" >> ${node}/postgresql.conf
+
+        cat ${node}/postgresql.conf | grep enable_bbox_dump
     done
 }
 
