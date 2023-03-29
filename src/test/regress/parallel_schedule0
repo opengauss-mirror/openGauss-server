@@ -66,7 +66,7 @@ test: pl_debugger_server pl_debugger_client
 test: update_for_wait_s1 update_for_wait_s2
 test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud null_test_opt deserialize_func
 test: large_sequence int16 gs_dump_sequence
-test: gs_dump_tableof view_definer_test
+test: gs_dump_tableof view_definer_test view_definer_permission_test
 test: analyze_commands
 #test: single_node_job
 test: single_node_ddl

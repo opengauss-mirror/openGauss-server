@@ -33,21 +33,12 @@ end;
 SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%' order by view_name;
 
 -- dump all views
-\! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^ALTER|^DROP'| tr -s ‘'\n' > @abs_bindir@/definer_view_dump.sql 2>&1
+\! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^DROP'| tr -s '\n' > @abs_bindir@/definer_view_dump.sql 2>&1
 \! cat @abs_bindir@/definer_view_dump.sql
+\! @abs_bindir@/gs_dump test_db -p @portstring@ -F c -f @abs_bindir@/definer_view_dump.dmp
+CREATE DATABASE target DBCOMPATIBILITY 'B';
 
-DROP VIEW definer_test_view1;
-DROP VIEW definer_test_view2;
-DROP VIEW definer_test_view3;
-DROP FUNCTION pro_1107262(n int);
-DROP TABLE tab_1107262;
-
-DROP SCHEMA "Test_User";
-DROP SCHEMA test_user2;
-
-GRANT ALL PRIVILEGES TO test_user2;
-
-\i @abs_bindir@/definer_view_dump.sql
+\! @abs_bindir@/gs_restore -d target -p @portstring@ @abs_bindir@/definer_view_dump.dmp
 
 SELECT * FROM definer_test_view1;
 SELECT * FROM definer_test_view2;
@@ -72,6 +63,7 @@ create database test_2;
 drop database test_db;
 drop database test_1;
 drop database test_2;
+drop database target;
 DROP USER "Test_User";
 DROP USER test_user2;
 DROP USER "Root_Test" CASCADE;
