@@ -7805,7 +7805,10 @@ static int exec_stmt_fetch(PLpgSQL_execstate* estate, PLpgSQL_stmt_fetch* stmt)
     exec_set_notfound(estate, (n == 0) ? PLPGSQL_TRUE : PLPGSQL_FALSE, stmt->curvar + CURSOR_NOTFOUND);
     
     if (B_FETCH && n == 0) {
-        return PLPGSQL_RC_EXIT;
+        ereport(ERROR,
+                (errcode(ERRCODE_NO_DATA),
+                    errmodule(MOD_PLSQL),
+                    errmsg("No data - zero rows fetched, selected, or processed")));
     }
     exec_set_rowcount(estate, n, false, stmt->curvar + CURSOR_ROWCOUNT);
 

@@ -407,9 +407,6 @@ typedef struct PLpgSQL_var { /* Scalar variable */
     PLpgSQL_expr* cursor_explicit_expr;
     int cursor_explicit_argrow;
     int cursor_options;
-    int customCondition; /* only for declare condition variable. */
-    char *sqlstateCondition;    /* only for declare condition variable. */
-    bool isSqlvalue;
 
     Datum value;
     bool isnull;

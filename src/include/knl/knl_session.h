@@ -1490,6 +1490,7 @@ typedef struct PLpgSQL_compile_context {
     struct PLpgSQL_stmt_block* plpgsql_parse_error_result;
     struct PLpgSQL_datum** plpgsql_Datums;
     struct PLpgSQL_function* plpgsql_curr_compile;
+    struct PLpgSQL_condition* plpgsql_conditions;
 
     bool* datum_need_free; /* need free datum when free function/package memory? */
     bool plpgsql_DumpExecTree;
