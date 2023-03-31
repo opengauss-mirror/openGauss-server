@@ -88,8 +88,8 @@ static void LogicalOutputWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, Tran
     str_lsn_temp = (char *)palloc0(str_lsn_len);
     rc = sprintf_s(str_lsn_temp, str_lsn_len, "%X/%X", uint32(lsn >> 32), uint32(lsn));
     securec_check_ss(rc, "", "");
-    values[0] = CStringGetTextDatum(str_lsn_temp);
-    values[1] = TransactionIdGetDatum(xid);
+    values[ARR_0] = CStringGetTextDatum(str_lsn_temp);
+    values[ARR_1] = TransactionIdGetDatum(xid);
 
     /*
      * Assert ctx->out is in database encoding when we're writing textual
@@ -100,9 +100,12 @@ static void LogicalOutputWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, Tran
     }
 
     /* ick, but cstring_to_text_with_len works for bytea perfectly fine */
-    values[2] = PointerGetDatum(cstring_to_text_with_len(ctx->out->data, (size_t)(uint)(ctx->out->len)));
+    values[ARR_2] = PointerGetDatum(cstring_to_text_with_len(ctx->out->data, (size_t)(uint)(ctx->out->len)));
 
     tuplestore_putvalues(p->tupstore, p->tupdesc, values, nulls);
+    pfree(DatumGetPointer(values[ARR_0]));
+    pfree(DatumGetPointer(values[ARR_2]));
+    pfree(str_lsn_temp);
     p->returned_rows++;
 }
 

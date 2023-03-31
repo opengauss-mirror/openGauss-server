@@ -692,7 +692,6 @@ typedef struct knl_g_parallel_decode_context {
     MemoryContext logicalLogCtx;
     int state;
     slock_t rwlock;
-    slock_t destroy_lock; /* redo worker destroy lock */
     char* dbUser;
     char* dbName;
     int totalNum;
