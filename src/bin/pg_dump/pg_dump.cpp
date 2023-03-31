@@ -504,6 +504,7 @@ static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxI
 static bool IsPlainFormat();
 static bool findDBCompatibility(Archive* fout, const char* databasename);
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
+static bool IsPlainFormat();
 static bool needIgnoreSequence(TableInfo* tbinfo);
 inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
 #ifdef DUMPSYSLOG
@@ -1732,7 +1733,9 @@ void validatedumpoptions()
  */
 void validatedumpformats()
 {
-    if (*format == 'c' || *format == 'd' || *format == 't') {
+    if ((pg_strcasecmp(format, "custom") == 0 || pg_strcasecmp(format, "c") == 0) ||
+        (pg_strcasecmp(format, "directory") == 0 || pg_strcasecmp(format, "d") == 0) ||
+        (pg_strcasecmp(format, "tar") == 0 || pg_strcasecmp(format, "t") == 0)) {
         if (check_filepath == false) {
             write_stderr(_("options -F/--format argument '%c' must be used with -f/--file together\n"), *format);
             write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
@@ -13435,7 +13438,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
             exit_horribly(NULL, "unrecognized provolatile value for function \"%s\"\n", finfo->dobj.name);
     }
 
-    if (isHasProshippable) {
+    if (isHasProshippable && (isProcedure || !addDelimiter)) {
         if (proshippable[0] == 't') {
             appendPQExpBuffer(q, " SHIPPABLE");
         } else {
@@ -13509,13 +13512,13 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     if (!fout->encryptfile && (pg_strcasecmp(format, "plain") == 0 || 
         pg_strcasecmp(format, "p") == 0 || pg_strcasecmp(format, "a") == 0
         || pg_strcasecmp(format, "append") == 0)) {
-        if (addDelimiter) {
+        if (addDelimiter && IsPlainFormat()) {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, "//\n");
         } else {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "/\n" : "");
         }
     } else {
-         if (addDelimiter) {
+         if (addDelimiter && IsPlainFormat()) {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, "//\n");
         } else {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "\n" : "");
@@ -13527,7 +13530,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     if (binary_upgrade)
         binary_upgrade_extension_member(q, &finfo->dobj, labelq->data);
 
-    if (addDelimiter) {
+    if (addDelimiter && IsPlainFormat()) {
         appendPQExpBuffer(q, "delimiter ;\n");
     }
 
@@ -18624,7 +18627,7 @@ static void dumpViewSchema(
      * The DROP statement is automatically backed up when the backup format is -c/-t/-d.
      * So when use include_depend_objs and -p, we should also add the function.
      */
-    if (include_depend_objs && !outputClean && (*format == 'p')) {
+    if (include_depend_objs && !outputClean && IsPlainFormat()) {
         appendPQExpBuffer(q, "DROP VIEW IF EXISTS %s.", fmtId(tbinfo->dobj.nmspace->dobj.name));
         appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
@@ -19178,7 +19181,7 @@ static void DumpMatviewSchema(
      * The DROP statement is automatically backed up when the backup format is -c/-t/-d.
      * So when use include_depend_objs and -p, we should also add the function.
      */
-    if (include_depend_objs && !outputClean && (*format == 'p')) {
+    if (include_depend_objs && !outputClean && IsPlainFormat()) {
         appendPQExpBuffer(q, "DROP MATERIALIZED VIEW IF EXISTS %s.", fmtId(tbinfo->dobj.nmspace->dobj.name));
         appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
@@ -19366,7 +19369,7 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
          * The DROP statement is automatically backed up when the backup format is -c/-t/-d.
          * So when use include_depend_objs and -p, we should also add the function.
          */
-        if (include_depend_objs && !outputClean && (*format == 'p')) {
+        if (include_depend_objs && !outputClean && IsPlainFormat()) {
             appendPQExpBuffer(q, "DROP %s IF EXISTS %s.", reltypename, fmtId(tbinfo->dobj.nmspace->dobj.name));
             appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
         }
@@ -21412,7 +21415,7 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
      * The DROP statement is automatically backed up when the backup format is -c/-t/-d.
      * So when use include_depend_objs and -p, we should also add the function.
      */
-    if (include_depend_objs && !outputClean && (*format == 'p')) {
+    if (include_depend_objs && !outputClean && IsPlainFormat()) {
         appendPQExpBuffer(query, "DROP %s SEQUENCE IF EXISTS %s.", optLarge, fmtId(tbinfo->dobj.nmspace->dobj.name));
         appendPQExpBuffer(query, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
@@ -21706,24 +21709,21 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
     if (NULL != tginfo->tgdef) {
         if (tginfo->tgdb) {
             appendPQExpBuffer(query, "DROP FUNCTION %s ;\n", tginfo->tgfname);
-            if (tginfo->tgbodybstyle)
+            if (tginfo->tgbodybstyle && IsPlainFormat())
                 appendPQExpBuffer(query, "delimiter //\n");
             appendPQExpBuffer(query, "%s", tginfo->tgdef);
-            if (*format == 'p') {
+            if (IsPlainFormat()) {
                 if (tginfo->tgbodybstyle)
                     appendPQExpBuffer(query, "\n//\n");
                 else
                     appendPQExpBuffer(query, "\n/\n");
             } else {
-                if (tginfo->tgbodybstyle)
-                    appendPQExpBuffer(query, "\n//\n");
-                else
-                    appendPQExpBuffer(query, ";\n");
+                appendPQExpBuffer(query, ";\n");
             }
         } else {
             appendPQExpBuffer(query, "%s;\n", tginfo->tgdef);
         }
-        if (tginfo->tgbodybstyle)
+        if (tginfo->tgbodybstyle && IsPlainFormat())
             appendPQExpBuffer(query, "delimiter ;\n");
     } else {
         if (tginfo->tgisconstraint) {
@@ -23552,6 +23552,11 @@ static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo*
 
     PQclear(res);
     destroyPQExpBuffer(query);
+}
+
+static bool IsPlainFormat()
+{
+	return pg_strcasecmp(format, "plain") == 0 || pg_strcasecmp(format, "p") == 0;
 }
 
 static bool needIgnoreSequence(TableInfo* tbinfo)
