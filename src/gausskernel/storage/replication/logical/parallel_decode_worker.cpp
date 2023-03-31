@@ -198,22 +198,22 @@ static void SetDecodeWorkerThreadState(int slotId, int workId, int state)
 void ReleaseParallelDecodeResource(int slotId)
 {
     knl_g_parallel_decode_context *pDecodeCxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
-
-    SpinLockAcquire(&pDecodeCxt->destroy_lock);
-    if (pDecodeCxt->parallelDecodeCtx != NULL) {
-        MemoryContextDelete(pDecodeCxt->parallelDecodeCtx);
-        pDecodeCxt->parallelDecodeCtx = NULL;
-    }
-    if (pDecodeCxt->logicalLogCtx != NULL) {
-        MemoryContextDelete(pDecodeCxt->logicalLogCtx);
-        pDecodeCxt->logicalLogCtx = NULL;
-    }
-    SpinLockRelease(&pDecodeCxt->destroy_lock);
+    MemoryContext decode_cxt = pDecodeCxt->parallelDecodeCtx;
+    MemoryContext llog_cxt = pDecodeCxt->logicalLogCtx;
 
     SpinLockAcquire(&pDecodeCxt->rwlock);
+    pDecodeCxt->parallelDecodeCtx = NULL;
+    pDecodeCxt->logicalLogCtx = NULL;
     g_Logicaldispatcher[slotId].active = false;
     g_Logicaldispatcher[slotId].abnormal = false;
     SpinLockRelease(&pDecodeCxt->rwlock);
+
+    if (decode_cxt != NULL) {
+        MemoryContextDelete(decode_cxt);
+    }
+    if (llog_cxt != NULL) {
+        MemoryContextDelete(llog_cxt);
+    }
 
     ereport(LOG, (errmsg("g_Logicaldispatcher[%d].active = false", slotId)));
 }
@@ -651,25 +651,14 @@ int GetLogicalDispatcher()
     const int maxReaderNum = 20;
     int maxDispatcherNum = Min(g_instance.attr.attr_storage.max_replication_slots, maxReaderNum);
     LWLockAcquire(ParallelDecodeLock, LW_EXCLUSIVE);
-    MemoryContext ctx = AllocSetContextCreate(g_instance.instance_context, "ParallelDecodeDispatcher",
-        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
-    MemoryContext logctx = AllocSetContextCreate(g_instance.instance_context, "ParallelDecodeLog",
-        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
-    knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
-
     for (int i = 0; i < maxDispatcherNum; i++) {
         if (g_Logicaldispatcher[i].active == false) {
             slotId = i;
-            errno_t rc = memset_s(&g_Logicaldispatcher[slotId], sizeof(LogicalDispatcher), 0,
-                sizeof(LogicalDispatcher));
+            errno_t rc =
+                memset_s(&g_Logicaldispatcher[slotId], sizeof(LogicalDispatcher), 0, sizeof(LogicalDispatcher));
             securec_check(rc, "", "");
             InitLogicalDispatcher(&g_Logicaldispatcher[slotId]);
             g_Logicaldispatcher[i].active = true;
-
-            ereport(LOG, (errmsg("g_Logicaldispatcher[%d].active = true", slotId)));
-            g_Logicaldispatcher[i].abnormal = false;
-            gDecodeCxt[i].parallelDecodeCtx = ctx;
-            gDecodeCxt[i].logicalLogCtx = logctx;
             break;
         }
     }
@@ -677,6 +666,17 @@ int GetLogicalDispatcher()
     if(slotId == -1) {
         return slotId;
     }
+    ereport(LOG, (errmsg("g_Logicaldispatcher[%d].active = true", slotId)));
+
+    MemoryContext ctx = AllocSetContextCreate(g_instance.instance_context, "ParallelDecodeDispatcher",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+    MemoryContext logctx = AllocSetContextCreate(g_instance.instance_context, "ParallelDecodeLog",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+    knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
+
+    g_Logicaldispatcher[slotId].abnormal = false;
+    gDecodeCxt[slotId].parallelDecodeCtx = ctx;
+    gDecodeCxt[slotId].logicalLogCtx = logctx;
 
     SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
     int state = gDecodeCxt[slotId].state;
@@ -720,56 +720,51 @@ bool CheckWhiteList(const List *whiteList, const char *schema, const char *table
  */
 static bool ParseSchemaAndTableName(List *tableList, List **tableWhiteList)
 {
-    ListCell *lc = NULL;
-    char *str = NULL;
-    char *startPos = NULL;
+    ListCell *table_cell = NULL;
     char *curPos = NULL;
-    size_t len = 0;
     chosenTable *cTable = NULL;
-    bool anySchema = false;
-    bool anyTable = false;
-    errno_t rc = 0;
 
-    foreach(lc, tableList) {
-        str = (char*)lfirst(lc);
-        cTable = (chosenTable *)palloc(sizeof(chosenTable));
+    foreach(table_cell, tableList) {
+        bool anySchema = false;
+        bool anyTable = false;
+        char *head = (char*)lfirst(table_cell);
+        cTable = (chosenTable *)palloc0(sizeof(chosenTable));
 
-        if (*str == '*' && *(str + 1) == '.') {
+        if (*head == '*' && *(head + 1) == '.') {
             cTable->schema = NULL;
             anySchema = true;
         }
-        startPos = str;
-        curPos = str;
+        curPos = head;
         while (*curPos != '\0' && *curPos != '.') {
             curPos++;
         }
-        len = (size_t)(curPos - startPos);
+        size_t schema_len = (size_t)(curPos - head);
 
         if (*curPos == '\0') {
             pfree(cTable);
             return false;
         } else {
             if (!anySchema) {
-                cTable->schema = (char *)palloc0((len + 1) * sizeof(char));
-                errno_t rc = strncpy_s(cTable->schema, len + 1, startPos, len);
+                cTable->schema = (char *)palloc0((schema_len + 1) * sizeof(char));
+                errno_t rc = strncpy_s(cTable->schema, schema_len + 1, head, schema_len);
                 securec_check(rc, "", "");
             }
 
             curPos++;
-            startPos = curPos;
+            head = curPos;
 
-            if (*startPos == '*' && *(startPos + 1) == '\0') {
+            if (*head == '*' && *(head + 1) == '\0') {
                 cTable->table = NULL;
                 anyTable = true;
             }
             while (*curPos != '\0') {
                 curPos++;
             }
-            len = (size_t)(curPos - startPos);
+            size_t table_len = (size_t)(curPos - head);
 
             if (!anyTable) {
-                cTable->table = (char *)palloc((len + 1) * sizeof(char));
-                rc = strncpy_s(cTable->table, len + 1, startPos, len);
+                cTable->table = (char *)palloc0((table_len + 1) * sizeof(char));
+                errno_t rc = strncpy_s(cTable->table, table_len + 1, head, table_len);
                 securec_check(rc, "", "");
             }
         }
@@ -779,40 +774,44 @@ static bool ParseSchemaAndTableName(List *tableList, List **tableWhiteList)
 }
 
 /*
- * Parse a rawstring to a list of table names.
+ * Skip leading spaces.
+ */
+inline void SkipSpaceForString(char **str)
+{
+    while (isspace(**str)) {
+        (*str)++;
+    }
+}
+
+/*
+ * Parse a raw string to a list of table names.
  */
 bool ParseStringToWhiteList(char *tableString, List **tableWhiteList)
 {
     char *curPos = tableString;
-    bool finished = false;
-    List *tableList = NIL;
-    while (isspace(*curPos)) {
-        curPos++;
-    }
+    SkipSpaceForString(&curPos);
     if (*curPos == '\0') {
         return true;
     }
 
+    bool finished = false;
+    List *tableList = NIL;
     do {
         char* tmpName = curPos;
         while (*curPos != '\0' && *curPos != ',' && !isspace(*curPos)) {
             curPos++;
         }
-        char *tmpEnd = curPos;
         if (tmpName == curPos) {
             list_free_deep(tableList);
             return false;
         }
-        while (isspace(*curPos)) {
-            curPos++;
-        }
+        char *tmpEnd = curPos;
+        SkipSpaceForString(&curPos);
         if (*curPos == '\0') {
             finished = true;
         } else if (*curPos == ',') {
             curPos++;
-            while (isspace(*curPos)) {
-                curPos++;
-            }
+            SkipSpaceForString(&curPos);
         } else {
             list_free_deep(tableList);
             return false;
@@ -822,13 +821,9 @@ bool ParseStringToWhiteList(char *tableString, List **tableWhiteList)
         tableList = lappend(tableList, tableName);
     } while (!finished);
 
-    if (!ParseSchemaAndTableName(tableList, tableWhiteList)) {
-        list_free_deep(tableList);
-        return false;
-    }
-
+    bool parseSuccess = ParseSchemaAndTableName(tableList, tableWhiteList);
     list_free_deep(tableList);
-    return true;
+    return parseSuccess;
 }
 
 /*
@@ -1256,6 +1251,7 @@ void LogicalReadRecordMain(ParallelDecodeReaderWorker *worker)
 
     PG_TRY();
     {
+        int retries = 0;
         /* make sure that our requirements are still fulfilled */
         CheckLogicalDecodingRequirements(u_sess->proc_cxt.MyDatabaseId);
 
@@ -1308,15 +1304,21 @@ void LogicalReadRecordMain(ParallelDecodeReaderWorker *worker)
                 ProcessConfigFile(PGC_SIGHUP);
             }
             char *errm = NULL;
+            const uint32 upperLen = 32;
             XLogRecord *record = XLogReadRecord(ctx->reader, startptr, &errm);
             if (errm != NULL) {
-                const uint32 upperLen = 32;
-                ereport(LOG, (errmsg("Stop parsing any XLog Record at %X/%X, sleep 1 second: %s.",
-                    (uint32)(ctx->reader->EndRecPtr >> upperLen), (uint32)ctx->reader->EndRecPtr, errm)));
-
+                retries++;
+                if (retries >= XLOG_STREAM_READREC_MAXTRY) {
+                    ereport(ERROR, (errmsg("Stop parsing any XLog Record at %X/%X after %d attempts: %s.",
+                        (uint32)(ctx->reader->EndRecPtr >> upperLen), (uint32)ctx->reader->EndRecPtr, retries, errm)));
+                }
                 const long sleepTime = 1000000L;
                 pg_usleep(sleepTime);
                 continue;
+            } else if (retries != 0) {
+                ereport(LOG, (errmsg("Reread XLog Record after %d retries at %X/%X.", retries,
+                    (uint32)(ctx->reader->EndRecPtr >> upperLen), (uint32)ctx->reader->EndRecPtr)));
+                retries = 0;
             }
             startptr = InvalidXLogRecPtr;
 

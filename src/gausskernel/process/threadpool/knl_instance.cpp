@@ -316,7 +316,6 @@ static void knl_g_parallel_decode_init(knl_g_parallel_decode_context* pdecode_cx
     pdecode_cxt->totalNum = 0;
     pdecode_cxt->edata = NULL;
     SpinLockInit(&(pdecode_cxt->rwlock));
-    SpinLockInit(&(pdecode_cxt->destroy_lock));
 }
 
 static void knl_g_cache_init(knl_g_cache_context* cache_cxt)

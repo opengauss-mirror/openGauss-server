@@ -75,9 +75,6 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *rb, Paral
     XLogSegNo *segno, int slotId);
 static void ParallelReorderBufferRestoreChange(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn, char *data,
     int slotId);
-void ParallelReorderBufferCleanupTXN(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn,
-    XLogRecPtr lsn = InvalidXLogRecPtr);
-
 
 /* Parallel decoding batch sending unit length is set to 1MB. */
 static const int g_batch_unit_length = 1 * 1024 * 1024;
