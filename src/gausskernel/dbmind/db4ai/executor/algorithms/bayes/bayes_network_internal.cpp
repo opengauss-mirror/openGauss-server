@@ -201,8 +201,8 @@ void extract_graph(const char *edges_of_network, int num_of_edge, int num_nodes,
             }
             if (!validateParamEdges(node_pos, edge_size, substr, substr_len)) {
                 ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                errmsg("Incorrect Hyperparameters (edges_of_network unmatch with num_edges), \
-                                        parse failed.")));
+                                errmsg("Incorrect Hyperparameters (edges_of_network unmatch with num_edges), "
+                                "parse failed.")));
             }
             all_edges[node_pos++] = atoi(substr);
             start = end + 1;
@@ -219,8 +219,8 @@ void extract_graph(const char *edges_of_network, int num_of_edge, int num_nodes,
     substr[substr_len] = '\0';
     if (!validateParamEdges(node_pos, edge_size, substr, substr_len) || node_pos != edge_size - 1) {
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("Incorrect Hyperparameters (edges_of_network should match with num_edges), \
-                                parse failed.")));
+                        errmsg("Incorrect Hyperparameters (edges_of_network should match with num_edges), "
+                                "parse failed.")));
     }
     all_edges[node_pos] = atoi(substr);
     if (!validateParamNodes(all_edges, edge_size, num_nodes)) {

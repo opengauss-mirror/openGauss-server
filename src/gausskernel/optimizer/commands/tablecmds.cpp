@@ -23440,6 +23440,8 @@ bool IsPartKeyFunc(Relation rel, bool isPartRel, bool forSubPartition, Partition
         ereport(ERROR,
             (errcode(ERRCODE_NODE_ID_MISSMATCH),
                 errmsg("The node type %d is wrong, it must be T_OpExpr or T_FuncExpr", partkeyexpr->type)));
+    /* suppress warning: -Wreturn-type */
+    return false;
 }
 
 static void CheckSubpartitionForAddPartition(Relation rel, Node *partDefState)

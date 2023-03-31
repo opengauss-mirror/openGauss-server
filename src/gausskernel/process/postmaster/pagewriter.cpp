@@ -1655,7 +1655,7 @@ static void incre_ckpt_aio_callback(struct io_event *event)
         SegSpace *spc = spc_open(buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, false);
         seg_physical_read(spc, buf_desc->tag.rnode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, temp_buf);
     } else if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
-        SMGR_READ_STATUS rdStatus = SmgrNetPageCheckRead(buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
+        (void)SmgrNetPageCheckRead(buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
                                             buf_desc->extra->seg_fileno, buf_desc->tag.forkNum,
                                             buf_desc->extra->seg_blockno, (char *)temp_buf);
     }

@@ -813,8 +813,8 @@ retry_victim:
                     MarkDmsBufBeingReleased(buf, true);
                     UnlockBufHdr(buf, buf_state);
                     pg_usleep(1000L);
-                    ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d retry release owner",
-                        rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                    ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d retry release owner "
+                    "for %d times", rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
                         buf->tag.forkNum, buf->tag.blockNum, buf->buf_id, ++retry_times)));
                     goto retry_victim;
                 } else { /* if returned and !released, we will have to try another victim */

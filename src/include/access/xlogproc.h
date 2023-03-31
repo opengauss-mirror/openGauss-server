@@ -43,9 +43,6 @@
 #endif
 
 typedef void (*relasexlogreadstate)(void* record);
-/* **************define for parse end******************************* */
-#define MIN(_a, _b) ((_a) > (_b) ? (_b) : (_a))
-
 /* for common blockhead  begin  */
 
 #define XLogBlockHeadGetInfo(blockhead) ((blockhead)->xl_info)

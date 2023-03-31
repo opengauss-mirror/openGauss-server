@@ -1270,7 +1270,6 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
 {
     UserSetElemState* usestate = (UserSetElemState*)exprstate;
     UserSetElem* elem = usestate->use;
-    Node* node = NULL;
     UserSetElem elemcopy;
     elemcopy.xpr = elem->xpr;
     elemcopy.name = elem->name;
