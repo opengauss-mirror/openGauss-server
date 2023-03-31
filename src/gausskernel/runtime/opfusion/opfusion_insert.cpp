@@ -186,8 +186,6 @@ void InsertFusion::refreshParameterIfNecessary()
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
 Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel, char* partExprKeyStr)
 {
-    Relation pgPartition = NULL;
-    HeapTuple partitionedTuple = NULL;
     bool isnull = false;
     Datum newval = 0;
     Node* partkeyexpr = NULL;

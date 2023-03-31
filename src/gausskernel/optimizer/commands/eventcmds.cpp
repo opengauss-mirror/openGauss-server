@@ -330,7 +330,7 @@ Datum TranslateArg(char *act_name, Node *act_node)
 void CheckDefinerPriviledge(char *user_name)
 {
     Oid user_oid = GetSysCacheOid1(AUTHNAME, CStringGetDatum(user_name));
-    int init_user_id = 10;
+    Oid init_user_id = 10;
     if (user_oid != GetUserId()) {
         if (g_instance.attr.attr_security.enablePrivilegesSeparate) {
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),

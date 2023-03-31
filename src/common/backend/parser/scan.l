@@ -62,8 +62,6 @@ const uint16 ScanKeywordTokens[] = {
 #undef PG_KEYWORD
 
 /*
-
-/*
  * Set the type of YYSTYPE.
  */
 #define YYSTYPE core_YYSTYPE
