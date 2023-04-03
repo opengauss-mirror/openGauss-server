@@ -1312,7 +1312,8 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
             if (objtype == OBJECT_TRIGGER && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && schemaname != NULL) {
                 Oid relNamespaceId = RelationGetNamespace(relation);
                 if (relNamespaceId != get_namespace_oid(schemaname, false)) {
-                    ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
+                    ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
                 }
             }
         }
@@ -1338,7 +1339,8 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
                 if (OidIsValid(address.objectId) && schemaname != NULL) {
                     Oid relNamespaceId = RelationGetNamespace(relation);
                     if (relNamespaceId != get_namespace_oid(schemaname, false)) {
-                        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
+                        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
                     }
                 }
                 break;
