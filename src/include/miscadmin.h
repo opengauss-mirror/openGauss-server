@@ -37,7 +37,6 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
-
 extern const uint32 SRF_FUSION_VERSION_NUM;
 extern const uint32 INNER_UNIQUE_VERSION_NUM;
 extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
@@ -82,9 +81,9 @@ extern const uint32 DECODE_ABORT_VERSION_NUM;
 extern const uint32 COPY_TRANSFORM_VERSION_NUM;
 extern const uint32 TDE_VERSION_NUM;
 extern const uint32 PARALLEL_DECODE_VERSION_NUM;
-extern const uint32 V5R1C20_BACKEND_VERSION_NUM;
-extern const uint32 V5R2C00_START_VERSION_NUM;
-extern const uint32 V5R2C00_BACKEND_VERSION_NUM;
+extern const uint32 BACKEND_VERSION_INCLUDE_NUM;
+extern const uint32 BACKEND_VERSION_PRE_END_NUM;
+extern const uint32 BACKEND_VERSION_PRE_INCLUDE_NUM;
 extern const uint32 TWOPHASE_FILE_VERSION;
 extern const uint32 CLIENT_ENCRYPTION_PROC_VERSION_NUM;
 extern const uint32 PRIVS_DIRECTORY_VERSION_NUM;
