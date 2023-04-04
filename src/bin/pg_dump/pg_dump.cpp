@@ -54,6 +54,7 @@
 #include "catalog/pg_cast.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_database.h"
+#include "catalog/pg_extension.h"
 #include "catalog/pg_default_acl.h"
 #include "catalog/pg_event_trigger.h"
 #include "catalog/pg_largeobject.h"
@@ -507,6 +508,7 @@ inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
 #ifdef DUMPSYSLOG
 static void ReceiveSyslog(PGconn* conn, const char* current_path);
 #endif
+static bool hasSpecificExtension(Archive* fout, const char* databasename);
 
 #ifdef GSDUMP_LLT
 bool lltRunning = true;
@@ -11363,8 +11365,12 @@ static void dumpType(Archive* fout, TypeInfo* tyinfo)
         dumpDomain(fout, tyinfo);
     else if (tyinfo->typtype == TYPTYPE_COMPOSITE)
         dumpCompositeType(fout, tyinfo);
-    else if (tyinfo->typtype == TYPTYPE_ENUM)
-        return;
+    else if (tyinfo->typtype == TYPTYPE_ENUM) {
+        if (findDBCompatibility(fout, PQdb(GetConnection(fout))) && hasSpecificExtension(fout, "dolphin")) {
+            return;
+        }
+        dumpEnumType(fout, tyinfo);
+    }
     else if (tyinfo->typtype == TYPTYPE_RANGE)
         dumpRangeType(fout, tyinfo);
     else if (tyinfo->typtype == TYPTYPE_TABLEOF)
@@ -23485,4 +23491,32 @@ static bool needIgnoreSequence(TableInfo* tbinfo)
         }
     }
     return false;
+}
+
+/*
+ * check if current database has specific extension whose name is provided by parameter
+ */
+static bool hasSpecificExtension(Archive* fout, const char* extensionName)
+{
+    PGresult *res = NULL;
+    int ntups = 0;
+    bool hasExtnameColumn = true;
+    ArchiveHandle *AH = (ArchiveHandle *)fout;
+
+    hasExtnameColumn = is_column_exists(AH->connection, ExtensionRelationId, "extname");
+    if (!hasExtnameColumn) {
+        return false;
+    }
+
+    PQExpBuffer query = createPQExpBuffer();
+
+    resetPQExpBuffer(query);
+    appendPQExpBuffer(query, "SELECT extname from pg_catalog.pg_extension where extname = ");
+    appendStringLiteralAH(query, extensionName, fout);
+
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    ntups = PQntuples(res);
+    PQclear(res);
+    destroyPQExpBuffer(query);
+    return ntups != 0;
 }
