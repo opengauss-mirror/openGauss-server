@@ -6271,6 +6271,8 @@ static CreateTrigStmt* _copyCreateTrigStmt(const CreateTrigStmt* from)
     COPY_SCALAR_FIELD(if_not_exists);
     COPY_STRING_FIELD(trgordername);
     COPY_SCALAR_FIELD(is_follows);
+    COPY_STRING_FIELD(schemaname);
+
     return newnode;
 }
 

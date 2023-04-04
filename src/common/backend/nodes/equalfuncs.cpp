@@ -2280,6 +2280,7 @@ static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* 
     COMPARE_SCALAR_FIELD(if_not_exists);
     COMPARE_STRING_FIELD(trgordername);
     COMPARE_SCALAR_FIELD(is_follows);
+    COMPARE_STRING_FIELD(schemaname);
 
     return true;
 }
