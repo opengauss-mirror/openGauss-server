@@ -91,7 +91,6 @@ delete from testscm.food_scm;
 drop trigger animals_trigger3;
 drop trigger animals_trigger3;
 select tgname from pg_trigger;
-
 -- 1.1.1.2 trigger with right schema
 create trigger testscm.animals_trigger2
 after insert on testscm.animals_scm
@@ -547,7 +546,7 @@ select tgname from pg_trigger;
 alter trigger testscm.animals_trigger2_1 on testscm.animals_scm rename to animals_trigger2_2;
 alter trigger testscm_no.animals_trigger2_2 on testscm.animals_scm rename to animals_trigger2_3;
 drop trigger testscm.animals_trigger2_2 on testscm.animals_scm;
--- 1.6 set search_path to schema
+-- 1.4 set search_path to schema
 set search_path to testscm;
 create trigger animals_trigger2
 after insert on animals_scm

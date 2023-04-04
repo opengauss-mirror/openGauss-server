@@ -1454,9 +1454,10 @@ ObjectAddress renametrig(RenameStmt* stmt)
     /* Have lock already, so just need to build relcache entry. */
     targetrel = relation_open(relid, NoLock);
 
-    if (PointerIsValid(stmt->renameTargetList) && PointerIsValid(stmt->renameTargetList->head)) {
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT &&
+        PointerIsValid(stmt->renameTargetList) && PointerIsValid(stmt->renameTargetList->head)) {
         RangeVar* trigname = (RangeVar*)lfirst(list_head(stmt->renameTargetList));
-        if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && trigname->schemaname != NULL) {
+        if (trigname->schemaname != NULL) {
             Oid relNamespaceId = RelationGetNamespace(targetrel);
             if (relNamespaceId != get_namespace_oid(trigname->schemaname, false)) {
                 ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
