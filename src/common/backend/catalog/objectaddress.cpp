@@ -1274,6 +1274,7 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
         RangeVar* trigname = makeRangeVarFromNameList((List*)lfirst(list_tail(objname)));
         depname = trigname->relname;
         schemaname = trigname->schemaname;
+        pfree_ext(trigname);
     } else {
         depname = strVal(lfirst(list_tail(objname)));
     }
