@@ -17,6 +17,7 @@ create user 'test_user_host'@'127.0.%' password 'test123@';
 create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
 set b_compatibility_user_host_auth = on;
+CREATE USER 'da@localhost'@'%' PASSWORD 'test123@';
 create user if not exists 'test_user_host'@'%' password 'test123@';
 alter user 'test_user_host'@'%' with account lock;
 alter user 'test_user_host'@'%' password 'test1234@';

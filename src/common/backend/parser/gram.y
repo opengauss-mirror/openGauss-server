@@ -31336,6 +31336,8 @@ static CharsetCollateOptions* MakeCharsetCollateOptions(CharsetCollateOptions *o
 static char* GetValidUserHostId(char* userName, char* hostId)
 {
 	CheckUserHostIsValid();
+	if (strchr(userName,'@'))
+		ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("@ can't be allowed in username")));
 	char* userHostId = NULL;
 	if (*hostId == '\'') {
 		userHostId = hostId + 1;
