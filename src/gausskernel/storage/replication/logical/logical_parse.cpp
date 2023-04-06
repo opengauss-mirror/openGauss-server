@@ -545,11 +545,6 @@ void ParseInsertXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     char *tupledata = XLogRecGetBlockData(r, 0, &tuplelen);
     int slotId = worker->slotId;
 
-    if (tuplelen == 0 && !AllocSizeIsValid(tuplelen)) {
-        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("ParseInsertXlog tuplelen is invalid(%lu), don't decode it", tuplelen)));
-        return;
-    }
     XLogRecGetBlockTag(r, 0, &target_node, NULL, NULL);
     if (target_node.dbNode != ctx->slot->data.database) {
         return;
@@ -613,11 +608,6 @@ void ParseUInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     char *tupledata = XLogRecGetBlockData(r, 0, &tuplelen);
     int slotId = worker->slotId;
 
-    if (tuplelen == 0 && !AllocSizeIsValid(tuplelen)) {
-        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("ParseUinsert tuplelen is invalid(%lu), don't decode it", tuplelen)));
-        return;
-    }
     XLogRecGetBlockTag(r, 0, &target_node, NULL, NULL);
 
     if (target_node.dbNode != ctx->slot->data.database) {
@@ -692,11 +682,6 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 
     data_new = XLogRecGetBlockData(r, 0, &datalen_new);
     tuplelen_new = datalen_new - SizeOfHeapHeader;
-    if (tuplelen_new == 0 && !AllocSizeIsValid(tuplelen_new)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", tuplelen_new)));
-        return;
-    }
 
     /* adapt 64 xid, if this tuple is the first tuple of a new page */
     is_init = (XLogRecGetInfo(r) & XLOG_HEAP_INIT_PAGE) != 0;
@@ -708,11 +693,6 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
         datalen_old = XLogRecGetDataLen(r) - heapUpdateSize - sizeof(CommitSeqNo);
     }
     tuplelen_old = datalen_old - SizeOfHeapHeader;
-    if (tuplelen_old == 0 && !AllocSizeIsValid(tuplelen_old)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", tuplelen_old)));
-        return;
-    }
 
     /* output plugin doesn't look for this origin, no need to queue */
     if (ParallelFilterByOrigin(ctx, XLogRecGetOrigin(r)))
@@ -774,12 +754,6 @@ void ParseUUpdate(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     }
     Size datalenNew = 0;
     char *dataNew = XLogRecGetBlockData(r, 0, &datalenNew);
-
-    if (datalenNew == 0 && !AllocSizeIsValid(datalenNew)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), don't decode it", datalenNew)));
-        return;
-    }
 
     Size tuplelenOld = XLogRecGetDataLen(r) - SizeOfUHeapUpdate - sizeof(CommitSeqNo);
     char *dataOld = (char *)xlrec + SizeOfUHeapUpdate + sizeof(CommitSeqNo);
@@ -887,11 +861,6 @@ void ParseDeleteXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     }
 
     datalen = XLogRecGetDataLen(r) - heapDeleteSize;
-    if (datalen == 0 && !AllocSizeIsValid(datalen)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", datalen)));
-        return;
-    }
 
     change = ParallelReorderBufferGetChange(ctx->reorder, slotId);
     change->action = PARALLEL_REORDER_BUFFER_CHANGE_DELETE;
@@ -1045,7 +1014,11 @@ void ParseMultiInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf
          */
         if (xlrec->flags & XLH_INSERT_CONTAINS_NEW_TUPLE) {
             HeapTupleHeader header;
-            xlhdr = (xl_multi_insert_tuple *)SHORTALIGN(data);
+            if ((data - tupledata) % ALIGNOF_SHORT == 0) {
+                xlhdr = (xl_multi_insert_tuple *)data;
+            } else {
+                xlhdr = (xl_multi_insert_tuple *)(data + ALIGNOF_SHORT - (data - tupledata) % ALIGNOF_SHORT);
+            }
             data = ((char *)xlhdr) + SizeOfMultiInsertTuple;
             datalen = xlhdr->datalen;
             if (datalen != 0 && AllocSizeIsValid((uint)datalen)) {

@@ -37,7 +37,6 @@
 
 #define AllSlotInUse(a, b) ((a) == (b))
 extern void *internal_load_library(const char *libname);
-extern bool PMstateIsRun(void);
 static void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_content = NULL);
 #ifndef ENABLE_LITE_MODE
 static XLogRecPtr create_physical_replication_slot_for_backup(const char* slot_name, bool is_dummy, char* extra);
@@ -49,7 +48,7 @@ static void slot_advance(const char* slotname, XLogRecPtr &moveto, NameData &dat
 
 void log_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_content)
 {
-    if (!u_sess->attr.attr_sql.enable_slot_log || !PMstateIsRun()) {
+    if (!u_sess->attr.attr_sql.enable_slot_log || RecoveryInProgress()) {
         return;
     }
 
@@ -83,7 +82,7 @@ void log_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_
 
 void log_slot_advance(const ReplicationSlotPersistentData *slotInfo, char* extra_content)
 {
-    if ((!u_sess->attr.attr_sql.enable_slot_log && t_thrd.role != ARCH) || !PMstateIsRun()) {
+    if ((!u_sess->attr.attr_sql.enable_slot_log && t_thrd.role != ARCH) || RecoveryInProgress()) {
         return;
     }
 
@@ -119,7 +118,7 @@ void log_slot_advance(const ReplicationSlotPersistentData *slotInfo, char* extra
 
 void log_slot_drop(const char *name)
 {
-    if (!u_sess->attr.attr_sql.enable_slot_log || !PMstateIsRun())
+    if (!u_sess->attr.attr_sql.enable_slot_log || RecoveryInProgress())
         return;
     XLogRecPtr Ptr;
     ReplicationSlotPersistentData xlrec;
@@ -153,7 +152,7 @@ void LogCheckSlot()
     LogicalPersistentData *LogicalSlot = NULL;
     size = GetAllLogicalSlot(LogicalSlot);
 
-    if (!u_sess->attr.attr_sql.enable_slot_log || !PMstateIsRun())
+    if (!u_sess->attr.attr_sql.enable_slot_log || RecoveryInProgress())
         return;
     START_CRIT_SECTION();
 
