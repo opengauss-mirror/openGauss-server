@@ -1598,6 +1598,10 @@ static void GsTarDirCheck(char* tarfilename)
     }
 
     DIR* dir = opendir(basedir);
+    if (dir == NULL) {
+        fprintf(stderr, "IO error when opening %s: %s\n", basedir, strerror(errno));
+        exit(1);
+    }
     struct dirent* ent;
     while (1) {
         ent = readdir(dir);
