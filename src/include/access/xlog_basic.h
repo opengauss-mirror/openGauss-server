@@ -314,6 +314,9 @@ struct XLogReaderState {
     XLogRecPtr preReadStartPtr;
     char* preReadBuf;
     char* preReadBufOrigin;
+    
+    /* streaming replication during pre-reading for dss */
+    XLogRecPtr xlogFlushPtrForPerRead;
 
     /* last read segment, segment offset, TLI for data currently in readBuf */
     XLogSegNo readSegNo;

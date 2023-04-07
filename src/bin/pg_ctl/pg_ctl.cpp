@@ -55,6 +55,9 @@
 #include "common/fe_memutils.h"
 #include "logging.h"
 #include "tool_common.h"
+#include "catalog/pg_control.h"
+#include "storage/dss/dss_adaptor.h"
+#include "storage/file/fio_device.h"
 
 #ifdef ENABLE_MOT
 #include "fetchmot.h"
@@ -238,6 +241,14 @@ const static int INC_BUILD_RETRY_TIMES = 3;
 BuildFailReason g_inc_fail_reason = DEFAULT_REASON;
 
 bool g_is_obsmode = false;
+
+/* dss parameter */
+static char* vgname = NULL;
+static char* vgdata = NULL;
+static char* vglog = NULL;
+static char* socketpath = NULL;
+static bool enable_dss = false;
+static char* ss_nodedatainfo = NULL;
 
 #ifndef FREE_AND_RESET
 #define FREE_AND_RESET(ptr) \
@@ -3824,6 +3835,12 @@ static void do_help(void)
     printf(_("\nBuild connection option:\n"));
     printf(_("  -r, --recvtimeout=INTERVAL    time that receiver waits for communication from server (in seconds)\n"));
     printf(_("  -C, connector    CN/DN connect to specified CN/DN for build\n"));
+#ifndef ENABLE_LITE_MODE
+    printf(_("  --enable-dss    enable dss function\n"));
+    printf(_("  --instance-id=instance_id      id number of instance when dss and dms are enabled\n"));
+    printf(_("  --vgname         vg name in dss  when dss is enabled\n"));
+    printf(_("  --socketpath=socketpath  \n"));
+#endif
 
 #if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     printf("\nReport bugs to GaussDB support.\n");
@@ -6146,6 +6163,37 @@ void SetConfigFilePath()
         }
     }
 }
+#ifndef ENABLE_LITE_MODE
+static void parse_vgname_args(char* args)
+{
+    vgname = xstrdup(args);
+    enable_dss = true;
+    if (strstr(vgname, "/") != NULL) {
+        fprintf(stderr, "invalid token \"/\" in vgname");
+        exit(1);
+    }
+
+    char *comma = strstr(vgname, ",");
+    if (comma == NULL) {
+        vgdata = vgname;
+        vglog = (char *)"";
+        return;
+    }
+
+    vgdata = xstrdup(vgname);
+    comma = strstr(vgdata, ",");
+    comma[0] = '\0';
+    vglog = comma + 1;
+    if (strstr(vgdata, ",") != NULL) {
+        fprintf(stderr, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
+        exit(1);
+    }
+    if (strstr(vglog, ",") != NULL) {
+        fprintf(stderr, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
+        exit(1);
+    }
+}
+#endif
 
 int main(int argc, char** argv)
 {
@@ -6177,6 +6225,10 @@ int main(int argc, char** argv)
         {"keycn", required_argument, NULL, 'k'},
         {"slotname", required_argument, NULL, 'K'},
         {"taskid", required_argument, NULL, 'I'},
+        {"vgname", required_argument, NULL, 5},
+        {"socketpath", required_argument, NULL, 6},
+        {"enable-dss", no_argument, NULL, 7},
+        {"dms_url", required_argument, NULL, 8},
         {NULL, 0, NULL, 0}};
 
     int option_index;
@@ -6248,14 +6300,14 @@ int main(int argc, char** argv)
         pgxcCommand = xstrdup("--single_node");
 #ifdef ENABLE_PRIVATEGAUSS
 #ifndef ENABLE_LITE_MODE
-        while ((c = getopt_long(argc, argv, "a:b:cD:e:fi:G:l:m:M:N:n:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:I:T:Q:",
+        while ((c = getopt_long(argc, argv, "a:b:cD:e:fi:G:l:m:M:N:n:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:I:T:Q:g:",
             long_options, &option_index)) != -1)
 #else
         while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:I:T:Q:",
             long_options, &option_index)) != -1)
 #endif
 #else
-        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:I:T:Q:",
+        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:I:T:Q:g:",
             long_options, &option_index)) != -1)
 #endif
 #endif
@@ -6606,6 +6658,15 @@ int main(int argc, char** argv)
                     }
                     break;
                 }
+                case 'g':
+                    check_input_for_security(optarg);
+                    if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > MAX_INSTANCEID) {
+                        pg_log(PG_WARNING, _("unexpected node id specified, valid range is %d - %d.\n"),
+                               MIN_INSTANCEID, MAX_INSTANCEID );
+                        goto Error;
+                    }
+                    instance_config.dss.instance_id = atoi(optarg);
+                    break;
                 case 1:
                     clear_backup_dir = true;
                     break;
@@ -6623,6 +6684,47 @@ int main(int argc, char** argv)
                         pg_log(PG_WARNING, _("unexpected vote number specified\n"));
                         goto Error;
                     }
+                    break;
+                }
+                case 5:{
+                    check_input_for_security(optarg);
+                    if (strlen(optarg) > MAX_PATH_LEN) {
+                        pg_log(PG_WARNING, _("max path length is exceeded\n"));
+                        goto Error;
+                    }
+                    
+                    FREE_AND_RESET(vgname);
+                    FREE_AND_RESET(vgdata);
+                    FREE_AND_RESET(vgdata);
+                    parse_vgname_args(optarg);
+                    instance_config.dss.vgname = xstrdup(vgname);
+                    instance_config.dss.vgdata = xstrdup(vgdata);
+                    instance_config.dss.vglog = xstrdup(vglog);
+                    break;
+                }
+                case 6:{
+                    check_input_for_security(optarg);
+                    if (strlen(optarg) > MAX_PATH_LEN) {
+                        pg_log(PG_WARNING, _("max path length is exceeded\n"));
+                        goto Error;
+                    }
+                    socketpath = xstrdup(optarg);
+                    instance_config.dss.socketpath = xstrdup(optarg);
+                    break;
+                }
+                case 7:
+                    instance_config.dss.enable_dss = true;
+                    break;
+                case 8:{
+                    check_input_for_security(optarg);
+                    if (strlen(optarg) > MAX_PATH_LEN) {
+                        pg_log(PG_WARNING, _("max path length is exceeded\n"));
+                        goto Error;
+                    }
+                    
+                    FREE_AND_RESET(ss_nodedatainfo);
+                    securec_check_c(ret, ss_nodedatainfo, "\0");
+                    ss_nodedatainfo = xstrdup(optarg);
                     break;
                 }
                 default:
@@ -6787,7 +6889,30 @@ int main(int argc, char** argv)
         do_wait = false;
     }
 
-    initDataPathStruct(false);
+    if (instance_config.dss.enable_dss) {
+        // dss device init
+        if (dss_device_init(instance_config.dss.socketpath,
+            instance_config.dss.enable_dss) != DSS_SUCCESS) {
+            pg_log(PG_WARNING, _("failed to init dss device\n"));
+            goto Error;
+        }
+
+        /* Prepare some g_datadir parameters */
+        g_datadir.instance_id = instance_config.dss.instance_id;
+
+        errno_t rc = strcpy_s(g_datadir.dss_data, strlen(instance_config.dss.vgdata) + 1, instance_config.dss.vgdata);
+        securec_check_c(rc, "\0", "\0");
+
+        rc = strcpy_s(g_datadir.dss_log, strlen(instance_config.dss.vglog) + 1, instance_config.dss.vglog);
+        securec_check_c(rc, "\0", "\0");
+        
+        /* The default of XLogSegmentSize was set 16M during configure, we reassign 1G to XLogSegmentSize
+           when dss enable */
+        XLogSegmentSize = DSS_XLOG_SEG_SIZE;
+    }
+
+    initDataPathStruct(instance_config.dss.enable_dss);
+    
     SetConfigFilePath();
 
     pg_host = getenv("PGHOST");

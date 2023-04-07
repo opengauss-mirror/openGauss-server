@@ -11,6 +11,8 @@
 #ifndef PG_PROBACKUPB_H
 #define PG_PROBACKUPB_H
 
+#include "tool_common.h"
+
 /* Information about single file (or dir) in backup */
 typedef struct pgFile_t
 {
@@ -128,16 +130,6 @@ typedef struct ArchiveOptions
     const char *port;
     const char *user;
 } ArchiveOptions;
-
-typedef struct DssOptions
-{
-    bool enable_dss;
-    int instance_id;
-    const char *vgname;
-    char *vglog;
-    char *vgdata;
-    char *socketpath;
-} DssOptions;
 
 /*
  * An instance configuration. It can be stored in a configuration file or passed

@@ -39,6 +39,7 @@
 #include "storage/page_compression.h"
 #include "storage/pmsignal.h"
 #include "storage/checksum.h"
+#include "storage/file/fio_device.h"
 #ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
 #endif
@@ -187,8 +188,14 @@ static void send_xlog_location()
     char fullpath[MAXPGPATH] = {0};
     struct stat statbuf;
     int rc = 0;
-
-    rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, "%s/pg_xlog", t_thrd.proc_cxt.DataDir);
+    
+    if (ENABLE_DSS) {
+        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+        rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, "%s/pg_xlog%d", dssdir,
+             g_instance.attr.attr_storage.dms_attr.instance_id);
+    } else {
+        rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, "%s/pg_xlog", t_thrd.proc_cxt.DataDir);
+    }
     securec_check_ss(rc, "", "");
 
     if (lstat(fullpath, &statbuf) != 0) {
@@ -849,9 +856,20 @@ void SendBaseBackup(BaseBackupCmd *cmd)
 
         set_ps_display(activitymsg, false);
     }
+    
+    if (ENABLE_DSS) {
+        int rc = 0;
+        char fullpath[MAXPGPATH] = {0};
+        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
 
-    /* Make sure we can open the directory with tablespaces in it */
-    dir = AllocateDir("pg_tblspc");
+        rc = snprintf_s(fullpath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc", dssdir);
+        securec_check_ss(rc, "", "");
+
+        dir = AllocateDir(fullpath);
+    } else {
+        /* Make sure we can open the directory with tablespaces in it */
+        dir = AllocateDir("pg_tblspc");
+    }
     if (dir == NULL) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not open directory \"%s\": %m", "pg_tblspc")));
         return;
@@ -1164,6 +1182,28 @@ int64 sendTablespace(const char *path, bool sizeonly)
     return size;
 }
 
+int IsBeginWith(const char *str1, char *str2)
+{
+    if (str1 == NULL || str2 == NULL)
+        return -1;
+    int len1 = strlen(str1);
+    int len2 = strlen(str2);
+    if ((len1 < len2) || (len1 == 0 || len2 == 0)) {
+        return -1;
+    }
+
+    char *p = str2;
+    int i = 0;
+    while (*p != '\0') {
+        if (*p != str1[i]) {
+            return 0;
+        }
+        p++;
+        i++;
+    }
+    return 1;
+}
+
 bool IsSkipDir(const char * dirName)
 {
     if (strcmp(dirName, ".") == 0 || strcmp(dirName, "..") == 0)
@@ -1185,30 +1225,33 @@ bool IsSkipDir(const char * dirName)
         return true;
     if (strcmp(dirName, DISABLE_CONN_FILE) == 0)
         return true;
+    
+    /* skip .recycle in dss */
+    if (ENABLE_DSS && strcmp(dirName, ".recycle") == 0)
+        return true;
+    
+    /* skip directory which not belong to primary in dss */
+    if (ENABLE_DSS) {
+        /* skip primary doublewrite and other node doublewrite */
+        if (IsBeginWith(dirName, "pg_doublewrite") > 0) {
+            return true;
+        }
+    
+        /* skip other node pg_xlog except primary */
+        if (IsBeginWith(dirName, "pg_xlog") > 0) { 
+            int dirNameLen = strlen("pg_xlog");
+            char instance_id[MAX_INSTANCEID_LEN];
+            errno_t rc = EOK;
+            rc = snprintf_s(instance_id, sizeof(instance_id), sizeof(instance_id) - 1, "%d",
+                            g_instance.attr.attr_storage.dms_attr.instance_id);
+            securec_check_ss_c(rc, "\0", "\0");
+            /* not skip pg_xlog directory in file systerm */
+            if (strlen(dirName) > dirNameLen && strcmp(dirName + dirNameLen, instance_id) != 0) 
+                return true;
+        }
+    }
 
     return false;
-}
-
-int IsBeginWith(const char *str1, char *str2)
-{
-    if (str1 == NULL || str2 == NULL)
-        return -1;
-    int len1 = strlen(str1);
-    int len2 = strlen(str2);
-    if ((len1 < len2) || (len1 == 0 || len2 == 0)) {
-        return -1;
-    }
-
-    char *p = str2;
-    int i = 0;
-    while (*p != '\0') {
-        if (*p != str1[i]) {
-            return 0;
-        }
-        p++;
-        i++;
-    }
-    return 1;
 }
 
 bool IsSkipPath(const char * pathName)
@@ -1249,6 +1292,11 @@ bool IsSkipPath(const char * pathName)
 
     if (t_thrd.walsender_cxt.is_obsmode == true && strcmp(pathName, "./pg_replslot") == 0)
         return true;
+
+    /* skip pg_control in dss */
+    if (ENABLE_DSS && strcmp(pathName, "+data/pg_control") == 0) {
+        return true;
+    }
 
     return false;
 }
@@ -1309,7 +1357,12 @@ static int64 SendRealFile(bool sizeOnly, char* pathbuf, int basepathlen, struct 
     } else {
         bool sent = false;
         if (!sizeOnly) {
-            sent = sendFile(pathbuf, pathbuf + basepathlen + 1, statbuf, true);
+            /* dss file send to other node in entire path */
+            if (ENABLE_DSS && is_dss_file(pathbuf)) {
+                sent = sendFile(pathbuf, pathbuf, statbuf, true);
+            } else {
+                sent = sendFile(pathbuf, pathbuf + basepathlen + 1, statbuf, true);
+            }
         }
         if (sent || sizeOnly) {
             /* Add size, rounded up to 512byte block */
@@ -1465,7 +1518,8 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
          * WAL archive anyway. But include it as an empty directory anyway, so
          * we get permissions right.
          */
-        if (strcmp(pathbuf, "./pg_xlog") == 0) {
+        int pathNameLen = strlen("+data/pg_xlog");
+        if (strcmp(pathbuf, "./pg_xlog") == 0 || strncmp(pathbuf, "+data/pg_xlog", pathNameLen) == 0) {
             if (!sizeonly) {
                 /* If pg_xlog is a symlink, write it as a directory anyway */
 #ifndef WIN32
@@ -1486,7 +1540,11 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                     linkpath[MAXPGPATH - 1] = '\0';
 
                     if (!sizeonly)
-                        _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
+                        if (ENABLE_DSS && is_dss_file(pathbuf)) {
+                            _tarWriteHeader(pathbuf, linkpath, &statbuf);
+                        } else {
+                            _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);    
+                        }
 #else
 
                     /*
@@ -1500,7 +1558,12 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
 #endif /* HAVE_READLINK */
                 } else if (S_ISDIR(statbuf.st_mode)) {
                     statbuf.st_mode = S_IFDIR | S_IRWXU;
-                    _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);
+                    /* dss directory send to other node in entire path */
+                    if (ENABLE_DSS && is_dss_file(pathbuf)) {
+                        _tarWriteHeader(pathbuf, NULL, &statbuf);
+                    } else {
+                        _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);    
+                    }
                 }
             }
             size += BUILD_PATH_LEN; /* Size of the header just added */
@@ -1521,7 +1584,11 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                         ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG),
                                 errmsg("symbolic link \"%s\" target is too long", pathbuf)));
                     linkpath[MAXPGPATH - 1] = '\0';
-                    _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
+                    if (ENABLE_DSS && is_dss_file(pathbuf)) {
+                        _tarWriteHeader(pathbuf, linkpath, &statbuf);
+                    } else {
+                        _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);    
+                    }
 #else
                     /*
                      * If the platform does not have symbolic links, it should not be
@@ -1539,7 +1606,11 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                      * statbuf from above ...).
                      */
                     statbuf.st_mode = S_IFDIR | S_IRWXU;
-                    _tarWriteHeader("pg_xlog/archive_status", NULL, &statbuf);
+                    if (ENABLE_DSS && is_dss_file(pathbuf)) {
+                        _tarWriteHeader(pathbuf, NULL, &statbuf);
+                    } else {
+                        _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);    
+                    }
                 }
             }
             size += BUILD_PATH_LEN; /* Size of the header just added */
@@ -1565,7 +1636,11 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                         (errcode(ERRCODE_NAME_TOO_LONG), errmsg("symbolic link \"%s\" target is too long", pathbuf)));
             linkpath[rllen] = '\0';
             if (!sizeonly)
-                _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
+                if (ENABLE_DSS && is_dss_file(pathbuf)) {
+                    _tarWriteHeader(pathbuf, linkpath, &statbuf);
+                } else {
+                    _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);    
+                }
             size += BUILD_PATH_LEN; /* Size of the header just added */
 #else
 
@@ -1587,7 +1662,11 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
              * permissions right.
              */
             if (!sizeonly)
-                _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);
+                if (ENABLE_DSS && is_dss_file(pathbuf)) {
+                    _tarWriteHeader(pathbuf, NULL, &statbuf);
+                } else {
+                    _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);    
+                }
             size += BUILD_PATH_LEN; /* Size of the header just added */
 
             /*
@@ -1801,9 +1880,19 @@ bool is_row_data_file(const char *path, int *segNo, UndoFileType *undoFileType)
 static void SendTableSpaceForBackup(basebackup_options* opt, List* tablespaces, char* labelfile, char* tblspc_map_file)
 {
     ListCell *lc = NULL;
+    int64 asize = 0;
+    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+
+    if (ENABLE_DSS) {
+        /* Add a node for all directory in dss*/
+        asize = sendDir(".", 1, true, tablespaces, true) + sendDir(dssdir, 1, true, tablespaces, true);
+    } else {
+        asize = sendDir(".", 1, true, tablespaces, true);
+    }
+    
     /* Add a node for the base directory at the end */
     tablespaceinfo *ti = (tablespaceinfo *)palloc0(sizeof(tablespaceinfo));
-    ti->size = opt->progress ? sendDir(".", 1, true, tablespaces, true) : -1;
+    ti->size = opt->progress ? asize : -1;
     tablespaces = (List *)lappend(tablespaces, ti);
 
     /* Send tablespace header */
@@ -1839,8 +1928,12 @@ static void SendTableSpaceForBackup(basebackup_options* opt, List* tablespaces, 
                 sendDir(".", 1, false, tablespaces, false);
             } else
                 sendDir(".", 1, false, tablespaces, true);
+                /* send file in dss*/
+                if (ENABLE_DSS) {
+                    sendDir(dssdir, 1, false, tablespaces, true);
+                }
         }
-
+        
         /* In the main tar, include pg_control last. */
         if (iterti->path == NULL) {
             struct stat statbuf;
@@ -2092,7 +2185,12 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
 
     /* send the pkg header containing msg like file size */
     _tarWriteHeader(tarfilename, NULL, statbuf);
-
+    
+    if (ENABLE_DSS && strcmp(tarfilename, XLOG_CONTROL_FILE) == 0) {
+        int read_size = BUFFERALIGN(sizeof(ControlFileData));
+        statbuf->st_size = read_size;
+    }
+    
     while ((cnt = fread(t_thrd.basebackup_cxt.buf_block, 1, Min(TAR_SEND_SIZE, statbuf->st_size - len), fp)) > 0) {
         if (t_thrd.walsender_cxt.walsender_ready_to_stop)
             ereport(ERROR, (errcode_for_file_access(), errmsg("base backup receive stop message, aborting backup")));

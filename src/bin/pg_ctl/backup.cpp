@@ -48,6 +48,7 @@
 #include "port/pg_crc32c.h"
 #include "replication/dcf_data.h"
 #include "PageCompression.h"
+#include "storage/file/fio_device.h"
 
 #ifdef ENABLE_MOT
 #include "fetchmot.h"
@@ -136,6 +137,7 @@ static XLogRecPtr read_full_backup_label(
     const char* dirname, char* sysid, uint32 sysid_len, char* tline, uint32 tline_len);
 static int replace_node_name(char* sSrc, const char* sMatchStr, const char* sReplaceStr);
 static void show_full_build_process(const char* errmg);
+static bool ss_backup_dw_file(const char* target_dir);
 static bool backup_dw_file(const char* target_dir);
 void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
 static bool UpdatePaxosIndexFile(unsigned long long paxosIndex);
@@ -870,7 +872,12 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
              */
             if (NULL != conn_str)
                 (void)replace_node_name(copybuf, (const char*)remotenodename, (const char*)pgxcnodename);
-            nRet = snprintf_s(filename, MAXPGPATH, sizeof(filename) - 1, "%s/%s", current_path, copybuf);
+            
+            if (is_dss_file(copybuf)) {
+                nRet = snprintf_s(filename, MAXPGPATH, sizeof(filename) - 1, "%s", copybuf);
+            } else {
+                nRet = snprintf_s(filename, MAXPGPATH, sizeof(filename) - 1, "%s/%s", current_path, copybuf);
+            }
             securec_check_ss_c(nRet, "\0", "\0");
             forbid_write = (IS_CROSS_CLUSTER_BUILD && strcmp(copybuf, "pg_hba.conf") == 0);
 
@@ -916,6 +923,9 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                      * description: we need refactor the communication protocol for well maintaining code
                      */
                     filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
+                    if (is_dss_file(filename)) {
+                        continue;   
+                    }
                     if (symlink(&copybuf[bufOffset + 1], filename) != 0) {
                         if (!streamwal || strcmp(filename + strlen(filename) - len, "/pg_xlog") != 0) {
                             pg_log(PG_WARNING, _("could not create symbolic link from \"%s\" to \"%s\": %s\n"),
@@ -1002,6 +1012,11 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 totaldone += r;
                 continue;
             }
+
+            if (instance_config.dss.enable_dss && strcmp(filename, "+data/pg_control") == 0) {
+                pg_log(PG_WARNING, _("file size %d. \n"), r);
+            }
+
             if (forbid_write == false) {
                 if (fwrite(copybuf, r, 1, file) != 1) {
                     pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
@@ -1161,6 +1176,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     errno_t rc = EOK;
     int nRet = 0;
     struct stat st;
+    char *dssdir = instance_config.dss.vgdata; 
 
     pqsignal(SIGCHLD, BuildReaper); /* handle child termination */
     /* concat file and path */
@@ -1205,6 +1221,11 @@ static bool BaseBackup(const char* dirname, uint32 term)
 
         /* delete data/ and pg_tblspc/, but keep .config */
         delete_datadir(dirname);
+
+        /* delete data/ and pg_tblspc/ in dss, but keep .config */
+        if (instance_config.dss.enable_dss) {
+            delete_datadir(dssdir);
+        }
         show_full_build_process("clear old target dir success");
 
         /* create  build tag file */
@@ -1737,7 +1758,11 @@ static bool BaseBackup(const char* dirname, uint32 term)
     /* fsync all data come from source */
     if (!no_need_fsync) {
         show_full_build_process("starting fsync all files come from source.");
-        (void) fsync_pgdata(basedir);
+        if (instance_config.dss.enable_dss) {
+            (void) fsync_pgdata(dssdir);
+        } else {
+            (void) fsync_pgdata(basedir);
+        }
         show_full_build_process("finish fsync all files.");
     }
 
@@ -1746,7 +1771,11 @@ static bool BaseBackup(const char* dirname, uint32 term)
     if (g_is_obsmode) {
         backupDWFileSuccess = backup_dw_file(basedir);
     } else {
-        backupDWFileSuccess = backup_dw_file(dirname);
+        if (instance_config.dss.enable_dss) {
+            backupDWFileSuccess = ss_backup_dw_file(dssdir);
+        } else {
+            backupDWFileSuccess = backup_dw_file(dirname);
+        }
     }
 
     if (!backupDWFileSuccess) {
@@ -1768,9 +1797,13 @@ static bool BaseBackup(const char* dirname, uint32 term)
     if (!deleteFilsSuccess) {
         return false;
     }
-
-    nRet = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH, "%s/pg_tblspc", dirname);
-    securec_check_ss_c(nRet, "\0", "\0");
+    
+    if (instance_config.dss.enable_dss) {
+        nRet = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH, "%s/pg_tblspc", dssdir);
+    } else {
+        nRet = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH, "%s/pg_tblspc", dirname);
+        securec_check_ss_c(nRet, "\0", "\0");
+    }
     deleteFilsSuccess = DeleteAlreadyDropedFile(tblspcPath, true);
     if (!deleteFilsSuccess) {
         return false;
@@ -2332,6 +2365,73 @@ static void show_full_build_process(const char* errmg)
 }
 
 /**
+ * delete existing double write file if existed in dss, recreate it and write one page of zero
+ * @param target_dir dss vgdata
+ */
+static bool ss_backup_dw_file(const char* target_dir)
+{
+    int rc;
+    int fd = -1;
+    char dw_file_path[PATH_MAX];
+    char dw_path[PATH_MAX];
+    char* buf = NULL;
+    char* unaligned_buf = NULL;
+
+    /* Delete the dw file, if it exists. */
+    rc = snprintf_s(dw_path, PATH_MAX, PATH_MAX - 1, "%s/pg_doublewrite%d", target_dir,
+                    instance_config.dss.instance_id);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    /* check whether directory is exits or not, if not exit then mkdir it */
+    if (-1 == access(dw_path, R_OK | W_OK)) {
+        if (mkdir(dw_path, S_IRWXU) != 0) {
+            pg_log(PG_WARNING, _("failed to make dir %s.\n"), dw_path);
+            return false;   
+        }
+    }
+
+    /* Delete the dw file, if it exists. */
+    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s", T_OLD_DW_FILE_NAME);
+    securec_check_ss_c(rc, "\0", "\0");
+    
+    delete_target_file(dw_file_path);
+
+    /* Delete the dw build file, if it exists. */
+    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s", T_DW_BUILD_FILE_NAME);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    delete_target_file(dw_file_path);
+
+    /* Create the dw build file. */
+    if ((fd = open(dw_file_path, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM)) < 0) {
+        pg_log(PG_WARNING, _("could not create file %s: %s\n"), dw_file_path, gs_strerror(errno));
+        return false;
+    }
+
+    unaligned_buf = (char*)malloc(BLCKSZ + BLCKSZ);
+    if (unaligned_buf == NULL) {
+        pg_log(PG_WARNING, _("out of memory"));
+        close(fd);
+        return false;
+    }
+
+    buf = (char*)TYPEALIGN(BLCKSZ, unaligned_buf);
+    rc = memset_s(buf, BLCKSZ, 0, BLCKSZ);
+    securec_check_c(rc, "\0", "\0");
+
+    if (write(fd, buf, BLCKSZ) != BLCKSZ) {
+        pg_log(PG_WARNING, _("could not write data to file %s: %s\n"), dw_file_path, gs_strerror(errno));
+        close(fd);
+        return false;
+    }
+
+    free(unaligned_buf);
+    close(fd);
+
+    return true;
+}
+
+/**
  * delete existing double write file if existed, recreate it and write one page of zero
  * @param target_dir data base root dir
  */
@@ -2411,7 +2511,15 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH])
     char linkpath[MAXPGPATH] = {0};
     errno_t rc = EOK;
     struct stat stbuf;
-    int nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", basedir);
+    int nRet = 0;
+
+    if (instance_config.dss.enable_dss) {
+        char *dssdir = instance_config.dss.vgdata;
+        nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", dssdir,
+            instance_config.dss.instance_id);
+    } else {
+        nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", basedir);
+    }
     securec_check_ss_c(nRet, "", "");
 
     if (lstat(xlog_location, &stbuf) == 0) {

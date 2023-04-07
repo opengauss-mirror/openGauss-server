@@ -168,34 +168,34 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
 
     // Unix file directory (instance owner)
     rc = snprintf_s(dataDir->dwDir.dwOldPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw",
-        dataDir->pg_data, dataDir->instance_id);
+        dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->dwDir.dwPathPrefix, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw_",
-        dataDir->pg_data, dataDir->instance_id);
+        dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->dwDir.dwSinglePath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw_single",
-        dataDir->pg_data, dataDir->instance_id);
+        dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->dwDir.dwBuildPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw.build",
-        dataDir->pg_data, dataDir->instance_id);
+        dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->dwDir.dwUpgradePath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/dw_upgrade",
-        dataDir->pg_data, dataDir->instance_id);
+        dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->dwDir.dwMetaPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw_meta",
-        dataDir->pg_data, dataDir->instance_id);
+        dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->dwDir.dwBatchUpgradeMetaPath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/dw_batch_upgrade_meta", dataDir->pg_data, dataDir->instance_id);
+        "%s/pg_doublewrite%d/dw_batch_upgrade_meta", dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->dwDir.dwBatchUpgradeFilePath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/dw_batch_upgrade_files", dataDir->pg_data, dataDir->instance_id);
+        "%s/pg_doublewrite%d/dw_batch_upgrade_files", dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 }

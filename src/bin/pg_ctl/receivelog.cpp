@@ -38,6 +38,7 @@
 #include <time.h>
 #include <signal.h>
 #include <unistd.h>
+#include "storage/file/fio_device.h"
 
 /* Size of the streaming replication protocol headers */
 #define STREAMING_HEADER_SIZE (1 + sizeof(WalDataMessageHeader))
@@ -98,12 +99,19 @@ static int open_walfile(XLogRecPtr startpoint, uint32 timeline, const char* base
 
     nRet = snprintf_s(fn, sizeof(fn), sizeof(fn) - 1, "%s/%s.partial", basedir, namebuf);
     securec_check_ss_c(nRet, "", "");
-
-    retVal = realpath(fn, Lrealpath);
-    if (retVal == NULL && '\0' == Lrealpath[0]) {
-        pg_log(PG_PRINT, _("%s: realpath WAL segment path %s failed : %s\n"), progname, Lrealpath, strerror(errno));
-    }
-
+    
+    /* This basedir is real path when dss enabled,we need to not transform to realpath */
+    if (is_dss_file(fn)) {
+        nRet = snprintf_s(Lrealpath, sizeof(Lrealpath), sizeof(Lrealpath) - 1, "%s", fn);
+        securec_check_ss_c(nRet, "", "");
+        pg_log(PG_DEBUG, _("%s: WAL segment path that will open is %s \n"), progname, fn);
+    } else {
+        retVal = realpath(fn, Lrealpath); 
+        if (retVal == NULL && '\0' == Lrealpath[0]) {
+            pg_log(PG_PRINT, _("%s: realpath WAL segment path %s failed : %s\n"), progname, Lrealpath, strerror(errno));
+        } 
+    } 
+    
     int f = open(Lrealpath, O_WRONLY | O_CREAT | PG_BINARY, S_IRUSR | S_IWUSR);
     if (f == -1) {
         pg_log(PG_PRINT, _("%s: Could not open WAL segment %s: %s\n"), progname, Lrealpath, strerror(errno));
@@ -137,12 +145,16 @@ static int open_walfile(XLogRecPtr startpoint, uint32 timeline, const char* base
         f = -1;
         return -1;
     }
-
-    /* New, empty, file. So pad it to 16Mb with zeroes */
-    zerobuf = (char*)xmalloc0(XLOG_BLCKSZ);
-    for (bytes = 0; bytes < (int)XLogSegSize; bytes += XLOG_BLCKSZ) {
-        if (write(f, zerobuf, XLOG_BLCKSZ) != XLOG_BLCKSZ) {
-            pg_log(PG_PRINT, _("%s: could not pad WAL segment %s: %s\n"), progname, Lrealpath, strerror(errno));
+    
+    
+    if (is_dss_fd(f)) {
+        /* extend file and fill space at once to avoid performance issue */
+        errno = 0;
+        if (ftruncate(f, XLogSegSize) != 0) {
+            int save_errno = errno;
+            /* if write didn't set errno, assume problem is no disk space */
+            errno = save_errno ? save_errno : ENOSPC;
+            pg_log(PG_PRINT, _("%s: could not write to file %s: %s\n"), progname, Lrealpath, strerror(errno));
             if (close(f) != 0) {
                 pg_log(PG_PRINT, _("%s: close file failed %s: %s\n"), progname, Lrealpath, strerror(errno));
             }
@@ -150,13 +162,29 @@ static int open_walfile(XLogRecPtr startpoint, uint32 timeline, const char* base
             if (unlink(Lrealpath) != 0) {
                 pg_log(PG_PRINT, _("%s: unlink file failed %s: %s\n"), progname, Lrealpath, strerror(errno));
             }
-            free(zerobuf);
-            zerobuf = NULL;
             return -1;
         }
+    } else {
+        /* New, empty, file. So pad it to 16Mb with zeroes */
+        zerobuf = (char*)xmalloc0(XLOG_BLCKSZ);
+        for (bytes = 0; bytes < (int)XLogSegSize; bytes += XLOG_BLCKSZ) {
+            if (write(f, zerobuf, XLOG_BLCKSZ) != XLOG_BLCKSZ) {
+                pg_log(PG_PRINT, _("%s: could not pad WAL segment %s: %s\n"), progname, Lrealpath, strerror(errno));
+                if (close(f) != 0) {
+                    pg_log(PG_PRINT, _("%s: close file failed %s: %s\n"), progname, Lrealpath, strerror(errno));
+                }
+                f = -1;
+                if (unlink(Lrealpath) != 0) {
+                    pg_log(PG_PRINT, _("%s: unlink file failed %s: %s\n"), progname, Lrealpath, strerror(errno));
+                }
+                free(zerobuf);
+                zerobuf = NULL;
+                return -1;
+            }
+        }
+        free(zerobuf);
+        zerobuf = NULL;
     }
-    free(zerobuf);
-    zerobuf = NULL;
 
     if (lseek(f, SEEK_SET, 0) != 0) {
         pg_log(PG_PRINT,
