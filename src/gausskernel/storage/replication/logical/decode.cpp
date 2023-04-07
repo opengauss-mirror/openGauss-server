@@ -1149,12 +1149,6 @@ static void DecodeInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     /* only interested in our database */
     Size tuplelen;
     char *tupledata = XLogRecGetBlockData(r, 0, &tuplelen);
-    if (tuplelen == 0 && !AllocSizeIsValid(tuplelen)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", tuplelen)));
-        return;
-    }
-
     XLogRecGetBlockTag(r, 0, &target_node, NULL, NULL);
     if (target_node.dbNode != ctx->slot->data.database)
         return;
@@ -1196,11 +1190,6 @@ static void AreaDecodeInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     }
     Size tuplelen;
     char *tupledata = XLogRecGetBlockData(r, 0, &tuplelen);
-    if (tuplelen == 0 && !AllocSizeIsValid(tuplelen)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), don't decode it", tuplelen)));
-        return;
-    } 
     XLogRecGetBlockTag(r, 0, &target_node, NULL, NULL);
     /* output plugin doesn't look for this origin, no need to queue */
     if (FilterByOrigin(ctx, XLogRecGetOrigin(r))) {
@@ -1241,11 +1230,6 @@ static void DecodeUInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     }
     Size tuplelen = 0;
     char *tupledata = XLogRecGetBlockData(r, 0, &tuplelen);
-    if (tuplelen == 0 && !AllocSizeIsValid(tuplelen)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), don't decode it", tuplelen)));
-        return;
-    }
     XLogRecGetBlockTag(r, 0, &targetNode, NULL, NULL);
     if (targetNode.dbNode != ctx->slot->data.database) {
         return;
@@ -1286,11 +1270,6 @@ static void AreaDecodeUInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
     Size tuplelen = 0;
     char *tupledata = XLogRecGetBlockData(r, 0, &tuplelen);
 
-    if (tuplelen == 0 && !AllocSizeIsValid(tuplelen)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), don't decode it", tuplelen)));
-        return;
-    }
     XLogRecGetBlockTag(r, 0, &targetNode, NULL, NULL);
 
     /* output plugin doesn't look for this origin, no need to queue */
@@ -1344,11 +1323,6 @@ static void DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     Size datalen_new = 0;
     char *data_new = XLogRecGetBlockData(r, 0, &datalen_new);
     Size tuplelen_new = datalen_new - SizeOfHeapHeader;
-    if (tuplelen_new == 0 && !AllocSizeIsValid(tuplelen_new)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", tuplelen_new)));
-        return;
-    }
     Size datalen_old = 0;
 
     /* adapt 64 xid, if this tuple is the first tuple of a new page */
@@ -1362,11 +1336,6 @@ static void DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     }
     datalen_old -= hasCSN ? sizeof(CommitSeqNo) : 0;
     Size tuplelen_old = datalen_old - SizeOfHeapHeader;
-    if (tuplelen_old == 0 && !AllocSizeIsValid(tuplelen_old)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), don't decode it", tuplelen_old)));
-        return;
-    }
 
     /* output plugin doesn't look for this origin, no need to queue */
     if (FilterByOrigin(ctx, XLogRecGetOrigin(r))) {
@@ -1418,11 +1387,6 @@ static void AreaDecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     Size datalen_new = 0;
     char *data_new = XLogRecGetBlockData(r, 0, &datalen_new);
     Size tuplelen_new = datalen_new - SizeOfHeapHeader;
-    if (tuplelen_new == 0 && !AllocSizeIsValid(tuplelen_new)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), don't decode it", tuplelen_new)));
-        return;
-    }
     Size datalen_old = 0;
 
     /* adapt 64 xid, if this tuple is the first tuple of a new page */
@@ -1436,11 +1400,6 @@ static void AreaDecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     }
     datalen_old -= hasCSN ? sizeof(CommitSeqNo) : 0;
     Size tuplelen_old = datalen_old - SizeOfHeapHeader;
-    if (tuplelen_old == 0 && !AllocSizeIsValid(tuplelen_old)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", tuplelen_old)));
-        return;
-    }
 
     /* output plugin doesn't look for this origin, no need to queue */
     if (FilterByOrigin(ctx, XLogRecGetOrigin(r))) {
@@ -1566,12 +1525,6 @@ static void DecodeUUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     Size datalenNew = 0;
     char *dataNew = XLogRecGetBlockData(r, 0, &datalenNew);
 
-    if (datalenNew == 0 && !AllocSizeIsValid(datalenNew)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), don't decode it", datalenNew)));
-        return;
-    }
-
     Size tuplelenOld = XLogRecGetDataLen(r) - SizeOfUHeapUpdate - (hasCSN ? sizeof(CommitSeqNo) : 0);
     char *dataOld = (char *)xlrec + SizeOfUHeapUpdate + (hasCSN ? sizeof(CommitSeqNo) : 0);
     uint32 toastLen = 0;
@@ -1661,11 +1614,6 @@ static void AreaDecodeUUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
 
     Size datalenNew = 0;
     char *dataNew = XLogRecGetBlockData(r, 0, &datalenNew);
-    if (datalenNew == 0 && !AllocSizeIsValid(datalenNew)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), don't decode it", datalenNew)));
-        return;
-    }
 
     ReorderBufferChange *change = ReorderBufferGetChange(ctx->reorder);
     change->action = REORDER_BUFFER_CHANGE_UUPDATE;
@@ -1737,11 +1685,6 @@ static void DecodeDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     }
 
     Size datalen = XLogRecGetDataLen(r) - heapDeleteSize;
-    if (datalen == 0 && !AllocSizeIsValid(datalen)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", datalen)));
-        return;
-    }
     ReorderBufferChange *change = ReorderBufferGetChange(ctx->reorder);
     change->action = REORDER_BUFFER_CHANGE_DELETE;
     change->origin_id = XLogRecGetOrigin(r);
@@ -1790,11 +1733,6 @@ static void AreaDecodeDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     }
 
     Size datalen = XLogRecGetDataLen(r) - heapDeleteSize;
-    if (datalen == 0 && !AllocSizeIsValid(datalen)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("datalen is invalid(%lu), tuplelen, don't decode it", datalen)));
-        return;
-    }
     ReorderBufferChange *change = ReorderBufferGetChange(ctx->reorder);
     change->action = REORDER_BUFFER_CHANGE_DELETE;
     change->origin_id = XLogRecGetOrigin(r);
@@ -1925,12 +1863,6 @@ static void AreaDecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
     Size metaLen = DecodeUndoMeta((char*)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0) +
         SizeOfXLUndoHeader + addLen);
     addLen += metaLen;
-
-    if (datalen == 0 && !AllocSizeIsValid(datalen)) {
-        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
-            errmsg("tuplelen is invalid(%lu), don't decode it", datalen)));
-        return;
-    }
 
     ReorderBufferChange* change = ReorderBufferGetChange(ctx->reorder);
     change->action = REORDER_BUFFER_CHANGE_UDELETE;

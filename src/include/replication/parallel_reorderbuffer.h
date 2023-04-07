@@ -391,6 +391,8 @@ extern void WalSndPrepareWriteHelper(StringInfo out, XLogRecPtr lsn, Transaction
 extern void ParallelReorderBufferUpdateMemory(ParallelReorderBuffer *rb, logicalLog *change, int slotId, bool add);
 extern void CheckNewTupleMissingToastChunk(ParallelReorderBufferChange *change, bool isHeap);
 extern void ParallelReorderBufferChildAssignment(ParallelReorderBuffer *prb, logicalLog *logChange);
+extern void ParallelReorderBufferCleanupTXN(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn,
+    XLogRecPtr lsn = InvalidXLogRecPtr);
 
 const uint32 max_decode_cache_num = 100000;
 #endif
