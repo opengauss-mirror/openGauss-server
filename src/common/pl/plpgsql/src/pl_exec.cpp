@@ -1163,6 +1163,7 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
         PLpgSQL_execstate* estate_tmp = (PLpgSQL_execstate*)(plcallstack.prev->elem);
         exec_set_cursor_att_var(estate_tmp, &estate);
     }
+    list_free_deep(autonmsList);
 #endif
     /* Clean up any leftover temporary memory */
     plpgsql_destroy_econtext(&estate);
