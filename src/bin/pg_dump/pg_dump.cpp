@@ -826,6 +826,20 @@ int main(int argc, char** argv)
             ((dbname != NULL) ? dbname : ""), errorMessages);
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * During gs_dump, PQfnumber() is matched according to the lowercase column name.
+     * However, when uppercase_attribute_name is on, the column names in the result set
+     * will be converted to uppercase. So we need to turn off it temporarily. We don't
+     * need to turn it on cause this connection is for gs_dump only, will not affect others.
+     */
+    if (!SetUppercaseAttributeNameToOff(((ArchiveHandle*)fout)->connection)) {
+        (void)remove(filename);
+        GS_FREE(filename);
+        exit_horribly(NULL, "set uppercase_attribute_name to off failed.\n", progname);
+    }
+#endif
+
     if (CheckIfStandby(fout)) {
         (void)remove(filename);
         exit_horribly(NULL, "%s is not supported on standby or cascade standby\n", progname);

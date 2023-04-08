@@ -136,5 +136,8 @@ extern bool IsDir(const char* dirpath);
 extern char* make_absolute_path(const char* path);
 extern bool isExistsSQLResult(PGconn* conn, const char* sqlCmd);
 extern bool is_column_exists(PGconn* conn, Oid relid, const char* column_name);
+#ifndef ENABLE_MULTIPLE_NODES
+extern bool SetUppercaseAttributeNameToOff(PGconn* conn);
+#endif
 
 #endif /* DUMPUTILS_H */
