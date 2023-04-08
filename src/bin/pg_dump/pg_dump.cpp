@@ -816,6 +816,20 @@ int main(int argc, char** argv)
                 "Notice: options -U is not super or sysadmin role, can only back up objects belonging to user %s.\n",
                 PQuser(((ArchiveHandle*)fout)->connection));
     }
+    
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * During gs_dump, PQfnumber() is matched according to the lowercase column name.
+     * However, when uppercase_attribute_name is on, the column names in the result set
+     * will be converted to uppercase. So we need to turn off it temporarily. We don't
+     * need to turn it on cause this connection is for gs_dump only, will not affect others.
+     */
+    if (!SetUppercaseAttributeNameToOff(((ArchiveHandle*)fout)->connection)) {
+        (void)remove(filename);
+        GS_FREE(filename);
+        exit_horribly(NULL, "set uppercase_attribute_name to off failed.\n", progname);
+    }
+#endif
 
     if (CheckIfStandby(fout)) {
         (void)remove(filename);
