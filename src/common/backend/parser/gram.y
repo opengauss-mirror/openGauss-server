@@ -28562,6 +28562,7 @@ unreserved_keyword:
 			| IDENTIFIED
 			| IDENTITY_P
 			| IF_P
+			| IGNORE
 			| IGNORE_EXTRA_DATA
 			| IMMEDIATE
 			| IMMUTABLE
