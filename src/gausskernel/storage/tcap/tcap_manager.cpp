@@ -298,7 +298,9 @@ static bool TrFetchOrinameImpl(Oid nspId, const char *oriname, TrObjType type,
         F_NAMEEQ, CStringGetDatum(oriname));
 
     sd = systable_beginscan(rbRel, RecyclebinDbidNspOrinameIndexId, true, NULL, 3, skey);
-    while ((tup = systable_getnext(sd)) != NULL) {
+    /* restore drop/truncate use the latest version, purge use the oldest version */
+    ScanDirection scan_direct = (operMode == RB_OPER_PURGE) ? ForwardScanDirection : BackwardScanDirection;
+    while ((tup = (HeapTuple)index_getnext(sd->iscan, scan_direct)) != NULL) {
         Form_pg_recyclebin rbForm = (Form_pg_recyclebin)GETSTRUCT(tup);
         if ((rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_TABLE) ||
             (rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_INDEX) ||
