@@ -5200,7 +5200,6 @@ static void exec_execute_message(const char* portal_name, long max_rows)
     if (dest == DestRemoteExecute)
         SetRemoteDestReceiverParams(receiver, portal);
 
-    resetErrorDataArea(true);
     /*
      * Ensure we are in a transaction command (this should normally be the
      * case already due to prior BIND).
@@ -9418,6 +9417,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     u_sess->exec_cxt.RetryController->CacheStmtName(stmt_name);
                 }
 
+            resetErrorDataArea(true);
             } break;
 
             case 'B': /* bind */
