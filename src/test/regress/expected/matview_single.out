@@ -124,5 +124,22 @@ select oid, relname from pg_class where relname like 'mlog%';
 --------+------+------+-------+---------
 (0 rows)
 
+create table test_syn(id int unique,a1 varchar(20));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_syn_id_key" for table "test_syn"
+create materialized view mv_test_syn as select * from test_syn;
+create incremental materialized view imv_test_syn as select * from test_syn;
+create synonym s_mv_test_syn for mv_test_syn;
+create synonym s_imv_test_syn for imv_test_syn;
+REFRESH MATERIALIZED VIEW s_mv_test_syn;
+REFRESH MATERIALIZED VIEW s_imv_test_syn;
+REFRESH INCREMENTAL MATERIALIZED VIEW s_mv_test_syn;
+ERROR:  "mv_test_syn" is not an incremental materialized view
+REFRESH INCREMENTAL MATERIALIZED VIEW s_imv_test_syn;
+drop synonym s_mv_test_syn;
+drop synonym s_imv_test_syn;
+drop table test_syn cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to materialized view mv_test_syn
+drop cascades to materialized view imv_test_syn
 \c regression
 drop database test_imv_db;
