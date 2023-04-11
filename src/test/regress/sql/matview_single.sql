@@ -57,5 +57,20 @@ drop table imv1_t cascade;
 select oid, relname from pg_class where relname like 'mlog%';
 \d
 
+create table test_syn(id int unique,a1 varchar(20));
+create materialized view mv_test_syn as select * from test_syn;
+create incremental materialized view imv_test_syn as select * from test_syn;
+create synonym s_mv_test_syn for mv_test_syn;
+create synonym s_imv_test_syn for imv_test_syn;
+
+REFRESH MATERIALIZED VIEW s_mv_test_syn;
+REFRESH MATERIALIZED VIEW s_imv_test_syn;
+REFRESH INCREMENTAL MATERIALIZED VIEW s_mv_test_syn;
+REFRESH INCREMENTAL MATERIALIZED VIEW s_imv_test_syn;
+
+drop synonym s_mv_test_syn;
+drop synonym s_imv_test_syn;
+drop table test_syn cascade;
+
 \c regression
 drop database test_imv_db;

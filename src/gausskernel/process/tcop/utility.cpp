@@ -6197,7 +6197,9 @@ ProcessUtilitySlow(Node *parse_tree,
                 /* something happen on datanodes */
                 if (IS_PGXC_DATANODE)
 #else
-                Relation matview = heap_openrv(stmt->relation, stmt->incremental ? ExclusiveLock : AccessExclusiveLock);
+                Relation matview = HeapOpenrvExtended(stmt->relation,
+                                                      stmt->incremental ? ExclusiveLock : AccessExclusiveLock,
+                                                      false, true);
                 CheckRefreshMatview(matview, is_incremental_matview(matview->rd_id));
                 heap_close(matview, NoLock);
 #endif
