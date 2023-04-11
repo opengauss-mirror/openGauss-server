@@ -500,6 +500,7 @@ char* CheckReferencedObject(Oid relOid, RangeVar* objVar, const char* synName)
         case RELKIND_CONTQUERY:
         case RELKIND_FOREIGN_TABLE:
         case RELKIND_STREAM:
+        case RELKIND_MATVIEW:
             break;
         case RELKIND_COMPOSITE_TYPE:
             appendStringInfo(

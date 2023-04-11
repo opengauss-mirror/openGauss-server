@@ -814,7 +814,7 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
      */
     matviewOid = RangeVarGetRelidExtended(stmt->relation,
                                            ExclusiveLock,
-                                           false, false, false, false,
+                                           false, false, false, true,
                                            RangeVarCallbackOwnsTable, NULL);
 
     Oid mapid = DatumGetObjectId(get_matview_mapid(matviewOid));
@@ -928,7 +928,7 @@ void ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
      */
     matviewOid = RangeVarGetRelidExtended(stmt->relation,
                                            AccessExclusiveLock,
-                                           false, false, false, false,
+                                           false, false, false, true,
                                            RangeVarCallbackOwnsTable, NULL);
     mapid = DatumGetObjectId(get_matview_mapid(matviewOid));
     matviewRel = heap_open(matviewOid, AccessExclusiveLock);
@@ -1036,7 +1036,7 @@ void ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *queryString
      * Get a lock until end of transaction.
      */
     matviewOid = RangeVarGetRelidExtended(stmt->relation,
-                                          AccessExclusiveLock, false, false, false, false,
+                                          AccessExclusiveLock, false, false, false, true,
                                           RangeVarCallbackOwnsTable, NULL);
     matviewRel = heap_open(matviewOid, NoLock);
 
@@ -1147,7 +1147,7 @@ bool isIncMatView(RangeVar *rv)
 {
     Oid matviewOid = RangeVarGetRelidExtended(rv,
                                            NoLock,
-                                           false, false, false, false,
+                                           false, false, false, true,
                                            RangeVarCallbackOwnsTable, NULL);
     Relation matviewRel = heap_open(matviewOid, AccessShareLock);
 
