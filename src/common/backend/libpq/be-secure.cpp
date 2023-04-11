@@ -144,8 +144,8 @@ static const char* ssl_ciphers_map[] = {
 const char* ssl_cipher_file = "server.key.cipher";
 const char* ssl_rand_file = "server.key.rand";
 #ifdef USE_TASSL
-const char *ssl_enc_cipher_file = "server.key.cipher";
-const char *ssl_enc_rand_file = "server.key.rand";
+const char *ssl_enc_cipher_file = "server_enc.key.cipher";
+const char *ssl_enc_rand_file = "server_enc.key.rand";
 #endif
 /* ------------------------------------------------------------ */
 /*                       Hardcoded values                       */
