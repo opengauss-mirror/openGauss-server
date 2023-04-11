@@ -345,7 +345,8 @@ static const struct b_format_behavior_compat_entry b_format_behavior_compat_opti
     {"set_session_transaction", B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION},
     {"enable_set_variables", B_FORMAT_OPT_ENABLE_SET_VARIABLES},
     {"enable_modify_column", B_FORMAT_OPT_ENABLE_MODIFY_COLUMN},
-    {"default_collation", B_FORMAT_OPT_DEFAULT_COLLATION}
+    {"default_collation", B_FORMAT_OPT_DEFAULT_COLLATION},
+    {"fetch", B_FORMAT_OPT_FETCH}
 };
 
 typedef struct behavior_compat_entry {
@@ -3334,7 +3335,8 @@ static bool b_format_forbid_distribute_parameter(const char *elem)
     const char *forbidList[] = {
         "set_session_transaction",
         "enable_set_variables",
-        "enable_modify_column"
+        "enable_modify_column",
+        "fetch"
     };
     for (int i = 0; i < B_FORMAT_FORBID_GUC_NUM; i++) {
         if (strcmp(forbidList[i], elem) == 0) {
