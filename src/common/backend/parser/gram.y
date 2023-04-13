@@ -1692,6 +1692,9 @@ UserId:
 							ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("syntax error at or near \"%s\"", $1), parser_errposition(@1)));
 						if (strchr($1,'@'))
 							ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("@ can't be allowed in username")));
+						if (strlen($1) >= NAMEDATALEN) {
+							ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("String %s is too long for user name (should be no longer than 64)", $1)));
+						}
 						$$ = $1;
 					}
 			| RoleId SET_USER_IDENT
@@ -31318,6 +31321,9 @@ static char* GetValidUserHostId(char* userName, char* hostId)
 	appendStringInfoString(&buf, userName);
 	appendStringInfoString(&buf, "@");
 	appendStringInfoString(&buf, userHostId);
+	if (strlen(buf.data) >= NAMEDATALEN) {
+		ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("String %s is too long for user name (should be no longer than 64)", buf.data)));
+	}
 	return buf.data;
 }
 
