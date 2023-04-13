@@ -334,8 +334,13 @@ NOTICE:  oracle : usa : 2
  
 (1 row)
 
-set b_fetch = off;
-ERROR:  unrecognized configuration parameter "b_fetch"
+set b_format_behavior_compat_options = '';
+show b_format_behavior_compat_options;
+ b_format_behavior_compat_options 
+----------------------------------
+ 
+(1 row)
+
 -- test declare condition
 create or replace procedure test_condition_1 as
 declare
