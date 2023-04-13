@@ -266,7 +266,8 @@ begin
 end;
 /
 call test_cursor_1();
-set b_fetch = off;
+set b_format_behavior_compat_options = '';
+show b_format_behavior_compat_options;
 -- test declare condition
 create or replace procedure test_condition_1 as
 declare
