@@ -2279,6 +2279,9 @@ int PostmasterMain(int argc, char* argv[])
         return 0;
     }
     
+    /* Check for invalid combinations of GUC settings */
+    CheckGUCConflicts();
+
     /* Check DSS config */
     initDSSConf();
 
@@ -2287,11 +2290,7 @@ int PostmasterMain(int argc, char* argv[])
 
     /* And switch working directory into it */
     ChangeToDataDir();
-    /*
-        * Check for invalid combinations of GUC settings.
-        */
-    CheckGUCConflicts();
-
+    
     /* Set parallel recovery config */
     ConfigRecoveryParallelism();
     ProcessRedoCpuBindInfo();
@@ -3403,6 +3402,13 @@ static void CheckShareStorageConfigConflicts(void)
                     errmsg("shared storage mode could not support specifics tablespace(s)."),
                     errhint("Either set temp_tablespaces to NULL, or turn off ss_enable_dss.")));
         }
+    }
+
+    if (g_instance.attr.attr_storage.dss_attr.ss_enable_dss != 
+            g_instance.attr.attr_storage.dms_attr.enable_dms) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SYSTEM_ERROR),
+                errmsg("ss_enable_dms and ss_enable_dss must be turned on or off simultaneously.")));
     }
 }
 
