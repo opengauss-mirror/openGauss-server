@@ -4785,7 +4785,7 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
         SegFlushCheckDiskLSN(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno, bufToWrite);
 #endif
 
-        if (ENABLE_DMS && t_thrd.role == PAGEWRITER_THREAD && ENABLE_DSS_AIO) {
+        if (ENABLE_DMS && (t_thrd.role == PAGEWRITER_THREAD) && ENABLE_DSS_AIO) {
             int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
             PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
             DSSAioCxt *aio_cxt = &pgwr->aio_cxt;

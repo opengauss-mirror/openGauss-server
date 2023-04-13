@@ -1020,7 +1020,7 @@ static void InitStorageConfigureNamesBool()
             NULL},
 
         {{"ss_enable_aio",
-            PGC_SIGHUP,
+            PGC_POSTMASTER,
             NODE_SINGLENODE,
             SHARED_STORAGE_OPTIONS,
             gettext_noop("Whether use dss aio"),
@@ -1029,7 +1029,7 @@ static void InitStorageConfigureNamesBool()
             &g_instance.attr.attr_storage.dms_attr.enable_dss_aio,
             true,
             NULL,
-            assign_ss_enable_aio,
+            NULL,
             NULL},
 
 #ifdef USE_ASSERT_CHECKING
@@ -5877,11 +5877,6 @@ static bool check_ss_enable_ssl(bool *newval, void **extra, GucSource source)
         ereport(WARNING, (errmsg("The SSL connection will be disabled during build, which brings security risks.")));
     }
     return true;
-}
-
-static void assign_ss_enable_aio(bool newval, void *extra)
-{
-    g_instance.attr.attr_storage.dms_attr.enable_dss_aio = newval;
 }
 
 #ifdef USE_ASSERT_CHECKING
