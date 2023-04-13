@@ -6482,95 +6482,90 @@ fi
 #
 
 if [[ "$enable_lite_mode" != yes ]]; then
-  with_libxml=yes
+    with_libxml=yes
 else
-  with_libxml=no
+    with_libxml=no
 fi
 
 # Check whether --with-libxml was given.
 if test "${with_libxml+set}" = set; then
-  withval=$with_libxml;
-  case $withval in
+    withval=$with_libxml
+    case $withval in
     yes)
-
-cat >>confdefs.h <<\_ACEOF
+    
+        cat >>confdefs.h <<\_ACEOF
 #define USE_LIBXML 1
 _ACEOF
 
-      ;;
+        ;;
     no)
-      :
-      ;;
+        :
+        ;;
     *)
-      { { $as_echo "$as_me:$LINENO: error: no argument expected for --with-libxml option" >&5
-$as_echo "$as_me: error: no argument expected for --with-libxml option" >&2;}
-   { (exit 1); exit 1; }; }
-      ;;
-  esac
-
+        {
+            {
+                $as_echo "$as_me:$LINENO: error: no argument expected for --with-libxml option" >&5
+                $as_echo "$as_me: error: no argument expected for --with-libxml option" >&2
+            }
+            {
+                (exit 1)
+                exit 1
+            }
+        }
+        ;;
+    esac
 else
-  with_libxml=no
-
+    with_libxml=no
 fi
 
 xml2_cflag=${with_3rdpartydir}/kernel/dependency/libxml2/comm/include/libxml2
 xml2_lib=${with_3rdpartydir}/kernel/dependency/libxml2/comm/lib
 xml2_config=${with_3rdpartydir}/kernel/dependency/libxml2/comm/bin/xml2-config
-if test "$with_libxml" = yes ; then
-  for ac_prog in ${xml2_config}
-do
-  # Extract the first word of "$ac_prog", so it can be a program name with args.
-set dummy $ac_prog; ac_word=$2
-{ $as_echo "$as_me:$LINENO: checking for $ac_word" >&5
-$as_echo_n "checking for $ac_word... " >&6; }
-if test "${ac_cv_prog_XML2_CONFIG+set}" = set; then
-  $as_echo_n "(cached) " >&6
-else
-  if test -n "$XML2_CONFIG"; then
-  ac_cv_prog_XML2_CONFIG="$XML2_CONFIG" # Let the user override the test.
-else
-as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in $PATH
-do
-  IFS=$as_save_IFS
-  test -z "$as_dir" && as_dir=.
-  for ac_exec_ext in '' $ac_executable_extensions; do
-  if { test -f "$as_dir/$ac_word$ac_exec_ext" && $as_test_x "$as_dir/$ac_word$ac_exec_ext"; }; then
-    ac_cv_prog_XML2_CONFIG="$ac_prog"
-    $as_echo "$as_me:$LINENO: found $as_dir/$ac_word$ac_exec_ext" >&5
-    break 2
-  fi
-done
-done
-IFS=$as_save_IFS
 
-fi
-fi
-XML2_CONFIG=$xml2_config
-if test -n "$XML2_CONFIG"; then
-  { $as_echo "$as_me:$LINENO: result: $XML2_CONFIG" >&5
-$as_echo "$XML2_CONFIG" >&6; }
-else
-  { $as_echo "$as_me:$LINENO: result: no" >&5
-$as_echo "no" >&6; }
-fi
+if test "$with_libxml" = yes; then
+    for ac_prog in ${xml2_config}; do
+        # Extract the first word of "$ac_prog", so it can be a program name with args.
+        set dummy $ac_prog
+        ac_word=$2
+        {
+            $as_echo "$as_me:$LINENO: checking for $ac_word" >&5
+            $as_echo_n "checking for $ac_word... " >&6
+        }
+        if test "${ac_cv_prog_XML2_CONFIG+set}" = set; then
+            $as_echo_n "(cached) " >&6
+        else
+            if test -n "$XML2_CONFIG"; then
+                ac_cv_prog_XML2_CONFIG="$XML2_CONFIG" # Let the user override the test.
+            else
+                as_save_IFS=$IFS
+                IFS=$PATH_SEPARATOR
+                for as_dir in $PATH; do
+                    IFS=$as_save_IFS
+                    test -z "$as_dir" && as_dir=.
+                    for ac_exec_ext in '' $ac_executable_extensions; do
+                        if { test -f "$as_dir/$ac_word$ac_exec_ext" && $as_test_x "$as_dir/$ac_word$ac_exec_ext"; }; then
+                            ac_cv_prog_XML2_CONFIG="$ac_prog"
+                            $as_echo "$as_me:$LINENO: found $as_dir/$ac_word$ac_exec_ext" >&5
+                            break 2
+                        fi
+                    done
+                done
+                IFS=$as_save_IFS
 
-
-  test -n "$XML2_CONFIG" && break
-done
-
-  if test -n "$XML2_CONFIG"; then
-    for pgac_option in `$XML2_CONFIG --cflags`; do
-      case $pgac_option in
-        -I*|-D*) CPPFLAGS="$CPPFLAGS $pgac_option -I${xml2_cflag}";;
-      esac
+            fi
+        fi
+        XML2_CONFIG=$xml2_config
+        if test -n "$XML2_CONFIG"; then
+            $as_echo "$as_me:$LINENO: result: $XML2_CONFIG" >&5
+            $as_echo "$XML2_CONFIG" >&6
+        else
+            $as_echo "$as_me:$LINENO: result: no" >&5
+            $as_echo "no" >&6
+        fi
     done
-    for pgac_option in `$XML2_CONFIG --libs`; do
-      case $pgac_option in
-        -L*) LDFLAGS="$LDFLAGS $pgac_option -L${xml2_lib}";;
-      esac
-    done
-  fi
+    
+    CPPFLAGS="$CPPFLAGS -I${xml2_cflag}"
+    LDFLAGS="$LDFLAGS -L${xml2_lib}"
 fi
 
 
