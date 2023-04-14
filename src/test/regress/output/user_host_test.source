@@ -48,6 +48,13 @@ LINE 1: create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
 ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 set b_compatibility_user_host_auth = on;
+CREATE USER 'sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc'@'%' PASSWORD 'test123@';
+ERROR:  String sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc@% is too long for user name (should be no longer than 64)
+CREATE USER 'sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc' PASSWORD 'test123@';
+ERROR:  String sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc is too long for user name (should be no longer than 64)
+CREATE USER sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfkvjhsdkfu@127.0.0.1 PASSWORD 'test123@';
+NOTICE:  identifier "sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfkvjhsdkfu" will be truncated to "sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfkvjhsdk"
+ERROR:  String sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfkvjhsdk@127.0.0.1 is too long for user name (should be no longer than 64)
 CREATE USER 'da@localhost'@'%' PASSWORD 'test123@';
 ERROR:  @ can't be allowed in username
 create user if not exists 'test_user_host'@'%' password 'test123@';
