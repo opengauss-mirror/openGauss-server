@@ -1765,17 +1765,17 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
             } else {
                 char pathbuf[MAXPGPATH];
                 get_lib_path(my_exec_path, pathbuf);
+
+                join_path_components(pathbuf, pathbuf, "postgresql");
 #ifdef ENABLE_PYTHON3
                 join_path_components(pathbuf, pathbuf, "plpython3.so");
 #else
                 join_path_components(pathbuf, pathbuf, "plpython2.so");
 #endif
-                char *libpl_location = strdup(pathbuf);
-                void *libpl_handler = internal_load_library(libpl_location);
+                void *libpl_handler = internal_load_library(pathbuf);
                 if (NULL == libpl_handler)
                     ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                                    errmsg("internal_load_library %s failed: %m", libpl_location)));
-                free(libpl_location);
+                                    errmsg("internal_load_library %s failed: %m", pathbuf)));
                 Datum (*plpython_call_handler)(FunctionCallInfoData *);
 #ifdef ENABLE_PYTHON2
                 plpython_call_handler = (Datum(*)(FunctionCallInfoData *))pg_dlsym(libpl_handler, "plpython_call_handler");
