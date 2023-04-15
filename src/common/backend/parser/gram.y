@@ -12079,7 +12079,7 @@ qualified_trigger_name:
 						case 1:
 							if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
 							{
-    							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 								ereport(errstate,
 										(errcode(ERRCODE_SYNTAX_ERROR),
 										 errmsg("only support trigger in schema in B compatibility database"),
@@ -12089,7 +12089,7 @@ qualified_trigger_name:
 							$$->relname = strVal(linitial($2));
 							break;
 						default:
-    						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 							ereport(errstate,
 									(errcode(ERRCODE_SYNTAX_ERROR),
 									 errmsg("improper qualified name (too many dotted names): %s",
