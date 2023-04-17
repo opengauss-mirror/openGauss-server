@@ -57,6 +57,8 @@ typedef struct st_ss_dms_func {
     void (*dms_get_event)(dms_wait_event_t event_type, unsigned long long *event_cnt, unsigned long long *event_time);
     int (*dms_buf_res_rebuild_drc)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
                                    unsigned char is_dirty);
+    int (*dms_buf_res_rebuild_drc_parallel)(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index,
+                                            unsigned char for_rebuild);
     int (*dms_is_recovery_session)(unsigned int sid);
     int (*drc_get_page_master_id)(char pageid[DMS_PAGEID_SIZE], unsigned char *master_id);
     int (*dms_release_page_batch)(dms_context_t *dms_ctx, dcs_batch_buf_t *owner_map, unsigned int *owner_count);
@@ -103,6 +105,8 @@ int dms_wait_reform(unsigned int *has_offline);
 void dms_get_event(dms_wait_event_t event_type, unsigned long long *event_cnt, unsigned long long *event_time);
 int dms_buf_res_rebuild_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
                             unsigned char is_dirty);
+int dms_buf_res_rebuild_drc_parallel(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index,
+                                    unsigned char for_rebuild);
 int dms_is_recovery_session(unsigned int sid);
 int drc_get_page_master_id(char pageid[DMS_PAGEID_SIZE], unsigned char *master_id);
 int dms_release_page_batch(dms_context_t *dms_ctx, dcs_batch_buf_t *owner_map, unsigned int *owner_count);

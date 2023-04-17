@@ -533,33 +533,6 @@ void BufValidateDrc(BufferDesc *buf_desc)
     dms_validate_drc(&dms_ctx, buf_ctrl, lsn, (unsigned char)is_dirty);
 }
 
-int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
-{
-#ifdef USE_ASSERT_CHECKING
-    if (IsSegmentPhysicalRelNode(buf_desc->tag.rnode)) {
-        SegNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
-    } else {
-        SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
-    }
-#endif
-
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    Assert(buf_ctrl != NULL);
-    Assert(buf_ctrl->is_edp != 1);
-    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
-    dms_context_t dms_ctx;
-    InitDmsBufContext(&dms_ctx, buf_desc->tag);
-    bool is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;
-    int ret = dms_buf_res_rebuild_drc(&dms_ctx, buf_ctrl, (unsigned long long)BufferGetLSN(buf_desc), is_dirty);
-    if (ret != DMS_SUCCESS) {
-        ereport(LOG, (errmsg("Failed to rebuild page, rel:%u/%u/%u/%d, forknum:%d, blocknum:%u.",
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-            buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
-        return ret;
-    }
-    return DMS_SUCCESS;
-}
-
 int SSLockAcquire(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock, bool dontWait,
     dms_opengauss_lock_req_type_t reqType)
 {
