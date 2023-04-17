@@ -101,3 +101,11 @@ SELECT COUNT(*) FROM point_gist_tbl WHERE f1 ~= '(0.0000018,0.0000018)'::point;
 RESET enable_seqscan;
 RESET enable_indexscan;
 RESET enable_bitmapscan;
+
+CREATE TABLE point_tbl_test(f1 point);
+CREATE INDEX gpointind_test ON point_tbl_test USING gist(f1);
+INSERT INTO point_tbl_test SELECT ('0,0') FROM generate_series(1, 185);
+INSERT INTO point_tbl_test VALUES ('0,NaN');
+select count(*) from point_tbl_test where f1~='0,0';
+select count(*) from point_tbl_test where f1~='0,NaN';
+drop table point_tbl_test;
