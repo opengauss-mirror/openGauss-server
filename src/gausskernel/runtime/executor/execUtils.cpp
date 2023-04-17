@@ -2870,7 +2870,13 @@ void SortTargetListAsArray(RightRefState* refState, List* targetList, GenericExp
             }
         }
 
-        Assert(defaultNodeOffset == len);
+        if (defaultNodeOffset != len) {
+            /* this should never happen, the system must come in mess */
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_STATUS),
+                 errmsg("the number of elements put up does not match the length of targetlist, array:%d, list:%d",
+                        defaultNodeOffset, len)));
+        }
     } else if (IS_ENABLE_UPSERT_RIGHT_REF(refState)) {
         const int len = list_length(targetList);
         GenericExprState* tempArr[len];
@@ -2891,7 +2897,14 @@ void SortTargetListAsArray(RightRefState* refState, List* targetList, GenericExp
                 targetArr[defaultNodeOffset++] = tempArr[i];
             }
         }
-        Assert(defaultNodeOffset == len);
+
+        if (defaultNodeOffset != len) {
+            /* this should never happen, the system must come in mess */
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_STATUS),
+                 errmsg("the number of elements put up does not match the length of targetlist, array:%d, list:%d",
+                        defaultNodeOffset, len)));
+        }
     } else {
         int index = 0;
         foreach(lc, targetList) {
