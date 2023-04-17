@@ -121,6 +121,7 @@ typedef struct knl_instance_attr_dms {
     int32 sslog_level;
     int32 sslog_backup_file_count;
     int32 sslog_max_file_size; //Unit:KB
+    int parallel_thread_num;
 } knl_instance_attr_dms;
 
 typedef struct knl_instance_attr_storage {

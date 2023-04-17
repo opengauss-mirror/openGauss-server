@@ -50,7 +50,7 @@ typedef struct SSBroadcastDDLLock {
 
 void InitDmsBufCtrl(void);
 void InitDmsContext(dms_context_t* dmsContext);
-
+void InitDmsBufContext(dms_context_t* dmsBufCxt, BufferTag buftag);
 void MarkReadHint(int buf_id, char persistence, bool extend, const XLogPhyBlock *pblk);
 bool LockModeCompatible(dms_buf_ctrl_t *buf_ctrl, LWLockMode mode);
 bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode);
@@ -61,7 +61,6 @@ Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
 Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool *with_io);
 Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool *with_io);
 bool DmsReleaseOwner(BufferTag buf_tag, int buf_id, unsigned char* released);
-int32 CheckBuf4Rebuild(BufferDesc* buf_desc);
 int SSLockAcquire(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock, bool dontWait,
     dms_opengauss_lock_req_type_t reqType = LOCK_NORMAL_MODE);
 int SSLockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock);

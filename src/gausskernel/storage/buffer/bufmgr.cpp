@@ -2428,6 +2428,14 @@ found_branch:
             Assert(!(pg_atomic_read_u32(&bufHdr->state) & BM_VALID));
 
             do {
+                if (!DmsCheckBufAccessible()) {
+                    if(LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
+                        TerminateBufferIO(bufHdr, false, 0);
+                    }
+                    pg_usleep(5000L);
+                    continue;
+                }
+
                 bool startio;
                 if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                     startio = true;

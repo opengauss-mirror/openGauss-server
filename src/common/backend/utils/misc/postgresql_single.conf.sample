@@ -845,3 +845,4 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #ss_log_level = 7
 #ss_log_backup_file_count = 10
 #ss_log_max_file_size = 10MB
+#ss_parallel_thread_count = 16

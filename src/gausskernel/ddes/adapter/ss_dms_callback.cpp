@@ -1063,32 +1063,100 @@ static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint32 buf_state)
     return ret;
 }
 
-static int32 CBDrcBufRebuild(void *db_handle)
+static int32 SSRebuildBuf(BufferDesc *buf_desc, unsigned char thread_index)
 {
-    /* Load Control File */
-    int src_id = SSGetPrimaryInstId();
-    SSReadControlFile(src_id, true);
-
-    uint32 buf_state;
-    for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
-        BufferDesc *buf_desc = GetBufferDescriptor(i);
-        buf_state = LockBufHdr(buf_desc);
-        if (SSCheckBufferIfCanGoRebuild(buf_desc, buf_state)) {
-            int ret = CheckBuf4Rebuild(buf_desc);
-            if (ret != DMS_SUCCESS) {
-                if (LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
-                    LWLockRelease(buf_desc->io_in_progress_lock);
-                }
-                UnlockBufHdr(buf_desc, buf_state);
-                return ret;
-            }
-        }
-        if (LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
-            LWLockRelease(buf_desc->io_in_progress_lock);
-        }
-        UnlockBufHdr(buf_desc, buf_state);
+#ifdef USE_ASSERT_CHECKING
+    if (IsSegmentPhysicalRelNode(buf_desc->tag.rnode)) {
+        SegNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
+    } else {
+        SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
     }
+#endif
+
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    Assert(buf_ctrl != NULL);
+    Assert(buf_ctrl->is_edp != 1);
+    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
+    dms_context_t dms_ctx;
+    InitDmsBufContext(&dms_ctx, buf_desc->tag);
+    dms_ctrl_info_t ctrl_info = { 0 };
+    ctrl_info.ctrl = *buf_ctrl;
+    ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
+    ctrl_info.is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false; 
+    int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index, true);
+    if (ret != DMS_SUCCESS) {
+        ereport(WARNING, (errmsg("Failed to rebuild page, rel:%u/%u/%u/%d, forknum:%d, blocknum:%u.",
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+        return ret;
+    }
+    return DMS_SUCCESS;
+}
+
+static int32 CBDrcBufRebuildInternal(int begin, int len, unsigned char thread_index)
+{
+    uint32 buf_state;
+    Assert(begin >= 0 && len > 0 && (begin + len) <= TOTAL_BUFFER_NUM);
+    for (int i = begin; i < begin + len; i++) {
+        BufferDesc *buf_desc = GetBufferDescriptor(i);
+        if (LWLockConditionalAcquire(buf_desc->content_lock, LW_EXCLUSIVE)) {
+            buf_state = LockBufHdr(buf_desc);
+            if (buf_state & BM_VALID) {
+                dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+                buf_ctrl->lock_mode = DMS_LOCK_NULL;
+            }
+            UnlockBufHdr(buf_desc, buf_state);
+            LWLockRelease(buf_desc->content_lock);
+        } else {
+            buf_state = LockBufHdr(buf_desc);
+            if (SSCheckBufferIfCanGoRebuild(buf_desc, buf_state)) {
+                int ret = SSRebuildBuf(buf_desc, thread_index);
+                if (ret != DMS_SUCCESS) {
+                    if (LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
+                        LWLockRelease(buf_desc->io_in_progress_lock);
+                    }
+                    UnlockBufHdr(buf_desc, buf_state);
+                    return ret;
+                }
+            }
+            if (LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
+                LWLockRelease(buf_desc->io_in_progress_lock);
+            }
+            UnlockBufHdr(buf_desc, buf_state);
+        }
+    }
+    ereport(LOG, (errmodule(MOD_DMS),
+        errmsg("[SS reform] rebuild buf thread_index:%d, buf_if start from:%d to:%d, max_buf_id:%d",
+        (int)thread_index, begin, (begin + len - 1), (TOTAL_BUFFER_NUM - 1))));
     return GS_SUCCESS;
+}
+
+/* 
+    * as you can see, thread_num represets the number of thread. thread_index reprsents the n-th thread, begin from 0.
+    * special case: 
+    *   when parallel disable, rebuild phase still call this function, 
+    *   do you think thread_num is 1, and thread_index is 0 ?
+    *   actually thread_num and thread_index are 255. It just a agreement in DMS
+    */
+const int dms_invalid_thread_index = 255;
+const int dms_invalid_thread_num = 255;
+static int32 CBDrcBufRebuildParallel(void* db_handle, unsigned char thread_index, unsigned char thread_num,
+    unsigned char for_rebuild)
+{
+    Assert((thread_index == dms_invalid_thread_index && thread_num == dms_invalid_thread_num) ||
+            (thread_index != dms_invalid_thread_index && thread_num != dms_invalid_thread_num &&
+            thread_index < thread_num));
+    int buf_num = TOTAL_BUFFER_NUM / thread_num;
+    int buf_begin = thread_index * buf_num;
+    if (thread_index == thread_num - 1) {
+        buf_num = TOTAL_BUFFER_NUM - buf_begin;
+    }
+
+    if (thread_index == dms_invalid_thread_index && thread_num == dms_invalid_thread_num) {
+        buf_begin = 0;
+        buf_num = TOTAL_BUFFER_NUM;
+    }
+    return CBDrcBufRebuildInternal(buf_begin, buf_num, thread_index);
 }
 
 static int32 CBDrcBufValidate(void *db_handle)
@@ -1512,6 +1580,9 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
         }
     }
 
+    int old_primary = SSGetPrimaryInstId();
+    SSReadControlFile(old_primary, true);
+
     /* cluster has no transactions during startup reform */
     if (!g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
         SendPostmasterSignal(PMSIGNAL_DMS_REFORM);
@@ -1641,7 +1712,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->opengauss_recovery_primary = CBRecoveryPrimary;
     callback->get_dms_status = CBGetDmsStatus;
     callback->set_dms_status = CBSetDmsStatus;
-    callback->dms_reform_rebuild_buf_res = CBDrcBufRebuild;
+    callback->dms_reform_rebuild_parallel = CBDrcBufRebuildParallel;
     callback->dms_thread_init = DmsCallbackThreadShmemInit;
     callback->confirm_owner = CBConfirmOwner;
     callback->confirm_converting = CBConfirmConverting;
