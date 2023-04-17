@@ -1614,17 +1614,23 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
         return;
     }
     RightRefState* rstate = pstate->rightRefState;
-    int len = list_length(targetList);
+    const int len = list_length(targetList);
     rstate->usExplicitAttrLen = len;
     rstate->usExplicitAttrNos = (int*)palloc0(sizeof(int) * len);
 
     Relation relation = (Relation)linitial(pstate->p_target_relation);
     FormData_pg_attribute* attr = relation->rd_att->attrs;
-    int colNum = RelationGetNumberOfAttributes(relation);
+    const int colNum = RelationGetNumberOfAttributes(relation);
     ListCell* target = list_head(targetList);
     for (int ni = 0; ni < len; ++ni) {
         ResTarget* res = (ResTarget*)lfirst(target);
-        const char* name = res->name;
+        char* name = nullptr;
+        if (list_length(res->indirection) > 0) {
+            name = ((Value*)llast(res->indirection))->val.str;
+        } else {
+            name = res->name;
+        }
+
         for (int ci = 0; ci < colNum; ++ci) {
             if (attr[ci].attisdropped) {
                 continue;
@@ -1634,7 +1640,12 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
                 break;
             }
         }
-        
+
+        if (rstate->usExplicitAttrNos[ni] == InvalidOid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_COLUMN),
+                 errmsg("Column \"%s\" not found in upsert attrno state initialization", name)));
+        }
         target = lnext(target);
     }
 }

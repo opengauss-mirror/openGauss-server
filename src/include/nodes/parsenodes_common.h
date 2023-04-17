@@ -405,7 +405,7 @@ typedef struct A_Indices {
  */
 typedef struct ResTarget {
     NodeTag type;
-    char *name;        /* column name or NULL */
+    char *name;        /* column name or NULL or first part of name(db, schema or table name) of destination column */
     List *indirection; /* subscripts, field names, and '*', or NIL */
     Node *val;         /* the value expression to compute or assign */
     int location;      /* token location, or -1 if unknown */
