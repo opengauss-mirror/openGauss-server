@@ -613,6 +613,18 @@ VALUES
           3
 (1 row)
 
+-- upsert case
+CREATE TABLE t2 (
+    col1 INT,
+    col2 INT PRIMARY KEY,
+    col3 INT DEFAULT 1,
+    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 BIGSERIAL
+);
+NOTICE:  CREATE TABLE will create implicit sequence "t2_col5_seq" for serial column "t2.col5"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_pkey" for table "t2"
+INSERT INTO t2 VALUES (6, 6) ON DUPLICATE KEY UPDATE t2.col1 = t2.col2 + 1;
+INSERT INTO t2 VALUES (6, 6) ON DUPLICATE KEY UPDATE t2.col1 = extract(century from col4) * 100 + extract(isodow from col4);
 -- jdbc case
 DROP USER IF EXISTS rightref CASCADE;
 NOTICE:  role "rightref" does not exist, skipping
