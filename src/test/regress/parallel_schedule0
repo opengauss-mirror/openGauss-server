@@ -630,7 +630,7 @@ test: copy_new_gram
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-test: drop_if_exists test_if_not_exists test_create_index_if_not_exists
+test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists
 #test: constraints
 
 #test: errors subplan_base
