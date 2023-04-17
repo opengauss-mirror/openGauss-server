@@ -2868,3 +2868,11 @@ NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_alter_type_c0_key" 
 alter table t_alter_type alter c0 set data type int4range;
 ERROR:  could not find cast from int4range to anyrange
 drop table t_alter_type;
+CREATE TABLE astore_test(id int, name text);
+alter table astore_test rename id to tid;
+ERROR:  column name "tid" conflicts with a system column name
+CREATE TABLE cstore_test(id int, name text) with(orientation=column);
+alter table cstore_test rename id to tid;
+ERROR:  column name "tid" conflicts with a system column name
+DROP TABLE astore_test;
+DROP TABLE cstore_test;
