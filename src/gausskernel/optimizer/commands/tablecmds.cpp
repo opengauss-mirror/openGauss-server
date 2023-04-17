@@ -5867,6 +5867,13 @@ static AttrNumber  renameatt_internal(Oid myrelid, const char* oldattname, const
     /* new name should not already exist */
     check_for_column_name_collision(targetrelation, newattname);
 
+    /* new name should not conflict with system columns */
+    if (CHCHK_PSORT_RESERVE_COLUMN(newattname)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DUPLICATE_COLUMN),
+                errmsg("column name \"%s\" conflicts with a system column name", newattname)));
+    }
+
     /* apply the update */
     (void)namestrcpy(&(attform->attname), newattname);
     bool should_rename_ce = false;
