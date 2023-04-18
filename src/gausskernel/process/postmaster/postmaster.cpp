@@ -2246,12 +2246,6 @@ int PostmasterMain(int argc, char* argv[])
         write_stderr("failed to init dss device\n");
         ExitPostmaster(1);
     }
-    if (ENABLE_DSS) {
-        if (u_sess->attr.attr_common.XLogArchiveMode || strlen(u_sess->attr.attr_storage.XLogArchiveCommand) != 0) {
-            write_stderr("Not support archive function while DMS and DSS enabled\n");
-            ExitPostmaster(1);
-        }
-    }
 
     noProcLogicTid = GLOBAL_ALL_PROCS;
 
@@ -3428,6 +3422,14 @@ static void CheckGUCConflicts(void)
             (errcode(ERRCODE_SYSTEM_ERROR),
                 errmsg(
                     "WAL archival (archive_mode=on) requires wal_level \"archive\", \"hot_standby\" or \"logical\"")));
+
+    if (ENABLE_DSS) {
+        if (u_sess->attr.attr_common.XLogArchiveMode || strlen(u_sess->attr.attr_storage.XLogArchiveCommand) != 0) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("archive functions are not supported when DMS and DSS enabled\n")));
+        }
+    }
 
     if (g_instance.attr.attr_storage.max_wal_senders > 0 && g_instance.attr.attr_storage.wal_level == WAL_LEVEL_MINIMAL)
         ereport(ERROR,
