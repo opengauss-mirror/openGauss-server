@@ -827,7 +827,8 @@ typedef enum NodeTag {
     T_CentroidPoint,
     T_UserSetElem,
     T_UserVar,
-	T_CharsetCollateOptions
+    T_CharsetCollateOptions,
+    T_FunctionSources
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */
