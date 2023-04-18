@@ -9417,6 +9417,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     u_sess->exec_cxt.RetryController->CacheStmtName(stmt_name);
                 }
 
+            resetErrorDataArea(true);
             } break;
 
             case 'B': /* bind */
