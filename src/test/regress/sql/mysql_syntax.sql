@@ -241,6 +241,33 @@ begin
     end if;
 end;
 /
+-- mysql fetch 自动退出
+show b_format_behavior_compat_options;
+set b_format_behavior_compat_options = 'fetch';
+create or replace procedure test_cursor_1 
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+begin 
+    declare c1_all cursor is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+    if not c1_all%isopen then
+        open c1_all;
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        close c1_all;
+    end if;
+end;
+/
+call test_cursor_1();
+set b_format_behavior_compat_options = '';
+show b_format_behavior_compat_options;
 -- test declare condition
 create or replace procedure test_condition_1 as
 declare
