@@ -79,6 +79,7 @@ typedef enum en_dms_dr_type {
     DMS_DR_TYPE_UNDO = 22,
     DMS_DR_TYPE_PROC = 23,
     DMS_DR_TYPE_GDV = 24,
+    DMS_DR_TYPE_SEQVAL = 25,
     DMS_DR_TYPE_MAX,
 } dms_dr_type_t;
 
@@ -273,10 +274,10 @@ typedef struct st_dms_buf_ctrl {
     volatile unsigned char is_edp;
     volatile unsigned char force_request;   // force to request page from remote
     volatile unsigned char need_flush;      // for recovery, owner is abort, copy instance should flush before release
+    volatile unsigned char been_loaded;     // first alloc ctrl:FALSE, after successfully loaded: TRUE
     unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
-    unsigned int ver;
 #ifdef OPENGAUSS
     int buf_id;
     unsigned int state;
@@ -488,7 +489,7 @@ typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stab
 typedef int(*dms_get_dms_status)(void *db_handle);
 typedef void(*dms_set_dms_status)(void *db_handle, int status);
 typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned char smon_chk,
-    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn, unsigned int *ver);
+    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn);
 typedef int(*dms_confirm_owner)(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
     unsigned long long *lsn);
 typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
@@ -526,7 +527,7 @@ typedef unsigned char(*dms_page_is_dirty)(dms_buf_ctrl_t *buf_ctrl);
 typedef void(*dms_leave_local_page)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
 typedef void(*dms_get_pageid)(dms_buf_ctrl_t *buf_ctrl, char **pageid, unsigned int *size);
 typedef char *(*dms_get_page)(dms_buf_ctrl_t *buf_ctrl);
-typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned int ver);
+typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner);
 typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index);
 typedef void (*dms_release_db_handle)(void *db_handle);
 typedef void *(*dms_stack_push_cr_cursor)(void *db_handle);
@@ -675,7 +676,7 @@ typedef struct st_dms_callback {
     dms_leave_local_page leave_local_page;
     dms_get_pageid get_pageid;
     dms_get_page get_page;
-    dms_invalidate_page invld_share_copy;
+    dms_invalidate_page invalidate_page;
     dms_get_db_handle get_db_handle;
     dms_release_db_handle release_db_handle;
     dms_stack_push_cr_cursor stack_push_cr_cursor;

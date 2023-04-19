@@ -311,6 +311,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
             ereport(PANIC, (errmsg("extend page should not be tranferred from DMS, "
                 "and needs to be loaded from disk!")));
         }
+        if (buf_ctrl->been_loaded == false) {
+            ereport(PANIC, (errmsg("ctrl not marked loaded before transferring from remote")));
+        }
 #endif
 
         Block bufBlock = BufHdrGetBlock(buf_desc);
@@ -326,6 +329,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
             buf_desc->extra->seg_fileno == EXTENT_INVALID) {
             CalcSegDmsPhysicalLoc(buf_desc, buffer, !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy);
         }
+    }
+    if (BufferIsValid(buffer)) {
+        buf_ctrl->been_loaded = true;
     }
 
     if ((read_mode == RBM_ZERO_AND_LOCK || read_mode == RBM_ZERO_AND_CLEANUP_LOCK) &&
@@ -432,6 +438,9 @@ Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
 
         SegTerminateBufferIO(buf_desc, false, BM_VALID);
         buffer = BufferDescriptorGetBuffer(buf_desc);
+    }
+    if (!BufferIsInvalid(buffer)) {
+        buf_ctrl->been_loaded = true;
     }
 
     if ((read_mode == RBM_ZERO_AND_LOCK || read_mode == RBM_ZERO_AND_CLEANUP_LOCK) &&
