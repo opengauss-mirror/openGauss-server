@@ -3474,6 +3474,8 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             var->notnull = (int)notNull;
             var->pkg = NULL;
             var->customCondition = 0;
+            var->sqlstateCondition = NULL;
+            var->isSqlvalue = false;
             /* other fields might be filled by caller */
 
             /* preset to NULL */
@@ -4333,6 +4335,47 @@ PLpgSQL_condition* plpgsql_parse_err_condition(char* condname)
 }
 
 /*
+ * plpgsql_parse_err_condition_b_signal
+ *              Mysql Generate PLpgSQL_condition entry(s) for an exception condition name in siganl/resignal statement
+ *
+ * This has to be able to return a list because there are some duplicate
+ * names in the table of error code names.
+ */
+PLpgSQL_condition* plpgsql_parse_err_condition_b_signal(const char* condname)
+{
+    PLpgSQL_condition* newm = NULL;
+    PLpgSQL_condition* prev = NULL;
+
+    PLpgSQL_nsitem* ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, condname, NULL, NULL, NULL);
+    if (ns != NULL) {
+        PLpgSQL_var* var = NULL;
+
+        var = (PLpgSQL_var*)(u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno]);
+        if (var->customCondition != 0) {
+            newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
+            newm->sqlerrstate = var->customCondition;
+            newm->condname = pstrdup(condname);
+            newm->sqlstate = var->sqlstateCondition;
+            newm->next = prev;
+            newm->isSqlvalue = var->isSqlvalue;
+            prev = newm;
+        }
+    }
+    if (prev == NULL) {
+        char message[MAXSTRLEN]; 
+        errno_t rc = 0;
+        rc = sprintf_s(message, MAXSTRLEN, "unrecognized exception condition \"%s\"", condname);
+        securec_check_ss(rc, "", "");
+        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+                errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("unrecognized exception condition \"%s\"", condname)));
+    }
+    return prev;
+}
+
+/*
  * plpgsql_parse_err_condition_b
  *              Mysql Generate PLpgSQL_condition entry(s) for an exception condition name
  *
@@ -4353,7 +4396,9 @@ PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname)
         newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
         newm->sqlerrstate = 1;
         newm->condname = pstrdup(condname);
+        newm->sqlstate = NULL;
         newm->next = NULL;
+        newm->isSqlvalue = false;
         return newm;
     }
 
@@ -4361,7 +4406,9 @@ PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname)
         newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
         newm->sqlerrstate = 2;
         newm->condname = pstrdup(condname);
+        newm->sqlstate = NULL;
         newm->next = NULL;
+        newm->isSqlvalue = false;
         return newm;
     }
 
@@ -4369,7 +4416,9 @@ PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname)
         newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
         newm->sqlerrstate = 3;
         newm->condname = pstrdup(condname);
-        newm->next = NULL;\
+        newm->sqlstate = NULL;
+        newm->next = NULL;
+        newm->isSqlvalue = false;
         return newm;
     }
 
@@ -4379,37 +4428,17 @@ PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname)
             newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
             newm->sqlerrstate = exception_label_map[i].sqlerrstate;
             newm->condname = pstrdup(condname);
+            newm->sqlstate = NULL;
             newm->next = prev;
+            newm->isSqlvalue = false;
             prev = newm;
         }
     }
 
     if (prev == NULL) {
-        PLpgSQL_nsitem* ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, condname, NULL, NULL, NULL);
-        if (ns != NULL) {
-            PLpgSQL_var* var = NULL;
-
-            var = (PLpgSQL_var*)(u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno]);
-            if (var->customCondition != 0) {
-                newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
-                newm->sqlerrstate = var->customCondition;
-                newm->condname = pstrdup(condname);
-                newm->next = prev;
-                prev = newm;
-            }
-        }
-        if (prev == NULL) {
-            char message[MAXSTRLEN]; 
-            errno_t rc = 0;
-            rc = sprintf_s(message, MAXSTRLEN, "unrecognized exception condition \"%s\"", condname);
-            securec_check_ss(rc, "", "");
-            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL),
-                    errcode(ERRCODE_UNDEFINED_OBJECT),
-                    errmsg("unrecognized exception condition \"%s\"", condname)));
-        }
+        prev = plpgsql_parse_err_condition_b_signal(condname);
     }
+    
     return prev;
 }
 

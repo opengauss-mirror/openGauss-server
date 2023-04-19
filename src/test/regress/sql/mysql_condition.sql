@@ -87,6 +87,7 @@ begin
 end;
 /
 -- SQLWARNING
+DROP USER pri_user_independent cascade;
 declare
 begin
     declare exit handler for sqlwarning
@@ -97,6 +98,7 @@ begin
 end;
 /
 
+DROP USER pri_user_independent cascade;
 declare
 begin
     declare exit handler for "sqlwarning"
