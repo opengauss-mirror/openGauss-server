@@ -1,3 +1,4 @@
+
 /* --------------------------------------------------------------------
  * guc_storage.cpp
  *
@@ -5771,48 +5772,33 @@ static bool check_ss_interconnect_type(char **newval, void **extra, GucSource so
     return (strcmp("TCP", *newval) == 0 || strcmp("RDMA", *newval) == 0);
 }
 
-static inline bool check_digit_text(char *str, uint32* len)
+static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source)
 {
-    uint32 idx = 0;
-    if (str == NULL) {
-        *len = 0;
+    if(**newval == '\0') {
         return true;
     }
+    
+    char* str = *newval;
+    bool parsing = false;
+    int cnt = 0;
+    const int len = strlen(str);
 
-    while (*str != '\0' && *str == ' ') {
-        idx++;
-        ++str;
-    }
-
-    while (*str != '\0') {
-        if (*str == ' ') {
-            break;
-        }
-
-        if (*str >= '0' && *str <= '9') {
-            ++str;
-            ++idx;
+    for (int i = 0; i < len; i++) {
+        if (isdigit(str[i])) {
+            if (!parsing) {
+                cnt++;
+                parsing = true;
+            }
+        } else if (isspace(str[i])) {
+            parsing = false;
         } else {
-            *len = 0;
             return false;
         }
     }
-
-    *len = idx;
-    return true;
-}
-
-static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source)
-{
-    uint32 idx1 = 0;
-    uint32 idx2 = 0;
-    if (!check_digit_text(*newval, &idx1)) {
-        return false;
+    if (cnt == 2) {
+        return true;
     }
-    if (!check_digit_text(*newval + idx1, &idx2)) {
-        return false;
-    }
-    return true;
+    return false;
 }
 
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source)
