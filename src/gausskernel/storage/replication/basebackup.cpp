@@ -1609,7 +1609,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                     if (ENABLE_DSS && is_dss_file(pathbuf)) {
                         _tarWriteHeader(pathbuf, NULL, &statbuf);
                     } else {
-                        _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);    
+                        _tarWriteHeader("pg_xlog/archive_status", NULL, &statbuf);
                     }
                 }
             }
