@@ -109,7 +109,6 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_buf_res_rebuild_drc_parallel));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_is_recovery_session));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(drc_get_page_master_id));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_release_page_batch));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_register_ssl_decrypt_pwd));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_set_ssl_param));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_ssl_param));
@@ -283,11 +282,6 @@ int dms_is_recovery_session(unsigned int sid)
 int drc_get_page_master_id(char pageid[DMS_PAGEID_SIZE], unsigned char *master_id)
 {
     return g_ss_dms_func.drc_get_page_master_id(pageid, master_id);
-}
-
-int dms_release_page_batch(dms_context_t *dms_ctx, dcs_batch_buf_t *owner_map, unsigned int *owner_count)
-{
-    return g_ss_dms_func.dms_release_page_batch(dms_ctx, owner_map, owner_count);
 }
 
 int dms_register_ssl_decrypt_pwd(dms_decrypt_pwd_t cb_func)

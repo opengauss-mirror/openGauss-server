@@ -61,7 +61,6 @@ typedef struct st_ss_dms_func {
                                             unsigned char for_rebuild);
     int (*dms_is_recovery_session)(unsigned int sid);
     int (*drc_get_page_master_id)(char pageid[DMS_PAGEID_SIZE], unsigned char *master_id);
-    int (*dms_release_page_batch)(dms_context_t *dms_ctx, dcs_batch_buf_t *owner_map, unsigned int *owner_count);
     int (*dms_register_ssl_decrypt_pwd)(dms_decrypt_pwd_t cb_func);
     int (*dms_set_ssl_param)(const char *param_name, const char *param_value);
     int (*dms_get_ssl_param)(const char *param_name, char *param_value, unsigned int size);
@@ -109,7 +108,6 @@ int dms_buf_res_rebuild_drc_parallel(dms_context_t *dms_ctx, dms_ctrl_info_t *ct
                                     unsigned char for_rebuild);
 int dms_is_recovery_session(unsigned int sid);
 int drc_get_page_master_id(char pageid[DMS_PAGEID_SIZE], unsigned char *master_id);
-int dms_release_page_batch(dms_context_t *dms_ctx, dcs_batch_buf_t *owner_map, unsigned int *owner_count);
 int dms_register_ssl_decrypt_pwd(dms_decrypt_pwd_t cb_func);
 int dms_set_ssl_param(const char *param_name, const char *param_value);
 int dms_get_ssl_param(const char *param_name, char *param_value, unsigned int size);

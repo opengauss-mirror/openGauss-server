@@ -819,6 +819,7 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
 
     if (ENABLE_DMS) {
         GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
+        GetDmsBufCtrl(buf->buf_id)->been_loaded = false;
     }
 
     if (old_flag_valid) {
