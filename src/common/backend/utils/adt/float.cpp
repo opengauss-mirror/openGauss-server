@@ -61,7 +61,6 @@ static const uint32 nan[2] = {0xffffffff, 0x7fffffff};
 /* ========== USER I/O ROUTINES ========== */
 
 static int float4_cmp_internal(float4 a, float4 b);
-int float8_cmp_internal(float8 a, float8 b);
 double float8in_internal(char* str, char** s, bool* hasError);
 
 #ifndef HAVE_CBRT

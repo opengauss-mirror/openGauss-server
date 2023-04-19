@@ -33,20 +33,20 @@
 
 #ifdef EPSILON
 #define FPzero(A) (fabs(A) <= EPSILON)
-#define FPeq(A, B) (fabs((A) - (B)) <= EPSILON)
-#define FPne(A, B) (fabs((A) - (B)) > EPSILON)
-#define FPlt(A, B) ((B) - (A) > EPSILON)
-#define FPle(A, B) ((A) - (B) <= EPSILON)
-#define FPgt(A, B) ((A) - (B) > EPSILON)
-#define FPge(A, B) ((B) - (A) <= EPSILON)
+#define FPeq(A, B) (fabs((A) - (B)) <= EPSILON || (isnan(A) && isnan(B)))
+#define FPne(A, B) !FPeq(A, B)
+#define FPlt(A, B) ((B) - (A) > EPSILON || (isnan(B) && !isnan(A)))
+#define FPle(A, B) ((A) - (B) <= EPSILON || isnan(B))
+#define FPgt(A, B) ((A) - (B) > EPSILON || (isnan(A) && !isnan(B)))
+#define FPge(A, B) ((B) - (A) <= EPSILON || isnan(A))
 #else
 #define FPzero(A) ((A) == 0)
-#define FPeq(A, B) ((A) == (B))
-#define FPne(A, B) ((A) != (B))
-#define FPlt(A, B) ((A) < (B))
-#define FPle(A, B) ((A) <= (B))
-#define FPgt(A, B) ((A) > (B))
-#define FPge(A, B) ((A) >= (B))
+#define FPeq(A, B) ((A) == (B) || (isnan(A) && isnan(B)))
+#define FPne(A, B) !FPeq(A, B)
+#define FPlt(A, B) ((A) < (B) || (isnan(B) && !isnan(A)))
+#define FPle(A, B) ((A) <= (B) || isnan(B))
+#define FPgt(A, B) ((A) > (B) || (isnan(A) && !isnan(B)))
+#define FPge(A, B) ((A) >= (B) || isnan(A))
 #endif
 
 #define HYPOT(A, B) pg_hypot(A, B)
