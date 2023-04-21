@@ -9799,7 +9799,6 @@ make_execsql_stmt(int firsttoken, int location)
         HeapTuple rel_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_oid));
         if (!HeapTupleIsValid(rel_tuple)) {
             yyerror("invalid type's rel tuple for insert.", true);
-            u_sess->plsql_cxt.have_error = true;
         } else {
 
             plpgsql_append_source_text(&ds, location, values_end_loc);
