@@ -96,6 +96,7 @@
 #include "utils/inval.h"
 #include "commands/tablespace.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "catalog/pg_partition_fn.h"
 #include "utils/syscache.h"
 /* table for fast counting of set bits */
 static const uint8 number_of_ones[256] = {
@@ -373,6 +374,22 @@ BlockNumber visibilitymap_count(Relation rel, Partition part)
             result += visibilitymap_count_heap(buckRel);
             bucketCloseRelation(buckRel);
         }
+    } else if (RelationIsPartitioned(rel) && PointerIsValid(part)) {
+        Relation partRel = partitionGetRelation(rel, part);
+        if (RelationIsSubPartitioned(rel) && PartitionIsTablePartition(part)) {
+            List *subPartList = relationGetPartitionList(partRel, NoLock);
+            ListCell *lc = NULL;
+            foreach (lc, subPartList) {
+                Partition subPart = (Partition)lfirst(lc);
+                Relation subPartRel = partitionGetRelation(rel, subPart);
+                result += visibilitymap_count_heap(subPartRel);
+                releaseDummyRelation(&subPartRel);
+            }
+            releasePartitionList(partRel, &subPartList, NoLock);
+        } else {
+            result = visibilitymap_count_heap(partRel);
+        }
+        releaseDummyRelation(&partRel);
     } else {
         result = visibilitymap_count_heap(rel);
     }
