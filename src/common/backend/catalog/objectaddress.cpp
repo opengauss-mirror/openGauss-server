@@ -1267,9 +1267,17 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
     Relation relation = NULL;
     int nnames;
     const char* depname = NULL;
+    const char* schemaname = NULL;
 
     /* Extract name of dependent object. */
-    depname = strVal(llast(objname));
+    if (objtype == OBJECT_TRIGGER && nodeTag(lfirst(list_tail(objname))) == T_List) {
+        RangeVar* trigname = makeRangeVarFromNameList((List*)lfirst(list_tail(objname)));
+        depname = trigname->relname;
+        schemaname = trigname->schemaname;
+        pfree_ext(trigname);
+    } else {
+        depname = strVal(lfirst(list_tail(objname)));
+    }
 
     /* Separate relation name from dependent object name. */
     nnames = list_length(objname);
@@ -1300,8 +1308,16 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
          * Caller is expecting to get back the relation, even though we didn't
          * end up using it to find the rule.
          */
-        if (OidIsValid(address.objectId))
+        if (OidIsValid(address.objectId)) {
             relation = heap_open(reloid, AccessShareLock);
+            if (objtype == OBJECT_TRIGGER && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && schemaname != NULL) {
+                Oid relNamespaceId = RelationGetNamespace(relation);
+                if (relNamespaceId != get_namespace_oid(schemaname, false)) {
+                    ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
+                }
+            }
+        }
     } else {
         List* relname = NIL;
         Oid reloid;
@@ -1321,6 +1337,13 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
                 address.classId = TriggerRelationId;
                 address.objectId = get_trigger_oid(reloid, depname, missing_ok);
                 address.objectSubId = 0;
+                if (OidIsValid(address.objectId) && schemaname != NULL) {
+                    Oid relNamespaceId = RelationGetNamespace(relation);
+                    if (relNamespaceId != get_namespace_oid(schemaname, false)) {
+                        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
+                    }
+                }
                 break;
             case OBJECT_TABCONSTRAINT:
                 address.classId = ConstraintRelationId;

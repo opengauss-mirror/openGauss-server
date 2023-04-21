@@ -472,6 +472,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 				opt_collation
 
 %type <range>	qualified_name insert_target OptConstrFromTable opt_index_name insert_partition_clause update_delete_partition_clause
+				qualified_trigger_name
 
 %type <str>		all_Op MathOp
 
@@ -11646,7 +11647,7 @@ DropDataSourceStmt: DROP DATA_P SOURCE_P name opt_drop_behavior
  *****************************************************************************/
 
 CreateTrigStmt:
-			CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
+			CREATE opt_or_replace definer_user TRIGGER qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
@@ -11661,7 +11662,8 @@ CreateTrigStmt:
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->definer = $3;
 					n->if_not_exists = false;
-					n->trigname = $5;
+					n->schemaname = $5->schemaname;
+					n->trigname = $5->relname;					
 					n->relation = $9;
 					n->funcname = $14;
 					n->args = $16;
@@ -11679,13 +11681,14 @@ CreateTrigStmt:
 					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE CONSTRAINT TRIGGER name AFTER TriggerEvents ON
+			| CREATE CONSTRAINT TRIGGER qualified_trigger_name AFTER TriggerEvents ON
 			qualified_name OptConstrFromTable ConstraintAttributeSpec
 			FOR EACH ROW TriggerWhen
 			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
-					n->trigname = $4;
+					n->schemaname = $4->schemaname;
+					n->trigname = $4->relname;
 					n->definer = NULL;
 					n->if_not_exists  = false;
 					n->relation = $8;
@@ -11706,7 +11709,7 @@ CreateTrigStmt:
 					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
+			| CREATE opt_or_replace definer_user TRIGGER qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			trigger_order
 			{
@@ -11727,7 +11730,8 @@ CreateTrigStmt:
 					}
 					n->definer = $3;
 					n->if_not_exists = false;
-					n->trigname = $5;
+					n->schemaname = $5->schemaname;
+					n->trigname = $5->relname;
 					n->timing = $6;
 					n->events = intVal(linitial($7));
 					n->columns = (List *) lsecond($7);
@@ -11744,7 +11748,7 @@ CreateTrigStmt:
 					n->constrrel = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE opt_or_replace definer_user TRIGGER IF_P NOT EXISTS name TriggerActionTime TriggerEvents ON
+			| CREATE opt_or_replace definer_user TRIGGER IF_P NOT EXISTS qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			trigger_order
 			{
@@ -11765,7 +11769,8 @@ CreateTrigStmt:
 					}
 					n->definer = $3;
 					n->if_not_exists = true;
-					n->trigname = $8;
+					n->schemaname = $8->schemaname;
+					n->trigname = $8->relname;
 					n->timing = $9;
 					n->events = intVal(linitial($10));
 					n->columns = (List *) lsecond($10);
@@ -12027,30 +12032,66 @@ enable_trigger:
 			| DISABLE_P                 { $$ = TRIGGER_DISABLED; }
 		;
 
+qualified_trigger_name:
+			name
+				{
+					$$ = makeRangeVar(NULL, $1, @1);
+				}
+			| ColId indirection
+				{
+					check_qualified_name($2, yyscanner);
+					$$ = makeRangeVar(NULL, NULL, @1);
+					const char* message = "improper qualified name (too many dotted names): %s";
+					switch (list_length($2))
+					{
+						case 1:
+							if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+							{
+								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+								ereport(errstate,
+										(errcode(ERRCODE_SYNTAX_ERROR),
+										 errmsg("only support trigger in schema in B compatibility database"),
+									 	 parser_errposition(@1)));
+							}
+							$$->schemaname = $1;
+							$$->relname = strVal(linitial($2));
+							break;
+						default:
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("improper qualified name (too many dotted names): %s",
+											NameListToString(lcons(makeString($1), $2))),
+									 parser_errposition(@1)));
+							break;
+					}
+				}
+		;
+
 DropTrigStmt:
-			DROP TRIGGER name ON any_name opt_drop_behavior
+			DROP TRIGGER qualified_trigger_name ON any_name opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(lappend($5, makeString($3)));
+					n->objects = list_make1(lappend($5, list_make2(makeString($3->schemaname), makeString($3->relname))));
 					n->arguments = NIL;
 					n->behavior = $6;
 					n->missing_ok = false;
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
-			| DROP TRIGGER IF_P EXISTS name ON any_name opt_drop_behavior
+			| DROP TRIGGER IF_P EXISTS qualified_trigger_name ON any_name opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(lappend($7, makeString($5)));
+					n->objects = list_make1(lappend($7, list_make2(makeString($5->schemaname), makeString($5->relname))));
 					n->arguments = NIL;
 					n->behavior = $8;
 					n->missing_ok = true;
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
-			| DROP TRIGGER name opt_drop_behavior
+			| DROP TRIGGER qualified_trigger_name opt_drop_behavior
 				{
 #ifdef	ENABLE_MULTIPLE_NODES
 					const char* message = "drop trigger name is not yet supported in distributed database.";
@@ -12066,14 +12107,14 @@ DropTrigStmt:
 					}
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(list_make1(makeString($3)));
+					n->objects = list_make1(list_make1(list_make2(makeString($3->schemaname), makeString($3->relname))));
 					n->arguments = NIL;
 					n->behavior = $4;
 					n->missing_ok = false;
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
-			| DROP TRIGGER IF_P EXISTS name opt_drop_behavior
+			| DROP TRIGGER IF_P EXISTS qualified_trigger_name opt_drop_behavior
 				{
 #ifdef	ENABLE_MULTIPLE_NODES
 					const char* message = "drop trigger if exists name is not yet supported in distributed database.";
@@ -12089,7 +12130,7 @@ DropTrigStmt:
 					}
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(list_make1(makeString($5)));
+					n->objects = list_make1(list_make1(list_make2(makeString($5->schemaname), makeString($5->relname))));
 					n->arguments = NIL;
 					n->behavior = $6;
 					n->missing_ok = true;
@@ -17735,14 +17776,15 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
-			| ALTER TRIGGER name ON qualified_name RENAME TO name
+			| ALTER TRIGGER qualified_trigger_name ON qualified_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_TRIGGER;
 					n->relation = $5;
-					n->subname = $3;
+					n->subname = $3->relname;
 					n->newname = $8;
 					n->missing_ok = false;
+					n->renameTargetList = list_make1($3);
 					$$ = (Node *)n;
 				}
 			| ALTER ROLE RoleId RENAME TO RoleId
