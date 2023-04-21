@@ -66,8 +66,7 @@ ALTER SCHEMA "Test_User" OWNER TO "Test_User";
 CREATE SCHEMA test_user2;
 ALTER SCHEMA test_user2 OWNER TO test_user2;
 CREATE DEFINER = "Root_Test" PROCEDURE pro_1107262(n int)  NOT SHIPPABLE
- AS  DECLARE 
-begin
+ AS  DECLARE begin
 repeat
 insert into tab_1107262 values(n,n*2);
 n:=n+1;

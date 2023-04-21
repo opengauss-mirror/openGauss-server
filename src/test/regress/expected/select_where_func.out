@@ -226,7 +226,7 @@ end;
 /
 INFO:  proc1
 CONTEXT:  SQL statement "CALL call_test.proc1()"
-PL/pgSQL function inline_code_block line 3 at PERFORM
+PL/pgSQL function inline_code_block line 2 at PERFORM
 select * from t1 where c1 = call_test.func1;
  c1 
 ----
@@ -261,7 +261,7 @@ call_test.func2;
 end;
 /
 ERROR:  function call_test.func2 has no enough parameters
-CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 1
 declare
 var int;
 begin
@@ -283,7 +283,7 @@ ERROR:  missing FROM-clause entry for table "call_test"
 LINE 1: select c1          from t1 where c1 = call_test.func2
                                               ^
 QUERY:  select c1          from t1 where c1 = call_test.func2
-CONTEXT:  PL/pgSQL function inline_code_block line 6 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at SQL statement
 drop package call_test;
 NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function sch2.func1()

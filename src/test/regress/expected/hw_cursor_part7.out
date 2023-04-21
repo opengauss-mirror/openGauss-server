@@ -925,7 +925,7 @@ end
 /
 NOTICE:  1,true,1
 CONTEXT:  SQL statement "CALL proc_test()"
-PL/pgSQL function inline_code_block line 7 at PERFORM
+PL/pgSQL function inline_code_block line 6 at PERFORM
 NOTICE:  1,true,1
 drop table tb_test;
 drop schema hw_cursor_part7 CASCADE;

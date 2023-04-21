@@ -275,7 +275,7 @@ end;
 ERROR:  duplicate declaration at or near "c1_all"
 LINE 8:     declare c1_all cursor is --cursor without args 
                     ^
-QUERY:   DECLARE  company_name    varchar(100);
+QUERY:   DECLARE company_name    varchar(100);
     company_loc varchar(100);
     company_no  integer;
 
@@ -400,10 +400,9 @@ exception
 END;
 /
 ERROR:  duplicate declaration at or near "DIVISION_ZERO"
-LINE 6:     declare DIVISION_ZERO condition for SQLSTATE '22005';
+LINE 5:     declare DIVISION_ZERO condition for SQLSTATE '22005';
                     ^
-QUERY:  
-declare
+QUERY:  declare
     a int;
 BEGIN
     declare DIVISION_ZERO condition for SQLSTATE '22012';
@@ -437,7 +436,7 @@ BEGIN
 END;
 /
 ERROR:  Incorrect CONDITION value: '0'
-CONTEXT:  compilation of PL/pgSQL function "test_condition_5" near line 3
+CONTEXT:  compilation of PL/pgSQL function "test_condition_5" near line 2
 -- declare condition sqlstate begin with '00'
 create or replace procedure test_condition_6 as
 BEGIN
@@ -446,7 +445,7 @@ BEGIN
 END;
 /
 ERROR:  bad SQLSTATE '00000'
-CONTEXT:  compilation of PL/pgSQL function "test_condition_6" near line 3
+CONTEXT:  compilation of PL/pgSQL function "test_condition_6" near line 2
 create or replace procedure test_condition_1 as
 declare
     a int;
@@ -508,10 +507,9 @@ exception
 END;
 /
 ERROR:  syntax error at or near "SQLSTATE"
-LINE 5:     declare DIVISION_ZERO condition for SQLSTATE '22012';
+LINE 4:     declare DIVISION_ZERO condition for SQLSTATE '22012';
                                   ^
-QUERY:  
-declare
+QUERY:  declare
     a int;
 BEGIN
     declare DIVISION_ZERO condition for SQLSTATE '22012';

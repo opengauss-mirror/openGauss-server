@@ -23,7 +23,7 @@ ERROR:  missing "DML" at end of SQL expression
 LINE 3:         CREATE ROLE jonathan PASSWORD '********' LOGIN;
                                                                ^
 QUERY:  DECLARE 
-BEGIN  forall i in 1..iter
+BEGIN forall i in 1..iter
         CREATE ROLE jonathan PASSWORD '********' LOGIN;
 end
 CREATE PROCEDURE test_proc_define
@@ -811,5 +811,107 @@ drop procedure p_definer;
 drop procedure p_caller;
 drop table test_emp_001;
 drop procedure test_proc_using_001;
+create or replace procedure test_bt_b is
+a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+     prosrc      
+-----------------
+  DECLARE a int;+
+   begin        +
+   a := 'abc';  +
+ end
+(1 row)
+
+select test_bt_b();
+ERROR:  invalid input syntax for integer: "abc"
+CONTEXT:  PL/pgSQL function test_bt_b() line 3 at assignment
+referenced column: test_bt_b
+create or replace procedure test_bt_b is
+ a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+     prosrc      
+-----------------
+  DECLARE a int;+
+   begin        +
+   a := 'abc';  +
+ end
+(1 row)
+
+select test_bt_b();
+ERROR:  invalid input syntax for integer: "abc"
+CONTEXT:  PL/pgSQL function test_bt_b() line 3 at assignment
+referenced column: test_bt_b
+create or replace procedure test_bt_b is
+declare a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+     prosrc     
+----------------
+ declare a int;+
+   begin       +
+   a := 'abc'; +
+ end
+(1 row)
+
+select test_bt_b();
+ERROR:  invalid input syntax for integer: "abc"
+CONTEXT:  PL/pgSQL function test_bt_b() line 3 at assignment
+referenced column: test_bt_b
+create or replace procedure test_bt_b is
+ declare a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+     prosrc     
+----------------
+ declare a int;+
+   begin       +
+   a := 'abc'; +
+ end
+(1 row)
+
+select test_bt_b();
+ERROR:  invalid input syntax for integer: "abc"
+CONTEXT:  PL/pgSQL function test_bt_b() line 3 at assignment
+referenced column: test_bt_b
+create or
+replace
+procedure
+test_bt_b
+is
+
+
+ a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+     prosrc      
+-----------------
+  DECLARE a int;+
+   begin        +
+   a := 'abc';  +
+ end
+(1 row)
+
+select test_bt_b();
+ERROR:  invalid input syntax for integer: "abc"
+CONTEXT:  PL/pgSQL function test_bt_b() line 3 at assignment
+referenced column: test_bt_b
+drop procedure test_bt_b;
 \c regression;
 drop database IF EXISTS pl_test_pkg_define;

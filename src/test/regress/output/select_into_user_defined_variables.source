@@ -257,7 +257,7 @@ end;
 call outer_pro(10);
 NOTICE:  table "tb1" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists tb1"
-PL/pgSQL function outer_pro(integer) line 4 at SQL statement
+PL/pgSQL function outer_pro(integer) line 3 at SQL statement
  outer_pro 
 -----------
  

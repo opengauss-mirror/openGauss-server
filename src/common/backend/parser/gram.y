@@ -16709,16 +16709,19 @@ subprogram_body: 	{
 				if (add_declare)
 				{
 					proc_body_str = (char *)palloc0(proc_body_len + DECLARE_LEN + 1);
-					strncpy(proc_body_str, DECLARE_STR, DECLARE_LEN + 1);
-					strncpy(proc_body_str + DECLARE_LEN,
-							yyextra->core_yy_extra.scanbuf + proc_b - 1, proc_body_len);
+					rc = strcpy_s(proc_body_str, proc_body_len + DECLARE_LEN + 1, DECLARE_STR);
+					securec_check(rc, "", "");
+					rc = strncpy_s(proc_body_str + DECLARE_LEN, proc_body_len + 1,
+							yyextra->core_yy_extra.scanbuf + proc_b, proc_body_len - 1);
+					securec_check(rc, "", "");
 					proc_body_len = DECLARE_LEN + proc_body_len;
 				}
 				else
 				{
 					proc_body_str = (char *)palloc0(proc_body_len + 1);
-					strncpy(proc_body_str,
-						yyextra->core_yy_extra.scanbuf + proc_b - 1, proc_body_len);
+					rc = strncpy_s(proc_body_str, proc_body_len + 1,
+						yyextra->core_yy_extra.scanbuf + proc_b, proc_body_len - 1);
+					securec_check(rc, "", "");
 				}
 
 				proc_body_str[proc_body_len] = '\0';

@@ -41,10 +41,10 @@ end savepck;
 call savepck.save2();
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 --case 2  indexscan
 set enable_seqscan = 0;
 set enable_indexscan = 1;
@@ -85,10 +85,10 @@ end savepck;
 call savepck.save2();
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 --case 3  indexonlyscan
 set enable_seqscan = 0;
 set enable_indexscan = 0;
@@ -128,10 +128,10 @@ end savepck;
 call savepck.save2();
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 --case 4  bitmapscan
 set enable_seqscan = 0;
 set enable_indexscan = 0;
@@ -173,10 +173,10 @@ end savepck;
 call savepck.save2();
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 --case 5  tidscan
 drop table pl_txn_t;
 create table pl_txn_t(tc1 int,b number(3));
@@ -219,16 +219,16 @@ end savepck;
 call savepck.save2();
 NOTICE:  ----(0,1)
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  ----1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 --case 6  Multiple tables: Open after insert，rollback
 --case 6-1 seqscan
 drop table pl_txn_t;
@@ -281,10 +281,10 @@ end savepck;
 call savepck.save2();
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 --case 6-2 indexscan
 set enable_seqscan = 0;
 set enable_indexscan = 1;
@@ -326,10 +326,10 @@ end savepck;
 call savepck.save2();
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 --case 6-3 indexonlyscan
 set enable_seqscan = 0;
 set enable_indexscan = 0;
@@ -371,10 +371,10 @@ end savepck;
 call savepck.save2();
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 --case 6-4 bitmapscan
 set enable_seqscan = 0;
 set enable_indexscan = 0;
@@ -418,10 +418,10 @@ end savepck;
 call savepck.save2();
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 --case 6-5 tidscan
 drop table pl_txn_t;
 drop table pl_txn_t2;
@@ -474,16 +474,16 @@ end savepck;
 call savepck.save2();
 NOTICE:  ----(0,1)
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  ----1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  1
 CONTEXT:  SQL statement "CALL savepointtest(c1)"
-PL/pgSQL function save2() line 5 at SQL statement
+PL/pgSQL function save2() line 4 at SQL statement
 NOTICE:  2
 ERROR:  The data has been rollback, and the cursor data cannot be obtained.
-CONTEXT:  PL/pgSQL function save2() line 7 at FETCH
+CONTEXT:  PL/pgSQL function save2() line 6 at FETCH
 drop schema hw_cursor_rollback CASCADE;
 NOTICE:  drop cascades to 5 other objects
 --?DETAIL:  drop cascades to package .*
