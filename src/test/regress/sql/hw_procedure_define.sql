@@ -634,5 +634,58 @@ drop procedure p_definer;
 drop procedure p_caller;
 drop table test_emp_001;
 drop procedure test_proc_using_001;
+
+create or replace procedure test_bt_b is
+a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+select test_bt_b();
+
+create or replace procedure test_bt_b is
+ a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+select test_bt_b();
+
+create or replace procedure test_bt_b is
+declare a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+select test_bt_b();
+
+create or replace procedure test_bt_b is
+ declare a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+select test_bt_b();
+
+create or
+replace
+procedure
+test_bt_b
+is
+
+
+ a int;
+  begin
+  a := 'abc';
+end;
+/
+select prosrc from pg_proc where proname='test_bt_b';
+select test_bt_b();
+drop procedure test_bt_b;
+
 \c regression;
 drop database IF EXISTS pl_test_pkg_define;

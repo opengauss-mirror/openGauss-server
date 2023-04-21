@@ -155,11 +155,11 @@ end pck1;
 call pck1.p1();
 ERROR:  ERROR:  division by zero
 CONTEXT:  SQL statement "SELECT 3/0"
-PL/pgSQL function p2() line 8 at assignment
+PL/pgSQL function p2() line 7 at assignment
 referenced column: p2
 
 CONTEXT:  SQL statement "CALL p2(c1)"
-PL/pgSQL function p1() line 5 at SQL statement
+PL/pgSQL function p1() line 4 at SQL statement
 drop package pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -234,7 +234,7 @@ end pck1;
 call pck1.p1();
 INFO:  rowcount: <NULL>
 ERROR:  cursor variable "c1" is null in FETCH statement.
-CONTEXT:  PL/pgSQL function p1() line 7 at FETCH
+CONTEXT:  PL/pgSQL function p1() line 6 at FETCH
 drop package pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -269,7 +269,7 @@ end pck1;
 call pck1.p1();
 INFO:  rowcount: <NULL>
 ERROR:  cursor variable "c1" is null in FETCH statement.
-CONTEXT:  PL/pgSQL function p1() line 7 at FETCH
+CONTEXT:  PL/pgSQL function p1() line 6 at FETCH
 drop package pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -305,7 +305,7 @@ end pck1;
 call pck1.p1();
 INFO:  rowcount: <NULL>
 ERROR:  cursor variable "c1" is null in FETCH statement.
-CONTEXT:  PL/pgSQL function p1() line 7 at FETCH
+CONTEXT:  PL/pgSQL function p1() line 6 at FETCH
 drop package pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -354,7 +354,7 @@ CONTEXT:  PL/pgSQL function p2() during function exit
 referenced column: p2
 
 CONTEXT:  SQL statement "CALL p2(c1)"
-PL/pgSQL function p1() line 5 at SQL statement
+PL/pgSQL function p1() line 4 at SQL statement
 drop package pck1;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -403,7 +403,7 @@ CONTEXT:  PL/pgSQL function p2() during function exit
 referenced column: p2
 
 CONTEXT:  SQL statement "CALL p2(c1)"
-PL/pgSQL function p1() line 5 at SQL statement
+PL/pgSQL function p1() line 4 at SQL statement
 drop package pck1;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -495,7 +495,7 @@ end pck1;
 call pck1.p1();
 INFO:  rowcount: <NULL>
 ERROR:  cursor variable "c1" is null in FETCH statement.
-CONTEXT:  PL/pgSQL function p1() line 7 at FETCH
+CONTEXT:  PL/pgSQL function p1() line 6 at FETCH
 drop package pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -534,7 +534,7 @@ end pck1;
 call pck1.p1();
 INFO:  rowcount: <NULL>
 ERROR:  cursor variable "c1" is null in FETCH statement.
-CONTEXT:  PL/pgSQL function p1() line 7 at FETCH
+CONTEXT:  PL/pgSQL function p1() line 6 at FETCH
 drop package pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -577,7 +577,7 @@ end pck1;
 call pck1.p1();
 INFO:  rowcount: <NULL>
 ERROR:  cursor variable "c1" is null in FETCH statement.
-CONTEXT:  PL/pgSQL function p1() line 7 at FETCH
+CONTEXT:  PL/pgSQL function p1() line 6 at FETCH
 drop package pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -803,7 +803,7 @@ truncate table t1;
 call pck1.p1();
 INFO:  rowcount: <NULL>
 ERROR:  cursor variable "c1" is null in FETCH statement.
-CONTEXT:  PL/pgSQL function p1() line 7 at FETCH
+CONTEXT:  PL/pgSQL function p1() line 6 at FETCH
 drop package pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pl_auto_ref.p1()
@@ -1655,7 +1655,7 @@ end;
 call p1();
 INFO:  p2:<unnamed portal 28>
 CONTEXT:  SQL statement "CALL p2(c1)"
-PL/pgSQL function p1() line 4 at SQL statement
+PL/pgSQL function p1() line 3 at SQL statement
 INFO:  p1:<unnamed portal 28>
  p1 
 ----
@@ -1731,11 +1731,11 @@ ERROR:  ERROR:  deadlock detected
 --?*
 HINT:  See server log for query details.
 CONTEXT:  SQL statement "update t2_test set a=10"
-PL/pgSQL function p2() line 6 at SQL statement
+PL/pgSQL function p2() line 5 at SQL statement
 referenced column: p2
 
 CONTEXT:  SQL statement "CALL p2(c1)"
-PL/pgSQL function p1() line 7 at SQL statement
+PL/pgSQL function p1() line 6 at SQL statement
 select * from t2_test;
  a |  b  |  c   |   d   |    e     |   f   |     g      
 ---+-----+------+-------+----------+-------+------------
@@ -1839,11 +1839,11 @@ end;
 /
 ERROR:  ERROR:  autonomous procedure out ref cursor parameter can not be assigned
 DETAIL:  procedure "p1()" out parameter "$1" not support to be assigned value
-CONTEXT:  PL/pgSQL function p1() line 4 at assignment
+CONTEXT:  PL/pgSQL function p1() line 3 at assignment
 referenced column: p1
 
 CONTEXT:  SQL statement "CALL p1(va)"
-PL/pgSQL function inline_code_block line 4 at SQL statement
+PL/pgSQL function inline_code_block line 3 at SQL statement
 create or replace procedure p1 (va out sys_refcursor)
 as
 PRAGMA AUTONOMOUS_TRANSACTION;
@@ -1859,11 +1859,11 @@ end;
 /
 ERROR:  ERROR:  autonomous procedure out ref cursor parameter can not be assigned
 DETAIL:  procedure "p1()" out parameter "va" not support to be assigned value
-CONTEXT:  PL/pgSQL function p1() line 4 at assignment
+CONTEXT:  PL/pgSQL function p1() line 3 at assignment
 referenced column: p1
 
 CONTEXT:  SQL statement "CALL p1(va)"
-PL/pgSQL function inline_code_block line 4 at SQL statement
+PL/pgSQL function inline_code_block line 3 at SQL statement
 drop table t1;
 drop procedure p1;
 -- test function with ref cursor

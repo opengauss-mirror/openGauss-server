@@ -176,7 +176,7 @@ END;
 ERROR:  refcursor not support declare multiple variable
 LINE 2:     C1,C2 CURSOR_TYPE;
             ^
-QUERY:  DECLARE  TYPE CURSOR_TYPE IS REF CURSOR;
+QUERY:  DECLARE TYPE CURSOR_TYPE IS REF CURSOR;
     C1,C2 CURSOR_TYPE;
 BEGIN
 END
@@ -186,9 +186,9 @@ BEGIN
 END;
 /
 ERROR:  refcursor not support declare multiple variable
-LINE 1: DECLARE  DECLARE C1,C2 SYS_REFCURSOR; 
-                         ^
-QUERY:  DECLARE 	DECLARE C1,C2 SYS_REFCURSOR; 
+LINE 1: DECLARE DECLARE C1,C2 SYS_REFCURSOR; 
+                        ^
+QUERY:  DECLARE DECLARE C1,C2 SYS_REFCURSOR; 
 BEGIN
 END
 --test declare mutile variabe for alias
@@ -201,7 +201,7 @@ END;
 ERROR:  alias not support declare multiple variable
 LINE 2:  DECLARE alias1,alias2 ALIAS FOR old1; 
                  ^
-QUERY:  DECLARE 	old1,old2 int;
+QUERY:  DECLARE old1,old2 int;
 	DECLARE alias1,alias2 ALIAS FOR old1; 
 BEGIN
 END
@@ -234,9 +234,9 @@ BEGIN
 END;
 /
 ERROR:  not support declare multiple variable
-LINE 1: DECLARE  DECLARE res1,res2 int default (3+4);
-                         ^
-QUERY:  DECLARE 	DECLARE res1,res2 int default (3+4);
+LINE 1: DECLARE DECLARE res1,res2 int default (3+4);
+                        ^
+QUERY:  DECLARE DECLARE res1,res2 int default (3+4);
 	DECLARE str1,str2 text default 'opengunass';
 	DECLARE num1,num2,num3 number default 23.34;
 	DECLARE mon1,mon2 money default 1000.00;
@@ -271,7 +271,7 @@ END;
 ERROR:  not support declare multiple variable
 LINE 2:     C1,C2 CURSOR_TYPE;
             ^
-QUERY:  DECLARE  TYPE CURSOR_TYPE IS REF CURSOR;
+QUERY:  DECLARE TYPE CURSOR_TYPE IS REF CURSOR;
     C1,C2 CURSOR_TYPE;
 BEGIN
 END
@@ -281,9 +281,9 @@ BEGIN
 END;
 /
 ERROR:  not support declare multiple variable
-LINE 1: DECLARE  DECLARE C1,C2 SYS_REFCURSOR; 
-                         ^
-QUERY:  DECLARE 	DECLARE C1,C2 SYS_REFCURSOR; 
+LINE 1: DECLARE DECLARE C1,C2 SYS_REFCURSOR; 
+                        ^
+QUERY:  DECLARE DECLARE C1,C2 SYS_REFCURSOR; 
 BEGIN
 END
 --test declare mutile variabe for alias
@@ -294,9 +294,9 @@ BEGIN
 END;
 /
 ERROR:  not support declare multiple variable
-LINE 1: DECLARE  old1,old2 int;
-                 ^
-QUERY:  DECLARE 	old1,old2 int;
+LINE 1: DECLARE old1,old2 int;
+                ^
+QUERY:  DECLARE old1,old2 int;
 	DECLARE alias1,alias2 ALIAS FOR old1; 
 BEGIN
 END
@@ -320,10 +320,9 @@ begin
 end;
 /
 ERROR:  not support declare multiple variable
-LINE 6: declare va1,va2 t1 default '{1,2}';
+LINE 5: declare va1,va2 t1 default '{1,2}';
                 ^
-QUERY:   DECLARE 
-type t1 is varray(10) of int;
+QUERY:   DECLARE type t1 is varray(10) of int;
 type t2 is table of int;
 type t3 is table of varchar2(10) index by varchar2(10);
 type t4 is varray(10) of text;
@@ -358,10 +357,9 @@ begin
 end;
 /
 ERROR:  not support declare multiple variable
-LINE 6: declare va1,va2 t1 default '{1,2}';
+LINE 5: declare va1,va2 t1 default '{1,2}';
                 ^
-QUERY:   DECLARE 
-type t1 is varray(10) of int;
+QUERY:   DECLARE type t1 is varray(10) of int;
 type t2 is table of int;
 type t3 is table of varchar2(10) index by varchar2(10);
 type t4 is varray(10) of text;

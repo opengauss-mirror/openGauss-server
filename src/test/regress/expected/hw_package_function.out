@@ -691,7 +691,7 @@ begin
 end;
 /
 ERROR:  argument name "j" used more than once
-CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 3
 declare
 a int := 1;
 b int := 1;
@@ -701,7 +701,7 @@ begin
 end;
 /
 ERROR:  Named argument "j" can not be a const
-CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 6
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 5
 create or replace function test_para2(col in text, col2 out int)
 returns text package as $$
 declare
@@ -890,7 +890,7 @@ end pkg2;
 call pkg2.f1(5);
 INFO:  the number is 5.
 CONTEXT:  SQL statement "CALL syn1.p1(p)"
-PL/pgSQL function f1(integer) line 3 at PERFORM
+PL/pgSQL function f1(integer) line 2 at PERFORM
  f1 
 ----
  

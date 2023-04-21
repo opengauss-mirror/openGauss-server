@@ -46,9 +46,9 @@ END ;
 /
 call proc_test();
 ERROR:  commit/rollback/savepoint is not allowed in a non-volatile function
-CONTEXT:  PL/pgSQL function proc_commit() line 3 at COMMIT
+CONTEXT:  PL/pgSQL function proc_commit() line 2 at COMMIT
 SQL statement "CALL proc_commit()"
-PL/pgSQL function proc_test() line 3 at PERFORM
+PL/pgSQL function proc_test() line 2 at PERFORM
 create or replace procedure p1(a out varchar2,b int) is
 begin
 a:='aa'||b;
@@ -63,5 +63,5 @@ raise info 'var:%',var;
 end;
 /
 INFO:  a:aa3
-CONTEXT:  PL/pgSQL function inline_code_block line 4 at assignment
+CONTEXT:  PL/pgSQL function inline_code_block line 3 at assignment
 INFO:  var:aa3
