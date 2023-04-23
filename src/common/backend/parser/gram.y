@@ -11653,11 +11653,15 @@ CreateTrigStmt:
 				{
 					if ($2 != false)
 					{
-						parser_yyerror("syntax error found");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+							 	errmsg("syntax error.")));
 					}
 					if ($3 != NULL)
 					{
-						parser_yyerror("only support definer in B compatibility database and B syntax");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("only support definer in B compatibility database and B syntax")));
 					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->definer = $3;
@@ -11719,15 +11723,20 @@ CreateTrigStmt:
 				u_sess->parser_cxt.isCreateFuncOrProc = true;
 			} subprogram_body
 				{
-					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || $2 != false)
-					{
-						parser_yyerror("only support definer, trigger_order, subprogram_body in B compatibility database");
-					}
-					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)
 					{
-						parser_yyerror("syntax error found");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("syntax error.")));
 					}
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Current syntax is supported only in B compatibility database")));
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					
 					n->definer = $3;
 					n->if_not_exists = false;
 					n->schemaname = $5->schemaname;
@@ -11758,15 +11767,20 @@ CreateTrigStmt:
 				u_sess->parser_cxt.isCreateFuncOrProc = true;
 			} subprogram_body
 				{
-					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
-					{
-						parser_yyerror("only support definer, if not exists, trigger_order, subprogram_body in B compatibility database");
-					}
-					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)
 					{
-						parser_yyerror("syntax error");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("syntax error.")));
 					}
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Current syntax is supported only in B compatibility database")));
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					
 					n->definer = $3;
 					n->if_not_exists = true;
 					n->schemaname = $8->schemaname;
