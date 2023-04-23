@@ -1452,7 +1452,7 @@ Datum pg_stat_segment_extent_usage(PG_FUNCTION_ARGS)
     ForkNumber forknum = PG_GETARG_INT32(3);
     if (!ExtentTypeIsValid(extent_type)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_SEGMENT_PAGE),
-                        errmsg("The parameter extent_type is not valid"), errhint("extent_type should be in [1, 4]")));
+                        errmsg("The parameter extent_type is not valid"), errhint("extent_type should be in [1, 5]")));
     }
     if (forknum < 0 || forknum > MAX_FORKNUM) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_SEGMENT_PAGE),
