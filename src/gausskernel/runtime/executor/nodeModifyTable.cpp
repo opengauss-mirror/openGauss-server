@@ -488,7 +488,11 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     uint32 updated_colnum_resno;
     Bitmapset* updatedCols = GetUpdatedColumns(resultRelInfo, estate);
 
+    /* use pertuple memory for trigger tuple */
+    oldContext = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
     HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
+    MemoryContextSwitchTo(oldContext);
+
     RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
 
     /*
