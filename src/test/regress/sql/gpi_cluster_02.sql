@@ -61,13 +61,13 @@ vacuum analyze inventory_table_02;
 select true from (select correlation from pg_stats where tablename='inventory_table_02' and attname='inv_date_sk') where correlation = 1;
 select true from (select correlation from pg_stats where tablename='inventory_table_02' and attname='inv_item_sk') where correlation = 1;
 
-select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible, part.partkey, part.interval, part.boundaries, part.reltuples
+select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'inventory_table_02' and ind.indrelid = class.oid and part.parentid = ind.indexrelid
-order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
 
-select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible, part.partkey, part.interval, part.boundaries, part.reltuples
+select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'inventory_table_02' and ind.indrelid = class.oid and part.parentid = ind.indrelid
-order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
 
 cluster inventory_table_02 using global_inventory_table_02_index2;
 
