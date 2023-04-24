@@ -138,7 +138,7 @@ call pri_fun_schema.pri_autonomous_1();
 ERROR:  permission denied for relation creditcard_info
 DETAIL:  N/A
 CONTEXT:  SQL statement "insert into pri_fun_schema.creditcard_info values(66, 66,66)"
-PL/pgSQL function pri_autonomous_1() line 3 at SQL statement
+PL/pgSQL function pri_autonomous_1() line 2 at SQL statement
 --  CREATE TABLE in procedure
 create or replace procedure pri_fun_schema.pri_test_proc_create(i in integer)
 as
@@ -150,7 +150,7 @@ select pri_fun_schema.pri_test_proc_create(1);
 ERROR:  permission denied for schema pri_fun_schema
 DETAIL:  N/A
 CONTEXT:  SQL statement "create table pri_fun_schema.pri_t11(id int) tablespace pri_create_fun_tsp"
-PL/pgSQL function pri_test_proc_create(integer) line 3 at SQL statement
+PL/pgSQL function pri_test_proc_create(integer) line 2 at SQL statement
 referenced column: pri_test_proc_create
 reset role;
 --删除函数。

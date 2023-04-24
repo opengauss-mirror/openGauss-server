@@ -30,7 +30,7 @@ end;
 /
 call test_explain_param(123);
 ERROR:  query has no destination for result data
-CONTEXT:  PL/pgSQL function test_explain_param(integer) line 3 at SQL statement
+CONTEXT:  PL/pgSQL function test_explain_param(integer) line 2 at SQL statement
 ----
 --- test 1: Insert with nonzero rows
 ----

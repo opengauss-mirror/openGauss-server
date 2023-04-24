@@ -367,13 +367,13 @@ end;
 /
 call proc_test(1,'hello');
 NOTICE:  dfdf+f
-CONTEXT:  PL/pgSQL function proc_test(character varying) line 6 at assignment
+CONTEXT:  PL/pgSQL function proc_test(character varying) line 5 at assignment
 NOTICE:  dfdf+t
-CONTEXT:  PL/pgSQL function proc_test(character varying) line 8 at assignment
+CONTEXT:  PL/pgSQL function proc_test(character varying) line 7 at assignment
 NOTICE:  t
-CONTEXT:  PL/pgSQL function proc_test(character varying) line 8 at assignment
+CONTEXT:  PL/pgSQL function proc_test(character varying) line 7 at assignment
 NOTICE:  1,test
-CONTEXT:  PL/pgSQL function proc_test(character varying) line 8 at assignment
+CONTEXT:  PL/pgSQL function proc_test(character varying) line 7 at assignment
 NOTICE:  t
 NOTICE:  0
  o_retcode 
@@ -434,11 +434,11 @@ end;
 call proc_test(1);
 NOTICE:  v_c row count 0
 NOTICE:  open is true
-CONTEXT:  PL/pgSQL function proc_test(numeric) line 15 at assignment
+CONTEXT:  PL/pgSQL function proc_test(numeric) line 14 at assignment
 NOTICE:  a is open
-CONTEXT:  PL/pgSQL function proc_test(numeric) line 15 at assignment
+CONTEXT:  PL/pgSQL function proc_test(numeric) line 14 at assignment
 NOTICE:  fetch is execute
-CONTEXT:  PL/pgSQL function proc_test(numeric) line 15 at assignment
+CONTEXT:  PL/pgSQL function proc_test(numeric) line 14 at assignment
 NOTICE:  v_c found is true
 NOTICE:  v_c row count 1
  proc_test 
@@ -656,12 +656,12 @@ select proc_test('1');
 NOTICE:  a is open
 CONTEXT:  referenced column: func_test
 SQL statement "SELECT func_test(v_c,i_b)"
-PL/pgSQL function proc_test(character varying) line 7 at assignment
+PL/pgSQL function proc_test(character varying) line 6 at assignment
 referenced column: proc_test
 NOTICE:  fetch is execute
 CONTEXT:  referenced column: func_test
 SQL statement "SELECT func_test(v_c,i_b)"
-PL/pgSQL function proc_test(character varying) line 7 at assignment
+PL/pgSQL function proc_test(character varying) line 6 at assignment
 referenced column: proc_test
 NOTICE:  t
 CONTEXT:  referenced column: proc_test
@@ -970,11 +970,11 @@ close c;
 end;
 /
 NOTICE:  a1:1
-CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at assignment
 NOTICE:  a1:2
-CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at assignment
 ERROR:  cursor " select c1 from tb1;" does not exist in FETCH statement.
-CONTEXT:  PL/pgSQL function inline_code_block line 7 at FETCH
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at FETCH
 create table t1_refcursor(a int);
 insert into t1_refcursor values (1);
 insert into t1_refcursor values (2);

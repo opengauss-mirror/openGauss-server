@@ -1166,7 +1166,7 @@ raise info 'res is:%',res;
 end;
 /
 ERROR:  when invoking function f1, no destination for argments ""
-CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 1
 drop function f1;
 create or replace package pck1 is
 type tp1 is record(v01 number, v03 varchar2, v02 number);

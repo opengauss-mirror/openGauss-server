@@ -379,7 +379,7 @@ select * from debug_info;
 select * from test_debug4(1);
 INFO:  cnt is 3
 CONTEXT:  SQL statement "call test_debug(a)"
-PL/pgSQL function test_debug4(integer) line 8 at SQL statement
+PL/pgSQL function test_debug4(integer) line 7 at SQL statement
  test_debug4 
 -------------
          101
@@ -388,12 +388,12 @@ PL/pgSQL function test_debug4(integer) line 8 at SQL statement
 -- test with client error in exception
 select * from test_debug4(1);
 ERROR:  receive abort message
-CONTEXT:  PL/pgSQL function test_debug4(integer) line 15 at assignment
+CONTEXT:  PL/pgSQL function test_debug4(integer) line 14 at assignment
 -- test with breakpoint
 select * from test_debug4(1);
 INFO:  cnt is 3
 CONTEXT:  SQL statement "call test_debug(a)"
-PL/pgSQL function test_debug4(integer) line 8 at SQL statement
+PL/pgSQL function test_debug4(integer) line 7 at SQL statement
  test_debug4 
 -------------
          101
@@ -403,7 +403,7 @@ PL/pgSQL function test_debug4(integer) line 8 at SQL statement
 select * from test_debug4(1);
 INFO:  cnt is 3
 CONTEXT:  SQL statement "call test_debug(a)"
-PL/pgSQL function test_debug4(integer) line 8 at SQL statement
+PL/pgSQL function test_debug4(integer) line 7 at SQL statement
  test_debug4 
 -------------
          101

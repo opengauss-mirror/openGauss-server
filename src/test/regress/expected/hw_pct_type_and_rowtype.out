@@ -376,7 +376,7 @@ end;
 ERROR:  invalid type name "va.c%TYPE"
 LINE 3:   vc va.c%TYPE;
              ^
-QUERY:   DECLARE  va foo%ROWTYPE;
+QUERY:   DECLARE va foo%ROWTYPE;
   vb va.b%TYPE;
   vc va.c%TYPE;
 begin
@@ -580,10 +580,10 @@ end pckg_test;
 call synonym_user_2.pckg_test.proc_test1();
 INFO:  test procedure
 CONTEXT:  SQL statement "CALL proc_test()"
-PL/pgSQL function proc_test1() line 3 at PERFORM
+PL/pgSQL function proc_test1() line 2 at PERFORM
 INFO:  test package procedure
 CONTEXT:  SQL statement "CALL pckg_test1.proc_test2()"
-PL/pgSQL function proc_test1() line 4 at PERFORM
+PL/pgSQL function proc_test1() line 3 at PERFORM
  proc_test1 
 ------------
  
@@ -851,7 +851,7 @@ raise info '%',vb;
 end;
 /
 ERROR:  relation "va" does not exist when parse word.
-CONTEXT:  compilation of PL/pgSQL function "p1" near line 4
+CONTEXT:  compilation of PL/pgSQL function "p1" near line 3
 -- (2) in package
 create or replace package pck1 is
 va test1%ROWTYPE;
