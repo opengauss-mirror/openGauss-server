@@ -6446,6 +6446,7 @@ static LockStmt* _copyLockStmt(const LockStmt* from)
     COPY_SCALAR_FIELD(mode);
     COPY_SCALAR_FIELD(nowait);
     COPY_SCALAR_FIELD(cancelable);
+    COPY_SCALAR_FIELD(isLockTables);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(waitSec);
     }
