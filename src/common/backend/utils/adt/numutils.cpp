@@ -603,6 +603,53 @@ pg_ultostr(char *str, uint32 value)
 }
 
 /*
+ * pg_ultostr_zeropad
+ *		Converts 'value' into a decimal string representation stored at 'str'.
+ *		'minwidth' specifies the minimum width of the result; any extra space
+ *		is filled up by prefixing the number with zeros.
+ *
+ * Returns the ending address of the string result (the last character written
+ * plus 1).  Note that no NUL terminator is written.
+ *
+ * The intended use-case for this function is to build strings that contain
+ * multiple individual numbers, for example:
+ *
+ *	str = pg_ltostr_zeropad(str, hours, 2);
+ *	*str++ = ':';
+ *	str = pg_ltostr_zeropad(str, mins, 2);
+ *	*str++ = ':';
+ *	str = pg_ltostr_zeropad(str, secs, 2);
+ *	*str = '\0';
+ *
+ * Note: Caller must ensure that 'str' points to enough memory to hold the
+ * result.
+ */
+char* pg_ultostr_zeropad(char* str, uint32 value, int32 minwidth)
+{
+    int len;
+    errno_t rc = EOK;
+
+    Assert(minwidth > 0);
+
+    if (value < 100 && minwidth == 2)	/* Short cut for common case */
+    {
+        rc = memcpy_s(str, 2, DIGIT_TABLE + value * 2, 2);
+        securec_check(rc, "\0", "\0");
+        return str + 2;
+    }
+
+    len = pg_ultoa_n(value, str);
+    if (len >= minwidth)
+        return str + len;
+
+    rc = memmove_s(str + minwidth - len, len, str, len);
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(str, minwidth - len, '0', minwidth - len);
+    securec_check(rc, "\0", "\0");
+    return str + minwidth;
+}
+
+/*
  * pg_strtouint64
  *		Converts 'str' into an unsigned 64-bit integer.
  *
