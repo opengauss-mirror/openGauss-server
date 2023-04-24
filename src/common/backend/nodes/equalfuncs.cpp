@@ -2357,6 +2357,8 @@ static bool _equalLockStmt(const LockStmt* a, const LockStmt* b)
     COMPARE_NODE_FIELD(relations);
     COMPARE_SCALAR_FIELD(mode);
     COMPARE_SCALAR_FIELD(nowait);
+    COMPARE_SCALAR_FIELD(cancelable);
+    COMPARE_SCALAR_FIELD(isLockTables);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COMPARE_SCALAR_FIELD(waitSec);
     }
