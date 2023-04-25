@@ -269,7 +269,8 @@ MemoryContext AsanMemoryAllocator::AllocSetContextCreate(MemoryContext parent, c
      * Don't limit the memory allocation for ErrorContext.
      * And skip memory tracking memory allocation.
      */
-    if ((strcmp(name, "ErrorContext") != 0) && (strcmp(name, "MemoryTrackMemoryContext") != 0)) {
+    if ((strcmp(name, "ErrorContext") != 0) && (strcmp(name, "MemoryTrackMemoryContext") != 0)
+        && (strcmp(name, "DolphinErrorData") != 0)) {
         value |= IS_PROTECT;
     }
 
