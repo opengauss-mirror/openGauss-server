@@ -495,7 +495,7 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
      * Don't limit the memory allocation for ErrorContext. And skip memory tracking memory allocation.
      */
     if ((0 != strcmp(name, "ErrorContext")) && (0 != strcmp(name, "MemoryTrackMemoryContext")) &&
-        (strcmp(name, "Track MemoryInfo hash") != 0))
+        (strcmp(name, "Track MemoryInfo hash") != 0) && (0 != strcmp(name, "DolphinErrorData")))
         value |= IS_PROTECT;
 
     /* only track the unshared context after t_thrd.mem_cxt.mem_track_mem_cxt is created */

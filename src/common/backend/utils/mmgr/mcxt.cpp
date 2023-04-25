@@ -937,7 +937,7 @@ MemoryContext MemoryContextCreate(
 }
 
 /* check if the memory context is out of control */
-#define MEMORY_CONTEXT_CONTROL_LEVEL 3  // ExecutorState
+#define MEMORY_CONTEXT_CONTROL_LEVEL (ENABLE_THREAD_POOL ? 5: 3)  // ExecutorState
 void MemoryContextCheckMaxSize(MemoryContext context, Size size, const char* file, int line)
 {
 #ifndef ENABLE_MEMORY_CHECK
