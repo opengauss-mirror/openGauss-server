@@ -19480,6 +19480,8 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                 if ((tbinfo->reloftype != NULL) && !binary_upgrade) {
                     appendPQExpBuffer(q, "WITH OPTIONS");
                 } else if (fout->remoteVersion >= 70100) {
+                    if (isBcompatibility && hasSpecificExtension(fout, "dolphin") && strcmp(tbinfo->atttypnames[j], "numeric") == 0)
+                        tbinfo->atttypnames[j] = "number";
                     appendPQExpBuffer(q, "%s", tbinfo->atttypnames[j]);
                     if (has_encrypted_column) {
                         char *encryption_type = NULL;
