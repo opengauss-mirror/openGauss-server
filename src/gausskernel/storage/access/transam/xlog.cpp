@@ -4207,6 +4207,23 @@ int XLogFileOpen(XLogSegNo segno)
 }
 
 /*
+ * Copy one page starting with targetpageptr of EndOfLog from old priamry to new primary.
+ */
+void SSXLOGCopyFromOldPrimary(XLogReaderState *state, XLogRecPtr pageptr)
+{
+    ssize_t actualBytes = write(t_thrd.xlog_cxt.openLogFile, state->readBuf, XLOG_BLCKSZ);
+    if (actualBytes != XLOG_BLCKSZ) {
+        if (errno == 0) {
+            errno = ENOSPC;
+        }
+        uint32 shiftSize = 32;
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write xlog at start:%X/%X, length %d: %m",
+                                                          static_cast<uint32>(pageptr >> shiftSize),
+                                                          static_cast<uint32>(pageptr), XLOG_BLCKSZ)));
+    }
+}
+
+/*
  * Open a logfile segment for reading (during recovery).
  *
  * If source = XLOG_FROM_ARCHIVE, the segment is retrieved from archive.
@@ -10547,9 +10564,15 @@ void StartupXLOG(void)
         (void)XLogFileInit(endLogSegNo, &use_existent, true);
     }
     uint32 redoReadOff = t_thrd.xlog_cxt.readOff;
-
-    GetWritePermissionSharedStorage();
-    CheckShareStorageCtlInfo(EndOfLog);
+    
+    /* only primary mode can call getwritepermissionsharedstorage wnen dorado hyperreplication
+     * and dms enabled.
+     */
+    if(!SS_PRIMARY_STANDBY_CLUSTER_STANDBY) {
+        GetWritePermissionSharedStorage();
+        CheckShareStorageCtlInfo(EndOfLog);   
+    }
+   
     /*
      * Complain if we did not roll forward far enough to render the backup
      * dump consistent.  Note: it is indeed okay to look at the local variable
@@ -10798,6 +10821,29 @@ void StartupXLOG(void)
 
     /* Shut down readFile facility, free space. */
     ShutdownReadFileFacility();
+
+    if (SS_STANDBY_FAILOVER && SS_PRIMARY_CLUSTER_STANDBY) {
+        ereport(LOG, (errmodule(MOD_DMS),
+                      errmsg("[SS failover] standby promoting: copy endofxlog pageptr from primary to standby")));
+        XLogRecPtr EndOfLogPagePtr = EndOfLog - (EndOfLog % XLOG_BLCKSZ);
+        SSXLOGCopyFromOldPrimary(xlogreader, EndOfLogPagePtr);
+
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] standby promoting: copy xlog from local to dorado")));
+        ShareStorageXLogCtl *sharestorageCtl = g_instance.xlog_cxt.shareStorageXLogCtl;
+        XLogRecPtr localFlush = InvalidXLogRecPtr;
+        localFlush = EndOfLog;
+        XLogRecPtr maxPosCanWrite = GetMaxPosCanOverWrite();
+        uint32 shiftSize = 32;
+        ereport(LOG,
+                (errmsg("start to copy xlog from local to shared storage, localFlush: %X/%X, maxPosCanWrite: %X/%X.",
+                        static_cast<uint32>(localFlush >> shiftSize), static_cast<uint32>(localFlush),
+                        static_cast<uint32>(maxPosCanWrite >> shiftSize), static_cast<uint32>(maxPosCanWrite))));
+
+        if (XLByteLT(sharestorageCtl->insertHead, maxPosCanWrite)) {
+            XLogRecPtr expectPos = XLByteLT(localFlush, maxPosCanWrite) ? localFlush : maxPosCanWrite;
+            SSDoXLogCopyFromLocal(expectPos);
+        }
+    }
 
     /* Shut down the xlog reader facility. */
     XLogReaderFree(xlogreader);

@@ -675,7 +675,16 @@ dms_session_e DMSGetProcType4RequestPage()
 {
     // proc type used in DMS request page
     if (AmDmsReformProcProcess() || AmPageRedoProcess() || AmStartupProcess()) {
-        return DMS_SESSION_RECOVER;
+        /* When xlog_file_path is not null and enable_dms is set on, main standby always is in recovery.
+         * When pmState is PM_HOT_STANDBY, this case indicates main standby support to read only. So here
+         * DMS_SESSION_RECOVER_HOT_STANDBY will be returned, it indicates that normal threads can access
+         * page in recovery state.
+         */
+        if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
+            return DMS_SESSION_RECOVER_HOT_STANDBY; 
+        } else {
+            return DMS_SESSION_RECOVER;   
+        }
     } else {
         return DMS_SESSION_NORMAL;
     }

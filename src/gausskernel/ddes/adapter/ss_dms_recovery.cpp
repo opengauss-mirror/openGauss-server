@@ -110,6 +110,15 @@ bool SSRecoveryNodes()
             break;
         }
         LWLockRelease(ControlFileLock);
+        
+        /* If main standby is set hot standby to on, when it reach consistency or recovery all xlogs in disk,
+         * recovery phase could be regarded successful in hot_standby thus set pmState = PM_HOT_STANDBY, which
+         * indicate database systerm is ready to accept read only connections.
+         */
+        if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
+            result = true;
+            break;
+        }
         pg_usleep(REFORM_WAIT_TIME);
     }
     return result;

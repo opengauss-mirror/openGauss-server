@@ -230,23 +230,23 @@ bool SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, X
          * record just writing into pg_xlog file when source is XLOG_FROM_STREAM and dms and dss are enabled. So we
          * need to reread xlog from dss to preReadBuf.
          */
-        if (SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
+        if (SS_STANDBY_CLUSTER_MAIN_STANDBY) {
             volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
             if (XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr) && 
                ((targetRecPtr < xlogFlushPtrForPerRead && t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM) || 
-               (!xlogctl->IsRecoveryDone))) {
+               (!xlogctl->IsRecoveryDone) || (t_thrd.xlog_cxt.readSource != XLOG_FROM_STREAM))) {
                    isReadFile = false;
                }
         }
 
         if ((XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr) &&
-             !SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) || (!isReadFile)) {
+             !SS_STANDBY_CLUSTER_MAIN_STANDBY) || (!isReadFile)) {
             preReadOff = targetPagePtr % XLogPreReadSize;
             int err = memcpy_s(buf, XLOG_BLCKSZ, xlogreader->preReadBuf + preReadOff, XLOG_BLCKSZ);
             securec_check(err, "\0", "\0");
             break;
         } else {
-            if (SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
+            if (SS_STANDBY_CLUSTER_MAIN_STANDBY) {
                 xlogreader->xlogFlushPtrForPerRead = GetWalRcvWriteRecPtr(NULL);
                 xlogFlushPtrForPerRead = xlogreader->xlogFlushPtrForPerRead;
             }

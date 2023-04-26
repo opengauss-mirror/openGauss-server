@@ -160,6 +160,7 @@ typedef enum en_dms_session {
     DMS_SESSION_NORMAL = 0,     // can not access DRC when DRC is inaccessible
     DMS_SESSION_REFORM = 1,     // can access DRC when DRC is inaccessible
     DMS_SESSION_RECOVER = 2,    // can access DRC when DRC is inaccessible, buf if no owner, should set in recovery
+    DMS_SESSION_RECOVER_HOT_STANDBY = 3, // can access DRC when pmstate = PM_HOT_STANDBY
 } dms_session_e;
 
 #define DMS_RESID_SIZE  32
