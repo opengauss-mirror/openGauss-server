@@ -2187,9 +2187,16 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
     /* send the pkg header containing msg like file size */
     _tarWriteHeader(tarfilename, NULL, statbuf);
     
+    /* Because pg_control file is shared in all instance when dss is enabled. Here pg_control of primary id
+     * need to send to main standby in standby cluster, so we must seek a postion accoring to primary id.
+     * Then content of primary id will be read.
+     */
     if (ENABLE_DSS && strcmp(tarfilename, XLOG_CONTROL_FILE) == 0) {
         int read_size = BUFFERALIGN(sizeof(ControlFileData));
         statbuf->st_size = read_size;
+        int primary_id = SSGetPrimaryInstId();
+        off_t seekpos = (off_t)BLCKSZ * primary_id;
+        fseek(fp, seekpos, SEEK_SET);
     }
     
     while ((cnt = fread(t_thrd.basebackup_cxt.buf_block, 1, Min(TAR_SEND_SIZE, statbuf->st_size - len), fp)) > 0) {

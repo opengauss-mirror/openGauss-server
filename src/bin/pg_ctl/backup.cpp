@@ -1012,9 +1012,13 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 totaldone += r;
                 continue;
             }
-
+            
+            /* pg_control will be written into a specified postion of main stanby corresponding to */
             if (instance_config.dss.enable_dss && strcmp(filename, "+data/pg_control") == 0) {
                 pg_log(PG_WARNING, _("file size %d. \n"), r);
+                int main_standby_id = instance_config.dss.instance_id;
+                off_t seekpos = (off_t)BLCKSZ * main_standby_id;
+                fseek(file, seekpos, SEEK_SET);
             }
 
             if (forbid_write == false) {
@@ -2731,8 +2735,13 @@ bool RenameTblspcDir(char *dataDir)
     if (strcmp(remotenodename, pgxcnodename) == 0) {
         return true;
     }
-
-    rc = snprintf_s(tblspcParentPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dataDir, "pg_tblspc");
+    
+    if (instance_config.dss.enable_dss) {
+        char *dssdir = instance_config.dss.vgdata;
+        rc = snprintf_s(tblspcParentPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dssdir, "pg_tblspc");
+    } else {
+        rc = snprintf_s(tblspcParentPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dataDir, "pg_tblspc");
+    }
     securec_check_ss_c(rc, "\0", "\0");
     tblspcParentDir = opendir(tblspcParentPath);
     if (!tblspcParentDir) {

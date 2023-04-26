@@ -1655,6 +1655,8 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
             pg_memory_barrier();
             g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ALLOW_CKPT;
             g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_FAILOVER_PROMOTING;
+            /* Backends should exit in here, this step should be bring forward and not in CBFailoverPromote */
+            pmState = PM_WAIT_BACKENDS;
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] failover trigger.")));
         }
     }
@@ -1685,6 +1687,11 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
         ReformCleanBackends();
     }
 
+    /* After reform done, standby of standby cluster need to set mode to STANDBY_MODE in dual cluster. */
+    if (SS_REFORM_REFORMER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) &&
+       (g_instance.attr.attr_storage.xlog_file_path != 0)) {
+        t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
+    }
 }
 
 static int CBReformDoneNotify(void *db_handle)
@@ -1696,6 +1703,13 @@ static int CBReformDoneNotify(void *db_handle)
                 g_instance.attr.attr_storage.dms_attr.instance_id)));
         }
     }
+    
+    /* After reform done, primary of master cluster need to set mode to PRIMARY_MODE in dual cluster. */
+    if (SS_REFORM_REFORMER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) &&
+       (g_instance.attr.attr_storage.xlog_file_path != 0)) {
+        t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;    
+    }
+   
     /* SSClusterState and in_reform must be set atomically */
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
