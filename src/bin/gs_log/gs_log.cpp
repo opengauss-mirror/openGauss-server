@@ -108,7 +108,7 @@ typedef struct {
     pthread_mutex_t mylock;
     pthread_cond_t mycond;
 
-    /* each item within thsi job list is a directory. */
+    /* each item within this job list is a directory. */
     job_type* jobs;
 
     /*
@@ -1003,7 +1003,7 @@ error_happened:
 
     /*
      * Done, start to exit thread.
-     * it doesn't matter that lock is hold or not, becuase this
+     * it doesn't matter that lock is hold or not, because this
      * thread will exit immediately.
      */
     w->worker_args.exit_flag = true;

@@ -335,7 +335,7 @@ int cgexec_get_cgroup_id_range(int high, int* forstart, int* forend)
  *                    are beyond the upper limit
  * @IN high         : the id of the high group that the low group belongs to.
  * @IN low          : the id of the low group to be updated.
- * @OUT cpuset      : if succeed, the calculated cpuset will be stored in it.
+ * @OUT cpuset      : if succeeded, the calculated cpuset will be stored in it.
  * @Return          : -1: abnormal
  *                     0: the cpuset has been set well
  *                     1: need reset.
