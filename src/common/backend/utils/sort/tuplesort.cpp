@@ -3653,7 +3653,6 @@ static void readtup_cluster(Tuplesortstate* state, SortTuple* stup, int tapenum,
     unsigned int t_len = tuplen - sizeof(ItemPointerData) - sizeof(int) - sizeof(TransactionId) * 2;
     HeapTuple tuple = (HeapTuple)heaptup_alloc(t_len + HEAPTUPLESIZE);
 
-    USEMEM(state, GetMemoryChunkSpace(tuple));
     /* Reconstruct the HeapTupleData header */
     tuple->t_data = (HeapTupleHeader)((char*)tuple + HEAPTUPLESIZE);
     tuple->t_len = t_len;
