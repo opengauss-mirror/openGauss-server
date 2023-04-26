@@ -934,7 +934,8 @@ static void dss_init(void)
 {
     if (IsDssMode()) {
         /* skip in some special backup modes */
-        if (backup_subcmd == DELETE_CMD || backup_subcmd == DELETE_INSTANCE_CMD) {
+        if (backup_subcmd == DELETE_CMD || backup_subcmd == DELETE_INSTANCE_CMD || 
+            backup_subcmd == SHOW_CMD || backup_subcmd == MERGE_CMD) {
             return;
         }
 
