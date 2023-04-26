@@ -13,7 +13,7 @@ include $(top_builddir)/src/Makefile.global
 
 SUBDIRS = cm_feconnect cm_libpq
 
-# Supress parallel build to avoid depencies in the subdirectories.
+# Suppress parallel build to avoid dependencies in the subdirectories.
 .NOTPARALLEL:
 
 $(recurse)

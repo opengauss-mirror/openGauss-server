@@ -15,7 +15,7 @@
  * @param file file fp
  * @param pcaFilePath file path,for ereport
  * @param rewindCompressInfo pointer of return
- * @return sucesss or not
+ * @return success or not
  */
 static bool ReadRewindCompressedInfo(FILE *file, RewindCompressInfo *rewindCompressInfo)
 {

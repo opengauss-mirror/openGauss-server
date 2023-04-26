@@ -29,7 +29,7 @@ top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
 
-# Supress parallel build to avoid depencies in the subdirectories. 
+# Suppress parallel build to avoid dependencies in the subdirectories.
 .NOTPARALLEL: 
 
 SUBDIRS = common tool 
