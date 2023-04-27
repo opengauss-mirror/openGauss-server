@@ -43,6 +43,7 @@ endfunction(add_func_target_withargs_fastcheck)
 MESSAGE(STATUS ${PROJECT_TRUNK_DIR} ${CMAKE_BINARY_DIR} ${CMAKE_INSTALL_PREFIX})
 
 add_func_target_withargs_fastcheck(fastcheck_single fastcheck_single)
+add_func_target_withargs_fastcheck(plugin_check plugin_check)
 add_func_target_withargs_fastcheck(fastcheck_single_audit fastcheck_single_audit)
 add_func_target_withargs_fastcheck(fastcheck_single_ss fastcheck_single_ss)
 add_func_target_withargs_fastcheck(fastcheck_gs_probackup fastcheck_gs_probackup)
