@@ -1263,8 +1263,7 @@ bool SsIsSkipPath(const char* dirname, bool needskipall)
         /* skip pg_xlog and doublewrite of all instances*/
         if (IsBeginWith(dirname, "pg_xlog") > 0) {
             return true;
-        } 
-
+        }
     } else {
         /* skip other node pg_xlog except primary */
         if (IsBeginWith(dirname, "pg_xlog") > 0) { 
@@ -1279,6 +1278,7 @@ bool SsIsSkipPath(const char* dirname, bool needskipall)
                 return true;
         }
     }
+    return false;
 }
 
 static void DeleteSubDataDir(const char* dirname)
