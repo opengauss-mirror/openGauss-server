@@ -3283,8 +3283,8 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
                    strcmp(te->desc, "CONSTRAINT") == 0 || strcmp(te->desc, "DEFAULT") == 0 ||
                    strcmp(te->desc, "FK CONSTRAINT") == 0 || strcmp(te->desc, "INDEX") == 0 ||
                    strcmp(te->desc, "RULE") == 0 || strcmp(te->desc, "TRIGGER") == 0 ||
-                   strcmp(te->desc, "USER MAPPING") == 0 || strcmp(te->desc, "PACKAGE BODY") ||
-                   strcmp(te->desc, "PACKAGE")) {
+                   strcmp(te->desc, "USER MAPPING") == 0 || strcmp(te->desc, "PACKAGE BODY") == 0 ||
+                   strcmp(te->desc, "PACKAGE") == 0) {
             /* these object types don't have separate owners */
         } else {
             write_msg(modulename, "WARNING: don't know how to set owner for object type %s\n", te->desc);
