@@ -3798,7 +3798,7 @@ static void usage(const char* prog_name)
     printf(_("  -c, --enable-dcf          enable DCF mode\n"));
 #endif
 #ifndef ENABLE_LITE_MODE
-    printf(_("      --enable-dss          enable ss_enable_dss mode\n"));
+    printf(_("      --enable-dss          enable shared storage mode\n"));
 #endif
     printf(_(" [-D, --pgdata=]DATADIR     location for this database cluster\n"));
 #ifdef ENABLE_MULTIPLE_NODES
