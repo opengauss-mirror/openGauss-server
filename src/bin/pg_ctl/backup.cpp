@@ -2421,6 +2421,7 @@ static bool ss_backup_dw_file(const char* target_dir)
 
     if (write(fd, buf, BLCKSZ) != BLCKSZ) {
         pg_log(PG_WARNING, _("could not write data to file %s: %s\n"), dw_file_path, gs_strerror(errno));
+        free(unaligned_buf);
         close(fd);
         return false;
     }
@@ -2489,6 +2490,7 @@ static bool backup_dw_file(const char* target_dir)
 
     if (write(fd, buf, BLCKSZ) != BLCKSZ) {
         pg_log(PG_WARNING, _("could not write data to file %s: %s\n"), real_file_path, gs_strerror(errno));
+        free(unaligned_buf);
         close(fd);
         return false;
     }
