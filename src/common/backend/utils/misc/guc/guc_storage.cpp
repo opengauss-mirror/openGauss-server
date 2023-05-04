@@ -207,6 +207,7 @@ static bool check_and_assign_namespace_oids(List* elemlist);
 static bool check_and_assign_general_oids(List* elemlist);
 static int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
+static bool check_ss_interconnect_url(char **newval, void **extra, GucSource source);
 static bool check_ss_interconnect_type(char **newval, void **extra, GucSource source);
 static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
@@ -4398,7 +4399,7 @@ static void InitStorageConfigureNamesString()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.dms_attr.interconnect_url,
             "0:127.0.0.1:1611",
-            NULL,
+            check_ss_interconnect_url,
             NULL,
             NULL},
         {{"ss_interconnect_type",
@@ -5839,6 +5840,102 @@ static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source)
     ereport(ERROR, (errmsg("DSS vg name must start with '+' and not comtain '\\'.")));
     pfree(ReplStr);
     return false;
+}
+
+static inline bool check_str_is_digit(char* s)
+{
+    if (s == NULL) {
+        return false;
+    }
+
+    int len = strlen(s);
+    for (int i = 0; i < len; ++i) {
+        if (!isdigit((unsigned char)(s[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool check_every_interconnect_url(char* url)
+{
+    List* l = NULL;
+    const int URL_PART_NUM = 3;
+    if (!SplitIdentifierString(url, ':', &l) || list_length(l) != URL_PART_NUM) {
+        return false;
+    }
+
+    char* instId = (char*)linitial(l);
+    char* ip = (char*)lsecond(l);
+    char* port = (char*)lthird(l);
+
+    if (!check_str_is_digit(instId)) {
+        return false; 
+    }
+    if (!check_str_is_digit(port)) {
+        return false;
+    }
+
+    List* lp = NULL;
+    ListCell* cell = NULL;
+    char *ipNum = NULL;
+    const int IP_PART_NUM = 4;
+    if (!SplitIdentifierString(ip, '.', &lp) || list_length(lp) != IP_PART_NUM) {
+        return false;
+    }
+
+    foreach(cell, lp) {
+        ipNum = (char*)lfirst(cell);
+        if (!check_str_is_digit(ipNum)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool check_ss_interconnect_url_list_valid(List *l)
+{
+    char* port = NULL;
+    ListCell* cell = NULL;
+
+    foreach(cell, l) {
+        port = (char*)lfirst(cell);
+        if (!check_every_interconnect_url(port)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool check_ss_interconnect_url(char **newval, void **extra, GucSource source)
+{
+    if (!ENABLE_DMS) {
+        return true;
+    }
+    
+    if (newval == NULL || *newval == NULL || **newval == '\0') {
+        ereport(ERROR, (errmsg("ss_interconnect_url cannot be NULL.")));
+        return false;
+    }
+
+    char* replStr = NULL;
+    List* l = NULL;
+    replStr = pstrdup(*newval);
+
+    if (!SplitIdentifierString(replStr, ',', &l)) {
+        return false;
+    }
+
+    if (list_length(l) == 0 || list_length(l) > DMS_MAX_INSTANCE) {
+        return false;
+    }
+
+    if (!check_ss_interconnect_url_list_valid(l)) {
+        return false;
+    }
+
+    pfree(replStr);
+    return true;
 }
 
 static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source)
