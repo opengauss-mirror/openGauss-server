@@ -600,11 +600,11 @@ char *ParsePage(char *path, int64 blocknum, char *relation_type, bool read_memor
     SMgrRelation smgr = smgropen(*relnode, InvalidBackendId, GetColumnNum(forkNum));
     if (strcmp(relation_type, "segment") == 0)
         CheckSegment(relnode, forkNum, outputfile, outputFilename);
-    BlockNumber maxBlockNum = smgrnblocks(smgr, forkNum) - 1;
-    if (blocknum > maxBlockNum) {
+    BlockNumber maxBlockNum = smgrnblocks(smgr, forkNum);
+    if ((blocknum != -1 && blocknum > maxBlockNum) || (maxBlockNum == 0)) {
         CheckCloseFile(outputfile, outputFilename, false);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            (errmsg("Blocknum should be between -1 and %u.", maxBlockNum))));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), (errmsg(
+            "The max blocknum of current file is %u. Target blocknum exceeds current file size.", maxBlockNum))));
     }
 
     pfree_ext(relnode);
