@@ -45,5 +45,12 @@ SELECT pg_advisory_unlock(1), pg_advisory_unlock_shared(2), pg_advisory_unlock(1
 show warnings;
 show warnings limit 2, 4;
 
+show enable_thread_pool;
+set query_mem='32MB';
+set query_max_mem='32MB';
+create table aaa(a int,b date,partial cluster key(b)) with (orientation = column);
+insert into aaa(a ) select generate_series(1,10000000);
+
+
 \c postgres
 drop database if exists db_show_warnings;
