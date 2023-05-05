@@ -630,6 +630,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_log_max_file_size                             | integer | kB   | 1024      | 4194304
  ssl_renegotiation_limit                          | integer | kB   | 0         | 2147483647
  ss_ock_log_path                                  | string  |      |           | 
+ ss_parallel_thread_count                         | integer |      | 0         | 64
  ss_rdma_work_config                              | string  |      |           | 
  ss_recv_msg_pool_size                            | integer | kB   | 1024      | 1048576
  ss_scrlock_server_bind_core                      | string  |      |           | 

@@ -106,6 +106,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_wait_reform));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_event));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_buf_res_rebuild_drc));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_buf_res_rebuild_drc_parallel));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_is_recovery_session));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(drc_get_page_master_id));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_release_page_batch));
@@ -266,6 +267,12 @@ int dms_buf_res_rebuild_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsign
     unsigned char is_dirty)
 {
     return g_ss_dms_func.dms_buf_res_rebuild_drc(dms_ctx, ctrl, lsn, is_dirty);
+}
+
+int dms_buf_res_rebuild_drc_parallel(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index,
+    unsigned char for_rebuild)
+{
+    return g_ss_dms_func.dms_buf_res_rebuild_drc_parallel(dms_ctx, ctrl_info, thread_index, for_rebuild);
 }
 
 int dms_is_recovery_session(unsigned int sid)
