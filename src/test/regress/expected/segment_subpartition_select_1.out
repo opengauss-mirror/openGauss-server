@@ -1,0 +1,128 @@
+--prepare
+DROP SCHEMA segment_subpartition_select_1 CASCADE;
+ERROR:  schema "segment_subpartition_select_1" does not exist
+CREATE SCHEMA segment_subpartition_select_1;
+SET CURRENT_SCHEMA TO segment_subpartition_select_1;
+drop table list_range_02;
+ERROR:  table "list_range_02" does not exist
+CREATE TABLE IF NOT EXISTS list_range_02
+(
+    col_1 int ,
+    col_2 int, 
+	col_3 VARCHAR2 ( 30 )  ,
+    col_4  int
+) WITH (SEGMENT=ON)
+PARTITION BY list (col_1) SUBPARTITION BY range (col_2)
+(
+ PARTITION p_list_1 VALUES(-1,-2,-3,-4,-5,-6,-7,-8,-9,-10 )
+  (
+    SUBPARTITION p_range_1_1 VALUES LESS THAN( -10 ),
+    SUBPARTITION p_range_1_2 VALUES LESS THAN( 0 ),
+    SUBPARTITION p_range_1_3 VALUES LESS THAN( 10 ),
+    SUBPARTITION p_range_1_4 VALUES LESS THAN( 20 ),
+    SUBPARTITION p_range_1_5 VALUES LESS THAN( 50 )
+  ),
+  PARTITION p_list_2 VALUES(1,2,3,4,5,6,7,8,9,10 ),
+  PARTITION p_list_3 VALUES(11,12,13,14,15,16,17,18,19,20)
+  (
+    SUBPARTITION p_range_3_1 VALUES LESS THAN( 15 ),
+    SUBPARTITION p_range_3_2 VALUES LESS THAN( MAXVALUE )
+  ),
+    PARTITION p_list_4 VALUES(21,22,23,24,25,26,27,28,29,30)
+  (
+    SUBPARTITION p_range_4_1 VALUES LESS THAN( -10 ),
+    SUBPARTITION p_range_4_2 VALUES LESS THAN( 0 ),
+    SUBPARTITION p_range_4_3 VALUES LESS THAN( 10 ),
+    SUBPARTITION p_range_4_4 VALUES LESS THAN( 20 ),
+    SUBPARTITION p_range_4_5 VALUES LESS THAN( 50 )
+  ),
+   PARTITION p_list_5 VALUES(31,32,33,34,35,36,37,38,39,40)
+  (
+    SUBPARTITION p_range_5_1 VALUES LESS THAN( MAXVALUE )
+  ),
+   PARTITION p_list_6 VALUES(41,42,43,44,45,46,47,48,49,50)
+   (
+    SUBPARTITION p_range_6_1 VALUES LESS THAN( -10 ),
+    SUBPARTITION p_range_6_2 VALUES LESS THAN( 0 ),
+    SUBPARTITION p_range_6_3 VALUES LESS THAN( 10 ),
+    SUBPARTITION p_range_6_4 VALUES LESS THAN( 20 ),
+    SUBPARTITION p_range_6_5 VALUES LESS THAN( 50 )
+   ),
+   PARTITION p_list_7 VALUES(default)
+) ENABLE ROW MOVEMENT;
+INSERT INTO list_range_02 VALUES (GENERATE_SERIES(0, 19),GENERATE_SERIES(0, 100),GENERATE_SERIES(0, 99));
+create index index_01 on list_range_02(col_2) local ;
+ explain (costs off, verbose on) select *  from list_range_02 where col_2 >500 and col_2 <8000 order by col_1;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Sort
+   Output: col_1, col_2, col_3, col_4
+   Sort Key: list_range_02.col_1
+   ->  Partition Iterator
+         Output: col_1, col_2, col_3, col_4
+         Iterations: 4, Sub Iterations: 4
+         ->  Partitioned Bitmap Heap Scan on segment_subpartition_select_1.list_range_02
+               Output: col_1, col_2, col_3, col_4
+               Recheck Cond: ((list_range_02.col_2 > 500) AND (list_range_02.col_2 < 8000))
+               Selected Partitions:  2..3,5,7
+               Selected Subpartitions:  2:1, 3:1, 5:1, 7:1
+               ->  Partitioned Bitmap Index Scan on index_01
+                     Index Cond: ((list_range_02.col_2 > 500) AND (list_range_02.col_2 < 8000))
+                     Selected Partitions:  2..3,5,7
+                     Selected Subpartitions:  2:1, 3:1, 5:1, 7:1
+(15 rows)
+
+drop index index_01;
+drop table list_range_02;
+create table pjade(jid int,jn int,name varchar2) WITH (SEGMENT=ON) partition by range(jid) subpartition by range(jn)
+(
+  partition hrp1 values less than(16)(
+    subpartition hrp1_1 values less than(16),
+    subpartition hrp1_2 values less than(maxvalue)),
+  partition hrp2 values less than(maxvalue)(
+    subpartition hrp3_1 values less than(16),
+    subpartition hrp3_3 values less than(maxvalue))
+);
+create table cjade(jid int,jn int,name varchar2) WITH (SEGMENT=ON);
+insert into pjade values(6,8,'tom'),(8,18,'jerry'),(16,8,'jade'),(18,20,'jack');
+insert into cjade values(6,8,'tom'),(8,18,'jerry'),(16,8,'jade'),(18,20,'jack');
+select * from pjade subpartition(hrp1_1) union select * from cjade order by 1,2,3;
+ jid | jn | name  
+-----+----+-------
+   6 |  8 | tom
+   8 | 18 | jerry
+  16 |  8 | jade
+  18 | 20 | jack
+(4 rows)
+
+select * from pjade subpartition(hrp1_1) p union select * from cjade order by 1,2,3;
+ jid | jn | name  
+-----+----+-------
+   6 |  8 | tom
+   8 | 18 | jerry
+  16 |  8 | jade
+  18 | 20 | jack
+(4 rows)
+
+select * from pjade subpartition(hrp1_1) union select * from cjade order by 1,2,3;
+ jid | jn | name  
+-----+----+-------
+   6 |  8 | tom
+   8 | 18 | jerry
+  16 |  8 | jade
+  18 | 20 | jack
+(4 rows)
+
+select * from pjade subpartition(hrp1_1) p union select * from cjade order by 1,2,3;
+ jid | jn | name  
+-----+----+-------
+   6 |  8 | tom
+   8 | 18 | jerry
+  16 |  8 | jade
+  18 | 20 | jack
+(4 rows)
+
+drop table pjade;
+drop table cjade;
+DROP SCHEMA segment_subpartition_select_1 CASCADE;
+RESET CURRENT_SCHEMA;
