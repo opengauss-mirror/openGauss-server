@@ -1,6 +1,6 @@
 -- b compatibility case
-drop database if exists b;
-create database b dbcompatibility 'b';
+drop database if exists b_cmpt_db;
+create database b_cmpt_db dbcompatibility 'b';
 
 --------------------concat--------------------
 -- concat case in a compatibility
@@ -16,7 +16,7 @@ select * from text1 where a is null;
 drop table text1;
 
 -- concat case in b compatibility
-\c b
+\c b_cmpt_db
 select concat('','A');
 select concat(null,'A');
 select concat_ws(',', 'A', null);
@@ -39,7 +39,7 @@ select * from text2 where a is not null;
 drop table text2;
 
 -- null case in b
-\c b
+\c b_cmpt_db
 create table text2 (a char(10));
 insert into text2 values('');
 insert into text2 values (null);
@@ -56,7 +56,7 @@ select int1in('.1');
 select int2in('s');
 select int4in('s');
 
-\c b
+\c b_cmpt_db
 select '-'::int8;
 select int1in('');
 select int1in('.1');
@@ -90,7 +90,7 @@ select * from test_limit order by 1 limit 6,2;
 drop table test_limit;
 
 -- limit case in b
-\c b
+\c b_cmpt_db
 create table test_limit(a int);
 insert into test_limit values (1),(2),(3),(4),(5);
 select * from test_limit order by 1 limit 2,3;
@@ -101,7 +101,7 @@ drop table test_limit;
 --------------timestampdiff-----------------
 -- timestamp with time zone
 -- timestamp1 > timestamp2
-\c b
+\c b_cmpt_db
 select timestampdiff(year, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
 select timestampdiff(quarter, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
 select timestampdiff(week, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
@@ -354,7 +354,7 @@ end;
 call doiterate(3);
 
 drop procedure if exists doiterate;
-\c b
+\c b_cmpt_db
 --success
 create or replace procedure doiterate(p1 int)
 as
@@ -825,7 +825,7 @@ drop function func1;
 drop procedure debug;
 drop procedure call;
 drop schema test CASCADE;
-\c b
+\c b_cmpt_db
 
 create or replace procedure func_zzm(num1 in int, num2 inout int, res out int)
 as begin
@@ -1185,7 +1185,7 @@ end; $$ language plpgsql;
 
 select while_test1();
 drop function while_test1;
-\c b
+\c b_cmpt_db
 
 
 create or replace function while_test1() returns void as $$
@@ -1410,7 +1410,7 @@ raise notice '%',i;
 end;
 /
 drop function if exists dorepeat;
-\c b
+\c b_cmpt_db
 
 --success
 CREATE or replace PROCEDURE dorepeat(p1 INT)
@@ -1501,6 +1501,6 @@ drop function select_into_null_func;
 reset behavior_compat_options;
 
 \c regression
-drop database b;
+drop database b_cmpt_db;
 DROP USER test_c;
 DROP USER test_d;
