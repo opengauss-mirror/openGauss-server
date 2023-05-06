@@ -82,6 +82,97 @@ INSERT INTO test_dump_autoinc_range_list VALUES(0,6,'6');
 CREATE TABLE "TEST_DUMP_autoinc_word"("Col1" int auto_increment UNIQUE, col2 int default 1) AUTO_INCREMENT = 10;
 NOTICE:  CREATE TABLE will create implicit sequence "TEST_DUMP_autoinc_word_Col1_seq" for serial column "TEST_DUMP_autoinc_word.Col1"
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "TEST_DUMP_autoinc_word_Col1_key" for table "TEST_DUMP_autoinc_word"
+create table "t_dump001"("c1 colmun" int not null primary key auto_increment comment '主键'); 
+NOTICE:  CREATE TABLE will create implicit sequence "t_dump001_c1 colmun_seq" for serial column "t_dump001.c1 colmun"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_dump001_pkey" for table "t_dump001"
+create table "t_dump002"("c1 \ colmun" int not null primary key auto_increment);
+NOTICE:  CREATE TABLE will create implicit sequence "t_dump002_c1 \ colmun_seq" for serial column "t_dump002.c1 \ colmun"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_dump002_pkey" for table "t_dump002"
+create table "t_dump003"("c1 ? colmun" int not null primary key auto_increment);
+NOTICE:  CREATE TABLE will create implicit sequence "t_dump003_c1 ? colmun_seq" for serial column "t_dump003.c1 ? colmun"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_dump003_pkey" for table "t_dump003"
+create table "t_dump004"("c1 \? colmun" int not null primary key auto_increment);
+NOTICE:  CREATE TABLE will create implicit sequence "t_dump004_c1 \? colmun_seq" for serial column "t_dump004.c1 \? colmun"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_dump004_pkey" for table "t_dump004"
+create table "t_dump005"("c1 \ \ colmun" int not null primary key auto_increment);
+NOTICE:  CREATE TABLE will create implicit sequence "t_dump005_c1 \ \ colmun_seq" for serial column "t_dump005.c1 \ \ colmun"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_dump005_pkey" for table "t_dump005"
+create table "t_dump006"("c1 \\\ colmun" int not null primary key auto_increment);
+NOTICE:  CREATE TABLE will create implicit sequence "t_dump006_c1 \\\ colmun_seq" for serial column "t_dump006.c1 \\\ colmun"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_dump006_pkey" for table "t_dump006"
+create table "t_dump007"("c1 &*^@~!%#$+-=/.><[{}]() colmun" int not null primary key auto_increment);
+NOTICE:  CREATE TABLE will create implicit sequence "t_dump007_c1 &*^@~!%#$+-=/.><[{}]() colmun_seq" for serial column "t_dump007.c1 &*^@~!%#$+-=/.><[{}]() colmun"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_dump007_pkey" for table "t_dump007"
+\d+ t_dump001
+                               Table "public.t_dump001"
+  Column   |  Type   |        Modifiers        | Storage | Stats target | Description 
+-----------+---------+-------------------------+---------+--------------+-------------
+ c1 colmun | integer | not null AUTO_INCREMENT | plain   |              | 主键
+Indexes:
+    "t_dump001_pkey" PRIMARY KEY, btree ("c1 colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump002
+                                Table "public.t_dump002"
+   Column    |  Type   |        Modifiers        | Storage | Stats target | Description 
+-------------+---------+-------------------------+---------+--------------+-------------
+ c1 \ colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump002_pkey" PRIMARY KEY, btree ("c1 \ colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump003
+                                Table "public.t_dump003"
+   Column    |  Type   |        Modifiers        | Storage | Stats target | Description 
+-------------+---------+-------------------------+---------+--------------+-------------
+ c1 ? colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump003_pkey" PRIMARY KEY, btree ("c1 ? colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump004
+                                Table "public.t_dump004"
+    Column    |  Type   |        Modifiers        | Storage | Stats target | Description 
+--------------+---------+-------------------------+---------+--------------+-------------
+ c1 \? colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump004_pkey" PRIMARY KEY, btree ("c1 \? colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump005
+                                 Table "public.t_dump005"
+    Column     |  Type   |        Modifiers        | Storage | Stats target | Description 
+---------------+---------+-------------------------+---------+--------------+-------------
+ c1 \ \ colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump005_pkey" PRIMARY KEY, btree ("c1 \ \ colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump006
+                                 Table "public.t_dump006"
+    Column     |  Type   |        Modifiers        | Storage | Stats target | Description 
+---------------+---------+-------------------------+---------+--------------+-------------
+ c1 \\\ colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump006_pkey" PRIMARY KEY, btree ("c1 \\\ colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump007
+                                          Table "public.t_dump007"
+              Column              |  Type   |        Modifiers        | Storage | Stats target | Description 
+----------------------------------+---------+-------------------------+---------+--------------+-------------
+ c1 &*^@~!%#$+-=/.><[{}]() colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump007_pkey" PRIMARY KEY, btree ("c1 &*^@~!%#$+-=/.><[{}]() colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
 \! @abs_bindir@/gs_dump dump_autoinc_db -p @portstring@ -f @abs_bindir@/dump_autoinc_test.tar -F t >/dev/null 2>&1; echo $?
 0
 \! @abs_bindir@/gs_restore -d restore_autoinc_db -p @portstring@ @abs_bindir@/dump_autoinc_test.tar >/dev/null 2>&1; echo $?
@@ -216,6 +307,76 @@ select col_1,col_2,col_3,col_4 from test_dump_autoinc_range_list order by 1,2,3,
      2 |     6 | 6     |    12
      3 |    16 | 16    |    32
 (3 rows)
+
+\d+ t_dump001
+                               Table "public.t_dump001"
+  Column   |  Type   |        Modifiers        | Storage | Stats target | Description 
+-----------+---------+-------------------------+---------+--------------+-------------
+ c1 colmun | integer | not null AUTO_INCREMENT | plain   |              | 主键
+Indexes:
+    "t_dump001_pkey" PRIMARY KEY, btree ("c1 colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump002
+                                Table "public.t_dump002"
+   Column    |  Type   |        Modifiers        | Storage | Stats target | Description 
+-------------+---------+-------------------------+---------+--------------+-------------
+ c1 \ colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump002_pkey" PRIMARY KEY, btree ("c1 \ colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump003
+                                Table "public.t_dump003"
+   Column    |  Type   |        Modifiers        | Storage | Stats target | Description 
+-------------+---------+-------------------------+---------+--------------+-------------
+ c1 ? colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump003_pkey" PRIMARY KEY, btree ("c1 ? colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump004
+                                Table "public.t_dump004"
+    Column    |  Type   |        Modifiers        | Storage | Stats target | Description 
+--------------+---------+-------------------------+---------+--------------+-------------
+ c1 \? colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump004_pkey" PRIMARY KEY, btree ("c1 \? colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump005
+                                 Table "public.t_dump005"
+    Column     |  Type   |        Modifiers        | Storage | Stats target | Description 
+---------------+---------+-------------------------+---------+--------------+-------------
+ c1 \ \ colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump005_pkey" PRIMARY KEY, btree ("c1 \ \ colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump006
+                                 Table "public.t_dump006"
+    Column     |  Type   |        Modifiers        | Storage | Stats target | Description 
+---------------+---------+-------------------------+---------+--------------+-------------
+ c1 \\\ colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump006_pkey" PRIMARY KEY, btree ("c1 \\\ colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ t_dump007
+                                          Table "public.t_dump007"
+              Column              |  Type   |        Modifiers        | Storage | Stats target | Description 
+----------------------------------+---------+-------------------------+---------+--------------+-------------
+ c1 &*^@~!%#$+-=/.><[{}]() colmun | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "t_dump007_pkey" PRIMARY KEY, btree ("c1 &*^@~!%#$+-=/.><[{}]() colmun") TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
 
 \c regression
 drop database if exists restore_autoinc_db;
