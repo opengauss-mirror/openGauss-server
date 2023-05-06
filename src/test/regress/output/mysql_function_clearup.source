@@ -1,0 +1,4 @@
+-- drop database used in mysql_function\mysql_function_2
+drop database if exists mysqltest;
+drop database if exists mysqltestbak;
+drop database if exists mysqlfunction;
