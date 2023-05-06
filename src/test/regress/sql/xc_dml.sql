@@ -350,3 +350,43 @@ DROP TABLE parent_replica_table;
 DROP TABLE UPDATE_XC_C;
 DROP TABLE UPDATE_XC_D;
 
+--
+-- create some tables
+--
+create table t1(val int, val2 int);
+create table t2(val int, val2 int);
+create table t3(val int, val2 int);
+
+create table p1(a int, b int);
+create table c1(a int, b int,d int, e int);
+
+-- insert some rows in them
+insert into t1 values(1,11),(2,11);
+insert into t2 values(3,11),(4,11);
+insert into t3 values(5,11),(6,11);
+
+insert into p1 values(55,66),(77,88),(111,222),(123,345);
+insert into c1 values(111,222,333,444),(123,345,567,789);
+
+select * from t1 order by val;
+select * from t2 order by val;
+select * from t3 order by val;
+select * from p1 order by a;
+select * from c1 order by a;
+
+-- test a few queries with row marks
+select * from t1 order by 1 for update of t1 nowait;
+select * from t1, t2, t3 order by 1 for update;
+
+WITH q1 AS (SELECT * from t1 order by 1 FOR UPDATE) SELECT * FROM q1,t2 order by 1 FOR UPDATE;
+
+WITH q1 AS (SELECT * from t1 order by 1) SELECT * FROM q1;
+WITH q1 AS (SELECT * from t1 order by 1) SELECT * FROM q1 FOR UPDATE;
+WITH q1 AS (SELECT * from t1 order by 1 FOR UPDATE) SELECT * FROM q1 FOR UPDATE;
+
+-- drop objects created
+drop table c1;
+drop table p1;
+drop table t1;
+drop table t2;
+drop table t3;

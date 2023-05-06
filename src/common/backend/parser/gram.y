@@ -22993,7 +22993,7 @@ select_no_parens:
 										(Node*)list_nth($5, 0), (Node*)list_nth($5, 1),
 										$1,
 										yyscanner);
-					$$ = processIntoClauseInSelectStmt((SelectStmt *) $1, (IntoClause *) $6);
+					$$ = processIntoClauseInSelectStmt((SelectStmt *) $2, (IntoClause *) $6);
 				}
 			| with_clause select_clause opt_sort_clause select_limit for_locking_clause into_clause
 				{
@@ -23002,7 +23002,7 @@ select_no_parens:
 										(Node*)list_nth($4, 0), (Node*)list_nth($4, 1),
 										$1,
 										yyscanner);
-					$$ = processIntoClauseInSelectStmt((SelectStmt *) $1, (IntoClause *) $6);
+					$$ = processIntoClauseInSelectStmt((SelectStmt *) $2, (IntoClause *) $6);
 				}
 			| with_clause select_clause opt_sort_clause opt_select_limit into_clause opt_for_locking_clause
 				{
@@ -23011,7 +23011,7 @@ select_no_parens:
 										(Node*)list_nth($4, 0), (Node*)list_nth($4, 1),
 										$1,
 										yyscanner);
-					$$ = processIntoClauseInSelectStmt((SelectStmt *) $1, (IntoClause *) $5);
+					$$ = processIntoClauseInSelectStmt((SelectStmt *) $2, (IntoClause *) $5);
 				}
 			| with_clause select_clause opt_sort_clause select_limit opt_for_locking_clause
 				{
