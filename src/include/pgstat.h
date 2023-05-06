@@ -2779,6 +2779,22 @@ typedef struct {
     uint32 	pinning_backends;
 } BufferCachePagesRec;
 
+typedef struct {
+    int bufferid;
+    uint8 is_remote_dirty;
+    uint8 lock_mode;
+    uint8 is_edp;
+    uint8 force_request;
+    uint8 need_flush;
+    int buf_id;
+    uint32 state;
+    uint32 pblk_relno;
+    uint32 pblk_blkno;
+    uint64 pblk_lsn;
+    uint8 seg_fileno;
+    uint32 seg_blockno;
+} SSBufferCtrlRec;
+
 /*
  * Function context for data persisting over repeated calls.
  */
@@ -2786,6 +2802,11 @@ typedef struct {
     TupleDesc tupdesc;
     BufferCachePagesRec* record;
 } BufferCachePagesContext;
+
+typedef struct {
+    TupleDesc tupdesc;
+    SSBufferCtrlRec* record;
+} SSBufferCtrlContext;
 
 /* Function context for table distribution over repeated calls. */
 typedef struct TableDistributionInfo {
