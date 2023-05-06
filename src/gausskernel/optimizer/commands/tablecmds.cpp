@@ -1154,6 +1154,7 @@ static bool isOrientationSet(List* options, bool* isCUFormat, bool isDfsTbl)
                             errdetail("Valid string is \"orc\".")));
                 }
             } else {
+#ifdef ENABLE_MULTIPLE_NODES
                 if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) != 0 &&
                     pg_strcasecmp(defGetString(def), ORIENTATION_TIMESERIES) != 0 &&
                     pg_strcasecmp(defGetString(def), ORIENTATION_ROW) != 0) {
@@ -1162,6 +1163,15 @@ static bool isOrientationSet(List* options, bool* isCUFormat, bool isDfsTbl)
                             errmsg("Invalid string for  \"ORIENTATION\" option"),
                             errdetail("Valid string are \"column\", \"row\", \"timeseries\".")));
                 }
+#else   /* ENABLE_MULTIPLE_NODES */
+                if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) != 0 &&
+                    pg_strcasecmp(defGetString(def), ORIENTATION_ROW) != 0) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OPTION),
+                            errmsg("Invalid string for  \"ORIENTATION\" option"),
+                            errdetail("Valid string are \"column\", \"row\".")));
+                }
+#endif   /* ENABLE_MULTIPLE_NODES */
             }
             if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) == 0 && isCUFormat != NULL) {
                 *isCUFormat = true;
@@ -1233,10 +1243,17 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
         }
 
         if (pg_strcasecmp(def->defname, "orientation") == 0 && pg_strcasecmp(defGetString(def), ORIENTATION_ORC) == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPTION),
                     errmsg("Invalid string for  \"ORIENTATION\" option"),
                     errdetail("Valid string are \"column\", \"row\", \"timeseries\".")));
+#else   /* ENABLE_MULTIPLE_NODES */
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OPTION),
+                    errmsg("Invalid string for  \"ORIENTATION\" option"),
+                    errdetail("Valid string are \"column\", \"row\".")));
+#endif   /* ENABLE_MULTIPLE_NODES */
         }
         if (pg_strcasecmp(def->defname, "storage_type") == 0) {
             if (pg_strcasecmp(defGetString(def), TABLE_ACCESS_METHOD_USTORE) == 0) {
