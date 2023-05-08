@@ -2626,6 +2626,41 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
     }
 }
 
+void UpdatePgClassRelOptionsSystemCache(Datum relOptions, HeapTuple* reltup, Relation relRelation, void** relform) 
+{
+    Datum values[Natts_pg_class];
+    bool nulls[Natts_pg_class];
+    bool replaces[Natts_pg_class];
+    HeapTuple nctup = NULL;
+    errno_t rc;
+    HeapTuple tmp;
+
+    
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    if (relOptions != (Datum)0) {
+        values[Anum_pg_class_reloptions - 1] = relOptions;
+        nulls[Anum_pg_class_reloptions - 1] = false;
+    } else {
+        nulls[Anum_pg_class_reloptions - 1] = true;
+    }
+    replaces[Anum_pg_class_reloptions - 1] = true;
+
+    nctup = (HeapTuple) tableam_tops_modify_tuple(*reltup, RelationGetDescr(relRelation), values, nulls, replaces); 
+
+    *relform = (Form_pg_class)GETSTRUCT(nctup);
+
+    tmp = nctup;
+    nctup = *reltup;
+    *reltup = tmp;
+    heap_freetuple(nctup);
+}
+
 /*
  * Swap the physical files of two given relations.
  *
@@ -2652,7 +2687,7 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
  */
 static void swap_relation_files(
     Oid r1, Oid r2, bool target_is_pg_class, bool swap_toast_by_content, TransactionId frozenXid,
-    MultiXactId frozenMulti, Oid* mapped_tables)
+    MultiXactId frozenMulti, Oid* mapped_tables, AlteredTableInfo* tab)
 {
     Relation relRelation;
     HeapTuple reltup1, reltup2;
@@ -2817,6 +2852,13 @@ static void swap_relation_files(
         reltup1 = tmp;
     }
 
+    /* Set the relOptions of new rel to the ones before alter compressed options, 
+     * which was used to delete the correct data files when droping new rel.
+     */
+    if (tab !=NULL && tab->rewrite == AT_REWRITE_ALTER_COMPRESSION) {
+        UpdatePgClassRelOptionsSystemCache(tab->oldOptions, &reltup2, relRelation, (void**)&relform2);
+    }
+
     /* swap size statistics too, since new rel has freshly-updated stats */
     if (!IS_PGXC_COORDINATOR) {
         float8 swap_pages;
@@ -2873,7 +2915,8 @@ static void swap_relation_files(
                     swap_toast_by_content,
                     frozenXid,
                     frozenMulti,
-                    mapped_tables);
+                    mapped_tables,
+                    NULL);
             } else {
                 /* caller messed up */
                 ereport(ERROR,
@@ -2964,7 +3007,8 @@ static void swap_relation_files(
             swap_toast_by_content,
             InvalidTransactionId,
             InvalidMultiXactId,
-            mapped_tables);
+            mapped_tables,
+            NULL);
     /* Clean up. */
     if (nctup)
         heap_freetuple(nctup);
@@ -3032,6 +3076,39 @@ static void swap_relation_names(Oid r1, Oid r2)
     CommandCounterIncrement();
 }
 
+void static UpdatePartitionRelOptionsSystemCache(Datum relOptions, HeapTuple* reltup, Relation relRelation, void** relform) 
+{
+    Datum values[Natts_pg_partition];
+    bool nulls[Natts_pg_partition];
+    bool replaces[Natts_pg_partition];
+    HeapTuple ntup = NULL;
+    errno_t rc;
+    HeapTuple tmp;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    if (relOptions != (Datum)0) {
+        values[Anum_pg_partition_reloptions - 1] = relOptions;
+        nulls[Anum_pg_partition_reloptions - 1] = false;
+    } else {
+        nulls[Anum_pg_partition_reloptions - 1] = true;
+    }
+    replaces[Anum_pg_partition_reloptions - 1] = true;
+
+    ntup = (HeapTuple) tableam_tops_modify_tuple(*reltup, RelationGetDescr(relRelation), values, nulls, replaces);
+
+    *relform = GETSTRUCT(ntup);
+    tmp = ntup;
+    ntup = *reltup;
+    *reltup = tmp;
+    heap_freetuple(ntup);
+}
+
 /*
  * @@GaussDB@@
  * Target       : data partition
@@ -3043,7 +3120,7 @@ static void swap_relation_names(Oid r1, Oid r2)
  */
 static void swapPartitionfiles(
     Oid partitionOid, Oid tempTableOid, bool swapToastByContent, TransactionId frozenXid,
-    MultiXactId multiXid, Oid* mappedTables)
+    MultiXactId multiXid, Oid* mappedTables,  AlteredTableInfo* tab = NULL)
 {
     Relation relRelation1 = NULL;
     Relation relRelation2 = NULL;
@@ -3138,6 +3215,13 @@ static void swapPartitionfiles(
         reltup1 = tmp;
     }
 
+    if (tab != NULL && tab->rewrite == AT_REWRITE_ALTER_COMPRESSION) {
+        /* set the relOptions of old rel to the ones after compressed options */
+        UpdatePartitionRelOptionsSystemCache(tab->newOptions, &reltup1, relRelation1, (void**)&relform1);
+        /* set the relOptions of new rel to the ones before alter compressed options */
+        UpdatePartitionRelOptionsSystemCache(tab->oldOptions, &reltup2, relRelation2, (void**)&relform2);
+    }
+
     /* swap size statistics too, since new rel has freshly-updated stats */
     {
         float8 swap_pages;
@@ -3192,7 +3276,8 @@ static void swapPartitionfiles(
             swapToastByContent,
             InvalidTransactionId,
             InvalidMultiXactId,
-            mappedTables);
+            mappedTables,
+            NULL);
 
     /* Clean up. */
     if (ntup)
@@ -3218,7 +3303,7 @@ static void swapCascadeHeapTables(
         if (swapByContent) {
             if (relId1 && relId2) {
                 /* Recursively swap the contents of the toast tables */
-                swap_relation_files(relId1, relId2, false, swapByContent, frozenXid, multiXid, mappedTables);
+                swap_relation_files(relId1, relId2, false, swapByContent, frozenXid, multiXid, mappedTables, NULL);
             } else {
                 /* caller messed up */
                 ereport(ERROR,
@@ -3341,7 +3426,7 @@ static void SwapCStoreTables(Oid relId1, Oid relId2, Oid parentOid, Oid tempTabl
  * cleaning up (including rebuilding all indexes on the old heap).
  */
 void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bool swap_toast_by_content,
-    bool checkConstraints, TransactionId frozenXid, MultiXactId frozenMulti, AdaptMem* memInfo)
+    bool checkConstraints, TransactionId frozenXid, MultiXactId frozenMulti, AdaptMem* memInfo, AlteredTableInfo* tab)
 {
     ObjectAddress object;
     Oid mapped_tables[4];
@@ -3363,7 +3448,7 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
     }
 
     swap_relation_files(OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId), 
-        swap_toast_by_content, frozenXid, frozenMulti, mapped_tables);
+        swap_toast_by_content, frozenXid, frozenMulti, mapped_tables, tab);
 
     /*
      * If it's a system catalog, queue an sinval message to flush all
@@ -3474,7 +3559,7 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
  */
 void finishPartitionHeapSwap(
     Oid partitionOid, Oid tempTableOid, bool swapToastByContent, TransactionId frozenXid,
-    MultiXactId multiXid, bool tempTableIsPartition)
+    MultiXactId multiXid, bool tempTableIsPartition, AlteredTableInfo* tab)
 {
     Oid mapped_tables[4];
     int i = 0;
@@ -3493,7 +3578,7 @@ void finishPartitionHeapSwap(
         swap_partition_relfilenode(partitionOid, tempTableOid, swapToastByContent, frozenXid, multiXid, mapped_tables);
     } else {
         /* For alter table exchange, between partition and a normal table */
-        swapPartitionfiles(partitionOid, tempTableOid, swapToastByContent, frozenXid, multiXid, mapped_tables);
+        swapPartitionfiles(partitionOid, tempTableOid, swapToastByContent, frozenXid, multiXid, mapped_tables, tab);
     }
 
     /*
@@ -5359,7 +5444,8 @@ static void swap_partition_relfilenode(
             swapToastByContent,
             InvalidTransactionId,
             InvalidMultiXactId,
-            mappedTables);
+            mappedTables,
+            NULL);
 
     /* Clean up. */
     if (ntup)
@@ -5703,7 +5789,8 @@ void relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch, Transact
         false,
         relfrozenxid,
         relMultiXid,
-        mapped_tables);
+        mapped_tables,
+        NULL);
     /*
      * Now we must remove any relation mapping entries that we set up for the
      * transient table, as well as its toast table and toast index if any. If

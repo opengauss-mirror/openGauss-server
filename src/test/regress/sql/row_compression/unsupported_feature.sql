@@ -38,11 +38,11 @@ ALTER TABLE unsupported_feature.alter_table EXCHANGE PARTITION FOR(2500) WITH TA
 -- unspport alter compress_chunk_size
 create TABLE unsupported_feature.alter_table_option(id int) WITH(compresstype=2);
 \d+ unsupported_feature.alter_table_option
-ALTER TABLE unsupported_feature.alter_table_option SET(compresstype=0); -- fail
-ALTER TABLE unsupported_feature.alter_table_option SET(compress_chunk_size=2048); -- fail
-ALTER TABLE unsupported_feature.alter_table_option SET(compress_level=2, compress_prealloc_chunks=0);
+ALTER TABLE unsupported_feature.alter_table_option SET(compresstype=0); -- success
+ALTER TABLE unsupported_feature.alter_table_option SET(compress_chunk_size=2048); -- failed
+ALTER TABLE unsupported_feature.alter_table_option SET(compresstype=2, compress_level=2, compress_prealloc_chunks=0); -- success
 -- alter compress_byte_convert\compress_diff_convert
-create table unsupported_feature.rolcompress_table_001(a int) with (compresstype=2, compress_diff_convert=true); -- fail
+create table unsupported_feature.rolcompress_table_001(a int) with (compresstype=2, compress_diff_convert=true); -- failed
 
 create table unsupported_feature.t_rowcompress_0007(cid int, name varchar2) with (compresstype=1);
 alter table unsupported_feature.t_rowcompress_0007 set (compress_diff_convert=true); --fail
@@ -59,8 +59,8 @@ CREATE INDEX on unsupported_feature.index_test(c1) WITH(compresstype=2, segment=
 create table unsupported_feature.compress_byte_test(id int) with (compresstype=2, compress_byte_convert=false, compress_diff_convert = true); -- failed
 
 create table unsupported_feature.test(id int) with (compresstype=2); -- success
-alter table unsupported_feature.test set(Compresstype=1); -- failed
-alter table unsupported_feature.test set(Compress_level=3); -- success
+alter table unsupported_feature.test set(Compresstype=1); -- success
+alter table unsupported_feature.test set(Compress_level=3); -- failed
 
 create table lm_rcp_4 (c1 int,c2 varchar2,c3 number,c4 money,c5 CHAR(20),c6 CLOB,c7 blob,c8 DATE,c9 BOOLEAN,c10 TIMESTAMP,c11 point,columns12 cidr) with(Compresstype=2,Compress_chunk_size=512)
     partition by list(c1) subpartition by range(c3)(
