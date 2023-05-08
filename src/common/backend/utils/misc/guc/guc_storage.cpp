@@ -209,6 +209,7 @@ static bool check_and_assign_general_oids(List* elemlist);
 static int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
 static bool check_ss_interconnect_url(char **newval, void **extra, GucSource source);
+static bool check_ss_ock_log_path(char **newval, void **extra, GucSource source);
 static bool check_ss_interconnect_type(char **newval, void **extra, GucSource source);
 static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
@@ -4450,7 +4451,7 @@ static void InitStorageConfigureNamesString()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.dms_attr.ock_log_path,
             "",
-            NULL,
+            check_ss_ock_log_path,
             NULL,
             NULL},
         {{"ss_scrlock_worker_bind_core",
@@ -5814,6 +5815,34 @@ static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource sou
         return true;
     }
     return false;
+}
+
+extern bool check_special_character(char c);
+
+static bool check_ss_ock_log_path(char **newval, void **extra, GucSource source)
+{
+    if (newval == NULL || *newval == NULL || **newval == '\0') {
+        return true;
+    }
+
+    char *absPath;
+    absPath = pstrdup(*newval);
+
+    int len = strlen(absPath);
+    for (int i = 0; i < len; i++) {
+        if (!check_special_character(absPath[i]) || isspace(absPath[i])) {
+            ereport(ERROR, (errmsg("Special character \"%c\" can not used.", absPath[i])));
+            return false;
+        }
+    }
+
+    char realPath[PATH_MAX + 1] = {0};
+    if (realpath(*newval, realPath) == NULL) {
+        ereport(ERROR, (errmsg("Fail to realpath config param ss_ock_log_path.")));
+        return false;
+    }
+
+    return true;
 }
 
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source)
