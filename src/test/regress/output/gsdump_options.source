@@ -1,20 +1,16 @@
 --prepare_test
-create user gsqlbot2 password 'Gaussdba_Mpp';
---?.*
-create database gsqldb2 with encoding='UTF8' template=template0 owner gsqlbot2;
---?.*
-\c gsqldb2
-grant all on schema public to gsqlbot2;
+create user gsqlbot2gsdump password 'Gaussdba_Mpp';
+create database gsqldb2gsdump with encoding='UTF8' template=template0 owner gsqlbot2gsdump;
+\c gsqldb2gsdump
+grant all on schema public to gsqlbot2gsdump;
 GRANT CREATE ON SCHEMA public TO PUBLIC;
-\! @abs_bindir@/gs_dump gsqldb2 -w -p -f @abs_srcdir@/tmp_check/dump1.sql
+\! @abs_bindir@/gs_dump gsqldb2gsdump -w -p -f @abs_srcdir@/tmp_check/dump1.sql
 gs_dump: The option '-p' requires a parameter.
-\! @abs_bindir@/gs_dump gsqldb2 -w -p -f @abs_srcdir@/tmp_check/dump1.sql
+\! @abs_bindir@/gs_dump gsqldb2gsdump -w -p -f @abs_srcdir@/tmp_check/dump1.sql
 gs_dump: The option '-p' requires a parameter.
-\! @abs_bindir@/gs_dump gsqldb2 -w -p @portstring@f -f @abs_srcdir@/tmp_check/dump1.sql
-connection to database "gsqldb2" failed: invalid integer value "@portstring@f" for connection option "port"
- \! @abs_bindir@/gs_dump gsqldb2 -w -p 65534 -f @abs_srcdir@/tmp_check/dump1.sql
-connection to database "gsqldb2" failed: connect to server failed: No such file or directory
- \! @abs_bindir@/gs_dump gsqldb2 -w -f@abs_srcdir@/tmp_check/dump1.sql -p@portstring@ 1>/dev/null 2>/dev/null;echo $?
-0
-\! @abs_bindir@/gs_dump gsqldb2 -w -f @abs_srcdir@/tmp_check/dump1.sql -p @portstring@ 1>/dev/null 2>/dev/null;echo $?
+\! @abs_bindir@/gs_dump gsqldb2gsdump -w -p @portstring@f -f @abs_srcdir@/tmp_check/dump1.sql
+connection to database "gsqldb2gsdump" failed: invalid integer value "@portstring@f" for connection option "port"
+ \! @abs_bindir@/gs_dump gsqldb2gsdump -w -p 65534 -f @abs_srcdir@/tmp_check/dump1.sql
+connection to database "gsqldb2gsdump" failed: connect to server failed: No such file or directory
+ \! @abs_bindir@/gs_dump gsqldb2gsdump -w -f@abs_srcdir@/tmp_check/dump1.sql -p @portstring@ 1>/dev/null 2>/dev/null;echo $?
 0

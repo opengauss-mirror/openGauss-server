@@ -1053,13 +1053,8 @@ test: rename_table
 # debug instrument
 test: test_debug5
 
-# fix echo infos
-test: gstrace_options
-test: gaussdb_options
-test: gsql_options
-test: gsbasebackup_options
-test: gsdump_options
-test: gsloader_options
+# fix notice infos
+test: gstrace_options gaussdb_options gsql_options gsbasebackup_options gsdump_options gsloader_options
 
 # debug ceil(-0.5) -0
 test: ceil_negtive_zero
