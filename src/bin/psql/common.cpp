@@ -1228,6 +1228,9 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
 
         if (is_explain) {
             OK = GetPrintResult(&results, is_explain, is_print, query, print_error);
+#ifdef HAVE_CE            
+            pset.db->client_logic->isInvalidOperationOnColumn = false;
+#endif
             if (pset.timing && is_print) {
                 INSTR_TIME_SET_CURRENT(after);
                 INSTR_TIME_SUBTRACT(after, before);
