@@ -23483,7 +23483,9 @@ static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo*
     /* Obtain the sequence name of the auto_increment column from the pg_attrdef. */
     appendPQExpBuffer(query,
         "SELECT pg_catalog.split_part(pg_catalog.split_part(adbin, ':seqNameSpace ', 2), ' ', 1) as seqnamespace, "
-        "pg_catalog.split_part(pg_catalog.split_part(adbin, ':seqName ', 2), ' ', 1) as seqname "
+        "pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace"
+        "(pg_catalog.split_part(pg_catalog.split_part(adbin, ':seqName ', 2), ' :seqNameSpace', 1), '\\ ', ' '), "
+        "'\\{', '{'), '\\}', '}'), '\\(', '('), '\\)', ')'), '\\\\', '\\') as seqname "
         "from pg_catalog.pg_attrdef where adrelid = %u and adnum = %d",
         tbinfo->dobj.catId.oid, tbinfo->autoinc_attnum);
 
