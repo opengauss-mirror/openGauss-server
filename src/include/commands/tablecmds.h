@@ -166,4 +166,5 @@ extern int getPartitionElementsIndexByOid(Relation partTableRel, Oid partOid);
 extern void SetPartionIndexType(IndexStmt* stmt, Relation rel, bool is_alter_table);
 extern bool ConstraintSatisfyAutoIncrement(HeapTuple tuple, TupleDesc desc, AttrNumber attrnum, char contype);
 extern void CheckRelAutoIncrementIndex(Oid relid, LOCKMODE lockmode);
+extern void RebuildDependViewForProc(Oid proc_oid);
 #endif /* TABLECMDS_H */
