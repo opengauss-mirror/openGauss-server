@@ -137,6 +137,7 @@ static void write_eventlog(int level, const char* line, int len);
 
 static const int CREATE_ALTER_SUBSCRIPTION = 16;
 static const int CREATE_ALTER_USERMAPPING = 18;
+static const int GRANT_USAGE = 19;
 
 /* Macro for checking t_thrd.log_cxt.errordata_stack_depth is reasonable */
 #define CHECK_STACK_DEPTH()                                               \
@@ -4368,6 +4369,7 @@ static char* mask_Password_internal(const char* query_string)
      * 16 - create/alter subscription(CREATE_ALTER_SUBSCRIPTION)
      * 17 - set password (b compatibility)
      * 18 - create/alter user mapping
+     * 19 - grant usage on *.*(b compatibility, same as create/alter user)
      */
     int curStmtType = 0;
     int prevToken[5] = {0};
@@ -4964,6 +4966,9 @@ static char* mask_Password_internal(const char* query_string)
                             curStmtType = 0;
                         }
                         idx = 0;
+                    } else if (DB_IS_CMPT(B_FORMAT) && prevToken[1] == GRANT &&
+                        pg_strcasecmp(yylval.str, "usage") == 0) {
+                        curStmtType = GRANT_USAGE;
                     }
                     break;
                 case SCONST:
@@ -5077,6 +5082,11 @@ static char* mask_Password_internal(const char* query_string)
                 case MAPPING:
                     if (prevToken[0] == USER) {
                         prevToken[1] = MAPPING;
+                    }
+                    break;
+                case GRANT:
+                    if (DB_IS_CMPT(B_FORMAT) && prevToken[0] == ';') {
+                        prevToken[1] = GRANT;
                     }
                     break;
                 default:
