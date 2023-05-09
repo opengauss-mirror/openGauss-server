@@ -8703,6 +8703,7 @@ void* copyObject(const void* from)
             break;
         case T_ShowEventStmt:
             retval =node_copy_show_event_info((ShowEventStmt *)from);
+            break;
         case T_IndexHintRelationData:
             retval = _copyIndexHintRelationData((IndexHintRelationData *)from);
             break;
