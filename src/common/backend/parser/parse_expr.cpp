@@ -1235,7 +1235,7 @@ static bool isCol2Function(List* fields)
         char **p_argnames = NULL;
         char *p_argmodes = NULL;
         int allArgs = get_func_arg_info(proctup, &p_argtypes, &p_argnames, &p_argmodes);
-        if (allArgs > 0 || !OidIsValid(procform->prorettype)) {
+        if ((allArgs > 0 && allArgs != procform->pronargdefaults) || !OidIsValid(procform->prorettype)) {
             continue;
         }
 
