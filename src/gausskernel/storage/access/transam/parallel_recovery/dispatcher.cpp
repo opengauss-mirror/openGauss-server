@@ -2481,6 +2481,12 @@ static void HandleStartupProcInterruptsForParallelRedo(void)
         SendSingalToPageWorker(SIGHUP);
     }
 
+    if (ENABLE_DMS && t_thrd.startup_cxt.shutdown_requested && SmartShutdown != g_instance.status &&
+        g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally) {
+        crps_destory_ctxs();
+        proc_exit(0);
+    }
+
     /*
      * Check if we were requested to exit without finishing recovery.
      */

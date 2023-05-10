@@ -624,6 +624,12 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                         SegTerminateBufferIO((BufferDesc *)bufHdr, false, 0);
                         // when reform fail, should return InvalidBuffer to reform proc thread
                         if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                            SSUnPinBuffer(bufHdr);
+                            return InvalidBuffer;
+                        }
+
+                        if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
+                            SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
 
