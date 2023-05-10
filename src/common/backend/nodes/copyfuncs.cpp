@@ -192,6 +192,41 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
 }
 
 /*
+ * CopyNdpPlan
+ */
+static void CopyNdpPlan(const Plan* from, Plan* newnode)
+{
+    COPY_SCALAR_FIELD(ndp_pushdown_optimized);
+    COPY_NODE_FIELD(ndp_pushdown_condition);
+    NdpScanCondition* newcond = (NdpScanCondition*)newnode->ndp_pushdown_condition;
+    NdpScanCondition* fromcond = (NdpScanCondition*)from->ndp_pushdown_condition;
+    if (IsA(newnode, SeqScan)) {
+        if (newcond != nullptr) {
+            newcond->plan = newnode;
+        }
+        return;
+    }
+    if (!IsA(from, Agg) || !IsA(newnode, Agg)) {
+        return;
+    }
+    if ((from->lefttree == nullptr || from->righttree != nullptr) ||
+        (newnode->lefttree == nullptr || newnode->righttree !=nullptr)) {
+        return;
+    }
+    if (!IsA(from->lefttree, SeqScan) || !IsA(newnode->lefttree, SeqScan)) {
+        return;
+    }
+    newcond = (NdpScanCondition *)newnode->lefttree->ndp_pushdown_condition;
+    fromcond = (NdpScanCondition *)from->lefttree->ndp_pushdown_condition;
+    if (fromcond == nullptr || newcond == nullptr) {
+        return;
+    }
+    if (fromcond->plan == from) {
+        newcond->plan = newnode;
+    }
+}
+
+/*
  * CopyPlanFields
  *
  *		This function copies the fields of the Plan node.  It is used by
@@ -241,6 +276,7 @@ static void CopyPlanFields(const Plan* from, Plan* newnode)
     COPY_SCALAR_FIELD(pred_startup_time);
     COPY_SCALAR_FIELD(pred_total_time);
     COPY_SCALAR_FIELD(pred_max_memory);
+    CopyNdpPlan(from, newnode);
 
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 }
@@ -257,6 +293,18 @@ static Plan* _copyPlan(const Plan* from)
      */
     CopyPlanFields(from, newnode);
 
+    return newnode;
+}
+
+/*
+ * _copyNdp
+ */
+static NdpScanCondition* _copyNdp(const NdpScanCondition* from)
+{
+    NdpScanCondition* newnode = makeNode(NdpScanCondition);
+    COPY_SCALAR_FIELD(tableId);
+    COPY_SCALAR_FIELD(ctx);
+    newnode->plan = nullptr;
     return newnode;
 }
 
@@ -7396,6 +7444,9 @@ void* copyObject(const void* from)
             break;
         case T_Plan:
             retval = _copyPlan((Plan*)from);
+            break;
+        case T_NdpScanCondition:
+            retval = _copyNdp((NdpScanCondition*)from);
             break;
         case T_BaseResult:
             retval = _copyResult((BaseResult*)from);

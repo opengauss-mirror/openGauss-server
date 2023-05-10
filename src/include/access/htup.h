@@ -207,7 +207,7 @@ typedef HeapTupleHeaderData* HeapTupleHeader;
 
 #define HEAP_HAS_8BYTE_UID (0x4000) /* tuple has 8 bytes uid */
 #define HEAP_UID_MASK (0x4000)
-#define HEAP_RESERVED_BIT (0x8000) /* tuple uid related bits */
+#define NDP_HANDLED_TUPLE (0x8000) /* tuple is from ndp backend */
 
 #define HEAP_XACT_MASK (0x3FE0) /* visibility-related bits */
 

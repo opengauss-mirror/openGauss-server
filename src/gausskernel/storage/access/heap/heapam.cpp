@@ -271,6 +271,9 @@ static void initscan(HeapScanDesc scan, ScanKey key, bool is_rescan)
     scan->rs_base.rs_ss_accessor = NULL;
     scan->dop = 1;
 
+    /* ndp args init */
+    scan->rs_base.ndp_pushdown_optimized = false;
+
     /* we don't have a marked position... */
     ItemPointerSetInvalid(&(scan->rs_mctid));
 

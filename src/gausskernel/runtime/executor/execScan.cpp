@@ -190,6 +190,18 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
             }
         }
 
+        /* place to filter Ndp page */
+        if (node->ss_currentScanDesc && node->ss_currentScanDesc->ndp_pushdown_optimized) {
+            HeapTuple tuple = (HeapTuple)slot->tts_tuple;
+            if (tuple && tuple->t_data && (tuple->t_data->t_infomask & NDP_HANDLED_TUPLE)) {
+                if (proj_info != NULL) {
+                    return proj_info->pi_slot;
+                } else {
+                    return slot;
+                }
+            }
+        }
+
         /*
          * place the current tuple into the expr context
          */

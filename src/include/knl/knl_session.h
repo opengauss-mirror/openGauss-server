@@ -2758,6 +2758,29 @@ typedef enum {
     EXECUTE_MESSAGE_QUERY,
     EXECUTE_BATCH_MESSAGE_QUERY
 } PBEMessage;
+
+/* record statement of ndp plugin */
+typedef struct NdpStats {
+    unsigned long queryCounter;
+    unsigned long sendFailed;
+    unsigned long failedIO;
+    unsigned long pushDownPage;
+    unsigned long sendBackPage;
+    unsigned long ndpPageAgg;
+    unsigned long ndpPageScan;
+} NdpStats;
+
+typedef struct knl_u_ndp_context {
+    NdpStats *stats;
+    MemoryContext mem_cxt;
+    void *cxt;
+    bool enable_ndp;
+    int pushdown_min_blocks;
+    int ndp_port;
+    char *ca_path;
+    char *crl_path;
+} knl_u_ndp_context;
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
     /* used for threadworker, elem in m_readySessionList */
@@ -2886,6 +2909,8 @@ typedef struct knl_session_context {
      * end on returning message by server side clientfd.
      */
     struct knl_u_clientConnTime_context clientConnTime_cxt;
+
+    knl_u_ndp_context ndp_cxt;
 
     knl_u_hook_context hook_cxt;
 

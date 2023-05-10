@@ -325,6 +325,10 @@ typedef struct Instrumentation {
     int ec_libodbc_type;                       /* ec execute libodbc_type*/
     int64 ec_fetch_count;                      /* ec fetch count*/
     RecursiveInfo recursiveInfo;
+
+    int ndp_pushdown_page;
+    int ndp_sendback_page;
+    int ndp_handled;
 } Instrumentation;
 
 /* instrumentation data */

@@ -190,7 +190,7 @@ static TupleTableSlot* SeqNext(SeqScanState* node);
 
 static void ExecInitNextPartitionForSeqScan(SeqScanState* node);
 
-template<TableAmType type, bool hashBucket>
+template<TableAmType type, bool hashBucket, bool pushdown>
 FORCE_INLINE
 void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDirection direction,
     bool* has_cur_xact_write)
@@ -199,6 +199,8 @@ void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDi
     if(hashBucket) {
         /* fall back to orign slow function. */
         tuple =  scan_handler_tbl_getnext(scan, direction, NULL, has_cur_xact_write);
+    } else if (pushdown) {
+        tuple = ndp_tableam->scan_getnexttuple(scan, direction, slot);
     } else if(type == TAM_HEAP) {
         tuple =  (Tuple)heap_getnext(scan, direction, has_cur_xact_write);
     } else {
@@ -841,16 +843,30 @@ static inline void InitSeqNextMtd(SeqScan* node, SeqScanState* scanstate)
 {
     if (!node->tablesample) {
         scanstate->ScanNextMtd = SeqNext;
-        if(RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {
-            if(scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
-                scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, true>;
-            else
-                scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, true>;
+        if (scanstate->ss_currentScanDesc != NULL && scanstate->ss_currentScanDesc->ndp_pushdown_optimized) {
+            if (RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {
+                if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, true, true>;
+                else
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, true, true>;
+            } else {
+                if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, false, true>;
+                else
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, false, true>;
+            }
         } else {
-            if(scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
-                scanstate->fillNextSlotFunc = seq_scan_getnext;
-            else
-                scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, false>;
+            if (RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {
+                if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, true, false>;
+                else
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, true, false>;
+            } else {
+                if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
+                    scanstate->fillNextSlotFunc = seq_scan_getnext;
+                else
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, false, false>;
+            }
         }
     } else {
         if (RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {

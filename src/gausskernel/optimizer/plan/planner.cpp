@@ -90,6 +90,9 @@
 #include "optimizer/gplanmgr.h"
 #include "instruments/instr_statement.h"
 
+/* Hook for plugins to get control in planner() */
+THR_LOCAL ndp_pushdown_hook_type ndp_pushdown_hook = NULL;
+
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
 #endif
@@ -395,6 +398,10 @@ PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
     result->plannertime = totaltime;
     if (u_sess->attr.attr_common.max_datanode_for_plan > 0 && IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         GetRemoteQuery(result, NULL);
+    }
+
+    if (ndp_pushdown_hook) {
+        (*ndp_pushdown_hook)(parse, result);
     }
 
     return result;
