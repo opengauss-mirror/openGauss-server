@@ -1367,10 +1367,10 @@ static int CBStartup(void *db_handle)
 static int CBRecoveryStandby(void *db_handle, int inst_id)
 {
     Assert(inst_id == g_instance.attr.attr_storage.dms_attr.instance_id);
-    ereport(LOG, (errmsg("[SS reform] Recovery as standby")));
+    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] Recovery as standby")));
 
     if (!SSRecoveryNodes()) {
-        ereport(WARNING, (errmodule(MOD_DMS), errmsg("Recovery failed in startup first")));
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform] Recovery failed")));
         return GS_ERROR;
     }
 
@@ -1382,14 +1382,14 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
     Assert(g_instance.dms_cxt.SSReformerControl.primaryInstId == inst_id ||
         g_instance.dms_cxt.SSReformerControl.primaryInstId == -1);
     g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
-    ereport(LOG, (errmsg("[SS reform] Recovery as primary, will replay xlog from inst:%d",
+    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] Recovery as primary, will replay xlog from inst:%d",
                          g_instance.dms_cxt.SSReformerControl.primaryInstId)));
 
     /* Release my own lock before recovery */
     SSLockReleaseAll();
     SSWakeupRecovery();
     if (!SSRecoveryNodes()) {
-        ereport(WARNING, (errmodule(MOD_DMS), errmsg("Recovery failed in startup first")));
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform] Recovery failed")));
         return GS_ERROR;
     }
 
@@ -1548,9 +1548,11 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
     g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
+    g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = false;
     g_instance.dms_cxt.resetSyscache = true;
     if (ss_reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
+        g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
         if (role == DMS_ROLE_REFORMER) {
             g_instance.dms_cxt.dw_init = false;
             // variable set order: SharedRecoveryInProgress -> failover_triggered -> dms_role

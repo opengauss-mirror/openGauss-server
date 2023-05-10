@@ -10209,6 +10209,13 @@ static void sigusr1_handler(SIGNAL_ARGS)
                 wal_get_role_string(get_cur_mode()))));
     }
 
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP)) {
+        if (g_instance.pid_cxt.StartupPID != 0) {
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] send to startup term signal")));
+            signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+        }
+    }
+
     if (CheckPromoteSignal()) {
         handle_promote_signal();
     }

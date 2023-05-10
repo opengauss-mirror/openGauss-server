@@ -55,6 +55,7 @@ typedef enum {
     PMSIGNAL_DMS_SWITCHOVER_PROMOTE,   /* dms standby switchover promote */
     PMSIGNAL_DMS_REFORM,               /* dms reform start during PM_RUN */
     PMSIGNAL_DMS_REFORM_DONE,          /* dms reform done */
+    PMSIGNAL_DMS_TERM_STARTUP,         /* term startup thread*/
     NUM_PMSIGNALS                      /* Must be last value of enum! */
 } PMSignalReason;
 
