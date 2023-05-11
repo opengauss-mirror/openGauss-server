@@ -87,13 +87,13 @@ create table t_collate(id int, f1 text collate "utf8mb4_general_ci");
 alter table t_collate add column f2 text collate "utf8mb4_unicode_ci",add column f3 varchar collate "utf8mb4_general_ci";
 alter table t_collate alter f1 type text collate "utf8mb4_bin";
 \d+ t_collate
-                                    Table "public.t_collate"
- Column |       Type        |         Modifiers          | Storage  | Stats target | Description 
---------+-------------------+----------------------------+----------+--------------+-------------
- id     | integer           |                            | plain    |              | 
- f1     | text              | collate utf8mb4_bin        | extended |              | 
- f2     | text              | collate utf8mb4_unicode_ci | extended |              | 
- f3     | character varying | collate utf8mb4_general_ci | extended |              | 
+                                              Table "public.t_collate"
+ Column |       Type        |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-------------------+-----------------------------------------------+----------+--------------+-------------
+ id     | integer           |                                               | plain    |              | 
+ f1     | text              | character set UTF8 collate utf8mb4_bin        | extended |              | 
+ f2     | text              | character set UTF8 collate utf8mb4_unicode_ci | extended |              | 
+ f3     | character varying | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no
 
