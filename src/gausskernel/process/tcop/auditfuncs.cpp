@@ -1157,7 +1157,7 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
                 pgaudit_ddl_schema(objectname, querystring);
             } break;
             case OBJECT_TRIGGER: {
-                objectname = strVal(lfirst(list_tail(names)));
+                objectname = strVal(lfirst(list_tail((List*)lfirst(list_tail(names)))));
                 pgaudit_ddl_trigger(objectname, querystring);
             } break;
             case OBJECT_FUNCTION: {
