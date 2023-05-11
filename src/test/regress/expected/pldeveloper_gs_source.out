@@ -275,7 +275,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
  func2      | function     |    4 | it is not a known variable 
  func2      | function     |    4 | syntax error
  p1         | procedure    |    5 | unrecognized row security option
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
 (6 rows)
 
 create or replace package pkg1
@@ -298,7 +298,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
  func2      | function     |    4 | syntax error
  func2      | function     |    4 | it is not a known variable 
  p1         | procedure    |    5 | unrecognized row security option
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
  pkg1       | package      |    3 | syntax error
 (7 rows)
 
@@ -353,7 +353,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors;
  emp_bonus9 | package body |    6 | syntax error
  func1      | procedure    |    4 | syntax error
  p1         | procedure    |    5 | unrecognized row security option
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
  pkg1       | package      |    3 | syntax error
  pkg2       | package      |    3 | invalid type name
 (8 rows)
@@ -466,7 +466,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
  func1      | procedure    |    4 | syntax error
  func2      | function     |    4 | it is not a known variable 
  func2      | function     |    4 | syntax error
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
  p1         | procedure    |    5 | unrecognized row security option
  pkg1       | package      |    3 | syntax error
  pkg2       | package      |    3 | invalid type name
@@ -520,7 +520,7 @@ select name,type,src,line from DBE_PLDEVELOPER.gs_errors order by name;
  func2      | function     | it is not a known variable            |    4
  func2      | function     | syntax error                          |    4
  p1         | procedure    | unrecognized row security option      |    5
- p1         | procedure    | relation "account_row" does not exist |    7
+ p1         | procedure    | relation "account_row" does not exist |    5
  pkg1       | package      | syntax error                          |    3
  pkg2       | package      | invalid type name                     |    3
  pkg4       | package      | type does not exist                   |    3
@@ -1068,7 +1068,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
  func2      | function     |    4 | it is not a known variable 
  func2      | function     |    4 | syntax error
  p1         | procedure    |    5 | unrecognized row security option
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
  pkg1       | package      |    3 | syntax error
  pkg2       | package      |    3 | invalid type name
  pkg4       | package      |    3 | type does not exist
