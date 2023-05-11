@@ -397,7 +397,7 @@ test: partiton_pathkey_col_plan partiton_pathkey_col_randomexec partiton_pathkey
 # ----------
 #test: type_sanity
 #test: create_function_1
-test: create_table
+test: create_table create_table_2 create_table_3
 test: temp__4
 #test: copy#
 
@@ -1022,14 +1022,15 @@ test: subscription
 test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
-test: gs_dump_encrypt substr
-test: composite_datum_record mysql_function b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint mysql_trigger
+# mysql_function_prepare must precede mysql_function/mysql_function_2, and mysql_function_clearup must follow mysql_function/mysql_function_2
+test: gs_dump_encrypt substr mysql_function_prepare
+test: composite_datum_record mysql_function mysql_function_2 b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint mysql_trigger
 
 test: join_test_alias alter_ctable_compress
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition ignore/ignore_invalid_input
 
 test: pg_ls_dir
-test: cost_model
+test: mysql_function_clearup cost_model
 test: base_update
 test: seqscan_fusion
 
