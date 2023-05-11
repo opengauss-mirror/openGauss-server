@@ -112,6 +112,7 @@ DESCR("utf8_bin collation");
 /* GB10830's start with 1792 */
 
 #define B_FORMAT_COLLATION_OID_MAX 10000
+#define B_FORMAT_COLLATION_STR_LEN 4
 
 #define COLLATION_IN_B_FORMAT(colloid) \
 	((colloid) > B_FORMAT_COLLATION_OID_MIN && (colloid) < B_FORMAT_COLLATION_OID_MAX)
