@@ -573,7 +573,7 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
     bool is_modified, bool *hasPartition);
 static void UpdatePgTriggerFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static void UpdatePgRlspolicyFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
-static ViewInfoForAdd *GetViewInfoFirstAfter(Relation rel, Oid objid, bool keep_star = false);
+static ViewInfoForAdd *GetViewInfoFirstAfter(const char *rel_name, Oid objid, bool keep_star = false);
 static List *CheckPgRewriteFirstAfter(Relation rel);
 static void ReplaceViewQueryFirstAfter(List *query_str);
 static void UpdateDependRefobjsubidFirstAfter(Relation rel, Oid myrelid, int curattnum, int newattnum,
@@ -11579,7 +11579,7 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
 }
 
 
-static ViewInfoForAdd *GetViewInfoFirstAfter(Relation rel, Oid objid, bool keep_star)
+static ViewInfoForAdd *GetViewInfoFirstAfter(const char *rel_name, Oid objid, bool keep_star)
 {
     ScanKeyData entry;
     ViewInfoForAdd *info = NULL;
@@ -11639,7 +11639,7 @@ static ViewInfoForAdd *GetViewInfoFirstAfter(Relation rel, Oid objid, bool keep_
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Un-supported feature"),
                     errdetail("rule %s depend on %s, alter table %s add ... first|after colname is not supported",
-                    NameStr(rewrite_form->rulename), NameStr(rel->rd_rel->relname), NameStr(rel->rd_rel->relname))));
+                    NameStr(rewrite_form->rulename), rel_name, rel_name)));
         }
     }
     systable_endscan(rewrite_scan);
@@ -11684,7 +11684,7 @@ static List *CheckPgRewriteFirstAfter(Relation rel)
 
             pre_objid = dep_form->objid;
 
-            ViewInfoForAdd *info = GetViewInfoFirstAfter(rel, dep_form->objid);
+            ViewInfoForAdd *info = GetViewInfoFirstAfter(NameStr(rel->rd_rel->relname), dep_form->objid);
 
             foreach (viewinfo, query_str) {
                 ViewInfoForAdd *oldInfo = (ViewInfoForAdd *)lfirst(viewinfo);
@@ -31635,7 +31635,7 @@ static void ATPrepAlterModifyColumn(List** wqueue, AlteredTableInfo* tab, Relati
     def->raw_default = tmp_expr;
 }
 
-static char* GetCreateViewCommand(Relation rel, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid)
+static char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid)
 {
     StringInfoData buf;
     ViewInfoForAdd* view_info = NULL;
@@ -31672,7 +31672,7 @@ static char* GetCreateViewCommand(Relation rel, HeapTuple tup, Form_pg_class rel
     }
     pfree_ext(view_options);
     /* concat CREATE VIEW command with query */
-    view_info = GetViewInfoFirstAfter(rel, pg_rewrite_oid, true);
+    view_info = GetViewInfoFirstAfter(rel_name, pg_rewrite_oid, true);
     if (view_info == NULL) {
         pfree_ext(buf.data);
         return NULL; /* should not happen */
@@ -31706,7 +31706,7 @@ static void ATAlterRecordRebuildView(AlteredTableInfo* tab, Relation rel, Oid pg
             errdetail("modify or change a column used by materialized view or rule is not supported")));
     }
     /* print CREATE VIEW command */
-    view_def = GetCreateViewCommand(rel, tup, reltup, pg_rewrite_oid, view_oid);
+    view_def = GetCreateViewCommand(NameStr(rel->rd_rel->relname), tup, reltup, pg_rewrite_oid, view_oid);
     ReleaseSysCache(tup);
     if (view_def) {
         /* record it */
@@ -32307,4 +32307,66 @@ static Node* RecookAutoincAttrDefault(Relation rel, int attrno, Oid targettype, 
         COERCE_IMPLICIT_CAST,
         -1);
     return (Node*)aexpr;
+}
+
+/*
+ * findout view which depend on proc, then rebuild it. It will check view's
+ * column type and name(checkViewTupleDesc) when rebuild the view.
+ */
+void RebuildDependViewForProc(Oid proc_oid)
+{
+    ScanKeyData key[2];
+    SysScanDesc scan = NULL;
+    HeapTuple tup = NULL;
+    List *oid_list = NIL;
+
+    /* open pg_depend to find which view depend on this proc */
+    Relation depRel = heap_open(DependRelationId, AccessShareLock);
+
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(ProcedureRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(proc_oid));
+
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
+    while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
+        Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
+
+        if (depform->classid == RewriteRelationId && depform->deptype == DEPENDENCY_NORMAL) {
+            oid_list = lappend_oid(oid_list, depform->objid);
+        }
+    }
+    systable_endscan(scan);
+    heap_close(depRel, AccessShareLock);
+
+    /* rebuild view by rewrite oid */
+    ListCell *cell = NULL;
+    foreach(cell, oid_list) {
+        Oid objid = lfirst_oid(cell);
+        Oid view_oid = get_rewrite_relid(objid, true);
+        if (!OidIsValid(view_oid)) {
+            continue;
+        }
+        tup = SearchSysCache1(RELOID, ObjectIdGetDatum(view_oid));
+        if (!HeapTupleIsValid(tup)) {
+            continue;
+        }
+        Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tup);
+        if (reltup->relkind != RELKIND_VIEW) {
+            ReleaseSysCache(tup);
+            continue;
+        }
+
+        /* get rebuild view sql */
+        char *view_def = GetCreateViewCommand(NameStr(reltup->relname), tup, reltup, objid, view_oid);
+        ReleaseSysCache(tup);
+
+        CommandCounterIncrement();
+        List* raw_parsetree_list = raw_parser(view_def);
+        Node* stmt = (Node*)linitial(raw_parsetree_list);
+        Assert(IsA(stmt, ViewStmt));
+        DefineView((ViewStmt*)stmt, view_def);
+        pfree(view_def);
+        list_free(raw_parsetree_list);
+    }
+    list_free_ext(oid_list);
 }

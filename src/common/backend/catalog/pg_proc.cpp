@@ -72,6 +72,7 @@
 #include "access/heapam.h"
 #include "postmaster/postmaster.h"
 #include "commands/dbcommands.h"
+#include "commands/tablecmds.h"
 #include "storage/lmgr.h"
 #include "libpq/md5.h"
 
@@ -1645,6 +1646,9 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
 
         /* send invalid message for for relation holding replaced function as trigger */
         InvalidRelcacheForTriggerFunction(retval, ((Form_pg_proc)GETSTRUCT(tup))->prorettype);
+
+        /* rebuild view depend on this proc */
+        RebuildDependViewForProc(retval);
 
 #ifdef ENABLE_MOT
         if (proIsProcedure && !package && JitExec::IsMotSPCodegenEnabled()) {
