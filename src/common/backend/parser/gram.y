@@ -23921,7 +23921,7 @@ table_ref:	relation_expr		%prec UMINUS
         					int rc = sprintf_s(message, MAXFNAMELEN, "relation \"%s\" does not exist", r->relname);
         					securec_check_ss(rc, "", "");
 							ReleaseSysCacheList(catlist);
-        					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
+        					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
             				ereport(ERROR,
                 				(errcode(ERRCODE_UNDEFINED_TABLE),
                     				errmsg("relation \"%s\" does not exist", r->relname),
