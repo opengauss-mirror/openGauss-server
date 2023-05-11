@@ -238,9 +238,11 @@ ERROR:  missing FROM-clause entry for table "call_test"
 LINE 1: select * from t1 where c1 = call_test.func2;
                                     ^
 select * from t1 where c1 = call_test.func3;
-ERROR:  missing FROM-clause entry for table "call_test"
-LINE 1: select * from t1 where c1 = call_test.func3;
-                                    ^
+ c1 
+----
+  3
+(1 row)
+
 select * from t1 where c1 = call_test.proc1;
 ERROR:  operator does not exist: integer = void
 LINE 1: select * from t1 where c1 = call_test.proc1;
@@ -254,6 +256,23 @@ select * from t1 where c1 = call_test.proc3;
 ERROR:  missing FROM-clause entry for table "call_test"
 LINE 1: select * from t1 where c1 = call_test.proc3;
                                     ^
+create or replace function syn_fun_077(c bigint:=1) return int
+as
+  b int := c;
+begin
+ for i in 1..c loop
+   b := b + 1;
+ end loop;
+ return b;
+end;
+/
+select syn_fun_077;
+ syn_fun_077 
+-------------
+           2
+(1 row)
+
+drop  function syn_fun_077;
 declare
 var int;
 begin
