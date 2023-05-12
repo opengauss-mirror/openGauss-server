@@ -28492,6 +28492,7 @@ unreserved_keyword:
 			| CHANGE
 			| CHARACTERISTICS
 			| CHARACTERSET
+			| CHARSET
 			| CHECKPOINT
 			| CLASS
 			| CLEAN
