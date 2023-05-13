@@ -158,6 +158,7 @@ extern int errcode_for_socket_access(void);
 extern int errmodule(ModuleId id);
 extern const char* mask_encrypted_key(const char* query_string, int str_len);
 extern char* maskPassword(const char* query_string);
+extern char* mask_error_password(const char* query_string, int str_len);
 
 #define MASK_PASSWORD_START(mask_string, query_string) \
     do {                                               \
