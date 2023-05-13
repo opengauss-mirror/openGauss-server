@@ -926,7 +926,7 @@ trace_msg_code DumpFileParser::parse()
         ret = readAndParseDump(startSlot, &reversedNumRecsFormatted);
         totNumRecsFormatted += reversedNumRecsFormatted;
     }
-    printf("Found %lu trace records and formatted %lu of them(most recent)\n",
+    printf("Found %llu trace records and formatted %llu of them(most recent)\n",
            (uint64_t)trc_infra.g_Counter, totNumRecsFormatted);
 
     return ret;
@@ -1245,7 +1245,7 @@ static trace_msg_code readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t co
         }
     }
 
-    printf("Found %lu trace records and formatted %lu of them\n", counter, totalNumRecs);
+    printf("Found %llu trace records and formatted %llu of them\n", counter, totalNumRecs);
     return ret;
 }
 
@@ -1283,7 +1283,7 @@ static trace_msg_code formatTrcDumpFile(const char* inputPath, const char* outpu
 
         uint64_t maxSlots = trc_cfg.size / SLOT_SIZE;
         if (trc_infra.g_slot_count > maxSlots) {
-            printf("Trace has wrapped.Dumped and formatted files contain only the most recent %lu records\n", maxSlots);
+            printf("Trace has wrapped.Dumped and formatted files contain only the most recent %llu records\n", maxSlots);
         }
 
         ret = readAndFormatTrcRec(fdInput, fdOutput, MIN(maxSlots, trc_infra.g_Counter));
