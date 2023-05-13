@@ -1,4 +1,5 @@
 drop database if exists mysql;
+NOTICE:  database "mysql" does not exist, skipping
 create database mysql dbcompatibility 'B';
 \c mysql
 create schema test;

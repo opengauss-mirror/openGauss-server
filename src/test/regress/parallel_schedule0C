@@ -1,9 +1,186 @@
-test: sqlldr/load_to_copy_basic
-test: sqlldr/load_to_table_basic
-test: sqlldr/load_to_table_column
-test: sqlldr/gs_loader_basic
-test: sqlldr/gs_loader_parameter
-test: sqlldr/gs_loader_column
-test: sqlldr/gs_loader_multi_data
-test: sqlldr/gs_loader_issues
-test: sqlldr/gs_loader_column_filler
+# ----------
+# Database security
+# ----------
+test: hw_pwd_reuse
+#test: hw_auditadmin
+
+test: hw_audit_toughness
+test: hw_audit_detailinfo
+
+test: hw_audit_client
+test: hw_audit_full
+test: hw_audit_system_func
+
+test: performance_enhance
+test: explain_fqs
+test: explain_pbe
+
+# gs_basebackup
+# test: gs_basebackup
+
+# autonomous transaction Test
+
+#test jdbc pbe for bypass
+test: bypass_pbe
+#test: partition for hash list
+test: pbe_hash_list_partition 
+test: hw_partition_list_insert
+test: hw_partition_list_ddl
+test: hw_partition_hash_insert
+test: hw_partition_hash_ddl
+test: hw_partition_hash_dml
+test: hw_partition_hash_dql
+test: hw_partition_list_dml
+test: hw_partition_list_dql
+test: hw_partition_b_db
+test: dump_partition_b_db
+test: hw_cipher_sm4
+test: hw_cipher_aes128
+test: hw_pwd_encryption_sm3
+test: rule_test
+test: test_auto_increment
+test: dump_auto_increment
+
+#delete limit
+test: delete_limit
+
+# --------------------------
+# DB4AI
+# --------------------------
+test: db4ai_snapshots
+test: db4ai_gd_train_predict
+test: db4ai_gd_houses
+test: db4ai_gd_snapshots
+test: db4ai_gd_pca_train_predict
+#test: db4ai_kmeans_train_predict
+test: db4ai_xgboost_train_predict
+
+#test: db4ai_explain_model
+
+test: leaky_function_operator
+
+# ----------
+# gs_guc test
+# ----------
+#test: gs_guc
+
+test: cstore_unique_index
+
+test: cast_privileges_test
+
+#generated column test
+test: generated_col
+test: gen_col_pall_start
+test: gen_col_thread1 gen_col_thread2
+test: gen_col_pall_end
+
+# gs_ledger
+test: ledger_table_case
+
+# select ... for update skip locked
+test: skiplocked_prep
+test: skiplocked_test1_1 skiplocked_test1_2
+test: skiplocked_test1_1 skiplocked_test1_3
+test: skiplocked_post
+
+# store and restore comment on ora function and procedure
+test: comment_proc
+test: hw_package
+test: hw_cipher_sm4
+test: hw_cipher_aes128
+test: sequence_cache_test
+test: pg_buffercache_pages
+test: procedure_privilege_test
+
+# global temporary table: parallel truncate
+test: gtt_trunc_pre
+test: gtt_trunc_parallel_dml1 gtt_trunc_parallel_dml2 gtt_trunc_parallel_ddl1 gtt_trunc_parallel_ddl2
+#test: gtt_trunc_clean
+
+test: toomanyparams
+
+test: test_astore_multixact
+
+test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test 
+# test: row_compression/pg_tablespace_size
+test: row_compression/twophase
+test: row_compression/row_compress_feature pldebugger_shutdown
+test: row_compression/row_compression_basebackup
+test: component_view_enhancements single_node_user_mapping
+# reindex concurrently
+#test: reindex_concurrently
+test: reindex_concurrently_parallel
+#test: reindex_concurrently_partition
+test: reindex_concurrently_partition_parallel
+# publication and subscription, we need to record audit log for them, so seperate them into two test group
+test: publication
+test: subscription
+test: fdw_audit
+test: gs_global_config_audit
+test: detail declare_multiple_variable
+# mysql_function_prepare must precede mysql_function/mysql_function_2, and mysql_function_clearup must follow mysql_function/mysql_function_2
+test: gs_dump_encrypt substr mysql_function_prepare
+test: composite_datum_record mysql_function mysql_function_2 b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint mysql_trigger
+
+test: join_test_alias alter_ctable_compress
+test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition ignore/ignore_invalid_input
+
+test: pg_ls_dir
+test: mysql_function_clearup cost_model
+test: base_update
+test: seqscan_fusion
+
+test: union_null_01 fulljoin_rewrite
+
+# var selectivity
+test: var_eq_const_selectivity
+
+test: pg_controldata
+
+test: describe_index_with_tablespace
+
+# syntax compatibility
+test: sytcomp_del_upt4orderby
+test: aioptimizer
+test: aioptimizer_small
+test: pgfincore
+test: rename_table
+
+# debug instrument
+test: test_debug5
+
+# fix notice infos
+test: gstrace_options gaussdb_options gsql_options gsbasebackup_options gsdump_options gsloader_options
+
+# debug ceil(-0.5) -0
+test: ceil_negtive_zero
+
+# dolphin_guc_config
+test: dolphin_guc_config
+
+# optimizing_index_scan
+test: optimizing_index_scan_cstore
+test: optimizing_index_scan_ustore
+
+# row_count()
+test: row_count_function
+
+# show_warnings
+test: show_warnings prevent_table_in_sys_schema create_tbl_init_td_check
+
+# test event trigger and object address
+test: test_object_alter
+test: event_trigger object_address
+test: event_trigger_dump_restore
+
+# partition expression key
+test: partition_expr_key
+test: alter_foreign_schema
+
+# test for slow_sql
+test: slow_sql
+# test user@host
+test: user_host_test
+
+# test for new_expr_by_flatten
+test: enable_expr_fusion_flatten
