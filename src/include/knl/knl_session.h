@@ -2736,6 +2736,7 @@ typedef struct knl_u_hook_context {
     void *pluginSearchCatHook;
     void *pluginCCHashEqFuncs;
     void *plpgsqlParserSetHook;
+    void *coreYYlexHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

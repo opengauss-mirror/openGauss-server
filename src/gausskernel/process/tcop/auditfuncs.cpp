@@ -373,7 +373,11 @@ static void pgaudit_ddl_database_object(
     Assert(cmdtext != NULL);
     char* mask_string = maskPassword(cmdtext);
     if (mask_string == NULL) {
-        mask_string = (char*)cmdtext;
+        if (u_sess->attr.attr_sql.dolphin) {
+            mask_string = mask_error_password(cmdtext, strlen(cmdtext));
+        } else {
+            mask_string = (char*)cmdtext;
+        }
     }
 
     switch (audit_type) {
