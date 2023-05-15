@@ -1486,12 +1486,13 @@ static void storeRow(storeInfo* sinfo, PGresult* res, bool first)
      */
     oldcontext = MemoryContextSwitchTo(sinfo->tmpcontext);
 
-     /* Should have a single-row result if we get here */
-    Assert(PQntuples(res) == 1);
-
     /* Done if empty resultset */
     if (PQntuples(res) == 0)
-            return;
+        return;
+
+     /* Should have a single-row result if we get here */
+    Assert(PQntuples(res) == 1);
+    
     /*
      * Fill cstrs with null-terminated strings of column values.
      */
