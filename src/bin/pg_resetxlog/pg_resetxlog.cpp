@@ -230,7 +230,7 @@ int main(int argc, char* argv[])
                     exit(1);
                 }
                 if ((int32)set_mxoff == -1) {
-                    fprintf(stderr, _("%s: multitransaction offset (-O) must not be -1\n"), progname);
+                    fprintf(stderr, _("%s: the low 32bit of multitransaction offset (-O) must not be ffffffff\n"), progname);
                     exit(1);
                 }
                 break;
