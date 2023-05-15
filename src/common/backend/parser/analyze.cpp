@@ -4051,7 +4051,7 @@ static void init_execdirect_utility_stmt(RemoteQuery* step, const char* statemen
 }
 
 /*
- * find agg functions which need add finalize funcion on sql statement in deparse_query
+ * find agg functions which need add finalize function on sql statement in deparse_query
  */
 static bool check_agg_in_execute_direct_query(Node* node, void* context)
 {
