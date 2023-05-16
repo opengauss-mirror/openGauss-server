@@ -942,6 +942,7 @@ void UniqueSql::fill_in_constant_lengths(pgssJumbleState* jstate, const char* qu
     /* initialize the flex scanner --- should match raw_parser() */
     yyscanner = scanner_init(query, &yyextra, &ScanKeywords, ScanKeywordTokens);
 
+    void* coreYYlex = u_sess->hook_cxt.coreYYlexHook ? u_sess->hook_cxt.coreYYlexHook : (void*)core_yylex;
     /* Search for each constant, in sequence */
     for (i = 0; i < jstate->clocations_count; i++) {
         int loc = locs[i].location;
@@ -954,7 +955,7 @@ void UniqueSql::fill_in_constant_lengths(pgssJumbleState* jstate, const char* qu
         }
         /* Lex tokens until we find the desired constant */
         for (;;) {
-            tok = core_yylex(&yylval, &yylloc, yyscanner);
+            tok = ((coreYYlexFunc)coreYYlex)(&yylval, &yylloc, yyscanner);
             /* We should not hit end-of-string, but if we do, behave sanely */
             if (tok == 0) {
                 break; /* out of inner for-loop */
@@ -977,7 +978,7 @@ void UniqueSql::fill_in_constant_lengths(pgssJumbleState* jstate, const char* qu
                      * where bar = 1" and "select * from foo where bar = -2"
                      * will have identical normalized query strings.
                      */
-                    tok = core_yylex(&yylval, &yylloc, yyscanner);
+                    tok = ((coreYYlexFunc)coreYYlex)(&yylval, &yylloc, yyscanner);
                     if (tok == 0) {
                         break; /* out of inner for-loop */
                     }
