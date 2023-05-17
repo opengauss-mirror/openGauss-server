@@ -16710,7 +16710,7 @@ subprogram_body: 	{
 				yyextra->core_yy_extra.query_string_locationlist = 
 					lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);
 
-				funSrc = (FunctionSources*)palloc0(sizeof(FunctionSources));
+				funSrc = makeNode(FunctionSources);
 				funSrc->bodySrc   = proc_body_str;
 				funSrc->headerSrc = proc_header_str;
 
