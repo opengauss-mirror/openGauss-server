@@ -1,0 +1,5 @@
+# ndpplugin extension
+comment = 'example implementation for openGauss server smart executor pushdown interface'
+default_version = '1.0'
+module_pathname = '$libdir/nddplugin'
+relocatable = true

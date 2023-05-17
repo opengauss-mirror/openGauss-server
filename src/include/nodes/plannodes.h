@@ -358,7 +358,22 @@ typedef struct Plan {
     List* flatList = NULL; /* flattened targetlist representing columns in query */
     
     RightRefState* rightRefState;
+    bool ndp_pushdown_optimized;
+    /* normally used for save ndp condition
+     * caution: ndp_pushdown_condition under Agg node is used for save ndp handled aggslot
+     * -> SeqScan save ndp condition
+     * -> Agg save ndp aggslot
+     *     -> SeqScan->ndp_pushdown_condition save ndp condition
+     * */
+    Node* ndp_pushdown_condition;
 } Plan;
+
+typedef struct NdpScanCondition { // for each scan node
+    NodeTag type;
+    uint16 tableId;
+    void* ctx;
+    Plan* plan; // plan tree to pushdown;
+} NdpScanCondition;
 
 /* ----------------
  *	these are defined to avoid confusion problems with "left"

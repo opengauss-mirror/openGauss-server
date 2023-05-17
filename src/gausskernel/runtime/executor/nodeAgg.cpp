@@ -1897,6 +1897,11 @@ static void agg_fill_hash_table(AggState* aggstate)
             break;
         }
 
+        if (aggstate->ndp_slot && outerslot->tts_mintuple && (outerslot->tts_mintuple->t_infomask & NDP_HANDLED_TUPLE)) {
+            ndp_tableam->handle_hashaggslot(aggstate, &outerslot->tts_minhdr);
+            continue;
+        }
+
         /* set up for advance_aggregates call */
         tmpcontext->ecxt_outertuple = outerslot;
 

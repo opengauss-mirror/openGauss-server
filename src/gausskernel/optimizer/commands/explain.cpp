@@ -269,6 +269,7 @@ static bool show_scan_distributekey(const Plan* plan)
 }
 #endif   /* ENABLE_MULTIPLE_NODES */
 static void show_unique_check_info(PlanState *planstate, ExplainState *es);
+static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate);
 
 /*
  * ExplainQuery -
@@ -2494,6 +2495,11 @@ static void ExplainNode(
             PredGetInfo(plan, es);
 #endif
         }
+    }
+
+    /* explain ndpplugin activities */
+    if (ndp_pushdown_hook) {
+        show_ndpplugin_statistic(es, planstate);
     }
 
     /*
@@ -10917,6 +10923,57 @@ static void show_unique_check_info(PlanState *planstate, ExplainState *es)
             }
         }
     }
+}
+
+static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate)
+{
+    Plan* plan = planstate->plan;
+    if (!plan->ndp_pushdown_optimized &&
+        !(plan->lefttree && plan->type == T_Agg && plan->lefttree->ndp_pushdown_optimized &&
+        reinterpret_cast<NdpScanCondition*>(plan->lefttree->ndp_pushdown_condition)->plan == plan)) {
+        return;
+    }
+
+    TableScanDesc desc = reinterpret_cast<ScanState*>(planstate)->ss_currentScanDesc;
+    if (desc && !desc->ndp_pushdown_optimized) {
+        return;
+    }
+    appendStringInfo(es->str, " NDPpushdown");
+
+    if (!es->analyze) {
+        return;
+    }
+
+    Instrumentation* instr;
+    int pushdownPage = 0;
+    int normalPage = 0;
+    int ndpPage = 0;
+
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
+    if (planstate->plan->plan_node_id > 0 && u_sess->instr_cxt.global_instr &&
+        u_sess->instr_cxt.global_instr->isFromDataNode(planstate->plan->plan_node_id)) {
+        for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+            ThreadInstrumentation* threadinstr =
+                u_sess->instr_cxt.global_instr->getThreadInstrumentation(i, planstate->plan->plan_node_id, 0);
+            if (threadinstr == NULL)
+                continue;
+            for (int j = 0; j < dop; j++) {
+                instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
+                if (instr != NULL && instr->nloops > 0) {
+                    pushdownPage += instr->ndp_pushdown_page;
+                    normalPage += instr->ndp_sendback_page;
+                    ndpPage += instr->ndp_handled;
+                }
+            }
+        }
+    }
+
+    instr = planstate->instrument;
+    pushdownPage += instr->ndp_pushdown_page;
+    normalPage += instr->ndp_sendback_page;
+    ndpPage += instr->ndp_handled;
+
+    appendStringInfo(es->str, " (total page: %d, back to normal page: %d, ndp handled: %d)", pushdownPage, normalPage, ndpPage);
 }
 
 void ExplainDatumProperty(char const *name, Datum const value, Oid const type, ExplainState* es)

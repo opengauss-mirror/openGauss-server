@@ -101,6 +101,10 @@ typedef struct TableScanDescData
     /* variables for batch mode scan */
     int rs_ctupRows;
     int rs_maxScanRows;
+
+    /* variables for ndp pushdown scan */
+    bool ndp_pushdown_optimized;
+    void *ndp_ctx;
 } TableScanDescData;
 
 /* struct definition appears in relscan.h */

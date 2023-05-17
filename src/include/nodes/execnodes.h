@@ -2499,6 +2499,8 @@ typedef struct AggState {
     int num_hashes;
     AggStatePerGroup hash_pergroup; /* grouping set indexed array of* per-group pointers */
     AggStatePerGroup all_pergroups; /* array of first ->pergroups, than * ->hash_pergroup */
+
+    TupleTableSlot* ndp_slot; /* slot for load ndp data */
 } AggState;
 
 /* ----------------

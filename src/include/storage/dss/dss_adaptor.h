@@ -67,6 +67,9 @@ typedef void (*dss_error_info)(int *errorcode, const char **errormsg);
 typedef void (*dss_svr_path)(const char *conn_path);
 typedef void (*dss_log_callback)(dss_log_output cb_log_output);
 typedef int (*dss_version)(void);
+typedef int (*dss_get_storage_addr)(int handle, long long offset, char *poolname, char *imagename, char *objAddr,
+    unsigned int *objId, unsigned long int *objOffset);
+typedef int (*dss_compare_size_equal)(const char *vg_name, long long *au_size);
 typedef int (*dss_aio_prep_pwrite_device)(void *iocb, int handle, void *buf, size_t count, long long offset);
 typedef int (*dss_aio_prep_pread_device)(void *iocb, int handle, void *buf, size_t count, long long offset);
 typedef int (*dss_init_logger_t)(char *log_home, unsigned int log_level, unsigned int log_backup_file_count, unsigned long long log_max_file_size);
@@ -108,6 +111,8 @@ typedef struct st_dss_device_op_t {
     dss_svr_path dss_set_svr_path;
     dss_log_callback dss_register_log_callback;
     dss_version dss_get_version;
+    dss_get_storage_addr dss_get_addr;
+    dss_compare_size_equal dss_compare_size;
     dss_aio_prep_pwrite_device dss_aio_pwrite;
     dss_aio_prep_pread_device dss_aio_pread;
     dss_init_logger_t dss_init_logger;
