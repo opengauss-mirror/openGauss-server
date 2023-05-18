@@ -546,6 +546,15 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             (void)LWLockAcquire(buf_desc->content_lock, content_mode);
             *buf_ctrl = GetDmsBufCtrl(buf_id);
             Assert(buf_id >= 0);
+            if ((*buf_ctrl)->been_loaded == false) {
+                *buf_ctrl = NULL;
+                DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                ereport(WARNING, (errmodule(MOD_DMS),
+                    errmsg("[%u/%u/%u/%d %d-%u] been_loaded marked false, page swapped out and failed to load",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum)));
+                break;
+            }
             if ((*buf_ctrl)->lock_mode == DMS_LOCK_NULL) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[%u/%u/%u/%d %d-%u] lock mode is null, still need to transfer page",
@@ -609,7 +618,7 @@ static char* CBGetPage(dms_buf_ctrl_t *buf_ctrl)
     return (char *)BufHdrGetBlock(buf_desc);
 }
 
-static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned int ver)
+static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner)
 {
     int buf_id = -1;
     BufferTag* tag = (BufferTag *)pageid;
@@ -652,16 +661,19 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
             break;
         }
 
-        (void)LWLockAcquire(buf_desc->content_lock, LW_EXCLUSIVE);
-        buf_ctrl = GetDmsBufCtrl(buf_id);
-        if (ver == buf_ctrl->ver) {
+        bool can_invld_owner = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED | BM_PERMANENT)) > 0 ? false : true;
+        if (!invld_owner || (invld_owner && can_invld_owner)) {
+            (void)LWLockAcquire(buf_desc->content_lock, LW_EXCLUSIVE);
+            buf_ctrl = GetDmsBufCtrl(buf_id);
             buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
-        } else {
-            ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("[CBInvalidatePage] invalid ver:%u, buf_ctrl ver:%u", ver, buf_ctrl->ver)));
+            LWLockRelease(buf_desc->content_lock);
+        } else { /* invalidate owner which buffer is dirty/permanent */
+            ereport(DEBUG1, (errmodule(MOD_DMS),
+                errmsg("[%d/%d/%d/%d %d-%d] invalidate owner rejected, buffer is dirty/permanent, state = 0x%x",
+                tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                tag->forkNum, tag->blockNum, buf_desc->state)));
             ret = DMS_ERROR;
         }
-        LWLockRelease(buf_desc->content_lock);
 
         if (IsSegmentBufferID(buf_id)) {
             SegReleaseBuffer(buf_id + 1);
@@ -1286,7 +1298,7 @@ static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mod
 }
 
 static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon_chk,
-    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn, unsigned int *ver)
+    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn)
 {
     BufferDesc *buf_desc = NULL;
     bool valid;
@@ -1317,7 +1329,6 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
         bool is_locked = LWLockConditionalAcquire(buf_desc->io_in_progress_lock, LW_EXCLUSIVE);
         if (is_locked) {
             buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-            *ver = buf_ctrl->ver;
             *lock_mode = buf_ctrl->lock_mode;
             LWLockRelease(buf_desc->io_in_progress_lock);
             break;
@@ -1344,7 +1355,6 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
 
     // without lock
     buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    *ver = buf_ctrl->ver;
     *lock_mode = buf_ctrl->lock_mode;
 
     SSUnPinBuffer(buf_desc);
@@ -1733,7 +1743,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->get_page = CBGetPage;
     callback->set_buf_load_status = CBSetBufLoadStatus;
     callback->remove_buf_load_status = CBRemoveBufLoadStatus;
-    callback->invld_share_copy = CBInvalidatePage;
+    callback->invalidate_page = CBInvalidatePage;
     callback->get_db_handle = CBGetHandle;
     callback->display_pageid = CBDisplayBufferTag;
     callback->verify_page = CBVerifyPage;

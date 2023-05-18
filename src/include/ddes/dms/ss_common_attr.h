@@ -127,8 +127,6 @@
 #define BUF_READ_MODE_ZERO_LOCK    0x80
 #define BUF_DIRTY_NEED_FLUSH    0x100
 #define BUF_ERTO_NEED_MARK_DIRTY    0x200
-/* mark buffer whether is being released in DMS DRC */
-#define BUF_BEING_RELEASED      0x400
 
 #define SS_BROADCAST_FAILED_RETRYCOUNTS 4
 #define SS_BROADCAST_WAIT_INFINITE (0xFFFFFFFF)

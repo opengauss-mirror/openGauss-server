@@ -153,41 +153,10 @@ void MarkReadHint(int buf_id, char persistence, bool extend, const XLogPhyBlock 
 void ClearReadHint(int buf_id, bool buf_deleted)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
-
-    if (buf_ctrl->state & BUF_BEING_RELEASED) {
-        BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
-        RelFileNode rnode = buf_desc->tag.rnode;
-        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d marked as NOT being" 
-            " released during release owner, old_val:%u", rnode.spcNode, rnode.dbNode, rnode.relNode,
-            rnode.bucketNode, rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-            buf_desc->buf_id, BUF_BEING_RELEASED)));
-    }
-
     buf_ctrl->state &=
-        ~(BUF_NEED_LOAD | BUF_IS_LOADED | BUF_LOAD_FAILED | BUF_NEED_TRANSFER | BUF_IS_EXTEND |
-        BUF_DIRTY_NEED_FLUSH | BUF_BEING_RELEASED);
+        ~(BUF_NEED_LOAD | BUF_IS_LOADED | BUF_LOAD_FAILED | BUF_NEED_TRANSFER | BUF_IS_EXTEND | BUF_DIRTY_NEED_FLUSH);
     if (buf_deleted) {
         buf_ctrl->state = 0;
-    }
-}
-
-/* this function should be called inside header lock */
-void MarkDmsBufBeingReleased(BufferDesc *buf_desc, bool set)
-{
-    RelFileNode rnode = buf_desc->tag.rnode;
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    unsigned int old_val = buf_ctrl->state & BUF_BEING_RELEASED;
-    if (set) {
-        buf_ctrl->state |= BUF_BEING_RELEASED;
-        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d marked as being released during"
-            " release owner, old_val:%u", rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode,
-            rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum, buf_desc->buf_id, old_val)));
-    } else if (!set && old_val) {
-        buf_ctrl->state &= ~BUF_BEING_RELEASED;
-        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d marked as NOT being"
-            " released during release owner, old_val:%u", rnode.spcNode, rnode.dbNode, rnode.relNode,
-            rnode.bucketNode, rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-            buf_desc->buf_id, old_val)));
     }
 }
 
@@ -200,14 +169,6 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     dms_lock_mode_t req_mode = (mode == LW_SHARED) ? DMS_LOCK_SHARE : DMS_LOCK_EXCLUSIVE;
-    RelFileNode rnode = buf_desc->tag.rnode;
-
-    if (buf_ctrl->state & BUF_BEING_RELEASED) {
-        ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] buffer is being released in dms_release_owner",
-                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
-        return false;
-    }
 
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
@@ -311,6 +272,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
             ereport(PANIC, (errmsg("extend page should not be tranferred from DMS, "
                 "and needs to be loaded from disk!")));
         }
+        if (buf_ctrl->been_loaded == false) {
+            ereport(PANIC, (errmsg("ctrl not marked loaded before transferring from remote")));
+        }
 #endif
 
         Block bufBlock = BufHdrGetBlock(buf_desc);
@@ -326,6 +290,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
             buf_desc->extra->seg_fileno == EXTENT_INVALID) {
             CalcSegDmsPhysicalLoc(buf_desc, buffer, !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy);
         }
+    }
+    if (BufferIsValid(buffer)) {
+        buf_ctrl->been_loaded = true;
     }
 
     if ((read_mode == RBM_ZERO_AND_LOCK || read_mode == RBM_ZERO_AND_CLEANUP_LOCK) &&
@@ -433,6 +400,9 @@ Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
         SegTerminateBufferIO(buf_desc, false, BM_VALID);
         buffer = BufferDescriptorGetBuffer(buf_desc);
     }
+    if (!BufferIsInvalid(buffer)) {
+        buf_ctrl->been_loaded = true;
+    }
 
     if ((read_mode == RBM_ZERO_AND_LOCK || read_mode == RBM_ZERO_AND_CLEANUP_LOCK) &&
         !LWLockHeldByMe(buf_desc->content_lock)) {
@@ -508,15 +478,17 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
     return TerminateReadPage(buf_desc, read_mode, OidIsValid(buf_ctrl->pblk_relno) ? &pblk : NULL);
 }
 
-bool DmsReleaseOwner(BufferTag buf_tag, int buf_id, unsigned char* released)
+bool DmsReleaseOwner(BufferTag buf_tag, int buf_id)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
     if (buf_ctrl->state & BUF_IS_RELPERSISTENT_TEMP) {
         return true;
     }
+    unsigned char released = 0;
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_tag);
-    return (dms_release_owner(&dms_ctx, buf_ctrl, released) == DMS_SUCCESS);
+
+    return ((dms_release_owner(&dms_ctx, buf_ctrl, &released) == DMS_SUCCESS) && (released != 0));
 }
 
 void BufValidateDrc(BufferDesc *buf_desc)
