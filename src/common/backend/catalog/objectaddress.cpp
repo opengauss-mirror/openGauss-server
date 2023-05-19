@@ -1312,9 +1312,16 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
             relation = heap_open(reloid, AccessShareLock);
             if (objtype == OBJECT_TRIGGER && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && schemaname != NULL) {
                 Oid relNamespaceId = RelationGetNamespace(relation);
-                if (relNamespaceId != get_namespace_oid(schemaname, false)) {
-                    ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
+                if (relNamespaceId != get_namespace_oid(schemaname, missing_ok)) {
+                    if(!missing_ok) {
+                        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
+                    } else {
+                        address.objectId = InvalidOid;
+                        heap_close(relation, AccessShareLock);
+                        relation = NULL;
+                        return address;
+                    }
                 }
             }
         }
@@ -1339,9 +1346,13 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
                 address.objectSubId = 0;
                 if (OidIsValid(address.objectId) && schemaname != NULL) {
                     Oid relNamespaceId = RelationGetNamespace(relation);
-                    if (relNamespaceId != get_namespace_oid(schemaname, false)) {
-                        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                            errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
+                    if (relNamespaceId != get_namespace_oid(schemaname, missing_ok)) {
+                        if(!missing_ok) {
+                            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                                errmsg("trigger in wrong schema: \"%s\".\"%s\"", schemaname, depname)));
+                        } else {
+                            address.objectId = InvalidOid;
+                        }
                     }
                 }
                 break;
