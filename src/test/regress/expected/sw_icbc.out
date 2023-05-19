@@ -25,11 +25,11 @@ select * from t1 start with id = 1 connect by prior id = pid;
 ----+-----+------
   1 |   0 | 1
   2 |   1 | 2
-  4 |   1 | 4
   5 |   2 | 5
+  4 |   1 | 4
   7 |   4 | 7
-  8 |   4 | 8
   9 |   7 | 9
+  8 |   4 | 8
 (7 rows)
 
 explain (costs off)
@@ -55,11 +55,11 @@ select * from t1 start with t1.id = 1 connect by prior t1.id = t1.pid;
 ----+-----+------
   1 |   0 | 1
   2 |   1 | 2
-  4 |   1 | 4
   5 |   2 | 5
+  4 |   1 | 4
   7 |   4 | 7
-  8 |   4 | 8
   9 |   7 | 9
+  8 |   4 | 8
 (7 rows)
 
 explain (costs off)
@@ -85,11 +85,11 @@ select * from t1 as test start with test.id = 1 connect by prior test.id = test.
 ----+-----+------
   1 |   0 | 1
   2 |   1 | 2
-  4 |   1 | 4
   5 |   2 | 5
+  4 |   1 | 4
   7 |   4 | 7
-  8 |   4 | 8
   9 |   7 | 9
+  8 |   4 | 8
 (7 rows)
 
 explain (costs off)
@@ -181,11 +181,11 @@ select t1.id, t1.pid, t1.name from t1 start with id = 1 connect by prior id = pi
 ----+-----+------
   1 |   0 | 1
   2 |   1 | 2
-  4 |   1 | 4
   5 |   2 | 5
+  4 |   1 | 4
   7 |   4 | 7
-  8 |   4 | 8
   9 |   7 | 9
+  8 |   4 | 8
 (7 rows)
 
 explain (costs off) select sum(name) from t1 start with id = 1 connect by prior id = pid group by id, pid;
@@ -245,11 +245,11 @@ select * from t1 start with id = 1 connect by prior id = pid and id IN (select i
 ----+-----+------
   1 |   0 | 1
   2 |   1 | 2
-  4 |   1 | 4
   5 |   2 | 5
+  4 |   1 | 4
   7 |   4 | 7
-  8 |   4 | 8
   9 |   7 | 9
+  8 |   4 | 8
 (7 rows)
 
 explain (costs off) select * from t1 start with id = 1 and id is not NULL connect by prior id = pid;
@@ -274,11 +274,11 @@ select * from t1 start with id = 1 and id is not NULL connect by prior id = pid;
 ----+-----+------
   1 |   0 | 1
   2 |   1 | 2
-  4 |   1 | 4
   5 |   2 | 5
+  4 |   1 | 4
   7 |   4 | 7
-  8 |   4 | 8
   9 |   7 | 9
+  8 |   4 | 8
 (7 rows)
 
 explain (costs off)
@@ -326,11 +326,11 @@ connect by prior test.id = test.pid;
 ----+-----+------
   1 |   0 | 1
   2 |   1 | 2
-  4 |   1 | 4
   5 |   2 | 5
+  4 |   1 | 4
   7 |   4 | 7
-  8 |   4 | 8
   9 |   7 | 9
+  8 |   4 | 8
 (7 rows)
 
 explain (costs off)
@@ -417,11 +417,11 @@ START WITH tt.id = 1;
 ----+-----+------
   1 |   0 | 1
   2 |   1 | 2
-  4 |   1 | 4
   5 |   2 | 5
+  4 |   1 | 4
   7 |   4 | 7
-  8 |   4 | 8
   9 |   7 | 9
+  8 |   4 | 8
 (7 rows)
 
 --test correlated sublink in targetlist
