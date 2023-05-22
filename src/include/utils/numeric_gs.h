@@ -96,7 +96,7 @@
 #define NUMERIC_DSCALE_MASK 0x3FFF
 
 #define NUMERIC_SIGN(n)                                                                           \
-    (NUMERIC_HEADER_IS_SHORT(n)                                                                   \
+    (NUMERIC_IS_SHORT(n)                                                                   \
          ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS) \
          : NUMERIC_FLAGBITS(n))
 #define NUMERIC_DSCALE(n)                                                                           \
