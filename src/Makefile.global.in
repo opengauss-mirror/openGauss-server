@@ -1089,8 +1089,10 @@ libpq_pgport = -L$(top_builddir)/src/common/port -lpgport $(libpq)
 endif
 
 ifneq ($(enable_lite_mode), yes)
-submake-libpq_ce:
-	flock $(libpq_builddir)/libpq.lock $(MAKE) -C $(libpq_builddir) ENABLE_CE=1 && $(MAKE) -C $(libpq_builddir)/jdbc
+submake-libpq_ce: submake-libpq_ce-actually
+	flock $(libpq_builddir)/jdbc/jdbc.lock $(MAKE) -C $(libpq_builddir)/jdbc
+submake-libpq_ce-actually:
+	flock $(libpq_builddir)/libpq.lock $(MAKE) -C $(libpq_builddir) ENABLE_CE=1
 endif
 submake-libpq:
 	flock $(libpq_builddir)/libpq.lock $(MAKE) -C $(libpq_builddir) all
