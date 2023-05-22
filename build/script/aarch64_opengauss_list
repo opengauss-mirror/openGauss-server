@@ -66,6 +66,8 @@
 ./share/postgresql/extension/hstore.control
 ./share/postgresql/extension/security_plugin.control
 ./share/postgresql/extension/security_plugin--1.0.sql
+./share/postgresql/extension/ndpplugin.control
+./share/postgresql/extension/ndpplugin--1.0.sql
 ./share/postgresql/extension/dolphin.control
 ./share/postgresql/extension/dolphin--1.0.sql
 ./share/postgresql/extension/dolphin--1.1.sql
