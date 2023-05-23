@@ -5754,8 +5754,9 @@ int main(int argc, char** argv)
         exit(1);
     }
 
-    if (enable_dss && socketpath == NULL) {
-        fprintf(stderr, "Socketpath cannot be NULL when enable dss.\n");
+    if (enable_dss && (socketpath == NULL || strlen(socketpath) == 0 || strncmp("UDS:", socketpath, 4) != 0)) {
+        fprintf(stderr, "Socketpath must be specific correctly when enable dss, "
+            "format is: '-c UDS:xxx'.\n");
         exit(1);
     }
 

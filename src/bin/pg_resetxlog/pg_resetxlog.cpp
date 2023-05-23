@@ -284,8 +284,9 @@ int main(int argc, char* argv[])
     }
 
     if (dss.enable_dss) {
-        if (dss.socketpath == NULL) {
-            fprintf(stderr, _("%s: socketpath cannot be NULL when enable dss\n"), progname);
+        if (dss.socketpath == NULL || strlen(dss.socketpath) == 0 || strncmp("UDS:", dss.socketpath, 4) != 0) {
+            fprintf(stderr, _("%s: socketpath must be specific correctly when enable dss, "
+                "format is: '--socketpath=\"UDS:xxx\"'.\n"), progname);
             exit(1);
         }
         if (dss.vgname == NULL) {

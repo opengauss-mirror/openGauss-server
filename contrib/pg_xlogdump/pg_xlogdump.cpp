@@ -1012,8 +1012,10 @@ int main(int argc, char** argv)
     }
 
     if (dumpprivate.enable_dss) {
-        if (dumpprivate.socketpath == NULL) {
-            fprintf(stderr, "%s: socketpath cannot be NULL when enable dss\n", progname);
+        if (dumpprivate.socketpath == NULL || strlen(dumpprivate.socketpath) == 0 ||
+            strncmp("UDS:", dumpprivate.socketpath, 4) != 0) {
+            fprintf(stderr, "%s: socketpath must be specific correctly when enable dss, "
+                "format is: '--socketpath=\"UDS:xxx\"'.\n", progname);
             goto bad_argument;
         }
 
