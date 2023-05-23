@@ -835,7 +835,9 @@ typedef enum NodeTag {
     /* ndpplugin tag */
     T_NdpScanCondition,
     T_CondInfo,
-    T_GetDiagStmt
+    T_GetDiagStmt,
+    T_DolphinCallStmt,
+    T_CallContext
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */

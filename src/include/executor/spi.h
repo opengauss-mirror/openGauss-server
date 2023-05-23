@@ -66,6 +66,7 @@ typedef struct SPICachedPlanStack {
 #define SPI_OPT_NONATOMIC (1 << 0)
 
 typedef List* (*parse_query_func)(const char *query_string, List **query_string_locationlist);
+typedef void (*SpiReciverParamHook)(DestReceiver *self, SPIPlanPtr plan);
 /* in postgres.cpp, avoid include tcopprot.h */
 extern List* raw_parser(const char* query_string, List** query_string_locationlist);
 

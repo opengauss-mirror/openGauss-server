@@ -2147,7 +2147,8 @@ static bool is_explain_command(const char* query)
     while (isalpha((unsigned char)query[wordlen]))
         wordlen += PQmblen(&query[wordlen], pset.encoding);
 
-    if (wordlen == 7 && pg_strncasecmp(query, "explain", 7) == 0)
+    if ((wordlen == 7 && pg_strncasecmp(query, "explain", 7) == 0) ||
+         (wordlen == 4 && pg_strncasecmp(query, "call", 4) == 0))
         result = true;
 
     return result;

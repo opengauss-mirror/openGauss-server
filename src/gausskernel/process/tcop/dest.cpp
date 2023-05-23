@@ -44,6 +44,8 @@
 
 #include "tcop/stmt_retry.h"
 
+typedef DestReceiver* (*ProcDestReciverHook)(CommandDest dest);
+
 /* ----------------
  *		dummy DestReceiver functions
  * ----------------
@@ -162,6 +164,8 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
         case DestTrainModel:
             return CreateTrainModelDestReceiver();
 
+        case DestSqlProcSPI:
+            return ((ProcDestReciverHook)u_sess->hook_cxt.pluginProcDestReciverHook)(dest);
         default:
             break;
     }

@@ -9550,6 +9550,9 @@ const char* CreateCommandTag(Node* parse_tree)
         case T_GetDiagStmt:
             tag = "GET DIAGNOSTICS";
             break;
+        case T_DolphinCallStmt:
+            tag = "CALL";
+            break;    
         default:
             elog(WARNING, "unrecognized node type: %d", (int)nodeTag(parse_tree));
             tag = "?\?\?";
