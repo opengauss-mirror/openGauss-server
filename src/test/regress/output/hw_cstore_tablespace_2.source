@@ -1,0 +1,93 @@
+\! rm -fr '@testtablespace@/hw_cstore_tablespace_2'
+\! mkdir '@testtablespace@/hw_cstore_tablespace_2'
+create tablespace hw_cstore_tablespace_2 location '@testtablespace@/hw_cstore_tablespace_2';
+-- 1. Column Ordinary table + Index table
+CREATE TABLE set_tblspc_lineitem_2
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+with (orientation = column) tablespace hw_cstore_tablespace_2;
+COPY set_tblspc_lineitem_2 FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
+create index idx3_set_tblspc_lineitem_2 on set_tblspc_lineitem_2(L_LINENUMBER, L_SHIPDATE) tablespace pg_default;
+-- 1.5 DROP/SET not null
+alter table set_tblspc_lineitem_2 alter column L_PARTKEY drop not  null;
+ERROR:  Un-support feature
+DETAIL:  column-store relation doesn't support this ALTER yet
+alter table set_tblspc_lineitem_2 alter column L_PARTKEY set not  null;
+ERROR:  Un-support feature
+DETAIL:  column-store relation doesn't support this ALTER yet
+-- 1.6 whole deleted CU
+DELETE FROM set_tblspc_lineitem_2;
+ALTER TABLE set_tblspc_lineitem_2 SET TABLESPACE hw_cstore_tablespace_2;
+ALTER TABLE set_tblspc_lineitem_2 SET TABLESPACE pg_default;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_2' );
+ count 
+-------
+     0
+(1 row)
+
+drop tablespace hw_cstore_tablespace_2;
+create tablespace hw_cstore_tablespace_2 location '@testtablespace@/hw_cstore_tablespace_2';
+-- 1.7 rollback
+START TRANSACTION;
+ALTER TABLE set_tblspc_lineitem_2 SET TABLESPACE hw_cstore_tablespace_2;
+CHECKPOINT;
+ROLLBACK;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_2' );
+ count 
+-------
+     0
+(1 row)
+
+drop tablespace hw_cstore_tablespace_2;
+create tablespace hw_cstore_tablespace_2 location '@testtablespace@/hw_cstore_tablespace_2';
+START TRANSACTION;
+ALTER TABLE set_tblspc_lineitem_2 ADD COLUMN c19 int default 1000, SET TABLESPACE hw_cstore_tablespace_2;
+CHECKPOINT;
+ROLLBACK;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_2' );
+ count 
+-------
+     0
+(1 row)
+
+drop tablespace hw_cstore_tablespace_2;
+create tablespace hw_cstore_tablespace_2 location '@testtablespace@/hw_cstore_tablespace_2';
+START TRANSACTION;
+ALTER INDEX idx3_set_tblspc_lineitem_2 SET TABLESPACE hw_cstore_tablespace_2;
+CHECKPOINT;
+ROLLBACK;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_2' );
+ count 
+-------
+     0
+(1 row)
+
+drop tablespace hw_cstore_tablespace_2;
+create tablespace hw_cstore_tablespace_2 location '@testtablespace@/hw_cstore_tablespace_2';
+-- 1.8 test drop table
+ALTER TABLE idx3_set_tblspc_lineitem_2 SET TABLESPACE hw_cstore_tablespace_2;
+drop table set_tblspc_lineitem_2 cascade;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_2' );
+ count 
+-------
+     0
+(1 row)
+
+drop tablespace hw_cstore_tablespace_2;
