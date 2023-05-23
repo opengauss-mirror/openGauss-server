@@ -949,6 +949,10 @@ static void dss_init(void)
             elog(ERROR, "Remote operations on dss mode are not supported");
         }
 
+        if (instance_config.dss.vgname == NULL) {
+            elog(ERROR, "Vgname must be specified in dss mode.");
+        }
+
         parse_vgname_args(instance_config.dss.vgname);
 
         /* Check dss connect */
