@@ -207,6 +207,8 @@ typedef struct knl_instance_attr_storage {
 #ifndef ENABLE_MULTIPLE_NODES
     bool enable_save_confirmed_lsn;
 #endif
+    bool enable_huge_pages;
+    int huge_page_size;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

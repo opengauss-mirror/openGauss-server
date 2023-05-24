@@ -267,6 +267,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_hashagg                                   | bool    |      |           | 
  enable_hashjoin                                  | bool    |      |           | 
  enable_hdfs_predicate_pushdown                   | bool    |      |           | 
+ enable_huge_pages                                | bool    |      |           | 
  enable_hypo_index                                | bool    |      |           | 
  enable_incremental_catchup                       | bool    |      |           | 
  enable_incremental_checkpoint                    | bool    |      |           | 
@@ -380,6 +381,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  hll_max_sparse                                   | integer |      | -1        | 2147483647
  hot_standby                                      | bool    |      |           | 
  hot_standby_feedback                             | bool    |      |           | 
+ huge_page_size                                   | integer | 8kB  | 0         | 1073741823
  ident_file                                       | string  |      |           | 
  idle_in_transaction_session_timeout              | integer | s    | 0         | 86400
  ignore_checksum_failure                          | bool    |      |           | 
