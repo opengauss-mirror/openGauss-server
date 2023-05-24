@@ -210,6 +210,10 @@ static	void			 check_labels(const char *start_label,
 static	PLpgSQL_expr	*read_cursor_args(PLpgSQL_var *cursor,
                                           int until, const char *expected);
 static	List			*read_raise_options(void);
+static void read_signal_sqlstate(PLpgSQL_stmt_signal *newp, int tok);
+static void read_signal_condname(PLpgSQL_stmt_signal *newp, int tok);
+static void read_signal_set(PLpgSQL_stmt_signal *newp, int tok);
+static List *read_signal_items(void);
 static  int             errstate = ERROR;
 static DefElem* get_proc_str(int tok);
 static char* get_init_proc(int tok);
@@ -378,6 +382,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <stmt>	stmt_open stmt_fetch stmt_move stmt_close stmt_null
 %type <stmt>	stmt_commit stmt_rollback stmt_savepoint
 %type <stmt>	stmt_case stmt_foreach_a
+%type <stmt>	stmt_signal stmt_resignal
 
 %type <list>	proc_exceptions declare_stmts
 %type <exception_block> exception_sect declare_sect_b
@@ -400,7 +405,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <fetch>	opt_fetch_direction
 %type <expr>	fetch_limit_expr
 %type <datum>	fetch_into_target
-%type <ival>    condition_value
+%type <condition>    condition_value
 
 %type <keyword>	unreserved_keyword
 
@@ -467,15 +472,22 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_BY
 %token <keyword>        K_CALL
 %token <keyword>	K_CASE
+%token <keyword>	K_CATALOG_NAME
+%token <keyword>	K_CLASS_ORIGIN
 %token <keyword>	K_CLOSE
 %token <keyword>	K_COLLATE
 %token <keyword>	K_COLLECT
+%token <keyword>	K_COLUMN_NAME
 %token <keyword>	K_COMMIT
 %token <keyword>	K_CONDITION
 %token <keyword>	K_CONSTANT
+%token <keyword>	K_CONSTRAINT_CATALOG
+%token <keyword>	K_CONSTRAINT_NAME
+%token <keyword>	K_CONSTRAINT_SCHEMA
 %token <keyword>	K_CONTINUE
 %token <keyword>	K_CURRENT
 %token <keyword>	K_CURSOR
+%token <keyword>	K_CURSOR_NAME
 %token <keyword>	K_DEBUG
 %token <keyword>	K_DECLARE
 %token <keyword>	K_DEFAULT
@@ -531,6 +543,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_MOVE
 %token <keyword>    K_MULTISET
 %token <keyword>    K_MULTISETS
+%token <keyword>	K_MYSQL_ERRNO
 %token <keyword>	K_NEXT
 %token <keyword>	K_NO
 %token <keyword>	K_NOT
@@ -558,6 +571,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_REPEAT
 %token <keyword>	K_REPLACE
 %token <keyword>	K_RESULT_OID
+%token <keyword>	K_RESIGNAL
 %token <keyword>	K_RETURN
 %token <keyword>	K_RETURNED_SQLSTATE
 %token <keyword>	K_REVERSE
@@ -566,16 +580,20 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_ROW_COUNT
 %token <keyword>	K_SAVE
 %token <keyword>	K_SAVEPOINT
+%token <keyword>	K_SCHEMA_NAME
 %token <keyword>	K_SELECT
 %token <keyword>	K_SCROLL
+%token <keyword>	K_SIGNAL
 %token <keyword>	K_SLICE
 %token <keyword>	K_SQLEXCEPTION
 %token <keyword>	K_SQLSTATE
 %token <keyword>	K_SQLWARNING
 %token <keyword>	K_STACKED
 %token <keyword>	K_STRICT
+%token <keyword>	K_SUBCLASS_ORIGIN
 %token <keyword>	K_SYS_REFCURSOR
 %token <keyword>	K_TABLE
+%token <keyword>	K_TABLE_NAME
 %token <keyword>	K_THEN
 %token <keyword>	K_TO
 %token <keyword>	K_TYPE
@@ -797,6 +815,18 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                         if (tok != K_DECLARE) {
                             u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
                         }
+                        if ($2->name != NULL) {
+                            if (pg_strcasecmp($2->name, "set") == 0) {
+                                yyerror("syntax error, set is keyword.");
+                            }
+                            if (pg_strcasecmp($2->name, "sqlwarning") == 0) {
+                                yyerror("syntax error, sqlwarning is keyword.");
+                            }
+                            if (pg_strcasecmp($2->name, "sqlexception") == 0) {
+                                yyerror("syntax error, sqlexception is keyword.");
+                            }
+                        }
+                        
                         IsInPublicNamespace($2->name);
                         PLpgSQL_var	*var;
 
@@ -805,7 +835,9 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                                                                                   -1,
                                                                                   InvalidOid),
                                                           true);
-                        var->customCondition = $5;
+                        var->customCondition = $5->sqlerrstate;
+                        var->sqlstateCondition = $5->sqlstate;
+                        var->isSqlvalue = $5->isSqlvalue;
                         pfree_ext($2->name);
                         pfree($2);
                         $$ = NULL;
@@ -883,8 +915,10 @@ cond_element	: any_identifier
                                                           sqlstatestr[2],
                                                           sqlstatestr[3],
                                                           sqlstatestr[4]);
-                        newp->condname = sqlstatestr;
+                        newp->condname = NULL;
+                        newp->sqlstate = pstrdup(sqlstatestr);
                         newp->next = NULL;
+                        newp->isSqlvalue = false;
                         $$ = newp;
                     }
                 | K_SQLWARNING
@@ -904,7 +938,7 @@ cond_element	: any_identifier
                     }
                 | ICONST
                     {
-                        if ($1 == 0){
+                        if ($1 == 0) {
                             const char* message = "Incorrect CONDITION value: '0'";
                             InsertErrorMessage(message, plpgsql_yylloc);
                             ereport(ERROR,
@@ -912,39 +946,39 @@ cond_element	: any_identifier
                                         errmsg("Incorrect CONDITION value: '0'")));
                         }
                         int num = $1;
-                        char sqlstatestr[5] = {};
+                        char *sqlstatestr = (char *)palloc0(sizeof(char) * 6);
                         for (int i= 4; i >= 0; i--) {
                             sqlstatestr[i] = num % 10 + '0';
                             num /= 10;
                         }
+                        sqlstatestr[5] = '\0';
                         if (num != 0) {
                             $$ = NULL;
                         }
-
-                        if ($1 > 3) {
-                            PLpgSQL_condition *newp;
-                            newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
-                            newp->sqlerrstate = MAKE_SQLSTATE(sqlstatestr[0],
-                                              sqlstatestr[1],
-                                              sqlstatestr[2],
-                                              sqlstatestr[3],
-                                              sqlstatestr[4]);
-                            newp->condname = NULL;
-                            newp->next = NULL;
-                            $$ = newp;
-                        } else {
-                            $$ = NULL;
-                        }
+                        
+                        PLpgSQL_condition *newp = (PLpgSQL_condition *)palloc0(sizeof(PLpgSQL_condition));
+                        newp->sqlerrstate = MAKE_SQLSTATE(sqlstatestr[0],
+                                                          sqlstatestr[1],
+                                              	          sqlstatestr[2],
+                                              	          sqlstatestr[3],
+                                              	          sqlstatestr[4]);
+                        newp->condname = NULL;
+                        newp->next = NULL;
+                        newp->sqlstate = pstrdup(sqlstatestr);
+                        newp->isSqlvalue = true;
+                        $$ = newp;
                     }
                 ;
 
 
 condition_value	: K_SQLSTATE
                     {
+                        PLpgSQL_condition *newp;
+                        newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
                         /* next token should be a string literal */
                         char   *sqlstatestr;
                         yylex();
-                        if (strcmp(yylval.str, "value") ==0) {
+                        if (strcmp(yylval.str, "value") == 0) {
                             yylex();
                         }
                         sqlstatestr = yylval.str;
@@ -961,22 +995,50 @@ condition_value	: K_SQLSTATE
                                         errmsg("bad SQLSTATE '%s'",sqlstatestr)));
                         }
 
-                        $$ =  MAKE_SQLSTATE(sqlstatestr[0],
-                                            sqlstatestr[1],
-                                            sqlstatestr[2],
-                                            sqlstatestr[3],
-                                            sqlstatestr[4]);
+                        newp->sqlerrstate = MAKE_SQLSTATE(sqlstatestr[0],
+                                                          sqlstatestr[1],
+                                                          sqlstatestr[2],
+                                                          sqlstatestr[3],
+                                                          sqlstatestr[4]);
+                        newp->condname = NULL;
+                        newp->sqlstate = sqlstatestr;
+                        newp->next = NULL;
+                        newp->isSqlvalue = false;
+                        $$ = newp;
                     }
                 | ICONST
                     {
-                        if ($1 == 0){
+                        PLpgSQL_condition *newp;
+                        newp = (PLpgSQL_condition *)palloc(sizeof(PLpgSQL_condition));
+                        if ($1 == 0) {
                             const char* message = "Incorrect CONDITION value: '0'";
                             InsertErrorMessage(message, plpgsql_yylloc);
                             ereport(ERROR,
                                     (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
                                         errmsg("Incorrect CONDITION value: '0'")));
                         }
-                        $$ = $1;
+
+                        int num = $1;
+                        char *sqlstatestr = (char *)palloc0(sizeof(char) * 6);
+                        for (int i = 4; i >= 0; i--) {
+                            sqlstatestr[i] = num % 10 + '0';
+                            num /= 10;
+                        }
+                        sqlstatestr[5] = '\0';
+                        if (num != 0) {
+                            $$ = NULL;
+                        }
+
+                        newp->sqlerrstate = MAKE_SQLSTATE(sqlstatestr[0],
+                                                          sqlstatestr[1],
+                                                          sqlstatestr[2],
+                                                          sqlstatestr[3],
+                                                          sqlstatestr[4]);
+                        newp->condname = NULL;
+                        newp->sqlstate = pstrdup(sqlstatestr);
+                        newp->next = NULL;
+                        newp->isSqlvalue = true;
+                        $$ = newp;
                     }
                 ;
 
@@ -2463,6 +2525,10 @@ proc_stmt		: pl_block ';'
                 | label_stmts
                         { $$ = $1; }
                 | stmt_savepoint
+                        { $$ = $1; }
+                | stmt_signal
+                        { $$ = $1; }
+                | stmt_resignal
                         { $$ = $1; }
                 ;
 
@@ -4359,6 +4425,102 @@ stmt_raise		: K_RAISE
                     }
                 ;
 
+stmt_signal		: K_SIGNAL
+                    {
+                        if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+                            const char *message = "SIGNAL is supported only in B-format database.";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(ERROR,
+                                (errmodule(MOD_PARSER),
+                                    errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg("SIGNAL is supported only in B-format database."),
+                                    parser_errposition(@1)));
+                            $$ = NULL;/* not reached */		
+                        }
+                        int tok;
+                        PLpgSQL_stmt_signal *newp;
+
+                        newp = (PLpgSQL_stmt_signal *)palloc(sizeof(PLpgSQL_stmt_signal));
+
+                        newp->cmd_type = PLPGSQL_STMT_SIGNAL;
+                        newp->lineno = plpgsql_location_to_lineno(@1);
+                        newp->sqlString = plpgsql_get_curline_query();
+
+                        tok = yylex();
+                        if (tok == 0) {
+                            yyerror("unexpected end of function definition");
+                        }
+
+                        /* must be condition name or SQLSTATE */
+                        if (tok_is_keyword(tok, &yylval, K_SQLSTATE, "sqlstate")) {
+                            tok = yylex();
+
+                            read_signal_sqlstate(newp, tok);
+                        } else {
+                            read_signal_condname(newp, tok);
+                        }
+
+                        tok = yylex();
+                        read_signal_set(newp, tok);
+
+                        $$ = (PLpgSQL_stmt *)newp;
+                    }
+                ;
+
+stmt_resignal	: K_RESIGNAL
+                    {
+                        if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+                            const char *message = "RESIGNAL is supported only in B-format database.";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(ERROR,
+                                (errmodule(MOD_PARSER),
+                                    errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg("RESIGNAL is supported only in B-format database."),
+                                    parser_errposition(@1)));
+                            $$ = NULL;/* not reached */		
+                        }
+                        int tok;
+                        PLpgSQL_stmt_signal *newp;
+
+                        newp = (PLpgSQL_stmt_signal *)palloc(sizeof(PLpgSQL_stmt_signal));
+
+                        newp->cmd_type = PLPGSQL_STMT_RESIGNAL;
+                        newp->lineno = plpgsql_location_to_lineno(@1);
+                        newp->sqlString = plpgsql_get_curline_query();
+
+                        tok = yylex();
+                        if (tok == 0) {
+                            yyerror("unexpected end of function definition");
+                        }
+
+                        if (tok == ';') {
+                            newp->sqlerrstate = -1;
+                            newp->sqlstate = NULL;
+                            newp->condname = NULL;
+                            newp->cond_info_item = NIL;
+                        } else if (tok == T_WORD && pg_strcasecmp(yylval.word.ident, "set") == 0) {
+                            newp->sqlerrstate = -1;
+                            newp->sqlstate = NULL;
+                            newp->condname = NULL;
+                            newp->cond_info_item = read_signal_items();
+                        } else if (tok_is_keyword(tok, &yylval, K_SQLSTATE, "sqlstate")) {
+                            tok = yylex();
+                            
+                            read_signal_sqlstate(newp, tok);
+                            
+                            tok = yylex();
+                            read_signal_set(newp, tok);
+                        } else {
+                            read_signal_condname(newp, tok);
+                            
+                            tok = yylex();
+                            read_signal_set(newp, tok);
+                        }
+
+                        $$ = (PLpgSQL_stmt *)newp;
+                    }
+                ;
+
 loop_body		: proc_sect K_END K_LOOP opt_label ';'
                     {
                         $$.stmts = $1;
@@ -5888,11 +6050,18 @@ unreserved_keyword	:
                 | K_ARRAY
                 | K_BACKWARD
                 | K_CALL
+                | K_CATALOG_NAME
+                | K_CLASS_ORIGIN
+                | K_COLUMN_NAME
                 | K_COMMIT
                 | K_CONDITION
                 | K_CONSTANT
+                | K_CONSTRAINT_CATALOG
+                | K_CONSTRAINT_NAME
+                | K_CONSTRAINT_SCHEMA
                 | K_CONTINUE
                 | K_CURRENT
+                | K_CURSOR_NAME
                 | K_DEBUG
                 | K_DETAIL
                 | K_DISTINCT
@@ -5914,6 +6083,7 @@ unreserved_keyword	:
                 | K_MESSAGE
                 | K_MESSAGE_TEXT
                 | K_MULTISET
+                | K_MYSQL_ERRNO
                 | K_NEXT
                 | K_NO
                 | K_NOTICE
@@ -5927,6 +6097,7 @@ unreserved_keyword	:
                 | K_QUERY
                 | K_RECORD
                 | K_RELATIVE
+                | K_RESIGNAL
                 | K_RESULT_OID
                 | K_RETURNED_SQLSTATE
                 | K_REVERSE
@@ -5934,12 +6105,16 @@ unreserved_keyword	:
                 | K_ROW_COUNT
                 | K_ROWTYPE
                 | K_SAVE
+                | K_SCHEMA_NAME
                 | K_SCROLL
+                | K_SIGNAL
                 | K_SLICE
                 | K_SQLSTATE
                 | K_STACKED
+                | K_SUBCLASS_ORIGIN
                 | K_SYS_REFCURSOR
                 | K_TABLE
+                | K_TABLE_NAME
                 | K_UNION
                 | K_USE_COLUMN
                 | K_USE_VARIABLE
@@ -12615,6 +12790,178 @@ read_raise_options(void)
 
         if (tok == ';')
             break;
+    }
+
+    return result;
+}
+
+/* 
+ * Parse SIGNAL/RESIGNAL ... SQLSTATE
+ */
+static void read_signal_sqlstate(PLpgSQL_stmt_signal *newp, int tok)
+{
+    char *sqlstate_value;
+
+    if (tok == 0 || tok == ';') {
+        yyerror("unexpected end of function definition");
+    }
+
+    if (strcmp(yylval.str, "value") == 0) {
+        if (yylex() != SCONST) {
+            yyerror("syntax error, the expected value is a string.");
+        }
+    }
+    sqlstate_value = yylval.str;
+
+    if (strlen(sqlstate_value) != 5 ||
+        strspn(sqlstate_value, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") != 5 ||
+        strncmp(sqlstate_value, "00", 2) == 0) {
+            const char *message = "bad SQLSTATE";
+            InsertErrorMessage(message, plpgsql_yylloc);
+                ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                        errmsg("bad SQLSTATE '%s'", sqlstate_value)));
+    }
+
+    newp->sqlstate = sqlstate_value;
+    newp->sqlerrstate = MAKE_SQLSTATE(sqlstate_value[0],
+                                      sqlstate_value[1],
+                                      sqlstate_value[2],
+                                      sqlstate_value[3],
+                                      sqlstate_value[4]);
+    newp->condname = NULL;
+    return;
+}
+
+/*
+ * Parse SIGNAL/RESIGNAL ... condname
+ */
+static void read_signal_condname(PLpgSQL_stmt_signal *newp, int tok)
+{
+    char *condname = NULL;
+
+    if (tok == T_WORD) {
+        condname = yylval.word.ident;
+    } else if (tok == T_DATUM) {
+        condname = NameOfDatum(&yylval.wdatum);
+    } else {
+        yyerror("syntax error, the condition name is expected.");
+    }
+
+    PLpgSQL_condition *newcon = plpgsql_parse_err_condition_b_signal(condname);
+    if (newcon->isSqlvalue) {
+        const char *message = "SIGNAL/RESIGNAL can only use a CONDITION defined with SQLSTATE";
+        InsertErrorMessage(message, plpgsql_yylloc);
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                errmsg("SIGNAL/RESIGNAL can only use a CONDITION defined with SQLSTATE")));
+    }
+    newp->sqlerrstate = newcon->sqlerrstate;
+    newp->sqlstate = newcon->sqlstate;
+    newp->condname = newcon->condname;
+    return;
+}
+
+/*
+ * Parse SIGNAL/RESIGNAL ... set
+ */
+static void read_signal_set(PLpgSQL_stmt_signal *newp, int tok)
+{
+    if (tok == T_WORD) {
+        if (pg_strcasecmp(yylval.word.ident, "set") == 0) {
+            newp->cond_info_item = read_signal_items();
+        } else {
+            yyerror("invalid keyword");
+        }
+    } else if (tok == ';') {
+        newp->cond_info_item = NIL;
+    } else {
+        yyerror("syntax error");
+    }
+    return;
+}
+
+/*
+ * Parse SIGNAL/RESIGNAL ... SET items
+ */
+static List *read_signal_items(void)
+{
+    List *result = NIL;
+
+    for (;;) {
+        PLpgSQL_signal_info_item *item;
+        int tok;
+        ListCell *lc;
+
+        if ((tok = yylex()) == 0) {
+            yyerror("unexpected end of siganl information definition");
+        }
+
+        item = (PLpgSQL_signal_info_item *)palloc(sizeof(PLpgSQL_signal_info_item));
+
+        if (tok_is_keyword(tok, &yylval, K_CLASS_ORIGIN, "class_origin")) {
+            item->con_info_value = PLPGSQL_CLASS_ORIGIN;
+            item->con_name = pstrdup("CLASS_ORIGIN");
+        } else if (tok_is_keyword(tok, &yylval, K_SUBCLASS_ORIGIN, "subclass_origin")) {
+            item->con_info_value = PLPGSQL_SUBCLASS_ORIGIN;
+            item->con_name = pstrdup("SUBCLASS_ORIGIN");
+        } else if (tok_is_keyword(tok, &yylval, K_MESSAGE_TEXT, "message_text")) {
+            item->con_info_value = PLPGSQL_MESSAGE_TEXT;
+            item->con_name = pstrdup("MESSAGE_TEXT");
+        } else if (tok_is_keyword(tok, &yylval, K_MYSQL_ERRNO, "mysql_errno")) {
+            item->con_info_value = PLPGSQL_MYSQL_ERRNO;
+            item->con_name = pstrdup("MYSQL_ERRNO");
+        } else if (tok_is_keyword(tok, &yylval, K_CONSTRAINT_CATALOG, "constraint_catalog")) {
+            item->con_info_value = PLPGSQL_CONSTRAINT_CATALOG;
+            item->con_name = pstrdup("CONSTRAINT_CATALOG");
+        } else if (tok_is_keyword(tok, &yylval, K_CONSTRAINT_SCHEMA, "constraint_schema")) {
+            item->con_info_value = PLPGSQL_CONSTRAINT_SCHEMA;
+            item->con_name = pstrdup("CONSTRAINT_SCHEMA");
+        } else if (tok_is_keyword(tok, &yylval, K_CONSTRAINT_NAME, "constraint_name")) {
+            item->con_info_value = PLPGSQL_CONSTRAINT_NAME;
+            item->con_name = pstrdup("CONSTRAINT_NAME");
+        } else if (tok_is_keyword(tok, &yylval, K_CATALOG_NAME, "catalog_name")) {
+            item->con_info_value = PLPGSQL_CATALOG_NAME;
+            item->con_name = pstrdup("CATALOG_NAME");
+        } else if (tok_is_keyword(tok, &yylval, K_SCHEMA_NAME, "schema_name")) {
+            item->con_info_value = PLPGSQL_SCHEMA_NAME;
+            item->con_name = pstrdup("SCHEMA_NAME");
+        } else if (tok_is_keyword(tok, &yylval, K_TABLE_NAME, "table_name")) {
+            item->con_info_value = PLPGSQL_TABLE_NAME;
+            item->con_name = pstrdup("TABLE_NAME");
+        } else if (tok_is_keyword(tok, &yylval, K_COLUMN_NAME, "column_name")) {
+            item->con_info_value = PLPGSQL_COLUMN_NAME;
+            item->con_name = pstrdup("COLUMN_NAME");
+        } else if (tok_is_keyword(tok, &yylval, K_CURSOR_NAME, "corsor_name")) {
+            item->con_info_value = PLPGSQL_CURSOR_NAME;
+            item->con_name = pstrdup("CURSOR_NAME");
+        } else {
+            yyerror("syntax error, unrecognized SIGNAL/RESIGNAL statement item");
+        }
+
+        tok = yylex();
+        if (tok != '=') {
+            yyerror("syntax error, expected \"=\"");
+        }
+
+        item->expr = read_sql_expression2(',', ';', ", or ;", &tok);
+
+        foreach (lc, result) {
+            PLpgSQL_signal_info_item *signal_item = (PLpgSQL_signal_info_item *)lfirst(lc);
+            if (signal_item->con_info_value == item->con_info_value) {
+                const char *message = "Duplicate condition information item";
+                InsertErrorMessage(message, plpgsql_yylloc);
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                            errmsg("Duplicate condition information item '%s'", item->con_name)));
+            }
+        }
+
+        result = lappend(result, item);
+
+        if (tok == ';') {
+            break;
+        }
     }
 
     return result;

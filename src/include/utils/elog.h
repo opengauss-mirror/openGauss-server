@@ -86,6 +86,9 @@
 #define ERRCODE_TO_CATEGORY(ec) ((ec) & ((1 << 12) - 1))
 #define ERRCODE_IS_CATEGORY(ec) (((ec) & ~((1 << 12) - 1)) == 0)
 
+/* signal/resignal statement */
+#define MYSQL_ERRNO_MAX 65535
+
 /* SQLSTATE codes for errors are defined in a separate file */
 #include "utils/errcodes.h"
 
@@ -245,6 +248,18 @@ extern int ErrOutToClient(bool outToClient);
 extern int geterrcode(void);
 extern int geterrposition(void);
 extern int getinternalerrposition(void);
+extern int signal_is_warnings_throw(bool is_warning_throw);
+extern int signal_returnd_sqlstate(const char *returnd_sqlstate);
+extern int signal_class_origin(const char *class_origin);
+extern int signal_subclass_origin(const char *subclass_origin);
+extern int signal_constraint_catalog(const char *constraint_catalog);
+extern int signal_constraint_schema(const char *constraint_schema);
+extern int signal_constraint_name(const char *constraint_name);
+extern int signal_catalog_name(const char *catalog_name);
+extern int signal_schema_name(const char *schema_name);
+extern int signal_table_name(const char *table_name);
+extern int signal_column_name(const char *column_name);
+extern int signal_cursor_name(const char *cursor_name);
 
 extern void save_error_message(void);
 
@@ -508,6 +523,18 @@ typedef struct ErrorData {
     bool ignore_interrupt; /* true to ignore interrupt when writing server log */
     char* cause;
     char* action;
+    char* sqlstate;        /* returned_sqlstate for signal/resignal */
+    char* class_origin;    /* class origin for signal/resignal */
+    char* subclass_origin; /* subclass_origin for signal/resignal */
+    char* cons_catalog;    /* constraint catalog for signal/resignal */
+    char* cons_schema;     /* constraint_schema for signal/resignal */
+    char* cons_name;       /* constraint_name for signal/resignal */
+    char* catalog_name;    /* catalog_name for signal/resignal */
+    char* schema_name;     /* schema_name for signal/resignal */
+    char* table_name;      /* table_name for signal/resignal */
+    char* column_name;     /* column_name for signal/resignal */
+    char* cursor_name;     /* cursor_name for signal/resignal */
+    bool is_warnings_throw;
 } ErrorData;
 
 /* The error data from remote */

@@ -101,6 +101,8 @@ end;
 /
 NOTICE:  SQLSTATE = 22012, SQLCODE = 33816706, SQLERRM = division by zero
 -- SQLWARNING
+DROP USER pri_user_independent cascade;
+ERROR:  role "pri_user_independent" does not exist
 declare
 begin
     declare exit handler for sqlwarning
@@ -114,6 +116,7 @@ WARNING:  Please carefully use independent user as it need more self-management.
 HINT:  Self-management include logical backup, password manage and so on.
 CONTEXT:  SQL statement "CREATE USER pri_user_independent WITH INDEPENDENT IDENTIFIED BY "********""
 PL/pgSQL function inline_code_block line 6 at SQL statement
+DROP USER pri_user_independent cascade;
 declare
 begin
     declare exit handler for "sqlwarning"
