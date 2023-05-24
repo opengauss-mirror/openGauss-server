@@ -2465,7 +2465,8 @@ typedef struct AutoIncrement {
 } AutoIncrement;
 
 typedef enum IndexHintType {
-    INDEX_HINT_USE =1,
+    INDEX_HINT_IGNORE = 0,
+    INDEX_HINT_USE = 1,
     INDEX_HINT_FORCE, 
     INDEX_HINT_MIX,
     INDEX_HINT_NOT_EXISTS

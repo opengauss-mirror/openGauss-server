@@ -969,7 +969,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 			END_OF_PROC
 			EVENT_TRIGGER
 			NOT_IN NOT_BETWEEN NOT_LIKE NOT_ILIKE NOT_SIMILAR
-			FORCE_INDEX USE_INDEX
+			FORCE_INDEX USE_INDEX IGNORE_INDEX
 
 /* Precedence: lowest to highest */
 %nonassoc   COMMENT
@@ -14413,6 +14413,13 @@ index_hint_definition:
 			{
 				IndexHintDefinition* n = makeNode(IndexHintDefinition);
 				n->index_type = INDEX_HINT_FORCE;
+				n->indexnames = $3;
+				$$ = (Node*)n;
+			}
+			| IGNORE_INDEX '(' key_usage_list ')'
+			{
+				IndexHintDefinition* n = makeNode(IndexHintDefinition);
+				n->index_type = INDEX_HINT_IGNORE;
 				n->indexnames = $3;
 				$$ = (Node*)n;
 			}
