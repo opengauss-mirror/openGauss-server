@@ -40,6 +40,7 @@
 #include <mutex>
 #include <condition_variable>
 #include "comm_connection.h"
+#include "utils/guc.h"
 
 /*--------------------------Global Variables Declaretion-------------------------------*/
 #define COMM_PROXY_DEBUG_LEVEL COMM_DEBUG1
@@ -109,9 +110,11 @@ typedef struct CommSendParam {
 
     int caller(Sys_send fn, unsigned long int reqid = 0) {
         int ret = fn(s_fd, buff, len, flags);
-        ereport(DEBUG4, (errmodule(MOD_COMM_PROXY),
-            errmsg("%s reqid[%016lu] comm_send: send comm_server_fd[%d], buff_char:%c, ret:%d, errno:%d, %m",
-            t_thrd.proxy_cxt.identifier, reqid, s_fd, ((char *)buff)[0], ret, errno)));
+        if ((SECUREC_UNLIKELY(log_min_messages <= DEBUG1))) {
+            ereport(DEBUG4, (errmodule(MOD_COMM_PROXY),
+                errmsg("%s reqid[%016lu] comm_send: send comm_server_fd[%d], buff_char:%c, ret:%d, errno:%d, %m",
+                t_thrd.proxy_cxt.identifier, reqid, s_fd, ((char *)buff)[0], ret, errno)));
+        }
 
         s_ret = ret;
         return ret;

@@ -872,6 +872,16 @@ typedef struct Node {
         _result->type = (tag);                                            \
         _result;                                                          \
     })
+
+#define newNodeNotZero(size, tag)                                                \
+    ({                                                                    \
+        Node* _result;                                                    \
+        AssertMacro((size) >= sizeof(Node)); /* need the tag, at least */ \
+        _result = (Node*)palloc(size);                               \
+        _result->type = (tag);                                            \
+        _result;                                                          \
+    })
+
 #else // !FRONTEND_PARSER
 #define newNode(size, tag)                                                \
     ({                                                                    \
@@ -881,6 +891,8 @@ typedef struct Node {
         _result->type = (tag);                                            \
         _result;                                                          \
     })
+#define newNodeNotZero(size, tag) newNode(size, tag)
+
 #endif // !FRONTEND_PARSER
 #else
 
@@ -889,9 +901,13 @@ typedef struct Node {
         t_thrd.utils_cxt.newNodeMacroHolder = (Node*)palloc0fast(size), \
         t_thrd.utils_cxt.newNodeMacroHolder->type = (tag),              \
         t_thrd.utils_cxt.newNodeMacroHolder)
+
+#define newNodeNotZero(size, tag) newNode(size, tag)
+
 #endif /* __GNUC__ */
 
 #define makeNode(_type_) ((_type_*)newNode(sizeof(_type_), T_##_type_))
+#define makeNodeFast(_type_) ((_type_*)newNodeNotZero(sizeof(_type_), T_##_type_))
 #define makeNodeWithSize(_type_, _size) ((_type_*)newNode(_size, T_##_type_))
 
 #define NodeSetTag(nodeptr, t) (((Node*)(nodeptr))->type = (t))

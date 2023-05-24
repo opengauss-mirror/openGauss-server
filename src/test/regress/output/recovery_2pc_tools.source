@@ -278,6 +278,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_instr_cpu_timer                           | bool    |      |           | 
  enable_instr_rt_percentile                       | bool    |      |           | 
  enable_instr_track_wait                          | bool    |      |           | 
+ enable_iud_fusion                                | bool    |      |           | 
  enable_kill_query                                | bool    |      |           | 
  enable_logical_io_statistics                     | bool    |      |           | 
  enable_material                                  | bool    |      |           | 

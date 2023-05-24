@@ -137,7 +137,9 @@ static TsStoreScan* make_tsstorescan(List* qptlist, List* qpqual, Index scanreli
 static PartIterator* create_partIterator_plan(
     PlannerInfo* root, PartIteratorPath* pIterpath, GlobalPartIterator* gpIter);
 static Plan* setPartitionParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
+#ifdef ENABLE_MULTIPLE_NODES
 static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
+#endif
 Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath);
 
 static IndexScan* make_indexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
@@ -600,6 +602,7 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
     List* scan_clauses = NIL;
     Plan* plan = NULL;
 
+#ifdef ENABLE_MULTIPLE_NODES
     /*
      * If planning is uner recursive CTE, we need check if we are going to generate
      * path that not supported with current Recursive-Execution mode.
@@ -614,6 +617,7 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
             mark_stream_unsupport();
         }
     }
+#endif
 
     /*
      * For table scans, rather than using the relation targetlist (which is
@@ -751,8 +755,9 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
     if (!CheckPathUseGlobalPartIndex(best_path)) {
         (void*)setPartitionParam(root, plan, best_path->parent);
     }
+#ifdef ENABLE_MULTIPLE_NODES
     (void*)setBucketInfoParam(root, plan, best_path->parent);
-
+#endif
     /*
      * If there are any pseudoconstant clauses attached to this node, insert a
      * gating Result node that evaluates the pseudoconstants as one-time
@@ -2617,10 +2622,12 @@ static Scan* create_indexscan_plan(
             best_path->indexinfo->indextlist,
             best_path->indexscandir,
             indexonly);
+#ifdef ENABLE_MULTIPLE_NODES
     } else if (best_path->path.parent->orientation == REL_TIMESERIES_ORIENTED) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Unsupported Index Scan FOR TIMESERIES.")));
+#endif
     } else {
         if (indexonly) {
             scan_plan = (Scan*)make_indexonlyscan(tlist,
@@ -9266,6 +9273,8 @@ static Plan* setPartitionParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel)
     }
     return plan;
 }
+
+#ifdef ENABLE_MULTIPLE_NODES
 static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel)
 {
     if (rel->bucketInfo != NULL) {
@@ -9308,7 +9317,7 @@ static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel)
 
     return plan;
 }
-
+#endif
 #ifdef PGXC
 /*
  * Wrapper functions to expose some functions to PGXC planner. These functions

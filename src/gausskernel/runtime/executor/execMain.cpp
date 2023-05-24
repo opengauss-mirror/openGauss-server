@@ -253,7 +253,9 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     t_thrd.utils_cxt.mctx_sequent_count = 0;
 
     /* Initialize the memory tracking information */
-    MemoryTrackingInit();
+    if (u_sess->attr.attr_memory.memory_tracking_mode > MEMORY_TRACKING_NONE) {
+        MemoryTrackingInit();
+    }
 
     /*
      * Build EState, switch into per-query memory context for startup.
@@ -262,11 +264,13 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     queryDesc->estate = estate;
 
     /* record the init memory track of the executor engine */
+    if (u_sess->attr.attr_memory.memory_tracking_mode > MEMORY_TRACKING_NONE) {
 #ifndef ENABLE_MEMORY_CHECK
-    t_thrd.utils_cxt.ExecutorMemoryTrack = ((AllocSet)(estate->es_query_cxt))->track;
+        t_thrd.utils_cxt.ExecutorMemoryTrack = ((AllocSet)(estate->es_query_cxt))->track;
 #else
-    t_thrd.utils_cxt.ExecutorMemoryTrack = ((AsanSet)(estate->es_query_cxt))->track;
+        t_thrd.utils_cxt.ExecutorMemoryTrack = ((AsanSet)(estate->es_query_cxt))->track;
 #endif
+    }
 
 #ifndef ENABLE_MULTIPLE_NODES
     (void)InitStreamObject(queryDesc->plannedstmt);
@@ -286,7 +290,7 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     }
 
     /* CN of the compute pool. */
-    if (StreamTopConsumerAmI() && queryDesc->instrument_options != 0 && IS_PGXC_COORDINATOR &&
+    if (IS_PGXC_COORDINATOR && StreamTopConsumerAmI() && queryDesc->instrument_options != 0 &&
         queryDesc->plannedstmt->in_compute_pool) {
         const int dop = 1;
 
@@ -1323,74 +1327,75 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
      * While we are at it, build the ExecRowMark list.
      */
     estate->es_rowMarks = NIL;
-    uint64 plan_start_time = time(NULL);
-    foreach (l, plannedstmt->rowMarks) {
-        PlanRowMark *rc = (PlanRowMark *)lfirst(l);
-        Oid relid;
-        Relation relation = NULL;
-        ExecRowMark *erm = NULL;
+    if (plannedstmt->rowMarks) {
+        uint64 plan_start_time = time(NULL);
+        foreach (l, plannedstmt->rowMarks) {
+            PlanRowMark *rc = (PlanRowMark *)lfirst(l);
+            Oid relid;
+            Relation relation = NULL;
+            ExecRowMark *erm = NULL;
 
-        /* ignore "parent" rowmarks; they are irrelevant at runtime */
-        if (rc->isParent) {
-            continue;
+            /* ignore "parent" rowmarks; they are irrelevant at runtime */
+            if (rc->isParent) {
+                continue;
+            }
+
+            /*
+            * If you change the conditions under which rel locks are acquired
+            * here, be sure to adjust ExecOpenScanRelation to match.
+            */
+            switch (rc->markType) {
+                case ROW_MARK_EXCLUSIVE:
+                case ROW_MARK_NOKEYEXCLUSIVE:
+                case ROW_MARK_SHARE:
+                case ROW_MARK_KEYSHARE:
+                    if (IS_PGXC_COORDINATOR || u_sess->pgxc_cxt.PGXCNodeId < 0 ||
+                        bms_is_member(u_sess->pgxc_cxt.PGXCNodeId, rc->bms_nodeids)) {
+                        relid = getrelid(rc->rti, rangeTable);
+                        relation = heap_open(relid, RowShareLock);
+                    }
+                    break;
+                case ROW_MARK_REFERENCE:
+                    if (IS_PGXC_COORDINATOR || u_sess->pgxc_cxt.PGXCNodeId < 0 ||
+                        bms_is_member(u_sess->pgxc_cxt.PGXCNodeId, rc->bms_nodeids)) {
+                        relid = getrelid(rc->rti, rangeTable);
+                        relation = heap_open(relid, AccessShareLock);
+                    }
+                    break;
+                case ROW_MARK_COPY:
+                case ROW_MARK_COPY_DATUM:
+                    /* there's no real table here ... */
+                    break;
+                default:
+                    ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("unrecognized markType: %d when initializing query plan.", rc->markType)));
+                    break;
+            }
+
+            /* Check that relation is a legal target for marking */
+            if (relation != NULL) {
+                CheckValidRowMarkRel(relation, rc->markType);
+            }
+
+            erm = (ExecRowMark *)palloc(sizeof(ExecRowMark));
+            erm->relation = relation;
+            erm->rti = rc->rti;
+            erm->prti = rc->prti;
+            erm->rowmarkId = rc->rowmarkId;
+            erm->markType = rc->markType;
+            erm->waitPolicy = rc->waitPolicy;
+            erm->waitSec = rc->waitSec;
+            erm->numAttrs = rc->numAttrs;
+            ItemPointerSetInvalid(&(erm->curCtid));
+            estate->es_rowMarks = lappend(estate->es_rowMarks, erm);
         }
-
-        /*
-         * If you change the conditions under which rel locks are acquired
-         * here, be sure to adjust ExecOpenScanRelation to match.
-         */
-        switch (rc->markType) {
-            case ROW_MARK_EXCLUSIVE:
-            case ROW_MARK_NOKEYEXCLUSIVE:
-            case ROW_MARK_SHARE:
-            case ROW_MARK_KEYSHARE:
-                if (IS_PGXC_COORDINATOR || u_sess->pgxc_cxt.PGXCNodeId < 0 ||
-                    bms_is_member(u_sess->pgxc_cxt.PGXCNodeId, rc->bms_nodeids)) {
-                    relid = getrelid(rc->rti, rangeTable);
-                    relation = heap_open(relid, RowShareLock);
-                }
-                break;
-            case ROW_MARK_REFERENCE:
-                if (IS_PGXC_COORDINATOR || u_sess->pgxc_cxt.PGXCNodeId < 0 ||
-                    bms_is_member(u_sess->pgxc_cxt.PGXCNodeId, rc->bms_nodeids)) {
-                    relid = getrelid(rc->rti, rangeTable);
-                    relation = heap_open(relid, AccessShareLock);
-                }
-                break;
-            case ROW_MARK_COPY:
-            case ROW_MARK_COPY_DATUM:
-                /* there's no real table here ... */
-                break;
-            default:
-                ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmsg("unrecognized markType: %d when initializing query plan.", rc->markType)));
-                break;
+        uint64 plan_end_time = time(NULL);
+        if ((plan_end_time - plan_start_time) > THREAD_INTSERVAL_60S) {
+            ereport(WARNING,
+                (errmsg("InitPlan foreach plannedstmt->rowMarks takes %lus, plan_start_time:%lus, plan_end_time:%lus.",
+                plan_end_time - plan_start_time, plan_start_time, plan_end_time)));
         }
-
-        /* Check that relation is a legal target for marking */
-        if (relation != NULL) {
-            CheckValidRowMarkRel(relation, rc->markType);
-        }
-
-        erm = (ExecRowMark *)palloc(sizeof(ExecRowMark));
-        erm->relation = relation;
-        erm->rti = rc->rti;
-        erm->prti = rc->prti;
-        erm->rowmarkId = rc->rowmarkId;
-        erm->markType = rc->markType;
-        erm->waitPolicy = rc->waitPolicy;
-        erm->waitSec = rc->waitSec;
-        erm->numAttrs = rc->numAttrs;
-        ItemPointerSetInvalid(&(erm->curCtid));
-        estate->es_rowMarks = lappend(estate->es_rowMarks, erm);
     }
-    uint64 plan_end_time = time(NULL);
-    if ((plan_end_time - plan_start_time) > THREAD_INTSERVAL_60S) {
-        ereport(WARNING,
-            (errmsg("InitPlan foreach plannedstmt->rowMarks takes %lus, plan_start_time:%lus, plan_end_time:%lus.",
-            plan_end_time - plan_start_time, plan_start_time, plan_end_time)));
-    }
-
     /*
      * Initialize the executor's tuple table to empty.
      */

@@ -4997,7 +4997,9 @@ TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer ot
     uint16 infomask_new_tuple;
     uint16 infomask2_new_tuple;
     int options = 0;
+#ifdef ENABLE_MULTI_NODES
     bool rel_in_redis = RelationInClusterResizing(relation);
+#endif
     OffsetNumber maxoff;
     BlockNumber rel_end_block = InvalidBlockNumber;
     char relreplident;
@@ -5483,11 +5485,12 @@ l2:
 #ifdef PGXC
     newtup->t_xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
 #endif
+#ifdef ENABLE_MULTIPLE_NODES
     if (rel_in_redis && !RelationInClusterResizingReadOnly(relation)) {
         options |= HEAP_INSERT_SKIP_FSM;
         rel_end_block = RelationGetEndBlock(relation);
     }
-
+#endif
     /*
      * Replace cid with a combo cid if necessary.  Note that we already put
      * the plain cid into the new tuple.
@@ -5518,7 +5521,11 @@ l2:
     pagefree = PageGetHeapFreeSpace(page);
 
     new_tup_size = MAXALIGN(newtup->t_len);
-    if (need_toast || new_tup_size > pagefree || rel_in_redis) {
+    if (need_toast || new_tup_size > pagefree
+#ifdef ENABLE_MULTIPLE_NODES
+         || rel_in_redis
+#endif
+        ) {
         /* Clear obsolete visibility flags ... */
         oldtup.t_data->t_infomask &= ~HEAP_XMAX_BITS;
         oldtup.t_data->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
@@ -5569,7 +5576,12 @@ l2:
          * while not holding the lock on the old page, and we must rely on it
          * to get the locks on both pages in the correct order.
          */
-        if (new_tup_size > pagefree || rel_in_redis) {
+        if (new_tup_size > pagefree
+#ifdef ENABLE_MULTIPLE_NODES
+            || rel_in_redis
+#endif
+        ) {
+
             /* Assume there's no chance to put heaptup on same page. */
             newbuf = RelationGetBufferForTuple(
                 relation, heaptup->t_len, buffer, options, NULL, &vmbuffer_new, &vmbuffer, rel_end_block);

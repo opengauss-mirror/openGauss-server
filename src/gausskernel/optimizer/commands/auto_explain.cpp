@@ -154,12 +154,6 @@ static void explain_ExecutorFinish(QueryDesc *queryDesc)
 
 void opfusion_executeEnd(PlannedStmt* plannedstmt, const char *queryString, Snapshot snapshot)
 {
-    long secs;
-    int usecs;
-    int msecs;
-    TimestampDifference(GetCurrentStatementLocalStartTimestamp(), GetCurrentTimestamp(), &secs, &usecs);
-    msecs = usecs / 1000 + secs * 1000;
-
     if (!auto_explain_enabled() || !instr_stmt_need_track_plan())
         return;
 
@@ -235,7 +229,7 @@ void print_parameters(const QueryDesc *queryDesc, ExplainState es)
 void exec_explain_plan(QueryDesc *queryDesc)
 {
     ExplainState es;
-    if (is_valid_query(queryDesc) && auto_explain_plan()) {
+    if (auto_explain_plan() && is_valid_query(queryDesc)) {
         INSTR_TIME_SET_CURRENT(plan_time);
         ExplainInitState(&es);
         es.costs = true;
@@ -279,7 +273,7 @@ void exec_explain_plan(QueryDesc *queryDesc)
     }
 }
 void print_duration(const QueryDesc *queryDesc) {
-    if (is_valid_query(queryDesc) && auto_explain_plan()) {
+    if (auto_explain_plan() && is_valid_query(queryDesc)) {
         double time_diff = 0;
         time_diff += elapsed_time(&plan_time);
         ereport(u_sess->attr.attr_resource.auto_explain_level,
