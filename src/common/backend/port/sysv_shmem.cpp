@@ -28,8 +28,10 @@
 #endif
 
 #include "miscadmin.h"
+#include "port/pg_bitutils.h"
 #include "postmaster/postmaster.h"
 #include "storage/ipc.h"
+#include "storage/smgr/fd.h"
 #include "storage/pg_shmem.h"
 #include "securec.h"
 
@@ -47,10 +49,64 @@ typedef int IpcMemoryId;    /* shared memory ID returned by shmget(2) */
 THR_LOCAL unsigned long UsedShmemSegID = 0;
 THR_LOCAL void* UsedShmemSegAddr = NULL;
 
+static int GetSystemDefaultHugepagesSize();
+static void GetHugepageSize(Size* hugepageSize, int* flag);
 static void* InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size);
 static void IpcMemoryDetach(int status, Datum shmaddr);
 static void IpcMemoryDelete(int status, Datum shmId);
 static PGShmemHeader* PGSharedMemoryAttach(IpcMemoryKey key, IpcMemoryId* shmid);
+
+static int GetSystemDefaultHugepagesSize()
+{
+    int result = 0;
+    FILE *fp = AllocateFile("/proc/meminfo", "r");
+    if (!fp) {
+        return result;
+    }
+    char buf[128];
+    unsigned int size;
+    char ch;
+    while (fgets(buf, sizeof(buf), fp)) {
+        if (sscanf_s(buf, "Hugepagesize: %u %c", &size, &ch, sizeof(char)) == 2) {
+            if (ch == 'k') {
+                result = ((Size)1024) * size;
+                break;
+            }
+            // extend for mB, gB if needed in the future
+        }
+    }
+    FreeFile(fp);
+    return result;
+}
+
+static void GetHugepageSize(Size* hugepageSize, int* flag)
+{
+    Assert(g_instance.attr.attr_storage.enable_huge_pages);
+#ifdef SHM_HUGETLB
+    Size sizeLocal = 0;
+    if (g_instance.attr.attr_storage.huge_page_size != 0) {
+        sizeLocal = (Size)(g_instance.attr.attr_storage.huge_page_size * (Size)BLCKSZ);
+    } else {
+        sizeLocal = GetSystemDefaultHugepagesSize();
+    }
+    if (sizeLocal == 0) {
+        /* if we failed to read default size, set hugepage size to 2MB */
+        sizeLocal = 2 * 1024 * 1024;
+    }
+    int flagLocal = SHM_HUGETLB;
+
+#if defined(MAP_HUGE_MASK) && defined(MAP_HUGE_SHIFT)
+    int shift = pg_leftmost_one_pos64(sizeLocal - 1) + 1;
+    flagLocal |= (shift & MAP_HUGE_MASK) << MAP_HUGE_SHIFT;
+#endif
+
+    *hugepageSize = sizeLocal;
+    *flag = flagLocal;
+#else
+    *hugepageSize = 0;
+    *flags = 0;
+#endif  /* SHM_HUGETLB */
+}
 
 /*
  * InternalIpcMemoryCreate(memKey, size)
@@ -69,7 +125,21 @@ static void* InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size)
     IpcMemoryId shmid;
     void* memAddress = NULL;
 
-    shmid = shmget(memKey, size, IPC_CREAT | IPC_EXCL | IPCProtection);
+    if (g_instance.attr.attr_storage.enable_huge_pages) {
+        Size hugepageSize;
+        Size allocSize = size;
+        int hugepageFlag;
+        GetHugepageSize(&hugepageSize, &hugepageFlag);
+        // make sure the allocated shared memory size is multiple of hugepage size.
+        if (allocSize % hugepageSize != 0) {
+            allocSize += hugepageSize - (allocSize % hugepageSize);
+        }
+        ereport(LOG, (errmsg("Allocate shared memory as huge pages. Huge page size: %d KB, required pages count: %d",
+                             (int)hugepageSize / 1024, (int)(allocSize / hugepageSize))));
+        shmid = shmget(memKey, allocSize, IPC_CREAT | IPC_EXCL | IPCProtection | hugepageFlag);
+    } else {
+        shmid = shmget(memKey, size, IPC_CREAT | IPC_EXCL | IPCProtection);
+    }
     if (shmid < 0) {
         /*
          * Fail quietly if error indicates a collision with existing segment.
