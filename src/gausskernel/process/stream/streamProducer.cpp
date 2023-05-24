@@ -1816,7 +1816,7 @@ void StreamProducer::initSharedContext()
         /* Init tuples. */
         for (int i = 0; i < m_connNum; i++) {
             TupleVector* TupleVec = (TupleVector*)palloc0(sizeof(TupleVector));
-            TupleVec->tupleVector = (TupleTableSlot**)palloc0(sizeof(TupleTableSlot*) * TupleVectorMaxSize);
+            TupleVec->tupleVector = (TupleTableSlot**)palloc(sizeof(TupleTableSlot*) * TupleVectorMaxSize);
             m_sharedContext->sharedTuples[i][u_sess->stream_cxt.smp_id] = TupleVec;
 
             for (int j = 0; j < TupleVectorMaxSize; j++) {
