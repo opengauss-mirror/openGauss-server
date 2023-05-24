@@ -1357,18 +1357,28 @@ void set_hint_value(RelOptInfo* join_rel, Path* new_path, HintState* hstate)
     }
 }
 
-bool find_index_hint_value(List* indexhintList, Oid pathindexOid, bool* isUse)
+/*
+ * @Description: find index_hint to this new path.
+ * Level of the ignore index is the highest
+ */
+bool find_index_hint_value(List* indexhintList, Oid pathindexOid, short* hintMask)
 {
     ListCell* lc = NULL;
     Oid indexOid;
+    bool result = false;
     foreach(lc, indexhintList) {
         indexOid = ((IndexHintRelationData*)lfirst(lc))->indexOid;
-        *isUse = (((IndexHintRelationData*)lfirst(lc))->index_type == INDEX_HINT_USE);
+        if (((IndexHintRelationData*)lfirst(lc))->index_type == INDEX_HINT_USE) {
+            *hintMask |= HINT_MATCH_USE;
+        }  
         if (pathindexOid == indexOid) {
-            return true;
+            if (((IndexHintRelationData*)lfirst(lc))->index_type == INDEX_HINT_IGNORE) {
+                *hintMask |= HINT_MATCH_IGNORE;
+            }
+            result = true;
         }
     }
-    return false;
+    return result;
 }
 
 void set_index_hint_value(Path* new_path, List* indexhintList)
@@ -1376,8 +1386,9 @@ void set_index_hint_value(Path* new_path, List* indexhintList)
     if (indexhintList == NULL)
         return ;
     IndexPath* index_path = (IndexPath*)new_path;
-    bool useIndex = false;
-    bool hintUse = false;
+    bool matchIndex = false;
+    bool isIndexScan = false;
+    short hintMask = 0;
     
     switch (new_path->pathtype) {
         case T_SeqScan:
@@ -1387,21 +1398,32 @@ void set_index_hint_value(Path* new_path, List* indexhintList)
 #endif   /* ENABLE_MULTIPLE_NODES */
         case T_SubqueryScan:
         case T_ForeignScan: {
-            useIndex = find_index_hint_value(indexhintList, InvalidOid, &hintUse);
+            matchIndex = find_index_hint_value(indexhintList, InvalidOid, &hintMask);
             break;
         }
         case T_IndexScan:
         case T_IndexOnlyScan: {
-            useIndex = find_index_hint_value(indexhintList, index_path->indexinfo->indexoid, &hintUse);
+            isIndexScan = true;
+            matchIndex = find_index_hint_value(indexhintList, index_path->indexinfo->indexoid, &hintMask);
             break;
         }
         default:
             break;
     }
-    if (useIndex)
+    if (matchIndex) {
+        if ((hintMask & HINT_MATCH_IGNORE) > 0) {
+        /* ignore index is the top level concerned any hint shoule be reset to zero */
+            if (new_path->hint_value > 0) {
+                new_path->hint_value = 0;
+            } 
+            new_path->hint_value--;
+        } else {
+            new_path->hint_value++;
+        }
+    } else if ((hintMask & HINT_MATCH_USE) > 0 && !isIndexScan) {
+        /* use index should both add seqscan and when matched*/
         new_path->hint_value++;
-    else if (hintUse)
-        new_path->hint_value++;
+    }
     return ;
 }
 
