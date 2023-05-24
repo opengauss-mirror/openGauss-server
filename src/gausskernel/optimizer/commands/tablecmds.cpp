@@ -2902,6 +2902,18 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
                 errmsg("The table %s do not support segment storage", stmt->relation->relname)));
     }
 
+    if (storage_type == SEGMENT_PAGE) {
+        Oid tbspcId = (tablespaceId == InvalidOid) ? u_sess->proc_cxt.MyDatabaseTableSpace : tablespaceId;
+        uint64 tablespaceMaxSize = 0;
+        bool isLimit = TableSpaceUsageManager::IsLimited(tbspcId, &tablespaceMaxSize);
+        if (isLimit) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
+                errmsg("The table %s do not support segment-page storage", stmt->relation->relname),
+                errdetail("Segment-page storage doest not support limited tablespace \"%s\"", get_tablespace_name(tbspcId)),
+                errhint("use default or unlimited user defined tablespace before using segment-page storage.")));
+        }
+    }
+
     if (ENABLE_DMS && !u_sess->attr.attr_common.IsInplaceUpgrade) {
         if ((relkind == RELKIND_RELATION && storage_type != SEGMENT_PAGE) ||
             relkind == RELKIND_MATVIEW ||
