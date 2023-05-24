@@ -3560,8 +3560,14 @@ static char *ColumnRefFindRelname(ParseState *pstate, const char *colname)
                     Value *col = (Value *)lfirst(lc2);
                     if (strcmp(colname, strVal(col)) == 0) {
                         if (rte->rtekind == RTE_RELATION) {
-                            relname = (rte->alias && rte->alias->aliasname) ?
-                                       rte->alias->aliasname : rte->relname;
+                            if (rte->alias && rte->alias->aliasname) {
+                                relname = rte->alias->aliasname;
+                            } else if (rte->eref && rte->eref->aliasname) {
+                                /* should use eref->aliasname for SYNONYM*/
+                                relname = rte->eref->aliasname;
+                            } else {
+                                relname = rte->relname;
+                            }
                         } else if (rte->rtekind == RTE_SUBQUERY) {
                             relname = rte->alias->aliasname;
                         } else if (rte->rtekind == RTE_CTE) {
