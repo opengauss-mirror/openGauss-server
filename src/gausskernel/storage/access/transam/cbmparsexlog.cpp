@@ -174,8 +174,6 @@ static void DestoryCbmHashEntry(CbmHashEntry *cbmPageEntry, bool reuse, XlogBitm
 static Dlelem *FindPageElemFromEntry(CbmHashEntry *cbmPageEntry, BlockNumber pageFirstBlock);
 static bool checkUserRequstAndRotateCbm();
 
-extern void *palloc_extended(Size size, int flags);
-
 extern void InitXlogCbmSys(void)
 {
     CBMFileHomeInitialize();

@@ -407,7 +407,7 @@ bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted, long 
     if (m_local.m_isCompleted) {
         UnregisterSnapshot(m_local.m_snapshot);
         m_local.m_snapshot = NULL;
-        MemoryContextDeleteChildren(m_local.m_tmpContext);
+        MemoryContextDeleteChildren(m_local.m_tmpContext, NULL);
         /* reset the context. */
         MemoryContextReset(m_local.m_tmpContext);
         /* clear hash table */
@@ -1104,7 +1104,7 @@ void OpFusion::bindClearPosition()
     m_local.m_outParams = NULL;
     m_local.m_snapshot = NULL;
 
-    MemoryContextDeleteChildren(m_local.m_tmpContext);
+    MemoryContextDeleteChildren(m_local.m_tmpContext, NULL);
     /* reset the context. */
     MemoryContextReset(m_local.m_tmpContext);
 }
@@ -1200,7 +1200,7 @@ void OpFusion::clean()
         if (m_local.m_scan)
             m_local.m_scan->End(true);
         m_local.m_isCompleted = false;
-        MemoryContextDeleteChildren(m_local.m_tmpContext);
+        MemoryContextDeleteChildren(m_local.m_tmpContext, NULL);
         /* reset the context. */
         MemoryContextReset(m_local.m_tmpContext);
     }

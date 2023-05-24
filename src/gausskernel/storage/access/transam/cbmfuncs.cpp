@@ -42,7 +42,6 @@
 #include "storage/smgr/segment.h"
 #include "utils/builtins.h"
 
-extern void *palloc_extended(Size size, int flags);
 extern void validate_xlog_location(char *str);
 static void validate_start_end_lsn(char *start_lsn_str, char *end_lsn_str, XLogRecPtr *start_lsn, XLogRecPtr *end_lsn);
 static void validate_get_lsn(char *lsn_str, XLogRecPtr *lsn_ptr);

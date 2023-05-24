@@ -68,6 +68,7 @@ extern void* MemoryContextAllocZeroAligned(MemoryContext context, Size size);
                        : MemoryContextAllocZero(CurrentMemoryContext, sz))
 
 extern void pfree(void* pointer);
+extern void opt_pfree(void* pointer);
 
 extern void* repalloc(void* pointer, Size size);
 

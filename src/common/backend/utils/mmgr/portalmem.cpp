@@ -912,7 +912,7 @@ void AtAbort_Portals(bool STP_rollback)
                 portal->streamInfo.Reset();
             }
 #endif
-            MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
+            MemoryContextDeleteChildren(PortalGetHeapMemory(portal), NULL);
         }
     }
 }
@@ -1134,7 +1134,7 @@ void AtSubAbort_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
              * The cleanup hook was the last thing that might have needed data
              * there.
              */
-            MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
+            MemoryContextDeleteChildren(PortalGetHeapMemory(portal), NULL);
         } else {
             /* clean up snapshots before release its reource owner. */
             if (portal->resowner != NULL) {
@@ -1147,7 +1147,7 @@ void AtSubAbort_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
              */
             if (portal->status != PORTAL_ACTIVE) {
                 ReleaseStreamGroup(portal);
-                MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
+                MemoryContextDeleteChildren(PortalGetHeapMemory(portal), NULL);
             }
         }
     }

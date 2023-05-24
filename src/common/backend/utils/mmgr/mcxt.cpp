@@ -69,6 +69,32 @@ static void FreeMemoryContextList(List* context_list);
 void* allocTopCxt(size_t s);
 #endif
 
+static McxtAllocationMethods StdMcxtAllocMtd = {
+    MemoryAllocFromContext,
+    MemoryContextAllocDebug,
+    MemoryContextAllocZeroDebug,
+    MemoryContextAllocZeroAlignedDebug,
+    MemoryContextAllocHugeDebug,
+    MemoryContextAllocHugeZeroDebug,
+    MemoryContextAllocExtendedDebug,
+    MemoryContextStrdupDebug,
+    std_palloc_extended,
+    std_palloc0_noexcept
+};
+
+static McxtOperationMethods StdMcxtOpMtd = {
+    std_MemoryContextReset,
+    std_MemoryContextDelete,
+    std_MemoryContextDeleteChildren,
+    std_MemoryContextDestroyAtThreadExit,
+    std_MemoryContextResetAndDeleteChildren,
+    std_MemoryContextSetParent
+#ifdef MEMORY_CONTEXT_CHECKING
+    ,
+    std_MemoryContextCheck
+#endif
+};
+
 /*****************************************************************************
  *	  EXPORTED ROUTINES														 *
  *****************************************************************************/
@@ -205,18 +231,20 @@ static inline void PreventActionOnSealedContext(MemoryContext context)
 }
 
 /*
- * MemoryContextReset
+ * std_MemoryContextReset
  *		Release all space allocated within a context and its descendants,
  *		but don't delete the contexts themselves.
  *
  * The type-specific reset routine handles the context itself, but we
  * have to do the recursion for the children.
  */
-void MemoryContextReset(MemoryContext context)
+void std_MemoryContextReset(MemoryContext context)
 {
     AssertArg(MemoryContextIsValid(context));
 
+#ifdef MEMORY_CONTEXT_CHECKING
     PreventActionOnSealedContext(context);
+#endif
 
     if (MemoryContextIsShared(context))
         MemoryContextLock(context);
@@ -282,7 +310,7 @@ static inline bool IsTopMemCxt(const MemoryContext mcxt)
 }
 
 /*
- * MemoryContextDelete
+ * MemoryContextDeleteInternal
  *		Delete a context and its descendants, and release all space
  *		allocated therein.
  *
@@ -291,7 +319,7 @@ static inline bool IsTopMemCxt(const MemoryContext mcxt)
  * as well as recurse to get the children.	We must also delink the
  * node from its parent, if it has one.
  */
-void MemoryContextDeleteInternal(MemoryContext context, bool parent_locked,
+static void MemoryContextDeleteInternal(MemoryContext context, bool parent_locked,
     List* context_list)
 {
     AssertArg(MemoryContextIsValid(context));
@@ -361,7 +389,7 @@ void MemoryContextDeleteInternal(MemoryContext context, bool parent_locked,
     PG_END_TRY();
 }
 
-void MemoryContextDelete(MemoryContext context)
+void std_MemoryContextDelete(MemoryContext context)
 {
     List context_list = {T_List, 0, NULL, NULL};;
 
@@ -391,11 +419,11 @@ void MemoryContextDelete(MemoryContext context)
 }
 
 /*
- * MemoryContextDeleteChildren
+ * std_MemoryContextDeleteChildren
  *		Delete all the descendants of the named context and release all
  *		space allocated therein.  The named context itself is not touched.
  */
-void MemoryContextDeleteChildren(MemoryContext context, List* context_list)
+void std_MemoryContextDeleteChildren(MemoryContext context, List* context_list)
 {
     AssertArg(MemoryContextIsValid(context));
     List res_list = {T_List, 0, NULL, NULL};
@@ -422,14 +450,14 @@ void MemoryContextDeleteChildren(MemoryContext context, List* context_list)
 }
 
 /*
- * MemoryContextResetAndDeleteChildren
+ * std_MemoryContextResetAndDeleteChildren
  *		Release all space allocated within a context and delete all
  *		its descendants.
  *
  * This is a common combination case where we want to preserve the
  * specific context but get rid of absolutely everything under it.
  */
-void MemoryContextResetAndDeleteChildren(MemoryContext context)
+void std_MemoryContextResetAndDeleteChildren(MemoryContext context)
 {
     AssertArg(MemoryContextIsValid(context));
     if (!IsTopMemCxt(context)) {
@@ -452,7 +480,7 @@ void MemoryContextResetAndDeleteChildren(MemoryContext context)
 }
 
 /*
- * MemoryContextSetParent
+ * std_MemoryContextSetParent
  *		Change a context to belong to a new parent (or no parent).
  *
  * We provide this as an API function because it is sometimes useful to
@@ -469,7 +497,7 @@ void MemoryContextResetAndDeleteChildren(MemoryContext context)
  * a loop in the context graph.  We assert here that context != new_parent,
  * but checking for multi-level loops seems more trouble than it's worth.
  */
-void MemoryContextSetParent(MemoryContext context, MemoryContext new_parent)
+void std_MemoryContextSetParent(MemoryContext context, MemoryContext new_parent)
 {
     AssertArg(MemoryContextIsValid(context));
     AssertArg(context != new_parent);
@@ -667,13 +695,13 @@ static void MemoryContextStatsInternal(MemoryContext context, int level)
 }
 
 /*
- * MemoryContextCheck
+ * std_MemoryContextCheck
  *		Check all chunks in the named context.
  *
  * This is just a debugging utility, so it's not fancy.
  */
 #ifdef MEMORY_CONTEXT_CHECKING
-void MemoryContextCheck(MemoryContext context, bool own_by_session)
+void std_MemoryContextCheck(MemoryContext context, bool own_by_session)
 {
     MemoryContext child;
 
@@ -886,6 +914,8 @@ MemoryContext MemoryContextCreate(
     node->isReset = true;
     node->is_sealed = false;
     node->methods = (MemoryContextMethods*)(((char*)node) + size);
+    node->alloc_methods = &StdMcxtAllocMtd;
+    node->mcxt_methods = &StdMcxtOpMtd;
     node->name = ((char*)node) + size + sizeof(MemoryContextMethods);
     node->cell.data.ptr_value = (void*)node;
     node->cell.next = NULL;
@@ -991,6 +1021,7 @@ void MemoryContextCheckSessionMemory(MemoryContext context, Size size, const cha
 void* MemoryAllocFromContext(MemoryContext context, Size size, const char* file, int line)
 {
     void* ret = NULL;
+
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -1199,10 +1230,10 @@ void* MemoryContextAllocExtendedDebug(MemoryContext context, Size size, int flag
 }
 
 /*
- * palloc_extended
+ * std_palloc_extended
  *    palloc with flags, it will return NULL while OOM happend.
  */
-void* palloc_extended(Size size, int flags)
+void* std_palloc_extended(Size size, int flags)
 {
     /* duplicates MemoryContextAllocExtended to avoid increased overhead */
     void* ret = NULL;
@@ -1240,11 +1271,11 @@ void* palloc_extended(Size size, int flags)
 }
 
 /*
- * palloc0_noexcept
+ * std_palloc0_noexcept
  *    palloc without exception, it will return NULL while OOM happend.
  *    the memory will reset 0 if alloc successful.
  */
-void* palloc0_noexcept(Size size)
+void* std_palloc0_noexcept(Size size)
 {
     return palloc_extended(size, MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
 }
@@ -1275,6 +1306,11 @@ void pfree(void* pointer)
     context = &(block->aset->header);
 #endif
 
+    if (IsOptAllocSetContext(context)) {
+        opt_pfree(pointer);
+        return;
+    }
+
     AssertArg(MemoryContextIsValid(context));
 #ifdef MEMORY_CONTEXT_CHECKING
     if (!IsTopMemCxt(context)) {
@@ -1292,6 +1328,20 @@ void* repalloc_noexcept_Debug(void* pointer, Size size, const char* file, int li
     MemoryContext context;
     void* ret = NULL;
 
+#ifndef ENABLE_MEMORY_CHECK
+    /*
+     * OK, it's probably safe to look at the chunk header.
+     */
+    context = ((StandardChunkHeader*)((char*)pointer - STANDARDCHUNKHEADERSIZE))->context;
+#else
+    AsanBlock block = ((AsanBlock)(((char*)(pointer)) - ASAN_BLOCKHDRSZ));
+    context = &(block->aset->header);
+#endif
+
+    if (IsOptAllocSetContext(context)) {
+        return opt_repalloc_noexcept_Debug(pointer, size, file, line);
+    }
+
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -1305,16 +1355,6 @@ void* repalloc_noexcept_Debug(void* pointer, Size size, const char* file, int li
      */
     Assert(pointer != NULL);
     Assert(pointer == (void*)MAXALIGN(pointer));
-
-#ifndef ENABLE_MEMORY_CHECK
-    /*
-     * OK, it's probably safe to look at the chunk header.
-     */
-    context = ((StandardChunkHeader*)((char*)pointer - STANDARDCHUNKHEADERSIZE))->context;
-#else
-    AsanBlock block = ((AsanBlock)(((char*)(pointer)) - ASAN_BLOCKHDRSZ));
-    context = &(block->aset->header);
-#endif
 
     AssertArg(MemoryContextIsValid(context));
 
@@ -1346,6 +1386,20 @@ void* repallocDebug(void* pointer, Size size, const char* file, int line)
     MemoryContext context;
     void* ret = NULL;
 
+#ifndef ENABLE_MEMORY_CHECK
+    /*
+     * OK, it's probably safe to look at the chunk header.
+     */
+    context = ((StandardChunkHeader*)((char*)pointer - STANDARDCHUNKHEADERSIZE))->context;
+#else
+    AsanBlock block = ((AsanBlock)(((char*)(pointer)) - ASAN_BLOCKHDRSZ));
+    context = &(block->aset->header);
+#endif
+
+    if (IsOptAllocSetContext(context)) {
+        return opt_repallocDebug(pointer, size, file, line);
+    }
+
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -1359,15 +1413,7 @@ void* repallocDebug(void* pointer, Size size, const char* file, int line)
      */
     Assert(pointer != NULL);
     Assert(pointer == (void*)MAXALIGN(pointer));
-#ifndef ENABLE_MEMORY_CHECK
-    /*
-     * OK, it's probably safe to look at the chunk header.
-     */
-    context = ((StandardChunkHeader*)((char*)pointer - STANDARDCHUNKHEADERSIZE))->context;
-#else
-    AsanBlock block = ((AsanBlock)(((char*)(pointer)) - ASAN_BLOCKHDRSZ));
-    context = &(block->aset->header);
-#endif
+
     AssertArg(MemoryContextIsValid(context));
     PreventActionOnSealedContext(context);
     /* isReset must be false already */
@@ -1465,6 +1511,52 @@ void* MemoryContextAllocHugeDebug(MemoryContext context, Size size, const char* 
     context->isReset = false;
 
     ret = (*context->methods->alloc)(context, 0, size, file, line);
+    if (unlikely(ret == NULL))
+        ereport(ERROR,
+            (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
+                errmsg("memory is temporarily unavailable"),
+                errdetail("Failed on request of size %lu bytes under queryid %lu in %s:%d.",
+                    (unsigned long)size,
+                    u_sess->debug_query_id,
+                    file,
+                    line)));
+
+#ifdef MEMORY_CONTEXT_CHECKING
+    /* check if the memory context is out of control */
+    MemoryContextCheckMaxSize(context, size, file, line);
+#endif
+
+    /* check if the session used memory is beyond the limitation */
+    if (unlikely(STATEMENT_MAX_MEM)) {
+        MemoryContextCheckSessionMemory(context, size, file, line);
+    }
+    InsertMemoryAllocInfo(ret, context, file, line, size);
+
+    return ret;
+}
+
+/**
+ * @Description: Allocate (possibly-expansive) space within the specified context.
+ *				See considerations in comment at MaxAllocHugeSize.
+ * @in context - the pointer of memory context
+ * @in size - the allocated size
+ * @in file - which file are allocating memory
+ * @in line - which line are allocating memory
+ */
+void* MemoryContextAllocHugeZeroDebug(MemoryContext context, Size size, const char* file, int line)
+{
+    void* ret = NULL;
+
+    AssertArg(MemoryContextIsValid(context));
+
+    if (!AllocHugeSizeIsValid(size)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+                errmsg("invalid memory alloc request size %zu in %s:%d", size, file, line)));
+    }
+
+    context->isReset = false;
+
+    ret = (*context->methods->alloc)(context, 0, size, file, line);
     if (ret == NULL)
         ereport(ERROR,
             (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
@@ -1502,6 +1594,20 @@ void* repallocHugeDebug(void* pointer, Size size, const char* file, int line)
     MemoryContext context;
     void* ret = NULL;
 
+#ifndef ENABLE_MEMORY_CHECK
+    /*
+     * OK, it's probably safe to look at the chunk header.
+     */
+    context = ((StandardChunkHeader*)((char*)pointer - STANDARDCHUNKHEADERSIZE))->context;
+#else
+    AsanBlock block = ((AsanBlock)(((char*)(pointer)) - ASAN_BLOCKHDRSZ));
+    context = &(block->aset->header);
+#endif
+
+    if (IsOptAllocSetContext(context)) {
+        return opt_repallocDebug(pointer, size, file, line);
+    }
+
     if (!AllocHugeSizeIsValid(size)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid memory alloc request size %lu in %s:%d", size, file, line)));
@@ -1514,15 +1620,7 @@ void* repallocHugeDebug(void* pointer, Size size, const char* file, int line)
      */
     Assert(pointer != NULL);
     Assert(pointer == (void*)MAXALIGN(pointer));
-#ifndef ENABLE_MEMORY_CHECK
-    /*
-     * OK, it's probably safe to look at the chunk header.
-     */
-    context = ((StandardChunkHeader*)((char*)pointer - STANDARDCHUNKHEADERSIZE))->context;
-#else
-    AsanBlock block = ((AsanBlock)(((char*)(pointer)) - ASAN_BLOCKHDRSZ));
-    context = &(block->aset->header);
-#endif
+
     AssertArg(MemoryContextIsValid(context));
 
     /* isReset must be false already */
@@ -1705,7 +1803,7 @@ Gen_Alloc genAlloc_class = {(void* (*)(void*, size_t))gen_alloc,
 
 #endif
 
-void MemoryContextDestroyAtThreadExit(MemoryContext context)
+void std_MemoryContextDestroyAtThreadExit(MemoryContext context)
 {
     MemoryContext pContext = context;
     if (!IsTopMemCxt(context)) {
@@ -1725,7 +1823,7 @@ void MemoryContextDestroyAtThreadExit(MemoryContext context)
 
         /* Delete all its decendents */
         Assert(!pContext->parent);
-        MemoryContextDeleteChildren(pContext);
+        MemoryContextDeleteChildren(pContext, NULL);
 
         /* Delete the top context itself */
         RemoveMemoryContextInfo(pContext);

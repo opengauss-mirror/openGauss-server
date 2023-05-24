@@ -205,6 +205,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  dfs_partition_directory_length                   | integer |      | 92        | 7999
  dirty_page_percent_max                           | real    |      | 0.1       | 1
  disable_memory_protect                           | bool    |      |           | 
+ disable_memory_stats                             | bool    |      |           | 
  dolphin_server_port                              | integer |      | 1024      | 65535
  dw_file_num                                      | integer |      | 1         | 16
  dw_file_size                                     | integer |      | 32        | 256
