@@ -67,6 +67,18 @@ void validateWithCheckOption(const char *value)
     }
 }
 
+/*---------------------------------------------------------------------
+ * Validator for "view_sql_security" reloption on views. The allowed values
+ * are "local" and "cascaded".
+ */
+void validateViewSecurityOption(const char *value)
+{
+    if (value == NULL || (pg_strcasecmp(value, "definer") != 0 && pg_strcasecmp(value, "invoker") != 0)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for \"view_sql_security\" option"),
+                errdetail("Valid values are \"INVOKER\", and \"DEFINER\".")));
+    }
+}
 static void setEncryptedColumnRef(ColumnDef *def, TargetEntry *tle)
 {
     def->clientLogicColumnRef = (ClientLogicColumnRef*)palloc(sizeof(ClientLogicColumnRef));
@@ -654,6 +666,14 @@ ObjectAddress DefineView(ViewStmt* stmt, const char* queryString, bool send_remo
         stmt->options = lappend(stmt->options, makeDefElem("check_option", (Node*)makeString("local")));
     else if (stmt->withCheckOption == CASCADED_CHECK_OPTION)
         stmt->options = lappend(stmt->options, makeDefElem("check_option", (Node*)makeString("cascaded")));
+
+    /*
+     * For B format sql security option ,add it to the list of reloptions.
+     */
+    if (stmt->viewSecurityOption == VIEW_SQL_SECURITY_DEFINER)
+        stmt->options = lappend(stmt->options, makeDefElem("view_sql_security", (Node*)makeString("definer")));
+    else if (stmt->viewSecurityOption == VIEW_SQL_SECURITY_INVOKER)
+        stmt->options = lappend(stmt->options, makeDefElem("view_sql_security", (Node*)makeString("invoker")));
 
     /*
     * Check that the view is auto-updatable if WITH CHECK OPTION was

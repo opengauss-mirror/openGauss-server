@@ -1500,7 +1500,146 @@ drop table test_table_030;
 drop function select_into_null_func;
 reset behavior_compat_options;
 
+-- view sql security test
+
+create database db_a1144425 dbcompatibility 'B';
+
+\c db_a1144425;
+create user use_a_1144425 identified by 'A@123456';
+create user use_b_1144425 identified by 'A@123456';
+create table sql_security_1144425(id int,cal int);
+insert into sql_security_1144425 values(1,1);
+insert into sql_security_1144425 values(2,2);
+insert into sql_security_1144425 values(3,3);
+--user a can create view in shcema
+grant all on schema public to use_a_1144425;
+
+-- definer 
+create definer=use_a_1144425 sql security definer view v_1144425_2 as select * from sql_security_1144425;
+-- invoker 
+create definer=use_a_1144425 sql security invoker view v_1144425_1 as select * from sql_security_1144425;
+
+--user a call view shoule be failed cause table operation
+set role use_a_1144425 password 'A@123456';
+select * from sql_security_1144425 order by 1,2;
+-- call definer\invoker  view shoule be failed
+select * from v_1144425_2 order by 1,2;
+select * from v_1144425_1 order by 1,2;
+-- root user shoule success in invoker ,failed in definer
+reset role;
+select * from v_1144425_2 order by 1,2;
+select * from v_1144425_1 order by 1,2;
+--user b call view shoule filed , no view permission both
+set role use_b_1144425 password 'A@123456';
+select * from v_1144425_2 order by 1,2;
+select * from v_1144425_1 order by 1,2;
+--give user b permission of view , no table permission both
+reset role;
+grant all on table v_1144425_2 to use_b_1144425;
+grant all on table v_1144425_1 to use_b_1144425;
+set role use_b_1144425 password 'A@123456';
+select * from v_1144425_2 order by 1,2;
+select * from v_1144425_1 order by 1,2;
+-- give user b permission of table , invoker success 
+reset role;
+grant all on table sql_security_1144425 to use_b_1144425;
+set role use_b_1144425 password 'A@123456';
+select * from v_1144425_2 order by 1,2;
+select * from v_1144425_1 order by 1,2;
+-- give user a permission of table , definer  success 
+reset role;
+grant all on table sql_security_1144425 to use_a_1144425;
+set role use_b_1144425 password 'A@123456';
+select * from v_1144425_2 order by 1,2;
+-- revoke user b permision of table , definer success, invoker failed
+reset role;
+revoke all on table sql_security_1144425 from use_b_1144425;
+set role use_b_1144425 password 'A@123456';
+select * from v_1144425_2 order by 1,2;
+select * from v_1144425_1 order by 1,2;
+reset role;
+-- test auth passdown for multi view;
+--clear all 
+drop table sql_security_1144425 cascade;
+drop user use_a_1144425 cascade;
+drop user use_b_1144425 cascade;
+
+create user use_a_1144425 identified by 'A@123456';
+create user use_b_1144425 identified by 'A@123456';
+create table sql_security_1144425(id int,cal int);
+insert into sql_security_1144425 values(1,1);
+--user a can create view in shcema
+grant all on schema public to use_a_1144425;
+-- definer view v_d_inner
+create definer=use_a_1144425 sql security definer view v_d_inner as select * from sql_security_1144425;
+-- invoker view v_i_inner
+create definer=use_a_1144425 sql security invoker view v_i_inner as select * from sql_security_1144425;
+-- definer view v_d_d_outer
+create definer=use_a_1144425 sql security definer view v_d_d_outer as select * from v_d_inner;
+-- definer view v_d_i_outer
+create definer=use_a_1144425 sql security definer view v_d_i_outer as select * from v_i_inner;
+-- definer view v_i_d_outer
+create definer=use_a_1144425 sql security invoker view v_i_d_outer as select * from v_d_inner;
+-- definer view v_i_i_outer
+create definer=use_a_1144425 sql security invoker view v_i_i_outer as select * from v_i_inner;
+-- root could only success in vii 
+select * from v_i_i_outer;
+select * from v_i_d_outer;
+select * from v_d_i_outer;
+select * from v_d_d_outer;
+-- give user b permisson of view;
+grant all on table v_i_i_outer to use_b_1144425;
+grant all on table v_i_d_outer to use_b_1144425;
+grant all on table v_d_i_outer to use_b_1144425;
+grant all on table v_d_d_outer to use_b_1144425;
+-- user b got error of table ,in vdi ,vdd. vii ,vid got view error
+set role use_b_1144425 password 'A@123456';
+select * from v_i_i_outer;
+select * from v_i_d_outer;
+select * from v_d_i_outer;
+select * from v_d_d_outer;
+--now give user a permission of table 
+reset role;
+grant all on table sql_security_1144425 to use_a_1144425;
+-- root could  success in all 
+select * from v_i_i_outer;
+select * from v_i_d_outer;
+select * from v_d_i_outer;
+select * from v_d_d_outer;
+-- user b only success in  vdd , vdi
+set role use_b_1144425 password 'A@123456';
+select * from v_i_i_outer;
+select * from v_i_d_outer;
+select * from v_d_i_outer;
+select * from v_d_d_outer;
+reset role;
+-- coverage test
+create view v1 as select * from sql_security_1144425;
+create or replace view v1 as select * from sql_security_1144425;
+create or replace definer=use_a_1144425 view v1 as select * from sql_security_1144425;
+create sql security invoker view v2 as select * from sql_security_1144425;
+create or replace sql security invoker view v2 as select * from sql_security_1144425;
+create or replace definer=use_a_1144425 sql security invoker view v2 as select * from sql_security_1144425;
+alter view v1 as select * from sql_security_1144425;
+alter definer=use_a_1144425 view v1 as select * from sql_security_1144425;
+alter sql security definer view v2 as select * from sql_security_1144425;
+alter definer=use_a_1144425 sql security definer view v2 as select * from sql_security_1144425;
+alter sql security definer view v1 as select * from sql_security_1144425;
+alter definer=use_a_1144425 sql security definer view v1 as select * from sql_security_1144425;
+
+--pg_dump test 
+--see view_definer_test.source
+
+--clear all 
+drop table sql_security_1144425 cascade;
+drop user use_a_1144425 cascade;
+drop user use_b_1144425 cascade;
+
+-- sql security end 
+
+
 \c regression
 drop database b_cmpt_db;
+drop database db_a1144425;
 DROP USER test_c;
 DROP USER test_d;

@@ -6689,6 +6689,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
     int i_parttype = 0;
     int i_relrowmovement = 0;
     int i_relhsblockchain = 0;
+    int i_viewsecurity = 0;
     int1 i_relcmprs = 0;
     SimpleOidListCell* cell = NULL;
     int count = 0;
@@ -6791,9 +6792,14 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "(SELECT pg_catalog.string_agg(node_name,',') AS pgxc_node_names from pgxc_node n where n.oid "
                 "in (select pg_catalog.unnest(nodeoids) from pgxc_class v where v.pcrelid=c.oid) ) , "
 #endif
-                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
-                      "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
-                        "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
+                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(pg_catalog.array_remove"
+                    "(pg_catalog.array_remove(c.reloptions, 'view_sql_security=definer'), 'view_sql_security=invoker'), "
+                        "'check_option=local'), 'check_option=cascaded'), ', ') AS reloptions, "
+                "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
+                    "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
+                "CASE WHEN 'view_sql_security=definer' = ANY (c.reloptions) THEN 'DEFINER'::text "  
+                     "WHEN 'view_sql_security=invoker' = ANY (c.reloptions) THEN 'INVOKER'::text "
+                        "ELSE NULL END AS viewsecurity, "     
                 "pg_catalog.array_to_string(array(SELECT 'toast.' || "
                 "x FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
@@ -6843,9 +6849,14 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "(SELECT pg_catalog.string_agg(node_name,',') AS pgxc_node_names from pgxc_node n where n.oid "
                 "in (select pg_catalog.unnest(nodeoids) from pgxc_class v where v.pcrelid=c.oid) ) , "
 #endif
-                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
-                      "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
-                        "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
+                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(pg_catalog.array_remove"
+                    "(pg_catalog.array_remove(c.reloptions, 'view_sql_security=definer'), 'view_sql_security=invoker'), "
+                        "'check_option=local'), 'check_option=cascaded'), ', ') AS reloptions, "
+                "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
+                    "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
+                "CASE WHEN 'view_sql_security=definer' = ANY (c.reloptions) THEN 'DEFINER'::text "  
+                     "WHEN 'view_sql_security=invoker' = ANY (c.reloptions) THEN 'INVOKER'::text "
+                        "ELSE NULL END AS viewsecurity, "  
                 "pg_catalog.array_to_string(array(SELECT 'toast.' || "
                 "x FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
@@ -7199,6 +7210,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
     i_reltablespace = PQfnumber(res, "reltablespace");
     i_reloptions = PQfnumber(res, "reloptions");
     i_checkoption = PQfnumber(res, "checkoption");
+    i_viewsecurity = PQfnumber(res, "viewsecurity"); 
     i_toastreloptions = PQfnumber(res, "toast_reloptions");
     i_reloftype = PQfnumber(res, "reloftype");
 
@@ -7377,6 +7389,11 @@ TableInfo* getTables(Archive* fout, int* numTables)
             tblinfo[i].checkoption = gs_strdup(PQgetvalue(res, i, i_checkoption));
         tblinfo[i].toast_reloptions = gs_strdup(PQgetvalue(res, i, i_toastreloptions));
 
+        /* b_format database views' sql security options */
+        if (i_viewsecurity == -1 || PQgetisnull(res, i, i_viewsecurity))
+            tblinfo[i].viewsecurity = NULL;
+        else
+            tblinfo[i].viewsecurity = gs_strdup(PQgetvalue(res, i, i_viewsecurity));
         /* other fields were zeroed above */
 
 #ifdef ENABLE_MOT
@@ -18612,7 +18629,11 @@ static void dumpViewSchema(
         appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
 
-    appendPQExpBuffer(q, "CREATE VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
+    appendPQExpBuffer(q, "CREATE ");
+    if (tbinfo->viewsecurity != NULL)
+        appendPQExpBuffer(q, "\n  SQL SECURITY %s \n   ", tbinfo->viewsecurity);
+        
+    appendPQExpBuffer(q, "VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
     if ((tbinfo->reloptions != NULL) && strlen(tbinfo->reloptions) > 0)
         appendPQExpBuffer(q, " WITH (%s)", tbinfo->reloptions);
     appendPQExpBuffer(q, " AS\n    ");
