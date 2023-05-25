@@ -1,0 +1,204 @@
+\! rm -fr '@testtablespace@/hw_cstore_tablespace_5'
+\! mkdir '@testtablespace@/hw_cstore_tablespace_5'
+
+create tablespace hw_cstore_tablespace_5 location '@testtablespace@/hw_cstore_tablespace_5';
+
+-- 6. temp table
+-- 6.1 row temp table
+CREATE TEMP TABLE set_tblspc_temp_lineitem1
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+with (orientation = row) tablespace hw_cstore_tablespace_5;
+COPY set_tblspc_temp_lineitem1 FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
+ALTER TABLE set_tblspc_temp_lineitem1 SET TABLESPACE pg_default;
+SELECT reltablespace FROM pg_class WHERE relname = 'set_tblspc_temp_lineitem1'; -- 0
+-- 6.5 row temp index
+CREATE INDEX idx3_set_tblspc_temp_lineitem1 ON set_tblspc_temp_lineitem1(L_LINENUMBER) tablespace hw_cstore_tablespace_5;
+ALTER INDEX idx3_set_tblspc_temp_lineitem1 SET TABLESPACE pg_default;
+SELECT reltablespace FROM pg_class WHERE relname = 'idx3_set_tblspc_temp_lineitem1'; -- 0
+-- 6.2 column temp table
+CREATE TEMP TABLE set_tblspc_temp_lineitem2
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+with (orientation = column) tablespace hw_cstore_tablespace_5;
+INSERT INTO set_tblspc_temp_lineitem2 SELECT * FROM set_tblspc_temp_lineitem1;
+ALTER TABLE set_tblspc_temp_lineitem2 SET TABLESPACE pg_default;
+SELECT reltablespace FROM pg_class WHERE relname = 'set_tblspc_temp_lineitem2'; -- 0
+-- 6.6 column temp index
+CREATE INDEX idx3_set_tblspc_temp_lineitem2 ON set_tblspc_temp_lineitem2(L_LINENUMBER) tablespace hw_cstore_tablespace_5;
+ALTER INDEX idx3_set_tblspc_temp_lineitem2 SET TABLESPACE pg_default;
+SELECT reltablespace FROM pg_class WHERE relname = 'idx3_set_tblspc_temp_lineitem2'; -- 0
+-- 6.3 row temp partition
+CREATE TEMP TABLE set_tblspc_temp_lineitem3
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+) with (orientation = row) partition by range(L_PARTKEY)
+(
+partition p1 values less than(0) ,
+partition p2 values less than(10) tablespace hw_cstore_tablespace_5,
+partition p3 values less than(20),
+partition p4 values less than(maxvalue)
+); -- ERROR
+-- 6.4 column temp partition
+CREATE TEMP TABLE set_tblspc_temp_lineitem3
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+) with (orientation = column) partition by range(L_PARTKEY)
+(
+partition p1 values less than(0) ,
+partition p2 values less than(10) tablespace hw_cstore_tablespace_5,
+partition p3 values less than(20),
+partition p4 values less than(maxvalue)
+); -- ERROR
+-- 6.7 row temp index partition
+-- 6.8 column temp index partition
+CREATE TABLE set_tblspc_temp_lineitem3
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+) with (orientation = row) partition by range(L_PARTKEY)
+(
+partition p1 values less than(0) ,
+partition p2 values less than(10) tablespace hw_cstore_tablespace_5,
+partition p3 values less than(20),
+partition p4 values less than(maxvalue)
+);
+CREATE TEMP INDEX idx_set_tblspc_temp_lineitem3 ON set_tblspc_temp_lineitem3(L_PARTKEY) LOCAL 
+(
+partition p1, partition p2, partition p3, partition p4
+); -- ERROR
+DROP TABLE set_tblspc_temp_lineitem1 CASCADE;
+DROP TABLE set_tblspc_temp_lineitem2 CASCADE;
+DROP TABLE set_tblspc_temp_lineitem3 CASCADE;
+-- 7. column psort index tablespace
+create table test_psort_tblspc
+(
+id int,
+info text
+) with(orientation=column) partition by range(id)
+(
+partition p1 values less  than(3000),
+partition p2 values less than(6000),
+partition p3 values less than(maxvalue)
+);
+insert into test_psort_tblspc values( 1, 'zhaaaang'), (2,'cahabo'), (3,'wcedi');
+insert into test_psort_tblspc select * from test_psort_tblspc ;
+insert into test_psort_tblspc select * from test_psort_tblspc ;
+insert into test_psort_tblspc select * from test_psort_tblspc ;
+insert into test_psort_tblspc select * from test_psort_tblspc ;
+insert into test_psort_tblspc select * from test_psort_tblspc ;
+insert into test_psort_tblspc select * from test_psort_tblspc ;
+vacuum full test_psort_tblspc;
+create index idx_test_psort_tblspc on test_psort_tblspc(id,info) local 
+(
+partition p1_idx tablespace hw_cstore_tablespace_5,
+partition p2_idx,
+partition p3_idx
+);
+-- check index partition tablespace
+WITH 
+  queryParent AS (SELECT OID FROM PG_CLASS WHERE relname='idx_test_psort_tblspc'),
+  queryPsortId AS (SELECT p.relcudescrelid FROM pg_partition p, queryParent q WHERE p.relname = 'p1_idx' and p.parentid = q.oid )
+SELECT 
+  (SELECT p.reltablespace FROM pg_partition p, queryParent q WHERE p.relname = 'p1_idx' and p.parentid = q.oid  )
+  =
+  (SELECT c.reltablespace FROM pg_class c, queryPsortId d WHERE c.oid = d.relcudescrelid );
+
+WITH 
+  queryParent AS (SELECT OID FROM PG_CLASS WHERE relname='idx_test_psort_tblspc'),
+  queryPsortId AS (SELECT p.relcudescrelid FROM pg_partition p, queryParent q WHERE p.relname = 'p2_idx' and p.parentid = q.oid )
+SELECT 
+  (SELECT p.reltablespace FROM pg_partition p, queryParent q WHERE p.relname = 'p2_idx' and p.parentid = q.oid  )
+  =
+  (SELECT c.reltablespace FROM pg_class c, queryPsortId d WHERE c.oid = d.relcudescrelid );
+
+WITH 
+  queryParent AS (SELECT OID FROM PG_CLASS WHERE relname='idx_test_psort_tblspc'),
+  queryPsortId AS (SELECT p.relcudescrelid FROM pg_partition p, queryParent q WHERE p.relname = 'p3_idx' and p.parentid = q.oid )
+SELECT 
+  (SELECT p.reltablespace FROM pg_partition p, queryParent q WHERE p.relname = 'p3_idx' and p.parentid = q.oid  )
+  =
+  (SELECT c.reltablespace FROM pg_class c, queryPsortId d WHERE c.oid = d.relcudescrelid );
+DROP TABLE test_psort_tblspc CASCADE;
+drop tablespace hw_cstore_tablespace_5;
