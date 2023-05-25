@@ -1175,6 +1175,7 @@ bool get_files_list(const char *dir,std::vector<std::string>& files, const char 
         }while (FindNextFile(hFind, &fd));
         FindClose(hFind);
     }
+    return files.size() > 0;
 }
 #endif
 

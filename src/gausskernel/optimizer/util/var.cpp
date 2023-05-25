@@ -110,7 +110,7 @@ static bool pull_var_clause_walker(Node* node, pull_var_clause_context* context)
 static Node* flatten_join_alias_vars_mutator(Node* node, flatten_join_alias_vars_context* context);
 static Relids alias_relid_set(PlannerInfo* root, Relids relids);
 static Node* replace_node_clause_mutator(Node* node, replace_node_clause_context* context);
-static bool check_node_clause_walker(Node* clause, Node* node);
+static bool check_node_clause_walker(Node* node, Node* src);
 static bool check_param_clause_walker(Node* clause, void* context);
 static bool check_param_expr_walker(Node* node, void* context);
 static bool check_random_expr_walker(Node* node, pull_node* context);
