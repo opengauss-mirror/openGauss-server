@@ -232,7 +232,7 @@ void SSWriteReformerControlPages(void)
         if (g_instance.dms_cxt.SSReformerControl.list_stable != 0 ||
             g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
             (void)printf("[SS] ERROR: files from last install must be cleared.\n");
-            ereport(PANIC, (errmsg("Files from last initdb not cleared")));
+            ereport(ERROR, (errmsg("Files from last initdb not cleared")));
         }
         (void)printf("[SS] Current node:%d acknowledges cluster PRIMARY node:%d.\n",
             SS_MY_INST_ID, g_instance.dms_cxt.SSReformerControl.primaryInstId);

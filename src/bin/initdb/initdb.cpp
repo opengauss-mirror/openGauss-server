@@ -4292,7 +4292,7 @@ int main(int argc, char* argv[])
     }
     
     /* check nodedata.cfg and node_id */
-    ss_issharedstorage = ss_check_nodedatainfo();
+    ss_issharedstorage = ss_check_nodedatainfo(enable_dss);
     
     if (default_text_search_config_tmp != NULL)
         default_text_search_config = default_text_search_config_tmp;
