@@ -391,11 +391,11 @@ begin
     insert into food(id, foodtype, remark, time_flag) values (1,'bamboo', 'healthy', now());
 end;
 /
--- ERROR:  trigger in wrong schema: "testscm"."animals_trigger1"
+-- NOTICE:  trigger "animals_trigger1" does not exist, skipping
 drop trigger if exists testscm.animals_trigger1;
 -- OK
 drop trigger if exists animals_trigger1;
--- ERROR:  schema "testscm_no" does not exist
+-- NOTICE:  trigger "animals_trigger1" does not exist, skipping
 drop trigger if exists testscm_no.animals_trigger2;
 -- OK
 drop trigger if exists animals_trigger2;
@@ -463,9 +463,9 @@ begin
 end;
 /
 select tgname from pg_trigger;
--- ERROR:  trigger in wrong schema: "testscm"."animals_trigger1"
+-- NOTICE:  trigger "animals.animals_trigger1" for table "animals" does not exist, skipping
 drop trigger if exists testscm.animals_trigger1 on animals;
--- ERROR:  schema "testscm_no" does not exist
+-- NOTICE:  trigger "animals.animals_trigger1" for table "animals" does not exist, skipping
 drop trigger if exists testscm_no.animals_trigger1 on animals;
 -- NOTICE:  trigger "animals.animals_trigger_no" for table "animals" does not exist, skipping
 drop trigger if exists animals_trigger_no on animals;
@@ -503,9 +503,9 @@ begin
 end;
 /
 select tgname from pg_trigger;
--- ERROR:  trigger in wrong schema: "testscm2"."animals_trigger2"
+-- NOTICE:  trigger "testscm.animals_scm.animals_trigger2" for table "testscm.animals_scm" does not exist, skipping
 drop trigger if exists testscm2.animals_trigger2 on testscm.animals_scm;
--- ERROR:  schema "testscm_no" does not exist
+-- NOTICE:  trigger "testscm.animals_scm.animals_trigger2" for table "testscm.animals_scm" does not exist, skipping
 drop trigger if exists testscm_no.animals_trigger2 on testscm.animals_scm;
 -- NOTICE:  trigger "testscm.animals_scm.animals_trigger_no" for table "testscm.animals_scm" does not exist, skipping
 drop trigger if exists animals_trigger_no on testscm.animals_scm;
