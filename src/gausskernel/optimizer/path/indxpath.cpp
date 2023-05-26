@@ -1664,9 +1664,7 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, 
         return pathinfoarray[0]->path;
 
     /* Sort the surviving paths by index access cost */
-    if (globalPartPaths > 1) {
-        qsort(pathinfoarray, npaths, sizeof(PathClauseUsage*), path_usage_comparator);
-    }
+    qsort(pathinfoarray, npaths, sizeof(PathClauseUsage*), path_usage_comparator);
     /*
      * For each surviving index, consider it as an "AND group leader", and see
      * whether adding on any of the later indexes results in an AND path with
