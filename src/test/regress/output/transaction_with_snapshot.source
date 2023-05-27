@@ -1,0 +1,236 @@
+create database with_snapshot_test dbcompatibility 'b';
+\c with_snapshot_test;
+set global transaction isolation level repeatable read;
+\c
+create table t(a int);
+start transaction;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+INSERT 0 1
+select * from t;
+ a 
+---
+ 1
+(1 row)
+
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(2);";
+INSERT 0 1
+select * from t;
+ a 
+---
+ 1
+(1 row)
+
+commit;
+select * from t;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+delete from t;
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+INSERT 0 1
+select * from t;
+ a 
+---
+(0 rows)
+
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(2);";
+INSERT 0 1
+select * from t;
+ a 
+---
+(0 rows)
+
+commit;
+select * from t;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "delete from t where a=1;";
+DELETE 1
+select * from t;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "delete from t where a=2;";
+DELETE 1
+select * from t;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+commit;
+select * from t;
+ a 
+---
+(0 rows)
+
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+INSERT 0 1
+select * from t;
+ a 
+---
+(0 rows)
+
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "update t set a=a+100;";
+UPDATE 1
+select * from t;
+ a 
+---
+(0 rows)
+
+commit;
+select * from t;
+  a  
+-----
+ 101
+(1 row)
+
+set global transaction isolation level read committed;
+\c
+start transaction;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+INSERT 0 1
+select * from t;
+  a  
+-----
+ 101
+   1
+(2 rows)
+
+commit;
+select * from t;
+  a  
+-----
+ 101
+   1
+(2 rows)
+
+delete from t;
+set b_format_behavior_compat_options = 'set_session_transaction';
+set session transaction isolation level repeatable read;
+start transaction;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+INSERT 0 1
+select * from t;
+ a 
+---
+ 1
+(1 row)
+
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(2);";
+INSERT 0 1
+select * from t;
+ a 
+---
+ 1
+(1 row)
+
+commit;
+select * from t;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+delete from t;
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+INSERT 0 1
+select * from t;
+ a 
+---
+(0 rows)
+
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(2);";
+INSERT 0 1
+select * from t;
+ a 
+---
+(0 rows)
+
+commit;
+select * from t;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "delete from t where a=1;";
+DELETE 1
+select * from t;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "delete from t where a=2;";
+DELETE 1
+select * from t;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+commit;
+select * from t;
+ a 
+---
+(0 rows)
+
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+INSERT 0 1
+select * from t;
+ a 
+---
+(0 rows)
+
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "update t set a=a+100;";
+UPDATE 1
+select * from t;
+ a 
+---
+(0 rows)
+
+commit;
+select * from t;
+  a  
+-----
+ 101
+(1 row)
+
+\c
+start transaction with consistent snapshot;
+WARNING:  with consistent snapshot only effected in repeatable read mode
+commit;
+create or replace procedure protest()
+as
+begin
+start transaction with consistent snapshot;
+commit;
+end
+/
+call protest();
+ERROR:  only support commit/rollback transaction statements.
+HINT:  Use a BEGIN block with an EXCEPTION clause instead of begin/end transaction.
+CONTEXT:  PL/pgSQL function protest() line 2 at SQL statement
+\c regression;

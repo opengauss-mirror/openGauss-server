@@ -1652,6 +1652,7 @@ static bool _equalTransactionStmt(const TransactionStmt* a, const TransactionStm
     COMPARE_SCALAR_FIELD(kind);
     COMPARE_NODE_FIELD(options);
     COMPARE_STRING_FIELD(gid);
+    COMPARE_SCALAR_FIELD(with_snapshot);
 
     return true;
 }

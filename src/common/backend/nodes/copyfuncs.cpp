@@ -5589,6 +5589,7 @@ static TransactionStmt* _copyTransactionStmt(const TransactionStmt* from)
     COPY_NODE_FIELD(options);
     COPY_STRING_FIELD(gid);
     COPY_SCALAR_FIELD(csn);
+    COPY_SCALAR_FIELD(with_snapshot);
 
     return newnode;
 }

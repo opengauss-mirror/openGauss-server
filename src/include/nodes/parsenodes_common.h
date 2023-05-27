@@ -2105,6 +2105,7 @@ typedef struct TransactionStmt {
     List *options;            /* for BEGIN/START and savepoint commands */
     char *gid;                /* for two-phase-commit related commands */
     CommitSeqNo csn;          /* for gs_clean two-phase-commit related commands */
+    bool with_snapshot;
 } TransactionStmt;
 /* ----------------------
  * Create View Statement
