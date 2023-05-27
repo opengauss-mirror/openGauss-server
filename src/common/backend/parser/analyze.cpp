@@ -5123,6 +5123,29 @@ void CheckSelectLocking(Query* qry)
     }
 }
 
+static bool CheckViewBasedOnCstore(Relation targetrel)
+{
+    Assert(RelationIsView(targetrel));
+
+    Query* viewquery = get_view_query(targetrel);
+    ListCell* l = NULL;
+
+    foreach (l, viewquery->jointree->fromlist) {
+        RangeTblRef* rtr = (RangeTblRef*)lfirst(l);
+        RangeTblEntry* base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
+        Relation base_rel = try_relation_open(base_rte->relid, AccessShareLock);
+
+        if (RelationIsColStore(base_rel) || (RelationIsView(base_rel) && CheckViewBasedOnCstore(base_rel))) {
+            heap_close(base_rel, AccessShareLock);
+            return true;
+        }
+
+        heap_close(base_rel, AccessShareLock);
+    }
+
+    return false;
+}
+
 /*
  * Transform a FOR [KEY] UPDATE/SHARE clause
  *
@@ -5185,6 +5208,12 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
                                        "column table \"%s\"", rte->eref->aliasname)));
+                    } else if (RelationIsView(rel) && CheckViewBasedOnCstore(rel)) {
+                        heap_close(rel, AccessShareLock);
+                        ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
+                                       "view \"%s\" based on column table", rte->eref->aliasname)));
                     } else {
                         if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
                             ereport(ERROR,
@@ -5251,7 +5280,14 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                                         errmsg("SELECT FOR UPDATE/SHARE%s cannot be used with column table \"%s\"",
                                                NOKEYUPDATE_KEYSHARE_ERRMSG, rte->eref->aliasname),
                                         parser_errposition(pstate, thisrel->location)));
-                            }else {
+                            } else if (RelationIsView(rel) && CheckViewBasedOnCstore(rel)) {
+                                heap_close(rel, AccessShareLock);
+                                ereport(ERROR,
+                                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                        errmsg("SELECT FOR UPDATE/SHARE%s cannot be used with view \"%s\" based on"
+                                               " column table", NOKEYUPDATE_KEYSHARE_ERRMSG, rte->eref->aliasname),
+                                        parser_errposition(pstate, thisrel->location)));
+                            } else {
                                 if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
                                     ereport(ERROR,
                                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
