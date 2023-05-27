@@ -119,6 +119,29 @@ create event IF NOT EXISTS evtest on schedule every 1 minute starts sysdate + in
 select pg_sleep(0.2);
 select  job_name, nspname from pg_job where dbname='event_b';
 drop event if exists evtest;
+--test time unit
+drop event if exists ev_unit;
+create event ev_unit on schedule every '1-1' YEAR_MONTH do select 1;
+select interval from pg_job where job_name='ev_unit';
+drop event if exists ev_unit;
+create event ev_unit on schedule every '-1 10' DAY_HOUR do select 1;
+select interval from pg_job where job_name='ev_unit';
+drop event if exists ev_unit;
+create event ev_unit on schedule every '1 1:00' DAY_MINUTE do select 1;
+select interval from pg_job where job_name='ev_unit';
+drop event if exists ev_unit;
+create event ev_unit on schedule every '1 1:1:1' DAY_SECOND do select 1;
+select interval from pg_job where job_name='ev_unit';
+drop event if exists ev_unit;
+create event ev_unit on schedule every '1:1:1' HOUR_MINUTE do select 1;
+select interval from pg_job where job_name='ev_unit';
+drop event if exists ev_unit;
+create event ev_unit on schedule every '1:1' MINUTE_SECOND do select 1;
+select interval from pg_job where job_name='ev_unit';
+drop event if exists ev_unit;
+create event ev_unit on schedule every '01:12:30' HOUR_SECOND do select 1;
+select interval from pg_job where job_name='ev_unit';
+drop event if exists ev_unit;
 
 
 --if not exists 
