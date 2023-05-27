@@ -413,6 +413,65 @@ select  job_name, nspname from pg_job where dbname='event_b';
 
 drop event if exists evtest;
 NOTICE:  event "evtest" is not exists, skipping
+--test time unit
+drop event if exists ev_unit;
+NOTICE:  event "ev_unit" is not exists, skipping
+create event ev_unit on schedule every '1-1' YEAR_MONTH do select 1;
+select interval from pg_job where job_name='ev_unit';
+           interval            
+-------------------------------
+ interval '1-1'  year to month
+(1 row)
+
+drop event if exists ev_unit;
+create event ev_unit on schedule every '-1 10' DAY_HOUR do select 1;
+select interval from pg_job where job_name='ev_unit';
+           interval            
+-------------------------------
+ interval '-1 10'  day to hour
+(1 row)
+
+drop event if exists ev_unit;
+create event ev_unit on schedule every '1 1:00' DAY_MINUTE do select 1;
+select interval from pg_job where job_name='ev_unit';
+             interval             
+----------------------------------
+ interval '1 1:00'  day to minute
+(1 row)
+
+drop event if exists ev_unit;
+create event ev_unit on schedule every '1 1:1:1' DAY_SECOND do select 1;
+select interval from pg_job where job_name='ev_unit';
+             interval              
+-----------------------------------
+ interval '1 1:1:1'  day to second
+(1 row)
+
+drop event if exists ev_unit;
+create event ev_unit on schedule every '1:1:1' HOUR_MINUTE do select 1;
+select interval from pg_job where job_name='ev_unit';
+             interval             
+----------------------------------
+ interval '1:1:1'  hour to minute
+(1 row)
+
+drop event if exists ev_unit;
+create event ev_unit on schedule every '1:1' MINUTE_SECOND do select 1;
+select interval from pg_job where job_name='ev_unit';
+             interval             
+----------------------------------
+ interval '1:1'  minute to second
+(1 row)
+
+drop event if exists ev_unit;
+create event ev_unit on schedule every '01:12:30' HOUR_SECOND do select 1;
+select interval from pg_job where job_name='ev_unit';
+              interval               
+-------------------------------------
+ interval '01:12:30'  hour to second
+(1 row)
+
+drop event if exists ev_unit;
 --if not exists 
 create event e on schedule every 1 month disable do select 1;
 select pg_sleep(0.2);
@@ -996,7 +1055,7 @@ schedule_expr: {
 interval_expr:
     quantity {YEAR | MONTH | DAY | HOUR | MINUTE |
               SECOND | YEAR_MONTH | DAY_HOUR | DAY_MINUTE |
-              DAY TO SECOND | HOUR TO MINUTE | HOUR TO SECOND | MINUTE TO SECOND}
+              DAY_SECOND | HOUR_MINUTE | HOUR_SECOND | MINUTE_SECOND}
 
 \h ALTER EVENT
 Command:     ALTER EVENT
