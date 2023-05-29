@@ -254,6 +254,7 @@ typedef struct knl_session_attr_sql {
     bool enable_custom_parser;
     bool dolphin;
     bool whale;
+    bool enable_vector_targetlist;
 #endif
 } knl_session_attr_sql;
 

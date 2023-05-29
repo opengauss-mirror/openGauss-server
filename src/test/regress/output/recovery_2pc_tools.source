@@ -329,6 +329,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_ustore                                    | bool    |      |           | 
  enable_valuepartition_pruning                    | bool    |      |           | 
  enable_vector_engine                             | bool    |      |           | 
+ enable_vector_targetlist                         | bool    |      |           |
  enable_wal_shipping_compression                  | bool    |      |           | 
  enable_wdr_snapshot                              | bool    |      |           | 
  enable_xlog_prune                                | bool    |      |           | 
