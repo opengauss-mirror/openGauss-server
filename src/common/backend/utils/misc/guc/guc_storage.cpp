@@ -4925,6 +4925,7 @@ static int IsReplConnInfoChanged(const char* replConnInfo, const char* newval)
     replconninfo* newReplInfo = NULL;
     replconninfo* ReplInfo_1 = t_thrd.postmaster_cxt.ReplConnArray[1];
     newval = TrimStr(newval);
+    replConnInfo = TrimStr(replConnInfo);
     if (replConnInfo == NULL || newval == NULL) {
         return NO_CHANGE;
     }
