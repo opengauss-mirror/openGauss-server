@@ -222,6 +222,7 @@ static AttrNumber get_assign_attrno(PLpgSQL_datum* target,  char* attrname);
 static void raw_parse_package_function(char* proc_str, int location, int leaderlen);
 static void checkFuncName(List* funcname);
 static void IsInPublicNamespace(char* varname);
+static void CheckDuplicateCondition (char* name);
 static void SetErrorState();
 static void AddNamespaceIfNeed(int dno, char* ident);
 static void AddNamespaceIfPkgVar(const char* ident, IdentifierLookup save_IdentifierLookup);
@@ -346,7 +347,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 
 %type <plnode> assign_el
 %type <declhdr> decl_sect
-%type <varname> decl_varname
+%type <varname> decl_varname declare_condname
 %type <list> decl_varname_list
 %type <boolean>	decl_const decl_notnull exit_type
 %type <expr>	decl_defval decl_rec_defval decl_cursor_query
@@ -808,7 +809,7 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                         pfree($2);
                         $$ = NULL;
                     }
-                | T_DECLARE_CONDITION decl_varname K_CONDITION K_FOR condition_value ';'
+                | T_DECLARE_CONDITION declare_condname K_CONDITION K_FOR condition_value ';'
                     {
                         int tok = -1;
                         plpgsql_peek(&tok);
@@ -827,17 +828,17 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                             }
                         }
                         
-                        IsInPublicNamespace($2->name);
-                        PLpgSQL_var	*var;
+                        CheckDuplicateCondition($2->name);
+                        PLpgSQL_condition* cond = $5;
+                        cond->condname = pstrdup($2->name);
+                        PLpgSQL_condition* old = u_sess->plsql_cxt.curr_compile_context->plpgsql_conditions;
+                        if (old != NULL) {
+                            cond->next = old;
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_conditions = cond;
+                        } else {
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_conditions = cond;
+                        }
 
-                        var = (PLpgSQL_var *)plpgsql_build_variable($2->name, $2->lineno,
-                                                     plpgsql_build_datatype(INT4OID,
-                                                                                  -1,
-                                                                                  InvalidOid),
-                                                          true);
-                        var->customCondition = $5->sqlerrstate;
-                        var->sqlstateCondition = $5->sqlstate;
-                        var->isSqlvalue = $5->isSqlvalue;
                         pfree_ext($2->name);
                         pfree($2);
                         $$ = NULL;
@@ -970,6 +971,83 @@ cond_element	: any_identifier
                     }
                 ;
 
+declare_condname: T_WORD
+                    {
+                        VarName* varname = NULL;
+                        varname = (VarName *)palloc0(sizeof(VarName));
+                        varname->name = $1.ident;
+                        varname->lineno = plpgsql_location_to_lineno(@1);
+                        $$ = varname;
+                    }
+                | unreserved_keyword
+                    {
+                        VarName* varname = NULL;
+                        varname = (VarName *)palloc0(sizeof(VarName));
+                        varname->name = pstrdup($1);
+                        varname->lineno = plpgsql_location_to_lineno(@1);
+                        $$ = varname;
+                    }
+                | T_VARRAY
+                    {
+                        VarName* varname = NULL;
+                        varname = (VarName *)palloc0(sizeof(VarName));
+                        varname->name = pstrdup($1.ident);
+                        varname->lineno = plpgsql_location_to_lineno(@1);
+                        $$ = varname;
+
+                    }
+                | T_RECORD
+                    {
+                        VarName* varname = NULL;
+                        varname = (VarName *)palloc0(sizeof(VarName));
+                        varname->name = pstrdup($1.ident);
+                        varname->lineno = plpgsql_location_to_lineno(@1);
+                        $$ = varname;
+
+                    }
+                | T_TABLE
+                    {
+                        VarName* varname = NULL;
+                        varname = (VarName *)palloc0(sizeof(VarName));
+                        varname->name = pstrdup($1.ident);
+                        varname->lineno = plpgsql_location_to_lineno(@1);
+                        $$ = varname;
+
+                    }
+                | T_REFCURSOR
+                    {
+                        VarName* varname = NULL;
+                        varname = (VarName *)palloc0(sizeof(VarName));
+                        varname->name = pstrdup($1.ident);
+                        varname->lineno = plpgsql_location_to_lineno(@1);
+                        $$ = varname;
+
+                    }
+                | T_TABLE_VAR
+                    {
+                        VarName* varname = NULL;
+                        if ($1.idents != NIL) {
+                            yyerror("syntax error");
+                        }
+                        varname = (VarName *)palloc0(sizeof(VarName));
+                        varname->name = pstrdup($1.ident);
+                        varname->lineno = plpgsql_location_to_lineno(@1);
+                        $$ = varname;
+
+                    }
+                | T_VARRAY_VAR
+                    {
+                        VarName* varname = NULL;
+                        if ($1.idents != NIL || strcmp($1.ident, "bulk_exceptions") == 0) {
+                            yyerror("syntax error");
+                        }
+                        varname = (VarName *)palloc0(sizeof(VarName));
+                        varname->name = pstrdup($1.ident);
+                        varname->lineno = plpgsql_location_to_lineno(@1);
+                        $$ = varname;
+
+                    }
+                ;
 
 condition_value	: K_SQLSTATE
                     {
@@ -13330,6 +13408,23 @@ static void IsInPublicNamespace(char* varname) {
     }
 }
 
+static void CheckDuplicateCondition (char* name) {
+    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_conditions != NULL) {
+        PLpgSQL_condition* cond = u_sess->plsql_cxt.curr_compile_context->plpgsql_conditions;
+        while(cond) {
+            if (strcmp(cond->condname, name) == 0) {
+                const char* message = "duplicate declaration";
+                InsertErrorMessage(message, plpgsql_yylloc);
+                ereport(errstate,
+                    (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("duplicate declaration"),
+                        errdetail("condition \"%s\" already defined", name)));
+                break;
+            }
+            cond = cond->next;
+        }
+    }
+}
 static void AddNamespaceIfNeed(int dno, char* ident)
 {
     if (getCompileStatus() != COMPILIE_PKG_FUNC) {

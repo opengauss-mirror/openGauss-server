@@ -359,11 +359,8 @@ call test_cursor_1();
 NOTICE:  backberry : canada : 3
 NOTICE:  macrosoft : usa : 1
 NOTICE:  oracle : usa : 2
- test_cursor_1 
----------------
- 
-(1 row)
-
+ERROR:  No data - zero rows fetched, selected, or processed
+CONTEXT:  PL/pgSQL function test_cursor_1() line 12 at FETCH
 set b_format_behavior_compat_options = '';
 show b_format_behavior_compat_options;
  b_format_behavior_compat_options 
@@ -429,21 +426,9 @@ exception
     END;
 END;
 /
-ERROR:  duplicate declaration at or near "DIVISION_ZERO"
-LINE 5:     declare DIVISION_ZERO condition for SQLSTATE '22005';
-                    ^
-QUERY:  declare
-    a int;
-BEGIN
-    declare DIVISION_ZERO condition for SQLSTATE '22012';
-    declare DIVISION_ZERO condition for SQLSTATE '22005';
-    a := 1/0;
-exception
-    when DIVISION_ZERO then
-    BEGIN
-        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
-    END;
-END
+ERROR:  duplicate declaration
+DETAIL:  condition "division_zero" already defined
+CONTEXT:  compilation of PL/pgSQL function "test_condition_3" near line 5
 -- declare condition sqlcode
 create or replace procedure test_condition_4 as
 BEGIN
@@ -512,6 +497,27 @@ END;
 call test_condition_1();
 NOTICE:  SQLSTATE = 22012, SQLERRM = division by zero
  test_condition_1 
+------------------
+ 
+(1 row)
+
+-- test other values compilte with condition name
+create or replace procedure test_condition_7 as
+declare
+    a int;
+BEGIN
+    declare a condition for SQLSTATE '22012';
+    a := 1/0;
+exception
+    when a then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_7();
+NOTICE:  SQLSTATE = 22012, SQLERRM = division by zero
+ test_condition_7 
 ------------------
  
 (1 row)

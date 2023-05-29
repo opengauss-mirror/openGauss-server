@@ -395,7 +395,22 @@ exception
 END;
 /
 call test_condition_1();
+-- test other values compilte with condition name
 
+create or replace procedure test_condition_7 as
+declare
+    a int;
+BEGIN
+    declare a condition for SQLSTATE '22012';
+    a := 1/0;
+exception
+    when a then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_7();
 \c regression
 drop trigger animal_trigger1;
 drop trigger if exists animal_trigger1;
