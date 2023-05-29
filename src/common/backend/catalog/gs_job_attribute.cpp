@@ -994,7 +994,6 @@ char *CreateEventInlineProgram(Datum job_name, Datum job_type, Datum job_action,
         check_program_name_valid(CStringGetTextDatum(program_name), true);
     }
     check_program_type_valid(job_type);
-    check_program_creation_privilege(job_type);
     check_program_type_argument(job_type, 0);
     check_program_action(job_action);
     check_if_arguments_defined(CStringGetTextDatum(program_name), 0);
@@ -1140,10 +1139,10 @@ void create_job_raw(PG_FUNCTION_ARGS)
     Datum job_definer_oid = (PG_ARGISNULL(18)) ? Datum(0) : PG_GETARG_DATUM(18);
 
     /* Various checks */
-    if (!(u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)) {
+    if (PG_ARGISNULL(16)) {
         check_job_name_valid(job_name);
+        check_job_creation_privilege(job_type);
     }
-    check_job_creation_privilege(job_type);
     check_job_class_valid(job_class);
 
     /* gs_job_attribute */
