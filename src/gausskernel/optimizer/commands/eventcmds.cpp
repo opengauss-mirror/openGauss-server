@@ -274,8 +274,8 @@ Datum TranslateArg(char *act_name, Node *act_node)
             break;
         }
         case job_type::ARG_JOB_RENAME: {
-            RangeVar *name_var = (RangeVar *)act_node;
-            result = CStringGetTextDatum(name_var->relname);
+            Value *new_name_val = (Value *)act_node;
+            result = CStringGetTextDatum(new_name_val->val.str);
             break;
         }
         case job_type::ARG_JOB_DEFINER: {
@@ -414,13 +414,53 @@ void PrepareFuncArg(CreateEventStmt *stmt, Datum ev_name, Datum schemaName, Func
     ev_arg->arg[ARG_18] = CStringGetTextDatum(job_definer_oid);
 }
 
+void CheckEventPrivilege(char* schema_name, char* event_name, AclMode mode, bool is_create_or_alter)
+{
+    Oid user_oid = GetUserId();
+
+    /* Check whether user have the permission on the specified schema. */
+    Oid schema_oid = get_namespace_oid(schema_name, true);
+    AclResult acl_result = pg_namespace_aclcheck(schema_oid, user_oid, mode);
+    if(acl_result != ACLCHECK_OK) {
+        aclcheck_error(acl_result, ACL_KIND_NAMESPACE, schema_name);
+    }
+
+    /* Superusers bypass all permission checking. */
+    if(superuser_arg(user_oid) || systemDBA_arg(user_oid)) {
+        return;
+    }
+    if(is_create_or_alter) {
+        return;
+    }
+
+    /* The owner needs to be checked for the alter and drop operation. */
+    HeapTuple tup = NULL;
+    tup = SearchSysCache2(JOBATTRIBUTENAME, CStringGetTextDatum(event_name), CStringGetTextDatum("owner"));
+    if(!HeapTupleIsValid(tup)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("event \"%s\" does not exist", event_name)));
+    }
+
+    bool isnull = false;
+    Datum owner_datum = SysCacheGetAttr(JOBATTRIBUTENAME, tup, Anum_gs_job_attribute_attribute_value, &isnull);
+    char* owner_id_str = TextDatumGetCString(owner_datum);
+    Oid owner_id = pg_atoi(owner_id_str, sizeof(int32), '\0');
+
+    if(owner_id != user_oid) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("only event's owner have the permission to operate object \"%s\"", event_name)));
+    }
+    ReleaseSysCache(tup);
+}
+
 void CreateEventCommand(CreateEventStmt *stmt)
 {
-    Datum schema_name = (stmt->event_name->schemaname)
-                            ? CStringGetDatum(stmt->event_name->schemaname)
-                            : DirectFunctionCall1(namein, CStringGetDatum(get_real_search_schema()));
-    Datum ev_name = CStringGetTextDatum(stmt->event_name->relname);
+    char *event_name_str = stmt->event_name->relname;
+    char *schema_name_str = (stmt->event_name->schemaname) ? stmt->event_name->schemaname : get_real_search_schema();
+    CheckEventPrivilege(schema_name_str, event_name_str, ACL_CREATE, true);
 
+    Datum schema_name = DirectFunctionCall1(namein, CStringGetDatum(schema_name_str));
+    Datum ev_name = CStringGetTextDatum(event_name_str);
     FunctionCallInfoData ev_arg;
     const short nrgs_job = ARG_19;
 
@@ -789,17 +829,8 @@ void UpdatePgJobParam(AlterEventStmt *stmt, Datum ev_name)
         replaces[Anum_pg_job_enable - 1] = true;
     }
     if (stmt->new_name) {
-        Datum schema_name;
-        Datum new_ev_name;
-        RangeVar *event_name_var = (RangeVar *)stmt->new_name->arg;
-        schema_name = (event_name_var->schemaname)
-                          ? DirectFunctionCall1(namein, CStringGetDatum(event_name_var->schemaname))
-                          : DirectFunctionCall1(namein, CStringGetDatum(get_real_search_schema()));
-        new_ev_name = CStringGetTextDatum(event_name_var->relname);
-        values[Anum_pg_job_nspname - 1] = schema_name;
-        nulls[Anum_pg_job_nspname - 1] = false;
-        replaces[Anum_pg_job_nspname - 1] = true;
-        values[Anum_pg_job_job_name - 1] = new_ev_name;
+        arg_result = TranslateArg(stmt->new_name->defname, stmt->new_name->arg);
+        values[Anum_pg_job_job_name - 1] = arg_result;
         nulls[Anum_pg_job_job_name - 1] = false;
         replaces[Anum_pg_job_job_name - 1] = true;
     }
@@ -808,7 +839,11 @@ void UpdatePgJobParam(AlterEventStmt *stmt, Datum ev_name)
 
 void AlterEventCommand(AlterEventStmt *stmt)
 {
-    Datum ev_name = CStringGetTextDatum(stmt->event_name->relname);
+    char *event_name_str = stmt->event_name->relname;
+    char *schema_name_str = (stmt->event_name->schemaname) ? stmt->event_name->schemaname : get_real_search_schema();
+
+    Datum ev_name = CStringGetTextDatum(event_name_str);
+    CheckEventPrivilege(schema_name_str, event_name_str, ACL_USAGE, false);
 
     /* Check if object is visible for current user. */
     check_object_is_visible(ev_name, false);
@@ -828,10 +863,14 @@ void AlterEventCommand(AlterEventStmt *stmt)
 
 void DropEventCommand(DropEventStmt *stmt)
 {
-    Datum ev_name = CStringGetTextDatum(stmt->event_name->relname);
+    char *event_name_str = stmt->event_name->relname;
+    char *schema_name_str = (stmt->event_name->schemaname) ? stmt->event_name->schemaname : get_real_search_schema();
+
+    Datum ev_name = CStringGetTextDatum(event_name_str);
     if (CheckEventNotExists(ev_name, stmt->missing_ok)) {
         return;
     }
+    CheckEventPrivilege(schema_name_str, event_name_str, ACL_USAGE, false);
 
     FunctionCallInfoData ev_arg;
     const short nrgs_job = ARG_3;
