@@ -1664,6 +1664,34 @@ static int CBCacheMsg(void *db_handle, char* msg)
     return GS_SUCCESS;
 }
 
+static int CBMarkNeedFlush(void *db_handle, char *pageid)
+{
+    bool valid = false;
+    BufferDesc *buf_desc = NULL;
+    dms_buf_ctrl_t *buf_ctrl = NULL;
+    BufferTag *tag = (BufferTag *)pageid;
+
+    SSGetBufferDesc(pageid, &valid, &buf_desc);
+    if (buf_desc == NULL) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBMarkNeedFlush, buf_desc not found")));
+        return DMS_ERROR;
+    }
+
+    if (!valid) {
+        SSUnPinBuffer(buf_desc);
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBMarkNeedFlush, buf_desc not valid")));
+        return DMS_ERROR;
+    }
+
+    ereport(LOG, (errmsg("[SS] CBMarkNeedFlush found buf: %u/%u/%u/%d %d-%u",
+        tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+        tag->forkNum, tag->blockNum)));
+    SSUnPinBuffer(buf_desc);
+    return DMS_SUCCESS;
+}
+
 void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
 {
     IsUnderPostmaster = true;
@@ -1776,4 +1804,5 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->drc_validate = CBDrcBufValidate;
     callback->db_check_lock = CBDBCheckLock;
     callback->cache_msg = CBCacheMsg;
+    callback->need_flush = CBMarkNeedFlush;
 }
