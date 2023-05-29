@@ -112,6 +112,7 @@
 #include "executor/node/nodeWindowAgg.h"
 #include "executor/node/nodeWorktablescan.h"
 #include "executor/node/nodeProjectSet.h"
+#include "executor/node/nodeSortGroup.h"
 #include "executor/exec/execStream.h"
 #include "optimizer/clauses.h"
 #include "optimizer/encoding.h"
@@ -306,6 +307,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitMaterial((Material*)node, estate, eflags);
         case T_Sort:
             return (PlanState*)ExecInitSort((Sort*)node, estate, eflags);
+        case T_SortGroup:
+            return (PlanState*)ExecInitSortGroup((SortGroup*)node, estate, eflags);
         case T_Group:
             return (PlanState*)ExecInitGroup((Group*)node, estate, eflags);
         case T_Agg:
@@ -1132,6 +1135,10 @@ static void ExecEndNodeByType(PlanState* node)
 
         case T_SortState:
             ExecEndSort((SortState*)node);
+            break;
+
+        case T_SortGroupState:
+            ExecEndSortGroup((SortGroupState*)node);
             break;
 
         case T_GroupState:

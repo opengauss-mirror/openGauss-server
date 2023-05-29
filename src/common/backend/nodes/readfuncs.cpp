@@ -4024,6 +4024,25 @@ static Sort* _readSort(Sort* local_node)
     READ_DONE();
 }
 
+static SortGroup* _readSortGroup(SortGroup* local_node)
+{
+    READ_LOCALS_NULL(SortGroup);
+    READ_TEMP_LOCALS();
+
+    // Read Plan
+    _readPlan(&local_node->plan);
+
+    READ_INT_FIELD(numCols);
+    READ_ATTR_ARRAY(sortColIdx, numCols);
+    READ_OPERATOROID_ARRAY(sortOperators, numCols);
+    READ_OID_ARRAY(collations, numCols);
+
+    READ_OID_ARRAY_BYCONVERT(collations, numCols);
+
+    READ_BOOL_ARRAY(nullsFirst, numCols);
+    READ_DONE();
+}
+
 static Unique* _readUnique(Unique* local_node)
 {
     READ_LOCALS_NULL(Unique);
@@ -6354,6 +6373,8 @@ Node* parseNodeString(void)
         return_value = _readSimpleSort(NULL);
     } else if (MATCH("SORT", 4)) {
         return_value = _readSort(NULL);
+    }  else if (MATCH("SORTGROUP", 9)) {
+        return_value = _readSortGroup(NULL);
     } else if (MATCH("UNIQUE", 6)) {
         return_value = _readUnique(NULL);
     } else if (MATCH("PLANNEDSTMT", 11)) {

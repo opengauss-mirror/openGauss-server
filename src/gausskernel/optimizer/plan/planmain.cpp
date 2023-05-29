@@ -503,8 +503,8 @@ void update_tuple_fraction(PlannerInfo* root,
             !pathkeys_contained_in(root->window_pathkeys, root->group_pathkeys))
             tuple_fraction = 0.0;
 
-        /* In any case, limit_tuples shouldn't be specified here */
-        AssertEreport(limit_tuples < 0,
+        /* if we don not consider sort group agg, limit_tuples shouldn't be specified here */
+        AssertEreport(root->consider_sortgroup_agg || limit_tuples < 0,
             MOD_OPT,
             "invalid limit tuples when estimating the number of result groups in grouping process.");
     } else if (parse->hasAggs || root->hasHavingQual || parse->groupingSets) {
