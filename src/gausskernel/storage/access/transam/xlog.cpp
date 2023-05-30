@@ -6752,7 +6752,7 @@ void XLOGShmemInit(void)
         /* Reset walbuffer only before startup thread init, in which StartupXLOG pushes LSN */
         if (ENABLE_DMS && t_thrd.role == STARTUP && (((SS_STANDBY_PROMOTING || SS_PRIMARY_DEMOTED) &&
             g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag == true) ||
-            SSFAILOVER_TRIGGER)) {
+            SS_STANDBY_FAILOVER)) {
             g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag = false;
             errorno = memset_s(t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks,
                 sizeof(XLogRecPtr) * g_instance.attr.attr_storage.XLOGbuffers, 0,
@@ -9259,7 +9259,7 @@ void StartupXLOG(void)
      */
     if (ENABLE_DMS) {
         int src_id = g_instance.attr.attr_storage.dms_attr.instance_id;
-        if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+        if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
             src_id = SSGetPrimaryInstId();
             ereport(LOG, (errmsg("[SS Reform]: Standby:%d promoting, reading control file of original primary:%d",
                 g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
@@ -9461,7 +9461,7 @@ void StartupXLOG(void)
     securec_check(errorno, "", "");
 
     if (ENABLE_DMS && ENABLE_DSS) {
-        if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+        if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
             SSGetXlogPath();
             xlogreader = SSXLogReaderAllocate(&SSXLogPageRead, &readprivate, ALIGNOF_BUFFER);
             close_readFile_if_open();
@@ -9689,7 +9689,7 @@ void StartupXLOG(void)
      * in SS Switchover, skip dw init since we didn't do ShutdownXLOG
      */
 
-    if ((ENABLE_REFORM && SS_REFORM_REFORMER && !SSFAILOVER_TRIGGER && !SS_PERFORMING_SWITCHOVER) ||
+    if ((ENABLE_REFORM && SS_REFORM_REFORMER && !SS_STANDBY_FAILOVER && !SS_PERFORMING_SWITCHOVER) ||
         !ENABLE_DMS || !ENABLE_REFORM) {
         /* process assist file of chunk recycling */
         dw_ext_init();
@@ -9890,7 +9890,7 @@ void StartupXLOG(void)
      * have been a clean shutdown and we did not have a recovery.conf file,
      * then assume no recovery needed.
      */
-    if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+    if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
         t_thrd.xlog_cxt.InRecovery = true;
         if (SS_STANDBY_PROMOTING) {
             ereport(LOG, (errmsg("[SS switchover] Standby promote: redo shutdown checkpoint now")));
@@ -10014,7 +10014,7 @@ void StartupXLOG(void)
         }
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
         /* No need to hold ControlFileLock yet, we aren't up far enough */
-        if (!SSFAILOVER_TRIGGER) {
+        if (!SS_STANDBY_FAILOVER) {
             UpdateControlFile();
         }
 
@@ -10062,7 +10062,7 @@ void StartupXLOG(void)
          * connections, so that read-only backends don't try to read whatever
          * garbage is left over from before.
          */
-        if (!RecoveryByPending && (!SSFAILOVER_TRIGGER && SSModifySharedLunAllowed())) {
+        if (!RecoveryByPending && (!SS_STANDBY_FAILOVER && SSModifySharedLunAllowed())) {
             ResetUnloggedRelations(UNLOGGED_RELATION_CLEANUP);
         }
 
@@ -10541,7 +10541,7 @@ void StartupXLOG(void)
 
     EndOfLog = t_thrd.xlog_cxt.EndRecPtr;
     XLByteToPrevSeg(EndOfLog, endLogSegNo);
-    if ((ENABLE_DMS && SSFAILOVER_TRIGGER) || SS_STANDBY_PROMOTING) {
+    if ((ENABLE_DMS && SS_STANDBY_FAILOVER) || SS_STANDBY_PROMOTING) {
         bool use_existent = true;
         (void)XLogFileInit(endLogSegNo, &use_existent, true);
     }
@@ -10743,7 +10743,7 @@ void StartupXLOG(void)
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
     }
 
-    if (!SSFAILOVER_TRIGGER && !SS_STANDBY_PROMOTING) {
+    if (!SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING) {
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_PRODUCTION;
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
@@ -10846,9 +10846,9 @@ void StartupXLOG(void)
         }
     }
 
-    if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
-        if (SSFAILOVER_TRIGGER) {
-            g_instance.dms_cxt.SSRecoveryInfo.failover_triggered = false;
+    if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
+        if (SS_STANDBY_FAILOVER) {
+            g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = ALLOW_CKPT;
             pg_memory_barrier();
         }
         ereport(LOG, (errmodule(MOD_DMS),
@@ -11255,7 +11255,8 @@ bool RecoveryInProgress(void)
      * shared variable has once been seen false.
      */
     if (!t_thrd.xlog_cxt.LocalRecoveryInProgress) {
-        if (!ENABLE_DMS || (ENABLE_DMS && !SSFAILOVER_TRIGGER && !SS_STANDBY_PROMOTING)) {
+        if (!ENABLE_DMS || (ENABLE_DMS && !SS_STANDBY_PROMOTING &&
+            g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status == NOT_ACTIVE)) {
             return false;
         }
     }
@@ -11893,7 +11894,7 @@ void CreateCheckPoint(int flags)
             END_CRIT_SECTION();
         }
         return;
-    } else if (SSFAILOVER_TRIGGER) {
+    } else if (g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status == NOT_ALLOW_CKPT) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do not do CreateCheckpoint during failover")));
         return;
     }
@@ -17184,7 +17185,7 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
         if (readSource & XLOG_FROM_STREAM) {
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
-            if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+            if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
                 readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
                     xlogreader->readBuf, readTLI, NULL);
             } else {
@@ -19769,7 +19770,7 @@ bool SSModifySharedLunAllowed()
         g_instance.dms_cxt.SSClusterState == NODESTATE_PRIMARY_DEMOTING ||
         g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTING ||
         g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED ||
-        SSFAILOVER_TRIGGER) {
+        SS_STANDBY_FAILOVER) {
         return true;
     }
     return false;

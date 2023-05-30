@@ -181,7 +181,7 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSReformInfo.dms_role = DMS_ROLE_UNKNOW;
     dms_cxt->SSClusterState = NODESTATE_NORMAL;
     dms_cxt->SSRecoveryInfo.recovery_pause_flag = true;
-    dms_cxt->SSRecoveryInfo.failover_triggered = false;
+    dms_cxt->SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
     dms_cxt->SSRecoveryInfo.new_primary_reset_walbuf_flag = false;
     dms_cxt->SSRecoveryInfo.ready_to_startup = false;
     dms_cxt->SSRecoveryInfo.startup_reform = true;
