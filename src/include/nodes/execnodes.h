@@ -581,6 +581,8 @@ typedef struct ResultRelInfo {
     int ri_NumUpdatedNeeded;
     List* ri_WithCheckOptions;
     List* ri_WithCheckOptionExprs;
+
+    ProjectionInfo* ri_updateWhere; /* list of ON CONFLICT DO UPDATE exprs (qual)*/
 } ResultRelInfo;
 
 /* bloom filter controller */

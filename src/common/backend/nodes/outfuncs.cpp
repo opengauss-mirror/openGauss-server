@@ -2384,6 +2384,11 @@ static void _outAggref(StringInfo str, Aggref* node)
 
     WRITE_TYPEINFO_FIELD(aggtype);
     WRITE_TYPEINFO_FIELD(aggtrantype);
+    if (t_thrd.proc->workingVersionNum >= TIMESCALE_DB_VERSION_NUM){
+        WRITE_NODE_FIELD(aggargtypes);
+        WRITE_INT_FIELD(aggsplit);
+        WRITE_OID_FIELD(aggtranstype);
+    }
 }
 
 static void _outGroupingFunc(StringInfo str, const GroupingFunc* node)
@@ -3450,6 +3455,9 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_NODE_FIELD(joininfo);
     WRITE_BOOL_FIELD(has_eclass_joins);
     WRITE_UINT_FIELD(num_data_nodes);
+    if (t_thrd.proc->workingVersionNum >= TIMESCALE_DB_VERSION_NUM){
+        WRITE_NODE_FIELD(partial_pathlist);
+    }
 }
 
 static void _outIndexOptInfo(StringInfo str, IndexOptInfo* node)
@@ -3472,6 +3480,9 @@ static void _outIndexOptInfo(StringInfo str, IndexOptInfo* node)
     WRITE_BOOL_FIELD(unique);
     WRITE_BOOL_FIELD(immediate);
     WRITE_BOOL_FIELD(hypothetical);
+    if (t_thrd.proc->workingVersionNum >= TIMESCALE_DB_VERSION_NUM){
+        WRITE_NODE_FIELD(indrestrictinfo);
+    }
 }
 
 static void _outEquivalenceClass(StringInfo str, EquivalenceClass* node)
