@@ -4429,7 +4429,12 @@ static Query* transformDeclareCursorStmt(ParseState* pstate, DeclareCursorStmt* 
             ERROR, (errcode(ERRCODE_INVALID_CURSOR_DEFINITION), errmsg("cannot specify both SCROLL and NO SCROLL")));
     }
 
+    /*除WITH HOLD游标外，根据DeclareCursorName对使用的row type形成依赖*/
+    if (!(stmt->options & CURSOR_OPT_HOLD)) {
+        u_sess->analyze_cxt.DeclareCursorName = stmt->portalname;
+    }
     result = transformStmt(pstate, stmt->query);
+    u_sess->analyze_cxt.DeclareCursorName = NULL;
 
     /* Grammar should not have allowed anything but SELECT */
     if (!IsA(result, Query) || result->commandType != CMD_SELECT || result->utilityStmt != NULL) {

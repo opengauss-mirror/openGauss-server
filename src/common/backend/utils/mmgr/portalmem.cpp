@@ -44,6 +44,7 @@
 
 
 extern void ReleaseSharedCachedPlan(CachedPlan* plan, bool useResOwner);
+static void CursorRecordTypeUnbind(const char* portal_name);
 /*
  * Estimate of the maximum number of open portals a user would have,
  * used in initially sizing the PortalHashTable in EnablePortalManager().
@@ -567,6 +568,11 @@ void PortalDrop(Portal portal, bool isTopCommit)
 
     /* drop cached plan reference, if any */
     PortalReleaseCachedPlan(portal);
+
+    /*if cursor record row type*/
+    if (portal->name[0] != '\0' && u_sess->plsql_cxt.CursorRecordTypeList) {
+        CursorRecordTypeUnbind(portal->name);
+    }
 
     /*
      * Release any resources still attached to the portal.	There are several
@@ -1395,4 +1401,30 @@ HoldPinnedPortals(bool is_rollback)
             portal->autoHeld = true;
         }
     }
+}
+
+/*解除游标与row type类型的依赖关系*/
+static void CursorRecordTypeUnbind(const char* portal_name)
+{
+    ListCell* cell = NULL;
+    MemoryContext old = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
+    List* temp_list = list_copy(u_sess->plsql_cxt.CursorRecordTypeList);
+    foreach(cell,temp_list) {
+        CursorRecordType* var = (CursorRecordType*)lfirst(cell);
+        if (strcmp(portal_name,var->cursor_name) == 0) {
+            Relation rel = relation_open(var->type_oid,AccessShareLock);
+            if (rel->rd_refcnt > 1) {
+                RelationDecrementReferenceCount(rel);
+            }
+            relation_close(rel,AccessShareLock);
+            u_sess->plsql_cxt.CursorRecordTypeList = list_delete_ptr(u_sess->plsql_cxt.CursorRecordTypeList,var);
+            pfree(var->cursor_name);
+            pfree(var);
+        }
+    }
+    list_free(temp_list);
+    t_thrd.utils_cxt.CurrentResourceOwner = save;
+    (void)MemoryContextSwitchTo(old);
 }

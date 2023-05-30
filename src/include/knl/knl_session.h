@@ -304,6 +304,8 @@ typedef struct knl_u_analyze_context {
     struct StringInfoData* autoanalyze_timeinfo;
 
     struct BufferAccessStrategyData* vac_strategy;
+
+    char* DeclareCursorName;
 } knl_u_analyze_context;
 
 #define PATH_SEED_FACTOR_LEN 3
@@ -1662,6 +1664,7 @@ typedef struct knl_u_plpgsql_context {
     bool pragma_autonomous; /* save autonomous flag */
     char* debug_query_string;
     bool is_insert_gs_source; /* is doing insert gs_source? */
+    List* CursorRecordTypeList;  /*Save the type recorded during the cursor definition*/
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
