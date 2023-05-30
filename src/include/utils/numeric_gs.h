@@ -22,10 +22,13 @@
 #define NUMERIC_HDRSZ_SHORT (VARHDRSZ + sizeof(uint16))
 
 #define NUMERIC_FLAGBITS(n) ((n)->choice.n_header & NUMERIC_SIGN_MASK)
+#define NUMERIC_FLAGBITS_CHOICE(n) ((n)->n_header & NUMERIC_SIGN_MASK)
 #define NUMERIC_NB_FLAGBITS(n) ((n)->choice.n_header & NUMERIC_BI_MASK)  // nan or biginteger
+#define NUMERIC_NB_FLAGBITS_CHOICE(n) ((n)->n_header & NUMERIC_BI_MASK) 
 
 #define NUMERIC_IS_NAN(n) (NUMERIC_NB_FLAGBITS(n) == NUMERIC_NAN)
 #define NUMERIC_IS_SHORT(n) (NUMERIC_FLAGBITS(n) == NUMERIC_SHORT)
+#define NUMERIC_IS_SHORT_CHOICE(n) (NUMERIC_FLAGBITS_CHOICE(n) == NUMERIC_SHORT)
 
 /*
  * big integer macro
@@ -44,6 +47,7 @@
  * verify whether a numeric data is NAN or BI by itself.
  */
 #define NUMERIC_IS_NANORBI(n) (NUMERIC_NB_FLAGBITS(n) >= NUMERIC_NAN)
+#define NUMERIC_IS_NANORBI_CHOICE(n) (NUMERIC_NB_FLAGBITS_CHOICE(n) >= NUMERIC_NAN)
 #define NUMERIC_IS_BI(n) (NUMERIC_NB_FLAGBITS(n) > NUMERIC_NAN)
 #define NUMERIC_IS_BI64(n) (NUMERIC_NB_FLAGBITS(n) == NUMERIC_64)
 #define NUMERIC_IS_BI128(n) (NUMERIC_NB_FLAGBITS(n) == NUMERIC_128)
@@ -76,7 +80,9 @@
  * can just look at the high bit, for a slight efficiency gain.
  */
 #define NUMERIC_HEADER_IS_SHORT(n)	(((n)->choice.n_header & 0x8000) != 0)
+#define NUMERIC_HEADER_IS_SHORT_CHOICE(n)	(((n)->n_header & 0x8000) != 0)
 #define NUMERIC_HEADER_SIZE(n) (VARHDRSZ + sizeof(uint16) + (NUMERIC_HEADER_IS_SHORT(n) ? 0 : sizeof(int16)))
+#define NUMERIC_HEADER_SIZE_CHOICE_1B(n) (VARHDRSZ_SHORT + sizeof(uint16) + (NUMERIC_HEADER_IS_SHORT_CHOICE(n) ? 0 : sizeof(int16)))
 
 /*
  * Short format definitions.
@@ -110,6 +116,18 @@
          : ((n)->choice.n_long.n_weight))
 #define NUMERIC_DIGITS(num) (NUMERIC_HEADER_IS_SHORT(num) ? (num)->choice.n_short.n_data : (num)->choice.n_long.n_data)
 #define NUMERIC_NDIGITS(num) ((VARSIZE(num) - NUMERIC_HEADER_SIZE(num)) / sizeof(NumericDigit))
+
+#define NUMERIC_SIGN_CHOICE(n)                                                                                    \
+    (NUMERIC_IS_SHORT_CHOICE(n) ? (((n)->n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS) \
+        : NUMERIC_FLAGBITS_CHOICE(n))
+#define NUMERIC_DSCALE_CHOICE(n)                                                                                             \
+    (NUMERIC_HEADER_IS_SHORT_CHOICE((n)) ? ((n)->n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT \
+        : ((n)->n_long.n_sign_dscale & NUMERIC_DSCALE_MASK))
+#define NUMERIC_WEIGHT_CHOICE(n)                                                                                         \
+    (NUMERIC_HEADER_IS_SHORT_CHOICE((n)) ? (((n)->n_short.n_header & NUMERIC_SHORT_WEIGHT_SIGN_MASK \
+        ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) | ((n)->n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK))    \
+        : ((n)->n_long.n_weight))
+#define NUMERIC_DIGITS_CHOICE(num) (NUMERIC_HEADER_IS_SHORT_CHOICE(num) ? (num)->n_short.n_data : (num)->n_long.n_data)
 
 /*
  * @Description: copy bi64 to ptr,  this operation no need to allocate memory
