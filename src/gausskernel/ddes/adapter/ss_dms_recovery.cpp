@@ -281,17 +281,6 @@ void SSWriteReformerControlPages(void)
     }
 }
 
-void SSTriggerFailover()
-{
-    if (g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
-        g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = true;
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB restart.")));
-    } else {
-        SendPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER);
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB alive")));
-    }
-}
-
 void SShandle_promote_signal()
 {
     if (pmState == PM_WAIT_BACKENDS) {
