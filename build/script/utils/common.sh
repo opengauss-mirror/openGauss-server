@@ -98,7 +98,17 @@ declare INSTALL_TOOLS_DIR=${binarylib_dir}/install_tools
 declare UNIX_ODBC="${BINARYLIBS_PATH}/unixodbc"
 
 # Comment 编译相关
-gcc_version="7.3"
+if [ -d "${USE_CCACHE}$BUILD_TOOLS_PATH/gcc10.3" ]; then
+    gcc_version="10.3"
+else
+    gcc_version="7.3"
+fi
+
+if [ "$PLATFORM_ARCH"X == "aarch64"X ] && [ "$gcc_version" == "10.3" ]; then
+    gcc_sub_version="1"
+else
+    gcc_sub_version="0"
+fi
 ccache -V >/dev/null 2>&1 && USE_CCACHE="ccache " ENABLE_CCACHE="--enable-ccache"
 export CC="${USE_CCACHE}$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/gcc"
 export CXX="${USE_CCACHE}$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/g++"
