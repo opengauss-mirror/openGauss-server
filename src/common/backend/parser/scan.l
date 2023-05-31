@@ -1178,6 +1178,15 @@ other			.
 					 * if necessary.
 					 */
 					ident = downcase_truncate_identifier(yytext, yyleng, yyextra->warnOnTruncateIdent);
+					/* Is it _charset? */
+					if (ident[0] == '_' &&
+						ENABLE_MULTI_CHARSET &&
+						pg_valid_server_encoding(ident + 1) >= 0) {
+						yylval->str = pstrdup(ident + 1);
+						yyextra->is_hint_str = false;
+						yyextra->ident_quoted = false;
+						return UNDERSCORE_CHARSET;
+					}
 					yylval->str = ident;
 					yyextra->ident_quoted = false;
 					set_is_delimiter_name(yytext,yyscanner);

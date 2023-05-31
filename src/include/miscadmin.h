@@ -40,6 +40,7 @@
 extern const uint32 NBTREE_INSERT_OPTIMIZATION_VERSION_NUM;
 extern const uint32 NBTREE_DEDUPLICATION_VERSION_NUM;
 extern const uint32 ONDEMAND_REDO_VERSION_NUM;
+extern const uint32 MULTI_CHARSET_VERSION_NUM;
 extern const uint32 SRF_FUSION_VERSION_NUM;
 extern const uint32 INNER_UNIQUE_VERSION_NUM;
 extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
@@ -145,7 +146,8 @@ extern void SSUpgradeFileBeforeCommit();
 #define B_FORMAT_OPT_DEFAULT_COLLATION 8
 #define B_FORMAT_OPT_FETCH 16
 #define B_FORMAT_OPT_DIAGNOSTICS 32
-#define B_FORMAT_OPT_MAX 6
+#define B_FORMAT_OPT_ENABLE_MULTI_CHARSET 64
+#define B_FORMAT_OPT_MAX 7
 
 #define ENABLE_SET_SESSION_TRANSACTION                                                                   \
     ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION) && \
@@ -157,6 +159,9 @@ extern void SSUpgradeFileBeforeCommit();
         ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_MODIFY_COLUMN) && \
         u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 #define B_FETCH ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_FETCH) && \
+        u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+#define ENABLE_MULTI_CHARSET \
+        ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_MULTI_CHARSET) && \
         u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 
 #define B_DIAGNOSTICS ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_DIAGNOSTICS) && \

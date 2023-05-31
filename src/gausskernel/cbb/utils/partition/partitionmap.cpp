@@ -40,6 +40,7 @@
 #include "parser/parse_node.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_expr.h"
+#include "parser/parse_collate.h"
 #include "utils/catcache.h"
 #include "utils/syscache.h"
 #include "utils/array.h"
@@ -2788,11 +2789,13 @@ int constCompare_constType(Const* value1, Const* value2)
     eqExpr = (Expr*)makeSimpleA_Expr(AEXPR_OP, "=", (Node*)value1, (Node*)value2, -1);
 
     eqExpr = (Expr*)transformExpr(pstate, (Node*)eqExpr, EXPR_KIND_PARTITION_EXPRESSION);
+    assign_expr_collations(pstate, (Node*)eqExpr);
 
     gtExpr = (Expr*)makeSimpleA_Expr(AEXPR_OP, ">", (Node*)value1, (Node*)value2, -1);
 
     gtExpr = (Expr*)transformExpr(pstate, (Node*)gtExpr, EXPR_KIND_PARTITION_EXPRESSION);
     ((OpExpr*)gtExpr)->inputcollid = value1->constcollid;
+    assign_expr_collations(pstate, (Node*)gtExpr);
 
     estate = CreateExecutorState();
     econtext = GetPerTupleExprContext(estate);

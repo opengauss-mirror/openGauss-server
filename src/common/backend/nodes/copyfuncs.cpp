@@ -7425,6 +7425,16 @@ static CharsetCollateOptions *_copyCharsetcollateOptions(const CharsetCollateOpt
     return newnode;
 }
 
+static CharsetClause *_copyCharsetClause(const CharsetClause* from)
+{
+    CharsetClause* newnode = makeNode(CharsetClause);
+    COPY_NODE_FIELD(arg);
+    COPY_SCALAR_FIELD(charset);
+    COPY_SCALAR_FIELD(is_binary);
+    COPY_LOCATION_FIELD(location);
+    return newnode;
+}
+
 static PrefixKey* _copyPrefixKey(const PrefixKey* from)
 {
     PrefixKey* newnode = makeNode(PrefixKey);
@@ -8825,6 +8835,9 @@ void* copyObject(const void* from)
             break;
         case T_DolphinCallStmt:
             retval = _copyDolphinCallStmt((DolphinCallStmt *)from);
+            break;
+        case T_CharsetClause:
+            retval = _copyCharsetClause((CharsetClause *)from);
             break;
         default:
             ereport(ERROR,

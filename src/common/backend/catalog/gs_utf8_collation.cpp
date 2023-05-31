@@ -31,7 +31,7 @@
 #include "parser/parse_type.h"
 #include "access/hash.h"
 #include "utils/lsyscache.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
 
 typedef struct GS_UNICASE_PAGES {
     GS_UINT32 **sort_page;
@@ -475,62 +475,14 @@ static GS_UINT32 *unicase_sort_pages[256] = {
 * the character collation is set to 0xFFFD.
 */
 #define GS_REPLACEMENT_CHARACTER 0xFFFD
-#define NEXT_WORD_POS(p, p_word_bytes) ((p) += (p_word_bytes))
 
 GS_UNICASE_INFO g_unicase_default = {
     unicase_sort_pages
 };
 
-static int strnncoll_utf8mb4_general_pad_space(const unsigned char* arg1, size_t len1,
-                                               const unsigned char* arg2, size_t len2);
 static int mb_wc_utf8mb4(const unsigned char* s, const unsigned char* end, GS_UINT32* wchar);
-static int strnncoll_utf8mb4_bin_pad_space(const unsigned char* arg1, size_t len1,
-                                           const unsigned char* arg2, size_t len2);
-Datum hash_utf8mb4_general_pad_space(const unsigned char *key, size_t len);
-Datum hash_utf8mb4_bin_pad_space(const unsigned char *key);
 static int get_current_char_sorted_value(const unsigned char* cur_str, const unsigned char* str_end,
                                          GS_UINT32* next_word, const GS_UNICASE_INFO *uni_plane);
-bool is_b_format_collation(Oid collation);
-static int strnncoll_binary(const unsigned char* arg1, size_t len1,
-                            const unsigned char* arg2, size_t len2);
-
-/* binary collation only support binary string types, such as : blob. */
-void check_binary_collation(Oid collation, Oid type_oid)
-{
-    if (collation == BINARY_COLLATION_OID && !DB_IS_CMPT(B_FORMAT)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Un-support feature"),
-                errdetail("this collation only support in B-format database")));
-    }
-
-    if (IsBinaryType(type_oid) && collation != BINARY_COLLATION_OID) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("binary collation only support binary type in B format")));
-    }
-}
-
-bool is_support_b_format_collation(Oid collation)
-{
-    if (is_b_format_collation(collation) && !DB_IS_CMPT(B_FORMAT)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Un-support feature"),
-                errdetail("this collation only support in B-format database")));
-    }
-    return true;
-}
-
-bool is_b_format_collation(Oid collation)
-{
-    if (COLLATION_IN_B_FORMAT(collation)) {
-#ifdef ENABLE_MULTIPLE_NODES
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Un-support feature"),
-                errdetail("this collation is not currently supported ")));
-#endif
-        return true;
-    }
-    return false;
-}
 
 /*
 * In unicase_sort_pages array, Search for the sorting value based by the unicode value.
@@ -550,59 +502,8 @@ static inline void sort_by_unicode(GS_UINT32 **test_sort, GS_UINT32 *wchar)
     }
 }
 
-int varstr_cmp_by_builtin_collations(char* arg1, int len1, char* arg2, int len2, Oid collid)
-{
-    int result = 0;
-    switch (collid) {
-        case UTF8MB4_GENERAL_CI_COLLATION_OID:
-        case UTF8MB4_UNICODE_CI_COLLATION_OID:
-        case UTF8_GENERAL_CI_COLLATION_OID:
-        case UTF8_UNICODE_CI_COLLATION_OID:
-            result = strnncoll_utf8mb4_general_pad_space((unsigned char*)arg1, len1, (unsigned char*)arg2, len2);
-            break;
-        case UTF8MB4_BIN_COLLATION_OID:
-        case UTF8_BIN_COLLATION_OID:
-            result = strnncoll_utf8mb4_bin_pad_space((unsigned char*)arg1, len1, (unsigned char*)arg2, len2);
-            break;
-        case BINARY_COLLATION_OID:
-            result = strnncoll_binary((unsigned char*)arg1, len1, (unsigned char*)arg2, len2);
-            break;
-        default:
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Un-support feature"),
-                    errdetail("this collation is not currently supported ")));
-            break;
-    }
-
-    return result;
-}
-
-Datum hash_text_by_builtin_colltions(const unsigned char *key, size_t len, Oid collid)
-{
-    Datum result = 0;
-    switch (collid) {
-        case UTF8MB4_GENERAL_CI_COLLATION_OID:
-        case UTF8MB4_UNICODE_CI_COLLATION_OID:
-        case UTF8_GENERAL_CI_COLLATION_OID:
-        case UTF8_UNICODE_CI_COLLATION_OID:
-            result = hash_utf8mb4_general_pad_space((unsigned char*)key, len);
-            break;
-        case UTF8MB4_BIN_COLLATION_OID:
-        case UTF8_BIN_COLLATION_OID:
-            result = hash_any((unsigned char*)key, bpchartruelen((char*)key, len));
-            break;
-        default:
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Un-support feature"),
-                    errdetail("this collation is not currently supported ")));
-            break;
-    }
-
-    return result;
-}
-
-static int strnncoll_binary(const unsigned char* arg1, size_t len1,
-                            const unsigned char* arg2, size_t len2)
+int strnncoll_binary(const unsigned char* arg1, size_t len1,
+                     const unsigned char* arg2, size_t len2)
 {
     size_t len = len1 < len2 ? len1 : len2;
     int res = memcmp(arg1, arg2, len);
@@ -629,11 +530,12 @@ static inline int bincmp_utf8mb4(const unsigned char *arg1, const unsigned char 
 * return < 0 , arg1 < arg2
 * return > 0 , arg1 > arg2
 */
-static int strnncoll_utf8mb4_general_pad_space(const unsigned char* arg1, size_t len1,
-                                               const unsigned char* arg2, size_t len2)
+int strnncoll_utf8mb4_general_pad_space(const unsigned char* arg1, size_t len1,
+                                        const unsigned char* arg2, size_t len2)
 {
     GS_UINT32 arg1_word = 0;
     GS_UINT32 arg2_word = 0;
+    int res = 0;
 
     const unsigned char* arg1_end = arg1 + len1;
     const unsigned char* arg2_end = arg2 + len2;
@@ -654,24 +556,11 @@ static int strnncoll_utf8mb4_general_pad_space(const unsigned char* arg1, size_t
         NEXT_WORD_POS(arg2, arg2_bytes);
     }
 
-    int res = 0;
-    len1 = (size_t)(arg1_end - arg1);
-    len2 = (size_t)(arg2_end - arg2);
-
-    if (len1 != len2) {
-        int swap = 1;
- 
-        if (len1 < len2) {
-            len1 = len2;
-            arg1 = arg2;
-            arg1_end = arg2_end;
-            swap = -1;
-        }
-        for (; arg1 < arg1_end; arg1++) {
-            if (*arg1 != ' ') {
-                return (*arg1 < ' ') ? -swap : swap;
-            }
-        }
+    int len1_space = arg1_end - arg1;
+    int len2_space = arg2_end - arg2;
+    if (len1_space != len2_space) {
+        res = len1_space > len2_space ? compare_tail_space(arg1, len1_space, 1) :
+            compare_tail_space(arg2, len2_space, -1);
     }
 
     return res;
@@ -731,39 +620,6 @@ static int mb_wc_utf8mb4(const unsigned char* s, const unsigned char* end, GS_UI
         return GS_ERR_ILLEGAL_SEQUENCE;
     }
     return bytes;
-}
-
-/*
-* string compare function for collation utf8mb4_bin.
-*/
-static int strnncoll_utf8mb4_bin_pad_space(const unsigned char* arg1, size_t len1,
-                                           const unsigned char* arg2, size_t len2)
-{
-    size_t len = len1 < len2 ? len1 : len2;
-    const unsigned char* arg1_end = arg1 + len;
-    int res = 0;
-
-    while (arg1 < arg1_end) {
-        if (*arg1++ != *arg2++) {
-            return ((int)arg1[-1] - (int)arg2[-1]);
-        }
-    }
-
-    if (len1 != len2) {
-        int swap = 1;
-        if (len1 < len2) {
-            len1 = len2;
-            arg1 = arg2;
-            swap = -1;
-            res = -res;
-        }
-        for (arg1_end = arg1 + len1 - len; arg1 < arg1_end; arg1++) {
-            if (*arg1 != ' ') {
-                return (*arg1 < ' ') ? -swap : swap;
-            }
-        }
-    }
-    return res;
 }
 
 /*

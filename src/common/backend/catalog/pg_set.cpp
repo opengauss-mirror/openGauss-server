@@ -36,6 +36,7 @@
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "catalog/gs_collation.h"
 
 static void checkSetLableValue(char *label)
 {
@@ -49,12 +50,32 @@ static void checkSetLableValue(char *label)
 
     /* character length can not over 255 */
     text *text_label = cstring_to_text(label);
-
     if (text_length(PointerGetDatum(text_label)) > SETNAMELEN) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_NAME),
             errmsg("Too long set value for column"),
             errdetail("Set value must contain 0 to %d characters.", SETNAMELEN)));
+    }
+}
+
+void check_duplicate_value_by_collation(List* vals, Oid collation)
+{
+    if (!is_b_format_collation(collation)) {
+        return ;
+    }
+
+    ListCell* lc = NULL;
+    foreach (lc, vals) {
+        ListCell* next_cell = lc->next;
+        char* lab = strVal(lfirst(lc));
+        while(next_cell != NULL) {
+            char* next_lab = strVal(lfirst(next_cell));
+            if (varstr_cmp_by_builtin_collations(lab, strlen(lab), next_lab, strlen(next_lab), collation) == 0) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("set has duplicate key value \"%s\" = \"%s\"", lab, next_lab)));
+            }
+            next_cell = lnext(next_cell);
+        }
     }
 }
 
@@ -64,7 +85,7 @@ static void checkSetLableValue(char *label)
  *
  * vals is a list of Value strings.
  */
-void SetValuesCreate(Oid setTypeOid, List* vals)
+void SetValuesCreate(Oid setTypeOid, List* vals, Oid collation)
 {
     Relation pg_set = NULL;
     text *setlabel = NULL;
@@ -89,6 +110,8 @@ void SetValuesCreate(Oid setTypeOid, List* vals)
      * have any, you'll get a less-than-friendly unique-index violation. It is
      * probably not worth trying harder.
      */
+
+    check_duplicate_value_by_collation(vals, collation);
 
     pg_set = heap_open(SetRelationId, RowExclusiveLock);
 

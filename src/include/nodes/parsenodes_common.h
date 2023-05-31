@@ -752,6 +752,17 @@ typedef struct CharsetCollateOptions {
     char* collate;
 } CharsetCollateOptions;
 
+/*
+ * CharsetClause - a  expression
+ */
+typedef struct CharsetClause {
+    NodeTag type;
+    Node *arg;      /* string const */
+    int charset;    /* encoding id */
+    bool is_binary;
+    int location;
+} CharsetClause;
+
 /* ----------------------
  * Create Schema Statement
  *

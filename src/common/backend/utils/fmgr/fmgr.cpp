@@ -2136,7 +2136,7 @@ void CheckNullResult(Oid oid, bool isnull, char* str)
  * With param can_ignore == true, truncation or transformation may be cast
  * if function failed for ignorable errors like overflowing or out of range.
  */
-Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, bool can_ignore)
+Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, bool can_ignore, Oid collation)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -2158,7 +2158,7 @@ Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmo
     fcinfo.argnull[1] = false;
     fcinfo.argnull[2] = false;
     fcinfo.can_ignore = can_ignore;
-
+    fcinfo.fncollation = collation;
     result = FunctionCallInvoke(&fcinfo);
 
     /* Should get null result if and only if str is NULL */
@@ -2356,6 +2356,13 @@ bytea* OidSendFunctionCall(Oid functionId, Datum val)
     return SendFunctionCall(&flinfo, val);
 }
 
+Datum OidInputFunctionCallColl(Oid functionId, char* str, Oid typioparam, int32 typmod, Oid collation)
+{
+    FmgrInfo flinfo;
+
+    fmgr_info(functionId, &flinfo);
+    return InputFunctionCall(&flinfo, str, typioparam, typmod, false, collation);
+}
 /*
  * !!! OLD INTERFACE !!!
  *

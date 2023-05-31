@@ -495,7 +495,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
  * DOT_DOT is unused in the core SQL grammar, and so will always provoke
  * parse errors.  It is needed by PL/pgsql.
  */
-%token <str>	IDENT FCONST SCONST BCONST XCONST Op CmpOp COMMENTSTRING SET_USER_IDENT SET_IDENT
+%token <str>	IDENT FCONST SCONST BCONST XCONST Op CmpOp COMMENTSTRING SET_USER_IDENT SET_IDENT UNDERSCORE_CHARSET
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 

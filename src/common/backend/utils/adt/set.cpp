@@ -42,10 +42,11 @@
 #include "utils/int8.h"
 #include "utils/sortsupport.h"
 #include "fmgr.h"
+#include "catalog/gs_collation.h"
 
 #define KEY_NUM (2)
 
-static VarBit* get_set_in_result(Oid settypoid, char *setlabels);
+static VarBit* get_set_in_result(Oid settypoid, char *setlabels, Oid collation);
 
 /* Basic I/O support */
 
@@ -54,7 +55,7 @@ Datum set_in(PG_FUNCTION_ARGS)
     char *setlabels = PG_GETARG_CSTRING(0);
     Oid settypoid = PG_GETARG_OID(1);
 
-    PG_RETURN_VARBIT_P(get_set_in_result(settypoid, setlabels));
+    PG_RETURN_VARBIT_P(get_set_in_result(settypoid, setlabels, PG_GET_COLLATION()));
 }
 
 Datum set_out(PG_FUNCTION_ARGS)
@@ -138,7 +139,7 @@ Datum set_recv(PG_FUNCTION_ARGS)
     int nbytes;
     char* setlabels = pq_getmsgtext(buf, buf->len - buf->cursor, &nbytes);
 
-    PG_RETURN_VARBIT_P(get_set_in_result(settypoid, setlabels));
+    PG_RETURN_VARBIT_P(get_set_in_result(settypoid, setlabels, PG_GET_COLLATION()));
 }
 
 Datum set_send(PG_FUNCTION_ARGS)
@@ -285,6 +286,12 @@ Datum hashsetint(PG_FUNCTION_ARGS)
 Datum hashsettext(PG_FUNCTION_ARGS)
 {
     char *setlabels = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(0)));
+    if (is_b_format_collation(PG_GET_COLLATION())) {
+        Datum result = hash_text_by_builtin_collations((GS_UCHAR*)setlabels, strlen(setlabels), PG_GET_COLLATION());
+        pfree_ext(setlabels);
+        return result;
+    }
+
     return DirectFunctionCall1(hashtext, PointerGetDatum(cstring_to_text(setlabels)));
 }
 
@@ -354,6 +361,13 @@ Datum btsetint8cmp(PG_FUNCTION_ARGS)
 /* compare (>,>=,<,<=,=,!=) functions */
 Datum seteq(PG_FUNCTION_ARGS)
 {
+    if (is_b_format_collation(PG_GET_COLLATION())) {
+        const char *a = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(0)));
+        const char *b = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(1)));
+        bool result = (varstr_cmp_by_builtin_collations(a, strlen(a), b, strlen(b), PG_GET_COLLATION()) == 0);
+        PG_RETURN_BOOL(result);
+    }
+
     VarBit *d1 = PG_GETARG_VARBIT_P(0);
     Oid settypid1 = *(Oid *)VARBITS(d1);
     VarBit *d2 = PG_GETARG_VARBIT_P(1);
@@ -377,6 +391,13 @@ Datum seteq(PG_FUNCTION_ARGS)
 
 Datum setne(PG_FUNCTION_ARGS)
 {
+    if (is_b_format_collation(PG_GET_COLLATION())) {
+        const char *a = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(0)));
+        const char *b = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(1)));
+        bool result = (varstr_cmp_by_builtin_collations(a, strlen(a), b, strlen(b), PG_GET_COLLATION()) != 0);
+        PG_RETURN_BOOL(result);
+    }
+
     VarBit *d1 = PG_GETARG_VARBIT_P(0);
     Oid settypid1 = *(Oid *)VARBITS(d1);
     VarBit *d2 = PG_GETARG_VARBIT_P(1);
@@ -400,6 +421,13 @@ Datum setne(PG_FUNCTION_ARGS)
 
 Datum setge(PG_FUNCTION_ARGS)
 {
+    if (is_b_format_collation(PG_GET_COLLATION())) {
+        const char *a = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(0)));
+        const char *b = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(1)));
+        bool result = (varstr_cmp_by_builtin_collations(a, strlen(a), b, strlen(b), PG_GET_COLLATION()) >= 0);
+        PG_RETURN_BOOL(result);
+    }
+
     VarBit *d1 = PG_GETARG_VARBIT_P(0);
     Oid settypid1 = *(Oid *)VARBITS(d1);
     VarBit *d2 = PG_GETARG_VARBIT_P(1);
@@ -423,6 +451,13 @@ Datum setge(PG_FUNCTION_ARGS)
 
 Datum setgt(PG_FUNCTION_ARGS)
 {
+    if (is_b_format_collation(PG_GET_COLLATION())) {
+        const char *a = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(0)));
+        const char *b = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(1)));
+        bool result = (varstr_cmp_by_builtin_collations(a, strlen(a), b, strlen(b), PG_GET_COLLATION()) > 0);
+        PG_RETURN_BOOL(result);
+    }
+
     VarBit *d1 = PG_GETARG_VARBIT_P(0);
     Oid settypid1 = *(Oid *)VARBITS(d1);
 
@@ -447,6 +482,13 @@ Datum setgt(PG_FUNCTION_ARGS)
 
 Datum setlt(PG_FUNCTION_ARGS)
 {
+    if (is_b_format_collation(PG_GET_COLLATION())) {
+        const char *a = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(0)));
+        const char *b = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(1)));
+        bool result = (varstr_cmp_by_builtin_collations(a, strlen(a), b, strlen(b), PG_GET_COLLATION()) < 0);
+        PG_RETURN_BOOL(result);
+    }
+
     VarBit *d1 = PG_GETARG_VARBIT_P(0);
     Oid settypid1 = *(Oid *)VARBITS(d1);
     VarBit *d2 = PG_GETARG_VARBIT_P(1);
@@ -470,6 +512,13 @@ Datum setlt(PG_FUNCTION_ARGS)
 
 Datum setle(PG_FUNCTION_ARGS)
 {
+    if (is_b_format_collation(PG_GET_COLLATION())) {
+        const char *a = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(0)));
+        const char *b = DatumGetCString(DirectFunctionCall1(set_out, PG_GETARG_DATUM(1)));
+        bool result = (varstr_cmp_by_builtin_collations(a, strlen(a), b, strlen(b), PG_GET_COLLATION()) <= 0);
+        PG_RETURN_BOOL(result);
+    }
+
     VarBit *d1 = PG_GETARG_VARBIT_P(0);
     Oid settypid1 = *(Oid *)VARBITS(d1);
     VarBit *d2 = PG_GETARG_VARBIT_P(1);
@@ -753,13 +802,13 @@ Datum setint8le(PG_FUNCTION_ARGS)
 Datum settexteq(PG_FUNCTION_ARGS)
 {
     Datum set = DirectFunctionCall1(settotext, PG_GETARG_DATUM(0));
-    return DirectFunctionCall2(texteq, PointerGetDatum(set), PG_GETARG_DATUM(1));
+    return DirectFunctionCall2Coll(texteq, PG_GET_COLLATION(), PointerGetDatum(set), PG_GETARG_DATUM(1));
 }
 
 Datum settextne(PG_FUNCTION_ARGS)
 {
     Datum set = DirectFunctionCall1(settotext, PG_GETARG_DATUM(0));
-    return DirectFunctionCall2(textne, PointerGetDatum(set), PG_GETARG_DATUM(1));
+    return DirectFunctionCall2Coll(textne, PG_GET_COLLATION(), PointerGetDatum(set), PG_GETARG_DATUM(1));
 }
 
 Datum settextgt(PG_FUNCTION_ARGS)
@@ -776,7 +825,7 @@ Datum settextge(PG_FUNCTION_ARGS)
 
 Datum settextlt(PG_FUNCTION_ARGS)
 {
-    Datum set = DirectFunctionCall1(settotext, PG_GETARG_DATUM(0));
+    Datum set = DirectFunctionCall1(settotext, PG_GETARG_DATUM(0));\
     return DirectFunctionCall2Coll(text_lt, PG_GET_COLLATION(), PointerGetDatum(set), PG_GETARG_DATUM(1));
 }
 
@@ -790,13 +839,13 @@ Datum settextle(PG_FUNCTION_ARGS)
 Datum textseteq(PG_FUNCTION_ARGS)
 {
     Datum set = DirectFunctionCall1(settotext, PG_GETARG_DATUM(1));
-    return DirectFunctionCall2(texteq, PG_GETARG_DATUM(0), PointerGetDatum(set));
+    return DirectFunctionCall2Coll(texteq, PG_GET_COLLATION(), PG_GETARG_DATUM(0), PointerGetDatum(set));
 }
 
 Datum textsetne(PG_FUNCTION_ARGS)
 {
     Datum set = DirectFunctionCall1(settotext, PG_GETARG_DATUM(1));
-    return DirectFunctionCall2(textne, PG_GETARG_DATUM(0), PointerGetDatum(set));
+    return DirectFunctionCall2Coll(textne, PG_GET_COLLATION(), PG_GETARG_DATUM(0), PointerGetDatum(set));
 }
 
 Datum textsetgt(PG_FUNCTION_ARGS)
@@ -927,7 +976,7 @@ Datum bpchartoset(PG_FUNCTION_ARGS)
     Datum txt = PG_GETARG_DATUM(0);
     text* trimtxt = (text*)DirectFunctionCall1(rtrim1, txt);
     char* setlabels = TextDatumGetCString(trimtxt);
-    Datum result = (Datum)get_set_in_result(PG_GETARG_OID(1), setlabels);
+    Datum result = (Datum)get_set_in_result(PG_GETARG_OID(1), setlabels, PG_GET_COLLATION());
     pfree_ext(trimtxt);
     pfree_ext(setlabels);
     PG_RETURN_VARBIT_P(result);
@@ -938,7 +987,7 @@ Datum varchartoset(PG_FUNCTION_ARGS)
     Datum txt = PG_GETARG_DATUM(0);
     char* setlabels = DatumGetCString(DirectFunctionCall1(varcharout, txt));
 
-    Datum result = (Datum)get_set_in_result(PG_GETARG_OID(1), setlabels);
+    Datum result = (Datum)get_set_in_result(PG_GETARG_OID(1), setlabels, PG_GET_COLLATION());
     pfree_ext(setlabels);
     PG_RETURN_VARBIT_P(result);
 }
@@ -948,7 +997,7 @@ Datum texttoset(PG_FUNCTION_ARGS)
     Datum txt = PG_GETARG_DATUM(0);
     char *setlabels = DatumGetCString(DirectFunctionCall1(textout, txt));
 
-    Datum result = (Datum)get_set_in_result(PG_GETARG_OID(1), setlabels);
+    Datum result = (Datum)get_set_in_result(PG_GETARG_OID(1), setlabels, PG_GET_COLLATION());
     pfree_ext(setlabels);
     PG_RETURN_VARBIT_P(result);
 }
@@ -958,7 +1007,7 @@ Datum nvarchar2toset(PG_FUNCTION_ARGS)
     Datum txt = PG_GETARG_DATUM(0);
     char *setlabels = DatumGetCString(DirectFunctionCall1(nvarchar2out, txt));
 
-    Datum result = (Datum)get_set_in_result(PG_GETARG_OID(1), setlabels);
+    Datum result = (Datum)get_set_in_result(PG_GETARG_OID(1), setlabels, PG_GET_COLLATION());
     pfree_ext(setlabels);
     PG_RETURN_VARBIT_P(result);
 }
@@ -970,6 +1019,15 @@ static int btsetfastcmp(Datum x, Datum y, SortSupport ssup)
 
     VarBit *d2 = DatumGetVarBitP(y);
     Oid settypid2 = *(Oid *)VARBITS(d2);
+
+    if (is_b_format_collation(ssup->ssup_collation)) {
+        int result;
+        const char *a = DatumGetCString(DirectFunctionCall1(set_out, x));
+        const char *b = DatumGetCString(DirectFunctionCall1(set_out, y));
+        result = varstr_cmp_by_builtin_collations((char*)a, strlen(a), (char*)b, strlen(b), ssup->ssup_collation);
+        return result;
+    }
+
     /* compare by its value if arguments are the same set, otherwise by character order */
     if (settypid1 == settypid2) {
         int64 a = settoint64(d1);
@@ -1062,38 +1120,9 @@ Datum findinset(PG_FUNCTION_ARGS)
     PG_RETURN_INT32(0);
 }
 
-static void process_set_label(const char *label, Oid settypoid, VarBit **result)
+static void get_set_result(Oid settypoid, VarBit **result, Form_pg_set settup)
 {
     Oid *oid = NULL;
-    Relation pg_set = NULL;
-    ScanKeyData key[2];
-    SysScanDesc scan = NULL;
-    HeapTuple tup = NULL;
-
-    text *s = cstring_to_text(label);
-    if (text_length(PointerGetDatum(s)) > SETNAMELEN) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                errmsg("invalid input value for set %s: \"%s\"", format_type_be(settypoid), label)));
-    }
-
-    pg_set = heap_open(SetRelationId, AccessShareLock);
-    ScanKeyInit(&key[0], Anum_pg_set_settypid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(settypoid));
-    ScanKeyInit(&key[1], Anum_pg_set_setlabel, BTEqualStrategyNumber, F_TEXTEQ, PointerGetDatum(s));
-
-    scan = systable_beginscan(pg_set, SetTypIdLabelIndexId, true, NULL, KEY_NUM, key);
-    tup = systable_getnext(scan);
-    pfree_ext(s);
-
-    if (!HeapTupleIsValid(tup)) {
-        systable_endscan(scan);
-        heap_close(pg_set, AccessShareLock);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                errmsg("invalid input value for set %s: '%s'", format_type_be(settypoid), label)));
-    }
-    
-    Form_pg_set settup = (Form_pg_set)GETSTRUCT(tup);
 
     if (*result == NULL) {
         int typmod = settup->setnum + sizeof(Oid) * BITS_PER_BYTE;
@@ -1109,11 +1138,87 @@ static void process_set_label(const char *label, Oid settypoid, VarBit **result)
     bits8 *bitmap = (bits8 *)((char*)oid + sizeof(Oid) + (settup->setsortorder / BITS_PER_BYTE));
     (*bitmap) |= (1 << (settup->setsortorder % BITS_PER_BYTE));
 
-    systable_endscan(scan);
-    heap_close(pg_set, AccessShareLock);
 }
 
-static void preprocess_set_value(char *value, Oid settypoid, VarBit **result)
+static void process_set_label_by_collation(char *label, Oid settypoid, VarBit **result, Oid collation)
+{
+    Relation pg_set = NULL;
+    HeapTuple tup = NULL;
+
+    ScanKeyData key[1];
+    SysScanDesc scan = NULL;
+    int res = 0;
+    bool find = false;
+    bool isnull = true;
+
+    pg_set = heap_open(SetRelationId, AccessShareLock);
+    ScanKeyInit(&key[0], Anum_pg_set_settypid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(settypoid));
+
+    scan = systable_beginscan(pg_set, SetTypIdLabelIndexId, true, NULL, 1, key);
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        Form_pg_set settup = (Form_pg_set)GETSTRUCT(tup);
+        text* setlabel = (text*)heap_getattr(tup, Anum_pg_set_setlabel, pg_set->rd_att, &isnull);
+
+        res = varstr_cmp_by_builtin_collations((char*)VARDATA_ANY(setlabel), VARSIZE_ANY_EXHDR(setlabel),
+                                                label, strlen(label), collation);
+        if (res == 0) {
+            get_set_result(settypoid, result, settup);
+
+            find = true;
+            break;
+        }
+    }
+    systable_endscan(scan);
+    heap_close(pg_set, AccessShareLock);
+    if (!find) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("invalid input value for set %s: '%s'", format_type_be(settypoid), label)));
+    }
+}
+
+static void process_set_label(char *label, Oid settypoid, VarBit **result, Oid collation)
+{
+    Relation pg_set = NULL;
+    HeapTuple tup = NULL;
+    text *s = cstring_to_text(label);
+
+    if (is_b_format_collation(collation)) {
+        process_set_label_by_collation(label, settypoid, result, collation);
+    } else {
+        if (text_length(PointerGetDatum(s)) > SETNAMELEN) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                    errmsg("invalid input value for set %s: \"%s\"", format_type_be(settypoid), label)));
+        }
+        ScanKeyData key[2];
+        SysScanDesc scan = NULL;
+        pg_set = heap_open(SetRelationId, AccessShareLock);
+        ScanKeyInit(&key[0], Anum_pg_set_settypid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(settypoid));
+        ScanKeyInit(&key[1], Anum_pg_set_setlabel, BTEqualStrategyNumber, F_TEXTEQ, PointerGetDatum(s));
+
+        scan = systable_beginscan(pg_set, SetTypIdLabelIndexId, true, NULL, KEY_NUM, key);
+
+        tup = systable_getnext(scan);
+        pfree_ext(s);
+
+        if (!HeapTupleIsValid(tup)) {
+            systable_endscan(scan);
+            heap_close(pg_set, AccessShareLock);
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                    errmsg("invalid input value for set %s: '%s'", format_type_be(settypoid), label)));
+        }
+        
+        Form_pg_set settup = (Form_pg_set)GETSTRUCT(tup);
+        get_set_result(settypoid, result, settup);
+
+        systable_endscan(scan);
+        heap_close(pg_set, AccessShareLock);
+    }
+}
+
+static void preprocess_set_value(char *value, Oid settypoid, VarBit **result, Oid collation)
 {
     bool hasEmpty = false;
     
@@ -1131,21 +1236,21 @@ static void preprocess_set_value(char *value, Oid settypoid, VarBit **result)
     }
 
     if (hasEmpty) {
-        process_set_label("", settypoid, result);
+        process_set_label("", settypoid, result, collation);
     }
 }
 
-static VarBit* get_set_in_result(Oid settypoid, char *setlabels)
+static VarBit* get_set_in_result(Oid settypoid, char *setlabels, Oid collation)
 {
     VarBit *result = NULL;
     char* next_token = NULL;
     char* labels = pstrdup(setlabels);
 
-    preprocess_set_value(setlabels, settypoid, &result);
+    preprocess_set_value(setlabels, settypoid, &result, collation);
 
     char* token = strtok_s(labels, SETLABELDELIMIT, &next_token);
     while (token != NULL) {
-        process_set_label(token, settypoid, &result);
+        process_set_label(token, settypoid, &result, collation);
         token = strtok_s(NULL, SETLABELDELIMIT, &next_token);
     }
 

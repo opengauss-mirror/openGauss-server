@@ -2348,6 +2348,7 @@ typedef struct DolphinCallStmt
 typedef struct CreateSetStmt {
     NodeTag type;
     TypeName *typname;  /* type of column */
+    Oid set_collation;
 } CreateSetStmt;
 
 /* ----------------------

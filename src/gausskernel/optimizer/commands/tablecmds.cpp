@@ -174,7 +174,7 @@
 #include "fmgr.h"
 #include "pgstat.h"
 #include "postmaster/rbcleaner.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/utils/ts_relcache.h"
 #include "tsdb/common/ts_tablecmds.h"
@@ -779,6 +779,7 @@ static void ATAlterCheckModifiyColumnRepeatedly(const AlterTableCmd* cmd, const 
 static int128 EvaluateAutoIncrement(Relation rel, TupleDesc desc, AttrNumber attnum, Datum* value, bool* is_null);
 static void SetRelAutoIncrement(Relation rel, TupleDesc desc, int128 autoinc);
 static Node* RecookAutoincAttrDefault(Relation rel, int attrno, Oid targettype, int targettypmod);
+static void check_unsupported_charset_for_column(Oid collation, const char* col_name);
 
 inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
 {
@@ -1924,6 +1925,15 @@ static void CheckPartitionKeyForCreateTable(PartitionState *partTableState, List
     else if (partTableState->partitionStrategy == PART_STRATEGY_LIST)
         CompareListValue(pos, descriptor->attrs, partTableState->partitionList, partkeyIsFunc);
 
+    /* charset of partkey columns cannot be different from server_encoding */
+    if (DB_IS_CMPT(B_FORMAT)) {
+        foreach_cell (cell, pos) {
+            int attidx = lfirst_int(cell);
+            check_unsupported_charset_for_column(
+                descriptor->attrs[attidx].attcollation, NameStr(descriptor->attrs[attidx].attname));
+        }
+    }
+
     list_free_ext(pos);
 }
 
@@ -2614,6 +2624,15 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     /* Must specify at least one column when creating a table. */
     if (descriptor->natts == 0 && relkind != RELKIND_COMPOSITE_TYPE) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("must have at least one column")));
+    }
+
+    /* check column charset */
+    if (DB_IS_CMPT(B_FORMAT) &&
+        (0 == pg_strcasecmp(storeChar, ORIENTATION_COLUMN) || 0 == pg_strcasecmp(storeChar, ORIENTATION_TIMESERIES))) {
+        for (int attidx = 0; attidx < descriptor->natts; attidx++) {
+            check_unsupported_charset_for_column(
+                descriptor->attrs[attidx].attcollation, NameStr(descriptor->attrs[attidx].attname));
+        }
     }
 
     if (stmt->partTableState) {
@@ -8641,7 +8660,7 @@ static void sqlcmd_alter_prep_convert_charset(AlteredTableInfo* tab, Relation re
                                format_type_be(targettypid))));
         }
 
-        transform = coerce_to_target_charset(transform, cc->charset, targettypid);
+        transform = coerce_to_target_charset(transform, cc->charset, targettypid, attTup->atttypmod, targetcollid);
 
         exprSetCollation(transform, targetcollid);
 
@@ -11987,6 +12006,9 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
     collOid = GetColumnDefCollation(NULL, colDef, typeOid, rel_coll_oid);
     if (DB_IS_CMPT(B_FORMAT)) {
         typeOid = binary_need_transform_typeid(typeOid, &collOid);
+        if (RelationIsColStore(rel) || RelationIsTsStore(rel)) {
+            check_unsupported_charset_for_column(collOid, colDef->colname);
+        }
     }
 
     aclresult = pg_type_aclcheck(typeOid, GetUserId(), ACL_USAGE);
@@ -15604,7 +15626,7 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
                         "column \"%s\" cannot be cast automatically to type %s", colName, format_type_be(targettype)),
                     errhint("Specify a USING expression to perform the conversion.")));
 #ifndef ENABLE_MULTIPLE_NODES
-        transform = coerce_to_target_charset(transform, target_charset, attTup->atttypid);
+        transform = coerce_to_target_charset(transform, target_charset, attTup->atttypid, attTup->atttypmod, targetcollid);
 #endif
         /* Fix collations after all else */
         assign_expr_collations(pstate, transform);
@@ -16247,6 +16269,9 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
     targetcollid = GetColumnDefCollation(NULL, def, targettype, rel_coll_oid);
     if (DB_IS_CMPT(B_FORMAT)) {
         targettype = binary_need_transform_typeid(targettype, &targetcollid);
+        if (RelationIsColStore(rel) || RelationIsTsStore(rel)) {
+            check_unsupported_charset_for_column(targetcollid, colName);
+        }
     }
     if (attnum == RelAutoIncAttrNum(rel)) {
         CheckAutoIncrementDatatype(targettype, colName);
@@ -16592,8 +16617,8 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
             RangeTblEntry*  rte = addRangeTableEntryForRelation(pstate, rel, NULL, false, true);
             addRTEtoQuery(pstate, rte, true, true, true);
             pstate->p_rawdefaultlist = NULL;
-            update_expr = cookDefault(pstate, update_expr, attTup->atttypid, attTup->atttypmod, NameStr(attTup->attname),
-                def->generatedCol);
+            update_expr = cookDefault(pstate, update_expr, attTup->atttypid, attTup->atttypmod,
+                attTup->attcollation, NameStr(attTup->attname), def->generatedCol);
         }
 
         StoreAttrDefault(rel, attnum, defaultexpr, generatedCol, update_expr);
@@ -31739,7 +31764,7 @@ static Node* RebuildGeneratedColumnExpr(Relation rel, AttrNumber gen_attnum)
 {
     ParseState* pstate = NULL;
     RangeTblEntry *rte = NULL;
-    FormData_pg_attribute pgattr = rel->rd_att->attrs[gen_attnum - 1];
+    Form_pg_attribute pgattr = &rel->rd_att->attrs[gen_attnum - 1];
     Node* gen_expr = build_column_default(rel, gen_attnum);
 
     Assert(gen_expr);
@@ -31749,8 +31774,8 @@ static Node* RebuildGeneratedColumnExpr(Relation rel, AttrNumber gen_attnum)
     pstate = make_parsestate(NULL);
     rte = addRangeTableEntryForRelation(pstate, rel, NULL, false, true);
     addRTEtoQuery(pstate, rte, false, true, true);
-    gen_expr = cookDefault(
-        pstate, gen_expr, pgattr.atttypid, pgattr.atttypmod, NameStr(pgattr.attname), ATTRIBUTE_GENERATED_STORED);
+    gen_expr = cookDefault(pstate, gen_expr, pgattr->atttypid, pgattr->atttypmod, pgattr->attcollation,
+        NameStr(pgattr->attname), ATTRIBUTE_GENERATED_STORED);
     /* readd pg_attrdef */
     RemoveAttrDefault(RelationGetRelid(rel), gen_attnum, DROP_RESTRICT, true, true);
     StoreAttrDefault(rel, gen_attnum, gen_expr, ATTRIBUTE_GENERATED_STORED, NULL, true);
@@ -32510,4 +32535,18 @@ void RebuildDependViewForProc(Oid proc_oid)
         list_free(raw_parsetree_list);
     }
     list_free_ext(oid_list);
+}
+
+static void check_unsupported_charset_for_column(Oid collation, const char* col_name)
+{
+    if (!OidIsValid(collation)) {
+        return;
+    }
+
+    int attcharset = get_valid_charset_by_collation(collation);
+    if (attcharset != PG_SQL_ASCII && attcharset != GetDatabaseEncoding()) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("difference between the charset of column %s and the database encoding has not supported",
+                col_name)));
+    }
 }

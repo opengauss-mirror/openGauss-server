@@ -152,12 +152,12 @@ void pq_sendcountedtext(StringInfo buf, const char* str, int slen, bool countinc
     }
 }
 
-void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen)
+void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen, int src_encoding, void* convert_finfo)
 {
     char* p = (char*)str;
 
-    if (unlikely(u_sess->mb_cxt.DatabaseEncoding->encoding != u_sess->mb_cxt.ClientEncoding->encoding)) {
-        p = pg_server_to_client(str, slen);
+    if (unlikely(src_encoding != u_sess->mb_cxt.ClientEncoding->encoding)) {
+        p = pg_any_to_client(str, slen, src_encoding, convert_finfo);
     }
     if (unlikely(p != str)) { /* actual conversion has been done? */
         slen = strlen(p);

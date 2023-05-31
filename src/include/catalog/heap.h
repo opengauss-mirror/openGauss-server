@@ -192,7 +192,7 @@ extern List *AddRelationNewConstraints(Relation rel, List *newColDefaults, List 
 extern List *AddRelClusterConstraints(Relation rel, List *clusterKeys);
 extern Oid StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol, Node* update_expr,
     bool skip_dep = false);
-extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname,
+extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, Oid attcollation, char *attname,
     char generatedCol);
 extern void DeleteRelationTuple(Oid relid);
 extern void DeleteAttributeTuples(Oid relid);

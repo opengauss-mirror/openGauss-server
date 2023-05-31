@@ -90,7 +90,10 @@ test: event_dump_audit
 test: single_node_sha
 
 #test b format collation
-test: test_b_format_collate charset_b_format
+test: test_b_format_collate charset_b_format test_b_format_gb_collate
+test: charset_utf8mb4_b_db charset_gbk_b_db
+test: charset_connection_test
+test: add_b_format_behavior_all
 
 # test subpartition
 test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size hw_partition_size hw_cstore_partition_size
@@ -651,10 +654,10 @@ test: select_into subselect_part2 gs_aggregate
 test: holdable_cursor
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
-test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
+test: alter_table_000 alter_table_002 alter_table_003
 #test: alter_table_001 alter_table_modify_ustore
 test: alter_table_modify_ltt alter_table_modify_gtt
-test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
+test: alter_table_modify alter_table_modify_ustore
 
 #test: with
 

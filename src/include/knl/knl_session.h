@@ -931,6 +931,8 @@ typedef struct knl_u_mb_context {
 
     struct pg_enc2name* PlatformEncoding;
 
+    struct pg_enc2name* character_set_connection;
+    Oid collation_connection;
     /*
      * During backend startup we can't set client encoding because we (a)
      * can't look up the conversion functions, and (b) may not know the database

@@ -19,6 +19,7 @@ ERROR:  invalid input value for set anyset: 1
 CONTEXT:  referenced column: find_in_set
 create database test dbcompatibility = 'B';
 \c test
+SET b_format_behavior_compat_options = 'enable_multi_charset';
 drop table if exists tab;
 NOTICE:  table "tab" does not exist, skipping
 drop table if exists dual;
@@ -4150,3 +4151,1194 @@ select c1, c1+0 from t2 order by 2;
 
 drop table t1;
 drop table t2;
+-- test check duplicate set scenes
+-- 1. column charset/collate
+drop table if exists test_set_key1;
+NOTICE:  table "test_set_key1" does not exist, skipping
+create table test_set_key1(a set('', '  '));
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  duplicate key value violates unique constraint "pg_set_typid_label_index"
+--?.*
+create table test_set_key1(a set('', '  ') collate utf8_bin);
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "" = "  "
+create table test_set_key1(a set('a', 'a  '));
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  duplicate key value violates unique constraint "pg_set_typid_label_index"
+--?.*
+create table test_set_key1(a set('a', 'a  ') collate utf8_bin);
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "a" = "a  "
+create table test_set_key1(a set('aaa', 'AAA  ') collate utf8_general_ci);
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "AAA  "
+create table test_set_key1(a set('高斯sS', '高斯ŠŠ  ') collate utf8_general_ci);
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "高斯sS" = "高斯ŠŠ  "
+create table test_set_key1(a set('aaa', 'aaA   ') charset 'utf8');
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "aaA   "
+create table test_set_key1(a set('aaa', 'aaA   ') charset 'gbk');
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "aaA   "
+create table test_set_key1(a set('aaa', 'aaA   ') charset 'gb18030');
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "aaA   "
+--succeed scenes
+create table t_column_collation1(a set('a', 'b', 'A','B') collate utf8_bin);
+NOTICE:  CREATE TABLE will create implicit set "t_column_collation1_a_set" for column "t_column_collation1.a"
+create table t_column_collation2(a set('a', 'b', 'A','B') collate utf8_bin);
+NOTICE:  CREATE TABLE will create implicit set "t_column_collation2_a_set" for column "t_column_collation2.a"
+create table t_column_collation3(a set('aaa', 'bbb') charset 'utf8');
+NOTICE:  CREATE TABLE will create implicit set "t_column_collation3_a_set" for column "t_column_collation3.a"
+create table t_column_collation4(a set('a', 'b', 'A','B') collate utf8_bin);
+NOTICE:  CREATE TABLE will create implicit set "t_column_collation4_a_set" for column "t_column_collation4.a"
+create table t_column_collation5(a set('高斯DB','1') character set utf8mb4 collate utf8mb4_general_ci default '高斯db');
+NOTICE:  CREATE TABLE will create implicit set "t_column_collation5_a_set" for column "t_column_collation5.a"
+drop table t_column_collation1;
+drop table t_column_collation2;
+drop table t_column_collation3;
+drop table t_column_collation4;
+drop table t_column_collation5;
+-- 2. table charset/collate
+create table test_set_key1(a set('aaa', 'aaA   ')) charset 'utf8';
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "aaA   "
+create table test_set_key1(a set('aaa', 'aaA   ')) collate 'utf8_general_ci';
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "aaA   "
+create table test_set_key1(a set('aaa', 'aaA   ')) charset 'gbk';
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "aaA   "
+create table test_set_key1(a set('aaa', 'aaa   ')) charset 'gbk' collate gbk_bin;
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "aaa   "
+create table test_set_key1(a set('aaa', 'aaA   ')) charset 'gb18030';
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "aaA   "
+create table test_set_key1(a set('aaa', 'aaa   ')) charset 'gb18030' collate gb18030_bin;
+NOTICE:  CREATE TABLE will create implicit set "test_set_key1_a_set" for column "test_set_key1.a"
+ERROR:  set has duplicate key value "aaa" = "aaa   "
+--succeed scenes
+create table t_table_collation1(a set('aaa', 'bbb')) charset 'utf8';
+NOTICE:  CREATE TABLE will create implicit set "t_table_collation1_a_set" for column "t_table_collation1.a"
+create table t_table_collation2(a set('aaa', 'aaA   ') collate 'utf8_bin')charset 'utf8';
+NOTICE:  CREATE TABLE will create implicit set "t_table_collation2_a_set" for column "t_table_collation2.a"
+drop table t_table_collation1;
+drop table t_table_collation2;
+-- 3. schema charset/collate
+create schema set_test_schema1  charset = utf8;
+set current_schema='set_test_schema1';
+create table t(a set('a', 'A'));  --fail
+NOTICE:  CREATE TABLE will create implicit set "t_a_set" for column "t.a"
+ERROR:  set has duplicate key value "a" = "A"
+create table t(a set('a', 'b'));  -- succeed
+NOTICE:  CREATE TABLE will create implicit set "t_a_set" for column "t.a"
+alter table t add column b set('a', 'A', 'b'); -- fail
+NOTICE:  ALTER TABLE will create implicit set "t_b_set" for column "t.b"
+ERROR:  set has duplicate key value "a" = "A"
+alter table t add column b set('a', 'A', 'b') collate utf8_bin; --succeed
+NOTICE:  ALTER TABLE will create implicit set "t_b_set" for column "t.b"
+insert into t values('a  ', 'a  ');
+insert into t values('a  ', 'A  ');
+insert into t values('B  ', 'A  ');
+insert into t values('a  ', 'B  ');  --fail
+ERROR:  invalid input value for set t_b_set: 'B  '
+LINE 1: insert into t values('a  ', 'B  ');
+                                    ^
+CONTEXT:  referenced column: b
+drop table t;
+create schema set_test_schema2  charset = utf8mb4 collate = utf8mb4_bin;
+set current_schema='set_test_schema2';
+create table t(a set('a', 'A'));  -- succeed
+NOTICE:  CREATE TABLE will create implicit set "t_a_set" for column "t.a"
+alter table t add column b set('a', 'A', 'b') collate utf8_general_ci; --fail
+NOTICE:  ALTER TABLE will create implicit set "t_b_set" for column "t.b"
+ERROR:  set has duplicate key value "a" = "A"
+alter table t add column b set('a', 'A', 'b'); -- succeed
+NOTICE:  ALTER TABLE will create implicit set "t_b_set" for column "t.b"
+insert into t values ('a  ', 'b  ');
+insert into t values ('a  ', 'B  '); -- fail
+ERROR:  invalid input value for set t_b_set: 'B  '
+LINE 1: insert into t values ('a  ', 'B  ');
+                                     ^
+CONTEXT:  referenced column: b
+drop table t;
+drop schema set_test_schema1;
+drop schema set_test_schema2;
+\c test
+SET b_format_behavior_compat_options = 'enable_multi_charset';
+-- test insert value with collation
+-- 1. insert value length ignore end space
+create table test_set_len (col SET('ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd') collate utf8_bin);
+NOTICE:  CREATE TABLE will create implicit set "test_set_len_col_set" for column "test_set_len.col"
+insert into test_set_len values ('ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                     ');
+drop table test_set_len;
+-- 2. insert value while collate is binary
+-- 3. insert value while collate like _bin
+create table test_collation2(a set('aaa', 'AAA','高斯SS', '高斯ss') collate utf8_bin);
+NOTICE:  CREATE TABLE will create implicit set "test_collation2_a_set" for column "test_collation2.a"
+insert into test_collation2 values('aaa  ');
+insert into test_collation2 values('aaa');
+insert into test_collation2 values('AAA');
+insert into test_collation2 values('AAA  ');
+insert into test_collation2 values('高斯ss   ');
+insert into test_collation2 values('高斯SS   ');
+insert into test_collation2 values('高斯sS   '); --failed
+ERROR:  invalid input value for set test_collation2_a_set: '高斯sS   '
+LINE 1: insert into test_collation2 values('高斯sS   ');
+                                           ^
+CONTEXT:  referenced column: a
+insert into test_collation2 values('高斯ss,高斯ss   ');
+-- 4. insert value while collate like _ci
+create table test_collation3(a set('高斯sS', '汉字sS', 'aaa', 'bbb')) charset utf8;
+NOTICE:  CREATE TABLE will create implicit set "test_collation3_a_set" for column "test_collation3.a"
+select pg_get_tabledef('test_collation3');
+                                       pg_get_tabledef                                       
+---------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                  +
+ CREATE TABLE test_collation3 (                                                             +
+     a SET('高斯sS', '汉字sS', 'aaa', 'bbb') CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                                          +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"                                      +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+insert into test_collation3 values('高斯sS   ');
+insert into test_collation3 values('高斯ss,高斯ss   ');
+insert into test_collation3 values('高斯ŠŠ');
+insert into test_collation3 values('汉字sS   ');
+insert into test_collation3 values('汉字ss,汉字ss   ');
+insert into test_collation3 values('汉字ŠŠ');
+insert into test_collation3 values('aaa  ');
+insert into test_collation3 values('aaa');
+insert into test_collation3 values('AAA  ');
+-- test update with colalte
+create table test_update(a set('a', 'A', 'b'))collate utf8_bin;
+NOTICE:  CREATE TABLE will create implicit set "test_update_a_set" for column "test_update.a"
+insert into test_update values('a'),('A');
+update test_update set a = 'b' where a = 'a';
+update test_update set a = 'b' where a = 'a' collate utf8_general_ci;
+select * from test_update;
+ a 
+---
+ b
+ b
+(2 rows)
+
+update test_update set a = 'a' where a = 'B' collate utf8_general_ci;
+select * from test_update;
+ a 
+---
+ a
+ a
+(2 rows)
+
+drop table test_update;
+-- test operator
+create table test_collation_op(a set('a', 'A', 'b', 'B'), b set('a', 'A', 'b', 'B')) collate utf8_bin;
+NOTICE:  CREATE TABLE will create implicit set "test_collation_op_a_set" for column "test_collation_op.a"
+NOTICE:  CREATE TABLE will create implicit set "test_collation_op_b_set" for column "test_collation_op.b"
+insert into test_collation_op values('a', 'A'),('A','a'),('b','B'),('B','b');
+-- test '='
+select a from test_collation2 where a = 'aaa';
+  a  
+-----
+ aaa
+ aaa
+(2 rows)
+
+select a from test_collation2 where a = '高斯ss' collate utf8_bin;
+   a    
+--------
+ 高斯ss
+ 高斯ss
+(2 rows)
+
+select a from test_collation2 where a = 'aaa' collate "utf8_general_ci"; -- set = text
+  a  
+-----
+ aaa
+ aaa
+ AAA
+ AAA
+(4 rows)
+
+select a from test_collation2 where a = '高斯ss' collate utf8_general_ci;
+   a    
+--------
+ 高斯ss
+ 高斯SS
+ 高斯ss
+(3 rows)
+
+select a from test_collation3 where a = '高斯ss';
+   a    
+--------
+ 高斯sS
+ 高斯sS
+ 高斯sS
+(3 rows)
+
+select a from test_collation3 where a = '高斯ss' collate utf8_bin;
+ a 
+---
+(0 rows)
+
+select a from test_collation3 where a = 'aaa' collate "utf8_general_ci";
+  a  
+-----
+ aaa
+ aaa
+ aaa
+(3 rows)
+
+select a from test_collation2 where 'aaa' = a collate "utf8_general_ci"; -- text = set
+  a  
+-----
+ aaa
+ aaa
+ AAA
+ AAA
+(4 rows)
+
+select
+  distinct t2.a, t3.a 
+from
+  test_collation2 as t2,
+  test_collation2 as t3
+where t2.a = t3.a  collate "utf8_general_ci"; -- set = set
+   a    |   a    
+--------+--------
+ 高斯SS | 高斯SS
+ aaa    | AAA
+ aaa    | aaa
+ 高斯ss | 高斯ss
+ AAA    | AAA
+ 高斯ss | 高斯SS
+ AAA    | aaa
+ 高斯SS | 高斯ss
+(8 rows)
+
+select
+  distinct t2.a, t3.a 
+from
+  test_collation2 as t2,
+  test_collation2 as t3
+where t2.a = t3.a;
+   a    |   a    
+--------+--------
+ aaa    | aaa
+ 高斯ss | 高斯ss
+ 高斯SS | 高斯SS
+ AAA    | AAA
+(4 rows)
+
+-- '<>'
+select a, b from test_collation_op where a <> b; -- set <> other set
+ a | b 
+---+---
+ a | A
+ A | a
+ b | B
+ B | b
+(4 rows)
+
+select a, b from test_collation_op where a <> b collate 'utf8_general_ci';
+ a | b 
+---+---
+(0 rows)
+
+select a, b from test_collation_op where a <> 'a'; -- set <> text
+ a | b 
+---+---
+ A | a
+ b | B
+ B | b
+(3 rows)
+
+select a, b from test_collation_op where a <> 'a' collate 'utf8_general_ci';
+ a | b 
+---+---
+ b | B
+ B | b
+(2 rows)
+
+select a, b from test_collation_op where 'a' <> a;
+ a | b 
+---+---
+ A | a
+ b | B
+ B | b
+(3 rows)
+
+select a, b from test_collation_op where 'a' <> a collate 'utf8_general_ci'; -- text <> set
+ a | b 
+---+---
+ b | B
+ B | b
+(2 rows)
+
+-- '<'
+select a, b from test_collation_op where a < b; -- set < other set
+ a | b 
+---+---
+ A | a
+ B | b
+(2 rows)
+
+select a from test_collation_op where a < b collate 'utf8_general_ci';
+ a 
+---
+(0 rows)
+
+select a from test_collation_op where a < 'C'; -- set < text
+ a 
+---
+ A
+ B
+(2 rows)
+
+select a from test_collation_op where a < 'C' collate 'utf8_general_ci';
+ a 
+---
+ a
+ A
+ b
+ B
+(4 rows)
+
+select a from test_collation_op where 'B' < a;
+ a 
+---
+ a
+ b
+(2 rows)
+
+select a from test_collation_op where 'B' < a collate 'utf8_general_ci';
+ a 
+---
+(0 rows)
+
+-- '<='
+select a, b from test_collation_op where a <= b; -- set <= other set
+ a | b 
+---+---
+ A | a
+ B | b
+(2 rows)
+
+select a from test_collation_op where a <= b collate 'utf8_general_ci';
+ a 
+---
+ a
+ A
+ b
+ B
+(4 rows)
+
+select a from test_collation_op where a <= 'A'; -- set <= text
+ a 
+---
+ A
+(1 row)
+
+select a from test_collation_op where a <= 'A' collate 'utf8_general_ci';
+ a 
+---
+ a
+ A
+(2 rows)
+
+select a from test_collation_op where 'B' <= a; -- text <= set
+ a 
+---
+ a
+ b
+ B
+(3 rows)
+
+select a from test_collation_op where 'B' <= a collate 'utf8_general_ci';
+ a 
+---
+ b
+ B
+(2 rows)
+
+-- '>'
+select a, b from test_collation_op where a > b; -- set > other set
+ a | b 
+---+---
+ a | A
+ b | B
+(2 rows)
+
+select a from test_collation_op where a > b collate 'utf8_general_ci';
+ a 
+---
+(0 rows)
+
+select a from test_collation_op where a > 'B'; -- set > text
+ a 
+---
+ a
+ b
+(2 rows)
+
+select a from test_collation_op where a > 'B' collate 'utf8_general_ci';
+ a 
+---
+(0 rows)
+
+select a from test_collation_op where 'C' > a;
+ a 
+---
+ A
+ B
+(2 rows)
+
+select a from test_collation_op where 'C' > a collate 'utf8_general_ci';
+ a 
+---
+ a
+ A
+ b
+ B
+(4 rows)
+
+-- '>='
+select a, b from test_collation_op where a >= b; -- set >= other set
+ a | b 
+---+---
+ a | A
+ b | B
+(2 rows)
+
+select a from test_collation_op where a >= b collate 'utf8_general_ci';
+ a 
+---
+ a
+ A
+ b
+ B
+(4 rows)
+
+select a from test_collation_op where a >= 'B'; -- set >= text
+ a 
+---
+ a
+ b
+ B
+(3 rows)
+
+select a from test_collation_op where a >= 'B' collate 'utf8_general_ci';
+ a 
+---
+ b
+ B
+(2 rows)
+
+select a from test_collation_op where 'C' >= a;
+ a 
+---
+ A
+ B
+(2 rows)
+
+select a from test_collation_op where 'C' >= a collate 'utf8_general_ci';
+ a 
+---
+ a
+ A
+ b
+ B
+(4 rows)
+
+-- test order by
+select a from test_collation2 order by a;
+   a    
+--------
+ AAA
+ AAA
+ aaa
+ aaa
+ 高斯SS
+ 高斯ss
+ 高斯ss
+(7 rows)
+
+select a from test_collation2 order by a collate 'utf8_general_ci';
+   a    
+--------
+ aaa
+ aaa
+ AAA
+ AAA
+ 高斯ss
+ 高斯SS
+ 高斯ss
+(7 rows)
+
+select a from test_collation2 order by a collate 'utf8_bin';
+   a    
+--------
+ AAA
+ AAA
+ aaa
+ aaa
+ 高斯SS
+ 高斯ss
+ 高斯ss
+(7 rows)
+
+select a from test_collation3 order by a;
+   a    
+--------
+ aaa
+ aaa
+ aaa
+ 汉字sS
+ 汉字sS
+ 汉字sS
+ 高斯sS
+ 高斯sS
+ 高斯sS
+(9 rows)
+
+select a from test_collation3 order by a collate 'utf8_general_ci';
+   a    
+--------
+ aaa
+ aaa
+ aaa
+ 汉字sS
+ 汉字sS
+ 汉字sS
+ 高斯sS
+ 高斯sS
+ 高斯sS
+(9 rows)
+
+select a from test_collation3 order by a collate 'utf8_bin';
+   a    
+--------
+ aaa
+ aaa
+ aaa
+ 汉字sS
+ 汉字sS
+ 汉字sS
+ 高斯sS
+ 高斯sS
+ 高斯sS
+(9 rows)
+
+-- test distinct
+select distinct a from test_collation2;
+   a    
+--------
+ 高斯SS
+ 高斯ss
+ aaa
+ AAA
+(4 rows)
+
+select distinct a collate 'utf8_bin' from test_collation2;
+   a    
+--------
+ 高斯SS
+ 高斯ss
+ aaa
+ AAA
+(4 rows)
+
+select distinct a collate 'utf8_general_ci' from test_collation2;
+   a    
+--------
+ aaa
+ 高斯ss
+(2 rows)
+
+select distinct a from test_collation3;
+   a    
+--------
+ 汉字sS
+ aaa
+ 高斯sS
+(3 rows)
+
+select distinct a collate 'utf8_bin' from test_collation3;
+   a    
+--------
+ 高斯sS
+ aaa
+ 汉字sS
+(3 rows)
+
+select distinct a collate 'utf8_general_ci' from test_collation3;
+   a    
+--------
+ 汉字sS
+ aaa
+ 高斯sS
+(3 rows)
+
+-- test like
+select a from test_collation2 where a like 'aa%';
+  a  
+-----
+ aaa
+ aaa
+(2 rows)
+
+select a from test_collation2 where a like 'aa%' collate 'utf8_general_ci';
+  a  
+-----
+ aaa
+ aaa
+ AAA
+ AAA
+(4 rows)
+
+select a from test_collation3 where a like 'aa%';
+  a  
+-----
+ aaa
+ aaa
+ aaa
+(3 rows)
+
+select a from test_collation3 where a like 'aa%' collate 'utf8_general_ci';
+  a  
+-----
+ aaa
+ aaa
+ aaa
+(3 rows)
+
+-- test alter table modify/add
+alter table test_collation3 modify a char(10) collate utf8_bin;
+select a from test_collation3 where a = '高斯ss';
+ a 
+---
+(0 rows)
+
+select a from test_collation3 where a = '高斯sS' collate utf8_bin;
+    a     
+----------
+ 高斯sS  
+ 高斯sS  
+ 高斯sS  
+(3 rows)
+
+alter table test_collation3 modify a set('高斯sS', '汉字sS', 'aaa', 'bbb');
+NOTICE:  ALTER TABLE will create implicit set "test_collation3_a_set" for column "test_collation3.a"
+select pg_get_tabledef('test_collation3');
+                                       pg_get_tabledef                                       
+---------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                  +
+ CREATE TABLE test_collation3 (                                                             +
+     a SET('高斯sS', '汉字sS', 'aaa', 'bbb') CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                                          +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"                                      +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+insert into test_collation3 values('高斯ŠŠ  ');
+alter table test_collation3 add b set('a','b', 'c');
+NOTICE:  ALTER TABLE will create implicit set "test_collation3_b_set" for column "test_collation3.b"
+insert into test_collation3(b) values('A'), ('b  '), (3);
+-- test unique/primary key
+create table t_collation_set5(a set('aaa', 'bbb') collate utf8_general_ci unique);
+NOTICE:  CREATE TABLE will create implicit set "t_collation_set5_a_set" for column "t_collation_set5.a"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_collation_set5_a_key" for table "t_collation_set5"
+insert into t_collation_set5 values('aaa');
+insert into t_collation_set5 values('aaa  ');
+ERROR:  duplicate key value violates unique constraint "t_collation_set5_a_key"
+DETAIL:  Key (a)=(aaa) already exists.
+insert into t_collation_set5 values('AAA  ');
+ERROR:  duplicate key value violates unique constraint "t_collation_set5_a_key"
+DETAIL:  Key (a)=(aaa) already exists.
+create table t_collation_set6(a set('aaa', 'bbb') collate utf8_general_ci primary key);
+NOTICE:  CREATE TABLE will create implicit set "t_collation_set6_a_set" for column "t_collation_set6.a"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_collation_set6_pkey" for table "t_collation_set6"
+insert into t_collation_set6 values('aaa  ');
+insert into t_collation_set6 values('aaa');
+ERROR:  duplicate key value violates unique constraint "t_collation_set6_pkey"
+DETAIL:  Key (a)=(aaa) already exists.
+insert into t_collation_set6 values('AAA  ');
+ERROR:  duplicate key value violates unique constraint "t_collation_set6_pkey"
+DETAIL:  Key (a)=(aaa) already exists.
+drop table t_collation_set5;
+drop table t_collation_set6;
+-- test join
+create table test_join1(
+  c_char char(10),
+  c_varchar varchar(10),
+  c_nvarchar2 nvarchar2(10),
+  c_text text,
+  c_set set('a')
+) collate utf8_bin;
+NOTICE:  CREATE TABLE will create implicit set "test_join1_c_set_set" for column "test_join1.c_set"
+create table test_join2(
+  c_set set('A')
+) collate utf8_bin;
+NOTICE:  CREATE TABLE will create implicit set "test_join2_c_set_set" for column "test_join2.c_set"
+insert into test_join1 values('a  ', 'a  ', 'a  ', 'a  ','a  ');
+insert into test_join2 values('A');
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_char;
+ c_char | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_char collate 'utf8_general_ci';
+   c_char   | c_set 
+------------+-------
+ a          | A
+(1 row)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_char;
+   c_char   | c_set 
+------------+-------
+ a          | A
+(1 row)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_char collate 'utf8_general_ci';
+ c_char | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_char > t2.c_set;
+   c_char   | c_set 
+------------+-------
+ a          | A
+(1 row)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_char > t2.c_set collate 'utf8_general_ci';
+ c_char | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_char;
+ c_char | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_char collate 'utf8_general_ci';
+   c_char   | c_set 
+------------+-------
+ a          | A
+(1 row)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_char;
+   c_char   | c_set 
+------------+-------
+ a          | A
+(1 row)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_char collate 'utf8_general_ci';
+ c_char | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_char;
+   c_char   | c_set 
+------------+-------
+ a          | A
+(1 row)
+
+select t1.c_char, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_char collate 'utf8_general_ci';
+   c_char   | c_set 
+------------+-------
+ a          | A
+(1 row)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_varchar;
+ c_varchar | c_set 
+-----------+-------
+(0 rows)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_varchar collate 'utf8_general_ci';
+ c_varchar | c_set 
+-----------+-------
+ a         | A
+(1 row)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_varchar;
+ c_varchar | c_set 
+-----------+-------
+ a         | A
+(1 row)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_varchar collate 'utf8_general_ci';
+ c_varchar | c_set 
+-----------+-------
+(0 rows)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_varchar > t2.c_set;
+ c_varchar | c_set 
+-----------+-------
+ a         | A
+(1 row)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_varchar > t2.c_set collate 'utf8_general_ci';
+ c_varchar | c_set 
+-----------+-------
+(0 rows)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_varchar;
+ c_varchar | c_set 
+-----------+-------
+(0 rows)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_varchar collate 'utf8_general_ci';
+ c_varchar | c_set 
+-----------+-------
+ a         | A
+(1 row)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_varchar;
+ c_varchar | c_set 
+-----------+-------
+ a         | A
+(1 row)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_varchar collate 'utf8_general_ci';
+ c_varchar | c_set 
+-----------+-------
+(0 rows)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_varchar;
+ c_varchar | c_set 
+-----------+-------
+ a         | A
+(1 row)
+
+select t1.c_varchar, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_varchar collate 'utf8_general_ci';
+ c_varchar | c_set 
+-----------+-------
+ a         | A
+(1 row)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_nvarchar2;
+ c_nvarchar2 | c_set 
+-------------+-------
+(0 rows)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_nvarchar2 collate 'utf8_general_ci';
+ c_nvarchar2 | c_set 
+-------------+-------
+ a           | A
+(1 row)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_nvarchar2;
+ c_nvarchar2 | c_set 
+-------------+-------
+ a           | A
+(1 row)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_nvarchar2 collate 'utf8_general_ci';
+ c_nvarchar2 | c_set 
+-------------+-------
+(0 rows)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_nvarchar2 > t2.c_set;
+ c_nvarchar2 | c_set 
+-------------+-------
+ a           | A
+(1 row)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_nvarchar2 > t2.c_set collate 'utf8_general_ci';
+ c_nvarchar2 | c_set 
+-------------+-------
+(0 rows)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_nvarchar2;
+ c_nvarchar2 | c_set 
+-------------+-------
+(0 rows)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_nvarchar2 collate 'utf8_general_ci';
+ c_nvarchar2 | c_set 
+-------------+-------
+ a           | A
+(1 row)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_nvarchar2;
+ c_nvarchar2 | c_set 
+-------------+-------
+ a           | A
+(1 row)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_nvarchar2 collate 'utf8_general_ci';
+ c_nvarchar2 | c_set 
+-------------+-------
+(0 rows)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_nvarchar2;
+ c_nvarchar2 | c_set 
+-------------+-------
+ a           | A
+(1 row)
+
+select t1.c_nvarchar2, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_nvarchar2 collate 'utf8_general_ci';
+ c_nvarchar2 | c_set 
+-------------+-------
+ a           | A
+(1 row)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_text;
+ c_text | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_text collate 'utf8_general_ci';
+ c_text | c_set 
+--------+-------
+ a      | A
+(1 row)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_text;
+ c_text | c_set 
+--------+-------
+ a      | A
+(1 row)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_text collate 'utf8_general_ci';
+ c_text | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_text > t2.c_set;
+ c_text | c_set 
+--------+-------
+ a      | A
+(1 row)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_text > t2.c_set collate 'utf8_general_ci';
+ c_text | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_text;
+ c_text | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_text collate 'utf8_general_ci';
+ c_text | c_set 
+--------+-------
+ a      | A
+(1 row)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_text;
+ c_text | c_set 
+--------+-------
+ a      | A
+(1 row)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_text collate 'utf8_general_ci';
+ c_text | c_set 
+--------+-------
+(0 rows)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_text;
+ c_text | c_set 
+--------+-------
+ a      | A
+(1 row)
+
+select t1.c_text, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_text collate 'utf8_general_ci';
+ c_text | c_set 
+--------+-------
+ a      | A
+(1 row)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_set;
+ c_set | c_set 
+-------+-------
+(0 rows)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set = t1.c_set collate 'utf8_general_ci';
+ c_set | c_set 
+-------+-------
+ a     | A
+(1 row)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_set;
+ c_set | c_set 
+-------+-------
+ a     | A
+(1 row)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <> t1.c_set collate 'utf8_general_ci';
+ c_set | c_set 
+-------+-------
+(0 rows)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_set > t2.c_set;
+ c_set | c_set 
+-------+-------
+ a     | A
+(1 row)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t1.c_set > t2.c_set collate 'utf8_general_ci';
+ c_set | c_set 
+-------+-------
+(0 rows)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_set;
+ c_set | c_set 
+-------+-------
+(0 rows)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set >= t1.c_set collate 'utf8_general_ci';
+ c_set | c_set 
+-------+-------
+ a     | A
+(1 row)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_set;
+ c_set | c_set 
+-------+-------
+ a     | A
+(1 row)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set < t1.c_set collate 'utf8_general_ci';
+ c_set | c_set 
+-------+-------
+(0 rows)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_set;
+ c_set | c_set 
+-------+-------
+ a     | A
+(1 row)
+
+select t1.c_set, t2.c_set from test_join1 t1 join test_join2 t2 on t2.c_set <= t1.c_set collate 'utf8_general_ci';
+ c_set | c_set 
+-------+-------
+ a     | A
+(1 row)
+
+drop table test_join1;
+drop table test_join2;
+-- test partition table with collate
+create table test_part_tab1(c1 int, c2 set('a', 'b', 'A', 'B'))charset utf8 partition by range(c1)  --fail
+(
+    partition test_set_tab_p1 values less than (5),
+    partition test_set_tab_p2 values less than (10)
+);
+NOTICE:  CREATE TABLE will create implicit set "test_part_tab1_c2_set" for column "test_part_tab1.c2"
+ERROR:  set has duplicate key value "a" = "A"
+create table test_part_tab1(c1 int, c2 set('a', 'b', 'A', 'B'))charset utf8 collate utf8_bin partition by range(c1)  -- success
+(
+    partition test_set_tab_p1 values less than (5),
+    partition test_set_tab_p2 values less than (10)
+);
+NOTICE:  CREATE TABLE will create implicit set "test_part_tab1_c2_set" for column "test_part_tab1.c2"
+select pg_get_tabledef('test_part_tab1');
+                              pg_get_tabledef                              
+---------------------------------------------------------------------------
+ SET search_path = public;                                                +
+ CREATE TABLE test_part_tab1 (                                            +
+     c1 integer,                                                          +
+     c2 SET('a', 'b', 'A', 'B') CHARACTER SET "UTF8" COLLATE utf8_bin     +
+ )                                                                        +
+ CHARACTER SET = "UTF8" COLLATE = "utf8_bin"                              +
+ WITH (orientation=row, compression=no)                                   +
+ PARTITION BY RANGE (c1)                                                  +
+ (                                                                        +
+     PARTITION test_set_tab_p1 VALUES LESS THAN (5) TABLESPACE pg_default,+
+     PARTITION test_set_tab_p2 VALUES LESS THAN (10) TABLESPACE pg_default+
+ )                                                                        +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+insert into test_part_tab1 values(1, 'a  ');
+insert into test_part_tab1 values(6, 'A  ');
+insert into test_part_tab1 values(2, 'b  ');
+insert into test_part_tab1 values(7, 'B  ');
+create table test_part_tab2(c1 int, c2 set('a', 'b', 'c', 'd'))charset utf8 partition by range(c1) -- success
+(
+    partition test_set_tab_p1 values less than (5),
+    partition test_set_tab_p2 values less than (10)
+);
+NOTICE:  CREATE TABLE will create implicit set "test_part_tab2_c2_set" for column "test_part_tab2.c2"
+insert into test_part_tab2 values(1, 'a  ');
+insert into test_part_tab2 values(6, 'A  ');
+insert into test_part_tab2 values(2, 'b  ');
+insert into test_part_tab2 values(7, 'B  ');
+drop table test_part_tab1;
+drop table test_part_tab2;
+-- test local/global temp table with collate
+create local temp table test_temp_tab1 (c1 set('a', 'b')) charset utf8;
+NOTICE:  CREATE TABLE will create implicit set "test_temp_tab1_c1_set" for column "test_temp_tab1.c1"
+insert into test_temp_tab1 values('a  ');
+insert into test_temp_tab1 values('A  ');
+create global temp table test_temp_tab2 (c1 set('a', 'b')) charset utf8 collate utf8_bin;
+NOTICE:  CREATE TABLE will create implicit set "test_temp_tab2_c1_set" for column "test_temp_tab2.c1"
+insert into test_temp_tab2 values('a  ');
+insert into test_temp_tab2 values('A  '); --fail
+ERROR:  invalid input value for set test_temp_tab2_c1_set: 'A  '
+LINE 1: insert into test_temp_tab2 values('A  ');
+                                          ^
+CONTEXT:  referenced column: c1
+drop table test_temp_tab1;
+drop table test_temp_tab2;
+-- test ustore
+create table test_ustore1(
+  c1 set('a', 'b', 'c', 'd'),
+  c2 set('a', 'b','A', 'B') collate 'gbk_bin'
+) charset utf8 with (STORAGE_TYPE = ustore);
+NOTICE:  CREATE TABLE will create implicit set "test_ustore1_c1_set" for column "test_ustore1.c1"
+NOTICE:  CREATE TABLE will create implicit set "test_ustore1_c2_set" for column "test_ustore1.c2"
+select pg_get_tabledef('test_ustore1');
+                                 pg_get_tabledef                                 
+---------------------------------------------------------------------------------
+ SET search_path = public;                                                      +
+ CREATE TABLE test_ustore1 (                                                    +
+     c1 SET('a', 'b', 'c', 'd') CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     c2 SET('a', 'b', 'A', 'B') CHARACTER SET "GBK" COLLATE gbk_bin             +
+ )                                                                              +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"                          +
+ WITH (orientation=row, storage_type=ustore, compression=no);
+(1 row)
+
+insert into test_ustore1 values('a  ', 'a  ');
+insert into test_ustore1 values('A  ', 'A  ');
+select c2 from test_ustore1 where c2 = 'a';
+ c2 
+----
+ a
+(1 row)
+
+select c2 from test_ustore1 where c2 = 'a' collate 'utf8_general_ci';
+ c2 
+----
+ a
+ A
+(2 rows)
+
+select c2 from test_ustore1 where c2 = c1;
+ c2 
+----
+ a
+ A
+(2 rows)
+
+drop table test_ustore1;
+-- test cstore(not supported)
+create table test_cstore1(c1 set('a', 'b', 'c', 'd') collate 'utf8_bin') with (ORIENTATION = column);
+NOTICE:  CREATE TABLE will create implicit set "test_cstore1_c1_set" for column "test_cstore1.c1"
+ERROR:  type "test_cstore1_c1_set" is not supported in column store
+-- test check constraint with collate
+create table test_check1(a set('a', 'b', 'c') check(a >= 'b'))charset utf8;
+NOTICE:  CREATE TABLE will create implicit set "test_check1_a_set" for column "test_check1.a"
+insert into test_check1 values('a');
+ERROR:  new row for relation "test_check1" violates check constraint "test_check1_a_check"
+DETAIL:  N/A
+insert into test_check1 values('B  ');
+insert into test_check1 values('C');
+insert into test_check1 values('c');
+drop table test_check1;

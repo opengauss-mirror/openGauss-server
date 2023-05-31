@@ -4073,7 +4073,7 @@ static Node* CookAutoIncDefault(ParseState* pstate, Relation rel, RawColumnDefau
     (void)find_coercion_pathway(INT16OID, atp->atttypid, COERCION_ASSIGNMENT, &autoinc->autoincin_funcid);
     (void)find_coercion_pathway(atp->atttypid, INT16OID, COERCION_ASSIGNMENT, &autoinc->autoincout_funcid);
     autoinc->expr = cookDefault(pstate, ((AutoIncrement*)colDef->raw_default)->expr, atp->atttypid,
-        atp->atttypmod, NameStr(atp->attname), colDef->generatedCol);
+        atp->atttypmod, atp->attcollation, NameStr(atp->attname), colDef->generatedCol);
 
     /* If relation is temp table, cooked default must be a constant of the auto increment start value. */
     if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
@@ -4172,8 +4172,8 @@ List* AddRelationNewConstraints(
                 autoinc_attnum = colDef->attnum;
                 expr = CookAutoIncDefault(pstate, rel, colDef, atp);
             } else {
-                expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
-                colDef->generatedCol);
+                expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod,
+                    atp->attcollation, NameStr(atp->attname), colDef->generatedCol);
                 if (colDef->generatedCol == ATTRIBUTE_GENERATED_STORED) {
                     pull_varattnos(expr, 1, &generated_by_attrs);
                 }
@@ -4181,8 +4181,8 @@ List* AddRelationNewConstraints(
         }
 
         if (colDef->update_expr != NULL) {
-            update_expr = cookDefault(pstate, colDef->update_expr, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
-                colDef->generatedCol);
+            update_expr = cookDefault(pstate, colDef->update_expr, atp->atttypid, atp->atttypmod,
+                atp->attcollation, NameStr(atp->attname), colDef->generatedCol);
         }
 
         /*
@@ -4585,8 +4585,8 @@ Node* parseParamRef(ParseState* pstate, ParamRef* pref)
  * type (and typmod atttypmod).   attname is only needed in this case:
  * it is used in the error message, if any.
  */
-Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname,
-    char generatedCol)
+Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, Oid attcollation,
+    char *attname, char generatedCol)
 {
     Node* expr = NULL;
 
@@ -4658,21 +4658,28 @@ Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 att
      */
     if (OidIsValid(atttypid)) {
         Oid type_id = exprType(expr);
-
-        expr = coerce_to_target_type(pstate, expr, type_id, atttypid, atttypmod, COERCION_ASSIGNMENT,
-            COERCE_IMPLICIT_CAST, -1);
-        if (expr == NULL)
-            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
-                errmsg("column \"%s\" is of type %s but %s expression is of type %s", attname, format_type_be(atttypid),
-                generatedCol ? "generated column" : "default", format_type_be(type_id)),
-                errhint("You will need to rewrite or cast the expression.")));
+        if (type_is_set(atttypid)) {
+            expr = coerce_to_settype(
+                    pstate, expr, type_id, atttypid, atttypmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1, attcollation);
+        } else {
+            expr = coerce_to_target_type(pstate, expr, type_id, atttypid, atttypmod, COERCION_ASSIGNMENT,
+                COERCE_IMPLICIT_CAST, -1);
+            if (expr == NULL)
+                ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                    errmsg("column \"%s\" is of type %s but %s expression is of type %s", attname, format_type_be(atttypid),
+                    generatedCol ? "generated column" : "default", format_type_be(type_id)),
+                    errhint("You will need to rewrite or cast the expression.")));
+        }
     }
 
     /*
      * Finally, take care of collations in the finished expression.
      */
     assign_expr_collations(pstate, expr);
-
+    if (DB_IS_CMPT(B_FORMAT) && OidIsValid(attcollation)) {
+        int attcharset = get_valid_charset_by_collation(attcollation);
+        expr = coerce_to_target_charset(expr, attcharset, atttypid, atttypmod, attcollation);
+    }
     return expr;
 }
 

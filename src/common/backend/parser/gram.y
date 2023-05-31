@@ -841,7 +841,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
  * DOT_DOT is unused in the core SQL grammar, and so will always provoke
  * parse errors.  It is needed by PL/pgsql.
  */
-%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT UNDERSCORE_CHARSET
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 
@@ -2464,15 +2464,31 @@ set_rest_more:  /* Generic SET syntaxes: */
 					n->args = list_make1(makeStringConst($2, @2));
 					$$ = n;
 				}
-			| NAMES opt_encoding
+			| NAMES opt_encoding opt_collate
 				{
 					VariableSetStmt *n = makeNode(VariableSetStmt);
 					n->kind = VAR_SET_VALUE;
-					n->name = "client_encoding";
-					if ($2 != NULL)
-						n->args = list_make1(makeStringConst($2, @2));
-					else
-						n->kind = VAR_SET_DEFAULT;
+					if ($3 != NULL) {
+						if ($2 == NULL) {
+							ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("cannot specify collation without character set"),
+								parser_errposition(@3)));
+						}
+						n->args = list_make2(makeStringConst($2, @2), makeStringConst($3, @3));
+						n->name = "set_names";
+					} else {
+						if ($2 != NULL) {
+							n->args = list_make1(makeStringConst($2, @2));
+						} else {
+							n->kind = VAR_SET_DEFAULT;
+						}
+						if (ENABLE_MULTI_CHARSET) {
+							n->name = "set_names";
+						} else {
+							n->name = "client_encoding";
+						}
+					}
 					$$ = n;
 				}
 			| ROLE ColId_or_Sconst
@@ -3082,6 +3098,8 @@ zone_value:
 
 opt_encoding:
 			Sconst									{ $$ = $1; }
+			| IDENT									{ $$ = $1; }
+			| BINARY								{ $$ = (char*)$1; }
 			| DEFAULT								{ $$ = NULL; }
 			| /*EMPTY*/								{ $$ = NULL; }
 		;
@@ -25277,7 +25295,7 @@ character_set:
 
 charset_collate_name:
 			ColId									{ $$ = $1; }
-			| BINARY								{ $$ = pstrdup($1); }
+			| BINARY								{ $$ = "binary"; }
 			| Sconst								{ $$ = $1; }
 		;
 
@@ -28559,6 +28577,51 @@ AexprConst: Iconst
 					 */
 					$$ = makeBitStringConst($1, @1);
 				}
+			| UNDERSCORE_CHARSET Sconst
+				{
+					const char* encoding_name = $1;
+					char *original_str = pg_server_to_client($2, strlen($2));
+					int encoding = pg_valid_server_encoding(encoding_name);
+					Assert(encoding >= 0);
+
+					A_Const *con = makeNode(A_Const);
+					con->val.type = T_String;
+					con->val.val.str = original_str;
+					con->location = @2;
+
+					CharsetClause *n = makeNode(CharsetClause);
+					n->arg = (Node *)con;
+					n->charset = encoding;
+					n->is_binary = (strcmp(encoding_name, "binary") == 0);
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| UNDERSCORE_CHARSET BCONST
+				{
+					const char* encoding_name = $1;
+					int encoding = pg_valid_server_encoding(encoding_name);
+					Assert(encoding >= 0);
+
+					CharsetClause *n = makeNode(CharsetClause);
+					n->arg = makeBitStringConst($2, @2);
+					n->charset = encoding;
+					n->is_binary = (strcmp(encoding_name, "binary") == 0);
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| UNDERSCORE_CHARSET XCONST
+				{
+					const char* encoding_name = $1;
+					int encoding = pg_valid_server_encoding(encoding_name);
+					Assert(encoding >= 0);
+
+					CharsetClause *n = makeNode(CharsetClause);
+					n->arg = makeBitStringConst($2, @2);
+					n->charset = encoding;
+					n->is_binary = (strcmp(encoding_name, "binary") == 0);
+					n->location = @1;
+					$$ = (Node *) n;
+				}
 			| func_name Sconst
 				{
 					/* generic type 'literal' syntax */
@@ -29670,8 +29733,12 @@ makeStringConst(char *str, int location)
 	else
 	{
 		n->val.type = T_String;
-		n->val.val.str = str;
 		n->location = location;
+		if (NULL == str) {
+			n->val.val.str = str;
+		} else {
+			n->val.val.str = pg_server_to_any(str, strlen(str), GetCharsetConnection());
+		}
 	}
 
 	return (Node *)n;
