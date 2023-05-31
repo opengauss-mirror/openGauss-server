@@ -1271,6 +1271,7 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
     UserSetElem* elem = usestate->use;
     Node* node = NULL;
     UserSetElem elemcopy;
+    Oid collid = exprCollation((Node*)elem->val);
     elemcopy.xpr = elem->xpr;
     elemcopy.name = elem->name;
 
@@ -1292,7 +1293,7 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
     Datum result = ExecEvalExpr(usestate->instate, econtext, isNull, isDone);
 
     if (*isNull) {
-        con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, result, true, false);
+        con = makeConst(UNKNOWNOID, -1, collid, -2, result, true, false);
         res = (Node*)con;
         elemcopy.val = (Expr*)const_expression_to_const(res);
     } else {
@@ -1319,7 +1320,7 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
         Oid atttypid = exprType((Node*)elem->val);
 
         value = CStringFromDatum(atttypid, result);
-        con = processResToConst(value, atttypid);
+        con = processResToConst(value, atttypid, collid);
         if (atttypid == BOOLOID)
             res = (Node*)con;
         else
@@ -2202,6 +2203,8 @@ static Datum ExecMakeFunctionResult(FuncExprState* fcache, ExprContext* econtext
     bool hasSetArg = false;
     int i;
     int* var_dno = NULL;
+    int func_encoding = PG_INVALID_ENCODING;
+    int db_encoding = PG_INVALID_ENCODING;
 
     econtext->plpgsql_estate = plpgsql_estate;
     plpgsql_estate = NULL;
@@ -2326,6 +2329,11 @@ restart:
         hasSetArg = fcache->setHasSetArg;
         /* Reset flag (we may set it again below) */
         fcache->setArgsValid = false;
+    }
+
+    if (DB_IS_CMPT(B_FORMAT)) {
+        func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+        db_encoding = GetDatabaseEncoding();
     }
 
     /*
@@ -2560,7 +2568,13 @@ restart:
         pgstat_init_function_usage(fcinfo, &fcusage);
 
         fcinfo->isnull = false;
-        result = FunctionCallInvoke(fcinfo);
+        if (func_encoding != db_encoding) {
+            DB_ENCODING_SWITCH_TO(func_encoding);
+            result = FunctionCallInvoke(fcinfo);
+            DB_ENCODING_SWITCH_BACK(db_encoding);
+        } else {
+            result = FunctionCallInvoke(fcinfo);
+        }
         *isNull = fcinfo->isnull;
 
         pgstat_end_function_usage(&fcusage, true);
@@ -2641,6 +2655,8 @@ static Datum ExecMakeFunctionResultNoSets(
     bool proIsProcedure = false;
     bool supportTranaction = false;
     bool is_have_huge_clob = false;
+    int func_encoding = PG_INVALID_ENCODING;
+    int db_encoding = PG_INVALID_ENCODING;
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && (t_thrd.proc->workingVersionNum  >= STP_SUPPORT_COMMIT_ROLLBACK)) {
@@ -2821,6 +2837,11 @@ static Datum ExecMakeFunctionResultNoSets(
                 return (Datum)0;
             }
         }
+    }
+
+    if (DB_IS_CMPT(B_FORMAT)) {
+        func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+        db_encoding = GetDatabaseEncoding();
     }
 
     pgstat_init_function_usage(fcinfo, &fcusage);
@@ -5552,7 +5573,7 @@ static Datum ExecEvalCurrentOfExpr(ExprState* exprstate, ExprContext* econtext, 
  *		ExecEvalPrefixText
  * ----------------------------------------------------------------
  */
-static Datum ExecEvalPrefixText(GenericExprState* state, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+static Datum ExecEvalPrefixText(PrefixKeyState* state, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
 {
     PrefixKey* pkey = (PrefixKey*)state->xprstate.expr;
     Datum result = ExecEvalExpr(state->arg, econtext, isNull, isDone);
@@ -5561,13 +5582,13 @@ static Datum ExecEvalPrefixText(GenericExprState* state, ExprContext* econtext, 
         return (Datum)0;
     }
 
-    return PointerGetDatum(text_substring(result, 1, pkey->length, false));
+    return PointerGetDatum(text_substring_with_encoding(result, 1, pkey->length, false, state->encoding));
 }
 /* ----------------------------------------------------------------
  *		ExecEvalPrefixBytea
  * ----------------------------------------------------------------
  */
-static Datum ExecEvalPrefixBytea(GenericExprState* state, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+static Datum ExecEvalPrefixBytea(PrefixKeyState* state, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
 {
     PrefixKey* pkey = (PrefixKey*)state->xprstate.expr;
     Datum result = ExecEvalExpr(state->arg, econtext, isNull, isDone);
@@ -6303,16 +6324,20 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
         } break;
         case T_PrefixKey: {
             PrefixKey* pkey = (PrefixKey*)node;
-            GenericExprState* gstate = makeNode(GenericExprState);
+            PrefixKeyState* pstate = makeNode(PrefixKeyState);
             Oid argtype = exprType((Node*)pkey->arg);
 
             if (argtype == BYTEAOID || argtype == RAWOID || argtype == BLOBOID) {
-                gstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalPrefixBytea;
+                pstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalPrefixBytea;
+                pstate->encoding = PG_INVALID_ENCODING;
             } else {
-                gstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalPrefixText;
+                Oid argcollation = exprCollation((Node*)pkey->arg);
+                pstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalPrefixText;
+                pstate->encoding = get_valid_charset_by_collation(argcollation);
             }
-            gstate->arg = ExecInitExpr(pkey->arg, parent);
-            state = (ExprState*)gstate;
+            pstate->arg = ExecInitExpr(pkey->arg, parent);
+            
+            state = (ExprState*)pstate;
         } break;
         case T_UserSetElem: {
             UserSetElem* useexpr = (UserSetElem*)node;

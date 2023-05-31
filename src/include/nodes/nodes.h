@@ -304,6 +304,7 @@ typedef enum NodeTag {
     T_UserSetElemState,
     T_ListPartitionDefState,
     T_HashPartitionDefState,
+    T_PrefixKeyState,
 
     /*
      * TAGS FOR PLANNER NODES (relation.h)
@@ -827,7 +828,8 @@ typedef enum NodeTag {
     T_UserSetElem,
     T_UserVar,
     T_CharsetCollateOptions,
-    T_FunctionSources
+    T_FunctionSources,
+    T_CharsetClause
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */

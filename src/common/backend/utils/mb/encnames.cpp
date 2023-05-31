@@ -130,9 +130,9 @@ unsigned int pg_encname_tbl_sz = sizeof(pg_encname_tbl) / sizeof(pg_encname_tbl[
  */
 pg_enc pg_enc_coll_map_b[] = {
     PG_SQL_ASCII,     /* SQL/ASCII */
-    PG_GBK,           /* GBK (Windows-936) */
+    PG_GBK,           /* GBK (Windows-936), collation oid range(1280 - 1535) */
     PG_UTF8,          /* Unicode UTF8 */
-    PG_GB18030        /* GB18030 */
+    PG_GB18030        /* GB18030, collation oid range(1768 - 2024) */
 };
 
 /* ----------

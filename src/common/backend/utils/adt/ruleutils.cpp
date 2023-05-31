@@ -10930,6 +10930,7 @@ static void get_const_expr(Const* constval, deparse_context* context, int showty
     char* extval = NULL;
     bool isfloat = false;
     bool needlabel = false;
+    bool skip_collation = false;
 
     if (constval->constisnull || constval->ismaxvalue) {
         /*
@@ -11057,7 +11058,16 @@ static void get_const_expr(Const* constval, deparse_context* context, int showty
             break;
 
         default:
-            simple_quote_literal(buf, extval);
+            int src_encoding = get_valid_charset_by_collation(constval->constcollid);
+            char* converted_str = (src_encoding != GetDatabaseEncoding()) ?
+                pg_any_to_server(extval, strlen(extval), src_encoding) : extval;
+            skip_collation = (src_encoding != GetCharsetConnection() || GetCollationConnection() == constval->constcollid);
+            if (converted_str != extval) {
+                simple_quote_literal(buf, converted_str);
+                pfree_ext(converted_str);
+            } else {
+                simple_quote_literal(buf, extval);
+            }
             break;
     }
 
@@ -11095,6 +11105,9 @@ static void get_const_expr(Const* constval, deparse_context* context, int showty
     if (needlabel || showtype > 0)
         appendStringInfo(buf, "::%s", format_type_with_typemod(constval->consttype, constval->consttypmod));
 
+    if (skip_collation) {
+        return;
+    }
     get_const_collation(constval, context);
 }
 

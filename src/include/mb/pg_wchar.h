@@ -250,6 +250,8 @@ typedef enum pg_enc {
 /* On FE are possible all encodings */
 #define PG_VALID_FE_ENCODING(_enc) PG_VALID_ENCODING(_enc)
 
+#define IS_UNICODE_ENCODING(_enc) ((_enc) == PG_UTF8)
+
 /*
  * When converting strings between different encodings, we assume that space
  * for converted result is 4-to-1 growth in the worst case. The rate for
@@ -448,6 +450,7 @@ extern int pg_mbstrlen(const char* mbstr);
 extern int pg_mbstrlen_with_len(const char* mbstr, int len);
 extern int pg_mbstrlen_with_len_eml(const char* mbstr, int len, int eml);
 extern int pg_mbstrlen_with_len_toast(const char* mbstr, int* limit);
+extern int pg_encoding_mbstrlen_with_len(const char* mbstr, int limit, int encoding);
 extern int pg_mbcliplen(const char* mbstr, int len, int limit);
 extern int pg_encoding_mbcliplen(int encoding, const char* mbstr, int len, int limit);
 extern int pg_mbcharcliplen(const char* mbstr, int len, int imit);
@@ -465,6 +468,9 @@ extern const char* pg_get_client_encoding_name(void);
 extern void SetDatabaseEncoding(int encoding);
 extern int GetDatabaseEncoding(void);
 extern const char* GetDatabaseEncodingName(void);
+extern int GetCharsetConnection(void);
+extern const char* GetCharsetConnectionName(void);
+extern Oid GetCollationConnection(void);
 extern int GetPlatformEncoding(void);
 extern void pg_bind_textdomain_codeset(const char* domainname);
 
@@ -475,11 +481,15 @@ extern unsigned char* unicode_to_utf8(pg_wchar c, unsigned char* utf8string);
 extern pg_wchar utf8_to_unicode(const unsigned char* c);
 extern int pg_utf_mblen(const unsigned char*);
 extern unsigned char* pg_do_encoding_conversion(unsigned char* src, int len, int src_encoding, int dest_encoding);
+extern void construct_conversion_fmgr_info(int src_encoding, int dst_encoding, void* finfo);
+extern char* try_fast_encoding_conversion(
+    char* src, int len, int src_encoding, int dest_encoding, void* convert_finfo);
 
 extern char* pg_client_to_server(const char* s, int len);
 extern char* pg_server_to_client(const char* s, int len);
 extern char* pg_any_to_server(const char* s, int len, int encoding);
-extern char* pg_server_to_any(const char* s, int len, int encoding);
+extern char* pg_server_to_any(const char* s, int len, int encoding, void* convert_finfo = NULL);
+extern char* pg_any_to_client(const char* s, int len, int encoding, void* convert_finfo = NULL);
 extern bool WillTranscodingBePerformed(int encoding);
 
 extern unsigned short BIG5toCNS(unsigned short big5, unsigned char* lc);
@@ -523,5 +533,24 @@ extern char* gs_nl_langinfo_r(const char* ctype);
 #ifdef WIN32
 extern WCHAR* pgwin32_toUTF16(const char* str, int len, int* utf16len);
 #endif
+
+#define DB_ENCODING_SWITCH_TO(tmp_encoding)                     \
+    do {                                                        \
+        SetDatabaseEncoding(tmp_encoding);                      \
+        uint32 save_count = t_thrd.int_cxt.InterruptHoldoffCount; \
+        PG_TRY();                                               \
+        {                                                       \
+
+#define DB_ENCODING_SWITCH_BACK(db_encoding)                    \
+        }                                                       \
+        PG_CATCH();                                             \
+        {                                                       \
+            t_thrd.int_cxt.InterruptHoldoffCount = save_count;  \
+            SetDatabaseEncoding(db_encoding);                   \
+            PG_RE_THROW();                                      \
+        }                                                       \
+        PG_END_TRY();                                           \
+        SetDatabaseEncoding(db_encoding);                       \
+    } while (0)                                                 \
 
 #endif /* PG_WCHAR_H */

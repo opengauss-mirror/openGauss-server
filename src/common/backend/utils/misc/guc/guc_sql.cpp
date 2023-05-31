@@ -348,6 +348,7 @@ static const struct b_format_behavior_compat_entry b_format_behavior_compat_opti
     {"enable_modify_column", B_FORMAT_OPT_ENABLE_MODIFY_COLUMN},
     {"default_collation", B_FORMAT_OPT_DEFAULT_COLLATION},
     {"fetch", B_FORMAT_OPT_FETCH}
+    {"enable_multi_charset", B_FORMAT_OPT_ENABLE_MULTI_CHARSET}
 };
 
 typedef struct behavior_compat_entry {
@@ -3339,7 +3340,8 @@ static bool b_format_forbid_distribute_parameter(const char *elem)
         "set_session_transaction",
         "enable_set_variables",
         "enable_modify_column",
-        "fetch"
+        "fetch",
+        "enable_multi_charset"
     };
     for (int i = 0; i < B_FORMAT_FORBID_GUC_NUM; i++) {
         if (strcmp(forbidList[i], elem) == 0) {
@@ -3354,6 +3356,10 @@ static bool b_format_forbid_distribute_parameter(const char *elem)
  */
 static bool check_b_format_behavior_compat_options(char **newval, void **extra, GucSource source)
 {
+    if (strcasecmp(*newval, "ALL") == 0) {
+        return true;
+    }
+
     char *rawstring = NULL;
     List *elemlist = NULL;
     ListCell *cell = NULL;
@@ -3411,11 +3417,17 @@ static bool check_b_format_behavior_compat_options(char **newval, void **extra, 
  */
 static void assign_b_format_behavior_compat_options(const char *newval, void *extra)
 {
+    int start = 0;
+    int result = 0;
+
+    if (strcasecmp(newval, "ALL") == 0) {
+        u_sess->utils_cxt.b_format_behavior_compat_flags = 0xFFFFFFFF;
+        return;
+    }
+
     char *rawstring = NULL;
     List *elemlist = NULL;
     ListCell *cell = NULL;
-    int start = 0;
-    int result = 0;
  
     rawstring = pstrdup(newval);
     (void)SplitIdentifierString(rawstring, ',', &elemlist);

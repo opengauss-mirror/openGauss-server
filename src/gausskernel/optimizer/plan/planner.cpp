@@ -89,6 +89,7 @@
 #include "executor/node/nodeModifyTable.h"
 #include "optimizer/gplanmgr.h"
 #include "instruments/instr_statement.h"
+#include "catalog/gs_collation.h"
 
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
@@ -8943,6 +8944,28 @@ static bool IsTypeUnSupportedByVectorEngine(Oid typeOid)
     }
     return false;
 }
+
+static bool IsCollationUnSupportedByVectorEngine(Oid collation)
+{
+    if (!DB_IS_CMPT(B_FORMAT)) {
+        return false;
+    }
+
+    if (is_b_format_collation(collation)) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+                errmsg("Vectorize plan failed due to has unsupport collation: %u", collation)));
+        return true;
+    }
+
+    int charset = get_valid_charset_by_collation(collation);
+    if (charset != GetDatabaseEncoding()) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+                errmsg("Vectorize plan failed due to has charset: %d different from server_encoding", charset)));
+        return true;
+    }
+    return false;
+}
+
 /*
  * @Description: Check if it has unsupport expression in vector engine
  *
@@ -8980,22 +9003,30 @@ bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* pl
                     errmsg("Vectorize plan failed due to has system column")));
                 return true;
             } else {
-                return IsTypeUnSupportedByVectorEngine(var->vartype);
+                return (IsTypeUnSupportedByVectorEngine(var->vartype) ||
+                    IsCollationUnSupportedByVectorEngine(var->varcollid));
             }
             break;
         }
         case T_Const: {
             Const* c = (Const *)node;
-            return IsTypeUnSupportedByVectorEngine(c->consttype);
+            return (IsTypeUnSupportedByVectorEngine(c->consttype) ||
+                IsCollationUnSupportedByVectorEngine(c->constcollid));
         }
         case T_Param: {
             Param *par = (Param *)node;
-            return IsTypeUnSupportedByVectorEngine(par->paramtype);
+            return (IsTypeUnSupportedByVectorEngine(par->paramtype) ||
+                IsCollationUnSupportedByVectorEngine(par->paramcollid));
         }
         case T_SubPlan: {
             SubPlan* subplan = (SubPlan*)node;
             /* make sure that subplan return type must supported by vector engine */
             if (!IsTypeSupportedByVectorEngine(subplan->firstColType)) {
+                return true;
+            }
+
+            Oid collation = exprCollation(node);
+            if (IsCollationUnSupportedByVectorEngine(collation)) {
                 return true;
             }
             break;
@@ -9012,6 +9043,15 @@ bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* pl
 	     */
             if (planContext && !planContext->currentExprIsFilter
                 && !IsTypeSupportedByVectorEngine(exprType(node))) {
+                return true;
+            }
+
+            Oid collation = exprInputCollation(node);
+            if (IsCollationUnSupportedByVectorEngine(collation)) {
+                return true;
+            }
+            collation = exprCollation(node);
+            if (IsCollationUnSupportedByVectorEngine(collation)) {
                 return true;
             }
             break;

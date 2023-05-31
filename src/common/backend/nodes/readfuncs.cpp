@@ -6119,6 +6119,18 @@ static CharsetCollateOptions* _readCharsetcollateOptions()
     READ_DONE();
 }
 
+static CharsetClause* _readCharsetClause()
+{
+    READ_LOCALS(CharsetClause);
+
+    READ_NODE_FIELD(arg);
+    READ_INT_FIELD(charset);
+    READ_BOOL_FIELD(is_binary);
+    READ_LOCATION_FIELD(location);
+
+    READ_DONE();
+}
+
 static PrefixKey* _readPrefixKey()
 {
     READ_LOCALS(PrefixKey);
@@ -6624,6 +6636,8 @@ Node* parseNodeString(void)
         return_value = _readUserVar();
     } else if (MATCH("CHARSETCOLLATE", 14)) {
         return_value = _readCharsetcollateOptions();
+    } else if (MATCH("CHARSET", 7)) {
+        return_value = _readCharsetClause();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

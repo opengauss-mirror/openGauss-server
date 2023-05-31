@@ -130,6 +130,7 @@ extern char* SPI_getvalue(HeapTuple tuple, TupleDesc tupdesc, int fnumber);
 extern Datum SPI_getbinval(HeapTuple tuple, TupleDesc tupdesc, int fnumber, bool* isnull);
 extern char* SPI_gettype(TupleDesc tupdesc, int fnumber);
 extern Oid SPI_gettypeid(TupleDesc tupdesc, int fnumber);
+extern Oid SPI_getcollation(TupleDesc tupdesc, int fnumber);
 extern char* SPI_getrelname(Relation rel);
 extern char* SPI_getnspname(Relation rel);
 extern void* SPI_palloc(Size size);

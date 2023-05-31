@@ -25,7 +25,7 @@
 #include "utils/sortsupport.h"
 #include "vecexecutor/vectorbatch.h"
 #include "utils/pg_locale.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
 
 #include "miscadmin.h"
 
@@ -986,10 +986,10 @@ Datum hashbpchar(PG_FUNCTION_ARGS)
     keydata = VARDATA_ANY(key);
     keylen = bcTruelen(key);
 
-    if (!is_b_format_collation(collid)) {
-        result = hash_any((unsigned char*)keydata, keylen);
+    if (is_b_format_collation(collid)) {
+        result = hash_text_by_builtin_collations((unsigned char *)VARDATA_ANY(key), keylen, collid);
     } else {
-        result = hash_text_by_builtin_colltions((unsigned char *)VARDATA_ANY(key), keylen, collid);
+        result = hash_any((unsigned char*)keydata, keylen);
     }
 
     /* Avoid leaking memory for toasted inputs */

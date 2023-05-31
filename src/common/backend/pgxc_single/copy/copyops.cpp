@@ -37,7 +37,7 @@
     } while (0)
 
 static int get_decimal_from_hex(char hex);
-static void attribute_out_text(StringInfo buf, char* string);
+static void attribute_out_text(StringInfo buf, char* string, int str_encoding, FmgrInfo *convert_finfo);
 
 /*
  * Return decimal value for a hexadecimal digit
@@ -54,7 +54,7 @@ static int get_decimal_from_hex(char hex)
  * Output an attribute to text
  * This takes portions of the code of CopyAttributeOutText
  */
-static void attribute_out_text(StringInfo buf, char* string)
+static void attribute_out_text(StringInfo buf, char* string, int str_encoding, FmgrInfo *convert_finfo)
 {
     char* ptr = NULL;
     char c;
@@ -63,11 +63,15 @@ static void attribute_out_text(StringInfo buf, char* string)
     bool need_transcoding, encoding_embeds_ascii;
     int file_encoding = pg_get_client_encoding();
 
-    need_transcoding = (file_encoding != GetDatabaseEncoding() || pg_database_encoding_max_length() > 1);
+    need_transcoding = (file_encoding != str_encoding || pg_encoding_max_length(str_encoding) > 1);
     encoding_embeds_ascii = PG_ENCODING_IS_CLIENT_ONLY(file_encoding);
 
     if (need_transcoding) {
-        ptr = pg_server_to_any(string, strlen(string), file_encoding);
+        if (str_encoding != GetDatabaseEncoding()) {
+            ptr = try_fast_encoding_conversion(string, strlen(string), str_encoding, file_encoding, (void*)convert_finfo);
+        } else {
+            ptr = pg_server_to_any(string, strlen(string), file_encoding, (void*)convert_finfo);
+        }
     } else {
         ptr = string;
     }
@@ -356,11 +360,15 @@ char* CopyOps_BuildOneRowTo(TupleDesc tupdesc, Datum* values, const bool* nulls,
     char* res = NULL;
     int i;
     FmgrInfo* out_functions = NULL;
+    FmgrInfo* out_convert_funcs = NULL;
     FormData_pg_attribute* attr = tupdesc->attrs;
+    int *attr_encodings = NULL;
     StringInfo buf;
 
     /* Get info about the columns we need to process. */
     out_functions = (FmgrInfo*)palloc(tupdesc->natts * sizeof(FmgrInfo));
+    out_convert_funcs = (FmgrInfo*)palloc(tupdesc->natts * sizeof(FmgrInfo));
+    attr_encodings = (int*)palloc(tupdesc->natts * sizeof(int));
     for (i = 0; i < tupdesc->natts; i++) {
         Oid out_func_oid;
         bool isvarlena = false;
@@ -371,6 +379,8 @@ char* CopyOps_BuildOneRowTo(TupleDesc tupdesc, Datum* values, const bool* nulls,
 
         getTypeOutputInfo(attr[i].atttypid, &out_func_oid, &isvarlena);
         fmgr_info(out_func_oid, &out_functions[i]);
+        attr_encodings[i] = get_valid_charset_by_collation(attr[i].attcollation);
+        construct_conversion_fmgr_info(attr_encodings[i], pg_get_client_encoding(), (void*)&out_convert_funcs[i]);
     }
 
     /* Initialize output buffer */
@@ -394,7 +404,7 @@ char* CopyOps_BuildOneRowTo(TupleDesc tupdesc, Datum* values, const bool* nulls,
         } else {
             char* string = NULL;
             string = OutputFunctionCall(&out_functions[i], value);
-            attribute_out_text(buf, string);
+            attribute_out_text(buf, string, attr_encodings[i], &out_convert_funcs[i]);
             pfree(string);
         }
     }
@@ -402,6 +412,8 @@ char* CopyOps_BuildOneRowTo(TupleDesc tupdesc, Datum* values, const bool* nulls,
     /* Record length of message */
     *len = buf->len;
     res = pstrdup(buf->data);
+    pfree(attr_encodings);
+    pfree(out_convert_funcs);
     pfree(out_functions);
     pfree(buf->data);
     pfree(buf);

@@ -80,6 +80,13 @@ DETAIL:  this collation only support in B-format database
 create table t1(a blob);
 -- test B format
 \c test_collate_B
+SET b_format_behavior_compat_options = 'enable_multi_charset';
+SHOW b_format_behavior_compat_options;
+ b_format_behavior_compat_options 
+----------------------------------
+ enable_multi_charset
+(1 row)
+
 -- test create table/alter table
 drop table if exists t_collate;
 NOTICE:  table "t_collate" does not exist, skipping
@@ -980,7 +987,7 @@ select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f
 ERROR:  syntax error at or near "select"
 LINE 2: select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 ...
         ^
-select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1;
  f1 | f1 
 ----+----
  S  | S
@@ -1042,7 +1049,7 @@ select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f
 ERROR:  syntax error at or near "select"
 LINE 2: select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 ...
         ^
-select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1;
  f1 | f1 
 ----+----
  S  | S
@@ -1135,11 +1142,14 @@ select * from test_sep_option3 union select * from test_sep_option4 order by f1;
  Š  | Š
 (4 rows)
 
-select * from test_sep_option1 union select * from test_sep_option3;  -- fail
-ERROR:  collation mismatch between implicit collations "utf8mb4_general_ci" and "utf8mb4_bin"
-LINE 1: select * from test_sep_option1 union select * from test_sep_...
-                                                    ^
-HINT:  You can choose the collation by applying the COLLATE clause to one or both expressions.
+select * from test_sep_option1 union select * from test_sep_option3 order by f1;
+ f1 | f2 
+----+----
+ s  | s
+ ś  | ś
+ Š  | Š
+(3 rows)
+
 -- test setop
 drop table if exists test_sep_option1;
 drop table if exists test_sep_option2;
