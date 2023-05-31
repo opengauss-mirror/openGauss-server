@@ -11,10 +11,6 @@ function test_1()
   gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test1; CREATE TABLE mpp_test1(id INT,name VARCHAR(15) NOT NULL);"
   echo "drop table success"
 
-  #copy error, use insert to by-pass
-  #copy data(25M) to standby 1 times
-  #gsql -d $db -p $dn1_primary_port -c "set enable_data_replicate=on; copy mpp_test1 from '$scripts_dir/data/data5';"
-
   #prepare insert sql
   cat $scripts_dir'/data/data5_head_100' | python tools.py mpp_test1 '|' > $scripts_dir'/data/data5_head_100_sql'
   gsql -d $db -p $dn1_primary_port < $scripts_dir'/data/data5_head_100_sql' &> /dev/null
@@ -31,30 +27,26 @@ function test_1()
 
   sleep 1
 
-  echo "begin to switch to standby1"
+  echo "begin to switch to standby1 with timeout 1s"
   #switchover
-  switchover_to_standby
-  echo "end of switch to standby1"
+  switchover_to_standby 1
+  echo "end of switch to standby1 with timeout 1s"
 
-  sleep 10
+  sleep 60
 
-  echo "begin to switch to standby2"
+  echo "begin to switch to standby2 with timeout 2s"
   #switchover
-  switchover_to_standby2
+  switchover_to_standby2 2
   echo "end of switch to standby2"
 
-  sleep 10
+  sleep 60
 
-  echo "begin to switch to standby3"
+  echo "begin to switch to standby3 with timeout 3s"
   #switchover
-  switchover_to_standby3
+  switchover_to_standby3 3
   echo "end of switch to standby3"
 
-  #echo "begin to switch to standby4"
-  #switchover
-  #switchover_to_standby4
-  #echo "end of swtich to standby4"
-
+  sleep 60
 
   #test the insert results
   b=`wc $scripts_dir'/data/data5_head_100_sql' | awk '{print $1}'`
