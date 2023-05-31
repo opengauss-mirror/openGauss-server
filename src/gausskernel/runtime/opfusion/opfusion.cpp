@@ -739,6 +739,9 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
         case DELETE_FUSION:
             opfusionObj = New(objCxt)DeleteFusion(context, psrc, plantree_list, params);
             break;
+        case DELETE_SUB_FUSION:
+            opfusionObj = New(objCxt)DeleteSubFusion(context, psrc, plantree_list, params);
+            break;
         case SELECT_FOR_UPDATE_FUSION:
             opfusionObj = New(objCxt)SelectForUpdateFusion(context, psrc, plantree_list, params);
             break;

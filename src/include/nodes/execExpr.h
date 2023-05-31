@@ -27,10 +27,13 @@ struct ArrayRefState;
 /* jump-threading is in use */
 #define EEO_FLAG_DIRECT_THREADED			(1 << 2)
 
-#define FUNC_EXPR_FLAG_HAS_REFCURSOR		0x01
-#define FUNC_EXPR_FLAG_HAS_CURSOR_RETURN	0x02
-#define FUNC_EXPR_FLAG_STRICT				0x04
-#define FUNC_EXPR_FLAG_FUSAGE				0x08
+#define FUNC_EXPR_FLAG_HAS_REFCURSOR        uint32(1 << 0)
+#define FUNC_EXPR_FLAG_HAS_CURSOR_RETURN    uint32(1 << 1)
+#define FUNC_EXPR_FLAG_STRICT               uint32(1 << 2)
+#define FUNC_EXPR_FLAG_FUSAGE               uint32(1 << 3)
+#define FUNC_EXPR_FLAG_STRICT_FUSAGE        (FUNC_EXPR_FLAG_STRICT | FUNC_EXPR_FLAG_FUSAGE)
+#define FUNC_EXPR_FLAG_IS_PLPGSQL           uint32(1 << 4)
+#define FUNC_EXPR_FLAG_ORACLE_COMPATIBILITY uint32(1 << 5)
 
 /*
  * Discriminator for ExprEvalSteps.
@@ -87,6 +90,11 @@ typedef enum ExprEvalOp
 	 * requires usage stats tracking.
 	 */
 	EEOP_FUNCEXPR,
+
+	EEOP_FUNCEXPR_STRICT,
+	EEOP_FUNCEXPR_FUSAGE,
+	EEOP_FUNCEXPR_STRICT_FUSAGE,
+	EEOP_FUNCEXPR_MAKE_FUNCTION_RESULT,	/* evaluate results by ExecMakeFunctionResultNosets() */
 
 	/*
 	 * Evaluate boolean AND expression, one step per subexpression. FIRST/LAST
@@ -329,7 +337,7 @@ typedef struct ExprEvalStep
 		{
 			char prokind;
             bool needResetErrMsg;
-			int flag;
+			uint32 flag;
 			FmgrInfo   *finfo;	/* function's lookup data */
 			FunctionCallInfo fcinfo_data;	/* arguments etc */
 			/* faster to access without additional indirection: */
@@ -704,11 +712,15 @@ typedef struct ArrayRefState
 extern void ExecReadyInterpretedExpr(ExprState *state);
 extern ExprEvalOp ExecEvalStepOp(ExprState *state, ExprEvalStep *op);
 
+extern Datum ExecInterpExprStillValid(ExprState *state, ExprContext *econtext, bool *isNull, ExprDoneCond* isDone);
+extern void CheckExprStillValid(ExprState *state, ExprContext *econtext);
 /*
  * Non fast-path execution functions. These are externs instead of statics in
  * execExprInterp.c, because that allows them to be used by other methods of
  * expression evaluation, reducing code duplication.
  */
+extern void ExecEvalFuncExprFusage(ExprEvalStep *op, ExprContext *econtext);
+extern void ExecEvalFuncExprStrictFusage(ExprEvalStep *op, ExprContext *econtext);
 extern void ExecEvalParamExec(ExprState *state, ExprEvalStep *op,
 				  ExprContext *econtext);
 extern void ExecEvalParamExtern(ExprState *state, ExprEvalStep *op,
@@ -747,6 +759,7 @@ extern void ExecEvalHashFilter(ExprState *state, ExprEvalStep *op,
 						   ExprContext *econtext);
 extern void ExecEvalWholeRowVar(ExprState *state, ExprEvalStep *op,
 					ExprContext *econtext);
+extern bool IsTableOfFunc(Oid funcOid);
 extern Datum ExecAggTransReparent(AggState *aggstate, AggStatePerTrans pertrans, Datum newValue, bool newValueIsNull,
                                   Datum oldValue, bool oldValueIsNull);
 extern void ExecAggInitGroup(AggState *aggstate, AggStatePerTrans pertrans, AggStatePerGroup pergroup,

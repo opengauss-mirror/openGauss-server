@@ -2,6 +2,7 @@
 #include "nodes/execnodes.h"
 #include "nodes/execExpr.h"
 #include "executor/node/nodeSubplan.h"
+#include "executor/node/nodeCtescan.h"
 #include "executor/executor.h"
 #include "access/nbtree.h"
 #include "catalog/objectaccess.h"
@@ -2102,6 +2103,7 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
 	int			argno;
 	ListCell   *lc;
 	int i;
+	uint32 func_flags = 0;
 
 	FunctionScanState *fssnode = NULL;
 	bool savedIsSTP = u_sess->SPI_cxt.is_stp;
@@ -2154,10 +2156,15 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
          * the proconfig setting off the stack.  That restriction could be lifted
          * by redesigning the GUC nesting mechanism a bit.
          */
+        bool isNullSTP = false;
         HeapTuple tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
         if (!HeapTupleIsValid(tp)) {
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                        errmsg("cache lookup failed for function %u", funcid)));
+                errmsg("cache lookup failed for function %u", funcid)));
+        }
+        Form_pg_proc procStruct = (Form_pg_proc)GETSTRUCT(tp);
+        if (IsPlpgsqlLanguageOid(procStruct->prolang)) {
+            func_flags |= FUNC_EXPR_FLAG_IS_PLPGSQL;
         }
         if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
             u_sess->SPI_cxt.is_proconfig_set = true;
@@ -2172,6 +2179,8 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
             stp_set_commit_rollback_err_msg(STP_XACT_IMMUTABLE);
         }
 
+        Datum datum = SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_provolatile, &isNullSTP);
+        scratch->d.func.prokind = CharGetDatum(datum);
         /* if proIsProcedure is ture means it was a stored procedure */
         u_sess->SPI_cxt.is_stp = savedIsSTP;
         ReleaseSysCache(tp);
@@ -2192,6 +2201,12 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
 	InitFunctionCallInfoData(*fcinfo, flinfo,
 							 nargs, inputcollid, NULL, NULL);
 
+    if (flinfo->fn_oid == CONNECT_BY_ROOT_FUNCOID
+        || flinfo->fn_oid == SYS_CONNECT_BY_PATH_FUNCOID
+        || IsTableOfFunc(flinfo->fn_oid)){
+        func_flags |= FUNC_EXPR_FLAG_ORACLE_COMPATIBILITY;
+    }
+
 	/* Keep extra copies of this info to save an indirection at runtime */
 	scratch->d.func.fn_addr = flinfo->fn_addr;
 	scratch->d.func.nargs = nargs;
@@ -2203,17 +2218,17 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("set-valued function called in context that cannot accept a set")));
 
-	if (func_has_refcursor_args(funcid, fcinfo))
-		scratch->d.func.flag |= FUNC_EXPR_FLAG_HAS_REFCURSOR;
+    if (func_has_refcursor_args(funcid, fcinfo))
+        func_flags |= (FUNC_EXPR_FLAG_HAS_REFCURSOR | FUNC_EXPR_FLAG_ORACLE_COMPATIBILITY);
 
-	if (fcinfo->refcursor_data.return_number)
-		scratch->d.func.flag |= FUNC_EXPR_FLAG_HAS_CURSOR_RETURN;
+    if (fcinfo->refcursor_data.return_number)
+        func_flags |= (FUNC_EXPR_FLAG_HAS_CURSOR_RETURN | FUNC_EXPR_FLAG_ORACLE_COMPATIBILITY);
 
     if (supportTranaction) {
         fcinfo->context = (Node *)fssnode;
     }
 
-	if (scratch->d.func.flag & FUNC_EXPR_FLAG_HAS_CURSOR_RETURN) {
+	if (func_flags & FUNC_EXPR_FLAG_HAS_CURSOR_RETURN) {
         /* init returnCursor to store out-args cursor info on ExprContext*/
         fcinfo->refcursor_data.returnCursor =
             (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->refcursor_data.return_number);
@@ -2222,7 +2237,7 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
     }
 
 	scratch->d.func.var_dno = NULL;
-	if (scratch->d.func.flag & FUNC_EXPR_FLAG_HAS_REFCURSOR) {
+	if (func_flags & FUNC_EXPR_FLAG_HAS_REFCURSOR) {
         /* init argCursor to store in-args cursor info on ExprContext */
         fcinfo->refcursor_data.argCursor = (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->nargs);
         scratch->d.func.var_dno = (int*)palloc0(sizeof(int) * fcinfo->nargs);
@@ -2233,11 +2248,9 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
 
 	/* Build code to evaluate arguments directly into the fcinfo struct */
 	argno = 0;
-	foreach(lc, args)
-	{
-		Expr	   *arg = (Expr *) lfirst(lc);
-        if (IsA(arg, Const) && !(scratch->d.func.flag & (FUNC_EXPR_FLAG_HAS_REFCURSOR | FUNC_EXPR_FLAG_HAS_CURSOR_RETURN)))
-        {
+    foreach(lc, args) {
+        Expr *arg = (Expr *) lfirst(lc);
+        if (IsA(arg, Const) && !(func_flags & (FUNC_EXPR_FLAG_HAS_REFCURSOR | FUNC_EXPR_FLAG_HAS_CURSOR_RETURN))) {
             Const *con = (Const *) arg;
             fcinfo->arg[argno] = con->constvalue;
             fcinfo->argnull[argno] = con->constisnull;
@@ -2245,25 +2258,43 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
             ExecInitExprRec(arg, state, &fcinfo->arg[argno], &fcinfo->argnull[argno], node);
         }
 		fcinfo->argTypes[argno] = exprType((Node*)arg);
+        if (fcinfo->argTypes[argno] == CLOBOID && !fcinfo->argnull[argno]) {
+            /*maybe huge clob */
+            func_flags |= FUNC_EXPR_FLAG_ORACLE_COMPATIBILITY;
+        }
+
+        if (IsA(arg, Param)) {
+            Param* param = (Param*) arg;
+            if (param->paramkind == PARAM_EXTERN 
+                && (OidIsValid(param->tableOfIndexType) || OidIsValid(param->recordVarTypOid))) {
+                func_flags |= FUNC_EXPR_FLAG_ORACLE_COMPATIBILITY;
+            }
+        }
 		argno++;
 	}
 
-	scratch->opcode = EEOP_FUNCEXPR;
+    if (flinfo->fn_strict && nargs > 0) {
+        func_flags |= FUNC_EXPR_FLAG_STRICT;
+    }
+    if (u_sess->attr.attr_common.pgstat_track_functions > flinfo->fn_stats) {
+        /*ollect stats if track_functions > fn_stats*/
+        func_flags |= FUNC_EXPR_FLAG_FUSAGE;
+    }
 
 	/* Insert appropriate opcode depending on strictness and stats level */
-	if (u_sess->attr.attr_common.pgstat_track_functions <= flinfo->fn_stats)
-	{
-		if (flinfo->fn_strict && nargs > 0)
-			scratch->d.func.flag |= FUNC_EXPR_FLAG_STRICT;
-	}
-	else
-	{
-		if (flinfo->fn_strict && nargs > 0)
-			scratch->d.func.flag |= (FUNC_EXPR_FLAG_STRICT | FUNC_EXPR_FLAG_FUSAGE);
-		else
-			scratch->d.func.flag |= FUNC_EXPR_FLAG_FUSAGE;
-	}
 
+    if (func_flags == 0) {
+        scratch->opcode = EEOP_FUNCEXPR;
+    } else if (func_flags == FUNC_EXPR_FLAG_STRICT) {
+        scratch->opcode = EEOP_FUNCEXPR_STRICT;
+    } else if (func_flags == FUNC_EXPR_FLAG_FUSAGE) {
+        scratch->opcode = EEOP_FUNCEXPR_FUSAGE;
+    }  else if (func_flags == FUNC_EXPR_FLAG_STRICT_FUSAGE) {
+        scratch->opcode = EEOP_FUNCEXPR_STRICT_FUSAGE;
+    } else {
+        scratch->opcode = EEOP_FUNCEXPR_MAKE_FUNCTION_RESULT;
+    }
+    scratch->d.func.flag = func_flags;
 	scratch->d.func.is_plpgsql_func_with_outparam = is_function_with_plpgsql_language_and_outparam(funcid);
 }
 
