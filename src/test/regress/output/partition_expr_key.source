@@ -605,6 +605,36 @@ select * from b_bug_2 partition(p3);
 (1 row)
 
 --test some bug fix
+CREATE TABLE opfusion_part_table (a int) PARTITION BY RANGE (a+100)
+(PARTITION p0 VALUES LESS THAN (200),
+ PARTITION p1 VALUES LESS THAN (2000),
+ PARTITION p2 VALUES LESS THAN (20000));
+set enable_opfusion to on;
+set enable_partition_opfusion to on;
+insert into opfusion_part_table values(99),(999),(9999);
+copy opfusion_part_table from stdin;
+select * from opfusion_part_table partition(p0);
+ a  
+----
+ 99
+(1 row)
+
+select * from opfusion_part_table partition(p1);
+  a  
+-----
+ 999
+ 888
+(2 rows)
+
+select * from opfusion_part_table partition(p2);
+  a   
+------
+ 9999
+(1 row)
+
+reset enable_opfusion;
+reset enable_partition_opfusion;
+drop table opfusion_part_table;
 create table subpart_range_add (col1 int, col2 int) partition by range( abs(col2) )
 subpartition by hash( abs(col1) )
 (
