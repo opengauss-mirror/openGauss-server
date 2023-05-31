@@ -570,7 +570,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 %type <list>	extract_list timestamp_arg_list overlay_list position_list
 %type <list>	substr_list trim_list
-%type <list>	opt_interval interval_second
+%type <list>	opt_interval interval_second event_interval_unit opt_evtime_unit
 %type <node>	overlay_placing substr_from substr_for
 
 %type <boolean> opt_instead opt_incremental
@@ -864,7 +864,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
 	SHRINK USE_P
 
-	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
+	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DAY_HOUR_P DAY_MINUTE_P DAY_SECOND_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
 /* PGXC_BEGIN */
 	DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
@@ -881,7 +881,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 	GENERATED GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
 
-	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P
+	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P HOUR_MINUTE_P HOUR_SECOND_P
 
 	IDENTIFIED IDENTITY_P IF_P IGNORE IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE
 	INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
@@ -896,7 +896,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
 	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
-	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
+	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
 	MODEL // DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
 	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
@@ -942,7 +942,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	XML_P XMLATTRIBUTES XMLCONCAT XMLELEMENT XMLEXISTS XMLFOREST XMLPARSE
 	XMLPI XMLROOT XMLSERIALIZE
 
-	YEAR_P YES_P
+	YEAR_P YEAR_MONTH_P YES_P
 
 	ZONE
 
@@ -15086,8 +15086,12 @@ user:
 		ColId                                                                   { $$ = $1; }
 	;
 
+event_interval_unit: opt_interval			{$$ = $1;}
+					| opt_evtime_unit		{$$ = $1;}
+				;
+
 every_interval:
-                Iconst opt_interval			
+                Iconst event_interval_unit			
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15095,7 +15099,7 @@ every_interval:
 					Node *num = makeIntConst($1, @1);
 		            $$ = makeTypeCast(num, t, -1);	
 				}
-				| Sconst opt_interval
+				| Sconst event_interval_unit
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15103,7 +15107,7 @@ every_interval:
 					Node *num = makeStringConst($1, @1);
 					$$ = makeTypeCast(num, t, -1);
 				}
-				| FCONST opt_interval
+				| FCONST event_interval_unit
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -25211,6 +25215,47 @@ opt_timezone:
 			| /*EMPTY*/								{ $$ = FALSE; }
 		;
 
+opt_evtime_unit:
+			DAY_HOUR_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR), @1));
+			}
+			| DAY_MINUTE_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE), @1));
+			}
+			| DAY_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| HOUR_MINUTE_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE), @1));
+			}
+			| HOUR_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| MINUTE_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| YEAR_MONTH_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(YEAR) |
+												 INTERVAL_MASK(MONTH), @1));
+			}
+
 opt_interval:
 			YEAR_P
 				{ $$ = list_make1(makeIntConst(INTERVAL_MASK(YEAR), @1)); }
@@ -28540,7 +28585,10 @@ unreserved_keyword:
 			| DATANODES
 			| DATATYPE_CL
 			| DATE_FORMAT_P
+			| DAY_HOUR_P
+			| DAY_MINUTE_P
 			| DAY_P
+			| DAY_SECOND_P
 			| DBCOMPATIBILITY_P
 			| DEALLOCATE
 			| DECLARE
@@ -28621,7 +28669,9 @@ unreserved_keyword:
 			| HANDLER
 			| HEADER_P
 			| HOLD
+			| HOUR_MINUTE_P
 			| HOUR_P
+			| HOUR_SECOND_P
 			| IDENTIFIED
 			| IDENTITY_P
 			| IF_P
@@ -28691,6 +28741,7 @@ unreserved_keyword:
 			| MERGE
 			| MINEXTENTS
 			| MINUTE_P
+			| MINUTE_SECOND_P
 			| MINVALUE
 			| MODE
 			| MODEL      // DB4AI
@@ -28918,6 +28969,7 @@ unreserved_keyword:
 			| WRAPPER
 			| WRITE
 			| XML_P
+			| YEAR_MONTH_P
 			| YEAR_P
 			| YES_P
 			| ZONE
