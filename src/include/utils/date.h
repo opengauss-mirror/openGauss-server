@@ -92,6 +92,7 @@ typedef struct {
 extern double date2timestamp_no_overflow(DateADT dateVal);
 
 extern Datum date_in(PG_FUNCTION_ARGS);
+extern Datum input_date_in(char* str, bool can_ignore);
 extern Datum date_out(PG_FUNCTION_ARGS);
 extern Datum date_recv(PG_FUNCTION_ARGS);
 extern Datum date_send(PG_FUNCTION_ARGS);

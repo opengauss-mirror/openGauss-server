@@ -210,6 +210,19 @@ Datum bpcharin(PG_FUNCTION_ARGS)
     PG_RETURN_BPCHAR_P(result);
 }
 
+Datum input_bpcharin(char* str, Oid typioparam, int32 atttypmod)
+{
+    if (str == NULL) {
+        return (Datum)0;
+    }
+    BpChar* result = NULL;
+#ifdef NOT_USED
+    Oid typelem = typioparam;
+#endif
+    result = bpchar_input(str, strlen(str), atttypmod);
+    PG_RETURN_BPCHAR_P(result);
+}
+
 /*
  * Convert a CHARACTER value to a C string.
  *
@@ -253,30 +266,14 @@ Datum bpcharsend(PG_FUNCTION_ARGS)
     return textsend(fcinfo);
 }
 
-/*
- * Converts a CHARACTER type to the specified size.
- *
- * maxlen is the typmod, ie, declared length plus VARHDRSZ bytes.
- * isExplicit is true if this is for an explicit cast to char(N).
- *
- * Truncation rules: for an explicit cast, silently truncate to the given
- * length; for an implicit cast, raise error unless extra characters are
- * all spaces.	(This is sort-of per SQL: the spec would actually have us
- * raise a "completion condition" for the explicit cast case, but Postgres
- * hasn't got such a concept.)
- */
-Datum bpchar(PG_FUNCTION_ARGS)
+Datum bpchar_launch(bool can_ignore, BpChar* source, int32 &maxlen, bool isExplicit)
 {
-    BpChar* source = PG_GETARG_BPCHAR_PP(0);
-    int32 maxlen = PG_GETARG_INT32(1);
-    bool isExplicit = PG_GETARG_BOOL(2);
     BpChar* result = NULL;
     int32 len;
     char* r = NULL;
     char* s = NULL;
-    int i;
     errno_t ss_rc = 0;
-
+    int i;
     /* No work if typmod is invalid */
     if (maxlen < (int32)VARHDRSZ)
         PG_RETURN_BPCHAR_P(source);
@@ -305,7 +302,7 @@ Datum bpchar(PG_FUNCTION_ARGS)
         if (!isExplicit) {
             for (i = maxmblen; i < len; i++)
                 if (s[i] != ' ') {
-                    ereport(fcinfo->can_ignore ? WARNING : ERROR,
+                    ereport(can_ignore ? WARNING : ERROR,
                         (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
                              errmsg("value too long for type character(%d)", maxlen)));
                     break;
@@ -342,6 +339,34 @@ Datum bpchar(PG_FUNCTION_ARGS)
     }
 
     PG_RETURN_BPCHAR_P(result);
+}
+
+/*
+ * Converts a CHARACTER type to the specified size.
+ *
+ * maxlen is the typmod, ie, declared length plus VARHDRSZ bytes.
+ * isExplicit is true if this is for an explicit cast to char(N).
+ *
+ * Truncation rules: for an explicit cast, silently truncate to the given
+ * length; for an implicit cast, raise error unless extra characters are
+ * all spaces.	(This is sort-of per SQL: the spec would actually have us
+ * raise a "completion condition" for the explicit cast case, but Postgres
+ * hasn't got such a concept.)
+ */
+Datum bpchar(PG_FUNCTION_ARGS)
+{
+    BpChar* source = PG_GETARG_BPCHAR_PP(0);
+    int32 maxlen = PG_GETARG_INT32(1);
+    bool isExplicit = PG_GETARG_BOOL(2);
+    return bpchar_launch(fcinfo->can_ignore, source, maxlen, isExplicit);
+}
+
+Datum opfusion_bpchar(Datum arg1, Datum arg2, Datum arg3)
+{
+    BpChar* source = (BpChar*)arg1;
+    int32 maxlen = arg2;
+    bool isExplicit = arg3;
+    return bpchar_launch(false, source, maxlen, isExplicit);
 }
 
 /* char_bpchar()
@@ -495,6 +520,21 @@ Datum varcharin(PG_FUNCTION_ARGS)
     PG_RETURN_VARCHAR_P(result);
 }
 
+Datum input_varcharin(char* str, Oid typioparam, int32 atttypmod)
+{
+    if (str ==NULL) {
+        return (Datum)0;
+    }
+    VarChar* result = NULL;
+
+#ifdef NOT_USED
+    Oid typelem = typioparam;
+#endif
+
+    result = varchar_input(str, strlen(str), atttypmod);
+    PG_RETURN_VARCHAR_P(result);
+}
+
 /*
  * Convert a VARCHAR value to a C string.
  *
@@ -569,6 +609,40 @@ Datum varchar_transform(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(ret);
 }
 
+Datum varchar_launch(bool can_ignore, VarChar* source, int32 &typmod, bool isExplicit)
+{
+    int32 len, maxlen;
+    size_t maxmblen;
+    int i;
+    char* s_data = NULL;
+    len = VARSIZE_ANY_EXHDR(source);
+    s_data = VARDATA_ANY(source);
+    maxlen = typmod - VARHDRSZ;
+    /* No work if typmod is invalid or supplied data fits it already */
+    if (maxlen < 0 || len <= maxlen)
+        PG_RETURN_VARCHAR_P(source);
+
+    /* only reach here if string is too long... */
+    if (len > maxlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+        ereport(ERROR,
+            (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                errmsg("value too long for type character varying(%d)", maxlen)));
+
+    /* truncate multibyte string preserving multibyte boundary */
+    maxmblen = pg_mbcharcliplen(s_data, len, maxlen);
+
+    if (!isExplicit) {
+        for (i = maxmblen; i < len; i++)
+            if (s_data[i] != ' ') {
+                ereport(can_ignore ? WARNING : ERROR,
+                    (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                        errmsg("value too long for type character varying(%d)", maxlen)));
+                break;
+            }
+    }
+    PG_RETURN_VARCHAR_P((VarChar*)cstring_to_text_with_len(s_data, maxmblen));
+}
+
 /*
  * Converts a VARCHAR type to the specified size.
  *
@@ -586,39 +660,15 @@ Datum varchar(PG_FUNCTION_ARGS)
     VarChar* source = PG_GETARG_VARCHAR_PP(0);
     int32 typmod = PG_GETARG_INT32(1);
     bool isExplicit = PG_GETARG_BOOL(2);
-    int32 len, maxlen;
-    size_t maxmblen;
-    int i;
-    char* s_data = NULL;
+    return varchar_launch(fcinfo->can_ignore, source, typmod, isExplicit);
+}
 
-    len = VARSIZE_ANY_EXHDR(source);
-    s_data = VARDATA_ANY(source);
-    maxlen = typmod - VARHDRSZ;
-
-    /* No work if typmod is invalid or supplied data fits it already */
-    if (maxlen < 0 || len <= maxlen)
-        PG_RETURN_VARCHAR_P(source);
-
-    /* only reach here if string is too long... */
-    if (len > maxlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
-        ereport(ERROR,
-            (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                errmsg("value too long for type character varying(%d)", maxlen)));
-
-    /* truncate multibyte string preserving multibyte boundary */
-    maxmblen = pg_mbcharcliplen(s_data, len, maxlen);
-
-    if (!isExplicit) {
-        for (i = maxmblen; i < len; i++)
-            if (s_data[i] != ' ') {
-                ereport(fcinfo->can_ignore ? WARNING : ERROR,
-                    (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                        errmsg("value too long for type character varying(%d)", maxlen)));
-                break;
-            }
-    }
-
-    PG_RETURN_VARCHAR_P((VarChar*)cstring_to_text_with_len(s_data, maxmblen));
+Datum opfusion_varchar(Datum arg1, Datum arg2, Datum arg3)
+{
+    VarChar* source = (VarChar*)arg1;
+    int32 typmod = arg2;
+    bool isExplicit = arg3;
+    return varchar_launch(false, source, typmod, isExplicit);
 }
 
 Datum varchartypmodin(PG_FUNCTION_ARGS)

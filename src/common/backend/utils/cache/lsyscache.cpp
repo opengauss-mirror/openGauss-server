@@ -32,6 +32,7 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_operator.h"
+#include "catalog/pg_opfamily.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_range.h"
@@ -107,12 +108,17 @@ bool op_in_opfamily(Oid opno, Oid opfamily)
  *
  * This function only considers search operators, not ordering operators.
  */
+constexpr int OPERATOR_EQUALS_STRATEGY = 3;
+constexpr Oid OPERATOR_EQUALS_OPNO = 96;
 int get_op_opfamily_strategy(Oid opno, Oid opfamily)
 {
     HeapTuple tp;
     Form_pg_amop amop_tup;
     int result;
-
+    if (opno == OPERATOR_EQUALS_OPNO && opfamily == INTEGER_UBTREE_FAM_OID) {
+        result = OPERATOR_EQUALS_STRATEGY;
+        return result;
+    }
     tp = SearchSysCache3(AMOPOPID, ObjectIdGetDatum(opno), CharGetDatum(AMOP_SEARCH), ObjectIdGetDatum(opfamily));
     if (!HeapTupleIsValid(tp)) {
         return 0;
@@ -1296,8 +1302,14 @@ Oid get_equal(Oid opno)
  *
  *		Returns procedure id for computing selectivity of an operator.
  */
+constexpr RegProcedure OPERATOR_EQUALS_PROCEDURE_ID = 101;
 RegProcedure get_oprrest(Oid opno)
 {
+    RegProcedure result;
+    if (opno == OPERATOR_EQUALS_OPNO) {
+        result = OPERATOR_EQUALS_PROCEDURE_ID;
+        return result;
+    }
     HeapTuple tp;
     tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(opno));
     if (HeapTupleIsValid(tp)) {
@@ -2122,8 +2134,17 @@ bool get_typisdefined(Oid typid)
  *
  *		Given the type OID, return the length of the type.
  */
+constexpr int16 DATE_TYPLEN = 4;
+constexpr int16 TIMESTAMP_TYPLEN = 8;
 int16 get_typlen(Oid typid)
 {
+    if (typid == INT4OID || typid == DATEOID) {
+        return DATE_TYPLEN;
+    } else if (typid == BPCHAROID || typid == VARCHAROID) {
+        return -1;
+    } else if (typid == TIMESTAMPOID) {
+        return TIMESTAMP_TYPLEN;
+    }
     HeapTuple tp;
     tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
     if (HeapTupleIsValid(tp)) {
@@ -2418,6 +2439,9 @@ Oid getBaseType(Oid typid)
  */
 Oid getBaseTypeAndTypmod(Oid typid, int32* typmod)
 {
+    if (typid == DATEOID || typid == TIMESTAMPOID || typid == BPCHAROID || typid == VARCHAROID) {
+        return typid;
+    }
     /*
      * We loop to find the bottom base type in a stack of domains.
      */

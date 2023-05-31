@@ -15,7 +15,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
-
+#include "utils/fmgroids.h"
 #include "catalog/pg_cast.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_inherits_fn.h"
@@ -120,6 +120,50 @@ inline Oid get_valid_array_type(Oid elem_type)
  * ccontext, cformat - context indicators to control coercions
  * location - parse location of the coercion request, or -1 if unknown/implicit
  */
+
+static bool check_varchar_coerce(Node* node, Oid target_type_id, int32 target_typ_mod)
+{
+    if ((target_type_id != VARCHAROID && target_type_id != BPCHAROID)|| exprTypmod(node) != -1) {
+        return false;
+    }
+    if (!IsA(node, Const)) {
+        return false;
+    }
+    Const *con = (Const*)node;
+
+    if (con->constisnull) {
+        return false;
+    }
+    if (target_type_id == VARCHAROID) {
+        VarChar *source = DatumGetVarCharPP(con->constvalue);
+        int32 len;
+        int32 maxlen;
+        len = VARSIZE_ANY_EXHDR(source);
+        maxlen = target_typ_mod;
+        /*No work if typmod is invalid or supplied data fits it already*/
+        if (maxlen < 0 || len <= maxlen) {
+            return true;
+        }
+        return false;
+    } else if (target_type_id == BPCHAROID) {
+        BpChar *source = DatumGetBpCharPP(con->constvalue);
+        int32 len;
+        int32 maxlen = 0;
+        maxlen = target_typ_mod;
+        if (maxlen < (int32)VARHDRSZ) {
+            return true;
+        }
+        maxlen -= VARHDRSZ;
+        len = VARSIZE_ANY_EXHDR(source);
+        if (len == maxlen) {
+            return true;
+        }
+        return false;
+    } else {
+        return false;
+    }
+}
+
 Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid targettype, int32 targettypmod,
     CoercionContext ccontext, CoercionForm cformat, int location)
 {
@@ -151,14 +195,23 @@ Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid ta
      * well as a type coercion.  If we find ourselves adding both, force the
      * inner coercion node to implicit display form.
      */
-    result = coerce_type_typmod(result,
-        targettype,
-        targettypmod,
-        cformat,
-        location,
-        (cformat != COERCE_IMPLICIT_CAST),
-        (result != expr && !IsA(result, Const)));
-
+    if (u_sess->attr.attr_common.enable_iud_fusion && pstate
+        && !pstate->p_joinlist && pstate->p_expr_kind == EXPR_KIND_INSERT_TARGET && result != NULL
+        && check_varchar_coerce(result, targettype, targettypmod)) {
+        Const* cons = (Const*)result;
+        cons->consttypmod = DatumGetInt32((targettypmod));
+        cons->constcollid = InvalidOid;
+        cons->location = -1;
+        result = (Node*)cons;
+    } else {
+        result = coerce_type_typmod(result,
+            targettype,
+            targettypmod,
+            cformat,
+            location,
+            (cformat != COERCE_IMPLICIT_CAST),
+            (result != expr && !IsA(result, Const)));
+    }
 #ifdef PGXC
     /* Do not need to do that on local Coordinator */
     if (IsConnFromCoord())
@@ -2725,30 +2778,36 @@ CoercionPathType find_typmod_coercion_function(Oid typeId, Oid* funcid)
     *funcid = InvalidOid;
     result = COERCION_PATH_FUNC;
 
-    targetType = typeidType(typeId);
-    typeForm = (Form_pg_type)GETSTRUCT(targetType);
-
-    /* Check for a varlena array type */
-    if (typeForm->typelem != InvalidOid && typeForm->typlen == -1) {
-        /* Yes, switch our attention to the element type */
-        typeId = typeForm->typelem;
-        result = COERCION_PATH_ARRAYCOERCE;
+    switch (typeId) {
+        case BPCHAROID:
+            *funcid = F_BPCHAR;
+            break;
+        case VARCHAROID:
+            *funcid = F_VARCHAR;
+            break;
+        default:
+        {
+            targetType = typeidType(typeId);
+            typeForm = (Form_pg_type)GETSTRUCT(targetType);
+            /* Check for a varlena array type */
+            if (typeForm->typelem != InvalidOid && typeForm->typlen == -1) {
+                /* Yes, switch our attention to the element type */
+                typeId = typeForm->typelem;
+                result = COERCION_PATH_ARRAYCOERCE;
+            }
+            ReleaseSysCache(targetType);
+            /* Look in pg_cast */
+            tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(typeId), ObjectIdGetDatum(typeId));
+            if (HeapTupleIsValid(tuple)) {
+                Form_pg_cast castForm = (Form_pg_cast)GETSTRUCT(tuple);
+                *funcid = castForm->castfunc;
+                ReleaseSysCache(tuple);
+            }
+            if (!OidIsValid(*funcid)) {
+                result = COERCION_PATH_NONE;
+            }
+        }
     }
-    ReleaseSysCache(targetType);
-
-    /* Look in pg_cast */
-    tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(typeId), ObjectIdGetDatum(typeId));
-
-    if (HeapTupleIsValid(tuple)) {
-        Form_pg_cast castForm = (Form_pg_cast)GETSTRUCT(tuple);
-        *funcid = castForm->castfunc;
-        ReleaseSysCache(tuple);
-    }
-
-    if (!OidIsValid(*funcid)) {
-        result = COERCION_PATH_NONE;
-    }
-
     return result;
 }
 
