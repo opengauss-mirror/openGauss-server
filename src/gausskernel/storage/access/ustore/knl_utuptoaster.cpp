@@ -651,9 +651,9 @@ static Datum UHeapToastSaveDatum(Relation rel, Datum value, struct varlena *olde
     CommandId mycid = GetCurrentCommandId(true);
     struct varlena *result = NULL;
     struct varatt_external toastPointer;
-    struct {
+    union {
         struct varlena hdr;
-        char data[UTOAST_MAX_CHUNK_SIZE]; /* make struct big enough */
+        char data[UTOAST_MAX_CHUNK_SIZE + sizeof(struct varlena) + sizeof(int32)]; /* make struct big enough */
         int32 align_it;                   /* ensure struct is aligned well enough */
     } chunkData;
     int32 chunkSize;

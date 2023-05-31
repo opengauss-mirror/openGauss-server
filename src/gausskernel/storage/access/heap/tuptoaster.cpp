@@ -1491,9 +1491,9 @@ void toast_huge_concat_varlenas_internal(Relation toastrel, Relation toastidx, t
     struct varatt_external first_toast_pointer;
     char *data = NULL;
     int32 data_all;
-    struct {
+    union {
         struct varlena hdr;
-        char data[TOAST_MAX_CHUNK_SIZE]; /* make struct big enough */
+        char data[TOAST_MAX_CHUNK_SIZE + sizeof(struct varlena) + sizeof(int32)]; /* make struct big enough */
         int32 align_it;                  /* ensure struct is aligned well enough */
     } chunk_data;
     int32 chunk_size;
@@ -1605,9 +1605,9 @@ void toast_huge_fetch_and_append_datum(Relation toastrel, Relation toastidx, tex
     bool toast_isnull[3];
     char *data_all = NULL;
     int32 data_size;
-    struct {
+    union {
         struct varlena hdr;
-        char data[TOAST_MAX_CHUNK_SIZE]; /* make struct big enough */
+        char data[TOAST_MAX_CHUNK_SIZE + sizeof(struct varlena) + sizeof(int32)]; /* make struct big enough */
         int32 align_it;                  /* ensure struct is aligned well enough */
     } chunk_data;
     int32 chunk_size;
@@ -1967,9 +1967,9 @@ Datum toast_save_datum(Relation rel, Datum value, struct varlena *oldexternal, i
     CommandId mycid = GetCurrentCommandId(true);
     struct varlena *result = NULL;
     struct varatt_external toast_pointer;
-    struct {
+    union {
         struct varlena hdr;
-        char data[TOAST_MAX_CHUNK_SIZE]; /* make struct big enough */
+        char data[TOAST_MAX_CHUNK_SIZE + sizeof(struct varlena) + sizeof(int32)]; /* make struct big enough */
         int32 align_it;                  /* ensure struct is aligned well enough */
     } chunk_data;
     int32 chunk_size;

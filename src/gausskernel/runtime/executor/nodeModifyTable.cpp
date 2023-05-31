@@ -1949,9 +1949,9 @@ end:;
             HeapTupleData del_tuple;
             Buffer del_buffer;
 
-            struct {
+            union {
                 HeapTupleHeaderData hdr;
-                char data[MaxHeapTupleSize];
+                char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
             } tbuf;
             errno_t errorNo = EOK;
             errorNo = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));

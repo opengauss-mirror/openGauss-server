@@ -3063,9 +3063,9 @@ HeapTuple heap_lock_updated(CommandId cid, Relation relation, int lockmode, Item
     HeapTuple copyTuple = NULL;
     HeapTupleData tuple;
     SnapshotData SnapshotDirty;
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf;
     errno_t errorno = EOK;
     errorno = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
@@ -3523,9 +3523,9 @@ void EvalPlanQualFetchRowMarksUHeap(EPQState *epqstate)
 void EvalPlanQualFetchRowMarks(EPQState *epqstate)
 {
     ListCell *l = NULL;
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf;
     errno_t errorno = EOK;
     errorno = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
