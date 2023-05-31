@@ -301,7 +301,12 @@ function set_most_available_sync_helper() {
 }
 
 function switchover_to_primary() {
-  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode1
+  if [ $# -eq 0 ]; then
+    switchover_timeout=$gsctl_wait_time
+  else
+    switchover_timeout=$1
+  fi
+  gs_ctl switchover -w -t $switchover_timeout -D $data_dir/datanode1
   if [ $? -eq 0 ]; then
     echo "switchover to primary success!"
   else
@@ -311,7 +316,12 @@ function switchover_to_primary() {
 }
 
 function switchover_to_standby() {
-  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode1_standby
+  if [ $# -eq 0 ]; then
+    switchover_timeout=$gsctl_wait_time
+  else
+    switchover_timeout=$1
+  fi
+  gs_ctl switchover -w -t $switchover_timeout -D $data_dir/datanode1_standby
   if [ $? -eq 0 ]; then
     echo "switchover to standby1 success!"
   else
@@ -321,7 +331,12 @@ function switchover_to_standby() {
 }
 
 function switchover_to_standby2() {
-  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode2_standby
+  if [ $# -eq 0 ]; then
+    switchover_timeout=$gsctl_wait_time
+  else
+    switchover_timeout=$1
+  fi
+  gs_ctl switchover -w -t $switchover_timeout -D $data_dir/datanode2_standby
   if [ $? -eq 0 ]; then
     echo "switchover to standby2 success!"
   else
@@ -331,7 +346,12 @@ function switchover_to_standby2() {
 }
 
 function switchover_to_standby3() {
-  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode3_standby -f
+  if [ $# -eq 0 ]; then
+    switchover_timeout=$gsctl_wait_time
+  else
+    switchover_timeout=$1
+  fi
+  gs_ctl switchover -w -t $switchover_timeout -D $data_dir/datanode3_standby -f
   if [ $? -eq 0 ]; then
     echo "switchover to standby3 success!"
   else
@@ -341,7 +361,12 @@ function switchover_to_standby3() {
 }
 
 function switchover_to_standby4() {
-  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode4_standby -f
+  if [ $# -eq 0 ]; then
+    switchover_timeout=$gsctl_wait_time
+  else
+    switchover_timeout=$1
+  fi
+  gs_ctl switchover -w -t $switchover_timeout -D $data_dir/datanode4_standby -f
   if [ $? -eq 0 ]; then
     echo "switchover to standby4 success!"
   else
@@ -349,7 +374,6 @@ function switchover_to_standby4() {
     exit 1
   fi
 }
-
 
 function failover_to_primary() {
   gs_ctl failover -w -t $gsctl_wait_time -D $data_dir/datanode1
@@ -489,7 +513,12 @@ function failover_to_cascade_standby() {
   fi
 }
 function switchover_to_cascade_standby() {
-  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode2_standby
+  if [ $# -eq 0 ]; then
+    switchover_timeout=$gsctl_wait_time
+  else
+    switchover_timeout=$1
+  fi
+  gs_ctl switchover -w -t $switchover_timeout -D $data_dir/datanode2_standby
   if [ $? -eq 0 ]; then
     echo "switchover to cascade standby success!"
   else
@@ -497,6 +526,7 @@ function switchover_to_cascade_standby() {
     exit 1
   fi
 }
+
 function check_cascade_detailed_instance(){
   sleep 2
   #date
