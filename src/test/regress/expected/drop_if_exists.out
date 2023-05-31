@@ -233,3 +233,8 @@ ERROR:  table "test_exists" does not exist
 -- drop the database
 DROP DATABASE if exists abc123_123ABCxar;
 NOTICE:  database "abc123_123abcxar" does not exist, skipping
+-- drop extension
+drop extension file_fdw;
+ERROR:  EXTENSION file_fdw does not allow to drop.
+drop extension file_fdw cascade;
+ERROR:  EXTENSION file_fdw does not allow to drop.
