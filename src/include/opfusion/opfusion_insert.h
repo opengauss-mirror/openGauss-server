@@ -40,9 +40,14 @@ public:
     void InitGlobals();
 
     void refreshParameterIfNecessary();
+
+    virtual bool ResetReuseFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params);
+
 private:
 
     unsigned long ExecInsert(Relation rel, ResultRelInfo* resultRelInfo);
+
+    void InitBaseParam(List* targetList);
 
     struct InsertFusionGlobalVariable {
         /* for func/op expr calculation */

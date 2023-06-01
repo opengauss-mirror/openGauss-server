@@ -2413,6 +2413,10 @@ typedef struct knl_u_dolphin_errdata_context {
     int max_error_count;
 } knl_u_dolphin_errdata_context;
 
+typedef struct knl_u_opfusion_reuse_context {
+    void *opfusionObj;                /* Opfusion cache Object */
+} knl_u_opfusion_reuse_context;
+
 typedef struct knl_u_catalog_context {
     bool nulls[4];
     struct PartitionIdentifier* route;
@@ -2906,6 +2910,8 @@ typedef struct knl_session_context {
 
     knl_u_rep_origin_context reporigin_cxt;
     knl_u_dolphin_errdata_context dolphin_errdata_ctx;
+
+    knl_u_opfusion_reuse_context opfusion_reuse_ctx;
 
     /*
      * Initialize context which records time for client connection establish.

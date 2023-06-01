@@ -293,6 +293,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_nvm                                       | bool    |      |           | 
  enable_online_ddl_waitlock                       | bool    |      |           | 
  enable_opfusion                                  | bool    |      |           | 
+ enable_opfusion_reuse                            | bool    |      |           | 
  enable_orc_cache                                 | bool    |      |           | 
  enable_page_lsn_check                            | bool    |      |           | 
  enable_partition_opfusion                        | bool    |      |           | 

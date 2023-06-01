@@ -244,7 +244,7 @@ typedef struct knl_session_attr_sql {
     char* db4ai_snapshot_version_separator;
     int pldebugger_timeout;
     bool partition_page_estimation;
-
+    bool enable_opfusion_reuse;
 #ifndef ENABLE_MULTIPLE_NODES
     bool uppercase_attribute_name;
 #endif
