@@ -8818,20 +8818,16 @@ uint32 getDistSessionKey(List* fdw_private)
     uint32 distSessionKey = 0;
 
     foreach (lc, fdw_private) {
-#ifdef ENABLE_MOT
         /*
-         * MOT FDW may put a node of any type into the list, so if we are looking for
+         * FDW may put a node of any type into the list, so if we are looking for
          * some specific type, we need to first make sure that it's the correct type.
          */
         Node* node = (Node*)lfirst(lc);
         if (IsA(node, DefElem)) {
-#endif
             DefElem* defElem = (DefElem*)lfirst(lc);
             if (strcmp("session_key", defElem->defname) == 0)
                 distSessionKey = intVal(defElem->arg);
-#ifdef ENABLE_MOT
         }
-#endif
     }
 
     return distSessionKey;
