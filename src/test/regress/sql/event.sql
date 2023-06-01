@@ -370,6 +370,96 @@ drop user if exists event_se_b cascade;
 drop user if exists event_se_c cascade;
 drop user if exists event_se_d cascade;
 
+--test privilege
+drop user if exists priv_a cascade;
+drop user if exists priv_b cascade;
+drop user if exists priv_c cascade;
+
+create user priv_a password 'event_123';
+create user priv_b with sysadmin password 'event_123';
+create user priv_c password 'event_123';
+
+--test CREATE
+set role priv_a password 'event_123';
+drop event if exists priv_e_a;
+--fail Non-administrator users do not have the permission
+create event priv_b.priv_e_a on schedule at sysdate disable do select 1;
+
+\c event_b
+grant create on schema priv_b to priv_a;
+set role priv_a password 'event_123';
+--success
+create event priv_b.priv_e_a on schedule at sysdate disable do select 1;
+drop event if exists priv_e_a;
+
+set role priv_b password 'event_123';
+--success
+drop event if exists priv_e_b;
+create event priv_a.priv_e_b on schedule at sysdate disable do select 1;
+drop event if exists priv_e_b;
+
+\c event_b
+revoke all on schema priv_b from priv_a;
+
+--test ALTER
+set role priv_a password 'event_123';
+drop event if exists priv_e_a;
+create event priv_a.priv_e_a on schedule at sysdate disable do select 1;
+
+--fail Non-administrator users do not have the permission
+set role priv_c password 'event_123';
+alter event priv_a.priv_e_a do select 2;
+
+\c event_b
+grant usage on schema priv_a to priv_c;
+set role priv_c password 'event_123';
+--fail only owner and sysadmin user have the permission
+alter event priv_a.priv_e_a do select 2;
+\c event_b
+alter definer = priv_c event priv_a.priv_e_a;
+set role priv_c password 'event_123';
+--success
+alter event priv_a.priv_e_a do select 2;
+drop event if exists priv_e_a;
+
+set role priv_a password 'event_123';
+drop event if exists priv_e_a;
+create event priv_a.priv_e_a on schedule at sysdate disable do select 1;
+set role priv_b password 'event_123';
+--success
+alter event priv_a.priv_e_a do select 2;
+drop event if exists priv_e_a;
+revoke all on schema priv_a from priv_c;
+
+--test DROP
+set role priv_a password 'event_123';
+drop event if exists priv_e_a;
+create event priv_a.priv_e_a on schedule at sysdate disable do select 1;
+
+set role priv_c password 'event_123';
+--fail Non-administrator users do not have the permission
+drop event if exists priv_e_a;
+
+\c event_b
+grant usage on schema priv_a to priv_c;
+set role priv_c password 'event_123';
+--fail only owner and sysadmin user have the permission
+drop event if exists priv_e_a;
+
+--success
+set role priv_a password 'event_123';
+drop event if exists priv_e_a;
+create event priv_a.priv_e_a on schedule at sysdate disable do select 1;
+
+set role priv_b password 'event_123';
+--success
+drop event if exists priv_e_a;
+
+\c event_b
+drop user if exists priv_a cascade;
+drop user if exists priv_b cascade;
+drop user if exists priv_c cascade;
+
 --test sql help
 \h CREATE EVENT
 \h ALTER EVENT

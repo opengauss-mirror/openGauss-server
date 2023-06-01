@@ -15486,9 +15486,9 @@ preserve_opt:   ON COMPLETION PRESERVE
                                 | /*EMPTY*/                     { $$ = NULL; }
                         ;
 
-rename_opt:		RENAME TO qualified_name
+rename_opt:		RENAME TO name
 				{
-					$$ = makeDefElem("rename", (Node *)$3);
+					$$ = makeDefElem("rename", (Node *)makeString($3));
 				}
 				| /*EMPTY*/			{ $$ = NULL; }
 			;
