@@ -29,7 +29,6 @@
 #define REFORM_CTRL_PAGE  DMS_MAX_INSTANCE
 
 #define RECOVERY_WAIT_TIME 10000
-#define SSFAILOVER_TRIGGER (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.failover_triggered == true)
 #define SS_BEFORE_RECOVERY (ENABLE_DMS && g_instance.dms_cxt.SSReformInfo.in_reform == true \
                             && g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag == true)
 #define SS_IN_FAILOVER (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_failover == true)
@@ -43,11 +42,18 @@ typedef struct st_reformer_ctrl {
 typedef struct st_reform_info {
     bool in_reform;
     dms_role_t dms_role;
+    SSReformType reform_type;
 } ss_reform_info_t;
+
+typedef enum st_failover_ckpt_status {
+    NOT_ACTIVE = 0,
+    NOT_ALLOW_CKPT,
+    ALLOW_CKPT
+} failover_ckpt_status_t;
 
 typedef struct ss_recovery_info {
     bool recovery_pause_flag;
-    volatile bool failover_triggered;
+    volatile failover_ckpt_status_t failover_ckpt_status;
     char recovery_xlogDir[MAXPGPATH];
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;
@@ -69,7 +75,6 @@ extern void SSReadControlFile(int id, bool updateDmsCtx = false);
 extern void SSWriteReformerControlPages(void);
 extern bool SSRecoveryApplyDelay();
 extern void SShandle_promote_signal();
-extern void SSTriggerFailover();
 extern void ss_failover_dw_init();
 extern void ss_switchover_promoting_dw_init();
 
