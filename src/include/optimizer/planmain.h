@@ -79,9 +79,12 @@ extern Sort* make_sort_from_pathkeys(
     PlannerInfo* root, Plan* lefttree, List* pathkeys, double limit_tuples, bool can_parallel = false);
 extern Sort* make_sort_from_sortclauses(PlannerInfo* root, List* sortcls, Plan* lefttree);
 extern Sort* make_sort_from_groupcols(PlannerInfo* root, List* groupcls, AttrNumber* grpColIdx, Plan* lefttree);
+extern SortGroup* make_sort_group_from_groupcols(PlannerInfo* root, List* groupcls, AttrNumber* grpColIdx, Plan* lefttree, double dNumGroup);
 extern Sort* make_sort_from_targetlist(PlannerInfo* root, Plan* lefttree, double limit_tuples);
 extern Sort* make_sort(PlannerInfo* root, Plan* lefttree, int numCols, AttrNumber* sortColIdx, Oid* sortOperators,
     Oid* collations, bool* nullsFirst, double limit_tuples);
+extern SortGroup* make_sortgroup(PlannerInfo* root, Plan* lefttree, int numCols, AttrNumber* sortColIdx, Oid* sortOperators,
+    Oid* collations, bool* nullsFirst, double dNumGroup);
 extern Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrategy,
     const AggClauseCosts* aggcosts, int numGroupCols, AttrNumber* grpColIdx, Oid* grpOperators, Oid* grp_collations,
     long numGroups, Plan* lefttree, WindowLists* wflists, bool need_stream, bool trans_agg, List* groupingSets = NIL,
