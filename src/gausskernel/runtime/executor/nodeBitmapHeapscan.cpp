@@ -1304,49 +1304,67 @@ void BitmapHeapPrefetchNext(
     ADIO_ELSE()
     {
         /* prefetch next synchronously */
-        HBktTblScanDesc hpscan = NULL;
-        Oid oldOid = GPIGetCurrPartOid(node->gpi_scan);
-        int2 oldBktId = cbi_get_current_bucketid(node->cbi_scan);
-        Relation oldheap = NULL;
-        
-        while (node->prefetch_pages < node->prefetch_target) {
-            TBMIterateResult* tbmpre = tbm_iterate(*prefetch_iterator);
-            Relation prefetchRel = scan->rs_rd;
-            hpscan = (tbm_is_crossbucket(node->tbm) ? (HBktTblScanDesc)node->ss.ss_currentScanDesc : NULL);
+        if (unlikely(tbm_is_crossbucket(tbm) || tbm_is_global(tbm))) {
+            HBktTblScanDesc hpscan = NULL;
+            Oid oldOid = GPIGetCurrPartOid(node->gpi_scan);
+            int2 oldBktId = cbi_get_current_bucketid(node->cbi_scan);
+            Relation oldheap = NULL;
+            
+            while (node->prefetch_pages < node->prefetch_target) {
+                TBMIterateResult* tbmpre = tbm_iterate(*prefetch_iterator);
+                Relation prefetchRel = scan->rs_rd;
+                hpscan = (tbm_is_crossbucket(node->tbm) ? (HBktTblScanDesc)node->ss.ss_currentScanDesc : NULL);
 
-            if (tbmpre == NULL) {
-                /* No more pages to prefetch */
-                tbm_end_iterate(*prefetch_iterator);
-                node->prefetch_iterator = *prefetch_iterator = NULL;
-                break;
+                if (tbmpre == NULL) {
+                    /* No more pages to prefetch */
+                    tbm_end_iterate(*prefetch_iterator);
+                    node->prefetch_iterator = *prefetch_iterator = NULL;
+                    break;
+                }
+                node->prefetch_pages++;
+
+                prefetchRel = BitmapHeapPrefetchNextTargetHeap(node, tbmpre, prefetchRel);
+                if (prefetchRel == NULL) {
+                    tbmpre = NULL;
+                    continue;
+                }
+
+                /* For posix_fadvise() we just send the one request */
+                PrefetchBuffer(prefetchRel, MAIN_FORKNUM, tbmpre->blockno);
+                if (RelationIsValid(oldheap) && oldheap != prefetchRel && PointerIsValid(hpscan) &&
+                    oldheap != hpscan->currBktRel) {
+                    /* release previous bucket fake relation except the current scanning one */
+                    bucketCloseRelation(oldheap);
+                    /* now oldheap is NULL */
+                }
+                oldheap = prefetchRel;
             }
-            node->prefetch_pages++;
 
-            prefetchRel = BitmapHeapPrefetchNextTargetHeap(node, tbmpre, prefetchRel);
-            if (prefetchRel == NULL) {
-                tbmpre = NULL;
-                continue;
-            }
-
-            /* For posix_fadvise() we just send the one request */
-            PrefetchBuffer(prefetchRel, MAIN_FORKNUM, tbmpre->blockno);
-            if (RelationIsValid(oldheap) && oldheap != prefetchRel && PointerIsValid(hpscan) &&
-                oldheap != hpscan->currBktRel) {
+            if (RelationIsValid(oldheap) && PointerIsValid(hpscan) && oldheap != hpscan->currBktRel) {
                 /* release previous bucket fake relation except the current scanning one */
                 bucketCloseRelation(oldheap);
-                /* now oldheap is NULL */
             }
-            oldheap = prefetchRel;
-        }
 
-        if (RelationIsValid(oldheap) && PointerIsValid(hpscan) && oldheap != hpscan->currBktRel) {
-            /* release previous bucket fake relation except the current scanning one */
-            bucketCloseRelation(oldheap);
-        }
+            /* recover old oid after prefetch switch */
+            GPISetCurrPartOid(node->gpi_scan, oldOid);
+            cbi_set_bucketid(node->cbi_scan, oldBktId);
+        } else {
+            while (node->prefetch_pages < node->prefetch_target) {
+                TBMIterateResult* tbmpre = tbm_iterate(*prefetch_iterator);
+                Relation prefetchRel = scan->rs_rd;
 
-        /* recover old oid after prefetch switch */
-        GPISetCurrPartOid(node->gpi_scan, oldOid);
-        cbi_set_bucketid(node->cbi_scan, oldBktId);
+                if (tbmpre == NULL) {
+                    /* No more pages to prefetch */
+                    tbm_end_iterate(*prefetch_iterator);
+                    node->prefetch_iterator = *prefetch_iterator = NULL;
+                    break;
+                }
+                node->prefetch_pages++;
+
+                /* For posix_fadvise() we just send the one request */
+                PrefetchBuffer(prefetchRel, MAIN_FORKNUM, tbmpre->blockno);
+            }
+        }
     }
     ADIO_END();
 }
