@@ -3431,7 +3431,10 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                  *
                  * We don't want any excess columns for hashagg, since we support hashagg write-out-to-disk now
                  */
-                if (use_hashed_grouping)
+                if (use_hashed_grouping || 
+                    (u_sess->attr.attr_sql.enable_vector_engine && 
+                     u_sess->attr.attr_sql.vectorEngineStrategy != OFF_VECTOR_ENGINE && 
+                     u_sess->attr.attr_sql.enable_vector_targetlist))
                     disuse_physical_tlist(result_plan, best_path);
 
                 locate_grouping_columns(root, tlist, result_plan->targetlist, groupColIdx);

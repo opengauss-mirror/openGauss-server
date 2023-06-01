@@ -4860,7 +4860,10 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
     disuse_physical_tlist(inner_plan, best_path->jpath.innerjoinpath);
 
     /* If we expect batching, suppress excess columns in outer tuples too */
-    if (best_path->num_batches > 1)
+    if (best_path->num_batches > 1 ||
+        (u_sess->attr.attr_sql.enable_vector_engine && 
+         u_sess->attr.attr_sql.vectorEngineStrategy != OFF_VECTOR_ENGINE && 
+         u_sess->attr.attr_sql.enable_vector_targetlist))
         disuse_physical_tlist(outer_plan, best_path->jpath.outerjoinpath);
 
     /*
