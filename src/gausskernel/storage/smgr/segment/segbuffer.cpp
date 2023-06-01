@@ -50,7 +50,7 @@ static const int TEN_MICROSECOND = 10;
 
 static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state);
 
-extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool create, bool do_move);
+extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool do_move);
 extern void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref);
 
 void SetInProgressFlags(BufferDesc *bufDesc, bool input)
@@ -188,13 +188,16 @@ bool SegPinBuffer(BufferDesc *buf)
     
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
+    Buffer b = BufferDescriptorGetBuffer(buf);
     bool result;
-    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true, true);
-    SegmentCheck(ref != NULL);
+    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(b, true);
 
-    if (ref->refcount == 0) {
+    if (ref == NULL) {
         uint32 buf_state;
         uint32 old_buf_state = pg_atomic_read_u32(&buf->state);
+
+        ReservePrivateRefCountEntry();
+        ref = NewPrivateRefCountEntry(b);
 
         for (;;) {
             if (old_buf_state & BM_LOCKED) {
@@ -213,7 +216,7 @@ bool SegPinBuffer(BufferDesc *buf)
     }
 
     ref->refcount++;
-    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf));
+    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, b);
 
     return result;
 }
@@ -224,20 +227,27 @@ static bool SegPinBufferLocked(BufferDesc *buf, const BufferTag *tag)
                      errmsg("[SegPinBufferLocked] (%u %u %u %d) %d %u ", tag->rnode.spcNode, tag->rnode.dbNode,
                             tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
     SegmentCheck(BufHdrLocked(buf));
-    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true, true);
-    SegmentCheck(ref != NULL);
+    Buffer b;
+    PrivateRefCountEntry *ref = NULL;
+
+    /*
+     * As explained, We don't expect any preexisting pins. That allows us to
+     * manipulate the PrivateRefCount after releasing the spinlock
+     */
+    Assert(GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), false) == NULL);
 
     uint32 buf_state = pg_atomic_read_u32(&buf->state);
-
-    if (ref->refcount == 0) {
-        buf_state += BUF_REFCOUNT_ONE;
-    }
+    Assert(buf_state & BM_LOCKED);
+    buf_state += BUF_REFCOUNT_ONE;
     UnlockBufHdr(buf, buf_state);
 
+    b = BufferDescriptorGetBuffer(buf);
+
+    ref = NewPrivateRefCountEntry(b);
     ref->refcount++;
 
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
-    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf));
+    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, b);
 
     return buf_state & BM_VALID;
 }
@@ -247,7 +257,7 @@ void SegUnpinBuffer(BufferDesc *buf)
     ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
                      errmsg("[SegUnpinBuffer] (%u %u %u %d) %d %u ", buf->tag.rnode.spcNode, buf->tag.rnode.dbNode,
                             buf->tag.rnode.relNode, buf->tag.rnode.bucketNode, buf->tag.forkNum, buf->tag.blockNum)));
-    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true, true);
+    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true);
     SegmentCheck(ref != NULL);
 
     ResourceOwnerForgetBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf));
@@ -729,6 +739,8 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
     LWLockRelease(new_partition_lock);
 
     for (;;) {
+        ReservePrivateRefCountEntry();
+
         buf = SegStrategyGetBuffer(&buf_state);
         SegmentCheck(BUF_STATE_GET_REFCOUNT(buf_state) == 0);
 
