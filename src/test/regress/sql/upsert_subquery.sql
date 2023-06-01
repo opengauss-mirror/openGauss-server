@@ -118,15 +118,23 @@ insert into aa values(2,2,2,2) on duplicate key update a2 = (select h1 from hh w
 explain (costs off, verbose) insert into aa values(2,3,3,3) on duplicate key update a2 = (select h1 from hh where h1 = 20);          -- upsert not support bypass, so subquery is not a bypass, too.
 set query_dop = 2;
 explain (costs off, verbose) select count(*) from hh;                                                                                -- should be a smp query
+set enable_seqscan_dopcost = off;
+explain (costs off, verbose) select count(*) from hh;                                                                                -- should not be a smp query
 insert into aa values(3,3,3,3) on duplicate key update a2 = (select count(*) from hh);                                               -- suc
 explain (costs off, verbose) insert into aa values(3,3,3,3) on duplicate key update a2 = (select count(*) from hh);                  -- subquery is not execute by smp, but there still is a two-level agg.
 
+explain (costs off, verbose) select 4,count(*), 4, 4 from hh;                                                                        -- should not be a smp query
+set enable_seqscan_dopcost = on;
 explain (costs off, verbose) select 4,count(*), 4, 4 from hh;                                                                        -- should be a smp query
 insert into aa select 4,count(*), 4, 4 from hh on duplicate key update a2 = (select count(*) from hh);                               -- suc
 explain (costs off, verbose) insert into aa select 4,count(*), 4, 4 from hh on duplicate key update a2 = (select count(*) from hh);  -- insert-part is a smp plan, but update-part not
+set enable_seqscan_dopcost = off;
+explain (costs off, verbose) insert into aa select 4,count(*), 4, 4 from hh on duplicate key update a2 = (select count(*) from hh);  -- neither insert-part is a smp plan, nor update-part
 
 prepare sub4 as insert into aa select $1, count(*), 4, 4 from hh on duplicate key update a2 =(select count(*) + $1 from hh);
 execute sub4(1);                                                                                                                     -- suc
+explain (costs off, verbose) execute sub4(1);                                                                                        -- insert-part is a smp plan, but update-part not
+set enable_seqscan_dopcost = on;
 explain (costs off, verbose) execute sub4(1);                                                                                        -- insert-part is a smp plan, but update-part not
 
 set query_dop = 1;

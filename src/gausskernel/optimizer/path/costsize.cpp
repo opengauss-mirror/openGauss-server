@@ -668,7 +668,10 @@ void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathI
      * wiil be equal division to all parallelism thread.
      */
     run_cost += u_sess->opt_cxt.smp_thread_cost * (dop - 1);
-    run_cost += spc_seq_page_cost * baserel->pages / dop;
+    if (u_sess->attr.attr_sql.enable_seqscan_dopcost)
+        run_cost += spc_seq_page_cost * baserel->pages / dop;
+    else
+        run_cost += spc_seq_page_cost * baserel->pages;
     cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
     run_cost += cpu_per_tuple * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples) / dop;
     double cpu_run_cost = 0;

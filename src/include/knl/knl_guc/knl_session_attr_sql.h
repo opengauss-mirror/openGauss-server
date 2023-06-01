@@ -58,6 +58,7 @@ typedef struct knl_session_attr_sql {
     bool enable_csqual_pushdown;
     bool enable_change_hjcost;
     bool enable_seqscan;
+    bool enable_seqscan_dopcost;
     bool enable_indexscan;
     bool enable_indexonlyscan;
     bool enable_bitmapscan;
