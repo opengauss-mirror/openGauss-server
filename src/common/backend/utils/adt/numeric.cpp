@@ -19266,6 +19266,23 @@ int64 convert_short_numeric_to_int64_byscale(_in_ Numeric n, _in_ int scale)
     return (int64)result;
 }
 
+int64 convert_short_numeric_to_int64_byscale_fast(NumericVar *numVar)
+{
+    int128 result = 0;
+    int ascale = (numVar->ndigits > 0) ? (numVar->ndigits - numVar->weight - 1) : 0;
+    int scaleDiff = numVar->dscale - ascale * DEC_DIGITS;
+
+    encode_digits(result, numVar->digits, numVar->ndigits);
+
+    /* adjust scale */
+    result = (scaleDiff > 0) ? (result * ScaleMultipler[scaleDiff]) : (result / ScaleMultipler[-scaleDiff]);
+    /* get the result by sign */
+    result = (NUMERIC_POS == numVar->sign) ? result : -result;
+    Assert(INT128_INT64_EQ(result));
+
+    return (int64)result;
+}
+
 /*
  * n: ndigits
  * w: weight
@@ -19357,6 +19374,47 @@ void convert_short_numeric_to_int128_byscale(_in_ Numeric n, _in_ int dscale, _o
     result = (NUMERIC_POS == NUMERIC_SIGN(n)) ? result : -result;
 }
 
+void convert_short_numeric_to_int128_byscale_fast(NumericVar *numVar, int128& result)
+{
+    bool special_do = false;
+
+    /* ndigits is 0, result is 0, return directly */
+    result = 0;
+    if (0 == numVar->ndigits) {
+        return;
+    }
+
+    int remainder = numVar->dscale % DEC_DIGITS;
+    int ascale = numVar->ndigits - (numVar->weight + 1);
+    int end_index = numVar->ndigits;
+    int diff_scale = 0;
+    Assert(numVar->ndigits >= 0);
+
+    if (ascale > 0 && remainder != 0 && (numVar->dscale / DEC_DIGITS + 1) == ascale) {
+        special_do = true;
+        --end_index;
+    }
+
+    /* step1. get all valid digitals to result */
+    for (int i = 0; i < end_index; i++)
+        result += (numVar->digits[i] * getScaleMultiplier((end_index - 1 - i) * DEC_DIGITS));
+
+    if (special_do) {
+        result = (result * getScaleMultiplier(remainder)) +
+                 (numVar->digits[numVar->ndigits - 1] / getScaleMultiplier(DEC_DIGITS - remainder));
+        /* step2. get diff_scale by dscale and ascale */
+        diff_scale = numVar->dscale - (ascale - 1) * 4 - numVar->dscale % 4;
+    } else {
+        /* step2. get diff_scale by dscale and ascale */
+        diff_scale = numVar->dscale - ascale * 4;
+    }
+
+    /* step3. adjust result by diff_scale */
+    result *= getScaleMultiplier(diff_scale);
+
+    result = (NUMERIC_POS == numVar->sign) ? result : -result;
+}
+
 /*
  * vscale is from orc file, and dscale is from gaussdb
  */
@@ -19441,9 +19499,68 @@ Datum try_convert_numeric_normal_to_fast(Datum value, ScalarVector *arr)
     } else if (CAN_CONVERT_BI128(whole_scale)) {
         int128 result = 0;
         convert_short_numeric_to_int128_byscale(val, numVar.dscale, result);
-        return makeNumeric128(result, numVar.dscale);
+        return makeNumeric128(result, numVar.dscale, arr);
     } else
         return NumericGetDatum(val);
+}
+
+Datum try_direct_convert_numeric_normal_to_fast(Datum value, ScalarVector *arr)
+{
+    Numeric val = NULL;
+    struct varlena* attr = (struct varlena*)value;
+    union NumericChoice* choice;
+    NumericVar numVar;
+
+    if (u_sess->attr.attr_sql.enable_fast_numeric == false)
+        return NumericGetDatum(DatumGetNumeric(value));
+
+    if (VARATT_IS_EXTENDED(attr)) {
+        if (VARATT_IS_SHORT(attr) && !VARATT_IS_HUGE_TOAST_POINTER(attr)) {
+            choice = (union NumericChoice*)VARDATA_SHORT(attr);
+
+            if (NUMERIC_IS_NANORBI_CHOICE(choice))
+                return NumericGetDatum(DatumGetNumeric(value));
+
+            numVar.ndigits = ((VARSIZE_SHORT(attr) - NUMERIC_HEADER_SIZE_CHOICE_1B(choice)) / sizeof(NumericDigit));
+            numVar.weight = NUMERIC_WEIGHT_CHOICE(choice);
+            numVar.sign = NUMERIC_SIGN_CHOICE(choice);
+            numVar.dscale = NUMERIC_DSCALE_CHOICE(choice);
+            numVar.digits = NUMERIC_DIGITS_CHOICE(choice);
+        }
+        else {
+            val = DatumGetNumeric(value);
+
+            if (NUMERIC_IS_NANORBI(val))
+                return NumericGetDatum(val);
+
+            init_var_from_num(val, &numVar);
+        }
+    }
+    else {
+        val = (Numeric)value;
+
+        if (NUMERIC_IS_NANORBI(val))
+            return NumericGetDatum(val);
+
+        init_var_from_num(val, &numVar);
+    }
+
+    int whole_scale = get_whole_scale(numVar);
+
+    // should be ( whole_scale <= MAXINT64DIGIT)
+    if (CAN_CONVERT_BI64(whole_scale)) {
+        int64 result = convert_short_numeric_to_int64_byscale_fast(&numVar);
+        return makeNumeric64(result, numVar.dscale, arr);
+    } else if (CAN_CONVERT_BI128(whole_scale)) {
+        int128 result = 0;
+        convert_short_numeric_to_int128_byscale_fast(&numVar, result);
+        return makeNumeric128(result, numVar.dscale, arr);
+    } else {
+        if (val)
+            return NumericGetDatum(val);
+        else
+            return NumericGetDatum(DatumGetNumeric(value));
+    }   
 }
 
 /*

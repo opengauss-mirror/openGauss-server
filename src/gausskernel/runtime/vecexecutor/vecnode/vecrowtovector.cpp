@@ -85,15 +85,19 @@ bool VectorizeOneTuple(_in_ VectorBatch* pBatch, _in_ TupleTableSlot* slot, _in_
                     pBatch->m_arr[i].AddVar(slot->tts_values[i], j);
                     break;
                 case -1: {
-                    Datum v = PointerGetDatum(PG_DETOAST_DATUM(slot->tts_values[i]));
-                    /* if numeric cloumn, try to convert numeric to big integer */
                     if (attr->atttypid == NUMERICOID) {
-                        v = try_convert_numeric_normal_to_fast(v);
+                        ScalarVector* pVector = &pBatch->m_arr[i];
+                        Datum v = PointerGetDatum(slot->tts_values[i]);
+                        /* if numeric cloumn, try to convert numeric to big integer */
+                        pVector->m_vals[j] = try_direct_convert_numeric_normal_to_fast(v, pVector);
                     }
-                    pBatch->m_arr[i].AddVar(v, j);
-                    /* because new memory may be created, so we have to check and free in time. */
-                    if (DatumGetPointer(slot->tts_values[i]) != DatumGetPointer(v)) {
-                        pfree(DatumGetPointer(v));
+                    else {
+                        Datum v = PointerGetDatum(PG_DETOAST_DATUM(slot->tts_values[i]));
+                        pBatch->m_arr[i].AddVar(v, j);
+                        /* because new memory may be created, so we have to check and free in time. */
+                        if (DatumGetPointer(slot->tts_values[i]) != DatumGetPointer(v)) {
+                            pfree(DatumGetPointer(v));
+                        }
                     }
                     break;
                 }
@@ -184,22 +188,30 @@ static void TransformScalarVector(Form_pg_attribute attr, ScalarVector* pVector,
             FillVector<hasNull>(pVector, rows);
             break;
         case -1:
-            for (i = 0; i < rows; i++) {
-                if (hasNull && unlikely(IS_NULL(pVector->m_flag[i]))) {
-                    continue;
-                }
+            if (attr->atttypid == NUMERICOID) {
+                for (i = 0; i < rows; i++) {
+                    if (hasNull && unlikely(IS_NULL(pVector->m_flag[i]))) {
+                        continue;
+                    }
 
-                v0 = pVector->m_vals[i];
-                v = PointerGetDatum(DetoastDatumBatch((struct varlena *)DatumGetPointer(v0), pVector));
-                /* if numeric cloumn, try to convert numeric to big integer */
-                if (attr->atttypid == NUMERICOID) {
-                    v = try_convert_numeric_normal_to_fast(v, pVector);
+                    v = pVector->m_vals[i];
+                    /* if numeric cloumn, try to convert numeric to big integer */
+                    pVector->m_vals[i] = try_direct_convert_numeric_normal_to_fast(v, pVector);
                 }
+            }
+            else {
+                for (i = 0; i < rows; i++) {
+                    if (hasNull && unlikely(IS_NULL(pVector->m_flag[i]))) {
+                        continue;
+                    }
 
-                if (v == v0) {
-                    pVector->AddVar(v0, i);
-                } else {
-                    pVector->m_vals[i] = v;
+                    v0 = pVector->m_vals[i];
+                    v = PointerGetDatum(DetoastDatumBatch((struct varlena *)DatumGetPointer(v0), pVector));
+                    if (v == v0) {
+                        pVector->AddVar(v0, i);
+                    } else {
+                        pVector->m_vals[i] = v;
+                    }
                 }
             }
             break;
