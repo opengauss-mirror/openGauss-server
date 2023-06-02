@@ -70,6 +70,7 @@ typedef struct ss_recovery_info {
 } ss_recovery_info_t;
 
 extern bool SSRecoveryNodes();
+extern void SSWaitStartupExit();
 extern int SSGetPrimaryInstId();
 extern void SSSavePrimaryInstId(int id);
 extern void SSReadControlFile(int id, bool updateDmsCtx = false);

@@ -1449,6 +1449,7 @@ static int CBFlushCopy(void *db_handle, char *pageid)
      */
     if (BufferIsInvalid(buffer)) {
         if (dms_reform_failed()) {
+            SSWaitStartupExit();
             return GS_ERROR;
         } else {
             Assert(0);
@@ -1457,6 +1458,11 @@ static int CBFlushCopy(void *db_handle, char *pageid)
 
     Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
     LockBuffer(buffer, BUFFER_LOCK_SHARE);
+    if (t_thrd.dms_cxt.flush_copy_get_page_failed) {
+        t_thrd.dms_cxt.flush_copy_get_page_failed = false;
+        SSWaitStartupExit();
+        return GS_ERROR;
+    }
     BufferDesc* buf_desc = GetBufferDescriptor(buffer - 1);
     XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
     if (XLByteLT(g_instance.dms_cxt.ckptRedo, pagelsn)) {

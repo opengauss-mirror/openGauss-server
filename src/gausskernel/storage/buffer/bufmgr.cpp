@@ -5913,6 +5913,11 @@ retry:
             
             LWLockRelease(buf->content_lock);
 
+            if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                t_thrd.dms_cxt.flush_copy_get_page_failed = true;
+                return;
+            }
+
             if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
                 g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request = true;
             }
