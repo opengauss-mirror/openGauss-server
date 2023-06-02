@@ -861,10 +861,6 @@ Tuple NdpScanGetTuple(TableScanDesc sscan, ScanDirection dir, TupleTableSlot* sl
     }
     PG_CATCH();
     {
-        // wait all callback return
-        while (pg_atomic_read_u32(&ndpScan->reqCount) != pg_atomic_read_u32(&ndpScan->respCount)) {
-            pg_usleep(NDP_RPC_WAIT_USEC);
-        }
         delete ndpScan;
         sscan->ndp_ctx = nullptr;
         PG_RE_THROW();

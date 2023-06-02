@@ -374,6 +374,10 @@ NdpRetCode NdpScanDescData::Init(ScanState* sstate, TableScanDesc sscan)
 
 NdpScanDescData::~NdpScanDescData()
 {
+    // wait all callback return
+    while (pg_atomic_read_u32(&reqCount) != pg_atomic_read_u32(&respCount)) {
+        pg_usleep(NDP_RPC_WAIT_USEC);
+    }
 #ifdef NDP_ASYNC_RPC
     if (respIO) {
         NdpIoSlot* tmpIO = nullptr;
