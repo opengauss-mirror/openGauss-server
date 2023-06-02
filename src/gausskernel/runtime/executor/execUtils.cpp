@@ -548,6 +548,7 @@ static void GetAccessedVarNumbers(ProjectionInfo* projInfo, List* targetList, Li
     List* vars = NIL;
     List* varattno_list = NIL;
     List* lateAccessVarNoList = NIL;
+    List* projectVarNumbers = NIL;
     List* sysVarList = NIL;
     List* qualVarNoList = NIL;
     bool isConst = false;
@@ -579,6 +580,7 @@ static void GetAccessedVarNumbers(ProjectionInfo* projInfo, List* targetList, Li
      * Used for PackT optimization: PackTCopyVarsList records those columns what we need to move.
      */
     List* PackTCopyVarsList = list_copy(varattno_list);
+    projectVarNumbers = list_copy(varattno_list);
 
     /* Now consider the  quals */
     vars = pull_var_clause((Node*)qual, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
@@ -617,6 +619,7 @@ static void GetAccessedVarNumbers(ProjectionInfo* projInfo, List* targetList, Li
     projInfo->pi_PackTCopyVars = PackTCopyVarsList;
     projInfo->pi_acessedVarNumbers = varattno_list;
     projInfo->pi_lateAceessVarNumbers = lateAccessVarNoList;
+    projInfo->pi_projectVarNumbers = projectVarNumbers;
     projInfo->pi_sysAttrList = sysVarList;
     projInfo->pi_const = isConst;
     projInfo->pi_PackLateAccessVarNumbers = PackLateAccessList;

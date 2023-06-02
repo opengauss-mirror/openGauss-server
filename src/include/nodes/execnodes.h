@@ -487,6 +487,7 @@ typedef struct ProjectionInfo {
     int pi_lastInnerVar;
     int pi_lastOuterVar;
     int pi_lastScanVar;
+    List* pi_projectVarNumbers; 
     List* pi_acessedVarNumbers;
     List* pi_sysAttrList;
     List* pi_lateAceessVarNumbers;
@@ -1736,15 +1737,19 @@ struct ScanBatchResult {
     TupleTableSlot** scanTupleSlotInBatch; /* array size of BatchMaxSize, stores tuples scanned in a page */
 };
 
+struct ScanBatchColAttr {
+    int colId;          /* only save the used cols. */
+    bool lateRead;      /* for project */
+    bool isProject;     /* is project? */
+};
+
 struct ScanBatchState {
-    VectorBatch*    pCurrentBatch;  /* for output in batch */
     VectorBatch*    pScanBatch;     /* batch formed from tuples */
     int             scanTupleSlotMaxNum; /* max row number of tuples can be scanned once */
     int             colNum;
-    int *colId;    /* for qual and project, only save the used cols. */
     int maxcolId;
+    ScanBatchColAttr* colAttr;  /* for qual and project, save attributes. */
     bool *nullflag;  /*indicate the batch has null value for performance */
-    bool *lateRead;  /* for project */
     bool scanfinished; /* last time return with rows, but pages of this partition is read out */
     ScanBatchResult scanBatch;
 };
