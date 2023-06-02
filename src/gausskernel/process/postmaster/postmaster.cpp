@@ -10161,7 +10161,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
     }
 
-    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER)) {
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS)) {
         PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
         t_thrd.dms_cxt.CloseAllSessionsFailed = false;
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] kill backends begin.")));

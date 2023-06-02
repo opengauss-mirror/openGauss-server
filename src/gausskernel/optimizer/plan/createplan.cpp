@@ -4860,7 +4860,10 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
     disuse_physical_tlist(inner_plan, best_path->jpath.innerjoinpath);
 
     /* If we expect batching, suppress excess columns in outer tuples too */
-    if (best_path->num_batches > 1)
+    if (best_path->num_batches > 1 ||
+        (u_sess->attr.attr_sql.enable_vector_engine && 
+         u_sess->attr.attr_sql.vectorEngineStrategy != OFF_VECTOR_ENGINE && 
+         u_sess->attr.attr_sql.enable_vector_targetlist))
         disuse_physical_tlist(outer_plan, best_path->jpath.outerjoinpath);
 
     /*
@@ -6981,6 +6984,48 @@ Sort* make_sort(PlannerInfo* root, Plan* lefttree, int numCols, AttrNumber* sort
 }
 
 /*
+ * make_sortgroup --- basic routine to build a SortGroup plan node
+ */
+SortGroup* make_sortgroup(PlannerInfo* root, Plan* lefttree, int numCols, AttrNumber* sortColIdx, Oid* sortOperators,
+    Oid* collations, bool* nullsFirst, double dNumGroup)
+{
+    SortGroup* node = makeNode(SortGroup);
+    Plan* plan = &node->plan;
+    Path sort_path; /* dummy for result of cost_sort_group */
+
+    copy_plan_costsize(plan, lefttree); /* only care about copying size */
+
+#ifdef STREAMPLAN
+    inherit_plan_locator_info((Plan*)node, lefttree);
+#endif
+    
+    cost_sort_group(&sort_path, 
+                    root, 
+                    lefttree->total_cost, 
+                    lefttree->plan_rows, 
+                    lefttree->plan_width, 
+                    0.0,
+                    u_sess->opt_cxt.op_work_mem,
+                    dNumGroup);
+
+    plan->startup_cost = sort_path.startup_cost;
+    plan->total_cost = sort_path.total_cost;
+    plan->plan_rows = sort_path.rows;
+    plan->targetlist = lefttree->targetlist;
+    plan->qual = NIL;
+    plan->lefttree = lefttree;
+    plan->righttree = NULL;
+    plan->hasUniqueResults = lefttree->hasUniqueResults;
+    plan->dop = lefttree->dop;
+    node->numCols = numCols;
+    node->sortColIdx = sortColIdx;
+    node->sortOperators = sortOperators;
+    node->collations = collations;
+    node->nullsFirst = nullsFirst;
+    return node;   
+}
+
+/*
  * prepare_sort_from_pathkeys
  *	  Prepare to sort according to given pathkeys
  *
@@ -7418,6 +7463,54 @@ Sort* make_sort_from_groupcols(PlannerInfo* root, List* groupcls, AttrNumber* gr
     return make_sort(root, lefttree, numsortkeys, sortColIdx, sortOperators, collations, nullsFirst, -1.0);
 }
 
+
+/*
+ * make_sort_group_from_groupcols
+ *	  Create SortGroup plan
+ *
+ * 'groupcls' is the list of SortGroupClauses
+ * 'grpColIdx' gives the column numbers to use
+ *
+ */
+SortGroup* make_sort_group_from_groupcols(PlannerInfo* root, List* groupcls, AttrNumber* grpColIdx, Plan* lefttree, double dNumGroup)
+{
+    List* sub_tlist = lefttree->targetlist;
+    ListCell* l = NULL;
+    int numsortkeys;
+    AttrNumber* sortColIdx = NULL;
+    Oid* sortOperators = NULL;
+    Oid* collations = NULL;
+    bool* nullsFirst = NULL;
+
+    /* Convert list-ish representation to arrays wanted by executor */
+    numsortkeys = list_length(groupcls);
+    sortColIdx = (AttrNumber*)palloc(numsortkeys * sizeof(AttrNumber));
+    sortOperators = (Oid*)palloc(numsortkeys * sizeof(Oid));
+    collations = (Oid*)palloc(numsortkeys * sizeof(Oid));
+    nullsFirst = (bool*)palloc(numsortkeys * sizeof(bool));
+
+    numsortkeys = 0;
+    foreach (l, groupcls) {
+        SortGroupClause* grpcl = (SortGroupClause*)lfirst(l);
+        TargetEntry* tle = get_tle_by_resno(sub_tlist, grpColIdx[numsortkeys]);
+
+        if (tle == NULL) {
+            /* just break if we cannot find TargetEntry for SortGroupClause */
+            ereport(ERROR,
+                (errmodule(MOD_OPT),
+                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                        errmsg("fail to find TargetEntry referenced by SortGroupClause"))));
+        }
+
+        sortColIdx[numsortkeys] = tle->resno;
+        sortOperators[numsortkeys] = grpcl->sortop;
+        collations[numsortkeys] = exprCollation((Node*)tle->expr);
+        nullsFirst[numsortkeys] = grpcl->nulls_first;
+        numsortkeys++;
+    }
+    return make_sortgroup(root, lefttree, numsortkeys, sortColIdx, sortOperators, collations, nullsFirst, dNumGroup);
+}
+
 /*
  * make_sort_from_targetlist
  *	  Create sort plan to sort based on input plan's targetlist
@@ -7624,6 +7717,12 @@ Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrateg
     if ((IS_STREAM_PLAN && trans_agg && !need_stream) ||
         (IS_SINGLE_NODE && !IS_STREAM_PLAN)) {
         node->single_node = true;
+    }
+
+    if (aggstrategy == AGG_SORT_GROUP && lefttree->type != T_SortGroup) {
+        /*subnode is not SortGroup, fallback strategy to AGG_SORTED */
+        aggstrategy = AGG_SORTED;
+        root->consider_sortgroup_agg = false;
     }
 
     node->aggstrategy = aggstrategy;
@@ -8719,20 +8818,16 @@ uint32 getDistSessionKey(List* fdw_private)
     uint32 distSessionKey = 0;
 
     foreach (lc, fdw_private) {
-#ifdef ENABLE_MOT
         /*
-         * MOT FDW may put a node of any type into the list, so if we are looking for
+         * FDW may put a node of any type into the list, so if we are looking for
          * some specific type, we need to first make sure that it's the correct type.
          */
         Node* node = (Node*)lfirst(lc);
         if (IsA(node, DefElem)) {
-#endif
             DefElem* defElem = (DefElem*)lfirst(lc);
             if (strcmp("session_key", defElem->defname) == 0)
                 distSessionKey = intVal(defElem->arg);
-#ifdef ENABLE_MOT
         }
-#endif
     }
 
     return distSessionKey;
@@ -9140,6 +9235,7 @@ bool is_projection_capable_plan(Plan* plan)
         case T_Hash:
         case T_Material:
         case T_Sort:
+        case T_SortGroup:
         case T_Unique:
         case T_SetOp:
         case T_LockRows:
@@ -10564,6 +10660,7 @@ bool is_projection_capable_path(Path *path)
         case T_Hash:
         case T_Material:
         case T_Sort:
+        case T_SortGroup:
         case T_Unique:
         case T_SetOp:
         case T_LockRows:

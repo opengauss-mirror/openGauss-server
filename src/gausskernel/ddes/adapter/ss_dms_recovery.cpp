@@ -241,7 +241,7 @@ void SSWriteReformerControlPages(void)
         if (g_instance.dms_cxt.SSReformerControl.list_stable != 0 ||
             g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
             (void)printf("[SS] ERROR: files from last install must be cleared.\n");
-            ereport(PANIC, (errmsg("Files from last initdb not cleared")));
+            ereport(ERROR, (errmsg("Files from last initdb not cleared")));
         }
         (void)printf("[SS] Current node:%d acknowledges cluster PRIMARY node:%d.\n",
             SS_MY_INST_ID, g_instance.dms_cxt.SSReformerControl.primaryInstId);
@@ -287,17 +287,6 @@ void SSWriteReformerControlPages(void)
     SSWriteInstanceControlFile(fd, buffer, REFORM_CTRL_PAGE, PG_CONTROL_SIZE);
     if (close(fd)) {
         ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
-    }
-}
-
-void SSTriggerFailover()
-{
-    if (g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
-        g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = true;
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB restart.")));
-    } else {
-        SendPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER);
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB alive")));
     }
 }
 

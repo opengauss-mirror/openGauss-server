@@ -67,9 +67,7 @@
 
 #define SS_IN_FLUSHCOPY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == true)
 
-#define SS_STANDBY_FAILOVER ((g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING) \
-    && (g_instance.dms_cxt.SSReformerControl.primaryInstId != SS_MY_INST_ID) \
-    && SS_REFORM_REFORMER)
+#define SS_STANDBY_FAILOVER (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING)
 
 #define SS_PERFORMING_SWITCHOVER \
     (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState > NODESTATE_NORMAL && \

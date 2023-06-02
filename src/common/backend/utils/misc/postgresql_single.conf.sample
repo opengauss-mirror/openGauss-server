@@ -347,6 +347,7 @@ hot_standby = on			# "on" allows queries during recovery
 
 #enable_bitmapscan = on
 #enable_hashagg = on
+#enable_sortgroup_agg = off
 #enable_hashjoin = on
 #enable_indexscan = on
 #enable_indexonlyscan = on

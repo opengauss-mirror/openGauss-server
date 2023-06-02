@@ -50,7 +50,7 @@ typedef enum {
     PMSIGNAL_START_LOGICAL_READ_WORKER,/* start logical read worker */
     PMSIGNAL_START_PARALLEL_DECODE_WORKER,/* start parallel decoding worker */
     PMSIGNAL_START_APPLY_WORKER,       /* start a apply worker */
-    PMSIGNAL_DMS_TRIGGERFAILOVER,      /* failover for reform */
+    PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS,  /* term backends in alive failover */
     PMSIGNAL_DMS_FAILOVER_STARTUP,     /* start startup thread in alive failover */
     PMSIGNAL_DMS_SWITCHOVER_PROMOTE,   /* dms standby switchover promote */
     PMSIGNAL_DMS_REFORM,               /* dms reform start during PM_RUN */

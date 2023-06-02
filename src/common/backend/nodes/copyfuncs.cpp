@@ -1394,6 +1394,37 @@ static Sort* _copySort(const Sort* from)
 }
 
 /*
+ * CopySortGroupFields
+ *
+ *		This function copies the fields of the SortGroup node.
+ */
+static void CopySortGroupFields(const SortGroup *from, SortGroup *newnode)
+{
+    CopyPlanFields((const Plan *)from, (Plan *)newnode);
+
+    COPY_SCALAR_FIELD(numCols);
+    COPY_POINTER_FIELD(sortColIdx, from->numCols * sizeof(AttrNumber));
+    COPY_POINTER_FIELD(sortOperators, from->numCols * sizeof(Oid));
+    COPY_POINTER_FIELD(collations, from->numCols * sizeof(Oid));
+    COPY_POINTER_FIELD(nullsFirst, from->numCols * sizeof(bool));
+}
+
+/*
+ * _copySortGroup
+ */
+static SortGroup *_copySortGroup(const SortGroup *from)
+{
+    SortGroup *newnode = makeNode(SortGroup);
+
+    /*
+     * copy node superclass fields
+     */
+    CopySortGroupFields(from, newnode);
+
+    return newnode;
+}
+
+/*
  * _copyGroup
  */
 static Group* _copyGroup(const Group* from)
@@ -7571,6 +7602,9 @@ void* copyObject(const void* from)
         case T_Sort:
             retval = _copySort((Sort*)from);
             break;
+        case T_SortGroup:
+            retval = _copySortGroup((SortGroup*)from);
+            break;        
         case T_Group:
             retval = _copyGroup((Group*)from);
             break;

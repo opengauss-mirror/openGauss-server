@@ -837,6 +837,16 @@ NdpRetCode NdpScanChannel::SendIo(NdpIoSlot* req, NdpScanDesc ndpScan)
 
 NdpAdminRequest* NdpScanChannel::ConstructPlanReq(NdpScanDesc ndpScan)
 {
+    if (IsA(ndpScan->cond->plan, Agg)) {
+        Agg* agg = (Agg*)ndpScan->cond->plan;
+        if (agg->grp_collations == NULL && agg->numCols > 0) {
+            agg->grp_collations = (unsigned int*)palloc(sizeof(unsigned int) * agg->numCols);
+            for (int i = 0; i < agg->numCols; i++) {
+                agg->grp_collations[i] = InvalidOid;
+            }
+        }
+    }
+
     char* str = nodeToString(ndpScan->cond->plan);
     int len = strlen(str) + 1;
     if (len == 1) {

@@ -191,13 +191,14 @@ struct LogicalTapeSet {
 
     /* The array of logical tapes. */
     int nTapes;                               /* # of logical tapes in set */
-    LogicalTape tapes[FLEXIBLE_ARRAY_MEMBER]; /* has nTapes nentries */
+    LogicalTape *tapes;                       /* has nTapes nentries */
 };
 
 static void ltsWriteBlock(LogicalTapeSet *lts, long blocknum, void *buffer);
 static void ltsReadBlock(LogicalTapeSet *lts, long blocknum, void *buffer);
 static long ltsGetFreeBlock(LogicalTapeSet *lts);
 static void ltsReleaseBlock(LogicalTapeSet *lts, long blocknum);
+static void ltsInitTape(LogicalTape *lt);
 static void ltsConcatWorkerTapes(LogicalTapeSet *lts, TapeShare *shared, SharedFileSet *fileset);
 
 /*
@@ -462,14 +463,13 @@ static void ltsConcatWorkerTapes(LogicalTapeSet *lts, TapeShare *shared, SharedF
 LogicalTapeSet* LogicalTapeSetCreate(int ntapes, TapeShare *shared, SharedFileSet *fileset, int worker)
 {
     LogicalTapeSet *lts;
-    LogicalTape *lt;
     int i;
 
     /*
      * Create top-level struct including per-tape LogicalTape structs.
      */
     Assert(ntapes > 0);
-    lts = (LogicalTapeSet *) palloc(offsetof(LogicalTapeSet, tapes) + ntapes * sizeof(LogicalTape));
+    lts = (LogicalTapeSet *) palloc(sizeof(LogicalTapeSet));
     lts->nBlocksAllocated = 0L;
     lts->nBlocksWritten = 0L;
     lts->nHoleBlocks = 0L;
@@ -479,6 +479,7 @@ LogicalTapeSet* LogicalTapeSetCreate(int ntapes, TapeShare *shared, SharedFileSe
     lts->freeBlocks = (long *) palloc(lts->freeBlocksLen * sizeof(long));
     lts->nFreeBlocks = 0;
     lts->nTapes = ntapes;
+    lts->tapes = (LogicalTape *) palloc(ntapes * sizeof(LogicalTape));
 
     /*
      * Initialize per-tape structs.  Note we allocate the I/O buffer and the
@@ -487,20 +488,7 @@ LogicalTapeSet* LogicalTapeSetCreate(int ntapes, TapeShare *shared, SharedFileSe
      * of tapes needed.
      */
     for (i = 0; i < ntapes; i++) {
-        lt = &lts->tapes[i];
-        lt->writing = true;
-        lt->frozen = false;
-        lt->dirty = false;
-        lt->firstBlockNumber = -1L;
-        lt->curBlockNumber = -1L;
-        lt->nextBlockNumber = -1L;
-        lt->offsetBlockNumber = 0L;
-        lt->buffer = NULL;
-        lt->buffer_size = 0;
-        /* palloc() larger than MaxAllocSize would fail */
-        lt->max_size = MaxAllocSize;
-        lt->pos = 0;
-        lt->nbytes = 0;
+        ltsInitTape(&lts->tapes[i]);
     }
 
     /*
@@ -849,6 +837,43 @@ void LogicalTapeFreeze(LogicalTapeSet *lts, int tapenum, TapeShare *share)
         share->firstblocknumber = lt->firstBlockNumber;
         share->buffilesize = BufFileSize(lts->pfile);
     }
+}
+
+/*
+ * Initialize per-tape struct.  Note we allocate the I/O buffer lazily.
+ */
+static void ltsInitTape(LogicalTape *lt)
+{
+    lt->writing = true;
+    lt->frozen = false;
+    lt->dirty = false;
+    lt->firstBlockNumber = -1L;
+    lt->curBlockNumber = -1L;
+    lt->nextBlockNumber = -1L;
+    lt->offsetBlockNumber = 0L;
+    lt->buffer = NULL;
+    lt->buffer_size = 0;
+    /* palloc() larger than MaxAllocSize would fail */
+    lt->max_size = MaxAllocSize;
+    lt->pos = 0;
+    lt->nbytes = 0;
+}
+
+/*
+ * Add additional tapes to this tape set. Not intended to be used when any
+ * tapes are frozen.
+ */
+void LogicalTapeSetExtend(LogicalTapeSet *lts, int nAdditional)
+{
+    int i;
+    int nTapesOrig = lts->nTapes;
+
+    lts->nTapes += nAdditional;
+
+    lts->tapes = (LogicalTape *)repalloc(lts->tapes, lts->nTapes * sizeof(LogicalTape));
+
+    for (i = nTapesOrig; i < lts->nTapes; i++)
+        ltsInitTape(&lts->tapes[i]);
 }
 
 /*

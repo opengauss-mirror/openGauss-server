@@ -1160,6 +1160,19 @@ typedef struct Sort {
     OpMemInfo mem_info;    /* Memory info for sort */
 } Sort;
 
+/* ----------------
+ * SortGroup node
+ * ----------------
+ */
+typedef struct SortGroup {
+    Plan plan;
+    int numCols;            /* number of sort-key columns */
+    AttrNumber *sortColIdx; /* their indexes in the target list */
+    Oid *sortOperators;     /* OIDs of operators to sort them by */
+    Oid *collations;        /* OIDs of collations */
+    bool *nullsFirst;       /* NULLS FIRST/LAST directions */
+} SortGroup;
+
 typedef struct VecSort : public Sort {
 } VecSort;
 
@@ -1196,7 +1209,8 @@ typedef struct VecGroup : public Group {
 typedef enum AggStrategy {
     AGG_PLAIN,  /* simple agg across all input rows */
     AGG_SORTED, /* grouped agg, input must be sorted */
-    AGG_HASHED  /* grouped agg, use internal hashtable */
+    AGG_HASHED,  /* grouped agg, use internal hashtable */
+    AGG_SORT_GROUP  /* grouped agg, use sort group */
 } AggStrategy;
 
 #ifdef STREAMPLAN

@@ -2412,6 +2412,21 @@ typedef struct SortState {
     int64* space_size;    /* spill size for temp table */
 } SortState;
 
+struct SortGroupStatePriv;
+/* ----------------
+ *	 SortGroupState information
+ * ----------------
+ */
+typedef struct SortGroupState {
+    ScanState ss;                     /* its first field is NodeTag */
+    int64 bound;                      /* if bounded, how many group are needed */
+    struct SortGroupStatePriv *state; /* private state of nodeSortGroup.c */
+    bool sort_Done;                   /* sort completed yet? */
+    bool *new_group_trigger;          /* indicates new groups where returning tuples */
+    const char *spaceType;            /* type of space spaceUsed represents */
+    int64 spaceUsed;                  /* space used for explain */       
+} SortGroupState;
+
 /* ---------------------
  *	GroupState information
  * -------------------------
@@ -2455,6 +2470,7 @@ typedef struct AggState {
     AggStatePerAgg curperagg;   /* identifies currently active aggregate */
     bool input_done;            /* indicates end of input */
     bool agg_done;              /* indicates completion of Agg scan */
+    bool new_group_trigger;     /* indicates new groups where returning tuples*/
     int projected_set;          /* The last projected grouping set */
     int current_set;            /* The current grouping set being evaluated */
     Bitmapset* grouped_cols;    /* grouped cols in current projection */

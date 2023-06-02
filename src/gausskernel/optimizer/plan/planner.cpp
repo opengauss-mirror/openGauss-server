@@ -2738,6 +2738,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         planner_targets->scanjoin_contains_srfs = false;
         root->planner_targets = planner_targets;
     }
+    root->consider_sortgroup_agg = u_sess->attr.attr_sql.enable_sortgroup_agg;
 
     /*
      * Apply memory context for generate plan in optimizer.
@@ -2763,6 +2764,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         if (count_est > 0 && offset_est >= 0)
             limit_tuples = (double)count_est + (double)offset_est;
     }
+
+    if (limit_tuples < 0)
+        root->consider_sortgroup_agg = false;
 
     if (parse->setOperations) {
         List* set_sortclauses = NIL;
@@ -2885,8 +2889,10 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
         /* Preprocess GROUP BY clause, if any */
         /* Preprocess Grouping set, if any */
-        if (parse->groupingSets)
+        if (parse->groupingSets) {
             parse->groupingSets = expand_grouping_sets(parse->groupingSets, -1);
+            root->consider_sortgroup_agg = false;
+        }
 
         if (parse->groupClause) {
             ListCell* lc = NULL;
@@ -2967,6 +2973,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
             upsertClause->updateTlist =
                 preprocess_upsert_targetlist(upsertClause->updateTlist, linitial_int(parse->resultRelations),
                                              parse->rtable);
+            root->consider_sortgroup_agg = false;
         }
         /*
          * Locate any window functions in the tlist.  (We don't need to look
@@ -2983,6 +2990,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
             } else {
                 parse->hasWindowFuncs = false;
             }
+            root->consider_sortgroup_agg = false;
         }
 
         /*
@@ -3035,15 +3043,19 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
             u_sess->opt_cxt.query_dop = dop_tmp;
         }
 
+        if (parse->distinctClause || parse->havingQual || parse->hasWindowFuncs || root->hasHavingQual || parse->hasTargetSRFs)
+            root->consider_sortgroup_agg = false;
+
         /*
          * Figure out whether there's a hard limit on the number of rows that
          * query_planner's result subplan needs to return.  Even if we know a
          * hard limit overall, it doesn't apply if the query has any
          * grouping/aggregation operations, or SRFs in the tlist.
          */
-        if (parse->groupClause || parse->groupingSets || parse->distinctClause || parse->hasAggs ||
+        if (!root->consider_sortgroup_agg &&
+            (parse->groupClause || parse->groupingSets || parse->distinctClause || parse->hasAggs ||
             parse->hasWindowFuncs || root->hasHavingQual ||
-            (parse->is_flt_frame && parse->hasTargetSRFs))
+            (parse->is_flt_frame && parse->hasTargetSRFs)))
             sub_limit_tuples = -1.0;
         else
             sub_limit_tuples = limit_tuples;
@@ -3257,6 +3269,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
              * right tlist, and it has no sort order.
              */
             current_pathkeys = NIL;
+            root->consider_sortgroup_agg = false;
         } else {
             /*
              * Normal case --- create a plan according to query_planner's
@@ -3418,7 +3431,10 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                  *
                  * We don't want any excess columns for hashagg, since we support hashagg write-out-to-disk now
                  */
-                if (use_hashed_grouping)
+                if (use_hashed_grouping || 
+                    (u_sess->attr.attr_sql.enable_vector_engine && 
+                     u_sess->attr.attr_sql.vectorEngineStrategy != OFF_VECTOR_ENGINE && 
+                     u_sess->attr.attr_sql.enable_vector_targetlist))
                     disuse_physical_tlist(result_plan, best_path);
 
                 locate_grouping_columns(root, tlist, result_plan->targetlist, groupColIdx);
@@ -3872,11 +3888,18 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
                     if (need_sort_for_grouping && partial_plan == NULL &&
                         (IS_STREAM_PLAN || parse->groupingSets == NULL)) {
-                        result_plan =
-                            (Plan*)make_sort_from_groupcols(root, parse->groupClause, groupColIdx, result_plan);
+                        if (root->consider_sortgroup_agg) {
+                            result_plan = (Plan*) make_sort_group_from_groupcols(root, parse->groupClause, groupColIdx, result_plan, dNumGroups[0]);
+                        } else {
+                            result_plan =
+                                (Plan*)make_sort_from_groupcols(root, parse->groupClause, groupColIdx, result_plan);
+                        }
                         current_pathkeys = root->group_pathkeys;
                     }
-                    aggstrategy = AGG_SORTED;
+                    if (root->consider_sortgroup_agg)
+                        aggstrategy = AGG_SORT_GROUP;
+                    else
+                        aggstrategy = AGG_SORTED;
 
                 } else {
                     if (IS_STREAM_PLAN && count_distinct_optimization) {
@@ -6141,6 +6164,12 @@ static void compute_hashed_path_cost(PlannerInfo* root, double limit_tuples, int
     bool needs_stream = false;
     bool need_second_hashagg = false;
 
+    if (!u_sess->attr.attr_sql.enable_hashagg) {
+        copy_path_costsize(hashed_p, cheapest_path);
+        hashed_p->total_cost = hashed_p->startup_cost = g_instance.cost_cxt.disable_cost;
+        return;
+    }
+
     /*
      * See if the estimated cost is no more than doing it the other way. While
      * avoiding the need for sorted input is usually a win, the fact that the
@@ -6643,6 +6672,14 @@ static void compute_sorted_path_cost(PlannerInfo* root, double limit_tuples, int
     if (!pathkeys_contained_in(root->group_pathkeys, current_pathkeys)) {
         current_pathkeys = root->group_pathkeys;
         need_sort_for_grouping = true;
+
+        if (!u_sess->attr.attr_sql.enable_sort) {
+            sorted_p->total_cost = sorted_p->startup_cost = g_instance.cost_cxt.disable_cost;
+            return;
+        }
+    } else {
+        /* already sorted, never consider group sorting */
+        root->consider_sortgroup_agg = false;
     }
 
     bool is_replicate = (!IS_STREAM_PLAN ||
@@ -6750,6 +6787,57 @@ static void compute_sorted_path_cost(PlannerInfo* root, double limit_tuples, int
 }
 
 /*
+ * compute_sort_group_path_cost: compute sort group path cost for choose.
+ *
+ */
+static void compute_sort_group_path_cost(PlannerInfo *root, double limit_tuples, int path_width, Path *cheapest_path,
+                                         const double dNumGroup, AggClauseCosts *agg_costs, Size hashentrysize,
+                                         List *target_pathkeys, Path *sorted_p)
+{
+    Query *parse = root->parse;
+    int numGroupCols = list_length(parse->groupClause);
+    List *current_pathkeys;
+    
+    copy_path_costsize(sorted_p, cheapest_path);
+    current_pathkeys = cheapest_path->pathkeys;
+
+
+    if (!u_sess->attr.attr_sql.enable_sortgroup_agg ||
+        !root->consider_sortgroup_agg ||
+        pathkeys_contained_in(root->group_pathkeys, current_pathkeys))
+    {
+        /* already sorted, or sort group agg is disabled, never consider group sorting */
+        root->consider_sortgroup_agg = false;
+        sorted_p->total_cost = sorted_p->startup_cost = g_instance.cost_cxt.disable_cost;
+        return;
+    }
+    else {
+        current_pathkeys = root->group_pathkeys;
+    }
+
+    cost_sort_group(sorted_p, 
+                    root, 
+                    cheapest_path->total_cost, 
+                    PATH_LOCAL_ROWS(cheapest_path), 
+                    path_width,
+                    0.0,
+                    u_sess->opt_cxt.op_work_mem,
+                    dNumGroup);
+    cost_agg(sorted_p, 
+             root,  
+             AGG_SORT_GROUP, 
+             agg_costs,
+             numGroupCols,
+             dNumGroup,
+             sorted_p->startup_cost,
+             sorted_p->total_cost,
+             sorted_p->rows,
+             path_width,
+             path_width, 
+             hashentrysize);
+}
+
+/*
  * Executor doesn't support hashed aggregation with DISTINCT or ORDER BY
  * aggregates.	(Doing so would imply storing *all* the input values in
  * the hash table, and/or running many sorts in parallel, either of which
@@ -6800,7 +6888,7 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
     bool can_sort = false;
     Size hashentrysize;
     List* target_pathkeys = NIL;
-    Path hashed_p, sorted_p;
+    Path hashed_p, sorted_p, sort_group_p;
     errno_t rc = EOK;
 
     can_hash = grouping_is_can_hash(parse, agg_costs);
@@ -6863,15 +6951,10 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
 #endif
     }
 
-    /* Prefer hashagg or sort when guc is set */
-    if (!u_sess->attr.attr_sql.enable_hashagg && u_sess->attr.attr_sql.enable_sort)
-        return false;
-    if (!u_sess->attr.attr_sql.enable_sort && u_sess->attr.attr_sql.enable_hashagg)
-        return true;
-
     /* If guc plan_mode_seed is random plan, we should choose random path between AGG_HASHED and AGG_SORTED */
     if (u_sess->attr.attr_sql.plan_mode_seed != OPTIMIZE_PLAN) {
         int random_option = choose_random_option(lengthof(g_agglist));
+        root->consider_sortgroup_agg = false;
         return (AGG_HASHED == g_agglist[random_option]);
     }
 
@@ -6892,6 +6975,8 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
     rc = memset_s(&hashed_p, sizeof(hashed_p), 0, sizeof(hashed_p));
     securec_check(rc, "\0", "\0");
     rc = memset_s(&sorted_p, sizeof(sorted_p), 0, sizeof(sorted_p));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(&sort_group_p, sizeof(sort_group_p), 0, sizeof(sort_group_p));
     securec_check(rc, "\0", "\0");
 
     /* compute the minimal total cost for hash path. */
@@ -6919,11 +7004,29 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
         target_pathkeys,
         &sorted_p);
 
+   compute_sort_group_path_cost(root,
+            limit_tuples,
+            path_width,
+            cheapest_path,
+            dNumGroups[0],
+            agg_costs,
+            hashentrysize,
+            target_pathkeys,
+            &sort_group_p);
+
     /*
      * Now make the decision using the top-level tuple fraction.  First we
      * have to convert an absolute count (LIMIT) into fractional form.
      */
     tuple_fraction = tuple_fraction >= 1.0 ? tuple_fraction / dNumGroups[0] : tuple_fraction;
+
+    if (root->consider_sortgroup_agg && 
+        compare_fractional_path_costs(&sort_group_p, &sorted_p, tuple_fraction) < 0) {
+        /*sort group is cheaper, so use it*/
+        copy_path_costsize(&sorted_p, &sort_group_p);
+    } else {
+        root->consider_sortgroup_agg = false;
+    }
 
     if (compare_fractional_path_costs(&hashed_p, &sorted_p, tuple_fraction) < 0) {
         /* Hashed is cheaper, so use it */
@@ -9682,6 +9785,8 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
             break;
 
         case T_Agg: {
+                if (((Agg*)result_plan)->aggstrategy == AGG_SORT_GROUP)
+                return true;
             /* Check if targetlist contains unsupported feature */
             if (vector_engine_expression_walker((Node*)(result_plan->targetlist), NULL))
                 return true;
@@ -9917,6 +10022,7 @@ static Plan* fallback_plan(Plan* result_plan)
         case T_BaseResult:
         case T_ProjectSet:
         case T_Sort:
+        case T_SortGroup:
         case T_Stream:
         case T_Material:
         case T_StartWithOp:
@@ -10100,7 +10206,14 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery, bool forceVecto
                 return make_rowtove_plan(result_plan);
             }
             break;
-
+        case T_SortGroup:
+            {
+                result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery, forceVectorEngine);
+                if (result_plan->lefttree && IsVecOutput(result_plan->lefttree)) {
+                    result_plan->lefttree = (Plan*) make_vectorow(result_plan->lefttree);
+                }
+                return result_plan;
+            }
         case T_MergeJoin:
         case T_NestLoop:
             result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery, forceVectorEngine);

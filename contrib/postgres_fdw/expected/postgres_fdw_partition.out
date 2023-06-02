@@ -5482,7 +5482,6 @@ HINT:  No function matches the given name and argument types. You might need to 
 CONTEXT:  referenced column: least_agg
 -- Add function and aggregate into extension
 alter extension postgres_fdw add function least_accum(anyelement, variadic anyarray);
-ERROR:  function least_accum(anyelement,anyarray) is already a member of extension "postgres_fdw"
 alter extension postgres_fdw add aggregate least_agg(variadic items anyarray);
 ERROR:  syntax error at or near "variadic"
 LINE 1: ...er extension postgres_fdw add aggregate least_agg(variadic i...

@@ -290,6 +290,8 @@ void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags);
 uint32 WaitBufHdrUnlocked(BufferDesc* buf);
 void WaitIO(BufferDesc *buf);
 void InvalidateBuffer(BufferDesc *buf);
+extern void ReservePrivateRefCountEntry(void);
+extern PrivateRefCountEntry* NewPrivateRefCountEntry(Buffer buffer);
 void LockTwoLWLock(LWLock *new_partition_lock, LWLock *old_partition_lock);
 
 extern void InitBufferPool(void);

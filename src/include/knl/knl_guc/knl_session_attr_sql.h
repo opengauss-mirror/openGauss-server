@@ -58,6 +58,7 @@ typedef struct knl_session_attr_sql {
     bool enable_csqual_pushdown;
     bool enable_change_hjcost;
     bool enable_seqscan;
+    bool enable_seqscan_dopcost;
     bool enable_indexscan;
     bool enable_indexonlyscan;
     bool enable_bitmapscan;
@@ -67,6 +68,7 @@ typedef struct knl_session_attr_sql {
     bool enable_sort;
     bool enable_compress_spill;
     bool enable_hashagg;
+    bool enable_sortgroup_agg;
     bool enable_material;
     bool enable_nestloop;
     bool enable_mergejoin;
@@ -244,7 +246,7 @@ typedef struct knl_session_attr_sql {
     char* db4ai_snapshot_version_separator;
     int pldebugger_timeout;
     bool partition_page_estimation;
-
+    bool enable_opfusion_reuse;
 #ifndef ENABLE_MULTIPLE_NODES
     bool uppercase_attribute_name;
 #endif
@@ -254,6 +256,7 @@ typedef struct knl_session_attr_sql {
     bool enable_custom_parser;
     bool dolphin;
     bool whale;
+    bool enable_vector_targetlist;
 #endif
 } knl_session_attr_sql;
 

@@ -1477,39 +1477,24 @@ static int CBFlushCopy(void *db_handle, char *pageid)
     return GS_SUCCESS;
 }
 
+static void SSFailoverPromoteNotify()
+{
+    if (g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+        g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = true;
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB restart.")));
+    } else {
+        SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_STARTUP);
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB alive")));
+    }
+}
+
 static int CBFailoverPromote(void *db_handle)
 {
-    g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = false;
-    SSTriggerFailover();
-    /**
-     * for alive failover: wait for backend threads to exit, at most 30s
-     * why wait code write this
-     *      step 1, sned PMSIGNAL_DMS_TRIGGERFAILOVER to tell thread to exit
-     *      step 2, PM detected backend exit
-     *      step 3, reform proc wait
-     */
-    if (!g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
-        long max_wait_time = 30000000L;
-        long wait_time = 0;
-        while (true) {
-            if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left) {
-                ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] backends exit successfully")));
-                break;
-            }
-            if (wait_time > max_wait_time) {
-                ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS failover] failover failed, backends can not exit")));
-                _exit(0);
-            }
-            pg_usleep(REFORM_WAIT_TIME);
-            wait_time += REFORM_WAIT_TIME;
-        }
-
-        SSClearSegCache();
-        SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_STARTUP);
-    }
+    SSClearSegCache();
+    SSFailoverPromoteNotify();
 
     while (true) {
-        if (SSFAILOVER_TRIGGER && g_instance.pid_cxt.StartupPID != 0) {
+        if (SS_STANDBY_FAILOVER && g_instance.pid_cxt.StartupPID != 0) {
             ereport(LOG, (errmodule(MOD_DMS), errmsg("startup thread success.")));
             return GS_SUCCESS;
         }
@@ -1551,21 +1536,102 @@ static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
             SS_MY_INST_ID, reform_info->dms_role)));
 }
 
+static void ReformCleanBackends()
+{
+    /* cluster has no transactions during startup reform */
+    if (!g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+        SendPostmasterSignal(PMSIGNAL_DMS_REFORM);
+    }
+
+    while (true) {
+        if (dms_reform_failed()) {
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform]reform failed during caneling backends")));
+            return;
+        }
+        if (g_instance.dms_cxt.SSRecoveryInfo.reform_ready || g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform]reform ready, backends have been terminated")));
+            return;
+        }
+        pg_usleep(REFORM_WAIT_TIME);
+    }
+}
+
+static void AliveFailoverCleanBackends()
+{
+    if (g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+        return;
+    }
+
+    /**
+     * for alive failover: wait for backend threads to exit, at most 30s
+     * why wait code write this
+     *      step 1, sned signal to tell thread to exit
+     *      step 2, PM detected backend exit
+     *      step 3, reform proc wait
+     */
+    g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = false;
+    SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS);
+    long max_wait_time = 30000000L;
+    long wait_time = 0;
+    while (true) {
+        if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left) {
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] backends exit successfully")));
+            break;
+        }
+        if (wait_time > max_wait_time) {
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS failover] failover failed, backends can not exit")));
+            _exit(0);
+        }
+
+        if (dms_reform_failed()) {
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS failover] reform failed during clean backends")));
+            return;
+        }
+
+        pg_usleep(REFORM_WAIT_TIME);
+        wait_time += REFORM_WAIT_TIME;
+    }
+}
+
+static int reform_type_str_len = 30;
+static void ReformTypeToString(SSReformType reform_type, char* ret_str)
+{
+    switch (reform_type)
+    {
+    case DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS:
+        strcpy_s(ret_str, reform_type_str_len, "normal reform");
+        break;
+    case DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS:
+        strcpy_s(ret_str, reform_type_str_len, "failover reform");
+        break;
+    case DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS:
+        strcpy_s(ret_str, reform_type_str_len, "switchover reform");
+        break;
+    case DMS_REFORM_TYPE_FOR_FULL_CLEAN:
+        strcpy_s(ret_str, reform_type_str_len, "full clean reform");
+        break;
+    default:
+        strcpy_s(ret_str, reform_type_str_len, "unknown");
+        break;
+    } 
+    return;
+}
+
 static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type)
 {
-    SSReformType ss_reform_type = (SSReformType)reform_type;
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+    reform_info->reform_type = (SSReformType)reform_type;
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
     g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
     g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = false;
     g_instance.dms_cxt.resetSyscache = true;
-    if (ss_reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
+    if (reform_info->reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
         if (role == DMS_ROLE_REFORMER) {
             g_instance.dms_cxt.dw_init = false;
-            // variable set order: SharedRecoveryInProgress -> failover_triggered -> dms_role
+            // variable set order: SharedRecoveryInProgress -> failover_ckpt_status -> dms_role
             volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
             SpinLockAcquire(&xlogctl->info_lck);
             xlogctl->IsRecoveryDone = false;
@@ -1573,7 +1639,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
             SpinLockRelease(&xlogctl->info_lck);
             t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
             pg_memory_barrier();
-            g_instance.dms_cxt.SSRecoveryInfo.failover_triggered = true;
+            g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ALLOW_CKPT;
             g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_FAILOVER_PROMOTING;
             /* Backends should exit in here, this step should be bring forward and not in CBFailoverPromote */
             pmState = PM_WAIT_BACKENDS;
@@ -1583,8 +1649,10 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     reform_info->dms_role = role;
     reform_info->in_reform = true;
 
+    char reform_type_str[reform_type_str_len] = {0};
+    ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),
-        errmsg("[SS reform] dms reform start, role:%d, reform type:%d", role, (int)ss_reform_type)));
+        errmsg("[SS reform] dms reform start, role:%d, reform type:%s", role, reform_type_str)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
         while (dss_set_server_status_wrapper() != GS_SUCCESS) {
             pg_usleep(REFORM_WAIT_LONG);
@@ -1599,27 +1667,16 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     int old_primary = SSGetPrimaryInstId();
     SSReadControlFile(old_primary, true);
 
-    /* cluster has no transactions during startup reform */
-    if (!g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
-        SendPostmasterSignal(PMSIGNAL_DMS_REFORM);
+    if (SS_STANDBY_FAILOVER) {
+        AliveFailoverCleanBackends();
+    } else {
+        ReformCleanBackends();
     }
 
     /* After reform done, standby of standby cluster need to set mode to STANDBY_MODE in dual cluster. */
     if (SS_REFORM_REFORMER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) &&
        (g_instance.attr.attr_storage.xlog_file_path != 0)) {
         t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
-    }
-
-    while (true) {
-        if (dms_reform_failed()) {
-            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform]reform failed during caneling backends")));
-            return;
-        }
-        if (g_instance.dms_cxt.SSRecoveryInfo.reform_ready || g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
-            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform]reform ready, backends have been terminated")));
-            return;
-        }
-        pg_usleep(REFORM_WAIT_TIME);
     }
 }
 
@@ -1640,10 +1697,9 @@ static int CBReformDoneNotify(void *db_handle)
     }
    
     /* SSClusterState and in_reform must be set atomically */
-    g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
-    g_instance.dms_cxt.SSReformInfo.in_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
+    g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
     Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     ereport(LOG,
             (errmodule(MOD_DMS),
@@ -1652,6 +1708,8 @@ static int CBReformDoneNotify(void *db_handle)
 
     /* reform success indicates that reform of primary and standby all complete, then update gaussdb.state */
     SendPostmasterSignal(PMSIGNAL_DMS_REFORM_DONE);
+    g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
+    g_instance.dms_cxt.SSReformInfo.in_reform = false;
     return GS_SUCCESS;
 }
 
@@ -1677,6 +1735,34 @@ static int CBCacheMsg(void *db_handle, char* msg)
                         sizeof(t_thrd.dms_cxt.msg_backup));
     securec_check(rc, "\0", "\0");
     return GS_SUCCESS;
+}
+
+static int CBMarkNeedFlush(void *db_handle, char *pageid)
+{
+    bool valid = false;
+    BufferDesc *buf_desc = NULL;
+    dms_buf_ctrl_t *buf_ctrl = NULL;
+    BufferTag *tag = (BufferTag *)pageid;
+
+    SSGetBufferDesc(pageid, &valid, &buf_desc);
+    if (buf_desc == NULL) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBMarkNeedFlush, buf_desc not found")));
+        return DMS_ERROR;
+    }
+
+    if (!valid) {
+        SSUnPinBuffer(buf_desc);
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBMarkNeedFlush, buf_desc not valid")));
+        return DMS_ERROR;
+    }
+
+    ereport(LOG, (errmsg("[SS] CBMarkNeedFlush found buf: %u/%u/%u/%d %d-%u",
+        tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+        tag->forkNum, tag->blockNum)));
+    SSUnPinBuffer(buf_desc);
+    return DMS_SUCCESS;
 }
 
 void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
@@ -1791,4 +1877,5 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->drc_validate = CBDrcBufValidate;
     callback->db_check_lock = CBDBCheckLock;
     callback->cache_msg = CBCacheMsg;
+    callback->need_flush = CBMarkNeedFlush;
 }
