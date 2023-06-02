@@ -457,6 +457,11 @@ Plan* CheckAndGetNdpPlan(PlannedStmt* stmt, SeqScan* scan, Plan* parent)
         return nullptr;
     }
 
+    // 6. if seqscan is under limit, do not push down
+    if (parent && IsA(parent, Limit)) {
+        return nullptr;
+    }
+
     return node;
 }
 
