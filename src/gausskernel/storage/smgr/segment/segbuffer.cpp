@@ -483,11 +483,8 @@ void ReportInvalidPage(RepairBlockKey key)
 void ReadSegBufferForCheck(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *spc, Block bufBlock)
 {
     if (spc == NULL) {
-        bool found;
-        SegSpcTag tag = {.spcNode = bufHdr->tag.rnode.spcNode, .dbNode = bufHdr->tag.rnode.dbNode};
-        SegmentCheck(t_thrd.storage_cxt.SegSpcCache != NULL);
-        spc = (SegSpace *)hash_search(t_thrd.storage_cxt.SegSpcCache, (void *)&tag, HASH_FIND, &found);
-        SegmentCheck(found);
+        spc = spc_open(bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode, false, false);
+        SegmentCheck(spc != NULL);
     }
 
     seg_physical_read(spc, bufHdr->tag.rnode, bufHdr->tag.forkNum, bufHdr->tag.blockNum, (char *)bufBlock);
