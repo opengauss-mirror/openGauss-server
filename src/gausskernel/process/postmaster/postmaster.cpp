@@ -10175,6 +10175,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
+        //active check once
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
+            g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
+        }
+
         /* and the autovac launcher too */
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);

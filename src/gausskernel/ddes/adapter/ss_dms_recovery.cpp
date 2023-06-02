@@ -54,6 +54,33 @@ void SSSavePrimaryInstId(int id)
     SSSaveReformerCtrl();
 }
 
+void SSWaitStartupExit()
+{
+    if (g_instance.pid_cxt.StartupPID == 0) {
+        return;
+    }
+
+    if (SS_STANDBY_FAILOVER && !g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag) {
+        g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = true;
+    }
+    SendPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP);
+    int err_level = g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally ? LOG : WARNING;
+    ereport(err_level, (errmodule(MOD_DMS), errmsg("[SS reform] reform failed, startup thread need exit")));
+
+    while (true) {
+        if (g_instance.pid_cxt.StartupPID == 0) {
+            break;
+        }
+
+        if (g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request) {
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform] pageredo or startup thread are trapped "
+                "in page request during recovery phase, need exit")));
+            _exit(0);
+        }
+        pg_usleep(5000L);
+    }
+}
+
 /**
  * find reform failed in recovery phase, maybe other node restart
  * pageredo or startup thread may trapped in LockBuffer for page request
@@ -74,25 +101,7 @@ bool SSRecoveryNodes()
     bool result = false;
     while (true) {
         if (dms_reform_failed()) {
-            if (SS_STANDBY_FAILOVER && !g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag) {
-                g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = true;
-            }
-            SendPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP);
-
-            while (true) {
-                if (g_instance.pid_cxt.StartupPID == 0) {
-                    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] reform failed, startup thread exit noramlly "
-                        "during recovery")));
-                    break;
-                }
-
-                if (g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request) {
-                    ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform] pageredo or startup thread are trapped "
-                        "in page request during recovery phase, need exit")));
-                    _exit(0);
-                }
-                pg_usleep(5000L);
-            }
+            SSWaitStartupExit();
             result = false;
             break;
         }
