@@ -54,11 +54,18 @@ void SSWakeupRecovery(void)
 {
     uint32 thread_num = (uint32)g_instance.ckpt_cxt_ctl->pgwr_procs.num;
     /* need make sure pagewriter started first */
+    bool need_recovery = true;
     while (pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) != thread_num) {
+        if (!RecoveryInProgress()) {
+            need_recovery = false;
+            break;
+        }
         pg_usleep(REFORM_WAIT_TIME);
     }
 
-    g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
+    if (need_recovery) {
+        g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
+    }
 }
 
 static int CBGetUpdateXid(void *db_handle, unsigned long long xid, unsigned int t_infomask, unsigned int t_infomask2,
@@ -329,7 +336,7 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
 
     const int WAIT_PROMOTE = 1200;  /* wait 120 sec */
     for (int ntries = 0;; ntries++) {
-        if (pmState == PM_RUN && g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED) {
+        if (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED) {
             /* flush control file primary id in advance to save new standby's waiting time */
             SSSavePrimaryInstId(SS_MY_INST_ID);
 
@@ -362,7 +369,6 @@ static void CBSwitchoverResult(void *db_handle, int result)
         return;
     } else {
         /* abort and restore state */
-        g_instance.dms_cxt.SSReformInfo.in_reform = false;
         g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS switchover] Switchover failed, errno: %d.", result)));
     }
@@ -1399,10 +1405,12 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
     SSLockReleaseAll();
     SSWakeupRecovery();
     if (!SSRecoveryNodes()) {
+        g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform] Recovery failed")));
         return GS_ERROR;
     }
 
+    g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
     return GS_SUCCESS;
 }
 
