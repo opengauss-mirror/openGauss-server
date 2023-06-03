@@ -471,10 +471,17 @@ void DMSUninit()
     dms_uninit();
 }
 
+// order: DMS reform finish -> CBReformDoneNotify finish -> startup exit (if has)
 int32 DMSWaitReform()
 {
     uint32 has_offline; /* currently not used in openGauss */
-    return dms_wait_reform(&has_offline);
+    int ret = dms_wait_reform(&has_offline);
+    if (ret) {
+        while (g_instance.dms_cxt.SSReformInfo.in_reform) {
+            pg_usleep(5000L);
+        }
+    }
+    return ret;
 }
 
 static bool DMSReformCheckStartup()
