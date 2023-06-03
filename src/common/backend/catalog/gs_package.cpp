@@ -493,6 +493,9 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     }
     oldPkgOid = PackageNameGetOid(pkgName, pkgNamespace);
     if (!OidIsValid(oldPkgOid)) {
+#ifndef ENABLE_MULTIPLE_NODES
+        InsertGsSource(oldPkgOid, pkgNamespace, pkgName, "package body", false);
+#endif
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("package spec not found")));
     }
     /* initialize nulls and values */

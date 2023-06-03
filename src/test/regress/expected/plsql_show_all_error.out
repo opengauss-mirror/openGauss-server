@@ -1834,3 +1834,38 @@ select count(*) from dbe_pldeveloper.gs_errors;
 (1 row)
 
 set plsql_show_all_error to off;
+delete from DBE_PLDEVELOPER.gs_source;
+create package pac_1139606 is
+procedure pro_1139606();
+function fun_1139606();
+end pac_1139606;
+/
+ERROR:  syntax error at or near "BEGIN"
+LINE 4: end pac_1139606;
+          ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+select name, status, src from DBE_PLDEVELOPER.gs_source;
+    name     | status |              src              
+-------------+--------+-------------------------------
+ pac_1139606 | f      | create package pac_1139606 is+
+             |        | procedure pro_1139606();     +
+             |        | function fun_1139606();      +
+             |        | end pac_1139606;
+(1 row)
+
+delete from DBE_PLDEVELOPER.gs_source;
+create package pac_1139606 is
+procedure pro_1139606();
+end pac_1139606;
+/
+select name, status, src from DBE_PLDEVELOPER.gs_source;
+    name     | status |              src              
+-------------+--------+-------------------------------
+ pac_1139606 | t      | create package pac_1139606 is+
+             |        | procedure pro_1139606();     +
+             |        | end pac_1139606;
+(1 row)
+
+delete from DBE_PLDEVELOPER.gs_source;
+drop package pac_1139606;
+NOTICE:  drop cascades to function public.pro_1139606()
