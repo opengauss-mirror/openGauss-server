@@ -1808,12 +1808,12 @@ static RowMarkClause* _readRowMarkClause(void)
 
     READ_UINT_FIELD(rti);
     READ_BOOL_FIELD(forUpdate);
-    IF_EXIST(waitSec) {
-        READ_INT_FIELD(waitSec);
-    }
 
     IF_EXIST(waitPolicy) {
         READ_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    }
+    IF_EXIST(waitSec) {
+        READ_INT_FIELD(waitSec);
     }
     /* convert noWait (true/false) to LockWaitPolicy (LockWaitError/LockWaitBlock) */
     IF_EXIST(noWait) {
