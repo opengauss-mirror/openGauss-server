@@ -1271,12 +1271,13 @@ void
 scanner_yyerror(const char *message, core_yyscan_t yyscanner)
 {
 	const char *loc = yyextra->scanbuf + *yylloc;
-	u_sess->plsql_cxt.have_error = true; 
+	u_sess->plsql_cxt.have_error = true;
     int errstate = 0;
 	int lines = 0;
 	int rc = CompileWhich();
 #ifndef ENABLE_MULTIPLE_NODES
-        if (rc != PLPGSQL_COMPILE_NULL && u_sess->attr.attr_common.plsql_show_all_error) {
+        if (rc != PLPGSQL_COMPILE_NULL && u_sess->attr.attr_common.plsql_show_all_error
+            && t_thrd.log_cxt.errordata_stack_depth <= ERRORDATA_STACK_SIZE - 2) {
             lines = GetProcedureLineNumberInPackage(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, u_sess->plsql_cxt.plpgsql_yylloc);
             addErrorList(message, lines);
         }

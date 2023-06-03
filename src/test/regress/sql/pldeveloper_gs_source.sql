@@ -257,7 +257,7 @@ is
 a a;
 end pkg4;
 /
-select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
+select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name,type;
 create or replace procedure proc5
 is
 b int;
@@ -312,8 +312,8 @@ set  check_function_bodies to off;
 create or replace procedure test1 is begin null; end;
 /
 set  check_function_bodies to on;
-select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
-select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
+select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name,type;
+select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name,type;
 drop package if exists pkg4;
 drop package if exists pkg5;
 drop function if exists proc4;
