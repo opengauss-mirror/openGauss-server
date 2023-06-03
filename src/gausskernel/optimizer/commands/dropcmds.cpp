@@ -91,7 +91,10 @@ static void DropExtensionInListIsSupported(List* objname)
         }
     }
 
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXTENSION is not yet supported.")));
+    /* Enable DROP operation of the above objects during inplace upgrade or support_extended_features is true */
+    if (!u_sess->attr.attr_common.IsInplaceUpgrade && !g_instance.attr.attr_common.support_extended_features) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXTENSION is not yet supported.")));
+    }
 }
 
 /*
