@@ -103,7 +103,7 @@ extern struct varlena *heap_tuple_fetch_and_copy(Relation rel, struct varlena *a
  * CurrentMemoryContext.
  * ----------------
  */
-EState* CreateExecutorState(MemoryContext saveCxt)
+EState* CreateExecutorState()
 {
     EState* estate = NULL;
     MemoryContext qcontext;
@@ -112,15 +112,11 @@ EState* CreateExecutorState(MemoryContext saveCxt)
     /*
      * Create the per-query context for this Executor run.
      */
-    if (saveCxt != NULL) {
-        qcontext = saveCxt;
-    } else {
-        qcontext = AllocSetContextCreate(CurrentMemoryContext,
-            "ExecutorState",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
-    }
+    qcontext = AllocSetContextCreate(CurrentMemoryContext,
+        "ExecutorState",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
 
     /*
      * Make the EState node within the per-query context.  This way, we don't

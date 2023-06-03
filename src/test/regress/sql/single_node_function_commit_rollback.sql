@@ -997,3 +997,70 @@ drop function func_base13_06;
 drop function func_base13_07;
 drop function func_base13_08;
 
+drop table if exists PROCEDURE_DDL_TAB_009_1;
+CREATE TABLE PROCEDURE_DDL_TAB_009_1 (COL1 INT,COL2 INT,COL3 INT,COL4 TIMESTAMP) ;
+CREATE INDEX PROCEDURE_DDL_TAB_009_1_INX ON PROCEDURE_DDL_TAB_009_1 (COL1,COL2,COL4); 
+
+ INSERT INTO PROCEDURE_DDL_TAB_009_1 VALUES (GENERATE_SERIES(1, 5),GENERATE_SERIES(1, 5),GENERATE_SERIES(1, 5),TO_DATE('2020-05-06', 'YYYY-MM-DD'));
+drop table if exists PROCEDURE_DDL_TAB_009_2;
+CREATE TABLE PROCEDURE_DDL_TAB_009_2(COL1 INT,COL2 INT,COL3 INT); 
+INSERT INTO PROCEDURE_DDL_TAB_009_2 VALUES (GENERATE_SERIES(1, 5),GENERATE_SERIES(1, 5),GENERATE_SERIES(1, 5)); 
+
+
+ CREATE  OR REPLACE procedure PROCEDURE_TRI_009_1 (V_COL1 IN PROCEDURE_DDL_TAB_009_1.COL1%TYPE,V_SUM out number)
+AS
+V_COL2 PROCEDURE_DDL_TAB_009_1.COL2%TYPE;
+V_COL3 PROCEDURE_DDL_TAB_009_1.COL3%TYPE;
+--V_SUM NUMBER;
+BEGIN
+    DECLARE
+        CURSOR TRI_CURSOR_009_1
+        IS
+            SELECT SUM(COL1) FROM PROCEDURE_DDL_TAB_009_1;
+        BEGIN
+            OPEN TRI_CURSOR_009_1;
+            SELECT COL2,COL3 INTO V_COL2,V_COL3 FROM PROCEDURE_DDL_TAB_009_1 WHERE COL1 = V_COL1;
+            IF SQL%FOUND THEN
+                V_SUM := V_COL2 + V_COL3;
+                commit;
+            ELSE
+                RAISE NO_DATA_FOUND;
+            END IF;
+            CLOSE TRI_CURSOR_009_1;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                raise notice 'NoDataFound';
+        END;
+END;
+/
+
+create or replace procedure PROCEDURE_TRI_009_2
+as
+v_return number;
+v_sql_create varchar2(500);
+v_sql_select varchar2(500);
+v_sql_update varchar2(500);
+v_sql_delete varchar2(500);
+v_sql_insert varchar2(500);
+begin
+    v_sql_select := 'select * from PROCEDURE_DDL_TAB_009_2 where COL1=1';
+    v_sql_update := 'update PROCEDURE_DDL_TAB_009_2 set col2 = '||PROCEDURE_TRI_009_1(1)*5;
+    v_sql_delete := 'delete from PROCEDURE_DDL_TAB_009_2 where col1='||PROCEDURE_TRI_009_1(1)*5;
+    v_sql_insert := 'INSERT INTO PROCEDURE_DDL_TAB_009_2 VALUES (GENERATE_SERIES(1, 5),'||PROCEDURE_TRI_009_1(2)||',GENERATE_SERIES(1, 5))';
+    raise notice 'v_sql_select:%', v_sql_select;
+    execute immediate v_sql_select;
+    execute immediate v_sql_update;
+    commit;
+    execute immediate v_sql_select;
+    execute immediate v_sql_delete;
+    execute immediate v_sql_insert;
+    rollback;
+    execute immediate v_sql_select;
+end;
+/
+
+select PROCEDURE_TRI_009_2(); 
+drop function PROCEDURE_TRI_009_2;
+drop function PROCEDURE_TRI_009_1;
+drop table PROCEDURE_DDL_TAB_009_1;
+drop table PROCEDURE_DDL_TAB_009_2;

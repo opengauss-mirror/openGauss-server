@@ -102,6 +102,10 @@ typedef struct {
  * function within a transaction.)
  */
 typedef struct SimpleEcontextStackEntry {
+    bool is_valid; /* set true in default, set false before procedure commit/rollback */
+    bool has_change_parent; /* has change simple_econtext's parent context or not */
+    int upper_func_used_level;
+    int spi_level; /* u_sess->SPI_cxt._curid when create this expr context */
     ExprContext* stack_econtext;           /* a stacked econtext */
     SubTransactionId xact_subxid;          /* ID for current subxact */
     int64 statckEntryId;                   /* ID for current StackEntry */
@@ -202,7 +206,7 @@ static int expand_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, 
 static int expand_stmt_if(PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool& exception_flag, List* block_ptr_stack, bool resignal_in_handler = false);
 static int expand_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt, bool& exception_flag, List* block_ptr_stack, bool resignal_in_handler = false);
 static int expand_stmt_loop(PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt, bool& exception_flag, List* lock_ptr_stack, bool resignal_in_handler = false);
-static void plpgsql_create_econtext(PLpgSQL_execstate *estate, MemoryContext saveCxt = NULL);
+static void plpgsql_create_econtext(PLpgSQL_execstate *estate);
 static void free_var(PLpgSQL_var* var);
 static PreparedParamsData* exec_eval_using_params(PLpgSQL_execstate* estate, List* params);
 static void free_params_data(PreparedParamsData* ppd);
@@ -229,7 +233,7 @@ static int check_line_validity_in_for_query(PLpgSQL_stmt_forq* stmt, int, int);
 static void BindCursorWithPortal(Portal portal, PLpgSQL_execstate *estate, int varno);
 static char* transformAnonymousBlock(char* query);
 
-static void rebuild_exception_subtransaction_chain(PLpgSQL_execstate* estate, List* transactionList);
+static void rebuild_exception_subtransaction_chain(PLpgSQL_execstate* estate, List** transactionList);
 
 static void stp_check_transaction_and_set_resource_owner(ResourceOwner oldResourceOwner,TransactionId oldTransactionId);
 static void stp_check_transaction_and_create_econtext(PLpgSQL_execstate* estate,TransactionId oldTransactionId);
@@ -719,6 +723,10 @@ typedef struct {
 
     bool is_commit; /* flag when free it */
 
+    bool is_valid;
+
+    bool has_change_parent;
+
     /* next item in the list */
     void *next;
 } XactExprContextItem;
@@ -733,6 +741,8 @@ void stp_reserve_subxact_exprcontext(SimpleEcontextStackEntry* simple_econtext, 
     item->simple_econtext = simple_econtext->stack_econtext;
     item->stackId = simple_econtext->statckEntryId;
     item->is_commit = is_commit;
+    item->is_valid = simple_econtext->is_valid;
+    item->has_change_parent = simple_econtext->has_change_parent;
     item->next = u_sess->plsql_cxt.spi_xact_expr_context;
     MemoryContextSwitchTo(oldcxt);
     ShutdownExprContext(simple_econtext->stack_econtext, is_commit);
@@ -753,8 +763,9 @@ void stp_cleanup_subxact_exprcontext(int64 stackId)
          * (2) -1 means it can be clean at any time.
          */
         if (item->stackId > stackId  || item->stackId == -1) {
-            FreeExprContext(item->simple_econtext, item->is_commit);
-
+            if (item->is_valid) {
+                FreeExprContext(item->simple_econtext, item->is_commit);
+            }
             /* remove it and process the next one. */
             if (preItem != NULL) {
                 preItem->next = item->next;
@@ -771,6 +782,77 @@ void stp_cleanup_subxact_exprcontext(int64 stackId)
         }
     }
 }
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * Set flag or context parent to keep these context during later commit/rollback.
+ * 1. Set invalid flag for reverse subxact's expr context during commit/rollback in procedure.
+ * 2. Switch context parent to keep expr context during later commit/rollback. And Because of
+ *    different stack_econtext may use same ecxt_per_query_memory, we only switch parent and set
+ *    flag for last entry in u_sess->plsql_cxt.simple_econtext_stack list, to make sure only
+ *    check and free the earliest entry during plpgsql_xact_cb and plpgsql_destroy_econtext.
+ * 3. If has earlyer commit/rollback mark items in spi_xact_expr_context to change parent, we
+ *    need to change their parents again beacuse they always been reset parent after commit/rollback.
+*/
+static void stp_keep_context_subxact_exprcontext(int stackId)
+{
+    SimpleEcontextStackEntry *entry = u_sess->plsql_cxt.simple_econtext_stack;
+    SimpleEcontextStackEntry *last_entry = NULL;
+    while (entry != NULL && entry->statckEntryId > stackId) {
+        /* set invalid flag to keep this expr context in stp_cleanup_subxact_exprcontext. */
+        entry->is_valid = false;
+        if (entry->stack_econtext->ecxt_per_query_memory->parent != t_thrd.mem_cxt.portal_mem_cxt &&
+            ((entry->spi_level < u_sess->SPI_cxt._connected ||
+              entry->stack_econtext->ecxt_per_query_memory == u_sess->plsql_cxt.simple_eval_estate->es_query_cxt))) {
+            /* save the last entry in simple_econtext_stack, only set one flag for same ecxt_per_query_memory. */
+            if (last_entry == NULL) {
+                last_entry = entry;
+            } else if (last_entry->stack_econtext->ecxt_per_query_memory !=
+                        entry->stack_econtext->ecxt_per_query_memory) {
+                MemoryContextSetParent(last_entry->stack_econtext->ecxt_per_query_memory,
+                                       t_thrd.mem_cxt.portal_mem_cxt);
+                last_entry->has_change_parent = true;
+                last_entry = entry;
+            } else {
+                last_entry = entry;
+            }
+        }
+        entry = entry->next;
+    }
+    if (last_entry != NULL) {
+        MemoryContextSetParent(last_entry->stack_econtext->ecxt_per_query_memory, t_thrd.mem_cxt.portal_mem_cxt);
+        last_entry->has_change_parent = true;
+    }
+    /* u_sess->plsql_cxt.simple_econtext_stack will be move into u_sess->plsql_cxt.spi_xact_expr_context
+       in stp_reserve_subxact_exprcontext, we need to handle spi_xact_expr_context's context if there is any. */
+    XactExprContextItem* item = (XactExprContextItem*)u_sess->plsql_cxt.spi_xact_expr_context;
+    while (item != NULL) {
+        if (item->has_change_parent) {
+            MemoryContextSetParent(item->simple_econtext->ecxt_per_query_memory, t_thrd.mem_cxt.portal_mem_cxt);
+        }
+        item->is_valid = false;
+        item = (XactExprContextItem*)item->next;
+    }
+}
+
+/* If call a function has commit/rollback in loop, current expr's context maybe from inner function's context.
+   We need mark this situation to keep context in commit/rollback. */
+void stp_mark_upper_func_exprcontext()
+{
+    SimpleEcontextStackEntry *entry = u_sess->plsql_cxt.simple_econtext_stack;
+    while (entry != NULL) {
+        if (entry->spi_level > u_sess->SPI_cxt._connected &&
+            entry->stack_econtext->ecxt_per_query_memory == u_sess->plsql_cxt.simple_eval_estate->es_query_cxt) {
+            if (entry->upper_func_used_level == -1) {
+                entry->upper_func_used_level = u_sess->SPI_cxt._connected;
+            } else {
+                entry->upper_func_used_level = (entry->upper_func_used_level < u_sess->SPI_cxt._connected) ?
+                                                entry->upper_func_used_level : u_sess->SPI_cxt._connected;
+            }
+        }
+        entry = entry->next;
+    }
+}
+#endif
 
 /*
  * reserve current subxact's Resowner into session list.
@@ -7887,7 +7969,7 @@ static int exec_stmt_close(PLpgSQL_execstate* estate, PLpgSQL_stmt_close* stmt)
     return PLPGSQL_RC_OK;
 }
 
-static void rebuild_exception_subtransaction_chain(PLpgSQL_execstate* estate, List* transactionList)
+static void rebuild_exception_subtransaction_chain(PLpgSQL_execstate* estate, List** transactionList)
 {
     // Rebuild ResourceOwner chain, link Portal ResourceOwner to Top ResourceOwner.
     ResourceOwnerNewParent(t_thrd.utils_cxt.STPSavedResourceOwner, t_thrd.utils_cxt.CurrentResourceOwner);
@@ -7909,9 +7991,9 @@ static void rebuild_exception_subtransaction_chain(PLpgSQL_execstate* estate, Li
             PG_TRY();
             {
                 GetUserIdAndSecContext(&savedCurrentUser, &saveSecContext);
-                transactionNode* node = (transactionNode*)lfirst(list_head(transactionList));
+                transactionNode* node = (transactionNode*)lfirst(list_head(*transactionList));
                 SetUserIdAndSecContext(node->userId, node->secContext);
-                list_delete(transactionList, node);
+                *transactionList = list_delete(*transactionList, node);
                 pfree(node);
                 BeginInternalSubTransaction(NULL);
             }
@@ -7974,11 +8056,9 @@ static int exec_stmt_transaction(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt)
     // 3. Save current transaction state for the outer transaction started by user's 
     // begin/start statement.
     SPI_save_current_stp_transaction_state();
-    /* Saving es_query_cxt, transaction commit, or rollback will no longer delete es_query_cxt information */
-    MemoryContext saveCxt = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
-    saveCxt = u_sess->plsql_cxt.simple_eval_estate->es_query_cxt;
-    MemoryContextSetParent(saveCxt, t_thrd.mem_cxt.portal_mem_cxt);
+    /* Set flag or change context's place for keeping context not be deleted in transaction commit/rollback */
+    stp_keep_context_subxact_exprcontext(0);
 #endif
     // 4. Commit/rollback
     switch((PLpgSQL_stmt_types)stmt->cmd_type) {
@@ -8004,7 +8084,20 @@ static int exec_stmt_transaction(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt)
     // 7. Rebuild estate's context.
     u_sess->plsql_cxt.simple_eval_estate = NULL;
     u_sess->plsql_cxt.shared_simple_eval_resowner = NULL;
-    plpgsql_create_econtext(estate, saveCxt);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /* Reset parent context to transaction's context after commit/rollback, but no need to
+       reset has_change_parent flag. Because current func may call commit/rollback again later,
+       and we need to mark which context has to be keeped. */
+    XactExprContextItem *item = (XactExprContextItem*)u_sess->plsql_cxt.spi_xact_expr_context;
+    while (item != NULL) {
+        if (item->has_change_parent) {
+            MemoryContextSetParent(item->simple_econtext->ecxt_per_query_memory, u_sess->top_transaction_mem_cxt);
+        }
+        item = (XactExprContextItem*)item->next;
+    }
+#endif
+    plpgsql_create_econtext(estate);
 
 #ifndef ENABLE_MULTIPLE_NODES
     /* old savedcxt has freed, use new context */
@@ -8017,7 +8110,8 @@ static int exec_stmt_transaction(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt)
     }
 #endif
     // 8. Rebuild subtransaction chain for exception.
-    rebuild_exception_subtransaction_chain(estate, transactionHead);
+    rebuild_exception_subtransaction_chain(estate, &transactionHead);
+    list_free_deep(transactionHead);
     // 9. move old subtransaction' remain resource into Current Transaction
     stp_cleanup_subxact_resource(estate->stack_entry_start);
     if (u_sess->SPI_cxt.portal_stp_exception_counter == 0) {
@@ -10853,6 +10947,9 @@ static bool exec_eval_simple_expr(
      */
 
     if (expr->expr_simple_lxid != curlxid) {
+#ifndef ENABLE_MULTIPLE_NODES
+        stp_mark_upper_func_exprcontext();
+#endif
         oldcontext = MemoryContextSwitchTo(u_sess->plsql_cxt.simple_eval_estate->es_query_cxt);
         expr->expr_simple_state = ExecInitExpr(expr->expr_simple_expr, NULL);
         // expr->expr_simple_state = ExecInitExprForPlSql(expr->expr_simple_expr, econtext->ecxt_param_list_info,
@@ -12970,7 +13067,7 @@ static void exec_set_sql_rowcount(PLpgSQL_execstate* estate, int rowcount)
  * already for the current transaction.  The EState will be cleaned up at
  * transaction end.
  */
-static void plpgsql_create_econtext(PLpgSQL_execstate* estate, MemoryContext saveCxt)
+static void plpgsql_create_econtext(PLpgSQL_execstate* estate)
 {
     SimpleEcontextStackEntry* entry = NULL;
 
@@ -12983,11 +13080,7 @@ static void plpgsql_create_econtext(PLpgSQL_execstate* estate, MemoryContext sav
         MemoryContext oldcontext;
 
         oldcontext = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
-        u_sess->plsql_cxt.simple_eval_estate = CreateExecutorState(saveCxt);
-
-        if (saveCxt != NULL) {
-            MemoryContextSetParent(saveCxt, u_sess->top_transaction_mem_cxt);
-        }
+        u_sess->plsql_cxt.simple_eval_estate = CreateExecutorState();
         MemoryContextSwitchTo(oldcontext);
     }
 
@@ -13015,9 +13108,12 @@ static void plpgsql_create_econtext(PLpgSQL_execstate* estate, MemoryContext sav
                                                           sizeof(SimpleEcontextStackEntry));
 
     entry->stack_econtext = estate->eval_econtext;
+    entry->is_valid = true;
     entry->xact_subxid = GetCurrentSubTransactionId();
     entry->statckEntryId = ++u_sess->plsql_cxt.nextStackEntryId;
-
+    entry->spi_level = u_sess->SPI_cxt._connected;
+    entry->has_change_parent = false;
+    entry->upper_func_used_level = -1;
     entry->next = u_sess->plsql_cxt.simple_econtext_stack;
     u_sess->plsql_cxt.simple_econtext_stack = entry;
 }
@@ -13038,7 +13134,15 @@ void plpgsql_destroy_econtext(PLpgSQL_execstate* estate)
      * more or less. The top stack entry may not be the pushed one at the begining of PL function.
      * Here we skip some, try to find and release the entry identified by estate->stack_entry_start.
      */
-    while (plcontext != NULL &&  plcontext->statckEntryId > estate->stack_entry_start) {
+    while (plcontext != NULL && plcontext->statckEntryId > estate->stack_entry_start) {
+#ifndef ENABLE_MULTIPLE_NODES
+        /* reset current func's entry's parent context if necessary */
+        if (plcontext->has_change_parent && plcontext->spi_level >= u_sess->SPI_cxt._connected &&
+            (plcontext->upper_func_used_level == -1 ||
+             plcontext->upper_func_used_level >= u_sess->SPI_cxt._connected)) {
+            MemoryContextSetParent(plcontext->stack_econtext->ecxt_per_query_memory, u_sess->top_transaction_mem_cxt);
+        }
+#endif
         /*
          * Call any shutdown callbacks and reset the econtext created by this PL function
          * as possible. Don't free it since the subtransaction is still alive.
@@ -13084,6 +13188,17 @@ void plpgsql_xact_cb(XactEvent event, void* arg)
 #endif
 
     u_sess->plsql_cxt.simple_eval_estate = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    /* reset current func's entry's parent context if necessary */
+    SimpleEcontextStackEntry *entry = u_sess->plsql_cxt.simple_econtext_stack;
+    while (entry != NULL) {
+        if (entry->has_change_parent && entry->spi_level >= u_sess->SPI_cxt._connected &&
+            (entry->upper_func_used_level == -1 || entry->upper_func_used_level >= u_sess->SPI_cxt._connected)) {
+            MemoryContextSetParent(entry->stack_econtext->ecxt_per_query_memory, u_sess->top_transaction_mem_cxt);
+        }
+        entry = entry->next;
+    }
+#endif
     /*
      * If we are doing a clean transaction shutdown, free the EState (so that
      * any remaining resources will be released correctly). In an abort, we

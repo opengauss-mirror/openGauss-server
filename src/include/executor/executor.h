@@ -552,7 +552,7 @@ extern void end_tup_output(TupOutputState* tstate);
 /*
  * prototypes from functions in execUtils.c
  */
-extern EState* CreateExecutorState(MemoryContext saveCxt = NULL);
+extern EState* CreateExecutorState();
 extern void FreeExecutorState(EState* estate);
 extern ExprContext* CreateExprContext(EState* estate);
 extern ExprContext* CreateStandaloneExprContext(void);
