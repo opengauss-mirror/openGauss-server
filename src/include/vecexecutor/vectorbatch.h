@@ -293,6 +293,7 @@ public:
     void copy(ScalarVector* vector);
 
     void copyDeep(ScalarVector* vector, int start_idx, int endIdx);
+    void copyFlag(ScalarVector* vector, int start_idx, int end_idx);
     void copyNth(ScalarVector* vector, int Nth);
 
     void copy(ScalarVector* vector, const bool* pSel);

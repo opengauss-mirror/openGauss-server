@@ -836,6 +836,17 @@ void ScalarVector::copyDeep(ScalarVector* vector, int start_idx, int end_idx)
     m_rows += copy_rows;
 }
 
+void ScalarVector::copyFlag(ScalarVector* vector, int start_idx, int end_idx)
+{
+    errno_t rc;
+    Assert(vector != NULL);
+    int copy_rows;  /* the number of rows to be copyed */
+
+    copy_rows = end_idx - start_idx;
+    rc = memcpy_s(&m_flag[m_rows], BatchMaxSize - m_rows, &vector->m_flag[start_idx], copy_rows);
+    securec_check(rc, "\0", "\0");
+}
+
 void ScalarVector::copyNth(ScalarVector* vector, int nth)
 {
     Assert(vector != NULL);
