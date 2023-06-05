@@ -76,10 +76,11 @@ explain (costs on, verbose on) select * from (select name from regex_1 union sel
 explain (costs on, verbose on) insert into regex_1 (select * from regex_2);
                                QUERY PLAN                               
 ------------------------------------------------------------------------
+ [Bypass]
 --? Insert on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
 --?   ->  Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
          Output: regex_2.id, regex_2.name, regex_2.value
-(3 rows)
+(4 rows)
 
 set enable_hashjoin=on;
 set enable_nestloop=off;

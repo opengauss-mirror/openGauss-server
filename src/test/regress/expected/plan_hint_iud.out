@@ -21,10 +21,11 @@ analyze t2;
 :EXP insert into t1 select c1, c2 from t2 where c2 = 1;
         QUERY PLAN        
 --------------------------
+ [Bypass]
  Insert on t1
    ->  Seq Scan on t2
          Filter: (c2 = 1)
-(3 rows)
+(4 rows)
 
 --- Scan
 :EXP insert /*+ indexscan(t2) */ into t1 select c1, c2 from t2 where c2 = 1;
@@ -90,10 +91,11 @@ set plan_cache_mode = force_custom_plan;
 :EXP execute insert_g(2);
         QUERY PLAN         
 ---------------------------
+ [Bypass]
  Insert on t1
    ->  Seq Scan on t2
          Filter: (c2 = $1)
-(3 rows)
+(4 rows)
 
 prepare insert_c as insert /*+ use_cplan */ into t1 select c1, c2 from t2 where c2 = $1;
 set plan_cache_mode = force_generic_plan;

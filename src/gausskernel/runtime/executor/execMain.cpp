@@ -116,7 +116,7 @@ THR_LOCAL bool is_syncup_producer = false;
 void InitPlan(QueryDesc *queryDesc, int eflags);
 static void CheckValidRowMarkRel(Relation rel, RowMarkType markType);
 static void ExecPostprocessPlan(EState *estate);
-static void ExecEndPlan(PlanState *planstate, EState *estate);
+void ExecEndPlan(PlanState *planstate, EState *estate);
 static void ExecCollectMaterialForSubplan(EState *estate);
 #ifdef ENABLE_MOT
 static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
@@ -2021,7 +2021,7 @@ static void ExecPostprocessPlan(EState *estate)
  * tuple tables must be cleared or dropped to ensure pins are released.
  * ----------------------------------------------------------------
  */
-static void ExecEndPlan(PlanState *planstate, EState *estate)
+void ExecEndPlan(PlanState *planstate, EState *estate)
 {
     ResultRelInfo *resultRelInfo = NULL;
     int i;

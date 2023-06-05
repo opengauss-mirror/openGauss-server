@@ -315,12 +315,13 @@ begin;
 explain (verbose on, analyze on) create table t4 as select * from t1 where t1.a = 1;
                                                      QUERY PLAN                                                     
 --------------------------------------------------------------------------------------------------------------------
+ [Bypass]
 --? Insert on schema_plan_hint.t4  (cost=0.00..1.01 rows=1 width=12) (actual time=.* rows=1 loops=1)
 --?   ->  Seq Scan on schema_plan_hint.t1  (cost=0.00..1.01 rows=1 width=12) (actual time=.* rows=1 loops=1)
          Output: t1.a, t1.b, t1.c
          Filter: (t1.a = 1)
 --?.*
-(5 rows)
+(6 rows)
 
 rollback;
 --- with hint

@@ -71,6 +71,10 @@ const char* getBypassReason(FusionType result)
             return "Bypass executed through delete fusion";
         }
 
+        case INSERT_SUB_FUSION: {
+            return "Bypass executed through insert sub fusion";
+        }
+
         case AGG_INDEX_FUSION: {
         	return "Bypass executed through agg fusion";
         }
@@ -278,6 +282,11 @@ const char* getBypassReason(FusionType result)
 
         case NOBYPASS_VERSION_SCAN_PLAN: {
             return "Bypass not executed because the plan contains version table scan.";
+            break;
+        }
+
+        case NOBYPASS_INSERT_SUB_FUSION_NOT_SUPPORT_PARTITION_BYPASS: {
+            return "Bypass not executed because insert sub fusion not support partition table bypass.";
             break;
         }
 
@@ -921,13 +930,19 @@ FusionType checkBaseResult(Plan* top_plan)
 {
     FusionType result = INSERT_FUSION;
     ModifyTable *node = (ModifyTable *)top_plan;
-    if (!IsA(linitial(node->plans), BaseResult)) {
+
+    if (IsA(linitial(node->plans), SeqScan) && list_length(node->plans) == 1) {
+        result = INSERT_SUB_FUSION;
+        /* may be we need do some extra check here like BaseResult? */
+    } else if (IsA(linitial(node->plans), BaseResult)) {
+        BaseResult *base = (BaseResult *)linitial(node->plans);
+        if (base->plan.lefttree != NULL || base->plan.initPlan != NIL || base->resconstantqual != NULL) {
+            return NOBYPASS_NO_SIMPLE_INSERT;
+        }
+    } else {
         return NOBYPASS_NO_SIMPLE_INSERT;
     }
-    BaseResult *base = (BaseResult *)linitial(node->plans);
-    if (base->plan.lefttree != NULL || base->plan.initPlan != NIL || base->resconstantqual != NULL) {
-        return NOBYPASS_NO_SIMPLE_INSERT;
-    }
+
     if (node->upsertAction != UPSERT_NONE) {
         return NOBYPASS_UPSERT_NOT_SUPPORT;
     }
@@ -959,12 +974,12 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
 #endif
 
     /* check subquery num */
-    FusionType ttype = checkBaseResult(top_plan);
-    if (ttype > BYPASS_OK) {
-        return ttype;
+    /* we also check SeqScan here, so ftype may be INSERT_SUB_FUSION */
+    ftype = checkBaseResult(top_plan);
+    if (ftype > BYPASS_OK) {
+        return ftype;
     }
     ModifyTable *node = (ModifyTable *)top_plan;
-    BaseResult *base = (BaseResult *)linitial(node->plans);
 
     /* check relation */
     Index res_rel_idx = linitial_int((List*)linitial(plannedstmt->resultRelations));
@@ -997,6 +1012,10 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
         heap_close(rel, NoLock);
         return NOBYPASS_PARTITION_BYPASS_NOT_OPEN;
     }
+    if (RELATION_IS_PARTITIONED(rel) && ftype == INSERT_SUB_FUSION) {
+        heap_close(rel, AccessShareLock);
+        return NOBYPASS_PARTITION_BYPASS_NOT_OPEN;
+    }
     if (RELATION_IS_PARTITIONED(rel) && ENABLE_GPC) {
         heap_close(rel, NoLock);
         return NOBYPASS_GPC_NOT_SUPPORT_PARTITION_BYPASS;
@@ -1010,7 +1029,12 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
      * check targetlist
      * maybe expr type is FuncExpr because of type conversion.
      */
-    List *targetlist = base->plan.targetlist;
+    List *targetlist = NIL;
+    if (IsA(linitial(node->plans), SeqScan)) {
+        targetlist = ((SeqScan*)linitial(node->plans))->plan.targetlist;
+    } else {
+        targetlist = ((BaseResult*)linitial(node->plans))->plan.targetlist;
+    }
     checkTargetlist(targetlist, &ftype);
     return ftype;
 }

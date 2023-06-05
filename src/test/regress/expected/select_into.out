@@ -104,10 +104,11 @@ ERROR:  EXPLAIN SELECT INTO requires ANALYZE
 EXPLAIN ANALYZE SELECT * INTO select_into_tbl FROM tmp_table;
 --?.*
 --?.*
+ [Bypass]
 --? Insert on select_into_tbl  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on tmp_table  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .*
-(3 rows)
+(4 rows)
 
 SELECT count(*) FROM select_into_tbl;
  count 
@@ -121,10 +122,11 @@ ERROR:  EXPLAIN CREATE TABLE AS SELECT requires ANALYZE
 EXPLAIN ANALYZE CREATE TABLE ctas_tbl AS SELECT * FROM tmp_table;
 --?.*
 --?.*
+ [Bypass]
 --? Insert on ctas_tbl  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on tmp_table  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .*
-(3 rows)
+(4 rows)
 
 SELECT count(*) FROM ctas_tbl;
  count 
