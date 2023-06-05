@@ -89,24 +89,56 @@
 
 /* Mode in dorado hyperreplication and dms enabled as follow */
 
-/* main standby which is runing normally, not in intermediate state */
-#define SS_PRIMARY_CLUSTER_NORMAL_PRIMARY                                    \
-    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) && \
-    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
-
-/* main standby which is runing normally, not in intermediate state */
-#define SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY                                    \
+/* main standby in standby cluster */
+#define SS_STANDBY_CLUSTER_MAIN_STANDBY                                    \
     (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
     t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
     (g_instance.attr.attr_storage.xlog_file_path != 0))
 
-/* main standby which is runing normally, not in intermediate state */
+/* standby mode in primary or standby cluster */
+#define SS_PRIMARY_STANDBY_CLUSTER_STANDBY                                    \
+    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == NORMAL_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  NORMAL_MODE) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* standby mode in primary cluster */
+#define SS_PRIMARY_CLUSTER_STANDBY                                    \
+    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == NORMAL_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  NORMAL_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* arbitrary mode when dorado hyperreplication and dms enabled */
 #define SS_PRIMARY_STANDBY_CLUSTER_NORMAL                                   \
     (ENABLE_DMS && ((g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) || \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY)) && \
     (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* primary mode in primary cluster, after reform done and primary id has been determined */
+#define SS_PRIMARY_CLUSTER_NORMAL_PRIMARY                                    \
+    (SS_NORMAL_PRIMARY && (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  PRIMARY_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* main standby in standby cluster, after reform done and primary id has been determined */
+#define SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY                                    \
+    (SS_NORMAL_PRIMARY && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* standby mode in standby cluster, after reform done and primary id has been determined */
+#define SS_STANDBY_CLUSTER_NORMAL_STANDBY                                    \
+    (SS_NORMAL_STANDBY && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* standby mode in primary or standby, after reform done and primary id has been determined */
+#define SS_PRIMARY_STANDBY_CLUSTER_NORMAL_STANDBY                                    \
+    (SS_NORMAL_STANDBY && (g_instance.attr.attr_storage.xlog_file_path != 0))
 
 /* DMS_BUF_NEED_LOAD */
 #define BUF_NEED_LOAD           0x1

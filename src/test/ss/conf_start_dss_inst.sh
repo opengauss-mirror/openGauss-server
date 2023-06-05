@@ -23,12 +23,33 @@ init_nodes_list()
     done
 }
 
+init_nodes_list_standby_cluster()
+{
+    inst_count=$1
+    last_id=`expr $inst_count - 1`
+    for i in `seq 0 $last_id`
+    do
+        inst_id=`expr $i + $INST_OFFSET - 2`
+        port=`expr $i + $DSS_PORT_BASE + 10000`
+        if [ $i != $last_id ]; then
+            mes_cfg=$mes_cfg$inst_id":127.0.0.1:"$port","
+        else
+            mes_cfg=$mes_cfg$inst_id":127.0.0.1:"$port
+        fi
+    done
+}
+
 init_dss_conf()
 {
     dss_home=$1
-    inst_id=`expr $2 + $INST_OFFSET`
     simu_path=$3
     lock_path=$4
+    cluster_mode=$5
+    if [ ${cluster_mode} == 'standby_cluster' ]; then
+        inst_id=`expr $2 + $INST_OFFSET - 2`
+    else
+        inst_id=`expr $2 + $INST_OFFSET`
+    fi
     echo "init ${dss_home}"
 
     mkdir -p ${dss_home}/cfg
@@ -84,6 +105,11 @@ create_vg()
 start_dss()
 {
     dsshome_pre=$1
+    inst_count=$2
+    cluster_mode=$3
+    if [ ${cluster_mode} == 'standby_cluster' ]; then
+        inst_count=4
+    fi    
     echo " =================   starting $inst_count dssserver process   ================="
     for i in `seq 0 $last_id`
     do
@@ -110,16 +136,23 @@ function main() {
         mkdir -p ${pre_path}
     fi
     simu_path=$3
-    init_nodes_list $inst_count
-    echo "init & start $inst_count dss node"
+    cluster_mode=$4
+    if [ ${cluster_mode} == 'standby_cluster' ]; then
+        init_nodes_list_standby_cluster $inst_count
+        echo "init & start $inst_count dss node for standby_cluster"
+    else
+        cluster_mode='single_cluster'
+        init_nodes_list $inst_count
+        echo "init & start $inst_count dss node"
+    fi 
     for i in `seq 0 $last_id`
-    do
-        echo "init_dss_conf ${pre_path}/dss_home$i"
-        init_dss_conf ${pre_path}/dss_home$i $i ${simu_path} ${pre_path}
-    done
+        do
+            echo "init_dss_conf ${pre_path}/dss_home$i"
+            init_dss_conf ${pre_path}/dss_home$i $i ${simu_path} ${pre_path} ${cluster_mode}
+        done
 
     create_vg ${pre_path}/dss_home0 ${simu_path}
-    start_dss ${pre_path}/dss_home ${inst_count}
+    start_dss ${pre_path}/dss_home ${inst_count} ${cluster_mode}
 }
 
 main $@

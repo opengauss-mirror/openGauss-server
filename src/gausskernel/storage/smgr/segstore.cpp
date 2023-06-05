@@ -369,10 +369,10 @@ SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_
     BlockNumber blocknum;
 
     /* Recovery thread should use physical location to read data directly. */
-    if (ENABLE_DMS && t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE &&
+    if (ENABLE_DMS && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
         g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY &&
         g_instance.attr.attr_storage.xlog_file_path != 0) {
-        ereport(DEBUG1, (errmsg("can segment address translation when role is SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY")));
+        ereport(DEBUG1, (errmsg("can segment address translation when role is SS_STANDBY_CLUSTER_MAIN_STANDBY")));
     } else {
         if (RecoveryInProgress() && !CurrentThreadIsWorker() && !SS_IN_FLUSHCOPY) {
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
