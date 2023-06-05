@@ -2018,10 +2018,13 @@ RETRY:
     }
 #ifndef ENABLE_MULTIPLE_NODES
     bool retry_get = false;
+    uint64 retry_count = 0;
+    const static uint64 WAIT_COUNT = 0x7FFFF;
     /* reset xmin before acquiring lwlock, in case blocking redo */
     t_thrd.pgxact->xmin = InvalidTransactionId;
 RETRY_GET:
-    if (snapshot->takenDuringRecovery && !StreamThreadAmI()) {
+    if (snapshot->takenDuringRecovery && !StreamThreadAmI() &&
+        !u_sess->proc_cxt.clientIsCMAgent) {
         if (InterruptPending) {
             (void)pgstat_report_waitstatus(oldStatus);
         }
@@ -2030,7 +2033,17 @@ RETRY_GET:
             pg_usleep(100L);
         }
         XLogRecPtr redoEndLsn = GetXLogReplayRecPtr(NULL, NULL);
-        if (u_sess->proc_cxt.clientIsCMAgent || (u_sess->proc_cxt.gsqlRemainCopyNum > 0 && retry_get)) {
+        retry_count++;
+        if ((retry_count & WAIT_COUNT) == WAIT_COUNT) {
+            ereport(LOG, (errmsg("standbyRedoCleanupXmin = %ld, "
+                                 "standbyRedoCleanupXminLsn = %ld, "
+                                 "standbyXmin = %ld, redoEndLsn = %ld",
+                                 t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin,
+                                 t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXminLsn,
+                                 t_thrd.xact_cxt.ShmemVariableCache->standbyXmin,
+                                 redoEndLsn)));
+        }
+        if ((u_sess->proc_cxt.gsqlRemainCopyNum > 0 && retry_get)) {
             LWLockAcquire(ProcArrayLock, LW_SHARED);
             if ((t_thrd.xact_cxt.ShmemVariableCache->standbyXmin
                 <= t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin)
