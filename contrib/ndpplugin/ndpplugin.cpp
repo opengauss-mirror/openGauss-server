@@ -317,7 +317,7 @@ static bool NdpScanGetPage(NdpScanDesc ndpScan)
         if (resp < req) {
             pg_usleep(NDP_RPC_WAIT_USEC);
         // if normal page finish, io request failed, pages been added to normal queue, can't return directly.
-        } else if (ndpScan->normalPagesId->Empty() && !NdpScanGetPageQueue(ndpScan)) {
+        } else if (ndpScan->normalPagesId->Empty() && ndpScan->respIO->Empty()) {
             return false;
         }
 #else
