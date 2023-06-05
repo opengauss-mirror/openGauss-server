@@ -426,7 +426,8 @@ Plan* CheckAndGetNdpPlan(PlannedStmt* stmt, SeqScan* scan, Plan* parent)
     // 1. check scan, should check Scan::tableRows or Plan::plan_rows?
     if (scan->plan.exec_type != EXEC_ON_DATANODES
         || !CheckNdpSupportListType(scan->plan.targetlist)
-        || !CheckNdpSupportListType(scan->plan.qual)) {
+        || !CheckNdpSupportListType(scan->plan.qual)
+        || scan->isPartTbl) {
         return nullptr;
     }
     node = (Plan*)scan;
