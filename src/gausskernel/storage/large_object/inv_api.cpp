@@ -497,9 +497,9 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
     bool neednextpage = true;
     bytea* datafield = NULL;
     bool pfreeit = false;
-    struct {
+    union {
         bytea hdr;
-        char data[LOBLKSIZE]; /* make struct big enough */
+        char data[LOBLKSIZE + sizeof(bytea) + sizeof(int32)]; /* make struct big enough */
         int32 align_it;       /* ensure struct is aligned well enough */
     } workbuf;
     char* workb = VARDATA(&workbuf.hdr);
@@ -672,9 +672,9 @@ void inv_truncate(LargeObjectDesc* obj_desc, int len)
     SysScanDesc sd;
     HeapTuple oldtuple;
     Form_pg_largeobject olddata;
-    struct {
+    union {
         bytea hdr;
-        char data[LOBLKSIZE]; /* make struct big enough */
+        char data[LOBLKSIZE + sizeof(bytea) + sizeof(int32)]; /* make struct big enough */
         int32 align_it;       /* ensure struct is aligned well enough */
     } workbuf;
     char* workb = VARDATA(&workbuf.hdr);

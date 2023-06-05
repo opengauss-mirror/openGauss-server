@@ -340,9 +340,9 @@ static bool RelationFindReplTupleByIndex(EState *estate, Relation rel, Relation 
             Tuple locktup;
             HeapTupleData heaplocktup;
             UHeapTupleData UHeaplocktup;
-            struct {
+            union {
                 UHeapDiskTupleData hdr;
-                char data[MaxPossibleUHeapTupleSize];
+                char data[MaxPossibleUHeapTupleSize + sizeof(UHeapDiskTupleData)];
             } tbuf;
             ItemPointer tid = tableam_tops_get_t_self(targetRel, outslot->tts_tuple);
 
@@ -512,9 +512,9 @@ static bool RelationFindReplTupleSeq(Relation rel, LockTupleMode lockmode, Tuple
             Tuple locktup = NULL;
             HeapTupleData heaplocktup;
             UHeapTupleData UHeaplocktup;
-            struct {
+            union {
                 UHeapDiskTupleData hdr;
-                char data[MaxPossibleUHeapTupleSize];
+                char data[MaxPossibleUHeapTupleSize + sizeof(UHeapDiskTupleData)];
             } tbuf;
             ItemPointer tid = tableam_tops_get_t_self(rel, outslot->tts_tuple);
 

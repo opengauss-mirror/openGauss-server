@@ -3056,9 +3056,9 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
 
         UHeapTupleData uheaptupdata;
         utuple = &uheaptupdata;
-        struct {
+        union {
             UHeapDiskTupleData hdr;
-            char data[MaxPossibleUHeapTupleSize];
+            char data[MaxPossibleUHeapTupleSize + sizeof(UHeapDiskTupleData)];
         } tbuf;
 
         errno_t errorNo = EOK;
@@ -4043,13 +4043,13 @@ static void AfterTriggerExecute(AfterTriggerEvent event, Relation rel, Oid oldPa
     HeapTuple rs_tuple2 = NULL;
     bool is_remote_relation = (RelationGetLocInfo(rel) != NULL);
 #endif
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf1 = {0};
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf2 = {0};
 
     /*

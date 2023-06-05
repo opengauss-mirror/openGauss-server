@@ -174,7 +174,7 @@ JARPLJAVA = pljava.jar
 ##############################################################################
 ifeq ($(enable_mot), yes)
   LIBS += -latomic -lmot_engine -lmasstree
-  LDFLAGS += -L$(top_builddir)/src/gausskernel/storage/mot/core/bin -L$(MASSTREE_LIB_PATH) -L$(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64
+  LDFLAGS += -L$(top_builddir)/src/gausskernel/storage/mot/core/bin -L$(MASSTREE_LIB_PATH) -L$(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64
   CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
 endif
 
@@ -629,28 +629,28 @@ ifeq ($(enable_mot), yes)
 	cp -d $(MASSTREE_LIB_PATH)/libmasstree* '$(DESTDIR)$(libdir)/'
 endif
 ifeq ($(with_3rd), NONE)
-	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libstdc++.so.6 '$(DESTDIR)$(libdir)/'
-	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libgcc_s.so.1 '$(DESTDIR)$(libdir)/'
-	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libgomp.so* '$(DESTDIR)$(libdir)/'
+	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libstdc++.so.6 '$(DESTDIR)$(libdir)/'
+	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libgcc_s.so.1 '$(DESTDIR)$(libdir)/'
+	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libgomp.so* '$(DESTDIR)$(libdir)/'
 ifeq ($(enable_mot), yes)
-	cp -d $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libatomic.so* '$(DESTDIR)$(libdir)/'
+	cp -d $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libatomic.so* '$(DESTDIR)$(libdir)/'
 endif
 ifeq ($(enable_thread_check), yes)
-	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so '$(DESTDIR)$(libdir)/'
-	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0 '$(DESTDIR)$(libdir)/'
-	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0.0.0 '$(DESTDIR)$(libdir)/'
+	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libtsan.so '$(DESTDIR)$(libdir)/'
+	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libtsan.so.0 '$(DESTDIR)$(libdir)/'
+	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libtsan.so.0.0.0 '$(DESTDIR)$(libdir)/'
 endif
 else
-	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libstdc++.so.6 '$(DESTDIR)$(libdir)/'
-	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libgcc_s.so.1 '$(DESTDIR)$(libdir)/'
-	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libgomp.so* '$(DESTDIR)$(libdir)/'
+	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libstdc++.so.6 '$(DESTDIR)$(libdir)/'
+	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libgcc_s.so.1 '$(DESTDIR)$(libdir)/'
+	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libgomp.so* '$(DESTDIR)$(libdir)/'
 ifeq ($(enable_mot), yes)
-	cp -d $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libatomic.so* '$(DESTDIR)$(libdir)/'
+	cp -d $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libatomic.so* '$(DESTDIR)$(libdir)/'
 endif
 ifeq ($(enable_thread_check), yes)
-	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so '$(DESTDIR)$(libdir)/'
-	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0 '$(DESTDIR)$(libdir)/'
-	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0.0.0 '$(DESTDIR)$(libdir)/'
+	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libtsan.so '$(DESTDIR)$(libdir)/'
+	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libtsan.so.0 '$(DESTDIR)$(libdir)/'
+	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libtsan.so.0.0.0 '$(DESTDIR)$(libdir)/'
 endif
 endif
 endif
