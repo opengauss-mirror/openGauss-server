@@ -10740,10 +10740,6 @@ void StartupXLOG(void)
     t_thrd.xlog_cxt.InRecovery = false;
     g_instance.roach_cxt.isRoachRestore = false;
 
-    if (ENABLE_DMS && ENABLE_REFORM) {
-        g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
-    }
-
     if (!SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING) {
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_PRODUCTION;
@@ -10916,6 +10912,10 @@ void StartupXLOG(void)
         MOTRecoveryDone();
     }
 #endif
+
+    if (ENABLE_DMS && ENABLE_REFORM && !SS_PRIMARY_DEMOTED) {
+        DMSWaitReform();
+    }
 }
 
 void CopyXlogForForceFinishRedo(XLogSegNo logSegNo, uint32 termId, XLogReaderState *xlogreader,
