@@ -145,6 +145,36 @@ void pg_ltoa(int32 value, char *a)
     }
 }
 
+static char *ss_concat_path(int32 node_id, const char *parent_dir, const char *dir)
+{
+    char *path = NULL;
+    char *prepath = NULL;
+    char nodeid_str[MAXPGPATH];
+    size_t len = strlen(parent_dir) + 2 + strlen(dir);
+    
+    /* prepared path by connecting vgname and subdir */
+    prepath = (char *)pg_malloc(len);
+    errno_t sret = sprintf_s(prepath, len, "%s/%s", parent_dir, dir + 1);
+    securec_check_ss_c(sret, prepath, "\0");
+    
+    if (node_id != INVALID_INSTANCEID) {
+        pg_ltoa(node_id, nodeid_str);
+        len = len + strlen(nodeid_str);
+        path = (char *)pg_malloc(len);
+    
+        /* full path by connecting prepared path and node id */
+        sret = sprintf_s(path, len, "%s%d", prepath, node_id);
+        securec_check_ss_c(sret, path, "\0");
+    } else {
+        path = (char *)pg_malloc(len);
+        sret = sprintf_s(path, len, "%s", prepath);
+        securec_check_ss_c(sret, path, "\0");
+    }
+    
+    FREE_AND_RESET(prepath);
+    return path;
+}
+
 /* check dms url when gs_initdb */
 bool ss_check_nodedatainfo(bool enable_dss)
 {   
@@ -170,48 +200,78 @@ bool ss_check_nodedatainfo(bool enable_dss)
     return issharedstorage;
 }
 
-bool ss_check_existclusterdir(const char *path)
+int ss_check_existdir(const char *path, int node_id, const char **subdir)
 {
-    for (uint32 i = 0; i < SS_CLUSTERDIRS_NUM; i++) {
-        if (strcmp(ss_clusterdirs[i] + 1, path) == 0) {
-            /* skip this and parent directory */
-            return true;
+    char *subpath = NULL;
+    errno_t sret = 0; 
+    struct stat statbuf;
+    int existnum = 0;
+    int totalnum = ARRAY_NUM(subdir);
+
+    for (uint32 i = 0; i < totalnum; i++) {
+        subpath = ss_concat_path(node_id, path, subdir[i]);
+        if (lstat(subpath, &statbuf) == 0) {
+            existnum++;
         }
+        FREE_AND_RESET(subpath);
     }
-    return false;
+
+    if (existnum == 0) {
+        return 0; // subdir do not exists
+    } else if (existnum < totalnum) {
+        return 1; // subdir exists but not complete
+    }
+    return 2; // subdir exists and complete
 }
 
-bool ss_check_shareddir(char *path)
+int ss_check_shareddir(char *path, int node_id, bool *need_mkclusterdir)
 {
-    char *datadir = path;
-    DIR *chk_pg_data_dir = NULL;
-    struct dirent *file = NULL;
+    int ret = 0;
+    *need_mkclusterdir = false;
 
-    if ((chk_pg_data_dir = opendir(datadir)) != NULL) {
-        while ((file = readdir(chk_pg_data_dir)) != NULL) {
-            if (strcmp(".", file->d_name) == 0 || strcmp("..", file->d_name) == 0) {
-                /* skip this and parent directory */
-                continue;
-            } else if (ss_check_existclusterdir(file->d_name)) {
-                (void)closedir(chk_pg_data_dir);
-                return true;
-            }
-        }
-        (void)closedir(chk_pg_data_dir);
+    // step1: check cluster dir, must exists when instance id is not 0
+    switch (ss_check_existdir(path, INVALID_INSTANCEID, ss_clusterdirs)) {
+        case 0:
+            *need_mkclusterdir = true;
+            break;
+        case 1:
+            ret |= ERROR_CLUSTERDIR_INCOMPLETE; // cluster dir exists but not complete
+            break;
+        case 2:
+            *need_mkclusterdir = false;
+            break;
+        default:
+            fprintf(stderr, _("unkown state for ss_clusterdirs.\n"));
     }
 
-    return false;
+    // node 0 must be primary in initdb
+    if (node_id != 0 && (*need_mkclusterdir)) {
+        ret |= ERROR_CLUSTERDIR_NO_EXISTS_BY_STANDBY;
+    }
+
+    if (node_id == 0 && !(*need_mkclusterdir)) {
+        ret |= ERROR_CLUSTERDIR_EXISTS_BY_PRIMARY;
+    }
+
+    // step2: check instancedir dir, do not allow exists
+    switch (ss_check_existdir(path, node_id, ss_instancedirs)) {
+        case 0:
+            break;
+        case 1:
+        case 2:
+            ret |= ERROR_INSTANCEDIR_EXISTS;
+            fprintf(stderr, _("instancedir already exists.\n"));
+            break;
+        default:
+            fprintf(stderr, _("unkown state for ss_instancedirs.\n"));
+    }
+
+    return ret;
 }
 
 void ss_mkdirdir(int32 node_id, const char *pg_data, const char *vgdata_dir, const char *vglog_dir,
     bool need_mkclusterdir)
 {
-    if (node_id == 0 && !need_mkclusterdir) {
-        printf(_("The dss file needs to be cleared before node 0 init db.\n"));
-        (void)fflush(stdout);
-        exit_nicely();
-    }
-
     /* Create required subdirectories */
     printf(_("creating subdirectories ... in shared storage mode ... "));
     (void)fflush(stdout);
@@ -257,36 +317,6 @@ void ss_makesubdir(char *path, const char **subdir, uint num)
         ss_makedirectory(subpath);
         FREE_AND_RESET(subpath);
     }
-}
-
-static char *ss_concat_path(int32 node_id, const char *parent_dir, const char *dir)
-{
-    char *path = NULL;
-    char *prepath = NULL;
-    char nodeid_str[MAXPGPATH];
-    size_t len = strlen(parent_dir) + 2 + strlen(dir);
-    
-    /* prepared path by connecting vgname and subdir */
-    prepath = (char *)pg_malloc(len);
-    errno_t sret = sprintf_s(prepath, len, "%s/%s", parent_dir, dir + 1);
-    securec_check_ss_c(sret, prepath, "\0");
-    
-    if (node_id != INVALID_INSTANCEID) {
-        pg_ltoa(node_id, nodeid_str);
-        len = len + strlen(nodeid_str);
-        path = (char *)pg_malloc(len);
-    
-        /* full path by connecting prepared path and node id */
-        sret = sprintf_s(path, len, "%s%d", prepath, node_id);
-        securec_check_ss_c(sret, path, "\0");
-    } else {
-        path = (char *)pg_malloc(len);
-        sret = sprintf_s(path, len, "%s", prepath);
-        securec_check_ss_c(sret, path, "\0");
-    }
-    
-    FREE_AND_RESET(prepath);
-    return path;
 }
 
 void ss_createdir(const char **ss_dirs, int32 num, int32 node_id, const char *pg_data, const char *vgdata_dir,
