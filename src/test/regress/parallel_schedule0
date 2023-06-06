@@ -46,6 +46,7 @@ test: set_system_variables_test
 
 # test for set [session | global] transaction
 test: set_transaction_test
+test: transaction_with_snapshot
 
 # test select into statement
 test: select_into_user_defined_variables

@@ -2654,6 +2654,14 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                      */
                 case TRANS_STMT_BEGIN:
                 case TRANS_STMT_START: {
+                    if (stmt->with_snapshot) {
+                        if (u_sess->utils_cxt.XactIsoLevel == XACT_REPEATABLE_READ) {
+                            GetTransactionSnapshot();
+                        } else {
+                            ereport(WARNING, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("with consistent snapshot only effected in repeatable read mode")));
+                        }
+                    }
                     ListCell* lc = NULL;
                     BeginTransactionBlock();
                     foreach (lc, stmt->options) {
