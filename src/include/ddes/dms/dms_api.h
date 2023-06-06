@@ -283,6 +283,7 @@ typedef struct st_dms_buf_ctrl {
     volatile unsigned char force_request;   // force to request page from remote
     volatile unsigned char need_flush;      // for recovery, owner is abort, copy instance should flush before release
     volatile unsigned char been_loaded;     // first alloc ctrl:FALSE, after successfully loaded: TRUE
+    volatile unsigned char in_rcy;          // if drc lost, we can rebuild in_recovery flag according buf_ctrl
     unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
@@ -317,7 +318,6 @@ typedef enum en_dms_page_latch_mode {
 #define DMS_ENTER_PAGE_LRU_STATS_SCAN (unsigned char)0x10 // add to stats LRU list
 #define DMS_ENTER_PAGE_LRU_HIGH_AGE   (unsigned char)0x20 // decrease possibility to be recycled of page
 #define DMS_ENTER_PAGE_LOCAL          (unsigned char)0x40 // check local page without redo log, use carefully
-#define DMS_ENTER_PAGE_REMOTE         (unsigned char)0x80 // remote access mode
 
 // pack read page parameters together
 typedef struct st_dms_read_page_assist {
@@ -402,6 +402,12 @@ typedef struct st_dw_recovery_info {
     unsigned long long bitmap_new_join;     // the new-join-inst bitmap in dw_recovery phase
 } dw_recovery_info_t;
 
+typedef struct st_file_orglsn_recovery_info {
+    unsigned long long bitmap_old_join;     // the old-join-inst bitmap in dw_recovery phase
+    unsigned long long bitmap_old_remove;   // the old-remove-inst bitmap in dw_recovery phase
+    unsigned long long bitmap_new_join;     // the new-join-inst bitmap in dw_recovery phase
+} file_orglsn_recovery_info_t;
+
 typedef struct st_inst_list {
     unsigned char inst_id_list[DMS_MAX_INSTANCES];
     unsigned char inst_id_count;
@@ -445,6 +451,7 @@ typedef enum en_dms_wait_event {
     DMS_EVT_LATCH_S,
     DMS_EVT_LATCH_X_REMOTE,
     DMS_EVT_LATCH_S_REMOTE,
+    DMS_EVT_ONDEMAND_REDO,
 
 
     DMS_EVT_COUNT,
@@ -513,6 +520,8 @@ typedef int(*dms_edp_lsn)(void *db_handle, char *pageid, unsigned long long *lsn
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int is_reformer);
 typedef int(*dms_dw_recovery)(void *db_handle, void *recovery_list, int is_reformer);
+typedef int(*dms_df_recovery)(void *db_handle);
+typedef int(*dms_file_orglsn_recovery)(void *db_handle, void *recovery_list, int is_reformer);
 typedef int(*dms_opengauss_startup)(void *db_handle);
 typedef int(*dms_opengauss_recovery_standby)(void *db_handle, int inst_id);
 typedef int(*dms_opengauss_recovery_primary)(void *db_handle, int inst_id);
@@ -599,11 +608,12 @@ typedef char *(*dms_display_rowid)(char *display_buf, unsigned int count, char *
 typedef int (*dms_drc_buf_res_rebuild)(void *db_handle);
 typedef int (*dms_drc_buf_res_rebuild_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num,
     unsigned char for_rebuild);
+typedef int(*dms_ctl_rcy_clean_parallel_t)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
 typedef unsigned char(*dms_ckpt_session)(void *db_handle);
 typedef void (*dms_check_if_build_complete)(void *db_handle, unsigned int *build_complete);
 typedef int (*dms_db_is_primary)(void *db_handle);
 typedef void (*dms_set_switchover_result)(void *db_handle, int result);
-typedef void (*dms_set_db_standby)(void *db_handle);
+typedef void (*dms_set_db_role)(void *db_handle, unsigned char is_primary);
 typedef int (*dms_mount_to_recovery)(void *db_handle, unsigned int *has_offline);
 typedef int(*dms_get_open_status)(void *db_handle);
 typedef void (*dms_reform_set_dms_role)(void *db_handle, unsigned int reformer_id);
@@ -611,6 +621,7 @@ typedef void (*dms_reform_set_dms_role)(void *db_handle, unsigned int reformer_i
 // for openGauss
 typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
 typedef int (*dms_get_db_primary_id)(void *db_handle, unsigned int *primary_id);
+typedef int (*dms_opengauss_ondemand_redo_buffer)(void *block_key, int *redo_status);
 
 // for ssl
 typedef int(*dms_decrypt_pwd_t)(const char *cipher, unsigned int len, char *plain, unsigned int size);
@@ -654,6 +665,8 @@ typedef struct st_dms_callback {
     dms_disk_lsn disk_lsn;
     dms_recovery recovery;
     dms_dw_recovery dw_recovery;
+    dms_df_recovery df_recovery;
+    dms_file_orglsn_recovery file_orglsn_recovery;
     dms_db_is_primary db_is_primary;
     dms_get_open_status get_open_status;
     dms_undo_init undo_init;
@@ -663,6 +676,7 @@ typedef struct st_dms_callback {
     dms_recovery_in_progress recovery_in_progress;
     dms_drc_buf_res_rebuild dms_reform_rebuild_buf_res;
     dms_drc_buf_res_rebuild_parallel dms_reform_rebuild_parallel;
+    dms_ctl_rcy_clean_parallel_t dms_ctl_rcy_clean_parallel;
     dms_check_if_build_complete check_if_build_complete;
 
     // used in reform for opengauss
@@ -671,6 +685,7 @@ typedef struct st_dms_callback {
     dms_opengauss_startup opengauss_startup;
     dms_opengauss_recovery_standby opengauss_recovery_standby;
     dms_opengauss_recovery_primary opengauss_recovery_primary;
+    dms_opengauss_ondemand_redo_buffer opengauss_ondemand_redo_buffer;
     dms_reform_start_notify reform_start_notify;
     dms_reform_set_dms_role reform_set_dms_role;
 
@@ -755,7 +770,7 @@ typedef struct st_dms_callback {
     dms_switchover_promote_opengauss switchover_promote_opengauss;
     dms_failover_promote_opengauss failover_promote_opengauss;
     dms_set_switchover_result set_switchover_result;
-    dms_set_db_standby set_db_standby;
+    dms_set_db_role set_db_role;
     dms_mount_to_recovery mount_to_recovery;
 
     dms_reform_done_notify reform_done_notify;
@@ -840,7 +855,7 @@ typedef enum en_dms_info_id {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           78
+#define DMS_LOCAL_VERSION           70
 
 #ifdef __cplusplus
 }

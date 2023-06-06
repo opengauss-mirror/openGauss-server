@@ -2646,7 +2646,6 @@ void ResetReplicationSlotsShmem()
                 slot->candidate_restart_valid = 0;
                 slot->candidate_restart_lsn = 0;
                 slot->is_recovery = false;
-                slot->last_xmin_change_time = 0;
             }
         }
     }
