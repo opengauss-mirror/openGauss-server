@@ -294,14 +294,14 @@ explain (costs off) SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE ke
                                      QUERY PLAN                                     
 ------------------------------------------------------------------------------------
  Partitioned Bitmap Heap Scan on test_part_bitmapand_ginst_btree
-   Recheck Cond: ((a = 10) AND (keyword @> '''new'''::tsquery))
+   Recheck Cond: ((keyword @> '''new'''::tsquery) AND (a = 10))
    Selected Partitions:  1
    ->  BitmapAnd
-         ->  Partitioned Bitmap Index Scan on test_part_bitmapand_ginst_btree_a_idx
-               Index Cond: (a = 10)
-               Selected Partitions:  1
          ->  Partitioned Bitmap Index Scan on qq
                Index Cond: (keyword @> '''new'''::tsquery)
+               Selected Partitions:  1
+         ->  Partitioned Bitmap Index Scan on test_part_bitmapand_ginst_btree_a_idx
+               Index Cond: (a = 10)
                Selected Partitions:  1
 (10 rows)
 

@@ -598,14 +598,15 @@ bool UpdateFusion::execute(long max_rows, char *completionTag)
 
     Relation rel = ((m_local.m_scan->m_parentRel) == NULL ? m_local.m_scan->m_rel :
         m_local.m_scan->m_parentRel);
-    ResultRelInfo *result_rel_info = makeNode(ResultRelInfo);
+    ResultRelInfo *result_rel_info = makeNodeFast(ResultRelInfo);
     InitResultRelInfo(result_rel_info, rel, 1, 0);
     m_c_local.m_estate->es_result_relation_info = result_rel_info;
     m_c_local.m_estate->es_output_cid = GetCurrentCommandId(true);
     m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        ExecOpenIndices(result_rel_info, true);
+        bool speculative = m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore;
+        ExecOpenIndices(result_rel_info, speculative);
     }
 
     ModifyTable* node = (ModifyTable*)(m_global->m_planstmt->planTree);

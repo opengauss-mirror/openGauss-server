@@ -78,6 +78,7 @@ static void DropExtensionInListIsSupported(List* objname)
         "drop",
         "postgis",
         "packages",
+        "ndpplugin",
 #ifndef ENABLE_MULTIPLE_NODES
         "mysql_fdw",
         "oracle_fdw",
@@ -113,6 +114,11 @@ static void DropExtensionInListIsSupported(List* objname)
         if (pg_strcasecmp(name, supportList[i]) == 0) {
             return;
         }
+    }
+
+    if (pg_strcasecmp(name, "file_fdw") == 0 && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("EXTENSION file_fdw does not allow to drop.")));
     }
 
     /* Enable DROP operation of the above objects during inplace upgrade or support_extended_features is true */
@@ -340,6 +346,7 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
     char* msg = NULL;
     char* name = NULL;
     char* args = NULL;
+    List* relname = NIL;
     StringInfo message = makeStringInfo();
 
     switch (objtype) {
@@ -430,12 +437,13 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
         case OBJECT_TRIGGER:
             if (list_length(objname) == 1) {
                 msg = gettext_noop("trigger \"%s\" does not exist");
-                name = NameListToString(objname);
+                name = NameListToString(list_make1(lfirst(list_tail((List*)lfirst(list_tail(objname))))));
                 break;
             } else {
                 msg = gettext_noop("trigger \"%s\" for table \"%s\" does not exist");
-                name = NameListToString(objname);
-                args = NameListToString(list_truncate(list_copy(objname), list_length(objname) - 1));
+                relname = list_truncate(list_copy(objname), list_length(objname) - 1);
+                args = NameListToString(relname);
+                name = NameListToString(lappend(relname, lfirst(list_tail((List*)lfirst(list_tail(objname))))));
                 break;
             }
         case OBJECT_EVENT_TRIGGER:

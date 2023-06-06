@@ -1326,6 +1326,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->PrivateRefCountHash = NULL;
     storage_cxt->PrivateRefCountOverflowed = 0;
     storage_cxt->PrivateRefCountClock = 0;
+    storage_cxt->ReservedRefCountEntry = NULL;
     storage_cxt->saved_info_valid = false;
     storage_cxt->prev_strategy_buf_id = 0;
     storage_cxt->prev_strategy_passes = 0;
@@ -1704,6 +1705,7 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     dms_cxt->file_size = 0;
     errno_t rc = memset_s(dms_cxt->msg_backup, sizeof(dms_cxt->msg_backup), 0, sizeof(dms_cxt->msg_backup));
     securec_check(rc, "\0", "\0");
+    dms_cxt->flush_copy_get_page_failed = false;
 }
 static void knl_t_rc_init(knl_t_rc_context* rc_cxt)
 {

@@ -308,12 +308,12 @@ void recompute_limits(LimitState* node)
  */
 static void pass_down_bound(LimitState* node, PlanState* child_node)
 {
+    /* Note: if this overflows, we'll return a negative value, which is OK */
+    int64 tuples_needed = node->noCount ? -1 : (node->count + node->offset); 
     if (IsA(child_node, SortState) || IsA(child_node, VecSortState)) {
         SortState* sortState = (SortState*)child_node;
-        int64 tuples_needed = node->count + node->offset;
-
         /* negative test checks for overflow in sum */
-        if (node->noCount || tuples_needed < 0) {
+        if (tuples_needed < 0) {
             /* make sure flag gets reset if needed upon rescan */
             sortState->bounded = false;
         } else {
@@ -340,6 +340,14 @@ static void pass_down_bound(LimitState* node, PlanState* child_node)
          */
         if (outerPlanState(child_node) && !expression_returns_set((Node*)child_node->plan->targetlist))
             pass_down_bound(node, outerPlanState(child_node));
+    } else if (IsA(child_node, AggState)) {
+        if (tuples_needed > 0) {
+            child_node = outerPlanState((AggState *)child_node);
+            if (IsA(child_node, SortGroupState)) {
+                SortGroupState *sortGroup = (SortGroupState *)child_node;
+                sortGroup->bound = tuples_needed;
+            }
+        }
     }
 }
 

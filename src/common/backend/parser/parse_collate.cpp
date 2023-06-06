@@ -87,8 +87,8 @@ static void assign_ordered_set_collations(Aggref* aggref, assign_collations_cont
  * @in collatable: represent if the input is collatable
  * @in context: collation state
  */
-static void get_valid_collation(Oid& collation, CollateStrength& strength, int& location, Oid typcollation,
-    bool collatable, int expr_location, assign_collations_context context)
+FORCE_INLINE static void get_valid_collation(Oid& collation, CollateStrength& strength, int& location, Oid typcollation,
+    bool collatable, const Node* node, assign_collations_context context)
 {
     if (OidIsValid(typcollation)) {
         /* typllation (comes from a node) is collatable; what about its input? */
@@ -106,7 +106,7 @@ static void get_valid_collation(Oid& collation, CollateStrength& strength, int& 
              */
             collation = typcollation;
             strength = COLLATE_IMPLICIT;
-            location = expr_location;
+            location = exprCollation(node);
         }
     } else {
         /* Node's result type isn't collatable. */
@@ -408,7 +408,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                 location,
                 typcollation,
                 (typcollation == DEFAULT_COLLATION_OID) ? true : false,
-                exprLocation(node),
+                node,
                 loccontext);
 
             /*
@@ -607,7 +607,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                 location,
                 typcollation,
                 (loccontext.strength > COLLATE_NONE) ? true : false,
-                exprLocation(node),
+                node,
                 loccontext);
 
             /*

@@ -298,7 +298,7 @@ void hashBasedOperator::freeMemoryContext()
 {
     if (m_hashContext != NULL) {
         /* Delete child context for m_hashContext */
-        MemoryContextDeleteChildren(m_hashContext);
+        MemoryContextDeleteChildren(m_hashContext, NULL);
         MemoryContextDelete(m_hashContext);
         m_hashContext = NULL;
     }

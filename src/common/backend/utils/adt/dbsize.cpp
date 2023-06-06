@@ -253,6 +253,11 @@ static int64 calculate_database_size(Oid dbOid)
     return totalsize;
 }
 
+int64 pg_cal_database_size_oid(Oid dbOid)
+{
+    return (int64)(calculate_database_size(dbOid));
+}
+
 /*
  * @Description: calculate the compress ratio of the column-partition relation.
  * @in onerel: the relation.

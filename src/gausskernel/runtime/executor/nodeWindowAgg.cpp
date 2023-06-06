@@ -628,7 +628,7 @@ static void spool_tuples(WindowAggState* winstate, int64 pos)
         if (node->partNumCols > 0) {
             /* Check if this tuple still belongs to the current partition */
             if (!execTuplesMatch(winstate->first_part_slot, outer_slot, node->partNumCols, node->partColIdx,
-                winstate->partEqfunctions, winstate->tmpcontext->ecxt_per_tuple_memory, node->ord_collations)) {
+                winstate->partEqfunctions, winstate->tmpcontext->ecxt_per_tuple_memory, node->part_collations)) {
                 /*
                  * end of partition; copy the tuple for the next cycle.
                  */

@@ -451,7 +451,7 @@ test: xc_dml
 #test: hw_cstore_alter cstore_alter_table2 cstore_alter_table3 cstore_alter_table4 cstore_alter_table5 cstore_alter_table6 cstore_alter_table8 cstore_alter_table9 cstore_alter_table10 hw_cstore_copy hw_alter_table_instant hw_cstore_copy1
 #test: cstore_alter_table cstore_alter_table1 cstore_alter_table7 
 
-test: hw_cstore_tablespace hw_cstore_truncate hw_cstore_update
+test: hw_cstore_tablespace_1 hw_cstore_tablespace_2 hw_cstore_tablespace_3 hw_cstore_tablespace_4 hw_cstore_tablespace_5 hw_cstore_truncate hw_cstore_update
 #test: hw_cstore_roughcheck
 test: hw_cstore_partition_update hw_cstore_partition_update1 hw_cstore_partition_update2
 

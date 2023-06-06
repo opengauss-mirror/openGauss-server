@@ -934,7 +934,8 @@ static void dss_init(void)
 {
     if (IsDssMode()) {
         /* skip in some special backup modes */
-        if (backup_subcmd == DELETE_CMD || backup_subcmd == DELETE_INSTANCE_CMD) {
+        if (backup_subcmd == DELETE_CMD || backup_subcmd == DELETE_INSTANCE_CMD || 
+            backup_subcmd == SHOW_CMD || backup_subcmd == MERGE_CMD) {
             return;
         }
 
@@ -946,6 +947,10 @@ static void dss_init(void)
 
         if (IsSshProtocol()) {
             elog(ERROR, "Remote operations on dss mode are not supported");
+        }
+
+        if (instance_config.dss.vgname == NULL) {
+            elog(ERROR, "Vgname must be specified in dss mode.");
         }
 
         parse_vgname_args(instance_config.dss.vgname);

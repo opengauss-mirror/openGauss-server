@@ -564,7 +564,7 @@ Check out how openGauss implements open governance [works](https://gitee.com/ope
 
 ## Contribution
 
-Welcome contributions. See our [Contributor](https://opengauss.org/zh/contribution.html) for more details.
+Welcome contributions. See our [Contributor](https://opengauss.org/en/contribution/) for more details.
 
 ## Release Notes
 

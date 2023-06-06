@@ -477,6 +477,7 @@ void debug_print_agg_detail(PlannerInfo* root, AggStrategy aggstrategy, SAggMeth
             aggmthname = "DN_AGG_CN";
             break;
         case AGG_SORTED:
+        case AGG_SORT_GROUP:
             aggstgname = "GroupAggregate";
             break;
         case AGG_HASHED:

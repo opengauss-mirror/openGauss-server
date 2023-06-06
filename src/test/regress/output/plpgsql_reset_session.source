@@ -85,28 +85,28 @@ end;
 \! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "call proc094();";
 INFO:  c1.first is f
 CONTEXT:  SQL statement "CALL pkg094.p1(v1)"
-PL/pgSQL function proc094() line 9 at PERFORM
+PL/pgSQL function proc094() line 8 at PERFORM
 INFO:  c1.last is true
 CONTEXT:  SQL statement "CALL pkg094.p1(v1)"
-PL/pgSQL function proc094() line 9 at PERFORM
+PL/pgSQL function proc094() line 8 at PERFORM
 INFO:  c1.first.next t
 CONTEXT:  SQL statement "CALL pkg094.p1(v1)"
-PL/pgSQL function proc094() line 9 at PERFORM
+PL/pgSQL function proc094() line 8 at PERFORM
 INFO:  c1.last.prior t
 CONTEXT:  SQL statement "CALL pkg094.p1(v1)"
-PL/pgSQL function proc094() line 9 at PERFORM
+PL/pgSQL function proc094() line 8 at PERFORM
 INFO:  c1.first.prior <NULL>
 CONTEXT:  SQL statement "CALL pkg094.p1(v1)"
-PL/pgSQL function proc094() line 9 at PERFORM
+PL/pgSQL function proc094() line 8 at PERFORM
 INFO:  c1.last.next <NULL>
 CONTEXT:  SQL statement "CALL pkg094.p1(v1)"
-PL/pgSQL function proc094() line 9 at PERFORM
+PL/pgSQL function proc094() line 8 at PERFORM
 INFO:  c1(c1.first) is Thu Jan 06 11:22:33.234657 2022,c1(c1.last) is Thu Jan 06 12:02:44.123456 2022,c1(c1.next(c1.first)) is Thu Jan 06 09:36:45.123456 2022
 CONTEXT:  SQL statement "CALL pkg094.p1(v1)"
-PL/pgSQL function proc094() line 9 at PERFORM
+PL/pgSQL function proc094() line 8 at PERFORM
 INFO:  c1 is {"Thu Jan 06 11:22:33.234657 2022","Thu Jan 06 09:36:45.123456 2022","Thu Jan 06 12:02:44.123456 2022"}
 CONTEXT:  SQL statement "CALL pkg094.p1(v1)"
-PL/pgSQL function proc094() line 9 at PERFORM
+PL/pgSQL function proc094() line 8 at PERFORM
 INFO:  v1 is {"Thu Jan 06 11:22:33.234657 2022","Thu Jan 06 09:36:45.123456 2022","Thu Jan 06 12:02:44.123456 2022"}
 INFO:  v1.first is f
 INFO:  v1.last is true
@@ -173,24 +173,24 @@ end pkg096;
 call pkg096.p2();
 INFO:  c1 is {123455,ABCDEF,012345}
 CONTEXT:  SQL statement "CALL p3(c1=>c1)"
-PL/pgSQL function public.p1(_blob[],_blob[]) line 3 at PERFORM
+PL/pgSQL function public.p1(_blob[],_blob[]) line 2 at PERFORM
 SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c1 is {123455,ABCDEF,012345}
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c1.first is JIEsubst,c1.last is pingJIEsubstr,c1.first.next is pingJ
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c1(c1.first) is 012345,c1(c1.last) is 123455,c1(c1.first.next) is ABCDEF
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c2 is {123455,ABCDEF,012345,678910}
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c2.first is 13,c2.last is pingJIEsubstr,c2.first.next is JIEsubst,c2.count is 4
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  r1 is {123455,ABCDEF,012345}
 INFO:  r2 is {123455,ABCDEF,012345,678910}
  p2 
@@ -201,24 +201,24 @@ INFO:  r2 is {123455,ABCDEF,012345,678910}
 \! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "call pkg096.p2();";
 INFO:  c1 is {123455,ABCDEF,012345}
 CONTEXT:  SQL statement "CALL p3(c1=>c1)"
-PL/pgSQL function public.p1(_blob[],_blob[]) line 3 at PERFORM
+PL/pgSQL function public.p1(_blob[],_blob[]) line 2 at PERFORM
 SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c1 is {123455,ABCDEF,012345}
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c1.first is JIEsubst,c1.last is pingJIEsubstr,c1.first.next is pingJ
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c1(c1.first) is 012345,c1(c1.last) is 123455,c1(c1.first.next) is ABCDEF
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c2 is {123455,ABCDEF,012345,678910}
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c2.first is 13,c2.last is pingJIEsubstr,c2.first.next is JIEsubst,c2.count is 4
 CONTEXT:  SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
-PL/pgSQL function p2() line 10 at PERFORM
+PL/pgSQL function p2() line 9 at PERFORM
 INFO:  r1 is {123455,ABCDEF,012345}
 INFO:  r2 is {123455,ABCDEF,012345,678910}
  p2 

@@ -2170,16 +2170,34 @@ bool get_typbyval(Oid typid)
  */
 void get_typlenbyval(Oid typid, int16* typlen, bool* typbyval)
 {
-    HeapTuple tp;
-    Form_pg_type typtup;
-    tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
-    if (!HeapTupleIsValid(tp)) {
-        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
+    switch (typid) {
+        case INT4OID:
+        case DATEOID: {
+            *typlen = 4;
+            *typbyval = true;
+        } break;
+        case TIMESTAMPOID:{
+            *typlen = 8;
+            *typbyval = true;
+        } break;
+        case BPCHAROID:
+        case VARCHAROID: {
+            *typlen = -1;
+            *typbyval = false;
+        } break;
+        default: {
+            HeapTuple tp;
+            Form_pg_type typtup;
+            tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+            if (!HeapTupleIsValid(tp)) {
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
+            }
+            typtup = (Form_pg_type)GETSTRUCT(tp);
+            *typlen = typtup->typlen;
+            *typbyval = typtup->typbyval;
+            ReleaseSysCache(tp);
+        }
     }
-    typtup = (Form_pg_type)GETSTRUCT(tp);
-    *typlen = typtup->typlen;
-    *typbyval = typtup->typbyval;
-    ReleaseSysCache(tp);
 }
 
 /*
@@ -4464,16 +4482,29 @@ Oid get_typmodout(Oid typid)
  */
 Oid get_typcollation(Oid typid)
 {
-    HeapTuple tp;
-    tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
-    if (HeapTupleIsValid(tp)) {
-        Form_pg_type typtup = (Form_pg_type)GETSTRUCT(tp);
-        Oid result;
-        result = typtup->typcollation;
-        ReleaseSysCache(tp);
-        return result;
-    } else {
-        return InvalidOid;
+    switch (typid) {
+        case INT4OID:
+        case DATEOID:
+        case TIMESTAMPOID:{
+            return InvalidOid;
+        } break;
+        case BPCHAROID:
+        case VARCHAROID: {
+            return DEFAULT_COLLATION_OID;
+        } break;
+        default: {
+            HeapTuple tp;
+            tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+            if (HeapTupleIsValid(tp)) {
+                Form_pg_type typtup = (Form_pg_type)GETSTRUCT(tp);
+                Oid result;
+                result = typtup->typcollation;
+                ReleaseSysCache(tp);
+                return result;
+            } else {
+                return InvalidOid;
+            }
+        }
     }
 }
 

@@ -670,7 +670,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
              * than the table.
              */
             if (info->indpred == NIL) {
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
                 /*
                  * If parent relation is distributed the local storage manager
                  * does not have actual information about index size.
@@ -694,7 +694,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                             info->pages = EstimatePartitionIndexPages(relation, indexRelation, sampledPartitionIds);
                         }
                     }
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
                 }
 #endif
                 info->tuples = rel->tuples;
@@ -767,7 +767,7 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
     switch (rel->rd_rel->relkind) {
         case RELKIND_RELATION:
         case RELKIND_MATVIEW:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             /*
              * This is a remote table... we have no idea how many pages/rows
              * we may get from a scan of this table. However, we should set the
@@ -855,11 +855,15 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
                  */
                 curpages = rel->rd_rel->relpages;
             } else {
+#ifdef ENABLE_MULTIPLE_NODES
                 if (RELATION_CREATE_BUCKET(rel)) {
                     curpages = RelationGetNumberOfBlocksInFork(rel, MAIN_FORKNUM, true);
                 } else {
+#endif
                     curpages = RelationGetNumberOfBlocks(rel);
+#ifdef ENABLE_MULTIPLE_NODES
                 }
+#endif
             }
 
             /*
@@ -2024,9 +2028,11 @@ static void setRelStoreInfo(RelOptInfo* relOptInfo, Relation relation)
             AssertEreport(RelationIsCUFormat(relation), MOD_OPT, "Unexpected relation store format.");
             relOptInfo->orientation = REL_COL_ORIENTED;
         }
+#ifdef ENABLE_MULTIPLE_NODES
     } else if(RelationIsTsStore(relation)) {
         relOptInfo->orientation = REL_TIMESERIES_ORIENTED;
         relOptInfo->relStoreLocation = LOCAL_STORE;
+#endif
     } else {
         /*
          *  This is a row store table.

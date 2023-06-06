@@ -91,35 +91,35 @@ CONNECT BY id = PRIOR fatherid;
  id |  name  | fatherid | name_desc | connect_by_root |        sys_connect_by_path        
 ----+--------+----------+-----------+-----------------+-----------------------------------
  14 | 耒阳市 |       13 |           |                 | ->null
- 14 | 耒阳市 |       13 | Leiyang   | Leiyang         | ->Leiyang
- 13 | 衡阳市 |        2 |           |                 | ->Leiyang->null
  13 | 衡阳市 |        2 |           |                 | ->null->null
- 13 | 衡阳市 |        2 | Hengyang  | Leiyang         | ->Leiyang->Hengyang
+  2 | 湖南省 |        1 |           |                 | ->null->null->null
+  1 | 中国   |        0 |           |                 | ->null->null->null->null
+  1 | 中国   |        0 | China     | null            | ->null->null->null->China
+  2 | 湖南省 |        1 | Hunan     | null            | ->null->null->Hunan
+  1 | 中国   |        0 |           |                 | ->null->null->Hunan->null
+  1 | 中国   |        0 | China     | null            | ->null->null->Hunan->China
  13 | 衡阳市 |        2 | Hengyang  | null            | ->null->Hengyang
   2 | 湖南省 |        1 |           |                 | ->null->Hengyang->null
-  2 | 湖南省 |        1 |           |                 | ->Leiyang->Hengyang->null
-  2 | 湖南省 |        1 |           |                 | ->null->null->null
-  2 | 湖南省 |        1 |           |                 | ->Leiyang->null->null
+  1 | 中国   |        0 |           |                 | ->null->Hengyang->null->null
+  1 | 中国   |        0 | China     | null            | ->null->Hengyang->null->China
   2 | 湖南省 |        1 | Hunan     | null            | ->null->Hengyang->Hunan
-  2 | 湖南省 |        1 | Hunan     | Leiyang         | ->Leiyang->Hengyang->Hunan
-  2 | 湖南省 |        1 | Hunan     | null            | ->null->null->Hunan
+  1 | 中国   |        0 |           |                 | ->null->Hengyang->Hunan->null
+  1 | 中国   |        0 | China     | null            | ->null->Hengyang->Hunan->China
+ 14 | 耒阳市 |       13 | Leiyang   | Leiyang         | ->Leiyang
+ 13 | 衡阳市 |        2 |           |                 | ->Leiyang->null
+  2 | 湖南省 |        1 |           |                 | ->Leiyang->null->null
+  1 | 中国   |        0 |           |                 | ->Leiyang->null->null->null
+  1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->null->null->China
   2 | 湖南省 |        1 | Hunan     | Leiyang         | ->Leiyang->null->Hunan
   1 | 中国   |        0 |           |                 | ->Leiyang->null->Hunan->null
-  1 | 中国   |        0 |           |                 | ->null->null->Hunan->null
-  1 | 中国   |        0 |           |                 | ->Leiyang->Hengyang->Hunan->null
-  1 | 中国   |        0 |           |                 | ->null->Hengyang->Hunan->null
-  1 | 中国   |        0 |           |                 | ->Leiyang->null->null->null
-  1 | 中国   |        0 |           |                 | ->null->null->null->null
-  1 | 中国   |        0 |           |                 | ->Leiyang->Hengyang->null->null
-  1 | 中国   |        0 |           |                 | ->null->Hengyang->null->null
   1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->null->Hunan->China
-  1 | 中国   |        0 | China     | null            | ->null->null->Hunan->China
-  1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->Hengyang->Hunan->China
-  1 | 中国   |        0 | China     | null            | ->null->Hengyang->Hunan->China
-  1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->null->null->China
-  1 | 中国   |        0 | China     | null            | ->null->null->null->China
+ 13 | 衡阳市 |        2 | Hengyang  | Leiyang         | ->Leiyang->Hengyang
+  2 | 湖南省 |        1 |           |                 | ->Leiyang->Hengyang->null
+  1 | 中国   |        0 |           |                 | ->Leiyang->Hengyang->null->null
   1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->Hengyang->null->China
-  1 | 中国   |        0 | China     | null            | ->null->Hengyang->null->China
+  2 | 湖南省 |        1 | Hunan     | Leiyang         | ->Leiyang->Hengyang->Hunan
+  1 | 中国   |        0 |           |                 | ->Leiyang->Hengyang->Hunan->null
+  1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->Hengyang->Hunan->China
 (30 rows)
 
 SELECT * FROM t1_area START WITH id in ('1','2') CONNECT BY PRIOR fatherid = id;
@@ -127,11 +127,11 @@ SELECT * FROM t1_area START WITH id in ('1','2') CONNECT BY PRIOR fatherid = id;
 ----+--------+----------+-----------
   1 | 中国   |        0 | 
   2 | 湖南省 |        1 | 
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | China
   1 | 中国   |        0 | China
   2 | 湖南省 |        1 | Hunan
   1 | 中国   |        0 | 
-  1 | 中国   |        0 | 
-  1 | 中国   |        0 | China
   1 | 中国   |        0 | China
 (8 rows)
 
@@ -140,17 +140,17 @@ SELECT * FROM t1_area START WITH (cast(id as varchar) COLLATE "C") in (cast(+ (i
 ----+--------+----------+-----------
   1 | 中国   |        0 | 
   2 | 湖南省 |        1 | 
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | China
   3 | 广东省 |        1 | 
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | China
   1 | 中国   |        0 | China
   2 | 湖南省 |        1 | Hunan
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | China
   3 | 广东省 |        1 | Guangdong
   1 | 中国   |        0 | 
-  1 | 中国   |        0 | 
-  1 | 中国   |        0 | 
-  1 | 中国   |        0 | 
-  1 | 中国   |        0 | China
-  1 | 中国   |        0 | China
-  1 | 中国   |        0 | China
   1 | 中国   |        0 | China
 (14 rows)
 
@@ -503,23 +503,23 @@ select t1.id, t1.pid, t1.name from t1 start with not id=1 connect by prior pid=i
  id | pid | name 
 ----+-----+------
   2 |   1 | 2
+  1 |   0 | 1
   3 |   0 | 3
   4 |   1 | 4
+  1 |   0 | 1
   5 |   2 | 5
-  6 |   3 | 6
-  7 |   4 | 7
-  8 |   4 | 8
-  9 |   7 | 9
-  1 |   0 | 1
-  1 |   0 | 1
   2 |   1 | 2
+  1 |   0 | 1
+  6 |   3 | 6
   3 |   0 | 3
-  4 |   1 | 4
-  4 |   1 | 4
   7 |   4 | 7
+  4 |   1 | 4
   1 |   0 | 1
+  8 |   4 | 8
+  4 |   1 | 4
   1 |   0 | 1
-  1 |   0 | 1
+  9 |   7 | 9
+  7 |   4 | 7
   4 |   1 | 4
   1 |   0 | 1
 (20 rows)
@@ -551,7 +551,7 @@ insert into t1 values(2,2,2);
 select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2;
  c1 | c2 | c3 | connect_by_iscycle 
 ----+----+----+--------------------
-  1 |  1 |  1 |                  0
+  1 |  1 |  1 |                  1
 (1 row)
 
 insert into t1 values(1,1,1);
@@ -559,33 +559,33 @@ insert into t1 values(2,2,2);
 select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2;
  c1 | c2 | c3 | connect_by_iscycle 
 ----+----+----+--------------------
-  1 |  1 |  1 |                  0
-  1 |  1 |  1 |                  0
+  1 |  1 |  1 |                  1
+  1 |  1 |  1 |                  1
 (2 rows)
 
 insert into t1 values(1,NULL,1);
 select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls first;
  c1 | c2 | c3 | connect_by_iscycle 
 ----+----+----+--------------------
-  1 |    |  1 |                  0
-  1 |  1 |  1 |                  0
-  1 |  1 |  1 |                  0
+  1 |    |  1 |                  1
+  1 |  1 |  1 |                  1
+  1 |  1 |  1 |                  1
 (3 rows)
 
 select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls last;
  c1 | c2 | c3 | connect_by_iscycle 
 ----+----+----+--------------------
-  1 |  1 |  1 |                  0
-  1 |  1 |  1 |                  0
-  1 |    |  1 |                  0
+  1 |  1 |  1 |                  1
+  1 |  1 |  1 |                  1
+  1 |    |  1 |                  1
 (3 rows)
 
 with cte1 as (select * from t1) select *, connect_by_iscycle from cte1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls last;
  c1 | c2 | c3 | connect_by_iscycle 
 ----+----+----+--------------------
-  1 |  1 |  1 |                  0
-  1 |  1 |  1 |                  0
-  1 |    |  1 |                  0
+  1 |  1 |  1 |                  1
+  1 |  1 |  1 |                  1
+  1 |    |  1 |                  1
 (3 rows)
 
 delete from t1 where c2 is null;
@@ -611,20 +611,20 @@ select * from t1 connect by cast(level as bigint) < 3;
  c1 | c2 | c3 
 ----+----+----
   1 |  1 |  1
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
-  2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
-  1 |  1 |  1
-  2 |  2 |  2
-  1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
@@ -636,20 +636,20 @@ select * from t1 connect by cast(level as int4) < 3;
  c1 | c2 | c3 
 ----+----+----
   1 |  1 |  1
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
-  2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
-  1 |  1 |  1
-  2 |  2 |  2
-  1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
@@ -676,20 +676,20 @@ select * from t1 connect by level is not null and level < 3;
  c1 | c2 | c3 
 ----+----+----
   1 |  1 |  1
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
-  2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
-  1 |  1 |  1
-  2 |  2 |  2
-  1 |  1 |  1
   2 |  2 |  2
   1 |  1 |  1
   2 |  2 |  2
@@ -905,14 +905,14 @@ SELECT * FROM test_area START WITH name = '中国' CONNECT BY PRIOR id = fatheri
 ----+--------+----------+-----------
   1 | 中国   |        0 | China
   2 | 湖南省 |        1 | Hunan
-  3 | 广东省 |        1 | Guangdong
-  4 | 海南省 |        1 | Hainan
-  5 | 河北省 |        1 | Hebei
-  6 | 河南省 |        1 | Henan
-  7 | 山东省 |        1 | Shandong
-  8 | 湖北省 |        1 | Hubei
-  9 | 江苏省 |        1 | Jiangsu
- 10 | 深圳市 |        3 | Shenzhen
+ 11 | 长沙市 |        2 | Changsha
+ 13 | 衡阳市 |        2 | Hengyang
+ 22 | 祁北县 |       13 | Qibei
+ 21 | 祁西县 |       13 | Qixi
+ 14 | 耒阳市 |       13 | Leiyang
+ 19 | 祁东县 |       13 | Qidong
+ 18 | 常宁市 |       13 | Changning
+ 20 | 祁南县 |       13 | Qinan
 (10 rows)
 
 set max_recursive_times=1000;
@@ -976,14 +976,14 @@ SELECT id,level FROM core_060 CONNECT BY level in (1,2);
  id | level 
 ----+-------
  a  |     1
+ a  |     2
+ b  |     2
+ c  |     2
  b  |     1
+ a  |     2
+ b  |     2
+ c  |     2
  c  |     1
- a  |     2
- b  |     2
- c  |     2
- a  |     2
- b  |     2
- c  |     2
  a  |     2
  b  |     2
  c  |     2
@@ -993,14 +993,14 @@ SELECT id,level FROM core_060 CONNECT BY not (level>2);
  id | level 
 ----+-------
  a  |     1
+ a  |     2
+ b  |     2
+ c  |     2
  b  |     1
+ a  |     2
+ b  |     2
+ c  |     2
  c  |     1
- a  |     2
- b  |     2
- c  |     2
- a  |     2
- b  |     2
- c  |     2
  a  |     2
  b  |     2
  c  |     2
@@ -1010,14 +1010,14 @@ SELECT id,level FROM core_060 CONNECT BY cast(level as number(38,0))<3;
  id | level 
 ----+-------
  a  |     1
+ a  |     2
+ b  |     2
+ c  |     2
  b  |     1
+ a  |     2
+ b  |     2
+ c  |     2
  c  |     1
- a  |     2
- b  |     2
- c  |     2
- a  |     2
- b  |     2
- c  |     2
  a  |     2
  b  |     2
  c  |     2
@@ -1254,23 +1254,23 @@ SELECT id,pid,name,rownum,level FROM test_hcb_ptb START WITH id=1 CONNECT BY PRI
 -----+-----+--------+--------+-------
    1 |   0 | 中国   |      1 |     1
   11 |   1 | 江苏省 |      2 |     2
-  12 |   1 | 山东省 |      3 |     2
-  13 |   1 | 安徽省 |      4 |     2
-  14 |   1 | 河南省 |      5 |     2
-  15 |   1 | 河北省 |      6 |     2
-  16 |   1 | 湖南省 |      7 |     2
-  17 |   1 | 湖北省 |      8 |     2
-  18 |   1 | 贵州省 |      9 |     2
-  19 |   1 | 武汉省 |     10 |     2
- 111 |  11 | 南京市 |     11 |     3
- 112 |  11 | 宿迁市 |     12 |     3
- 113 |  11 | 徐州市 |     13 |     3
- 114 |  11 | 苏州市 |     14 |     3
- 115 |  11 | 盐城市 |     15 |     3
- 117 |  11 | 常州市 |     16 |     3
- 116 |  11 | 无锡市 |     17 |     3
- 118 |  11 | 连云港 |     18 |     3
- 119 |  11 | 泰州市 |     19 |     3
+ 111 |  11 | 南京市 |      3 |     3
+ 112 |  11 | 宿迁市 |      4 |     3
+ 113 |  11 | 徐州市 |      5 |     3
+ 114 |  11 | 苏州市 |      6 |     3
+ 115 |  11 | 盐城市 |      7 |     3
+ 117 |  11 | 常州市 |      8 |     3
+ 116 |  11 | 无锡市 |      9 |     3
+ 118 |  11 | 连云港 |     10 |     3
+ 119 |  11 | 泰州市 |     11 |     3
+  12 |   1 | 山东省 |     12 |     2
+  13 |   1 | 安徽省 |     13 |     2
+  14 |   1 | 河南省 |     14 |     2
+  15 |   1 | 河北省 |     15 |     2
+  16 |   1 | 湖南省 |     16 |     2
+  17 |   1 | 湖北省 |     17 |     2
+  18 |   1 | 贵州省 |     18 |     2
+  19 |   1 | 武汉省 |     19 |     2
 (19 rows)
 
 SELECT id,pid,name,rownum,level FROM test_hcb_ptb START WITH id=1 CONNECT BY NOCYCLE PRIOR id=pid AND level<4;
@@ -1333,16 +1333,16 @@ explain performance select * from sw_dummy connect by level < 50;
 --?.*
 --?.*
 --?.*
---?.*
---?.*
---?.*
---?.*
---?.*
---?.*
---?.*
---?.*
---?.*
---?.*
+--?.* 
+--?.* 
+--?.* 
+--?.* 
+--?.* 
+--?.* 
+--?.* 
+--?.* 
+--?.* 
+--?.* 
 --?.*
  
 --?.*
@@ -1375,14 +1375,6 @@ select t1.id,t1.pid,t2.id from test_hcb_ptb t1 join test_hcb_ptb t2 on t1.id=t2.
 -----+-----+-----
  141 | 131 | 141
  151 | 141 | 151
- 152 | 141 | 152
- 153 | 141 | 153
- 154 | 141 | 154
- 155 | 141 | 155
- 156 | 141 | 156
- 157 | 141 | 157
- 158 | 141 | 158
- 159 | 141 | 159
  161 | 151 | 161
  162 | 151 | 162
  163 | 151 | 163
@@ -1392,6 +1384,14 @@ select t1.id,t1.pid,t2.id from test_hcb_ptb t1 join test_hcb_ptb t2 on t1.id=t2.
  167 | 151 | 167
  168 | 151 | 168
  169 | 151 | 169
+ 152 | 141 | 152
+ 153 | 141 | 153
+ 154 | 141 | 154
+ 155 | 141 | 155
+ 156 | 141 | 156
+ 157 | 141 | 157
+ 158 | 141 | 158
+ 159 | 141 | 159
 (19 rows)
 
 create or replace function prior(id int) returns int
@@ -1522,30 +1522,28 @@ select (
     where id=test_hcb_ptb.id) as siblings,
     pid,level
 from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt  (cost=37.11..1472.07 rows=101 width=12)
    CTE tmp_reuslt
      ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
            Start With pseudo atts: RUITR, array_key_9, array_siblings
-           ->  Sort  (cost=40.47..40.72 rows=101 width=102)
-                 Sort Key: array_siblings
-                 ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
-                       ->  Sort  (cost=2.82..2.82 rows=1 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
-                                   Filter: (id = 141)
-                       ->  Sort  (cost=3.49..3.52 rows=10 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
-                                   Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
-                                   ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
-                                   ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                                         ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Sort  (cost=2.82..2.82 rows=1 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
+                             Filter: (id = 141)
+                 ->  Sort  (cost=3.49..3.52 rows=10 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                             Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
+                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
+                             ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                                   ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
    SubPlan 2
      ->  Seq Scan on test_place  (cost=0.00..14.19 rows=2 width=4)
            Filter: (id = tmp_reuslt."test_hcb_ptb@id")
-(21 rows)
+(19 rows)
 
 select (
     select id
@@ -1571,30 +1569,28 @@ select (
     where id=test_hcb_ptb.id) as siblings,
     pid,level
 from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by siblings;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt  (cost=37.11..1472.07 rows=101 width=12)
    CTE tmp_reuslt
      ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
            Start With pseudo atts: RUITR, array_key_9, array_siblings
-           ->  Sort  (cost=40.47..40.72 rows=101 width=102)
-                 Sort Key: array_siblings
-                 ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
-                       ->  Sort  (cost=2.82..2.82 rows=1 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
-                                   Filter: (id = 141)
-                       ->  Sort  (cost=3.49..3.52 rows=10 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
-                                   Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
-                                   ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
-                                   ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                                         ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Sort  (cost=2.82..2.82 rows=1 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
+                             Filter: (id = 141)
+                 ->  Sort  (cost=3.49..3.52 rows=10 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                             Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
+                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
+                             ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                                   ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
    SubPlan 2
      ->  Seq Scan on test_place  (cost=0.00..14.19 rows=2 width=4)
            Filter: (id = tmp_reuslt."test_hcb_ptb@id")
-(21 rows)
+(19 rows)
 
 select (
     select id
@@ -1615,27 +1611,25 @@ from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by si
 ---  test case for unnamed expr with order siblings by colIndex
 explain
 select id*2, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt  (cost=37.11..39.38 rows=101 width=8)
    CTE tmp_reuslt
      ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
            Start With pseudo atts: RUITR, array_key_9, array_siblings
-           ->  Sort  (cost=40.47..40.72 rows=101 width=102)
-                 Sort Key: array_siblings
-                 ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
-                       ->  Sort  (cost=2.82..2.82 rows=1 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
-                                   Filter: (id = 141)
-                       ->  Sort  (cost=3.49..3.52 rows=10 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
-                                   Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
-                                   ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
-                                   ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                                         ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
-(18 rows)
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Sort  (cost=2.82..2.82 rows=1 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
+                             Filter: (id = 141)
+                 ->  Sort  (cost=3.49..3.52 rows=10 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                             Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
+                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
+                             ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                                   ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+(16 rows)
 
 select id*2, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
  ?column? | pid 
@@ -1650,27 +1644,25 @@ select id*2, pid from test_hcb_ptb start with id=141 connect by prior pid=id ord
 
 explain
 select id*2 as a, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt  (cost=37.11..39.38 rows=101 width=8)
    CTE tmp_reuslt
      ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
            Start With pseudo atts: RUITR, array_key_9, array_siblings
-           ->  Sort  (cost=40.47..40.72 rows=101 width=102)
-                 Sort Key: array_siblings
-                 ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
-                       ->  Sort  (cost=2.82..2.82 rows=1 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
-                                   Filter: (id = 141)
-                       ->  Sort  (cost=3.49..3.52 rows=10 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
-                                   Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
-                                   ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
-                                   ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                                         ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
-(18 rows)
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Sort  (cost=2.82..2.82 rows=1 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
+                             Filter: (id = 141)
+                 ->  Sort  (cost=3.49..3.52 rows=10 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                             Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
+                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
+                             ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                                   ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+(16 rows)
 
 select id*2 as a, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
   a  | pid 
@@ -1686,27 +1678,25 @@ select id*2 as a, pid from test_hcb_ptb start with id=141 connect by prior pid=i
 --  test case for mix alias and colname in order siblings by calause
 explain
 select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt  (cost=37.11..39.13 rows=101 width=8)
    CTE tmp_reuslt
      ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
            Start With pseudo atts: RUITR, array_key_9, array_siblings
-           ->  Sort  (cost=40.47..40.72 rows=101 width=102)
-                 Sort Key: array_siblings
-                 ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
-                       ->  Sort  (cost=2.82..2.82 rows=1 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
-                                   Filter: (id = 141)
-                       ->  Sort  (cost=3.49..3.52 rows=10 width=102)
-                             Sort Key: swtest.test_hcb_ptb.id
-                             ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
-                                   Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
-                                   ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
-                                   ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                                         ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
-(18 rows)
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Sort  (cost=2.82..2.82 rows=1 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
+                             Filter: (id = 141)
+                 ->  Sort  (cost=3.49..3.52 rows=10 width=102)
+                       Sort Key: swtest.test_hcb_ptb.id
+                       ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                             Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
+                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
+                             ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                                   ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+(16 rows)
 
 select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
   a  | pid 
@@ -1721,27 +1711,25 @@ select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id o
 
 explain
 select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by pid,a;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt  (cost=37.11..39.13 rows=101 width=8)
    CTE tmp_reuslt
      ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
            Start With pseudo atts: RUITR, array_key_9, array_siblings
-           ->  Sort  (cost=40.47..40.72 rows=101 width=102)
-                 Sort Key: array_siblings
-                 ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
-                       ->  Sort  (cost=2.82..2.82 rows=1 width=102)
-                             Sort Key: swtest.test_hcb_ptb.pid, swtest.test_hcb_ptb.id
-                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
-                                   Filter: (id = 141)
-                       ->  Sort  (cost=3.49..3.52 rows=10 width=102)
-                             Sort Key: swtest.test_hcb_ptb.pid, swtest.test_hcb_ptb.id
-                             ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
-                                   Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
-                                   ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
-                                   ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                                         ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
-(18 rows)
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Sort  (cost=2.82..2.82 rows=1 width=102)
+                       Sort Key: swtest.test_hcb_ptb.pid, swtest.test_hcb_ptb.id
+                       ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.80 rows=1 width=102)
+                             Filter: (id = 141)
+                 ->  Sort  (cost=3.49..3.52 rows=10 width=102)
+                       Sort Key: swtest.test_hcb_ptb.pid, swtest.test_hcb_ptb.id
+                       ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                             Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
+                             ->  Seq Scan on test_hcb_ptb  (cost=0.00..2.64 rows=64 width=102)
+                             ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                                   ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+(16 rows)
 
 select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by pid,a;
   a  | pid 
@@ -1906,33 +1894,36 @@ ERROR:  column specified by prior cannot concide with ROWNUM/LEVEL.
 DETAIL:  Unsupported node type: 900.
 DROP TABLE RLTEST;
 create table nocycle_tbl(id int, lid int, name text);
-insert into nocycle_tbl values (1,3,'A'),(2,1,'B'),(3,2,'C'),(4,2,'D');
-select * from nocycle_tbl connect by nocycle prior id=lid start with id=1;
- id | lid | name 
-----+-----+------
-  1 |   3 | A
-  2 |   1 | B
-  3 |   2 | C
-  4 |   2 | D
-(4 rows)
+insert into nocycle_tbl values (1,3,'A'),(2,1,'B'),(3,2,'C'),(4,2,'D'),(5,3,'E');
+select *,connect_by_iscycle from nocycle_tbl connect by nocycle prior id=lid start with id=1;
+ id | lid | name | connect_by_iscycle 
+----+-----+------+--------------------
+  1 |   3 | A    |                  0
+  2 |   1 | B    |                  0
+  3 |   2 | C    |                  1
+  5 |   3 | E    |                  0
+  4 |   2 | D    |                  0
+(5 rows)
 
-select * from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id;
- id | lid | name 
-----+-----+------
-  1 |   3 | A
-  2 |   1 | B
-  3 |   2 | C
-  4 |   2 | D
-(4 rows)
+select *,connect_by_iscycle from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id;
+ id | lid | name | connect_by_iscycle 
+----+-----+------+--------------------
+  1 |   3 | A    |                  0
+  2 |   1 | B    |                  0
+  3 |   2 | C    |                  1
+  5 |   3 | E    |                  0
+  4 |   2 | D    |                  0
+(5 rows)
 
-select * from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id desc;
- id | lid | name 
-----+-----+------
-  1 |   3 | A
-  2 |   1 | B
-  4 |   2 | D
-  3 |   2 | C
-(4 rows)
+select *,connect_by_iscycle from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id desc;
+ id | lid | name | connect_by_iscycle 
+----+-----+------+--------------------
+  1 |   3 | A    |                  0
+  2 |   1 | B    |                  0
+  4 |   2 | D    |                  0
+  3 |   2 | C    |                  1
+  5 |   3 | E    |                  0
+(5 rows)
 
 drop table nocycle_tbl;
 CREATE TABLE swcb_employees ( employee_id VARCHAR, manager_id NUMBER(6));
@@ -2039,3 +2030,92 @@ ORDER BY I.ZB_CODE;
 DROP TABLE zb_layer;
 DROP TABLE rtms_dict;
 DROP TABLE zb_model;
+--test SYNONYM case
+ create table swtest.pf_org_rela_test
+(
+    org_parent_no varchar2(32),
+    org_no varchar2(32) not null ,
+    org_rela_type varchar2(32) not null
+);
+ INSERT INTO swtest.pf_org_rela_test (org_no,org_parent_no,org_rela_type) VALUES
+  ('201855','201844','ADMINISTRATION'),
+  ('201856','201844','ADMINISTRATION'),
+  ('119208','119200','ADMINISTRATION'),
+  ('201953','201932','ADMINISTRATION'),
+  ('201954','201932','ADMINISTRATION'),
+  ('201955','201932','ADMINISTRATION'),
+  ('201956','201932','ADMINISTRATION'),
+  ('120301','120300','ADMINISTRATION'),
+  ('201957','202573','ADMINISTRATION'),
+  ('201958','201957','ADMINISTRATION');
+ create synonym sy_pf for swtest.pf_org_rela_test;
+--normal case
+select
+    org_no
+from
+    swtest.pf_org_rela_test
+start with
+    org_no = '201957'
+    and org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and org_rela_type = 'ADMINISTRATION';
+ org_no 
+--------
+ 201957
+ 201958
+(2 rows)
+
+--SYNONYM case
+select
+    org_no
+from
+    sy_pf
+start with
+    org_no = '201957'
+    and org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and org_rela_type = 'ADMINISTRATION';
+ org_no 
+--------
+ 201957
+ 201958
+(2 rows)
+
+--SYNONYM alias
+select
+    aak.org_no
+from
+    sy_pf aak
+start with
+    org_no = '201957'
+    and org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and org_rela_type = 'ADMINISTRATION';
+ org_no 
+--------
+ 201957
+ 201958
+(2 rows)
+
+--SYNONYM case
+select
+    org_no
+from
+    sy_pf 
+start with
+    sy_pf.org_no = '201957'
+    and sy_pf.org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and sy_pf.org_rela_type = 'ADMINISTRATION';
+ org_no 
+--------
+ 201957
+ 201958
+(2 rows)
+
+drop synonym sy_pf;
+drop table pf_org_rela_test;

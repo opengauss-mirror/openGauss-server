@@ -188,12 +188,10 @@ uint64 get_query_id_beentry(ThreadId  tid)
         beentry--;
     }
 
-    if (localentry->st_procpid > 0 || localentry->st_sessionid > 0) {
-        pfree_ext(localentry->st_appname);
-        pfree_ext(localentry->st_clienthostname);
-        pfree_ext(localentry->st_conninfo);
-        pfree_ext(localentry->st_activity);
-    }
+    pfree_ext(localentry->st_appname);
+    pfree_ext(localentry->st_clienthostname);
+    pfree_ext(localentry->st_conninfo);
+    pfree_ext(localentry->st_activity);
 
     pfree(localentry);
 

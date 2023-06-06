@@ -176,8 +176,6 @@ static Sort *CreateSiblingsSortPlan(PlannerInfo* root, Plan* lefttree,
         List *sortEntryList, double limit_tuples);
 static Sort *CreateSortPlanUnderRU(PlannerInfo* root, Plan* lefttree,
         List *siblings, double limit_tuples);
-static Sort *CreateSortPlanAboveRU(PlannerInfo* root, Plan* lefttree,
-        double limit_tuples);
 static char *CheckAndFixSiblingsColName(PlannerInfo *root, Plan *basePlan,
                                         char *colname, TargetEntry *te);
 static char *GetOrderSiblingsColName(PlannerInfo* root, SortBy *sb, Plan *basePlan);
@@ -1007,9 +1005,6 @@ static void ProcessOrderSiblings(PlannerInfo *root, StartWithOp *swplan)
                                             swoptions->siblings_orderby_clause, -1);
     ruplan->plan.righttree = (Plan *)CreateSortPlanUnderRU(root, ruplan->plan.righttree,
                                             swoptions->siblings_orderby_clause, -1);
-
-    /* 2. Add up RU sort plan */
-    swplan->plan.lefttree = (Plan *)CreateSortPlanAboveRU(root, swplan->plan.lefttree, -1);
 }
 
 
@@ -1621,47 +1616,6 @@ static Sort *CreateSortPlanUnderRU(PlannerInfo* root, Plan* lefttree, List *sibl
     return sort;
 }
 
-/*
- * @Brief: Generate sort key above recursive union according array_siblings pseudo column
- *         that was filled by recursive union. Like the query below
- *         select * from t1 start with...connect by...order siblings by c1,c2,c3
- *         the plan like this:
- * ------------------QUERY PLAN--------------------
- *         > StartWithOP
- *             Sort Key, sort by array_siblings pseudo column   <<<<< we are have
- *                 > Recursive Union
- *                     > Sort Key, sort by c1, c2, c3
- *                         > Seqscan
- *                     > Sort Key, sort by c1, c2, c3
- *                         > Seqscan
- */
-static Sort *CreateSortPlanAboveRU(PlannerInfo* root, Plan* lefttree, double limit_tuples)
-{
-    Sort *sort = NULL;
-    List *sortEntryList = NIL;
-    ListCell *lc = NULL;
-
-    foreach (lc, lefttree->targetlist) {
-        TargetEntry *tle = (TargetEntry *)lfirst(lc);
-
-        if (strcmp(tle->resname, "array_siblings") == 0) {
-            OrderSiblingSortEntry *entry =
-                    CreateOrderSiblingSortEntry(tle, SORTBY_ASC);
-            sortEntryList = lappend(sortEntryList, entry);
-
-            if (u_sess->attr.attr_sql.enable_startwith_debug) {
-                elog(WARNING, "Good we got siblings sort key above RU.");
-            }
-        }
-    }
-
-    sort = CreateSiblingsSortPlan(root, lefttree, sortEntryList, limit_tuples);
-
-    /* Free sort entries */
-    list_free_deep(sortEntryList);
-
-    return sort;
-}
 
 /*
  * --------------------------------------------------------------------------------------

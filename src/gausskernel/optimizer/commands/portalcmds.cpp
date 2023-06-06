@@ -533,5 +533,5 @@ void PersistHoldablePortal(Portal portal, bool is_rollback)
      * but this will clean up anything that glommed onto the portal's heap via
      * t_thrd.mem_cxt.portal_mem_cxt.
      */
-    MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
+    MemoryContextDeleteChildren(PortalGetHeapMemory(portal), NULL);
 }

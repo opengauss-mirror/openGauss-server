@@ -197,6 +197,7 @@ extern void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblock
 extern void mdimmedsync(SMgrRelation reln, ForkNumber forknum);
 extern char* mdsegpath(const RelFileNode& rnode, ForkNumber forknum, BlockNumber blkno);
 extern void md_register_forget_request(RelFileNode rnode, ForkNumber forknum, BlockNumber segno);
+extern MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forknum, BlockNumber blkno, bool skipFsync, ExtensionBehavior behavior);
 
 /* md sync callbacks */
 extern void mdForgetDatabaseFsyncRequests(Oid dbid);

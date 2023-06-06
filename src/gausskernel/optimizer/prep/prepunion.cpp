@@ -1452,16 +1452,14 @@ static void expand_inherited_rtentry(PlannerInfo* root, RangeTblEntry* rte, Inde
     }
     /* Fast path for common case of childless table */
     parentOID = rte->relid;
-    parentRel = RelationIdGetRelation(parentOID);
-    if (parentRel == NULL) {
-        ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("No Such Relation")));
-    }
-
     if (!has_subclass(parentOID)) {
         /* Clear flag before returning */
         rte->inh = false;
-        RelationClose(parentRel);
         return;
+    }
+    parentRel = RelationIdGetRelation(parentOID);
+    if (parentRel == NULL) {
+        ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("No Such Relation")));
     }
 
     RelationClose(parentRel);

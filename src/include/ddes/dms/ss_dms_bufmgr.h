@@ -50,18 +50,16 @@ typedef struct SSBroadcastDDLLock {
 
 void InitDmsBufCtrl(void);
 void InitDmsContext(dms_context_t* dmsContext);
-
+void InitDmsBufContext(dms_context_t* dmsBufCxt, BufferTag buftag);
 void MarkReadHint(int buf_id, char persistence, bool extend, const XLogPhyBlock *pblk);
 bool LockModeCompatible(dms_buf_ctrl_t *buf_ctrl, LWLockMode mode);
 bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode);
 void ClearReadHint(int buf_id, bool buf_deleted = false);
-void MarkDmsBufBeingReleased(BufferDesc *buf_desc, bool set);
 Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk);
 Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc = NULL);
 Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool *with_io);
 Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool *with_io);
-bool DmsReleaseOwner(BufferTag buf_tag, int buf_id, unsigned char* released);
-int32 CheckBuf4Rebuild(BufferDesc* buf_desc);
+bool DmsReleaseOwner(BufferTag buf_tag, int buf_id);
 int SSLockAcquire(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock, bool dontWait,
     dms_opengauss_lock_req_type_t reqType = LOCK_NORMAL_MODE);
 int SSLockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock);
@@ -84,4 +82,5 @@ void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo);
 long SSGetBufSleepTime(int retry_times);
 SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, ForkNumber forkNum,
     BlockNumber blockNo, char *blockbuf);
+void SSUnPinBuffer(BufferDesc* buf_desc);
 #endif

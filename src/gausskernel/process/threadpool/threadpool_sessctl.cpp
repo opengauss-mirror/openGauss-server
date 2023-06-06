@@ -115,7 +115,7 @@ knl_session_context* ThreadPoolSessControl::CreateSession(Port* port)
         u_sess->stat_cxt.trackedMemChunks += sc->stat_cxt.trackedMemChunks;
         // sc->top_mem_cxt has been sealed in create_session_context
         MemoryContextUnSeal(sc->top_mem_cxt);
-        MemoryContextDeleteChildren(sc->top_mem_cxt);
+        MemoryContextDeleteChildren(sc->top_mem_cxt, NULL);
         MemoryContextDelete(sc->top_mem_cxt);
         pfree(sc);
         return NULL;

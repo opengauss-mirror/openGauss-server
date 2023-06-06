@@ -1091,6 +1091,13 @@ static void knl_u_dolphin_errdata_init(knl_u_dolphin_errdata_context *dolphin_er
     dolphin_errdata_context->max_error_count = 64;
 }
 
+static void knl_u_opfusion_reuse_init(knl_u_opfusion_reuse_context* opfusion_reuse_ctx) {
+
+    Assert(opfusion_reuse_ctx != NULL);
+
+    opfusion_reuse_ctx->opfusionObj = NULL;
+}
+
 static void knl_u_user_login_init(knl_u_user_login_context* user_login_cxt)
 {
     Assert(user_login_cxt != NULL);
@@ -1477,6 +1484,8 @@ void knl_session_init(knl_session_context* sess_cxt)
 
     knl_u_clientConnTime_init(&sess_cxt->clientConnTime_cxt);
 
+    knl_u_opfusion_reuse_init(&sess_cxt->opfusion_reuse_ctx);
+
     MemoryContextSeal(sess_cxt->top_mem_cxt);
 }
 
@@ -1611,7 +1620,7 @@ void free_session_context(knl_session_context* session)
         MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
     }
 
-    MemoryContextDeleteChildren(session->top_mem_cxt);
+    MemoryContextDeleteChildren(session->top_mem_cxt, NULL);
     MemoryContextDelete(session->top_mem_cxt);
     (void)syscalllockFree(&session->utils_cxt.deleMemContextMutex);
     pfree_ext(session);

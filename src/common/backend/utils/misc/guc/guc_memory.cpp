@@ -273,6 +273,19 @@ static void InitMemoryConfigureNamesBool()
             NULL,
             NULL},
 
+        // variable to disable memory stats
+        {{"disable_memory_stats",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("disable memory stats for query execution."),
+            NULL},
+            &g_instance.attr.attr_memory.disable_memory_stats,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
 #ifdef MEMORY_CONTEXT_CHECKING
         // variable to enable memory check
         {{"enable_memory_context_check_debug",

@@ -556,10 +556,10 @@ end;
 /
 INFO:  b:1
 CONTEXT:  SQL statement "CALL pck1.p1((1,'b',2),'a')"
-PL/pgSQL function inline_code_block line 3 at SQL statement
+PL/pgSQL function inline_code_block line 2 at SQL statement
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 2 at SQL statement
 drop table if exists test_tb;
 NOTICE:  table "test_tb" does not exist, skipping
 create table test_tb(c1 int,c2 varchar2);
@@ -855,7 +855,7 @@ raise info 'aa=%',aa;
 end;
 /
 ERROR:  when invoking function p11, no destination for argments num "a"
-CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 3
 drop procedure if exists p112(out int);
 NOTICE:  function p112(pg_catalog.int4) does not exist, skipping
 create procedure p112(a out int) is
@@ -868,7 +868,7 @@ raise info 'aa=%',aa;
 end;
 /
 ERROR:  when invoking function p11, no destination for argments num "a"
-CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 3
 drop procedure if exists p112(out int);
 NOTICE:  function p112(pg_catalog.int4) does not exist, skipping
 create procedure p112(a out int) is
@@ -881,7 +881,7 @@ raise info 'aa=%',aa;
 end;
 /
 ERROR:  when invoking function p11, no destination for argments num "a"
-CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 3
 drop procedure if exists p112(out int);
 NOTICE:  function p112(pg_catalog.int4) does not exist, skipping
 create procedure p112(a out int) is
@@ -894,7 +894,7 @@ raise info 'aa=%',aa;
 end;
 /
 ERROR:  when invoking function p11, no destination for argments num "a"
-CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 3
 drop procedure if exists p112(out int);
 NOTICE:  function p112(pg_catalog.int4) does not exist, skipping
 create procedure p112(a out int) is
@@ -927,7 +927,7 @@ raise info 'aa=%',aa;
 end;
 /
 ERROR:  when invoking function p11, no destination for argments num "a"
-CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 3
 drop package if exists pck1;
 NOTICE:  package pck1() does not exist, skipping
 create or replace package pck1 is
@@ -955,7 +955,7 @@ end;
 /
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 2 at SQL statement
 drop package if exists pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function plpgsql_override_out.p1()
@@ -991,10 +991,10 @@ end;
 /
 INFO:  b:bb
 CONTEXT:  SQL statement "CALL pck1.p1((1,'bb','11'),array[2,3,4],var2)"
-PL/pgSQL function inline_code_block line 5 at SQL statement
+PL/pgSQL function inline_code_block line 4 at SQL statement
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 5 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at SQL statement
 declare
 var1 pck1.tp_2;
 var2 varchar2;
@@ -1003,7 +1003,7 @@ perform pck1.p1(a=>(1,'bb','11'),c=>var1,b=>'aa');--报错
 end;
 /
 ERROR:  Named argument "b" can not be a const
-CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 5
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
 set plsql_compile_check_options='';
 drop package if exists pck1;
 NOTICE:  drop cascades to 2 other objects

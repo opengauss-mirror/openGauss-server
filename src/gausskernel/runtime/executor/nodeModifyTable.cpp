@@ -89,7 +89,6 @@
 #include "gs_ledger/userchain.h"
 
 #ifdef PGXC
-static TupleTableSlot* fill_slot_with_oldvals(TupleTableSlot* slot, HeapTupleHeader oldtuphd, Bitmapset* modifiedCols);
 static void RecoredGeneratedExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdType cmdtype);
 
 /* Copied from trigger.c */
@@ -111,6 +110,7 @@ extern void HeapDeleteCStore(Relation relation, ItemPointer tid, Oid tableOid, S
 extern Oid pg_get_serial_sequence_oid(text* tablename, text* columnname);
 #ifdef ENABLE_MULTIPLE_NODES
 extern void HeapInsertTsStore(Relation relation, ResultRelInfo* resultRelInfo, HeapTuple tup, int option);
+static TupleTableSlot* fill_slot_with_oldvals(TupleTableSlot* slot, HeapTupleHeader oldtuphd, Bitmapset* modifiedCols);
 #endif   /* ENABLE_MULTIPLE_NODES */
 
 /* check if set_dummy_tlist_references has set the dummy targetlist */
@@ -488,7 +488,11 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     uint32 updated_colnum_resno;
     Bitmapset* updatedCols = GetUpdatedColumns(resultRelInfo, estate);
 
+    /* use pertuple memory for trigger tuple */
+    oldContext = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
     HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
+    MemoryContextSwitchTo(oldContext);
+
     RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
 
     /*
@@ -1081,7 +1085,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
      */
     tuple = tableam_tslot_get_tuple_from_slot(result_rel_info->ri_RelationDesc, slot);    
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NDOES
     result_remote_rel = (RemoteQueryState*)estate->es_result_remoterel;
 #endif
     /*
@@ -1657,7 +1661,7 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
      */
     result_rel_info = estate->es_result_relation_info;
     result_relation_desc = result_rel_info->ri_RelationDesc;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     result_remote_rel = (RemoteQueryState*)estate->es_result_remoterel;
 #endif
 
@@ -1945,9 +1949,9 @@ end:;
             HeapTupleData del_tuple;
             Buffer del_buffer;
 
-            struct {
+            union {
                 HeapTupleHeaderData hdr;
-                char data[MaxHeapTupleSize];
+                char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
             } tbuf;
             errno_t errorNo = EOK;
             errorNo = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
@@ -2074,7 +2078,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                 (errcode(ERRCODE_E_R_E_MODIFYING_SQL_DATA_NOT_PERMITTED), errmsg("cannot UPDATE during bootstrap"))));
     }
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     result_remote_rel = (RemoteQueryState*)estate->es_result_remoterel;
 
     /*
@@ -3373,7 +3377,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
     ResultRelInfo* result_rel_info = NULL;
     PlanState* subPlanState = NULL;
     char* partExprKeyStr = NULL;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     PlanState* remote_rel_state = NULL;
     PlanState* insert_remote_rel_state = NULL;
     PlanState* update_remote_rel_state = NULL;
@@ -3438,7 +3442,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
     /* Preload local variables */
     result_rel_info = node->resultRelInfo + estate->result_rel_index;
     subPlanState = node->mt_plans[node->mt_whichplan];
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     /* Initialize remote plan state */
     remote_rel_state = node->mt_remoterels[node->mt_whichplan];
     insert_remote_rel_state = node->mt_insert_remoterels[node->mt_whichplan];
@@ -3453,12 +3457,12 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
      * CTE).  So we have to save and restore the caller's value.
      */
     saved_result_rel_info = estate->es_result_relation_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     saved_result_remote_rel = estate->es_result_remoterel;
 #endif
 
     estate->es_result_relation_info = result_rel_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     estate->es_result_remoterel = remote_rel_state;
     estate->es_result_insert_remoterel = insert_remote_rel_state;
     estate->es_result_update_remoterel = update_remote_rel_state;
@@ -3532,7 +3536,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
             Assert(estate->result_rel_index == 0);
             if (node->mt_whichplan < node->mt_nplans) {
                 subPlanState = node->mt_plans[node->mt_whichplan];
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
                 /* Move to next remote plan */
                 estate->es_result_remoterel = node->mt_remoterels[node->mt_whichplan];
                 remote_rel_state = node->mt_remoterels[node->mt_whichplan];
@@ -3691,7 +3695,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
                 slot = ExecFilterJunk(junk_filter, slot);
         }
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
         estate->es_result_remoterel = remote_rel_state;
         estate->es_result_insert_remoterel = insert_remote_rel_state;
         estate->es_result_update_remoterel = update_remote_rel_state;
@@ -3745,7 +3749,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
          */
         if (slot != NULL) {
             estate->es_result_relation_info = saved_result_rel_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             estate->es_result_remoterel = saved_result_remote_rel;
 #endif
             return slot;
@@ -3757,7 +3761,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
 
     /* Restore es_result_relation_info before exiting */
     estate->es_result_relation_info = saved_result_rel_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     estate->es_result_remoterel = saved_result_remote_rel;
 #endif
 
@@ -3890,7 +3894,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     mt_state->mt_done = false;
 
     mt_state->mt_plans = (PlanState**)palloc0(sizeof(PlanState*) * nplans);
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NDOES
     mt_state->mt_remoterels = (PlanState**)palloc0(sizeof(PlanState*) * nplans);
     mt_state->mt_insert_remoterels = (PlanState**)palloc0(sizeof(PlanState*) * nplans);
     mt_state->mt_update_remoterels = (PlanState**)palloc0(sizeof(PlanState*) * nplans);
@@ -3921,7 +3925,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
      * sub-plan; ExecContextForcesOids depends on that!
      */
     saved_result_rel_info = estate->es_result_relation_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NDOES
     saved_remote_rel_info = estate->es_result_remoterel;
 #endif
 
@@ -4029,7 +4033,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         i++;
     }
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NDOES
     i = 0;
     foreach (l, node->plans) {
 
@@ -4060,7 +4064,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     EvalPlanQualInit(&mt_state->mt_epqstate, estate, NULL, NIL, node->epqParam);
 
     estate->es_result_relation_info = saved_result_rel_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NDOES
     estate->es_result_remoterel = saved_remote_rel_info;
 #endif
 
@@ -4450,7 +4454,7 @@ void ExecEndModifyTable(ModifyTableState* node)
      */
     for (i = 0; i < node->mt_nplans; i++) {
         ExecEndNode(node->mt_plans[i]);
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NDOES
         ExecEndNode(node->mt_remoterels[i]);
 #endif
     }
@@ -4467,7 +4471,7 @@ void ExecReScanModifyTable(ModifyTableState* node)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("ExecReScanModifyTable is not implemented"))));
 }
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NDOES
 
 /*
  * fill_slot_with_oldvals:

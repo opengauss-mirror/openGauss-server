@@ -573,7 +573,7 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
     bool is_modified, bool *hasPartition);
 static void UpdatePgTriggerFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static void UpdatePgRlspolicyFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
-static ViewInfoForAdd *GetViewInfoFirstAfter(Relation rel, Oid objid, bool keep_star = false);
+static ViewInfoForAdd *GetViewInfoFirstAfter(const char *rel_name, Oid objid, bool keep_star = false);
 static List *CheckPgRewriteFirstAfter(Relation rel);
 static void ReplaceViewQueryFirstAfter(List *query_str);
 static void UpdateDependRefobjsubidFirstAfter(Relation rel, Oid myrelid, int curattnum, int newattnum,
@@ -1154,6 +1154,7 @@ static bool isOrientationSet(List* options, bool* isCUFormat, bool isDfsTbl)
                             errdetail("Valid string is \"orc\".")));
                 }
             } else {
+#ifdef ENABLE_MULTIPLE_NODES
                 if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) != 0 &&
                     pg_strcasecmp(defGetString(def), ORIENTATION_TIMESERIES) != 0 &&
                     pg_strcasecmp(defGetString(def), ORIENTATION_ROW) != 0) {
@@ -1162,6 +1163,15 @@ static bool isOrientationSet(List* options, bool* isCUFormat, bool isDfsTbl)
                             errmsg("Invalid string for  \"ORIENTATION\" option"),
                             errdetail("Valid string are \"column\", \"row\", \"timeseries\".")));
                 }
+#else   /* ENABLE_MULTIPLE_NODES */
+                if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) != 0 &&
+                    pg_strcasecmp(defGetString(def), ORIENTATION_ROW) != 0) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OPTION),
+                            errmsg("Invalid string for  \"ORIENTATION\" option"),
+                            errdetail("Valid string are \"column\", \"row\".")));
+                }
+#endif   /* ENABLE_MULTIPLE_NODES */
             }
             if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) == 0 && isCUFormat != NULL) {
                 *isCUFormat = true;
@@ -1233,10 +1243,17 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
         }
 
         if (pg_strcasecmp(def->defname, "orientation") == 0 && pg_strcasecmp(defGetString(def), ORIENTATION_ORC) == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPTION),
                     errmsg("Invalid string for  \"ORIENTATION\" option"),
                     errdetail("Valid string are \"column\", \"row\", \"timeseries\".")));
+#else   /* ENABLE_MULTIPLE_NODES */
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OPTION),
+                    errmsg("Invalid string for  \"ORIENTATION\" option"),
+                    errdetail("Valid string are \"column\", \"row\".")));
+#endif   /* ENABLE_MULTIPLE_NODES */
         }
         if (pg_strcasecmp(def->defname, "storage_type") == 0) {
             if (pg_strcasecmp(defGetString(def), TABLE_ACCESS_METHOD_USTORE) == 0) {
@@ -2883,6 +2900,18 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("The table %s do not support segment storage", stmt->relation->relname)));
+    }
+
+    if (storage_type == SEGMENT_PAGE) {
+        Oid tbspcId = (tablespaceId == InvalidOid) ? u_sess->proc_cxt.MyDatabaseTableSpace : tablespaceId;
+        uint64 tablespaceMaxSize = 0;
+        bool isLimit = TableSpaceUsageManager::IsLimited(tbspcId, &tablespaceMaxSize);
+        if (isLimit) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
+                errmsg("The table %s do not support segment-page storage", stmt->relation->relname),
+                errdetail("Segment-page storage doest not support limited tablespace \"%s\"", get_tablespace_name(tbspcId)),
+                errhint("use default or unlimited user defined tablespace before using segment-page storage.")));
+        }
     }
 
     if (ENABLE_DMS && !u_sess->attr.attr_common.IsInplaceUpgrade) {
@@ -11562,7 +11591,7 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
 }
 
 
-static ViewInfoForAdd *GetViewInfoFirstAfter(Relation rel, Oid objid, bool keep_star)
+static ViewInfoForAdd *GetViewInfoFirstAfter(const char *rel_name, Oid objid, bool keep_star)
 {
     ScanKeyData entry;
     ViewInfoForAdd *info = NULL;
@@ -11622,7 +11651,7 @@ static ViewInfoForAdd *GetViewInfoFirstAfter(Relation rel, Oid objid, bool keep_
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Un-supported feature"),
                     errdetail("rule %s depend on %s, alter table %s add ... first|after colname is not supported",
-                    NameStr(rewrite_form->rulename), NameStr(rel->rd_rel->relname), NameStr(rel->rd_rel->relname))));
+                    NameStr(rewrite_form->rulename), rel_name, rel_name)));
         }
     }
     systable_endscan(rewrite_scan);
@@ -11667,7 +11696,7 @@ static List *CheckPgRewriteFirstAfter(Relation rel)
 
             pre_objid = dep_form->objid;
 
-            ViewInfoForAdd *info = GetViewInfoFirstAfter(rel, dep_form->objid);
+            ViewInfoForAdd *info = GetViewInfoFirstAfter(NameStr(rel->rd_rel->relname), dep_form->objid);
 
             foreach (viewinfo, query_str) {
                 ViewInfoForAdd *oldInfo = (ViewInfoForAdd *)lfirst(viewinfo);
@@ -31618,7 +31647,7 @@ static void ATPrepAlterModifyColumn(List** wqueue, AlteredTableInfo* tab, Relati
     def->raw_default = tmp_expr;
 }
 
-static char* GetCreateViewCommand(Relation rel, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid)
+static char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid)
 {
     StringInfoData buf;
     ViewInfoForAdd* view_info = NULL;
@@ -31655,7 +31684,7 @@ static char* GetCreateViewCommand(Relation rel, HeapTuple tup, Form_pg_class rel
     }
     pfree_ext(view_options);
     /* concat CREATE VIEW command with query */
-    view_info = GetViewInfoFirstAfter(rel, pg_rewrite_oid, true);
+    view_info = GetViewInfoFirstAfter(rel_name, pg_rewrite_oid, true);
     if (view_info == NULL) {
         pfree_ext(buf.data);
         return NULL; /* should not happen */
@@ -31689,7 +31718,7 @@ static void ATAlterRecordRebuildView(AlteredTableInfo* tab, Relation rel, Oid pg
             errdetail("modify or change a column used by materialized view or rule is not supported")));
     }
     /* print CREATE VIEW command */
-    view_def = GetCreateViewCommand(rel, tup, reltup, pg_rewrite_oid, view_oid);
+    view_def = GetCreateViewCommand(NameStr(rel->rd_rel->relname), tup, reltup, pg_rewrite_oid, view_oid);
     ReleaseSysCache(tup);
     if (view_def) {
         /* record it */
@@ -32290,4 +32319,66 @@ static Node* RecookAutoincAttrDefault(Relation rel, int attrno, Oid targettype, 
         COERCE_IMPLICIT_CAST,
         -1);
     return (Node*)aexpr;
+}
+
+/*
+ * findout view which depend on proc, then rebuild it. It will check view's
+ * column type and name(checkViewTupleDesc) when rebuild the view.
+ */
+void RebuildDependViewForProc(Oid proc_oid)
+{
+    ScanKeyData key[2];
+    SysScanDesc scan = NULL;
+    HeapTuple tup = NULL;
+    List *oid_list = NIL;
+
+    /* open pg_depend to find which view depend on this proc */
+    Relation depRel = heap_open(DependRelationId, AccessShareLock);
+
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(ProcedureRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(proc_oid));
+
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
+    while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
+        Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
+
+        if (depform->classid == RewriteRelationId && depform->deptype == DEPENDENCY_NORMAL) {
+            oid_list = lappend_oid(oid_list, depform->objid);
+        }
+    }
+    systable_endscan(scan);
+    heap_close(depRel, AccessShareLock);
+
+    /* rebuild view by rewrite oid */
+    ListCell *cell = NULL;
+    foreach(cell, oid_list) {
+        Oid objid = lfirst_oid(cell);
+        Oid view_oid = get_rewrite_relid(objid, true);
+        if (!OidIsValid(view_oid)) {
+            continue;
+        }
+        tup = SearchSysCache1(RELOID, ObjectIdGetDatum(view_oid));
+        if (!HeapTupleIsValid(tup)) {
+            continue;
+        }
+        Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tup);
+        if (reltup->relkind != RELKIND_VIEW) {
+            ReleaseSysCache(tup);
+            continue;
+        }
+
+        /* get rebuild view sql */
+        char *view_def = GetCreateViewCommand(NameStr(reltup->relname), tup, reltup, objid, view_oid);
+        ReleaseSysCache(tup);
+
+        CommandCounterIncrement();
+        List* raw_parsetree_list = raw_parser(view_def);
+        Node* stmt = (Node*)linitial(raw_parsetree_list);
+        Assert(IsA(stmt, ViewStmt));
+        DefineView((ViewStmt*)stmt, view_def);
+        pfree(view_def);
+        list_free(raw_parsetree_list);
+    }
+    list_free_ext(oid_list);
 }

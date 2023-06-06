@@ -142,14 +142,15 @@ void IndexScanFusion::Init(long max_rows)
         *m_direction = NoMovementScanDirection;
     }
 
-    ScanState* scanstate = makeNode(ScanState); // need release
-
-    scanstate->ps.plan =  (Plan *)m_node;
+#ifdef ENABLE_MULTIPLE_NODES
     /*
      * for hash bucket pruning with Global Plan cache, we should build a temp EState object
      * to passing param info which is used to cal buckets in further hbkt_idx_beginscan.
      */
     if (ENABLE_GPC && RELATION_CREATE_BUCKET(m_rel)) {
+        ScanState* scanstate = makeNode(ScanState); // need release
+
+        scanstate->ps.plan =  (Plan *)m_node;
         EState tmpstate;
         tmpstate.es_param_list_info = m_params;
         scanstate->ps.state = &tmpstate;
@@ -158,10 +159,12 @@ void IndexScanFusion::Init(long max_rows)
         m_scandesc = scan_handler_idx_beginscan(m_rel, m_index, GetActiveSnapshot(), m_keyNum, 0, scanstate);
         scanstate->ps.state = NULL;
     } else {
+#endif
         /* add scanstate pointer ? */
-        m_scandesc = scan_handler_idx_beginscan(m_rel, m_index, GetActiveSnapshot(), m_keyNum, 0, scanstate);
+        m_scandesc = scan_handler_idx_beginscan(m_rel, m_index, GetActiveSnapshot(), m_keyNum, 0, NULL);
+#ifdef ENABLE_MULTIPLE_NODES
     }
-
+#endif
     if (m_scandesc) {
         scan_handler_idx_rescan_local(m_scandesc,
             m_keyNum > 0 ? m_scanKeys : NULL, m_keyNum, NULL, 0);

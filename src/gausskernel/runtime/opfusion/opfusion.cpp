@@ -194,6 +194,11 @@ void OpFusion::SaveInGPC(OpFusion *obj)
     rc = memset_s((void *)&obj->m_local, sizeof(OpFusionLocaleVariable), 0, sizeof(OpFusionLocaleVariable));
     securec_check(rc, "\0", "\0");
     MemoryContextSeal(obj->m_global->m_context);
+    /* we can not reuse this obj for opfusion reuse */
+    if (u_sess->opfusion_reuse_ctx.opfusionObj == obj) {
+        u_sess->opfusion_reuse_ctx.opfusionObj = NULL;
+    }
+    
 }
 
 void OpFusion::DropGlobalOpfusion(OpFusion *obj)
@@ -407,7 +412,7 @@ bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted, long 
     if (m_local.m_isCompleted) {
         UnregisterSnapshot(m_local.m_snapshot);
         m_local.m_snapshot = NULL;
-        MemoryContextDeleteChildren(m_local.m_tmpContext);
+        MemoryContextDeleteChildren(m_local.m_tmpContext, NULL);
         /* reset the context. */
         MemoryContextReset(m_local.m_tmpContext);
         /* clear hash table */
@@ -646,6 +651,49 @@ void OpFusion::useOuterParameter(ParamListInfo params)
     m_local.m_outParams = params;
 }
 
+static void* TryReuseOpfusionObj(FusionType ftype, MemoryContext context, CachedPlanSource *psrc,
+    List *plantree_list, ParamListInfo params)
+{
+    if (!u_sess->attr.attr_sql.enable_opfusion_reuse){
+        return NULL;
+    }
+    /* 
+     * we save the obj without FusionType check in FusionFactory
+     * so must check here
+     */
+    if (INSERT_FUSION != ftype) {
+        return NULL;
+    }
+
+    OpFusion* checkOpfusionObj = (OpFusion *)u_sess->opfusion_reuse_ctx.opfusionObj;
+    if (psrc != NULL /* not support for cacheplan case */
+        || checkOpfusionObj == NULL
+        || checkOpfusionObj->m_local.m_optype != ftype) {
+        return NULL;
+    }
+
+    /*check the rel id*/
+    PlannedStmt *curr_plan = (PlannedStmt *)linitial(plantree_list);
+    int rtindex = linitial_int((List*)linitial(curr_plan->resultRelations));
+    Oid rel_oid = getrelid(rtindex, curr_plan->rtable);
+    if (rel_oid != checkOpfusionObj->m_global->m_reloid) {
+        return NULL;
+    }
+
+    /* check the resultdesc*/
+    Relation rel = heap_open(rel_oid, AccessShareLock);
+    TupleDesc rel_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
+    heap_close(rel, AccessShareLock);
+    if (!equalTupleDescs(rel_tupDesc, checkOpfusionObj->m_global->m_tupDesc)) {
+        return NULL;
+    }
+
+    /* call specific reset function here*/
+    if (!checkOpfusionObj->ResetReuseFusion(context, psrc, plantree_list, params)){
+        checkOpfusionObj = NULL;
+    }
+    return (void*)checkOpfusionObj;
+}
 
 void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPlanSource *psrc, List *plantree_list,
     ParamListInfo params)
@@ -657,7 +705,16 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
     if (ftype > BYPASS_OK) {
         return NULL;
     }
-    void *opfusionObj = NULL;
+
+    void *opfusionObj = NULL; 
+    /*
+     * try to reuse opfusion object
+     */
+    opfusionObj = TryReuseOpfusionObj(ftype, context, psrc, plantree_list, params);
+    if (opfusionObj) {
+        return opfusionObj;
+    }
+
     MemoryContext objCxt = NULL;
     bool isShared = psrc && psrc->gpc.status.InShareTable();
     if (isShared) {
@@ -706,6 +763,12 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
     }
     if (opfusionObj != NULL && !((OpFusion *)opfusionObj)->m_global->m_is_global)
         ((OpFusion *)opfusionObj)->m_global->m_type = ftype;
+
+    if (u_sess->attr.attr_sql.enable_opfusion_reuse){
+        /* XXX: better to free previous obj */
+        u_sess->opfusion_reuse_ctx.opfusionObj = opfusionObj;
+    }
+
     return opfusionObj;
 }
 
@@ -1104,7 +1167,7 @@ void OpFusion::bindClearPosition()
     m_local.m_outParams = NULL;
     m_local.m_snapshot = NULL;
 
-    MemoryContextDeleteChildren(m_local.m_tmpContext);
+    MemoryContextDeleteChildren(m_local.m_tmpContext, NULL);
     /* reset the context. */
     MemoryContextReset(m_local.m_tmpContext);
 }
@@ -1200,7 +1263,7 @@ void OpFusion::clean()
         if (m_local.m_scan)
             m_local.m_scan->End(true);
         m_local.m_isCompleted = false;
-        MemoryContextDeleteChildren(m_local.m_tmpContext);
+        MemoryContextDeleteChildren(m_local.m_tmpContext, NULL);
         /* reset the context. */
         MemoryContextReset(m_local.m_tmpContext);
     }
@@ -1393,4 +1456,19 @@ void FreeExecutorStateForOpfusion(EState* estate)
         /* FreeExprContext removed the list link for us */
     }
     ResetOpfusionExecutorState(estate);
+}
+
+/*
+ * AtEOXact_OpfusionReuse
+ *
+ * This routine is called during transaction commit or abort (it doesn't
+ * particularly care which). reset the opfusion reuse context
+ */
+void AtEOXact_OpfusionReuse()
+{
+    /* 
+     * no need to delete the memory context
+     * the are the sub nodes of the top transaction ctx
+     */
+    u_sess->opfusion_reuse_ctx.opfusionObj = NULL;
 }

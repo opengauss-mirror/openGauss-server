@@ -10,7 +10,7 @@ create database event_audit_b with dbcompatibility  'b';
 drop event if exists e;
 show audit_system_object;
 create event e on schedule at '3000-01-01 00:00:00' disable do select 1;
-select pg_sleep(10);
+select pg_sleep(1);
 select detail_info from pg_query_audit(trunc((localtimestamp - interval '1' minute), 'second'), trunc(localtimestamp, 'second')) 
 where database = 'event_audit_b' AND type='ddl_event';
 drop event if exists e;

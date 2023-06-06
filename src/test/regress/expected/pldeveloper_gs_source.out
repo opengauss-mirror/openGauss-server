@@ -59,15 +59,14 @@ insert into fasd af asd asdf;
 end;
 /
 NOTICE:  syntax error at or near "af"
-LINE 3: insert into fasd af asd asdf;
+LINE 2: insert into fasd af asd asdf;
                          ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 insert into fasd af asd asdf;
 end
 ERROR:  Debug mod,create procedure has error.
 DETAIL:  N/A
-CONTEXT:  compilation of PL/pgSQL function "func1" near line 2
+CONTEXT:  compilation of PL/pgSQL function "func1" near line 1
 -- package
 CREATE OR REPLACE PACKAGE emp_bonus9 AS
 da int;
@@ -91,11 +90,10 @@ END;
 END emp_bonus9;
 /
 NOTICE:  syntax error at or near "int" when compile function aa(integer,character varying)
-LINE 3: insert int aa aa;
+LINE 2: insert int aa aa;
         ^
 DETAIL:  syntax error
-QUERY:   DECLARE 
-BEGIN
+QUERY:   DECLARE BEGIN
 insert int aa aa;
 END
 ERROR:  Debug mod,create procedure has error.
@@ -201,15 +199,14 @@ insert into fasd af asd asdf;
 end;
 /
 NOTICE:  syntax error at or near "af"
-LINE 3: insert into fasd af asd asdf;
+LINE 2: insert into fasd af asd asdf;
                          ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 insert into fasd af asd asdf;
 end
 ERROR:  Debug mod,create procedure has error.
 DETAIL:  N/A
-CONTEXT:  compilation of PL/pgSQL function "func1" near line 2
+CONTEXT:  compilation of PL/pgSQL function "func1" near line 1
 set role gs_developper password 'Dev@9999';
 set behavior_compat_options='allow_procedure_compile_check';
 -- [no log] trigger func
@@ -249,11 +246,10 @@ begin
 end;
 /
 NOTICE:  unrecognized row security option "whatever"
-LINE 3: ...TE ROW LEVEL SECURITY POLICY p02 ON document_row AS WHATEVER
+LINE 2: ...TE ROW LEVEL SECURITY POLICY p02 ON document_row AS WHATEVER
                                                                ^
 HINT:  Only PERMISSIVE or RESTRICTIVE policies are supported currently.
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
     CREATE ROW LEVEL SECURITY POLICY p02 ON document_row AS WHATEVER
     USING (dlevel <= (SELECT aid FROM account_row WHERE aname = current_user));
     insert int asd asd;
@@ -261,11 +257,10 @@ begin
     insert int asd asd;
 end
 ERROR:  relation "account_row" does not exist
-LINE 3:     CREATE ROW LEVEL SECURITY POLICY p02 ON document_row AS ...
+LINE 2:     CREATE ROW LEVEL SECURITY POLICY p02 ON document_row AS ...
             ^
 DETAIL:  
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
     CREATE ROW LEVEL SECURITY POLICY p02 ON document_row AS WHATEVER
     USING (dlevel <= (SELECT aid FROM account_row WHERE aname = current_user));
     insert int asd asd;
@@ -280,7 +275,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
  func2      | function     |    4 | it is not a known variable 
  func2      | function     |    4 | syntax error
  p1         | procedure    |    5 | unrecognized row security option
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
 (6 rows)
 
 create or replace package pkg1
@@ -303,7 +298,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
  func2      | function     |    4 | syntax error
  func2      | function     |    4 | it is not a known variable 
  p1         | procedure    |    5 | unrecognized row security option
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
  pkg1       | package      |    3 | syntax error
 (7 rows)
 
@@ -358,7 +353,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors;
  emp_bonus9 | package body |    6 | syntax error
  func1      | procedure    |    4 | syntax error
  p1         | procedure    |    5 | unrecognized row security option
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
  pkg1       | package      |    3 | syntax error
  pkg2       | package      |    3 | invalid type name
 (8 rows)
@@ -378,7 +373,7 @@ begin
 end;
 /
 ERROR:  column "pro70" has pseudo-type void
-CONTEXT:  compilation of PL/pgSQL function "pro71" near line 2
+CONTEXT:  compilation of PL/pgSQL function "pro71" near line 1
 create or replace function bulk_f_039_1() returns int[]
 LANGUAGE plpgsql AS 
 $$ 
@@ -398,19 +393,17 @@ open v_cur for select c1,c2 from tab1;
 end;
 /
 NOTICE:  "v_cur" is not a known variable
-LINE 5: open v_cur for select c1,c2 from tab1;
+LINE 4: open v_cur for select c1,c2 from tab1;
              ^
-QUERY:   DECLARE 
-type tpc1 is ref cursor;
+QUERY:   DECLARE type tpc1 is ref cursor;
 --v_cur tpc1;
 begin
 open v_cur for select c1,c2 from tab1;
 end
 ERROR:  open cursor error
-LINE 5: open v_cur for select c1,c2 from tab1;
+LINE 4: open v_cur for select c1,c2 from tab1;
              ^
-QUERY:   DECLARE 
-type tpc1 is ref cursor;
+QUERY:   DECLARE type tpc1 is ref cursor;
 --v_cur tpc1;
 begin
 open v_cur for select c1,c2 from tab1;
@@ -473,7 +466,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
  func1      | procedure    |    4 | syntax error
  func2      | function     |    4 | it is not a known variable 
  func2      | function     |    4 | syntax error
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
  p1         | procedure    |    5 | unrecognized row security option
  pkg1       | package      |    3 | syntax error
  pkg2       | package      |    3 | invalid type name
@@ -497,15 +490,14 @@ insert int a;
 end;
 /
 NOTICE:  syntax error at or near "int"
-LINE 3: insert int a;
+LINE 2: insert int a;
                ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 insert int a;
 end
 ERROR:  Debug mod,create procedure has error.
 DETAIL:  N/A
-CONTEXT:  compilation of PL/pgSQL function "proc4" near line 2
+CONTEXT:  compilation of PL/pgSQL function "proc4" near line 1
 create or replace package pkg4
 is
 a a;
@@ -528,7 +520,7 @@ select name,type,src,line from DBE_PLDEVELOPER.gs_errors order by name;
  func2      | function     | it is not a known variable            |    4
  func2      | function     | syntax error                          |    4
  p1         | procedure    | unrecognized row security option      |    5
- p1         | procedure    | relation "account_row" does not exist |    7
+ p1         | procedure    | relation "account_row" does not exist |    5
  pkg1       | package      | syntax error                          |    3
  pkg2       | package      | invalid type name                     |    3
  pkg4       | package      | type does not exist                   |    3
@@ -665,10 +657,9 @@ insert int a;
 end;
 /
 ERROR:  syntax error at or near "int"
-LINE 5: insert int a;
+LINE 4: insert int a;
                ^
-QUERY:   DECLARE 
-b int;
+QUERY:   DECLARE b int;
 c int;
 begin
 insert int a;
@@ -814,10 +805,9 @@ insert int a;
 end;
 /
 ERROR:  syntax error at or near "int"
-LINE 5: insert int a;
+LINE 4: insert int a;
                ^
-QUERY:   DECLARE 
-b int;
+QUERY:   DECLARE b int;
 c int;
 begin
 insert int a;
@@ -1078,7 +1068,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
  func2      | function     |    4 | it is not a known variable 
  func2      | function     |    4 | syntax error
  p1         | procedure    |    5 | unrecognized row security option
- p1         | procedure    |    7 | relation "account_row" does not exist
+ p1         | procedure    |    5 | relation "account_row" does not exist
  pkg1       | package      |    3 | syntax error
  pkg2       | package      |    3 | invalid type name
  pkg4       | package      |    3 | type does not exist

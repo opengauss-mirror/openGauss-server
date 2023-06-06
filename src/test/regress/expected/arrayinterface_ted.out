@@ -87,10 +87,9 @@ begin
 end;
 /
 ERROR:  syntax error at or near "["
-LINE 6:     colors.extend[1];
+LINE 5:     colors.extend[1];
                          ^
-QUERY:  
-declare
+QUERY:  declare
     colors varchar[] := array['red'];
 begin
     raise NOTICE'%',colors;
@@ -114,10 +113,9 @@ begin
 end;
 /
 ERROR:  syntax error at or near "["
-LINE 6:     colors.trim[1];
+LINE 5:     colors.trim[1];
                        ^
-QUERY:  
-declare
+QUERY:  declare
     colors varchar[] := array['red','orange','green','blue','indigo','violet'];
 begin
     raise NOTICE'%',colors;
@@ -151,10 +149,9 @@ begin
 end;
 /
 ERROR:  syntax error at or near "["
-LINE 18:     colors4.delete[-1];
+LINE 17:     colors4.delete[-1];
                            ^
-QUERY:  
-declare
+QUERY:  declare
     colors varchar[] := array['red','orange','green','blue','indigo','violet'];
     colors2 varchar[] := array['red','orange','green','blue','indigo','violet'];
     colors3 varchar[] := array['red','orange','green','blue','indigo','violet'];
@@ -212,10 +209,9 @@ begin
 end;
 /
 ERROR:  syntax error at or near "@*"
-LINE 3:     @*ar& integer[]:=array[1,0,5,6,8,3,9];
+LINE 2:     @*ar& integer[]:=array[1,0,5,6,8,3,9];
             ^
-QUERY:  
-declare
+QUERY:  declare
     @*ar& integer[]:=array[1,0,5,6,8,3,9];
 begin
     raise NOTICE'%',@*ar&;
@@ -292,10 +288,9 @@ begin
 end;
 /
 ERROR:  syntax error at or near "raise"
-LINE 7:     raise NOTICE'%',colors;
+LINE 6:     raise NOTICE'%',colors;
             ^
-QUERY:  
-declare
+QUERY:  declare
     colors varchar[] := array['red','orange','green','blue','indigo','violet'];
 begin
     raise NOTICE'%',colors;

@@ -704,14 +704,14 @@ void gslog_detailed_errinfo(gslog_dumper* parser)
             fprintf(stderr, "File name is too long(>%d).\n", MAXPGPATH);
             break;
         case FILESIZE_TOO_SMALL:
-            fprintf(stderr, "File size(%ld) is too small, at least %lu.\n", parser->m_file_size, sizeof(LogFileHeader));
+            fprintf(stderr, "File size(%ld) is too small, at least %zu.\n", parser->m_file_size, sizeof(LogFileHeader));
             break;
         case FILEDATA_BAD_MAGIC1:
-            fprintf(stderr, "The first magic of file head mismatched, offset 0, size %lu \n", sizeof(unsigned long));
+            fprintf(stderr, "The first magic of file head mismatched, offset 0, size %zu \n", sizeof(unsigned long));
             break;
         case FILEDATA_BAD_MAGIC2:
             fprintf(stderr,
-                "The tail magic of file head mismatched, offset %ld, size %lu \n",
+                "The tail magic of file head mismatched, offset %ld, size %zu \n",
                 parser->m_file_offset,
                 sizeof(unsigned long));
             break;

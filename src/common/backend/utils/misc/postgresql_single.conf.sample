@@ -347,6 +347,7 @@ hot_standby = on			# "on" allows queries during recovery
 
 #enable_bitmapscan = on
 #enable_hashagg = on
+#enable_sortgroup_agg = off
 #enable_hashjoin = on
 #enable_indexscan = on
 #enable_indexonlyscan = on
@@ -822,7 +823,6 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #------------------------------------------------------------------------------
 #ss_enable_dms = off
 #ss_enable_dss = off
-#ss_enable_reform = on
 #ss_enable_ssl = on
 #ss_enable_aio = on
 #ss_enable_catalog_centralized = on
@@ -845,3 +845,4 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #ss_log_level = 7
 #ss_log_backup_file_count = 10
 #ss_log_max_file_size = 10MB
+#ss_parallel_thread_count = 16

@@ -1,0 +1,7 @@
+-- create database for mysql_function\mysql_function_2
+drop database if exists mysqltest;
+drop database if exists mysqltestbak;
+drop database if exists mysqlfunction;
+CREATE DATABASE mysqltest DBCOMPATIBILITY  'B';
+CREATE DATABASE mysqltestbak DBCOMPATIBILITY  'B';
+CREATE DATABASE mysqlfunction DBCOMPATIBILITY  'B';

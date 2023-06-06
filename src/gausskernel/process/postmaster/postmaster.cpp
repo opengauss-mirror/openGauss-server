@@ -3914,7 +3914,9 @@ static int ServerLoop(void)
         if (g_instance.pid_cxt.ReaperBackendPID == 0)
             g_instance.pid_cxt.ReaperBackendPID = initialize_util_thread(REAPER);
 
-        if ((pmState == PM_RUN || t_thrd.xlog_cxt.is_hadr_main_standby) &&
+        if (((!ENABLE_DMS && (pmState == PM_RUN || t_thrd.xlog_cxt.is_hadr_main_standby)) || 
+            (ENABLE_DMS && pmState == PM_RUN && t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE &&
+             !SS_PERFORMING_SWITCHOVER)) &&
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == 0 && !dummyStandbyMode &&
             g_instance.attr.attr_storage.xlog_file_path != NULL) {
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
@@ -6869,7 +6871,8 @@ static void reaper(SIGNAL_ARGS)
             }
 
             if (g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == 0 && !dummyStandbyMode &&
-                g_instance.attr.attr_storage.xlog_file_path != NULL) {
+                g_instance.attr.attr_storage.xlog_file_path != NULL && (!SS_PRIMARY_STANDBY_CLUSTER_STANDBY
+                && !SS_PRIMARY_DEMOTING)) {
                 g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
             }
 
@@ -7194,7 +7197,11 @@ static void reaper(SIGNAL_ARGS)
                  * Any unexpected exit of the checkpointer (including FATAL
                  * exit) is treated as a crash.
                  */
-                HandleChildCrash(pid, exitstatus, _("checkpointer process"));
+                if (pid == g_instance.pid_cxt.sharedStorageXlogCopyThreadPID) {
+                    HandleChildCrash(pid, exitstatus, _("sharedStorageXlogCopy process"));
+                } else {
+                    HandleChildCrash(pid, exitstatus, _("checkpointer process"));
+                }
             }
 
             continue;
@@ -9964,7 +9971,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
      * and walrecwrite. Other modes don't need when dms is enabled. */
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER) && g_instance.pid_cxt.WalReceiverPID == 0 &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
-        g_instance.status == NoShutdown && (!ENABLE_DMS || SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY)) {
+        g_instance.status == NoShutdown && (!ENABLE_DMS || SS_STANDBY_CLUSTER_MAIN_STANDBY)) {
         if (g_instance.pid_cxt.WalRcvWriterPID == 0) {
             g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
             SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
@@ -10154,7 +10161,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
     }
 
-    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER)) {
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS)) {
         PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
         t_thrd.dms_cxt.CloseAllSessionsFailed = false;
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] kill backends begin.")));
@@ -10175,13 +10182,17 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
+        //active check once
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
+            g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
+        }
+
         /* and the autovac launcher too */
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
 
         if (g_instance.pid_cxt.PgJobSchdPID != 0)
             signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
-
         /*
          * before init startup threads, need close WalWriter and WalWriterAuxiliary
          * because during StartupXLOG remove_xlogtemp_files() occurs process file concurrently
@@ -10191,7 +10202,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
-
         pmState = PM_WAIT_BACKENDS;
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
@@ -10207,6 +10217,13 @@ static void sigusr1_handler(SIGNAL_ARGS)
         ereport(LOG,
             (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
                 wal_get_role_string(get_cur_mode()))));
+    }
+
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP)) {
+        if (g_instance.pid_cxt.StartupPID != 0) {
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] send to startup term signal")));
+            signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+        }
     }
 
     if (CheckPromoteSignal()) {
@@ -12487,6 +12504,11 @@ const char* wal_get_db_state_string(DbState db_state)
 static ServerMode get_cur_mode(void)
 {
     if (ENABLE_DMS) {
+        /* except for main standby in standby cluster, current mode of instance is determined by SS_OFFICIAL_PRIMARY*/
+        if (g_instance.attr.attr_storage.xlog_file_path !=0 && SS_OFFICIAL_PRIMARY &&
+            t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) {
+            return STANDBY_MODE;
+        }
         return !SS_OFFICIAL_PRIMARY ? STANDBY_MODE : PRIMARY_MODE;
     }
     return t_thrd.postmaster_cxt.HaShmData->current_mode;
@@ -14741,13 +14763,13 @@ void InitShmemForDmsCallBack()
 const char *GetSSServerMode(ServerMode mode)
 {
     if (g_instance.attr.attr_storage.xlog_file_path != 0) {
-        if (SS_OFFICIAL_PRIMARY && mode == PRIMARY_MODE) { 
+        if (SS_OFFICIAL_PRIMARY && (mode == PRIMARY_MODE || mode == NORMAL_MODE)) { 
             return "Primary";
         }
         
         /* main standby in standby cluster */
         if (SS_OFFICIAL_PRIMARY && mode == STANDBY_MODE) { 
-            return "Standby";
+            return "Main Standby";
         }
         
         if (!SS_OFFICIAL_PRIMARY) {

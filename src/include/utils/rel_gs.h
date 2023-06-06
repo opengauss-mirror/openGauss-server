@@ -376,9 +376,13 @@ static inline RedisHtlAction RelationGetAppendMode(Relation rel)
  * RelationIsPAXFormat
  * Return the relations' orientation. Pax format includes ORC format.
  */
+#ifdef ENABLE_MULTIPLE_NONDES
 #define RelationIsPAXFormat(relation)                   \
     ((RELKIND_RELATION == relation->rd_rel->relkind) && \
         pg_strcasecmp(RelationGetOrientation(relation), ORIENTATION_ORC) == 0)
+#else
+#define RelationIsPAXFormat(relation) (false)
+#endif
 
 /* RelationIsColStore
  * 	  Return relation whether is column store, which includes CU format and PAX format.
@@ -386,9 +390,13 @@ static inline RedisHtlAction RelationGetAppendMode(Relation rel)
 #define RelationIsColStore(relation) \
     ((RELKIND_RELATION == relation->rd_rel->relkind) && (RelationIsCUFormat(relation) || RelationIsPAXFormat(relation)))
 
+#ifdef ENABLE_MULTIPLE_NODES
 #define RelationIsTsStore(relation) \
     ((RELKIND_RELATION == relation->rd_rel->relkind) && \
         pg_strcasecmp(RelationGetOrientation(relation), ORIENTATION_TIMESERIES) == 0)
+#else
+#define RelationIsTsStore(relation) (false)
+#endif
 
 #define TsRelWithImplDistColumn(attribute, pos)     \
     (((attribute)[pos].attkvtype == ATT_KV_HIDE) &&  \
@@ -743,7 +751,9 @@ static inline bool IsCompressedByCmprsInPgclass(const RelCompressType cmprInPgcl
 
 #define RelationGetEndCtidInternal(relation) StdRdOptionsGetStringData((relation)->rd_options, end_ctid_internal, NULL)
 
+#ifdef ENABLE_MULTIPLE_NODES
 #define RelationInRedistribute(relation) (REDIS_REL_NORMAL < (RelationGetAppendMode(relation)) ? true : false)
+
 
 #define RelationInRedistributeReadOnly(relation) \
     (REDIS_REL_READ_ONLY == (RelationGetAppendMode(relation)) ? true : false)
@@ -753,7 +763,16 @@ static inline bool IsCompressedByCmprsInPgclass(const RelCompressType cmprInPgcl
 
 #define RelationIsRedistributeDest(relation)		\
     (REDIS_REL_DESTINATION == (RelationGetAppendMode(relation)) ? true : false)
+#else 
+#define RelationInRedistribute(relation) (false)
 
+#define RelationInRedistributeReadOnly(relation) (false)
+
+#define RelationInRedistributeEndCatchup(relation) (false)
+
+#define RelationIsRedistributeDest(relation) (false)
+
+#endif
 /* Get info */
 #define RelationGetRelCnOid(relation) \
     ((relation)->rd_options ? ((StdRdOptions*)(relation)->rd_options)->rel_cn_oid : InvalidOid)

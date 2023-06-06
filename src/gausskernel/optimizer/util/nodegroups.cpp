@@ -222,10 +222,9 @@ void ng_init_nodegroup_optimizer(Query* query)
      * it will be NULL if there is no 'in redistribution' group.
      */
     u_sess->opt_cxt.in_redistribution_group_distribution = NULL;
+#ifdef ENABLE_MULTIPLE_NODES
     u_sess->opt_cxt.in_redistribution_group_distribution = ng_get_in_redistribution_group_distribution();
-
-    /* Get installation group distribution */
-    Distribution* installation_group_distribution = ng_get_installation_group_distribution();
+#endif
 
     /*
      * Init compute permission group distribution
@@ -233,25 +232,36 @@ void ng_init_nodegroup_optimizer(Query* query)
      * so, in this mode, we set u_sess->opt_cxt.compute_permission_group_distribution,
      * and in other modes, we set u_sess->opt_cxt.compute_permission_group_distribution to NULL
      */
-    ComputingNodeGroupMode cng_mode = ng_get_computing_nodegroup_mode();
     u_sess->opt_cxt.compute_permission_group_distribution = NULL;
+#ifdef ENABLE_MULTIPLE_NODES
+    ComputingNodeGroupMode cng_mode = ng_get_computing_nodegroup_mode();
     if (CNG_MODE_COSTBASED_OPTIMAL == cng_mode) {
         u_sess->opt_cxt.compute_permission_group_distribution = ng_get_compute_permission_group_distribution();
     }
-
+#endif
     /*
      * Get and set query union group distribution and check wheather base relations are in same group
      * 1. Get base relations' range table entry list
      * 2. Construct query union-set group
      */
+    bool baserels_in_same_group = true;
+#ifdef ENABLE_MULTIPLE_NODES
     FindBaserelRTEContext* findBaserelRTEContext = (FindBaserelRTEContext*)palloc0(sizeof(FindBaserelRTEContext));
     (void)get_baserel_rte_list((Node*)query, findBaserelRTEContext);
-    bool baserels_in_same_group = true;
     u_sess->opt_cxt.query_union_set_group_distribution =
         ng_get_query_union_set_group_distribution(findBaserelRTEContext->baserel_rte_list, &baserels_in_same_group);
     pfree_ext(findBaserelRTEContext);
+#else
+    /* must in same group */
+    u_sess->opt_cxt.query_union_set_group_distribution =
+        ng_get_query_union_set_group_distribution(NULL, &baserels_in_same_group);
+
+#endif
 
     /* Check wheather it is a multiple node group scenario */
+#ifdef ENABLE_MULTIPLE_NODES
+    /* Get installation group distribution */
+    Distribution* installation_group_distribution = ng_get_installation_group_distribution();
     u_sess->opt_cxt.is_multiple_nodegroup_scenario = true;
     u_sess->opt_cxt.different_nodegroup_count = 2;
     if (baserels_in_same_group) {
@@ -265,6 +275,10 @@ void ng_init_nodegroup_optimizer(Query* query)
             }
         }
     }
+#else
+    u_sess->opt_cxt.is_multiple_nodegroup_scenario = false;
+    u_sess->opt_cxt.different_nodegroup_count = 1;
+#endif
 
     u_sess->opt_cxt.single_node_distribution = NULL;
     /* Init dn gather's single node distribution */
@@ -382,12 +396,16 @@ char* ng_get_installation_group_name()
  * @return:
  *     the oid of installation group
  */
-Oid ng_get_installation_group_oid()
+Oid FORCE_INLINE ng_get_installation_group_oid()
 {
+#ifdef ENABLE_MULTIPLE_NODES
     char* installation_group_name = ng_get_installation_group_name();
 
     Oid oid = ng_get_group_groupoid(installation_group_name);
     return oid;
+#else
+    return InvalidOid;
+#endif
 }
 
 /*

@@ -624,7 +624,7 @@ test: hw_cstore_vacuum
 test: hw_cstore_insert
 test: hw_cstore_delete
 test: hw_cstore_unsupport
-test: hw_cstore_tablespace
+test: hw_cstore_tablespace_1 hw_cstore_tablespace_2 hw_cstore_tablespace_3 hw_cstore_tablespace_4 hw_cstore_tablespace_5
 test: hw_cstore_truncate
 test: hw_cstore_roughcheck
 test: hw_cstore_update

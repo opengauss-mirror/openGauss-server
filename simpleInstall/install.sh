@@ -2,10 +2,10 @@
 # -*- coding:utf-8 -*-
 #############################################################################
 # Copyright (c): 2021, Huawei Tech. Co., Ltd.
-# FileName     : install.py
+# FileName     : install.sh
 # Version      : V1.0.0
 # Date         : 2021-03-15
-# Description  : the scripy used to install the single cluster on one machine
+# Description  : the script used to install the single cluster on one machine
 #########################################
 
 function usage()

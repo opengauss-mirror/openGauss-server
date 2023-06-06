@@ -190,7 +190,7 @@ static TupleTableSlot* SeqNext(SeqScanState* node);
 
 static void ExecInitNextPartitionForSeqScan(SeqScanState* node);
 
-template<TableAmType type, bool hashBucket>
+template<TableAmType type, bool hashBucket, bool pushdown>
 FORCE_INLINE
 void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDirection direction,
     bool* has_cur_xact_write)
@@ -199,6 +199,8 @@ void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDi
     if(hashBucket) {
         /* fall back to orign slow function. */
         tuple =  scan_handler_tbl_getnext(scan, direction, NULL, has_cur_xact_write);
+    } else if (pushdown) {
+        tuple = ndp_tableam->scan_getnexttuple(scan, direction, slot);
     } else if(type == TAM_HEAP) {
         tuple =  (Tuple)heap_getnext(scan, direction, has_cur_xact_write);
     } else {
@@ -723,8 +725,7 @@ static void InitRelationBatchScanEnv(SeqScanState *state)
     List *pColList = proj->pi_acessedVarNumbers;
 
     batchstate->colNum = list_length(pColList);
-    batchstate->lateRead = (bool *)palloc0(sizeof(bool) * batchstate->colNum);
-    batchstate->colId = (int *)palloc(sizeof(int) * batchstate->colNum);
+    batchstate->colAttr = (ScanBatchColAttr *)palloc0(sizeof(ScanBatchColAttr) * batchstate->colNum);
 
     int i = 0;
     ListCell *cell = NULL;
@@ -732,17 +733,27 @@ static void InitRelationBatchScanEnv(SeqScanState *state)
     /* Initilize which columns should be accessed */
     foreach (cell, pColList) {
         Assert(lfirst_int(cell) > 0);
-        batchstate->colId[i] = lfirst_int(cell) - 1;
-        batchstate->lateRead[i] = false;
+        batchstate->colAttr[i].colId = lfirst_int(cell) - 1;
+        batchstate->colAttr[i].lateRead = false;
         i++;
+    }
+
+    foreach (cell, proj->pi_projectVarNumbers) {
+        int colId = lfirst_int(cell) - 1;
+        for (i = 0; i < batchstate->colNum; ++i) {
+            if (batchstate->colAttr[i].colId == colId) {
+                batchstate->colAttr[i].isProject = true;
+                break;
+            }
+        }
     }
 
     /* Intilize which columns will be late read */
     foreach (cell, proj->pi_lateAceessVarNumbers) {
         int colId = lfirst_int(cell) - 1;
         for (i = 0; i < batchstate->colNum; ++i) {
-            if (batchstate->colId[i] == colId) {
-                batchstate->lateRead[i] = true;
+            if (batchstate->colAttr[i].colId == colId) {
+                batchstate->colAttr[i].lateRead = true;
                 break;
             }
         }
@@ -804,8 +815,7 @@ static SeqScanState *ExecInitSeqScanBatchMode(SeqScan *node, SeqScanState* scans
         ExecAssignVectorForExprEval(scanstate->ps.ps_ExprContext);
 
         scanstate->ps.targetlist = (List *)ExecInitVecExpr((Expr *)node->plan.targetlist, (PlanState *)scanstate);
-        scanBatchState->pCurrentBatch = New(CurrentMemoryContext)
-            VectorBatch(CurrentMemoryContext, scanstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor);
+
         scanBatchState->pScanBatch =
             New(CurrentMemoryContext)VectorBatch(CurrentMemoryContext, scanstate->ss_currentRelation->rd_att);
 
@@ -819,7 +829,7 @@ static SeqScanState *ExecInitSeqScanBatchMode(SeqScan *node, SeqScanState* scans
 
         InitRelationBatchScanEnv(scanstate);
         for (i = 0; i < scanBatchState->colNum; i++) {
-            scanBatchState->maxcolId = Max(scanBatchState->maxcolId, scanBatchState->colId[i]);
+            scanBatchState->maxcolId = Max(scanBatchState->maxcolId, scanBatchState->colAttr[i].colId);
         }
         scanBatchState->maxcolId++;
 
@@ -829,7 +839,8 @@ static SeqScanState *ExecInitSeqScanBatchMode(SeqScan *node, SeqScanState* scans
         proj = scanstate->ps.ps_ProjInfo;
 
         /* Check if it is simple without need to invoke projection code */
-        fSimpleMap = proj->pi_directMap && (scanBatchState->pCurrentBatch->m_cols == proj->pi_numSimpleVars);
+        fSimpleMap = proj->pi_directMap && 
+            (scanstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor->natts == proj->pi_numSimpleVars);
         scanstate->ps.ps_ProjInfo->pi_directMap = fSimpleMap;
         scanBatchState->scanfinished = false;
     }
@@ -841,16 +852,30 @@ static inline void InitSeqNextMtd(SeqScan* node, SeqScanState* scanstate)
 {
     if (!node->tablesample) {
         scanstate->ScanNextMtd = SeqNext;
-        if(RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {
-            if(scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
-                scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, true>;
-            else
-                scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, true>;
+        if (scanstate->ss_currentScanDesc != NULL && scanstate->ss_currentScanDesc->ndp_pushdown_optimized) {
+            if (RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {
+                if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, true, true>;
+                else
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, true, true>;
+            } else {
+                if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, false, true>;
+                else
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, false, true>;
+            }
         } else {
-            if(scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
-                scanstate->fillNextSlotFunc = seq_scan_getnext;
-            else
-                scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, false>;
+            if (RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {
+                if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_HEAP, true, false>;
+                else
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, true, false>;
+            } else {
+                if (scanstate->ss_currentRelation->rd_tam_ops == TableAmHeap)
+                    scanstate->fillNextSlotFunc = seq_scan_getnext;
+                else
+                    scanstate->fillNextSlotFunc = seq_scan_getnext_template<TAM_USTORE, false, false>;
+            }
         }
     } else {
         if (RELATION_OWN_BUCKET(scanstate->ss_currentRelation)) {

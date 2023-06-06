@@ -178,12 +178,12 @@ call exe_fun_schema.pri_autonomous_1();
 ERROR:  permission denied for relation creditcard_info
 DETAIL:  N/A
 CONTEXT:  SQL statement "insert into exe_fun_schema.creditcard_info values(66, 66,66)"
-PL/pgSQL function pri_autonomous_1() line 3 at SQL statement
+PL/pgSQL function pri_autonomous_1() line 2 at SQL statement
 select exe_fun_schema.pri_test_proc_create(1);
 ERROR:  permission denied for schema exe_fun_schema
 DETAIL:  N/A
 CONTEXT:  SQL statement "create table exe_fun_schema.pri_t11(id int) tablespace pri_execute_fun_tsp"
-PL/pgSQL function pri_test_proc_create(integer) line 3 at SQL statement
+PL/pgSQL function pri_test_proc_create(integer) line 2 at SQL statement
 referenced column: pri_test_proc_create
 DROP PROCEDURE exe_fun_schema.prc_add(INTEGER,INTEGER);
 ERROR:  permission denied for function exe_fun_schema.prc_add

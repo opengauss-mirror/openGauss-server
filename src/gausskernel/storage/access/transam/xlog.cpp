@@ -4207,6 +4207,23 @@ int XLogFileOpen(XLogSegNo segno)
 }
 
 /*
+ * Copy one page starting with targetpageptr of EndOfLog from old priamry to new primary.
+ */
+void SSXLOGCopyFromOldPrimary(XLogReaderState *state, XLogRecPtr pageptr)
+{
+    ssize_t actualBytes = write(t_thrd.xlog_cxt.openLogFile, state->readBuf, XLOG_BLCKSZ);
+    if (actualBytes != XLOG_BLCKSZ) {
+        if (errno == 0) {
+            errno = ENOSPC;
+        }
+        uint32 shiftSize = 32;
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write xlog at start:%X/%X, length %d: %m",
+                                                          static_cast<uint32>(pageptr >> shiftSize),
+                                                          static_cast<uint32>(pageptr), XLOG_BLCKSZ)));
+    }
+}
+
+/*
  * Open a logfile segment for reading (during recovery).
  *
  * If source = XLOG_FROM_ARCHIVE, the segment is retrieved from archive.
@@ -6752,7 +6769,7 @@ void XLOGShmemInit(void)
         /* Reset walbuffer only before startup thread init, in which StartupXLOG pushes LSN */
         if (ENABLE_DMS && t_thrd.role == STARTUP && (((SS_STANDBY_PROMOTING || SS_PRIMARY_DEMOTED) &&
             g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag == true) ||
-            SSFAILOVER_TRIGGER)) {
+            SS_STANDBY_FAILOVER)) {
             g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag = false;
             errorno = memset_s(t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks,
                 sizeof(XLogRecPtr) * g_instance.attr.attr_storage.XLOGbuffers, 0,
@@ -9260,7 +9277,7 @@ void StartupXLOG(void)
      */
     if (ENABLE_DMS) {
         int src_id = g_instance.attr.attr_storage.dms_attr.instance_id;
-        if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+        if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
             src_id = SSGetPrimaryInstId();
             ereport(LOG, (errmsg("[SS Reform]: Standby:%d promoting, reading control file of original primary:%d",
                 g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
@@ -9462,7 +9479,7 @@ void StartupXLOG(void)
     securec_check(errorno, "", "");
 
     if (ENABLE_DMS && ENABLE_DSS) {
-        if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+        if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
             SSGetXlogPath();
             xlogreader = SSXLogReaderAllocate(&SSXLogPageRead, &readprivate, ALIGNOF_BUFFER);
             close_readFile_if_open();
@@ -9690,7 +9707,7 @@ void StartupXLOG(void)
      * in SS Switchover, skip dw init since we didn't do ShutdownXLOG
      */
 
-    if ((ENABLE_REFORM && SS_REFORM_REFORMER && !SSFAILOVER_TRIGGER && !SS_PERFORMING_SWITCHOVER) ||
+    if ((ENABLE_REFORM && SS_REFORM_REFORMER && !SS_STANDBY_FAILOVER && !SS_PERFORMING_SWITCHOVER) ||
         !ENABLE_DMS || !ENABLE_REFORM) {
         /* process assist file of chunk recycling */
         dw_ext_init();
@@ -9891,7 +9908,7 @@ void StartupXLOG(void)
      * have been a clean shutdown and we did not have a recovery.conf file,
      * then assume no recovery needed.
      */
-    if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+    if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
         t_thrd.xlog_cxt.InRecovery = true;
         if (SS_STANDBY_PROMOTING) {
             ereport(LOG, (errmsg("[SS switchover] Standby promote: redo shutdown checkpoint now")));
@@ -10015,7 +10032,7 @@ void StartupXLOG(void)
         }
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
         /* No need to hold ControlFileLock yet, we aren't up far enough */
-        if (!SSFAILOVER_TRIGGER) {
+        if (!SS_STANDBY_FAILOVER) {
             UpdateControlFile();
         }
 
@@ -10063,7 +10080,7 @@ void StartupXLOG(void)
          * connections, so that read-only backends don't try to read whatever
          * garbage is left over from before.
          */
-        if (!RecoveryByPending && (!SSFAILOVER_TRIGGER && SSModifySharedLunAllowed())) {
+        if (!RecoveryByPending && (!SS_STANDBY_FAILOVER && SSModifySharedLunAllowed())) {
             ResetUnloggedRelations(UNLOGGED_RELATION_CLEANUP);
         }
 
@@ -10542,14 +10559,20 @@ void StartupXLOG(void)
 
     EndOfLog = t_thrd.xlog_cxt.EndRecPtr;
     XLByteToPrevSeg(EndOfLog, endLogSegNo);
-    if ((ENABLE_DMS && SSFAILOVER_TRIGGER) || SS_STANDBY_PROMOTING) {
+    if ((ENABLE_DMS && SS_STANDBY_FAILOVER) || SS_STANDBY_PROMOTING) {
         bool use_existent = true;
         (void)XLogFileInit(endLogSegNo, &use_existent, true);
     }
     uint32 redoReadOff = t_thrd.xlog_cxt.readOff;
-
-    GetWritePermissionSharedStorage();
-    CheckShareStorageCtlInfo(EndOfLog);
+    
+    /* only primary mode can call getwritepermissionsharedstorage wnen dorado hyperreplication
+     * and dms enabled.
+     */
+    if(!SS_PRIMARY_STANDBY_CLUSTER_STANDBY) {
+        GetWritePermissionSharedStorage();
+        CheckShareStorageCtlInfo(EndOfLog);   
+    }
+   
     /*
      * Complain if we did not roll forward far enough to render the backup
      * dump consistent.  Note: it is indeed okay to look at the local variable
@@ -10740,11 +10763,7 @@ void StartupXLOG(void)
     t_thrd.xlog_cxt.InRecovery = false;
     g_instance.roach_cxt.isRoachRestore = false;
 
-    if (ENABLE_DMS && ENABLE_REFORM) {
-        g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
-    }
-
-    if (!SSFAILOVER_TRIGGER && !SS_STANDBY_PROMOTING) {
+    if (!SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING) {
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_PRODUCTION;
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
@@ -10799,6 +10818,29 @@ void StartupXLOG(void)
     /* Shut down readFile facility, free space. */
     ShutdownReadFileFacility();
 
+    if (SS_STANDBY_FAILOVER && SS_PRIMARY_CLUSTER_STANDBY) {
+        ereport(LOG, (errmodule(MOD_DMS),
+                      errmsg("[SS failover] standby promoting: copy endofxlog pageptr from primary to standby")));
+        XLogRecPtr EndOfLogPagePtr = EndOfLog - (EndOfLog % XLOG_BLCKSZ);
+        SSXLOGCopyFromOldPrimary(xlogreader, EndOfLogPagePtr);
+
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] standby promoting: copy xlog from local to dorado")));
+        ShareStorageXLogCtl *sharestorageCtl = g_instance.xlog_cxt.shareStorageXLogCtl;
+        XLogRecPtr localFlush = InvalidXLogRecPtr;
+        localFlush = EndOfLog;
+        XLogRecPtr maxPosCanWrite = GetMaxPosCanOverWrite();
+        uint32 shiftSize = 32;
+        ereport(LOG,
+                (errmsg("start to copy xlog from local to shared storage, localFlush: %X/%X, maxPosCanWrite: %X/%X.",
+                        static_cast<uint32>(localFlush >> shiftSize), static_cast<uint32>(localFlush),
+                        static_cast<uint32>(maxPosCanWrite >> shiftSize), static_cast<uint32>(maxPosCanWrite))));
+
+        if (XLByteLT(sharestorageCtl->insertHead, maxPosCanWrite)) {
+            XLogRecPtr expectPos = XLByteLT(localFlush, maxPosCanWrite) ? localFlush : maxPosCanWrite;
+            SSDoXLogCopyFromLocal(expectPos);
+        }
+    }
+
     /* Shut down the xlog reader facility. */
     XLogReaderFree(xlogreader);
     xlogreader = NULL;
@@ -10847,9 +10889,9 @@ void StartupXLOG(void)
         }
     }
 
-    if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
-        if (SSFAILOVER_TRIGGER) {
-            g_instance.dms_cxt.SSRecoveryInfo.failover_triggered = false;
+    if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
+        if (SS_STANDBY_FAILOVER) {
+            g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = ALLOW_CKPT;
             pg_memory_barrier();
         }
         ereport(LOG, (errmodule(MOD_DMS),
@@ -10916,6 +10958,10 @@ void StartupXLOG(void)
         MOTRecoveryDone();
     }
 #endif
+
+    if (ENABLE_DMS && ENABLE_REFORM && !SS_PRIMARY_DEMOTED) {
+        DMSWaitReform();
+    }
 }
 
 void CopyXlogForForceFinishRedo(XLogSegNo logSegNo, uint32 termId, XLogReaderState *xlogreader,
@@ -11256,7 +11302,8 @@ bool RecoveryInProgress(void)
      * shared variable has once been seen false.
      */
     if (!t_thrd.xlog_cxt.LocalRecoveryInProgress) {
-        if (!ENABLE_DMS || (ENABLE_DMS && !SSFAILOVER_TRIGGER && !SS_STANDBY_PROMOTING)) {
+        if (!ENABLE_DMS || (ENABLE_DMS && !SS_STANDBY_PROMOTING &&
+            g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status == NOT_ACTIVE)) {
             return false;
         }
     }
@@ -11894,7 +11941,7 @@ void CreateCheckPoint(int flags)
             END_CRIT_SECTION();
         }
         return;
-    } else if (SSFAILOVER_TRIGGER) {
+    } else if (g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status == NOT_ALLOW_CKPT) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do not do CreateCheckpoint during failover")));
         return;
     }
@@ -17171,7 +17218,7 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
         if (readSource & XLOG_FROM_STREAM) {
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
-            if (SSFAILOVER_TRIGGER || SS_STANDBY_PROMOTING) {
+            if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
                 readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
                     xlogreader->readBuf, readTLI, NULL);
             } else {
@@ -19763,7 +19810,7 @@ bool SSModifySharedLunAllowed()
         g_instance.dms_cxt.SSClusterState == NODESTATE_PRIMARY_DEMOTING ||
         g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTING ||
         g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED ||
-        SSFAILOVER_TRIGGER) {
+        SS_STANDBY_FAILOVER) {
         return true;
     }
     return false;

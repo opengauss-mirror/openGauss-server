@@ -1798,6 +1798,7 @@ static void ExecHashBuildSkewHash(HashJoinTable hashtable, Hash* node, int mcvsT
             int bucket;
 
             hashvalue = DatumGetUInt32(FunctionCall1Coll(&hashfunctions[0], hashtable->collations[0], values[i]));
+            hashvalue = murmurhash32(hashvalue);
 
             /*
              * While we have not hit a hole in the hashtable and have not hit

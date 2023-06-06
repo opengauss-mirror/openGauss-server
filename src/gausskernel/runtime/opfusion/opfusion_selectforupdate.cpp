@@ -223,9 +223,9 @@ unsigned long SelectForUpdateFusion::ExecSelectForUpdate(Relation rel, ResultRel
     HeapTupleData newtuple;
 
     InitPartitionByScanFusion(rel, &partRel, &part, m_c_local.m_estate, m_local.m_scan);
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf;
 
     errno_t errorno = EOK;

@@ -122,6 +122,7 @@ static bool pg_is_in_recovery(PGconn *conn);
 static void confirm_block_size(PGconn *conn, const char *name, int blcksz);
 static void set_cfs_datafiles(parray *files, const char *root, char *relative, size_t i);
 static bool PathContainPath(const char* path1, const char* path2);
+static bool IsPrimary(PGconn* conn);
 
 static void
 backup_stopbackup_callback(bool fatal, void *userdata)
@@ -1137,6 +1138,11 @@ pg_start_backup(const char *label, bool smooth, pgBackup *backup,
 
     /* 2nd argument is 'fast'*/
     params[1] = smooth ? "false" : "true";
+
+    if(!IsPrimary(conn) && IsDssMode()) {
+        elog(ERROR, "backup only support on primary by dss mode");
+    }
+
     if (!exclusive_backup)
         res = pgut_execute(conn,
                                         "SELECT pg_catalog.pg_start_backup($1, $2, false)",
@@ -2703,4 +2709,52 @@ static bool PathContainPath(const char* path1, const char* path2)
     return false;
 }
 
+static bool IsPrimary(PGconn* conn)
+{
+#define MAXRUNMODE 64
+    PGresult* res = NULL;
+    const char* sql_string = "select local_role from pg_stat_get_stream_replications();";
+    char* val = NULL;
+    char run_mode[MAXRUNMODE] = {0};
+    GaussState state;
+    errno_t tnRet = EOK;
 
+    if (PQstatus(conn) != CONNECTION_OK) {
+        PQfinish(conn);
+        conn = NULL;
+        elog(ERROR,"could not connect to the local server: connection failed!\n");
+    }
+
+    /* Get local role from the local server. */
+    res = PQexec(conn, sql_string);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        PQfinish(conn);
+        conn = NULL;
+        elog(ERROR, "could not get local role from the local server");
+    }
+    
+    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
+        int ntuples = PQntuples(res);
+        int nfields = PQnfields(res);
+        PQclear(res);
+        PQfinish(conn);
+        conn = NULL;
+        elog(ERROR,"invalid response from primary server: "
+              "Expected 1 tuple with 1 fields, got %d tuples with %d fields.",
+            ntuples,
+            nfields);
+    }
+
+    if ((val = PQgetvalue(res, 0, 0)) != NULL) {
+        tnRet = strncpy_s(run_mode, MAXRUNMODE, val, strlen(val));
+        securec_check_c(tnRet, "\0", "\0");
+        run_mode[MAXRUNMODE - 1] = '\0';
+    }
+    PQclear(res);
+
+    if (!strncmp(run_mode, "Primary", MAXRUNMODE)) {
+        return true;
+    }
+    return false;
+}

@@ -494,7 +494,7 @@ static void dump_dir_r(const char* in_dir)
     worker_data* workers = create_and_init_worker_data(workers_num);
     if (NULL == workers) {
         fprintf(stderr,
-            THREAD_ID_FMT "Failed to preapre for starting worker thread, requred %lu bytes\n",
+            THREAD_ID_FMT "Failed to preapre for starting worker thread, requred %zu bytes\n",
             THREAD_ID(),
             (sizeof(worker_data) * workers_num));
         _exit(1);

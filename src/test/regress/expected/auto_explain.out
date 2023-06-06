@@ -89,27 +89,20 @@ Query Text: prepare get_stu_info(varchar)  as select stu.name,course.name,teache
 Name: datanode1
 --?.*
   Output: stu.name, course.name, teacher.name
---?.*
   Hash Cond: (teacher.cno = course.cno)
 --?.*
         Output: teacher.tno, teacher.name, teacher.sex, teacher.cno
-        Exec Nodes: All datanodes
 --?.*
         Output: stu.name, course.name, course.cno
-        Exec Nodes: All datanodes
 --?.*
               Output: stu.name, course.name, course.cno
-              Exec Nodes: All datanodes
               Hash Cond: (course.cno = stu.cno)
 --?.*
                     Output: course.cno, course.name
-                    Exec Nodes: All datanodes
 --?.*
                     Output: stu.name, stu.cno
-                    Exec Nodes: All datanodes
 --?.*
                           Output: stu.name, stu.cno
-                          Exec Nodes: All datanodes
                           Filter: ((stu.name)::text = ($1)::text)
 Parameter1 value: null 
 
@@ -197,10 +190,8 @@ Query Text: select count(1)               from stu
 Name: datanode1
 --?.*
 --?.*
-  Exec Nodes: All datanodes
 --?.*
         Output: sno, name, sex, cno
-        Exec Nodes: All datanodes
 
 
 CONTEXT:  SQL statement "select count(1)               from stu"
@@ -227,10 +218,8 @@ Query Text: select count(2)               from teacher
 Name: datanode1
 --?.*
 --?.*
-  Exec Nodes: All datanodes
 --?.*
         Output: tno, name, sex, cno
-        Exec Nodes: All datanodes
 
 
 CONTEXT:  SQL statement "select count(2)               from teacher"
@@ -258,7 +247,6 @@ Name: datanode1
 --?.*
 --?.*
         Output: 4, 'liu'::character varying, 'F'::character varying, 1
-        Exec Nodes: All datanodes
 
 
 CONTEXT:  SQL statement "insert into stu values(4,'liu','F',1)"
@@ -286,7 +274,6 @@ Name: datanode1
 --?.*
 --?.*
         Output: 4, 'li'::character varying, '4'::character varying, NULL::integer
-        Exec Nodes: All datanodes
 
 
 CONTEXT:  SQL statement "insert into teacher values(4,'li',4)"
@@ -314,7 +301,6 @@ Name: datanode1
 --?.*
 --?.*
         Output: 100, name, sex, cno, ctid
-        Exec Nodes: All datanodes
         Filter: (teacher.tno = 3)
 
 
@@ -368,27 +354,20 @@ Query Text: select teacher.name,stu.name from teacher left join course on course
 Name: datanode1
 --?.*
   Output: teacher.name, stu.name
-  Exec Nodes: All datanodes
   Hash Cond: (course.cno = stu.cno)
 --?.*
         Output: teacher.name, course.cno
-        Exec Nodes: All datanodes
         Hash Cond: (course.cno = teacher.cno)
 --?.*
               Output: course.cno, course.name
-              Exec Nodes: All datanodes
 --?.*
               Output: teacher.name, teacher.cno
-              Exec Nodes: All datanodes
 --?.*
                     Output: teacher.name, teacher.cno
-                    Exec Nodes: All datanodes
 --?.*
         Output: stu.name, stu.cno
-        Exec Nodes: All datanodes
 --?.*
               Output: stu.name, stu.cno
-              Exec Nodes: All datanodes
 
 
 CONTEXT:  PL/pgSQL function complicate_process() line 22 at FETCH
@@ -689,18 +668,14 @@ Name: datanode1
   Update Cond: (t1.id = ($15)::numeric)
 --?.*
         Output: (count(*)), t1.id, t1.val, t1.ctid, (count(*))
-        Exec Nodes: All datanodes
         Join Filter: ((count(*)) <> 0)
 --?.*
               Output: count(*)
-              Exec Nodes: All datanodes
 --?.*
                     Output: test1.id, test1.val
-                    Exec Nodes: All datanodes
                     Filter: (test1.id = ($15)::numeric)
 --?.*
               Output: t1.id, t1.val, t1.ctid
-              Exec Nodes: All datanodes
 param1 value: 103 type: int4
 
 

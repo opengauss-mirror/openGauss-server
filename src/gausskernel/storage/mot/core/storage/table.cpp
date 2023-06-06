@@ -928,7 +928,7 @@ void Table::PrintSchema() const
 {
     (void)printf("\n[Table] %s\n", m_tableName.c_str());
     for (uint32_t i = 0; i < m_fieldCnt; i++) {
-        (void)printf("\t%s\t%s\t%lu\n", GetFieldName(i), GetFieldTypeStr(i), GetFieldSize(i));
+        (void)printf("\t%s\t%s\t%llu\n", GetFieldName(i), GetFieldTypeStr(i), GetFieldSize(i));
     }
 }
 

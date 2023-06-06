@@ -469,7 +469,7 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
     Relation result_rel_desc;
     bool is_partitioned = false;
     PlanState* sub_plan_stat = NULL;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     PlanState* remote_rel_stat = NULL;
     PlanState* saved_result_remote_rel = NULL;
 #endif
@@ -525,7 +525,7 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
     /* Preload local variables */
     result_rel_info = node->resultRelInfo + node->mt_whichplan;
     sub_plan_stat = node->mt_plans[node->mt_whichplan];
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     /* Initialize remote plan state */
     remote_rel_stat = node->mt_remoterels[node->mt_whichplan];
 #endif
@@ -543,12 +543,12 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
      * CTE).  So we have to save and restore the caller's value.
      */
     saved_result_rel_info = estate->es_result_relation_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     saved_result_remote_rel = estate->es_result_remoterel;
 #endif
 
     estate->es_result_relation_info = result_rel_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     estate->es_result_remoterel = remote_rel_stat;
 #endif
 
@@ -605,7 +605,7 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
             }
         }
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
         estate->es_result_remoterel = remote_rel_stat;
 #endif
         switch (operation) {
@@ -686,7 +686,7 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
          */
         if (batch != NULL) {
             estate->es_result_relation_info = saved_result_rel_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             estate->es_result_remoterel = saved_result_remote_rel;
 #endif
             return batch;
@@ -757,7 +757,7 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
 
     /* Restore es_result_relation_info before exiting */
     estate->es_result_relation_info = saved_result_rel_info;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     estate->es_result_remoterel = saved_result_remote_rel;
 #endif
 

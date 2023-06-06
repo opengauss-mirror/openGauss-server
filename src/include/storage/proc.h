@@ -451,6 +451,8 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
 #define NUM_DMS_REFORM_CALLLBACK_PROCS (5)
 #define NUM_DMS_LSNR_CALLBACK_PROC (1)
 #define NUM_DMS_SMON_CALLBACK_PROC (1)
+#define NUM_DMS_PARALLEL_CALLBACK_PROC (g_instance.attr.attr_storage.dms_attr.parallel_thread_num <= 1 ? 0 : \
+                                        g_instance.attr.attr_storage.dms_attr.parallel_thread_num)
 #define NUM_DMS_RDMA_THREAD_CNT (g_instance.attr.attr_storage.dms_attr.work_thread_count * 2)
 #define NUM_DMS_CALLBACK_PROCS \
         (g_instance.attr.attr_storage.dms_attr.enable_dms ? \
@@ -460,6 +462,7 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
         NUM_DMS_RDMA_THREAD_CNT) + \
         NUM_DMS_LSNR_CALLBACK_PROC + \
         NUM_DMS_SMON_CALLBACK_PROC + \
+        NUM_DMS_PARALLEL_CALLBACK_PROC + \
         NUM_DMS_REFORM_CALLLBACK_PROCS ) : 0)
 
 #define GLOBAL_ALL_PROCS \

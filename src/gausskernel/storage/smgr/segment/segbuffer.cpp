@@ -50,7 +50,7 @@ static const int TEN_MICROSECOND = 10;
 
 static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state);
 
-extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool create, bool do_move);
+extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool do_move);
 extern void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref);
 
 void SetInProgressFlags(BufferDesc *bufDesc, bool input)
@@ -188,13 +188,16 @@ bool SegPinBuffer(BufferDesc *buf)
     
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
+    Buffer b = BufferDescriptorGetBuffer(buf);
     bool result;
-    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true, true);
-    SegmentCheck(ref != NULL);
+    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(b, true);
 
-    if (ref->refcount == 0) {
+    if (ref == NULL) {
         uint32 buf_state;
         uint32 old_buf_state = pg_atomic_read_u32(&buf->state);
+
+        ReservePrivateRefCountEntry();
+        ref = NewPrivateRefCountEntry(b);
 
         for (;;) {
             if (old_buf_state & BM_LOCKED) {
@@ -213,7 +216,7 @@ bool SegPinBuffer(BufferDesc *buf)
     }
 
     ref->refcount++;
-    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf));
+    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, b);
 
     return result;
 }
@@ -224,20 +227,27 @@ static bool SegPinBufferLocked(BufferDesc *buf, const BufferTag *tag)
                      errmsg("[SegPinBufferLocked] (%u %u %u %d) %d %u ", tag->rnode.spcNode, tag->rnode.dbNode,
                             tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
     SegmentCheck(BufHdrLocked(buf));
-    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true, true);
-    SegmentCheck(ref != NULL);
+    Buffer b;
+    PrivateRefCountEntry *ref = NULL;
+
+    /*
+     * As explained, We don't expect any preexisting pins. That allows us to
+     * manipulate the PrivateRefCount after releasing the spinlock
+     */
+    Assert(GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), false) == NULL);
 
     uint32 buf_state = pg_atomic_read_u32(&buf->state);
-
-    if (ref->refcount == 0) {
-        buf_state += BUF_REFCOUNT_ONE;
-    }
+    Assert(buf_state & BM_LOCKED);
+    buf_state += BUF_REFCOUNT_ONE;
     UnlockBufHdr(buf, buf_state);
 
+    b = BufferDescriptorGetBuffer(buf);
+
+    ref = NewPrivateRefCountEntry(b);
     ref->refcount++;
 
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
-    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf));
+    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, b);
 
     return buf_state & BM_VALID;
 }
@@ -247,7 +257,7 @@ void SegUnpinBuffer(BufferDesc *buf)
     ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
                      errmsg("[SegUnpinBuffer] (%u %u %u %d) %d %u ", buf->tag.rnode.spcNode, buf->tag.rnode.dbNode,
                             buf->tag.rnode.relNode, buf->tag.rnode.bucketNode, buf->tag.forkNum, buf->tag.blockNum)));
-    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true, true);
+    PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true);
     SegmentCheck(ref != NULL);
 
     ResourceOwnerForgetBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf));
@@ -473,11 +483,8 @@ void ReportInvalidPage(RepairBlockKey key)
 void ReadSegBufferForCheck(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *spc, Block bufBlock)
 {
     if (spc == NULL) {
-        bool found;
-        SegSpcTag tag = {.spcNode = bufHdr->tag.rnode.spcNode, .dbNode = bufHdr->tag.rnode.dbNode};
-        SegmentCheck(t_thrd.storage_cxt.SegSpcCache != NULL);
-        spc = (SegSpace *)hash_search(t_thrd.storage_cxt.SegSpcCache, (void *)&tag, HASH_FIND, &found);
-        SegmentCheck(found);
+        spc = spc_open(bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode, false, false);
+        SegmentCheck(spc != NULL);
     }
 
     seg_physical_read(spc, bufHdr->tag.rnode, bufHdr->tag.forkNum, bufHdr->tag.blockNum, (char *)bufBlock);
@@ -614,6 +621,12 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                         SegTerminateBufferIO((BufferDesc *)bufHdr, false, 0);
                         // when reform fail, should return InvalidBuffer to reform proc thread
                         if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                            SSUnPinBuffer(bufHdr);
+                            return InvalidBuffer;
+                        }
+
+                        if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
+                            SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
 
@@ -623,21 +636,9 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                 } else {
                     /*
                     * previous attempts to read the buffer must have failed,
-                    * but DRC has been created, so load page directly again;
-                    * but if previous read attempt has failed but concurrently
-                    * getting released, a contradiction happens and we panic.
+                    * but DRC has been created, so load page directly again
                     */
                     Assert(pg_atomic_read_u32(&bufHdr->state) & BM_IO_ERROR);
-
-                    if (buf_ctrl->state & BUF_BEING_RELEASED) {
-                        ereport(WARNING, (errmodule(MOD_DMS), errmsg(
-                            "[%d/%d/%d/%d/%d %d-%d] buffer:%d is in the process of release owner",
-                            rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                            bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufHdr->buf_id)));
-                        pg_usleep(5000L);
-                        continue;
-                    }
-
                     buf_ctrl->state |= BUF_NEED_LOAD;
                 }
 
@@ -735,6 +736,8 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
     LWLockRelease(new_partition_lock);
 
     for (;;) {
+        ReservePrivateRefCountEntry();
+
         buf = SegStrategyGetBuffer(&buf_state);
         SegmentCheck(BUF_STATE_GET_REFCOUNT(buf_state) == 0);
 
@@ -790,7 +793,6 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
             return FoundBufferInHashTable(buf_id, new_partition_lock, foundPtr);
         }
 
-retry_victim:
         buf_state = LockBufHdr(buf);
         old_flags = buf_state & BUF_FLAG_MASK;
 
@@ -801,32 +803,13 @@ retry_victim:
                 * release owner procedure is in buf header lock, it's not reasonable,
                 * need to improve.
                 */
-                unsigned char released = 0;
-                RelFileNode rnode = buf->tag.rnode;
-                bool returned = DmsReleaseOwner(old_tag, buf->buf_id, &released);
-                int retry_times = 0;
-
-                if (returned && released) {
+                if (DmsReleaseOwner(old_tag, buf->buf_id)) {
                     ClearReadHint(buf->buf_id, true);
                     break;
-                } else if (!returned) {
-                    MarkDmsBufBeingReleased(buf, true);
-                    UnlockBufHdr(buf, buf_state);
-                    pg_usleep(1000L);
-                    ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d retry release owner "
-                    "for %d times", rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                        buf->tag.forkNum, buf->tag.blockNum, buf->buf_id, ++retry_times)));
-                    goto retry_victim;
-                } else { /* if returned and !released, we will have to try another victim */
-                    MarkDmsBufBeingReleased(buf, false);
                 }
             } else {
                 break;
             }
-        }
-
-        if (ENABLE_DMS) { /* between two tries of releasing owner, buffer might be dirtied and got skipped */
-            MarkDmsBufBeingReleased(buf, false);
         }
         UnlockBufHdr(buf, buf_state);
         BufTableDelete(&new_tag, new_hash);
@@ -845,6 +828,7 @@ retry_victim:
 
     if (ENABLE_DMS) {
         GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
+        GetDmsBufCtrl(buf->buf_id)->been_loaded = false;
     }
 
     if (old_flag_valid) {

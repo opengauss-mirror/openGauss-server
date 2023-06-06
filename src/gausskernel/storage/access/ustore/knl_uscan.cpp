@@ -1123,9 +1123,9 @@ void UHeapRestRpos(TableScanDesc sscan)
         UHeapTuple utuple;
         UHeapTupleData uheaptupdata;
         utuple = &uheaptupdata;
-        struct {
+        union {
             UHeapDiskTupleData hdr;
-            char data[MaxPossibleUHeapTupleSize];
+            char data[MaxPossibleUHeapTupleSize + sizeof(UHeapDiskTupleData)];
         } tbuf;
 
         errno_t errorNo = EOK;

@@ -472,6 +472,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 				opt_collation
 
 %type <range>	qualified_name insert_target OptConstrFromTable opt_index_name insert_partition_clause update_delete_partition_clause
+				qualified_trigger_name
 
 %type <str>		all_Op MathOp
 
@@ -569,7 +570,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 %type <list>	extract_list timestamp_arg_list overlay_list position_list
 %type <list>	substr_list trim_list
-%type <list>	opt_interval interval_second
+%type <list>	opt_interval interval_second event_interval_unit opt_evtime_unit
 %type <node>	overlay_placing substr_from substr_for
 
 %type <boolean> opt_instead opt_incremental
@@ -863,7 +864,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
 	SHRINK USE_P
 
-	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
+	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DAY_HOUR_P DAY_MINUTE_P DAY_SECOND_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
 /* PGXC_BEGIN */
 	DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
@@ -880,7 +881,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 	GENERATED GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
 
-	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P
+	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P HOUR_MINUTE_P HOUR_SECOND_P
 
 	IDENTIFIED IDENTITY_P IF_P IGNORE IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE
 	INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
@@ -895,7 +896,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
 	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
-	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
+	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
 	MODEL // DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
 	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
@@ -941,7 +942,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	XML_P XMLATTRIBUTES XMLCONCAT XMLELEMENT XMLEXISTS XMLFOREST XMLPARSE
 	XMLPI XMLROOT XMLSERIALIZE
 
-	YEAR_P YES_P
+	YEAR_P YEAR_MONTH_P YES_P
 
 	ZONE
 
@@ -11646,22 +11647,27 @@ DropDataSourceStmt: DROP DATA_P SOURCE_P name opt_drop_behavior
  *****************************************************************************/
 
 CreateTrigStmt:
-			CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
+			CREATE opt_or_replace definer_user TRIGGER qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
 					if ($2 != false)
 					{
-						parser_yyerror("syntax error found");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+							 	errmsg("syntax error.")));
 					}
 					if ($3 != NULL)
 					{
-						parser_yyerror("only support definer in B compatibility database and B syntax");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("only support definer in B compatibility database and B syntax")));
 					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->definer = $3;
 					n->if_not_exists = false;
-					n->trigname = $5;
+					n->schemaname = $5->schemaname;
+					n->trigname = $5->relname;					
 					n->relation = $9;
 					n->funcname = $14;
 					n->args = $16;
@@ -11679,13 +11685,14 @@ CreateTrigStmt:
 					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE CONSTRAINT TRIGGER name AFTER TriggerEvents ON
+			| CREATE CONSTRAINT TRIGGER qualified_trigger_name AFTER TriggerEvents ON
 			qualified_name OptConstrFromTable ConstraintAttributeSpec
 			FOR EACH ROW TriggerWhen
 			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
-					n->trigname = $4;
+					n->schemaname = $4->schemaname;
+					n->trigname = $4->relname;
 					n->definer = NULL;
 					n->if_not_exists  = false;
 					n->relation = $8;
@@ -11706,7 +11713,7 @@ CreateTrigStmt:
 					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
+			| CREATE opt_or_replace definer_user TRIGGER qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			trigger_order
 			{
@@ -11716,18 +11723,24 @@ CreateTrigStmt:
 				u_sess->parser_cxt.isCreateFuncOrProc = true;
 			} subprogram_body
 				{
-					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || $2 != false)
-					{
-						parser_yyerror("only support definer, trigger_order, subprogram_body in B compatibility database");
-					}
-					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)
 					{
-						parser_yyerror("syntax error found");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("syntax error.")));
 					}
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Current syntax is supported only in B compatibility database")));
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					
 					n->definer = $3;
 					n->if_not_exists = false;
-					n->trigname = $5;
+					n->schemaname = $5->schemaname;
+					n->trigname = $5->relname;
 					n->timing = $6;
 					n->events = intVal(linitial($7));
 					n->columns = (List *) lsecond($7);
@@ -11744,7 +11757,7 @@ CreateTrigStmt:
 					n->constrrel = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE opt_or_replace definer_user TRIGGER IF_P NOT EXISTS name TriggerActionTime TriggerEvents ON
+			| CREATE opt_or_replace definer_user TRIGGER IF_P NOT EXISTS qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			trigger_order
 			{
@@ -11754,18 +11767,24 @@ CreateTrigStmt:
 				u_sess->parser_cxt.isCreateFuncOrProc = true;
 			} subprogram_body
 				{
-					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
-					{
-						parser_yyerror("only support definer, if not exists, trigger_order, subprogram_body in B compatibility database");
-					}
-					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)
 					{
-						parser_yyerror("syntax error");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("syntax error.")));
 					}
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Current syntax is supported only in B compatibility database")));
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					
 					n->definer = $3;
 					n->if_not_exists = true;
-					n->trigname = $8;
+					n->schemaname = $8->schemaname;
+					n->trigname = $8->relname;
 					n->timing = $9;
 					n->events = intVal(linitial($10));
 					n->columns = (List *) lsecond($10);
@@ -12027,30 +12046,66 @@ enable_trigger:
 			| DISABLE_P                 { $$ = TRIGGER_DISABLED; }
 		;
 
+qualified_trigger_name:
+			name
+				{
+					$$ = makeRangeVar(NULL, $1, @1);
+				}
+			| ColId indirection
+				{
+					check_qualified_name($2, yyscanner);
+					$$ = makeRangeVar(NULL, NULL, @1);
+					const char* message = "improper qualified name (too many dotted names): %s";
+					switch (list_length($2))
+					{
+						case 1:
+							if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+							{
+								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+								ereport(errstate,
+										(errcode(ERRCODE_SYNTAX_ERROR),
+										 errmsg("only support trigger in schema in B compatibility database"),
+									 	 parser_errposition(@1)));
+							}
+							$$->schemaname = $1;
+							$$->relname = strVal(linitial($2));
+							break;
+						default:
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("improper qualified name (too many dotted names): %s",
+											NameListToString(lcons(makeString($1), $2))),
+									 parser_errposition(@1)));
+							break;
+					}
+				}
+		;
+
 DropTrigStmt:
-			DROP TRIGGER name ON any_name opt_drop_behavior
+			DROP TRIGGER qualified_trigger_name ON any_name opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(lappend($5, makeString($3)));
+					n->objects = list_make1(lappend($5, list_make2(makeString($3->schemaname), makeString($3->relname))));
 					n->arguments = NIL;
 					n->behavior = $6;
 					n->missing_ok = false;
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
-			| DROP TRIGGER IF_P EXISTS name ON any_name opt_drop_behavior
+			| DROP TRIGGER IF_P EXISTS qualified_trigger_name ON any_name opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(lappend($7, makeString($5)));
+					n->objects = list_make1(lappend($7, list_make2(makeString($5->schemaname), makeString($5->relname))));
 					n->arguments = NIL;
 					n->behavior = $8;
 					n->missing_ok = true;
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
-			| DROP TRIGGER name opt_drop_behavior
+			| DROP TRIGGER qualified_trigger_name opt_drop_behavior
 				{
 #ifdef	ENABLE_MULTIPLE_NODES
 					const char* message = "drop trigger name is not yet supported in distributed database.";
@@ -12066,14 +12121,14 @@ DropTrigStmt:
 					}
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(list_make1(makeString($3)));
+					n->objects = list_make1(list_make1(list_make2(makeString($3->schemaname), makeString($3->relname))));
 					n->arguments = NIL;
 					n->behavior = $4;
 					n->missing_ok = false;
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
-			| DROP TRIGGER IF_P EXISTS name opt_drop_behavior
+			| DROP TRIGGER IF_P EXISTS qualified_trigger_name opt_drop_behavior
 				{
 #ifdef	ENABLE_MULTIPLE_NODES
 					const char* message = "drop trigger if exists name is not yet supported in distributed database.";
@@ -12089,7 +12144,7 @@ DropTrigStmt:
 					}
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(list_make1(makeString($5)));
+					n->objects = list_make1(list_make1(list_make2(makeString($5->schemaname), makeString($5->relname))));
 					n->arguments = NIL;
 					n->behavior = $6;
 					n->missing_ok = true;
@@ -15031,8 +15086,12 @@ user:
 		ColId                                                                   { $$ = $1; }
 	;
 
+event_interval_unit: opt_interval			{$$ = $1;}
+					| opt_evtime_unit		{$$ = $1;}
+				;
+
 every_interval:
-                Iconst opt_interval			
+                Iconst event_interval_unit			
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15040,7 +15099,7 @@ every_interval:
 					Node *num = makeIntConst($1, @1);
 		            $$ = makeTypeCast(num, t, -1);	
 				}
-				| Sconst opt_interval
+				| Sconst event_interval_unit
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15048,7 +15107,7 @@ every_interval:
 					Node *num = makeStringConst($1, @1);
 					$$ = makeTypeCast(num, t, -1);
 				}
-				| FCONST opt_interval
+				| FCONST event_interval_unit
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15427,9 +15486,9 @@ preserve_opt:   ON COMPLETION PRESERVE
                                 | /*EMPTY*/                     { $$ = NULL; }
                         ;
 
-rename_opt:		RENAME TO qualified_name
+rename_opt:		RENAME TO name
 				{
-					$$ = makeDefElem("rename", (Node *)$3);
+					$$ = makeDefElem("rename", (Node *)makeString($3));
 				}
 				| /*EMPTY*/			{ $$ = NULL; }
 			;
@@ -16668,16 +16727,19 @@ subprogram_body: 	{
 				if (add_declare)
 				{
 					proc_body_str = (char *)palloc0(proc_body_len + DECLARE_LEN + 1);
-					strncpy(proc_body_str, DECLARE_STR, DECLARE_LEN + 1);
-					strncpy(proc_body_str + DECLARE_LEN,
-							yyextra->core_yy_extra.scanbuf + proc_b - 1, proc_body_len);
+					rc = strcpy_s(proc_body_str, proc_body_len + DECLARE_LEN + 1, DECLARE_STR);
+					securec_check(rc, "", "");
+					rc = strncpy_s(proc_body_str + DECLARE_LEN, proc_body_len + 1,
+							yyextra->core_yy_extra.scanbuf + proc_b, proc_body_len - 1);
+					securec_check(rc, "", "");
 					proc_body_len = DECLARE_LEN + proc_body_len;
 				}
 				else
 				{
 					proc_body_str = (char *)palloc0(proc_body_len + 1);
-					strncpy(proc_body_str,
-						yyextra->core_yy_extra.scanbuf + proc_b - 1, proc_body_len);
+					rc = strncpy_s(proc_body_str, proc_body_len + 1,
+						yyextra->core_yy_extra.scanbuf + proc_b, proc_body_len - 1);
+					securec_check(rc, "", "");
 				}
 
 				proc_body_str[proc_body_len] = '\0';
@@ -16693,7 +16755,7 @@ subprogram_body: 	{
 				yyextra->core_yy_extra.query_string_locationlist = 
 					lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);
 
-				funSrc = (FunctionSources*)palloc0(sizeof(FunctionSources));
+				funSrc = makeNode(FunctionSources);
 				funSrc->bodySrc   = proc_body_str;
 				funSrc->headerSrc = proc_header_str;
 
@@ -17735,14 +17797,15 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
-			| ALTER TRIGGER name ON qualified_name RENAME TO name
+			| ALTER TRIGGER qualified_trigger_name ON qualified_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_TRIGGER;
 					n->relation = $5;
-					n->subname = $3;
+					n->subname = $3->relname;
 					n->newname = $8;
 					n->missing_ok = false;
+					n->renameTargetList = list_make1($3);
 					$$ = (Node *)n;
 				}
 			| ALTER ROLE RoleId RENAME TO RoleId
@@ -23011,7 +23074,7 @@ select_no_parens:
 										(Node*)list_nth($5, 0), (Node*)list_nth($5, 1),
 										$1,
 										yyscanner);
-					$$ = processIntoClauseInSelectStmt((SelectStmt *) $1, (IntoClause *) $6);
+					$$ = processIntoClauseInSelectStmt((SelectStmt *) $2, (IntoClause *) $6);
 				}
 			| with_clause select_clause opt_sort_clause select_limit for_locking_clause into_clause
 				{
@@ -23020,7 +23083,7 @@ select_no_parens:
 										(Node*)list_nth($4, 0), (Node*)list_nth($4, 1),
 										$1,
 										yyscanner);
-					$$ = processIntoClauseInSelectStmt((SelectStmt *) $1, (IntoClause *) $6);
+					$$ = processIntoClauseInSelectStmt((SelectStmt *) $2, (IntoClause *) $6);
 				}
 			| with_clause select_clause opt_sort_clause opt_select_limit into_clause opt_for_locking_clause
 				{
@@ -23029,7 +23092,7 @@ select_no_parens:
 										(Node*)list_nth($4, 0), (Node*)list_nth($4, 1),
 										$1,
 										yyscanner);
-					$$ = processIntoClauseInSelectStmt((SelectStmt *) $1, (IntoClause *) $5);
+					$$ = processIntoClauseInSelectStmt((SelectStmt *) $2, (IntoClause *) $5);
 				}
 			| with_clause select_clause opt_sort_clause select_limit opt_for_locking_clause
 				{
@@ -23862,7 +23925,7 @@ table_ref:	relation_expr		%prec UMINUS
         					int rc = sprintf_s(message, MAXFNAMELEN, "relation \"%s\" does not exist", r->relname);
         					securec_check_ss(rc, "", "");
 							ReleaseSysCacheList(catlist);
-        					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
+        					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
             				ereport(ERROR,
                 				(errcode(ERRCODE_UNDEFINED_TABLE),
                     				errmsg("relation \"%s\" does not exist", r->relname),
@@ -25151,6 +25214,47 @@ opt_timezone:
 			| WITHOUT TIME ZONE						{ $$ = FALSE; }
 			| /*EMPTY*/								{ $$ = FALSE; }
 		;
+
+opt_evtime_unit:
+			DAY_HOUR_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR), @1));
+			}
+			| DAY_MINUTE_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE), @1));
+			}
+			| DAY_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| HOUR_MINUTE_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE), @1));
+			}
+			| HOUR_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| MINUTE_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| YEAR_MONTH_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(YEAR) |
+												 INTERVAL_MASK(MONTH), @1));
+			}
 
 opt_interval:
 			YEAR_P
@@ -28433,6 +28537,7 @@ unreserved_keyword:
 			| CHANGE
 			| CHARACTERISTICS
 			| CHARACTERSET
+			| CHARSET
 			| CHECKPOINT
 			| CLASS
 			| CLEAN
@@ -28480,7 +28585,10 @@ unreserved_keyword:
 			| DATANODES
 			| DATATYPE_CL
 			| DATE_FORMAT_P
+			| DAY_HOUR_P
+			| DAY_MINUTE_P
 			| DAY_P
+			| DAY_SECOND_P
 			| DBCOMPATIBILITY_P
 			| DEALLOCATE
 			| DECLARE
@@ -28561,7 +28669,9 @@ unreserved_keyword:
 			| HANDLER
 			| HEADER_P
 			| HOLD
+			| HOUR_MINUTE_P
 			| HOUR_P
+			| HOUR_SECOND_P
 			| IDENTIFIED
 			| IDENTITY_P
 			| IF_P
@@ -28631,6 +28741,7 @@ unreserved_keyword:
 			| MERGE
 			| MINEXTENTS
 			| MINUTE_P
+			| MINUTE_SECOND_P
 			| MINVALUE
 			| MODE
 			| MODEL      // DB4AI
@@ -28858,6 +28969,7 @@ unreserved_keyword:
 			| WRAPPER
 			| WRITE
 			| XML_P
+			| YEAR_MONTH_P
 			| YEAR_P
 			| YES_P
 			| ZONE

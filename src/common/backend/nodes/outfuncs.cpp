@@ -1943,6 +1943,41 @@ static void _outSort(StringInfo str, Sort* node)
     out_mem_info(str, &node->mem_info);
 }
 
+static void _outSortGroup(StringInfo str, SortGroup* node)
+{
+    int i;
+
+    WRITE_NODE_TYPE("SORTGROUP");
+
+    _outPlanInfo(str, (Plan*)node);
+
+    WRITE_INT_FIELD(numCols);
+
+    appendStringInfo(str, " :sortColIdx");
+    for (i = 0; i < node->numCols; i++) {
+        appendStringInfo(str, " %d", node->sortColIdx[i]);
+    }
+
+    WRITE_GRPOP_FIELD(sortOperators, numCols);
+
+    appendStringInfo(str, " :collations");
+    for (i = 0; i < node->numCols; i++) {
+        appendStringInfo(str, " %u", node->collations[i]);
+    }
+
+    for (i = 0; i < node->numCols; i++) {
+        if (node->collations[i] >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->collations[i])) {
+            appendStringInfo(str, " :collname ");
+            _outToken(str, get_collation_name(node->collations[i]));
+        }
+    }
+
+    appendStringInfo(str, " :nullsFirst");
+    for (i = 0; i < node->numCols; i++) {
+        appendStringInfo(str, " %s", booltostr(node->nullsFirst[i]));
+    }
+}
+
 static void _outUnique(StringInfo str, Unique* node)
 {
     int i;
@@ -6178,6 +6213,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_Sort:
                 _outSort(str, (Sort*)obj);
+                break;
+            case T_SortGroup:
+                _outSortGroup(str, (SortGroup*)obj);
                 break;
             case T_Unique:
                 _outUnique(str, (Unique*)obj);

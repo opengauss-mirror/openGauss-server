@@ -1416,9 +1416,9 @@ static char** PsqlCompletion(const char *text, int start, int end)
         COMPLETE_WITH_LIST(listTableOptions);
     }
 
-    /* ALTER TABLESPACE <foo> with RENAME TO, OWNER TO, SET, RESET */
+    /* ALTER TABLESPACE <foo> with RENAME TO, OWNER TO, SET, RESET, RESIZE MAXSIZE */
     else if (pg_strcasecmp(PREV3_WD, "ALTER") == 0 && pg_strcasecmp(PREV2_WD, "TABLESPACE") == 0) {
-        static const char* const listAlterTspc[] = {"RENAME TO", "OWNER TO", "SET", "RESET", NULL};
+        static const char* const listAlterTspc[] = {"RENAME TO", "OWNER TO", "SET", "RESET", "RESIZE MAXSIZE", NULL};
 
         COMPLETE_WITH_LIST(listAlterTspc);
     }

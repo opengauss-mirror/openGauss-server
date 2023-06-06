@@ -7,6 +7,21 @@
 -- Enforce use of COMMIT instead of 2PC for temporary objects
 
 CREATE TEMP TABLE foo (f1 int, f2 text, f3 int default 42);
+CREATE TABLE returning_int8_tbl(q1 int8, q2 int8);
+INSERT INTO returning_int8_tbl VALUES('  123   ','  456');
+INSERT INTO returning_int8_tbl VALUES('123   ','4567890123456789');
+INSERT INTO returning_int8_tbl VALUES('4567890123456789','123');
+INSERT INTO returning_int8_tbl VALUES(+4567890123456789,'4567890123456789');
+INSERT INTO returning_int8_tbl VALUES('+4567890123456789','-4567890123456789');
+INSERT INTO returning_int8_tbl VALUES(null,null);
+
+CREATE TABLE returning_INT4_TBL(f1 int4);
+INSERT INTO returning_INT4_TBL(f1) VALUES ('   0  ');
+INSERT INTO returning_INT4_TBL(f1) VALUES ('123456     ');
+INSERT INTO returning_INT4_TBL(f1) VALUES ('    -123456');
+INSERT INTO returning_INT4_TBL(f1) VALUES ('2147483647');
+INSERT INTO returning_INT4_TBL(f1) VALUES ('-2147483647');
+INSERT INTO returning_INT4_TBL(f1) VALUES (null);
 
 INSERT INTO foo (f1,f2,f3)
   VALUES (1, 'test', DEFAULT), (2, 'More', 11), (3, upper('more'), 7+9)
@@ -29,15 +44,15 @@ SELECT * FROM foo ORDER BY f1;
 -- Subplans and initplans in the RETURNING list
 
 INSERT INTO foo SELECT f1+10, f2, f3+99 FROM foo order by 1, 2, 3
-  RETURNING *, f1+112 IN (SELECT q1 FROM int8_tbl) AS subplan,
-    EXISTS(SELECT * FROM int4_tbl) AS initplan;
+  RETURNING *, f1+112 IN (SELECT q1 FROM returning_int8_tbl) AS subplan,
+    EXISTS(SELECT * FROM returning_INT4_TBL) AS initplan;
 
 with t as
 (
 UPDATE foo SET f3 = f3 * 2
   WHERE f1 > 10
-  RETURNING *, f1+112 IN (SELECT q1 FROM int8_tbl) AS subplan,
-    EXISTS(SELECT * FROM int4_tbl) AS initplan
+  RETURNING *, f1+112 IN (SELECT q1 FROM returning_int8_tbl) AS subplan,
+    EXISTS(SELECT * FROM returning_INT4_TBL) AS initplan
 )
 select * from t order by 1,2,3,4;
 
@@ -45,22 +60,22 @@ with t as
 (
 DELETE FROM foo
   WHERE f1 > 10
-  RETURNING *, f1+112 IN (SELECT q1 FROM int8_tbl) AS subplan,
-    EXISTS(SELECT * FROM int4_tbl) AS initplan
+  RETURNING *, f1+112 IN (SELECT q1 FROM returning_int8_tbl) AS subplan,
+    EXISTS(SELECT * FROM returning_INT4_TBL) AS initplan
 )
 select * from t order by 1,2,3,4;
 
 -- Joins
 
 UPDATE foo SET f3 = f3*2
-  FROM int4_tbl i
+  FROM returning_INT4_TBL i
   WHERE foo.f1 + 123455 = i.f1
   RETURNING foo.*, i.f1 as "i.f1";
 
 SELECT * FROM foo ORDER BY f1;
 
 DELETE FROM foo
-  USING int4_tbl i
+  USING returning_INT4_TBL i
   WHERE foo.f1 + 123455 = i.f1
   RETURNING foo.*, i.f1 as "i.f1";
 
@@ -84,6 +99,8 @@ explain (verbose on, costs off)
 delete from tbl_return WHERE t1 = 3 RETURNING '1', '2';
 delete from tbl_return WHERE t1 = 3 RETURNING '1', '2';
 drop table tbl_return;
+drop table returning_int8_tbl;
+drop table returning_INT4_TBL;
 ---- Check inheritance cases
 --
 --CREATE TEMP TABLE foochild (fc int) INHERITS (foo);

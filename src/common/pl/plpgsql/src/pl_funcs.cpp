@@ -492,6 +492,10 @@ const char* plpgsql_stmt_typename(PLpgSQL_stmt* stmt)
             return "ROLLBACK";
         case PLPGSQL_STMT_SAVEPOINT:
             return plpgsql_savepoint_typename((PLpgSQL_stmt_savepoint*)stmt);
+        case PLPGSQL_STMT_SIGNAL:
+            return "SIGNAL";
+        case PLPGSQL_STMT_RESIGNAL:
+            return "RESIGNAL";
         default:
             break;
     }
@@ -564,6 +568,7 @@ static void free_perform(PLpgSQL_stmt_perform* stmt);
 static void free_commit(PLpgSQL_stmt_commit *stmt);
 static void free_rollback(PLpgSQL_stmt_rollback *stmt);
 static void free_savepoint(PLpgSQL_stmt_savepoint *stmt);
+static void free_signal(PLpgSQL_stmt_signal *stmt);
 
 static void free_stmt(PLpgSQL_stmt* stmt)
 {
@@ -651,6 +656,10 @@ static void free_stmt(PLpgSQL_stmt* stmt)
             break;
         case PLPGSQL_STMT_SAVEPOINT:
             free_savepoint((PLpgSQL_stmt_savepoint*)stmt);
+            break;
+        case PLPGSQL_STMT_SIGNAL:
+        case PLPGSQL_STMT_RESIGNAL:
+            free_signal((PLpgSQL_stmt_signal*)stmt);
             break;
         default:
             ereport(ERROR,
@@ -812,6 +821,17 @@ static void free_rollback(PLpgSQL_stmt_rollback *stmt)
 
 static void free_savepoint(PLpgSQL_stmt_savepoint *stmt)
 {
+}
+
+static void free_signal(PLpgSQL_stmt_signal *stmt)
+{
+    ListCell* lc = NULL;
+
+    foreach (lc, stmt->cond_info_item) {
+        PLpgSQL_signal_info_item *item = (PLpgSQL_signal_info_item *)lfirst(lc);
+
+        free_expr(item->expr);
+    }
 }
 
 static void free_exit(PLpgSQL_stmt_exit* stmt)

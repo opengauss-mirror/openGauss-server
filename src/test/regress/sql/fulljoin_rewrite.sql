@@ -50,3 +50,6 @@ select left(alias8.w_zip ,alias8.w_id) as alias10,true alias11,dense_rank() over
 drop table fulltest;
 drop table fulltest2;
 
+-- contain system column, don't rewrite full join
+explain (costs off) select t1.oid from pg_class t1 full join pg_constraint t2 on t1.relname = t2.conname;
+

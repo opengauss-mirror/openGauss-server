@@ -72,7 +72,7 @@ A_Expr* makeSimpleA_Expr(A_Expr_Kind kind, char* name, Node* lexpr, Node* rexpr,
  */
 Var* makeVar(Index varno, AttrNumber varattno, Oid vartype, int32 vartypmod, Oid varcollid, Index varlevelsup)
 {
-    Var* var = makeNode(Var);
+    Var* var = makeNodeFast(Var);
 
     var->varno = varno;
     var->varattno = varattno;

@@ -54,11 +54,54 @@ void SSSavePrimaryInstId(int id)
     SSSaveReformerCtrl();
 }
 
+void SSWaitStartupExit()
+{
+    if (g_instance.pid_cxt.StartupPID == 0) {
+        return;
+    }
+
+    if (SS_STANDBY_FAILOVER && !g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag) {
+        g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = true;
+    }
+    SendPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP);
+    int err_level = g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally ? LOG : WARNING;
+    ereport(err_level, (errmodule(MOD_DMS), errmsg("[SS reform] reform failed, startup thread need exit")));
+
+    while (true) {
+        if (g_instance.pid_cxt.StartupPID == 0) {
+            break;
+        }
+
+        if (g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request) {
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform] pageredo or startup thread are trapped "
+                "in page request during recovery phase, need exit")));
+            _exit(0);
+        }
+        pg_usleep(5000L);
+    }
+}
+
+/**
+ * find reform failed in recovery phase, maybe other node restart
+ * pageredo or startup thread may trapped in LockBuffer for page request
+ * to solve this: reform_proc thread need exit process
+ * 
+ * reform failed during recovery phase has three situation
+ * 1) primary restart 2) restart failover 3) alive failover
+ *  
+ * 1) primary restart 2) restart failover:
+ *      gaussdb will restart
+ * 3) alive failover:
+ *      try to exit startup thread, 
+ *      if success, gaussdb still alive and prepare next reform
+ *      if not, gaussdb need exit cause pageredo or startup may trapped in LockBuffer
+*/
 bool SSRecoveryNodes()
 {
     bool result = false;
     while (true) {
         if (dms_reform_failed()) {
+            SSWaitStartupExit();
             result = false;
             break;
         }
@@ -76,6 +119,15 @@ bool SSRecoveryNodes()
             break;
         }
         LWLockRelease(ControlFileLock);
+        
+        /* If main standby is set hot standby to on, when it reach consistency or recovery all xlogs in disk,
+         * recovery phase could be regarded successful in hot_standby thus set pmState = PM_HOT_STANDBY, which
+         * indicate database systerm is ready to accept read only connections.
+         */
+        if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
+            result = true;
+            break;
+        }
         pg_usleep(REFORM_WAIT_TIME);
     }
     return result;
@@ -198,7 +250,7 @@ void SSWriteReformerControlPages(void)
         if (g_instance.dms_cxt.SSReformerControl.list_stable != 0 ||
             g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
             (void)printf("[SS] ERROR: files from last install must be cleared.\n");
-            ereport(PANIC, (errmsg("Files from last initdb not cleared")));
+            ereport(ERROR, (errmsg("Files from last initdb not cleared")));
         }
         (void)printf("[SS] Current node:%d acknowledges cluster PRIMARY node:%d.\n",
             SS_MY_INST_ID, g_instance.dms_cxt.SSReformerControl.primaryInstId);
@@ -244,17 +296,6 @@ void SSWriteReformerControlPages(void)
     SSWriteInstanceControlFile(fd, buffer, REFORM_CTRL_PAGE, PG_CONTROL_SIZE);
     if (close(fd)) {
         ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
-    }
-}
-
-void SSTriggerFailover()
-{
-    if (g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
-        g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = true;
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB restart.")));
-    } else {
-        SendPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER);
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB alive")));
     }
 }
 

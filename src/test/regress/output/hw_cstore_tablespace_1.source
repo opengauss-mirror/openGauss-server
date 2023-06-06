@@ -1,0 +1,59 @@
+\! rm -fr '@testtablespace@/hw_cstore_tablespace_1'
+\! mkdir '@testtablespace@/hw_cstore_tablespace_1'
+create tablespace hw_cstore_tablespace_1 location '@testtablespace@/hw_cstore_tablespace_1' MAXSIZE 'UNLIMITEDxxx';
+ERROR:  Invalid value for tablespace maxsize: "UNLIMITEDxxx"
+HINT:  Unknown tablespace size
+create tablespace hw_cstore_tablespace_1 location '@testtablespace@/hw_cstore_tablespace_1';
+create table cst1 (a int, b float, c text) with(orientation=column) tablespace hw_cstore_tablespace_1;
+drop table cst1;
+-- drop tablespace hw_cstore_tablespace_1;
+-- 1. Column Ordinary table + Index table
+CREATE TABLE set_tblspc_lineitem_1
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+with (orientation = column) tablespace hw_cstore_tablespace_1;
+COPY set_tblspc_lineitem_1 FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
+create index idx3_set_tblspc_lineitem_1 on set_tblspc_lineitem_1(L_LINENUMBER, L_SHIPDATE) tablespace hw_cstore_tablespace_1;
+-- 1.1 SET TABLESPACE for column table
+ALTER TABLE set_tblspc_lineitem_1 SET TABLESPACE pg_default;
+-- 1.2 SET TABLESPACE for psort index
+ALTER INDEX idx3_set_tblspc_lineitem_1 SET TABLESPACE pg_default;
+-- 1.3 tablespace is empty, so drop it for testing
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_1' );
+ count 
+-------
+     0
+(1 row)
+
+drop tablespace hw_cstore_tablespace_1;
+create tablespace hw_cstore_tablespace_1 location '@testtablespace@/hw_cstore_tablespace_1';
+-- 1.4 Set Tablespace + Add column + Set datatype
+ALTER TABLE set_tblspc_lineitem_1 ADD COLUMN c18 int default 100, ALTER COLUMN L_DISCOUNT SET DATA TYPE char(32), SET TABLESPACE hw_cstore_tablespace_1;
+drop tablespace hw_cstore_tablespace_1;
+ERROR:  tablespace "hw_cstore_tablespace_1" is not empty
+ALTER TABLE set_tblspc_lineitem_1 SET TABLESPACE pg_default;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_1' );
+ count 
+-------
+     0
+(1 row)
+
+drop table set_tblspc_lineitem_1 cascade;
+drop tablespace hw_cstore_tablespace_1;

@@ -2301,6 +2301,16 @@ GROUP_GET_SNAPSHOT:
         TransactionIdPrecedes(replication_slot_xmin, u_sess->utils_cxt.RecentGlobalXmin)) {
         u_sess->utils_cxt.RecentGlobalXmin = replication_slot_xmin;
     }
+
+    /* Check whether there's a standby requiring an older xmin when dms is enabled. */
+    if (ENABLE_DMS && SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY && SSGetOldestXminFromAllStandby()) {
+        TransactionId ss_oldest_xmin = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
+        if (TransactionIdIsValid(ss_oldest_xmin) && TransactionIdIsNormal(ss_oldest_xmin) &&
+            TransactionIdPrecedes(ss_oldest_xmin, u_sess->utils_cxt.RecentGlobalXmin)) {
+            u_sess->utils_cxt.RecentGlobalXmin = ss_oldest_xmin;
+        }
+    }
+    
     /* Non-catalog tables can be vacuumed if older than this xid */
     u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
 

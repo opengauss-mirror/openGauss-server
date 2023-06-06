@@ -1,0 +1,80 @@
+\! rm -fr '@testtablespace@/hw_cstore_tablespace_3'
+\! mkdir '@testtablespace@/hw_cstore_tablespace_3'
+
+create tablespace hw_cstore_tablespace_3 location '@testtablespace@/hw_cstore_tablespace_3';
+
+-- 2. Column Partitioned Table + Index Table
+CREATE TABLE set_tblspc_lineitem_3
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+with (orientation = column)
+partition by range(L_ORDERKEY)
+(
+partition p1 values less than(100000) tablespace hw_cstore_tablespace_3,
+partition p2 values less than(200000),
+partition p3 values less than(300000),
+partition p4 values less than (100000000)
+);
+COPY set_tblspc_lineitem_3 FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
+create index idx3_set_tblspc_lineitem_3 on set_tblspc_lineitem_3(L_LINENUMBER) local;
+-- 2.1 SET TABLESPACE for partitioned table (heap)
+ALTER TABLE set_tblspc_lineitem_3 SET TABLESPACE hw_cstore_tablespace_3;
+ALTER TABLE set_tblspc_lineitem_3 ADD COLUMN c18 int default 100, ALTER COLUMN L_DISCOUNT SET DATA TYPE char(32), SET TABLESPACE hw_cstore_tablespace_3;
+-- 2.2 SET TABLESPACE for one partition (heap)
+ALTER TABLE set_tblspc_lineitem_3 MOVE PARTITION p1 TABLESPACE pg_default, MOVE PARTITION p2 TABLESPACE hw_cstore_tablespace_3;
+ALTER TABLE set_tblspc_lineitem_3 MOVE PARTITION p1 TABLESPACE pg_default;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+drop tablespace hw_cstore_tablespace_3;
+create tablespace hw_cstore_tablespace_3 location '@testtablespace@/hw_cstore_tablespace_3';
+-- 2.3 SET TABLESPACE for partitioned table (index)
+ALTER INDEX idx3_set_tblspc_lineitem_3 SET TABLESPACE pg_default;
+-- 2.4 SET TABLESPACE for one partition (index)
+ALTER INDEX idx3_set_tblspc_lineitem_3 MOVE PARTITION p1_l_linenumber_idx TABLESPACE  hw_cstore_tablespace_3;
+drop tablespace hw_cstore_tablespace_3;
+ALTER INDEX idx3_set_tblspc_lineitem_3 MOVE PARTITION p1_l_linenumber_idx TABLESPACE  pg_default;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+drop tablespace hw_cstore_tablespace_3;
+create tablespace hw_cstore_tablespace_3 location '@testtablespace@/hw_cstore_tablespace_3';
+-- 2.5 rollback
+START TRANSACTION;
+ALTER TABLE set_tblspc_lineitem_3 MOVE PARTITION p1 TABLESPACE hw_cstore_tablespace_3;
+CHECKPOINT;
+ROLLBACK;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+drop tablespace hw_cstore_tablespace_3;
+create tablespace hw_cstore_tablespace_3 location '@testtablespace@/hw_cstore_tablespace_3';
+START TRANSACTION;
+ALTER INDEX idx3_set_tblspc_lineitem_3 MOVE PARTITION p1_l_linenumber_idx TABLESPACE  hw_cstore_tablespace_3;
+CHECKPOINT;
+ROLLBACK;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+drop tablespace hw_cstore_tablespace_3;
+create tablespace hw_cstore_tablespace_3 location '@testtablespace@/hw_cstore_tablespace_3';
+-- 2.6 drop table
+ALTER TABLE set_tblspc_lineitem_3 MOVE PARTITION p1 TABLESPACE hw_cstore_tablespace_3;
+ALTER INDEX idx3_set_tblspc_lineitem_3 MOVE PARTITION p1_l_linenumber_idx TABLESPACE  hw_cstore_tablespace_3;
+drop table set_tblspc_lineitem_3 cascade;
+SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TABLESPACE WHERE SPCNAME = 'hw_cstore_tablespace_3' );
+drop tablespace hw_cstore_tablespace_3;

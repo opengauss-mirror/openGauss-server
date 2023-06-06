@@ -1867,6 +1867,19 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_iud_fusion",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING,
+            gettext_noop("Enable iud fusion"),
+            NULL},
+            &u_sess->attr.attr_common.enable_iud_fusion,
+            false,
+            NULL,
+            NULL,
+            NULL,
+            NULL
+        },
 #endif
         {{"enable_expr_fusion",
             PGC_USERSET,

@@ -77,6 +77,7 @@
 #include "replication/rto_statistic.h"
 #include "storage/lock/lock.h"
 #include "nodes/makefuncs.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -1453,11 +1454,16 @@ Datum pg_stat_segment_extent_usage(PG_FUNCTION_ARGS)
     ForkNumber forknum = PG_GETARG_INT32(3);
     if (!ExtentTypeIsValid(extent_type)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_SEGMENT_PAGE),
-                        errmsg("The parameter extent_type is not valid"), errhint("extent_type should be in [1, 4]")));
+                        errmsg("The parameter extent_type is not valid"), errhint("extent_type should be in [1, 5]")));
     }
     if (forknum < 0 || forknum > MAX_FORKNUM) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_SEGMENT_PAGE),
                         errmsg("The forknumber is invalid"), errdetail("forknum should be in [0, %d]", MAX_FORKNUM)));
+    }
+    if (forknum == BCM_FORKNUM || forknum == INIT_FORKNUM) {
+        ereport(ERROR, (errmodule(MOD_SEGMENT_PAGE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("We do not support BCM_FORKNUM and INIT_FORKNUM yet."),
+                        errdetail("BCM_FORKNUM is 3, INIT_FORKNUM is 4.")));
     }
     FuncCallContext *funcctx = NULL;
 
@@ -8790,6 +8796,121 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
     }
 }
 
+#define NUM_SS_BUFFER_CTRL_ELEM 13
+Datum ss_buffer_ctrl(PG_FUNCTION_ARGS)
+{
+    FuncCallContext* funcctx = NULL;
+    Datum result;
+    MemoryContext oldcontext;
+    SSBufferCtrlContext* fctx = NULL; /* User function context. */
+    TupleDesc tupledesc;
+    HeapTuple tuple;
+
+    if (SRF_IS_FIRSTCALL()) {
+        int i;
+        BufferDesc* bufHdr = NULL;
+        dms_buf_ctrl_t *buf_ctrl = NULL;
+
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        /* Switch context when allocating stuff to be used in later calls */
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* Create a user function context for cross-call persistence */
+        fctx = (SSBufferCtrlContext*)palloc(sizeof(SSBufferCtrlContext));
+
+        /* Construct a tuple descriptor for the result rows. */
+        tupledesc = CreateTemplateTupleDesc(NUM_SS_BUFFER_CTRL_ELEM, false);
+        TupleDescInitEntry(tupledesc, (AttrNumber)1, "bufferid", INT4OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)2, "is_remote_dirty", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)3, "lock_mode", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)4, "is_edp", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)5, "force_request", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)6, "need_flush", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)7, "buf_id", INT4OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)8, "state", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)9, "pblk_relno", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)10, "pblk_blkno", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)11, "pblk_lsn", INT8OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)12, "seg_fileno", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)13, "seg_blockno", OIDOID, -1, 0);
+        fctx->tupdesc = BlessTupleDesc(tupledesc);
+
+        fctx->record =
+            (SSBufferCtrlRec*)palloc_huge(CurrentMemoryContext,
+            sizeof(SSBufferCtrlRec) * g_instance.attr.attr_storage.NBuffers);
+
+        /* Set max calls and remember the user function context. */
+        funcctx->max_calls = g_instance.attr.attr_storage.NBuffers;
+        funcctx->user_fctx = fctx;
+
+        /* Return to original context when allocating transient memory */
+        MemoryContextSwitchTo(oldcontext);
+
+        for (i = 0; i < NUM_BUFFER_PARTITIONS; i++)
+            LWLockAcquire(GetMainLWLockByIndex(FirstBufMappingLock + i), LW_SHARED);
+
+        /*
+         * Scan though all the buffers, saving the relevant fields in the
+         * fctx->record structure.
+         */
+        for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
+            bufHdr = GetBufferDescriptor(i);
+            LWLockAcquire(bufHdr->content_lock, LW_SHARED);
+            buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
+            fctx->record[i].bufferid = i + 1;
+            fctx->record[i].is_remote_dirty = buf_ctrl->is_remote_dirty;
+            fctx->record[i].lock_mode = buf_ctrl->lock_mode;
+            fctx->record[i].is_edp = buf_ctrl->is_edp;
+            fctx->record[i].force_request = buf_ctrl->force_request;
+            fctx->record[i].need_flush = buf_ctrl->need_flush;
+            fctx->record[i].buf_id = buf_ctrl->buf_id;
+            fctx->record[i].state = buf_ctrl->state;
+            fctx->record[i].pblk_relno = buf_ctrl->pblk_relno;
+            fctx->record[i].pblk_blkno = buf_ctrl->pblk_blkno;
+            fctx->record[i].pblk_lsn = buf_ctrl->pblk_lsn;
+            fctx->record[i].seg_fileno = buf_ctrl->seg_fileno;
+            fctx->record[i].seg_blockno = buf_ctrl->seg_blockno;
+            LWLockRelease(bufHdr->content_lock);
+        }
+
+        for (i = NUM_BUFFER_PARTITIONS; --i >= 0;)
+            LWLockRelease(GetMainLWLockByIndex(FirstBufMappingLock + i));
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+
+    /* Get the saved state */
+    fctx = (SSBufferCtrlContext*)funcctx->user_fctx;
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
+        uint32 i = funcctx->call_cntr;
+        Datum values[NUM_SS_BUFFER_CTRL_ELEM];
+        bool nulls[NUM_SS_BUFFER_CTRL_ELEM] = {false};
+
+        values[0] = Int32GetDatum(fctx->record[i].bufferid);
+        values[1] = UInt8GetDatum(fctx->record[i].is_remote_dirty);
+        values[2] = UInt8GetDatum(fctx->record[i].lock_mode);
+        values[3] = UInt8GetDatum(fctx->record[i].is_edp);
+        values[4] = UInt8GetDatum(fctx->record[i].force_request);
+        values[5] = UInt8GetDatum(fctx->record[i].need_flush);
+        values[6] = Int32GetDatum(fctx->record[i].buf_id);
+        values[7] = UInt32GetDatum(fctx->record[i].state);
+        values[8] = UInt32GetDatum(fctx->record[i].pblk_relno);
+        values[9] = UInt32GetDatum(fctx->record[i].pblk_blkno);
+        values[10] = UInt64GetDatum(fctx->record[i].pblk_lsn);
+        values[11] = UInt8GetDatum(fctx->record[i].seg_fileno);
+        values[12] = UInt32GetDatum(fctx->record[i].seg_blockno);
+        
+        /* Build and return the tuple. */
+        tuple = heap_form_tuple(fctx->tupdesc, values, nulls);
+        result = HeapTupleGetDatum(tuple);
+
+        SRF_RETURN_NEXT(funcctx, result);
+    } else {
+        SRF_RETURN_DONE(funcctx);
+    }
+}
 
 Datum pv_session_time(PG_FUNCTION_ARGS)
 {

@@ -822,12 +822,14 @@ select pg_get_tabledef('s_t_charset_6');
 
 create table s_t_charset_7 as table s_t_charset_1;
 \d+ s_t_charset_7;
-                                  Table "s_charset_1.s_t_charset_7"
- Column |         Type          |         Modifiers          | Storage  | Stats target | Description 
---------+-----------------------+----------------------------+----------+--------------+-------------
- s1     | character varying(20) | collate utf8mb4_general_ci | extended |              | 
+                                           Table "s_charset_1.s_t_charset_7"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ s1     | character varying(20) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
 
 create table s_t_charset_8 as select '123';
 \d+ s_t_charset_8;
@@ -837,6 +839,8 @@ create table s_t_charset_8 as select '123';
  ?column? | text |           | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
 
 alter session set current_schema = s_charset_12;
 create table s_t_charset_9(s1 varchar(20) charset utf8mb4);
@@ -880,16 +884,18 @@ select * from p_charset_1;
 (1 row)
 
 \d+ p_charset_1;
-                                   Table "s_charset_1.p_charset_1"
- Column |         Type          |         Modifiers          | Storage  | Stats target | Description 
---------+-----------------------+----------------------------+----------+--------------+-------------
- c1     | character varying(20) | collate utf8mb4_general_ci | extended |              | 
- c2     | character varying(20) | collate utf8mb4_general_ci | extended |              | 
- c3     | integer               |                            | plain    |              | 
+                                            Table "s_charset_1.p_charset_1"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ c1     | character varying(20) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
+ c2     | character varying(20) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
+ c3     | integer               |                                               | plain    |              | 
 Partition By HASH(c1)
 Number of partitions: 2 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1538
+Character Set: UTF8
+Collate: utf8mb4_unicode_ci
 
 -- temporary table
 create temporary table tem_charset_1(c1 varchar(20),c2 varchar(20),c3 int) character set = utf8mb4;

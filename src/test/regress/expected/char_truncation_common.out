@@ -340,7 +340,7 @@ call pro_insert_trunc(43947123894723895743728943.5425235,'2016-06-30','2013-12-1
 ERROR:  value too long for type character(6)
 CONTEXT:  referenced column: c_char1
 SQL statement "insert into inst_trc_t1_01 values(c_varchar2,c_date,c_timestamp_wztimezone,c_number,substr(c_date,3,6))"
-PL/pgSQL function pro_insert_trunc(character varying,date,timestamp with time zone,numeric) line 3 at SQL statement
+PL/pgSQL function pro_insert_trunc(character varying,date,timestamp with time zone,numeric) line 2 at SQL statement
 set td_compatible_truncation=on;
 show td_compatible_truncation;
  td_compatible_truncation 
@@ -365,7 +365,7 @@ call pro_insert_trunc(43947123894723895743728943.5425235,'2016-06-30','2013-12-1
 ERROR:  value too long for type character(6)
 CONTEXT:  referenced column: c_char1
 SQL statement "insert into inst_trc_t1_01 values(c_varchar2,c_date,c_timestamp_wztimezone,c_number,substr(c_date,3,6))"
-PL/pgSQL function pro_insert_trunc(character varying,date,timestamp with time zone,numeric) line 3 at SQL statement
+PL/pgSQL function pro_insert_trunc(character varying,date,timestamp with time zone,numeric) line 2 at SQL statement
 drop table if exists inst_trc_t1_01;
 drop procedure if exists pro_insert_trunc;
 --Prepare stmt test

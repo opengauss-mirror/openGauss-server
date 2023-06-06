@@ -725,6 +725,7 @@ LDFLAGS
 CFLAGS
 CC
 CC_VERSION
+SUB_CC_VERSION
 enable_dtrace
 enable_gstrace
 DTRACEFLAGS
@@ -30097,6 +30098,7 @@ NEW_GCC=$gcc_version
 if test x"$GCC" = x"yes" ; then
   cc_string=`${CC} --version | sed q`
   CC_VERSION=`${CC} --version | sed q | awk -F')' '{print $2}' | awk '{print $1}'`
+  SUB_CC_VERSION=`${CC} --version | sed q | awk -F')' '{print $2}' | awk -F'.3' '{print $2}'`
   case $cc_string in [A-Za-z]*) ;; *) cc_string="GCC $cc_string";; esac
   if test "$enable_default_gcc" = yes && test "$CC_VERSION" = "$NEW_GCC"; then
     $as_echo "$as_myself: error: current GCC version is not old GCC version; Please remove environment variable to use old GCC" >&2

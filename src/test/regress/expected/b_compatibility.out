@@ -1,6 +1,7 @@
 -- b compatibility case
-drop database if exists b;
-create database b dbcompatibility 'b';
+drop database if exists b_cmpt_db;
+NOTICE:  database "b_cmpt_db" does not exist, skipping
+create database b_cmpt_db dbcompatibility 'b';
 --------------------concat--------------------
 -- concat case in a compatibility
 \c regression
@@ -38,7 +39,7 @@ select * from text1 where a is null;
 
 drop table text1;
 -- concat case in b compatibility
-\c b
+\c b_cmpt_db
 select concat('','A');
  concat 
 --------
@@ -98,7 +99,7 @@ select * from text2 where a is not null;
 
 drop table text2;
 -- null case in b
-\c b
+\c b_cmpt_db
 create table text2 (a char(10));
 insert into text2 values('');
 insert into text2 values (null);
@@ -143,7 +144,7 @@ CONTEXT:  referenced column: int2in
 select int4in('s');
 ERROR:  invalid input syntax for integer: "s"
 CONTEXT:  referenced column: int4in
-\c b
+\c b_cmpt_db
 select '-'::int8;
  int8 
 ------
@@ -293,7 +294,7 @@ select * from test_limit order by 1 limit 6,2;
 
 drop table test_limit;
 -- limit case in b
-\c b
+\c b_cmpt_db
 create table test_limit(a int);
 insert into test_limit values (1),(2),(3),(4),(5);
 select * from test_limit order by 1 limit 2,3;
@@ -321,7 +322,7 @@ drop table test_limit;
 --------------timestampdiff-----------------
 -- timestamp with time zone
 -- timestamp1 > timestamp2
-\c b
+\c b_cmpt_db
 select timestampdiff(year, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
  timestamp_diff 
 ----------------
@@ -953,7 +954,7 @@ raise notice 'p1:%',p1;
 end;
 /
 ERROR:  'ITERATE label' is only in database which dbcompatibility='B'.
-CONTEXT:  compilation of PL/pgSQL function "doiterate" near line 4
+CONTEXT:  compilation of PL/pgSQL function "doiterate" near line 3
 --error
 create or replace procedure doiterate(p1 int)
 as
@@ -969,7 +970,7 @@ raise notice 'p1:%',p1;
 end;
 /
 ERROR:  'LEAVE label' is only in database which dbcompatibility='B'.
-CONTEXT:  compilation of PL/pgSQL function "doiterate" near line 5
+CONTEXT:  compilation of PL/pgSQL function "doiterate" near line 4
 --success
 create or replace procedure doiterate(p1 int)
 as
@@ -992,7 +993,7 @@ NOTICE:  p1:10
 (1 row)
 
 drop procedure if exists doiterate;
-\c b
+\c b_cmpt_db
 --success
 create or replace procedure doiterate(p1 int)
 as
@@ -1223,7 +1224,7 @@ NOTICE:  identifier "label111111111111111111111111111111111111111111111111111111
 NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
 CONTEXT:  compilation of PL/pgSQL function "proc_label" near line 1
 NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
-CONTEXT:  compilation of PL/pgSQL function "proc_label" near line 4
+CONTEXT:  compilation of PL/pgSQL function "proc_label" near line 3
 --success
 create or replace procedure proc_label1(n int)
 as
@@ -1242,7 +1243,7 @@ NOTICE:  identifier "label111111111111111111111111111111111111111111111111111111
 NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
 CONTEXT:  compilation of PL/pgSQL function "proc_label1" near line 1
 NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
-CONTEXT:  compilation of PL/pgSQL function "proc_label1" near line 4
+CONTEXT:  compilation of PL/pgSQL function "proc_label1" near line 3
 call proc_label(5);
  proc_label 
 ------------
@@ -1291,7 +1292,7 @@ end;
 /
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 7 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at SQL statement
 CREATE OR REPLACE FUNCTION func1(num1 in int, num2 inout int, res out int) RETURNS record
 AS $$
 DECLARE
@@ -1331,7 +1332,7 @@ end;
 NOTICE:  10,100
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 8 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 7 at SQL statement
 create or replace procedure debug(num1 in int, num2 inout int, res out int)
 as begin
 num2 := num2 + 1;
@@ -1363,7 +1364,7 @@ end;
 /
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 7 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at SQL statement
 create or replace procedure call(num1 in int, num2 inout int, res out int)
 as begin
 num2 := num2 + 1;
@@ -1395,7 +1396,7 @@ end;
 /
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 7 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at SQL statement
 drop procedure call;
 CREATE OR REPLACE FUNCTION call() RETURNS int
 AS $$
@@ -1420,10 +1421,9 @@ call;
 end;
 /
 ERROR:  syntax error at end of input
-LINE 3: call;
+LINE 2: call;
             ^
-QUERY:  DECLARE 
-begin
+QUERY:  DECLARE begin
 call;
 end
 --error
@@ -1434,7 +1434,7 @@ end;
 /
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 2 at SQL statement
 --error
 declare
 begin
@@ -1442,10 +1442,9 @@ call call;
 end;
 /
 ERROR:  syntax error at end of input
-LINE 3: call call;
+LINE 2: call call;
                  ^
-QUERY:  DECLARE 
-begin
+QUERY:  DECLARE begin
 call call;
 end
 create schema test;
@@ -1473,7 +1472,7 @@ end;
 /
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 2 at SQL statement
 create or replace procedure test.debug(num1 in int, num2 inout int, res out int)
 as begin
 num2 := num2 + 1;
@@ -1505,7 +1504,7 @@ end;
 /
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 7 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at SQL statement
 create or replace procedure test.call(num1 in int, num2 inout int, res out int)
 as begin
 num2 := num2 + 1;
@@ -1537,7 +1536,7 @@ end;
 /
 ERROR:  query has no destination for result data
 HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
-CONTEXT:  PL/pgSQL function inline_code_block line 7 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at SQL statement
 drop procedure func_zzm;
 drop function func1;
 drop procedure debug;
@@ -1547,7 +1546,7 @@ NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function test.func1()
 drop cascades to function test.debug(integer,integer)
 drop cascades to function test.call(integer,integer)
-\c b
+\c b_cmpt_db
 create or replace procedure func_zzm(num1 in int, num2 inout int, res out int)
 as begin
 num2 := num2 + 1;
@@ -1700,10 +1699,9 @@ call;
 end;
 /
 ERROR:  syntax error at end of input
-LINE 3: call;
+LINE 2: call;
             ^
-QUERY:  DECLARE 
-begin
+QUERY:  DECLARE begin
 call;
 end
 --success
@@ -1719,10 +1717,9 @@ call call;
 end;
 /
 ERROR:  syntax error at end of input
-LINE 3: call call;
+LINE 2: call call;
                  ^
-QUERY:  DECLARE 
-begin
+QUERY:  DECLARE begin
 call call;
 end
 create schema test;
@@ -1944,7 +1941,7 @@ CONTEXT:  referenced column: while_test1
 (1 row)
 
 drop function while_test1;
-\c b
+\c b_cmpt_db
 create or replace function while_test1() returns void as $$
 declare _i integer = 0; _r record;
 begin
@@ -2243,10 +2240,9 @@ the_while:
 end; 
 /
 ERROR:  while-loop syntax is mixed with while-do syntax
-LINE 5:   while _i < 10 loop
+LINE 4:   while _i < 10 loop
           ^
-QUERY:  
-declare _i integer = 0;
+QUERY:  declare _i integer = 0;
 BEGIN
 the_while:
   while _i < 10 loop
@@ -2268,10 +2264,9 @@ BEGIN
 end; 
 /
 ERROR:  'while-do' is only supported in database which dbcompatibility='B'.
-LINE 4:   while _i < 10 do
+LINE 3:   while _i < 10 do
           ^
-QUERY:  
-declare _i integer = 0;
+QUERY:  declare _i integer = 0;
 BEGIN
   while _i < 10 do
     _i := _i + 1;
@@ -2292,10 +2287,9 @@ BEGIN
 end; 
 /
 ERROR:  while-loop syntax is mixed with while-do syntax
-LINE 4:   while _i < 10 loop
+LINE 3:   while _i < 10 loop
           ^
-QUERY:  
-declare _i integer = 0;
+QUERY:  declare _i integer = 0;
 BEGIN
   while _i < 10 loop
     _i := _i + 1;
@@ -2319,7 +2313,7 @@ raise notice '%',i;
 end;
 /
 ERROR:  'repeat' is only supported in database which dbcompatibility='B'.
-CONTEXT:  compilation of PL/pgSQL function "dorepeat" near line 6
+CONTEXT:  compilation of PL/pgSQL function "dorepeat" near line 5
 --error
 CREATE or replace PROCEDURE dorepeat(p1 INT)
 as 
@@ -2334,7 +2328,7 @@ raise notice '%',i;
 end;
 /
 ERROR:  'repeat' is only supported in database which dbcompatibility='B'.
-CONTEXT:  compilation of PL/pgSQL function "dorepeat" near line 7
+CONTEXT:  compilation of PL/pgSQL function "dorepeat" near line 6
 --error
 CREATE or replace PROCEDURE dorepeat(p1 INT)
 as 
@@ -2349,10 +2343,10 @@ raise notice '%',i;
 end;
 /
 ERROR:  'label:' is only supported in database which dbcompatibility='B'.
-CONTEXT:  compilation of PL/pgSQL function "dorepeat" near line 3
+CONTEXT:  compilation of PL/pgSQL function "dorepeat" near line 2
 drop function if exists dorepeat;
 NOTICE:  function dorepeat() does not exist, skipping
-\c b
+\c b_cmpt_db
 --success
 CREATE or replace PROCEDURE dorepeat(p1 INT)
 as 
@@ -2449,10 +2443,9 @@ raise notice '%',i;
 end;
 /
 ERROR:  The label name is invalid
-LINE 5: repeat:
+LINE 4: repeat:
               ^
-QUERY:  
-declare
+QUERY:  declare
 i int =0;
 BEGIN
 repeat:
@@ -2489,6 +2482,6 @@ drop table test_table_030;
 drop function select_into_null_func;
 reset behavior_compat_options;
 \c regression
-drop database b;
+drop database b_cmpt_db;
 DROP USER test_c;
 DROP USER test_d;

@@ -128,7 +128,16 @@ EState* CreateExecutorState(MemoryContext saveCxt)
      */
     oldcontext = MemoryContextSwitchTo(qcontext);
 
+    /*
+     * estate->first_autoinc is int128, when compiled with CLAGS=-O2 on some
+     * platforms, using the Movaps directive requires 16-byte alignment.
+     */
+#ifdef __aarch64__
     estate = makeNode(EState);
+#else
+    estate = (EState *) palloc0(sizeof(EState) + 16);
+    estate = (EState *) TYPEALIGN(16, estate);
+#endif  /* __aarch64__ */
 
     /*
      * Initialize all fields of the Executor State structure
@@ -539,6 +548,7 @@ static void GetAccessedVarNumbers(ProjectionInfo* projInfo, List* targetList, Li
     List* vars = NIL;
     List* varattno_list = NIL;
     List* lateAccessVarNoList = NIL;
+    List* projectVarNumbers = NIL;
     List* sysVarList = NIL;
     List* qualVarNoList = NIL;
     bool isConst = false;
@@ -570,6 +580,7 @@ static void GetAccessedVarNumbers(ProjectionInfo* projInfo, List* targetList, Li
      * Used for PackT optimization: PackTCopyVarsList records those columns what we need to move.
      */
     List* PackTCopyVarsList = list_copy(varattno_list);
+    projectVarNumbers = list_copy(varattno_list);
 
     /* Now consider the  quals */
     vars = pull_var_clause((Node*)qual, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
@@ -608,6 +619,7 @@ static void GetAccessedVarNumbers(ProjectionInfo* projInfo, List* targetList, Li
     projInfo->pi_PackTCopyVars = PackTCopyVarsList;
     projInfo->pi_acessedVarNumbers = varattno_list;
     projInfo->pi_lateAceessVarNumbers = lateAccessVarNoList;
+    projInfo->pi_projectVarNumbers = projectVarNumbers;
     projInfo->pi_sysAttrList = sysVarList;
     projInfo->pi_const = isConst;
     projInfo->pi_PackLateAccessVarNumbers = PackLateAccessList;
@@ -2923,6 +2935,9 @@ bool expr_func_has_refcursor_args(Oid Funcid)
     char* p_argmodes = NULL;
     bool use_cursor = false;
 
+    if (IsSystemObjOid(Funcid) && Funcid != CURSORTOXMLOID && Funcid != CURSORTOXMLSCHEMAOID) {
+        return false;
+    }
     proctup = SearchSysCache(PROCOID, ObjectIdGetDatum(Funcid), 0, 0, 0);
 
     /*

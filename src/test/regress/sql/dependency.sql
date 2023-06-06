@@ -98,3 +98,36 @@ DROP USER regression_user2;
 DROP OWNED BY regression_user2, regression_user0;
 DROP USER regression_user2;
 DROP USER regression_user0;
+
+-- test view depend on proc
+CREATE OR REPLACE procedure depend_p1(var1 varchar,var2 out varchar)
+as
+p_num varchar:='aaa';
+begin
+var2:=var1||p_num;
+END;
+/
+CREATE OR REPLACE VIEW depend_v1 AS select depend_p1('aa');
+select * from depend_v1;
+select definition from pg_views where viewname='depend_v1';
+
+-- failed, can't change var2's type
+CREATE OR REPLACE procedure depend_p1(var1 int,var2 out int)
+as
+begin
+var2:=var1+1;
+END;
+/
+
+--success, change var1's type only, but it will failed when select depend_v1
+CREATE OR REPLACE procedure depend_p1(var1 int,var2 out varchar)
+as
+begin
+var2:=var1||'bbb';
+END;
+/
+select * from depend_v1;
+select definition from pg_views where viewname='depend_v1';
+
+drop view depend_v1;
+drop procedure depend_p1;

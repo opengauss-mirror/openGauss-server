@@ -137,6 +137,7 @@ static void write_eventlog(int level, const char* line, int len);
 
 static const int CREATE_ALTER_SUBSCRIPTION = 16;
 static const int CREATE_ALTER_USERMAPPING = 18;
+static const int GRANT_USAGE = 19;
 
 /* Macro for checking t_thrd.log_cxt.errordata_stack_depth is reasonable */
 #define CHECK_STACK_DEPTH()                                               \
@@ -160,7 +161,6 @@ static void setup_formatted_log_time(void);
 static void setup_formatted_start_time(void);
 extern void send_only_message_to_frontend(const char* message, bool is_putline);
 static char* mask_Password_internal(const char* query_string);
-static char* mask_error_password(const char* query_string, int str_len);
 static void truncate_identified_by(char* query_string, int query_len);
 static char* mask_execute_direct_cmd(const char* query_string);
 static bool is_execute_cmd(const char* query_string);
@@ -501,6 +501,7 @@ void errfinish(int dummy, ...)
     ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
     ErrorData* producer_save_edata = NULL;
     int elevel = edata->elevel;
+    bool is_warnings_throw = edata->is_warnings_throw;
     MemoryContext oldcontext;
 
     ErrorContextCallback* econtext = NULL;
@@ -570,7 +571,7 @@ void errfinish(int dummy, ...)
 
 #ifdef MEMORY_CONTEXT_CHECKING
     /* Check all memory contexts when there is an error or a fatal */
-    if (elevel >= ERROR) {
+    if (elevel >= ERROR || is_warnings_throw) {
         MemoryContextCheck(t_thrd.top_mem_cxt, false);
     }
 #endif
@@ -580,7 +581,7 @@ void errfinish(int dummy, ...)
      * even in pg_try_catch case and procedure exception case.
      * Top transaction memcxt will release the memory, just set NULL.
      */
-    if (elevel >= ERROR) {
+    if (elevel >= ERROR || is_warnings_throw) {
         u_sess->catalog_cxt.setCurCreateSchema = false;
         u_sess->catalog_cxt.curCreateSchema = NULL;
         u_sess->exec_cxt.isLockRows = false;
@@ -591,7 +592,7 @@ void errfinish(int dummy, ...)
      * If ERROR (not more nor less) we pass it off to the current handler.
      * Printing it and popping the stack is the responsibility of the handler.
      */
-    if (elevel == ERROR) {
+    if (elevel == ERROR || is_warnings_throw) {
         /*
          * We do some minimal cleanup before longjmp'ing so that handlers can
          * execute in a reasonably sane state.
@@ -695,6 +696,28 @@ void errfinish(int dummy, ...)
         pfree(edata->cause);
     if (edata->action)
         pfree(edata->action);
+    if (edata->sqlstate)
+        pfree(edata->sqlstate);
+    if (edata->class_origin)
+        pfree(edata->class_origin);
+    if (edata->subclass_origin)
+        pfree(edata->subclass_origin);
+    if (edata->cons_catalog)
+        pfree(edata->cons_catalog);
+    if (edata->cons_schema)
+        pfree(edata->cons_schema);
+    if (edata->cons_name)
+        pfree(edata->cons_name);
+    if (edata->catalog_name)
+        pfree(edata->catalog_name);
+    if (edata->schema_name)
+        pfree(edata->schema_name);
+    if (edata->table_name)
+        pfree(edata->table_name);
+    if (edata->column_name)
+        pfree(edata->column_name);
+    if (edata->cursor_name)
+        pfree(edata->cursor_name);
     t_thrd.log_cxt.errordata_stack_depth--;
 
     /* Exit error-handling context */
@@ -1365,6 +1388,259 @@ int internalerrquery(const char* query)
     return 0; /* return value does not matter */
 }
 
+int signal_is_warnings_throw(bool is_warning_throw)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    edata->is_warnings_throw = is_warning_throw;
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * signal_returnd_sqlstate --- add returnd_sqlstate to the current error
+ */
+int signal_returnd_sqlstate(const char *returnd_sqlstate)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->sqlstate != NULL) {
+        pfree(edata->sqlstate);
+        edata->sqlstate = NULL;
+    }
+
+    if (returnd_sqlstate != NULL) {
+        edata->sqlstate = MemoryContextStrdup(ErrorContext, returnd_sqlstate);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * siganl_class_origin --- add class_origin to the current error
+ */
+int signal_class_origin(const char *class_origin)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->class_origin != NULL) {
+        pfree(edata->class_origin);
+        edata->class_origin = NULL;
+    }
+
+    if (class_origin != NULL) {
+        edata->class_origin = MemoryContextStrdup(ErrorContext, class_origin);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * siganl_subclass_origin --- add subclass_origin to the current error
+ */
+int signal_subclass_origin(const char *subclass_origin)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->subclass_origin != NULL) {
+        pfree(edata->subclass_origin);
+        edata->subclass_origin = NULL;
+    }
+
+    if (subclass_origin != NULL) {
+        edata->subclass_origin = MemoryContextStrdup(ErrorContext, subclass_origin);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * signal_constraint_catalog --- add constraint_catalog to the current error
+ */
+int signal_constraint_catalog(const char *constraint_catalog)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->cons_catalog != NULL) {
+        pfree(edata->cons_catalog);
+        edata->cons_catalog = NULL;
+    }
+
+    if (constraint_catalog != NULL) {
+        edata->cons_catalog = MemoryContextStrdup(ErrorContext, constraint_catalog);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * signal_constraint_schema --- add constraint_schema to the current error
+ */
+int signal_constraint_schema(const char *constraint_schema)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->cons_schema != NULL) {
+        pfree(edata->cons_schema);
+        edata->cons_schema = NULL;
+    }
+
+    if (constraint_schema != NULL) {
+        edata->cons_schema = MemoryContextStrdup(ErrorContext, constraint_schema);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * signal_constraint_name --- add constraint_name to the current error
+ */
+int signal_constraint_name(const char *constraint_name)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->cons_name != NULL) {
+        pfree(edata->cons_name);
+        edata->cons_name = NULL;
+    }
+
+    if (constraint_name != NULL) {
+        edata->cons_name = MemoryContextStrdup(ErrorContext, constraint_name);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * signal_catalog_name --- add catalog_name to the current error
+ */
+int signal_catalog_name(const char *catalog_name)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->catalog_name != NULL) {
+        pfree(edata->catalog_name);
+        edata->catalog_name = NULL;
+    }
+
+    if (catalog_name != NULL) {
+        edata->catalog_name = MemoryContextStrdup(ErrorContext, catalog_name);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * signal_schema_name --- add schema_name to the current error
+ */
+int signal_schema_name(const char *schema_name)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->schema_name != NULL) {
+        pfree(edata->schema_name);
+        edata->schema_name = NULL;
+    }
+
+    if (schema_name != NULL) {
+        edata->schema_name = MemoryContextStrdup(ErrorContext, schema_name);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * signal_table_name --- add table_name to the current error
+ */
+int signal_table_name(const char *table_name)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->table_name != NULL) {
+        pfree(edata->table_name);
+        edata->table_name = NULL;
+    }
+
+    if (table_name != NULL) {
+        edata->table_name = MemoryContextStrdup(ErrorContext, table_name);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * signal_column_name --- add column_name to the current error
+ */
+int signal_column_name(const char *column_name)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->column_name != NULL) {
+        pfree(edata->column_name);
+        edata->column_name = NULL;
+    }
+
+    if (column_name != NULL) {
+        edata->column_name = MemoryContextStrdup(ErrorContext, column_name);
+    }
+
+    return 0; /* return value does not matter */
+}
+
+/*
+ * signal_cursor_name --- add cursor_name to the current error
+ */
+int signal_cursor_name(const char *cursor_name)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    if (edata->cursor_name != NULL) {
+        pfree(edata->cursor_name);
+        edata->cursor_name = NULL;
+    }
+
+    if (cursor_name != NULL) {
+        edata->cursor_name = MemoryContextStrdup(ErrorContext, cursor_name);
+    }
+
+    return 0; /* return value does not matter */
+}
 
 /*
  * ErrOutToClient --- sets whether to send error output to client or not.
@@ -1709,6 +1985,28 @@ ErrorData* CopyErrorData(void)
         newedata->cause = pstrdup(newedata->cause);
     if (newedata->action)
         newedata->action = pstrdup(newedata->action);
+    if (edata->sqlstate)
+        newedata->sqlstate = pstrdup(newedata->sqlstate);
+    if (newedata->class_origin)
+        newedata->class_origin = pstrdup(newedata->class_origin);
+    if (newedata->subclass_origin)
+        newedata->subclass_origin = pstrdup(newedata->subclass_origin);
+    if (newedata->cons_catalog)
+        newedata->cons_catalog = pstrdup(newedata->cons_catalog);
+    if (newedata->cons_schema)
+        newedata->cons_schema = pstrdup(newedata->cons_schema);
+    if (newedata->cons_name)
+        newedata->cons_name = pstrdup(newedata->cons_name);
+    if (newedata->catalog_name)
+        newedata->catalog_name = pstrdup(newedata->catalog_name);
+    if (newedata->schema_name)
+        newedata->schema_name = pstrdup(newedata->schema_name);
+    if (newedata->table_name)
+        newedata->table_name = pstrdup(newedata->table_name);
+    if (newedata->column_name)
+        newedata->column_name = pstrdup(newedata->column_name);
+    if (newedata->cursor_name)
+        newedata->cursor_name = pstrdup(newedata->cursor_name);
     return newedata;
 }
 
@@ -1726,6 +2024,17 @@ void UpdateErrorData(ErrorData* edata, ErrorData* newData)
     FREE_POINTER(edata->backtrace_log);
     FREE_POINTER(edata->cause);
     FREE_POINTER(edata->action);
+    FREE_POINTER(edata->sqlstate);
+    FREE_POINTER(edata->class_origin);
+    FREE_POINTER(edata->subclass_origin);
+    FREE_POINTER(edata->cons_catalog);
+    FREE_POINTER(edata->cons_schema);
+    FREE_POINTER(edata->cons_name);
+    FREE_POINTER(edata->catalog_name);
+    FREE_POINTER(edata->schema_name);
+    FREE_POINTER(edata->table_name);
+    FREE_POINTER(edata->column_name);
+    FREE_POINTER(edata->cursor_name);
     MemoryContext oldcontext = MemoryContextSwitchTo(ErrorContext);
 
     edata->elevel = newData->elevel;
@@ -1746,6 +2055,17 @@ void UpdateErrorData(ErrorData* edata, ErrorData* newData)
     edata->internalerrcode = newData->internalerrcode;
     edata->cause = newData->cause;
     edata->action = newData->action;
+    edata->sqlstate = pstrdup(newData->sqlstate);
+    edata->class_origin = pstrdup(newData->class_origin);
+    edata->subclass_origin = pstrdup(newData->subclass_origin);
+    edata->cons_catalog = pstrdup(newData->cons_catalog);
+    edata->cons_schema = pstrdup(newData->cons_schema);
+    edata->cons_name = pstrdup(newData->cons_name);
+    edata->catalog_name = pstrdup(newData->catalog_name);
+    edata->schema_name = pstrdup(newData->schema_name);
+    edata->table_name = pstrdup(newData->table_name);
+    edata->column_name = pstrdup(newData->column_name);
+    edata->cursor_name = pstrdup(newData->cursor_name);
     MemoryContextSwitchTo(oldcontext);
 }
 
@@ -1784,6 +2104,50 @@ void FreeErrorData(ErrorData* edata)
     if (edata->action) {
         pfree(edata->action);
         edata->action = NULL;
+    }
+    if (edata->sqlstate) {
+        pfree(edata->sqlstate);
+        edata->sqlstate = NULL;
+    }
+    if (edata->class_origin) {
+        pfree(edata->class_origin);
+        edata->class_origin = NULL;
+    }
+    if (edata->subclass_origin) {
+        pfree(edata->subclass_origin);
+        edata->subclass_origin = NULL;
+    }
+    if (edata->cons_catalog) {
+        pfree(edata->cons_catalog);
+        edata->cons_catalog = NULL;
+    }
+    if (edata->cons_schema) {
+        pfree(edata->cons_schema);
+        edata->cons_schema = NULL;
+    }
+    if (edata->cons_name) {
+        pfree(edata->cons_name);
+        edata->cons_name = NULL;
+    }
+    if (edata->catalog_name) {
+        pfree(edata->catalog_name);
+        edata->catalog_name = NULL;
+    }
+    if (edata->schema_name) {
+        pfree(edata->schema_name);
+        edata->schema_name = NULL;
+    }
+    if (edata->table_name) {
+        pfree(edata->table_name);
+        edata->table_name = NULL;
+    }
+    if (edata->column_name) {
+        pfree(edata->column_name);
+        edata->column_name = NULL;
+    }
+    if (edata->cursor_name) {
+        pfree(edata->cursor_name);
+        edata->cursor_name = NULL;
     }
     pfree(edata);
 }
@@ -1828,7 +2192,11 @@ void FlushErrorStateWithoutDeleteChildrenContext(void)
 void ReThrowError(ErrorData* edata)
 {
     ErrorData* newedata = NULL;
-    Assert(edata->elevel == ERROR);
+    if (DB_IS_CMPT(B_FORMAT)) {
+        Assert(edata->elevel >= WARNING);
+    } else {
+        Assert(edata->elevel == ERROR);
+    }
 
     /* Push the data back into the error context */
     t_thrd.log_cxt.recursion_depth++;
@@ -1870,8 +2238,39 @@ void ReThrowError(ErrorData* edata)
         newedata->cause = pstrdup(newedata->cause);
     if (newedata->action)
         newedata->action = pstrdup(newedata->action);
+    if (newedata->sqlstate)
+        newedata->sqlstate = pstrdup(newedata->sqlstate);
+    if (newedata->class_origin)
+        newedata->class_origin = pstrdup(newedata->class_origin);
+    if (newedata->subclass_origin)
+        newedata->subclass_origin = pstrdup(newedata->subclass_origin);
+    if (newedata->cons_catalog)
+        newedata->cons_catalog = pstrdup(newedata->cons_catalog);
+    if (newedata->cons_schema)
+        newedata->cons_schema = pstrdup(newedata->cons_schema);
+    if (newedata->cons_name)
+        newedata->cons_name = pstrdup(newedata->cons_name);
+    if (newedata->catalog_name)
+        newedata->catalog_name = pstrdup(newedata->catalog_name);
+    if (newedata->schema_name)
+        newedata->schema_name = pstrdup(newedata->schema_name);
+    if (newedata->table_name)
+        newedata->table_name = pstrdup(newedata->table_name);
+    if (newedata->column_name)
+        newedata->column_name = pstrdup(newedata->column_name);
+    if (newedata->cursor_name)
+        newedata->cursor_name = pstrdup(newedata->cursor_name);
     t_thrd.log_cxt.recursion_depth--;
-    PG_RE_THROW();
+    
+    if (DB_IS_CMPT(B_FORMAT)) {
+        if (edata->elevel == WARNING) {
+            EmitErrorReport();
+        } else {
+            PG_RE_THROW();
+        }
+    } else {
+        PG_RE_THROW();
+    }
 }
 
 /*
@@ -3020,7 +3419,11 @@ static void send_message_to_server_log(ErrorData* edata)
         char* randomPlanInfo = NULL;
         char* mask_string = NULL;
         mask_string = maskPassword(t_thrd.postgres_cxt.debug_query_string);
-        if (edata->sqlerrcode == ERRCODE_SYNTAX_ERROR) {
+        /*
+         * For B-compatible database with dolphin, there're some scenarios that
+         * maskPassword couldn't cover.
+         */
+        if (edata->sqlerrcode == ERRCODE_SYNTAX_ERROR || u_sess->attr.attr_sql.dolphin) {
             if (mask_string != NULL) {
                 truncate_identified_by(mask_string, strlen(mask_string));
             } else {
@@ -4015,6 +4418,8 @@ static char* mask_word(char* query_string, int query_len, const char* word, int 
     char* lower_string = (char*)palloc0(query_len + 1);
     rc = memcpy_s(lower_string, query_len, query_string, query_len);
     securec_check(rc, "\0", "\0");
+    bool truncate = false;
+    int set_password_len = 0;
 
     tolower_func(lower_string);
 
@@ -4036,16 +4441,30 @@ static char* mask_word(char* query_string, int query_len, const char* word, int 
         }
         token_len++;
     }
+
+    /* set password for user=password */
+    if (strncmp(token_ptr, "for", token_len) == 0) {
+        token_ptr += token_len;
+        set_password_len = token_len + 1;
+        for (int i = 0; i < query_len - head_len - token_len; i++) {
+            if (token_ptr[i] == '=') {
+                truncate = true;
+                break;
+            }
+            set_password_len++;
+        }
+    }
     tail_ptr = token_ptr + token_len;
     tail_len = query_len - head_len - token_len;
 
-    rc = memcpy_s(mask_string, query_len + mask_len + 1, query_string, head_len);
+    rc = memcpy_s(mask_string, query_len + mask_len + 1, query_string, head_len + set_password_len);
     securec_check(rc, "\0", "\0");
-    rc = memset_s(mask_string + head_len, query_len + mask_len + 1 - head_len, '*', mask_len);
+    rc = memset_s(mask_string + head_len + set_password_len, query_len + mask_len + 1 - head_len - set_password_len,
+                  '*', mask_len);
     securec_check(rc, "\0", "\0");
-    bool is_identified_by = ((strstr(word, " identified by ") == NULL) ? false : true);
-    if (is_identified_by) {
-        mask_string[head_len + mask_len] = '\0';
+    truncate = truncate || ((strstr(word, " identified by ") == NULL) ? false : true);
+    if (truncate) {
+        mask_string[head_len + mask_len + set_password_len] = '\0';
     } else {
         rc = memcpy_s(mask_string + head_len + mask_len, query_len + 1 - head_len, tail_ptr, tail_len);
         securec_check(rc, "\0", "\0");
@@ -4090,7 +4509,7 @@ static void truncate_identified_by(char* query_string, int query_len)
     pfree_ext(lower_string);
 }
 
-static char* mask_error_password(const char* query_string, int str_len)
+char* mask_error_password(const char* query_string, int str_len)
 {
     char* mask_string = NULL;
     errno_t rc = EOK;
@@ -4368,6 +4787,7 @@ static char* mask_Password_internal(const char* query_string)
      * 16 - create/alter subscription(CREATE_ALTER_SUBSCRIPTION)
      * 17 - set password (b compatibility)
      * 18 - create/alter user mapping
+     * 19 - grant usage on *.*(b compatibility, same as create/alter user)
      */
     int curStmtType = 0;
     int prevToken[5] = {0};
@@ -4662,7 +5082,7 @@ static char* mask_Password_internal(const char* query_string)
                         idx = 0;
                     break;
                 case REPLACE:
-                    isPassword = (curStmtType == 3 || curStmtType == 4 || curStmtType == 17);
+                    isPassword = (curStmtType == 3 || curStmtType == 4);
                     if (isPassword)
                         idx = 0;
                     break;
@@ -4964,6 +5384,9 @@ static char* mask_Password_internal(const char* query_string)
                             curStmtType = 0;
                         }
                         idx = 0;
+                    } else if (DB_IS_CMPT(B_FORMAT) && prevToken[1] == GRANT &&
+                        pg_strcasecmp(yylval.str, "usage") == 0) {
+                        curStmtType = GRANT_USAGE;
                     }
                     break;
                 case SCONST:
@@ -5079,6 +5502,11 @@ static char* mask_Password_internal(const char* query_string)
                         prevToken[1] = MAPPING;
                     }
                     break;
+                case GRANT:
+                    if (DB_IS_CMPT(B_FORMAT) && prevToken[0] == ';') {
+                        prevToken[1] = GRANT;
+                    }
+                    break;
                 default:
                     break;
             }
@@ -5106,6 +5534,39 @@ static char* mask_Password_internal(const char* query_string)
             }
             if (NULL != edata->internalquery) {
                 pfree_ext(edata->internalquery);
+            }
+            if (NULL != edata->sqlstate) {
+                pfree_ext(edata->sqlstate);
+            }
+            if (NULL != edata->class_origin) {
+                pfree_ext(edata->class_origin);
+            }
+            if (NULL != edata->subclass_origin) {
+                pfree_ext(edata->subclass_origin);
+            }
+            if (NULL != edata->cons_catalog) {
+                pfree_ext(edata->cons_catalog);
+            }
+            if (NULL != edata->cons_schema) {
+                pfree_ext(edata->cons_schema);
+            }
+            if (NULL != edata->cons_name) {
+                pfree_ext(edata->cons_name);
+            }
+            if (NULL != edata->catalog_name) {
+                pfree_ext(edata->catalog_name);
+            }
+            if (NULL != edata->schema_name) {
+                pfree_ext(edata->schema_name);
+            }
+            if (NULL != edata->table_name) {
+                pfree_ext(edata->table_name);
+            }
+            if (NULL != edata->column_name) {
+                pfree_ext(edata->column_name);
+            }
+            if (NULL != edata->cursor_name) {
+                pfree_ext(edata->cursor_name);
             }
             t_thrd.log_cxt.errordata_stack_depth--;
         }

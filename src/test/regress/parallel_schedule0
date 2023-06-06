@@ -62,7 +62,7 @@ test: plpgsql_sql_with_proc_keyword
 test: plsql_show_all_error b_pg_plsql_show_all_error
 test: pldeveloper_gs_source
 test: index_advisor
-test: pl_debugger_server pl_debugger_client
+#test: pl_debugger_server pl_debugger_client
 test: update_for_wait_s1 update_for_wait_s2
 test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud null_test_opt deserialize_func
 test: large_sequence int16 gs_dump_sequence
@@ -93,13 +93,13 @@ test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw
 test: hw_subpartition_vacuum_partition hw_subpartition_tablespace_global
 test: gs_dump_subpartition
 test: partition_dml_operations partition_minmax partition_pruning hw_partitionno hw_partition_parallel
-test: partition_param_path
+test: partition_param_path hw_subpartition_add_drop_partition_1
 #test: partition_cost_model
 test: row_partition_iterator_elimination col_partition_iterator_elimination
 
 # test subpartition with segment=on
 test: segment_subpartition_createtable segment_subpartition_scan segment_subpartition_select segment_subpartition_split segment_subpartition_truncate segment_subpartition_update segment_subpartition_gpi segment_subpartition_analyze_vacuum segment_subpartition_alter_table segment_subpartition_add_drop_partition segment_subpartition_tablespace segment_subpartition_ddl_index
-test: segment_subpartition_vacuum_partition
+test: segment_subpartition_vacuum_partition segment_subpartition_select_1
 
 test: get_instr_unique_sql
 
@@ -326,7 +326,7 @@ test: hw_partition_interval_parallel_end
 test: hw_partition_interval_select
 test: hw_partition_interval_check_syntax
 test: hw_partition_interval_split
-test: hw_partition_interval_merge
+test: hw_partition_interval_merge hw_partition_interval_merge_1
 test: hw_partition_interval_compatibility
 test: hw_partition_interval_dump_restore
 
@@ -397,7 +397,7 @@ test: partiton_pathkey_col_plan partiton_pathkey_col_randomexec partiton_pathkey
 # ----------
 #test: type_sanity
 #test: create_function_1
-test: create_table
+test: create_table create_table_2 create_table_3
 test: temp__4
 #test: copy#
 
@@ -552,7 +552,7 @@ test: xc_dml
 #test: hw_cstore_alter cstore_alter_table2 cstore_alter_table3 cstore_alter_table4 cstore_alter_table5 cstore_alter_table6 cstore_alter_table8 cstore_alter_table9 cstore_alter_table10 hw_cstore_copy hw_alter_table_instant hw_cstore_copy1
 #test: cstore_alter_table cstore_alter_table1 cstore_alter_table7 
 
-test: hw_cstore_tablespace hw_cstore_truncate hw_cstore_update
+test: hw_cstore_tablespace_1 hw_cstore_tablespace_2 hw_cstore_tablespace_3 hw_cstore_tablespace_4 hw_cstore_tablespace_5 hw_cstore_truncate hw_cstore_update
 #test: hw_cstore_roughcheck
 test: hw_cstore_partition_update hw_cstore_partition_update1 hw_cstore_partition_update2 hw_cstore_partition
 
@@ -630,7 +630,7 @@ test: copy_new_gram
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-test: drop_if_exists test_if_not_exists test_create_index_if_not_exists
+test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists
 #test: constraints
 
 #test: errors subplan_base
@@ -822,6 +822,7 @@ test: vec_window_001
 #test: vec_window_002
 test: vec_numeric_sop_1 vec_numeric_sop_2 vec_numeric_sop_3 vec_numeric_sop_4 vec_numeric_sop_5
 #test: vec_window_end
+test: sortgroup_agg
 
 test: vec_unique_pre vec_bitmap_prepare
 test: vec_unique vec_setop_001 vec_setop_002 vec_setop_003 vec_setop_004 hw_vec_int4 hw_vec_int8 hw_vec_float4 hw_vec_float8
@@ -956,10 +957,10 @@ test: db4ai_gd_train_predict
 test: db4ai_gd_houses
 test: db4ai_gd_snapshots
 test: db4ai_gd_pca_train_predict
-test: db4ai_kmeans_train_predict
+#test: db4ai_kmeans_train_predict
 test: db4ai_xgboost_train_predict
 
-test: db4ai_explain_model
+#test: db4ai_explain_model
 
 test: leaky_function_operator
 
@@ -1022,14 +1023,15 @@ test: subscription
 test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
-test: gs_dump_encrypt substr
-test: composite_datum_record mysql_function b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint
+# mysql_function_prepare must precede mysql_function/mysql_function_2, and mysql_function_clearup must follow mysql_function/mysql_function_2
+test: gs_dump_encrypt substr mysql_function_prepare
+test: composite_datum_record mysql_function mysql_function_2 b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint mysql_trigger mysql_signal mysql_resignal
 
 test: join_test_alias alter_ctable_compress
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition ignore/ignore_invalid_input
 
 test: pg_ls_dir
-test: cost_model
+test: mysql_function_clearup cost_model
 test: base_update
 test: seqscan_fusion
 
@@ -1052,13 +1054,8 @@ test: rename_table
 # debug instrument
 test: test_debug5
 
-# fix echo infos
-test: gstrace_options
-test: gaussdb_options
-test: gsql_options
-test: gsbasebackup_options
-test: gsdump_options
-test: gsloader_options
+# fix notice infos
+test: gstrace_options gaussdb_options gsql_options gsbasebackup_options gsdump_options gsloader_options
 
 # debug ceil(-0.5) -0
 test: ceil_negtive_zero

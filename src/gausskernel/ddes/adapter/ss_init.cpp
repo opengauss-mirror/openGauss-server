@@ -371,6 +371,7 @@ static void setDMSProfile(dms_profile_t* profile)
     profile->inst_map = 0;
     profile->enable_reform = (unsigned char)dms_attr->enable_reform;
     profile->load_balance_mode = 1; /* primary-standby */
+    profile->parallel_thread_num = dms_attr->parallel_thread_num;
 
     if (dms_attr->enable_ssl && g_instance.attr.attr_security.EnableSSL) {
         InitDmsSSL();
@@ -470,10 +471,17 @@ void DMSUninit()
     dms_uninit();
 }
 
+// order: DMS reform finish -> CBReformDoneNotify finish -> startup exit (if has)
 int32 DMSWaitReform()
 {
     uint32 has_offline; /* currently not used in openGauss */
-    return dms_wait_reform(&has_offline);
+    int ret = dms_wait_reform(&has_offline);
+    if (ret) {
+        while (g_instance.dms_cxt.SSReformInfo.in_reform) {
+            pg_usleep(5000L);
+        }
+    }
+    return ret;
 }
 
 static bool DMSReformCheckStartup()

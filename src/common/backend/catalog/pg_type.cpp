@@ -698,7 +698,7 @@ char* makeArrayTypeName(const char* typname, Oid typeNamespace)
         pfree_ext(arr);
 
         /*  if pass == INT_MAX then error report */
-        if ((pass + 1) < pass) {
+        if (pass == INT_MAX) {
             ereport(ERROR,
                 (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("could not form array type name for type \"%s\"", typname)));
             break;
