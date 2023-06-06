@@ -432,12 +432,6 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
     return ret;
 }
 
-/* currently not used in switchover, everything set in setPrimaryId */
-static void CBSetDbStandby(void *db_handle)
-{
-    /* nothing to do now, but need to implements callback interface */
-}
-
 static void ReleaseResource()
 {
     LWLockReleaseAll();
@@ -1884,7 +1878,6 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->switchover_demote = CBSwitchoverDemote;
     callback->switchover_promote_opengauss = CBSwitchoverPromote;
     callback->set_switchover_result = CBSwitchoverResult;
-    callback->set_db_standby = CBSetDbStandby;
     callback->db_is_primary = CBDbIsPrimary;
     callback->reform_done_notify = CBReformDoneNotify;
     callback->log_wait_flush = CBXLogWaitFlush;
