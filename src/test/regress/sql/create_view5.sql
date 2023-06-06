@@ -73,3 +73,10 @@ select * from
   cast(1+2 as int8) as i8;
 select pg_get_viewdef('tt20v', true);
 drop view tt20v;
+
+create table test_view_for_update_tbl (a int, b int);
+create view test_view_for_update_view1 as select * from test_view_for_update_tbl for key share;
+create view test_view_for_update_view2 as select * from test_view_for_update_tbl for share;
+create view test_view_for_update_view3 as select * from test_view_for_update_tbl for no key update;
+create view test_view_for_update_view4 as select * from test_view_for_update_tbl for update;
+drop table test_view_for_update_tbl cascade;
