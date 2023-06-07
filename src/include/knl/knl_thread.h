@@ -3339,6 +3339,7 @@ typedef struct knl_t_publication_context {
     /* Map used to remember which relation schemas we sent. */
     HTAB* RelationSyncCache;
     bool updateConninfoNeeded;
+    bool firstTimeSendConninfo;
 } knl_t_publication_context;
 
 typedef struct knl_t_dms_context {

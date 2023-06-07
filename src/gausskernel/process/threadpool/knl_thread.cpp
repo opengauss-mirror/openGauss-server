@@ -1084,6 +1084,7 @@ static void KnlTPublicationInit(knl_t_publication_context* publicationCxt)
     publicationCxt->publications_valid = false;
     publicationCxt->RelationSyncCache = NULL;
     publicationCxt->updateConninfoNeeded = false;
+    publicationCxt->firstTimeSendConninfo = false;
 }
 
 static void KnlTUndolauncherInit(knl_t_undolauncher_context* undolauncherCxt)

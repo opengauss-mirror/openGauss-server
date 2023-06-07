@@ -178,6 +178,7 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
         if (data->protocol_version >= LOGICALREP_CONNINFO_PROTO_VERSION_NUM) {
             t_thrd.publication_cxt.updateConninfoNeeded = true;
         }
+        t_thrd.publication_cxt.firstTimeSendConninfo = true;
         CacheRegisterThreadSyscacheCallback(PUBLICATIONOID, publication_invalidation_cb, (Datum)0);
 
         /* Initialize relation schema cache. */
@@ -235,7 +236,8 @@ static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *t
      * Send the newest connecttion information to the subscriber,
      * when the connection information about the standby changes.
      */
-    if (t_thrd.publication_cxt.updateConninfoNeeded && ReplconninfoChanged()) {
+    if ((t_thrd.publication_cxt.updateConninfoNeeded && ReplconninfoChanged()) ||
+        t_thrd.publication_cxt.firstTimeSendConninfo) {
         StringInfoData standbysInfo;
         initStringInfo(&standbysInfo);
 
@@ -245,6 +247,7 @@ static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *t
         OutputPluginWrite(ctx, true);
 
         FreeStringInfo(&standbysInfo);
+        t_thrd.publication_cxt.firstTimeSendConninfo = false;
     }
 }
 
