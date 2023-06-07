@@ -1084,6 +1084,9 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
     TransactionId safeLimit;
     TransactionId nextXid;
 
+    /* Recompute replication_slot_xmin before GetOldestXmin */
+    ReplicationSlotsComputeRequiredXmin(false);
+
     /*
      * We can always ignore processes running lazy vacuum.	This is because we
      * use these values only for deciding which tuples we must keep in the

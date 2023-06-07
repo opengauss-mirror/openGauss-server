@@ -381,6 +381,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ident_file                                       | string  |      |           | 
  idle_in_transaction_session_timeout              | integer | s    | 0         | 86400
  ignore_checksum_failure                          | bool    |      |           | 
+ ignore_feedback_xmin_window                      | integer | ms   | 0         | 2147483647
+ ignore_standby_lsn_window                        | integer | ms   | 0         | 2147483647
  ignore_system_indexes                            | bool    |      |           | 
  incremental_checkpoint_timeout                   | integer | s    | 1         | 3600
  instance_metric_retention_time                   | integer |      | 0         | 3650
