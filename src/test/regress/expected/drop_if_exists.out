@@ -132,11 +132,7 @@ DROP EXTENSION test_extension_exists;
 ERROR:  extension "test_extension_exists" does not exist
 DROP EXTENSION IF EXISTS test_extension_exists;
 NOTICE:  extension "test_extension_exists" does not exist, skipping
--- exists but doesn't support drop
-DROP EXTENSION plpgsql;
-ERROR:  EXTENSION is not yet supported.
-DROP EXTENSION IF EXISTS plpgsql;
-ERROR:  EXTENSION is not yet supported.
+\c regression
 -- functions
 DROP FUNCTION test_function_exists();
 ERROR:  function test_function_exists does not exist
