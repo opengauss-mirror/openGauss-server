@@ -1709,6 +1709,8 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     errno_t rc = memset_s(dms_cxt->msg_backup, sizeof(dms_cxt->msg_backup), 0, sizeof(dms_cxt->msg_backup));
     securec_check(rc, "\0", "\0");
     dms_cxt->flush_copy_get_page_failed = false;
+    dms_cxt->SSTxnStatusHash = NULL;
+    dms_cxt->SSTxnStatusLRU = NULL;
 }
 
 static void knl_t_ondemand_xlog_copy_context_init(knl_t_ondemand_xlog_copy_context *ondemand_xlog_copy_cxt)

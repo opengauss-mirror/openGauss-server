@@ -220,6 +220,7 @@ static bool check_ss_enable_ondemand_recovery(bool* newval, void** extra, GucSou
 #ifdef USE_ASSERT_CHECKING
 static void assign_ss_enable_verify_page(bool newval, void *extra);
 #endif
+static bool check_ss_txnstatus_cache_size(int* newval, void** extra, GucSource source);
 
 #ifndef ENABLE_MULTIPLE_NODES
 static void assign_dcf_election_timeout(int newval, void* extra);
@@ -3667,6 +3668,20 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"ss_txnstatus_cache_size",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Number of entries in txnstatus_cache"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.txnstatus_cache_size,
+            131072,
+            0,
+            524288,
+            check_ss_txnstatus_cache_size,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -6106,6 +6121,24 @@ static void assign_ss_enable_verify_page(bool newval, void *extra)
     g_instance.attr.attr_storage.dms_attr.enable_verify_page = newval;
 }
 #endif
+
+static bool check_ss_txnstatus_cache_size(int* newval, void** extra, GucSource source)
+{
+    if (*newval == 0) {
+        return true;
+    }
+
+    const int minval = 8192;
+    if (*newval < minval) {
+        ereport(FATAL, (errmsg("ss_txnstatus_cache_size set as %d, should be >8192 or 0.", *newval)));
+    }
+
+    if (*newval % NUM_TXNSTATUS_CACHE_PARTITIONS != 0) {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+            errmsg("ss_txnstatus_cache_size should be multiple of partition number 256.")));
+    }
+    return true;
+}
 
 #ifndef ENABLE_MULTIPLE_NODES
 

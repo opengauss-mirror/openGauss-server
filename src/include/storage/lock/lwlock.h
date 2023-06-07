@@ -148,6 +148,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* Number of standby statement hsitory needed */
 #define NUM_STANDBY_STMTHIST_PARTITIONS 2
 
+/* Number of partitions of the txnstatus mapping hashtable */
+#define NUM_TXNSTATUS_CACHE_PARTITIONS 256
+
 /* 
  * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
 */
@@ -194,8 +197,11 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* standby statement history */
 #define FirstStandbyStmtHistLock (FirstGPRCMappingLock + NUM_GPRC_PARTITIONS)
 #define FirstXlogTrackLock (FirstStandbyStmtHistLock + NUM_STANDBY_STMTHIST_PARTITIONS)
+
+/* txn status cache */
+#define FirstTxnStatusCacheLock (FirstXlogTrackLock + NUM_XLOG_TRACK_PARTITIONS)
 /* must be last: */
-#define NumFixedLWLocks (FirstXlogTrackLock + NUM_XLOG_TRACK_PARTITIONS)
+#define NumFixedLWLocks (FirstTxnStatusCacheLock + NUM_TXNSTATUS_CACHE_PARTITIONS)
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
  *
@@ -275,6 +281,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_AUDIT_INDEX_WAIT,
     LWTRANCHE_PCA_BUFFER_CONTENT,
     LWTRANCHE_XLOG_TRACK_PARTITION,
+    LWTRANCHE_SS_TXNSTATUS_PARTITION,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

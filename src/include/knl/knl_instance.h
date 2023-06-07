@@ -1214,6 +1214,7 @@ typedef struct knl_g_dms_context {
     bool dw_init;
     char dmsInstAddr[MAX_REPLNODE_NUM][DMS_MAX_IP_LEN];
     char conninfo[MAXPGPATH];
+    ss_dfx_stats_t SSDFxStats;
 } knl_g_dms_context;
 
 typedef struct knl_instance_context {

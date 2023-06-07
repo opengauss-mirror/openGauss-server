@@ -35,10 +35,12 @@
 #define ENABLE_DMS false
 #define ENABLE_REFORM false
 #define ENABLE_VERIFY_PAGE_VERSION false
+#define ENABLE_SS_TXNSTATUS_CACHE false
 #else
 #define ENABLE_DMS (g_instance.attr.attr_storage.dms_attr.enable_dms && !IsInitdb)
 #define ENABLE_REFORM (g_instance.attr.attr_storage.dms_attr.enable_reform)
 #define ENABLE_VERIFY_PAGE_VERSION (g_instance.attr.attr_storage.dms_attr.enable_verify_page)
+#define ENABLE_SS_TXNSTATUS_CACHE (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.txnstatus_cache_size > 0)
 #endif
 
 #define SS_REFORM_REFORMER                                                  \
@@ -237,5 +239,15 @@ typedef enum SSOndemandRequestRedoStatus {
     ONDEMAND_REDO_TIMEOUT
 } SSOndemandRequestRedoStatus;
 
+/* consider DFX stats reset were node role to change */
+typedef struct ss_dfx_stats_t {
+    uint64 txnstatus_varcache_gets;
+    uint64 txnstatus_hashcache_gets;
+    uint64 txnstatus_network_io_gets;
+    uint64 txnstatus_total_niogets_time;
+    uint64 txnstatus_total_hcgets_time;
+    uint64 txnstatus_total_evictions;
+    uint64 txnstatus_total_eviction_refcnt;
+} ss_dfx_stats_t;
 
 #endif
