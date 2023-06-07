@@ -890,7 +890,8 @@ void partition_create_new_storage(Relation rel, Partition part, const RelFileNod
     /*
      * Schedule unlinking of the old storage at transaction commit.
      */
-    if (!u_sess->attr.attr_storage.enable_recyclebin) {
+    if (!u_sess->attr.attr_storage.enable_recyclebin ||
+        !RelationIsTableAccessMethodUStoreType(rel->rd_options)) {
         PartitionDropStorage(rel, part);
     }
 }
