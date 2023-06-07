@@ -385,6 +385,7 @@ typedef struct PlannerInfo {
     bool hasPseudoConstantQuals; /* true if any RestrictInfo has
                                   * pseudoconstant = true */
     bool hasRecursion;           /* true if planning a recursive WITH item */
+    bool consider_sortgroup_agg;  /*ture if consider to use SORT GROUP agg */
 
     /* Note: qualSecurityLevel is zero if there are no securityQuals */
     Index qualSecurityLevel; /* minimum security_level for quals */
@@ -465,6 +466,7 @@ typedef struct PlannerInfo {
     Bitmapset *param_upper;
 	
 	bool hasRownumQual;
+    bool hasRownumCheck;
     List *origin_tlist;
     struct PlannerTargets *planner_targets;
 } PlannerInfo;

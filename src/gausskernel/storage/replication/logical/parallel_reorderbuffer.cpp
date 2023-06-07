@@ -75,9 +75,6 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *rb, Paral
     XLogSegNo *segno, int slotId);
 static void ParallelReorderBufferRestoreChange(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn, char *data,
     int slotId);
-void ParallelReorderBufferCleanupTXN(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn,
-    XLogRecPtr lsn = InvalidXLogRecPtr);
-
 
 /* Parallel decoding batch sending unit length is set to 1MB. */
 static const int g_batch_unit_length = 1 * 1024 * 1024;
@@ -1496,8 +1493,8 @@ static void ParallelOutputBegin(StringInfo out, logicalLog *change, ParallelDeco
 {
     if (pdata->pOptions.decode_style == 'b') {
         int curPos = out->len;
-        const uint32 beginBaseLen = 25; /* this length does not include the seperator 'P' */
-        pq_sendint32(out, beginBaseLen);
+        uint32 beginLen = 25; /* this length does not include the seperator 'P' */
+        pq_sendint32(out, beginLen);
         pq_sendint64(out, txn->first_lsn);
         appendStringInfoChar(out, 'B');
         pq_sendint64(out, change->csn);
@@ -1507,10 +1504,17 @@ static void ParallelOutputBegin(StringInfo out, logicalLog *change, ParallelDeco
             const char *timeStamp = timestamptz_to_str(txn->commit_time);
             pq_sendint32(out, (uint32)(strlen(timeStamp)));
             appendStringInfoString(out, timeStamp);
-            uint32 beginLen = htonl(beginBaseLen + 1 + sizeof(uint32) + strlen(timeStamp));
-            errno_t rc = memcpy_s(out->data + curPos, sizeof(uint32), &beginLen, sizeof(uint32));
-            securec_check(rc, "", "");
+            beginLen += 1 + sizeof(uint32) + strlen(timeStamp);
         }
+        if (pdata->pOptions.include_originid) {
+            appendStringInfoChar(out, 'O');
+            pq_sendint32(out, txn->origin_id);
+            beginLen += 1 + sizeof(uint32);
+        }
+
+        beginLen = htonl(beginLen);
+        errno_t rc = memcpy_s(out->data + curPos, sizeof(uint32), &beginLen, sizeof(uint32));
+        securec_check(rc, "", "");
     } else {
         int curPos = out->len;
         uint32 beginLen = 0;
@@ -1524,6 +1528,9 @@ static void ParallelOutputBegin(StringInfo out, logicalLog *change, ParallelDeco
         if (pdata->pOptions.include_timestamp) {
             const char *timeStamp = timestamptz_to_str(txn->commit_time);
             appendStringInfo(out, " commit_time: %s", timeStamp);
+        }
+        if (pdata->pOptions.include_originid) {
+            appendStringInfo(out, " origin_id: %d", txn->origin_id);
         }
         if (batchSending) {
             beginLen = htonl((uint32)(out->len - curPos) - (uint32)sizeof(uint32));

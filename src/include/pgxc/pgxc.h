@@ -48,7 +48,11 @@ typedef enum {
 #define IS_SERVICE_NODE (g_instance.role == VCOORDINATOR || g_instance.role == VSINGLENODE)
 
 #define IsConnFromApp() (u_sess->attr.attr_common.remoteConnType == REMOTE_CONN_APP)
+#ifdef ENABLE_MULTIPLE_NODES
 #define IsConnFromCoord() (u_sess->attr.attr_common.remoteConnType == REMOTE_CONN_COORD)
+#else
+#define IsConnFromCoord() false
+#endif
 #define IsConnFromDatanode() (u_sess->attr.attr_common.remoteConnType == REMOTE_CONN_DATANODE)
 #define IsConnFromGtm() (u_sess->attr.attr_common.remoteConnType == REMOTE_CONN_GTM)
 #define IsConnFromGtmProxy() (u_sess->attr.attr_common.remoteConnType == REMOTE_CONN_GTM_PROXY)

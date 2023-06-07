@@ -103,8 +103,8 @@ select id,operation,options,object_name,object_type,projection from plan_table o
 ----+--------------------------------+----------+-------------------+-------------+-----------------------------------
   1 | ROW ADAPTER                    |          |                   |             | e.empno, e.ename, e.sal, d.dname
   2 | VECTOR SONIC HASH JOIN         | INNER    |                   |             | e.empno, e.ename, e.sal, d.dname
-  3 | VECTOR ADAPTER(TYPE: BATCH MOD |          |                   |             | d.deptno, d.dname, d.loc
-  4 | TABLE ACCESS                   | SEQ SCAN | force_vector_dept | TABLE       | d.deptno, d.dname, d.loc
+  3 | VECTOR ADAPTER(TYPE: BATCH MOD |          |                   |             | d.dname, d.deptno
+  4 | TABLE ACCESS                   | SEQ SCAN | force_vector_dept | TABLE       | d.dname, d.deptno
   5 | VECTOR ADAPTER(TYPE: BATCH MOD |          |                   |             | e.empno, e.ename, e.sal, e.deptno
   6 | TABLE ACCESS                   | SEQ SCAN | force_vector_emp  | TABLE       | e.empno, e.ename, e.sal, e.deptno
 (6 rows)

@@ -1652,6 +1652,7 @@ static bool _equalTransactionStmt(const TransactionStmt* a, const TransactionStm
     COMPARE_SCALAR_FIELD(kind);
     COMPARE_NODE_FIELD(options);
     COMPARE_STRING_FIELD(gid);
+    COMPARE_SCALAR_FIELD(with_snapshot);
 
     return true;
 }
@@ -2155,6 +2156,13 @@ static bool _equalIndexHintRelationData (const IndexHintRelationData* a, const I
     return true;
 }
 
+static bool _equalFunctionSources(const FunctionSources* a, const FunctionSources* b)
+{
+    COMPARE_STRING_FIELD(headerSrc);
+    COMPARE_STRING_FIELD(bodySrc);
+    return true;
+}
+
 static bool _equalCreatePolicyLabelStmt(const CreatePolicyLabelStmt* a, const CreatePolicyLabelStmt* b)
 {
     COMPARE_SCALAR_FIELD(if_not_exists);
@@ -2271,6 +2279,7 @@ static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* 
     COMPARE_SCALAR_FIELD(if_not_exists);
     COMPARE_STRING_FIELD(trgordername);
     COMPARE_SCALAR_FIELD(is_follows);
+    COMPARE_STRING_FIELD(schemaname);
 
     return true;
 }
@@ -4434,7 +4443,9 @@ bool equal(const void* a, const void* b)
         case T_IndexHintRelationData:
             retval = _equalIndexHintRelationData((IndexHintRelationData *)a, (IndexHintRelationData *)b);
             break;
-
+        case T_FunctionSources:
+            retval = _equalFunctionSources((const FunctionSources *)a, (const FunctionSources *)b);
+            break;
 
         default:
             ereport(ERROR,

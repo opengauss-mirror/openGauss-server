@@ -274,6 +274,14 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
         if (!systemDBA_arg(curuser) && proownerid != curuser)
             ereport (ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), 
                     errmsg("only system administrator can user definer other user ,others user definer self")));
+
+        if (stmt->schemaname != NULL) {
+            Oid relNamespaceId = RelationGetNamespace(rel);
+            if (relNamespaceId != get_namespace_oid(stmt->schemaname, false)) {
+                ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("trigger in wrong schema: \"%s\".\"%s\"", stmt->schemaname, stmt->trigname)));
+            }
+        }
     }
     /* permission checks */
     if (!isInternal) {
@@ -1445,6 +1453,17 @@ ObjectAddress renametrig(RenameStmt* stmt)
 
     /* Have lock already, so just need to build relcache entry. */
     targetrel = relation_open(relid, NoLock);
+
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        RangeVar* trigname = (RangeVar*)lfirst(list_head(stmt->renameTargetList));
+        if (trigname->schemaname != NULL) {
+            Oid relNamespaceId = RelationGetNamespace(targetrel);
+            if (relNamespaceId != get_namespace_oid(trigname->schemaname, false)) {
+                ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("trigger in wrong schema: \"%s\".\"%s\"", trigname->schemaname, stmt->subname)));
+            }
+        }
+    }
 
     /*
      * Scan pg_trigger twice for existing triggers on relation.  We do this in
@@ -3037,9 +3056,9 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
 
         UHeapTupleData uheaptupdata;
         utuple = &uheaptupdata;
-        struct {
+        union {
             UHeapDiskTupleData hdr;
-            char data[MaxPossibleUHeapTupleSize];
+            char data[MaxPossibleUHeapTupleSize + sizeof(UHeapDiskTupleData)];
         } tbuf;
 
         errno_t errorNo = EOK;
@@ -3182,7 +3201,7 @@ ltrmark:
                 lockmode,
                 LockWaitBlock,
                 &tmfd,
-                false,       // fake params below are for uheap implementation
+                true,       // fake params below are for uheap implementation
                 false, false, NULL, NULL, false);
             switch (test) {
                 case TM_SelfUpdated:
@@ -4024,13 +4043,13 @@ static void AfterTriggerExecute(AfterTriggerEvent event, Relation rel, Oid oldPa
     HeapTuple rs_tuple2 = NULL;
     bool is_remote_relation = (RelationGetLocInfo(rel) != NULL);
 #endif
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf1 = {0};
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf2 = {0};
 
     /*

@@ -707,42 +707,6 @@ StmtResult *execute_stmt(const char *query_string, bool need_result)
     return (StmtResult *)receiver;
 }
 
-StmtResult *execute_select_into_varlist(Query *parsetree)
-{
-    int16 format = 0;
-    DestReceiver *receiver = NULL;
-
-    PG_TRY();
-    {
-        Portal portal = NULL;
-
-        List *querytree_list = NULL;
-        List *plantree_list = NULL;
-
-        const char *commandTag = CreateCommandTag((Node *)parsetree);
-
-        querytree_list = pg_rewrite_query(parsetree);
-        plantree_list = pg_plan_queries(querytree_list, 0, NULL);
-
-        portal = CreatePortal("SELECT_INTO_STMT", true, true);
-        portal->visible = false;
-        PortalDefineQuery(portal, NULL, "SELECT_INTO_STMT", commandTag, plantree_list, NULL);
-        receiver = create_stmt_receiver();
-
-        PortalStart(portal, NULL, 0, NULL);
-        PortalSetResultFormat(portal, 1, &format);
-        (void)PortalRun(portal, FETCH_ALL, true, receiver, receiver, NULL);
-        PortalDrop(portal, false);
-    }
-    PG_CATCH();
-    {
-        PG_RE_THROW();
-    }
-    PG_END_TRY();
-
-    return (StmtResult *)receiver;
-}
-
 /* create_stmt_receiver
  *
  * The existing code cannot store the execution results of SQL statements to the list structure.

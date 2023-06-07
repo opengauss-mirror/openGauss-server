@@ -314,6 +314,9 @@ void GetPlanNodePlainText(
         case T_Sort:
             *pname = *sname = *pt_operation = "Sort";
             break;
+        case T_SortGroup:
+            *pname = *sname = *pt_operation = "Group Sort";
+            break;
         case T_VecSort:
             *pname = *sname = *pt_operation = "Vector Sort";
             break;
@@ -337,6 +340,10 @@ void GetPlanNodePlainText(
                 case AGG_HASHED:
                     *pname = "HashAggregate";
                     *strategy = *pt_options = "Hashed";
+                    break;
+                case AGG_SORT_GROUP:
+                    *pname = "GroupAggregate";
+                    *strategy = *pt_options = "Sorted Group";
                     break;
                 default:
                     *pname = "Aggregate ?\?\?";

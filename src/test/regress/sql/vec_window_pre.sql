@@ -57,7 +57,6 @@ insert into vector_window_engine.row_window_table_02 select * from vector_window
 insert into vector_window_engine.row_window_table_02 select * from vector_window_engine.row_window_table_02;
 insert into vector_window_engine.row_window_table_02 select * from vector_window_engine.row_window_table_02;
 insert into vector_window_engine.row_window_table_02 select * from vector_window_engine.row_window_table_02;
-insert into vector_window_engine.row_window_table_02 select * from vector_window_engine.row_window_table_02;
 
 insert into vector_window_engine.row_window_table_02 values('develop',3800,'2007-08-08');
 insert into vector_window_engine.row_window_table_02 values('develop',3800,'2007-08-08');

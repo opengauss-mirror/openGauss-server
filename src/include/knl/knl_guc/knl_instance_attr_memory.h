@@ -47,6 +47,7 @@ typedef struct knl_instance_attr_memory {
     int max_process_memory;
     bool enable_memory_context_check_debug;
     int global_syscache_threshold;
+    bool disable_memory_stats;
 } knl_instance_attr_memory;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_MEMORY_H_ */

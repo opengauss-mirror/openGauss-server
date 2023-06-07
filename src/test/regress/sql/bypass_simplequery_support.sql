@@ -430,6 +430,33 @@ reset explain_perf_mode;
 
 drop table test cascade;
 
+--test enable_opfusion_reuse
+set enable_opfusion_reuse=on;
+create table test_reuse_t1(a int,b int,c text);
+create table test_reuse_t2(a int,b int,c text,d text);
+
+begin;
+insert into test_reuse_t1 values(1,1,'2');
+insert into test_reuse_t1 values(2,3,'2');
+insert into test_reuse_t2 values(1,2,'3','4');
+insert into test_reuse_t1 values(1,3,'4');
+select * from test_reuse_t1;
+commit;
+
+truncate test_reuse_t1;
+truncate test_reuse_t2;
+
+begin;
+insert into test_reuse_t1 values(1,1,'2');
+alter table test_reuse_t1 add column colf int;
+insert into test_reuse_t1 values(1,1,'2');
+select * from test_reuse_t1;
+commit;
+
+drop table test_reuse_t1;
+drop table test_reuse_t2;
+reset enable_opfusion_reuse;
+
 -- end
 reset track_activities;
 set track_sql_count = off;

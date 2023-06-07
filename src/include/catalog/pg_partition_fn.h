@@ -168,6 +168,20 @@ extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
 typedef void (*PartitionNameGetPartidCallback) (Oid partitioned_relation, const char *partition_name, Oid partId,
     Oid oldPartId, char partition_type, void *callback_arg, LOCKMODE callbackobj_lockMode);
 
+/* some partition expr key info */
+struct PartitionExprKeyInfo {
+    bool partkeyexprIsNull;
+    bool partkeyIsFunc;
+    char* partExprKeyStr;
+
+    PartitionExprKeyInfo()
+    {
+        partkeyexprIsNull = true;
+        partkeyIsFunc = false;
+        partExprKeyStr = NULL;
+    }
+};
+
 /* some pg_partition tuple info */
 struct PartitionTupleInfo {
     int2vector* pkey;
@@ -176,10 +190,9 @@ struct PartitionTupleInfo {
     Datum boundaries;
     Datum transitionPoint;
     Datum reloptions;
-    bool partkeyexprIsNull;
-    bool partkeyIsFunc;
     int partitionno;
     int subpartitionno;
+    PartitionExprKeyInfo partexprkeyinfo;
 
     PartitionTupleInfo()
     {
@@ -189,10 +202,9 @@ struct PartitionTupleInfo {
         boundaries = (Datum)0;
         transitionPoint = (Datum)0;
         reloptions = (Datum)0;
-        partkeyexprIsNull = true;
-        partkeyIsFunc = false;
         partitionno = INVALID_PARTITION_NO;
         subpartitionno = INVALID_PARTITION_NO;
+        partexprkeyinfo = PartitionExprKeyInfo();
     }
 };
 
@@ -236,7 +248,6 @@ extern List *searchPgPartitionByParentId(char parttype, Oid parentId, ScanDirect
 extern List *searchPgSubPartitionByParentId(char parttype, List *parentOids,
     ScanDirection direction = ForwardScanDirection);
 extern void freePartList(List *l);
-extern void freeSubPartList(List* plist);
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
 extern Oid GetBaseRelOidOfParition(Relation relation);
 
@@ -257,7 +268,7 @@ extern void  releasePartitionList(Relation relation, List** partList, LOCKMODE l
 extern void  releaseSubPartitionList(Relation relation, List** partList, LOCKMODE lockmode);
 extern void releasePartitionOidList(List** partList);
 extern void ReleaseSubPartitionOidList(List** partList);
-extern bool PartExprKeyIsNull(Relation rel, Relation partitionRel);
+extern bool PartExprKeyIsNull(Relation rel, Relation partitionRel, char** partExprKeyStr = NULL);
 
 #endif
 

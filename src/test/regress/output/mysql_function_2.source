@@ -1,0 +1,633 @@
+\c  mysqlfunction
+create schema mysqlschema;
+grant ALL  on SCHEMA mysqlschema to PUBLIC;
+create user usr1 password '12345@abc';
+create user usr2 password '12345@abc';
+--test security--general user  create definer function
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -f @abs_srcdir@/sql/mysql_function_test.sql 
+gsql:@abs_srcdir@/sql/mysql_function_test.sql:2: NOTICE:  function mysqlschema.definer() does not exist, skipping
+DROP PROCEDURE
+gsql:@abs_srcdir@/sql/mysql_function_test.sql:3: NOTICE:  function mysqlschema.invoker() does not exist, skipping
+DROP PROCEDURE
+CREATE PROCEDURE
+CREATE PROCEDURE
+--? .*
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+--revoke execute from public
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "revoke EXECUTE on procedure mysqlschema.definer() from public;revoke EXECUTE on procedure mysqlschema.invoker() from public; select mysqlschema.definer(); select mysqlschema.invoker()"  
+REVOKE
+REVOKE
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+--revoke execute from usr1
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "revoke EXECUTE on procedure mysqlschema.definer() from usr1;revoke EXECUTE on procedure mysqlschema.invoker() from usr1; select mysqlschema.definer(); select mysqlschema.invoker()"  
+REVOKE
+REVOKE
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+--revoke execute from usr2
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "revoke EXECUTE on procedure mysqlschema.definer() from usr2;revoke EXECUTE on procedure mysqlschema.invoker() from usr2; select mysqlschema.definer(); select mysqlschema.invoker()"  
+REVOKE
+REVOKE
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+--grant execute from usr1
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "grant EXECUTE on procedure mysqlschema.definer() to usr1;grant EXECUTE on procedure mysqlschema.invoker() to usr1; select mysqlschema.definer(); select mysqlschema.invoker()"  
+GRANT
+GRANT
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+--grant execute from usr2
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "grant EXECUTE on procedure mysqlschema.definer() to usr2;grant EXECUTE on procedure mysqlschema.invoker() to usr2; select mysqlschema.definer(); select mysqlschema.invoker()"  
+GRANT
+GRANT
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+--revoke execute from usr1
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "revoke EXECUTE on procedure mysqlschema.definer() from usr1;revoke EXECUTE on procedure mysqlschema.invoker() from usr1; select mysqlschema.definer(); select mysqlschema.invoker()"  
+REVOKE
+REVOKE
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+--test security--super user create definer function
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -f @abs_srcdir@/sql/mysql_function_test.sql  
+DROP PROCEDURE
+DROP PROCEDURE
+CREATE PROCEDURE
+CREATE PROCEDURE
+--? .*
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+--revoke execute from public
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "revoke EXECUTE on procedure mysqlschema.definer() from public;revoke EXECUTE on procedure mysqlschema.invoker() from public; select mysqlschema.definer(); select mysqlschema.invoker()"  
+REVOKE
+REVOKE
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+--revoke execute from usr1
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "revoke EXECUTE on procedure mysqlschema.definer() from usr1;revoke EXECUTE on procedure mysqlschema.invoker() from usr1; select mysqlschema.definer(); select mysqlschema.invoker()"  
+REVOKE
+REVOKE
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+--revoke execute from usr2
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "revoke EXECUTE on procedure mysqlschema.definer() from usr2;revoke EXECUTE on procedure mysqlschema.invoker() from usr2; select mysqlschema.definer(); select mysqlschema.invoker()"  
+REVOKE
+REVOKE
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+--grant execute from usr1
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "grant EXECUTE on procedure mysqlschema.definer() to usr1;grant EXECUTE on procedure mysqlschema.invoker() to usr1; select mysqlschema.definer(); select mysqlschema.invoker()"  
+GRANT
+GRANT
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+ERROR:  permission denied for function definer
+DETAIL:  N/A
+CONTEXT:  referenced column: definer
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+--grant execute from usr2
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "grant EXECUTE on procedure mysqlschema.definer() to usr2;grant EXECUTE on procedure mysqlschema.invoker() to usr2; select mysqlschema.definer(); select mysqlschema.invoker()"  
+GRANT
+GRANT
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+--revoke execute from usr1
+--super user opengauss execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction  -c "revoke EXECUTE on procedure mysqlschema.definer() from usr1;revoke EXECUTE on procedure mysqlschema.invoker() from usr1; select mysqlschema.definer(); select mysqlschema.invoker()"  
+REVOKE
+REVOKE
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+
+-- usr1 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr1 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"  
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+ERROR:  permission denied for function invoker
+DETAIL:  N/A
+CONTEXT:  referenced column: invoker
+-- usr2 execute
+\! @abs_bindir@/gsql -r -p @portstring@ -d mysqlfunction -U usr2 -W '12345@abc' -c "select mysqlschema.definer(); select mysqlschema.invoker()"   
+INFO:  create definer procedure.
+CONTEXT:  referenced column: definer
+ definer 
+---------
+ 
+(1 row)
+
+INFO:  create invoker procedure.
+CONTEXT:  referenced column: invoker
+ invoker 
+---------
+ 
+(1 row)
+

@@ -4,34 +4,59 @@ show sql_compatibility;
  A
 (1 row)
 
+select short_desc from pg_settings where name = 'b_compatibility_user_host_auth';
+                                    short_desc                                     
+-----------------------------------------------------------------------------------
+ Enable the feature that supported username as user@host, 'user'@'host' and 'user'
+(1 row)
+
+select extra_desc from pg_settings where name = 'b_compatibility_user_host_auth';
+                         extra_desc                          
+-------------------------------------------------------------
+ It affected in DDL scenario and the connecting DB scenario.
+(1 row)
+
 create user 'test_user_host'@'%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 create user 'test_user_host'@'127.%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 create user 'test_user_host'@'127.0.0.%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 create user 'test_user_host'@'127.0.%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 create user 'test_user_host%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  syntax error at or near "test_user_host%"
+LINE 1: create user 'test_user_host%' password 'test123@';
+                    ^
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 create database user_host_db dbcompatibility 'B';
 \c user_host_db;
-set test_user_host = off;
+set b_compatibility_user_host_auth = off;
 create user 'test_user_host'@'%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 create user 'test_user_host'@'127.%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 create user 'test_user_host'@'127.0.0.%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 create user 'test_user_host'@'127.0.%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 create user 'test_user_host%' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
+ERROR:  syntax error at or near "test_user_host%"
+LINE 1: create user 'test_user_host%' password 'test123@';
+                    ^
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
-ERROR:  user@host is only supported in b database when the test_user_host is on
-set test_user_host = on;
+ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
+set b_compatibility_user_host_auth = on;
+CREATE USER 'sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc'@'%' PASSWORD 'test123@';
+ERROR:  String sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc@% is too long for user name (should be no longer than 64)
+CREATE USER 'sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc' PASSWORD 'test123@';
+ERROR:  String sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc is too long for user name (should be no longer than 64)
+CREATE USER sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfkvjhsdkfu@127.0.0.1 PASSWORD 'test123@';
+NOTICE:  identifier "sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfkvjhsdkfu" will be truncated to "sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfkvjhsdk"
+ERROR:  String sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfkvjhsdk@127.0.0.1 is too long for user name (should be no longer than 64)
+CREATE USER 'da@localhost'@'%' PASSWORD 'test123@';
+ERROR:  @ can't be allowed in username
 create user if not exists 'test_user_host'@'%' password 'test123@';
 alter user 'test_user_host'@'%' with account lock;
 alter user 'test_user_host'@'%' password 'test1234@';
@@ -71,6 +96,7 @@ create table test1(a int);
 alter table test1 owner to 'test_user_host'@'%';
 GRANT ALL PRIVILEGES TO 'test_user_host'@'%';
 REVOKE ALL PRIVILEGES FROM 'test_user_host'@'%';
+ALTER USER 'test_user_host'@'%' password 'test@123';
 ALTER USER 'test_user_host'@'%' RENAME TO 'test_user_host'@'1%';
 CREATE  DEFINER='test_user_host'@'127.0.%' FUNCTION test_func(integer, integer) RETURNS integer SECURITY INVOKER
 AS 'select $1 + $2;'

@@ -3247,5 +3247,14 @@ alter table t1 add f6 int generated always as (f1 * 10) stored, add f7 text defa
 select * from t1;
 drop table if exists t1 cascade;
 
+drop table if exists t1 cascade;
+create table t1(f1 int comment 'f1 is int', f2 varchar(20), f3 timestamp comment 'f3 is timestamp', f4 bit(8), f5 bool comment 'f5 is boolean');
+SELECT pg_get_tabledef('t1');
+alter table t1 add f6 int generated always as (f1 * 10) stored, add f7 text default '7' first, add f8 int primary key auto_increment after f2;
+SELECT pg_get_tabledef('t1');
+alter table t1 modify f1 int after f3, modify f5 bool first, modify f3 timestamp after f4;
+SELECT pg_get_tabledef('t1');
+drop table if exists t1 cascade;
+
 \c postgres
 drop database test_first_after_B;

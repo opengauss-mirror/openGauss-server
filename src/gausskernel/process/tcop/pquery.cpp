@@ -1923,7 +1923,7 @@ static void PortalRunMulti(
         AssertEreport(
             PortalGetHeapMemory(portal) == CurrentMemoryContext, MOD_EXECUTOR, "Memory context is not consistant");
 
-        MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
+        MemoryContextDeleteChildren(PortalGetHeapMemory(portal), NULL);
     }
 
     /* Pop the snapshot if we pushed one. */

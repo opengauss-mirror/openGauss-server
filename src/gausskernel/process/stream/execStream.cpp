@@ -352,13 +352,13 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     scanLoc = (int*)palloc0(sizeof(int) * consumerNum);
 
     /* Init data status. */
-    dataStatus = (DataStatus**)palloc0(sizeof(DataStatus*) * consumerNum);
-    is_connect_end = (bool**)palloc0(sizeof(bool*) * consumerNum);
-    messages = (StringInfo**)palloc0(sizeof(StringInfo*) * consumerNum);
+    dataStatus = (DataStatus**)palloc(sizeof(DataStatus*) * consumerNum);
+    is_connect_end = (bool**)palloc(sizeof(bool*) * consumerNum);
+    messages = (StringInfo**)palloc(sizeof(StringInfo*) * consumerNum);
     for (int i = 0; i < consumerNum; i++) {
-        dataStatus[i] = (DataStatus*)palloc0(sizeof(DataStatus) * producerNum);
-        is_connect_end[i] = (bool*)palloc0(sizeof(bool) * producerNum);
-        messages[i] = (StringInfo*)palloc0(sizeof(StringInfo) * producerNum);
+        dataStatus[i] = (DataStatus*)palloc(sizeof(DataStatus) * producerNum);
+        is_connect_end[i] = (bool*)palloc(sizeof(bool) * producerNum);
+        messages[i] = (StringInfo*)palloc(sizeof(StringInfo) * producerNum);
         for (int j = 0; j < producerNum; j++) {
             dataStatus[i][j] = DATA_EMPTY;
             is_connect_end[i][j] = false;
@@ -369,12 +369,12 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
 
     /* Init shared batches or tuples */
     if (IsA((Plan*)streamNode, VecStream)) {
-        sharedBatches = (VectorBatch***)palloc0(sizeof(VectorBatch**) * consumerNum);
+        sharedBatches = (VectorBatch***)palloc(sizeof(VectorBatch**) * consumerNum);
         for (int i = 0; i < consumerNum; i++) {
             sharedBatches[i] = (VectorBatch**)palloc0(sizeof(VectorBatch*) * producerNum);
         }
     } else {
-        sharedTuples = (TupleVector***)palloc0(sizeof(TupleVector**) * consumerNum);
+        sharedTuples = (TupleVector***)palloc(sizeof(TupleVector**) * consumerNum);
         for (int i = 0; i < consumerNum; i++) {
             sharedTuples[i] = (TupleVector**)palloc0(sizeof(TupleVector*) * producerNum);
         }

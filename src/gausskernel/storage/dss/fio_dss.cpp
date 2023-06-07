@@ -705,6 +705,25 @@ int dss_remove_dev(const char *name)
     }
 }
 
+int dss_get_addr(int handle, long long offset, char *poolname, char *imagename, char *objAddr,
+    unsigned int *objId, unsigned long int *objOffset)
+{
+    if (g_dss_device_op.dss_get_addr(handle, offset, poolname, imagename, objAddr, objId, objOffset) != DSS_SUCCESS) {
+        dss_set_errno(NULL);
+        return -1;
+    }
+    return GS_SUCCESS;
+}
+
+int dss_compare_size(const char *vg_name, long long *au_size)
+{
+    if (g_dss_device_op.dss_compare_size(vg_name, au_size) != DSS_SUCCESS) {
+        dss_set_errno(NULL);
+        return -1;
+    }
+    return GS_SUCCESS;
+}
+
 int dss_aio_prep_pwrite(void *iocb, int fd, void *buf, size_t count, long long offset)
 {
     return g_dss_device_op.dss_aio_pwrite(iocb, fd, buf, count, offset);

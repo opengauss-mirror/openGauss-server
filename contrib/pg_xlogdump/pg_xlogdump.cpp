@@ -577,7 +577,7 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
         XLogRecGetPhysicalBlock(record, block_id, &seg_fileno, &seg_blockno);
         
         // output format: ", blkref #%u: rel %u/%u/%u/%d storage %s fork %s blk %u (phy loc %u/%u) lastlsn %X/%X"
-        printf(", blkref #%u: rel %u/%u/%u", block_id, rnode.spcNode, rnode.dbNode, rnode.relNode);
+        printf(", blkref #%d: rel %u/%u/%u", block_id, rnode.spcNode, rnode.dbNode, rnode.relNode);
         if (IsBucketFileNode(rnode)) {
             printf("/%d", rnode.bucketNode);
         }
@@ -1012,8 +1012,10 @@ int main(int argc, char** argv)
     }
 
     if (dumpprivate.enable_dss) {
-        if (dumpprivate.socketpath == NULL) {
-            fprintf(stderr, "%s: socketpath cannot be NULL when enable dss\n", progname);
+        if (dumpprivate.socketpath == NULL || strlen(dumpprivate.socketpath) == 0 ||
+            strncmp("UDS:", dumpprivate.socketpath, 4) != 0) {
+            fprintf(stderr, "%s: socketpath must be specific correctly when enable dss, "
+                "format is: '--socketpath=\"UDS:xxx\"'.\n", progname);
             goto bad_argument;
         }
 

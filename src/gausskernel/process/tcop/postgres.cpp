@@ -277,6 +277,7 @@ static int ReadCommand(StringInfo inBuf);
 bool check_log_statement(List* stmt_list);
 static int errdetail_execute(List* raw_parsetree_list);
 int errdetail_params(ParamListInfo params);
+static List* pg_rewrite_query(Query* query);
 static int errdetail_recovery_conflict(void);
 bool IsTransactionExitStmt(Node* parsetree);
 static bool IsTransactionExitStmtList(List* parseTrees);
@@ -486,7 +487,7 @@ static int InteractiveBackend(StringInfo inBuf)
 static int interactive_getc(void)
 {
     int c;
-    if (u_sess->attr.attr_common.light_comm == FALSE) {
+    if (g_instance.attr.attr_common.light_comm == FALSE) {
         prepare_for_client_read();
         c = getc(stdin);
         client_read_ended();
@@ -1180,7 +1181,7 @@ List* pg_analyze_and_rewrite_params(
  * Note: query must just have come from the parser, because we do not do
  * AcquireRewriteLocks() on it.
  */
-List* pg_rewrite_query(Query* query)
+static List* pg_rewrite_query(Query* query)
 {
     List* querytree_list = NIL;
     PGSTAT_INIT_TIME_RECORD();
@@ -1430,6 +1431,7 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
 
     if (plan->planTree) {
         if (IS_ENABLE_RIGHT_REF(querytree->rightRefState)) {
+            plan->is_flt_frame = false;
             plan->planTree->rightRefState = querytree->rightRefState;
         } else {
             plan->planTree->rightRefState = nullptr;
@@ -1506,9 +1508,9 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
             output_utility_hint_warning((Node*)query, DEBUG1);
         } else {
             query->boundParamsQ = boundParams;
-
+#ifdef ENABLE_MULTIPLE_NODES
             bool is_insert_multiple_values = is_insert_multiple_values_query_in_gtmfree(query);
-
+#endif
             /* Temporarily apply SET hint using PG_TRY for later recovery */
             int nest_level = apply_set_hint(query);
             PG_TRY();
@@ -1523,7 +1525,7 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
             PG_END_TRY();
         
             recover_set_hint(nest_level);
- 
+#ifdef ENABLE_MULTIPLE_NODES
             /* When insert multiple values query is a generate plan,
              * we don't consider whether it can be executed on a single dn.
              * Because it can be executed on a single DN only in custom plan.
@@ -1534,7 +1536,7 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
                 check_gtm_free_plan((PlannedStmt *)stmt,
                     (u_sess->attr.attr_sql.explain_allow_multinode || ClusterResizingInProgress()) ? WARNING : ERROR);
             }
-
+#endif
             ps = (PlannedStmt*)stmt;
             check_plan_mergeinto_replicate(ps, ERROR);
 
@@ -1547,8 +1549,10 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
 
     t_thrd.time_cxt.is_abstimeout_in = false;
 
-    /* Set warning that no-analyzed relation name to log. */
-    output_noanalyze_rellist_to_log(LOG);
+    if (!u_sess->attr.attr_common.enable_iud_fusion) {
+        /* Set warning that no-analyzed relation name to log. */
+        output_noanalyze_rellist_to_log(LOG);
+    }
 
     return stmt_list;
 }
@@ -2342,7 +2346,7 @@ bool IsRightRefState(List* plantreeList)
     Node* node = (Node*)lfirst(cell);
     if (node && IsA(node, PlannedStmt)) {
         PlannedStmt* stmt = (PlannedStmt*) node;
-        return stmt->planTree && IS_ENABLE_RIGHT_REF(stmt->planTree->rightRefState);
+        return stmt->planTree && IS_ENABLE_RIGHT_REF(stmt->planTree->rightRefState) && !stmt->is_flt_frame;
     }
 
     return false;
@@ -3037,6 +3041,9 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         }
         WLMSetCollectInfoStatusFinish();
     }
+
+    /* Reset hint flag */
+    u_sess->parser_cxt.has_hintwarning = false;
 
     /*
      * Emit duration logging if appropriate.
@@ -6064,7 +6071,7 @@ void die(SIGNAL_ARGS)
     if (t_thrd.proc)
         SetLatch(&t_thrd.proc->procLatch);
 
-    if (u_sess->attr.attr_common.light_comm == TRUE &&
+    if (g_instance.attr.attr_common.light_comm == TRUE &&
         t_thrd.postgres_cxt.DoingCommandRead &&
         t_thrd.postgres_cxt.whereToSendOutput != DestRemote) {
         ProcessInterrupts();
@@ -7448,6 +7455,11 @@ static void InitGlobalNodeDefinition(PlannedStmt* planstmt)
 void InitThreadLocalWhenSessionExit()
 {
     t_thrd.postgres_cxt.xact_started = false;
+    if (u_sess != NULL) {
+        if (u_sess->libsw_cxt.redirect_manager == NULL) {
+            u_sess->libsw_cxt.redirect_manager = New(CurrentMemoryContext) RedirectManager();
+        }
+    }
 }
 
 /*
@@ -7553,8 +7565,6 @@ void RemoveTempNamespace()
 #define INITIAL_USER_ID 10
 void LoadSqlPlugin()
 {
-    if (strcmp(u_sess->attr.attr_common.application_name, "gs_clean") == 0)
-        return;
     if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && IsFileExisted(DOLPHIN)) {
         if (!u_sess->attr.attr_sql.dolphin && !u_sess->attr.attr_common.IsInplaceUpgrade) {
             Oid userId = GetUserId();
@@ -8126,6 +8136,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         }
         gstrace_tryblock_exit(true, oldTryCounter);
         Assert(t_thrd.proc->dw_pos == -1);
+
+        /* Reset hint flag */
+        u_sess->parser_cxt.has_hintwarning = false;
 
         volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
         if ((beentry->st_changecount & 1) != 0) {
@@ -9394,7 +9407,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
                 if (libpqsw_redirect() || libpqsw_get_set_command()) {
-                    ((RedirectManager*)t_thrd.libsw_cxt.redirect_manager)->push_message(firstchar,
+                    get_redirect_manager()->push_message(firstchar,
                         &input_message,
                         true,
                         libpqsw_get_set_command() ? RT_SET : RT_NORMAL
@@ -9412,6 +9425,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     u_sess->exec_cxt.RetryController->CacheStmtName(stmt_name);
                 }
 
+            resetErrorDataArea(true);
             } break;
 
             case 'B': /* bind */
@@ -9629,7 +9643,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         break;
                 }
 
-                if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
+                if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote
+                    && !libpqsw_skip_close_command()) {
                     pq_putemptymessage('3'); /* CloseComplete */
                 }
             } break;
@@ -11915,7 +11930,10 @@ static void exec_batch_bind_execute(StringInfo input_message)
     }
     /* end batch, reset gpc batch flag */
     u_sess->pcache_cxt.gpc_in_batch = false;
-
+    
+    /* Reset hint flag */
+    u_sess->parser_cxt.has_hintwarning = false;
+    
     /* Done with the snapshot used */
     if (snapshot_set)
         PopActiveSnapshot();

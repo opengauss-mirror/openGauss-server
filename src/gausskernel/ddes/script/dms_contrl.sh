@@ -141,10 +141,11 @@ assert_nonempty 3 ${3}
 CMD=${1}
 INSTANCE_ID=${2}
 GSDB_HOME=${3}
-TMP_DSS_HOME=${4}
-if [[ ! -z "${TMP_DSS_HOME}" ]]
+CMD_PARAM=${4}
+
+if [ X${DSS_HOME} == X"" ]
 then
-    export DSS_HOME=${4}
+    log "ERROR! DSS_HOME cannot be null!"
 fi
 
 # 1st step: if dss_flag_file exists, delete it
@@ -176,7 +177,7 @@ function Start()
         exit 6
     else
         log "Starting dn..."
-        nohup ${GSDB_BIN} -D ${GSDB_HOME} >> $db_start_log 2>&1 &
+        nohup ${GSDB_BIN} -D ${GSDB_HOME} ${CMD_PARAM} >> $db_start_log 2>&1 &
         sleep 3
         log "start dn in ${DSS_HOME} success."
     fi

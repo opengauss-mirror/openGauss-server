@@ -64,6 +64,7 @@ extern void LogicalTapeWrite(LogicalTapeSet *lts, int tapenum, void *ptr, size_t
 extern void LogicalTapeRewindForRead(LogicalTapeSet *lts, int tapenum, size_t buffer_size);
 extern void LogicalTapeRewindForWrite(LogicalTapeSet *lts, int tapenum);
 extern void LogicalTapeFreeze(LogicalTapeSet *lts, int tapenum, TapeShare *share = NULL);
+extern void LogicalTapeSetExtend(LogicalTapeSet *lts, int nAdditional);
 extern size_t LogicalTapeBackspace(LogicalTapeSet *lts, int tapenum, size_t size);
 extern void LogicalTapeSeek(LogicalTapeSet *lts, int tapenum, long blocknum, int offset);
 extern void LogicalTapeTell(LogicalTapeSet *lts, int tapenum, long *blocknum, int *offset);

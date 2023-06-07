@@ -37,7 +37,6 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
-
 extern const uint32 SRF_FUSION_VERSION_NUM;
 extern const uint32 INNER_UNIQUE_VERSION_NUM;
 extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
@@ -82,9 +81,9 @@ extern const uint32 DECODE_ABORT_VERSION_NUM;
 extern const uint32 COPY_TRANSFORM_VERSION_NUM;
 extern const uint32 TDE_VERSION_NUM;
 extern const uint32 PARALLEL_DECODE_VERSION_NUM;
-extern const uint32 V5R1C20_BACKEND_VERSION_NUM;
-extern const uint32 V5R2C00_START_VERSION_NUM;
-extern const uint32 V5R2C00_BACKEND_VERSION_NUM;
+extern const uint32 BACKEND_VERSION_INCLUDE_NUM;
+extern const uint32 BACKEND_VERSION_PRE_END_NUM;
+extern const uint32 BACKEND_VERSION_PRE_INCLUDE_NUM;
 extern const uint32 TWOPHASE_FILE_VERSION;
 extern const uint32 CLIENT_ENCRYPTION_PROC_VERSION_NUM;
 extern const uint32 PRIVS_DIRECTORY_VERSION_NUM;
@@ -140,7 +139,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define B_FORMAT_OPT_ENABLE_SET_VARIABLES 2
 #define B_FORMAT_OPT_ENABLE_MODIFY_COLUMN 4
 #define B_FORMAT_OPT_DEFAULT_COLLATION 8
-#define B_FORMAT_OPT_MAX 4
+#define B_FORMAT_OPT_FETCH 16
+#define B_FORMAT_OPT_MAX 5
 
 #define ENABLE_SET_SESSION_TRANSACTION                                                                   \
     ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION) && \
@@ -150,6 +150,8 @@ extern bool contain_backend_version(uint32 version_number);
     t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM && u_sess->attr.attr_common.upgrade_mode == 0)
 #define ENABLE_MODIFY_COLUMN \
         ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_MODIFY_COLUMN) && \
+        u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+#define B_FETCH ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_FETCH) && \
         u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 
 #define OPT_DISPLAY_LEADING_ZERO 1

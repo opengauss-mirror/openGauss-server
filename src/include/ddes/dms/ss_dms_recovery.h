@@ -29,7 +29,6 @@
 #define REFORM_CTRL_PAGE  DMS_MAX_INSTANCE
 
 #define RECOVERY_WAIT_TIME 10000
-#define SSFAILOVER_TRIGGER (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.failover_triggered == true)
 #define SS_BEFORE_RECOVERY (ENABLE_DMS && g_instance.dms_cxt.SSReformInfo.in_reform == true \
                             && g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag == true)
 #define SS_IN_FAILOVER (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_failover == true)
@@ -43,11 +42,18 @@ typedef struct st_reformer_ctrl {
 typedef struct st_reform_info {
     bool in_reform;
     dms_role_t dms_role;
+    SSReformType reform_type;
 } ss_reform_info_t;
+
+typedef enum st_failover_ckpt_status {
+    NOT_ACTIVE = 0,
+    NOT_ALLOW_CKPT,
+    ALLOW_CKPT
+} failover_ckpt_status_t;
 
 typedef struct ss_recovery_info {
     bool recovery_pause_flag;
-    volatile bool failover_triggered;
+    volatile failover_ckpt_status_t failover_ckpt_status;
     char recovery_xlogDir[MAXPGPATH];
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;
@@ -55,20 +61,21 @@ typedef struct ss_recovery_info {
     bool startup_reform;                // used to judge DB first start, when first reform finshed set false
     bool restart_failover_flag;         // used to indicate do failover when DB start
     bool reform_ready;
-    bool in_failover;      // used to judge this is failover, this tag will combine with failover_triggered later
-    // in failover Scenario,before failover_triggered become true, this node knows itself will become new primary
+    bool in_failover;      // used to detemin failover scenario, especially for the non-promoting node
     bool in_flushcopy;
     bool no_backend_left;
+    bool startup_need_exit_normally;        //used in alive failover
+    bool recovery_trapped_in_page_request;   //used in alive failover
 } ss_recovery_info_t;
 
 extern bool SSRecoveryNodes();
+extern void SSWaitStartupExit();
 extern int SSGetPrimaryInstId();
 extern void SSSavePrimaryInstId(int id);
 extern void SSReadControlFile(int id, bool updateDmsCtx = false);
 extern void SSWriteReformerControlPages(void);
 extern bool SSRecoveryApplyDelay();
 extern void SShandle_promote_signal();
-extern void SSTriggerFailover();
 extern void ss_failover_dw_init();
 extern void ss_switchover_promoting_dw_init();
 

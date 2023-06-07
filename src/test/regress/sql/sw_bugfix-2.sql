@@ -228,6 +228,7 @@ select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1
 insert into t1 values(1,NULL,1);
 select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls first;
 select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls last;
+with cte1 as (select * from t1) select *, connect_by_iscycle from cte1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls last;
 delete from t1 where c2 is null;
 
 select *, connect_by_iscycle from t1 start with c1<3 connect by nocycle prior c1<c2 order siblings by NLSSORT (c1, ' NLS_SORT = generic_m_ci ');
@@ -643,10 +644,10 @@ SELECT * FROM RLTEST CONNECT BY PRIOR B=A AND (LEVEL=1 OR B<10) AND (ROWNUM<3 OR
 SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (MOD(ROWNUM+1,2) = 0);
 DROP TABLE RLTEST;
 create table nocycle_tbl(id int, lid int, name text);
-insert into nocycle_tbl values (1,3,'A'),(2,1,'B'),(3,2,'C'),(4,2,'D');
-select * from nocycle_tbl connect by nocycle prior id=lid start with id=1;
-select * from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id;
-select * from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id desc;
+insert into nocycle_tbl values (1,3,'A'),(2,1,'B'),(3,2,'C'),(4,2,'D'),(5,3,'E');
+select *,connect_by_iscycle from nocycle_tbl connect by nocycle prior id=lid start with id=1;
+select *,connect_by_iscycle from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id;
+select *,connect_by_iscycle from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id desc;
 drop table nocycle_tbl;
 
 CREATE TABLE swcb_employees ( employee_id VARCHAR, manager_id NUMBER(6));
@@ -740,3 +741,72 @@ ORDER BY I.ZB_CODE;
 DROP TABLE zb_layer;
 DROP TABLE rtms_dict;
 DROP TABLE zb_model;
+
+--test SYNONYM case
+ create table swtest.pf_org_rela_test
+(
+    org_parent_no varchar2(32),
+    org_no varchar2(32) not null ,
+    org_rela_type varchar2(32) not null
+);
+
+ INSERT INTO swtest.pf_org_rela_test (org_no,org_parent_no,org_rela_type) VALUES
+  ('201855','201844','ADMINISTRATION'),
+  ('201856','201844','ADMINISTRATION'),
+  ('119208','119200','ADMINISTRATION'),
+  ('201953','201932','ADMINISTRATION'),
+  ('201954','201932','ADMINISTRATION'),
+  ('201955','201932','ADMINISTRATION'),
+  ('201956','201932','ADMINISTRATION'),
+  ('120301','120300','ADMINISTRATION'),
+  ('201957','202573','ADMINISTRATION'),
+  ('201958','201957','ADMINISTRATION');
+
+ create synonym sy_pf for swtest.pf_org_rela_test;
+--normal case
+select
+    org_no
+from
+    swtest.pf_org_rela_test
+start with
+    org_no = '201957'
+    and org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and org_rela_type = 'ADMINISTRATION';
+--SYNONYM case
+select
+    org_no
+from
+    sy_pf
+start with
+    org_no = '201957'
+    and org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and org_rela_type = 'ADMINISTRATION';
+--SYNONYM alias
+select
+    aak.org_no
+from
+    sy_pf aak
+start with
+    org_no = '201957'
+    and org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and org_rela_type = 'ADMINISTRATION';
+--SYNONYM case
+select
+    org_no
+from
+    sy_pf 
+start with
+    sy_pf.org_no = '201957'
+    and sy_pf.org_rela_type = 'ADMINISTRATION'
+connect by
+    prior org_no = org_parent_no
+    and sy_pf.org_rela_type = 'ADMINISTRATION';
+
+drop synonym sy_pf;
+drop table pf_org_rela_test;

@@ -51,6 +51,6 @@ end;
 /
 NOTICE:  table "t_ustore_proc_temp_table_0008" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists t_ustore_Proc_temp_table_0008"
-PL/pgSQL function t_ustore_proc_temp_table_0008(character varying) line 4 at EXECUTE statement
+PL/pgSQL function t_ustore_proc_temp_table_0008(character varying) line 3 at EXECUTE statement
 SQL statement "CALL t_ustore_proc_temp_table_0008(v_name)"
-PL/pgSQL function inline_code_block line 4 at PERFORM
+PL/pgSQL function inline_code_block line 3 at PERFORM

@@ -44,7 +44,30 @@ select * from colstore_engine.target order by c_id;
  9    | cyxjkjkgaj      | creoptppzjcgjrvyqa  | 480211111 |      1 | 1
 (5 rows)
 
+DROP TABLE IF EXISTS colstore_engine.ct;
+NOTICE:  table "ct" does not exist, skipping
+create table colstore_engine.ct(a int) with(orientation = column);
+insert into colstore_engine.ct values (1);
+begin;
+alter table colstore_engine.ct add c1 boolean default true;
+select * from colstore_engine.ct;
+ a | c1 
+---+----
+ 1 | t
+(1 row)
+
+rollback;
+begin;
+alter table colstore_engine.ct add c1 boolean default true;
+select * from colstore_engine.ct;
+ a | c1 
+---+----
+ 1 | t
+(1 row)
+
+rollback;
 drop schema colstore_engine cascade;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table colstore_engine.target
 drop cascades to table colstore_engine.source
+drop cascades to table colstore_engine.ct

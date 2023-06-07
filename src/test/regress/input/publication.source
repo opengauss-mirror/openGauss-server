@@ -109,11 +109,19 @@ RESET SESSION AUTHORIZATION;
 DROP ROLE regress_publication_user;
 DROP ROLE regress_publication_user2;
 --- permission
+CREATE ROLE regress_publication_user LOGIN SYSADMIN PASSWORD 'Abcdef@123';
+SET SESSION AUTHORIZATION 'regress_publication_user' PASSWORD 'Abcdef@123';
+CREATE PUBLICATION testpub FOR ALL TABLES;
 CREATE ROLE normal_user LOGIN PASSWORD 'Abcdef@123';
 SET SESSION AUTHORIZATION 'normal_user' PASSWORD 'Abcdef@123';
 --- fail permission denied
 create publication p1;
+ALTER PUBLICATION testpub RENAME TO testpub1;
+
+SET SESSION AUTHORIZATION 'regress_publication_user' PASSWORD 'Abcdef@123';
+DROP PUBLICATION testpub;
 RESET SESSION AUTHORIZATION;
+DROP ROLE regress_publication_user;
 DROP ROLE normal_user;
 
 SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_publication_subscription';

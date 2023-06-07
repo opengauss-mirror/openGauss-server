@@ -54,6 +54,17 @@ static void InternalAggIsSupported(const char *aggName)
         "group_concat",
         "json_objectagg",
         "json_arrayagg"
+#ifndef ENABLE_MULTIPLE_NODES
+        ,
+        "st_collect",
+        "st_clusterintersecting",
+        "st_clusterwithin",
+        "st_polygonize",
+        "st_makeline",
+        "st_asmvt",
+        "st_asgeobuf",
+        "st_asflatgeobuf"
+#endif
     };
 
     uint len = lengthof(supportList);

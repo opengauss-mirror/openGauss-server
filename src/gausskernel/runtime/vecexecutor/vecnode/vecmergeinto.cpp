@@ -176,8 +176,10 @@ void ExecVecMerge(VecModifyTableState* mtstate)
     result_rel_info = mtstate->resultRelInfo + mtstate->mt_whichplan;
     sub_plan_state = mtstate->mt_plans[mtstate->mt_whichplan];
 
+#ifdef ENABLE_MULTIPLE_NDOES
     /* Initialize remote plan state */
     remote_rel_state = mtstate->mt_remoterels[mtstate->mt_whichplan];
+#endif
 
     junkfilter = result_rel_info->ri_junkFilter;
     result_relation_desc = result_rel_info->ri_RelationDesc;

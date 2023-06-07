@@ -190,6 +190,7 @@ create table t_charset_26(c1 varchar(20)) charset utf8mb4 collate "aa_DJ.utf8"; 
 ERROR:  this collation only cannot be specified here
 create table t_charset_26(c1 varchar(20)) collate "aa_DJ"; -- error
 ERROR:  there is more than one collation "aa_DJ" with the same name
+create table t_charset_27(like t_charset_18 including reloptions);
 select relname, reloptions from pg_class where relname like 't_charset_%' order by 1;
    relname    |                  reloptions                   
 --------------+-----------------------------------------------
@@ -206,6 +207,7 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_21 | {orientation=row,compression=no,collate=1537}
  t_charset_22 | {orientation=row,compression=no,collate=1537}
  t_charset_23 | {orientation=row,compression=no,collate=1537}
+ t_charset_27 | {orientation=row,compression=no,collate=1538}
  t_charset_3  | {orientation=row,compression=no,collate=1537}
  t_charset_4  | {orientation=row,compression=no,collate=1537}
  t_charset_5  | {orientation=row,compression=no,collate=1537}
@@ -213,7 +215,7 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_7  | {orientation=row,compression=no,collate=1538}
  t_charset_8  | {orientation=row,compression=no,collate=1026}
  t_charset_9  | {orientation=row,compression=no,collate=1537}
-(20 rows)
+(21 rows)
 
 alter table t_charset_1 convert to charset binary; -- error
 ERROR:  Un-support feature
@@ -704,8 +706,8 @@ ADD [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ compr
     | MODIFY column_name data_type
     | MODIFY column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ]
     | MODIFY column_name [ CONSTRAINT constraint_name ] NULL
-    | MODIFY [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
-    | CHANGE [ COLUMN ] column_name new_column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
+    | MODIFY [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [COMMENT 'string'] [FIRST | AFTER column_name]
+    | CHANGE [ COLUMN ] column_name new_column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [COMMENT 'string'] [FIRST | AFTER column_name]
     | DROP [ COLUMN ] [ IF EXISTS ] column_name [ RESTRICT | CASCADE ]
     | ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ USING expression ]
     | ALTER [ COLUMN ] column_name { SET DEFAULT expression | DROP DEFAULT }
@@ -820,12 +822,14 @@ select pg_get_tabledef('s_t_charset_6');
 
 create table s_t_charset_7 as table s_t_charset_1;
 \d+ s_t_charset_7;
-                                  Table "s_charset_1.s_t_charset_7"
- Column |         Type          |         Modifiers          | Storage  | Stats target | Description 
---------+-----------------------+----------------------------+----------+--------------+-------------
- s1     | character varying(20) | collate utf8mb4_general_ci | extended |              | 
+                                           Table "s_charset_1.s_t_charset_7"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ s1     | character varying(20) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
 
 create table s_t_charset_8 as select '123';
 \d+ s_t_charset_8;
@@ -835,6 +839,8 @@ create table s_t_charset_8 as select '123';
  ?column? | text |           | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
 
 alter session set current_schema = s_charset_12;
 create table s_t_charset_9(s1 varchar(20) charset utf8mb4);
@@ -878,16 +884,18 @@ select * from p_charset_1;
 (1 row)
 
 \d+ p_charset_1;
-                                   Table "s_charset_1.p_charset_1"
- Column |         Type          |         Modifiers          | Storage  | Stats target | Description 
---------+-----------------------+----------------------------+----------+--------------+-------------
- c1     | character varying(20) | collate utf8mb4_general_ci | extended |              | 
- c2     | character varying(20) | collate utf8mb4_general_ci | extended |              | 
- c3     | integer               |                            | plain    |              | 
+                                            Table "s_charset_1.p_charset_1"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ c1     | character varying(20) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
+ c2     | character varying(20) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
+ c3     | integer               |                                               | plain    |              | 
 Partition By HASH(c1)
 Number of partitions: 2 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1538
+Character Set: UTF8
+Collate: utf8mb4_unicode_ci
 
 -- temporary table
 create temporary table tem_charset_1(c1 varchar(20),c2 varchar(20),c3 int) character set = utf8mb4;
@@ -971,6 +979,7 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_21 | {orientation=row,compression=no,collate=1537}
  t_charset_22 | {orientation=row,compression=no,collate=1537}
  t_charset_23 | {orientation=row,compression=no,collate=1537}
+ t_charset_27 | {orientation=row,compression=no,collate=1538}
  t_charset_3  | {orientation=row,compression=no,collate=1537}
  t_charset_4  | {orientation=row,compression=no,collate=1537}
  t_charset_5  | {orientation=row,compression=no,collate=1537}
@@ -978,7 +987,7 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_7  | {orientation=row,compression=no,collate=1538}
  t_charset_8  | {orientation=row,compression=no,collate=1026}
  t_charset_9  | {orientation=row,compression=no,collate=1537}
-(20 rows)
+(21 rows)
 
 select *,rawtohex(a1),rawtohex(a2),length(a1),length(a2),lengthb(a1),lengthb(a2) from a_charset_1;
   a1  |  a2  |  a3  |   rawtohex   |   rawtohex   | length | length | lengthb | lengthb 

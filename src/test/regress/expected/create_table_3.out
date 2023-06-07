@@ -1,0 +1,222 @@
+-- test mysql "create table as"
+-- a format
+create schema a_createas;
+set current_schema to 'a_createas';
+create table t_base(col1 int, col2 int, col3 int);
+create table t1 as select * from t_base;
+select * from t1;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+create table t2(col) as select * from t_base;
+select * from t2;
+ col | col2 | col3 
+-----+------+------
+(0 rows)
+
+-- fail
+create table t3(col1,col2,col3,col4) as select * from t_base;
+ERROR:  CREATE TABLE AS specifies too many column names
+create table t4(col int) as select * from t_base;
+ERROR:  define column_definition is supported only in B-format database
+reset current_schema;
+drop schema a_createas cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table a_createas.t_base
+drop cascades to table a_createas.t1
+drop cascades to table a_createas.t2
+-- b format
+create database b_createas dbcompatibility 'B';
+\c b_createas
+create table t_base(col1 int, col2 int, col3 int);
+create table t1 as select * from t_base;
+select * from t1;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+create table t2(col) as select * from t_base;
+select * from t2;
+ col | col2 | col3 
+-----+------+------
+(0 rows)
+
+create table t3(col int) as select * from t_base;
+select * from t3;
+ col | col1 | col2 | col3 
+-----+------+------+------
+(0 rows)
+
+create table t4(col1 int) as select * from t_base;
+select * from t4;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+-- fail
+create table t5() as select * from t_base;
+ERROR:  syntax error at or near ")"
+LINE 1: create table t5() as select * from t_base;
+                        ^
+create table t6(col1 int) as select col1,* from t_base;
+ERROR:  column "col1" specified more than once
+LINE 1: create table t6(col1 int) as select col1,* from t_base;
+                                           ^
+-- duplicate key
+insert into t_base values(1,1,10),(1,2,9),(2,2,8),(2,1,7),(1,1,6);
+-- error
+create table t7(col1 int unique) as select * from t_base;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t7_col1_key" for table "t7"
+ERROR:  duplicate key value violates unique constraint "t7_col1_key"
+DETAIL:  Key (col1)=(1) already exists.
+-- ignore
+create table t8(col1 int unique) ignore as select * from t_base;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t8_col1_key" for table "t8"
+select * from t8;
+ col1 | col2 | col3 
+------+------+------
+    1 |    1 |   10
+    2 |    2 |    8
+(2 rows)
+
+-- replace
+create table t9(col1 int unique) replace as select * from t_base;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t9_col1_key" for table "t9"
+select * from t9 order by col3;
+ col1 | col2 | col3 
+------+------+------
+    1 |    1 |    6
+    2 |    1 |    7
+(2 rows)
+
+create table t10(col1 int unique, col2 int unique) replace as select * from t_base;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t10_col1_key" for table "t10"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t10_col2_key" for table "t10"
+select * from t10 order by col3;
+ col1 | col2 | col3 
+------+------+------
+    1 |    1 |    6
+(1 row)
+
+-- foreign key
+create table ftable(col int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "ftable_pkey" for table "ftable"
+create table t11(col int, foreign key(col) references ftable(col)) as select * from t_base;
+ERROR:  CREATE TABLE AS SELECT is not allowed with Foreign Key
+create table t12(col int references ftable(col)) as select * from t_base;
+ERROR:  CREATE TABLE AS SELECT is not allowed with Foreign Key
+create table t13(foreign key(col1) references ftable(col)) as select * from t_base;
+ERROR:  CREATE TABLE AS SELECT is not allowed with Foreign Key
+-- table like
+create table t14(like t_base) as select * from t_base;
+ERROR:  CREATE TABLE AS SELECT is not allowed with Tablelike Clause
+-- with no data
+create table t15(id int, name char(8));
+insert into t15(id) select generate_series(1,10);
+create table t16(col1 int, id int) as select * from t15 where id with no data;
+select * from t16;
+ col1 | id | name 
+------+----+------
+(0 rows)
+
+create table t17(col1 int, id int unique) replace as select * from t15 where id with no data;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t17_id_key" for table "t17"
+select * from t17;
+ col1 | id | name 
+------+----+------
+(0 rows)
+
+-- union all
+create table test1(id int,name varchar(10),score numeric,date1 date,c1 bytea);
+insert into test1 values(1,'aaa',97.1,'1999-12-12','0101');
+insert into test1 values(5,'bbb',36.9,'1998-01-12','0110');
+insert into test1 values(30,'ooo',90.1,'2023-01-30','1001');
+insert into test1 values(6,'hhh',60,'2022-12-22','1010');
+insert into test1 values(7,'fff',71,'2001-11-23','1011');
+insert into test1 values(-1,'yaya',77.7,'2008-09-10','1100');
+insert into test1 values(7,'fff',71,'2001-11-23','1011');
+insert into test1 values(null,null,null,null,null);
+create table test2(id int,name varchar(10),score numeric,date1 date,c1 bytea);
+insert into test2 values(1,'aaa',99.1,'1998-12-12','0101');
+insert into test2 values(2,'hhh',36.9,'1996-01-12','0110');
+insert into test2 values(3,'ddd',89.2,'2000-03-12','0111');
+insert into test2 values(7,'uuu',60.9,'1997-01-01','1000');
+insert into test2 values(11,'eee',71,'2011-11-20','1011');
+insert into test2 values(-1,'yaya',76.7,'2008-09-10','1100');
+insert into test2 values(7,'uuu',60.9,'1997-01-01','1000');
+insert into test2 values(null,null,null,null,null);
+create table tb1(col1 int,id int) as select * from test1 where id<4 union all select * from test2 where score>80 order by id,score;
+select * from tb1 order by id;
+ col1 | id | name | score |   date1    |     c1     
+------+----+------+-------+------------+------------
+      | -1 | yaya |  77.7 | 09-10-2008 | \x31313030
+      |  1 | aaa  |  97.1 | 12-12-1999 | \x30313031
+      |  1 | aaa  |  99.1 | 12-12-1998 | \x30313031
+      |  3 | ddd  |  89.2 | 03-12-2000 | \x30313131
+(4 rows)
+
+create table tb2(col1 int,id int unique) replace as select * from test1 where id<4 union all select * from test2 where score>80 order by id,score;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "tb2_id_key" for table "tb2"
+select * from tb2 order by id;
+ col1 | id | name | score |   date1    |     c1     
+------+----+------+-------+------------+------------
+      | -1 | yaya |  77.7 | 09-10-2008 | \x31313030
+      |  1 | aaa  |  99.1 | 12-12-1998 | \x30313031
+      |  3 | ddd  |  89.2 | 03-12-2000 | \x30313131
+(3 rows)
+
+-- test update
+create table tb_primary(a int primary key, b int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tb_primary_pkey" for table "tb_primary"
+create table tb_unique(a int unique, b int);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "tb_unique_a_key" for table "tb_unique"
+insert into tb_primary values(1,2),(2,4),(3,6);
+insert into tb_unique values(1,2),(2,4),(3,6);
+-- error
+insert into tb_primary values(1,1);
+ERROR:  duplicate key value violates unique constraint "tb_primary_pkey"
+DETAIL:  Key (a)=(1) already exists.
+insert into tb_unique values(1,1);
+ERROR:  duplicate key value violates unique constraint "tb_unique_a_key"
+DETAIL:  Key (a)=(1) already exists.
+-- UPDATE nothing
+insert into tb_primary values(1,1) ON DUPLICATE KEY UPDATE NOTHING;
+insert into tb_unique values(1,1) ON DUPLICATE KEY UPDATE NOTHING;
+select * from tb_primary;
+ a | b 
+---+---
+ 1 | 2
+ 2 | 4
+ 3 | 6
+(3 rows)
+
+select * from tb_unique;
+ a | b 
+---+---
+ 1 | 2
+ 2 | 4
+ 3 | 6
+(3 rows)
+
+-- UPDATE
+insert into tb_primary values(1,1) ON DUPLICATE KEY UPDATE a = 1, b = 1;
+insert into tb_unique values(1,1) ON DUPLICATE KEY UPDATE a = 1, b = 1;
+select * from tb_primary;
+ a | b 
+---+---
+ 2 | 4
+ 3 | 6
+ 1 | 1
+(3 rows)
+
+select * from tb_unique;
+ a | b 
+---+---
+ 2 | 4
+ 3 | 6
+ 1 | 1
+(3 rows)
+
+\c postgres
+drop database b_createas;

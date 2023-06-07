@@ -3749,7 +3749,7 @@ RemoteQueryState* ExecInitRemoteQuery(RemoteQuery* node, EState* estate, int efl
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return NULL;
 #else
-    RemoteQueryState* remotestate = false;
+    RemoteQueryState* remotestate = NULL;
     TupleDesc scan_type;
 
     /* RemoteQuery node is the leaf node in the plan tree, just like seqscan */

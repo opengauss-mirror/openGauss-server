@@ -58,8 +58,8 @@ ADD [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ compr
     | MODIFY column_name data_type
     | MODIFY column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ]
     | MODIFY column_name [ CONSTRAINT constraint_name ] NULL
-    | MODIFY [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
-    | CHANGE [ COLUMN ] column_name new_column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
+    | MODIFY [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [COMMENT 'string'] [FIRST | AFTER column_name]
+    | CHANGE [ COLUMN ] column_name new_column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [COMMENT 'string'] [FIRST | AFTER column_name]
     | DROP [ COLUMN ] [ IF EXISTS ] column_name [ RESTRICT | CASCADE ]
     | ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ USING expression ]
     | ALTER [ COLUMN ] column_name { SET DEFAULT expression | DROP DEFAULT }
@@ -2863,3 +2863,16 @@ Options: orientation=row, compression=no
 
 drop table test_unique;
 \c postgres
+create table t_alter_type(c0 int4range Unique, foreign key(c0) references t_alter_type(c0));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_alter_type_c0_key" for table "t_alter_type"
+alter table t_alter_type alter c0 set data type int4range;
+ERROR:  could not find cast from int4range to anyrange
+drop table t_alter_type;
+CREATE TABLE astore_test(id int, name text);
+alter table astore_test rename id to tid;
+ERROR:  column name "tid" conflicts with a system column name
+CREATE TABLE cstore_test(id int, name text) with(orientation=column);
+alter table cstore_test rename id to tid;
+ERROR:  column name "tid" conflicts with a system column name
+DROP TABLE astore_test;
+DROP TABLE cstore_test;

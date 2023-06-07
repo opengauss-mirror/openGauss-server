@@ -321,17 +321,18 @@ deallocate all;
 
 --- Set
 :EXP update /*+ set(query_dop 1008) */ t1 set c2 = 2 where c2 in (select c2 from t2);
-                        QUERY PLAN                        
-----------------------------------------------------------
+                         QUERY PLAN                          
+-------------------------------------------------------------
  Update on t1
-   ->  Nested Loop
-         ->  HashAggregate
-               Group By Key: t2.c2
-               ->  Streaming(type: LOCAL GATHER dop: 1/8)
-                     ->  Seq Scan on t2
-         ->  Index Scan using t1_c2_idx on t1
-               Index Cond: (c2 = t2.c2)
-(8 rows)
+   ->  Streaming(type: LOCAL GATHER dop: 1/8)
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  HashAggregate
+                     Group By Key: t2.c2
+                     ->  Streaming(type: BROADCAST dop: 8/8)
+                           ->  Seq Scan on t2
+               ->  Seq Scan on t1
+(9 rows)
 
 --- No expand
 :EXP update t1 set c2 = 2 where c2 in (select /*+ no_expand */ c2 from t2);
@@ -452,17 +453,18 @@ deallocate all;
 
 --- Set
 :EXP delete /*+ set(query_dop 1008) */ t1 where c2 in (select c2 from t2);
-                        QUERY PLAN                        
-----------------------------------------------------------
+                         QUERY PLAN                          
+-------------------------------------------------------------
  Delete on t1
-   ->  Nested Loop
-         ->  HashAggregate
-               Group By Key: t2.c2
-               ->  Streaming(type: LOCAL GATHER dop: 1/8)
-                     ->  Seq Scan on t2
-         ->  Index Scan using t1_c2_idx on t1
-               Index Cond: (c2 = t2.c2)
-(8 rows)
+   ->  Streaming(type: LOCAL GATHER dop: 1/8)
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  HashAggregate
+                     Group By Key: t2.c2
+                     ->  Streaming(type: BROADCAST dop: 8/8)
+                           ->  Seq Scan on t2
+               ->  Seq Scan on t1
+(9 rows)
 
 --- No expand
 :EXP delete t1 where c2 in (select /*+ no_expand */ c2 from t2);

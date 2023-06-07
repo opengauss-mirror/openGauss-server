@@ -56,13 +56,33 @@ assign_hatest_parameter()
 {
     for node in $@
     do
-        echo -e "\nss_enable_reform = on" >> ${node}/postgresql.conf
-        echo -e "\nlog_min_messages = log" >> ${node}/postgresql.conf
-        echo -e "\nlogging_module = 'on(ALL)'" >> ${node}/postgresql.conf
-        echo "${node}:"
-        cat ${node}/postgresql.conf | grep ss_enable_dms
+        echo -e "ss_enable_reform = on" >> ${node}/postgresql.conf
+        echo -e "log_min_messages = log" >> ${node}/postgresql.conf
+        echo -e "logging_module = 'on(ALL)'" >> ${node}/postgresql.conf
+        echo -e "ss_log_level = 255" >> ${node}/postgresql.conf
+        echo -e "ss_log_backup_file_count = 100" >> ${node}/postgresql.conf
+        echo -e "ss_log_max_file_size = 1024MB" >> ${node}/postgresql.conf
+        echo -e "enable_bbox_dump = on" >> ${node}/postgresql.conf
+
+        cat ${node}/postgresql.conf | grep enable_bbox_dump
     done
 }
+
+assign_dorado_parameter()
+{
+    SS_DATA=$1
+    for node in $@
+    do
+        if [ ${node} == ${SS_DATA} ]; then
+            continue
+        fi
+        echo -e "\nxlog_lock_file_path = '${SS_DATA}/shared_lock_primary'" >> ${node}/postgresql.conf
+        echo -e "\nss_log_level = 255" >> ${node}/postgresql.conf
+        echo -e "\nss_log_backup_file_count = 100" >> ${node}/postgresql.conf
+        echo -e "\nss_log_max_file_size = 1GB" >> ${node}/postgresql.conf
+    done
+}
+
 
 init_gaussdb()
 {
@@ -70,9 +90,16 @@ init_gaussdb()
     dss_home=$2
     SS_DATA=$3
     nodedata_cfg=$4
-    echo "${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname=\"+data,+log${inst_id}\" --enable-dss --dms_url=\"${nodedata_cfg}\" -I ${inst_id} --socketpath=\"UDS:${dss_home}/.dss_unix_d_socket\""
+    if [ $# == 5 ]; then
+        dorado_shared_disk=$5
+        echo "${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname=\"+data,+log${inst_id}\" --enable-dss --dms_url=\"${nodedata_cfg}\" -I ${inst_id} --socketpath=\"UDS:${dss_home}/.dss_unix_d_socket\" -d -n -g ${dorado_shared_disk}"
 
-    ${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname="+data,+log${inst_id}" --enable-dss --dms_url="${nodedata_cfg}" -I ${inst_id} --socketpath="UDS:${dss_home}/.dss_unix_d_socket"
+        ${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname="+data,+log${inst_id}" --enable-dss --dms_url="${nodedata_cfg}" -I ${inst_id} --socketpath="UDS:${dss_home}/.dss_unix_d_socket" -d -n -g ${dorado_shared_disk}
+    else
+        echo "${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname=\"+data,+log${inst_id}\" --enable-dss --dms_url=\"${nodedata_cfg}\" -I ${inst_id} --socketpath=\"UDS:${dss_home}/.dss_unix_d_socket\""
+
+        ${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname="+data,+log${inst_id}" --enable-dss --dms_url="${nodedata_cfg}" -I ${inst_id} --socketpath="UDS:${dss_home}/.dss_unix_d_socket"
+    fi
 }
 
 set_gaussdb_port()

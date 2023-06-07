@@ -1,0 +1,1018 @@
+CREATE EXTENSION dblink;
+CREATE EXTENSION
+CREATE TABLE foo(f1 int, f2 text, f3 text[], primary key (f1,f2));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "foo_pkey" for table "foo"
+CREATE TABLE
+INSERT INTO foo VALUES (0,'a','{"a0","b0","c0"}');
+INSERT 0 1
+INSERT INTO foo VALUES (1,'b','{"a1","b1","c1"}');
+INSERT 0 1
+INSERT INTO foo VALUES (2,'c','{"a2","b2","c2"}');
+INSERT 0 1
+INSERT INTO foo VALUES (3,'d','{"a3","b3","c3"}');
+INSERT 0 1
+INSERT INTO foo VALUES (4,'e','{"a4","b4","c4"}');
+INSERT 0 1
+INSERT INTO foo VALUES (5,'f','{"a5","b5","c5"}');
+INSERT 0 1
+INSERT INTO foo VALUES (6,'g','{"a6","b6","c6"}');
+INSERT 0 1
+INSERT INTO foo VALUES (7,'h','{"a7","b7","c7"}');
+INSERT 0 1
+INSERT INTO foo VALUES (8,'i','{"a8","b8","c8"}');
+INSERT 0 1
+INSERT INTO foo VALUES (9,'j','{"a9","b9","c9"}');
+INSERT 0 1
+-- misc utilities
+-- list the primary key fields
+SELECT *
+FROM dblink_get_pkey('foo');
+ position | colname 
+----------+---------
+        1 | f1
+        2 | f2
+(2 rows)
+
+-- build an insert statement based on a local tuple,
+-- replacing the primary key values with new ones
+SELECT dblink_build_sql_insert('foo','1 2',2,'{"0", "a"}','{"99", "xyz"}');
+                  dblink_build_sql_insert                  
+-----------------------------------------------------------
+ INSERT INTO foo(f1,f2,f3) VALUES('99','xyz','{a0,b0,c0}')
+(1 row)
+
+-- too many pk fields, should fail
+SELECT dblink_build_sql_insert('foo','1 2 3 4',4,'{"0", "a", "{a0,b0,c0}"}','{"99", "xyz", "{za0,zb0,zc0}"}');
+ERROR:  invalid attribute number 4
+CONTEXT:  referenced column: dblink_build_sql_insert
+-- build an update statement based on a local tuple,
+-- replacing the primary key values with new ones
+SELECT dblink_build_sql_update('foo','1 2',2,'{"0", "a"}','{"99", "xyz"}');
+                                dblink_build_sql_update                                 
+----------------------------------------------------------------------------------------
+ UPDATE foo SET f1 = '99', f2 = 'xyz', f3 = '{a0,b0,c0}' WHERE f1 = '99' AND f2 = 'xyz'
+(1 row)
+
+-- too many pk fields, should fail
+SELECT dblink_build_sql_update('foo','1 2 3 4',4,'{"0", "a", "{a0,b0,c0}"}','{"99", "xyz", "{za0,zb0,zc0}"}');
+ERROR:  invalid attribute number 4
+CONTEXT:  referenced column: dblink_build_sql_update
+-- build a delete statement based on a local tuple,
+SELECT dblink_build_sql_delete('foo','1 2',2,'{"0", "a"}');
+           dblink_build_sql_delete           
+---------------------------------------------
+ DELETE FROM foo WHERE f1 = '0' AND f2 = 'a'
+(1 row)
+
+-- too many pk fields, should fail
+SELECT dblink_build_sql_delete('foo','1 2 3 4',4,'{"0", "a", "{a0,b0,c0}"}');
+ERROR:  invalid attribute number 4
+CONTEXT:  referenced column: dblink_build_sql_delete
+-- retest using a quoted and schema qualified table
+CREATE SCHEMA "MySchema";
+CREATE SCHEMA
+CREATE TABLE "MySchema"."Foo"(f1 int, f2 text, f3 text[], primary key (f1,f2));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "Foo_pkey" for table "Foo"
+CREATE TABLE
+INSERT INTO "MySchema"."Foo" VALUES (0,'a','{"a0","b0","c0"}');
+INSERT 0 1
+-- list the primary key fields
+SELECT *
+FROM dblink_get_pkey('"MySchema"."Foo"');
+ position | colname 
+----------+---------
+        1 | f1
+        2 | f2
+(2 rows)
+
+-- build an insert statement based on a local tuple,
+-- replacing the primary key values with new ones
+SELECT dblink_build_sql_insert('"MySchema"."Foo"','1 2',2,'{"0", "a"}','{"99", "xyz"}');
+                        dblink_build_sql_insert                         
+------------------------------------------------------------------------
+ INSERT INTO "MySchema"."Foo"(f1,f2,f3) VALUES('99','xyz','{a0,b0,c0}')
+(1 row)
+
+-- build an update statement based on a local tuple,
+-- replacing the primary key values with new ones
+SELECT dblink_build_sql_update('"MySchema"."Foo"','1 2',2,'{"0", "a"}','{"99", "xyz"}');
+                                       dblink_build_sql_update                                       
+-----------------------------------------------------------------------------------------------------
+ UPDATE "MySchema"."Foo" SET f1 = '99', f2 = 'xyz', f3 = '{a0,b0,c0}' WHERE f1 = '99' AND f2 = 'xyz'
+(1 row)
+
+-- build a delete statement based on a local tuple,
+SELECT dblink_build_sql_delete('"MySchema"."Foo"','1 2',2,'{"0", "a"}');
+                 dblink_build_sql_delete                  
+----------------------------------------------------------
+ DELETE FROM "MySchema"."Foo" WHERE f1 = '0' AND f2 = 'a'
+(1 row)
+
+-- regular old dblink
+SELECT *
+FROM dblink('user=userName password=passWord drivername=driverName','SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE t.a > 7;
+ a | b |     c      
+---+---+------------
+ 8 | i | {a8,b8,c8}
+ 9 | j | {a9,b9,c9}
+(2 rows)
+
+-- should generate "connection not available" error
+SELECT *
+FROM dblink('SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE t.a > 7;
+ERROR:  connection not available
+-- create a persistent connection
+SELECT dblink_connect('user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+-- use the persistent connection
+SELECT *
+FROM dblink('SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE t.a > 7;
+ a | b |     c      
+---+---+------------
+ 8 | i | {a8,b8,c8}
+ 9 | j | {a9,b9,c9}
+(2 rows)
+
+-- open a cursor with bad SQL and fail_on_error set to false
+SELECT dblink_open('rmt_foo_cursor','SELECT * FROM foobar',false);
+ERROR:  Error exec
+ERROR: relation "foobar" does not exist on single_node1;
+Error while executing the query
+CONTEXT:  referenced column: dblink_open
+-- reset remote transaction state
+SELECT dblink_exec('ABORT');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- open a cursor
+SELECT dblink_open('rmt_foo_cursor','SELECT * FROM foo');
+ERROR:  Error exec
+ERROR: DECLARE CURSOR can only be used in transaction blocks;
+Error while executing the query
+CONTEXT:  referenced column: dblink_open
+-- close the cursor
+SELECT dblink_close('rmt_foo_cursor',false);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+CONTEXT:  referenced column: dblink_close
+-- open the cursor again
+SELECT dblink_open('rmt_foo_cursor','SELECT * FROM foo');
+ERROR:  Error exec
+ERROR: DECLARE CURSOR can only be used in transaction blocks;
+Error while executing the query
+CONTEXT:  referenced column: dblink_open
+-- fetch some data
+SELECT *
+FROM dblink_fetch('rmt_foo_cursor',4) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+SELECT *
+FROM dblink_fetch('rmt_foo_cursor',4) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+-- this one only finds two rows left
+SELECT *
+FROM dblink_fetch('rmt_foo_cursor',4) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+-- intentionally botch a fetch
+SELECT *
+FROM dblink_fetch('rmt_foobar_cursor',4,false) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foobar_cursor" does not exist;
+Error while executing the query
+-- reset remote transaction state
+SELECT dblink_exec('ABORT');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- close the wrong cursor
+SELECT dblink_close('rmt_foobar_cursor',false);
+ERROR:  Error exec
+ERROR: cursor "rmt_foobar_cursor" does not exist;
+Error while executing the query
+CONTEXT:  referenced column: dblink_close
+-- should generate 'cursor "rmt_foo_cursor" not found' error
+SELECT *
+FROM dblink_fetch('rmt_foo_cursor',4) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+-- this time, 'cursor "rmt_foo_cursor" not found' as a notice
+SELECT *
+FROM dblink_fetch('rmt_foo_cursor',4,false) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+-- close the persistent connection
+SELECT dblink_disconnect();
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+-- should generate "connection not available" error
+SELECT *
+FROM dblink('SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE t.a > 7;
+ERROR:  connection not available
+-- put more data into our slave table, first using arbitrary connection syntax
+-- but truncate the actual return value so we can use diff to check for success
+SELECT substr(dblink_exec('user=userName password=passWord drivername=driverName','INSERT INTO foo VALUES(10,''k'',''{"a10","b10","c10"}'')'),1,6);
+ substr 
+--------
+ OK
+(1 row)
+
+-- create a persistent connection
+SELECT dblink_connect('user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+-- put more data into our slave table, using persistent connection syntax
+-- but truncate the actual return value so we can use diff to check for success
+SELECT substr(dblink_exec('INSERT INTO foo VALUES(11,''l'',''{"a11","b11","c11"}'')'),1,6);
+ substr 
+--------
+ OK
+(1 row)
+
+-- let's see it
+SELECT *
+FROM dblink('SELECT * FROM foo') AS t(a int, b text, c text[]);
+ a  | b |       c       
+----+---+---------------
+  0 | a | {a0,b0,c0}
+  1 | b | {a1,b1,c1}
+  2 | c | {a2,b2,c2}
+  3 | d | {a3,b3,c3}
+  4 | e | {a4,b4,c4}
+  5 | f | {a5,b5,c5}
+  6 | g | {a6,b6,c6}
+  7 | h | {a7,b7,c7}
+  8 | i | {a8,b8,c8}
+  9 | j | {a9,b9,c9}
+ 10 | k | {a10,b10,c10}
+ 11 | l | {a11,b11,c11}
+(12 rows)
+
+-- bad remote select
+SELECT *
+FROM dblink('SELECT * FROM foobar',false) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: relation "foobar" does not exist on single_node1;
+Error while executing the query
+-- change some data
+SELECT dblink_exec('UPDATE foo SET f3[2] = ''b99'' WHERE f1 = 11');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- let's see it
+SELECT *
+FROM dblink('SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE a = 11;
+ a  | b |       c       
+----+---+---------------
+ 11 | l | {a11,b99,c11}
+(1 row)
+
+-- botch a change to some other data
+SELECT dblink_exec('UPDATE foobar SET f3[2] = ''b99'' WHERE f1 = 11',false);
+ERROR:  Error exec
+ERROR: relation "foobar" does not exist on single_node1;
+Error while executing the query
+CONTEXT:  referenced column: dblink_exec
+-- delete some data
+SELECT dblink_exec('DELETE FROM foo WHERE f1 = 11');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- let's see it
+SELECT *
+FROM dblink('SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE a = 11;
+ a | b | c 
+---+---+---
+(0 rows)
+
+-- close the persistent connection
+SELECT dblink_disconnect();
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+--
+-- tests for the new named persistent connection syntax
+--
+-- should generate "missing "=" after "myconn" in connection info string" error
+SELECT *
+FROM dblink('myconn','SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE t.a > 7;
+ERROR:  could not establish connection
+DETAIL:  missing "=" after "myconn" in connection info string
+
+-- create a named persistent connection
+SELECT dblink_connect('myconn','user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+-- use the named persistent connection
+SELECT *
+FROM dblink('myconn','SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE t.a > 7;
+ a  | b |       c       
+----+---+---------------
+  8 | i | {a8,b8,c8}
+  9 | j | {a9,b9,c9}
+ 10 | k | {a10,b10,c10}
+(3 rows)
+
+-- use the named persistent connection, but get it wrong
+SELECT *
+FROM dblink('myconn','SELECT * FROM foobar',false) AS t(a int, b text, c text[])
+WHERE t.a > 7;
+ERROR:  Error exec
+ERROR: relation "foobar" does not exist on single_node1;
+Error while executing the query
+-- create a second named persistent connection
+-- should error with "duplicate connection name"
+SELECT dblink_connect('myconn','user=userName password=passWord drivername=driverName');
+ERROR:  duplicate connection name
+CONTEXT:  referenced column: dblink_connect
+-- create a second named persistent connection with a new name
+SELECT dblink_connect('myconn2','user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+-- use the second named persistent connection
+SELECT *
+FROM dblink('myconn2','SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE t.a > 7;
+ a  | b |       c       
+----+---+---------------
+  8 | i | {a8,b8,c8}
+  9 | j | {a9,b9,c9}
+ 10 | k | {a10,b10,c10}
+(3 rows)
+
+-- close the second named persistent connection
+SELECT dblink_disconnect('myconn2');
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+-- open a cursor incorrectly
+SELECT dblink_open('myconn','rmt_foo_cursor','SELECT * FROM foobar',false);
+ERROR:  Error exec
+ERROR: relation "foobar" does not exist on single_node1;
+Error while executing the query
+CONTEXT:  referenced column: dblink_open
+-- reset remote transaction state
+SELECT dblink_exec('myconn','ABORT');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- test opening cursor in a transaction
+SELECT dblink_exec('myconn','BEGIN');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- an open transaction will prevent dblink_open() from opening its own
+SELECT dblink_open('myconn','rmt_foo_cursor','SELECT * FROM foo');
+ dblink_open 
+-------------
+ OK
+(1 row)
+
+-- this should not commit the transaction because the client opened it
+SELECT dblink_close('myconn','rmt_foo_cursor');
+ dblink_close 
+--------------
+ OK
+(1 row)
+
+-- this should succeed because we have an open transaction
+SELECT dblink_exec('myconn','DECLARE xact_test CURSOR FOR SELECT * FROM foo');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- commit remote transaction
+SELECT dblink_exec('myconn','COMMIT');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- test automatic transactions for multiple cursor opens
+SELECT dblink_open('myconn','rmt_foo_cursor','SELECT * FROM foo');
+ERROR:  Error exec
+ERROR: DECLARE CURSOR can only be used in transaction blocks;
+Error while executing the query
+CONTEXT:  referenced column: dblink_open
+-- the second cursor
+SELECT dblink_open('myconn','rmt_foo_cursor2','SELECT * FROM foo');
+ERROR:  Error exec
+ERROR: DECLARE CURSOR can only be used in transaction blocks;
+Error while executing the query
+CONTEXT:  referenced column: dblink_open
+-- this should not commit the transaction
+SELECT dblink_close('myconn','rmt_foo_cursor2');
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor2" does not exist;
+Error while executing the query
+CONTEXT:  referenced column: dblink_close
+-- this should succeed because we have an open transaction
+SELECT dblink_exec('myconn','DECLARE xact_test CURSOR FOR SELECT * FROM foo');
+ERROR:  Error exec
+ERROR: DECLARE CURSOR can only be used in transaction blocks;
+Error while executing the query
+CONTEXT:  referenced column: dblink_exec
+-- this should commit the transaction
+SELECT dblink_close('myconn','rmt_foo_cursor');
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+CONTEXT:  referenced column: dblink_close
+-- this should fail because there is no open transaction
+SELECT dblink_exec('myconn','DECLARE xact_test CURSOR FOR SELECT * FROM foo');
+ERROR:  Error exec
+ERROR: DECLARE CURSOR can only be used in transaction blocks;
+Error while executing the query
+CONTEXT:  referenced column: dblink_exec
+-- reset remote transaction state
+SELECT dblink_exec('myconn','ABORT');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- open a cursor
+SELECT dblink_open('myconn','rmt_foo_cursor','SELECT * FROM foo');
+ERROR:  Error exec
+ERROR: DECLARE CURSOR can only be used in transaction blocks;
+Error while executing the query
+CONTEXT:  referenced column: dblink_open
+-- fetch some data
+SELECT *
+FROM dblink_fetch('myconn','rmt_foo_cursor',4) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+SELECT *
+FROM dblink_fetch('myconn','rmt_foo_cursor',4) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+-- this one only finds three rows left
+SELECT *
+FROM dblink_fetch('myconn','rmt_foo_cursor',4) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+-- fetch some data incorrectly
+SELECT *
+FROM dblink_fetch('myconn','rmt_foobar_cursor',4,false) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foobar_cursor" does not exist;
+Error while executing the query
+-- reset remote transaction state
+SELECT dblink_exec('myconn','ABORT');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- should generate 'cursor "rmt_foo_cursor" not found' error
+SELECT *
+FROM dblink_fetch('myconn','rmt_foo_cursor',4) AS t(a int, b text, c text[]);
+ERROR:  Error exec
+ERROR: cursor "rmt_foo_cursor" does not exist;
+Error while executing the query
+-- close the named persistent connection
+SELECT dblink_disconnect('myconn');
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+-- should generate "missing "=" after "myconn" in connection info string" error
+SELECT *
+FROM dblink('myconn','SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE t.a > 7;
+ERROR:  could not establish connection
+DETAIL:  missing "=" after "myconn" in connection info string
+
+-- create a named persistent connection
+SELECT dblink_connect('myconn','user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+-- put more data into our slave table, using named persistent connection syntax
+-- but truncate the actual return value so we can use diff to check for success
+SELECT substr(dblink_exec('myconn','INSERT INTO foo VALUES(11,''l'',''{"a11","b11","c11"}'')'),1,6);
+ substr 
+--------
+ OK
+(1 row)
+
+-- let's see it
+SELECT *
+FROM dblink('myconn','SELECT * FROM foo') AS t(a int, b text, c text[]);
+ a  | b |       c       
+----+---+---------------
+  0 | a | {a0,b0,c0}
+  1 | b | {a1,b1,c1}
+  2 | c | {a2,b2,c2}
+  3 | d | {a3,b3,c3}
+  4 | e | {a4,b4,c4}
+  5 | f | {a5,b5,c5}
+  6 | g | {a6,b6,c6}
+  7 | h | {a7,b7,c7}
+  8 | i | {a8,b8,c8}
+  9 | j | {a9,b9,c9}
+ 10 | k | {a10,b10,c10}
+ 11 | l | {a11,b11,c11}
+(12 rows)
+
+-- change some data
+SELECT dblink_exec('myconn','UPDATE foo SET f3[2] = ''b99'' WHERE f1 = 11');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- let's see it
+SELECT *
+FROM dblink('myconn','SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE a = 11;
+ a  | b |       c       
+----+---+---------------
+ 11 | l | {a11,b99,c11}
+(1 row)
+
+-- delete some data
+SELECT dblink_exec('myconn','DELETE FROM foo WHERE f1 = 11');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- let's see it
+SELECT *
+FROM dblink('myconn','SELECT * FROM foo') AS t(a int, b text, c text[])
+WHERE a = 11;
+ a | b | c 
+---+---+---
+(0 rows)
+
+-- close the named persistent connection
+SELECT dblink_disconnect('myconn');
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+-- close the named persistent connection again
+-- should get 'connection "myconn" not available' error
+SELECT dblink_disconnect('myconn');
+ERROR:  connection "myconn" not available
+CONTEXT:  referenced column: dblink_disconnect
+-- test asynchronous queries
+SELECT dblink_connect('dtest1', 'user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+SELECT * from
+ dblink_send_query('dtest1', 'select * from foo where f1 < 3') as t1;
+ t1 
+----
+  1
+(1 row)
+
+SELECT dblink_connect('dtest2', 'user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+SELECT * from
+ dblink_send_query('dtest2', 'select * from foo where f1 > 2 and f1 < 7') as t1;
+ t1 
+----
+  1
+(1 row)
+
+SELECT dblink_connect('dtest3', 'user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+SELECT * from
+ dblink_send_query('dtest3', 'select * from foo where f1 > 6') as t1;
+ t1 
+----
+  1
+(1 row)
+
+CREATE TEMPORARY TABLE result AS
+(SELECT * from dblink_get_result('dtest1') as t1(f1 int, f2 text, f3 text[]))
+UNION
+(SELECT * from dblink_get_result('dtest2') as t2(f1 int, f2 text, f3 text[]))
+UNION
+(SELECT * from dblink_get_result('dtest3') as t3(f1 int, f2 text, f3 text[]))
+ORDER by f1;
+INSERT 0 11
+-- dblink_get_connections returns an array with elements in a machine-dependent
+-- ordering, so we must resort to unnesting and sorting for a stable result
+create function unnest(anyarray) returns setof anyelement
+language sql strict immutable as $$
+select $1[i] from generate_series(array_lower($1,1), array_upper($1,1)) as i
+$$;
+CREATE FUNCTION
+SELECT * FROM unnest(dblink_get_connections()) ORDER BY 1;
+ unnest 
+--------
+ dtest1
+ dtest2
+ dtest3
+(3 rows)
+
+SELECT dblink_is_busy('dtest1');
+ dblink_is_busy 
+----------------
+              0
+(1 row)
+
+SELECT dblink_disconnect('dtest1');
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+SELECT dblink_disconnect('dtest2');
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+SELECT dblink_disconnect('dtest3');
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+SELECT * from result;
+ f1 | f2 |      f3       
+----+----+---------------
+  0 | a  | {a0,b0,c0}
+  1 | b  | {a1,b1,c1}
+  2 | c  | {a2,b2,c2}
+  3 | d  | {a3,b3,c3}
+  4 | e  | {a4,b4,c4}
+  5 | f  | {a5,b5,c5}
+  6 | g  | {a6,b6,c6}
+  7 | h  | {a7,b7,c7}
+  8 | i  | {a8,b8,c8}
+  9 | j  | {a9,b9,c9}
+ 10 | k  | {a10,b10,c10}
+(11 rows)
+
+SELECT dblink_connect('dtest1', 'user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+SELECT * from
+ dblink_send_query('dtest1', 'select * from foo where f1 < 3') as t1;
+ t1 
+----
+  1
+(1 row)
+
+SELECT dblink_cancel_query('dtest1');
+ dblink_cancel_query 
+---------------------
+ OK
+(1 row)
+
+SELECT dblink_error_message('dtest1');
+ dblink_error_message 
+----------------------
+ no error message
+(1 row)
+
+SELECT dblink_disconnect('dtest1');
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+-- test asynchronous notifications
+SELECT dblink_connect('user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+--should return listen
+SELECT dblink_exec('LISTEN regression');
+ERROR:  Error exec
+ERROR: LISTEN statement is not yet supported.;
+Error while executing the query
+CONTEXT:  referenced column: dblink_exec
+--should return listen
+SELECT dblink_exec('LISTEN foobar');
+ERROR:  Error exec
+ERROR: LISTEN statement is not yet supported.;
+Error while executing the query
+CONTEXT:  referenced column: dblink_exec
+SELECT dblink_exec('NOTIFY regression');
+ERROR:  Error exec
+ERROR: NOFITY statement is not yet supported.;
+Error while executing the query
+CONTEXT:  referenced column: dblink_exec
+SELECT dblink_exec('NOTIFY foobar');
+ERROR:  Error exec
+ERROR: NOFITY statement is not yet supported.;
+Error while executing the query
+CONTEXT:  referenced column: dblink_exec
+SELECT notify_name, be_pid = (select t.be_pid from dblink('select pg_backend_pid()') as t(be_pid int)) AS is_self_notify, extra from dblink_get_notify();
+ERROR:  dblink_get_notify not support by odbc
+SELECT * from dblink_get_notify();
+ERROR:  dblink_get_notify not support by odbc
+SELECT dblink_disconnect();
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+-- test dropped columns in dblink_build_sql_insert, dblink_build_sql_update
+CREATE TABLE test_dropped
+(
+	col1 INT NOT NULL DEFAULT 111,
+	id SERIAL PRIMARY KEY,
+	col2 INT NOT NULL DEFAULT 112,
+	col2b INT NOT NULL DEFAULT 113
+);
+NOTICE:  CREATE TABLE will create implicit sequence "test_dropped_id_seq" for serial column "test_dropped.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_dropped_pkey" for table "test_dropped"
+CREATE TABLE
+INSERT INTO test_dropped VALUES(default);
+INSERT 0 1
+ALTER TABLE test_dropped
+	DROP COLUMN col1,
+	DROP COLUMN col2,
+	ADD COLUMN col3 VARCHAR(10) NOT NULL DEFAULT 'foo',
+	ADD COLUMN col4 INT NOT NULL DEFAULT 42;
+ALTER TABLE
+SELECT dblink_build_sql_insert('test_dropped', '1', 1,
+                               ARRAY['1'::TEXT], ARRAY['2'::TEXT]);
+                          dblink_build_sql_insert                          
+---------------------------------------------------------------------------
+ INSERT INTO test_dropped(id,col2b,col3,col4) VALUES('2','113','foo','42')
+(1 row)
+
+SELECT dblink_build_sql_update('test_dropped', '1', 1,
+                               ARRAY['1'::TEXT], ARRAY['2'::TEXT]);
+                                  dblink_build_sql_update                                  
+-------------------------------------------------------------------------------------------
+ UPDATE test_dropped SET id = '2', col2b = '113', col3 = 'foo', col4 = '42' WHERE id = '2'
+(1 row)
+
+SELECT dblink_build_sql_delete('test_dropped', '1', 1,
+                               ARRAY['2'::TEXT]);
+         dblink_build_sql_delete         
+-----------------------------------------
+ DELETE FROM test_dropped WHERE id = '2'
+(1 row)
+
+-- test local mimicry of remote GUC values that affect datatype I/O
+SET datestyle = ISO, MDY;
+SET
+SET intervalstyle = postgres;
+SET
+SET timezone = UTC;
+SET
+SELECT dblink_connect('myconn','user=userName password=passWord drivername=driverName');
+ dblink_connect 
+----------------
+ OK
+(1 row)
+
+SELECT dblink_exec('myconn', 'SET datestyle = GERMAN, DMY;');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+-- single row synchronous case
+SELECT *
+FROM dblink('myconn',
+    'SELECT * FROM (VALUES (''12.03.2013 00:00:00+00'')) t')
+  AS t(a timestamptz);
+           a            
+------------------------
+ 2013-12-03 00:00:00+00
+(1 row)
+
+-- multi-row synchronous case
+SELECT *
+FROM dblink('myconn',
+    'SELECT * FROM
+     (VALUES (''12.03.2013 00:00:00+00''),
+             (''12.03.2013 00:00:00+00'')) t')
+  AS t(a timestamptz);
+           a            
+------------------------
+ 2013-12-03 00:00:00+00
+ 2013-12-03 00:00:00+00
+(2 rows)
+
+-- single-row asynchronous case
+SELECT *
+FROM dblink_send_query('myconn',
+    'SELECT * FROM
+     (VALUES (''12.03.2013 00:00:00+00'')) t');
+ dblink_send_query 
+-------------------
+                 1
+(1 row)
+
+DROP TABLE result;
+DROP TABLE
+CREATE TEMPORARY TABLE result AS
+(SELECT * from dblink_get_result('myconn') as t(t timestamptz))
+UNION ALL
+(SELECT * from dblink_get_result('myconn') as t(t timestamptz));
+INSERT 0 1
+SELECT * FROM result;
+           t            
+------------------------
+ 2013-12-03 00:00:00+00
+(1 row)
+
+DROP TABLE result;
+DROP TABLE
+-- multi-row asynchronous case
+SELECT *
+FROM dblink_send_query('myconn',
+    'SELECT * FROM
+     (VALUES (''12.03.2013 00:00:00+00''),
+             (''12.03.2013 00:00:00+00'')) t');
+ dblink_send_query 
+-------------------
+                 1
+(1 row)
+
+CREATE TEMPORARY TABLE result AS
+(SELECT * from dblink_get_result('myconn') as t(t timestamptz))
+UNION ALL
+(SELECT * from dblink_get_result('myconn') as t(t timestamptz))
+UNION ALL
+(SELECT * from dblink_get_result('myconn') as t(t timestamptz));
+INSERT 0 2
+SELECT * FROM result;
+           t            
+------------------------
+ 2013-12-03 00:00:00+00
+ 2013-12-03 00:00:00+00
+(2 rows)
+
+DROP TABLE result;
+DROP TABLE
+-- Try an ambiguous interval
+SELECT dblink_exec('myconn', 'SET intervalstyle = sql_standard;');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+SELECT *
+FROM dblink('myconn',
+    'SELECT * FROM (VALUES (''-1 2:03:04'')) i')
+  AS i(i interval);
+         i         
+-------------------
+ -1 days -02:03:04
+(1 row)
+
+-- Try swapping to another format to ensure the GUCs are tracked
+-- properly through a change.
+CREATE TEMPORARY TABLE result (t timestamptz);
+CREATE TABLE
+SELECT dblink_exec('myconn', 'SET datestyle = ISO, MDY;');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+INSERT INTO result
+  SELECT *
+  FROM dblink('myconn',
+              'SELECT * FROM (VALUES (''03.12.2013 00:00:00+00'')) t')
+    AS t(a timestamptz);
+INSERT 0 1
+SELECT dblink_exec('myconn', 'SET datestyle = GERMAN, DMY;');
+ dblink_exec 
+-------------
+ OK
+(1 row)
+
+INSERT INTO result
+  SELECT *
+  FROM dblink('myconn',
+              'SELECT * FROM (VALUES (''12.03.2013 00:00:00+00'')) t')
+    AS t(a timestamptz);
+INSERT 0 1
+SELECT * FROM result;
+           t            
+------------------------
+ 2013-03-12 00:00:00+00
+ 2013-12-03 00:00:00+00
+(2 rows)
+
+DROP TABLE result;
+DROP TABLE
+-- Check error throwing in dblink_fetch
+SELECT dblink_open('myconn','error_cursor',
+       'SELECT * FROM (VALUES (''1''), (''not an int'')) AS t(text);');
+ERROR:  Error exec
+ERROR: DECLARE CURSOR can only be used in transaction blocks;
+Error while executing the query
+CONTEXT:  referenced column: dblink_open
+SELECT *
+FROM dblink_fetch('myconn','error_cursor', 1) AS t(i int);
+ERROR:  Error exec
+ERROR: cursor "error_cursor" does not exist;
+Error while executing the query
+SELECT *
+FROM dblink_fetch('myconn','error_cursor', 1) AS t(i int);
+ERROR:  Error exec
+ERROR: cursor "error_cursor" does not exist;
+Error while executing the query
+-- Make sure that the local settings have retained their values in spite
+-- of shenanigans on the connection.
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, MDY
+(1 row)
+
+SHOW intervalstyle;
+ IntervalStyle 
+---------------
+ postgres
+(1 row)
+
+-- Clean up GUC-setting tests
+SELECT dblink_disconnect('myconn');
+ dblink_disconnect 
+-------------------
+ OK
+(1 row)
+
+RESET datestyle;
+RESET
+RESET intervalstyle;
+RESET
+RESET timezone;
+RESET

@@ -1,0 +1,85 @@
+create database with_snapshot_test dbcompatibility 'b';
+\c with_snapshot_test;
+set global transaction isolation level repeatable read;
+\c
+create table t(a int);
+start transaction;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(2);";
+select * from t;
+commit;
+select * from t;
+delete from t;
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(2);";
+select * from t;
+commit;
+select * from t;
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "delete from t where a=1;";
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "delete from t where a=2;";
+select * from t;
+commit;
+select * from t;
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "update t set a=a+100;";
+select * from t;
+commit;
+select * from t;
+set global transaction isolation level read committed;
+\c
+start transaction;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+select * from t;
+commit;
+select * from t;
+delete from t;
+set b_format_behavior_compat_options = 'set_session_transaction';
+set session transaction isolation level repeatable read;
+start transaction;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(2);";
+select * from t;
+commit;
+select * from t;
+delete from t;
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(2);";
+select * from t;
+commit;
+select * from t;
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "delete from t where a=1;";
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "delete from t where a=2;";
+select * from t;
+commit;
+select * from t;
+start transaction with consistent snapshot;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "insert into t values(1);";
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d with_snapshot_test -c "update t set a=a+100;";
+select * from t;
+commit;
+select * from t;
+\c
+start transaction with consistent snapshot;
+commit;
+create or replace procedure protest()
+as
+begin
+start transaction with consistent snapshot;
+commit;
+end
+/
+call protest();
+\c regression;

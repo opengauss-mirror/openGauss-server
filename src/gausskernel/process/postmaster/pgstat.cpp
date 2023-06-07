@@ -4218,9 +4218,11 @@ void pgstat_add_warning_hash_conflict()
  */
 void pgstat_set_io_state(WorkloadManagerIOState iostate)
 {
+    if (!u_sess->attr.attr_common.pgstat_track_activities)
+        return;
+    
     volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-
-    if (!u_sess->attr.attr_common.pgstat_track_activities || (beentry == NULL))
+    if (beentry == NULL)
         return;
 
     /* set current workload backend state */

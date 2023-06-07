@@ -1790,3 +1790,32 @@ bool is_column_exists(PGconn* conn, Oid relid, const char* column_name)
 
     return isExists;
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+bool SetUppercaseAttributeNameToOff(PGconn* conn)
+{
+    PGresult* res = NULL;
+    PQExpBuffer query = createPQExpBuffer();
+
+    /* check whether uppercase_attribute_name exist, can't use show xx, cause it will report error if not exist */
+    appendPQExpBuffer(query, "select setting from pg_settings where name = 'uppercase_attribute_name';");
+
+    res = PQexec(conn, query->data);
+    if (PQntuples(res) != 1 || strcmp(PQgetvalue(res, 0, 0), "on") != 0) {
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        return true;
+    }
+
+    PQclear(res);
+    destroyPQExpBuffer(query);
+
+    res = PQexec(conn, "set uppercase_attribute_name=off;");
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        PQclear(res);
+        return false;
+    }
+    PQclear(res);
+    return true;
+}
+#endif

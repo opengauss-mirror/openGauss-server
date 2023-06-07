@@ -1100,7 +1100,7 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
 
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && *newval > MAX_BACKENDS) {
-        ereport(LOG, (errmsg("PGXC can't support max_connections more than %d.", MAX_BACKENDS)));
+        GUC_check_errmsg("PGXC can't support max_connections more than %d.", MAX_BACKENDS);
         return false;
     }
 #endif
@@ -1111,7 +1111,7 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
     }
 
     if (g_instance.attr.attr_storage.dms_attr.enable_dms && *newval > DMS_MAX_CONNECTIONS) {
-        ereport(LOG, (errmsg("Shared Storage can't support max_connections more than %d.", DMS_MAX_CONNECTIONS)));
+        GUC_check_errmsg("Shared Storage can't support max_connections more than %d.", DMS_MAX_CONNECTIONS);
         return false;
     }
     return true;

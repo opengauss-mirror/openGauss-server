@@ -154,12 +154,18 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
         values[Anum_pg_partition_relminmxid - 1] = InvalidMultiXactId;
 #endif
     }
-    if (partTupleInfo->partkeyexprIsNull) {
+    if (partTupleInfo->partexprkeyinfo.partkeyexprIsNull) {
         nulls[Anum_pg_partition_partkeyexpr - 1] = true;
-    } else if (partTupleInfo->partkeyIsFunc) {
-        values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("partkeyisfunc");
+    } else if (partTupleInfo->partexprkeyinfo.partkeyIsFunc) {
+        if (partTupleInfo->partexprkeyinfo.partExprKeyStr)
+            values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum(partTupleInfo->partexprkeyinfo.partExprKeyStr);
+        else
+            values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("partkeyisfunc");
     } else {
-        values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("");
+        if (partTupleInfo->partexprkeyinfo.partExprKeyStr)
+            values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum(partTupleInfo->partexprkeyinfo.partExprKeyStr);
+        else
+            values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("");
     }
 
     if (partTupleInfo->partitionno != INVALID_PARTITION_NO) {
@@ -1042,26 +1048,18 @@ void freePartList(List* plist)
     ListCell* tuplecell = NULL;
     HeapTuple tuple = NULL;
 
-    foreach (tuplecell, plist) {
+    tuplecell = list_head(plist);
+    while (tuplecell != NULL) {
+        ListCell* tmp = tuplecell;
         tuple = (HeapTuple)lfirst(tuplecell);
 
+        tuplecell = lnext(tuplecell);
+        
         if (HeapTupleIsValid(tuple)) {
             heap_freetuple_ext(tuple);
         }
-    }
-
-    if (PointerIsValid(plist)) {
-        pfree_ext(plist);
-    }
-}
-
-void freeSubPartList(List* plist)
-{
-    ListCell* cell = NULL;
-
-    foreach (cell, plist) {
-        List *subParts = (List *)lfirst(cell);
-        freePartList(subParts);
+        
+        pfree(tmp);
     }
 
     if (PointerIsValid(plist)) {
@@ -2062,10 +2060,13 @@ int GetPartitionnoFromSequence(PartitionMap *partmap, int partseq)
     return partitionno;
 }
 
-bool PartExprKeyIsNull(Relation rel, Relation partitionRel)
+bool PartExprKeyIsNull(Relation rel, Relation partitionRel, char** partExprKeyStr)
 {
+    if (!rel)
+        ereport(ERROR,(errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("The relation can't be null here.")));
     Relation pgPartitionRel = partitionRel;
     HeapTuple partTuple = NULL;
+    Datum val = 0;
     if (!partitionRel)
         pgPartitionRel = heap_open(PartitionRelationId, RowExclusiveLock);
     if (OidIsValid(rel->parentId))
@@ -2075,7 +2076,10 @@ bool PartExprKeyIsNull(Relation rel, Relation partitionRel)
     if (!partTuple)
         ereport(ERROR,(errcode(ERRCODE_PARTITION_ERROR),errmsg("The partition can't be found")));
     bool isnull = false;
-    fastgetattr(partTuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pgPartitionRel), &isnull);
+    val = fastgetattr(partTuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pgPartitionRel), &isnull);
+    if (!isnull && partExprKeyStr) {
+        *partExprKeyStr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+    }
     if (OidIsValid(rel->parentId))
         ReleaseSysCache(partTuple);
     else

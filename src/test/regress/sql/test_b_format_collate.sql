@@ -194,6 +194,13 @@ select f2 from column_collate where f2 like 'A_%';
 select f2 from column_collate where f2 like 'A%\'; -- error
 select f2 from column_collate where f2 like 'A_\';-- error
 
+-- test ilike
+select f1 from column_collate where f1 ilike 'A_%';
+select f1 from column_collate where f1 not ilike 'A_%';
+select f1 from column_collate where f1 ilike 'A_%' collate 'utf8mb4_bin';
+select f1 from column_collate where f1 not ilike 'A_%' collate 'utf8mb4_bin';
+select f1 from column_collate where f1 like 'A_%' collate 'utf8mb4_bin';
+
 -- test notlike
 select f1 from column_collate where f1 not like 'A_%';
 select f1 from column_collate where f1 not like '%s%';
@@ -270,8 +277,8 @@ insert into test_sep_option2 values ('S','S');
 insert into test_sep_option3 values ('s','s'),('ś','ś'),('Š','Š');
 insert into test_sep_option4 values ('S','S');
 
-select * from test_sep_option1 union select * from test_sep_option2;
-select * from test_sep_option3 union select * from test_sep_option4;
+select * from test_sep_option1 union select * from test_sep_option2 order by f1;
+select * from test_sep_option3 union select * from test_sep_option4 order by f1;
 select * from test_sep_option1 union select * from test_sep_option3;  -- fail
 
 -- test setop
@@ -485,6 +492,90 @@ create table test24 as select @v1 collate 'utf8mb4_bin';
 select * from pg_get_tabledef('test24');
 create table test25 as select @v1 collate 'utf8mb4_bin', @v2;
 select * from pg_get_tabledef('test25');
+
+--test utf8 collate
+select 'abCdEf' = 'abcdef' collate "utf8_general_ci";
+select 'abCdEf' != 'abcdef' collate "utf8_general_ci";
+select 'abCdEf' > 'abcdef' collate "utf8_general_ci";
+select 'abCdEf' < 'abcdef' collate "utf8_general_ci";
+select 'abCdEf' = 'abcdef' collate "utf8_unicode_ci";
+select 'abCdEf' != 'abcdef' collate "utf8_unicode_ci";
+select 'abCdEf' > 'abcdef' collate "utf8_unicode_ci";
+select 'abCdEf' < 'abcdef' collate "utf8_unicode_ci";
+select 'abCdEf' = 'abcdef' collate "utf8_bin";
+select 'abCdEf' > 'abcdef' collate "utf8_bin";
+select 'abCdEf' < 'abcdef' collate "utf8_bin";
+drop table if exists column_collate;
+create table column_collate(f1 text collate "utf8_general_ci", f2 char(15) collate "utf8_bin", f3 text collate 'utf8_unicode_ci');
+insert into column_collate values('S','S','S'),('s','s','s'),('ś','ś','ś'),('Š','Š','Š'),('z','z','z'),('Z','Z','Z'),('c','c','c'),('A','A','A'),('C','C','C');
+insert into column_collate values('AaA','AaA','AaA'),('bb','bb','bb'),('aAA','aAA','aAA'),('Bb','Bb','Bb'),('dD','dd','dd'),('Cc','Cc','Cc'),('AAA','AAA','AAA');
+insert into column_collate values('A1中文','A1中文','A1中文'), ('b1中文','b1中文','b1中文'), ('a2中文','a2中文','a2中文'),
+('B2中文','B2中文','B2中文'), ('中文d1','中文d1','中文d1'), ('中文C1','中文C1','中文C1'), ('中文A3','中文A3','中文A3');
+-- test where clause
+select f1 from column_collate where f1 = 's';
+select f1 from column_collate where f1 = 'aaa';
+select f2 from column_collate where f2 = 's';
+select f2 from column_collate where f2 = 'aaa';
+select f2 from column_collate where f3 = 's';
+select f2 from column_collate where f3 = 'aaa';
+
+-- test order by clause
+select f1 from column_collate order by f1;
+select f2 from column_collate order by f2;
+select f3 from column_collate order by f3;
+
+-- test distinct clause
+insert into column_collate values ('AbcdEf','AbcdEf','AbcdEf'), ('abcdEF','abcdEF','abcdEF'), ('中文AbCdEFG','中文AbCdEFG','中文AbCdEFG'),
+('中文abcdEFG','中文abcdEFG','中文abcdEFG'), ('中文Ab','中文Ab','中文Ab'), ('中文ab','中文ab','中文ab');
+select distinct f1 from column_collate order by f1 limit 10;
+select distinct f2 from column_collate order by f2 limit 10;
+select distinct f3 from column_collate order by f3 limit 10;
+
+-- test group by 
+select count(f1),f1 from column_collate group by f1 order by f1 limit 10;
+select count(f2),f2 from column_collate group by f2 order by f2 limit 10;
+select count(f3),f3 from column_collate group by f3 order by f3 limit 10;
+
+-- test like
+select f1 from column_collate where f1 like 'A_%';
+select f1 from column_collate where f1 like '%s%';
+select f1 from column_collate where f1 like 'A%f';
+select f2 from column_collate where f2 like 'A_%';
+select f2 from column_collate where f2 like '%s%';
+select f2 from column_collate where f2 like 'A%f';
+select f3 from column_collate where f3 like 'A_%';
+select f3 from column_collate where f3 like '%s%';
+select f3 from column_collate where f3 like 'A%f';
+
+-- test function
+SELECT substring('foobar' from '(o(.)b)' collate 'utf8mb4_bin');
+SELECT regexp_like('str' collate 'utf8mb4_bin','[ac]');
+SELECT regexp_substr('foobarbaz' collate 'utf8mb4_bin', 'b(..)', 3, 2) AS RESULT;
+SELECT regexp_count('foobarbaz' collate 'utf8mb4_bin','b(..)', 5) AS RESULT;
+SELECT regexp_instr('foobarbaz' collate 'utf8mb4_bin','b(..)', 1, 1, 0) AS RESULT;
+SELECT regexp_matches('foobarbequebaz' collate 'utf8mb4_bin', '(bar)(beque)');
+create table test_func1(c1 text collate 'utf8mb4_bin',c2 text collate 'utf8mb4_general_ci');
+insert into test_func1 values ('abDASaa', 'abDASaa'), ('AaBbCc', 'AaBbCc'), ('SsSSss', 'SsSSss'), ('aAa', 'aAa'), ('12345', '12345'), ('aA中文', 'aA中文');
+select upper(c1) from test_func1;
+select upper(c2) from test_func1;
+select lower(c1) from test_func1;
+select lower(c2) from test_func1;
+SELECT substring(c1 from '(a(.))' collate 'utf8mb4_bin') from test_func1;
+SELECT regexp_like(c1 collate 'utf8mb4_bin','[a]') from test_func1;
+SELECT regexp_substr(c1 collate 'utf8mb4_bin', 'a', 1, 1) AS RESULT from test_func1;
+SELECT regexp_count(c1 collate 'utf8mb4_bin','a(..)', 2) AS RESULT from test_func1;
+SELECT regexp_instr(c1 collate 'utf8mb4_bin','a(..)', 1, 1, 0) AS RESULT from test_func1;
+SELECT regexp_matches(c1 collate 'utf8mb4_bin', '(Aa)(Bb)') from test_func1;
+
+-- test utf8mb4_bin
+drop table if exists test_utf8mb4_bin;
+create table test_utf8mb4_bin (c1 int ,c2 text collate 'utf8mb4_bin', c3 char(100) collate 'utf8mb4_bin');
+insert into test_utf8mb4_bin select generate_series(1,100), 'fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR', 'fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR';
+select count(*) from test_utf8mb4_bin where c2 = 'fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR';
+select count(*) from test_utf8mb4_bin where c3 = 'fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR';
+select count(*) from test_utf8mb4_bin group by c2, c3;
+select distinct c2 from test_utf8mb4_bin;
+select distinct c3 from test_utf8mb4_bin;
 
 \c regression
 clean connection to all force for database test_collate_A;

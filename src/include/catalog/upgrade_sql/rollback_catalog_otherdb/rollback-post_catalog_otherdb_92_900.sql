@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.ss_buffer_ctrl() CASCADE;

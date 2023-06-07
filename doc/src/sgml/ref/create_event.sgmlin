@@ -1,0 +1,34 @@
+<refentry id="SQL-CREATE_EVENT">
+<refmeta>
+<refentrytitle>CREATE EVENT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE EVENT</refname>
+<refpurpose>create a new event</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE
+    [DEFINER = user]
+    EVENT
+    [IF NOT EXISTS]
+    event_name_str
+    ON SCHEDULE schedule_expr
+    [ON COMPLETION [NOT] PRESERVE]
+    [ENABLE | DISABLE | DISABLE ON SLAVE]
+    [COMMENT 'string']
+    DO event_body;
+schedule_expr: {
+    AT timestamp_expr [+ INTERVAL interval_expr] ...
+  | EVERY interval_expr
+    [STARTS timestamp_expr [+ INTERVAL interval_expr] ...]
+    [ENDS timestamp_expr [+ INTERVAL interval_expr] ...]
+interval_expr:
+    quantity {YEAR | MONTH | DAY | HOUR | MINUTE |
+              SECOND | YEAR_MONTH | DAY_HOUR | DAY_MINUTE |
+              DAY_SECOND | HOUR_MINUTE | HOUR_SECOND | MINUTE_SECOND}
+</synopsis>
+</refsynopsisdiv>
+</refentry>

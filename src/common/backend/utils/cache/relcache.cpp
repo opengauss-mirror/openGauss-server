@@ -8718,12 +8718,20 @@ char RelationGetRelReplident(Relation r)
 
 bool IsRelationReplidentKey(Relation r, int attno)
 {
-    if (RelationGetRelReplident(r) == REPLICA_IDENTITY_FULL)
+    /* system column is not replica identify key. */
+    if (attno <= 0) {
+        return false;
+    }
+
+    /* any user attribute is replica identity key for FULL */
+    if (r->relreplident == REPLICA_IDENTITY_FULL) {
         return true;
+    }
 
     Oid replidindex = RelationGetReplicaIndex(r);
-    if (!OidIsValid(replidindex))
+    if (!OidIsValid(replidindex)) {
         return true;
+    }
 
     Relation idx_rel = RelationIdGetRelation(replidindex);
 

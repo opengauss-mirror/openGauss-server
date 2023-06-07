@@ -3817,7 +3817,6 @@ static void readtup_cluster(Tuplesortstate* state, SortTuple* stup, int tapenum,
     HeapTuple tuple = (HeapTuple) readtup_alloc(state, t_len + HEAPTUPLESIZE);
     tuple->tupTableType = HEAP_TUPLE;
 
-    USEMEM(state, GetMemoryChunkSpace(tuple));
     /* Reconstruct the HeapTupleData header */
     tuple->t_data = (HeapTupleHeader)((char*)tuple + HEAPTUPLESIZE);
     tuple->t_len = t_len;

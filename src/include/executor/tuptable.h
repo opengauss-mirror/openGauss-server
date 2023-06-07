@@ -164,6 +164,7 @@ typedef struct TupleTableSlot {
     MemoryContext tts_per_tuple_mcxt;
 #endif
     TableAmType tts_tupslotTableAm;      /* slots's tuple table type */
+    bool tts_ndpAggHandled;              /* slot is from ndp backend, handled by aggregate */
 } TupleTableSlot;
 
 #define TTS_HAS_PHYSICAL_TUPLE(slot) ((slot)->tts_tuple != NULL && (slot)->tts_tuple != &((slot)->tts_minhdr))

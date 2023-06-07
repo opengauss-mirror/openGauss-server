@@ -115,7 +115,6 @@ static MdfdVec *mdopen(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior 
 static MdfdVec *_fdvec_alloc(void);
 static char *_mdfd_segpath(const SMgrRelation reln, ForkNumber forknum, BlockNumber segno);
 static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forkno, BlockNumber segno, int oflags);
-static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forkno, BlockNumber blkno, bool skipFsync, ExtensionBehavior behavior);
 static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum, const MdfdVec *seg);
 static void register_dirty_segment(SMgrRelation reln, ForkNumber forknum, const MdfdVec *seg);
 static void register_unlink_segment(RelFileNodeBackend rnode, ForkNumber forknum, BlockNumber segno);
@@ -1827,7 +1826,7 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
  * segment, according to "behavior".  Note: skipFsync is only used in the
  * EXTENSION_CREATE case.
  */
-static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forknum, BlockNumber blkno, bool skipFsync,
+MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forknum, BlockNumber blkno, bool skipFsync,
                              ExtensionBehavior behavior)
 {
     MdfdVec *v = mdopen(reln, forknum, behavior);

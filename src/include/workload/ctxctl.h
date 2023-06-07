@@ -126,8 +126,6 @@
 
 typedef void (*CleanHandler)(void*);
 
-extern void* palloc0_noexcept(Size size);
-
 template <typename T>
 struct smart_ptr {
     smart_ptr() : m_handler(NULL), m_ptr(NULL)

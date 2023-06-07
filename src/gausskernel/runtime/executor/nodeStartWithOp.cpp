@@ -354,18 +354,9 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
     state->sw_curKeyArrayStr = NULL;
     state->sw_cycle_rowmarks = NULL;
 
-    /* Initialize nocycle controling flag */
-    state->sw_nocycleStopOrderSiblings = false;
-
     /* set underlying RecursiveUnionState pointing to current curernt node */
-    if (node->swoptions->siblings_orderby_clause != NULL) {
-        SortState *sstate = (SortState *)outerPlanState(state);
-        RecursiveUnionState *rustate = (RecursiveUnionState *)outerPlanState(sstate);
-        rustate->swstate = state;
-    } else {
-        RecursiveUnionState *rustate = (RecursiveUnionState *)outerPlanState(state);
-        rustate->swstate = state;
-    }
+    RecursiveUnionState *rustate = (RecursiveUnionState *)outerPlanState(state);
+    rustate->swstate = state;
 
     /* init other elements */
     state->sw_level = 0;
@@ -381,12 +372,7 @@ bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot)
     bool nocycle = swplan->swoptions->nocycle;
     bool   incycle = false;
 
-    if (swplan->swoptions->siblings_orderby_clause != NULL) {
-        SortState *sstate = (SortState *)node->ps.lefttree;
-        rustate = (RecursiveUnionState *)sstate->ss.ps.lefttree;
-    } else {
-        rustate = (RecursiveUnionState *)node->ps.lefttree;
-    }
+    rustate = (RecursiveUnionState *)node->ps.lefttree;
 
     Assert (IsA(rustate, RecursiveUnionState));
 
@@ -640,8 +626,6 @@ static TupleTableSlot* ExecStartWithOp(PlanState* state)
 {
     StartWithOpState *node = castNode(StartWithOpState, state);
     TupleTableSlot *dstSlot = node->ps.ps_ResultTupleSlot;
-    PlanState      *outerNode = outerPlanState(node);
-    StartWithOp    *swplan = (StartWithOp *)node->ps.plan;
     /* initialize row num count */
     node->sw_rownum = 0;
 
@@ -651,46 +635,9 @@ static TupleTableSlot* ExecStartWithOp(PlanState* state)
         case SWOP_BUILD: {
             Assert (node->sw_workingTable != NULL);
             markSWLevelBegin(node);
-            bool isDfsEnabled = swplan->swoptions->nocycle && !IsA(outerNode, SortState);
-            if (isDfsEnabled) {
-                /* For nocycle and non-order-siblings cases we use
-                 * depth-first connect by to achieve result consistency.
-                 */
-
-                /* Kick off dfs with StartWith tuples */
-                int dfsRowCount = 0;
-                depth_first_connect(1, node, makeStartTuples(node), &dfsRowCount);
-            }
-
-            /* Otherwise, use breadth-first style connect-by routine */
-            /* Materialize all content to make internal part ready */
-            for (; !isDfsEnabled;) {
-                /*
-                 * We check for interrupts here because infinite loop might happen.
-                 */
-                CHECK_FOR_INTERRUPTS();
-
-                /*
-                 * The actual executions and conversions are done
-                 * in the underlying recursve union node.
-                 */
-                dstSlot = ExecProcNode(outerNode);
-
-                if (TupIsNull(dstSlot)) {
-                    break;
-                }
-
-                /*
-                 * check we need stop infinit recursive iteration if NOCYCLE is specified in
-                 * ConnectByExpr, then return. Also, in case of cycle-report-error the ereport
-                 * is processed inside of CheckCycleException()
-                 */
-                if (CheckCycleExeception(node, dstSlot)) {
-                    continue;
-                }
-
-                tuplestore_puttupleslot(node->sw_workingTable, dstSlot);
-            }
+            /* Kick off dfs with StartWith tuples */
+            int dfsRowCount = 0;
+            depth_first_connect(1, node, makeStartTuples(node), &dfsRowCount);
 
             /* report we have done material step for current StartWithOp node */
             ereport(DEBUG1,
@@ -709,7 +656,7 @@ static TupleTableSlot* ExecStartWithOp(PlanState* state)
              */
             tuplestore_rescan(node->sw_workingTable);
             node->swop_status = SWOP_EXECUTE;
-        }
+        } // @suppress("No break at end of case")
 
         /* fall-thru for first time */
         case SWOP_EXECUTE: {
@@ -773,8 +720,6 @@ void ExecReScanStartWithOp(StartWithOpState *state)
     tuplestore_clear(state->sw_workingTable);
     tuplestore_clear(state->sw_backupTable);
     tuplestore_clear(state->sw_resultTable);
-
-    state->sw_nocycleStopOrderSiblings = false;
 
     /* init other elements */
     state->sw_level = 0;

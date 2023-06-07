@@ -1189,13 +1189,13 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-        {{"test_user_host",
+        {{"b_compatibility_user_host_auth",
             PGC_USERSET,
             NODE_ALL,
             DEVELOPER_OPTIONS,
-            gettext_noop("test_user_host"),
-            NULL},
-            &u_sess->attr.attr_common.test_user_host,
+            gettext_noop("Enable the feature that supported username as user@host, 'user'@'host' and 'user'"),
+            gettext_noop("It affected in DDL scenario and the connecting DB scenario.")},
+            &u_sess->attr.attr_common.b_compatibility_user_host_auth,
             false,
             NULL,
             NULL,
@@ -1867,6 +1867,19 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_iud_fusion",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING,
+            gettext_noop("Enable iud fusion"),
+            NULL},
+            &u_sess->attr.attr_common.enable_iud_fusion,
+            false,
+            NULL,
+            NULL,
+            NULL,
+            NULL
+        },
 #endif
         {{"enable_expr_fusion",
             PGC_USERSET,
@@ -1981,13 +1994,13 @@ static void InitConfigureNamesBool()
             NULL
         },
         {{"light_comm",
-            PGC_BACKEND,
+            PGC_POSTMASTER,
             NODE_ALL,
             CLIENT_CONN,
             gettext_noop("Enable to use light connection"),
             NULL,
             },
-            &u_sess->attr.attr_common.light_comm,
+            &g_instance.attr.attr_common.light_comm,
             false,
             NULL,
             NULL,
@@ -9153,8 +9166,15 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                 ListCell *head = list_head(stmt->defined_args);
                 UserSetElem *elem = (UserSetElem *)lfirst(head);
                 Node *node = (Node *)copyObject(((SelectIntoVarList *)elem->val)->sublink);
-                node = simplify_select_into_expression(node, paramInfo);
-                List *val_list = QueryRewriteSelectIntoVarList(node);
+
+                int real_targetlist_len = 0;
+                node = simplify_select_into_expression(node, paramInfo, &real_targetlist_len);
+                if (real_targetlist_len != list_length(elem->name)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("number of variables must equal the number of columns")));
+                }
+                List *val_list = QueryRewriteSelectIntoVarList(node, real_targetlist_len);
 
                 ListCell *name_cur = NULL;
                 ListCell *val_cur = NULL;

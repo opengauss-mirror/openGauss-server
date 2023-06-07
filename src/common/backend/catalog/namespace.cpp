@@ -1059,6 +1059,11 @@ bool IsPlpgsqlLanguageOid(Oid langoid)
     bool isNull = true;
     char* langName = NULL;
 
+    if (langoid == INTERNALlanguageId || langoid == ClanguageId
+        || langoid == SQLlanguageId || langoid == JavalanguageId) {
+        return false;
+    }
+
     Relation relation = heap_open(LanguageRelationId, NoLock);
     tp = SearchSysCache1(LANGOID, ObjectIdGetDatum(langoid));
     if (!HeapTupleIsValid(tp)) {
@@ -4152,7 +4157,7 @@ Oid get_collation_oid(List* name, bool missing_ok)
     }
 
     if (DB_IS_CMPT(B_FORMAT)) {
-        colloid = get_collation_oid_with_lower_name(collation_name, dbencoding);
+        colloid = get_collation_oid_with_lower_name(collation_name, PG_INVALID_ENCODING);
         if (OidIsValid(colloid) && is_support_b_format_collation(colloid)) {
             return colloid;
         }

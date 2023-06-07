@@ -2299,10 +2299,10 @@ explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
    ->  Vector Aggregate
          Output: count(a)
          ->  Vector Adapter(type: BATCH MODE)
-               Output: a, b, c, d
+               Output: a
                Filter: (test_hash_ht.a = 30)
                ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
-                     Output: a, b, c, d
+                     Output: a
                      Selected Partitions:  17
 (10 rows)
 
@@ -2314,10 +2314,10 @@ explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
    ->  Vector Aggregate
          Output: count(b)
          ->  Vector Adapter(type: BATCH MODE)
-               Output: a, b, c, d
+               Output: b
                Filter: (test_hash_ht.a = 30)
                ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
-                     Output: a, b, c, d
+                     Output: b
                      Selected Partitions:  17
 (10 rows)
 
@@ -2345,10 +2345,10 @@ explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
    ->  Vector Aggregate
          Output: count(a)
          ->  Vector Adapter(type: BATCH MODE)
-               Output: a, b, c, d
+               Output: a
                Filter: (test_range_pt.a = 30)
                ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
-                     Output: a, b, c, d
+                     Output: a
                      Selected Partitions:  3
 (10 rows)
 
@@ -2360,10 +2360,10 @@ explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
    ->  Vector Aggregate
          Output: count(b)
          ->  Vector Adapter(type: BATCH MODE)
-               Output: a, b, c, d
+               Output: b
                Filter: (test_range_pt.a = 30)
                ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
-                     Output: a, b, c, d
+                     Output: b
                      Selected Partitions:  3
 (10 rows)
 
@@ -2580,9 +2580,9 @@ explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
    ->  Vector Aggregate
          Output: count(b)
          ->  Vector Adapter
-               Output: a, b, c, d
+               Output: b
                ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
-                     Output: a, b, c, d
+                     Output: b
                      Index Cond: (test_hash_ht.a = 30)
                      Selected Partitions:  17
 (10 rows)
@@ -2626,9 +2626,9 @@ explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
    ->  Vector Aggregate
          Output: count(b)
          ->  Vector Adapter
-               Output: a, b, c, d
+               Output: b
                ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
-                     Output: a, b, c, d
+                     Output: b
                      Index Cond: (test_range_pt.a = 30)
                      Selected Partitions:  3
 (10 rows)
@@ -2834,9 +2834,9 @@ explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
    ->  Vector Aggregate
          Output: count(a)
          ->  Vector Adapter
-               Output: a, b, c, d
+               Output: a
                ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
-                     Output: a, b, c, d
+                     Output: a
                      Recheck Cond: (test_hash_ht.a = 30)
                      Selected Partitions:  17
                      ->  Partitioned Bitmap Index Scan on idx_hash_local
@@ -2852,9 +2852,9 @@ explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
    ->  Vector Aggregate
          Output: count(b)
          ->  Vector Adapter
-               Output: a, b, c, d
+               Output: b
                ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
-                     Output: a, b, c, d
+                     Output: b
                      Recheck Cond: (test_hash_ht.a = 30)
                      Selected Partitions:  17
                      ->  Partitioned Bitmap Index Scan on idx_hash_local
@@ -2889,9 +2889,9 @@ explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
    ->  Vector Aggregate
          Output: count(a)
          ->  Vector Adapter
-               Output: a, b, c, d
+               Output: a
                ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
-                     Output: a, b, c, d
+                     Output: a
                      Recheck Cond: (test_range_pt.a = 30)
                      Selected Partitions:  3
                      ->  Partitioned Bitmap Index Scan on idx_range_local
@@ -2907,9 +2907,9 @@ explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
    ->  Vector Aggregate
          Output: count(b)
          ->  Vector Adapter
-               Output: a, b, c, d
+               Output: b
                ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
-                     Output: a, b, c, d
+                     Output: b
                      Recheck Cond: (test_range_pt.a = 30)
                      Selected Partitions:  3
                      ->  Partitioned Bitmap Index Scan on idx_range_local

@@ -5,7 +5,9 @@ function fn_print_help()
 {
     echo "Usage: $0 [OPTION]
     -?|--help                         show help information
-    -U|--user_name                    cluster user
+    -o|--odbc_drivername              odbc driver name
+    -u|--user_name                    cluster user
+    -w|--user_password                cluster user password
     -p|--port                         database server port
     "
 }
@@ -19,11 +21,21 @@ function fn_prase_input_param()
                 fn_print_help
                 exit 1
                 ;;
-            -U|--user_name )
+            -o|--odbc_drivername )
+                fn_check_param drivername $2
+                drivername=$2
+                shift 2
+                ;;
+            -u|--user_name )
                 fn_check_param user_name $2
                 user_name=$2
                 shift 2
                 ;;
+            -w|--password )
+                fn_check_param password $2
+                password=$2
+                shift 2
+                ;;                
             -p|--port )
                 fn_check_param port $2
                 host_port=$2
@@ -51,9 +63,9 @@ function fn_check_param()
 
 function fn_check_input()
 {
-    if [ ! "$user_name" -o ! "$host_port" ]
+    if [[ ! "$drivername" || ! "$user_name" || ! "$password" || ! "$host_port" ]]
     then
-        echo "Usage: sh check_dblink.sh -U user_name -p port"
+        echo "Usage: sh check_dblink.sh -o odbc_drivername -u user_name -w user_password -p port"
         echo "The following command may help you"
         echo "sh check_dblink.sh --help or sh check_dblink.sh -?"
         return 1
@@ -74,7 +86,7 @@ function database_install()
     if [ $? -ne 0 ]
     then
         echo "init failed，see init.log for detail information"
-	delete
+    delete
         exit 1
     else
         echo "init success, begin to start"
@@ -84,7 +96,7 @@ function database_install()
     if [ $? -ne 0 ]
     then
         echo "start failed，see start.log for detail information"
-	delete
+    delete    
         exit 1
     else
         echo "openGauss start success，the port is $host_port"
@@ -94,12 +106,16 @@ function database_install()
 
 function create_sql()
 {
-    cp sql/dblink.tmp sql/dblink.sql
-    sed -i "s/portIp/$host_port/g" sql/dblink.sql
-    sed -i "s/userName/$user_name/g" sql/dblink.sql
-    cp expected/dblink.tmp expected/dblink.out
-    sed -i "s/portIp/$host_port/g" expected/dblink.out
-    sed -i "s/userName/$user_name/g" expected/dblink.out
+    cp sql/dblink_odbc.tmp sql/dblink_odbc.sql
+    sed -i "s/driverName/$drivername/g" sql/dblink_odbc.sql
+    sed -i "s/userName/$user_name/g" sql/dblink_odbc.sql
+    sed -i "s/passWord/$password/g" sql/dblink_odbc.sql
+    sed -i "s/portIp/$host_port/g" sql/dblink_odbc.sql
+    cp expected/dblink_odbc.tmp expected/dblink_odbc.out
+    sed -i "s/driverName/$drivername/g" expected/dblink_odbc.out
+    sed -i "s/userName/$user_name/g" expected/dblink_odbc.out
+    sed -i "s/passWord/$password/g" expected/dblink_odbc.out
+    sed -i "s/portIp/$host_port/g" expected/dblink_odbc.out
 }
 
 
@@ -109,19 +125,29 @@ function run_check()
     if [ $? -ne 0 ]
     then
         echo "create database failed"
-	delete
+    delete
         exit 1
     fi
+
+    gsql -d regression -p "$host_port" -c "create user $user_name password '$password';"
+        if [ $? -ne 0 ]
+    then
+        echo "create user failed"
+    delete
+        exit 1
+    fi
+    gsql -d regression -p "$host_port" -c "grant all privileges to $user_name;"
 
     create_sql
     if [ $? -ne 0 ]
     then
         echo "generate sql file failed"
-	delete
+    delete
         exit 1
     fi
-    gsql -d regression -p $host_port -a <  sql/dblink.sql > result/dblink.out 2>&1
-    diff -u result/dblink.out expected/dblink.out > diff.log
+
+    gsql -d regression -p $host_port -a <  sql/dblink_odbc.sql > result/dblink_odbc.out 2>&1
+    diff -u result/dblink_odbc.out expected/dblink_odbc.out > diff.log
     if [[ `cat diff.log |wc -l` -eq 0 ]]
     then
         echo -e "\033[32m OK \033[0m"
@@ -130,20 +156,21 @@ function run_check()
     fi
     pid=$(ps ux | grep "test_dblink" | grep -v "grep" | tr -s ' ' | cut -d ' ' -f 2)
     kill -9 $pid
-    delete
+
 }
 
 
 function delete()
 {
     rm -rf test_dblink
-    rm -rf sql/dblink.sql
-    rm -rf expected/dblink.out
+    rm -rf sql/dblink_odbc.sql
+    rm -rf expected/dblink_odbc.out
 }
 
 
 function main()
 {
+    delete
     fn_prase_input_param $@
     fn_check_input
     if [ $? -ne 0 ]

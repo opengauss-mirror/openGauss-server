@@ -464,7 +464,7 @@ void pq_init(void)
      * should always use COMMERROR on failure during communication
      */
 #ifndef WIN32
-    if (u_sess->attr.attr_common.light_comm == TRUE &&
+    if (g_instance.attr.attr_common.light_comm == TRUE &&
         u_sess->proc_cxt.MyProcPort->sock != PGINVALID_SOCKET && !pg_set_noblock(u_sess->proc_cxt.MyProcPort->sock)){
         ereport(COMMERROR, (errmsg("could not set socket to nonblocking mode: %m")));
     }
@@ -1172,7 +1172,7 @@ void TouchSocketFile(void)
  */
 void pq_set_nonblocking(bool nonblocking)
 {
-    if (u_sess->attr.attr_common.light_comm == FALSE) {
+    if (g_instance.attr.attr_common.light_comm == FALSE) {
         if (u_sess->proc_cxt.MyProcPort->noblock == nonblocking) {
             return;
         }

@@ -33,7 +33,7 @@
 #include "pgstat.h"
 
 static BufferDesc *NvmStrategyGetBuffer(uint32 *buf_state);
-extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool create, bool do_move);
+extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool do_move);
 
 static const int MILLISECOND_TO_MICROSECOND = 1000;
 static const int TEN_MILLISECOND = 10;
@@ -89,8 +89,11 @@ static bool NvmPinBuffer(BufferDesc *buf, bool *migrate)
         }
     }
 
-    PrivateRefCountEntry *ref = GetPrivateRefCountEntry(b, true, true);
-    Assert(ref != NULL);
+    PrivateRefCountEntry *ref = GetPrivateRefCountEntry(b, true);
+    if (ref == NULL) {
+        ReservePrivateRefCountEntry();
+        ref = NewPrivateRefCountEntry(b);
+    }
     ref->refcount++;
     Assert(ref->refcount > 0);
     ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, b);
@@ -103,7 +106,7 @@ static bool NvmPinBufferFast(BufferDesc *buf)
     PrivateRefCountEntry *ref = NULL;
 
     /* When the secondly and thirdly parameter all both true, the ret value must not be NULL. */
-    ref = GetPrivateRefCountEntry(b, false, false);
+    ref = GetPrivateRefCountEntry(b, false);
 
     if (ref == NULL) {
         return false;
@@ -397,6 +400,7 @@ restart:
                         return nvmBuf;
                     } else {
                         for (;;) {
+                            ReservePrivateRefCountEntry();
                             buf = (BufferDesc *)StrategyGetBuffer(strategy, &buf_state);
 
                             old_flags = buf_state & BUF_FLAG_MASK;
@@ -508,6 +512,11 @@ restart:
     /* Loop here in case we have to try another victim buffer */
     for (;;) {
         bool needGetLock = false;
+        /*
+         * Ensure, while the spinlock's not yet held, that there's a free refcount
+         * entry.
+         */
+        ReservePrivateRefCountEntry();
         /*
          * Select a victim buffer.	The buffer is returned with its header
          * spinlock still held!

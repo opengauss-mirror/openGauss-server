@@ -3642,8 +3642,8 @@ extern bool find_rownum_in_quals(PlannerInfo *root)
         return false;
     }
 
-    if(root->hasRownumQual) {
-        return true;
+    if(root->hasRownumQual || root->hasRownumCheck) {
+        return root->hasRownumQual;
     }
 
     bool hasRownum = false;
@@ -3657,9 +3657,7 @@ extern bool find_rownum_in_quals(PlannerInfo *root)
         }
     }
 
-    if (quallist) {
-        list_free(quallist);
-    }
+    root->hasRownumCheck = true;
 
     return hasRownum;
 }

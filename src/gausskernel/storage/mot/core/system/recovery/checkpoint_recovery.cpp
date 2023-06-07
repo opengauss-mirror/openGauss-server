@@ -677,16 +677,16 @@ void CheckpointRecovery::InsertRow(Table* table, char* keyData, uint16_t keyLen,
     row->CopyData((const uint8_t*)rowData, rowLen);
     row->SetCommitSequenceNumber(csn);
     row->SetRowId(rowId);
+    if (!sState.UpdateMaxKey(rowId)) {
+        status = RC_ERROR;
+        MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG, "Recovery Manager Insert Row", "Failed to update surrogate state");
+        table->DestroyRow(row);
+        return;
+    }
 
     MOT::Index* ix = table->GetPrimaryIndex();
     if (ix->IsFakePrimary()) {
         row->SetSurrogateKey();
-        if (!sState.UpdateMaxKey(rowId)) {
-            status = RC_ERROR;
-            MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG, "Recovery Manager Insert Row", "Failed to update surrogate state");
-            table->DestroyRow(row);
-            return;
-        }
     }
     key.CpKey((const uint8_t*)keyData, keyLen);
     status = table->InsertRowNonTransactional(row, tid, &key);

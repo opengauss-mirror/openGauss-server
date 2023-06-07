@@ -438,6 +438,18 @@ VALUES
     't_log_replica_mysql_2'
 ) RETURNING i_id_batch;
 
+-- upsert case
+CREATE TABLE t2 (
+    col1 INT,
+    col2 INT PRIMARY KEY,
+    col3 INT DEFAULT 1,
+    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 BIGSERIAL
+);
+
+INSERT INTO t2 VALUES (6, 6) ON DUPLICATE KEY UPDATE t2.col1 = t2.col2 + 1;
+INSERT INTO t2 VALUES (6, 6) ON DUPLICATE KEY UPDATE t2.col1 = extract(century from col4) * 100 + extract(isodow from col4);
+
 -- jdbc case
 DROP USER IF EXISTS rightref CASCADE;
 CREATE USER rightref WITH PASSWORD 'rightref@123';

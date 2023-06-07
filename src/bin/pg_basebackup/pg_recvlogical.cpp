@@ -398,6 +398,12 @@ static void BeginToText(const char* stream, uint32 *curPos, PQExpBuffer res)
         appendBinaryPQExpBuffer(res, &stream[*curPos], timeLen);
         *curPos += timeLen;
     }
+    if (stream[*curPos] == 'O') {
+        *curPos += 1;
+        uint32 originid = ntohl(*(uint32 *)(&stream[*curPos]));
+        *curPos += sizeof(uint32);
+        appendPQExpBuffer(res, " origin_id: %d", originid);
+    }
 }
 
 /*

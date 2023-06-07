@@ -18,11 +18,11 @@ comment on function PG_CATALOG.sha1(text) is 'use the sha1 algorithm to hash';
  
 -- sha2
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 560;
-CREATE OR REPLACE FUNCTION pg_catalog.sha2(text, int)
+CREATE OR REPLACE FUNCTION pg_catalog.sha2(text, bigint)
  RETURNS text
  LANGUAGE internal
  IMMUTABLE NOT FENCED NOT SHIPPABLE
 AS $function$sha2$function$;
-comment on function PG_CATALOG.sha2(text,int) is 'use the sha2 algorithm to hash';
+comment on function PG_CATALOG.sha2(text,bigint) is 'use the sha2 algorithm to hash';
  
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;

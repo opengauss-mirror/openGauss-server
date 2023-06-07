@@ -491,6 +491,8 @@ Datum hash_utf8mb4_bin_pad_space(const unsigned char *key);
 static int get_current_char_sorted_value(const unsigned char* cur_str, const unsigned char* str_end,
                                          GS_UINT32* next_word, const GS_UNICASE_INFO *uni_plane);
 bool is_b_format_collation(Oid collation);
+static int strnncoll_binary(const unsigned char* arg1, size_t len1,
+                            const unsigned char* arg2, size_t len2);
 
 /* binary collation only support binary string types, such as : blob. */
 void check_binary_collation(Oid collation, Oid type_oid)
@@ -505,31 +507,6 @@ void check_binary_collation(Oid collation, Oid type_oid)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("binary collation only support binary type in B format")));
     }
-}
-
-Oid binary_need_transform_typeid(Oid typeoid, Oid* collation)
-{
-    Oid new_typid = typeoid;
-    if (*collation == BINARY_COLLATION_OID) {
-        /* use switch case stmt for extension in feature */
-        switch (typeoid) {
-            /* binary type no need to transform */
-            case BLOBOID:
-                break;
-            /* string type need to transform to binary type */
-            case TEXTOID:
-                new_typid = BLOBOID;
-                break;
-            default:
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Un-support feature"),
-                        errdetail("type %s cannot be set to binary collation currently", get_typename(typeoid))));
-                break;;
-        }
-        /* binary collation in attribute level collation no need to be set. */
-        *collation = InvalidOid;
-    }
-    return new_typid;
 }
 
 bool is_support_b_format_collation(Oid collation)
@@ -579,10 +556,16 @@ int varstr_cmp_by_builtin_collations(char* arg1, int len1, char* arg2, int len2,
     switch (collid) {
         case UTF8MB4_GENERAL_CI_COLLATION_OID:
         case UTF8MB4_UNICODE_CI_COLLATION_OID:
+        case UTF8_GENERAL_CI_COLLATION_OID:
+        case UTF8_UNICODE_CI_COLLATION_OID:
             result = strnncoll_utf8mb4_general_pad_space((unsigned char*)arg1, len1, (unsigned char*)arg2, len2);
             break;
         case UTF8MB4_BIN_COLLATION_OID:
+        case UTF8_BIN_COLLATION_OID:
             result = strnncoll_utf8mb4_bin_pad_space((unsigned char*)arg1, len1, (unsigned char*)arg2, len2);
+            break;
+        case BINARY_COLLATION_OID:
+            result = strnncoll_binary((unsigned char*)arg1, len1, (unsigned char*)arg2, len2);
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -600,10 +583,13 @@ Datum hash_text_by_builtin_colltions(const unsigned char *key, size_t len, Oid c
     switch (collid) {
         case UTF8MB4_GENERAL_CI_COLLATION_OID:
         case UTF8MB4_UNICODE_CI_COLLATION_OID:
+        case UTF8_GENERAL_CI_COLLATION_OID:
+        case UTF8_UNICODE_CI_COLLATION_OID:
             result = hash_utf8mb4_general_pad_space((unsigned char*)key, len);
             break;
         case UTF8MB4_BIN_COLLATION_OID:
-            result = hash_utf8mb4_bin_pad_space((unsigned char*)key);
+        case UTF8_BIN_COLLATION_OID:
+            result = hash_any((unsigned char*)key, bpchartruelen((char*)key, len));
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -613,6 +599,14 @@ Datum hash_text_by_builtin_colltions(const unsigned char *key, size_t len, Oid c
     }
 
     return result;
+}
+
+static int strnncoll_binary(const unsigned char* arg1, size_t len1,
+                            const unsigned char* arg2, size_t len2)
+{
+    size_t len = len1 < len2 ? len1 : len2;
+    int res = memcmp(arg1, arg2, len);
+    return res ? res : (int)(len1 - len2);
 }
 
 /*
@@ -804,16 +798,6 @@ Datum hash_utf8mb4_general_pad_space(const unsigned char *key, size_t len)
         NEXT_WORD_POS(key, key_bytes);
     }
     return UInt32GetDatum(nr1);
-}
-
-/*
-* hash function for collation utf8mb4_bin
-*/
-Datum hash_utf8mb4_bin_pad_space(const unsigned char *key)
-{
-    unsigned char* remove_space_key = (unsigned char*)remove_trailing_spaces((const char*)key);
-
-    return hash_any(remove_space_key, strlen((const char*)remove_space_key));
 }
 
 /*

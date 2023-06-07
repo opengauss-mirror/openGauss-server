@@ -2673,13 +2673,13 @@ void check_collate_in_options(List *user_options)
         DefElem *def = (DefElem *)lfirst(opt);
 
         if (pg_strcasecmp(def->defname, "collate") == 0) {
-            Oid collate = intVal(def->arg);
+            Oid collate = IsA(def->arg, Integer) ? intVal(def->arg) : pg_strtoint32(strVal(def->arg));
             if (!DB_IS_CMPT(B_FORMAT))
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         (errmsg("Un-support feature"),
                          errdetail("Forbid to set or change \"%s\" in non-B format", "collate"))));
 
-            if (!COLLATION_IN_B_FORMAT(collate))
+            if (!COLLATION_IN_B_FORMAT(collate) && collate != DEFAULT_COLLATION_OID)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("this collation only cannot be specified here")));
             tp = SearchSysCache1(COLLOID, ObjectIdGetDatum(collate));

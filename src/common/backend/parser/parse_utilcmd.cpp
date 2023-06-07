@@ -94,8 +94,8 @@
 #include "client_logic/client_logic.h"
 #include "client_logic/client_logic_enums.h"
 #include "storage/checksum_impl.h"
-#include "catalog/gs_utf8_collation.h"
 
+#include "catalog/gs_utf8_collation.h"
 /* State shared by transformCreateSchemaStmt and its subroutines */
 typedef struct {
     const char* stmtType; /* "CREATE SCHEMA" or "ALTER SCHEMA" */
@@ -195,6 +195,7 @@ static char* CreatestmtGetOrientation(CreateStmt *stmt);
 static void CheckAutoIncrementIndex(CreateStmtContext *cxt);
 static List* semtc_generate_hash_partition_defs(CreateStmt* stmt, const char* prefix_name, int part_count);
 static void TransformModifyColumndef(CreateStmtContext* cxt, AlterTableCmd* cmd);
+static void TransformColumnDefinitionOptions(CreateStmtContext* cxt, ColumnDef* column);
 static void TransformColumnDefinitionConstraints(
     CreateStmtContext* cxt, ColumnDef* column, bool preCheck, bool is_modify);
 #define REDIS_SCHEMA "data_redis"
@@ -1366,6 +1367,11 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
         cxt->alist = lappend(cxt->alist, stmt);
     }
 
+    TransformColumnDefinitionOptions(cxt, column);
+}
+
+static void TransformColumnDefinitionOptions(CreateStmtContext* cxt, ColumnDef* column)
+{
     ListCell *columnOption = NULL;
     foreach (columnOption, column->columnOptions) {
         void *pointer = lfirst(columnOption);
@@ -8476,6 +8482,8 @@ static void TransformModifyColumndef(CreateStmtContext* cxt, AlterTableCmd* cmd)
             errmsg("Invalid modify column operation"),
             errdetail("modify or change column to encrypted column is not supported")));
     }
+    /* for column options like comment clause */
+    TransformColumnDefinitionOptions(cxt, def);
     // drop old auto_increment
     DropModifyColumnAutoIncrement(cxt, cxt->rel, cmd->name);
     /* for CHANGE column */

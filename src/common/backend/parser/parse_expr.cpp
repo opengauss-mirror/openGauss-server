@@ -338,6 +338,8 @@ Node *transformExprRecurse(ParseState *pstate, Node *expr)
         case T_ColumnRef:
             result = transformColumnRef(pstate, (ColumnRef*)expr);
             if (IS_SUPPORT_RIGHT_REF(pstate->rightRefState) && list_length(((ColumnRef*)expr)->fields) == 1) {
+                pstate->p_hasTargetSRFs = false;
+                pstate->p_is_flt_frame = false;
                 if (pstate->rightRefState->isUpsert) {
                     pstate->rightRefState->isUpsertHasRightRef = true;
                 } else {
@@ -1233,7 +1235,7 @@ static bool isCol2Function(List* fields)
         char **p_argnames = NULL;
         char *p_argmodes = NULL;
         int allArgs = get_func_arg_info(proctup, &p_argtypes, &p_argnames, &p_argmodes);
-        if (allArgs > 0 || !OidIsValid(procform->prorettype)) {
+        if ((allArgs > 0 && allArgs != procform->pronargdefaults) || !OidIsValid(procform->prorettype)) {
             continue;
         }
 
@@ -2134,13 +2136,6 @@ static Node* transformSelectIntoVarList(ParseState* pstate, SelectIntoVarList* s
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("unexpected non-SELECT command in SubLink")));
     }
     sublink->subselect = (Node*)qtree;
-    
-    if (list_length(qtree->targetList) != list_length(sis->userVarList)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_SYNTAX_ERROR),
-                errmsg("number of variables must equal the number of columns"),
-                parser_errposition(pstate, sublink->location)));
-    }
     return (Node *)sis;
 }
 
@@ -2969,7 +2964,6 @@ static Node* transformCollateClause(ParseState* pstate, CollateClause* c)
     }
     newc->collOid = LookupCollation(pstate, c->collname, c->location);
     newc->location = c->location;
-    check_binary_collation(newc->collOid, argtype);
 
     return (Node*)newc;
 }
@@ -3566,8 +3560,14 @@ static char *ColumnRefFindRelname(ParseState *pstate, const char *colname)
                     Value *col = (Value *)lfirst(lc2);
                     if (strcmp(colname, strVal(col)) == 0) {
                         if (rte->rtekind == RTE_RELATION) {
-                            relname = (rte->alias && rte->alias->aliasname) ?
-                                       rte->alias->aliasname : rte->relname;
+                            if (rte->alias && rte->alias->aliasname) {
+                                relname = rte->alias->aliasname;
+                            } else if (rte->eref && rte->eref->aliasname) {
+                                /* should use eref->aliasname for SYNONYM*/
+                                relname = rte->eref->aliasname;
+                            } else {
+                                relname = rte->relname;
+                            }
                         } else if (rte->rtekind == RTE_SUBQUERY) {
                             relname = rte->alias->aliasname;
                         } else if (rte->rtekind == RTE_CTE) {

@@ -56,16 +56,26 @@ bool enable_remote_excute();
 bool libpqsw_get_set_command();
 /* if skip readonly check in P or Q message */
 bool libpqsw_skip_check_readonly();
+/* judge if we need reply '3' for 'C' msg*/
+bool libpqsw_skip_close_command();
 /* get unique redirect manager*/
 RedirectManager* get_redirect_manager();
+/* get if session seek next */
+bool libpqsw_can_seek_next_session();
+/* clear libpqsw memory when process/session exit */
+void libpqsw_cleanup(int code, Datum arg);
+
 #ifdef _cplusplus
 }
 #endif
 
-
 // default is output log.
 #define LIBPQSW_ENABLE_LOG 1
 #define LIBPQSW_DEFAULT_LOG_LEVEL LOG
+
+// default is not output libpq message trace
+// log will in $GAUSSLOG/libpqsw/xx.log
+#define LIBPQSW_ENABLE_PORT_TRACE (0)
 
 #define libpqsw_log_enable()    (get_redirect_manager()->log_enable())
 #if LIBPQSW_ENABLE_LOG
@@ -102,7 +112,7 @@ typedef struct {
 #define PBE_MAX_SET_BLOCK (10)
 enum RedirectType {
     RT_NORMAL, //transfer to standby
-    RT_SET  //not transfer to standby
+    RT_SET  //not transfer to standby,set props=xxx or 'C' close msg
 };
 
 typedef struct {
@@ -127,6 +137,9 @@ public:
     }
     
     void reset() {
+        if (messages == NIL) {
+            return;
+        }
         foreach_cell(message, messages) {
             free_redirect_message((RedirectMessage*)lfirst(message));
         }
@@ -205,7 +218,16 @@ public:
         state.need_end = true;
         state.already_connected = false;
     }
-    
+
+    void Destroy()
+    {
+        messages_manager.reset();
+        if (log_trace_msg != NULL) {
+            DestroyStringInfo(log_trace_msg);
+            log_trace_msg = NULL;
+        }
+    }
+
     bool push_message(int qtype, StringInfo msg, bool need_switch, RedirectType msg_type)
     {
         // if one msg have many sql like 'set a;set b;set c', don't switch
@@ -233,7 +255,7 @@ public:
 
     void logtrace(int level, const char* fmt, ...)
     {
-        if (!log_enable()) {
+        if (!log_enable() || log_trace_msg == NULL) {
             return;
         }
         if (fmt != log_trace_msg->data) {
@@ -244,12 +266,13 @@ public:
             (void)vsnprintf_s(log_trace_msg->data, log_trace_msg->maxlen, log_trace_msg->maxlen - 1, fmt, args);
             va_end(args);
         }
-        ereport(level, (errmsg("libpqsw:%s", log_trace_msg->data)));
+        ereport(level, (errmsg("libpqsw(%ld-%ld):%s", (uint64)this,
+            u_sess == NULL ? 0 : u_sess->session_id, log_trace_msg->data)));
     }
     
     virtual ~RedirectManager()
     {
-        DestroyStringInfo(log_trace_msg);
+        Destroy();
     }
 public:
     RedirectState state;

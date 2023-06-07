@@ -84,8 +84,6 @@ extern void EarlyBindingTLSVariables(void);
 
 extern void proc_exit_prepare(int code);
 
-extern void MemoryContextDestroyAtThreadExit(MemoryContext context);
-
 static void* ThreadStarterFunc(void* arg);
 
 static void check_backend_name(const char* argv, char** name_thread);

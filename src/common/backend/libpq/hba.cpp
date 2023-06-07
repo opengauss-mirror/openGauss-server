@@ -2439,11 +2439,11 @@ HeapTuple SearchUserHostName(const char* userName, Oid* oid)
 {
     char* userHostName = NULL;
     HeapTuple roleTup = NULL;
-    if (u_sess->attr.attr_common.test_user_host && !OidIsValid(u_sess->proc_cxt.MyDatabaseId) && u_sess->proc_cxt.MyProcPort) {
+    if (u_sess->attr.attr_common.b_compatibility_user_host_auth && !OidIsValid(u_sess->proc_cxt.MyDatabaseId) && u_sess->proc_cxt.MyProcPort) {
         bool isBFormat = false;
         char* dbCompatibility = GetDatabaseCompatibility(u_sess->proc_cxt.MyProcPort->database_name);
         if (dbCompatibility)
-            isBFormat = (strcmp(dbCompatibility, "B") == 0);
+            isBFormat = (pg_strcasecmp(dbCompatibility, "B") == 0);
         if (isBFormat) {
             userHostName = GenUserHostName(u_sess->proc_cxt.MyProcPort, userName);
             roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(userHostName));

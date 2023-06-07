@@ -43,4 +43,12 @@ extern int get_aggregate_argtypes(Aggref* aggref, Oid* inputTypes, int func_max_
 
 extern Oid resolve_aggregate_transtype(Oid aggfuncid, Oid aggtranstype, Oid* inputTypes, int numArguments);
 
+extern void build_aggregate_transfn_expr(Oid *agg_input_types, int agg_num_inputs, int agg_num_direct_inputs,
+                                         bool agg_variadic, Oid agg_state_type, Oid agg_input_collation,
+                                         Oid transfn_oid, Expr **transfnexpr);
+
+extern void build_aggregate_finalfn_expr(Oid *agg_input_types, int num_finalfn_inputs, Oid agg_state_type,
+                                         Oid agg_result_type, Oid agg_input_collation, Oid finalfn_oid,
+                                         Expr **finalfnexpr);
+
 #endif /* PARSE_AGG_H */

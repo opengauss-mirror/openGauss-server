@@ -56,7 +56,7 @@
 #include "vecexecutor/vecsortagg.h"
 #include "vecexecutor/vechashagg.h"
 
-static void DispatchAggFunction(AggStatePerAgg agg_state, VecAggInfo* agg_info, bool use_sonichash = false);
+static void DispatchAggFunction(VecAggStatePerAgg agg_state, VecAggInfo* agg_info, bool use_sonichash = false);
 
 extern bool CodeGenThreadObjectReady();
 extern bool CodeGenPassThreshold(double rows, int dn_num, int dop);
@@ -64,7 +64,7 @@ extern bool CodeGenPassThreshold(double rows, int dn_num, int dop);
 /*
  * @Description: set vector agg function.
  */
-static void DispatchAggFunction(AggStatePerAgg agg_state, VecAggInfo* agg_info, bool use_sonichash)
+static void DispatchAggFunction(VecAggStatePerAgg agg_state, VecAggInfo* agg_info, bool use_sonichash)
 {
     VecFuncCacheEntry* entry = NULL;
     Oid aggfnoid = agg_state->aggref->aggfnoid;
@@ -103,7 +103,7 @@ static void DispatchAggFunction(AggStatePerAgg agg_state, VecAggInfo* agg_info, 
 VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
 {
     VecAggState* aggstate = NULL;
-    AggStatePerAgg peragg;
+    VecAggStatePerAgg peragg;
     Plan* outer_plan = NULL;
     int numaggs, aggno;
     ListCell* l = NULL;
@@ -129,7 +129,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
     aggstate->numaggs = 0;
     aggstate->eqfunctions = NULL;
     aggstate->hashfunctions = NULL;
-    aggstate->peragg = NULL;
+    aggstate->pervecagg = NULL;
     aggstate->agg_done = false;
     aggstate->pergroup = NULL;
     aggstate->grp_firstTuple = NULL;
@@ -343,8 +343,8 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
      * Set up aggregate-result storage in the output expr context, and also
      * allocate my private per-agg working storage
      */
-    peragg = (AggStatePerAgg)palloc0(sizeof(AggStatePerAggData) * numaggs * num_grp_sets);
-    aggstate->peragg = peragg;
+    peragg = (VecAggStatePerAgg)palloc0(sizeof(VecAggStatePerAggData) * numaggs * num_grp_sets);
+    aggstate->pervecagg = peragg;
 
     /* Compute the columns we actually need to hash on */
     aggstate->hash_needed = find_hash_columns(aggstate);
@@ -374,7 +374,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
     foreach (l, aggstate->aggs) {
         AggrefExprState* aggrefstate = (AggrefExprState*)lfirst(l);
         Aggref* aggref = (Aggref*)aggrefstate->xprstate.expr;
-        AggStatePerAgg peraggstate;
+        VecAggStatePerAgg peraggstate;
         Oid input_types[FUNC_MAX_ARGS];
         int num_arguments;
         int num_inputs;
@@ -442,7 +442,9 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
         transfn_oid = aggform->aggtransfn;
         finalfn_oid = aggform->aggfinalfn;
 #ifndef ENABLE_MULTIPLE_NODES
-        numeric_aggfn_info_change(aggref->aggfnoid, &transfn_oid, &aggtranstype, &transfn_oid);
+        if (estate->es_is_flt_frame) {
+            numeric_aggfn_info_change(aggref->aggfnoid, &transfn_oid, &aggtranstype, &transfn_oid);
+        }
 #endif
         peraggstate->transfn_oid = transfn_oid;
         peraggstate->finalfn_oid = finalfn_oid;
@@ -522,7 +524,10 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
          */
         text_init_val = SysCacheGetAttr(AGGFNOID, agg_tuple, Anum_pg_aggregate_agginitval, &peraggstate->initValueIsNull);
 #ifndef ENABLE_MULTIPLE_NODES
-        peraggstate->initValueIsNull = numeric_agg_trans_initvalisnull(peraggstate->transfn_oid, peraggstate->initValueIsNull);
+        if (estate->es_is_flt_frame) {
+            peraggstate->initValueIsNull = numeric_agg_trans_initvalisnull(peraggstate->transfn_oid,
+                peraggstate->initValueIsNull);
+        }
 #endif
         if (peraggstate->initValueIsNull)
             peraggstate->initValue = (Datum)0;
@@ -667,7 +672,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
             DBG_ASSERT(idx >= 0);
             bool use_sonichash = (node->aggstrategy == AGG_HASHED && node->is_sonichash);
 
-            DispatchAggFunction(&aggstate->peragg[aggno], &aggstate->aggInfo[idx], use_sonichash);
+            DispatchAggFunction(&aggstate->pervecagg[aggno], &aggstate->aggInfo[idx], use_sonichash);
 
             /* Initialize the function call parameter struct as well */
             InitFunctionCallInfoData(aggstate->aggInfo[idx].vec_agg_function,
@@ -1194,7 +1199,7 @@ void BaseAggRunner::BatchAggregation(VectorBatch* batch)
     for (i = 0; i < m_aggNum; i++) {
         VectorBatch* p_batch = NULL;
         ScalarVector* p_vector = NULL;
-        AggStatePerAgg per_agg_state = &m_runtime->peragg[m_aggNum - 1 - i];
+        VecAggStatePerAgg per_agg_state = &m_runtime->pervecagg[m_aggNum - 1 - i];
         ExprContext* econtext = NULL;
 
         /* count(*) per_agg_state->evalproj is null. */
@@ -1360,8 +1365,8 @@ VectorBatch* BaseAggRunner::ProducerBatch()
 void BaseAggRunner::initialize_sortstate(int work_mem, int max_mem, int plan_id, int dop)
 {
     int agg_no;
-    AggStatePerAgg per_agg = m_runtime->peragg;
-    AggStatePerAgg per_agg_state = NULL;
+    VecAggStatePerAgg per_agg = m_runtime->pervecagg;
+    VecAggStatePerAgg per_agg_state = NULL;
 
     for (agg_no = 0; agg_no < m_aggNum; agg_no++) {
         per_agg_state = &per_agg[agg_no];
@@ -1482,11 +1487,11 @@ void BaseAggRunner::BatchSortAggregation(int curr_set, int work_mem, int max_mem
         tmp_loc[k] = m_sortDistinct[curr_set].m_distinctLoc;
     }
 
-    AggStatePerAgg peragg = m_runtime->peragg;
+    AggStatePerAgg peragg = m_runtime->pervecagg;
     for (i = 0; i < m_aggNum; i++) {
         aggno = m_aggNum - 1 - i;
         first = true;
-        AggStatePerAgg peragg_stat = &peragg[aggno];
+        VecAggStatePerAgg peragg_stat = &peragg[aggno];
         if (peragg_stat->numSortCols > 0) {
             batchsort_performsort(sort_stat[aggno]);
             batchsort_getbatch(sort_stat[aggno], true, agg_batch[aggno]);
@@ -1554,7 +1559,7 @@ void BaseAggRunner::AppendBatchForSortAgg(VectorBatch* batch, int start, int end
 
     for (i = 0; i < m_aggNum; i++) {
         aggno = m_aggNum - 1 - i;
-        AggStatePerAgg peragg_stat = &m_runtime->peragg[aggno];
+        AggStatePerAgg peragg_stat = &m_runtime->pervecagg[aggno];
 
         if (peragg_stat->numSortCols > 0) {
             ExprContext* econtext = NULL;
@@ -1634,7 +1639,7 @@ void BaseAggRunner::BatchNoSortAgg(VectorBatch* batch)
 
     for (i = 0; i < m_aggNum; i++) {
         aggno = m_aggNum - 1 - i;
-        AggStatePerAgg peragg_stat = &m_runtime->peragg[aggno];
+        AggStatePerAgg peragg_stat = &m_runtime->pervecagg[aggno];
 
         if (peragg_stat->numSortCols <= 0) {
             VectorBatch* p_batch = NULL;

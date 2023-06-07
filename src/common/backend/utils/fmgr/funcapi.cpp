@@ -906,6 +906,7 @@ int get_func_arg_info(HeapTuple procTup, Oid** p_argtypes, char*** p_argnames, c
             ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
         }
         Assert(numargs >= ((Form_pg_proc)GETSTRUCT(procTup))->pronargs);
+
         *p_argtypes = (Oid*)palloc(numargs * sizeof(Oid));
         rc = memcpy_s(*p_argtypes, numargs * sizeof(Oid), ARR_DATA_PTR(arr), numargs * sizeof(Oid));
         securec_check(rc, "\0", "\0");
@@ -914,6 +915,7 @@ int get_func_arg_info(HeapTuple procTup, Oid** p_argtypes, char*** p_argnames, c
         oidvector* proargs = ProcedureGetArgTypes(procTup);
         numargs = proargs->dim1;
         Assert(numargs == ((Form_pg_proc)GETSTRUCT(procTup))->pronargs);
+
         *p_argtypes = (Oid*)palloc(numargs * sizeof(Oid));
 
         if (numargs > 0) {

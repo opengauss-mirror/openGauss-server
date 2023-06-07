@@ -96,7 +96,8 @@ static const pg_on_exit_callback on_sess_exit_list[] = {
     pq_close,
     AtProcExit_Files,
     audit_processlogout,
-    log_disconnections
+    log_disconnections,
+    libpqsw_cleanup
 };
 
 static const int on_sess_exit_size = lengthof(on_sess_exit_list);

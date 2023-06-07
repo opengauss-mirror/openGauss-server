@@ -237,8 +237,6 @@ DECLARE_UNIQUE_INDEX(pg_pltemplate_name_index, 1137, on pg_pltemplate using btre
 DECLARE_UNIQUE_INDEX(pg_proc_oid_index, 2690, on pg_proc using btree(oid oid_ops));
 #define ProcedureOidIndexId  2690
 
-DECLARE_INDEX(pg_proc_proname_args_nsp_index, 2691, on pg_proc using btree(proname name_ops, proargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops));
-#define ProcedureNameArgsNspIndexId  2691
 DECLARE_INDEX(pg_proc_proname_all_args_nsp_index, 9666, on pg_proc using btree(proname name_ops, allargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops));
 #define ProcedureNameAllArgsNspIndexId  9666
 

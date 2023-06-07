@@ -507,8 +507,13 @@ bool WorkerThreadCanSeekAnotherMission(ThreadStayReason* reason)
             *reason = TWORKER_UNCONSUMEMESSAGE;
             return false;
         } else {
-            *reason = TWORKER_CANSEEKNEXTSESSION;
-            return true;
+            if (libpqsw_can_seek_next_session()) {
+                *reason = TWORKER_CANSEEKNEXTSESSION;
+                return true;
+            } else {
+                *reason = TWORKER_UNCONSUMEMESSAGE;
+                return false;
+            }
         }
     }
 }
@@ -3022,7 +3027,7 @@ static void CommitTransaction(bool STP_commit)
     AtEOXact_PartitionCache(true);
 
     AtEOXact_BucketCache(true);
-
+    AtEOXact_OpfusionReuse();
     /*
      * Make catalog changes visible to all backends.  This has to happen after
      * relcache references are dropped (see comments for
@@ -3475,6 +3480,9 @@ static void PrepareTransaction(bool STP_commit)
     AtEOXact_PartitionCache(true);
 
     AtEOXact_BucketCache(true);
+
+    AtEOXact_OpfusionReuse();
+
     /* notify doesn't need a postprepare call */
     PostPrepare_PgStat();
 
@@ -3932,6 +3940,7 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
         AtEOXact_FreeTupleDesc();
         AtEOXact_PartitionCache(false);
         AtEOXact_BucketCache(false);
+        AtEOXact_OpfusionReuse();
         AtEOXact_Inval(false);
         smgrDoPendingDeletes(false);
         release_conn_to_compute_pool();

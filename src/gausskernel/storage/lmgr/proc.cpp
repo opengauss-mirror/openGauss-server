@@ -81,6 +81,7 @@
 #endif   /* ENABLE_MULTIPLE_NODES */
 
 #define MAX_NUMA_NODE 16
+#define BACKEND_TYPE_CMAGENT 0x0020
 
 extern THR_LOCAL uint32 *g_workingVersionNum;
 
@@ -973,6 +974,7 @@ void InitProcess(void)
      * g_instance.proc_base->cmAgentFreeProcs if proc_ext happend.
      */
     if (u_sess->libpq_cxt.IsConnFromCmAgent) {
+        t_thrd.bn->backend_type = BACKEND_TYPE_CMAGENT;
         CheckCMAReservedProc();
     }
 
@@ -3196,14 +3198,14 @@ TimestampTz GetStatementFinTime()
 
 AlarmCheckResult ConnectionOverloadChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     if (!IS_PGXC_COORDINATOR) {
         return ALM_ACR_UnKnown;
     }
 #endif
 
     int connectionLimit =
-        int(u_sess->attr.attr_common.ConnectionAlarmRate * g_instance.shmem_cxt.MaxConnections);
+        int(u_sess->attr.attr_common.ConnectionAlarmRate * g_instance.attr.attr_network.MaxConnections);
     SpinLockAcquire(&g_instance.conn_cxt.ConnCountLock);
     int currentConnections = g_instance.conn_cxt.CurConnCount;
     SpinLockRelease(&g_instance.conn_cxt.ConnCountLock);

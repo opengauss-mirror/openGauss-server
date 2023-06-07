@@ -32,35 +32,7 @@
 #include "executor/node/nodeModifyTable.h"
 #include "parser/parse_coerce.h"
 
-void InsertFusion::InitGlobals()
-{
-    m_c_global = (InsertFusionGlobalVariable*)palloc0(sizeof(InsertFusionGlobalVariable));
-
-    m_global->m_reloid = getrelid(linitial_int((List*)linitial(m_global->m_planstmt->resultRelations)),
-                                  m_global->m_planstmt->rtable);
-    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
-    BaseResult* baseresult = (BaseResult*)linitial(node->plans);
-    List* targetList = baseresult->plan.targetlist;
-
-    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
-    m_global->m_table_type = RelationIsUstoreFormat(rel) ? TAM_USTORE : TAM_HEAP;
-    m_global->m_exec_func_ptr = (OpFusionExecfuncType)&InsertFusion::ExecInsert;
-
-    m_global->m_natts = RelationGetDescr(rel)->natts;
-    m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
-    m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
-    m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
-    heap_close(rel, AccessShareLock);
-
-    /* init param func const */
-    m_global->m_paramNum = 0;
-    m_global->m_paramLoc = (ParamLoc*)palloc0(m_global->m_natts * sizeof(ParamLoc));
-    m_c_global->m_targetParamNum = 0;
-    m_c_global->m_targetFuncNum = 0;
-    m_c_global->m_targetFuncNodes = (FuncExprInfo*)palloc0(m_global->m_natts * sizeof(FuncExprInfo));
-    m_c_global->m_targetConstNum = 0;
-    m_c_global->m_targetConstLoc = (ConstLoc*)palloc0(m_global->m_natts * sizeof(ConstLoc));
-
+void InsertFusion::InitBaseParam(List* targetList) {
     ListCell* lc = NULL;
     int i = 0;
     FuncExpr* func = NULL;
@@ -104,6 +76,38 @@ void InsertFusion::InitGlobals()
         i++;
     }
     m_c_global->m_targetConstNum = i;
+}
+
+void InsertFusion::InitGlobals()
+{
+    m_c_global = (InsertFusionGlobalVariable*)palloc0(sizeof(InsertFusionGlobalVariable));
+
+    m_global->m_reloid = getrelid(linitial_int((List*)linitial(m_global->m_planstmt->resultRelations)),
+                                  m_global->m_planstmt->rtable);
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
+    BaseResult* baseresult = (BaseResult*)linitial(node->plans);
+    List* targetList = baseresult->plan.targetlist;
+
+    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
+    m_global->m_table_type = RelationIsUstoreFormat(rel) ? TAM_USTORE : TAM_HEAP;
+    m_global->m_exec_func_ptr = (OpFusionExecfuncType)&InsertFusion::ExecInsert;
+
+    m_global->m_natts = RelationGetDescr(rel)->natts;
+    m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
+    m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
+    m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
+    heap_close(rel, AccessShareLock);
+
+    /* init param func const */
+    m_global->m_paramNum = 0;
+    m_global->m_paramLoc = (ParamLoc*)palloc0(m_global->m_natts * sizeof(ParamLoc));
+    m_c_global->m_targetParamNum = 0;
+    m_c_global->m_targetFuncNum = 0;
+    m_c_global->m_targetFuncNodes = (FuncExprInfo*)palloc0(m_global->m_natts * sizeof(FuncExprInfo));
+    m_c_global->m_targetConstNum = 0;
+    m_c_global->m_targetConstLoc = (ConstLoc*)palloc0(m_global->m_natts * sizeof(ConstLoc));
+
+    InitBaseParam(targetList);
 
 }
 void InsertFusion::InitLocals(ParamListInfo params)
@@ -184,37 +188,16 @@ void InsertFusion::refreshParameterIfNecessary()
 }
 
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
-Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel)
+Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel, char* partExprKeyStr)
 {
-    Relation pgPartition = NULL;
-    HeapTuple partitionedTuple = NULL;
     bool isnull = false;
-    Datum val = 0;
-    char* partkeystr = "";
+    Datum newval = 0;
     Node* partkeyexpr = NULL;
     Relation tmpRel = NULL;
-    pgPartition = relation_open(PartitionRelationId, AccessShareLock);
-    if (PointerIsValid(partRel))
-        partitionedTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partRel->rd_id));
-    else
-        partitionedTuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, rel->rd_id);
-    val = fastgetattr(partitionedTuple, Anum_pg_partition_partkeyexpr, pgPartition->rd_att, &isnull);
-    if (isnull) {
-        relation_close(pgPartition, AccessShareLock);
-        if (PointerIsValid(partRel))
-            ReleaseSysCache(partitionedTuple);
-        else
-            heap_freetuple(partitionedTuple);
-        return 0;
-    }
-	int2vector* partitionKey = NULL;
-	Oid* partitionKeyDataType = NULL;
-    partitionKey = getPartitionKeyAttrNo(
-        &(partitionKeyDataType), partitionedTuple, RelationGetDescr(pgPartition), RelationGetDescr(rel));
-    partkeystr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
-    relation_close(pgPartition, AccessShareLock);
-    if (pg_strcasecmp(partkeystr, "") != 0) {
-        partkeyexpr = (Node*)stringToNode_skip_extern_fields(partkeystr);                      
+    if (partExprKeyStr && pg_strcasecmp(partExprKeyStr, "") != 0) {
+        partkeyexpr = (Node*)stringToNode_skip_extern_fields(partExprKeyStr);                      
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR), errmsg("The partition expr key can't be null for table %s", NameStr(rel->rd_rel->relname))));
     }
     (void)lockNextvalWalker(partkeyexpr, NULL);
     ExprState *exprstate = ExecPrepareExpr((Expr *)partkeyexpr, estate);
@@ -222,8 +205,7 @@ Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
     econtext = GetPerTupleExprContext(estate);
     econtext->ecxt_scantuple = slot;
     isnull = false;
-    val = 0;
-    val = ExecEvalExpr(exprstate, econtext, &isnull, NULL);
+    newval = ExecEvalExpr(exprstate, econtext, &isnull, NULL);
     Const** boundary = NULL;
     if (PointerIsValid(partRel))
         tmpRel = partRel;
@@ -240,12 +222,8 @@ Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
         ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR), errmsg("Unsupported partition type : %d", tmpRel->partMap->type)));
 
     if (!isnull)
-        val = datumCopy(val, boundary[0]->constbyval, boundary[0]->constlen);
-    if (PointerIsValid(partRel))
-        ReleaseSysCache(partitionedTuple);
-    else
-        heap_freetuple(partitionedTuple);
-    return val;
+        newval = datumCopy(newval, boundary[0]->constbyval, boundary[0]->constlen);
+    return newval;
 }
 
 static void ExecReleaseResource(Tuple tuple, TupleTableSlot *slot, ResultRelInfo *result_rel_info, EState *estate,
@@ -430,9 +408,10 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     refreshParameterIfNecessary();
 
     ModifyTable* node = (ModifyTable*)(m_global->m_planstmt->planTree);
+    PlanState* ps = NULL;
     if (node->withCheckOptionLists != NIL) {
         Plan* plan = (Plan*)linitial(node->plans);
-        PlanState* ps = ExecInitNode(plan, m_c_local.m_estate, 0);
+        ps = ExecInitNode(plan, m_c_local.m_estate, 0);
         List* wcoList = (List*)linitial(node->withCheckOptionLists);
         List* wcoExprs = NIL;
         ListCell* ll = NULL;
@@ -462,6 +441,9 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     /****************
      * step 3: done *
      ****************/
+    if (ps != NULL) {
+        ExecEndNode(ps);
+    }
     success = true;
     m_local.m_isCompleted = true;
     if (m_local.m_ledger_hash_exist && !IsConnFromApp()) {
@@ -476,4 +458,34 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     u_sess->statement_cxt.current_row_count = nprocessed;
     u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
     return success;
+}
+
+/*
+ * reset InsertFusion for reuse：
+ * such as
+ * insert into t values (1, 'a');
+ * insert into t values (2, 'b');
+ * only need to replace the planstmt
+ */ 
+bool InsertFusion::ResetReuseFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
+{
+    PlannedStmt *curr_plan = (PlannedStmt *)linitial(plantree_list);
+    m_global->m_planstmt = curr_plan;
+
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
+    BaseResult* baseresult = (BaseResult*)linitial(node->plans);
+    List* targetList = baseresult->plan.targetlist;
+
+    m_c_global->m_targetFuncNum = 0;
+    m_c_global->m_targetParamNum = 0;
+
+    InitBaseParam(targetList);
+
+    // local
+    m_c_local.m_estate->es_range_table = NIL;
+    m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
+    m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
+    initParams(params);
+
+    return true;
 }

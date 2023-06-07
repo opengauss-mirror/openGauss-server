@@ -543,3 +543,16 @@ WHERE pronargs != 2
 ----------+------------+---------
 (0 rows)
 
+-- pg_proc check--
+-- if the ouput here change, should fix the code expr_func_has_refcursor_args
+-- and func_has_refcursor_args.
+-- you should fix the code like 2925、2928
+select distinct(oid) from 
+(select prorettype as rettype, unnest(proargtypes) as argtype, oid from pg_proc) as qq
+where qq.rettype=1790 or qq.argtype=1790 order by oid;
+ oid  
+------
+ 2925
+ 2928
+(2 rows)
+

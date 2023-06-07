@@ -406,27 +406,6 @@ static TupleTableSlot* ExecRecursiveUnion(PlanState* state)
                 /* Not satisfy connect_by_level_qual，skip this tuple */
                 continue;
             }
-
-            /*
-             * In ORDER SIBLINGS case, as we add SORT-Operator(material) on top of
-             * RecursiveUnion, so we have to do nocycle check here
-             */
-            if (swplan->swoptions->siblings_orderby_clause) {
-                StartWithOpState *swstate = (StartWithOpState *)node->swstate;
-                if (swstate->sw_nocycleStopOrderSiblings) {
-                    return (TupleTableSlot*)NULL;
-                }
-
-                if (CheckCycleExeception(swstate, slot)) {
-                    /*
-                     * Mark execution stop for order siblings, note we let the cycle-causing
-                     * tuple return to upper node and stop next one
-                     */
-                    swstate->sw_nocycleStopOrderSiblings = true;
-                    elog(DEBUG1, "nocycle option take effect on RecursiveUnion for Order Siblings! %s",
-                            swstate->sw_curKeyArrayStr);
-                }
-            }
         }
 
         tuplestore_puttupleslot(node->intermediate_table, slot);

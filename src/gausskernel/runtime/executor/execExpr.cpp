@@ -48,6 +48,9 @@ static bool isAssignmentIndirectionExpr(Expr *expr);
 static void ExecInitCoerceToDomain(ExprEvalStep *scratch, CoerceToDomain *ctest,
 					   ExprState *state,
 					   Datum *resv, bool *resnull, Expr *node);
+static void ExecBuildAggTransCall(ExprState *state, AggState *aggstate, ExprEvalStep *scratch, FunctionCallInfo fcinfo,
+                                  AggStatePerTrans pertrans, int transno, int setno, int setoff, bool ishash,
+                                  bool iscollect);
 
 /*
  * ExecInitExpr: prepare an expression tree for execution
@@ -741,7 +744,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 				if (!state->parent 
 					|| (!IsA(state->parent, AggState) && !IsA(state->parent, VecAggState)) 
-					|| !IsA(state->parent->plan, Agg) && !IsA(state->parent->plan, VecAgg))
+					|| (!IsA(state->parent->plan, Agg) && !IsA(state->parent->plan, VecAgg)))
 					elog(ERROR, "GroupingFunc found in non-Agg plan node");
 
 				scratch.opcode = EEOP_GROUPING_FUNC;
@@ -2233,7 +2236,14 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
 	foreach(lc, args)
 	{
 		Expr	   *arg = (Expr *) lfirst(lc);
-		ExecInitExprRec(arg, state, &fcinfo->arg[argno], &fcinfo->argnull[argno], node);
+        if (IsA(arg, Const) && !(scratch->d.func.flag & (FUNC_EXPR_FLAG_HAS_REFCURSOR | FUNC_EXPR_FLAG_HAS_CURSOR_RETURN)))
+        {
+            Const *con = (Const *) arg;
+            fcinfo->arg[argno] = con->constvalue;
+            fcinfo->argnull[argno] = con->constisnull;
+        } else {
+            ExecInitExprRec(arg, state, &fcinfo->arg[argno], &fcinfo->argnull[argno], node);
+        }
 		fcinfo->argTypes[argno] = exprType((Node*)arg);
 		argno++;
 	}
@@ -2781,4 +2791,277 @@ ExecInitCoerceToDomain(ExprEvalStep *scratch, CoerceToDomain *ctest,
 				break;
 		}
 	}
+}
+
+/*
+ * Build transition/combine function invocations for all aggregate transition
+ * / combination function invocations in a grouping sets phase. This has to
+ * invoke all sort based transitions in a phase (if doSort is true), all hash
+ * based transitions (if doHash is true), or both (both true).
+ *
+ * The resulting expression will, for each set of transition values, first
+ * check for filters, evaluate aggregate input, check that that input is not
+ * NULL for a strict transition function, and then finally invoke the
+ * transition for each of the concurrently computed grouping sets.
+ */
+ExprState *ExecBuildAggTrans(AggState *aggstate, AggStatePerPhase phase, bool doSort, bool doHash)
+{
+    ExprState *state = makeNode(ExprState);
+    PlanState *parent = &aggstate->ss.ps;
+    ExprEvalStep scratch;
+    int transno = 0;
+    int setoff = 0;
+    LastAttnumInfo deform = {0, 0, 0};
+
+    state->expr = (Expr *)aggstate;
+    state->parent = parent;
+
+    scratch.resvalue = &state->resvalue;
+    scratch.resnull = &state->resnull;
+
+    /*
+     * First figure out which slots, and how many columns from each, we're
+     * going to need.
+     */
+    for (transno = 0; transno < aggstate->numtrans; transno++) {
+        AggStatePerTrans pertrans = &aggstate->pertrans[transno];
+
+        get_last_attnums_walker((Node *)pertrans->aggref->aggdirectargs, &deform);
+        get_last_attnums_walker((Node *)pertrans->aggref->args, &deform);
+        get_last_attnums_walker((Node *)pertrans->aggref->aggorder, &deform);
+        get_last_attnums_walker((Node *)pertrans->aggref->aggdistinct, &deform);
+        // get_last_attnums_walker((Node *) pertrans->aggref->aggfilter, &deform);
+    }
+    ExecPushExprSlots(state, &deform);
+
+    /*
+     * Emit instructions for each transition value / grouping set combination.
+     */
+    for (transno = 0; transno < aggstate->numtrans; transno++) {
+        AggStatePerTrans pertrans = &aggstate->pertrans[transno];
+        int numInputs = pertrans->numInputs;
+        int argno;
+        int setno;
+        bool isCollect = ((pertrans->aggref->aggstage > 0 || aggstate->is_final) &&
+                          need_adjust_agg_inner_func_type(pertrans->aggref) && pertrans->numSortCols == 0);
+        FunctionCallInfo trans_fcinfo = &pertrans->transfn_fcinfo;
+        FunctionCallInfo collect_fcinfo = &pertrans->collectfn_fcinfo;
+        ListCell *arg;
+        ListCell *bail;
+        List *adjust_bailout = NIL;
+        bool *strictnulls = NULL;
+
+        /*
+         * Evaluate arguments to aggregate/combine function.
+         */
+        argno = 0;
+        /*process the collect function*/
+        if (isCollect) {
+            /*
+             * like Normal transition function below
+             */
+            strictnulls = collect_fcinfo->argnull + 1;
+
+            foreach (arg, pertrans->aggref->args) {
+                TargetEntry *source_tle = (TargetEntry *)lfirst(arg);
+
+                /*
+                 * Start from 1, since the 0th arg will be the transition
+                 * value
+                 */
+                ExecInitExprRec(source_tle->expr, state, &collect_fcinfo->arg[argno + 1],
+                                &collect_fcinfo->argnull[argno + 1], NULL);
+                argno++;
+            }
+        } else if (pertrans->numSortCols == 0) {
+            /*
+             * Normal transition function without ORDER BY / DISTINCT.
+             */
+            strictnulls = trans_fcinfo->argnull + 1;
+
+            foreach (arg, pertrans->aggref->args) {
+                TargetEntry *source_tle = (TargetEntry *)lfirst(arg);
+
+                /*
+                 * Start from 1, since the 0th arg will be the transition
+                 * value
+                 */
+                ExecInitExprRec(source_tle->expr, state, &trans_fcinfo->arg[argno + 1],
+                                &trans_fcinfo->argnull[argno + 1], NULL);
+                argno++;
+            }
+        } else if (pertrans->numInputs == 1) {
+            /*
+             * DISTINCT and/or ORDER BY case, with a single column sorted on.
+             */
+            TargetEntry *source_tle = (TargetEntry *)linitial(pertrans->aggref->args);
+
+            Assert(list_length(pertrans->aggref->args) == 1);
+
+            ExecInitExprRec(source_tle->expr, state, &state->resvalue, &state->resnull, NULL);
+            strictnulls = &state->resnull;
+            argno++;
+        } else {
+            /*
+             * DISTINCT and/or ORDER BY case, with multiple columns sorted on.
+             */
+            Datum *values = pertrans->sortslot->tts_values;
+            bool *nulls = pertrans->sortslot->tts_isnull;
+
+            strictnulls = nulls;
+
+            foreach (arg, pertrans->aggref->args) {
+                TargetEntry *source_tle = (TargetEntry *)lfirst(arg);
+
+                ExecInitExprRec(source_tle->expr, state, &values[argno], &nulls[argno], NULL);
+                argno++;
+            }
+        }
+        Assert(numInputs == argno);
+
+        /*
+         * For a strict transfn, nothing happens when there's a NULL input; we
+         * just keep the prior transValue. This is true for both plain and
+         * sorted/distinct aggregates.
+         */
+        if (((!isCollect && trans_fcinfo->flinfo->fn_strict) || (isCollect && collect_fcinfo->flinfo->fn_strict)) &&
+            pertrans->numTransInputs > 0) {
+            scratch.opcode = EEOP_AGG_STRICT_INPUT_CHECK;
+            scratch.d.agg_strict_input_check.nulls = strictnulls;
+            scratch.d.agg_strict_input_check.jumpnull = -1; /* adjust later */
+            scratch.d.agg_strict_input_check.nargs = pertrans->numTransInputs;
+            ExprEvalPushStep(state, &scratch);
+            adjust_bailout = lappend_int(adjust_bailout, state->steps_len - 1);
+        }
+
+        /*
+         * Call transition function (once for each concurrently evaluated
+         * grouping set). Do so for both sort and hash based computations, as
+         * applicable.
+         */
+        setoff = 0;
+        if (doSort) {
+            int processGroupingSets = Max(phase->numsets, 1);
+
+            for (setno = 0; setno < processGroupingSets; setno++) {
+                ExecBuildAggTransCall(state, aggstate, &scratch, isCollect ? collect_fcinfo : trans_fcinfo, pertrans,
+                                      transno, setno, setoff, false, isCollect);
+                setoff++;
+            }
+        }
+
+        if (doHash) {
+            int numHashes = aggstate->num_hashes;
+
+            /* in MIXED mode, there'll be preceding transition values */
+            if (aggstate->aggstrategy != AGG_HASHED)
+                setoff = aggstate->maxsets;
+            else
+                setoff = 0;
+
+            for (setno = 0; setno < numHashes; setno++) {
+                ExecBuildAggTransCall(state, aggstate, &scratch, isCollect ? collect_fcinfo : trans_fcinfo, pertrans,
+                                      transno, setno, setoff, true, isCollect);
+                setoff++;
+            }
+        }
+
+        /* adjust early bail out jump target(s) */
+        foreach (bail, adjust_bailout) {
+            ExprEvalStep *as = &state->steps[lfirst_int(bail)];
+
+            if (as->opcode == EEOP_JUMP_IF_NOT_TRUE) {
+                Assert(as->d.jump.jumpdone == -1);
+                as->d.jump.jumpdone = state->steps_len;
+            } else if (as->opcode == EEOP_AGG_STRICT_INPUT_CHECK) {
+                Assert(as->d.agg_strict_input_check.jumpnull == -1);
+                as->d.agg_strict_input_check.jumpnull = state->steps_len;
+            } else if (as->opcode == EEOP_AGG_STRICT_DESERIALIZE) {
+                Assert(as->d.agg_deserialize.jumpnull == -1);
+                as->d.agg_deserialize.jumpnull = state->steps_len;
+            }
+        }
+    }
+
+    scratch.resvalue = NULL;
+    scratch.resnull = NULL;
+    scratch.opcode = EEOP_DONE;
+    ExprEvalPushStep(state, &scratch);
+
+    ExecReadyExpr(state);
+
+    return state;
+}
+
+static ExprEvalOp ExecBuildAggTransOpcodeInit(AggStatePerTrans pertrans, FunctionCallInfo fcinfo)
+{
+    /* trans by val */
+    if (pertrans->transtypeByVal) {
+        if (fcinfo->flinfo->fn_strict && pertrans->initValueIsNull) {
+            return EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL;
+        } else if (fcinfo->flinfo->fn_strict) {
+            return EEOP_AGG_PLAIN_TRANS_STRICT_BYVAL;
+        } else {
+            return EEOP_AGG_PLAIN_TRANS_BYVAL;
+        }
+    }
+
+    /* trans by ref */
+    if (fcinfo->flinfo->fn_strict && pertrans->initValueIsNull) {
+        return EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYREF;
+    } else if (fcinfo->flinfo->fn_strict) {
+        return EEOP_AGG_PLAIN_TRANS_STRICT_BYREF;
+    } else {
+        return EEOP_AGG_PLAIN_TRANS_BYREF;
+    }
+}
+
+static ExprEvalOp ExecBuildAggCollectOpcodeInit(AggStatePerTrans pertrans, FunctionCallInfo fcinfo)
+{
+    /* collect by val */
+    if (pertrans->transtypeByVal) {
+        if (fcinfo->flinfo->fn_strict && pertrans->initCollectValueIsNull) {
+            return EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYVAL;
+        } else if (fcinfo->flinfo->fn_strict) {
+            return EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYVAL;
+        } else {
+            return EEOP_AGG_COLLECT_PLAIN_TRANS_BYVAL;
+        }
+    }
+
+    /* collect by ref */
+    if (fcinfo->flinfo->fn_strict && pertrans->initCollectValueIsNull) {
+        return EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYREF;
+    } else if (fcinfo->flinfo->fn_strict) {
+        return EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYREF;
+    } else {
+        return EEOP_AGG_COLLECT_PLAIN_TRANS_BYREF;
+    }
+}
+
+static void ExecBuildAggTransCall(ExprState *state, AggState *aggstate, ExprEvalStep *scratch, FunctionCallInfo fcinfo, 
+    AggStatePerTrans pertrans, int transno, int setno, int setoff, bool ishash, bool iscollect)
+{
+    MemoryContext aggcontext;
+
+    aggcontext = aggstate->aggcontexts[setno];
+
+    if (pertrans->numSortCols == 0) {
+        if (iscollect) {
+            scratch->opcode = ExecBuildAggCollectOpcodeInit(pertrans, fcinfo);
+        } else {
+            scratch->opcode = ExecBuildAggTransOpcodeInit(pertrans, fcinfo);
+        }
+    } else if (pertrans->numInputs == 1) {
+        scratch->opcode = EEOP_AGG_ORDERED_TRANS_DATUM;
+    } else {
+        scratch->opcode = EEOP_AGG_ORDERED_TRANS_TUPLE;
+    }
+
+    scratch->d.agg_trans.pertrans = pertrans;
+    scratch->d.agg_trans.setno = setno;
+    scratch->d.agg_trans.setoff = setoff;
+    scratch->d.agg_trans.transno = transno;
+    scratch->d.agg_trans.aggcontext = aggcontext;
+    ExprEvalPushStep(state, scratch);
 }

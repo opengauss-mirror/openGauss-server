@@ -64,7 +64,6 @@
 #include "utils/memutils.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
-#include "nodes/execExpr.h"
 #include "parser/parsetree.h"
 #include "pgstat.h"
 #include "utils/builtins.h"
@@ -145,7 +144,6 @@ static Datum ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnul
 static void ExecInitInterpreter(void);
 
 /* support functions */
-static void CheckVarSlotCompatibility(TupleTableSlot *slot, int attnum, Oid vartype);
 static TupleDesc get_cached_rowtype(Oid type_id, int32 typmod,
 				   TupleDesc *cache_field, ExprContext *econtext);
 static void ShutdownTupleDescRef(Datum arg);
@@ -153,11 +151,8 @@ static void ExecEvalRowNullInt(ExprState *state, ExprEvalStep *op,
 				   ExprContext *econtext, bool checkisnull);
 
 /* fast-path evaluation functions */
-static Datum ExecJustInnerVarFirst(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
 static Datum ExecJustInnerVar(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
-static Datum ExecJustOuterVarFirst(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
 static Datum ExecJustOuterVar(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
-static Datum ExecJustScanVarFirst(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
 static Datum ExecJustScanVar(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
 static Datum ExecJustConst(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
 static Datum ExecJustAssignInnerVar(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
@@ -167,6 +162,15 @@ static Datum ExecJustAssignScanVar(ExprState *state, ExprContext *econtext, bool
 extern bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo);
 extern void check_huge_clob_paramter(FunctionCallInfoData* fcinfo, bool is_have_huge_clob);
 extern Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid, bool* is_null);
+
+static FORCE_INLINE void ExecAggPlainTransByVal(AggState *aggstate, AggStatePerTrans pertrans,
+    AggStatePerGroup pergroup, MemoryContext aggcontext, int setno);
+static FORCE_INLINE void ExecAggCollectPlainTransByVal(AggState *aggstate, AggStatePerTrans pertrans,
+    AggStatePerGroup pergroup, MemoryContext aggcontext, int setno);
+static FORCE_INLINE void ExecAggPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
+    AggStatePerGroup pergroup, MemoryContext aggcontext, int setno);
+static FORCE_INLINE void ExecAggCollectPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
+    AggStatePerGroup pergroup, MemoryContext aggcontext, int setno);
 
 /*
  * Prepare ExprState for interpreted execution.
@@ -277,20 +281,6 @@ ExecReadyInterpretedExpr(ExprState *state)
 	state->evalfunc = ExecInterpExpr;
 }
 
-static inline void
-UpdateElogFieldName(ExprState *state)
-{
-	if (state->expr) {
-		ListCell *lc = lnext(state->current_targetentry);
-		if (lc == NULL)
-			return;
-
-		TargetEntry *te = (TargetEntry*)lfirst(lc);
-		state->current_targetentry = lc;
-		ELOG_FIELD_NAME_UPDATE(te->resname);
-	}
-}
-
 static bool IsTableOfFunc(Oid funcOid)
 {
     const Oid array_function_start_oid = 7881;
@@ -310,7 +300,6 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
 	
     bool savedIsSTP = u_sess->SPI_cxt.is_stp;
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
-    bool supportTranaction = false;
     bool is_have_huge_clob = false;
 	bool needResetErrMsg = op->d.func.needResetErrMsg;
 
@@ -592,6 +581,23 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 		&&CASE_EEOP_USERSET_ELEM,
         &&CASE_EEOP_PREFIX_BTYEA,
         &&CASE_EEOP_PREFIX_TEXT,
+        &&CASE_EEOP_AGG_STRICT_DESERIALIZE,
+        &&CASE_EEOP_AGG_DESERIALIZE,
+        &&CASE_EEOP_AGG_STRICT_INPUT_CHECK,
+        &&CASE_EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL,
+        &&CASE_EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYVAL,
+        &&CASE_EEOP_AGG_PLAIN_TRANS_STRICT_BYVAL,
+        &&CASE_EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYVAL,
+        &&CASE_EEOP_AGG_PLAIN_TRANS_BYVAL,
+        &&CASE_EEOP_AGG_COLLECT_PLAIN_TRANS_BYVAL,
+        &&CASE_EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYREF,
+        &&CASE_EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYREF,
+        &&CASE_EEOP_AGG_PLAIN_TRANS_STRICT_BYREF,
+        &&CASE_EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYREF,
+        &&CASE_EEOP_AGG_PLAIN_TRANS_BYREF,
+        &&CASE_EEOP_AGG_COLLECT_PLAIN_TRANS_BYREF,
+        &&CASE_EEOP_AGG_ORDERED_TRANS_DATUM,
+        &&CASE_EEOP_AGG_ORDERED_TRANS_TUPLE,
 		&&CASE_EEOP_LAST
 	};
 
@@ -760,8 +766,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			resultslot->tts_values[resultnum] = innerslot->tts_values[attnum];
 			resultslot->tts_isnull[resultnum] = innerslot->tts_isnull[attnum];
 
-			UpdateElogFieldName(state);
-
 			EEO_NEXT();
 		}
 
@@ -778,8 +782,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			Assert(resultnum >= 0 && resultnum < resultslot->tts_tupleDescriptor->natts);
 			resultslot->tts_values[resultnum] = outerslot->tts_values[attnum];
 			resultslot->tts_isnull[resultnum] = outerslot->tts_isnull[attnum];
-
-			UpdateElogFieldName(state);
 
 			EEO_NEXT();
 		}
@@ -798,8 +800,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			resultslot->tts_values[resultnum] = scanslot->tts_values[attnum];
 			resultslot->tts_isnull[resultnum] = scanslot->tts_isnull[attnum];
 
-			UpdateElogFieldName(state);
-
 			EEO_NEXT();
 		}
 
@@ -810,8 +810,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			Assert(resultnum >= 0 && resultnum < resultslot->tts_tupleDescriptor->natts);
 			resultslot->tts_values[resultnum] = state->resvalue;
 			resultslot->tts_isnull[resultnum] = state->resnull;
-
-			UpdateElogFieldName(state);
 
 			EEO_NEXT();
 		}
@@ -827,8 +825,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 					MakeExpandedObjectReadOnlyInternal(state->resvalue);
 			else
 				resultslot->tts_values[resultnum] = state->resvalue;
-
-			UpdateElogFieldName(state);
 
 			EEO_NEXT();
 		}
@@ -1564,6 +1560,319 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			EEO_NEXT();
 		}
 
+        /* evaluate a strict aggregate deserialization function */
+        EEO_CASE(EEOP_AGG_STRICT_DESERIALIZE)
+        {
+            bool *argnull = op->d.agg_deserialize.fcinfo_data->argnull;
+
+            /* Don't call a strict deserialization function with NULL input */
+            if (argnull[0])
+                EEO_JUMP(op->d.agg_deserialize.jumpnull);
+
+            /* fallthrough */
+        }
+
+        /* evaluate aggregate deserialization function (non-strict portion) */
+        EEO_CASE(EEOP_AGG_DESERIALIZE)
+        {
+            FunctionCallInfo fcinfo = op->d.agg_deserialize.fcinfo_data;
+            AggState *aggstate = op->d.agg_deserialize.aggstate;
+            MemoryContext oldContext;
+
+            /*
+             * We run the deserialization functions in per-input-tuple memory
+             * context.
+             */
+            oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
+            fcinfo->isnull = false;
+            *op->resvalue = FunctionCallInvoke(fcinfo);
+            *op->resnull = fcinfo->isnull;
+            MemoryContextSwitchTo(oldContext);
+
+            EEO_NEXT();
+        }
+
+        /*
+         * Check that a strict aggregate transition / combination function's
+         * input is not NULL.
+         */
+        EEO_CASE(EEOP_AGG_STRICT_INPUT_CHECK)
+        {
+            int argno;
+            bool *nulls = op->d.agg_strict_input_check.nulls;
+            int nargs = op->d.agg_strict_input_check.nargs;
+
+            for (argno = 0; argno < nargs; argno++) {
+                if (nulls[argno])
+                    EEO_JUMP(op->d.agg_strict_input_check.jumpnull);
+            }
+            EEO_NEXT();
+        }
+
+        EEO_CASE(EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans + op->d.agg_trans.transno];
+
+            Assert(pertrans->transtypeByVal);
+
+            if (pergroup->noTransValue) {
+                /* If transValue has not yet been initialized, do so now. */
+                ExecAggInitGroup(aggstate, pertrans, pergroup, op->d.agg_trans.aggcontext);
+                /* copied trans value from input, done this round */
+            } else if (likely(!pergroup->transValueIsNull)) {
+                /* invoke transition function, unless prevented by strictness */
+                ExecAggPlainTransByVal(aggstate, pertrans, pergroup,
+                                       op->d.agg_trans.aggcontext,
+                                       op->d.agg_trans.setno);
+            }
+
+            EEO_NEXT();
+        }
+
+        EEO_CASE(EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYVAL)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+            Assert(pertrans->transtypeByVal);
+
+            if (pergroup->noCollectValue) {
+                /* If transValue has not yet been initialized, do so now. */
+                ExecAggInitCollectGroup(aggstate, pertrans, pergroup,
+                                 op->d.agg_trans.aggcontext);
+                /* copied trans value from input, done this round */
+            } else if (likely(!pergroup->collectValueIsNull)) {
+                /* invoke transition function, unless prevented by strictness */
+                ExecAggCollectPlainTransByVal(aggstate, pertrans, pergroup,
+                                       op->d.agg_trans.aggcontext,
+                                       op->d.agg_trans.setno);
+            }
+
+            EEO_NEXT();
+        }
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_PLAIN_TRANS_STRICT_BYVAL)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+            Assert(pertrans->transtypeByVal);
+
+            if (likely(!pergroup->transValueIsNull)) {
+                ExecAggPlainTransByVal(aggstate, pertrans, pergroup,
+                                       op->d.agg_trans.aggcontext,
+                                       op->d.agg_trans.setno);
+            }
+
+            EEO_NEXT();
+        }
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYVAL)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+
+            Assert(pertrans->transtypeByVal);
+
+            if (likely(!pergroup->collectValueIsNull)) {
+                ExecAggCollectPlainTransByVal(aggstate, pertrans, pergroup,
+                                              op->d.agg_trans.aggcontext,
+                                              op->d.agg_trans.setno);
+            }
+
+            EEO_NEXT();
+        }
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_PLAIN_TRANS_BYVAL)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+
+            Assert(pertrans->transtypeByVal);
+
+            ExecAggPlainTransByVal(aggstate, pertrans, pergroup,
+                                   op->d.agg_trans.aggcontext,
+                                   op->d.agg_trans.setno);
+
+            EEO_NEXT();
+        }
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_COLLECT_PLAIN_TRANS_BYVAL)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+
+            Assert(pertrans->transtypeByVal);
+
+            ExecAggCollectPlainTransByVal(aggstate, pertrans, pergroup,
+                                   op->d.agg_trans.aggcontext,
+                                   op->d.agg_trans.setno);
+
+            EEO_NEXT();
+        }
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYREF)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+
+            Assert(!pertrans->transtypeByVal);
+
+            if (pergroup->noTransValue) {
+                ExecAggInitGroup(aggstate, pertrans, pergroup, op->d.agg_trans.aggcontext);
+            } else if (likely(!pergroup->transValueIsNull)) {
+                ExecAggPlainTransByRef(aggstate, pertrans, pergroup,
+                                       op->d.agg_trans.aggcontext,
+                                       op->d.agg_trans.setno);
+            }
+
+            EEO_NEXT();
+        }
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYREF)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+
+            Assert(!pertrans->transtypeByVal);
+
+            if (pergroup->noCollectValue) {
+                ExecAggInitCollectGroup(aggstate, pertrans, pergroup, op->d.agg_trans.aggcontext);
+            } else if (likely(!pergroup->collectValueIsNull)) {
+                ExecAggCollectPlainTransByRef(aggstate, pertrans, pergroup,
+                                              op->d.agg_trans.aggcontext,
+                                              op->d.agg_trans.setno);
+            }
+
+            EEO_NEXT();
+        }
+        
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_PLAIN_TRANS_STRICT_BYREF)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+            Assert(!pertrans->transtypeByVal);
+
+            if (likely(!pergroup->transValueIsNull))
+                ExecAggPlainTransByRef(aggstate, pertrans, pergroup,
+                                    op->d.agg_trans.aggcontext,
+                                    op->d.agg_trans.setno);
+            EEO_NEXT();
+        }
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYREF)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+            Assert(!pertrans->transtypeByVal);
+
+            if (likely(!pergroup->collectValueIsNull))
+                ExecAggCollectPlainTransByRef(aggstate, pertrans, pergroup,
+                                    op->d.agg_trans.aggcontext,
+                                    op->d.agg_trans.setno);
+            EEO_NEXT();
+        }
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_PLAIN_TRANS_BYREF)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+            Assert(!pertrans->transtypeByVal);
+
+            ExecAggPlainTransByRef(aggstate, pertrans, pergroup,
+                                   op->d.agg_trans.aggcontext,
+                                   op->d.agg_trans.setno);
+
+            EEO_NEXT();
+        }
+
+        /* see comments above EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL */
+        EEO_CASE(EEOP_AGG_COLLECT_PLAIN_TRANS_BYREF)
+        {
+            AggState   *aggstate = castNode(AggState, state->parent);
+            AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+            AggStatePerGroup pergroup = &aggstate->all_pergroups
+                [op->d.agg_trans.setoff * aggstate->numtrans
+                + op->d.agg_trans.transno];
+
+            Assert(!pertrans->transtypeByVal);
+
+            ExecAggCollectPlainTransByRef(aggstate, pertrans, pergroup,
+                                   op->d.agg_trans.aggcontext,
+                                   op->d.agg_trans.setno);
+
+            EEO_NEXT();
+        }
+
+        /* process single-column ordered aggregate datum */
+        EEO_CASE(EEOP_AGG_ORDERED_TRANS_DATUM)
+        {
+            /* too complex for an inline implementation */
+            ExecEvalAggOrderedTransDatum(state, op, econtext);
+
+            EEO_NEXT();
+        }
+
+        /* process multi-column ordered aggregate tuple */
+        EEO_CASE(EEOP_AGG_ORDERED_TRANS_TUPLE)
+        {
+            /* too complex for an inline implementation */
+            ExecEvalAggOrderedTransTuple(state, op, econtext);
+
+            EEO_NEXT();
+        }
+
 		EEO_CASE(EEOP_XMLEXPR)
 		{
 			/* too complex for an inline implementation */
@@ -1742,59 +2051,6 @@ out:
 }
 
 /*
- * Check whether a user attribute in a slot can be referenced by a Var
- * expression.  This should succeed unless there have been schema changes
- * since the expression tree has been created.
- */
-static void
-CheckVarSlotCompatibility(TupleTableSlot *slot, int attnum, Oid vartype)
-{
-	/*
-	 * What we have to check for here is the possibility of an attribute
-	 * having been dropped or changed in type since the plan tree was created.
-	 * Ideally the plan will get invalidated and not re-used, but just in
-	 * case, we keep these defenses.  Fortunately it's sufficient to check
-	 * once on the first time through.
-	 *
-	 * Note: ideally we'd check typmod as well as typid, but that seems
-	 * impractical at the moment: in many cases the tupdesc will have been
-	 * generated by ExecTypeFromTL(), and that can't guarantee to generate an
-	 * accurate typmod in all cases, because some expression node types don't
-	 * carry typmod.  Fortunately, for precisely that reason, there should be
-	 * no places with a critical dependency on the typmod of a value.
-	 *
-	 * System attributes don't require checking since their types never
-	 * change.
-	 */
-	if (attnum > 0)
-	{
-		TupleDesc	slot_tupdesc = slot->tts_tupleDescriptor;
-		Form_pg_attribute attr;
-
-		if (attnum > slot_tupdesc->natts)	/* should never happen */
-			elog(ERROR, "attribute number %d exceeds number of columns %d",
-				 attnum, slot_tupdesc->natts);
-
-		attr = TupleDescAttr(slot_tupdesc, attnum - 1);
-
-		if (attr->attisdropped)
-			ereport(ERROR,
-					(errcode(ERRCODE_UNDEFINED_COLUMN),
-					 errmsg("attribute %d of type %s has been dropped",
-							attnum, format_type_be(slot_tupdesc->tdtypeid))));
-
-		if (vartype != attr->atttypid)
-			ereport(ERROR,
-					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("attribute %d of type %s has wrong type",
-							attnum, format_type_be(slot_tupdesc->tdtypeid)),
-					 errdetail("Table has type %s, but query expects %s.",
-							   format_type_be(attr->atttypid),
-							   format_type_be(vartype))));
-	}
-}
-
-/*
  * get_cached_rowtype: utility function to lookup a rowtype tupdesc
  *
  * type_id, typmod: identity of the rowtype
@@ -1861,8 +2117,9 @@ ExecJustInnerVar(ExprState *state, ExprContext *econtext, bool *isnull, ExprDone
 	int			attnum = op->d.var.attnum + 1;
 	TupleTableSlot *slot = econtext->ecxt_innertuple;
 
-    if (isDone != NULL)
+    if (isDone != NULL) {
         *isDone = ExprSingleResult;
+	}
 
 	/* See comments in ExecJustInnerVar */
 	return tableam_tslot_getattr(slot, attnum, isnull);
@@ -1876,9 +2133,9 @@ ExecJustOuterVar(ExprState *state, ExprContext *econtext, bool *isnull, ExprDone
 	int			attnum = op->d.var.attnum + 1;
 	TupleTableSlot *slot = econtext->ecxt_outertuple;
 
-    if (isDone != NULL)
+    if (isDone != NULL) {
         *isDone = ExprSingleResult;
-
+	}
 	/* See comments in ExecJustOuterVar */
 	return tableam_tslot_getattr(slot, attnum, isnull);
 }
@@ -1891,8 +2148,9 @@ ExecJustScanVar(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneC
 	int			attnum = op->d.var.attnum + 1;
 	TupleTableSlot *slot = econtext->ecxt_scantuple;
 
-    if (isDone != NULL)
+    if (isDone != NULL) {
         *isDone = ExprSingleResult;
+	}
 	/* See comments in ExecJustScanVar */
 	return tableam_tslot_getattr(slot, attnum, isnull);
 }
@@ -2215,7 +2473,6 @@ ExecEvalRowNullInt(ExprState *state, ExprEvalStep *op,
 	int32		tupTypmod;
 	TupleDesc	tupDesc;
 	HeapTupleData tmptup;
-	int			att;
 
 	*op->resnull = false;
 
@@ -2765,7 +3022,6 @@ bool
 ExecEvalArrayRefSubscript(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 {
 	ArrayRefState *arefstate = op->d.arrayref_subscript.state;
-	int		   *indexes;
 	int			off = op->d.arrayref_subscript.off;
 
 	ExecTableOfIndexInfo execTableOfIndexInfo;
@@ -3768,36 +4024,6 @@ ExecEvalWholeRowVar(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 			MemoryContextSwitchTo(oldcontext);
 		}
 
-		/*
-		 * Construct a tuple descriptor for the composite values we'll
-		 * produce, and make sure its record type is "blessed".  The main
-		 * reason to do this is to be sure that operations such as
-		 * row_to_json() will see the desired column names when they look up
-		 * the descriptor from the type information embedded in the composite
-		 * values.
-		 *
-		 * We already got the correct physical datatype info above, but now we
-		 * should try to find the source RTE and adopt its column aliases, in
-		 * case they are different from the original rowtype's names.  For
-		 * example, in "SELECT foo(t) FROM tab t(x,y)", the first two columns
-		 * in the composite output should be named "x" and "y" regardless of
-		 * tab's column names.
-		 *
-		 * If we can't locate the RTE, assume the column names we've got are
-		 * OK.  (As of this writing, the only cases where we can't locate the
-		 * RTE are in execution of trigger WHEN clauses, and then the Var will
-		 * have the trigger's relation's rowtype, so its names are fine.)
-		 * Also, if the creator of the RTE didn't bother to fill in an eref
-		 * field, assume our column names are OK.  (This happens in COPY, and
-		 * perhaps other places.)
-		 */
-		if (econtext->ecxt_estate &&
-			variable->varno <= list_length(econtext->ecxt_estate->es_range_table))
-		{
-			RangeTblEntry *rte = rt_fetch(variable->varno,
-									  econtext->ecxt_estate->es_range_table);
-		}
-
 		/* Bless the tupdesc if needed, and save it in the execution state */
 		op->d.wholerow.tupdesc = BlessTupleDesc(output_tupdesc);
 
@@ -3869,4 +4095,208 @@ ExecEvalWholeRowVar(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 
 	*op->resnull = false;
 	*op->resvalue = PointerGetDatum(dtuple);
+}
+
+void ExecAggInitGroup(AggState *aggstate, AggStatePerTrans pertrans, AggStatePerGroup pergroup,
+                      MemoryContext aggcontext)
+{
+    FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
+    MemoryContext oldContext;
+
+    /*
+     * We must copy the datum into aggcontext if it is pass-by-ref. We do not
+     * need to pfree the old transValue, since it's NULL.  (We already checked
+     * that the agg's input type is binary-compatible with its transtype, so
+     * straight copy here is OK.)
+     */
+    oldContext = MemoryContextSwitchTo(aggcontext);
+    pergroup->transValue = datumCopy(fcinfo->arg[1], pertrans->transtypeByVal, pertrans->transtypeLen);
+    pergroup->transValueIsNull = false;
+    pergroup->noTransValue = false;
+    MemoryContextSwitchTo(oldContext);
+}
+
+void ExecAggInitCollectGroup(AggState *aggstate, AggStatePerTrans pertrans, AggStatePerGroup pergroup,
+                             MemoryContext aggcontext)
+{
+    FunctionCallInfo fcinfo = &pertrans->collectfn_fcinfo;
+    MemoryContext oldContext;
+
+    /*
+     * We must copy the datum into aggcontext if it is pass-by-ref. We do not
+     * need to pfree the old transValue, since it's NULL.  (We already checked
+     * that the agg's input type is binary-compatible with its transtype, so
+     * straight copy here is OK.)
+     */
+    oldContext = MemoryContextSwitchTo(aggcontext);
+    pergroup->collectValue = datumCopy(fcinfo->arg[1], pertrans->transtypeByVal, pertrans->transtypeLen);
+    pergroup->collectValueIsNull = false;
+    pergroup->noCollectValue = false;
+    MemoryContextSwitchTo(oldContext);
+}
+
+/*
+ * Ensure that the current transition value is a child of the aggcontext,
+ * rather than the per-tuple context.
+ *
+ * NB: This can change the current memory context.
+ */
+Datum ExecAggTransReparent(AggState *aggstate, AggStatePerTrans pertrans, Datum newValue, bool newValueIsNull,
+                           Datum oldValue, bool oldValueIsNull)
+{
+    Assert(newValue != oldValue);
+
+    if (!newValueIsNull) {
+        MemoryContextSwitchTo(aggstate->curaggcontext);
+        newValue = datumCopy(newValue, pertrans->transtypeByVal, pertrans->transtypeLen);
+    } else {
+        /*
+         * Ensure that AggStatePerGroup->transValue ends up being 0, so
+         * callers can safely compare newValue/oldValue without having to
+         * check their respective nullness.
+         */
+        newValue = (Datum)0;
+    }
+
+    if (!oldValueIsNull) {
+        pfree(DatumGetPointer(oldValue));
+    }
+
+    return newValue;
+}
+
+/*
+ * Invoke ordered transition function, with a datum argument.
+ */
+void ExecEvalAggOrderedTransDatum(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
+{
+    AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+    int setno = op->d.agg_trans.setno;
+
+    tuplesort_putdatum(pertrans->sortstates[setno], *op->resvalue, *op->resnull);
+}
+
+/*
+ * Invoke ordered transition function, with a tuple argument.
+ */
+void ExecEvalAggOrderedTransTuple(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
+{
+    AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
+    int setno = op->d.agg_trans.setno;
+
+    ExecClearTuple(pertrans->sortslot);
+    pertrans->sortslot->tts_nvalid = pertrans->numInputs;
+    ExecStoreVirtualTuple(pertrans->sortslot);
+    tuplesort_puttupleslot(pertrans->sortstates[setno], pertrans->sortslot);
+}
+
+static FORCE_INLINE void ExecAggPlainTransByVal(AggState *aggstate, AggStatePerTrans pertrans,
+    AggStatePerGroup pergroup, MemoryContext aggcontext, int setno)
+{
+    FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
+    MemoryContext oldContext;
+    Datum        newVal;
+
+    aggstate->curaggcontext = aggcontext;
+    aggstate->current_set = setno;
+    aggstate->curpertrans = pertrans;
+
+    oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
+
+    fcinfo->arg[0] = pergroup->transValue;
+    fcinfo->argnull[0] = pergroup->transValueIsNull;
+    fcinfo->isnull = false;
+
+    newVal = FunctionCallInvoke(fcinfo);
+
+    pergroup->transValue = newVal;
+    pergroup->transValueIsNull = fcinfo->isnull;
+
+    MemoryContextSwitchTo(oldContext);
+}
+
+static FORCE_INLINE void ExecAggCollectPlainTransByVal(AggState *aggstate, AggStatePerTrans pertrans,
+    AggStatePerGroup pergroup, MemoryContext aggcontext, int setno)
+{
+    FunctionCallInfo fcinfo = &pertrans->collectfn_fcinfo;
+    MemoryContext oldContext;
+    Datum        newVal;
+
+    aggstate->curaggcontext = aggcontext;
+    aggstate->current_set = setno;
+
+    aggstate->curpertrans = pertrans;
+
+    oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
+
+    fcinfo->arg[0] = pergroup->collectValue;
+    fcinfo->argnull[0] = pergroup->collectValueIsNull;
+    fcinfo->isnull = false;
+
+    newVal = FunctionCallInvoke(fcinfo);
+
+    pergroup->collectValue = newVal;
+    pergroup->collectValueIsNull = fcinfo->isnull;
+
+    MemoryContextSwitchTo(oldContext);
+}
+
+static FORCE_INLINE void ExecAggPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
+    AggStatePerGroup pergroup, MemoryContext aggcontext, int setno)
+{
+    FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
+    MemoryContext oldContext;
+    Datum        newVal;
+
+    aggstate->curaggcontext = aggcontext;
+    aggstate->current_set = setno;
+    aggstate->curpertrans = pertrans;
+
+    oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
+
+    fcinfo->arg[0] = pergroup->transValue;
+    fcinfo->argnull[0] = pergroup->transValueIsNull;
+    fcinfo->isnull = false;
+
+    newVal = FunctionCallInvoke(fcinfo);
+
+    if (DatumGetPointer(newVal) != DatumGetPointer(pergroup->transValue)) {
+        newVal = ExecAggTransReparent(aggstate, pertrans, newVal, fcinfo->isnull, pergroup->transValue,
+            pergroup->transValueIsNull);
+    }
+
+    pergroup->transValue = newVal;
+    pergroup->transValueIsNull = fcinfo->isnull;
+
+    MemoryContextSwitchTo(oldContext);
+}
+
+static FORCE_INLINE void ExecAggCollectPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
+    AggStatePerGroup pergroup, MemoryContext aggcontext, int setno)
+{
+    FunctionCallInfo fcinfo = &pertrans->collectfn_fcinfo;
+    MemoryContext oldContext;
+    Datum        newVal;
+
+    aggstate->curaggcontext = aggcontext;
+    aggstate->current_set = setno;
+    aggstate->curpertrans = pertrans;
+
+    oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
+
+    fcinfo->arg[0] = pergroup->collectValue;
+    fcinfo->argnull[0] = pergroup->collectValueIsNull;
+    fcinfo->isnull = false;
+
+    newVal = FunctionCallInvoke(fcinfo);
+
+    if (DatumGetPointer(newVal) != DatumGetPointer(pergroup->collectValue)) {
+        newVal = ExecAggTransReparent(aggstate, pertrans, newVal, fcinfo->isnull, pergroup->collectValue,
+            pergroup->collectValueIsNull);
+    }
+
+    pergroup->collectValue = newVal;
+    pergroup->collectValueIsNull = fcinfo->isnull;
+
+    MemoryContextSwitchTo(oldContext);
 }

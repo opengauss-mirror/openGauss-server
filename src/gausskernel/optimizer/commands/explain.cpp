@@ -166,6 +166,7 @@ static void show_merge_append_keys(MergeAppendState* mstate, List* ancestors, Ex
 static void show_merge_sort_keys(PlanState* state, List* ancestors, ExplainState* es);
 static void show_startwith_pseudo_entries(PlanState* state, List* ancestors, ExplainState* es);
 static void show_sort_info(SortState* sortstate, ExplainState* es);
+static void show_sort_group_info(SortGroupState *state, ExplainState *es);
 static void show_hash_info(HashState* hashstate, ExplainState* es);
 static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es);
 static void show_tidbitmap_info(BitmapHeapScanState *planstate, ExplainState *es);
@@ -269,6 +270,7 @@ static bool show_scan_distributekey(const Plan* plan)
 }
 #endif   /* ENABLE_MULTIPLE_NODES */
 static void show_unique_check_info(PlanState *planstate, ExplainState *es);
+static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate);
 
 /*
  * ExplainQuery -
@@ -2496,6 +2498,11 @@ static void ExplainNode(
         }
     }
 
+    /* explain ndpplugin activities */
+    if (ndp_pushdown_hook) {
+        show_ndpplugin_statistic(es, planstate);
+    }
+
     /*
      * We have to forcibly clean up the instrumentation state because we
      * haven't done ExecutorEnd yet.  This is pretty grotty ...
@@ -2876,6 +2883,13 @@ static void ExplainNode(
             show_sort_info((SortState*)planstate, es);
             show_llvm_info(planstate, es);
             break;
+        case T_SortGroup: {
+            SortGroup *plan = (SortGroup *)planstate->plan;
+            show_sort_group_keys(planstate, "Sorted Group Key", plan->numCols, plan->sortColIdx, plan->sortOperators,
+                                 plan->collations, plan->nullsFirst, ancestors, es);
+            show_sort_group_info(castNode(SortGroupState, planstate), es);
+            break;
+        }
         case T_MergeAppend:
             show_merge_append_keys((MergeAppendState*)planstate, ancestors, es);
             break;
@@ -4317,6 +4331,28 @@ static void show_sort_info(SortState* sortstate, ExplainState* es)
 
                 show_detail_sortinfo(es, sortMethod, spaceType, sortstate->spaceUsed);
             }
+        }
+    }
+}
+
+/*
+ * If it's EXPLAIN ANALYZE, show stats for a SortGroupState
+ */
+static void show_sort_group_info(SortGroupState *state, ExplainState *es)
+{
+    if (!es->analyze)
+        return;
+    if (state->sort_Done && state->state != NULL) {
+        int64 spaceUsed = Max(1, state->spaceUsed / 1024);
+        if (es->format == EXPLAIN_FORMAT_TEXT) {
+            if (es->str->len == 0 || es->str->data[es->str->len - 1] == '\n')
+                appendStringInfoSpaces(es->str, es->indent * 2);
+            appendStringInfo(es->str, "Space Used: %s : " INT64_FORMAT "kB\n", state->spaceType,
+                             spaceUsed);
+        } 
+        else {
+            ExplainPropertyInteger("Sort Space Used(kB)", spaceUsed, es);
+            ExplainPropertyText("Sort Space Type", state->spaceType, es);
         }
     }
 }
@@ -10917,6 +10953,57 @@ static void show_unique_check_info(PlanState *planstate, ExplainState *es)
             }
         }
     }
+}
+
+static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate)
+{
+    Plan* plan = planstate->plan;
+    if (!plan->ndp_pushdown_optimized &&
+        !(plan->lefttree && plan->type == T_Agg && plan->lefttree->ndp_pushdown_optimized &&
+        reinterpret_cast<NdpScanCondition*>(plan->lefttree->ndp_pushdown_condition)->plan == plan)) {
+        return;
+    }
+
+    TableScanDesc desc = reinterpret_cast<ScanState*>(planstate)->ss_currentScanDesc;
+    if (desc && !desc->ndp_pushdown_optimized) {
+        return;
+    }
+    appendStringInfo(es->str, " NDPpushdown");
+
+    if (!es->analyze) {
+        return;
+    }
+
+    Instrumentation* instr;
+    int pushdownPage = 0;
+    int normalPage = 0;
+    int ndpPage = 0;
+
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
+    if (planstate->plan->plan_node_id > 0 && u_sess->instr_cxt.global_instr &&
+        u_sess->instr_cxt.global_instr->isFromDataNode(planstate->plan->plan_node_id)) {
+        for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+            ThreadInstrumentation* threadinstr =
+                u_sess->instr_cxt.global_instr->getThreadInstrumentation(i, planstate->plan->plan_node_id, 0);
+            if (threadinstr == NULL)
+                continue;
+            for (int j = 0; j < dop; j++) {
+                instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
+                if (instr != NULL && instr->nloops > 0) {
+                    pushdownPage += instr->ndp_pushdown_page;
+                    normalPage += instr->ndp_sendback_page;
+                    ndpPage += instr->ndp_handled;
+                }
+            }
+        }
+    }
+
+    instr = planstate->instrument;
+    pushdownPage += instr->ndp_pushdown_page;
+    normalPage += instr->ndp_sendback_page;
+    ndpPage += instr->ndp_handled;
+
+    appendStringInfo(es->str, " (total page: %d, back to normal page: %d, ndp handled: %d)", pushdownPage, normalPage, ndpPage);
 }
 
 void ExplainDatumProperty(char const *name, Datum const value, Oid const type, ExplainState* es)

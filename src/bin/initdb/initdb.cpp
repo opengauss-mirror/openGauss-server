@@ -3787,7 +3787,7 @@ static int CreateRestrictedProcess(char* cmd, PROCESS_INFORMATION* processInfo)
  */
 static void usage(const char* prog_name)
 {
-    printf(_("%s initializes a openGauss database cluster.\n\n"), prog_name);
+    printf(_("%s initializes an openGauss database cluster.\n\n"), prog_name);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... [DATADIR]\n"), prog_name);
     printf(_("\nOptions:\n"));
@@ -4292,7 +4292,7 @@ int main(int argc, char* argv[])
     }
     
     /* check nodedata.cfg and node_id */
-    ss_issharedstorage = ss_check_nodedatainfo();
+    ss_issharedstorage = ss_check_nodedatainfo(enable_dss);
     
     if (default_text_search_config_tmp != NULL)
         default_text_search_config = default_text_search_config_tmp;

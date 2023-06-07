@@ -133,8 +133,6 @@
 #endif
 
 #ifdef MEMORY_CONTEXT_CHECKING
-const uint64 BlkMagicNum = 0xDADADADADADADADA;
-const uint32 PremagicNum = 0xBABABABA;
 const uint32 PosmagicNum = 0xDCDCDCDC;
 typedef struct AllocMagicData {
     void* aset;
@@ -370,19 +368,25 @@ MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* 
     _in_ Size initBlockSize, _in_ Size maxBlockSize, _in_ MemoryContextType contextType, _in_ Size maxSize,
     _in_ bool isSession)
 {
-    /* The following situation is forbidden, parent context is not shared, while current context is shared. */
-    if (parent != NULL && !parent->is_shared && contextType == SHARED_CONTEXT) {
-        ereport(ERROR,
-            (errcode(ERRCODE_OPERATE_FAILED),
-                errmsg("Failed while creating shared memory context \"%s\" from standard context\"%s\".",
-                    name, parent->name)));
-    }
     switch (contextType) {
 #ifndef ENABLE_MEMORY_CHECK
-        case STANDARD_CONTEXT:
-            return GenericMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
+        case STANDARD_CONTEXT: {
+            if (g_instance.attr.attr_memory.disable_memory_stats) {
+                return opt_AllocSetContextCreate(parent, name, minContextSize, initBlockSize, maxBlockSize);
+            } else {
+                return GenericMemoryAllocator::AllocSetContextCreate(
+                    parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
+            }
+        }
         case SHARED_CONTEXT:
+            /* The following situation is forbidden, parent context is not shared, while current context is shared. */
+            if (parent != NULL && !parent->is_shared && contextType == SHARED_CONTEXT) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_OPERATE_FAILED),
+                        errmsg("Failed while creating shared memory context \"%s\" from standard context\"%s\".",
+                            name, parent->name)));
+            }
+
             return GenericMemoryAllocator::AllocSetContextCreate(
                 parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, false);
 #else
@@ -390,6 +394,14 @@ MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* 
             return AsanMemoryAllocator::AllocSetContextCreate(
                 parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
         case SHARED_CONTEXT:
+            /* The following situation is forbidden, parent context is not shared, while current context is shared. */
+            if (parent != NULL && !parent->is_shared && contextType == SHARED_CONTEXT) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_OPERATE_FAILED),
+                        errmsg("Failed while creating shared memory context \"%s\" from standard context\"%s\".",
+                            name, parent->name)));
+            }
+
             return AsanMemoryAllocator::AllocSetContextCreate(
                 parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, false);
 #endif
@@ -495,7 +507,7 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
      * Don't limit the memory allocation for ErrorContext. And skip memory tracking memory allocation.
      */
     if ((0 != strcmp(name, "ErrorContext")) && (0 != strcmp(name, "MemoryTrackMemoryContext")) &&
-        (strcmp(name, "Track MemoryInfo hash") != 0))
+        (strcmp(name, "Track MemoryInfo hash") != 0) && (0 != strcmp(name, "DolphinErrorData")))
         value |= IS_PROTECT;
 
     /* only track the unshared context after t_thrd.mem_cxt.mem_track_mem_cxt is created */

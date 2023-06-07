@@ -18,6 +18,7 @@
 #include "access/htup.h"
 #include "catalog/dependency.h"
 #include "catalog/objectaddress.h"
+#include "catalog/pg_partition_fn.h"
 #include "nodes/parsenodes.h"
 #include "nodes/plannodes.h"
 #include "rewrite/rewriteRlsPolicy.h"
@@ -116,7 +117,7 @@ extern void RangeVarCallbackOwnsTable(
 extern void RangeVarCallbackOwnsRelation(
     const RangeVar* relation, Oid relId, Oid oldRelId, bool target_is_partition, void* noCatalogs);
 extern void checkPartNotInUse(Partition part, const char* stmt);
-extern List* transformConstIntoTargetType(FormData_pg_attribute* attrs, int2vector* partitionKey, List* boundary);
+extern List* transformConstIntoTargetType(FormData_pg_attribute* attrs, int2vector* partitionKey, List* boundary, bool partkeyIsFunc = false);
 extern List* transformIntoTargetType(FormData_pg_attribute* attrs, int2 pos, List* boundary);
 
 extern void RenameDistributedTable(Oid distributedTableOid, const char* distributedTableNewName);
@@ -132,6 +133,7 @@ extern bool checkPartitionLocalIndexesUsable(Oid partitionOid);
 extern bool checkRelationLocalIndexesUsable(Relation relation);
 extern List* GetPartitionkeyPos(List* partitionkeys, List* schema, bool* partkeyIsFunc = NULL);
 
+extern bool IsPartKeyFunc(Relation rel, bool isPartRel, bool forSubPartition, PartitionExprKeyInfo* partExprKeyInfo = NULL);
 extern void ComparePartitionValue(List* pos, FormData_pg_attribute* attrs, List *partitionList, bool isPartition = true, bool partkeyIsFunc = false);
 extern void CompareListValue(const List* pos, FormData_pg_attribute* attrs, List *partitionList, bool partkeyIsFunc = false);
 extern void clearAttrInitDefVal(Oid relid);
@@ -164,4 +166,5 @@ extern int getPartitionElementsIndexByOid(Relation partTableRel, Oid partOid);
 extern void SetPartionIndexType(IndexStmt* stmt, Relation rel, bool is_alter_table);
 extern bool ConstraintSatisfyAutoIncrement(HeapTuple tuple, TupleDesc desc, AttrNumber attrnum, char contype);
 extern void CheckRelAutoIncrementIndex(Oid relid, LOCKMODE lockmode);
+extern void RebuildDependViewForProc(Oid proc_oid);
 #endif /* TABLECMDS_H */

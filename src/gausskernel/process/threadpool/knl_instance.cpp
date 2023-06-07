@@ -181,7 +181,7 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSReformInfo.dms_role = DMS_ROLE_UNKNOW;
     dms_cxt->SSClusterState = NODESTATE_NORMAL;
     dms_cxt->SSRecoveryInfo.recovery_pause_flag = true;
-    dms_cxt->SSRecoveryInfo.failover_triggered = false;
+    dms_cxt->SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
     dms_cxt->SSRecoveryInfo.new_primary_reset_walbuf_flag = false;
     dms_cxt->SSRecoveryInfo.ready_to_startup = false;
     dms_cxt->SSRecoveryInfo.startup_reform = true;
@@ -190,6 +190,8 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.in_failover = false;
     dms_cxt->SSRecoveryInfo.in_flushcopy = false;
     dms_cxt->SSRecoveryInfo.no_backend_left = false;
+    dms_cxt->SSRecoveryInfo.startup_need_exit_normally = false;
+    dms_cxt->SSRecoveryInfo.recovery_trapped_in_page_request = false;
     dms_cxt->log_timezone = NULL;
     pg_atomic_init_u32(&dms_cxt->inDmsThreShmemInitCnt, 0);
     pg_atomic_init_u32(&dms_cxt->inProcExitCnt, 0);
@@ -316,7 +318,6 @@ static void knl_g_parallel_decode_init(knl_g_parallel_decode_context* pdecode_cx
     pdecode_cxt->totalNum = 0;
     pdecode_cxt->edata = NULL;
     SpinLockInit(&(pdecode_cxt->rwlock));
-    SpinLockInit(&(pdecode_cxt->destroy_lock));
 }
 
 static void knl_g_cache_init(knl_g_cache_context* cache_cxt)

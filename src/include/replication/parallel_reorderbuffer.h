@@ -53,6 +53,7 @@ typedef struct logicalLog {
     int nsubxacts;
     TransactionId *subXids;
     TimestampTz commitTime;
+    RepOriginId origin_id;
     HTAB* toast_hash;
     ParallelReorderBufferTXN *txn;
     logicalLog *freeNext;
@@ -148,6 +149,7 @@ typedef struct ParallelReorderBufferChange {
     TransactionId * subXids;
     dlist_node node;
     TimestampTz commitTime;
+    RepOriginId origin_id;
 } ParallelReorderBufferChange;
 
 typedef struct ParallelReorderBufferTXN {
@@ -392,6 +394,8 @@ extern void WalSndPrepareWriteHelper(StringInfo out, XLogRecPtr lsn, Transaction
 extern void ParallelReorderBufferUpdateMemory(ParallelReorderBuffer *rb, logicalLog *change, int slotId, bool add);
 extern void CheckNewTupleMissingToastChunk(ParallelReorderBufferChange *change, bool isHeap);
 extern void ParallelReorderBufferChildAssignment(ParallelReorderBuffer *prb, logicalLog *logChange);
+extern void ParallelReorderBufferCleanupTXN(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn,
+    XLogRecPtr lsn = InvalidXLogRecPtr);
 
 const uint32 max_decode_cache_num = 100000;
 #endif

@@ -420,25 +420,25 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
 --?.*
 --?.*
---? (.*,test_debug2,3,"    insert into tb1 values (1000);")
+--? (.*,test_debug2,2,"    insert into tb1 values (1000);")
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |    query    
 -------------+--------+-------------
- test_debug2 |      4 |     commit;
+ test_debug2 |      3 |     commit;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.step();
   funcname   | lineno |               query                
 -------------+--------+------------------------------------
- test_debug2 |      5 |     insert into tb1 values (2000);
+ test_debug2 |      4 |     insert into tb1 values (2000);
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |     query     
 -------------+--------+---------------
- test_debug2 |      6 |     rollback;
+ test_debug2 |      5 |     rollback;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
@@ -457,13 +457,13 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
 --?.*
 --?.*
---? (.*,test_debug3,5,"    CASE a")
+--? (.*,test_debug3,4,"    CASE a")
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |         query         
 -------------+--------+-----------------------
- test_debug3 |      7 |             b := 111;
+ test_debug3 |      6 |             b := 111;
 (1 row)
 
 select * from dbe_pldebugger.info_locals();
@@ -476,19 +476,19 @@ select * from dbe_pldebugger.info_locals();
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |                   query                    
 -------------+--------+--------------------------------------------
- test_debug3 |     11 |     raise info 'pi_return : %',pi_return ;
+ test_debug3 |     10 |     raise info 'pi_return : %',pi_return ;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |       query       
 -------------+--------+-------------------
- test_debug3 |     14 |         b := 101;
+ test_debug3 |     13 |         b := 101;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |     query     
 -------------+--------+---------------
- test_debug3 |     15 |     return b;
+ test_debug3 |     14 |     return b;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
@@ -510,13 +510,13 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
 --?.*
 --?.*
---? (.*,test_debug4,5,"    CASE a")
+--? (.*,test_debug4,4,"    CASE a")
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.step();
   funcname   | lineno |         query         
 -------------+--------+-----------------------
- test_debug4 |      7 |             b := 111;
+ test_debug4 |      6 |             b := 111;
 (1 row)
 
 select * from dbe_pldebugger.info_locals();
@@ -529,7 +529,7 @@ select * from dbe_pldebugger.info_locals();
 select funcname, lineno, query from dbe_pldebugger.step();
   funcname   | lineno |              query              
 -------------+--------+---------------------------------
- test_debug4 |      8 |             call test_debug(a);
+ test_debug4 |      7 |             call test_debug(a);
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.step();
@@ -565,7 +565,7 @@ select funcname, lineno, query from dbe_pldebugger.step();
 select funcname, lineno, query from dbe_pldebugger.continue();
   funcname   | lineno |       query       
 -------------+--------+-------------------
- test_debug4 |     15 |         b := 101;
+ test_debug4 |     14 |         b := 101;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
@@ -584,19 +584,19 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
                attach               
 ------------------------------------
---? (.*,test_debug4,5,"    CASE a")
+--? (.*,test_debug4,4,"    CASE a")
 (1 row)
 
 SELECT funcname, lineno, query FROM DBE_PLDEBUGGER.step(); 
   funcname   | lineno |         query         
 -------------+--------+-----------------------
- test_debug4 |      7 |             b := 111;
+ test_debug4 |      6 |             b := 111;
 (1 row)
 
 SELECT funcname, lineno, query FROM DBE_PLDEBUGGER.step(); 
   funcname   | lineno |              query              
 -------------+--------+---------------------------------
- test_debug4 |      8 |             call test_debug(a);
+ test_debug4 |      7 |             call test_debug(a);
 (1 row)
 
 SELECT funcname, lineno, query FROM DBE_PLDEBUGGER.step(); 
@@ -633,7 +633,7 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
 --?.*
 --?.*
---? (.*,test_debug4,5,"    CASE a")
+--? (.*,test_debug4,4,"    CASE a")
 (1 row)
 
 truncate tmp_holder;
@@ -658,7 +658,7 @@ select * from tmp_holder;
  2
  0:31:    SELECT b FROM test where a = 7 INTO b_tmp;
  1:44:    RAISE INFO 'cnt is %', cnt;
- 2:12:    return b;
+ 2:12:    raise info 'pi_return : %',pi_return ;
 (6 rows)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
@@ -706,7 +706,7 @@ select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |  funcname   | lineno |                     query                      
 ---------+-------------+--------+------------------------------------------------
        0 | test_debug  |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
-       1 | test_debug4 |      8 |             call test_debug(a);
+       1 | test_debug4 |      7 |             call test_debug(a);
 (2 rows)
 
 select * from dbe_pldebugger.info_locals();
@@ -748,7 +748,7 @@ select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |  funcname   | lineno |              query              
 ---------+-------------+--------+---------------------------------
        0 | test_debug  |     44 |     RAISE INFO 'cnt is %', cnt;
-       1 | test_debug4 |      8 |             call test_debug(a);
+       1 | test_debug4 |      7 |             call test_debug(a);
 (2 rows)
 
 select * from dbe_pldebugger.info_locals();
@@ -799,31 +799,31 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
                attach               
 ------------------------------------
---? (.*,test_debug4,5,"    CASE a")
+--? (.*,test_debug4,4,"    CASE a")
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |         query         
 -------------+--------+-----------------------
- test_debug4 |      7 |             b := 111;
+ test_debug4 |      6 |             b := 111;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |              query              
 -------------+--------+---------------------------------
- test_debug4 |      8 |             call test_debug(a);
+ test_debug4 |      7 |             call test_debug(a);
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |       query       
 -------------+--------+-------------------
- test_debug4 |     15 |         b := 101;
+ test_debug4 |     14 |         b := 101;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.step();
   funcname   | lineno |     query     
 -------------+--------+---------------
- test_debug4 |     16 |     return b;
+ test_debug4 |     15 |     return b;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.finish();
@@ -845,7 +845,7 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
                attach               
 ------------------------------------
---? (.*,test_debug4,5,"    CASE a")
+--? (.*,test_debug4,4,"    CASE a")
 (1 row)
 
 truncate tmp_holder;
@@ -874,7 +874,7 @@ select funcname, lineno, query from dbe_pldebugger.finish();
 select funcname, lineno, query from dbe_pldebugger.finish();
   funcname   | lineno |       query       
 -------------+--------+-------------------
- test_debug4 |     15 |         b := 101;
+ test_debug4 |     14 |         b := 101;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.finish();
@@ -1142,7 +1142,7 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
 --?.*
 --?.*
---? (.*,test_setvar,14,"    RAISE INFO E'vint:%\\nvnum:%\\nvfloat:%\\nvtext:%\\nvvarchar:%\\nvrow:%\\nvrefcursor:%',")
+--? (.*,test_setvar,13,"    RAISE INFO E'vint:%\\nvnum:%\\nvfloat:%\\nvtext:%\\nvvarchar:%\\nvrow:%\\nvrefcursor:%',")
 (1 row)
 
 select * from dbe_pldebugger.info_locals();
@@ -1171,13 +1171,13 @@ select * from dbe_pldebugger.info_locals();
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |    query    
 -------------+--------+-------------
- test_setvar |     16 |     COMMIT;
+ test_setvar |     15 |     COMMIT;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |                                  query                                  
 -------------+--------+-------------------------------------------------------------------------
- test_setvar |     17 |     SELECT * FROM test ORDER BY 1 LIMIT 1 INTO vrow; -- do set var here
+ test_setvar |     16 |     SELECT * FROM test ORDER BY 1 LIMIT 1 INTO vrow; -- do set var here
 (1 row)
 
 -- immutable to sql injection
@@ -1352,13 +1352,13 @@ select * from dbe_pldebugger.info_locals();
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |                                         query                                          
 -------------+--------+----------------------------------------------------------------------------------------
- test_setvar |     18 |     RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+ test_setvar |     17 |     RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |     query     
 -------------+--------+---------------
- test_setvar |     20 |     ROLLBACK;
+ test_setvar |     19 |     ROLLBACK;
 (1 row)
 
 select * from dbe_pldebugger.info_locals();
@@ -1387,7 +1387,7 @@ select * from dbe_pldebugger.info_locals();
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |                                         query                                          
 -------------+--------+----------------------------------------------------------------------------------------
- test_setvar |     21 |     RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+ test_setvar |     20 |     RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
 (1 row)
 
 select * from dbe_pldebugger.info_locals();

@@ -2239,7 +2239,7 @@ void SonicHashAgg::BatchAggregation(VectorBatch* batch)
     for (i = 0; i < m_aggNum; i++) {
         VectorBatch* pBatch = NULL;
         ScalarVector* pVector = NULL;
-        AggStatePerAgg peraggstate = &m_runtime->peragg[m_aggNum - 1 - i];
+        VecAggStatePerAgg peraggstate = &m_runtime->pervecagg[m_aggNum - 1 - i];
         ExprContext* econtext = NULL;
 
         /* for count(*), peraggstate->evalproj is null. */

@@ -1816,6 +1816,73 @@ void build_trans_aggregate_fnexprs(int agg_num_inputs, int agg_num_direct_inputs
     /* finalfn is currently never treated as variadic */
 }
 
+
+void build_aggregate_transfn_expr(Oid *agg_input_types, int agg_num_inputs, int agg_num_direct_inputs,
+                                  bool agg_variadic, Oid agg_state_type, Oid agg_input_collation, Oid transfn_oid,
+                                  Expr **transfnexpr)
+{
+    Param *argp;
+    List *args;
+    FuncExpr *fexpr;
+    int i;
+
+    argp = makeNode(Param);
+    argp->paramkind = PARAM_EXEC;
+    argp->paramid = -1;
+    argp->paramtype = agg_state_type;
+    argp->paramtypmod = -1;
+    argp->paramcollid = agg_input_collation;
+    argp->location = -1;
+
+    args = list_make1(argp);
+
+    for (i = agg_num_direct_inputs; i < agg_num_inputs; i++) {
+        argp = makeNode(Param);
+        argp->paramkind = PARAM_EXEC;
+        argp->paramid = -1;
+        argp->paramtype = agg_input_types[i];
+        argp->paramtypmod = -1;
+        argp->paramcollid = agg_input_collation;
+        argp->location = -1;
+        args = lappend(args, argp);
+    }
+
+    fexpr = makeFuncExpr(transfn_oid, agg_state_type, args, InvalidOid, agg_input_collation, COERCE_EXPLICIT_CALL);
+    fexpr->funcvariadic = agg_variadic;
+    *transfnexpr = (Expr *)fexpr;
+}
+
+void build_aggregate_finalfn_expr(Oid *agg_input_types, int num_finalfn_inputs, Oid agg_state_type, Oid agg_result_type,
+                                  Oid agg_input_collation, Oid finalfn_oid, Expr **finalfnexpr)
+{
+    Param *argp;
+    List *args;
+    int i;
+
+    argp = makeNode(Param);
+    argp->paramkind = PARAM_EXEC;
+    argp->paramid = -1;
+    argp->paramtype = agg_state_type;
+    argp->paramtypmod = -1;
+    argp->paramcollid = agg_input_collation;
+    argp->location = -1;
+    args = list_make1(argp);
+
+    for (i = 0; i < num_finalfn_inputs - 1; i++) {
+        argp = makeNode(Param);
+        argp->paramkind = PARAM_EXEC;
+        argp->paramid = -1;
+        argp->paramtype = agg_input_types[i];
+        argp->paramtypmod = -1;
+        argp->paramcollid = agg_input_collation;
+        argp->location = -1;
+        args = lappend(args, argp);
+    }
+
+    *finalfnexpr =
+        (Expr *)makeFuncExpr(finalfn_oid, agg_result_type, args, InvalidOid, agg_input_collation, COERCE_EXPLICIT_CALL);
+}
+
 /*
  * Expand a groupingSets clause to a flat list of grouping sets.
  * The returned list is sorted by length, shortest sets first.

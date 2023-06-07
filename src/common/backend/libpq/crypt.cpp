@@ -104,7 +104,7 @@ bool get_stored_password(const char* role, password_info* pass_info)
     t_thrd.int_cxt.ImmediateInterruptOK = false;
 
     /* Get role info from pg_authid */
-    if (strchr(role, '@'))
+    if (strchr(role, '@') && !OidIsValid(u_sess->proc_cxt.MyDatabaseId))
         ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("@ can't be allowed in username")));
     roleTup = SearchUserHostName(role, NULL);
 
@@ -167,7 +167,7 @@ static bool GetValidPeriod(const char *role, password_info *passInfo)
     t_thrd.int_cxt.ImmediateInterruptOK = false;
     
     /* Get role info from pg_authid */
-    if (strchr(role, '@'))
+    if (strchr(role, '@') && !OidIsValid(u_sess->proc_cxt.MyDatabaseId))
         ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("@ can't be allowed in username")));
     HeapTuple roleTup = SearchUserHostName(role, NULL);
     if (!HeapTupleIsValid(roleTup)) {

@@ -81,6 +81,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  bbox_blanklist_items                             | string  |      |           | 
  bbox_dump_count                                  | integer |      | 1         | 20
  bbox_dump_path                                   | string  |      |           | 
+ b_compatibility_user_host_auth                   | bool    |      |           | 
  behavior_compat_options                          | string  |      |           | 
  b_format_behavior_compat_options                 | string  |      |           | 
  bgwriter_delay                                   | integer | ms   | 10        | 10000
@@ -204,6 +205,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  dfs_partition_directory_length                   | integer |      | 92        | 7999
  dirty_page_percent_max                           | real    |      | 0.1       | 1
  disable_memory_protect                           | bool    |      |           | 
+ disable_memory_stats                             | bool    |      |           | 
  dolphin_server_port                              | integer |      | 1024      | 65535
  dw_file_num                                      | integer |      | 1         | 16
  dw_file_size                                     | integer |      | 32        | 256
@@ -277,6 +279,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_instr_cpu_timer                           | bool    |      |           | 
  enable_instr_rt_percentile                       | bool    |      |           | 
  enable_instr_track_wait                          | bool    |      |           | 
+ enable_iud_fusion                                | bool    |      |           | 
  enable_kill_query                                | bool    |      |           | 
  enable_logical_io_statistics                     | bool    |      |           | 
  enable_material                                  | bool    |      |           | 
@@ -290,6 +293,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_nvm                                       | bool    |      |           | 
  enable_online_ddl_waitlock                       | bool    |      |           | 
  enable_opfusion                                  | bool    |      |           | 
+ enable_opfusion_reuse                            | bool    |      |           | 
  enable_orc_cache                                 | bool    |      |           | 
  enable_page_lsn_check                            | bool    |      |           | 
  enable_partition_opfusion                        | bool    |      |           | 
@@ -306,6 +310,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_segment                                   | bool    |      |           | 
  enableSeparationOfDuty                           | bool    |      |           | 
  enable_seqscan                                   | bool    |      |           | 
+ enable_seqscan_dopcost                           | bool    |      |           | 
  enable_seqscan_fusion                            | bool    |      |           | 
  enable_set_variable_b_format                     | bool    |      |           | 
  enable_show_any_tuples                           | bool    |      |           | 
@@ -315,6 +320,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_sonic_hashjoin                            | bool    |      |           | 
  enable_sonic_optspill                            | bool    |      |           | 
  enable_sort                                      | bool    |      |           | 
+ enable_sortgroup_agg                             | bool    |      |           | 
  enable_startwith_debug                           | bool    |      |           | 
  enable_stmt_track                                | bool    |      |           | 
  enable_stream_replication                        | bool    |      |           | 
@@ -326,6 +332,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_ustore                                    | bool    |      |           | 
  enable_valuepartition_pruning                    | bool    |      |           | 
  enable_vector_engine                             | bool    |      |           | 
+ enable_vector_targetlist                         | bool    |      |           | 
  enable_wal_shipping_compression                  | bool    |      |           | 
  enable_wdr_snapshot                              | bool    |      |           | 
  enable_xlog_prune                                | bool    |      |           | 
@@ -629,6 +636,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_log_max_file_size                             | integer | kB   | 1024      | 4194304
  ssl_renegotiation_limit                          | integer | kB   | 0         | 2147483647
  ss_ock_log_path                                  | string  |      |           | 
+ ss_parallel_thread_count                         | integer |      | 0         | 64
  ss_rdma_work_config                              | string  |      |           | 
  ss_recv_msg_pool_size                            | integer | kB   | 1024      | 1048576
  ss_scrlock_server_bind_core                      | string  |      |           | 
@@ -661,7 +669,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  temp_buffers                                     | integer | 8kB  | 100       | 1073741823
  temp_file_limit                                  | integer | kB   | -1        | 2147483647
  temp_tablespaces                                 | string  |      |           | 
- test_user_host                                   | bool    |      |           | 
  thread_pool_attr                                 | string  |      |           | 
  thread_pool_stream_attr                          | string  |      |           | 
  time_to_target_rpo                               | integer |      | 0         | 3600

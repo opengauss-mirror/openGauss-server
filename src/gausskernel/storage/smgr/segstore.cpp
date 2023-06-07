@@ -369,9 +369,15 @@ SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_
     BlockNumber blocknum;
 
     /* Recovery thread should use physical location to read data directly. */
-    if (RecoveryInProgress() && !CurrentThreadIsWorker() && !SS_IN_FLUSHCOPY) {
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
-                        errhint("cannot do segment address translation during recovery")));
+    if (ENABLE_DMS && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+        g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY &&
+        g_instance.attr.attr_storage.xlog_file_path != 0) {
+        ereport(DEBUG1, (errmsg("can segment address translation when role is SS_STANDBY_CLUSTER_MAIN_STANDBY")));
+    } else {
+        if (RecoveryInProgress() && !CurrentThreadIsWorker() && !SS_IN_FLUSHCOPY) {
+            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
+                            errhint("cannot do segment address translation during recovery")));
+        }
     }
 
     SegLogicPageIdToExtentId(logic_id, &extent_id, &offset, &extent_size);
@@ -1481,13 +1487,6 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
         XLogRegisterBuffer(1, buf, REGBUF_WILL_INIT);
         XLogRecPtr xlog_rec = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_SEGMENT_EXTEND, SegmentBktId);
         END_CRIT_SECTION();
-
-#ifdef USE_ASSERT_CHECKING
-        if (ENABLE_DMS) {
-            SegNetPageCheckDiskLSN(GetBufferDescriptor(seg_buffer - 1), RBM_NORMAL, NULL);
-            SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
-        }
-#endif
 
         PageSetLSN(BufferGetPage(seg_buffer), xlog_rec);
         PageSetLSN(buffer, xlog_rec);

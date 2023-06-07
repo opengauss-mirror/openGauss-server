@@ -487,6 +487,7 @@ typedef struct ProjectionInfo {
     int pi_lastInnerVar;
     int pi_lastOuterVar;
     int pi_lastScanVar;
+    List* pi_projectVarNumbers; 
     List* pi_acessedVarNumbers;
     List* pi_sysAttrList;
     List* pi_lateAceessVarNumbers;
@@ -1475,6 +1476,7 @@ typedef struct ProjectSetState {
     ExprDoneCond *elemdone;  /* array of per-SRF is-done states */
     int nelems;              /* length of elemdone[] array */
     bool pending_srf_tuples; /* still evaluating srfs in tlist? */
+    MemoryContext argcontext; /* context for SRF arguments */
 } ProjectSetState;
 
 /* ----------------
@@ -1520,6 +1522,7 @@ typedef struct ModifyTableState {
     List* targetlists;                    /* for multiple modifying, targetlist's list for each result relation. */
     List* mt_ResultTupleSlots;            /* for multiple modifying, ResultTupleSlot list for build mt_ProjInfos. */
     ProjectionInfo** mt_ProjInfos;        /* for multiple modifying, projectInfo list array for each result relation. */
+    char** partExprKeyStrArray;           /* for multiple modifying, partition expr key */
 } ModifyTableState;
 
 typedef struct CopyFromManagerData* CopyFromManager;
@@ -1675,12 +1678,6 @@ typedef struct StartWithOpState
     int                 sw_level;
     int                 sw_numtuples;       /* number of tuples in current level */
 
-    /*
-     * nocycle stop flag, normally is used to handle nocycle stop on order siblings
-     * case, as order-siblings add a sort operator on top of RU
-     */
-    bool                sw_nocycleStopOrderSiblings;
-
     MemoryContext       sw_context;
     List*               sw_cycle_rowmarks;
 } StartWithOpState;
@@ -1740,15 +1737,19 @@ struct ScanBatchResult {
     TupleTableSlot** scanTupleSlotInBatch; /* array size of BatchMaxSize, stores tuples scanned in a page */
 };
 
+struct ScanBatchColAttr {
+    int colId;          /* only save the used cols. */
+    bool lateRead;      /* for project */
+    bool isProject;     /* is project? */
+};
+
 struct ScanBatchState {
-    VectorBatch*    pCurrentBatch;  /* for output in batch */
     VectorBatch*    pScanBatch;     /* batch formed from tuples */
     int             scanTupleSlotMaxNum; /* max row number of tuples can be scanned once */
     int             colNum;
-    int *colId;    /* for qual and project, only save the used cols. */
     int maxcolId;
+    ScanBatchColAttr* colAttr;  /* for qual and project, save attributes. */
     bool *nullflag;  /*indicate the batch has null value for performance */
-    bool *lateRead;  /* for project */
     bool scanfinished; /* last time return with rows, but pages of this partition is read out */
     ScanBatchResult scanBatch;
 };
@@ -2416,6 +2417,21 @@ typedef struct SortState {
     int64* space_size;    /* spill size for temp table */
 } SortState;
 
+struct SortGroupStatePriv;
+/* ----------------
+ *	 SortGroupState information
+ * ----------------
+ */
+typedef struct SortGroupState {
+    ScanState ss;                     /* its first field is NodeTag */
+    int64 bound;                      /* if bounded, how many group are needed */
+    struct SortGroupStatePriv *state; /* private state of nodeSortGroup.c */
+    bool sort_Done;                   /* sort completed yet? */
+    bool *new_group_trigger;          /* indicates new groups where returning tuples */
+    const char *spaceType;            /* type of space spaceUsed represents */
+    int64 spaceUsed;                  /* space used for explain */       
+} SortGroupState;
+
 /* ---------------------
  *	GroupState information
  * -------------------------
@@ -2440,7 +2456,8 @@ typedef struct GroupState {
  */
 /* these structs are private in nodeAgg.c: */
 typedef struct AggStatePerAggData* AggStatePerAgg;
-typedef struct AggStatePerTransData *AggStatePerTrans;
+typedef struct AggStatePerAggForFlattenedExprData* AggStatePerAggForFlattenedExpr;
+typedef struct AggStatePerTransData* AggStatePerTrans;
 typedef struct AggStatePerGroupData* AggStatePerGroup;
 typedef struct AggStatePerPhaseData* AggStatePerPhase;
 
@@ -2458,6 +2475,7 @@ typedef struct AggState {
     AggStatePerAgg curperagg;   /* identifies currently active aggregate */
     bool input_done;            /* indicates end of input */
     bool agg_done;              /* indicates completion of Agg scan */
+    bool new_group_trigger;     /* indicates new groups where returning tuples*/
     int projected_set;          /* The last projected grouping set */
     int current_set;            /* The current grouping set being evaluated */
     Bitmapset* grouped_cols;    /* grouped cols in current projection */
@@ -2486,6 +2504,18 @@ typedef struct AggState {
     TupleTableSlot *evalslot;	/* slot for agg inputs */
     ProjectionInfo *evalproj;	/* projection machinery */
     TupleDesc	evaldesc;      /* descriptor of input tuples */
+
+    int numtrans;                                    /* number of pertrans items */
+    AggStrategy aggstrategy;                         /* strategy mode */
+    AggStatePerAggForFlattenedExpr peragg_flattened; /* per-Aggref information for flattened expression*/
+    AggStatePerTrans pertrans;                       /* per-Trans state information */
+    MemoryContext curaggcontext;                     /* currently active aggcontext */
+    AggStatePerTrans curpertrans;                    /* currently active trans state */
+    int num_hashes;
+    AggStatePerGroup hash_pergroup; /* grouping set indexed array of* per-group pointers */
+    AggStatePerGroup all_pergroups; /* array of first ->pergroups, than * ->hash_pergroup */
+
+    TupleTableSlot* ndp_slot; /* slot for load ndp data */
 } AggState;
 
 /* ----------------
@@ -2696,6 +2726,7 @@ typedef struct RownumState {
 typedef struct UserSetElemState {
     ExprState xprstate;
     UserSetElem* use;
+    ExprState* instate;
 } UserSetElemState;
 /* ----------------
  *		GroupingFuncExprState node

@@ -188,7 +188,7 @@ static bool check_snapshot_delimiter(char** newval, void** extra, GucSource sour
 static bool check_snapshot_separator(char** newval, void** extra, GucSource source);
 static bool check_sql_ignore_strategy(char** newval, void** extra, GucSource source);
 static void assign_sql_ignore_strategy(const char* newval, void* extra);
-
+static void strategy_assign_vector_targetlist(int newval, void* extra);
 
 static void InitSqlConfigureNamesBool();
 static void InitSqlConfigureNamesInt();
@@ -345,7 +345,8 @@ static const struct b_format_behavior_compat_entry b_format_behavior_compat_opti
     {"set_session_transaction", B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION},
     {"enable_set_variables", B_FORMAT_OPT_ENABLE_SET_VARIABLES},
     {"enable_modify_column", B_FORMAT_OPT_ENABLE_MODIFY_COLUMN},
-    {"default_collation", B_FORMAT_OPT_DEFAULT_COLLATION}
+    {"default_collation", B_FORMAT_OPT_DEFAULT_COLLATION},
+    {"fetch", B_FORMAT_OPT_FETCH}
 };
 
 typedef struct behavior_compat_entry {
@@ -647,6 +648,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_seqscan_dopcost",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables DOP cost calculating for sequential-scan."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_seqscan_dopcost,
+            true,
+            NULL,
+            NULL,
+            NULL},
         {{"enable_indexscan",
             PGC_USERSET,
             NODE_ALL,
@@ -745,6 +757,17 @@ static void InitSqlConfigureNamesBool()
             NULL},
             &u_sess->attr.attr_sql.enable_hashagg,
             true,
+            NULL,
+            NULL,
+            NULL},
+        {{"enable_sortgroup_agg",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables the planner's use of sort group aggregation plans."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_sortgroup_agg,
+            false,
             NULL,
             NULL,
             NULL},
@@ -1688,6 +1711,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_opfusion_reuse",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables reuse opfusion object."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_opfusion_reuse,
+            false,
+            NULL,
+            NULL,
+            NULL},
 #ifndef ENABLE_MULTIPLE_NODES
         {{"plsql_show_all_error",
             PGC_USERSET,
@@ -1726,6 +1760,18 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL},
 #endif
+        {{"enable_vector_targetlist",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("enable vector targetlist for row to vector."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_vector_targetlist, 
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -3053,7 +3099,7 @@ static void InitSqlConfigureNamesEnum()
             OFF_VECTOR_ENGINE,
             vector_engine_strategy,
             NULL,
-            NULL,
+            strategy_assign_vector_targetlist,
             NULL},
         {{"multi_stats_type",
             PGC_USERSET,
@@ -3334,7 +3380,8 @@ static bool b_format_forbid_distribute_parameter(const char *elem)
     const char *forbidList[] = {
         "set_session_transaction",
         "enable_set_variables",
-        "enable_modify_column"
+        "enable_modify_column",
+        "fetch"
     };
     for (int i = 0; i < B_FORMAT_FORBID_GUC_NUM; i++) {
         if (strcmp(forbidList[i], elem) == 0) {
@@ -4133,4 +4180,15 @@ static void assign_sql_ignore_strategy(const char* newval, void* extra) {
         }
     }
     u_sess->utils_cxt.sql_ignore_strategy_val = sql_ignore_strategy[0].val;
+}
+
+static void strategy_assign_vector_targetlist(int newval, void* extra)
+{
+    if (newval == FORCE_VECTOR_ENGINE || newval == OPT_VECTOR_ENGINE)
+        u_sess->attr.attr_sql.enable_vector_targetlist = true;
+    else {
+        u_sess->attr.attr_sql.enable_vector_targetlist = false;
+    }
+
+    return;
 }

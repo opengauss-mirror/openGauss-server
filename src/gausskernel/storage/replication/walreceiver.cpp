@@ -457,7 +457,14 @@ void WalReceiverMain(void)
     int nRet = 0;
     errno_t rc = 0;
 
-    Assert(ENABLE_DSS == false);
+    if (ENABLE_DSS && t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE &&
+        g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY &&
+        g_instance.attr.attr_storage.xlog_file_path != 0) {
+        ereport(LOG, (errmsg("walreceiver thread started for main standby")));
+    } else {
+        Assert(ENABLE_DSS == false);    
+    }
+
     t_thrd.walreceiver_cxt.last_sendfilereply_timestamp = GetCurrentTimestamp();
     t_thrd.walreceiver_cxt.standby_config_modify_time = time(NULL);
 
@@ -2440,7 +2447,7 @@ Datum pg_stat_get_stream_replications(PG_FUNCTION_ARGS)
 
     /* local role */
     if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
-        values[0] = CStringGetTextDatum(GetSSServerMode());
+        values[0] = CStringGetTextDatum(GetSSServerMode(local_role));
     } else {
         values[0] = CStringGetTextDatum(wal_get_role_string(local_role));
     }

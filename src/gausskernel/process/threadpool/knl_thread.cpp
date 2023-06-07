@@ -1326,6 +1326,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->PrivateRefCountHash = NULL;
     storage_cxt->PrivateRefCountOverflowed = 0;
     storage_cxt->PrivateRefCountClock = 0;
+    storage_cxt->ReservedRefCountEntry = NULL;
     storage_cxt->saved_info_valid = false;
     storage_cxt->prev_strategy_buf_id = 0;
     storage_cxt->prev_strategy_passes = 0;
@@ -1702,6 +1703,9 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     dms_cxt->offset = 0;
     dms_cxt->size = 0;
     dms_cxt->file_size = 0;
+    errno_t rc = memset_s(dms_cxt->msg_backup, sizeof(dms_cxt->msg_backup), 0, sizeof(dms_cxt->msg_backup));
+    securec_check(rc, "\0", "\0");
+    dms_cxt->flush_copy_get_page_failed = false;
 }
 static void knl_t_rc_init(knl_t_rc_context* rc_cxt)
 {
@@ -1762,13 +1766,6 @@ void KnlLscContextInit(knl_t_lsc_context *lsc_cxt)
     t_thrd.lsc_cxt.local_sysdb_resowner =
         ResourceOwnerCreate(NULL, "InitLocalSysCache", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
 }
-
-static void knl_t_libsw_init(knl_t_libsw_context* libsw_cxt)
-{
-    libsw_cxt->streamConn = NULL;
-    libsw_cxt->commandTag = NULL;
-    libsw_cxt->redirect_manager = New(CurrentMemoryContext) RedirectManager();
- }
 
 void knl_thread_init(knl_thread_role role)
 {
@@ -1906,7 +1903,6 @@ void knl_thread_init(knl_thread_role role)
 #endif
     KnlDcfContextInit(&t_thrd.dcf_cxt);
     knl_t_page_compression_init(&t_thrd.page_compression_cxt);
-    knl_t_libsw_init(&t_thrd.libsw_cxt);
     knl_t_rc_init(&t_thrd.rc_cxt);
 }
 

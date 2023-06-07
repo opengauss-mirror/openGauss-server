@@ -55,9 +55,9 @@ public:
     static int ShmemSize(void);
     static void Init(void);
     static void IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSize, bool segment);
-
-private:
     static bool IsLimited(Oid tableSpaceOid, uint64* maxSize);
+    
+private:
     static inline int GetBucketIndex(Oid tableSpaceOid);
     static inline void ResetUsageSlot(TableSpaceUsageSlot* info);
     static inline void ResetBucket(TableSpaceUsageBucket* bucket);

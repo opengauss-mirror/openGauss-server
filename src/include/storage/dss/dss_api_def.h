@@ -84,7 +84,7 @@ typedef void (*dss_log_output)(dss_log_id_t log_type, dss_log_level_t log_level,
 #define DSS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DSS_LOCAL_MAJOR_VERSION     0
 #define DSS_LOCAL_MINOR_VERSION     0
-#define DSS_LOCAL_VERSION           3
+#define DSS_LOCAL_VERSION           5
 
 #define DSS_SUCCESS 0
 #define DSS_ERROR (-1)

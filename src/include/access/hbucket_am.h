@@ -31,6 +31,7 @@
 #include "utils/relcache.h"
 #include "optimizer/bucketinfo.h"
 #include "access/tableam.h"
+#include "nodes/execnodes.h"
 
 /*
 * redis need merge item
@@ -85,5 +86,16 @@ extern void scan_handler_tbl_endscan(TableScanDesc scan);
 extern void scan_handler_tbl_rescan(TableScanDesc scan, struct ScanKeyData* key, Relation rel,
     bool is_bitmap_rescan = false);
 #define NOT_EXIST_MERGE_LIST "not_exist_merge_list"
+
+typedef struct TableAmNdpRoutine_hook {
+    TableScanDesc (*scan_begin)(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
+        ScanState* sstate, RangeScanInRedis rangeScanInRedis);
+    void (*scan_init_parallel_seqscan)(TableScanDesc sscan, int32 dop, ScanDirection dir);
+    void (*scan_rescan)(TableScanDesc sscan, ScanKey key);
+    void (*scan_end)(TableScanDesc sscan);
+    Tuple (*scan_getnexttuple)(TableScanDesc sscan, ScanDirection direction, TupleTableSlot* slot);
+    void (*handle_hashaggslot)(AggState* aggstate, HeapTupleData* tts_minhdr);
+} TableAmNdpRoutine_hook, *TableAmNdpRoutine_hook_type;
+extern PGDLLIMPORT TableAmNdpRoutine_hook_type ndp_tableam;
 
 #endif /* HASHPART_AM_H */

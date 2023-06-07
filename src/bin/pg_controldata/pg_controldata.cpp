@@ -39,7 +39,7 @@ static bool enable_dss = false;
 
 static void usage(const char* prog_name)
 {
-    printf(_("%s displays control information of a openGauss database cluster.\n\n"), prog_name);
+    printf(_("%s displays control information of an openGauss database cluster.\n\n"), prog_name);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION] [DATADIR]\n"), prog_name);
     printf(_("\nOptions:\n"));
@@ -327,8 +327,9 @@ int main(int argc, char* argv[])
     check_env_value_c(DataDir);
 
     if (enable_dss) {
-        if (socketpath == NULL) {
-            fprintf(stderr, _("%s: socketpath cannot be NULL when enable dss\n"), progname);
+        if (socketpath == NULL || strlen(socketpath) == 0 || strncmp("UDS:", socketpath, 4) != 0) {
+            fprintf(stderr, _("%s: socketpath must be specific correctly when enable dss, "
+                "format is: '--socketpath=\"UDS:xxx\"'.\n"), progname);
             exit_safely(1);
         }
 

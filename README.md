@@ -211,13 +211,13 @@ tar -zxvf openGauss-x.x.x-openEULER-64bit.tar.gz
 cd /opt/software/openGauss/script
    ```
 
-5.如果是openEuler的操作系统，执行如下命令打开performance.sh文件，用#注释sysctl -w vm.min_free_kbytes=112640 &> /dev/null，键入“ESC”键进入指令模式，执行**:wq**保存并退出修改。
+5.如果是openEuler的操作系统，执行如下命令打开performance.sh文件，用#注释sysctl -w vm.min_free_kbytes=112640 &> /dev/null，键入“ESC”键进入指令模式，执行 **:wq**保存并退出修改。
 
 ```
 vi /etc/profile.d/performance.sh
 ```
 
-6.为确保openssl版本正确，执行预安装前请加载安装包中lib库。执行命令如下，其中*{packagePath}*为用户安装包放置的路径，本示例中为/opt/software/openGauss。
+6.为确保openssl版本正确，执行预安装前请加载安装包中lib库。执行命令如下，其中 *{packagePath}* 为用户安装包放置的路径，本示例中为/opt/software/openGauss。
 
    ```
 export LD_LIBRARY_PATH={packagePath}/script/gspylib/clib:$LD_LIBRARY_PATH
@@ -406,17 +406,95 @@ https://opengauss.org/zh/
 
 各版本和分支对应编译好的三方库二进制地址如下：
 
-| 版本和分支            | 下载路径            |
-| ------------- | --------------- |
-| 1.0.0  | https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.0/openGauss-third_party_binarylibs.tar.gz      |
-| 1.1.0  | https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.1.0/openGauss-third_party_binarylibs.tar.gz      |
-| 2.0.0 2.0.1  |   https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_binarylibs.tar.gz    |
-| 2.1.0  |   https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.1.0/openGauss-third_party_binarylibs.tar.gz    |
-| 3.0.0  |    https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/openGauss-third_party_binarylibs.tar.gz   |
-| 3.1.0  |    **openEuler_arm:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz <br/> **openEuler_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz<br/> **Centos_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz   |
-| 3.1.1 |    **openEuler_arm:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.1.1/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz <br/> **openEuler_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.1.1/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz<br/> **Centos_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.1.1/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz   |
-| 5.0.0 |    **openEuler_arm:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz <br/> **openEuler_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz<br/> **Centos_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz   |
-| master |    **openEuler_arm:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz <br/> **openEuler_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz<br/> **Centos_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz   |
+<table>
+    <tr>
+    	<td>分支</td>
+        <td>tag</td>
+        <td>下载路径</td>
+    </tr>
+    <tr>
+    	<td rowspan=2>1.0.0</td>
+        <td>v1.0.0</td>
+        <td rowspan=2><a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.0/openGauss-third_party_binarylibs.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.0/openGauss-third_party_binarylibs.tar.gz</a></td>
+        <tr><td>v1.0.1</td></tr> 
+    </tr>
+    <tr>
+    	<td rowspan=1>1.1.0</td>
+        <td>v1.1.0</td>
+        <td rowspan=1><a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.1.0/openGauss-third_party_binarylibs.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.1.0/openGauss-third_party_binarylibs.tar.gz</a></td>
+    </tr>
+    <tr>
+    	<td rowspan=6>2.0.0</td>
+        <td>v2.0.0</td>
+        <td rowspan=6><a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_binarylibs.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_binarylibs.tar.gz</a></td>
+        <tr><td>v2.0.1</td></tr>
+        <tr><td>v2.0.2</td></tr>
+        <tr><td>v2.0.3</td></tr>
+        <tr><td>v2.0.4</td></tr>
+        <tr><td>v2.0.5</td></tr>
+    </tr>
+    <tr>
+        <td rowspan=1>2.1.0</td>
+        <td>v2.1.0</td>
+        <td rowspan=1><a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.1.0/openGauss-third_party_binarylibs.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.1.0/openGauss-third_party_binarylibs.tar.gz</a></td>
+    </tr>
+    <tr>
+        <td rowspan=4>3.0.0</td>
+        <td>v3.0.0</td>
+        <td rowspan=3><a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/openGauss-third_party_binarylibs.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/openGauss-third_party_binarylibs.tar.gz</a></td>
+        <tr><td>v3.0.1</td></tr>
+        <tr><td>v3.0.2</td></tr>
+        <tr><td>v3.0.3</td>
+        <td rowspan=1>
+            <strong>openEuler_arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_arm-3.0.3.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_arm-3.0.3.tar.gz</a> <br/>
+            <strong>openEuler_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64-3.0.3.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64-3.0.3.tar.gz</a><br/>
+            <strong>Centos_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64-3.0.3.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64-3.0.3.tar.gz</a></td></tr>
+        </tr>
+    <tr>
+        <td rowspan=2>3.1.0</td>
+        <td>v3.1.0</td>
+        <td rowspan=2>
+           <strong>openEuler_arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.1.0/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.1.0/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz</a></br>
+            <strong>openEuler_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.1.0/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.1.0/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz</a></br>
+            <strong>Centos_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.1.0/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.1.0/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz</a>
+        </tr>
+    </tr>
+    <tr><td>v3.1.1</td></tr>
+    <tr>
+        <td rowspan=1>5.0.0</td>
+        <td>v5.0.0</td>
+        <td rowspan=1>
+            <strong>openEuler 20.03 arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz</a><br/>
+            <strong>openEuler 20.03 x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz</a><br/>
+            <strong>Centos_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz</a><br/>
+            <strong>openEuler 22.03 arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz</a><br/>
+            <strong>openEuler 22.03 x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.0.0/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz</a></td>
+        </tr>
+    </tr>
+    <tr>
+        <td rowspan=1>5.1.0</td>
+        <td>v5.1.0</td>
+        <td rowspan=1>
+            <strong>openEuler 20.03 arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz</a><br/>
+            <strong>openEuler 20.03 x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz</a><br/>
+            <strong>Centos_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz</a><br/>
+            <strong>openEuler 22.03 arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz</a><br/>
+            <strong>openEuler 22.03 x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/5.1.0/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz</a></td>
+        </tr>
+    </tr>
+    <tr>
+        <td rowspan=1>master</td>
+        <td></td>
+        <td rowspan=1>
+           <strong>openEuler_arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz</a><br/>
+            <strong>openEuler_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz</a><br/>
+            <strong>Centos_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz</a><br/>
+            <strong>openEuler 22.03 arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz</a><br/>
+            <strong>openEuler 22.03 x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs_2203/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz</a></td>
+        </tr>
+    </tr>
+</table>
+
 
 现在我们已经拥有完整的openGauss代码，把它存储在以下目录中（以sda为例）。
 
@@ -452,7 +530,7 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 
 > **注意** 
 >
-> - **-m [debug | release | memcheck]**表示有三个目标版本可以选择：
+> - **-m [debug | release | memcheck]** 表示有三个目标版本可以选择：
 >    - **release**：生成release版本的二进制程序。此版本编译时，通过配置GCC高级优化选项，去除内核调试代码。此选项通常在生成环境或性能测试环境中使用。
 >    - **debug**：表示生成debug版本的二进制程序。此版本编译时，增加了内核代码调试功能，一般用于开发自测环境。
 >    - **memcheck**：表示生成memcheck版本的二进制程序。此版本编译时，在debug版本的基础上增加了ASAN功能，用于定位内存问题。
@@ -484,7 +562,7 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 
 1.获取对应的开源三方库二进制文件：
 
-   从3.1.0版本开始，对于不同的环境提供不同的开源三方库二进制文件。 目前社区提供Centos_x86_64, openEuler_aarch64, openEuler_x86_64三种平台的三方库二进制。
+   从3.1.0分支和3.0.3 tag开始，对于不同的环境提供不同的开源三方库二进制文件。 目前社区提供Centos_x86_64, openEuler_aarch64, openEuler_x86_64三种平台的三方库二进制。
    可以从对应地址下载 [下载openGauss](#下载opengauss)
 
 2.配置环境变量
@@ -523,10 +601,10 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 
    > **注意** 
    >
-   > - *[debug | release | memcheck]*表示有三个目标版本可用。 
-   > - 在ARM平台上，需要把**-D__USE_NUMA**添加至**CFLAGS**中。
-   > - 在**ARMv8.1**及以上平台（如鲲鹏920），需要把**-D__ARM_LSE**添加至**CFLAGS**中。
-   > - 如果**binarylibs**被移至**openGauss-server**中，或者在**openGauss-server**中创建了到**binarylibs**的软链接，则不需要指定**--3rd**参数。但请注意，这样做的话，该文件很容易被`git clean`命令删除。
+   > - **[debug | release | memcheck]** 表示有三个目标版本可用。 
+   > - 在**ARM**平台上，需要把 **-D__USE_NUMA** 添加至 **CFLAGS** 中。
+   > - 在**ARMv8.1**及以上平台（如鲲鹏920），需要把 **-D__ARM_LSE** 添加至**CFLAGS**中。
+   > - 如果**binarylibs**被移至**openGauss-server**中，或者在**openGauss-server**中创建了到**binarylibs**的软链接，则不需要指定 **--3rd** 参数。但请注意，这样做的话，该文件很容易被`git clean`命令删除。
 
 4.执行以下命令编译openGauss：
 
@@ -541,7 +619,7 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
    openGauss installation complete.
    ```
 
-- 编译后的软件安装路径为**$GAUSSHOME**。
+- 编译后的软件安装路径为: **$GAUSSHOME**。
 
 - 编译后的二进制文件存放路径为：**$GAUSSHOME/bin**。
 
@@ -594,7 +672,7 @@ sh build.sh -m debug -3rd /sdc/binarylibs -pkg           # 生成debug版本的o
 
 ## 贡献
 
-欢迎大家来参与贡献。详情请参阅我们的[社区贡献](https://opengauss.org/zh/contribution.html)。
+欢迎大家来参与贡献。详情请参阅我们的[社区贡献](https://opengauss.org/zh/contribution/)。
 
 ## 发行说明
 

@@ -865,11 +865,21 @@ WHERE rowno = 2;
 
 --test in error
 SELECT salary, (@rowno := salary) AS rowno FROM employee ;
-ERROR:  bogus varno: 1
-CONTEXT:  referenced column: rowno
+ salary | rowno 
+--------+-------
+    100 |   100
+    200 |   200
+    300 |   300
+(3 rows)
+
 SELECT salary, (@rowno := salary + 1) AS rowno FROM employee ;
-ERROR:  bogus varno: 1
-CONTEXT:  referenced column: rowno
+ salary | rowno 
+--------+-------
+    100 |   101
+    200 |   201
+    300 |   301
+(3 rows)
+
 --test in order by 
 set @rowno = 0;
 SELECT salary, (@rowno := @rowno + 1) AS rowno FROM employee order by  @rowno;
@@ -1138,6 +1148,498 @@ select * from test_trigger_des_tbl;
  id1 | id2 | id3 
 -----+-----+-----
  100 |     |    
+(1 row)
+
+--@var retest 
+--select
+select @a1:=cast(1 as int2);
+ ?column? 
+----------
+        1
+(1 row)
+
+select @a2:=cast(2 as int4);
+ ?column? 
+----------
+        2
+(1 row)
+
+select @a3:=cast(3 as int8);
+ ?column? 
+----------
+        3
+(1 row)
+
+select @a4:=cast(4 as number);
+ ?column? 
+----------
+        4
+(1 row)
+
+select @a5:=cast(5.5 as numeric);
+ ?column? 
+----------
+      5.5
+(1 row)
+
+select @a6:=cast(6.76 as number(5));
+ ?column? 
+----------
+        7
+(1 row)
+
+select @a7:=cast(0.54 as number(3,3));
+ ?column? 
+----------
+     .540
+(1 row)
+
+select @a8:=cast(8.0 as number(4,1));
+ ?column? 
+----------
+      8.0
+(1 row)
+
+select @a9:=cast(9.66 as float4);
+ ?column? 
+----------
+     9.66
+(1 row)
+
+select @a10:=cast(10.33 as float8);
+ ?column? 
+----------
+    10.33
+(1 row)
+
+select @a11:=cast(11.2 as real);
+ ?column? 
+----------
+     11.2
+(1 row)
+
+select @a1,@a2,@a3,@a4,@a5,@a6,@a7,@a8,@a9,@a10,@a11;
+ @a1 | @a2 | @a3 | @a4 | @a5 | @a6 | @a7 | @a8 | @a9  | @a10  | @a11 
+-----+-----+-----+-----+-----+-----+-----+-----+------+-------+------
+   1 |   2 |   3 |   4 | 5.5 |   7 | .54 |   8 | 9.66 | 10.33 | 11.2
+(1 row)
+
+--select
+select @a1:=cast(1 as char);
+ ?column? 
+----------
+ 1
+(1 row)
+
+select @a2:=cast(2 as varchar);
+ ?column? 
+----------
+ 2
+(1 row)
+
+select @a3:=cast(3 as clob);
+ ?column? 
+----------
+ 3
+(1 row)
+
+select @a4:=cast(4 as text);
+ ?column? 
+----------
+ 4
+(1 row)
+
+select @a5:=cast(5.5 as name);
+ ?column? 
+----------
+ 5.5
+(1 row)
+
+select @a6:=cast(6.76 as nchar);
+ ?column? 
+----------
+ 6
+(1 row)
+
+select @a7:=cast(7.54 as char(4));
+ ?column? 
+----------
+ 7.54
+(1 row)
+
+select @a8:=cast(8.0 as nchar(4));
+ ?column? 
+----------
+ 8.0 
+(1 row)
+
+select @a9:=cast(9.66 as varchar(4));
+ ?column? 
+----------
+ 9.66
+(1 row)
+
+select @a10:=cast(10.33 as varchar2(4));
+ ?column? 
+----------
+ 10.3
+(1 row)
+
+select @a11:=cast(11.2 as nvarchar2(4));
+ ?column? 
+----------
+ 11.2
+(1 row)
+
+select @a1,@a2,@a3,@a4,@a5,@a6,@a7,@a8,@a9,@a10,@a11;
+ @a1 | @a2 | @a3 | @a4 | @a5 | @a6 | @a7  | @a8  | @a9  | @a10 | @a11 
+-----+-----+-----+-----+-----+-----+------+------+------+------+------
+ 1   | 2   | 3   | 4   | 5.5 | 6   | 7.54 | 8.0  | 9.66 | 10.3 | 11.2
+(1 row)
+
+--select
+select @a1:=cast('2012-12-12' as date);
+  ?column?  
+------------
+ 12-12-2012
+(1 row)
+
+select @a2:=cast('10:25:32' as time);
+ ?column? 
+----------
+ 10:25:32
+(1 row)
+
+select @a3:=cast('2023-01-22' as timestamp);
+         ?column?         
+--------------------------
+ Sun Jan 22 00:00:00 2023
+(1 row)
+
+select @a4:=cast('2003-04-12 04:05:06' as smalldatetime);
+         ?column?         
+--------------------------
+ Sat Apr 12 04:05:00 2003
+(1 row)
+
+select @a5:=cast(INTERVAL '3' year as interval year);
+ ?column?  
+-----------
+ @ 3 years
+(1 row)
+
+select @a6:=cast(INTERVAL '3' DAY as interval day to second);
+ ?column? 
+----------
+ @ 3 days
+(1 row)
+
+select @a7:=cast('90' as reltime);
+ ?column? 
+----------
+ @ 3 mons
+(1 row)
+
+select @a1,@a2,@a3,@a4,@a5,@a6,@a7;
+    @a1     |   @a2    |           @a3            |           @a4            |    @a5    |   @a6    |   @a7    
+------------+----------+--------------------------+--------------------------+-----------+----------+----------
+ 12-12-2012 | 10:25:32 | Sun Jan 22 00:00:00 2023 | Sat Apr 12 04:05:00 2003 | @ 3 years | @ 3 days | @ 3 mons
+(1 row)
+
+--select
+select @a1:='[1,2,3]';
+ ?column? 
+----------
+ [1,2,3]
+(1 row)
+
+select @a2:='[1,[2,4,6],3]';
+   ?column?    
+---------------
+ [1,[2,4,6],3]
+(1 row)
+
+select @a3:='[1,{"aa":"ss","bb":4},3]';
+         ?column?         
+--------------------------
+ [1,{"aa":"ss","bb":4},3]
+(1 row)
+
+select @a4:='{"aa":"ss","bb":4}';
+      ?column?      
+--------------------
+ {"aa":"ss","bb":4}
+(1 row)
+
+select @a5:='{"aa":"ss","bb":4,"cc":{"dd":9}}';
+             ?column?             
+----------------------------------
+ {"aa":"ss","bb":4,"cc":{"dd":9}}
+(1 row)
+
+select @a6:='{"aa":[2,3,4],"bb":4}';
+       ?column?        
+-----------------------
+ {"aa":[2,3,4],"bb":4}
+(1 row)
+
+select @a1,@a2,@a3,@a4,@a5,@a6;
+   @a1   |      @a2      |           @a3            |        @a4         |               @a5                |          @a6          
+---------+---------------+--------------------------+--------------------+----------------------------------+-----------------------
+ [1,2,3] | [1,[2,4,6],3] | [1,{"aa":"ss","bb":4},3] | {"aa":"ss","bb":4} | {"aa":"ss","bb":4,"cc":{"dd":9}} | {"aa":[2,3,4],"bb":4}
+(1 row)
+
+--外表
+create table tt_1130949(a1 text PRIMARY KEY);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tt_1130949_pkey" for table "tt_1130949"
+insert into tt_1130949 values('d'),('r'),('i'),('j');
+--建表
+create table tab_1130949(a1 int not null,a2 char(8) unique,a3 text primary key,a4 date default '2023-02-03',a5 varchar(16) check(a5 is not null),a6 text REFERENCES tt_1130949(a1));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tab_1130949_pkey" for table "tab_1130949"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "tab_1130949_a2_key" for table "tab_1130949"
+--index
+create index on tab_1130949(a1);
+create index on tab_1130949 using btree(a2);
+create index on tab_1130949 using gin(to_tsvector('ngram', a4));
+--insert
+insert into tab_1130949 values(1,'a','b','2012-12-14','c','d');
+insert into tab_1130949 values(2,'q','w','2013-12-14','e','r');
+insert into tab_1130949 values(3,'t','y','2014-12-14','u','i');
+insert into tab_1130949 values(4,'f','g','2015-12-14','h','j');
+--select 变量
+select @b1:=a1 from tab_1130949;
+ ?column? 
+----------
+        1
+        2
+        3
+        4
+(4 rows)
+
+select @b2:=a2 from tab_1130949;
+ ?column? 
+----------
+ a       
+ q       
+ t       
+ f       
+(4 rows)
+
+select @b3:=a3 from tab_1130949;
+ ?column? 
+----------
+ b
+ w
+ y
+ g
+(4 rows)
+
+select @b4:=a4 from tab_1130949;
+  ?column?  
+------------
+ 12-14-2012
+ 12-14-2013
+ 12-14-2014
+ 12-14-2015
+(4 rows)
+
+select @b5:=a5 from tab_1130949;
+ ?column? 
+----------
+ c
+ e
+ u
+ h
+(4 rows)
+
+select @b6:=a6 from tab_1130949;
+ ?column? 
+----------
+ d
+ r
+ i
+ j
+(4 rows)
+
+select @b1,@b2,@b3,@b4,@b5,@b6;
+ @b1 |   @b2    | @b3 |    @b4     | @b5 | @b6 
+-----+----------+-----+------------+-----+-----
+   4 | f        | g   | 12-14-2015 | h   | j
+(1 row)
+
+drop table if exists tt_1130949 cascade;
+NOTICE:  drop cascades to constraint tab_1130949_a6_fkey on table tab_1130949
+drop table if exists tab_1130956 cascade;
+NOTICE:  table "tab_1130956" does not exist, skipping
+--建表
+create table tab_1130965(a1 int,a2 int);
+--插入数据
+insert into tab_1130965 values(1,1),(2,3),(3,2),(4,1);
+--select
+--表字段与常量
+select (@bq1:=case when tab_1130965.a1<3 then tab_1130965.a1 +3 else tab_1130965.a1 end) from tab_1130965;
+ ?column? 
+----------
+        4
+        5
+        3
+        4
+(4 rows)
+
+--表字段与表字段
+select (@bq2:=case when tab_1130965.a1<tab_1130965.a2 then tab_1130965.a1 else tab_1130965.a2 end) from tab_1130965;
+ ?column? 
+----------
+        1
+        2
+        2
+        1
+(4 rows)
+
+--表字段与变量
+set @asd1:=5;
+select (@bq3:=case when tab_1130965.a1< @asd1 then tab_1130965.a1 else @asd1 end) from tab_1130965;
+ ?column? 
+----------
+        1
+        2
+        3
+        4
+(4 rows)
+
+--变量与变量
+set @asd2:=3;
+select (@bq4:=case when @asd1> @asd2 then @asd2 else @asd1 end);
+ ?column? 
+----------
+        3
+(1 row)
+
+--变量与常量
+set @asd2:=2;
+select (@bq5:=case when @asd1>3 then @asd2 else @asd1 end);
+ ?column? 
+----------
+        2
+(1 row)
+
+select @bq1,@bq2,@bq3,@bq4,@bq5;
+ @bq1 | @bq2 | @bq3 | @bq4 | @bq5 
+------+------+------+------+------
+    4 |    1 |    4 |    3 |    2
+(1 row)
+
+--创建函数
+create or replace function fun_1131007(b1 in int,b2 in int,b3 out int)return int
+as
+begin
+select @bb:=b1>b2 into b3;
+raise notice '%',b3;
+return @bb;
+end;
+/
+select fun_1131007(1,2);
+NOTICE:  0
+CONTEXT:  referenced column: fun_1131007
+ fun_1131007 
+-------------
+           0
+(1 row)
+
+--建表
+create table tab_1131021(id int,aa char(8));
+insert into tab_1131021 values(1,'name');
+--select
+set @a_1131021:=1;
+select @a_1131021:=@a_1131021+id from tab_1131021;
+ ?column? 
+----------
+        2
+(1 row)
+
+select @a_1131021:=@a_1131021+aa from tab_1131021;--报错
+ ?column? 
+----------
+        2
+(1 row)
+
+drop table if exists tab_1131021 cascade;
+--建表
+create table tab_1131027(id int,aa char(8));
+insert into tab_1131027 values(1,'name'),(2,'ss'),(3,'dd');
+--select
+select @a_1131027:=min(id) from tab_1131027;
+ ?column? 
+----------
+        1
+(1 row)
+
+select @a_1131027:=max(id) from tab_1131027;
+ ?column? 
+----------
+        3
+(1 row)
+
+select @a_1131027:=sum(id) from tab_1131027;
+ ?column? 
+----------
+        6
+(1 row)
+
+select @a_1131027:=avg(id) from tab_1131027;
+      ?column?      
+--------------------
+ 2.0000000000000000
+(1 row)
+
+select @a_1131027:=count(id) from tab_1131027;
+ ?column? 
+----------
+        3
+(1 row)
+
+drop table if exists tab_1131027 cascade;
+--select
+select @a_1131028:=cast('x' as char(4));
+ ?column? 
+----------
+ x   
+(1 row)
+
+select @a_1131028:=cast('x' as varchar(4));
+ ?column? 
+----------
+ x
+(1 row)
+
+select @a_1131028:=cast('x' as nchar(4));
+ ?column? 
+----------
+ x   
+(1 row)
+
+select @a_1131028:=cast('x' as varchar2(4));
+ ?column? 
+----------
+ x
+(1 row)
+
+select @a_1131028:=cast('x' as text);
+ ?column? 
+----------
+ x
+(1 row)
+
+select @a_1131028:=cast(2 as int);
+ ?column? 
+----------
+        2
+(1 row)
+
+select @a_1131028:=cast(2 as number);
+ ?column? 
+----------
+        2
 (1 row)
 
 set enable_set_variable_b_format = 0;

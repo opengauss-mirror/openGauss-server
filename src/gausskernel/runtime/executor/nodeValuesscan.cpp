@@ -106,7 +106,11 @@ static TupleTableSlot* ValuesNext(ValuesScanState* node)
          * VALUES list should be InitPlans).
          */
         if (expr_state_list == NIL) {
-            expr_state_list = ExecInitExprList(exprlist, NULL);
+            if (estate->es_is_flt_frame) {
+                expr_state_list = ExecInitExprListByFlatten(exprlist, NULL);
+            } else {
+                expr_state_list = ExecInitExprListByRecursion(exprlist, NULL);
+            }
         }
 
         /* parser should have checked all sublists are the same length */

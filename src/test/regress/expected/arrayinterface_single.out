@@ -685,7 +685,7 @@ begin
 end;
 /
 ERROR:  schema "colors" does not exist
-CONTEXT:  compilation of PL/pgSQL function "array_interface_p8" near line 7
+CONTEXT:  compilation of PL/pgSQL function "array_interface_p8" near line 6
 --call array_interface_p8();
 -- test array exists interface A.B input parameter
 create or replace procedure array_interface_p9()

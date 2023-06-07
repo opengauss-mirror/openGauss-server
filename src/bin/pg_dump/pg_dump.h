@@ -374,6 +374,7 @@ typedef struct _triggerInfo {
     bool tginitdeferred;
     char* tgdef;
     bool tgdb;
+    bool tgbodybstyle;
 } TriggerInfo;
 typedef struct _eventInfo {
     DumpableObject dobj;

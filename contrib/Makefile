@@ -55,7 +55,8 @@ SUBDIRS = \
 		tsearch2	\
 		unaccent	\
 		vacuumlo	\
-		security_plugin
+		security_plugin	\
+		ndpplugin
 
 ifeq ($(with_openssl),yes)
 SUBDIRS += sslinfo

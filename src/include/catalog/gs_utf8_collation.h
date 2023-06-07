@@ -31,4 +31,9 @@ Oid binary_need_transform_typeid(Oid typeoid, Oid* collation);
 int matchtext_utf8mb4(unsigned char* t, int tlen, unsigned char* p, int plen);
 bool is_b_format_collation(Oid collation);
 
+#define IS_UTF8_GENERAL_COLLATION(colloid) \
+    ((colloid == UTF8MB4_GENERAL_CI_COLLATION_OID) || \
+     (colloid == UTF8MB4_UNICODE_CI_COLLATION_OID) || \
+     (colloid == UTF8_GENERAL_CI_COLLATION_OID) || \
+     (colloid == UTF8_UNICODE_CI_COLLATION_OID))
 #endif   /* GS_UTF8_COLLATION_H */

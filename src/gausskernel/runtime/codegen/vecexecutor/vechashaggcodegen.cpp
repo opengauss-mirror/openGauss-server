@@ -366,7 +366,7 @@ bool VecHashAggCodeGen::BatchAggJittable(VecAggState* node, bool isSonic)
 {
     int i = 0;
     VecAgg* vecagg = (VecAgg*)(node->ss.ps.plan);
-    AggStatePerAgg peragg = node->peragg;
+    VecAggStatePerAgg peragg = node->pervecagg;
 
     if (!u_sess->attr.attr_sql.enable_codegen || IS_PGXC_COORDINATOR)
         return false;
@@ -1275,7 +1275,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
 {
     /* First get the basic information of VecAggState */
     int numaggs = node->numaggs;
-    AggStatePerAgg peragg = node->peragg;
+    VecAggStatePerAgg peragg = node->pervecagg;
 
     Assert(NULL != (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj);
     GsCodeGen* llvmCodeGen = (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj;
@@ -1391,7 +1391,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
     llvm::Value** econtext = (llvm::Value**)palloc(sizeof(llvm::Value*) * numaggs);
     for (i = 0; i < numaggs; i++) {
         econtext[i] = NULL;
-        AggStatePerAgg peraggstate = &node->peragg[numaggs - i - 1];
+        VecAggStatePerAgg peraggstate = &node->pervecagg[numaggs - i - 1];
         aggref = (Aggref*)(peraggstate->aggref);
         if (peraggstate->evalproj != NULL && aggref->aggfnoid != COUNTOID) {
             ExprContext* exprcontext = peragg[numaggs - 1 - i].evalproj->pi_exprContext;
@@ -1448,7 +1448,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
      */
     for (i = 0; i < numaggs; i++) {
         int numSimpleVars = 0;
-        AggStatePerAgg peraggstate = &node->peragg[numaggs - i - 1];
+        VecAggStatePerAgg peraggstate = &node->pervecagg[numaggs - i - 1];
         aggref = (Aggref*)(peraggstate->aggref);
         ProjectionInfo* projInfo = (ProjectionInfo*)(peraggstate->evalproj);
 
@@ -1512,7 +1512,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
         llvm::BasicBlock* numsum_bb = NULL;
 
         /* the inverse order */
-        AggStatePerAgg peraggstate = &node->peragg[numaggs - i - 1];
+        VecAggStatePerAgg peraggstate = &node->pervecagg[numaggs - i - 1];
         aggref = (Aggref*)(peraggstate->aggref);
         ProjectionInfo* projInfo = (ProjectionInfo*)(peraggstate->evalproj);
 
@@ -3512,7 +3512,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
      */
     for (i = 0; i < numaggs; i++) {
         int numSimpleVars = 0;
-        AggStatePerAgg peraggstate = &node->peragg[numaggs - i - 1];
+        VecAggStatePerAgg peraggstate = &node->pervecagg[numaggs - i - 1];
         aggref = (Aggref*)(peraggstate->aggref);
         ProjectionInfo* projInfo = (ProjectionInfo*)(peraggstate->evalproj);
 
@@ -3565,7 +3565,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
         llvm::BasicBlock* numsum_bb = NULL;
 
         /* the inverse order */
-        AggStatePerAgg peraggstate = &node->peragg[numaggs - i - 1];
+        VecAggStatePerAgg peraggstate = &node->pervecagg[numaggs - i - 1];
         aggref = (Aggref*)(peraggstate->aggref);
         ProjectionInfo* projInfo = (ProjectionInfo*)(peraggstate->evalproj);
 

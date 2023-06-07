@@ -22,6 +22,7 @@
 #include "pg_build.h"
 #include "streamutil.h"
 #include "logging.h"
+#include "tool_common.h"
 
 #include "bin/elog.h"
 #include "nodes/pg_list.h"
@@ -32,6 +33,7 @@
 #include "common/fe_memutils.h"
 #include "libpq/libpq-fe.h"
 #include "libpq/libpq-int.h"
+#include "storage/file/fio_device.h"
 
 /* global variables for con */
 char conninfo_global[MAX_REPLNODE_NUM][MAX_VALUE_LEN] = {{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}};
@@ -70,6 +72,7 @@ char g_repl_uuid[MAX_VALUE_LEN] = {0};
 int g_replconn_idx = -1;
 int g_replication_type = -1;
 bool is_cross_region_build = false;
+SSInstanceConfig instance_config;
 #define RT_WITH_DUMMY_STANDBY 0
 #define RT_WITH_MULTI_STANDBY 1
 
@@ -1210,6 +1213,74 @@ static bool GetDCFKeyValue(const char *filename, const char *key, char *value)
     return true;
 }
 
+int IsBeginWith(const char *str1, char *str2)
+{
+    if (str1 == NULL || str2 == NULL) {
+        return -1;
+    }
+    int len1 = strlen(str1);
+    int len2 = strlen(str2);
+    if ((len1 < len2) || (len1 == 0 || len2 == 0)) {
+        return -1;
+    }
+
+    char *p = str2;
+    int i = 0;
+    while (*p != '\0') {
+        if (*p != str1[i]) {
+            return 0;
+        }
+        p++;
+        i++;
+    }
+    return 1;
+}
+
+bool SsIsSkipPath(const char* dirname, bool needskipall)
+{   
+    if (!instance_config.dss.enable_dss) {
+        return false;    
+    }
+
+    if (strcmp(dirname, ".recycle") == 0) {
+        return true;    
+    }
+
+    /* skip doublewrite of all instances*/
+    if (IsBeginWith(dirname, "pg_doublewrite") > 0) {
+        return true;
+    }
+
+    /* skip pg_control file when dss enable, only copy pg_control of main standby,
+     * we need to retain pg_control of other nodes, so pg_contol not be deleted directly.
+     */
+    if (strcmp(dirname, "pg_control") == 0) {
+        return true;
+    }
+
+    /* skip directory which not belong to primary in dss */
+    if (needskipall) {
+        /* skip pg_xlog and doublewrite of all instances*/
+        if (IsBeginWith(dirname, "pg_xlog") > 0) {
+            return true;
+        }
+    } else {
+        /* skip other node pg_xlog except primary */
+        if (IsBeginWith(dirname, "pg_xlog") > 0) { 
+            int dirNameLen = strlen("pg_xlog");
+            char instanceId[MAX_INSTANCEID_LEN] = {0};
+            errno_t rc = EOK;
+            rc = snprintf_s(instanceId, sizeof(instanceId), sizeof(instanceId) - 1, "%d",
+                                instance_config.dss.instance_id);
+            securec_check_ss_c(rc, "\0", "\0");
+            /* not skip pg_xlog directory in file systerm */
+            if (strlen(dirname) > dirNameLen && strcmp(dirname + dirNameLen, instanceId) != 0) 
+                return true;
+        }
+    }
+    return false;
+}
+
 static void DeleteSubDataDir(const char* dirname)
 {
     DIR* dir = NULL;
@@ -1257,6 +1328,9 @@ static void DeleteSubDataDir(const char* dirname)
                 continue;
             if (g_is_obsmode && (strcmp(de->d_name, "pg_replslot") == 0))
                 continue;
+            if (is_dss_file(dirname) && SsIsSkipPath(de->d_name, true))
+                continue;
+            
             rc = memset_s(fullpath, MAXPGPATH, 0, MAXPGPATH);
             securec_check_c(rc, "", "");
             /* others */
@@ -1376,6 +1450,7 @@ static void DeleteSubDataDir(const char* dirname)
                     (IS_CROSS_CLUSTER_BUILD && strcmp(de->d_name, "pg_hba.conf") == 0) ||
                     strcmp(de->d_name, "pg_hba.conf.old") == 0)
                     continue;
+                
                 /* Skip paxos index files for building process will write them */
                 if (enableDCF && ((strcmp(de->d_name, "paxosindex") == 0) ||
                     (strcmp(de->d_name, "paxosindex.backup") == 0)))
@@ -1417,6 +1492,7 @@ void delete_datadir(const char* dirname)
         pg_log(PG_WARNING, _("input parameter is NULL.\n"));
         exit(1);
     }
+    
     nRet = snprintf_s(fullpath, MAXPGPATH, sizeof(fullpath) - 1, "%s/pg_tblspc", dirname);
     securec_check_ss_c(nRet, "", "");
 
@@ -1500,7 +1576,12 @@ void delete_datadir(const char* dirname)
      * this is to keep the basedir/pg_xlog, and delete all files and
      * directories under it.
      */
-    nRet = snprintf_s(xlogpath, MAXPGPATH, sizeof(xlogpath) - 1, "%s/pg_xlog", dirname);
+    if (strncmp(dirname, "+", 1) == 0 ) {
+        nRet = snprintf_s(xlogpath, MAXPGPATH, sizeof(xlogpath) - 1, "%s/pg_xlog%d", dirname,
+        instance_config.dss.instance_id);
+    } else {
+        nRet = snprintf_s(xlogpath, MAXPGPATH, sizeof(xlogpath) - 1, "%s/pg_xlog", dirname);
+    }
     securec_check_ss_c(nRet, "", "");
 
     if (lstat(xlogpath, &stbuf) == 0) {
@@ -1708,7 +1789,12 @@ void fsync_pgdata(const char *pg_data)
     char pg_tblspc[MAXPGPATH] = {0};
     errno_t errorno = EOK;
 
-    errorno = snprintf_s(pg_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", pg_data);
+    if (is_dss_file(pg_data)) {
+        errorno = snprintf_s(pg_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", pg_data,
+                             instance_config.dss.instance_id);
+    } else {
+        errorno = snprintf_s(pg_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", pg_data);
+    }
     securec_check_ss_c(errorno, "\0", "\0");
     errorno = snprintf_s(pg_tblspc, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc", pg_data);
     securec_check_ss_c(errorno, "\0", "\0");

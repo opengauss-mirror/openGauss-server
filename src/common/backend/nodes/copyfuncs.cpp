@@ -192,6 +192,41 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
 }
 
 /*
+ * CopyNdpPlan
+ */
+static void CopyNdpPlan(const Plan* from, Plan* newnode)
+{
+    COPY_SCALAR_FIELD(ndp_pushdown_optimized);
+    COPY_NODE_FIELD(ndp_pushdown_condition);
+    NdpScanCondition* newcond = (NdpScanCondition*)newnode->ndp_pushdown_condition;
+    NdpScanCondition* fromcond = (NdpScanCondition*)from->ndp_pushdown_condition;
+    if (IsA(newnode, SeqScan)) {
+        if (newcond != nullptr) {
+            newcond->plan = newnode;
+        }
+        return;
+    }
+    if (!IsA(from, Agg) || !IsA(newnode, Agg)) {
+        return;
+    }
+    if ((from->lefttree == nullptr || from->righttree != nullptr) ||
+        (newnode->lefttree == nullptr || newnode->righttree !=nullptr)) {
+        return;
+    }
+    if (!IsA(from->lefttree, SeqScan) || !IsA(newnode->lefttree, SeqScan)) {
+        return;
+    }
+    newcond = (NdpScanCondition *)newnode->lefttree->ndp_pushdown_condition;
+    fromcond = (NdpScanCondition *)from->lefttree->ndp_pushdown_condition;
+    if (fromcond == nullptr || newcond == nullptr) {
+        return;
+    }
+    if (fromcond->plan == from) {
+        newcond->plan = newnode;
+    }
+}
+
+/*
  * CopyPlanFields
  *
  *		This function copies the fields of the Plan node.  It is used by
@@ -241,6 +276,7 @@ static void CopyPlanFields(const Plan* from, Plan* newnode)
     COPY_SCALAR_FIELD(pred_startup_time);
     COPY_SCALAR_FIELD(pred_total_time);
     COPY_SCALAR_FIELD(pred_max_memory);
+    CopyNdpPlan(from, newnode);
 
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 }
@@ -257,6 +293,18 @@ static Plan* _copyPlan(const Plan* from)
      */
     CopyPlanFields(from, newnode);
 
+    return newnode;
+}
+
+/*
+ * _copyNdp
+ */
+static NdpScanCondition* _copyNdp(const NdpScanCondition* from)
+{
+    NdpScanCondition* newnode = makeNode(NdpScanCondition);
+    COPY_SCALAR_FIELD(tableId);
+    COPY_SCALAR_FIELD(ctx);
+    newnode->plan = nullptr;
     return newnode;
 }
 
@@ -1341,6 +1389,37 @@ static Sort* _copySort(const Sort* from)
 #endif
 
     CopyMemInfoFields(&from->mem_info, &newnode->mem_info);
+
+    return newnode;
+}
+
+/*
+ * CopySortGroupFields
+ *
+ *		This function copies the fields of the SortGroup node.
+ */
+static void CopySortGroupFields(const SortGroup *from, SortGroup *newnode)
+{
+    CopyPlanFields((const Plan *)from, (Plan *)newnode);
+
+    COPY_SCALAR_FIELD(numCols);
+    COPY_POINTER_FIELD(sortColIdx, from->numCols * sizeof(AttrNumber));
+    COPY_POINTER_FIELD(sortOperators, from->numCols * sizeof(Oid));
+    COPY_POINTER_FIELD(collations, from->numCols * sizeof(Oid));
+    COPY_POINTER_FIELD(nullsFirst, from->numCols * sizeof(bool));
+}
+
+/*
+ * _copySortGroup
+ */
+static SortGroup *_copySortGroup(const SortGroup *from)
+{
+    SortGroup *newnode = makeNode(SortGroup);
+
+    /*
+     * copy node superclass fields
+     */
+    CopySortGroupFields(from, newnode);
 
     return newnode;
 }
@@ -4552,6 +4631,15 @@ static IndexHintDefinition* _copyIndexHintDefinition(const IndexHintDefinition* 
     return newnode;
 }
 
+static FunctionSources* _copyFunctionSources(const FunctionSources* from)
+{
+    FunctionSources* newnode = makeNode(FunctionSources);
+    COPY_STRING_FIELD(headerSrc);
+    COPY_STRING_FIELD(bodySrc);
+
+    return newnode;
+}
+
 static SkewRelInfo* _copySkewRelInfo(const SkewRelInfo* from)
 {
     SkewRelInfo* newnode = makeNode(SkewRelInfo);
@@ -5532,6 +5620,7 @@ static TransactionStmt* _copyTransactionStmt(const TransactionStmt* from)
     COPY_NODE_FIELD(options);
     COPY_STRING_FIELD(gid);
     COPY_SCALAR_FIELD(csn);
+    COPY_SCALAR_FIELD(with_snapshot);
 
     return newnode;
 }
@@ -6259,7 +6348,8 @@ static CreateTrigStmt* _copyCreateTrigStmt(const CreateTrigStmt* from)
     COPY_SCALAR_FIELD(if_not_exists);
     COPY_STRING_FIELD(trgordername);
     COPY_SCALAR_FIELD(is_follows);
-
+    COPY_STRING_FIELD(schemaname);
+    
     return newnode;
 }
 
@@ -7387,6 +7477,9 @@ void* copyObject(const void* from)
         case T_Plan:
             retval = _copyPlan((Plan*)from);
             break;
+        case T_NdpScanCondition:
+            retval = _copyNdp((NdpScanCondition*)from);
+            break;
         case T_BaseResult:
             retval = _copyResult((BaseResult*)from);
             break;
@@ -7510,6 +7603,9 @@ void* copyObject(const void* from)
         case T_Sort:
             retval = _copySort((Sort*)from);
             break;
+        case T_SortGroup:
+            retval = _copySortGroup((SortGroup*)from);
+            break;        
         case T_Group:
             retval = _copyGroup((Group*)from);
             break;
@@ -8684,6 +8780,9 @@ void* copyObject(const void* from)
             break;
         case T_IndexHintDefinition:
             retval = _copyIndexHintDefinition((IndexHintDefinition *)from);
+            break;
+        case T_FunctionSources:
+            retval = _copyFunctionSources((FunctionSources *)from);
             break;
         default:
             ereport(ERROR,

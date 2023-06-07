@@ -1842,4 +1842,7 @@ extern Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS);
 extern char *pg_ultostr(char *str, uint32 value);
 extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
 
+/* float.cpp */
+extern int float8_cmp_internal(float8 a, float8 b);
+
 #endif /* BUILTINS_H */

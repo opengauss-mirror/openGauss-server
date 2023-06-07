@@ -228,6 +228,25 @@ typedef enum ExprEvalOp
 	EEOP_PREFIX_BTYEA,
 	EEOP_PREFIX_TEXT,
 
+    /* aggregation related nodes */
+    EEOP_AGG_STRICT_DESERIALIZE,
+    EEOP_AGG_DESERIALIZE,
+    EEOP_AGG_STRICT_INPUT_CHECK,
+    EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYVAL,
+    EEOP_AGG_PLAIN_TRANS_STRICT_BYVAL,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYVAL,
+    EEOP_AGG_PLAIN_TRANS_BYVAL,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_BYVAL,
+    EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYREF,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_INIT_STRICT_BYREF,
+    EEOP_AGG_PLAIN_TRANS_STRICT_BYREF,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_STRICT_BYREF,
+    EEOP_AGG_PLAIN_TRANS_BYREF,
+    EEOP_AGG_COLLECT_PLAIN_TRANS_BYREF,
+    EEOP_AGG_ORDERED_TRANS_DATUM,
+    EEOP_AGG_ORDERED_TRANS_TUPLE,
+
 	/* non-existent operation, used e.g. to check array lengths */
 	EEOP_LAST
 } ExprEvalOp;
@@ -615,7 +634,29 @@ typedef struct ExprEvalStep
 			List* typeOids; /* type oid list of var for filter */
 		}			 hash_filter;
 
-	}			d;
+        /* for EEOP_AGG_*DESERIALIZE */
+        struct {
+            AggState *aggstate;
+            FunctionCallInfo fcinfo_data;
+            int jumpnull;
+        } agg_deserialize;
+
+        /* for EEOP_AGG_STRICT_INPUT_CHECK */
+        struct {
+            bool *nulls;
+            int nargs;
+            int jumpnull;
+        } agg_strict_input_check;
+
+        /* for EEOP_AGG_INIT_TRANS */
+        struct {
+            AggStatePerTrans pertrans;
+            MemoryContext aggcontext;
+            int setno;
+            int transno;
+            int setoff;
+        } agg_trans;
+    }			d;
 } ExprEvalStep;
 
 
@@ -706,5 +747,12 @@ extern void ExecEvalHashFilter(ExprState *state, ExprEvalStep *op,
 						   ExprContext *econtext);
 extern void ExecEvalWholeRowVar(ExprState *state, ExprEvalStep *op,
 					ExprContext *econtext);
-
+extern Datum ExecAggTransReparent(AggState *aggstate, AggStatePerTrans pertrans, Datum newValue, bool newValueIsNull,
+                                  Datum oldValue, bool oldValueIsNull);
+extern void ExecAggInitGroup(AggState *aggstate, AggStatePerTrans pertrans, AggStatePerGroup pergroup,
+                             MemoryContext aggcontext);
+extern void ExecAggInitCollectGroup(AggState *aggstate, AggStatePerTrans pertrans, AggStatePerGroup pergroup,
+                                    MemoryContext aggcontext);
+extern void ExecEvalAggOrderedTransDatum(ExprState *state, ExprEvalStep *op, ExprContext *econtext);
+extern void ExecEvalAggOrderedTransTuple(ExprState *state, ExprEvalStep *op, ExprContext *econtext);
 #endif							/* EXEC_EXPR_H */

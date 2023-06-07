@@ -94,6 +94,7 @@ install:
 	$(MAKE) -C contrib/postgres_fdw $@
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C contrib/dblink $@
+	$(MAKE) -C contrib/ndpplugin $@
 	@if test -d contrib/dolphin; then $(MAKE) -C contrib/dolphin $@; fi
 	+@echo "openGauss installation complete."
 endif

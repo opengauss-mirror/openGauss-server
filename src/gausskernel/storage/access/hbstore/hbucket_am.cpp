@@ -809,6 +809,7 @@ RedisMergeItem *search_redis_merge_item(const RedisMergeItemOrderArray *merge_it
  *     Reconstruct these functions into the hook API in the future.
  * ------------------------------------------------------------------------
  */
+TableAmNdpRoutine_hook_type ndp_tableam = NULL;
 
 /* Create HBktTblScanDesc with scan state. For hash-bucket table, it scans the
  * specified buckets in ScanState */
@@ -819,6 +820,10 @@ TableScanDesc scan_handler_tbl_beginscan(Relation relation, Snapshot snapshot,
         return (TableScanDesc)hbkt_tbl_beginscan(relation, snapshot, nkeys, key, sstate, isRangeScanInRedis);
     }
     RangeScanInRedis rangeScanInRedis = reset_scan_qual(relation, sstate, isRangeScanInRedis);
+
+    if (sstate != NULL && sstate->ps.plan->ndp_pushdown_optimized) {
+        return ndp_tableam->scan_begin(relation, snapshot, nkeys, key, sstate, rangeScanInRedis);
+    }
     return tableam_scan_begin(relation, snapshot, nkeys, key, rangeScanInRedis);
 }
 
@@ -863,6 +868,8 @@ void scan_handler_tbl_init_parallel_seqscan(TableScanDesc scan, int32 dop, ScanD
 {
     if (unlikely(RELATION_OWN_BUCKET(scan->rs_rd))) {
         tableam_scan_init_parallel_seqscan(((HBktTblScanDesc)scan)->currBktScan, dop, dir);
+    } else if (scan->ndp_pushdown_optimized) {
+        ndp_tableam->scan_init_parallel_seqscan(scan, dop, dir);
     } else {
         tableam_scan_init_parallel_seqscan(scan, dop, dir);
     }
@@ -921,6 +928,8 @@ void scan_handler_tbl_endscan(TableScanDesc scan)
         }
         pfree_ext(hp_scan->hBktList);
         pfree(hp_scan);
+    } else if (scan->ndp_pushdown_optimized) {
+        ndp_tableam->scan_end(scan);
     } else {
         tableam_scan_end(scan);
     }
@@ -930,6 +939,8 @@ void scan_handler_tbl_rescan(TableScanDesc scan, struct ScanKeyData* key, Relati
 {
     if (unlikely(RELATION_OWN_BUCKET(scan->rs_rd))) {
         hbkt_tbl_rescan(scan, key, is_bitmap_rescan);
+    } else if (scan->ndp_pushdown_optimized) {
+        ndp_tableam->scan_rescan(scan, key);
     } else {
         tableam_scan_rescan(scan, key);
     }

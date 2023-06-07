@@ -337,9 +337,9 @@ void HeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool i
     uint32 newlen;
     HeapTupleHeader htup;
     xl_heap_header xlhdr;
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf;
 
     if (isinit) {
@@ -416,9 +416,9 @@ void HeapXlogMultiInsertOperatorPage(RedoBufferInfo *buffer, const void *recored
     BlockNumber blkno = buffer->blockinfo.blkno;
     TransactionId pd_xid_base = InvalidTransactionId;
 
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf;
 
     errno_t rc = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
@@ -597,9 +597,9 @@ void HeapXlogUpdateOperatorNewpage(RedoBufferInfo *buffer, void *recorddata, boo
     OffsetNumber maxoff;
     xl_heap_header xlhdr;
     TransactionId pd_xid_base = InvalidTransactionId;
-    struct {
+    union {
         HeapTupleHeaderData hdr;
-        char data[MaxHeapTupleSize];
+        char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
     } tbuf;
     HeapTupleHeader htup;
     uint32 newlen;

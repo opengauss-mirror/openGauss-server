@@ -99,9 +99,20 @@ DESCR("utf8mb4_unicode_ci collation");
 DATA(insert OID = 1539 (utf8mb4_bin			PGNSP PGUID 7 "utf8mb4_bin" "utf8mb4_bin" "PAD SPACE" _null_));
 DESCR("utf8mb4_bin collation");
 #define UTF8MB4_BIN_COLLATION_OID				1539
-/* GB10830's start with 1536 */
+
+DATA(insert OID = 1551 (utf8_general_ci	PGNSP PGUID 7 "utf8_general_ci" "utf8_general_ci" "PAD SPACE" _null_));
+DESCR("utf8_general_ci collation");
+#define UTF8_GENERAL_CI_COLLATION_OID		1551
+DATA(insert OID = 1552 (utf8_unicode_ci	PGNSP PGUID 7 "utf8_unicode_ci" "utf8_unicode_ci" "PAD SPACE" _null_));
+DESCR("utf8_unicode_ci collation");
+#define UTF8_UNICODE_CI_COLLATION_OID		1552
+DATA(insert OID = 1553 (utf8_bin	PGNSP PGUID 7 "utf8_bin" "utf8_bin" "PAD SPACE" _null_));
+DESCR("utf8_bin collation");
+#define UTF8_BIN_COLLATION_OID		1553
+/* GB10830's start with 1792 */
 
 #define B_FORMAT_COLLATION_OID_MAX 10000
+#define B_FORMAT_COLLATION_STR_LEN 4
 
 #define COLLATION_IN_B_FORMAT(colloid) \
 	((colloid) > B_FORMAT_COLLATION_OID_MIN && (colloid) < B_FORMAT_COLLATION_OID_MAX)

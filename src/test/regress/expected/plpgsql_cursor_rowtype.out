@@ -188,7 +188,7 @@ end pck3;
 call pck3.ppp1();
 INFO:  a
 CONTEXT:  SQL statement "CALL ppp2(var1)"
-PL/pgSQL function ppp1() line 7 at PERFORM
+PL/pgSQL function ppp1() line 6 at PERFORM
 INFO:  a
  ppp1 
 ------
@@ -597,7 +597,7 @@ end;
 /
 call pro_cs_trans_1();
 --?.*
-CONTEXT:  PL/pgSQL function pro_cs_trans_1() line 11 at CLOSE
+CONTEXT:  PL/pgSQL function pro_cs_trans_1() line 10 at CLOSE
 create or replace procedure pro_cs_trans_1() as  
 cursor c1 is select * from cs_trans_1 order by 1; 
 rec_1 cs_trans_1%rowtype;
@@ -613,7 +613,7 @@ end;
 /
 call pro_cs_trans_1();
 --?.*
-CONTEXT:  PL/pgSQL function pro_cs_trans_1() line 11 at CLOSE
+CONTEXT:  PL/pgSQL function pro_cs_trans_1() line 10 at CLOSE
 create or replace procedure pro_cs_trans_1() as  
 cursor c1 is select * from cs_trans_1 order by 1; 
 rec_1 cs_trans_1%rowtype;

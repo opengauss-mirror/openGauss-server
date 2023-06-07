@@ -445,6 +445,8 @@ typedef struct knl_u_parser_context {
     bool isForbidTruncate;
     bool isPerform;
     void* stmt;
+
+    bool has_hintwarning;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {
@@ -1488,6 +1490,7 @@ typedef struct PLpgSQL_compile_context {
     struct PLpgSQL_stmt_block* plpgsql_parse_error_result;
     struct PLpgSQL_datum** plpgsql_Datums;
     struct PLpgSQL_function* plpgsql_curr_compile;
+    struct PLpgSQL_condition* plpgsql_conditions;
 
     bool* datum_need_free; /* need free datum when free function/package memory? */
     bool plpgsql_DumpExecTree;
@@ -1660,7 +1663,6 @@ typedef struct knl_u_plpgsql_context {
     bool pragma_autonomous; /* save autonomous flag */
     char* debug_query_string;
     bool is_insert_gs_source; /* is doing insert gs_source? */
-    bool b_warning_handler;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
@@ -2411,6 +2413,10 @@ typedef struct knl_u_dolphin_errdata_context {
     int max_error_count;
 } knl_u_dolphin_errdata_context;
 
+typedef struct knl_u_opfusion_reuse_context {
+    void *opfusionObj;                /* Opfusion cache Object */
+} knl_u_opfusion_reuse_context;
+
 typedef struct knl_u_catalog_context {
     bool nulls[4];
     struct PartitionIdentifier* route;
@@ -2737,7 +2743,20 @@ typedef struct knl_u_hook_context {
     void *pluginSearchCatHook;
     void *pluginCCHashEqFuncs;
     void *plpgsqlParserSetHook;
+    void *coreYYlexHook;
 } knl_u_hook_context;
+
+typedef struct knl_u_libsw_context {
+    /* Current connection to the primary, if any */
+    struct pg_conn* streamConn;
+    /* trace port log file */
+    FILE* conn_trace_file;
+    /* which command in last sql */
+    const char* commandTag;
+    /* the redirect manager */
+    void* redirect_manager;
+} knl_u_libsw_context;
+
 /* PBE message flag */
 typedef enum {
     NO_QUERY,
@@ -2747,6 +2766,29 @@ typedef enum {
     EXECUTE_MESSAGE_QUERY,
     EXECUTE_BATCH_MESSAGE_QUERY
 } PBEMessage;
+
+/* record statement of ndp plugin */
+typedef struct NdpStats {
+    unsigned long queryCounter;
+    unsigned long sendFailed;
+    unsigned long failedIO;
+    unsigned long pushDownPage;
+    unsigned long sendBackPage;
+    unsigned long ndpPageAgg;
+    unsigned long ndpPageScan;
+} NdpStats;
+
+typedef struct knl_u_ndp_context {
+    NdpStats *stats;
+    MemoryContext mem_cxt;
+    void *cxt;
+    bool enable_ndp;
+    int pushdown_min_blocks;
+    int ndp_port;
+    char *ca_path;
+    char *crl_path;
+} knl_u_ndp_context;
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
     /* used for threadworker, elem in m_readySessionList */
@@ -2869,12 +2911,16 @@ typedef struct knl_session_context {
     knl_u_rep_origin_context reporigin_cxt;
     knl_u_dolphin_errdata_context dolphin_errdata_ctx;
 
+    knl_u_opfusion_reuse_context opfusion_reuse_ctx;
+
     /*
      * Initialize context which records time for client connection establish.
      * This time records start on incommining resuest arrives e.g. poll() invoked to accept() and
      * end on returning message by server side clientfd.
      */
     struct knl_u_clientConnTime_context clientConnTime_cxt;
+
+    knl_u_ndp_context ndp_cxt;
 
     knl_u_hook_context hook_cxt;
 
@@ -2884,6 +2930,9 @@ typedef struct knl_session_context {
     struct pg_tm cache_tm;
     fsec_t cache_fsec;
     int cache_tz;
+
+    /* standby write. */
+    knl_u_libsw_context libsw_cxt;
 } knl_session_context;
 
 enum stp_xact_err_type {

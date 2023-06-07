@@ -49,6 +49,8 @@ replace into replace_test values(3,'ccccc','ccccc'),(4,'ddddd','ddddd'),(5,'eeee
 select * from replace_test;
 replace into replace_test values(1,'aaaaa','ddddd');
 select * from replace_test;
+replace into replace_test values(3,'ccccc','ccccc'),(3,'ddddd','ccccc'),(3,'eeeee','eeeee');
+select * from replace_test;
 explain analyze REPLACE INTO replace_test values(2,'aaaa','bbbb');
 explain performance REPLACE INTO replace_test values(2,'ddddd','fffff');
 truncate replace_test;

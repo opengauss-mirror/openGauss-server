@@ -303,7 +303,7 @@ static void print_lwlock_stats(int code, Datum arg)
 
     while ((lwstats = (lwlock_stats*)hash_seq_search(&scan)) != NULL) {
         fprintf(stderr,
-                "PID %d lwlock %s: shacq %u exacq %u blk %u spindelay %u dequeue self %u\n",
+                "PID %d lwlock %s: shacq %d exacq %d blk %d spindelay %d dequeue self %d\n",
                 t_thrd.proc_cxt.MyProcPid,
                 LWLockTrancheArray[lwstats->key.tranche]->name,
                 lwstats->sh_acquire_count,

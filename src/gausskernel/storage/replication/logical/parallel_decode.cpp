@@ -841,6 +841,7 @@ static logicalLog* ParallelDecodeCommitOrAbort(ParallelReorderBufferChange* chan
     logChange->endLsn = change->endLsn;
     logChange->nsubxacts = change->nsubxacts;
     logChange->commitTime = change->commitTime;
+    logChange->origin_id = change->origin_id;
     int slotId = worker->slotId;
     Size subXidSize = sizeof(TransactionId) * change->nsubxacts;
     if (subXidSize > 0 && change->subXids != NULL) {
@@ -971,41 +972,43 @@ ParallelStatusData *GetParallelDecodeStatus(uint32 *num)
         knl_g_parallel_decode_context *pDecodeCxt = &g_instance.comm_cxt.pdecode_cxt[i];
 
         if (!g_Logicaldispatcher[i].active || g_Logicaldispatcher[i].abnormal) {
+            FreeStringInfo(&readQueueLen);
+            FreeStringInfo(&decodeQueueLen);
             continue;
         }
         for (int j = 0; j < result[id].parallelDecodeNum; j++) {
-            SpinLockAcquire(&pDecodeCxt->destroy_lock);
+            SpinLockAcquire(&pDecodeCxt->rwlock);
             ParallelDecodeWorker *worker = g_Logicaldispatcher[i].decodeWorkers[j];
             if (!g_Logicaldispatcher[i].active || g_Logicaldispatcher[i].abnormal || worker == NULL) {
                 escape = true;
-                SpinLockRelease(&pDecodeCxt->destroy_lock);
+                SpinLockRelease(&pDecodeCxt->rwlock);
                 break;
             }
             LogicalQueue *readQueue = worker->changeQueue;
             if (!g_Logicaldispatcher[i].active || g_Logicaldispatcher[i].abnormal || readQueue == NULL) {
                 escape = true;
-                SpinLockRelease(&pDecodeCxt->destroy_lock);
+                SpinLockRelease(&pDecodeCxt->rwlock);
                 break;
             }
             uint32 rmask = readQueue->mask;
             uint32 readHead = pg_atomic_read_u32(&readQueue->writeHead);
             uint32 readTail = pg_atomic_read_u32(&readQueue->readTail);
             uint32 readCnt = COUNT(readHead, readTail, rmask);
-            SpinLockRelease(&pDecodeCxt->destroy_lock);
+            SpinLockRelease(&pDecodeCxt->rwlock);
             appendStringInfo(&readQueueLen, "queue%d: %u", j, readCnt);
 
-            SpinLockAcquire(&pDecodeCxt->destroy_lock);
+            SpinLockAcquire(&pDecodeCxt->rwlock);
             LogicalQueue *decodeQueue = worker->LogicalLogQueue;
             if (!g_Logicaldispatcher[i].active || g_Logicaldispatcher[i].abnormal || decodeQueue == NULL) {
                 escape = true;
-                SpinLockRelease(&pDecodeCxt->destroy_lock);
+                SpinLockRelease(&pDecodeCxt->rwlock);
                 break;
             }
             uint32 dmask = decodeQueue->mask;
             uint32 decodeHead = pg_atomic_read_u32(&decodeQueue->writeHead);
             uint32 decodeTail = pg_atomic_read_u32(&decodeQueue->readTail);
             uint32 decodeCnt = COUNT(decodeHead, decodeTail, dmask);
-            SpinLockRelease(&pDecodeCxt->destroy_lock);
+            SpinLockRelease(&pDecodeCxt->rwlock);
             appendStringInfo(&decodeQueueLen, "queue%d: %u", j, decodeCnt);
 
             if (j < result[id].parallelDecodeNum - 1) {

@@ -450,7 +450,8 @@ bool PMstateIsRun(void);
 #define BACKEND_TYPE_TEMPBACKEND                                        \
     0x0010                      /* temp thread processing cancel signal \
                                    or stream connection */
-#define BACKEND_TYPE_ALL 0x001F /* OR of all the above */
+#define BACKEND_TYPE_CMAGENT 0x0020 /* cmagent process*/
+#define BACKEND_TYPE_ALL 0x002F /* OR of all the above */
 
 #define GTM_LITE_CN (GTM_LITE_MODE && IS_PGXC_COORDINATOR)
 
@@ -2245,12 +2246,6 @@ int PostmasterMain(int argc, char* argv[])
         write_stderr("failed to init dss device\n");
         ExitPostmaster(1);
     }
-    if (ENABLE_DSS) {
-        if (u_sess->attr.attr_common.XLogArchiveMode || strlen(u_sess->attr.attr_storage.XLogArchiveCommand) != 0) {
-            write_stderr("Not support archive function while DMS and DSS enabled\n");
-            ExitPostmaster(1);
-        }
-    }
 
     noProcLogicTid = GLOBAL_ALL_PROCS;
 
@@ -2278,6 +2273,9 @@ int PostmasterMain(int argc, char* argv[])
         return 0;
     }
     
+    /* Check for invalid combinations of GUC settings */
+    CheckGUCConflicts();
+
     /* Check DSS config */
     initDSSConf();
 
@@ -2286,11 +2284,7 @@ int PostmasterMain(int argc, char* argv[])
 
     /* And switch working directory into it */
     ChangeToDataDir();
-    /*
-        * Check for invalid combinations of GUC settings.
-        */
-    CheckGUCConflicts();
-
+    
     /* Set parallel recovery config */
     ConfigRecoveryParallelism();
     ProcessRedoCpuBindInfo();
@@ -3335,6 +3329,21 @@ static void CheckExtremeRtoGUCConflicts(void)
                 errhint("Either turn off extreme rto, or turn off hot_standby.")));
     }
 #endif
+
+#ifdef ENABLE_LITE_MODE
+    int recovery_parse_workers = g_instance.attr.attr_storage.recovery_parse_workers;
+    int recovery_redo_workers = g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker;
+    if (recovery_parse_workers * recovery_redo_workers + recovery_parse_workers + recovery_parse_workers +
+            TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM >=
+        MAX_RECOVERY_THREAD_NUM) {
+        ereport(
+            ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+             errmsg("In lite mode, (recovery_parse_workers * (recovery_redo_workers + 2) + %d) cannot be greater than "
+                    "or equal to %d.",
+                    TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM, MAX_RECOVERY_THREAD_NUM)));
+    }
+#endif
 }
 static void CheckRecoveryParaConflict()
 {
@@ -3453,6 +3462,13 @@ static void CheckShareStorageConfigConflicts(void)
                     errhint("Either set temp_tablespaces to NULL, or turn off ss_enable_dss.")));
         }
     }
+
+    if (g_instance.attr.attr_storage.dss_attr.ss_enable_dss != 
+            g_instance.attr.attr_storage.dms_attr.enable_dms) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SYSTEM_ERROR),
+                errmsg("ss_enable_dms and ss_enable_dss must be turned on or off simultaneously.")));
+    }
 }
 
 /*
@@ -3471,6 +3487,14 @@ static void CheckGUCConflicts(void)
             (errcode(ERRCODE_SYSTEM_ERROR),
                 errmsg(
                     "WAL archival (archive_mode=on) requires wal_level \"archive\", \"hot_standby\" or \"logical\"")));
+
+    if (ENABLE_DSS) {
+        if (u_sess->attr.attr_common.XLogArchiveMode || strlen(u_sess->attr.attr_storage.XLogArchiveCommand) != 0) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("archive functions are not supported when DMS and DSS enabled\n")));
+        }
+    }
 
     if (g_instance.attr.attr_storage.max_wal_senders > 0 && g_instance.attr.attr_storage.wal_level == WAL_LEVEL_MINIMAL)
         ereport(ERROR,
@@ -3958,7 +3982,9 @@ static int ServerLoop(void)
         if (g_instance.pid_cxt.ReaperBackendPID == 0)
             g_instance.pid_cxt.ReaperBackendPID = initialize_util_thread(REAPER);
 
-        if ((pmState == PM_RUN || t_thrd.xlog_cxt.is_hadr_main_standby) &&
+        if (((!ENABLE_DMS && (pmState == PM_RUN || t_thrd.xlog_cxt.is_hadr_main_standby)) || 
+            (ENABLE_DMS && pmState == PM_RUN && t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE &&
+             !SS_PERFORMING_SWITCHOVER)) &&
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == 0 && !dummyStandbyMode &&
             g_instance.attr.attr_storage.xlog_file_path != NULL) {
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
@@ -6913,7 +6939,8 @@ static void reaper(SIGNAL_ARGS)
             }
 
             if (g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == 0 && !dummyStandbyMode &&
-                g_instance.attr.attr_storage.xlog_file_path != NULL) {
+                g_instance.attr.attr_storage.xlog_file_path != NULL && (!SS_PRIMARY_STANDBY_CLUSTER_STANDBY
+                && !SS_PRIMARY_DEMOTING)) {
                 g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
             }
 
@@ -7238,7 +7265,11 @@ static void reaper(SIGNAL_ARGS)
                  * Any unexpected exit of the checkpointer (including FATAL
                  * exit) is treated as a crash.
                  */
-                HandleChildCrash(pid, exitstatus, _("checkpointer process"));
+                if (pid == g_instance.pid_cxt.sharedStorageXlogCopyThreadPID) {
+                    HandleChildCrash(pid, exitstatus, _("sharedStorageXlogCopy process"));
+                } else {
+                    HandleChildCrash(pid, exitstatus, _("checkpointer process"));
+                }
             }
 
             continue;
@@ -10003,10 +10034,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* the parent process, return 0 if the fork failed, return the PID if fork succeed. */
         StartPgjobWorker();
     }
-
+    
+    /* if xlog_file_path is not equel to zero and dms is enabled, main standby need to initialize walreceiver
+     * and walrecwrite. Other modes don't need when dms is enabled. */
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER) && g_instance.pid_cxt.WalReceiverPID == 0 &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
-        g_instance.status == NoShutdown && !ENABLE_DMS) {
+        g_instance.status == NoShutdown && (!ENABLE_DMS || SS_STANDBY_CLUSTER_MAIN_STANDBY)) {
         if (g_instance.pid_cxt.WalRcvWriterPID == 0) {
             g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
             SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
@@ -10196,7 +10229,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
     }
 
-    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER)) {
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS)) {
         PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
         t_thrd.dms_cxt.CloseAllSessionsFailed = false;
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] kill backends begin.")));
@@ -10217,13 +10250,17 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
+        //active check once
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
+            g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
+        }
+
         /* and the autovac launcher too */
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
 
         if (g_instance.pid_cxt.PgJobSchdPID != 0)
             signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
-
         /*
          * before init startup threads, need close WalWriter and WalWriterAuxiliary
          * because during StartupXLOG remove_xlogtemp_files() occurs process file concurrently
@@ -10233,7 +10270,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
-
         pmState = PM_WAIT_BACKENDS;
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
@@ -10249,6 +10285,13 @@ static void sigusr1_handler(SIGNAL_ARGS)
         ereport(LOG,
             (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
                 wal_get_role_string(get_cur_mode()))));
+    }
+
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP)) {
+        if (g_instance.pid_cxt.StartupPID != 0) {
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] send to startup term signal")));
+            signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+        }
     }
 
     if (CheckPromoteSignal()) {
@@ -10442,6 +10485,8 @@ static int CountChildren(int target)
                 child = BACKEND_TYPE_WALSND;
             else if (IsPostmasterChildDataSender(bp->child_slot))
                 child = BACKEND_TYPE_DATASND;
+            else if (ENABLE_DMS && (bp->backend_type & BACKEND_TYPE_CMAGENT))
+                child = BACKEND_TYPE_CMAGENT;
             else
                 child = BACKEND_TYPE_NORMAL;
 
@@ -11537,6 +11582,7 @@ Backend* AssignFreeBackEnd(int slot)
     bn->role = t_thrd.role;
     bn->cancel_key = 0;
     bn->dead_end = false;
+    bn->backend_type = 0;
     return bn;
 }
 
@@ -12526,6 +12572,11 @@ const char* wal_get_db_state_string(DbState db_state)
 static ServerMode get_cur_mode(void)
 {
     if (ENABLE_DMS) {
+        /* except for main standby in standby cluster, current mode of instance is determined by SS_OFFICIAL_PRIMARY*/
+        if (g_instance.attr.attr_storage.xlog_file_path !=0 && SS_OFFICIAL_PRIMARY &&
+            t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) {
+            return STANDBY_MODE;
+        }
         return !SS_OFFICIAL_PRIMARY ? STANDBY_MODE : PRIMARY_MODE;
     }
     return t_thrd.postmaster_cxt.HaShmData->current_mode;
@@ -14777,14 +14828,29 @@ void InitShmemForDmsCallBack()
     InitProcessAndShareMemory();
 }
 
-const char *GetSSServerMode()
+const char *GetSSServerMode(ServerMode mode)
 {
-    if (!SS_OFFICIAL_PRIMARY) {
-        return "Standby";
-    }
- 
-    if (SS_OFFICIAL_PRIMARY) {
-        return "Primary";
+    if (g_instance.attr.attr_storage.xlog_file_path != 0) {
+        if (SS_OFFICIAL_PRIMARY && (mode == PRIMARY_MODE || mode == NORMAL_MODE)) { 
+            return "Primary";
+        }
+        
+        /* main standby in standby cluster */
+        if (SS_OFFICIAL_PRIMARY && mode == STANDBY_MODE) { 
+            return "Main Standby";
+        }
+        
+        if (!SS_OFFICIAL_PRIMARY) {
+            return "Standby";
+        }
+    } else {
+        if (!SS_OFFICIAL_PRIMARY) {
+            return "Standby";
+        }
+    
+        if (SS_OFFICIAL_PRIMARY) {
+            return "Primary";
+        }
     }
  
     return "Unknown";

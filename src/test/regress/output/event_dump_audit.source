@@ -14,7 +14,7 @@ show audit_system_object;
 (1 row)
 
 create event e on schedule at '3000-01-01 00:00:00' disable do select 1;
-select pg_sleep(10);
+select pg_sleep(1);
  pg_sleep 
 ----------
  

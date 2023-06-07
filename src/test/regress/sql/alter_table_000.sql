@@ -1377,3 +1377,13 @@ alter table test_unique add unique using btree(f31) comment 'unique index' using
 drop table test_unique;
 
 \c postgres
+
+create table t_alter_type(c0 int4range Unique, foreign key(c0) references t_alter_type(c0));
+alter table t_alter_type alter c0 set data type int4range;
+drop table t_alter_type;
+CREATE TABLE astore_test(id int, name text);
+alter table astore_test rename id to tid;
+CREATE TABLE cstore_test(id int, name text) with(orientation=column);
+alter table cstore_test rename id to tid;
+DROP TABLE astore_test;
+DROP TABLE cstore_test;

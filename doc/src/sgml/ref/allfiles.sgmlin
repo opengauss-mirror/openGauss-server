@@ -14,6 +14,7 @@ Complete list of usable sgml source files in this directory.
 <!ENTITY alterDomain        SYSTEM "alter_domain.sgml">
 <!ENTITY alterEventTrigger        SYSTEM "alter_event_trigger.sgml">
 <!ENTITY alterExtension     SYSTEM "alter_extension.sgml">
+<!ENTITY alterEvent         SYSTEM "alter_event.sgml">
 <!ENTITY alterForeignDataWrapper SYSTEM "alter_foreign_data_wrapper.sgml">
 <!ENTITY alterForeignTable  SYSTEM "alter_foreign_table.sgml">
 <!ENTITY alterFunction      SYSTEM "alter_function.sgml">
@@ -67,6 +68,7 @@ Complete list of usable sgml source files in this directory.
 <!ENTITY createDomain       SYSTEM "create_domain.sgml">
 <!ENTITY createEventTrigger SYSTEM "create_event_trigger.sgml">
 <!ENTITY createExtension    SYSTEM "create_extension.sgml">
+<!ENTITY createEvent        SYSTEM "create_event.sgml">
 <!ENTITY createForeignDataWrapper SYSTEM "create_foreign_data_wrapper.sgml">
 <!ENTITY createForeignTable SYSTEM "create_foreign_table.sgml">
 <!ENTITY createFunction     SYSTEM "create_function.sgml">
@@ -112,6 +114,7 @@ Complete list of usable sgml source files in this directory.
 <!ENTITY dropDomain         SYSTEM "drop_domain.sgml">
 <!ENTITY dropEventTrigger SYSTEM "drop_event_trigger.sgml">
 <!ENTITY dropExtension      SYSTEM "drop_extension.sgml">
+<!ENTITY dropEvent          SYSTEM "drop_event.sgml">
 <!ENTITY dropForeignDataWrapper SYSTEM "drop_foreign_data_wrapper.sgml">
 <!ENTITY dropForeignTable   SYSTEM "drop_foreign_table.sgml">
 <!ENTITY dropFunction       SYSTEM "drop_function.sgml">
@@ -180,6 +183,7 @@ Complete list of usable sgml source files in this directory.
 <!ENTITY setSessionAuth     SYSTEM "set_session_auth.sgml">
 <!ENTITY setTransaction     SYSTEM "set_transaction.sgml">
 <!ENTITY show               SYSTEM "show.sgml">
+<!ENTITY showEvents         SYSTEM "show_events.sgml">
 <!ENTITY startTransaction   SYSTEM "start_transaction.sgml">
 <!ENTITY truncate           SYSTEM "truncate.sgml">
 <!ENTITY unlisten           SYSTEM "unlisten.sgml">

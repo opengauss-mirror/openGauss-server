@@ -46,6 +46,7 @@
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_depend.h"
+#include "catalog/pg_description.h"
 #include "catalog/pg_foreign_table.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_inherits_fn.h"
@@ -557,6 +558,7 @@ static void ExecChangeTableSpaceForCStorePartition(AlteredTableInfo*, LOCKMODE);
 
 static int GetAfterColumnAttnum(Oid attrelid, const char *after_name);
 static Node *UpdateVarattnoAfterAddColumn(Node *node, int startattnum, int endattnum, bool is_increase);
+static void UpdatePgDescriptionFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static void UpdatePgAttributeFirstAfter(Relation attr_rel, Oid attrelid, int startattnum, int endattnum,
     bool is_increase);
 static void UpdatePgIndexFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
@@ -571,7 +573,7 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
     bool is_modified, bool *hasPartition);
 static void UpdatePgTriggerFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static void UpdatePgRlspolicyFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
-static ViewInfoForAdd *GetViewInfoFirstAfter(Relation rel, Oid objid, bool keep_star = false);
+static ViewInfoForAdd *GetViewInfoFirstAfter(const char *rel_name, Oid objid, bool keep_star = false);
 static List *CheckPgRewriteFirstAfter(Relation rel);
 static void ReplaceViewQueryFirstAfter(List *query_str);
 static void UpdateDependRefobjsubidFirstAfter(Relation rel, Oid myrelid, int curattnum, int newattnum,
@@ -726,7 +728,7 @@ static void CheckForAddPartition(Relation rel, List *partDefStateList);
 static void CheckForAddSubPartition(Relation rel, Relation partrel, List *subpartDefStateList);
 static void CheckTablespaceForAddPartition(Relation rel, List *partDefStateList);
 static void CheckPartitionNameConflictForAddPartition(List *newPartitionNameList, List *existingPartitionNameList);
-static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partDefState);
+static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partDefState, bool partkeyIsFunc = false);
 static void CheckSubpartitionForAddPartition(Relation rel, Node *partDefState);
 static void ATExecDropPartition(Relation rel, AlterTableCmd *cmd);
 static void ATExecDropSubPartition(Relation rel, AlterTableCmd *cmd);
@@ -1152,6 +1154,7 @@ static bool isOrientationSet(List* options, bool* isCUFormat, bool isDfsTbl)
                             errdetail("Valid string is \"orc\".")));
                 }
             } else {
+#ifdef ENABLE_MULTIPLE_NODES
                 if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) != 0 &&
                     pg_strcasecmp(defGetString(def), ORIENTATION_TIMESERIES) != 0 &&
                     pg_strcasecmp(defGetString(def), ORIENTATION_ROW) != 0) {
@@ -1160,6 +1163,15 @@ static bool isOrientationSet(List* options, bool* isCUFormat, bool isDfsTbl)
                             errmsg("Invalid string for  \"ORIENTATION\" option"),
                             errdetail("Valid string are \"column\", \"row\", \"timeseries\".")));
                 }
+#else   /* ENABLE_MULTIPLE_NODES */
+                if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) != 0 &&
+                    pg_strcasecmp(defGetString(def), ORIENTATION_ROW) != 0) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OPTION),
+                            errmsg("Invalid string for  \"ORIENTATION\" option"),
+                            errdetail("Valid string are \"column\", \"row\".")));
+                }
+#endif   /* ENABLE_MULTIPLE_NODES */
             }
             if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) == 0 && isCUFormat != NULL) {
                 *isCUFormat = true;
@@ -1231,10 +1243,17 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
         }
 
         if (pg_strcasecmp(def->defname, "orientation") == 0 && pg_strcasecmp(defGetString(def), ORIENTATION_ORC) == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPTION),
                     errmsg("Invalid string for  \"ORIENTATION\" option"),
                     errdetail("Valid string are \"column\", \"row\", \"timeseries\".")));
+#else   /* ENABLE_MULTIPLE_NODES */
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OPTION),
+                    errmsg("Invalid string for  \"ORIENTATION\" option"),
+                    errdetail("Valid string are \"column\", \"row\".")));
+#endif   /* ENABLE_MULTIPLE_NODES */
         }
         if (pg_strcasecmp(def->defname, "storage_type") == 0) {
             if (pg_strcasecmp(defGetString(def), TABLE_ACCESS_METHOD_USTORE) == 0) {
@@ -2883,7 +2902,19 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
                 errmsg("The table %s do not support segment storage", stmt->relation->relname)));
     }
 
-    if (ENABLE_DMS) {
+    if (storage_type == SEGMENT_PAGE) {
+        Oid tbspcId = (tablespaceId == InvalidOid) ? u_sess->proc_cxt.MyDatabaseTableSpace : tablespaceId;
+        uint64 tablespaceMaxSize = 0;
+        bool isLimit = TableSpaceUsageManager::IsLimited(tbspcId, &tablespaceMaxSize);
+        if (isLimit) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
+                errmsg("The table %s do not support segment-page storage", stmt->relation->relname),
+                errdetail("Segment-page storage doest not support limited tablespace \"%s\"", get_tablespace_name(tbspcId)),
+                errhint("use default or unlimited user defined tablespace before using segment-page storage.")));
+        }
+    }
+
+    if (ENABLE_DMS && !u_sess->attr.attr_common.IsInplaceUpgrade) {
         if ((relkind == RELKIND_RELATION && storage_type != SEGMENT_PAGE) ||
             relkind == RELKIND_MATVIEW ||
             pg_strcasecmp(storeChar, ORIENTATION_ROW) != 0 ||
@@ -5864,6 +5895,13 @@ static AttrNumber  renameatt_internal(Oid myrelid, const char* oldattname, const
 
     /* new name should not already exist */
     check_for_column_name_collision(targetrelation, newattname);
+
+    /* new name should not conflict with system columns */
+    if (CHCHK_PSORT_RESERVE_COLUMN(newattname)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DUPLICATE_COLUMN),
+                errmsg("column name \"%s\" conflicts with a system column name", newattname)));
+    }
 
     /* apply the update */
     (void)namestrcpy(&(attform->attname), newattname);
@@ -9036,12 +9074,8 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             break;
 #endif
         case AT_COMMENTS:
-            /* Modify Column comment or table comment */
-            if (cmd->def != NULL && IsA(cmd->def, ColumnDef)) {
-                ATCreateColumComments(rel->rd_id, (ColumnDef*)cmd->def);
-            } else {
-                CreateComments(rel->rd_id, RelationRelationId, 0, cmd->name);
-            }
+            /* alter table comment */
+            CreateComments(rel->rd_id, RelationRelationId, 0, cmd->name);
             break;
         default: /* oops */
             ereport(ERROR,
@@ -10876,6 +10910,54 @@ static Node *UpdateVarattnoAfterAddColumn(Node *node, int startattnum, int endat
 }
 
 /*
+ * update pg_description
+ * 1. add column with first or after col_name.
+ * 2. modify column to first or after column.
+ */
+static void UpdatePgDescriptionFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase)
+{
+    Relation desc_rel;
+    HeapTuple desc_tuple;
+    ScanKeyData key[3];
+    SysScanDesc scan;
+    Form_pg_description desc_form;
+    
+    desc_rel = heap_open(DescriptionRelationId, RowExclusiveLock);
+
+    for (int i = (is_increase ? endattnum : startattnum);
+        (is_increase ? i >= startattnum : i <= endattnum); (is_increase ? i-- : i++)) {
+        ScanKeyInit(&key[0], Anum_pg_description_objoid, BTEqualStrategyNumber, F_OIDEQ,
+            ObjectIdGetDatum(RelationGetRelid(rel)));
+        ScanKeyInit(&key[1], Anum_pg_description_classoid, BTEqualStrategyNumber, F_OIDEQ, RelationRelationId);
+        ScanKeyInit(&key[2], Anum_pg_description_objsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(i));
+
+        scan = systable_beginscan(desc_rel, DescriptionObjIndexId, true, NULL, 3, key);
+
+        while (HeapTupleIsValid(desc_tuple = systable_getnext(scan))) {
+            Datum values[Natts_pg_description] = { 0 };
+            bool nulls[Natts_pg_description] = { 0 };
+            bool replaces[Natts_pg_description] = { 0 };
+            HeapTuple new_desc_tuple;
+
+            desc_form = (Form_pg_description)GETSTRUCT(desc_tuple);
+
+            values[Anum_pg_description_objsubid - 1] = is_increase ? Int32GetDatum(desc_form->objsubid + 1) :
+                Int32GetDatum(desc_form->objsubid - 1);
+            replaces[Anum_pg_description_objsubid - 1] = true;
+
+            new_desc_tuple = heap_modify_tuple(desc_tuple, RelationGetDescr(desc_rel), values, nulls, replaces);
+            simple_heap_update(desc_rel, &new_desc_tuple->t_self, new_desc_tuple);
+            CatalogUpdateIndexes(desc_rel, new_desc_tuple);
+
+            heap_freetuple_ext(new_desc_tuple);
+        }
+        systable_endscan(scan);
+    }
+
+    heap_close(desc_rel, RowExclusiveLock);
+}
+ 
+/* 
  * update pg_attribute.
  * 1. add column with first or after col_name.
  * 2. modify column to first or after column.
@@ -11509,7 +11591,7 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
 }
 
 
-static ViewInfoForAdd *GetViewInfoFirstAfter(Relation rel, Oid objid, bool keep_star)
+static ViewInfoForAdd *GetViewInfoFirstAfter(const char *rel_name, Oid objid, bool keep_star)
 {
     ScanKeyData entry;
     ViewInfoForAdd *info = NULL;
@@ -11569,7 +11651,7 @@ static ViewInfoForAdd *GetViewInfoFirstAfter(Relation rel, Oid objid, bool keep_
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Un-supported feature"),
                     errdetail("rule %s depend on %s, alter table %s add ... first|after colname is not supported",
-                    NameStr(rewrite_form->rulename), NameStr(rel->rd_rel->relname), NameStr(rel->rd_rel->relname))));
+                    NameStr(rewrite_form->rulename), rel_name, rel_name)));
         }
     }
     systable_endscan(rewrite_scan);
@@ -11614,7 +11696,7 @@ static List *CheckPgRewriteFirstAfter(Relation rel)
 
             pre_objid = dep_form->objid;
 
-            ViewInfoForAdd *info = GetViewInfoFirstAfter(rel, dep_form->objid);
+            ViewInfoForAdd *info = GetViewInfoFirstAfter(NameStr(rel->rd_rel->relname), dep_form->objid);
 
             foreach (viewinfo, query_str) {
                 ViewInfoForAdd *oldInfo = (ViewInfoForAdd *)lfirst(viewinfo);
@@ -12022,6 +12104,7 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
 
     if (is_addloc) {
         UpdatePgAttributeFirstAfter(attrdesc, myrelid, newattnum, currattnum, true);
+        UpdatePgDescriptionFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgIndexFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgConstraintFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgConstraintConfkeyFirstAfter(rel, newattnum, currattnum, true);
@@ -14765,7 +14848,7 @@ static CoercionPathType findFkeyCast(Oid targetTypeId, Oid sourceTypeId, Oid* fu
             /* A previously-relied-upon cast is now gone. */
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_CHARACTER_VALUE_FOR_CAST),
-                    errmsg("could not find cast from %u to %u", sourceTypeId, targetTypeId)));
+                    errmsg("could not find cast from %s to %s", format_type_be(sourceTypeId), format_type_be(targetTypeId))));
     }
 
     return ret;
@@ -15757,6 +15840,46 @@ static void UpdateAttrdefAdnumFirstAfter(Relation rel, Oid myrelid, int curattnu
 }
 
 /*
+ * update pg_description objsubid for the modified column with first or after column.
+ */
+static void UpdateDescriptionObjsubidFirstAfter(Relation rel, Oid myrelid, int curattnum, int newattnum,
+    bool *has_comment)
+{
+    ScanKeyData key[3];
+    HeapTuple desc_tuple;
+    SysScanDesc scan;
+
+    ScanKeyInit(&key[0], Anum_pg_description_objoid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(myrelid));
+    ScanKeyInit(&key[1], Anum_pg_description_classoid, BTEqualStrategyNumber, F_OIDEQ, RelationRelationId);
+    ScanKeyInit(&key[2], Anum_pg_description_objsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(curattnum));
+
+    scan = systable_beginscan(rel, DescriptionObjIndexId, true, NULL, 3, key);
+
+    desc_tuple = systable_getnext(scan);
+    if (HeapTupleIsValid(desc_tuple)) {
+        Datum values[Natts_pg_description] = { 0 };
+        bool nulls[Natts_pg_description] = { 0 };
+        bool replaces[Natts_pg_description] = { 0 };
+        HeapTuple new_desc_tuple;
+
+        if (has_comment != NULL) {
+            *has_comment = true;
+        }
+
+        values[Anum_pg_description_objsubid - 1] = Int32GetDatum(newattnum);
+        replaces[Anum_pg_description_objsubid - 1] = true;
+
+        new_desc_tuple = heap_modify_tuple(desc_tuple, RelationGetDescr(rel), values, nulls, replaces);
+        simple_heap_update(rel, &new_desc_tuple->t_self, new_desc_tuple);
+        CatalogUpdateIndexes(rel, new_desc_tuple);
+
+        heap_freetuple_ext(new_desc_tuple);
+    }
+
+    systable_endscan(scan);
+}
+ 
+/* 
  * update pg_depend refobjsubid for the modified column with first or after column.
  */
 static void UpdateDependRefobjsubidFirstAfter(Relation rel, Oid myrelid, int curattnum, int newattnum,
@@ -15940,6 +16063,7 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
     HeapTuple att_tuple_old, att_tuple_new;
     Form_pg_attribute att_form_old, attr_form_new;
     int startattnum, endattnum;
+    bool has_comment = false;
     bool has_default = false;
     bool has_depend = false;
     bool has_partition = false;
@@ -15969,6 +16093,9 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
     simple_heap_update(attr_rel, &att_tuple_old->t_self, att_tuple_old);
     CatalogUpdateIndexes(attr_rel, att_tuple_old);
 
+    Relation desc_rel = heap_open(DescriptionRelationId, RowExclusiveLock);
+    UpdateDescriptionObjsubidFirstAfter(desc_rel, myrelid, curattnum, 0, &has_comment);
+ 
     Relation def_rel = heap_open(AttrDefaultRelationId, RowExclusiveLock);
     UpdateAttrdefAdnumFirstAfter(def_rel, myrelid, curattnum, 0, &has_default);
 
@@ -15986,6 +16113,7 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
 
     UpdatePgPartitionFirstAfter(rel, startattnum, endattnum, is_increase, true, &has_partition);
     UpdatePgAttributeFirstAfter(attr_rel, myrelid, startattnum, endattnum, is_increase);
+    UpdatePgDescriptionFirstAfter(rel, startattnum, endattnum, is_increase);
     UpdatePgIndexFirstAfter(rel, startattnum, endattnum, is_increase);
     UpdatePgConstraintFirstAfter(rel, startattnum, endattnum, is_increase);
     UpdatePgConstraintConfkeyFirstAfter(rel, startattnum, endattnum, is_increase);
@@ -16016,6 +16144,11 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
     heap_freetuple_ext(att_tuple_old);
     heap_freetuple_ext(att_tuple_new);
 
+    if (has_comment) {
+        UpdateDescriptionObjsubidFirstAfter(desc_rel, myrelid, 0, newattnum, NULL);
+    }
+    heap_close(desc_rel, RowExclusiveLock);
+ 
     if (has_default) {
         UpdateAttrdefAdnumFirstAfter(def_rel, myrelid, 0, newattnum, NULL);
     }
@@ -23194,7 +23327,7 @@ static void CheckPartitionNameConflictForAddPartition(List *newPartitionNameList
  * Used for adding a list partition syntax, for example:
  * 'ADD PARTITION VALUES (listValueList)' or 'SPLIT PARTITION VALUES (expr_list)'
  */
-static Oid FindPartOidByListBoundary(Relation rel, ListPartitionMap *partMap, Node* boundKey)
+static Oid FindPartOidByListBoundary(Relation rel, ListPartitionMap *partMap, Node* boundKey, bool partkeyIsFunc)
 {
     List *partKeyValueList = NIL;
     Oid res;
@@ -23223,7 +23356,7 @@ static Oid FindPartOidByListBoundary(Relation rel, ListPartitionMap *partMap, No
         }
         return InvalidOid;
     }
-    con = (Const*)GetTargetValue(&attr, con, false);
+    con = (Const*)GetTargetValue(&attr, con, false, partkeyIsFunc);
     if (!PointerIsValid(con)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
             errmsg("partition key value must be const or const-evaluable expression")));
@@ -23237,7 +23370,7 @@ static Oid FindPartOidByListBoundary(Relation rel, ListPartitionMap *partMap, No
     return res;
 }
 
-static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partDefState)
+static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partDefState, bool partkeyIsFunc)
 {
     Assert(IsA(partDefState, RangePartitionDefState) || IsA(partDefState, ListPartitionDefState));
 
@@ -23259,7 +23392,7 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
                 partDef->partitionInitName ? partDef->partitionInitName : partDef->partitionName)));
         }
         partKeyValueList = transformConstIntoTargetType(rel->rd_att->attrs,
-            partMap->partitionKey, partDef->boundary);
+            partMap->partitionKey, partDef->boundary, partkeyIsFunc);
         pfree_ext(curBound);
         existingPartOid = PartitionValuesGetPartitionOid(rel, partKeyValueList, AccessShareLock, false, true, false);
         list_free_ext(partKeyValueList);
@@ -23271,7 +23404,7 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
         ListPartitionDefState *partDef = (ListPartitionDefState *)partDefState;
 
         foreach (cell, partDef->boundary) {
-            existingPartOid = FindPartOidByListBoundary(rel, (ListPartitionMap *)rel->partMap, (Node*)lfirst(cell));
+            existingPartOid = FindPartOidByListBoundary(rel, (ListPartitionMap *)rel->partMap, (Node*)lfirst(cell), partkeyIsFunc);
             if (OidIsValid(existingPartOid)) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("list boundary of adding partition MUST NOT overlap with existing partition")));
@@ -23280,6 +23413,71 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
     }
 
     decre_partmap_refcount(rel->partMap);
+}
+
+bool IsPartKeyFunc(Relation rel, bool isPartRel, bool forSubPartition, PartitionExprKeyInfo* partExprKeyInfo)
+{
+    HeapTuple partTuple = NULL;
+    if (forSubPartition) {
+        if (isPartRel) {
+            partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(rel->rd_id));
+        } else {
+            PartitionMap* map = rel->partMap;
+            Oid partitionId = InvalidOid;
+            if (map->type == PART_TYPE_LIST) {
+                partitionId = ((ListPartitionMap*)map)->listElements[0].partitionOid;
+            } else if (map->type == PART_TYPE_HASH) {
+                partitionId = ((HashPartitionMap*)map)->hashElements[0].partitionOid;
+            } else {
+                partitionId = ((RangePartitionMap*)map)->rangeElements[0].partitionOid;
+            }
+            partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partitionId));
+        }
+    } else {
+        partTuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, rel->rd_id);
+    }
+    if (!partTuple)
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The partTuple for oid %d can't be found", rel->rd_id)));
+
+    bool isNull = false;
+    Datum datum = 0;
+    datum = SysCacheGetAttr(PARTRELID, partTuple, Anum_pg_partition_partkeyexpr, &isNull);
+    if (partExprKeyInfo)
+        partExprKeyInfo->partkeyexprIsNull = isNull;
+    if (isNull) {
+        if (forSubPartition)
+            ReleaseSysCache(partTuple);
+        else
+            heap_freetuple(partTuple);
+        return false;
+    }
+
+    char* partKeyStr = TextDatumGetCString(datum);
+    Node* partkeyexpr = NULL;
+    if (forSubPartition)
+        ReleaseSysCache(partTuple);
+    else
+        heap_freetuple(partTuple);
+
+    partkeyexpr = (Node*)stringToNode_skip_extern_fields(partKeyStr);
+    if (!partExprKeyInfo)
+        pfree_ext(partKeyStr);
+    else
+        partExprKeyInfo->partExprKeyStr = partKeyStr;
+
+    if (!partkeyexpr)
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The partkeyexpr can't be NULL")));
+
+    if (partkeyexpr->type == T_OpExpr)
+        return false;
+    else if (partkeyexpr->type == T_FuncExpr)
+        return true;
+    else
+        ereport(ERROR,
+            (errcode(ERRCODE_NODE_ID_MISSMATCH),
+                errmsg("The node type %d is wrong, it must be T_OpExpr or T_FuncExpr", partkeyexpr->type)));
+    /* suppress warning: -Wreturn-type */
+    return false;
 }
 
 static void CheckSubpartitionForAddPartition(Relation rel, Node *partDefState)
@@ -23329,13 +23527,14 @@ static void CheckSubpartitionForAddPartition(Relation rel, Node *partDefState)
         }
     }
 
+    bool partkeyIsFunc = IsPartKeyFunc(rel, false, true);
     /* c. subpartition values constraint */
     switch (subparttype) {
         case PART_STRATEGY_RANGE:
-            ComparePartitionValue(subpartKeyPosList, (RelationGetDescr(rel))->attrs, subPartitionDefStateList);
+            ComparePartitionValue(subpartKeyPosList, (RelationGetDescr(rel))->attrs, subPartitionDefStateList, true, partkeyIsFunc);
             break;
         case PART_STRATEGY_LIST:
-            CompareListValue(subpartKeyPosList, (RelationGetDescr(rel))->attrs, subPartitionDefStateList);
+            CompareListValue(subpartKeyPosList, (RelationGetDescr(rel))->attrs, subPartitionDefStateList, partkeyIsFunc);
             break;
         case PART_STRATEGY_HASH:
             break;
@@ -23375,22 +23574,23 @@ static void CheckForAddPartition(Relation rel, List *partDefStateList)
     list_free_ext(newPartitionNameList);
 
     /* check 4: partition values constraint */
+    bool partkeyIsFunc = IsPartKeyFunc(rel, false, false);
     int2vector *partitionKey = GetPartitionKey(rel->partMap);
     List *partKeyPosList = NIL;
     for (int i = 0; i < partitionKey->dim1; i++) {
         partKeyPosList = lappend_int(partKeyPosList, partitionKey->values[i] - 1);
     }
     if (rel->partMap->type == PART_TYPE_RANGE) {
-        ComparePartitionValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList);
+        ComparePartitionValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList, true, partkeyIsFunc);
     } else if (rel->partMap->type == PART_TYPE_LIST) {
-        CompareListValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList);
+        CompareListValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList, partkeyIsFunc);
     }
     list_free_ext(partKeyPosList);
 
     ListCell *cell = NULL;
     foreach (cell, partDefStateList) {
         /* check 5: new adding partitions behind the last partition */
-        CheckPartitionValueConflictForAddPartition(rel, (Node*)lfirst(cell));
+        CheckPartitionValueConflictForAddPartition(rel, (Node*)lfirst(cell), partkeyIsFunc);
 
         /* check 6: constraint for subpartition */
         CheckSubpartitionForAddPartition(rel, (Node*)lfirst(cell));
@@ -23433,22 +23633,23 @@ static void CheckForAddSubPartition(Relation rel, Relation partrel, List *subpar
     list_free_ext(newPartitionNameList);
 
     /* check 4: partition values constraint */
+    bool partkeyIsFunc = IsPartKeyFunc(partrel, true, true);
     int2vector *partitionKey = GetPartitionKey(partrel->partMap);
     List *partKeyPosList = NIL;
     for (int i = 0; i < partitionKey->dim1; i++) {
         partKeyPosList = lappend_int(partKeyPosList, partitionKey->values[i] - 1);
     }
     if (partrel->partMap->type == PART_TYPE_RANGE) {
-        ComparePartitionValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList);
+        ComparePartitionValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList, true, partkeyIsFunc);
     } else if (partrel->partMap->type == PART_TYPE_LIST) {
-        CompareListValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList);
+        CompareListValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList, partkeyIsFunc);
     }
     list_free_ext(partKeyPosList);
 
     ListCell *cell = NULL;
     foreach (cell, subpartDefStateList) {
         /* check 5: new adding partitions behind the last partition */
-        CheckPartitionValueConflictForAddPartition(partrel, (Node*)lfirst(cell));
+        CheckPartitionValueConflictForAddPartition(partrel, (Node*)lfirst(cell), partkeyIsFunc);
     }
 
     /* check 6: whether has the unusable local index */
@@ -23530,6 +23731,9 @@ static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partStat
 
     bucketOid = RelationGetBucketOid(rel);
 
+    PartitionExprKeyInfo partExprKeyInfo = PartitionExprKeyInfo();
+    partExprKeyInfo.partkeyIsFunc = IsPartKeyFunc(rel, false, true, &partExprKeyInfo);
+
     List *partitionNameList =
         list_concat(GetPartitionNameList(partState->partitionList), RelationGetPartitionNameList(rel));
     foreach (cell, partState->partitionList) {
@@ -23558,7 +23762,8 @@ static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partStat
                 isTimestamptz,
                 RelationGetStorageType(rel),
                 subpartitionKey,
-                RelationIsPartitionOfSubPartitionTable(rel));
+                RelationIsPartitionOfSubPartitionTable(rel),
+                &partExprKeyInfo);
         } else {
             newPartOid = heapAddRangePartition(pgPartRel,
                 rel->rd_id,
@@ -23571,7 +23776,8 @@ static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partStat
                 RelationGetStorageType(rel),
                 AccessExclusiveLock,
                 subpartitionKey,
-                RelationIsPartitionOfSubPartitionTable(rel));
+                RelationIsPartitionOfSubPartitionTable(rel),
+                &partExprKeyInfo);
         }
 
         Oid partTablespaceOid =
@@ -27842,8 +28048,9 @@ void CheckDestListSubPartitionBoundaryForSplit(Relation rel, Oid partOid, SplitP
         }
     }
 
+    bool partkeyIsFunc = IsPartKeyFunc(partRel, true, true);
     foreach (cell, splitSubPart->newListSubPartitionBoundry) {
-        existingSubPartOid = FindPartOidByListBoundary(partRel, partMap, (Node*)lfirst(cell));
+        existingSubPartOid = FindPartOidByListBoundary(partRel, partMap, (Node*)lfirst(cell), partkeyIsFunc);
         if (OidIsValid(existingSubPartOid) && existingSubPartOid != defaultSubPartOid) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
                 errmsg("list subpartition %s has overlapped value", getPartitionName(existingSubPartOid, false))));
@@ -28187,7 +28394,7 @@ static List* getDestPartBoundaryList(Relation partTableRel, List* destPartDefLis
 {
     ListCell* cell = NULL;
     List* result = NIL;
-
+    bool partkeyIsFunc = IsPartKeyFunc(partTableRel, false, false);
     foreach (cell, destPartDefList) {
         RangePartitionDefState* rangePartDef = (RangePartitionDefState*)lfirst(cell);
         List* partKeyValueList = NIL;
@@ -28197,7 +28404,7 @@ static List* getDestPartBoundaryList(Relation partTableRel, List* destPartDefLis
 
         partKeyValueList = transformConstIntoTargetType(partTableRel->rd_att->attrs,
             ((RangePartitionMap*)partTableRel->partMap)->partitionKey,
-            rangePartDef->boundary);
+            rangePartDef->boundary, partkeyIsFunc);
 
         foreach (otherCell, partKeyValueList) {
             partKeyValueArr[i++] = (Const*)lfirst(otherCell);
@@ -29042,7 +29249,7 @@ List* transformIntoTargetType(FormData_pg_attribute* attrs, int2 keypos, List* b
  * Description	:
  * Notes		:
  */
-List* transformConstIntoTargetType(FormData_pg_attribute* attrs, int2vector* partitionKey, List* boundary)
+List* transformConstIntoTargetType(FormData_pg_attribute* attrs, int2vector* partitionKey, List* boundary, bool partkeyIsFunc)
 {
     int counter = 0;
     int2 partKeyPos = 0;
@@ -29069,7 +29276,7 @@ List* transformConstIntoTargetType(FormData_pg_attribute* attrs, int2vector* par
         if (constBoundaryItem->ismaxvalue) {
             targetConstBoundaryItem = constBoundaryItem;
         } else {
-            targetConstBoundaryItem = (Const*)GetTargetValue(&attrs[partKeyPos - 1], constBoundaryItem, false);
+            targetConstBoundaryItem = (Const*)GetTargetValue(&attrs[partKeyPos - 1], constBoundaryItem, false, partkeyIsFunc);
             if (!PointerIsValid(targetConstBoundaryItem)) {
                 list_free_ext(newBoundaryList);
                 ereport(ERROR,
@@ -31440,7 +31647,7 @@ static void ATPrepAlterModifyColumn(List** wqueue, AlteredTableInfo* tab, Relati
     def->raw_default = tmp_expr;
 }
 
-static char* GetCreateViewCommand(Relation rel, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid)
+static char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid)
 {
     StringInfoData buf;
     ViewInfoForAdd* view_info = NULL;
@@ -31477,7 +31684,7 @@ static char* GetCreateViewCommand(Relation rel, HeapTuple tup, Form_pg_class rel
     }
     pfree_ext(view_options);
     /* concat CREATE VIEW command with query */
-    view_info = GetViewInfoFirstAfter(rel, pg_rewrite_oid, true);
+    view_info = GetViewInfoFirstAfter(rel_name, pg_rewrite_oid, true);
     if (view_info == NULL) {
         pfree_ext(buf.data);
         return NULL; /* should not happen */
@@ -31511,7 +31718,7 @@ static void ATAlterRecordRebuildView(AlteredTableInfo* tab, Relation rel, Oid pg
             errdetail("modify or change a column used by materialized view or rule is not supported")));
     }
     /* print CREATE VIEW command */
-    view_def = GetCreateViewCommand(rel, tup, reltup, pg_rewrite_oid, view_oid);
+    view_def = GetCreateViewCommand(NameStr(rel->rd_rel->relname), tup, reltup, pg_rewrite_oid, view_oid);
     ReleaseSysCache(tup);
     if (view_def) {
         /* record it */
@@ -32002,6 +32209,8 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
         }
     }
 
+    /* drop comment on column */
+    DeleteComments(RelationGetRelid(rel), RelationRelationId, attnum);
     /* Working with objects that depend on the column being modified. */
     ATHandleObjectsDependOnModifiedColumn(tab, rel, pg_attr, attnum, type_changed);
     /* Primary key column must be not null. */
@@ -32110,4 +32319,66 @@ static Node* RecookAutoincAttrDefault(Relation rel, int attrno, Oid targettype, 
         COERCE_IMPLICIT_CAST,
         -1);
     return (Node*)aexpr;
+}
+
+/*
+ * findout view which depend on proc, then rebuild it. It will check view's
+ * column type and name(checkViewTupleDesc) when rebuild the view.
+ */
+void RebuildDependViewForProc(Oid proc_oid)
+{
+    ScanKeyData key[2];
+    SysScanDesc scan = NULL;
+    HeapTuple tup = NULL;
+    List *oid_list = NIL;
+
+    /* open pg_depend to find which view depend on this proc */
+    Relation depRel = heap_open(DependRelationId, AccessShareLock);
+
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(ProcedureRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(proc_oid));
+
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
+    while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
+        Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
+
+        if (depform->classid == RewriteRelationId && depform->deptype == DEPENDENCY_NORMAL) {
+            oid_list = lappend_oid(oid_list, depform->objid);
+        }
+    }
+    systable_endscan(scan);
+    heap_close(depRel, AccessShareLock);
+
+    /* rebuild view by rewrite oid */
+    ListCell *cell = NULL;
+    foreach(cell, oid_list) {
+        Oid objid = lfirst_oid(cell);
+        Oid view_oid = get_rewrite_relid(objid, true);
+        if (!OidIsValid(view_oid)) {
+            continue;
+        }
+        tup = SearchSysCache1(RELOID, ObjectIdGetDatum(view_oid));
+        if (!HeapTupleIsValid(tup)) {
+            continue;
+        }
+        Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tup);
+        if (reltup->relkind != RELKIND_VIEW) {
+            ReleaseSysCache(tup);
+            continue;
+        }
+
+        /* get rebuild view sql */
+        char *view_def = GetCreateViewCommand(NameStr(reltup->relname), tup, reltup, objid, view_oid);
+        ReleaseSysCache(tup);
+
+        CommandCounterIncrement();
+        List* raw_parsetree_list = raw_parser(view_def);
+        Node* stmt = (Node*)linitial(raw_parsetree_list);
+        Assert(IsA(stmt, ViewStmt));
+        DefineView((ViewStmt*)stmt, view_def);
+        pfree(view_def);
+        list_free(raw_parsetree_list);
+    }
+    list_free_ext(oid_list);
 }

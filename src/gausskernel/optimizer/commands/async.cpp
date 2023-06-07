@@ -1498,7 +1498,7 @@ void HandleNotifyInterrupt(void)
     notifyInterruptPending = true;
 
     /* make sure the event is processed in due course */
-    if (u_sess->attr.attr_common.light_comm== TRUE && t_thrd.proc) {
+    if (g_instance.attr.attr_common.light_comm== TRUE && t_thrd.proc) {
         SetLatch(&t_thrd.proc->procLatch);
     }
 }

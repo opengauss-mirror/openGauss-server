@@ -1007,6 +1007,16 @@ void RemoveForeignServerById(Oid srvId)
         ereport(
             ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for foreign server %u", srvId)));
 
+#ifdef ENABLE_MOT
+    Form_pg_foreign_server form = (Form_pg_foreign_server)GETSTRUCT(tp);
+    if (0 == pg_strcasecmp(NameStr(form->srvname), MOT_FDW_SERVER)) {
+        ReleaseSysCache(tp);
+        ereport(
+            ERROR, (errmodule(MOD_MOT), errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
+                errmsg("drop foreign server \"%s\" is not allowed", MOT_FDW_SERVER)));
+    }
+#endif
+
     simple_heap_delete(rel, &tp->t_self);
 
     ReleaseSysCache(tp);
@@ -1857,7 +1867,8 @@ void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
 
 #ifdef ENABLE_MOT
     // For external lookup when drop database
-    recordDependencyOnDatabase(RelationRelationId, relid, server->serverid, u_sess->proc_cxt.MyDatabaseId);
+    if (isMOTTableFromSrvName(stmt->servername))
+        recordDependencyOnDatabase(RelationRelationId, relid, server->serverid, u_sess->proc_cxt.MyDatabaseId);
 #endif
 
     if (errortableOid != InvalidOid) {

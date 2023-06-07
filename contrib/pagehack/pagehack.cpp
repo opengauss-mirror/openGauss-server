@@ -198,7 +198,11 @@ static int PgIndexRelTupleParserCursor = -1;
 
 
 /* For Assert(...) macros. */
+#ifdef USE_ASSERT_CHECKING
 THR_LOCAL bool assert_enabled = true;
+#else
+THR_LOCAL bool assert_enabled = false;
+#endif
 
 /* Options */
 bool only_vm = false;
@@ -1501,12 +1505,12 @@ static void ParseToastIndexTupleData(binary tupdata, int len, binary nullBitmap,
     if (len > 0) {
         fprintf(stdout,
             "\n%s"
-            "unique_id: %u",
+            "unique_id: %d",
             indents[indentLevel],
             *values++);
         fprintf(stdout,
             "\n%s"
-            "chunk_seq: %u",
+            "chunk_seq: %d",
             indents[indentLevel],
             *values++);
     }
@@ -1521,12 +1525,12 @@ static void ParseToastTupleData(binary tupdata, int len, binary nullBitmap, int 
 
     fprintf(stdout,
         "\n%s"
-        "unique_id: %u",
+        "unique_id: %d",
         indents[indentLevel],
         *values++);
     fprintf(stdout,
         "\n%s"
-        "chunk_seq: %u",
+        "chunk_seq: %d",
         indents[indentLevel],
         *values++);
 }
@@ -2765,7 +2769,7 @@ static void parse_special_data(const char* buffer, SegmentType type)
         }
 
         int size = PageGetSpecialSize(page);
-        fprintf(stdout, "\ncompress metadata: offset %u, size %u\n\t\t", page->pd_special, size);
+        fprintf(stdout, "\ncompress metadata: offset %u, size %d\n\t\t", page->pd_special, size);
 #ifdef DEBUG
         const char* content = buffer + page->pd_special;
         formatBytes((unsigned char*)content, size);
@@ -2824,7 +2828,7 @@ static bool parse_bcm_page(const char* buffer, int blkno, int blknum)
     int numberOfMetaBits = 0;
 
     managedBlockNum = Max(0, blknum - blkno - 1);
-    fprintf(stdout, "\n\tBCM information on page %u\n", blkno);
+    fprintf(stdout, "\n\tBCM information on page %d\n", blkno);
 
     /* 24 is page header */
     bcm = (unsigned char*)(buffer + 24);
@@ -3161,7 +3165,7 @@ static int parse_page_file(const char *filename, SegmentType type, const uint32 
     while (start < number) {
         size_t compressedSize = pageCompression->ReadCompressedBuffer(start, compressed, BLCKSZ);
         if (compressedSize > MIN_COMPRESS_ERROR_RT) {
-            fprintf(stderr, "read block %u failed, filename: %s: code: %lu %s\n",
+            fprintf(stderr, "read block %u failed, filename: %s: code: %zu %s\n",
                     start, filename, compressedSize, strerror(errno));
             delete pageCompression;
             return false;
@@ -3709,7 +3713,7 @@ static int parse_filenodemap_file(char* filename)
 
         if (mapfile->mappings[i].mapoid > MAX_PG_CLASS_ID)
             fprintf(stderr,
-                "the oid(%u) of catalog is bigger than MAX_PG_CLASS_ID(%u)\n",
+                "the oid(%u) of catalog is bigger than MAX_PG_CLASS_ID(%d)\n",
                 mapfile->mappings[i].mapoid,
                 MAX_PG_CLASS_ID);
 
@@ -3795,7 +3799,7 @@ static int parse_cu_file(char* filename, uint64 offset)
 
     cmprDataSize = *(int*)(buffer + pos);
     pos += sizeof(cmprDataSize);
-    fprintf(stdout, "CU data cmprDataSize:                              %u\n", cmprDataSize);
+    fprintf(stdout, "CU data cmprDataSize:                              %d\n", cmprDataSize);
 
     fclose(fd);
 
@@ -5060,7 +5064,7 @@ static int OpenUndoBlock(int zoneId, BlockNumber blockno)
     rc = snprintf_s(fileName, sizeof(fileName), sizeof(fileName) - 1, g_dir);
     securec_check(rc, "\0", "\0");
     if (strlen(g_dir) + idLen >= MAX_PATH_LEN) {
-        fprintf(stdout, "ERROR: path is too long, MAX_PATH_LEN %d, path len %lu.\n", MAX_PATH_LEN, strlen(g_dir));
+        fprintf(stdout, "ERROR: path is too long, MAX_PATH_LEN %d, path len %zu.\n", MAX_PATH_LEN, strlen(g_dir));
     }
     rc = snprintf_s(fileName + strlen(fileName), sizeof(fileName) - strlen(fileName),
         sizeof(fileName) - strlen(fileName) - 1, "%05X.%07zX", zoneId, segno);
@@ -5265,7 +5269,7 @@ static bool ParseUndoRecord(UndoRecPtr urp, bool forward = false)
         fprintf(stdout, "wtd = oldxactid(%lu).\n", urec->wtd_.oldxactid);
         fprintf(stdout, "wpart_ = partitionoid(%u).\n", urec->wpart_.partitionoid);
         fprintf(stdout, "wtspc_ = tablespace(%u).\n", urec->wtspc_.tablespace);
-        fprintf(stdout, "len = alreadyRead(%u).\n", alreadyRead);
+        fprintf(stdout, "len = alreadyRead(%d).\n", alreadyRead);
         
         char prevLen[2];
         UndoRecordSize byteToRead = sizeof(UndoRecordSize);
@@ -5750,8 +5754,9 @@ int main(int argc, char** argv)
         exit(1);
     }
 
-    if (enable_dss && socketpath == NULL) {
-        fprintf(stderr, "Socketpath cannot be NULL when enable dss.\n");
+    if (enable_dss && (socketpath == NULL || strlen(socketpath) == 0 || strncmp("UDS:", socketpath, 4) != 0)) {
+        fprintf(stderr, "Socketpath must be specific correctly when enable dss, "
+            "format is: '-c UDS:xxx'.\n");
         exit(1);
     }
 

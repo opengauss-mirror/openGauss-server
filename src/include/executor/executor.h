@@ -303,16 +303,15 @@ static inline TupleTableSlot *ExecProcNode(PlanState *node)
 extern bool ExecQual(List* qual, ExprContext* econtext, bool resultForNull = false);
 extern TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone = NULL);
 extern ExprState* ExecInitExpr(Expr* node, PlanState* parent);
+extern List * ExecInitExprListByRecursion(List *nodes, PlanState* parent);
+extern List * ExecInitExprListByFlatten(List *nodes, PlanState* parent);
 extern ExprState *ExecInitQual(List *qual, PlanState *parent);
 extern ExprState *ExecInitCheck(List *qual, PlanState *parent);
 extern List *ExecInitExprList(List *nodes, PlanState *parent);
+extern ExprState* ExecBuildAggTrans(AggState* aggstate, struct AggStatePerPhaseData *phase, bool doSort, bool doHash);
 extern ProjectionInfo* ExecBuildProjectionInfo(List *targetList,
     ExprContext *econtext, TupleTableSlot *slot, PlanState *parent, TupleDesc inputDesc);
 extern ExprState* ExecPrepareExpr(Expr* node, EState* estate);
-extern Datum ExecMakeFunctionResultSet(FuncExprState *fcache,
-                            ExprContext *econtext,
-                            bool *isNull,
-                            ExprDoneCond *isDone);
 extern ExprState *ExecPrepareCheck(List *qual, EState *estate);
 extern List *ExecPrepareExprList(List *nodes, EState *estate);
 extern bool ExecCheck(ExprState *state, ExprContext *context);
@@ -335,6 +334,18 @@ extern ProjectionInfo* ExecBuildProjectionInfoByFlatten(List *targetList,
 extern ProjectionInfo* ExecBuildProjectionInfoByRecursion(List *targetList, ExprContext *econtext, TupleTableSlot *slot, TupleDesc inputDesc);
 extern ExprState *ExecPrepareQualByFlatten(List *qual, EState *estate);
 extern TupleTableSlot* ExecProjectByRecursion(ProjectionInfo* projInfo, ExprDoneCond* isDone);
+
+/**
+ * prototypes from functions in execSRF.cpp
+ */
+extern FuncExprState *ExecInitTableFunctionResult(Expr *expr, ExprContext *econtext, PlanState *parent);
+extern FuncExprState *ExecInitFunctionResultSet(Expr *expr, ExprContext *econtext, PlanState *parent);
+extern Datum ExecMakeFunctionResultSet(FuncExprState *fcache,
+                                       ExprContext *econtext,
+                                       MemoryContext argContext,
+                                       bool *isNull,
+                                       ExprDoneCond *isDone);
+
 /*
  * ExecEvalExpr
  *
@@ -470,9 +481,6 @@ ExecQualByFlatten(ExprState *state, ExprContext *econtext)
 /*
  * prototypes from functions in execSRF.c
  */
-extern FuncExprState *ExecInitTableFunctionResult(Expr *expr,
-							ExprContext *econtext, PlanState *parent);
-extern FuncExprState *ExecInitFunctionResultSet(Expr *expr, ExprContext *econtext, PlanState *parent);
 Tuplestorestate* ExecMakeTableFunctionResult(
     ExprState* setexpr, ExprContext* econtext, TupleDesc expectedDesc, bool randomAccess, FunctionScanState* node);
 
@@ -560,6 +568,8 @@ extern bool is_huge_clob(Oid type_oid, bool is_null, Datum value);
 extern bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo);
 extern void set_result_for_plpgsql_language_function_with_outparam(FuncExprState *fcache, Datum *result, bool *isNull);
 extern void set_result_for_plpgsql_language_function_with_outparam_by_flatten(Datum *result, bool *isNull);
+extern void ShutdownFuncExpr(Datum arg);
+extern void ExecPrepareTuplestoreResult(FuncExprState* fcache, ExprContext* econtext, Tuplestorestate* resultStore, TupleDesc resultDesc);
 extern bool expr_func_has_refcursor_args(Oid Funcid);
 extern Datum fetch_lob_value_from_tuple(varatt_lob_pointer *lob_pointer, Oid update_oid, bool *is_null);
 

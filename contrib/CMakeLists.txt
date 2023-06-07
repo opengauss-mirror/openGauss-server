@@ -22,6 +22,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/file_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/log_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/gc_fdw
+    ${CMAKE_CURRENT_SOURCE_DIR}/ndpplugin
 )
 
 add_subdirectory(hstore)
@@ -42,4 +43,5 @@ add_subdirectory(log_fdw)
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
     add_subdirectory(gc_fdw)
 endif()
+add_subdirectory(ndpplugin)
 

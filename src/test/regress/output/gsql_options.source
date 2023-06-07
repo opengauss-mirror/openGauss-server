@@ -1,14 +1,14 @@
 --prepare_test
-create user gsqlbot2 password 'Gaussdba_Mpp';
-create database gsqldb2 with encoding='UTF8' template=template0 owner gsqlbot2;
-\c gsqldb2
-grant all on schema public to gsqlbot2;
+create user gsqlbot2gsql password 'Gaussdba_Mpp';
+create database gsqldb2gsql with encoding='UTF8' template=template0 owner gsqlbot2gsql;
+\c gsqldb2gsql
+grant all on schema public to gsqlbot2gsql;
 GRANT CREATE ON SCHEMA public TO PUBLIC;
-\! @abs_bindir@/gsql -h localhost -d gsqldb2 -p -U gsqlbot2 -W Gaussdba_Mpp
+\! @abs_bindir@/gsql -h localhost -d gsqldb2gsql -p -U gsqlbot2gsql -W Gaussdba_Mpp
 gsql: The option '-p' need a parameter.
-\! @abs_bindir@/gsql -h localhost -d gsqldb2 -U gsqlbot2 -W Gaussdba_Mpp -p
+\! @abs_bindir@/gsql -h localhost -d gsqldb2gsql -U gsqlbot2gsql -W Gaussdba_Mpp -p
 gsql: The option '-p' need a parameter.
-\! @abs_bindir@/gsql -h localhost -d gsqldb2 -p @portstring@s -U gsqlbot2 -W Gaussdba_Mpp
+\! @abs_bindir@/gsql -h localhost -d gsqldb2gsql -p @portstring@s -U gsqlbot2gsql -W Gaussdba_Mpp
 failed to connect localhost:@portstring@s.
-\! @abs_bindir@/gsql -hlocalhost -dgsqldb2 -p@portstring@ -Ugsqlbot2 -WGaussdba_Mpp
-\! @abs_bindir@/gsql -h localhost -d gsqldb2 -p @portstring@ -U gsqlbot2 -W Gaussdba_Mpp
+\! @abs_bindir@/gsql -hlocalhost -dgsqldb2gsql -p@portstring@ -Ugsqlbot2gsql -WGaussdba_Mpp
+\! @abs_bindir@/gsql -h localhost -d gsqldb2gsql -p @portstring@ -U gsqlbot2gsql -W Gaussdba_Mpp

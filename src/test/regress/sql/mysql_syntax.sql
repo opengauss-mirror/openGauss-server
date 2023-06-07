@@ -2,6 +2,28 @@
 -- test mysql compatibility trigger 
 drop database if exists db_mysql;
 create database db_mysql dbcompatibility 'B';
+drop database if exists db_td;
+create database db_td dbcompatibility='C';
+
+\c db_td
+create table animals (id int, name char(30));
+create table food (id int, foodtype varchar(32), remark varchar(32), time_flag timestamp);
+
+create trigger animal_trigger1
+after insert on animals
+for each row
+begin
+    insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
+end;
+/
+
+create or replace trigger animal_trigger1
+after insert on animals
+for each row
+begin
+    insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
+end;
+/
 \c db_mysql
 create table t (id int);
 create table t1 (id int);
@@ -42,6 +64,14 @@ drop trigger animal_trigger1 on t;
 */
 -- trigger_order{follows|precedes} && begin ... end test
 create trigger animal_trigger1
+after insert on animals
+for each row
+begin
+    insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
+end;
+/
+
+create or replace trigger animal_trigger1
 after insert on animals
 for each row
 begin
@@ -241,6 +271,33 @@ begin
     end if;
 end;
 /
+-- mysql fetch 自动退出
+show b_format_behavior_compat_options;
+set b_format_behavior_compat_options = 'fetch';
+create or replace procedure test_cursor_1 
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+begin 
+    declare c1_all cursor is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+    if not c1_all%isopen then
+        open c1_all;
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        close c1_all;
+    end if;
+end;
+/
+call test_cursor_1();
+set b_format_behavior_compat_options = '';
+show b_format_behavior_compat_options;
 -- test declare condition
 create or replace procedure test_condition_1 as
 declare
@@ -338,11 +395,27 @@ exception
 END;
 /
 call test_condition_1();
+-- test other values compilte with condition name
 
+create or replace procedure test_condition_7 as
+declare
+    a int;
+BEGIN
+    declare a condition for SQLSTATE '22012';
+    a := 1/0;
+exception
+    when a then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_7();
 \c regression
 drop trigger animal_trigger1;
 drop trigger if exists animal_trigger1;
 drop database db_mysql;
+drop database db_td;
 
 -- test declare condition in other compatibility
 create or replace procedure test_condition_1 as

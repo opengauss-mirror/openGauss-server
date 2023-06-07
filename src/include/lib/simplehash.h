@@ -933,7 +933,7 @@ SH_SCOPE void SH_DELETE_ITEM(SH_TYPE *tb, SH_ELEMENT_TYPE *entry)
  */
 SH_SCOPE void SH_START_ITERATE(SH_TYPE *tb, SH_ITERATOR *iter)
 {
-    int i;
+    uint64 i;
     uint64 startelem = PG_UINT64_MAX;
 
     /*

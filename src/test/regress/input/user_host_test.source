@@ -1,4 +1,6 @@
 show sql_compatibility;
+select short_desc from pg_settings where name = 'b_compatibility_user_host_auth';
+select extra_desc from pg_settings where name = 'b_compatibility_user_host_auth';
 create user 'test_user_host'@'%' password 'test123@';
 create user 'test_user_host'@'127.%' password 'test123@';
 create user 'test_user_host'@'127.0.0.%' password 'test123@';
@@ -7,14 +9,18 @@ create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
 create database user_host_db dbcompatibility 'B';
 \c user_host_db;
-set test_user_host = off;
+set b_compatibility_user_host_auth = off;
 create user 'test_user_host'@'%' password 'test123@';
 create user 'test_user_host'@'127.%' password 'test123@';
 create user 'test_user_host'@'127.0.0.%' password 'test123@';
 create user 'test_user_host'@'127.0.%' password 'test123@';
 create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
-set test_user_host = on;
+set b_compatibility_user_host_auth = on;
+CREATE USER 'sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc'@'%' PASSWORD 'test123@';
+CREATE USER 'sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc' PASSWORD 'test123@';
+CREATE USER sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfkvjhsdkfu@127.0.0.1 PASSWORD 'test123@';
+CREATE USER 'da@localhost'@'%' PASSWORD 'test123@';
 create user if not exists 'test_user_host'@'%' password 'test123@';
 alter user 'test_user_host'@'%' with account lock;
 alter user 'test_user_host'@'%' password 'test1234@';
@@ -35,6 +41,7 @@ create table test1(a int);
 alter table test1 owner to 'test_user_host'@'%';
 GRANT ALL PRIVILEGES TO 'test_user_host'@'%';
 REVOKE ALL PRIVILEGES FROM 'test_user_host'@'%';
+ALTER USER 'test_user_host'@'%' password 'test@123';
 ALTER USER 'test_user_host'@'%' RENAME TO 'test_user_host'@'1%';
 CREATE  DEFINER='test_user_host'@'127.0.%' FUNCTION test_func(integer, integer) RETURNS integer SECURITY INVOKER
 AS 'select $1 + $2;'
@@ -46,7 +53,7 @@ insert into test2 values(1);
 grant select on test2 to 'test_user_host'@'127.0.%';
 grant insert on test2 to 'test_user_host'@'127.0.%';
 revoke insert on test2 from 'test_user_host'@'127.0.%';
-\! echo 'test_user_host = on' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo 'b_compatibility_user_host_auth = on' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
 \! sed -i 's#host.*all.*all.*127.0.0.1/32.*#host  all  all  all  sha256#g' @abs_srcdir@/tmp_check/datanode1/pg_hba.conf
 \! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
 \! sleep 5

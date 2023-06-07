@@ -156,7 +156,7 @@ int GenericMatchText(char* s, int slen, char* p, int plen)
 
 int generic_match_text_with_collation(char* s, int slen, char* p, int plen, Oid collation)
 {
-    if (collation == UTF8MB4_GENERAL_CI_COLLATION_OID || collation == UTF8MB4_UNICODE_CI_COLLATION_OID) {
+    if (IS_UTF8_GENERAL_COLLATION(collation)) {
         return matchtext_utf8mb4((unsigned char*)s, slen, (unsigned char*)p, plen);
     }
 
@@ -182,10 +182,7 @@ static inline int Generic_Text_IC_like(text* str, text* pat, Oid collation)
         str = DatumGetTextP(DirectFunctionCall1Coll(lower, collation, PointerGetDatum(str)));
         s = VARDATA(str);
         slen = (VARSIZE(str) - VARHDRSZ);
-        if (GetDatabaseEncoding() == PG_UTF8)
-            return UTF8_MatchText(s, slen, p, plen, 0, true);
-        else
-            return MB_MatchText(s, slen, p, plen, 0, true);
+        return generic_match_text_with_collation(s, slen, p, plen, collation);
     } else {
         /*
          * Here we need to prepare locale information for SB_lower_char. This
@@ -194,7 +191,7 @@ static inline int Generic_Text_IC_like(text* str, text* pat, Oid collation)
         pg_locale_t locale = 0;
         bool locale_is_c = false;
 
-        if (lc_ctype_is_c(collation))
+        if (lc_ctype_is_c(collation) || COLLATION_IN_B_FORMAT(collation))
             locale_is_c = true;
         else if (collation != DEFAULT_COLLATION_OID) {
             if (!OidIsValid(collation)) {

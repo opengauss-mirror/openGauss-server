@@ -2426,7 +2426,9 @@ static void CheckOrderbyColumns(ParseState* pstate, List* targetList, bool isAgg
                     break;
                 }
             }
-        } else {
+        }
+
+        if (!isFound) {
             Node* refExpr = transformExpr(pstate, (Node*)colRef, EXPR_KIND_ORDER_BY);
             ListCell* tcell = nullptr;
             foreach(tcell, targetList) {

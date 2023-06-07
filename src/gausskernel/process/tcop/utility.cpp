@@ -2654,6 +2654,14 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                      */
                 case TRANS_STMT_BEGIN:
                 case TRANS_STMT_START: {
+                    if (stmt->with_snapshot) {
+                        if (u_sess->utils_cxt.XactIsoLevel == XACT_REPEATABLE_READ) {
+                            GetTransactionSnapshot();
+                        } else {
+                            ereport(WARNING, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("with consistent snapshot only effected in repeatable read mode")));
+                        }
+                    }
                     ListCell* lc = NULL;
                     BeginTransactionBlock();
                     foreach (lc, stmt->options) {
@@ -3201,7 +3209,7 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
             uint64 processed;
             uint64 histhash;
             bool has_histhash;
-            processed = DoCopy((CopyStmt*)parse_tree, query_string, &processed);
+            DoCopy((CopyStmt*)parse_tree, query_string, &processed);
             has_histhash = ((CopyStmt*)parse_tree)->hashstate.has_histhash;
             histhash = ((CopyStmt*)parse_tree)->hashstate.histhash;
             if (completion_tag != NULL) {
@@ -6197,7 +6205,9 @@ ProcessUtilitySlow(Node *parse_tree,
                 /* something happen on datanodes */
                 if (IS_PGXC_DATANODE)
 #else
-                Relation matview = heap_openrv(stmt->relation, stmt->incremental ? ExclusiveLock : AccessExclusiveLock);
+                Relation matview = HeapOpenrvExtended(stmt->relation,
+                                                      stmt->incremental ? ExclusiveLock : AccessExclusiveLock,
+                                                      false, true);
                 CheckRefreshMatview(matview, is_incremental_matview(matview->rd_id));
                 heap_close(matview, NoLock);
 #endif

@@ -40,6 +40,8 @@ OBJS=	pg_ctl.o  pg_build.o backup.o receivelog.o streamutil.o xlogreader.o xlogr
              $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a
 endif
 
+OBJS += $(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o
+
 all: submake-pagecompression gs_ctl
 
 gs_ctl: $(OBJS) | submake-libpq submake-libpgport

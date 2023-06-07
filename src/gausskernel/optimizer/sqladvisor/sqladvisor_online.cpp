@@ -492,6 +492,7 @@ static PLpgSQL_execstate* copyPLpgEstate(PLpgSQL_execstate* srcEstate)
     destEstate->stack_entry_start = srcEstate->stack_entry_start;
     destEstate->curr_nested_table_type = 0;
     destEstate->is_exception = false;
+    destEstate->is_declare_handler = false;
 
     return destEstate;
 }

@@ -62,8 +62,6 @@ const uint16 ScanKeywordTokens[] = {
 #undef PG_KEYWORD
 
 /*
-
-/*
  * Set the type of YYSTYPE.
  */
 #define YYSTYPE core_YYSTYPE
@@ -1189,7 +1187,7 @@ other			.
 {setUserIdentifier}	{
 					SET_YYLLOC();
 					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT &&
-						(u_sess->attr.attr_common.enable_set_variable_b_format || ENABLE_SET_VARIABLES || u_sess->attr.attr_common.test_user_host)) {
+						(u_sess->attr.attr_common.enable_set_variable_b_format || ENABLE_SET_VARIABLES || u_sess->attr.attr_common.b_compatibility_user_host_auth)) {
 						yylval->str = pstrdup(yytext + 1);
 						yyextra->is_hint_str = false;
 						return SET_USER_IDENT;
@@ -1271,12 +1269,13 @@ void
 scanner_yyerror(const char *message, core_yyscan_t yyscanner)
 {
 	const char *loc = yyextra->scanbuf + *yylloc;
-	u_sess->plsql_cxt.have_error = true; 
+	u_sess->plsql_cxt.have_error = true;
     int errstate = 0;
 	int lines = 0;
 	int rc = CompileWhich();
 #ifndef ENABLE_MULTIPLE_NODES
-        if (rc != PLPGSQL_COMPILE_NULL && u_sess->attr.attr_common.plsql_show_all_error) {
+        if (rc != PLPGSQL_COMPILE_NULL && u_sess->attr.attr_common.plsql_show_all_error
+            && t_thrd.log_cxt.errordata_stack_depth <= ERRORDATA_STACK_SIZE - 2) {
             lines = GetProcedureLineNumberInPackage(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, u_sess->plsql_cxt.plpgsql_yylloc);
             addErrorList(message, lines);
         }

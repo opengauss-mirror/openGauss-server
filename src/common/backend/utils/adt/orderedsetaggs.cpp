@@ -115,9 +115,17 @@ static OrderedSetAggState* ordered_set_startup(PG_FUNCTION_ARGS)
     /* Need the agg info to perform sort */
     if (IsA(fcinfo->context, AggState)) {
         aggstate = (AggState*)fcinfo->context;
-        AggStatePerAgg curperagg = aggstate->curperagg;
-        if (curperagg != NULL)
-            aggref = curperagg->aggref;
+        if (aggstate->ss.ps.state->es_is_flt_frame) {
+            AggStatePerTrans curpertrans = aggstate->curpertrans;
+            if (curpertrans != NULL) {
+                aggref = curpertrans->aggref;
+            }
+        } else {
+            AggStatePerAgg curperagg = aggstate->curperagg;
+            if (curperagg != NULL) {
+                aggref = curperagg->aggref;
+            }
+        }
     }
 
     if (aggref == NULL || aggstate == NULL)

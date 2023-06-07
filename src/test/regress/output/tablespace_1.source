@@ -272,3 +272,10 @@ DROP TABLESPACE testspace;
 \! ln -s @testtablespace@/symlink/sym1 @testtablespace@/symlink/sym2
 CREATE TABLESPACE test_symlink LOCATION '@testtablespace@/symlink/sym2';
 ERROR:  location "@testtablespace@/symlink/sym2" is symbolic link
+-- check linked path deleted
+\! mkdir -p @testtablespace@/symlink/will_delete
+\! ln -s @testtablespace@/symlink/will_delete @testtablespace@/symlink/will_delete_link
+\! rm -rf @testtablespace@/symlink/will_delete
+CREATE TABLESPACE deleted_symlink LOCATION '@testtablespace@/symlink/will_delete_link/local';
+ERROR:  recheck location "@testtablespace@/symlink/will_delete_link" exeed max times.
+DETAIL:  the location contains symbolic link, the linked path likely has been deleted.

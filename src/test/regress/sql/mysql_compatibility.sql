@@ -390,6 +390,151 @@ select @va;
 select * from test_trigger_src_tbl;
 select * from test_trigger_des_tbl;
 
+--@var retest 
+--select
+select @a1:=cast(1 as int2);
+select @a2:=cast(2 as int4);
+select @a3:=cast(3 as int8);
+select @a4:=cast(4 as number);
+select @a5:=cast(5.5 as numeric);
+select @a6:=cast(6.76 as number(5));
+select @a7:=cast(0.54 as number(3,3));
+select @a8:=cast(8.0 as number(4,1));
+select @a9:=cast(9.66 as float4);
+select @a10:=cast(10.33 as float8);
+select @a11:=cast(11.2 as real);
+select @a1,@a2,@a3,@a4,@a5,@a6,@a7,@a8,@a9,@a10,@a11;
+
+--select
+select @a1:=cast(1 as char);
+select @a2:=cast(2 as varchar);
+select @a3:=cast(3 as clob);
+select @a4:=cast(4 as text);
+select @a5:=cast(5.5 as name);
+select @a6:=cast(6.76 as nchar);
+select @a7:=cast(7.54 as char(4));
+select @a8:=cast(8.0 as nchar(4));
+select @a9:=cast(9.66 as varchar(4));
+select @a10:=cast(10.33 as varchar2(4));
+select @a11:=cast(11.2 as nvarchar2(4));
+select @a1,@a2,@a3,@a4,@a5,@a6,@a7,@a8,@a9,@a10,@a11;
+
+--select
+select @a1:=cast('2012-12-12' as date);
+select @a2:=cast('10:25:32' as time);
+select @a3:=cast('2023-01-22' as timestamp);
+select @a4:=cast('2003-04-12 04:05:06' as smalldatetime);
+select @a5:=cast(INTERVAL '3' year as interval year);
+select @a6:=cast(INTERVAL '3' DAY as interval day to second);
+select @a7:=cast('90' as reltime);
+select @a1,@a2,@a3,@a4,@a5,@a6,@a7;
+
+
+--select
+select @a1:='[1,2,3]';
+select @a2:='[1,[2,4,6],3]';
+select @a3:='[1,{"aa":"ss","bb":4},3]';
+select @a4:='{"aa":"ss","bb":4}';
+select @a5:='{"aa":"ss","bb":4,"cc":{"dd":9}}';
+select @a6:='{"aa":[2,3,4],"bb":4}';
+select @a1,@a2,@a3,@a4,@a5,@a6;
+
+--外表
+create table tt_1130949(a1 text PRIMARY KEY);
+insert into tt_1130949 values('d'),('r'),('i'),('j');
+--建表
+create table tab_1130949(a1 int not null,a2 char(8) unique,a3 text primary key,a4 date default '2023-02-03',a5 varchar(16) check(a5 is not null),a6 text REFERENCES tt_1130949(a1));
+--index
+create index on tab_1130949(a1);
+create index on tab_1130949 using btree(a2);
+create index on tab_1130949 using gin(to_tsvector('ngram', a4));
+--insert
+insert into tab_1130949 values(1,'a','b','2012-12-14','c','d');
+insert into tab_1130949 values(2,'q','w','2013-12-14','e','r');
+insert into tab_1130949 values(3,'t','y','2014-12-14','u','i');
+insert into tab_1130949 values(4,'f','g','2015-12-14','h','j');
+
+--select 变量
+select @b1:=a1 from tab_1130949;
+select @b2:=a2 from tab_1130949;
+select @b3:=a3 from tab_1130949;
+select @b4:=a4 from tab_1130949;
+select @b5:=a5 from tab_1130949;
+select @b6:=a6 from tab_1130949;
+select @b1,@b2,@b3,@b4,@b5,@b6;
+
+
+drop table if exists tt_1130949 cascade;
+
+drop table if exists tab_1130956 cascade;
+
+--建表
+create table tab_1130965(a1 int,a2 int);
+--插入数据
+insert into tab_1130965 values(1,1),(2,3),(3,2),(4,1);
+
+--select
+--表字段与常量
+select (@bq1:=case when tab_1130965.a1<3 then tab_1130965.a1 +3 else tab_1130965.a1 end) from tab_1130965;
+--表字段与表字段
+select (@bq2:=case when tab_1130965.a1<tab_1130965.a2 then tab_1130965.a1 else tab_1130965.a2 end) from tab_1130965;
+--表字段与变量
+set @asd1:=5;
+select (@bq3:=case when tab_1130965.a1< @asd1 then tab_1130965.a1 else @asd1 end) from tab_1130965;
+--变量与变量
+set @asd2:=3;
+select (@bq4:=case when @asd1> @asd2 then @asd2 else @asd1 end);
+--变量与常量
+set @asd2:=2;
+select (@bq5:=case when @asd1>3 then @asd2 else @asd1 end);
+select @bq1,@bq2,@bq3,@bq4,@bq5;
+
+--创建函数
+create or replace function fun_1131007(b1 in int,b2 in int,b3 out int)return int
+as
+begin
+select @bb:=b1>b2 into b3;
+raise notice '%',b3;
+return @bb;
+end;
+/
+
+select fun_1131007(1,2);
+
+--建表
+create table tab_1131021(id int,aa char(8));
+insert into tab_1131021 values(1,'name');
+--select
+set @a_1131021:=1;
+select @a_1131021:=@a_1131021+id from tab_1131021;
+select @a_1131021:=@a_1131021+aa from tab_1131021;--报错
+
+drop table if exists tab_1131021 cascade;
+
+--建表
+create table tab_1131027(id int,aa char(8));
+insert into tab_1131027 values(1,'name'),(2,'ss'),(3,'dd');
+
+--select
+select @a_1131027:=min(id) from tab_1131027;
+select @a_1131027:=max(id) from tab_1131027;
+select @a_1131027:=sum(id) from tab_1131027;
+select @a_1131027:=avg(id) from tab_1131027;
+select @a_1131027:=count(id) from tab_1131027;
+
+drop table if exists tab_1131027 cascade;
+
+--select
+select @a_1131028:=cast('x' as char(4));
+select @a_1131028:=cast('x' as varchar(4));
+select @a_1131028:=cast('x' as nchar(4));
+select @a_1131028:=cast('x' as varchar2(4));
+select @a_1131028:=cast('x' as text);
+select @a_1131028:=cast(2 as int);
+select @a_1131028:=cast(2 as number);
+
+
+
 set enable_set_variable_b_format = 0;
 select @var_t_1 := 2;
 

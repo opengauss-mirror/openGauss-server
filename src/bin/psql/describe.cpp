@@ -13,13 +13,14 @@
  */
 #include "settings.h"
 #include "postgres_fe.h"
-
 #include <ctype.h>
 
 #include "catalog/pg_class.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_default_acl.h"
 #include "catalog/pg_attrdef.h"
+#include "catalog/pg_collation.h"
+#include "securec.h"
 #include "common.h"
 #include "describe.h"
 #include "dumputils.h"
@@ -1264,6 +1265,134 @@ static void PrintTableSliceInfo(char relKind, const char* distType, const char* 
     return;
 }
 
+uint32 GetVersionNum()
+{
+    PQExpBufferData query;
+    initPQExpBuffer(&query);
+    PGresult* result = NULL;
+    int tuples = 0;
+    uint32 versionNum = 0;
+
+    appendPQExpBuffer(&query, "select pg_catalog.working_version_num()");
+    result = PSQLexec(query.data, false);
+    tuples = PQntuples(result);
+    if (tuples > 0)
+        versionNum = atooid(PQgetvalue(result, 0, 0));
+
+    PQclear(result);
+    termPQExpBuffer(&query);
+
+    return versionNum;
+}
+
+bool PartkeyexprIsNull(const char* relationname, bool isSubPart)
+{
+    PQExpBufferData partkeyexpr;
+    PGresult* partkeyexpr_res = NULL;
+    int tuples = 0;
+    bool partkeyexprIsNull = true;
+    uint32 versionNum = GetVersionNum();
+    if (versionNum < 92836)
+        return partkeyexprIsNull;
+
+    initPQExpBuffer(&partkeyexpr);
+    if (!isSubPart)
+        appendPQExpBuffer(&partkeyexpr,
+            "select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = \'%s\'));",
+            relationname);
+    else
+        appendPQExpBuffer(&partkeyexpr,
+            "select distinct partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = \'%s\'))",
+            relationname);
+    partkeyexpr_res = PSQLexec(partkeyexpr.data, false);
+    tuples = PQntuples(partkeyexpr_res);
+    char* partkeyexpr_buf = NULL;
+    if (tuples > 0)
+        partkeyexpr_buf = PQgetvalue(partkeyexpr_res, 0, 0);
+    if (partkeyexpr_buf && strcmp(partkeyexpr_buf, "") != 0)
+        partkeyexprIsNull = false;
+    PQclear(partkeyexpr_res);
+    termPQExpBuffer(&partkeyexpr);
+    return partkeyexprIsNull;
+}
+
+bool GetPartkeyexprSrc(bool isSubPart, const char* schemaname, const char* relationname, PQExpBuffer result_buf)
+{
+    PQExpBufferData buf;
+    initPQExpBuffer(&buf);
+    PGresult* result = NULL;
+    int tuples = 0;
+    printfPQExpBuffer(&buf, "select pg_get_tabledef(\'\"%s\".\"%s\"\');", schemaname, relationname);
+    result = PSQLexec(buf.data, false);
+    tuples = PQntuples(result);
+
+    char* tabledef = NULL;
+    if (tuples > 0)
+        tabledef = PQgetvalue(result, 0, 0);
+    if (!tabledef) {
+        PQclear(result);
+        termPQExpBuffer(&buf);
+        return false;
+    }
+
+    char* start = NULL;
+    bool success = true;
+    if (isSubPart) {
+        start = strstr(tabledef, "SUBPARTITION BY");
+        if (!start) {
+            psql_error("Wrong table description: %s. The result is from SQL %s.", tabledef, buf.data);
+            success = false;
+        }
+        start += 16;
+    } else {
+        start = strstr(tabledef, "PARTITION BY");
+        if (!start) {
+            psql_error("Wrong table description: %s. The result is from SQL %s.", tabledef, buf.data);
+            success = false;
+        }
+        start += 13;
+    }
+
+    if (!success) {
+        PQclear(result);
+        termPQExpBuffer(&buf);
+        return false;
+    }
+
+    char* pos = strchr(start, '(');
+    if (!pos) {
+        psql_error("Wrong table description: %s. The result is from SQL %s.", tabledef, buf.data);
+        PQclear(result);
+        termPQExpBuffer(&buf);
+        return false;
+    }
+
+    char* i = strchr(start, ')');
+    char* j = strchr(pos + 1, '(');
+    size_t icount = 0;
+    size_t jcount = 0;
+    while (j && j < i) {
+        j++;
+        j = strchr(j, '(');
+        jcount++;
+    }
+    while (i && icount < jcount) {
+        i++;
+        i = strchr(i, ')');
+        icount++;
+    }
+    if (!i || (i < pos + 1)) {
+        psql_error("Wrong table description: %s. The result is from SQL %s.", tabledef, buf.data);
+        PQclear(result);
+        termPQExpBuffer(&buf);
+        return false;
+    }
+    appendBinaryPQExpBuffer(result_buf, pos + 1, i - pos - 1);
+
+    PQclear(result);
+    termPQExpBuffer(&buf);
+    return true;
+}
 
 /*
  * describeOneTableDetails (for \d)
@@ -1743,13 +1872,41 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             if (!PQgetisnull(res, i, 6)) {
                 if (tmpbuf.len > 0)
                     appendPQExpBufferStr(&tmpbuf, " ");
-                appendPQExpBuffer(&tmpbuf, _("collate %s"), PQgetvalue(res, i, 6));
+                char* collate = PQgetvalue(res, i, 6);
+                PQExpBufferData charsetbuf;
+                initPQExpBuffer(&charsetbuf);
+                appendPQExpBuffer(&charsetbuf, _("select oid,collencoding from pg_collation where collname = '%s';"), collate);
+                PGresult* charset_res = PSQLexec(charsetbuf.data, false);
+                int collid = atoi(PQgetvalue(charset_res, 0, 0));
+                if (COLLATION_IN_B_FORMAT(collid)) {
+                    int charset = atoi(PQgetvalue(charset_res, 0, 1));
+                    const char* encoding = pg_encoding_to_char(charset);
+                    appendPQExpBuffer(&tmpbuf, _("character set %s collate %s"), encoding, collate);
+                } else {
+                    appendPQExpBuffer(&tmpbuf, _("collate %s"), collate);
+                }
+                termPQExpBuffer(&charsetbuf);
+                PQclear(charset_res);
             }
         } else {
             if (!PQgetisnull(res, i, 5)) {
                 if (tmpbuf.len > 0)
                     appendPQExpBufferStr(&tmpbuf, " ");
-                appendPQExpBuffer(&tmpbuf, _("collate %s"), PQgetvalue(res, i, 5));
+                char* collate = PQgetvalue(res, i, 5);
+                PQExpBufferData charsetbuf;
+                initPQExpBuffer(&charsetbuf);
+                appendPQExpBuffer(&charsetbuf, _("select oid,collencoding from pg_collation where collname = '%s';"), collate);
+                PGresult* charset_res = PSQLexec(charsetbuf.data, false);
+                int collid = atoi(PQgetvalue(charset_res, 0, 0));
+                if (COLLATION_IN_B_FORMAT(collid)) {
+                    int charset = atoi(PQgetvalue(charset_res, 0, 1));
+                    const char* encoding = pg_encoding_to_char(charset);
+                    appendPQExpBuffer(&tmpbuf, _("character set %s collate %s"), encoding, collate);
+                } else {
+                    appendPQExpBuffer(&tmpbuf, _("collate %s"), collate);
+                }
+                termPQExpBuffer(&charsetbuf);
+                PQclear(charset_res);
             }
         }
 
@@ -2712,30 +2869,38 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             else if (strcmp(partition_type, "h") == 0)
                 printfPQExpBuffer(&tmp_part_buf, "Partition By HASH(");
             /* 3. Get partition key name through partition key postition and pg_attribute. */
-            printfPQExpBuffer(&buf,
-                "SELECT attname\n"
-                "FROM pg_attribute\n"
-                "WHERE attrelid = '%s' AND attnum > 0 order by attnum",
-                oid);
+            bool partkeyexprIsNull = PartkeyexprIsNull(relationname, false);
+            if (!partkeyexprIsNull) {
+                bool success = GetPartkeyexprSrc(false, schemaname, relationname, &tmp_part_buf);
+                if (!success)
+                    goto error_return;
+            } else {
+                printfPQExpBuffer(&buf,
+                    "SELECT attname\n"
+                    "FROM pg_attribute\n"
+                    "WHERE attrelid = '%s' AND attnum > 0 order by attnum",
+                    oid);
 
-            tmp_result = PSQLexec(buf.data, false);
-            if (tmp_result == NULL)
-                goto error_return;
+                tmp_result = PSQLexec(buf.data, false);
+                if (tmp_result == NULL)
+                    goto error_return;
 
-            key_position = strtok_s(partition_key, separator_symbol, &next_key);
-            while (key_position != NULL) {
-                /*
-                 * When there are multiple partition key, we use comma to separate them
-                 * and show.
-                 */
-                if (!first_flag) {
-                    appendPQExpBuffer(&tmp_part_buf, "%s", PQgetvalue(tmp_result, atoi(key_position) - 1, 0));
-                    first_flag = true;
-                } else {
-                    appendPQExpBuffer(&tmp_part_buf, ", %s", PQgetvalue(tmp_result, atoi(key_position) - 1, 0));
+                key_position = strtok_s(partition_key, separator_symbol, &next_key);
+                while (key_position != NULL) {
+                    /*
+                    * When there are multiple partition key, we use comma to separate them
+                    * and show.
+                    */
+                    if (!first_flag) {
+                        appendPQExpBuffer(&tmp_part_buf, "%s", PQgetvalue(tmp_result, atoi(key_position) - 1, 0));
+                        first_flag = true;
+                    } else {
+                        appendPQExpBuffer(&tmp_part_buf, ", %s", PQgetvalue(tmp_result, atoi(key_position) - 1, 0));
+                    }
+                    key_position = strtok_s(NULL, separator_symbol, &next_key);
                 }
-                key_position = strtok_s(NULL, separator_symbol, &next_key);
             }
+
             appendPQExpBuffer(&tmp_part_buf, ")");
 
             if (strcmp(partition_type, "i") == 0) {
@@ -2770,20 +2935,27 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                 } else {
                     goto error_return;
                 }
-
-                char* subpartition_key = PQgetvalue(partresult, 0, 0);
-                char* next_subkey = NULL;
-                char* subkey_position = strtok_s(subpartition_key, separator_symbol, &next_subkey);
-                first_flag = false;
-                while (subkey_position != NULL) {
-                    if (!first_flag) {
-                        appendPQExpBuffer(&tmp_part_buf, "%s", PQgetvalue(tmp_result, atoi(subkey_position) - 1, 0));
-                        first_flag = true;
-                    } else {
-                        appendPQExpBuffer(&tmp_part_buf, ", %s", PQgetvalue(tmp_result, atoi(subkey_position) - 1, 0));
+                bool subpartkeyexprIsNull = PartkeyexprIsNull(relationname, true);
+                if (!subpartkeyexprIsNull) {
+                    bool success = GetPartkeyexprSrc(true, schemaname, relationname, &tmp_part_buf);
+                    if (!success)
+                        goto error_return;
+                } else {
+                    char* subpartition_key = PQgetvalue(partresult, 0, 0);
+                    char* next_subkey = NULL;
+                    char* subkey_position = strtok_s(subpartition_key, separator_symbol, &next_subkey);
+                    first_flag = false;
+                    while (subkey_position != NULL) {
+                        if (!first_flag) {
+                            appendPQExpBuffer(&tmp_part_buf, "%s", PQgetvalue(tmp_result, atoi(subkey_position) - 1, 0));
+                            first_flag = true;
+                        } else {
+                            appendPQExpBuffer(&tmp_part_buf, ", %s", PQgetvalue(tmp_result, atoi(subkey_position) - 1, 0));
+                        }
+                        subkey_position = strtok_s(NULL, separator_symbol, &next_subkey);
                     }
-                    subkey_position = strtok_s(NULL, separator_symbol, &next_subkey);
                 }
+
                 appendPQExpBuffer(&tmp_part_buf, ")");
             }
 
@@ -2972,6 +3144,31 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
         printfPQExpBuffer(&buf, "%s: %s", t, tableinfo.reloptions);
         printTableAddFooter(&cont, buf.data);
+
+        char* p = strstr(tableinfo.reloptions, "collate=");
+        if (p != NULL) {
+            char coll_str[B_FORMAT_COLLATION_STR_LEN + 1] = {0};
+            errno_t rc = memcpy_s(coll_str, sizeof(coll_str), p + strlen("collate="), B_FORMAT_COLLATION_STR_LEN);
+            securec_check_c(rc, "\0", "\0");
+            int collid = atoi(coll_str);
+            if (COLLATION_IN_B_FORMAT(collid)) {
+                PQExpBufferData charsetbuf;
+                initPQExpBuffer(&charsetbuf);
+                appendPQExpBuffer(&charsetbuf, _("select collname,collencoding from pg_collation where oid = %s;"), coll_str);
+                PGresult* charset_res = PSQLexec(charsetbuf.data, false);
+
+                char* collname = PQgetvalue(charset_res, 0, 0);
+                int charset = atoi(PQgetvalue(charset_res, 0, 1));
+                const char* encoding = pg_encoding_to_char(charset);
+
+                resetPQExpBuffer(&charsetbuf);
+                appendPQExpBuffer(&charsetbuf, _("Character Set: %s\nCollate: %s"), encoding, collname);
+                printTableAddFooter(&cont, charsetbuf.data);
+
+                termPQExpBuffer(&charsetbuf);
+                PQclear(charset_res);
+            }
+        }
     }
 
     /* if rel in blockchain schema */

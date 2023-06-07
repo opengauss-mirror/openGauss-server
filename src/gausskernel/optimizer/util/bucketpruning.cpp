@@ -274,8 +274,9 @@ static BucketPruningResult* notPruningResult(BucketPruningResult* a, BucketPruni
  * @out RelOptInfo: the bucketinfo will set to rel->bucketInfo
  * @in  RangeTblEntry: the user might have selected some buckets from sql stmt
  */
-void set_rel_bucketinfo(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte)
+void FORCE_INLINE set_rel_bucketinfo(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     /* add the bucketinfo to the rel */
     if (rte->isbucket) {
         /* the user select the buckets from sql stmt */
@@ -289,7 +290,9 @@ void set_rel_bucketinfo(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte)
         /* the relation does not have underlying buckets */
         rel->bucketInfo = NULL;
     }
-
+#else
+    rel->bucketInfo = NULL;
+#endif
     return;
 }
 

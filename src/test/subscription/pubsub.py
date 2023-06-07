@@ -93,7 +93,7 @@ class Pterodb():
 	def __modify_conf_port(self, conf_file, port):
 		file_handler = open(conf_file,"a")
 
-		string = "port = " + str(port) + "\n"
+		string = "\n" + "port = " + str(port) + "\n"
 		file_handler.write(string)
 
 		file_handler.close()

@@ -948,7 +948,7 @@ ScalarToDatum GetTransferFuncByTypeOid(Oid attTypeOid)
             return convertScalarToDatumT<UNKNOWNOID>;
         }
         default: {
-            return convertScalarToDatumT<-2>;
+            return convertScalarToDatumT<((Oid)-2)>;
         }
     }
 }

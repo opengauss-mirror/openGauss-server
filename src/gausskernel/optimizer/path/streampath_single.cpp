@@ -302,10 +302,23 @@ const bool JoinPathGen::setJoinDistributeKeys(JoinPath* joinpath, List* desired_
     bool is_roundrobin_inner = (inner_path->locator_type == LOCATOR_TYPE_RROBIN);
     bool is_roundrobin_outer = (outer_path->locator_type == LOCATOR_TYPE_RROBIN);
 
+    bool is_replicate_inner = is_replicated_path(inner_path);
+    bool is_replicate_outer = is_replicated_path(outer_path);
+
     bool is_path_valid = true;
 
     if (is_roundrobin_inner || is_roundrobin_outer) {
         joinpath->path.distribute_keys = NIL;
+    } else if (is_replicate_outer && is_replicate_inner) {
+        joinpath->path.distribute_keys = NIL;
+    } else if (is_replicate_outer || is_replicate_inner) {
+        if (is_replicate_outer) {
+            joinpath->path.distribute_keys = inner_path->distribute_keys;
+            joinpath->path.rangelistOid = inner_path->rangelistOid;
+        } else {
+            joinpath->path.distribute_keys = outer_path->distribute_keys;
+            joinpath->path.rangelistOid = outer_path->rangelistOid;
+        }
     } else if (joinpath->path.dop > 1) {
         if (m_jointype != JOIN_FULL) {
             joinpath->path.distribute_keys = locate_distribute_key(

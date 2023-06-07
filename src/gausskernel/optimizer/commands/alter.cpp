@@ -37,6 +37,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_largeobject.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_publication.h"
 #include "catalog/pg_subscription.h"
 #include "catalog/pg_synonym.h"
 #include "commands/alter.h"
@@ -87,6 +88,12 @@ report_name_conflict(Oid classId, const char *name)
             break;
         case LanguageRelationId:
             msgfmt = gettext_noop("language \"%s\" already exists");
+            break;
+        case PublicationRelationId:
+            msgfmt = gettext_noop("publication \"%s\" already exists");
+            break;
+        case SubscriptionRelationId:
+            msgfmt = gettext_noop("subscription \"%s\" already exists");
             break;
         default:
             elog(ERROR, "unsupported object class %u", classId);
@@ -249,6 +256,14 @@ AlterObjectRename_internal(Relation rel, Oid objectId, const char *new_name)
                 if (!pg_ts_config_ownercheck(objectId, userId))
                     aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_TSCONFIGURATION, old_name);
                 break;    
+            case OBJECT_PUBLICATION:
+                if (!pg_publication_ownercheck(objectId, userId))
+                    aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PUBLICATION, old_name);
+                break;
+            case OBJECT_SUBSCRIPTION:
+                if (!pg_subscription_ownercheck(objectId, userId))
+                    aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_SUBSCRIPTION, old_name);
+                break;
             default: {
                     ereport(ERROR,
                             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

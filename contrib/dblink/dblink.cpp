@@ -55,10 +55,9 @@
 #include "access/heapam.h"
 #include "commands/extension.h"
 #include "dblink.h"
+#include "storage/ipc.h"
 
 PG_MODULE_MAGIC;
-
-
 
 /*
  * Internal declarations
@@ -106,7 +105,7 @@ static bool UseODBCLinker(char* connstr);
 #define REMOTE_CONN_HASH (get_session_context()->remoteConnHash)
 /* initial number of connection hashes */
 #define NUMCONN 16
-#define NAX_ERR_MSG_LEN 1000
+#define MAX_ERR_MSG_LEN 1000
 #define MAX_BUF_LEN 100000
 #define MAX_DRIVERNAME_LEN 50
 #define DBLINK_NOTIFY_COLS 3
@@ -158,8 +157,8 @@ static bool UseODBCLinker(char* connstr);
                 PQLinker* plinker = New(SESS_GET_MEM_CXT_GROUP                          \
                     (MEMORY_CONTEXT_COMMUNICATION)) PQLinker(connstr);                  \
                 linker = plinker;                                                       \
-                freeconn = true;                                                        \
             }                                                                           \
+            freeconn = true;                                                            \
         }                                                                               \
     } while (0)
 
@@ -183,6 +182,26 @@ static bool UseODBCLinker(char* connstr);
         }                                                                                             \
     } while (0)
 
+static void DblinkQuitAndClean(int code, Datum arg)
+{
+    if (PCONN->linker != NULL) {
+        PCONN->linker->finish();
+        PCONN->linker = NULL;
+    }
+    
+    HASH_SEQ_STATUS status;
+    remoteConnHashEnt* hentry = NULL;
+
+    if (REMOTE_CONN_HASH) {
+        hash_seq_init(&status, REMOTE_CONN_HASH);
+        while ((hentry = (remoteConnHashEnt*)hash_seq_search(&status)) != NULL) {
+            hentry->rconn->linker->finish();
+        }
+        hash_destroy(REMOTE_CONN_HASH);
+        REMOTE_CONN_HASH = NULL;
+    }
+}
+
 void set_extension_index(uint32 index)
 {
     dblink_index = index;
@@ -198,6 +217,7 @@ void init_session_vars(void)
 
     psc->pconn = NULL;
     psc->remoteConnHash = NULL;
+    psc->needFree = TRUE;
 }
 
 dblink_session_context* get_session_context()
@@ -206,6 +226,15 @@ dblink_session_context* get_session_context()
         init_session_vars();
     }
     return (dblink_session_context*)u_sess->attr.attr_common.extension_session_vars_array[dblink_index];
+}
+
+Linker::Linker()
+{
+    if (ENABLE_THREAD_POOL) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("dblink not support in thread pool")));
+    }
 }
 
 PQLinker::PQLinker(char* connstr)
@@ -541,7 +570,12 @@ void PQLinker::getNotify(ReturnSetInfo* rsinfo)
 
 ODBCLinker::ODBCLinker(char* connstr_or_name)
 {
+    this->msg = (char*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP
+            (MEMORY_CONTEXT_COMMUNICATION), sizeof(char*) * MAX_ERR_MSG_LEN);
+    errno_t rc = strcpy_s(this->msg, MAX_ERR_MSG_LEN, "no error message");
+    securec_check(rc, "\0", "\0");
     SQLINTEGER error = 0;
+
     error = SQLAllocHandle(SQL_HANDLE_ENV,SQL_NULL_HANDLE, &this->envHandle);
     if ((error != SQL_SUCCESS) && (error != SQL_SUCCESS_WITH_INFO)) {
         ereport(ERROR, 
@@ -568,12 +602,12 @@ ODBCLinker::ODBCLinker(char* connstr_or_name)
     /* atuo commit is the default value */
     error = SQLConnect(this->connHandle, linfo.drivername, SQL_NTS,
         linfo.username, SQL_NTS,  linfo.password, SQL_NTS);
-    errno_t rc = memset_s(connstr_or_name, len, 0, len);
+    rc = memset_s(connstr_or_name, len, 0, len);
     securec_check(rc, "\0", "\0");
 
     if ((error != SQL_SUCCESS) && (error != SQL_SUCCESS_WITH_INFO)) {
-        SQLCHAR sqlcode[NAX_ERR_MSG_LEN];
-        SQLGetDiagField(SQL_HANDLE_DBC, this->connHandle, 1, SQL_DIAG_MESSAGE_TEXT, &sqlcode, NAX_ERR_MSG_LEN, NULL);
+        SQLCHAR sqlcode[MAX_ERR_MSG_LEN];
+        SQLGetDiagField(SQL_HANDLE_DBC, this->connHandle, 1, SQL_DIAG_MESSAGE_TEXT, &sqlcode, MAX_ERR_MSG_LEN, NULL);
         SQLFreeHandle(SQL_HANDLE_DBC, this->connHandle);
         SQLFreeHandle(SQL_HANDLE_ENV, this->envHandle);
         ereport(ERROR,
@@ -621,23 +655,17 @@ text* ODBCLinker::exec(char* conname, const char* sql, bool fail)
     } 
     this->stmt = stmt;
     if ((error != SQL_SUCCESS) && (error != SQL_SUCCESS_WITH_INFO)) {
-        char* msg = this->errorMsg();
+        SQLError(this->envHandle, this->connHandle, this->stmt, NULL, NULL, (SQLCHAR*)this->msg, MAX_ERR_MSG_LEN, NULL);
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Error exec\n%s", msg)));
+                errmsg("Error exec\n%s", this->msg)));
     }
-
     return cstring_to_text("OK");
 }
 
 char* ODBCLinker::errorMsg()
 {
-    if (this->stmt == NULL) {
-        return NULL;
-    }
-    char* msg = (char*)palloc(sizeof(char) * NAX_ERR_MSG_LEN);
-    SQLGetDiagRec(SQL_HANDLE_STMT, this->stmt, 1, NULL, NULL, (SQLCHAR*)msg, NAX_ERR_MSG_LEN, NULL);
-    return msg;
+    return this->msg;
 }
 
 int ODBCLinker::isBusy()
@@ -681,12 +709,11 @@ int ODBCLinker::sendQuery(char *sql)
     } 
     this->stmt = stmt;
     if ((error != SQL_SUCCESS) && (error != SQL_SUCCESS_WITH_INFO)) {
-        char* msg = this->errorMsg();
+        SQLError(this->envHandle, this->connHandle, this->stmt, NULL, NULL, (SQLCHAR*)this->msg, MAX_ERR_MSG_LEN, NULL);
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Error exec\n%s", msg)));
+                errmsg("Error exec\n%s", this->msg)));
     }
-
     return 1;
 }
 
@@ -705,14 +732,10 @@ char* ODBCLinker::close(char* conname, char* sql, bool fail)
 void ODBCLinker::getResult(char* conname, FunctionCallInfo fcinfo, char* sql, bool fail)
 {
     prepTuplestoreResult(fcinfo);
-    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
     storeInfo sinfo;
     bool isFirst = true;
     SQLINTEGER error = 0;
     SQLSMALLINT nfields = 0;
-
-    /* prepTuplestoreResult must have been called previously */
-    Assert(rsinfo->returnMode == SFRM_Materialize);
 
     /* initialize storeInfo to empty */
     (void)memset_s(&sinfo, sizeof(sinfo), 0, sizeof(sinfo));
@@ -801,6 +824,11 @@ Datum dblink_connect(PG_FUNCTION_ARGS)
     
     DBLINK_INIT;
 
+    if (get_session_context()->needFree) {
+        on_proc_exit(DblinkQuitAndClean, 0);
+        get_session_context()->needFree = FALSE;
+    }
+
     if (PG_NARGS() == 2) {
         conname_or_str = text_to_cstring(PG_GETARG_TEXT_PP(1));
         conname = text_to_cstring(PG_GETARG_TEXT_PP(0));
@@ -830,7 +858,7 @@ Datum dblink_connect(PG_FUNCTION_ARGS)
             if (PCONN->linker) {
                 PCONN->linker->finish();
             }
-            PCONN->linker = olinker;  
+            PCONN->linker = olinker;
         }
     } else {
         /* first check for valid foreign data server */
@@ -850,7 +878,7 @@ Datum dblink_connect(PG_FUNCTION_ARGS)
             if (PCONN->linker) {
                 PCONN->linker->finish();
             }
-            PCONN->linker = plinker;       
+            PCONN->linker = plinker;      
         }
     }
     PG_RETURN_TEXT_P(cstring_to_text("OK"));
@@ -1179,7 +1207,7 @@ static Datum dblink_record_internal(FunctionCallInfo fcinfo, bool is_async)
     PG_CATCH();
     {
         /* if needed, close the connection to the database */
-        if (freeconn) {
+        if (freeconn && linker) {
             linker->finish();
         }
 
@@ -1188,7 +1216,7 @@ static Datum dblink_record_internal(FunctionCallInfo fcinfo, bool is_async)
     PG_END_TRY();
 
     /* if needed, close the connection to the database */
-    if (freeconn) {
+    if (freeconn && linker) {
         linker->finish();
     }
 
@@ -1458,12 +1486,13 @@ static void storeRow(storeInfo* sinfo, PGresult* res, bool first)
      */
     oldcontext = MemoryContextSwitchTo(sinfo->tmpcontext);
 
-     /* Should have a single-row result if we get here */
-    Assert(PQntuples(res) == 1);
-
     /* Done if empty resultset */
     if (PQntuples(res) == 0)
-            return;
+        return;
+
+     /* Should have a single-row result if we get here */
+    Assert(PQntuples(res) == 1);
+    
     /*
      * Fill cstrs with null-terminated strings of column values.
      */
@@ -1642,15 +1671,11 @@ Datum dblink_exec(PG_FUNCTION_ARGS)
         }
         
         sql_cmd_status = linker->exec(conname, sql, fail);
-
-        if (freeconn) {
-            linker->finish();
-        }
     }
     PG_CATCH();
     {
         /* if needed, close the connection to the database */
-        if (freeconn) {
+        if (freeconn && linker) {
             linker->finish();
         }
         PG_RE_THROW();
@@ -1658,7 +1683,7 @@ Datum dblink_exec(PG_FUNCTION_ARGS)
     PG_END_TRY();
 
     /* if needed, close the connection to the database */
-    if (freeconn) {
+    if (freeconn && linker) {
         linker->finish();
     }
 
@@ -2949,14 +2974,14 @@ static void GetDrivername(char* connstr_or_name, LinkInfo* linfo)
     char* p;
     p = strtok(connstr_or_name, " ");
     while(p != NULL) {
-        if(strstr(p,"drivername=")){
+        if(strstr(p, "drivername=")){
             linfo->drivername = (SQLCHAR*)(p + 11);
-        } else if(strstr(p,"user=")) {
+        } else if(strstr(p, "user=")) {
             linfo->username = (SQLCHAR*)(p + 5);
-        } else if(strstr(p,"password=")) {
+        } else if(strstr(p, "password=")) {
             linfo->password = (SQLCHAR*)(p + 9);
         }
-        p = strtok(NULL," ");
+        p = strtok(NULL, " ");
     }
 
     if (linfo->username == NULL || linfo->password == NULL) {
