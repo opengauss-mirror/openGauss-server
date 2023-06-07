@@ -49,6 +49,11 @@ extern volatile bool most_available_sync;
 #define GetWalsndSyncRepConfig(walsnder)  \
     (t_thrd.syncrep_cxt.SyncRepConfig[(walsnder)->sync_standby_group])
 
+#define IfIgnoreStandbyLsn(nowTime, lastTime) \
+    (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && \
+    u_sess->attr.attr_storage.ignore_standby_lsn_window > 0 && \
+    timestamptz_cmp_internal(nowTime, TimestampTzPlusMilliseconds(lastTime, \
+    u_sess->attr.attr_storage.ignore_standby_lsn_window)) >= 0)
 
 /*
  * SyncRepGetCandidateStandbys returns an array of these structs,
@@ -70,6 +75,10 @@ typedef struct SyncRepStandbyData
     /* This flag indicates whether this struct is about our own process */
     bool        is_me;
     bool        is_cross_cluster;
+    bool        receive_too_old;
+    bool        write_too_old;
+    bool        flush_too_old;
+    bool        apply_too_old;
 } SyncRepStandbyData;
 
 

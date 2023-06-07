@@ -107,7 +107,8 @@ static bool SyncRepQueueIsOrderedByLSN(int mode);
 static bool SyncPaxosQueueIsOrderedByLSN(void);
 #endif
 
-static int SyncRepGetSyncStandbysInGroup(SyncRepStandbyData** sync_standbys, int groupid, List** catchup_standbys);
+static int SyncRepGetSyncStandbysInGroup(SyncRepStandbyData** sync_standbys, int groupid, List** catchup_standbys,
+    int mode = SYNC_REP_NO_WAIT);
 
 static int	standby_priority_comparator(const void *a, const void *b);
 static inline void free_sync_standbys_list(List* sync_standbys);
@@ -866,7 +867,17 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
             break;
         }
     }
-    
+
+    SyncRepStandbyData *stby = NULL;
+    for(i = 0; !(*am_sync) && i < num_standbys; i++) {
+        /*
+         * there may be some hanging sync standby, so potential sync
+         * standby need to release waiters too.
+         */
+        stby = sync_standbys + i;
+        *am_sync = stby->receive_too_old || stby->write_too_old || stby->flush_too_old || stby->apply_too_old;
+    }
+
     /*
      * Quick exit if we are not managing a sync standby (or not check for check_am_sync is false)
      * or there are not enough synchronous standbys.
@@ -908,8 +919,15 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
                                 sync_standbys, num_standbys, i, t_thrd.syncrep_cxt.SyncRepConfig[i]->num_sync);
 
             }
-            
         }
+        /*
+         * deal with position is invalid when most available sync mode is on
+         * and all sync standbys don't update position over ignore_standby_lsn_window.
+         */
+        *writePtr = XLogRecPtrIsInvalid(*writePtr) ? GetXLogWriteRecPtr() : *writePtr;
+        *flushPtr = XLogRecPtrIsInvalid(*flushPtr) ? GetFlushRecPtr() : *flushPtr;
+        *receivePtr = XLogRecPtrIsInvalid(*receivePtr) ? *writePtr : *receivePtr;
+        *replayPtr = XLogRecPtrIsInvalid(*replayPtr) ? *flushPtr : *replayPtr;
     }
     pfree(sync_standbys);
     return true;
@@ -964,6 +982,41 @@ static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTi
 #endif
 
 /*
+ * Calculate the indicated position among sync standbys.
+ */
+static void SyncRepGetOldestSyncRecPtrByMode(XLogRecPtr* outPtr, SyncRepStandbyData* sync_standbys, int num_standbys,
+    int mode)
+{
+    int i;
+    SyncRepStandbyData* stby;
+    XLogRecPtr ptr;
+
+    /* Scan through all sync standbys and calculate the oldest positions. */
+    for(i = 0; i < num_standbys; i++) {
+        stby = sync_standbys + i;
+
+        switch (mode) {
+            case SYNC_REP_WAIT_RECEIVE:
+                ptr = stby->receive;
+                break;
+            case SYNC_REP_WAIT_WRITE:
+                ptr = stby->write;
+                break;
+            case SYNC_REP_WAIT_FLUSH:
+                ptr = stby->flush;
+                break;
+            case SYNC_REP_WAIT_APPLY:
+                ptr = stby->apply;
+                break;
+            default:
+                return;
+        }
+        if (XLogRecPtrIsInvalid(*outPtr) || !XLByteLE(*outPtr, ptr))
+            *outPtr = ptr;
+    }
+}
+
+/*
  * Calculate the oldest Write, Flush and Apply positions among sync standbys.
  */
 static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr,
@@ -975,6 +1028,10 @@ static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* write
     XLogRecPtr write;
     XLogRecPtr flush;
     XLogRecPtr apply;
+    bool receive_has_invalid = false;
+    bool write_has_invalid = false;
+    bool flush_has_invalid = false;
+    bool apply_has_invalid = false;
 
     /*
      * Scan through all sync standbys and calculate the oldest
@@ -985,21 +1042,60 @@ static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* write
         if(stby->sync_standby_group != groupid) {
             continue;
         }
-		
+
+        receive_has_invalid = receive_has_invalid || stby->receive_too_old;
+        write_has_invalid = write_has_invalid || stby->write_too_old;
+        flush_has_invalid = flush_has_invalid || stby->flush_too_old;
+        apply_has_invalid = apply_has_invalid || stby->apply_too_old;
+
         receive = stby->receive;
         write = stby->write;
         flush = stby->flush;
         apply = stby->apply;
 		
-        if (XLogRecPtrIsInvalid(*writePtr) || !XLByteLE(*writePtr, write))
+        if (!write_has_invalid && (XLogRecPtrIsInvalid(*writePtr) || !XLByteLE(*writePtr, write)))
             *writePtr = write;
-        if (XLogRecPtrIsInvalid(*flushPtr) || !XLByteLE(*flushPtr, flush))
+        if (!flush_has_invalid && (XLogRecPtrIsInvalid(*flushPtr) || !XLByteLE(*flushPtr, flush)))
             *flushPtr = flush;
-        if (XLogRecPtrIsInvalid(*receivePtr) || !XLByteLE(*receivePtr, receive))
+        if (!receive_has_invalid && (XLogRecPtrIsInvalid(*receivePtr) || !XLByteLE(*receivePtr, receive)))
             *receivePtr = receive;
-        if (XLogRecPtrIsInvalid(*replayPtr) || !XLByteLE(*replayPtr, apply))
+        if (!apply_has_invalid && (XLogRecPtrIsInvalid(*replayPtr) || !XLByteLE(*replayPtr, apply)))
             *replayPtr = apply;
     }
+
+    /*
+     * If any lsn point is invalid, reacquire sync standbys which have
+     * valid lsn porint and recompute.
+     */
+    SyncRepStandbyData* sync_standbys_tmp = (SyncRepStandbyData *)palloc(
+        g_instance.attr.attr_storage.max_wal_senders * sizeof(SyncRepStandbyData));
+    int num_standbys_tmp;
+
+    if (receive_has_invalid) {
+        Assert(XLogRecPtrIsInvalid(*receivePtr));
+        num_standbys_tmp = SyncRepGetSyncStandbysInGroup(&sync_standbys_tmp, groupid, NULL, SYNC_REP_WAIT_RECEIVE);
+        SyncRepGetOldestSyncRecPtrByMode(receivePtr, sync_standbys_tmp, num_standbys_tmp,
+                                         SYNC_REP_WAIT_RECEIVE);
+    }
+    if (write_has_invalid) {
+        Assert(XLogRecPtrIsInvalid(*writePtr));
+        num_standbys_tmp = SyncRepGetSyncStandbysInGroup(&sync_standbys_tmp, groupid, NULL, SYNC_REP_WAIT_WRITE);
+        SyncRepGetOldestSyncRecPtrByMode(writePtr, sync_standbys_tmp, num_standbys_tmp,
+                                         SYNC_REP_WAIT_WRITE);
+    }
+    if (flush_has_invalid) {
+        Assert(XLogRecPtrIsInvalid(*flushPtr));
+        num_standbys_tmp = SyncRepGetSyncStandbysInGroup(&sync_standbys_tmp, groupid, NULL, SYNC_REP_WAIT_FLUSH);
+        SyncRepGetOldestSyncRecPtrByMode(flushPtr, sync_standbys_tmp, num_standbys_tmp,
+                                         SYNC_REP_WAIT_FLUSH);
+    }
+    if (apply_has_invalid) {
+        Assert(XLogRecPtrIsInvalid(*replayPtr));
+        num_standbys_tmp = SyncRepGetSyncStandbysInGroup(&sync_standbys_tmp, groupid, NULL, SYNC_REP_WAIT_APPLY);
+        SyncRepGetOldestSyncRecPtrByMode(replayPtr, sync_standbys_tmp, num_standbys_tmp,
+                                         SYNC_REP_WAIT_APPLY);
+    }
+    pfree(sync_standbys_tmp);
 }
 
 /*
@@ -1016,6 +1112,7 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
     XLogRecPtr *flush_array = NULL;
     XLogRecPtr* apply_array = NULL;
     int group_len;
+    int receive_valid_num, write_valid_num, flush_valid_num, apply_valid_num;
     int i;
     SyncRepStandbyData* stby;
 
@@ -1036,6 +1133,10 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
     apply_array = (XLogRecPtr*)palloc(sizeof(XLogRecPtr) * group_len);
 
     i = 0;
+    receive_valid_num = 0;
+    write_valid_num = 0;
+    flush_valid_num = 0;
+    apply_valid_num = 0;
     foreach(cell, stby_list) {
         stby = sync_standbys + lfirst_int(cell);
 
@@ -1043,10 +1144,30 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
             continue;
         }
 
-        receive_array[i] = stby->receive;
-        write_array[i] = stby->write;
-        flush_array[i] = stby->flush;
-        apply_array[i] = stby->apply;
+        if (stby->receive_too_old) {
+            receive_array[i] = InvalidXLogRecPtr;
+        } else {
+            receive_array[i] = stby->receive;
+            receive_valid_num++;
+        }
+        if (stby->write_too_old) {
+            write_array[i] = InvalidXLogRecPtr;
+        } else {
+            write_array[i] = stby->write;
+            write_valid_num++;
+        }
+        if (stby->flush_too_old) {
+            flush_array[i] = InvalidXLogRecPtr;
+        } else {
+            flush_array[i] = stby->flush;
+            flush_valid_num++;
+        }
+        if (stby->apply_too_old) {
+            apply_array[i] = InvalidXLogRecPtr;
+        } else {
+            apply_array[i] = stby->apply;
+            apply_valid_num++;
+        }
 
         i++;
     }
@@ -1074,6 +1195,19 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
     if (XLogRecPtrIsInvalid(*replayPtr) || XLByteLE(apply_array[nth - 1], *replayPtr))
         *replayPtr = apply_array[nth - 1];
 
+    /* If positions are remain Invalid, return oldest valid one if posible */
+    if (XLogRecPtrIsInvalid(*receivePtr) && receive_valid_num > 0) {
+        *receivePtr = receive_array[receive_valid_num - 1];
+    }
+    if (XLogRecPtrIsInvalid(*writePtr) && write_valid_num > 0) {
+        *writePtr = write_array[write_valid_num - 1];
+    }
+    if (XLogRecPtrIsInvalid(*flushPtr) && flush_valid_num > 0) {
+        *flushPtr = flush_array[flush_valid_num - 1];
+    }
+    if (XLogRecPtrIsInvalid(*replayPtr) && apply_valid_num > 0) {
+        *replayPtr = apply_array[apply_valid_num - 1];
+    }
 
     list_free(stby_list);
     
@@ -1411,13 +1545,14 @@ int SyncRepGetSyncStandbys(SyncRepStandbyData** sync_standbys, List** catchup_st
     return num_sync;
 }
 
-
-static int SyncRepGetSyncStandbysInGroup(SyncRepStandbyData** sync_standbys, int groupid, List** catchup_standbys)
+static int SyncRepGetSyncStandbysInGroup(SyncRepStandbyData** sync_standbys, int groupid, List** catchup_standbys,
+    int mode)
 {
     int i;
     int num_sync = 0; /* how many sync standbys in current group */
     volatile WalSnd *walsnd = NULL; /* Use volatile pointer to prevent code rearrangement */
     SyncRepStandbyData *stby = NULL;
+    TimestampTz now = GetCurrentTimestamp();
     
     /* state/peer_state/peer_role is not included in SyncRepStandbyData */
     WalSndState state;		
@@ -1441,6 +1576,10 @@ static int SyncRepGetSyncStandbysInGroup(SyncRepStandbyData** sync_standbys, int
         stby->sync_standby_priority = walsnd->sync_standby_priority;
         stby->sync_standby_group = walsnd->sync_standby_group;
         stby->is_cross_cluster = walsnd->is_cross_cluster;
+        stby->receive_too_old = IfIgnoreStandbyLsn(now, walsnd->lastReceiveChangeTime);
+        stby->write_too_old = IfIgnoreStandbyLsn(now, walsnd->lastWriteChangeTime);
+        stby->flush_too_old = IfIgnoreStandbyLsn(now, walsnd->lastFlushChangeTime);
+        stby->apply_too_old = IfIgnoreStandbyLsn(now, walsnd->lastApplyChangeTime);
         SpinLockRelease(&walsnd->mutex);
 
         /* Must be active */
@@ -1465,6 +1604,14 @@ static int SyncRepGetSyncStandbysInGroup(SyncRepStandbyData** sync_standbys, int
             continue;
 
         if (t_thrd.syncrep_cxt.SyncRepConfig[groupid]->syncrep_method == SYNC_REP_QUORUM && peer_role == STANDBY_CLUSTER_MODE) {
+            continue;
+        }
+
+        /* used in SyncRepGetOldestSyncRecPtr to skip standby with too old position. */
+        if ((mode == SYNC_REP_WAIT_RECEIVE && stby->receive_too_old) ||
+            (mode == SYNC_REP_WAIT_WRITE && stby->write_too_old) ||
+            (mode == SYNC_REP_WAIT_FLUSH && stby->flush_too_old) ||
+            (mode == SYNC_REP_WAIT_APPLY && stby->apply_too_old)) {
             continue;
         }
 
