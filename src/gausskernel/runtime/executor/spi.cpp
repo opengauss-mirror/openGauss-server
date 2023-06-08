@@ -1289,7 +1289,11 @@ int SPI_fnumber(TupleDesc tupdesc, const char *fname)
     Form_pg_attribute sys_att;
 
     for (res = 0; res < tupdesc->natts; res++) {
-        if (namestrcmp(&tupdesc->attrs[res].attname, fname) == 0) {
+        if (u_sess->attr.attr_sql.dolphin) {
+            if (namestrcasecmp(&tupdesc->attrs[res].attname, fname) == 0) {
+                return res + 1;
+            }
+        } else if (namestrcmp(&tupdesc->attrs[res].attname, fname) == 0) {
             return res + 1;
         }
     }
