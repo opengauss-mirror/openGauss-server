@@ -1553,6 +1553,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                  * allowed.  Set the visibility map bit as well so that we get
                  * back in sync.
                  */
+                MarkBufferDirty(buf);
                 visibilitymap_set(onerel, blkno, buf, InvalidXLogRecPtr, vmbuffer, visibility_cutoff_xid, false);
             }
         } else if (all_visible_according_to_vm && !PageIsAllVisible(page) &&

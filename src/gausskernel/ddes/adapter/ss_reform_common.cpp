@@ -448,3 +448,42 @@ void SSClearSegCache()
     HeapMemResetHash(t_thrd.storage_cxt.SegSpcCache, "Shared Seg Spc hash by request");
     LWLockRelease(ShmemIndexLock);
 }
+
+void SSStandbySetLibpqswConninfo()
+{
+    if (strlen(g_instance.dms_cxt.dmsInstAddr[g_instance.dms_cxt.SSReformerControl.primaryInstId]) == 0) {
+        ereport(WARNING, (errmsg("Failed to get ip of primary node!")));
+        return;
+    }
+
+    int replIdx = -1;
+    ReplConnInfo *replconninfo = NULL;
+
+    for (int i = 0; i < MAX_REPLNODE_NUM; ++i) {
+        replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        if (replconninfo == NULL) {
+            continue;
+        }
+
+        if (strcmp(replconninfo->remotehost,
+            g_instance.dms_cxt.dmsInstAddr[g_instance.dms_cxt.SSReformerControl.primaryInstId]) == 0) {
+            replIdx = i;
+            break;
+        }
+    }
+
+    if (replIdx == -1) {
+        ereport(WARNING, (errmsg("Failed to get replconninfo of primary node, check the replconninfo config!")));
+        return;
+    }
+
+    replconninfo = t_thrd.postmaster_cxt.ReplConnArray[replIdx];
+    errno_t rc = EOK;
+    rc = snprintf_s(g_instance.dms_cxt.conninfo, MAXCONNINFO, MAXCONNINFO - 1,
+        "host=%s port=%d localhost=%s localport=%d", replconninfo->remotehost, replconninfo->remoteport,
+        replconninfo->localhost, replconninfo->localport);
+    securec_check_ss(rc, "\0", "\0");
+    g_instance.dms_cxt.conninfo[MAXCONNINFO - 1] = '\0';
+
+    return;
+}

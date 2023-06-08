@@ -316,6 +316,9 @@ static void SharedInvalReserveBackendInit(bool sendOnly)
 
     /* Advertise assigned backend ID in t_thrd.proc */
     t_thrd.proc->backendId = t_thrd.proc_cxt.MyBackendId;
+    if (t_thrd.proc_cxt.MyPMChildSlot > 0) {
+        t_thrd.proc->backendSlot = t_thrd.proc_cxt.MyPMChildSlot;
+    }
 
     /* Fetch next local transaction ID into local memory */
     u_sess->storage_cxt.nextLocalTransactionId = stateP->nextLXID;
@@ -382,6 +385,9 @@ static void SharedInvalWorkSessionInit(bool sendOnly)
 
     /* Advertise assigned backend ID in t_thrd.proc */
     t_thrd.proc->backendId = t_thrd.proc_cxt.MyBackendId;
+    if (t_thrd.proc_cxt.MyPMChildSlot > 0) {
+        t_thrd.proc->backendSlot = t_thrd.proc_cxt.MyPMChildSlot;
+    }
 
     /* Fetch next local transaction ID into local memory */
     u_sess->storage_cxt.nextLocalTransactionId = stateP->nextLXID;

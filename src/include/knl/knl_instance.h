@@ -1210,6 +1210,8 @@ typedef struct knl_g_dms_context {
     bool resetSyscache;
     bool finishedRecoverOldPrimaryDWFile;
     bool dw_init;
+    char dmsInstAddr[MAX_REPLNODE_NUM][DMS_MAX_IP_LEN];
+    char conninfo[MAXPGPATH];
 } knl_g_dms_context;
 
 typedef struct knl_instance_context {

@@ -34,6 +34,12 @@ class RedirectManager;
 extern "C" {
 #endif
 
+enum PhaseType {
+    LIBPQ_SW_QUERY,
+    LIBPQ_SW_PARSE,
+    LIBPQ_SW_BIND
+};
+
 void DestroyStringInfo(StringInfo str);
 /* process msg from backend */
 bool libpqsw_process_message(int qtype, const StringInfo msg);
@@ -64,6 +70,13 @@ RedirectManager* get_redirect_manager();
 bool libpqsw_can_seek_next_session();
 /* clear libpqsw memory when process/session exit */
 void libpqsw_cleanup(int code, Datum arg);
+bool libpqsw_begin_command(const char* commandTag);
+bool libpqsw_end_command(const char* commandTag);
+bool libpqsw_fetch_command(const char* commandTag);
+bool libpqsw_is_begin();
+bool libpqsw_is_end();
+bool libpqsw_only_localrun();
+void libpqsw_create_conn();
 
 #ifdef _cplusplus
 }
@@ -114,6 +127,13 @@ enum RedirectType {
     RT_NORMAL, //transfer to standby
     RT_SET  //not transfer to standby,set props=xxx or 'C' close msg
 };
+
+#define SS_STANDBY_REQ_WRITE_REDIRECT   0x1
+#define SS_STANDBY_RES_OK_REDIRECT      0x2
+#define SS_STANDBY_REQ_SELECT           0x4
+#define SS_STANDBY_REQ_BEGIN            0x8
+#define SS_STANDBY_REQ_END              0x10
+#define SS_STANDBY_REQ_SIMPLE_Q         0x20
 
 typedef struct {
     int pbe_types[PBE_MESSAGE_STACK];
@@ -217,6 +237,10 @@ public:
         state.inited = false;
         state.need_end = true;
         state.already_connected = false;
+        ss_standby_state = 0;
+        server_proc_slot = 0;
+        ss_standby_sxid = 0;
+        ss_standby_scid = 0;
     }
 
     void Destroy()
@@ -276,6 +300,12 @@ public:
     }
 public:
     RedirectState state;
+    uint32 ss_standby_state;
+    uint32 server_proc_slot;
+    /* current transaction id of primary while write request is transferred */
+    uint64 ss_standby_sxid;
+    /* current command id of primary while write request is transferred */
+    uint32 ss_standby_scid;
     RedirectMessageManager messages_manager;
 private:
     StringInfo log_trace_msg;

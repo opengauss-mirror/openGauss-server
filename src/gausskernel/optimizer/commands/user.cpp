@@ -4849,8 +4849,10 @@ int64 SearchAllAccounts()
 
         heap_endscan((TableScanDesc)scan);
         AcceptInvalidationMessages();
-        (void)GetCurrentCommandId(true);
-        CommandCounterIncrement();
+        if (!SS_STANDBY_MODE) {
+            (void)GetCurrentCommandId(true);
+            CommandCounterIncrement();
+        }
         heap_close(pg_user_status_rel, NoLock);
     } else {
         ereport(WARNING, (errmsg("the relation pg_user_status is invalid")));

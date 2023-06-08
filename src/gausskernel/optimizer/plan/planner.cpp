@@ -89,6 +89,7 @@
 #include "executor/node/nodeModifyTable.h"
 #include "optimizer/gplanmgr.h"
 #include "instruments/instr_statement.h"
+#include "replication/libpqsw.h"
 
 /* Hook for plugins to get control in planner() */
 THR_LOCAL ndp_pushdown_hook_type ndp_pushdown_hook = NULL;
@@ -425,7 +426,11 @@ bool queryIsReadOnly(Query* query)
             case CMD_UPDATE:
             case CMD_INSERT:
             case CMD_DELETE:
-            case CMD_MERGE:
+            case CMD_MERGE: {
+                if (SS_STANDBY_MODE && get_redirect_manager()->state.transaction) {
+                    get_redirect_manager()->ss_standby_state |= SS_STANDBY_REQ_WRITE_REDIRECT;
+                }
+            }
                 return false;
             default: {
                 ereport(ERROR,

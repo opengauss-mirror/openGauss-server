@@ -646,6 +646,10 @@ void SnapshotSetCommandId(CommandId curcid)
         u_sess->utils_cxt.CurrentSnapshot->curcid = curcid;
     if (u_sess->utils_cxt.SecondarySnapshot)
         u_sess->utils_cxt.SecondarySnapshot->curcid = curcid;
+
+    if (SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY) {
+        t_thrd.pgxact->cid = curcid;
+    }
 }
 
 /*
