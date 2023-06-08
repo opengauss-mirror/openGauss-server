@@ -319,3 +319,5 @@ create table if not exists test(
     c timestamptz on update current_timestamp(5));
 select * from pg_get_tabledef('test');
 \c regression
+
+DROP database mysql;

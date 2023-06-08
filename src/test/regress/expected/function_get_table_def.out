@@ -807,3 +807,4 @@ select * from pg_get_tabledef('test');
 (1 row)
 
 \c regression
+DROP database mysql;
