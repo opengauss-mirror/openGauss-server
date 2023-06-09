@@ -264,7 +264,8 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     queryDesc->estate = estate;
 
     /* record the init memory track of the executor engine */
-    if (u_sess->attr.attr_memory.memory_tracking_mode > MEMORY_TRACKING_NONE) {
+    if (u_sess->attr.attr_memory.memory_tracking_mode > MEMORY_TRACKING_NONE &&
+        t_thrd.utils_cxt.ExecutorMemoryTrack == NULL) {
 #ifndef ENABLE_MEMORY_CHECK
         t_thrd.utils_cxt.ExecutorMemoryTrack = ((AllocSet)(estate->es_query_cxt))->track;
 #else
