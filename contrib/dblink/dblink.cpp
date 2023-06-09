@@ -822,6 +822,12 @@ Datum dblink_connect(PG_FUNCTION_ARGS)
     char* conname = NULL;
     remoteConn* rconn = NULL;
     
+    if (ENABLE_THREAD_POOL) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("dblink not support in thread pool")));
+    }
+
     DBLINK_INIT;
 
     if (get_session_context()->needFree) {
