@@ -456,7 +456,7 @@ bool PMstateIsRun(void);
 #define GTM_LITE_CN (GTM_LITE_MODE && IS_PGXC_COORDINATOR)
 
 #ifdef ENABLE_MULTIPLE_NODES
-#define START_BARRIER_CREATOR (IS_PGXC_COORDINATOR && !IS_DISASTER_RECOVER_MODE)
+#define START_BARRIER_CREATOR (IS_PGXC_COORDINATOR && !IS_MULTI_DISASTER_RECOVER_MODE)
 #else
 #define START_BARRIER_CREATOR IS_PGXC_DATANODE
 #endif
@@ -3917,7 +3917,7 @@ static int ServerLoop(void)
           * pmState is PM_HOT_STANDBY, neither PM_RECOVERY nor PM_RUN
           */
         if (pmState == PM_HOT_STANDBY && g_instance.pid_cxt.BarrierPreParsePID == 0 &&
-            !dummyStandbyMode && IS_DISASTER_RECOVER_MODE) {
+            !dummyStandbyMode && IS_MULTI_DISASTER_RECOVER_MODE) {
             g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
         }
 #endif
@@ -4951,7 +4951,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     errmsg("can not accept connection in pending mode.")));
         } else {
 #ifdef ENABLE_MULTIPLE_NODES
-            if (STANDBY_MODE == hashmdata->current_mode && (!IS_DISASTER_RECOVER_MODE || GTM_FREE_MODE ||
+            if (STANDBY_MODE == hashmdata->current_mode && (!IS_MULTI_DISASTER_RECOVER_MODE || GTM_FREE_MODE ||
                                                             g_instance.attr.attr_storage.recovery_parse_workers > 1)) {
                 ereport(ERROR, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
                         errmsg("can not accept connection in standby mode.")));
@@ -9361,7 +9361,7 @@ static void handle_begin_hot_standby()
 
         ereport(LOG, (errmsg("database system is ready to accept read only connections")));
 #ifdef ENABLE_MULTIPLE_NODES
-        if (IS_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
+        if (IS_MULTI_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
             g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
         }
 #endif

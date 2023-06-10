@@ -7707,7 +7707,7 @@ void TruncateAndRemoveXLogForRoachRestore(XLogReaderState *record)
         pfree(writeContent);
     }
 
-    if (((IS_OBS_DISASTER_RECOVER_MODE == false) && (IS_DISASTER_RECOVER_MODE == false)) ||
+    if (((IS_OBS_DISASTER_RECOVER_MODE == false) && (IS_MULTI_DISASTER_RECOVER_MODE == false)) ||
         (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME_OBS))
         durable_rename(RECOVERY_COMMAND_FILE, RECOVERY_COMMAND_DONE, FATAL);
 
@@ -7879,7 +7879,7 @@ static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis)
     }
 
     /* Do we have a PITR target at all? */
-    if ((IS_OBS_DISASTER_RECOVER_MODE || IS_DISASTER_RECOVER_MODE) &&
+    if ((IS_OBS_DISASTER_RECOVER_MODE || IS_MULTI_DISASTER_RECOVER_MODE) &&
         t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_UNSET) {
         // Save timestamp of latest transaction commit/abort if this is a
         // transaction record
@@ -7982,7 +7982,7 @@ static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis)
                     pfree_ext(g_instance.roach_cxt.globalBarrierRecordForPITR);
                     pfree_ext(g_instance.roach_cxt.targetRestoreTimeFromMedia);
                     /* truncate XLOG after barrier time. */
-                    if (IS_OBS_DISASTER_RECOVER_MODE || IS_DISASTER_RECOVER_MODE) {
+                    if (IS_OBS_DISASTER_RECOVER_MODE || IS_MULTI_DISASTER_RECOVER_MODE) {
                         TruncateAndRemoveXLogForRoachRestore(record);
                         xlogOff = (uint32)(record->EndRecPtr) % XLOG_BLCKSZ;
                         if (xlogOff > 0 && xlogOff < XLOG_BLCKSZ) {
@@ -10377,7 +10377,7 @@ void StartupXLOG(void)
                 if (!recoveryContinue &&
                     (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE || t_thrd.xlog_cxt.server_mode == NORMAL_MODE ||
                      (IS_OBS_DISASTER_RECOVER_MODE && (t_thrd.xlog_cxt.recoveryTarget != RECOVERY_TARGET_TIME_OBS)) ||
-                     IS_DISASTER_RECOVER_MODE)) {
+                     IS_MULTI_DISASTER_RECOVER_MODE)) {
                     extreme_rto::WaitAllRedoWorkerQueueEmpty();
                     break;
                 }
@@ -10415,7 +10415,7 @@ void StartupXLOG(void)
             SendRecoveryEndMarkToWorkersAndWaitForFinish(0);
             RecoveryXlogReader(oldXlogReader, xlogreader);
 
-            if (!(IS_OBS_DISASTER_RECOVER_MODE || IS_DISASTER_RECOVER_MODE)) {
+            if (!(IS_OBS_DISASTER_RECOVER_MODE || IS_MULTI_DISASTER_RECOVER_MODE)) {
                 if (t_thrd.xlog_cxt.recoveryPauseAtTarget && reachedStopPoint) {
                     SetRecoveryPause(true);
                     recoveryPausesHere();
@@ -10501,7 +10501,7 @@ void StartupXLOG(void)
      */
     XLogCheckInvalidPages();
 
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         ereport(LOG, (errmsg("reach stop barrier wait startupxlog here")));
         while (reachedStopPoint) {
             pg_usleep(1000000L); /* 1000 ms */
@@ -11146,7 +11146,7 @@ static void sendPMBeginHotStby()
              * If we are in cluster-standby-mode, we need launch barreir preparse
              * thread from the minrecoverypoint point.
              */
-            if (IS_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
+            if (IS_MULTI_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
                 SetBarrierPreParseLsn(t_thrd.xlog_cxt.minRecoveryPoint);
             }
 #endif
@@ -13039,7 +13039,7 @@ bool CreateRestartPoint(int flags)
      * in csnlog.c).  When hot standby is disabled, though, we mustn't do
      * this because StartupCSNLOG hasn't been called yet.
      */
-    if (g_instance.attr.attr_storage.EnableHotStandby && !IS_DISASTER_RECOVER_MODE) {
+    if (g_instance.attr.attr_storage.EnableHotStandby && !IS_MULTI_DISASTER_RECOVER_MODE) {
         pg_time_t now;
         int elapsed_secs;
         now = (pg_time_t)time(NULL);

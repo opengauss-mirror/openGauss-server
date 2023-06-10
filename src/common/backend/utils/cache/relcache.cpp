@@ -2372,7 +2372,7 @@ Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
     relation->rd_createcsn = csnInfo.createcsn;
     relation->rd_changecsn = csnInfo.changecsn;
 
-    if (relation->rd_id >= FirstNormalObjectId && IS_DISASTER_RECOVER_MODE) {
+    if (relation->rd_id >= FirstNormalObjectId && IS_MULTI_DISASTER_RECOVER_MODE) {
         TransactionId xmin = HeapTupleGetRawXmin(pg_class_tuple);
         relation->xmin_csn = CSNLogGetDRCommitSeqNo(xmin);
     } else {

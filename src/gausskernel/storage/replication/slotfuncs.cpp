@@ -1082,7 +1082,7 @@ void slot_redo(XLogReaderState *record)
         return;
     }
 
-    if ((IS_DISASTER_RECOVER_MODE && (info == XLOG_SLOT_CREATE || info == XLOG_SLOT_ADVANCE)) ||
+    if ((IS_MULTI_DISASTER_RECOVER_MODE && (info == XLOG_SLOT_CREATE || info == XLOG_SLOT_ADVANCE)) ||
         IsRoachRestore() || t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME_OBS) {
         return;
     }

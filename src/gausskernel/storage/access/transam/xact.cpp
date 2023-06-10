@@ -7645,7 +7645,7 @@ void xact_redo(XLogReaderState *record)
         (void)TWOPAHSE_LWLOCK_ACQUIRE(xid, LW_EXCLUSIVE);
         PrepareRedoAdd(XLogRecGetData(record), record->ReadRecPtr, record->EndRecPtr);
 
-        if (IS_DISASTER_RECOVER_MODE) {
+        if (IS_MULTI_DISASTER_RECOVER_MODE) {
             TwoPhaseFileHeader *hdr = (TwoPhaseFileHeader *) XLogRecGetData(record);
             XactLockTableInsert(hdr->xid);
         }
@@ -7662,7 +7662,7 @@ void xact_redo(XLogReaderState *record)
         /* Delete TwoPhaseState gxact entry and/or 2PC file. */
         (void)TWOPAHSE_LWLOCK_ACQUIRE(xlrec->xid, LW_EXCLUSIVE);
         PrepareRedoRemove(xlrec->xid, false);
-        if (IS_DISASTER_RECOVER_MODE) {
+        if (IS_MULTI_DISASTER_RECOVER_MODE) {
             XactLockTableDelete(xlrec->xid);
         }
         TWOPAHSE_LWLOCK_RELEASE(xlrec->xid);
@@ -7674,7 +7674,7 @@ void xact_redo(XLogReaderState *record)
         /* Delete TwoPhaseState gxact entry and/or 2PC file. */
         (void)TWOPAHSE_LWLOCK_ACQUIRE(xlrec->xid, LW_EXCLUSIVE);
         PrepareRedoRemove(xlrec->xid, false);
-        if (IS_DISASTER_RECOVER_MODE) {
+        if (IS_MULTI_DISASTER_RECOVER_MODE) {
             XactLockTableDelete(xlrec->xid);
         }
         TWOPAHSE_LWLOCK_RELEASE(xlrec->xid);
