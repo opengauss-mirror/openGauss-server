@@ -270,7 +270,7 @@ static bool show_scan_distributekey(const Plan* plan)
 }
 #endif   /* ENABLE_MULTIPLE_NODES */
 static void show_unique_check_info(PlanState *planstate, ExplainState *es);
-static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate);
+static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate, StringInfo str, bool is_pretty);
 
 /*
  * ExplainQuery -
@@ -2396,6 +2396,11 @@ static void ExplainNode(
             appendStringInfo(tmpName, " stream_level:%d ", stream_plan->stream_level);
     }
 
+    /* explain ndpplugin activities */
+    if (ndp_pushdown_hook) {
+        show_ndpplugin_statistic(es, planstate, tmpName, is_pretty);
+    }
+
     if (is_pretty) {
 
         StringInfoData pretty_plan_name;
@@ -2496,11 +2501,6 @@ static void ExplainNode(
             PredGetInfo(plan, es);
 #endif
         }
-    }
-
-    /* explain ndpplugin activities */
-    if (ndp_pushdown_hook) {
-        show_ndpplugin_statistic(es, planstate);
     }
 
     /*
@@ -10955,7 +10955,7 @@ static void show_unique_check_info(PlanState *planstate, ExplainState *es)
     }
 }
 
-static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate)
+static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate, StringInfo str, bool is_pretty)
 {
     Plan* plan = planstate->plan;
     if (!plan->ndp_pushdown_optimized &&
@@ -10968,7 +10968,12 @@ static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate)
     if (desc && !desc->ndp_pushdown_optimized) {
         return;
     }
-    appendStringInfo(es->str, " NDPpushdown");
+
+    if (is_pretty) {
+        appendStringInfo(str, " NDPpushdown");
+    } else {
+        appendStringInfo(es->str, " NDPpushdown");
+    }
 
     if (!es->analyze) {
         return;

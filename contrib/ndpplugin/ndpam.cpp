@@ -267,21 +267,17 @@ NdpRetCode NdpIoSlot::GetResp(NdpPageHeader& pages, int& pageNum, BlockNumber& s
     pageNum = 0;
 
     if (respRet != NdpRetCode::NDP_OK) {
-        ereport(WARNING, (errmsg("rpc response status is illegal %d,  RPC status %d",
-                                 static_cast<int>(respRet), static_cast<int>(rpcStatus))));
         return respRet;
     }
 
     auto rpcResp = reinterpret_cast<NdpIOResponse*>(respMsg.data);
     if (rpcResp == nullptr) {
-        ereport(WARNING, (errmsg("rpc response is null.")));
         return NdpRetCode::NDP_RETURN_FAILED;
     }
 #ifdef ENABLE_SSL
     resp = reinterpret_cast<NdpIOResponse*>(respMsg.data);
 #endif
     if (rpcResp->status != 0) {
-        ereport(WARNING, (errmsg("backend handle IO failed, status is %u.", resp->status)));
         return NdpRetCode::NDP_RETURN_STATUS_ERROR;
     }
 
