@@ -36,6 +36,7 @@
 #include "distributelayer/streamProducer.h"
 #include "executor/exec/execStream.h"
 #include "access/heapam.h"
+#include "catalog/pg_proc.h"
 
 static void printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo);
 static void printtup_20(TupleTableSlot *slot, DestReceiver *self);
@@ -1019,6 +1020,10 @@ static inline bool check_need_free_numeric_output(const char* str)
 {
     return ((char*)str == u_sess->utils_cxt.numericoutput_buffer);
 }
+static inline bool check_need_free_date_output(const char* str)
+{
+    return ((char*)str == u_sess->utils_cxt.dateoutput_buffer);
+}
 /* ----------------
  *		printtup --- print a tuple in protocol 3.0
  * ----------------
@@ -1132,6 +1137,10 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                         outputstr = output_numeric_out(DatumGetNumeric(attr));
                         need_free = !check_need_free_numeric_output(outputstr);
                         break;
+                    case F_DATE_OUT:
+                        outputstr = output_date_out(DatumGetDateADT(attr));
+                        need_free = !check_need_free_date_output(outputstr);
+                        break; 
                     default:
                         outputstr = OutputFunctionCall(&thisState->finfo, attr);
                         need_free = true;

@@ -25,9 +25,19 @@
  */
 
 /* The unit size can be adjusted by changing these three declarations: */
+#if SIZEOF_VOID_P >= 8
+
+#define BITS_PER_BITMAPWORD 64
+typedef uint64 bitmapword;      /* must be an unsigned type */
+typedef int64 signedbitmapword; /* must be the matching signed type */
+
+#else
+
 #define BITS_PER_BITMAPWORD 32
 typedef uint32 bitmapword;      /* must be an unsigned type */
 typedef int32 signedbitmapword; /* must be the matching signed type */
+
+#endif
 
 typedef struct Bitmapset {
     int nwords;                              /* number of words in array */

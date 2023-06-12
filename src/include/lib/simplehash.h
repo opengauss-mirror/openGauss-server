@@ -266,6 +266,10 @@ SH_SCOPE void SH_STAT(SH_TYPE *tb);
 #define SH_GROW_MIN_FILLFACTOR 0.1
 #endif
 
+#ifndef SH_GROW_FACTOR
+#define SH_GROW_FACTOR(size) 2
+#endif
+
 #ifdef SH_STORE_HASH
 #define SH_COMPARE_KEYS(tb, ahash, akey, b) (ahash == SH_GET_HASH(tb, b) && SH_EQUAL(tb, b->SH_KEY, akey))
 #else
@@ -605,7 +609,7 @@ restart:
          * When optimizing, it can be very useful to print these out.
          */
         /* SH_STAT(tb); */
-        SH_GROW(tb, tb->size * 2);
+        SH_GROW(tb, tb->size * SH_GROW_FACTOR(tb->size));
         /* SH_STAT(tb); */
     }
 
@@ -1092,6 +1096,7 @@ SH_SCOPE void SH_STAT(SH_TYPE *tb)
 #undef SH_STORE_HASH
 #undef SH_USE_NONDEFAULT_ALLOCATOR
 #undef SH_EQUAL
+#undef SH_GROW_FACTOR
 
 /* undefine locally declared macros */
 #undef SH_MAKE_PREFIX

@@ -57,6 +57,7 @@
 #include "utils/selfuncs.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "utils/fmgroids.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -1798,13 +1799,14 @@ Selectivity restriction_selectivity(PlannerInfo* root, Oid operatorid, List* arg
      */
     if (!oprrest)
         return (Selectivity)0.5;
+    if (oprrest == F_SCALARLTSEL) {
+        result = scalarltsel_internal(root, operatorid, args, varRelid);
+    } else {
+        result = DatumGetFloat8(OidFunctionCall4Coll(oprrest, inputcollid, PointerGetDatum(root),
+                                                     ObjectIdGetDatum(operatorid), PointerGetDatum(args),
+                                                     Int32GetDatum(varRelid)));
+    }
 
-    result = DatumGetFloat8(OidFunctionCall4Coll(oprrest,
-        inputcollid,
-        PointerGetDatum(root),
-        ObjectIdGetDatum(operatorid),
-        PointerGetDatum(args),
-        Int32GetDatum(varRelid)));
 
     if (useInstrOpt) {
         list_free_ext(args);

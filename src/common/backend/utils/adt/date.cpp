@@ -239,6 +239,27 @@ Datum date_out(PG_FUNCTION_ARGS)
     PG_RETURN_CSTRING(result);
 }
 
+char* output_date_out(DateADT date)
+{
+    struct pg_tm tt, *tm = &tt;
+
+    u_sess->utils_cxt.dateoutput_buffer[0] = '\0';
+
+    if (DATE_NOT_FINITE(date))
+        EncodeSpecialDate(date, u_sess->utils_cxt.dateoutput_buffer, MAXDATELEN + 1);
+    else {
+        if (unlikely(date > 0 && (INT_MAX - date < POSTGRES_EPOCH_JDATE))) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("input julian date is overflow")));
+        }
+        j2date(date + POSTGRES_EPOCH_JDATE, &(tm->tm_year), &(tm->tm_mon), &(tm->tm_mday));
+        EncodeDateOnly(tm, u_sess->time_cxt.DateStyle, u_sess->utils_cxt.dateoutput_buffer);
+    }
+
+    return u_sess->utils_cxt.dateoutput_buffer;
+}
+
 /*
  *		date_recv			- converts external binary format to date
  */

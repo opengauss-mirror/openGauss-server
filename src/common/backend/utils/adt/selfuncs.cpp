@@ -1078,6 +1078,15 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
     Oid opera = PG_GETARG_OID(1);
     List* args = (List*)PG_GETARG_POINTER(2);
     int varRelid = PG_GETARG_INT32(3);
+    float8 selec;
+
+    selec = scalarltsel_internal(root, opera, args, varRelid);
+
+    PG_RETURN_FLOAT8(selec);
+}
+
+float8 scalarltsel_internal(PlannerInfo* root, Oid opera, List* args, int varRelid)
+{
     VariableStatData vardata;
     vardata.statsTuple = NULL;
     vardata.freefunc = NULL;
@@ -1095,14 +1104,14 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
      * then punt and return a default estimate.
      */
     if (!get_restriction_variable(root, args, varRelid, &vardata, &other, &varonleft))
-        PG_RETURN_FLOAT8(DEFAULT_INEQ_SEL);
+        return DEFAULT_INEQ_SEL;
 
     /*
      * Can't do anything useful if the something is not a constant, either.
      */
     if (!IsA(other, Const)) {
         ReleaseVariableStats(vardata);
-        PG_RETURN_FLOAT8(DEFAULT_INEQ_SEL);
+        return DEFAULT_INEQ_SEL;
     }
 
     /*
@@ -1111,7 +1120,7 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
      */
     if (((Const*)other)->constisnull) {
         ReleaseVariableStats(vardata);
-        PG_RETURN_FLOAT8(0.0);
+        return 0.0;
     }
     constval = ((Const*)other)->constvalue;
     consttype = ((Const*)other)->consttype;
@@ -1128,7 +1137,7 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
         if (!opera) {
             /* Use default selectivity (should we raise an error instead?) */
             ReleaseVariableStats(vardata);
-            PG_RETURN_FLOAT8(DEFAULT_INEQ_SEL);
+            return DEFAULT_INEQ_SEL;
         }
         isgt = true;
     }
@@ -1137,7 +1146,7 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
 
     ReleaseVariableStats(vardata);
 
-    PG_RETURN_FLOAT8((float8)selec);
+    return (float8)selec;
 }
 
 /*
@@ -6626,6 +6635,20 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
     Cost* indexTotalCost = (Cost*)PG_GETARG_POINTER(4);
     Selectivity* indexSelectivity = (Selectivity*)PG_GETARG_POINTER(5);
     double* indexCorrelation = (double*)PG_GETARG_POINTER(6);
+
+    btcostestimate_internal(root, path, loop_count, indexStartupCost, indexTotalCost, indexSelectivity, indexCorrelation);
+
+    PG_RETURN_VOID();
+}
+
+Datum ubtcostestimate(PG_FUNCTION_ARGS)
+{
+    return btcostestimate(fcinfo);
+}
+
+void btcostestimate_internal(PlannerInfo *root, IndexPath *path, double loop_count, Cost *indexStartupCost,
+                           Cost *indexTotalCost, Selectivity *indexSelectivity, double *indexCorrelation)
+{
     IndexOptInfo* index = path->indexinfo;
     Oid relid;
     AttrNumber colnum;
@@ -6894,13 +6917,6 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
     }
 
     ReleaseVariableStats(vardata);
-
-    PG_RETURN_VOID();
-}
-
-Datum ubtcostestimate(PG_FUNCTION_ARGS)
-{
-    return btcostestimate(fcinfo);
 }
 
 Datum hashcostestimate(PG_FUNCTION_ARGS)
