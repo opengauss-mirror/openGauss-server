@@ -159,6 +159,8 @@ typedef struct knl_instance_attr_storage {
     bool enable_save_confirmed_lsn;
 #endif
     int max_active_gtt;
+    bool enable_huge_pages;
+    int huge_page_size;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */
