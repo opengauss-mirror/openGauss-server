@@ -211,6 +211,7 @@ TCL_SHLIB_LD_LIBS	= @TCL_SHLIB_LD_LIBS@
 PTHREAD_CFLAGS		= @PTHREAD_CFLAGS@
 PTHREAD_LIBS		= @PTHREAD_LIBS@
 with_openeuler_os = @with_openeuler_os@
+with_openeuler_major = @with_openeuler_major@
 
 
 #############################################################################
@@ -711,6 +712,11 @@ endif
 ifeq ($(with_openeuler_os), yes)
   override CPPFLAGS := $(CPPFLAGS) -DWITH_OPENEULER_OS
 endif
+
+ifeq ($(with_openeuler_major), yes)
+  override CPPFLAGS := $(CPPFLAGS) -DOPENEULER_MAJOR
+endif
+
 CC = @CC@
 GCC = @GCC@
 C = gcc 

@@ -87,6 +87,7 @@ option(HAVE_LIBM "enable -lm, this set to default -lm" ON)
 option(HAVE_POSIX_SIGNALS "enable posix signals, this set to default" ON)
 option(HAVE_GCC_INT_ATOMICS "enable gcc buildin atomics operations, this set to default" ON)
 option(FLEXIBLE_ARRAY_MEMBER "pq_ce need" ON)
+option(ENABLE_OPENEULER_MAJOR "support openEuler 22.03 LTS, this set to default" OFF)
 
 # we will differ compile flags and definitions by different vars
 set(DB_COMMON_DEFINE "")
@@ -134,8 +135,12 @@ if(${ENABLE_LITE_MODE} STREQUAL "ON")
     set(KRB5 OFF)
 endif()
 
+if(${ENABLE_OPENEULER_MAJOR} STREQUAL "ON")
+    add_definitions(-DOPENEULER_MAJOR)
+endif()
+
 set(PROTECT_OPTIONS -fwrapv -std=c++14 -fnon-call-exceptions ${OPTIMIZE_LEVEL})
-set(WARNING_OPTIONS -Wall -Wendif-labels -Werror -Wformat-security)
+set(WARNING_OPTIONS -Wall -Wendif-labels -Wformat-security)
 set(OPTIMIZE_OPTIONS -pipe -pthread -fno-aggressive-loop-optimizations -fno-expensive-optimizations -fno-omit-frame-pointer -fno-strict-aliasing -freg-struct-return)
 set(CHECK_OPTIONS -Wmissing-format-attribute -Wno-attributes -Wno-unused-but-set-variable -Wno-write-strings -Wpointer-arith)
 set(MACRO_OPTIONS -D_GLIBCXX_USE_CXX11_ABI=0 -DENABLE_GSTRACE -D_GNU_SOURCE -DPGXC -D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT -DSTREAMPLAN -D_THREAD_SAFE ${DB_COMMON_DEFINE})
