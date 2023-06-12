@@ -95,6 +95,7 @@ extern void SPI_pop(void);
 extern bool SPI_push_conditional(void);
 extern void SPI_pop_conditional(bool pushed);
 extern void SPI_restore_connection(void);
+extern void SPI_restore_connection_on_exception(void);
 extern int SPI_execute(const char* src, bool read_only, long tcount, bool isCollectParam = false, parse_query_func parser = GetRawParser());
 extern int SPI_execute_plan(SPIPlanPtr plan, Datum* Values, const char* Nulls, bool read_only, long tcount);
 extern int SPI_execute_plan_with_paramlist(SPIPlanPtr plan, ParamListInfo params, bool read_only, long tcount);

@@ -25009,7 +25009,7 @@ character_set:
 
 charset_collate_name:
 			ColId									{ $$ = $1; }
-			| BINARY								{ $$ = pg_strdup($1); }
+			| BINARY								{ $$ = pstrdup($1); }
 			| Sconst								{ $$ = $1; }
 		;
 
