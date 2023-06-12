@@ -1013,6 +1013,17 @@ static void InitStorageConfigureNamesBool()
             NULL},
 #endif
 
+        {{"enable_huge_pages",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            RESOURCES_MEM,
+            gettext_noop("whether shared memory using huge pages."),
+            NULL},
+            &g_instance.attr.attr_storage.enable_huge_pages,
+            false,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -1065,6 +1076,20 @@ static void InitStorageConfigureNamesInt()
             &g_instance.attr.attr_storage.NBuffers,
             1024,
             16,
+            INT_MAX / 2,
+            NULL,
+            NULL,
+            NULL},
+        {{"huge_page_size",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            RESOURCES_MEM,
+            gettext_noop("Sets the size of huge pages used by the server."),
+            NULL,
+            GUC_UNIT_BLOCKS},
+            &g_instance.attr.attr_storage.huge_page_size,
+            0,
+            0,
             INT_MAX / 2,
             NULL,
             NULL,
@@ -4448,8 +4473,8 @@ static int IsReplConnInfoChanged(const char* replConnInfo, const char* newval)
                 pfree_ext(newReplStr);
                 return ADD_REPL_CONN_INFO_WITH_NEW_LOCAL_IP_PORT;
             }
-        
-            if (strcmp(ReplInfo_1->localhost, newReplInfo->localhost) != 0 || 
+
+            if (strcmp(ReplInfo_1->localhost, newReplInfo->localhost) != 0 ||
                 ReplInfo_1->localport != newReplInfo->localport ||
                 ReplInfo_1->localheartbeatport != newReplInfo->localheartbeatport) {
                 pfree_ext(newReplInfo);

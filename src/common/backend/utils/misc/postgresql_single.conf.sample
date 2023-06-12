@@ -138,6 +138,9 @@ session_timeout = 10min			# allowed duration of any unused session, 0s-86400s(1 
 #max_process_memory = 12GB
 #UDFWorkerMemHardLimit = 1GB
 
+#enable_huge_pages = off      # (change requires restart)
+#huge_page_size = 0     # make sure huge_page_size is valid for os. 0 as default.
+                    # (change requires restart)
 #shared_buffers = 32MB			# min 128kB
 					# (change requires restart)
 bulk_write_ring_size = 2GB		# for bulkload, max shared_buffers
