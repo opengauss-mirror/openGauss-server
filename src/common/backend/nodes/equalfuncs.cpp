@@ -3484,6 +3484,23 @@ static bool _equalPrefixKey(const PrefixKey* a, const PrefixKey* b)
     return true;
 }
 
+static bool _equalCondInfo(const CondInfo* a, const CondInfo* b)
+{
+    COMPARE_NODE_FIELD(target);
+    COMPARE_SCALAR_FIELD(kind);
+
+    return true;
+}
+
+static bool _equalGetDiagStmt(const GetDiagStmt* a, const GetDiagStmt* b)
+{
+    COMPARE_NODE_FIELD(condInfo);
+    COMPARE_SCALAR_FIELD(hasCondNum);
+    COMPARE_NODE_FIELD(condNum);
+
+    return true;
+}
+
 static bool node_equal_create_event_info(const CreateEventStmt* a, const CreateEventStmt* b)
 {
     COMPARE_NODE_FIELD(event_name);
@@ -4448,6 +4465,12 @@ bool equal(const void* a, const void* b)
             break;
         case T_FunctionSources:
             retval = _equalFunctionSources((const FunctionSources *)a, (const FunctionSources *)b);
+            break;
+        case T_CondInfo:
+            retval = _equalCondInfo((const CondInfo *)a, (const CondInfo *)b);
+            break;
+        case T_GetDiagStmt:
+            retval = _equalGetDiagStmt((const GetDiagStmt *)a, (const GetDiagStmt *)b);
             break;
 
         default:

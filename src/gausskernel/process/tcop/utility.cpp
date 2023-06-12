@@ -5078,6 +5078,10 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
 
             break;
         }
+        case T_GetDiagStmt: {
+            GetDiagStmt *n = (GetDiagStmt *)parse_tree;
+            getDiagnosticsInfo(n->condInfo, n->hasCondNum, n->condNum);
+        } break;
         default: {
             ProcessUtilitySlow(parse_tree, query_string, params, dest, 
 #ifdef PGXC
@@ -7714,6 +7718,7 @@ static bool is_stmt_allowed_in_locked_mode(Node* parse_tree, const char* query_s
         case T_AlterEventStmt:
         case T_DropEventStmt:
         case T_ShowEventStmt:
+        case T_GetDiagStmt:
             return ALLOW;
 
         default:
@@ -9542,6 +9547,9 @@ const char* CreateCommandTag(Node* parse_tree)
         case T_ShrinkStmt:
             tag = "SHRINK";
             break;
+        case T_GetDiagStmt:
+            tag = "GET DIAGNOSTICS";
+            break;
         default:
             elog(WARNING, "unrecognized node type: %d", (int)nodeTag(parse_tree));
             tag = "?\?\?";
@@ -10354,6 +10362,9 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             lev = LOGSTMT_ALL;
             break;
         case T_CreateModelStmt: // DB4AI
+            lev = LOGSTMT_ALL;
+            break;
+        case T_GetDiagStmt:
             lev = LOGSTMT_ALL;
             break;
 

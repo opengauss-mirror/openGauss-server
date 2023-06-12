@@ -400,7 +400,7 @@ CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
   level  | code |                 message                  
 ---------+------+------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
+ Warning | 64   | Unhandled user-defined warning condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -418,7 +418,7 @@ CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |  128 | Unhandled user-defined not found condition
+ Error | 128  | Unhandled user-defined not found condition
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -458,9 +458,9 @@ END;
 call p1();
 ERROR:  function "p1" with 0 parameters doesn't exist 
 show warnings;
- level |   code   |                    message                     
--------+----------+------------------------------------------------
- Error | 52461700 | function "p1" with 0 parameters doesn't exist 
+ level | code  |                    message                     
+-------+-------+------------------------------------------------
+ Error | 42883 | function "p1" with 0 parameters doesn't exist 
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -575,10 +575,9 @@ CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |       message        
----------+------+----------------------
- Warning | 1111 | table is not defined
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out int) IS
 BEGIN
@@ -619,10 +618,10 @@ call p1();
 ERROR:  table is not defined
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1111 | table is not defined
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1111  | table is not defined
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -640,10 +639,10 @@ call p1();
 ERROR:  table is not defined
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |      192 | table is not defined
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 192   | table is not defined
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -661,10 +660,10 @@ call p1();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |      192 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 192   | table "t1" does not exist
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -682,10 +681,10 @@ call p1();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |      192 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 192   | table "t1" does not exist
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -703,9 +702,9 @@ END;
 call p1();
 ERROR:  function "p1" with 0 parameters doesn't exist 
 show warnings;
- level |   code   |                    message                     
--------+----------+------------------------------------------------
- Error | 52461700 | function "p1" with 0 parameters doesn't exist 
+ level | code  |                    message                     
+-------+-------+------------------------------------------------
+ Error | 42883 | function "p1" with 0 parameters doesn't exist 
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -723,10 +722,10 @@ call p1();
 ERROR:  table is not defined
 CONTEXT:  PL/pgSQL function p1() line 5 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1111 | table is not defined
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1111  | table is not defined
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -765,11 +764,9 @@ CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |          message          
----------+----------+---------------------------
- Error   | 16908420 | table "t1" does not exist
- Warning |     1120 | table is not defined
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -792,11 +789,10 @@ CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |          message          
----------+----------+---------------------------
- Error   | 16908420 | table "t1" does not exist
- Warning |     1120 | table is not defined
-(2 rows)
+  level  | code |       message        
+---------+------+----------------------
+ Warning | 1120 | table is not defined
+(1 row)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -815,10 +811,10 @@ call p1();
 ERROR:  table is not defined
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1111 | table is not defined
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1111  | table is not defined
 (2 rows)
 
 set b_format_behavior_compat_options = 'enable_set_variables';
@@ -844,10 +840,10 @@ call p1();
 ERROR:  exception error
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1120 | exception error
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1120  | exception error
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -865,10 +861,10 @@ call p1();
 ERROR:  exception error
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1120 | exception error
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1120  | exception error
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -886,20 +882,20 @@ call p1('exception error', 1120);
 ERROR:  exception error
 CONTEXT:  PL/pgSQL function p1(text,integer) line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1120 | exception error
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1120  | exception error
 (2 rows)
 
 call p1(concat('exception ', 'error'), abs(-1120));
 ERROR:  exception error
 CONTEXT:  PL/pgSQL function p1(text,integer) line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1120 | exception error
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1120  | exception error
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -920,10 +916,10 @@ call p1();
 ERROR:  exception error
 CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1120 | exception error
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1120  | exception error
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -944,10 +940,10 @@ call p1();
 ERROR:  exception error
 CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1120 | exception error
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1120  | exception error
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -966,10 +962,10 @@ call p1(0);
 ERROR:  the table is not exist
 CONTEXT:  PL/pgSQL function p1() line 5 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |     1120 | the table is not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 1120  | the table is not exist
 (2 rows)
 
 -- error
@@ -1004,10 +1000,10 @@ call p1(0);
 ERROR:  the table is not exist
 CONTEXT:  PL/pgSQL function p1() line 5 at RESIGNAL
 show warnings;
- level |   code   |          message           
--------+----------+----------------------------
- Error | 50360452 | column "f1" does not exist
- Error |     1120 | the table is not exist
+ level | code  |          message           
+-------+-------+----------------------------
+ Error | 42703 | column "f1" does not exist
+ Error | 1120  | the table is not exist
 (2 rows)
 
 -- throw handler when sqlstate = 01000 with signal/resignal statement
@@ -1028,11 +1024,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
- Warning |    1 | this is warnings
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1053,8 +1047,8 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 show warnings;
   level  | code |                 message                  
 ---------+------+------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
- Warning |    1 | this is warnings
+ Warning | 64   | Unhandled user-defined warning condition
+ Warning | 1    | this is warnings
 (2 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
@@ -1074,11 +1068,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
- Warning |    1 | this is warnings
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1097,11 +1089,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning |    2 | Unhandled user-defined warning condition
- Warning |    2 | this is warnings
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1120,11 +1110,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning |    3 | Unhandled user-defined warning condition
- Warning |    3 | this is warnings
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1143,11 +1131,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning |    3 | Unhandled user-defined warning condition
- Warning |    3 | this is warnings
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1166,11 +1152,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
- Warning |    1 | this is warnings
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1189,11 +1173,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code  |                 message                  
----------+-------+------------------------------------------
- Warning | 65535 | Unhandled user-defined warning condition
- Warning | 65535 | this is warnings
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1214,11 +1196,9 @@ CONTEXT:  PL/pgSQL function p1() line 5 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
- Warning |    1 | this is warnings
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS hdfs_tbl_001;
 NOTICE:  table "hdfs_tbl_001" does not exist, skipping
@@ -1234,10 +1214,10 @@ call p1(0);
 ERROR:  this is not found error
 CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 show warnings;
- level |   code   |                            message                            
--------+----------+---------------------------------------------------------------
- Error | 33554560 | It is not allowed to assign version option for non-dfs table.
- Error |     1120 | this is not found error
+ level | code  |                            message                            
+-------+-------+---------------------------------------------------------------
+ Error | 02002 | It is not allowed to assign version option for non-dfs table.
+ Error | 1120  | this is not found error
 (2 rows)
 
 DROP TABLE IF EXISTS hdfs_tbl_001;
@@ -1254,10 +1234,10 @@ call p1(0);
 ERROR:  this is not found error
 CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 show warnings;
- level |   code   |                            message                            
--------+----------+---------------------------------------------------------------
- Error | 33554560 | It is not allowed to assign version option for non-dfs table.
- Error |     1120 | this is not found error
+ level | code  |                            message                            
+-------+-------+---------------------------------------------------------------
+ Error | 02002 | It is not allowed to assign version option for non-dfs table.
+ Error | 1120  | this is not found error
 (2 rows)
 
 DROP TABLE IF EXISTS hdfs_tbl_001;
@@ -1279,10 +1259,10 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |                            message                            
----------+----------+---------------------------------------------------------------
- Error   | 33554560 | It is not allowed to assign version option for non-dfs table.
- Warning |     1120 | this is not found error
+  level  | code  |                            message                            
+---------+-------+---------------------------------------------------------------
+ Error   | 02002 | It is not allowed to assign version option for non-dfs table.
+ Warning | 1120  | this is not found error
 (2 rows)
 
 DROP TABLE IF EXISTS hdfs_tbl_001;
@@ -1304,11 +1284,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |                            message                            
----------+----------+---------------------------------------------------------------
- Error   | 33554560 | It is not allowed to assign version option for non-dfs table.
- Warning |     1120 | this is not found error
-(2 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS hdfs_tbl_001;
 NOTICE:  table "hdfs_tbl_001" does not exist, skipping
@@ -1324,10 +1302,10 @@ call p1();
 ERROR:  this is not found error
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |                            message                            
--------+----------+---------------------------------------------------------------
- Error | 33554560 | It is not allowed to assign version option for non-dfs table.
- Error |     1120 | this is not found error
+ level | code  |                            message                            
+-------+-------+---------------------------------------------------------------
+ Error | 02002 | It is not allowed to assign version option for non-dfs table.
+ Error | 1120  | this is not found error
 (2 rows)
 
 -- nested scenario
@@ -1354,12 +1332,13 @@ CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |          message          
----------+----------+---------------------------
- Error   | 16908420 | table "t1" does not exist
- Warning |       64 | column is not defined2222
- Warning |       64 | column is not defined
-(3 rows)
+  level  | code  |          message          
+---------+-------+---------------------------
+ Error   | 42P01 | table "t1" does not exist
+ Warning | 64    | column is not defined2222
+ Warning | 64    | column is not defined2222
+ Warning | 64    | column is not defined
+(4 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -1385,11 +1364,11 @@ CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |          message          
----------+----------+---------------------------
- Error   | 16908420 | table "t1" does not exist
- Warning |       64 | column is not defined2222
- Warning |       64 | column is not defined
+  level  | code  |          message          
+---------+-------+---------------------------
+ Error   | 42P01 | table "t1" does not exist
+ Warning | 64    | column is not defined2222
+ Warning | 64    | column is not defined
 (3 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -1416,11 +1395,11 @@ CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |          message          
----------+----------+---------------------------
- Error   | 16908420 | table "t1" does not exist
- Error   |      192 | column is not defined2222
- Warning |       64 | column is not defined
+  level  | code  |          message          
+---------+-------+---------------------------
+ Error   | 42P01 | table "t1" does not exist
+ Error   | 192   | column is not defined2222
+ Warning | 64    | column is not defined
 (3 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -1448,12 +1427,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |          message          
----------+----------+---------------------------
- Error   | 16908420 | table "t1" does not exist
- Warning |       64 | column is not defined2222
- Warning |       64 | column is not defined
-(3 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -1480,12 +1456,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |          message          
----------+----------+---------------------------
- Error   | 16908420 | table "t1" does not exist
- Warning |       64 | column is not defined2222
- Warning |       64 | column is not defined
-(3 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -1512,12 +1485,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |          message          
----------+----------+---------------------------
- Error   | 16908420 | table "t1" does not exist
- Warning |       64 | column is not defined2222
- Warning |       64 | column is not defined
-(3 rows)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -1544,11 +1514,11 @@ CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  |   code   |          message          
----------+----------+---------------------------
- Error   | 16908420 | table "t1" does not exist
- Warning |       64 | column is not defined2222
- Warning |       64 | column is not defined
+  level  | code  |          message          
+---------+-------+---------------------------
+ Error   | 42P01 | table "t1" does not exist
+ Warning | 64    | column is not defined2222
+ Warning | 64    | column is not defined
 (3 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -1573,10 +1543,10 @@ call p1();
 ERROR:  column is not defined
 CONTEXT:  PL/pgSQL function p1() line 6 at RESIGNAL
 show warnings;
- level |   code   |         message          
--------+----------+--------------------------
- Error | 16908420 | view "v1" does not exist
- Error |     1051 | column is not defined
+ level | code  |         message          
+-------+-------+--------------------------
+ Error | 42P01 | view "v1" does not exist
+ Error | 1051  | column is not defined
 (2 rows)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -1591,7 +1561,7 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |    1 | Unhandled user-defined exception condition
+ Error | 1    | Unhandled user-defined exception condition
 (1 row)
 
 -- mysql example
@@ -1611,9 +1581,9 @@ END;
 call p3(1, 0, 1);
 ERROR:  function "p3" doesn't exist 
 show warnings;
- level |   code   |           message            
--------+----------+------------------------------
- Error | 52461700 | function "p3" doesn't exist 
+ level | code  |           message            
+-------+-------+------------------------------
+ Error | 42883 | function "p3" doesn't exist 
 (1 row)
 
 call p3(2, 1, 0);
@@ -1700,10 +1670,10 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
- Error |        5 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
+ Error | 5     | table "t1" does not exist
 (2 rows)
 
 select @a, @error_count;
@@ -1734,7 +1704,7 @@ CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
  level | code |          message          
 -------+------+---------------------------
- Error |    5 | table "t1" does not exist
+ Error | 5    | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;

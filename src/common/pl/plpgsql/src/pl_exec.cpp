@@ -124,6 +124,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
 static int exec_stmt_assign(PLpgSQL_execstate* estate, PLpgSQL_stmt_assign* stmt);
 static int exec_stmt_perform(PLpgSQL_execstate* estate, PLpgSQL_stmt_perform* stmt);
 static int exec_stmt_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* stmt);
+static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* stmt);
 static int exec_stmt_if(PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool resignal_in_handler = false);
 static int exec_stmt_goto(PLpgSQL_execstate* estate, PLpgSQL_stmt_goto* stmt);
 static PLpgSQL_stmt* search_goto_target_global(PLpgSQL_execstate* estate, const PLpgSQL_stmt_goto* goto_stmt);
@@ -1281,6 +1282,8 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
     plpgsql_estate_setup(&estate, func, (ReturnSetInfo*)fcinfo->resultinfo);
     func->debug = NULL;
 
+    if (u_sess->dolphin_errdata_ctx.handler_active)
+        u_sess->dolphin_errdata_ctx.handler_active = false;
 #ifndef ENABLE_MULTIPLE_NODES
     check_debug(func, &estate);
     bool isExecAutoFunc = u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0;
@@ -2923,6 +2926,12 @@ static int exec_exception_handler(PLpgSQL_execstate* estate, PLpgSQL_stmt_block*
         PLpgSQL_exception* exception = (PLpgSQL_exception*)lfirst(e);
 
         if (exception_matches_conditions(edata, exception->conditions)) {
+
+            u_sess->dolphin_errdata_ctx.handler_active = true;
+            estate->handler_level = estate->block_level + 1;
+            resetErrorDataArea(true, u_sess->dolphin_errdata_ctx.handler_active);
+            pushErrorData(edata);
+            copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
             /*
              * Initialize the magic SQLSTATE and SQLERRM variables for
              * the exception block. We needn't do this until we have
@@ -3912,6 +3921,18 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType = InvalidOid;
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex = NULL;
     }
+    if (DB_IS_CMPT(B_FORMAT)) {
+        if ((enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_RETURN 
+            && (enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_GETDIAG
+            && (enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_RAISE
+            && (enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_RESIGNAL
+            && (enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_BLOCK) {
+                if (!u_sess->dolphin_errdata_ctx.handler_active) {
+                    copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
+                }
+                resetErrorDataArea(true, u_sess->dolphin_errdata_ctx.handler_active);
+            } 
+    }
 
     switch ((enum PLpgSQL_stmt_types)stmt->cmd_type) {
         case PLPGSQL_STMT_BLOCK:
@@ -3927,7 +3948,11 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             break;
 
         case PLPGSQL_STMT_GETDIAG:
-            rc = exec_stmt_getdiag(estate, (PLpgSQL_stmt_getdiag*)stmt);
+            if (DB_IS_CMPT(B_FORMAT)) {
+                rc = exec_stmt_b_getdiag(estate, (PLpgSQL_stmt_getdiag*)stmt);
+            } else {
+                rc = exec_stmt_getdiag(estate, (PLpgSQL_stmt_getdiag*)stmt);
+            }
             break;
 
         case PLPGSQL_STMT_IF:
@@ -4066,6 +4091,28 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
     CHECK_FOR_INTERRUPTS();
 
     estate->err_stmt = save_estmt;
+    if (DB_IS_CMPT(B_FORMAT)) {
+        if ((enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_RETURN 
+            && (enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_GETDIAG
+            && (enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_RAISE
+            && (enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_BLOCK) {
+                if (!u_sess->dolphin_errdata_ctx.handler_active) {
+                    copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
+                }
+            } else {
+                if ((enum PLpgSQL_stmt_types)stmt->cmd_type == PLPGSQL_STMT_BLOCK) {
+                    if (estate->handler_level == estate->block_level) {
+                        copyDiffErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea, estate->cur_error);
+                        copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
+                        u_sess->dolphin_errdata_ctx.handler_active = false;
+                    } else if (!u_sess->dolphin_errdata_ctx.handler_active) {
+                        copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
+                    }
+                } else if (!u_sess->dolphin_errdata_ctx.handler_active && (enum PLpgSQL_stmt_types)stmt->cmd_type != PLPGSQL_STMT_RETURN) {
+                    copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
+                }
+            }
+    }
 
     return rc;
 }
@@ -4289,6 +4336,243 @@ static int exec_stmt_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* st
         }
     }
 
+    return PLPGSQL_RC_OK;
+}
+
+/* ----------
+ * exec_stmt_b_getdiag					Put internal PG information into
+ *										specified variables.
+ * ----------
+ */
+static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* stmt)
+{
+    ListCell* lc = NULL;
+    ListCell* lc1 = NULL;
+    ErrorDataArea *errorDataArea;
+    StringInfoData buf;
+    int condCount = 0;
+    int condition_number = 0;
+    int currIdx = 0;
+    int ret = 0;
+
+    /*
+     * GET STACKED DIAGNOSTICS is only valid inside an exception handler.
+     *
+     * Note: we trust the grammar to have disallowed the relevant item kinds
+     * if not is_stacked, otherwise we'd dump core below.
+     */
+    if (stmt->is_stacked && estate->cur_error == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_STACKED_DIAGNOSTICS_ACCESSED_WITHOUT_ACTIVE_HANDLER),
+                errmodule(MOD_PLSQL),
+                errmsg("GET STACKED DIAGNOSTICS cannot be used outside an exception handler")));
+    }
+    initStringInfo(&buf);
+
+    if (stmt->is_stacked) {
+        errorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
+    } else {
+        errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
+    }
+    condCount = list_length(errorDataArea->sqlErrorDataList);
+
+    if (stmt->is_cond_item) {
+        PLpgSQL_datum* retval = estate->datums[stmt->cond_number];
+        PLpgSQL_var* var = (PLpgSQL_var *)retval;
+        Datum value = var->value;
+        condition_number = DatumGetInt32(value);
+    } else {
+        condition_number = stmt->cond_number;
+    }
+
+    if (stmt->has_cond) {
+        if (condition_number < 1 || condition_number > condCount) {
+            ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+            edata->elevel = ERROR;
+            edata->sqlerrcode = ERRCODE_INVALID_CONDITION_NUMBER;
+            edata->message = "Invalid condition number";
+            edata->class_origin = edata->sqlstate = edata->subclass_origin = edata->cons_catalog = edata->cons_schema = NULL;
+            edata->cons_name = edata->catalog_name = edata->schema_name = edata->table_name = edata->column_name = edata->cursor_name = NULL;
+            copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
+            pushErrorData(edata);
+            FreeStringInfo(&buf);
+            return PLPGSQL_RC_OK;
+        }
+
+        DolphinErrorData* eData = (DolphinErrorData *)list_nth(errorDataArea->sqlErrorDataList, condition_number - 1);
+        foreach(lc1, stmt->diag_items) {
+            PLpgSQL_diag_item *diag_item = (PLpgSQL_diag_item *)lfirst(lc1);
+            if (diag_item->user_ident == NULL) {
+                PLpgSQL_datum* var = estate->datums[diag_item->target];
+                switch (diag_item->kind) {
+                    case PLPGSQL_GETDIAG_B_CLASS_ORIGIN:
+                        exec_assign_c_string(estate, var, eData->class_origin);
+                        break;
+                    case PLPGSQL_GETDIAG_B_SUBCLASS_ORIGIN:
+                        exec_assign_c_string(estate, var, eData->subclass_origin);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CONSTRAINT_CATALOG:
+                        exec_assign_c_string(estate, var, eData->constraint_catalog);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CONSTRAINT_SCHEMA:
+                        exec_assign_c_string(estate, var, eData->constraint_schema);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CONSTRAINT_NAME:
+                        exec_assign_c_string(estate, var, eData->constraint_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CATALOG_NAME:
+                        exec_assign_c_string(estate, var, eData->catalog_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_SCHEMA_NAME:
+                        exec_assign_c_string(estate, var, eData->schema_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_TABLE_NAME:
+                        exec_assign_c_string(estate, var, eData->table_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_COLUMN_NAME:
+                        exec_assign_c_string(estate, var, eData->column_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CURSOR_NAME:
+                        exec_assign_c_string(estate, var, eData->cursor_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_MESSAGE_TEXT:
+                        exec_assign_c_string(estate, var, eData->message_text);
+                        break;
+                    case PLPGSQL_GETDIAG_B_MYSQL_ERRNO:
+                        exec_assign_c_string(estate, var, eData->errorcode);
+                        break;
+                    case PLPGSQL_GETDIAG_B_RETURNED_SQLSTATE:
+                        exec_assign_c_string(estate, var, eData->sqlstatestr);
+                        break;
+                    default:
+                        break;
+                }
+            } else {
+                switch(diag_item->kind) {
+                    case PLPGSQL_GETDIAG_B_CLASS_ORIGIN:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->class_origin);
+                        break;
+                    case PLPGSQL_GETDIAG_B_SUBCLASS_ORIGIN:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->subclass_origin);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CONSTRAINT_CATALOG:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->constraint_catalog);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CONSTRAINT_SCHEMA:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->constraint_schema);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CONSTRAINT_NAME:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->constraint_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CATALOG_NAME:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->catalog_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_SCHEMA_NAME:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->schema_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_TABLE_NAME:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->table_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_COLUMN_NAME:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->column_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_CURSOR_NAME:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->cursor_name);
+                        break;
+                    case PLPGSQL_GETDIAG_B_MESSAGE_TEXT:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->message_text);
+                        break;
+                    case PLPGSQL_GETDIAG_B_MYSQL_ERRNO:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->errorcode);
+                        break;
+                    case PLPGSQL_GETDIAG_B_RETURNED_SQLSTATE:
+                        appendStringInfo(&buf, "set @%s = '%s';", diag_item->user_ident, eData->sqlstatestr);
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+    } else {
+        foreach(lc, stmt->diag_items) {
+            PLpgSQL_diag_item* diag_item = (PLpgSQL_diag_item*)lfirst(lc);
+            if (diag_item->user_ident == NULL) {
+                PLpgSQL_datum* var = estate->datums[diag_item->target];
+                bool isnull = false;
+                switch (diag_item->kind) {
+                    case PLPGSQL_GETDIAG_B_NUMBER:
+                        exec_assign_value(estate, var, UInt32GetDatum(condCount), INT4OID, &isnull);
+                        break;
+
+                    case PLPGSQL_GETDIAG_ROW_COUNT:
+                        if (stmt->is_stacked) {
+                            exec_assign_value(estate, var, -1, INT4OID, &isnull);
+                        } else {
+                            if (B_DIAGNOSTICS) {
+                                exec_assign_value(estate, var, UInt32GetDatum(u_sess->statement_cxt.current_row_count), INT4OID, &isnull);
+                            } else {
+                                exec_assign_value(estate, var, UInt32GetDatum(estate->eval_processed), INT4OID, &isnull);
+                            }
+                        } break;
+
+                    case PLPGSQL_GETDIAG_RESULT_OID:
+                        exec_assign_value(estate, var, ObjectIdGetDatum(estate->eval_lastoid), OIDOID, &isnull);
+                        break;
+
+                    case PLPGSQL_GETDIAG_ERROR_CONTEXT:
+                        exec_assign_c_string(estate, var, estate->cur_error->context);
+                        break;
+
+                    case PLPGSQL_GETDIAG_ERROR_DETAIL:
+                        exec_assign_c_string(estate, var, estate->cur_error->detail);
+                        break;
+
+                    case PLPGSQL_GETDIAG_ERROR_HINT:
+                        exec_assign_c_string(estate, var, estate->cur_error->hint);
+                        break;
+
+                    case PLPGSQL_GETDIAG_RETURNED_SQLSTATE:
+                        exec_assign_c_string(estate, var, plpgsql_get_sqlstate(estate->cur_error->sqlerrcode));
+                        break;
+
+                    case PLPGSQL_GETDIAG_MESSAGE_TEXT:
+                        exec_assign_c_string(estate, var, estate->cur_error->message);
+                        break;
+
+                    default:
+                        ereport(ERROR,
+                            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                                errmodule(MOD_PLSQL),
+                                errmsg("unrecognized diagnostic item kind: %d", diag_item->kind)));
+                        break;
+                }
+            } else {
+                switch (diag_item->kind) {
+                    case PLPGSQL_GETDIAG_B_NUMBER:
+                        appendStringInfo(&buf, "set @%s = %d;", diag_item->user_ident, condCount);
+                        break;
+                    case PLPGSQL_GETDIAG_ROW_COUNT:
+                        appendStringInfo(&buf, "set @%s = %ld;", diag_item->user_ident, u_sess->statement_cxt.current_row_count);
+                        break;
+                    default:
+                        ereport(ERROR,
+                            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                                errmodule(MOD_PLSQL),
+                                errmsg("unrecognized diagnostic item kind: %d", diag_item->kind)));
+                        break;
+                }
+            }
+        }
+    }
+    if (strlen(buf.data) != 0) {
+        ret = SPI_execute(buf.data, false, 0);
+        if (ret != SPI_OK_UTILITY) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_SPI_EXECUTE_FAILURE),
+                        errmsg("SPI_execute execute job interval fail, job_id: %d.", ret)));
+        }
+    }
+    FreeStringInfo(&buf);
     return PLPGSQL_RC_OK;
 }
 
@@ -6148,7 +6432,7 @@ static void exec_get_condition_information(PLpgSQL_execstate* estate, PLpgSQL_st
     return;
 }
 
-static void StoreSignalError(int elevel, PLpgSQL_condition_info_item *con_item, bool is_warning_throw)
+static void StoreSignalError(int elevel, PLpgSQL_condition_info_item *con_item, bool is_warning_throw, int is_signal)
 {
     ereport(elevel, 
         (errcode(con_item->sqlerrcode ? con_item->sqlerrcode : 0),
@@ -6164,7 +6448,8 @@ static void StoreSignalError(int elevel, PLpgSQL_condition_info_item *con_item, 
             (con_item->table_name != NULL) ? signal_table_name(con_item->table_name) : 0,
             (con_item->column_name != NULL) ? signal_column_name(con_item->column_name) : 0,
             (con_item->cursor_name != NULL) ? signal_cursor_name(con_item->cursor_name) : 0,
-            signal_is_warnings_throw(is_warning_throw)));
+            signal_is_warnings_throw(is_warning_throw),
+            signal_is_signal(is_signal)));
     
     return;
 }
@@ -6224,7 +6509,7 @@ static int exec_stmt_signal(PLpgSQL_execstate* estate, PLpgSQL_stmt_signal* stmt
 
     exec_get_condition_information(estate, stmt, con_item);
 
-    StoreSignalError(elevel, con_item, is_warning_throw);
+    StoreSignalError(elevel, con_item, is_warning_throw, PLpgSQL_signal_resignal::PLPGSQL_SIGNAL);
 
     exec_free_con_item(con_item);
     return PLPGSQL_RC_OK;
@@ -6241,12 +6526,14 @@ static int exec_stmt_resignal(PLpgSQL_execstate* estate, PLpgSQL_stmt_signal* st
     int elevel = cur_errdata->elevel;
     bool is_declare_handler = estate->is_declare_handler;
     bool is_warning_throw = false;
+    bool has_sqlstate = false;
     
     PLpgSQL_condition_info_item *con_item = (PLpgSQL_condition_info_item *)palloc0(sizeof(PLpgSQL_condition_info_item));
     
     con_item->message_text = pstrdup(cur_errdata->message);
     con_item->sqlerrcode = cur_errdata->sqlerrcode;
     if (sqlstate != NULL) {
+        has_sqlstate = true;
         con_item->sqlstate = pstrdup(sqlstate);
     } else {
         con_item->sqlstate = pstrdup(cur_errdata->sqlstate);
@@ -6266,10 +6553,11 @@ static int exec_stmt_resignal(PLpgSQL_execstate* estate, PLpgSQL_stmt_signal* st
 
     exec_get_condition_information(estate, stmt, con_item);
 
-    if (sqlstate != NULL) {
-        pushErrorData(cur_errdata);
+    if (has_sqlstate) {
+        StoreSignalError(elevel, con_item, is_warning_throw, PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITH_SQLSTATE);
+    } else {
+        StoreSignalError(elevel, con_item, is_warning_throw, PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITHOUT_SQLSTATE);
     }
-    StoreSignalError(elevel, con_item, is_warning_throw);
 
     exec_free_con_item(con_item);
     return PLPGSQL_RC_OK;
@@ -6355,6 +6643,7 @@ void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, Ret
     /* Support GOTO */
     estate->goto_labels = func->goto_labels;
     estate->block_level = 0;
+    estate->handler_level = 0;
     estate->goto_target_label = NULL;
     estate->goto_target_stmt = NULL;
 

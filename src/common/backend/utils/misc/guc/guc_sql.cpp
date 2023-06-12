@@ -346,7 +346,8 @@ static const struct b_format_behavior_compat_entry b_format_behavior_compat_opti
     {"enable_set_variables", B_FORMAT_OPT_ENABLE_SET_VARIABLES},
     {"enable_modify_column", B_FORMAT_OPT_ENABLE_MODIFY_COLUMN},
     {"default_collation", B_FORMAT_OPT_DEFAULT_COLLATION},
-    {"fetch", B_FORMAT_OPT_FETCH}
+    {"fetch", B_FORMAT_OPT_FETCH},
+    {"diagnostics", B_FORMAT_OPT_DIAGNOSTICS}
 };
 
 typedef struct behavior_compat_entry {

@@ -7385,6 +7385,27 @@ static AutoIncrement *_copyAutoIncrement(const AutoIncrement *from)
     return newnode;
 }
 
+static CondInfo *_copyCondInfo(const CondInfo *from)
+{
+    CondInfo* newnode = makeNode(CondInfo);
+
+    COPY_NODE_FIELD(target);
+    COPY_SCALAR_FIELD(kind);
+
+    return newnode;
+}
+
+static GetDiagStmt *_copyGetDiagStmt(const GetDiagStmt *from)
+{
+    GetDiagStmt* newnode = makeNode(GetDiagStmt);
+
+    COPY_NODE_FIELD(condInfo);
+    COPY_SCALAR_FIELD(hasCondNum);
+    COPY_NODE_FIELD(condNum);
+
+    return newnode;
+}
+
 static CharsetCollateOptions *_copyCharsetcollateOptions(const CharsetCollateOptions* from)
 {
     CharsetCollateOptions* newnode = makeNode(CharsetCollateOptions);
@@ -8785,6 +8806,12 @@ void* copyObject(const void* from)
             break;
         case T_FunctionSources:
             retval = _copyFunctionSources((FunctionSources *)from);
+            break;
+        case T_CondInfo:
+            retval = _copyCondInfo((CondInfo *)from);
+            break;
+        case T_GetDiagStmt:
+            retval = _copyGetDiagStmt((GetDiagStmt *)from);
             break;
         default:
             ereport(ERROR,

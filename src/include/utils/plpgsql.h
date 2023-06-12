@@ -218,7 +218,21 @@ enum {
     PLPGSQL_GETDIAG_ERROR_DETAIL,
     PLPGSQL_GETDIAG_ERROR_HINT,
     PLPGSQL_GETDIAG_RETURNED_SQLSTATE,
-    PLPGSQL_GETDIAG_MESSAGE_TEXT
+    PLPGSQL_GETDIAG_MESSAGE_TEXT,
+    PLPGSQL_GETDIAG_B_NUMBER,
+    PLPGSQL_GETDIAG_B_CLASS_ORIGIN,
+    PLPGSQL_GETDIAG_B_SUBCLASS_ORIGIN,
+    PLPGSQL_GETDIAG_B_CONSTRAINT_CATALOG,
+    PLPGSQL_GETDIAG_B_CONSTRAINT_SCHEMA,
+    PLPGSQL_GETDIAG_B_CONSTRAINT_NAME,
+    PLPGSQL_GETDIAG_B_CATALOG_NAME,
+    PLPGSQL_GETDIAG_B_SCHEMA_NAME,
+    PLPGSQL_GETDIAG_B_TABLE_NAME,
+    PLPGSQL_GETDIAG_B_COLUMN_NAME,
+    PLPGSQL_GETDIAG_B_CURSOR_NAME,
+    PLPGSQL_GETDIAG_B_MESSAGE_TEXT,
+    PLPGSQL_GETDIAG_B_MYSQL_ERRNO,
+    PLPGSQL_GETDIAG_B_RETURNED_SQLSTATE
 };
 
 /* --------
@@ -248,6 +262,12 @@ typedef enum { PLPGSQL_TRUE, PLPGSQL_FALSE, PLPGSQL_NULL } PLpgSQL_state;
  * --------
  */
 typedef enum { DECLARE_HANDLER_EXIT, DECLARE_HANDLER_CONTINUE } PLpgSQL_declare_handler;
+
+/* --------
+ * State of RESIGNAL
+ * --------
+ */
+typedef enum { PLPGSQL_NORMAL, PLPGSQL_SIGNAL, PLPGSQL_RESIGNAL_WITH_SQLSTATE,  PLPGSQL_RESIGNAL_WITHOUT_SQLSTATE} PLpgSQL_signal_resignal;
 
 /* --------
  * condition_information_item_name of the SIGNAL/RESIGNAL
@@ -614,6 +634,11 @@ typedef struct {
     PLpgSQL_stmt* stmt;
 } PLpgSQL_gotoLabel;
 
+typedef struct PLpgSQL_cond_item {
+    PLpgSQL_con_info_item_value cond_item;
+    char* condString;
+}PLpgSQL_cond_item;
+
 typedef struct PLpgSQL_condition { /* One EXCEPTION condition name */
     int sqlerrstate;               /* SQLSTATE integer format */
     char *sqlstate;                /* SQLSTATE string format */
@@ -682,12 +707,16 @@ typedef struct {
 typedef struct { /* Get Diagnostics item		*/
     int kind;    /* id for diagnostic value desired */
     int target;  /* where to assign it */
+    char* user_ident;
 } PLpgSQL_diag_item;
 
 typedef struct { /* Get Diagnostics statement		*/
     int cmd_type;
     int lineno;
     bool is_stacked;  /* STACKED or CURRENT diagnostics area? */
+    bool has_cond;
+    bool is_cond_item;
+    int cond_number;
     List* diag_items; /* List of PLpgSQL_diag_item */
     char* sqlString;
 } PLpgSQL_stmt_getdiag;
@@ -1215,6 +1244,7 @@ typedef struct PLpgSQL_execstate { /* Runtime execution data	*/
     int curr_nested_table_layers;
     bool is_exception;
     bool is_declare_handler;    /* the block has declare handler stmt */
+    int handler_level;
 } PLpgSQL_execstate;
 
 typedef struct PLpgSQL_pkg_execstate { /* Runtime execution data	*/

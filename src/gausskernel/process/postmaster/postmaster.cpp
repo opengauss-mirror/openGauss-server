@@ -13532,6 +13532,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     }
 
     InitializeGUCOptions();
+
+    init_set_user_params_htab();
     /*
      * Set reference point for stack-depth checking
      */

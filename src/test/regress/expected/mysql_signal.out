@@ -139,7 +139,7 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
   level  | code |                 message                  
 ---------+------+------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
+ Warning | 64   | Unhandled user-defined warning condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -153,7 +153,7 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |  128 | Unhandled user-defined not found condition
+ Error | 128  | Unhandled user-defined not found condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -167,7 +167,7 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |  192 | Unhandled user-defined exception condition
+ Error | 192  | Unhandled user-defined exception condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -181,7 +181,7 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |  192 | Unhandled user-defined exception condition
+ Error | 192  | Unhandled user-defined exception condition
 (1 row)
 
 -- parse error
@@ -221,7 +221,7 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |  192 | Unhandled user-defined exception condition
+ Error | 192  | Unhandled user-defined exception condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -241,7 +241,7 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
   level  | code |                 message                  
 ---------+------+------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
+ Warning | 64   | Unhandled user-defined warning condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -256,7 +256,7 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |  128 | Unhandled user-defined not found condition
+ Error | 128  | Unhandled user-defined not found condition
 (1 row)
 
 -- parse_error
@@ -280,11 +280,10 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 ERROR:  Unhandled user-defined not found condition
 CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
-  level  | code |                  message                   
----------+------+--------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
- Error   |  128 | Unhandled user-defined not found condition
-(2 rows)
+ level | code |                  message                   
+-------+------+--------------------------------------------
+ Error | 128  | Unhandled user-defined not found condition
+(1 row)
 
 -- 2.signa with SQLSTATE and signal_information_item
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -479,7 +478,7 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |    1 | Unhandled user-defined exception condition
+ Error | 1    | Unhandled user-defined exception condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -632,7 +631,7 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |  192 | Unhandled user-defined exception condition
+ Error | 192  | Unhandled user-defined exception condition
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -650,7 +649,7 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |  192 | Unhandled user-defined exception condition
+ Error | 192  | Unhandled user-defined exception condition
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -668,7 +667,7 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
  level | code |        message         
 -------+------+------------------------
- Error |  192 | the table is not exist
+ Error | 192  | the table is not exist
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -712,7 +711,7 @@ CONTEXT:  PL/pgSQL function p1() line 5 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |  192 | Unhandled user-defined exception condition
+ Error | 192  | Unhandled user-defined exception condition
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -870,9 +869,9 @@ PL/pgSQL function p1() line 4 at SQL statement
 (1 row)
 
 show warnings;
-  level  | code |                  message                   
----------+------+--------------------------------------------
- Warning |   64 | GUC parameter 'enable_wdr_snapshot' is off
+  level  | code  |                  message                   
+---------+-------+--------------------------------------------
+ Warning | 01000 | GUC parameter 'enable_wdr_snapshot' is off
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
@@ -893,9 +892,9 @@ PL/pgSQL function p1() line 4 at SQL statement
 (1 row)
 
 show warnings;
-  level  | code |                  message                   
----------+------+--------------------------------------------
- Warning |   64 | GUC parameter 'enable_wdr_snapshot' is off
+  level  | code  |                  message                   
+---------+-------+--------------------------------------------
+ Warning | 01000 | GUC parameter 'enable_wdr_snapshot' is off
 (1 row)
 
 -- throw handler when sqlstate = 01000 with signal/resignal statement
@@ -916,10 +915,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |     message      
----------+------+------------------
- Warning |    1 | this is warnings
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -940,7 +938,7 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
   level  | code |     message      
 ---------+------+------------------
- Warning |    1 | this is warnings
+ Warning | 1    | this is warnings
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
@@ -957,7 +955,7 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
  level | code |     message      
 -------+------+------------------
- Error |    1 | this is warnings
+ Error | 1    | this is warnings
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
@@ -977,10 +975,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |     message      
----------+------+------------------
- Warning |    1 | this is warnings
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -999,10 +996,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |     message      
----------+------+------------------
- Warning |    3 | this is warnings
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1021,10 +1017,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |     message      
----------+------+------------------
- Warning |    3 | this is warnings
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1043,10 +1038,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |     message      
----------+------+------------------
- Warning |    1 | this is warnings
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1065,10 +1059,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code  |     message      
----------+-------+------------------
- Warning | 65535 | this is warnings
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
 BEGIN
@@ -1089,10 +1082,9 @@ CONTEXT:  PL/pgSQL function p1() line 5 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |     message      
----------+------+------------------
- Warning |    1 | this is warnings
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS hdfs_tbl_001;
 NOTICE:  table "hdfs_tbl_001" does not exist, skipping
@@ -1175,10 +1167,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |         message         
----------+------+-------------------------
- Warning | 1120 | this is not found error
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS hdfs_tbl_001;
 NOTICE:  table "hdfs_tbl_001" does not exist, skipping
@@ -1225,7 +1216,7 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 show warnings;
   level  | code |        message        
 ---------+------+-----------------------
- Warning |   64 | column is not defined
+ Warning | 64   | column is not defined
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -1254,7 +1245,7 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 show warnings;
   level  | code |        message        
 ---------+------+-----------------------
- Warning |   64 | column is not defined
+ Warning | 64   | column is not defined
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -1283,7 +1274,7 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 show warnings;
   level  | code |        message        
 ---------+------+-----------------------
- Warning |   64 | column is not defined
+ Warning | 64   | column is not defined
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -1311,10 +1302,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |        message        
----------+------+-----------------------
- Warning |   64 | column is not defined
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -1341,10 +1331,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |        message        
----------+------+-----------------------
- Warning |   64 | column is not defined
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -1371,10 +1360,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |        message        
----------+------+-----------------------
- Warning |   64 | column is not defined
-(1 row)
+ level | code | message 
+-------+------+---------
+(0 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -1403,7 +1391,7 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 show warnings;
   level  | code |        message        
 ---------+------+-----------------------
- Warning |   64 | column is not defined
+ Warning | 64   | column is not defined
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -1445,7 +1433,7 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
  level | code |                  message                   
 -------+------+--------------------------------------------
- Error |    1 | Unhandled user-defined exception condition
+ Error | 1    | Unhandled user-defined exception condition
 (1 row)
 
 -- mysql example
@@ -1466,7 +1454,7 @@ CONTEXT:  PL/pgSQL function p2() line 4 at SIGNAL
 show warnings;
  level | code |      message      
 -------+------+-------------------
- Error |  192 | an error occurred
+ Error | 192  | an error occurred
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p2(pval int) IS
@@ -1495,7 +1483,7 @@ CONTEXT:  PL/pgSQL function p2(integer) line 4 at SIGNAL
 show warnings;
   level  | code |                 message                  
 ---------+------+------------------------------------------
- Warning |   64 | Unhandled user-defined warning condition
+ Warning | 64   | Unhandled user-defined warning condition
 (1 row)
 
 call p2(1);
@@ -1504,7 +1492,7 @@ CONTEXT:  PL/pgSQL function p2(integer) line 6 at SIGNAL
 show warnings;
  level | code |         message         
 -------+------+-------------------------
- Error |  192 | an error occurred for 1
+ Error | 192  | an error occurred for 1
 (1 row)
 
 call p2(2);
@@ -1513,7 +1501,7 @@ CONTEXT:  PL/pgSQL function p2(integer) line 8 at SIGNAL
 show warnings;
  level | code |         message         
 -------+------+-------------------------
- Error |  192 | an error occurred for 2
+ Error | 192  | an error occurred for 2
 (1 row)
 
 call p2(3);
@@ -1522,11 +1510,10 @@ CONTEXT:  PL/pgSQL function p2(integer) line 10 at SIGNAL
 ERROR:  an error occurred
 CONTEXT:  PL/pgSQL function p2(integer) line 11 at SIGNAL
 show warnings;
-  level  | code |      message      
----------+------+-------------------
- Warning | 1000 | an error occurred
- Error   | 1001 | an error occurred
-(2 rows)
+ level | code |      message      
+-------+------+-------------------
+ Error | 1001 | an error occurred
+(1 row)
 
 DROP TABLE IF EXISTS user_info;
 NOTICE:  table "user_info" does not exist, skipping
@@ -1554,7 +1541,7 @@ CONTEXT:  PL/pgSQL function p2(integer) line 5 at SIGNAL
 show warnings;
  level | code |   message   
 -------+------+-------------
- Error |   22 | duplicated!
+ Error | 22   | duplicated!
 (1 row)
 
 \c regression
