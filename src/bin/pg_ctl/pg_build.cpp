@@ -1433,6 +1433,7 @@ static void DeleteSubDataDir(const char* dirname)
             } else if (S_ISREG(st.st_mode)) {
                 if (strcmp(de->d_name, "postgresql.conf") == 0 || strcmp(de->d_name, "pg_ctl.lock") == 0 ||
                     strcmp(de->d_name, "postgresql.conf.lock") == 0 || strcmp(de->d_name, "postgresql.conf.bak.old") == 0 ||
+                    strcmp(de->d_name, "postgresql.conf.bak") == 0 || strcmp(de->d_name, "postgresql.conf.guc.bak") == 0 ||
                     strcmp(de->d_name, "build_completed.start") == 0 || strcmp(de->d_name, "gs_build.pid") == 0 ||
                     strcmp(de->d_name, "postmaster.opts") == 0 || strcmp(de->d_name, "gaussdb.state") == 0 ||
                     strcmp(de->d_name, "disc_readonly_test") == 0 || strcmp(de->d_name, ssl_cert_file) == 0 ||
