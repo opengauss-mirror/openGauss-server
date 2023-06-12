@@ -941,9 +941,9 @@ DROP PACKAGE pckg_test;
 DROP PACKAGE PCKG_EXCHANGE_RATE;
 
 
-drop table if exists tb_test;
-drop synonym if exists tb_test;
-create table tb_test(col1 int,col2 int,col3 int);
+drop table if exists pkg_test_tb_test;
+drop synonym if exists pkg_test_tb_test;
+create table pkg_test_tb_test(col1 int,col2 int,col3 int);
 create or replace package pckg_test1 as
 procedure pr_test(i_col1 in varchar2,o_ret inout varchar2,o_ret1 out varchar2);
 procedure pr_test1(i_col1 in varchar2);
@@ -960,7 +960,7 @@ o_ret1:=0;
 end;
 procedure pr_test1(i_col1 in varchar2)as
 begin
-for rec in (select col1,col2,col3 from tb_test) loop
+for rec in (select col1,col2,col3 from pkg_test_tb_test) loop
 pr_test(rec.col1,rec.col2,rec.col3);
 end loop;
 end;
@@ -1101,7 +1101,7 @@ end pckg_test1;
 drop procedure read_pro1();
 drop procedure read_pro2();
 
-drop table tb_test;
+drop table pkg_test_tb_test;
 drop package pckg_test1;
 drop package test1.aa;
 drop package test2.aa;

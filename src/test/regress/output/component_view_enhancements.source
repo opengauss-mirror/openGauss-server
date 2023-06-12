@@ -46,7 +46,7 @@ START TRANSACTION;
 CREATE TABLE test_ustore (a int, b int ,c int) with(storage_type=ustore);
 CREATE INDEX test_ustore_idx ON test_ustore(a);
 CREATE INDEX test_ustore_idx2 ON test_ustore(b,c);
-INSERT INTO test_ustore values(generate_series(1,1000000),generate_series(1,1000000), generate_series(1,1000000));
+INSERT INTO test_ustore values(generate_series(1,100000),generate_series(1,100000), generate_series(1,100000));
 CHECKPOINT;
 CREATE OR REPLACE FUNCTION proc_gs_index_verify(tablename in varchar2)
 RETURNS SETOF varchar 
@@ -88,7 +88,7 @@ START TRANSACTION;
 CREATE TABLE test_ustore (a int, b int ,c int) with(storage_type=ustore);
 CREATE INDEX test_ustore_idx ON test_ustore(a);
 CREATE INDEX test_ustore_idx2 ON test_ustore(b,c);
-INSERT INTO test_ustore values(generate_series(1,1000000),generate_series(1,1000000), generate_series(1,1000000));
+INSERT INTO test_ustore values(generate_series(1,100000),generate_series(1,100000), generate_series(1,100000));
 CHECKPOINT;
 CREATE OR REPLACE FUNCTION proc_gs_index_recycle_queue(tablename in varchar2)
 RETURNS SETOF varchar 

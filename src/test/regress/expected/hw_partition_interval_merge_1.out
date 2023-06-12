@@ -1,0 +1,395 @@
+-- 1 init environment
+create schema partition_interval_merge_1;
+set current_schema to partition_interval_merge_1;
+set DateStyle = 'Postgres';
+prepare pg_partition_sql2(char) as
+    select relname,
+           parttype,
+           rangenum,
+           intervalnum,
+           partstrategy,
+           interval,
+           to_char(to_date(boundaries[1], 'Dy Mon DD hh24:mi:ss YYYY'), 'YYYY-MM-DD') boundary
+    from pg_partition
+    where parentid = (select oid from pg_class where relname = $1)
+    order by to_date(boundaries[1], 'Dy Mon DD hh24:mi:ss YYYY');
+-- B. test with index
+    CREATE TABLE interval_sales_1
+    (
+        prod_id       NUMBER(6),
+        cust_id       NUMBER,
+        time_id       DATE,
+        channel_id    CHAR(1),
+        promo_id      NUMBER(6),
+        quantity_sold NUMBER(3),
+        amount_sold   NUMBER(10, 2)
+    )
+        PARTITION BY RANGE (time_id)
+        INTERVAL
+    ('1 MONTH')
+    (PARTITION p0 VALUES LESS THAN (TO_DATE('1-1-2008', 'DD-MM-YYYY')),
+        PARTITION p1 VALUES LESS THAN (TO_DATE('6-5-2008', 'DD-MM-YYYY'))
+    );
+    create index interval_sales_1_time_id_idx on interval_sales_1 (time_id) local;
+    create index interval_sales_1_quantity_sold_idx on interval_sales_1 (quantity_sold) local;
+    alter table interval_sales_1 split partition p0 at (to_date('2007-02-10', 'YYYY-MM-DD')) into (partition p0_1, partition p0_2);
+    execute pg_partition_sql2('interval_sales_1');
+     relname      | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
+------------------+----------+----------+-------------+--------------+-------------+------------
+ p0_1             | p        |        0 |           0 | r            |             | 2007-02-10
+ p0_2             | p        |        0 |           0 | r            |             | 2008-01-01
+ p1               | p        |        0 |           0 | r            |             | 2008-05-06
+ interval_sales_1 | r        |        0 |           0 | i            | {"1 MONTH"} | 
+(4 rows)
+
+    insert into interval_sales_1
+    values (1, 1, to_date('9-2-2007', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('11-2-2007', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('11-2-2008', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('20-2-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('05-2-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('08-2-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('05-4-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('05-8-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-8-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-9-2008', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-11-2008', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-12-2008', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-01-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-5-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-6-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-7-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-8-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    insert into interval_sales_1
+    values (1, 1, to_date('04-9-2009', 'DD-MM-YYYY'), 'a', 1, 1, 1);
+    -- 2 cases
+    -- 2.1.0 merge normal range partitions in bad order
+    select *
+    from interval_sales_1 partition (p0_1);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Fri Feb 09 00:00:00 2007 | a          |        1 |             1 |        1.00
+(1 row)
+
+    select *
+    from interval_sales_1 partition (p0_2);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Sun Feb 11 00:00:00 2007 | a          |        1 |             1 |        1.00
+(1 row)
+
+    select *
+    from interval_sales_1 partition (p1);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Mon Feb 11 00:00:00 2008 | a          |        1 |             1 |        1.00
+(1 row)
+
+    alter table interval_sales_1 merge partitions p1, p0_1, p0_2 into partition p01;
+ERROR:  source partitions must be continuous and in ascending order of boundary
+    -- 2.1.1 merge normal range partitions in right order
+    execute pg_partition_sql2('interval_sales_1');
+     relname      | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
+------------------+----------+----------+-------------+--------------+-------------+------------
+ p0_1             | p        |        0 |           0 | r            |             | 2007-02-10
+ p0_2             | p        |        0 |           0 | r            |             | 2008-01-01
+ p1               | p        |        0 |           0 | r            |             | 2008-05-06
+ sys_p5           | p        |        0 |           0 | i            |             | 2008-09-06
+ sys_p6           | p        |        0 |           0 | i            |             | 2008-11-06
+ sys_p7           | p        |        0 |           0 | i            |             | 2008-12-06
+ sys_p8           | p        |        0 |           0 | i            |             | 2009-01-06
+ sys_p2           | p        |        0 |           0 | i            |             | 2009-02-06
+ sys_p1           | p        |        0 |           0 | i            |             | 2009-03-06
+ sys_p3           | p        |        0 |           0 | i            |             | 2009-04-06
+ sys_p9           | p        |        0 |           0 | i            |             | 2009-05-06
+ sys_p10          | p        |        0 |           0 | i            |             | 2009-06-06
+ sys_p11          | p        |        0 |           0 | i            |             | 2009-07-06
+ sys_p4           | p        |        0 |           0 | i            |             | 2009-08-06
+ sys_p12          | p        |        0 |           0 | i            |             | 2009-09-06
+ interval_sales_1 | r        |        0 |           0 | i            | {"1 MONTH"} | 
+(16 rows)
+
+    alter table interval_sales_1 merge partitions p0_1, p0_2, p1 into partition p01;
+    execute pg_partition_sql2('interval_sales_1');
+     relname      | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
+------------------+----------+----------+-------------+--------------+-------------+------------
+ p01              | p        |        0 |           0 | r            |             | 2008-05-06
+ sys_p5           | p        |        0 |           0 | i            |             | 2008-09-06
+ sys_p6           | p        |        0 |           0 | i            |             | 2008-11-06
+ sys_p7           | p        |        0 |           0 | i            |             | 2008-12-06
+ sys_p8           | p        |        0 |           0 | i            |             | 2009-01-06
+ sys_p2           | p        |        0 |           0 | i            |             | 2009-02-06
+ sys_p1           | p        |        0 |           0 | i            |             | 2009-03-06
+ sys_p3           | p        |        0 |           0 | i            |             | 2009-04-06
+ sys_p9           | p        |        0 |           0 | i            |             | 2009-05-06
+ sys_p10          | p        |        0 |           0 | i            |             | 2009-06-06
+ sys_p11          | p        |        0 |           0 | i            |             | 2009-07-06
+ sys_p4           | p        |        0 |           0 | i            |             | 2009-08-06
+ sys_p12          | p        |        0 |           0 | i            |             | 2009-09-06
+ interval_sales_1 | r        |        0 |           0 | i            | {"1 MONTH"} | 
+(14 rows)
+
+    select *
+    from interval_sales_1 partition (p0_1);
+ERROR:  partition "p0_1" of relation "interval_sales_1" does not exist
+    select *
+    from interval_sales_1 partition (p0_2);
+ERROR:  partition "p0_2" of relation "interval_sales_1" does not exist
+    select *
+    from interval_sales_1 partition (p1);
+ERROR:  partition "p1" of relation "interval_sales_1" does not exist
+    select *
+    from interval_sales_1 partition (p01);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Fri Feb 09 00:00:00 2007 | a          |        1 |             1 |        1.00
+       1 |       1 | Sun Feb 11 00:00:00 2007 | a          |        1 |             1 |        1.00
+       1 |       1 | Mon Feb 11 00:00:00 2008 | a          |        1 |             1 |        1.00
+(3 rows)
+
+    -- 2.2.0 merge interval partitions in wrong order
+    select *
+    from interval_sales_1 partition (sys_p6);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Tue Nov 04 00:00:00 2008 | a          |        1 |             1 |        1.00
+(1 row)
+
+    select *
+    from interval_sales_1 partition (sys_p5);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Thu Sep 04 00:00:00 2008 | a          |        1 |             1 |        1.00
+(1 row)
+
+    alter table interval_sales_1 merge partitions sys_p6, sys_p5 into partition sys_p6_p5;
+ERROR:  source partitions must be continuous and in ascending order of boundary
+    -- 2.2.1 merge interval partitions in right order, but they are not continuous
+    alter table interval_sales_1 merge partitions sys_p5, sys_p6 into partition sys_p5_p6;
+ERROR:  source partitions must be continuous and in ascending order of boundary
+    -- 2.2.2 merge interval partitions in right order, and they are continuous.
+    select *
+    from interval_sales_1 partition (sys_p6);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Tue Nov 04 00:00:00 2008 | a          |        1 |             1 |        1.00
+(1 row)
+
+    select *
+    from interval_sales_1 partition (sys_p7);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Thu Dec 04 00:00:00 2008 | a          |        1 |             1 |        1.00
+(1 row)
+
+    select *
+    from interval_sales_1 partition (sys_p8);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Sun Jan 04 00:00:00 2009 | a          |        1 |             1 |        1.00
+(1 row)
+
+    execute pg_partition_sql2('interval_sales_1');
+     relname      | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
+------------------+----------+----------+-------------+--------------+-------------+------------
+ p01              | p        |        0 |           0 | r            |             | 2008-05-06
+ sys_p5           | p        |        0 |           0 | i            |             | 2008-09-06
+ sys_p6           | p        |        0 |           0 | i            |             | 2008-11-06
+ sys_p7           | p        |        0 |           0 | i            |             | 2008-12-06
+ sys_p8           | p        |        0 |           0 | i            |             | 2009-01-06
+ sys_p2           | p        |        0 |           0 | i            |             | 2009-02-06
+ sys_p1           | p        |        0 |           0 | i            |             | 2009-03-06
+ sys_p3           | p        |        0 |           0 | i            |             | 2009-04-06
+ sys_p9           | p        |        0 |           0 | i            |             | 2009-05-06
+ sys_p10          | p        |        0 |           0 | i            |             | 2009-06-06
+ sys_p11          | p        |        0 |           0 | i            |             | 2009-07-06
+ sys_p4           | p        |        0 |           0 | i            |             | 2009-08-06
+ sys_p12          | p        |        0 |           0 | i            |             | 2009-09-06
+ interval_sales_1 | r        |        0 |           0 | i            | {"1 MONTH"} | 
+(14 rows)
+
+    alter table interval_sales_1 merge partitions sys_p6, sys_p7, sys_p8 into partition sys_p6_p7_p8;
+    select *
+    from interval_sales_1 partition (sys_p6);
+ERROR:  partition "sys_p6" of relation "interval_sales_1" does not exist
+    select *
+    from interval_sales_1 partition (sys_p7);
+ERROR:  partition "sys_p7" of relation "interval_sales_1" does not exist
+    select *
+    from interval_sales_1 partition (sys_p8);
+ERROR:  partition "sys_p8" of relation "interval_sales_1" does not exist
+    select *
+    from interval_sales_1 partition (sys_p6_p7_p8);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Tue Nov 04 00:00:00 2008 | a          |        1 |             1 |        1.00
+       1 |       1 | Thu Dec 04 00:00:00 2008 | a          |        1 |             1 |        1.00
+       1 |       1 | Sun Jan 04 00:00:00 2009 | a          |        1 |             1 |        1.00
+(3 rows)
+
+    execute pg_partition_sql2('interval_sales_1');
+     relname      | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
+------------------+----------+----------+-------------+--------------+-------------+------------
+ p01              | p        |        0 |           0 | r            |             | 2008-05-06
+ sys_p5           | p        |        0 |           0 | r            |             | 2008-09-06
+ sys_p6_p7_p8     | p        |        0 |           0 | r            |             | 2009-01-06
+ sys_p2           | p        |        0 |           0 | i            |             | 2009-02-06
+ sys_p1           | p        |        0 |           0 | i            |             | 2009-03-06
+ sys_p3           | p        |        0 |           0 | i            |             | 2009-04-06
+ sys_p9           | p        |        0 |           0 | i            |             | 2009-05-06
+ sys_p10          | p        |        0 |           0 | i            |             | 2009-06-06
+ sys_p11          | p        |        0 |           0 | i            |             | 2009-07-06
+ sys_p4           | p        |        0 |           0 | i            |             | 2009-08-06
+ sys_p12          | p        |        0 |           0 | i            |             | 2009-09-06
+ interval_sales_1 | r        |        0 |           0 | i            | {"1 MONTH"} | 
+(12 rows)
+
+    -- 2.3 merge interval partition and range partition
+    -- FIRST, build a range partition which is continuous with a interval partition
+    alter table interval_sales_1 merge partitions sys_p2, sys_p1 into partition sys_p2_p1;
+    -- 2.3.1 merge sys_p2_p1 with sys_p3 in wrong order
+    alter table interval_sales_1 merge partitions sys_p3, sys_p2_p1 into partition sys_p2_p1_p3;
+ERROR:  source partitions must be continuous and in ascending order of boundary
+    -- 2.3.2 merge sys_p2_p1 with sys_p3 in right order
+    select *
+    from interval_sales_1 partition (sys_p2_p1);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Thu Feb 05 00:00:00 2009 | a          |        1 |             1 |        1.00
+       1 |       1 | Fri Feb 20 00:00:00 2009 | a          |        1 |             1 |        1.00
+       1 |       1 | Sun Feb 08 00:00:00 2009 | a          |        1 |             1 |        1.00
+(3 rows)
+
+    select *
+    from interval_sales_1 partition (sys_p3);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Sun Apr 05 00:00:00 2009 | a          |        1 |             1 |        1.00
+(1 row)
+
+    alter table interval_sales_1 merge partitions sys_p2_p1, sys_p3 into partition sys_p2_p1_p3;
+    select *
+    from interval_sales_1 partition (sys_p2_p1_p3);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Thu Feb 05 00:00:00 2009 | a          |        1 |             1 |        1.00
+       1 |       1 | Fri Feb 20 00:00:00 2009 | a          |        1 |             1 |        1.00
+       1 |       1 | Sun Feb 08 00:00:00 2009 | a          |        1 |             1 |        1.00
+       1 |       1 | Sun Apr 05 00:00:00 2009 | a          |        1 |             1 |        1.00
+(4 rows)
+
+    execute pg_partition_sql2('interval_sales_1');
+     relname      | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
+------------------+----------+----------+-------------+--------------+-------------+------------
+ p01              | p        |        0 |           0 | r            |             | 2008-05-06
+ sys_p5           | p        |        0 |           0 | r            |             | 2008-09-06
+ sys_p6_p7_p8     | p        |        0 |           0 | r            |             | 2009-01-06
+ sys_p2_p1_p3     | p        |        0 |           0 | r            |             | 2009-04-06
+ sys_p9           | p        |        0 |           0 | i            |             | 2009-05-06
+ sys_p10          | p        |        0 |           0 | i            |             | 2009-06-06
+ sys_p11          | p        |        0 |           0 | i            |             | 2009-07-06
+ sys_p4           | p        |        0 |           0 | i            |             | 2009-08-06
+ sys_p12          | p        |        0 |           0 | i            |             | 2009-09-06
+ interval_sales_1 | r        |        0 |           0 | i            | {"1 MONTH"} | 
+(10 rows)
+
+    -- 2.4.0 merge interval partition and range partition into one in wrong order
+    alter table interval_sales_1 merge partitions sys_p9, sys_p2_p1_p3 into partition sys_p9_p2_p1_p3;
+ERROR:  source partitions must be continuous and in ascending order of boundary
+    -- 2.4.1 merge interval partition and range partition into one in right order
+    alter table interval_sales_1 merge partitions sys_p2_p1_p3, sys_p9 into partition sys_p9_p2_p1_p3;
+    select *
+    from interval_sales_1 partition (sys_p9_p2_p1_p3);
+ prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
+---------+---------+--------------------------+------------+----------+---------------+-------------
+       1 |       1 | Thu Feb 05 00:00:00 2009 | a          |        1 |             1 |        1.00
+       1 |       1 | Fri Feb 20 00:00:00 2009 | a          |        1 |             1 |        1.00
+       1 |       1 | Sun Feb 08 00:00:00 2009 | a          |        1 |             1 |        1.00
+       1 |       1 | Sun Apr 05 00:00:00 2009 | a          |        1 |             1 |        1.00
+       1 |       1 | Mon May 04 00:00:00 2009 | a          |        1 |             1 |        1.00
+(5 rows)
+
+    execute pg_partition_sql2('interval_sales_1');
+     relname      | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
+------------------+----------+----------+-------------+--------------+-------------+------------
+ p01              | p        |        0 |           0 | r            |             | 2008-05-06
+ sys_p5           | p        |        0 |           0 | r            |             | 2008-09-06
+ sys_p6_p7_p8     | p        |        0 |           0 | r            |             | 2009-01-06
+ sys_p9_p2_p1_p3  | p        |        0 |           0 | r            |             | 2009-05-06
+ sys_p10          | p        |        0 |           0 | i            |             | 2009-06-06
+ sys_p11          | p        |        0 |           0 | i            |             | 2009-07-06
+ sys_p4           | p        |        0 |           0 | i            |             | 2009-08-06
+ sys_p12          | p        |        0 |           0 | i            |             | 2009-09-06
+ interval_sales_1 | r        |        0 |           0 | i            | {"1 MONTH"} | 
+(9 rows)
+
+    -- 2.5 merge interval partitions, which is divided by several interval partitions, will failed
+    alter table interval_sales_1 merge partitions sys_p10, sys_p12 into partition sys_p10_p12;
+ERROR:  source partitions must be continuous and in ascending order of boundary
+    -- 2.6 case that failed to update new partition's type
+    drop table if exists partiton_table_001;
+NOTICE:  table "partiton_table_001" does not exist, skipping
+    create table partiton_table_001(
+        COL_4 date
+    )
+        PARTITION BY RANGE (COL_4)
+        INTERVAL ('1 month')
+    (
+        PARTITION partiton_table_001_p1 VALUES LESS THAN (date'2020-03-01'),
+        PARTITION partiton_table_001_p2 VALUES LESS THAN (date'2020-04-01'),
+        PARTITION partiton_table_001_p3 VALUES LESS THAN (date'2020-05-01')
+    );
+    -- @插入的分区键值
+    insert into partiton_table_001 values (date'2020-02-23');
+    insert into partiton_table_001 values (date'2020-03-23');
+    insert into partiton_table_001 values (date'2020-04-23');
+    insert into partiton_table_001 values (date'2020-05-23');
+    insert into partiton_table_001 values (date'2020-06-23');
+    insert into partiton_table_001 values (date'2020-07-23');
+    -- @查看分区表、分区表索引信息
+    execute pg_partition_sql2('partiton_table_001');
+        relname        | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
+-----------------------+----------+----------+-------------+--------------+-------------+------------
+ partiton_table_001_p1 | p        |        0 |           0 | r            |             | 2020-03-01
+ partiton_table_001_p2 | p        |        0 |           0 | r            |             | 2020-04-01
+ partiton_table_001_p3 | p        |        0 |           0 | r            |             | 2020-05-01
+ sys_p1                | p        |        0 |           0 | i            |             | 2020-06-01
+ sys_p2                | p        |        0 |           0 | i            |             | 2020-07-01
+ sys_p3                | p        |        0 |           0 | i            |             | 2020-08-01
+ partiton_table_001    | r        |        0 |           0 | i            | {"1 month"} | 
+(7 rows)
+
+    alter table partiton_table_001 merge partitions sys_p1, sys_p2 into PARTITION sys_p4;
+    execute pg_partition_sql2('partiton_table_001');
+        relname        | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
+-----------------------+----------+----------+-------------+--------------+-------------+------------
+ partiton_table_001_p1 | p        |        0 |           0 | r            |             | 2020-03-01
+ partiton_table_001_p2 | p        |        0 |           0 | r            |             | 2020-04-01
+ partiton_table_001_p3 | p        |        0 |           0 | r            |             | 2020-05-01
+ sys_p4                | p        |        0 |           0 | r            |             | 2020-07-01
+ sys_p3                | p        |        0 |           0 | i            |             | 2020-08-01
+ partiton_table_001    | r        |        0 |           0 | i            | {"1 month"} | 
+(6 rows)
+
+    drop table if exists partiton_table_001;
+-- 3 drop indexes and table
+    drop index interval_sales_1_time_id_idx;
+    drop index interval_sales_1_quantity_sold_idx;
+    drop table interval_sales_1;
+    drop schema partition_interval_merge_1;
