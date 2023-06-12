@@ -2755,7 +2755,15 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             querytree_list = pg_analyze_and_rewrite(parsetree, sql_query_string, NULL, 0);
 
         isCollect = checkCollectSimpleQuery(isCollect, querytree_list);
-
+        if (quickPlanner(querytree_list, parsetree, query_string, dest, completionTag)) {
+            CommandCounterIncrement();
+            if (snapshot_set != false)
+                PopActiveSnapshot();
+            finish_xact_command();
+            EndCommand(completionTag, dest);
+            MemoryContextReset(OptimizerContext);
+            break;
+        }
 #ifdef ENABLE_MOT
         /* check cross engine queries and transactions violation for MOT */
         StorageEngineType storageEngineType = SE_TYPE_UNSPECIFIED;
