@@ -44,7 +44,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 OBJS = $(LIBOBJS) pg_crc32c_sse42.o pg_crc32c_sb8.o pg_crc32c_choose.o chklocale.o dirmod.o erand48.o exec.o fls.o inet_net_ntop.o \
-	noblock.o path.o pgcheckdir.o pgmkdirp.o pgsleep.o \
+	noblock.o path.o pg_bitutils.o pgcheckdir.o pgmkdirp.o pgsleep.o \
 	pgstrcasecmp.o qsort.o qsort_arg.o sprompt.o thread.o flock.o pgstrcasestr.o\
 	gs_thread.o gs_env_r.o gs_getopt_r.o \
 	gs_readdir.o gs_strerror.o gs_syscall_lock.o \
@@ -53,7 +53,7 @@ OBJS = $(LIBOBJS) pg_crc32c_sse42.o pg_crc32c_sb8.o pg_crc32c_choose.o chklocale
 
 ifeq "${host_cpu}" "aarch64"
 OBJS = $(LIBOBJS) pg_crc32c_choose.o chklocale.o dirmod.o erand48.o exec.o fls.o inet_net_ntop.o \
-	noblock.o path.o pgcheckdir.o pgmkdirp.o pgsleep.o \
+	noblock.o path.o pg_bitutils.o pgcheckdir.o pgmkdirp.o pgsleep.o \
 	pgstrcasecmp.o qsort.o qsort_arg.o sprompt.o thread.o flock.o pgstrcasestr.o\
 	gs_thread.o gs_env_r.o gs_getopt_r.o \
 	gs_readdir.o gs_strerror.o gs_syscall_lock.o \
@@ -70,7 +70,7 @@ ifeq "${host_cpu}" "aarch64"
 endif
 
 OBJS_TOOL = fls.o strlcat.o strlcpy.o getpeereid.o chklocale.o dirmod.o erand48.o exec.o inet_net_ntop.o \
-	noblock.o path.o pgcheckdir.o pgmkdirp.o pgsleep.o pgstrcasecmp.o qsort.o qsort_arg.o sprompt.o thread.o flock.o pgstrcasestr.o \
+	noblock.o path.o pg_bitutils.o pgcheckdir.o pgmkdirp.o pgsleep.o pgstrcasecmp.o qsort.o qsort_arg.o sprompt.o thread.o flock.o pgstrcasestr.o \
 	gs_thread.o gs_env_r.o gs_getopt_r.o gs_readdir.o gs_strerror.o gs_syscall_lock.o gs_system.o cipher.o 
 
 all: libpgport.a libpgport_srv.a libpgport_tool.so
