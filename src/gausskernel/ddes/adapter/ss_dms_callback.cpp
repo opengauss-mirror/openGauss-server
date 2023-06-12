@@ -1097,7 +1097,8 @@ static int32 SSRebuildBuf(BufferDesc *buf_desc, unsigned char thread_index)
     ctrl_info.ctrl = *buf_ctrl;
     ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
     ctrl_info.is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false; 
-    int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index, true);
+    unsigned char release = false; // not used in openGauss, just adapt interface
+    int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index, true, false, &release);
     if (ret != DMS_SUCCESS) {
         ereport(WARNING, (errmsg("Failed to rebuild page, rel:%u/%u/%u/%d, forknum:%d, blocknum:%u.",
             buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,

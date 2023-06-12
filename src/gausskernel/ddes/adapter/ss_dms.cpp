@@ -269,9 +269,9 @@ int dms_buf_res_rebuild_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsign
 }
 
 int dms_buf_res_rebuild_drc_parallel(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index,
-    unsigned char for_rebuild)
+    unsigned char for_rebuild, unsigned char can_release, unsigned char *release)
 {
-    return g_ss_dms_func.dms_buf_res_rebuild_drc_parallel(dms_ctx, ctrl_info, thread_index, for_rebuild);
+    return g_ss_dms_func.dms_buf_res_rebuild_drc_parallel(dms_ctx, ctrl_info, thread_index, for_rebuild, can_release, release);
 }
 
 int dms_is_recovery_session(unsigned int sid)
