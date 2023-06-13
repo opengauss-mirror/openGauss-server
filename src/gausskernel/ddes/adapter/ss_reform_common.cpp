@@ -46,7 +46,7 @@ typedef struct XLogPageReadPrivate {
     bool randAccess;
 } XLogPageReadPrivate;
 
-static int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path)
+int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path)
 {
     char path[MAXPGPATH];
     ListCell *cell = NULL;
@@ -109,112 +109,6 @@ static int emode_for_corrupt_record(int emode, XLogRecPtr RecPtr)
         }
     }
     return emode;
-}
-
-static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int expectReadLen,
-                      XLogRecPtr targetRecPtr, char *buf, TimeLineID *readTLI, char* xlog_path)
-{
-    /* Load reader private data */
-    XLogPageReadPrivate *readprivate = (XLogPageReadPrivate *)xlogreader->private_data;
-    int emode = IsExtremeRedo() ? LOG : readprivate->emode;
-    bool randAccess = IsExtremeRedo() ? false : readprivate->randAccess;
-    XLogRecPtr RecPtr = targetPagePtr;
-    uint32 targetPageOff;
-
-#ifdef USE_ASSERT_CHECKING
-    XLogSegNo targetSegNo;
-
-    XLByteToSeg(targetPagePtr, targetSegNo);
-#endif
-    targetPageOff = targetPagePtr % XLogSegSize;
-
-    /*
-     * See if we need to switch to a new segment because the requested record
-     * is not in the currently open one.
-     */
-    if (t_thrd.xlog_cxt.readFile >= 0 && !XLByteInSeg(targetPagePtr, t_thrd.xlog_cxt.readSegNo)) {
-        close(t_thrd.xlog_cxt.readFile);
-        t_thrd.xlog_cxt.readFile = -1;
-        t_thrd.xlog_cxt.readSource = 0;
-    }
-
-    XLByteToSeg(targetPagePtr, t_thrd.xlog_cxt.readSegNo);
-    XLByteAdvance(RecPtr, expectReadLen);
-
-    /* In archive or crash recovery. */
-    if (t_thrd.xlog_cxt.readFile < 0) {
-        uint32 sources;
-
-        /* Reset curFileTLI if random fetch. */
-        if (randAccess) {
-            t_thrd.xlog_cxt.curFileTLI = 0;
-        }
-
-        sources = XLOG_FROM_PG_XLOG;
-        if (t_thrd.xlog_cxt.InArchiveRecovery) {
-            sources |= XLOG_FROM_ARCHIVE;
-        }
-
-        t_thrd.xlog_cxt.readFile = SSXLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources, xlog_path);
-
-        if (t_thrd.xlog_cxt.readFile < 0) {
-            return -1;
-        }
-    }
-
-    /*
-     * At this point, we have the right segment open and if we're streaming we
-     * know the requested record is in it.
-     */
-    Assert(t_thrd.xlog_cxt.readFile != -1);
-    
-    /* read size for XLOG_FROM_PG_XLOG */
-    t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
-
-    /* Read the requested page */
-    t_thrd.xlog_cxt.readOff = targetPageOff;
-
-    bool ret = SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, buf);
-    if (!ret) {
-        ereport(LOG, (errcode_for_file_access(), errmsg("read xlog(start:%X/%X, pos:%u len:%d) failed : %m",
-                                                        static_cast<uint32>(targetPagePtr >> BIT_NUM_INT32),
-                                                        static_cast<uint32>(targetPagePtr), targetPageOff,
-                                                        expectReadLen)));
-        ereport(emode_for_corrupt_record(emode, RecPtr),
-                (errcode_for_file_access(),
-                 errmsg("could not read from log file %s to offset %u: %m",
-                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
-                        t_thrd.xlog_cxt.readOff)));
-        goto next_record_is_invalid;
-    }
-
-    Assert(targetSegNo == t_thrd.xlog_cxt.readSegNo);
-    Assert(targetPageOff == t_thrd.xlog_cxt.readOff);
-    Assert((uint32)expectReadLen <= t_thrd.xlog_cxt.readLen);
-
-    *readTLI = t_thrd.xlog_cxt.curFileTLI;
-
-    return (int)t_thrd.xlog_cxt.readLen;
-
-next_record_is_invalid:
-    t_thrd.xlog_cxt.failedSources |= t_thrd.xlog_cxt.readSource;
-
-    if (t_thrd.xlog_cxt.readFile >= 0) {
-        close(t_thrd.xlog_cxt.readFile);
-    }
-    t_thrd.xlog_cxt.readFile = -1;
-    t_thrd.xlog_cxt.readLen = 0;
-    t_thrd.xlog_cxt.readSource = 0;
-
-    return -1;
-}
-
-int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
-    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path)
-{
-    int read_len = SSReadXLog(xlogreader, targetPagePtr, Max(XLOG_BLCKSZ, reqLen), targetRecPtr,
-                              readBuf, readTLI, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlogDir);
-    return read_len;
 }
 
 bool SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XLogRecPtr targetRecPtr, char *buf)

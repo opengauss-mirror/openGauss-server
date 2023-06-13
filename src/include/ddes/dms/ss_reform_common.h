@@ -35,8 +35,6 @@ typedef struct SSBroadcastCancelTrx {
     SSBroadcastOp type; // must be first
 } SSBroadcastCancelTrx;
 
-int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
-    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path);
 bool SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XLogRecPtr targetRecPtr, char *buf);
 XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize);
 void SSGetXlogPath();
@@ -44,3 +42,4 @@ void SSSaveReformerCtrl();
 void SSClearSegCache();
 int SSCancelTransactionOfAllStandby(SSBroadcastOp type);
 int SSProcessCancelTransaction(SSBroadcastOp type);
+int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path);

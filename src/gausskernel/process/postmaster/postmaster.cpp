@@ -6508,10 +6508,18 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.StatementPID, SIGTERM);
                     }
 
+                    if (g_instance.pid_cxt.StartupPID != 0 && DORADO_STANDBY_CLUSTER) {
+                        signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+                    }
+                    
                     /* and the walwriter too, to avoid checkpoint hang after ss switchover */
                     if (g_instance.pid_cxt.WalWriterPID != 0)
                         signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
                     StopAliveBuildSender();
+
+                    if (g_instance.pid_cxt.WalReceiverPID != 0 && DORADO_STANDBY_CLUSTER) {
+                        signal_child(g_instance.pid_cxt.WalReceiverPID, SIGTERM);
+                    }
 
                     if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
                         signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
@@ -10051,6 +10059,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
+        if (g_instance.pid_cxt.PgStatPID != 0 && 
+            g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) {
+            signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
+        }
+
         /* and the autovac launcher too */
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
@@ -10188,6 +10201,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* and the autovac launcher too */
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
+
+        if (g_instance.pid_cxt.PgStatPID != 0 && 
+            g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) {
+            signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
+        }
 
         if (g_instance.pid_cxt.PgJobSchdPID != 0)
             signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
@@ -12502,6 +12520,9 @@ const char* wal_get_db_state_string(DbState db_state)
 static ServerMode get_cur_mode(void)
 {
     if (ENABLE_DMS) {
+        if (DORADO_STANDBY_CLUSTER) {
+            return STANDBY_MODE;
+        }
         /* except for main standby in standby cluster, current mode of instance is determined by SS_OFFICIAL_PRIMARY*/
         if (g_instance.attr.attr_storage.xlog_file_path !=0 && SS_OFFICIAL_PRIMARY &&
             t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) {

@@ -138,7 +138,7 @@ bool SSRecoveryApplyDelay()
     if (!ENABLE_REFORM) {
         return false;
     }
-
+    
     while (g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag) {
         /* might change the trigger file's location */
         RedoInterruptCallBack();

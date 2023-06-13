@@ -424,6 +424,11 @@ static uint64 XLogRecPtrToBytePos(XLogRecPtr ptr);
 static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn);
 static bool DoEarlyExit();
 
+static int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
+    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path);
+static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int expectReadLen,
+                      XLogRecPtr targetRecPtr, char *buf, TimeLineID *readTLI, char* xlog_path);
+
 void ArchiveXlogForForceFinishRedo(XLogReaderState *xlogreader, TermFileData *term_file);
 TermFileData GetTermFileDataAndClear(void);
 XLogRecPtr mpfl_read_max_flush_lsn();
@@ -11679,7 +11684,11 @@ void ShutdownXLOG(int code, Datum arg)
 {
     if (SS_PRIMARY_DEMOTING) {
         ereport(LOG, (errmsg("[SS switchover] primary demote: doing shutdown checkpoint")));
-        CreateCheckPoint(CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_IMMEDIATE);
+        if (DORADO_STANDBY_CLUSTER) {
+            CreateRestartPoint(CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_IMMEDIATE);
+        } else {
+            CreateCheckPoint(CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_IMMEDIATE);
+        }
         ckpt_shutdown_pagewriter();
 
         if (g_instance.ckpt_cxt_ctl->dirty_page_queue != NULL) {
@@ -11707,8 +11716,13 @@ void ShutdownXLOG(int code, Datum arg)
                 (void)RequestXLogSwitch();
             }
 
-            if (g_instance.wal_cxt.upgradeSwitchMode != ExtremelyFast)
-                CreateCheckPoint(CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_IMMEDIATE);
+            if (g_instance.wal_cxt.upgradeSwitchMode != ExtremelyFast) {
+                if (DORADO_STANDBY_CLUSTER) {
+                    CreateRestartPoint(CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_IMMEDIATE);
+                } else {
+                    CreateCheckPoint(CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_IMMEDIATE);
+                }
+            }
         }
     }
 
@@ -19828,4 +19842,435 @@ bool SSModifySharedLunAllowed()
         return true;
     }
     return false;
+}
+
+static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int expectReadLen,
+                      XLogRecPtr targetRecPtr, char *buf, TimeLineID *readTLI, char* xlog_path)
+{
+    /* Load reader private data */
+    XLogPageReadPrivate *readprivate = (XLogPageReadPrivate *)xlogreader->private_data;
+    int emode = IsExtremeRedo() ? LOG : readprivate->emode;
+    XLogRecPtr RecPtr = targetPagePtr;
+    uint32 targetPageOff;
+    bool processtrxn = false;
+    bool fetching_ckpt = readprivate->fetching_ckpt;
+    bool randAccess = IsExtremeRedo() ? false : readprivate->randAccess;
+    XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
+    XLogSegNo replayedSegNo;
+
+#ifdef USE_ASSERT_CHECKING
+    XLogSegNo targetSegNo;
+
+    XLByteToSeg(targetPagePtr, targetSegNo);
+#endif
+    targetPageOff = targetPagePtr % XLogSegSize;
+
+    if (t_thrd.xlog_cxt.readFile >= 0 && !XLByteInSeg(targetPagePtr, t_thrd.xlog_cxt.readSegNo)) {
+        /*
+         * Request a restartpoint if we've replayed too much xlog since the
+         * last one.
+         */
+        if (t_thrd.xlog_cxt.StandbyModeRequested &&
+            (t_thrd.xlog_cxt.bgwriterLaunched || t_thrd.xlog_cxt.pagewriter_launched) && !dummyStandbyMode) {
+            if (get_real_recovery_parallelism() > 1) {
+                XLByteToSeg(GetXLogReplayRecPtr(NULL), replayedSegNo);
+            } else {
+                replayedSegNo = t_thrd.xlog_cxt.readSegNo;
+            }
+            if (XLogCheckpointNeeded(replayedSegNo)) {
+                (void)GetRedoRecPtr();
+                if (XLogCheckpointNeeded(replayedSegNo)) {
+                    RequestCheckpoint(CHECKPOINT_CAUSE_XLOG);
+                }
+            }
+        }
+
+        close(t_thrd.xlog_cxt.readFile);
+        t_thrd.xlog_cxt.readFile = -1;
+        t_thrd.xlog_cxt.readSource = 0;
+    }
+
+    XLByteToSeg(targetPagePtr, t_thrd.xlog_cxt.readSegNo);
+    XLByteAdvance(RecPtr, expectReadLen);
+
+retry:
+    /* See if we need to retrieve more data */
+    if (t_thrd.xlog_cxt.readFile < 0 || !DORADO_STANDBY_CLUSTER ||
+        (t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM && XLByteLT(t_thrd.xlog_cxt.receivedUpto, RecPtr))) {
+        if (t_thrd.xlog_cxt.StandbyMode && t_thrd.xlog_cxt.startup_processing && DORADO_STANDBY_CLUSTER) {
+            /*
+             * In standby mode, wait for the requested record to become
+             * available, either via restore_command succeeding to restore the
+             * segment, or via walreceiver having streamed the record.
+             */
+            for (;;) {
+                /*
+                 * Need to check here also for the case where consistency level is
+                 * already reached without replaying any record i.e. just after reading
+                 * of checkpoint data it has reached to minRecoveryPoint. Also
+                 * whenever we are going to loop in the data receive from master
+                 * node its bettwe we check if consistency level has reached. So
+                 * instead of keeping in all places before ReadRecord, we can keep
+                 * here in centralised location.
+                 */
+                ProcTxnWorkLoad(false);
+
+                CheckRecoveryConsistency();
+                if (WalRcvInProgress()) {
+                    XLogRecPtr expectedRecPtr = RecPtr;
+                    bool havedata = false;
+
+                    /*
+                     * If we find an invalid record in the WAL streamed from
+                     * master, something is seriously wrong. There's little
+                     * chance that the problem will just go away, but PANIC is
+                     * not good for availability either, especially in hot
+                     * standby mode. Disconnect, and retry from
+                     * archive/pg_xlog again. The WAL in the archive should be
+                     * identical to what was streamed, so it's unlikely that
+                     * it helps, but one can hope...
+                     */
+                    if (t_thrd.xlog_cxt.failedSources & XLOG_FROM_STREAM) {
+                        ProcTxnWorkLoad(true);
+                        ereport(LOG, (errmsg("read from stream failed, request xlog receivedupto at %X/%X. targetRecPtr:%X/%x",
+                                             (uint32)(t_thrd.xlog_cxt.receivedUpto >> 32),
+                                             (uint32)t_thrd.xlog_cxt.receivedUpto,
+                                             (uint32)(targetRecPtr >> 32),
+                                             (uint32)targetRecPtr
+                                             )));
+                        ShutdownWalRcv();
+                        continue;
+                    }
+
+                    /*
+                     * Walreceiver is active, so see if new data has arrived.
+                     *
+                     * We only advance XLogReceiptTime when we obtain fresh
+                     * WAL from walreceiver and observe that we had already
+                     * processed everything before the most recent "chunk"
+                     * that it flushed to disk.  In steady state where we are
+                     * keeping up with the incoming data, XLogReceiptTime will
+                     * be updated on each cycle.  When we are behind,
+                     * XLogReceiptTime will not advance, so the grace time
+                     * alloted to conflicting queries will decrease.
+                     */
+                    if (RecPtr % XLogSegSize == 0) {
+                        XLByteAdvance(expectedRecPtr, SizeOfXLogLongPHD);
+                    } else if (RecPtr % XLOG_BLCKSZ == 0) {
+                        XLByteAdvance(expectedRecPtr, SizeOfXLogShortPHD);
+                    }
+
+                    if (XLByteLT(expectedRecPtr, t_thrd.xlog_cxt.receivedUpto)) {
+                        havedata = true;
+                    } else {
+                        XLogRecPtr latestChunkStart;
+
+                        t_thrd.xlog_cxt.receivedUpto = GetWalRcvWriteRecPtr(&latestChunkStart);
+                        if (XLByteLT(expectedRecPtr, t_thrd.xlog_cxt.receivedUpto)) {
+                            havedata = true;
+                            if (!XLByteLT(RecPtr, latestChunkStart)) {
+                                t_thrd.xlog_cxt.XLogReceiptTime = GetCurrentTimestamp();
+                                SetCurrentChunkStartTime(t_thrd.xlog_cxt.XLogReceiptTime);
+                            }
+                        } else {
+                            havedata = false;
+                        }
+                    }
+                    if (havedata) {
+                        /*
+                         * Great, streamed far enough. Open the file if it's
+                         * not open already.  Use XLOG_FROM_STREAM so that
+                         * source info is set correctly and XLogReceiptTime
+                         * isn't changed.
+                         */
+                        if (t_thrd.xlog_cxt.readFile < 0) {
+                            t_thrd.xlog_cxt.readFile = XLogFileRead(t_thrd.xlog_cxt.readSegNo, PANIC,
+                                                                    t_thrd.xlog_cxt.recoveryTargetTLI, XLOG_FROM_STREAM,
+                                                                    false);
+                            Assert(t_thrd.xlog_cxt.readFile >= 0);
+                        } else {
+                            /* just make sure source info is correct... */
+                            t_thrd.xlog_cxt.readSource = XLOG_FROM_STREAM;
+                            t_thrd.xlog_cxt.XLogReceiptSource = XLOG_FROM_STREAM;
+                        }
+
+                        break;
+                    }
+
+                    t_thrd.xlog_cxt.RedoDone = IsRedoDonePromoting();
+                    pg_memory_barrier();
+
+                    if (IS_SHARED_STORAGE_MODE) {
+                        uint32 disableConnectionNode =
+                            pg_atomic_read_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node);
+                        if (disableConnectionNode && WalRcvIsRunning()) {
+                            ereport(LOG, (errmsg("request xlog receivedupto at %X/%X.",
+                                                 (uint32)(t_thrd.xlog_cxt.receivedUpto >> 32),
+                                                 (uint32)t_thrd.xlog_cxt.receivedUpto)));
+                            ShutdownWalRcv();
+                        }
+                    }
+                    if (!processtrxn) {
+                        ProcTxnWorkLoad(true);
+                        processtrxn = true;
+                        goto retry;
+                    }
+                    /*
+                     * Wait for more WAL to arrive, or timeout to be reached
+                     */
+                    WaitLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch, WL_LATCH_SET | WL_TIMEOUT, 1000L);
+                    processtrxn = false;
+                    ResetLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
+                } else {
+                    uint32 sources;
+                    /*
+                     * Until walreceiver manages to reconnect, poll the
+                     * archive.
+                     */
+                    if (t_thrd.xlog_cxt.readFile >= 0) {
+                        close(t_thrd.xlog_cxt.readFile);
+                        t_thrd.xlog_cxt.readFile = -1;
+                    }
+                    /* Reset curFileTLI if random fetch. */
+                    if (randAccess) {
+                        t_thrd.xlog_cxt.curFileTLI = 0;
+                    }
+
+                    /*
+                     * Try to restore the file from archive, or read an
+                     * existing file from pg_xlog.
+                     */
+                    sources = XLOG_FROM_ARCHIVE | XLOG_FROM_PG_XLOG;
+                    ereport(DEBUG5, (errmsg("failedSources: %u", t_thrd.xlog_cxt.failedSources)));
+                    if (!(sources & ~t_thrd.xlog_cxt.failedSources)) {
+                        /*
+                         * We've exhausted all options for retrieving the
+                         * file. Retry.
+                         */
+                        t_thrd.xlog_cxt.failedSources = 0;
+
+                        /*
+                         * Before we sleep, re-scan for possible new timelines
+                         * if we were requested to recover to the latest
+                         * timeline.
+                         */
+                        if (t_thrd.xlog_cxt.recoveryTargetIsLatest) {
+                            if (rescanLatestTimeLine()) {
+                                continue;
+                            }
+                        }
+
+                        if (t_thrd.startup_cxt.shutdown_requested) {
+                            ereport(LOG, (errmsg("startup shutdown")));
+                            proc_exit(0);
+                        }
+
+                        if (!xlogctl->IsRecoveryDone) {
+                            g_instance.comm_cxt.predo_cxt.redoPf.redo_done_time = GetCurrentTimestamp();
+                            g_instance.comm_cxt.predo_cxt.redoPf.recovery_done_ptr = t_thrd.xlog_cxt.ReadRecPtr;
+                            ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                                          errmsg("XLogPageRead IsRecoveryDone is set true,"
+                                                 "ReadRecPtr:%X/%X, EndRecPtr:%X/%X",
+                                                 (uint32)(t_thrd.xlog_cxt.ReadRecPtr >> 32),
+                                                 (uint32)(t_thrd.xlog_cxt.ReadRecPtr),
+                                                 (uint32)(t_thrd.xlog_cxt.EndRecPtr >> 32),
+                                                 (uint32)(t_thrd.xlog_cxt.EndRecPtr))));
+                            parallel_recovery::redo_dump_all_stats();
+                        }
+
+                        /*
+                         * signal postmaster to update local redo end
+                         * point to gaussdb state file.
+                         */
+                        ProcTxnWorkLoad(true);
+                        if (!xlogctl->IsRecoveryDone) {
+                            SendPostmasterSignal(PMSIGNAL_LOCAL_RECOVERY_DONE);
+                            if (DORADO_STANDBY_CLUSTER && SS_PERFORMING_SWITCHOVER) {
+                                g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTED;
+                            }
+                        }
+
+                        SpinLockAcquire(&xlogctl->info_lck);
+                        xlogctl->IsRecoveryDone = true;
+                        SpinLockRelease(&xlogctl->info_lck);
+                        static uint64 printFrequency = 0;
+                        if (!(IS_SHARED_STORAGE_MODE) ||
+                            pg_atomic_read_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage)) {
+                            knl_g_set_redo_finish_status(REDO_FINISH_STATUS_LOCAL | REDO_FINISH_STATUS_CM);
+                            if ((printFrequency & 0xFF) == 0) {
+                                ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                                          errmsg("XLogPageRead set redo finish status,"
+                                                 "ReadRecPtr:%X/%X, EndRecPtr:%X/%X",
+                                                 (uint32)(t_thrd.xlog_cxt.ReadRecPtr >> 32),
+                                                 (uint32)(t_thrd.xlog_cxt.ReadRecPtr),
+                                                 (uint32)(t_thrd.xlog_cxt.EndRecPtr >> 32),
+                                                 (uint32)(t_thrd.xlog_cxt.EndRecPtr))));
+                            }
+                            printFrequency++;
+                            /*
+                             * If it hasn't been long since last attempt, sleep 1s to
+                             * avoid busy-waiting.
+                             */
+                            if (IS_SHARED_STORAGE_MODE) {
+                                uint32 connMode =
+                                    pg_atomic_read_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node);
+                                if (connMode) {
+                                    pg_atomic_write_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node,
+                                                        false);
+                                }
+                                pg_usleep(2000000L);
+                            } else {
+#ifdef ENABLE_LITE_MODE
+                                pg_usleep(1000000L);
+#else
+                                pg_usleep(50000L);
+#endif
+                            }
+                        }
+                        /*
+                         * If primary_conninfo is set, launch walreceiver to
+                         * try to stream the missing WAL, before retrying to
+                         * restore from archive/pg_xlog.
+                         *
+                         * If fetching_ckpt is TRUE, RecPtr points to the
+                         * initial checkpoint location. In that case, we use
+                         * RedoStartLSN as the streaming start position
+                         * instead of RecPtr, so that when we later jump
+                         * backwards to start redo at RedoStartLSN, we will
+                         * have the logs streamed already.
+                         */
+                        load_server_mode();
+
+                        if (IS_SHARED_STORAGE_STANBY_MODE && !IS_SHARED_STORAGE_MAIN_STANDBY_MODE) {
+                            ProcTxnWorkLoad(false);
+                            /* use volatile pointer to prevent code rearrangement */
+                            volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+#ifndef ENABLE_MULTIPLE_NODES
+                            rename_recovery_conf_for_roach();
+#endif
+
+                            ereport(LOG, (errmsg("request xlog stream from shared storage at %X/%X.",
+                                                 fetching_ckpt ? (uint32)(t_thrd.xlog_cxt.RedoStartLSN >> 32)
+                                                                : (uint32)(targetRecPtr >> 32),
+                                                 fetching_ckpt ? (uint32)t_thrd.xlog_cxt.RedoStartLSN
+                                                                : (uint32)targetRecPtr)));
+                            ShutdownWalRcv();
+                            t_thrd.xlog_cxt.receivedUpto = 0;
+                            SpinLockAcquire(&walrcv->mutex);
+                            walrcv->receivedUpto = 0;
+                            SpinLockRelease(&walrcv->mutex);
+
+                            RequestXLogStreaming(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr, 0,
+                                                 REPCONNTARGET_SHARED_STORAGE, 0);
+                            continue;
+                        }
+                    }
+                    /* Don't try to read from a source that just failed */
+                    sources &= ~t_thrd.xlog_cxt.failedSources;
+                    t_thrd.xlog_cxt.readFile = SSXLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, 
+                        emode, sources, xlog_path);
+                    if (t_thrd.xlog_cxt.readFile >= 0) {
+                        break;
+                    }
+
+                    ereport(DEBUG5, (errmsg("do not find any more files.sources=%u failedSources=%u", sources,
+                                            t_thrd.xlog_cxt.failedSources)));
+                    /*
+                     * Nope, not found in archive and/or pg_xlog.
+                     */
+                    t_thrd.xlog_cxt.failedSources |= sources;
+
+                }
+
+                /*
+                 * This possibly-long loop needs to handle interrupts of
+                 * startup process.
+                 */
+                RedoInterruptCallBack();
+            }
+        } else {
+            /* In archive or crash recovery. */
+            if (t_thrd.xlog_cxt.readFile < 0) {
+                uint32 sources;
+
+                /* Reset curFileTLI if random fetch. */
+                if (randAccess) {
+                    t_thrd.xlog_cxt.curFileTLI = 0;
+                }
+
+                sources = XLOG_FROM_PG_XLOG;
+                if (t_thrd.xlog_cxt.InArchiveRecovery) {
+                    sources |= XLOG_FROM_ARCHIVE;
+                }
+
+                t_thrd.xlog_cxt.readFile = SSXLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, 
+                    emode, sources, xlog_path);
+
+                if (t_thrd.xlog_cxt.readFile < 0) {
+                    return -1;
+                }
+            }
+        }
+    }
+
+    /*
+     * At this point, we have the right segment open and if we're streaming we
+     * know the requested record is in it.
+     */
+    Assert(t_thrd.xlog_cxt.readFile != -1);
+    
+    if (t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM) {
+        if ((targetPagePtr / XLOG_BLCKSZ) != (t_thrd.xlog_cxt.receivedUpto / XLOG_BLCKSZ)) {
+            t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
+        } else {
+            t_thrd.xlog_cxt.readLen = t_thrd.xlog_cxt.receivedUpto % XLogSegSize - targetPageOff;
+        }
+    } else {
+        t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
+    }
+
+    /* Read the requested page */
+    t_thrd.xlog_cxt.readOff = targetPageOff;
+
+    bool ret = SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, buf);
+    if (!ret) {
+        ereport(LOG, (errcode_for_file_access(), errmsg("read xlog(start:%X/%X, pos:%u len:%d) failed : %m",
+                                                        static_cast<uint32>(targetPagePtr >> BIT_NUM_INT32),
+                                                        static_cast<uint32>(targetPagePtr), targetPageOff,
+                                                        expectReadLen)));
+        ereport(emode_for_corrupt_record(emode, RecPtr),
+                (errcode_for_file_access(),
+                 errmsg("could not read from log file %s to offset %u: %m",
+                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
+                        t_thrd.xlog_cxt.readOff)));
+        goto next_record_is_invalid;
+    }
+
+    Assert(targetSegNo == t_thrd.xlog_cxt.readSegNo);
+    Assert(targetPageOff == t_thrd.xlog_cxt.readOff);
+    Assert((uint32)expectReadLen <= t_thrd.xlog_cxt.readLen);
+
+    *readTLI = t_thrd.xlog_cxt.curFileTLI;
+
+    return (int)t_thrd.xlog_cxt.readLen;
+
+next_record_is_invalid:
+    t_thrd.xlog_cxt.failedSources |= t_thrd.xlog_cxt.readSource;
+
+    if (t_thrd.xlog_cxt.readFile >= 0) {
+        close(t_thrd.xlog_cxt.readFile);
+    }
+    t_thrd.xlog_cxt.readFile = -1;
+    t_thrd.xlog_cxt.readLen = 0;
+    t_thrd.xlog_cxt.readSource = 0;
+
+    return -1;
+}
+
+int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
+    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path)
+{
+    int read_len = SSReadXLog(xlogreader, targetPagePtr, reqLen, targetRecPtr,
+                              readBuf, readTLI, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlogDir);
+    return read_len;
 }
