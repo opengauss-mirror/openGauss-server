@@ -220,6 +220,9 @@ static char remove_member_file[MAXPGPATH];
 static char change_role_file[MAXPGPATH];
 static char* new_role = "passive";
 static char start_minority_file[MAXPGPATH];
+static int get_instance_id(void);
+static int ss_get_primary_id(void);
+static bool ss_read_dorado_config(void);
 static unsigned int vote_num = 0;
 static unsigned int xmode = 2;
 static char postport_lock_file[MAXPGPATH];
@@ -2579,6 +2582,8 @@ static void do_switchover(uint32 term)
     int ret;
     char term_path[MAXPGPATH];
 
+    bool is_cluster_standby = ss_read_dorado_config();
+
     pg_log(PG_WARNING, _("switchover term (%u)\n"), term);
 
     ret = snprintf_s(term_path, MAXPGPATH, MAXPGPATH - 1, "%s/term_file", pg_data);
@@ -2618,7 +2623,10 @@ static void do_switchover(uint32 term)
     }
 
     origin_run_mode = run_mode = get_runmode();
-    if (run_mode == PRIMARY_MODE) {
+    instance_config.dss.instance_id = get_instance_id();
+
+    if ((run_mode == PRIMARY_MODE && !is_cluster_standby) ||
+            (instance_config.dss.instance_id == ss_get_primary_id() && is_cluster_standby)) {
         pg_log(PG_WARNING, _("switchover completed (%s)\n"), pg_data);
         return;
     } else if (UNKNOWN_MODE == run_mode) {
@@ -2708,24 +2716,38 @@ static void do_switchover(uint32 term)
                     exit(1);
                 }
             }
-            if ((run_mode = get_runmode()) == origin_run_mode) {
-                pg_log(PG_PRINT, ".");
-                pg_usleep(1000000); /* 1 sec */
-            }
-            /*
-             * we query the status of server, if connection is failed, it will
-             * retry 3 times.
-             */
-            else if (failed_count < 3) {
-                failed_count++;
-                pg_log(PG_PRINT, ".");
-                pg_usleep(1000000); /* 1 sec */
+            /* 
+            * in share storage dorado cluster,the server mode of standby cluster not have primary 
+            * we can determine whether it is completed by reading the node ID and primaryid 
+            */
+            if (is_cluster_standby) {
+                if (instance_config.dss.instance_id != ss_get_primary_id()) {
+                    pg_log(PG_PRINT, ".");
+                    pg_usleep(1000000); /* 1 sec */
+                } else {
+                    break;
+                }
             } else {
-                break;
+                if ((run_mode = get_runmode()) == origin_run_mode) {
+                    pg_log(PG_PRINT, ".");
+                    pg_usleep(1000000); /* 1 sec */
+                }
+                /*
+                * we query the status of server, if connection is failed, it will
+                * retry 3 times.
+                */
+                else if (failed_count < 3) {
+                    failed_count++;
+                    pg_log(PG_PRINT, ".");
+                    pg_usleep(1000000); /* 1 sec */
+                } else {
+                    break;
+                }
             }
         }
         pg_log(PG_PRINT, _("\n"));
-        if ((origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE) ||
+        if ((!is_cluster_standby && origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE) ||
+            (is_cluster_standby && instance_config.dss.instance_id != ss_get_primary_id()) || 
             (origin_run_mode == CASCADE_STANDBY_MODE && run_mode != STANDBY_MODE)) {
             pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status.\n"), wait_seconds);
         } else {
@@ -7172,4 +7194,143 @@ static void free_ctl()
     FREE_AND_RESET(register_password);
     FREE_AND_RESET(pgha_str);
     FREE_AND_RESET(pgha_opt);
+}
+
+static int get_instance_id(void)
+{
+    PGconn* conn = NULL;
+    PGresult* res = NULL;
+    const char* sql_string = "show ss_instance_id;";
+    char* instid = NULL;
+
+    conn = get_connectionex();
+    if (PQstatus(conn) != CONNECTION_OK) {
+        pg_log(PG_WARNING, _("could not connect to server: %s"), PQerrorMessage(conn));
+        return -1;
+    }
+
+    /* Get local role from the local server. */
+    res = PQexec(conn, sql_string);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        pg_log(PG_WARNING, _("could not get local role from the local server: %s"), PQerrorMessage(conn));
+        close_connection();
+        conn = NULL;
+        return -1;
+    }
+
+    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
+        int ntuples = PQntuples(res);
+        int nfields = PQnfields(res);
+
+        PQclear(res);
+        pg_log(PG_WARNING,
+            _("invalid response from primary server: "
+              "Expected 1 tuple with 1 fields, got %d tuples with %d fields."),
+            ntuples,
+            nfields);
+        close_connection();
+        conn = NULL;
+        return -1;
+    }
+
+    instid = PQgetvalue(res, 0, 0);
+
+    PQclear(res);
+    close_connection();
+    conn = NULL;
+
+    return atoi(instid);
+}
+
+static int ss_get_primary_id(void)
+{
+    if (instance_config.dss.socketpath == NULL) {
+        pg_log(PG_WARNING, _("socketpath cannot be NULL when enable dss\n"));
+        exit(1);
+    }
+
+    if (instance_config.dss.vgname == NULL) {
+        pg_log(PG_WARNING, _("the DATADIR is not correct with enable dss\n"));
+        exit(1);
+    }
+
+    int fd = -1;
+    int len = 0;
+    int err = 0;
+    struct stat statbuf;
+    char control_file_path[MAXPGPATH];
+
+    err = memset_s(control_file_path, MAXPGPATH, 0, MAXPGPATH);
+    securec_check_c(err, "\0", "\0");
+    err = snprintf_s(control_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", instance_config.dss.vgname);
+    securec_check_ss_c(err, "\0", "\0");
+
+    if (dss_device_init(instance_config.dss.socketpath, true) != DSS_SUCCESS) {
+        pg_log(PG_WARNING, _("failed to init dss device\n"));
+        exit(1);
+    }
+
+    fd = open(control_file_path, O_RDONLY | PG_BINARY, 0);
+    if(fd < 0) {
+        pg_log(PG_WARNING, _("failed to open pg_contol\n"));
+        close(fd);
+        fd = -1;
+        exit(1);
+    }
+
+    if (stat(control_file_path, &statbuf) < 0) {
+        pg_log(PG_WARNING, _("failed to stat pg_contol\n"));
+        close(fd);
+        fd = -1;
+        exit(1);
+    }
+
+    len = statbuf.st_size;
+    char* tmpBuffer = (char*)malloc(len + 1);
+
+    if ((read(fd, tmpBuffer, len)) != len) {
+        close(fd);
+        fd = -1;
+        pg_log(PG_WARNING, _("failed to read pg_contol\n"));
+        exit(1);
+    }
+
+    ss_reformer_ctrl_t* reformerCtrl;
+
+    /* Calculate the offset to obtain the primary_id of the last page */
+    reformerCtrl = (ss_reformer_ctrl_t*)(tmpBuffer + REFORMER_CTL_INSTANCEID * PG_CONTROL_SIZE);
+    return reformerCtrl->primaryInstId;
+}
+
+/*
+* read dorado config, if it is dorado standby cluster,
+* we will get ss_dss_conn_path and ss_dss_vg_name.
+*/
+static bool ss_read_dorado_config(void)
+{
+    char config_file[MAXPGPATH] = {0};
+    char** optlines = NULL;
+    int ret = EOK;
+
+    ret = snprintf_s(config_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
+    securec_check_ss_c(ret, "\0", "\0");
+    config_file[MAXPGPATH - 1] = '\0';
+    optlines = readfile(config_file);
+    char cluster_run_mode[MAXPGPATH] = {0};
+
+    (void)find_guc_optval((const char**)optlines, "cluster_run_mode", cluster_run_mode);
+
+    /* this is not dorado cluster_standby, wo do not need to do anythiny else */
+    if(strncmp(cluster_run_mode, "cluster_standby", sizeof("cluster_standby")) != 0) {
+        return false;
+    }
+
+    instance_config.dss.socketpath = (char*)malloc(sizeof(char) * MAXPGPATH);
+    instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
+    (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", instance_config.dss.socketpath);
+    (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", (char*)instance_config.dss.vgname);
+    freefile(optlines);
+    optlines = NULL;
+    return true;
 }

@@ -33,6 +33,7 @@
 #include "access/xact.h"
 #include "access/transam.h"
 #include "access/csnlog.h"
+#include "access/xlog.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/buf/buf_internals.h"
 #include "ddes/dms/ss_transaction.h"
@@ -1527,6 +1528,10 @@ static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
     dms_role_t new_dms_role = reformer_id == (unsigned int)SS_MY_INST_ID ? DMS_ROLE_REFORMER : DMS_ROLE_PARTNER;
     if (new_dms_role == DMS_ROLE_REFORMER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover]begin to set currrent DSS as primary")));
+        /* standby of standby cluster need to set mode to STANDBY_MODE in dual cluster*/
+        if (DORADO_STANDBY_CLUSTER) {
+            t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
+        }
         while (dss_set_server_status_wrapper() != GS_SUCCESS) {
             pg_usleep(REFORM_WAIT_LONG);
             ereport(WARNING, (errmodule(MOD_DMS),
