@@ -16,6 +16,7 @@
 #include "nodes/parsenodes.h"
 #include "storage/lock/lock.h"
 #include "utils/relcache.h"
+#include "commands/tablecmds.h"
 
 extern void cluster(ClusterStmt* stmt, bool isTopLevel);
 extern void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, bool verbose, int freeze_min_age,
@@ -37,10 +38,10 @@ extern void getRelationRelxids(Relation ordTableRel, TransactionId* frozenXid, M
 extern void  setRelationRelfrozenxid(Oid relid, TransactionId frozenXid);
 extern void  setPartitionRelfrozenxid(Oid partid, TransactionId frozenXid);
 extern void finishPartitionHeapSwap(Oid partitionOid, Oid tempTableOid, bool swapToastByContent,
-    TransactionId frozenXid, MultiXactId multiXid, bool tempTableIsPartition = false);
+    TransactionId frozenXid, MultiXactId multiXid, bool tempTableIsPartition = false, AlteredTableInfo* tab = NULL);
 
 extern void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bool swap_toast_by_content,
-    bool check_constraints, TransactionId frozenXid, MultiXactId frozenMulti, AdaptMem* memInfo = NULL);
+    bool check_constraints, TransactionId frozenXid, MultiXactId frozenMulti, AdaptMem* memInfo = NULL, AlteredTableInfo* tab = NULL);
 
 extern void vacuumFullPart(Oid partOid, VacuumStmt* vacstmt, int freeze_min_age, int freeze_table_age);
 extern void GpiVacuumFullMainPartiton(Oid parentOid);

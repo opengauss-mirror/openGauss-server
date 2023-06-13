@@ -237,74 +237,12 @@ typedef struct OnCommitItem {
 
 static const char* ORCSupportOption[] = {"orientation", "compression", "version", "partial_cluster_rows"};
 
-/*
- * State information for ALTER TABLE
- *
- * The pending-work queue for an ALTER TABLE is a List of AlteredTableInfo
- * structs, one for each table modified by the operation (the named table
- * plus any child tables that are affected).  We save lists of subcommands
- * to apply to this table (possibly modified by parse transformation steps);
- * these lists will be executed in Phase 2.  If a Phase 3 step is needed,
- * necessary information is stored in the constraints and newvals lists.
- *
- * Phase 2 is divided into multiple passes; subcommands are executed in
- * a pass determined by subcommand type.
- */
-#define AT_PASS_DROP 0       /* DROP (all flavors) */
-#define AT_PASS_ALTER_TYPE 1 /* ALTER COLUMN TYPE */
-#define AT_PASS_OLD_INDEX 2  /* re-add existing indexes */
-#define AT_PASS_OLD_CONSTR 3 /* re-add existing constraints */
-#define AT_PASS_COL_ATTRS 4  /* set other column attributes */
-/* We could support a RENAME COLUMN pass here, but not currently used */
-#define AT_PASS_ADD_COL 5    /* ADD COLUMN */
-#define AT_PASS_ADD_INDEX 6  /* ADD indexes */
-#define AT_PASS_ADD_CONSTR 7 /* ADD constraints, defaults */
-
-#define AT_PASS_ADD_PARTITION 8
-
-#define AT_PASS_MISC 9 /* other stuff */
-#ifdef PGXC
-#define AT_PASS_DISTRIB 10 /* Redistribution pass */
-#define AT_COMMENT 11
-#define AT_NUM_PASSES 12
-#else
-#define AT_NUM_PASSES 10
-#endif
-
 typedef struct ViewInfoForAdd {
     Oid ev_class;
     char *query_string;
 } ViewInfoForAdd;
 
-typedef struct AlteredTableInfo {
-    /* Information saved before any work commences: */
-    Oid relid;         /* Relation to work on */
-    Oid partid;        /* Partition to work on */
-    char relkind;      /* Its relkind */
-    TupleDesc oldDesc; /* Pre-modification tuple descriptor */
-    /* Information saved by Phase 1 for Phase 2: */
-    List* subcmds[AT_NUM_PASSES]; /* Lists of AlterTableCmd */
-    /* Information saved by Phases 1/2 for Phase 3: */
-    List* constraints; /* List of NewConstraint */
-    List* newvals;     /* List of NewColumnValue */
-    bool new_notnull;  /* T if we added new NOT NULL constraints */
-    int rewrite;      /* Reason if a rewrite is forced */
-    Oid newTableSpace; /* new tablespace; 0 means no change */
-    /* Objects to rebuild after completing ALTER TYPE operations */
-    List* changedConstraintOids; /* OIDs of constraints to rebuild */
-    List* changedConstraintDefs; /* string definitions of same */
-    List* changedIndexOids;      /* OIDs of indexes to rebuild */
-    List* changedIndexDefs;      /* string definitions of same */
-    bool isDeltaTable;                  /* delta table or not */
-    List* changedGeneratedCols; /* attribute number of generated column to rebuild */
-    List* changedRLSPolicies;   /* oid of RLSPolicies to rebuild */
-    List* changedViewOids;      /* OIDs of views to rebuild */
-    List* changedViewDefs;      /* string definitions of same */
-    List* changedTriggerOids;      /* OIDs of triggers to rebuild */
-    List* changedTriggerDefs;      /* string definitions of same */
-    bool is_first_after;         /* modify first|after and add firs|after */
-    bool is_modify_primary;      /* modify column first|after with primary key, we should pre-record AT_SetNotNull */
-} AlteredTableInfo;
+
 
 /* Struct describing one new constraint to check in Phase 3 scan */
 /* Note: new NOT NULL constraints are handled elsewhere */
@@ -652,7 +590,7 @@ static void ATExecSetTableSpaceForPartitionP2(AlteredTableInfo* tab, Relation re
 static void ATExecSetTableSpaceForPartitionP3(Oid tableOid, Oid partOid, Oid newTableSpace, LOCKMODE lockmode);
 static void atexecset_table_space(Relation rel, Oid newTableSpace, Oid newrelfilenode);
 static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType operation, 
-    LOCKMODE lockmode, bool innerset = false);
+    LOCKMODE lockmode, bool innerset = false, AlteredTableInfo* tab = NULL);
 static void ATExecEnableDisableTrigger(
     Relation rel, const char* trigname, char fires_when, bool skip_system, LOCKMODE lockmode);
 static void ATExecEnableDisableRule(Relation rel, const char* rulename, char fires_when, LOCKMODE lockmode);
@@ -8651,7 +8589,7 @@ static void sqlcmd_alter_exec_set_charsetcollate(Relation rel, CharsetCollateOpt
     List* new_reloption = NULL;
 
     (void)fill_relation_collation(cc->collate, cc->charset, &new_reloption);
-    ATExecSetRelOptions(rel, new_reloption, AT_SetRelOptions, lockmode, false);
+    ATExecSetRelOptions(rel, new_reloption, AT_SetRelOptions, lockmode);
 }
 
 static void sqlcmd_alter_prep_convert_charset(AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd,
@@ -8742,7 +8680,7 @@ static void sqlcmd_alter_exec_convert_charset(AlteredTableInfo* tab, Relation re
     int target_charset = cc->charset;
     Oid target_coll_oid = fill_relation_collation(cc->collate, target_charset, &new_reloption);
 
-    ATExecSetRelOptions(rel, new_reloption, AT_SetRelOptions, lockmode, false);
+    ATExecSetRelOptions(rel, new_reloption, AT_SetRelOptions, lockmode);
 
     attrelation = heap_open(AttributeRelationId, RowExclusiveLock);
     foreach(lc, tab->newvals) {
@@ -8938,7 +8876,7 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         case AT_SetRelOptions:     /* SET (...) */
         case AT_ResetRelOptions:   /* RESET (...) */
         case AT_ReplaceRelOptions: /* replace entire option list */
-            ATExecSetRelOptions(rel, (List*)cmd->def, cmd->subtype, lockmode);
+            ATExecSetRelOptions(rel, (List*)cmd->def, cmd->subtype, lockmode, false, tab);
             break;
         case AT_EnableTrig: /* ENABLE TRIGGER name */
             ATExecEnableDisableTrigger(rel, cmd->name, TRIGGER_FIRES_ON_ORIGIN, false, lockmode);
@@ -18004,18 +17942,130 @@ static void ATExecSetRelOptionsToast(Oid toastid, List* defList, AlterTableType 
     heap_close(pgclass, RowExclusiveLock);
 }
 
-/**
- * Do not modify compression parameters.
- */
-void static CheckSupportModifyCompression(Relation rel, bytea* relOoption, List* defList)
+/* Check if compressed options have changed. */
+inline bool CheckIfModifyCompressedOptions(PageCompressOpts* newCompressOpt, RelFileCompressOption current) 
 {
-    if (!relOoption) {
-        return;
+    if (newCompressOpt->compressType != (int)current.compressAlgorithm || 
+        newCompressOpt->compressLevel != (int)current.compressLevel || 
+        newCompressOpt->compressChunkSize != CHUNK_SIZE_LIST[current.compressChunkSize] ||
+        newCompressOpt->compressPreallocChunks != (int)current.compressPreallocChunks ||
+        newCompressOpt->compressByteConvert != (int)current.byteConvert ||
+        newCompressOpt->compressDiffConvert != (int)current.diffConvert) {
+        return true;
+    } 
+    return false;
+}
+
+/**
+ * Row compressed Options can not be used in segment table, 
+ * column table, view, unlogged table or temp table.
+ */
+bool CheckTableSupportSetCompressedOptions(Relation rel) 
+{
+    if (rel == NULL) {
+        return false;
     }
-    if (!REL_SUPPORT_COMPRESSED(rel) || rel->rd_node.opt == 0) {
+
+    if (rel->rd_rel->relkind != RELKIND_RELATION) {
+        return false;
+    }
+
+    if (!RelationIsPermanent(rel)) {
+        return false;        
+    }
+
+    if (RelationIsColStore(rel) || RelationIsTsStore(rel) || RelationIsSegmentTable(rel)) {
+        return false;
+    }
+    return true;
+}
+
+bool CheckDefListContainsCompressedOptions(List* defList) 
+{
+    if (defList == NULL) {
+        return false;
+    }
+    static const char *compressedOptions[] = {"compresstype",   "compress_chunk_size",   "compress_prealloc_chunks",
+                                            "compress_level", "compress_byte_convert", "compress_diff_convert"};
+    static const int compressedOptionsNum = 6;
+    ListCell *opt = NULL;
+    for (int i = 0; i < compressedOptionsNum; ++i) {
+        foreach (opt, defList) {
+            DefElem *def = (DefElem *)lfirst(opt);
+            if (pg_strcasecmp(def->defname, compressedOptions[i]) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Set compressed options need to rebuild table, check whether the modification need to rebuild table,
+ * and check whether the new compressed options is valid.
+ */ 
+bool static transformTableCompressedOptions(Relation rel, bytea* relOption, List* defList)
+{
+    /* only row table can modify compressed options */
+    if (!CheckTableSupportSetCompressedOptions(rel)) {
+        ForbidUserToSetCompressedOptions(defList);
+        return false;
+    }
+
+    PageCompressOpts* newCompressOpt = &(((StdRdOptions*)relOption)->compress);
+    RelFileCompressOption currentCompressOpt;
+    TransCompressOptions(rel->rd_node, &currentCompressOpt);
+
+    if(!CheckIfModifyCompressedOptions(newCompressOpt, currentCompressOpt)) {
+        return false;
+    }
+
+    /* check whether the new compression parameter is valid */
+    if (newCompressOpt->compressType == COMPRESS_TYPE_NONE && 
+            (newCompressOpt->compressLevel != 0 || newCompressOpt->compressChunkSize != BLCKSZ / 2 ||
+            newCompressOpt->compressPreallocChunks != 0 || newCompressOpt->compressByteConvert != false ||
+            newCompressOpt->compressDiffConvert != false)) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                                errmsg("compress_level=0, compress_chunk_size=4096, compress_prealloc_chunks=0, compress_byte_convert=false, compress_diff_convert=false should be set when compresstype=0")));
+    }
+
+    if (newCompressOpt->compressType != COMPRESS_TYPE_ZSTD && newCompressOpt->compressLevel != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+            errmsg("compress_level should be used with ZSTD algorithm."))); 
+    }
+
+    if (!newCompressOpt->compressByteConvert && newCompressOpt->compressDiffConvert) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("compress_diff_convert should be used with compress_byte_convert.")));
+    }
+
+    bool success = false;
+    ConvertChunkSize(newCompressOpt->compressChunkSize, &success);
+    if (!success) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("invalid compress_chunk_size %u, must be one of %d, %d, %d or %d",
+                                newCompressOpt->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2)));
+    }
+    if (newCompressOpt->compressPreallocChunks >= BLCKSZ / newCompressOpt->compressChunkSize) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), 
+                        errmsg("invalid compress_prealloc_chunks %u, must be less than %u",
+                                newCompressOpt->compressPreallocChunks,
+                                BLCKSZ / newCompressOpt->compressChunkSize)));
+    }
+
+    return true;
+}
+
+/**
+ * Do not modify compression parameters of index.
+ */
+void static transfromIndexCompressedOptions(Relation rel, bytea* relOoption, List* defList)
+{
+    if (rel->rd_node.opt == 0) {
         ForbidUserToSetCompressedOptions(defList);
         return;
     }
+
     PageCompressOpts* newCompressOpt = &(((StdRdOptions*)relOoption)->compress);
     RelFileCompressOption current;
     TransCompressOptions(rel->rd_node, &current);
@@ -18066,14 +18116,42 @@ void static CheckSupportModifyCompression(Relation rel, bytea* relOoption, List*
 }
 
 /*
+ * Check whether the new compressed options are valid, and whether need to rewrite table.
+ * Modifying the compressed options of row table causes to rewrite.
+ */
+bool static transformCompressedOptions(Relation rel, bytea* relOption, List* defList, AlteredTableInfo* tab) {
+    /* If delist doesn't contains compressed options, return false. */
+    if (!relOption || defList == NULL || !CheckDefListContainsCompressedOptions(defList)) {
+        return false;
+    }
+
+    /* If the relkind doesn't support compressed options, check if delist contains compressed options.
+     * If does, throw exception. 
+     */
+    if (!REL_SUPPORT_COMPRESSED(rel)) {
+        ForbidUserToSetCompressedOptions(defList);
+        return false;
+    }
+
+    /* Most compressed options can be modified only in row table */
+    if (tab != NULL && RelationIsRelation(rel)) {
+        return transformTableCompressedOptions(rel, relOption, defList);
+    } else {
+        transfromIndexCompressedOptions(rel, relOption, defList);
+    }
+    return false;
+}
+
+/*
  * Set, reset, or replace reloptions.
  */
-static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType operation, LOCKMODE lockmode, bool innerset)
+static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType operation, LOCKMODE lockmode, bool innerset, AlteredTableInfo* tab)
 {
     Oid relid;
     Relation pgclass;
-    HeapTuple tuple, newtuple;
+    HeapTuple tuple, newtuple, tmptuple;
     Datum datum;
+    Datum oldOptions;
     bool isnull = false;
     Datum newOptions;
     Datum repl_val[Natts_pg_class];
@@ -18091,7 +18169,6 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
     char* merge_list = NULL;
     bool oldRelHasUids = RELATION_HAS_UIDS(rel);
     bool newRelHasUids = false;
-
     if (defList == NIL && operation != AT_ReplaceRelOptions)
         return; /* nothing to do */
 
@@ -18146,6 +18223,9 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
     } else {
         /* Get the old reloptions */
         datum = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isnull);
+    }
+    if (rel->rd_rel->relkind == RELKIND_RELATION) {
+        oldOptions = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isnull);
     }
 
     /* remove the redis reloptions. */
@@ -18277,7 +18357,28 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
         SetupPageCompressForRelation(&rel->rd_node, &((StdRdOptions *)(void *)(rel->rd_options))->compress,
                                      RelationGetRelationName(rel));
     }
-    CheckSupportModifyCompression(rel, relOpt, defList);
+
+    /* Only row table support rewriting table when modifying compressed options. */
+    if (transformCompressedOptions(rel, relOpt, defList, tab)) {
+        /*
+         * The oldOptions will be used in phase 3 to delete the old data file correctly, 
+         * so the tmpTuple will not be released manually, but be released by memory context.
+         */
+        tmptuple = heap_copytuple(tuple);
+        oldOptions = SysCacheGetAttr(RELOID, tmptuple, Anum_pg_class_reloptions, &isnull);
+
+        /*
+         * If modiying compressed options of row table, set tab->rewrite to 
+         * AT_REWRITE_ALTER_COMPRESSION, which will case rewriting table during 
+         * the phase 3 of altering reloptions.
+         */ 
+        tab->rewrite = AT_REWRITE_ALTER_COMPRESSION;
+        tab->opt = rel->rd_node.opt;
+        tab->newOptions = newOptions;
+        tab->oldOptions = oldOptions;
+    } else if (tab != NULL) {
+        tab->rewrite = 0;
+    }
 
     /* Special-case validation of view options */
     if (rel->rd_rel->relkind == RELKIND_VIEW) {
@@ -30126,7 +30227,6 @@ static void ForbidToChangeTableSpaceOfPartitionedTable(AlteredTableInfo* tab)
 static void ExecRewriteRowTable(AlteredTableInfo* tab, Oid NewTableSpace, LOCKMODE lockmode)
 {
     ForbidToRewriteOrTestCstoreIndex(tab);
-
     Oid OIDNewHeap = make_new_heap(tab->relid, NewTableSpace);
 
     /*
@@ -30135,7 +30235,15 @@ static void ExecRewriteRowTable(AlteredTableInfo* tab, Oid NewTableSpace, LOCKMO
      * against new constraints generated by ALTER TABLE commands.
      */
     Relation oldRel = heap_open(tab->relid, NoLock);
-    Relation newRel = heap_open(OIDNewHeap, lockmode);
+    Relation newRel = heap_open(OIDNewHeap, lockmode); 
+
+    /*
+     * Temporarily set the relOptions of the old rel to th ones before
+     * modification to execute rewrite table.
+     */
+    if (tab->rewrite == AT_REWRITE_ALTER_COMPRESSION) {
+        oldRel->rd_node.opt = tab->opt;
+    }
     ATRewriteTable(tab, oldRel, newRel);
     heap_close(oldRel, NoLock);
     heap_close(newRel, NoLock);
@@ -30149,7 +30257,7 @@ static void ExecRewriteRowTable(AlteredTableInfo* tab, Oid NewTableSpace, LOCKMO
      * interest in letting this code work on system catalogs.
      */
     finish_heap_swap(tab->relid, OIDNewHeap, false, false, true, u_sess->utils_cxt.RecentXmin,
-                     GetOldestMultiXactId());
+                     GetOldestMultiXactId(), NULL, tab);
 
     /* clear all attrinitdefval */
     clearAttrInitDefVal(tab->relid);
@@ -30221,11 +30329,21 @@ static void ExecRewriteRowPartitionedTable(AlteredTableInfo* tab, Oid NewTableSp
             foreach (subcell, subpartitions) {
                 Partition subpartition = (Partition)lfirst(subcell);
                 Relation oldRel = partitionGetRelation(partrel, subpartition);
+                Datum relOptions = 0;
 
+                /*
+                 * Make new partition heap with the new reloptions when modifying 
+                 * compressed options.
+                 */
+                if (tab->rewrite == AT_REWRITE_ALTER_COMPRESSION) {
+                    relOptions = tab->newOptions;
+                } else {
+                    relOptions = partTabRelOptions;
+                }
                 /* make a temp table for swapping partition */
                 Oid OIDNewHeap = makePartitionNewHeap(partrel,
                     RelationGetDescr(partrel),
-                    partTabRelOptions,
+                    relOptions,
                     oldRel->rd_id,
                     oldRel->rd_rel->reltoastrelid,
                     oldRel->rd_rel->reltablespace,
@@ -30239,7 +30357,7 @@ static void ExecRewriteRowPartitionedTable(AlteredTableInfo* tab, Oid NewTableSp
 
                 /* swap the temp table and partition */
                 finishPartitionHeapSwap(oldRel->rd_id, OIDNewHeap, false, u_sess->utils_cxt.RecentXmin,
-                                        GetOldestMultiXactId());
+                                        GetOldestMultiXactId(), false, tab);
 
                 /* record the temp table oid for dropping */
                 tempTableOidList = lappend_oid(tempTableOidList, OIDNewHeap);
@@ -30254,11 +30372,21 @@ static void ExecRewriteRowPartitionedTable(AlteredTableInfo* tab, Oid NewTableSp
         foreach (cell, partitions) {
             Partition partition = (Partition)lfirst(cell);
             Relation oldRel = partitionGetRelation(partitionedTableRel, partition);
+            Datum relOptions = 0;
 
+            /*
+             * Make new partition heap with the new reloptions when modifying 
+             * compressed options.
+             */
+            if (tab->rewrite == AT_REWRITE_ALTER_COMPRESSION) {
+                relOptions = tab->newOptions;
+            } else {
+                relOptions = partTabRelOptions;
+            }
             /* make a temp table for swapping partition */
             Oid OIDNewHeap = makePartitionNewHeap(partitionedTableRel,
                 partTabHeapDesc,
-                partTabRelOptions,
+                relOptions,
                 oldRel->rd_id,
                 oldRel->rd_rel->reltoastrelid,
                 oldRel->rd_rel->reltablespace);
@@ -30270,7 +30398,7 @@ static void ExecRewriteRowPartitionedTable(AlteredTableInfo* tab, Oid NewTableSp
 
             /* swap the temp table and partition */
             finishPartitionHeapSwap(oldRel->rd_id, OIDNewHeap, false, u_sess->utils_cxt.RecentXmin,
-                GetOldestMultiXactId());
+                GetOldestMultiXactId(), false, tab);
 
             /* record the temp table oid for dropping */
             tempTableOidList = lappend_oid(tempTableOidList, OIDNewHeap);
