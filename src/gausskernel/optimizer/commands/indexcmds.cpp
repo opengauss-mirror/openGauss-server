@@ -390,7 +390,7 @@ static List *ExtractSubPartitionIdf(IndexStmt* stmt, List *subPartitionOidList, 
         foreach(lc2, idxPartdef->sublist) {
             RangePartitionindexDefState *idxSubPartdef = (RangePartitionindexDefState*)lfirst(lc2);
             if (idxSubPartdef->tablespace == NULL) {
-                idxSubPartdef->tablespace = strdup(idxPartdef->tablespace);
+                idxSubPartdef->tablespace = pstrdup(idxPartdef->tablespace);
             }
         }
     }

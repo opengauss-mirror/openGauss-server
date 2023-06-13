@@ -729,6 +729,15 @@ void SPI_restore_connection(void)
     u_sess->SPI_cxt._curid = u_sess->SPI_cxt._connected - 1;
 }
 
+void SPI_restore_connection_on_exception(void)
+{
+    Assert(u_sess->SPI_cxt._connected >= 0);
+    if (u_sess->SPI_cxt._current && u_sess->SPI_cxt._curid > u_sess->SPI_cxt._connected - 1) {
+        MemoryContextResetAndDeleteChildren(u_sess->SPI_cxt._current->execCxt);
+    }
+    u_sess->SPI_cxt._curid = u_sess->SPI_cxt._connected - 1;
+}
+
 #ifdef PGXC
 /* SPI_execute_direct:
  * Runs the 'remote_sql' query string on the node 'nodename'

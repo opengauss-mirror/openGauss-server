@@ -2862,7 +2862,7 @@ static void exec_exception_cleanup(PLpgSQL_execstate* estate, ExceptionContext *
      * With subtransaction aborted or not, SPI may be in a disconnected state,
      * We need this hack to return to connected state.
      */
-    SPI_restore_connection();
+    SPI_restore_connection_on_exception();
 
     t_thrd.xact_cxt.isSelectInto = false;
 
@@ -7030,6 +7030,7 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
             u_sess->plsql_cxt.curr_compile_context = save_compile_context;
             u_sess->plsql_cxt.compile_status = save_compile_status;
             clearCompileContextList(save_compile_list_length);
+            pfree_ext(querystr);
             PG_RE_THROW();
         }
         PG_END_TRY();
@@ -7043,6 +7044,7 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
         res = exchange_parameters(estate, stmt, func->action->body, &ppdindex, &datumindex);
 
         if (res < 0) {
+            pfree_ext(querystr);
             return -1;
         }
 
@@ -7071,6 +7073,7 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
 #endif
             /* Decrement package use-count */
             DecreasePackageUseCount(func);
+            pfree_ext(querystr);
             PG_RE_THROW();
         }
         PG_END_TRY();
@@ -7131,24 +7134,34 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
 
     plpgsql_estate = estate;
 
-    /*
-     * Execute the query without preparing a saved plan.
-     */
-    if (stmt->ppd != NULL) {
-        PreparedParamsData* ppd = (PreparedParamsData*)stmt->ppd;
-        exec_res = SPI_execute_with_args(
-            querystr, ppd->nargs, ppd->types, ppd->values, ppd->nulls, estate->readonly_func, tcount, ppd->cursor_data);
-        free_params_data(ppd);
-        stmt->ppd = NULL;
-    } else {
-        bool isCollectParam = false;
+    PG_TRY();
+    {
+        /*
+        * Execute the query without preparing a saved plan.
+        */
+        if (stmt->ppd != NULL) {
+            PreparedParamsData* ppd = (PreparedParamsData*)stmt->ppd;
+            exec_res = SPI_execute_with_args(querystr, ppd->nargs, ppd->types, ppd->values, ppd->nulls,
+                                             estate->readonly_func, tcount, ppd->cursor_data);
+            free_params_data(ppd);
+            stmt->ppd = NULL;
+        } else {
+            bool isCollectParam = false;
 #ifdef ENABLE_MULTIPLE_NODES
-    if (checkAdivsorState()) {
-        isCollectParam = true;
-    }
+        if (checkAdivsorState()) {
+            isCollectParam = true;
+        }
 #endif
-        exec_res = SPI_execute(querystr, estate->readonly_func, 0, isCollectParam);
+            exec_res = SPI_execute(querystr, estate->readonly_func, 0, isCollectParam);
+        }
     }
+    PG_CATCH();
+    {
+        pfree_ext(querystr);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
     /*
      * This is used for nested STP. If the transaction Id changed,
      * then need to create new econtext for the TopTransaction.
