@@ -1974,7 +1974,7 @@ static void **CollectStatesFromWorkers(GetStateFunc getStateFunc)
         return NULL;
 }
 
-void redo_get_wroker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum)
+void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum)
 {
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
     knl_parallel_redo_state state = g_instance.comm_cxt.predo_cxt.state;
@@ -2017,7 +2017,7 @@ void redo_get_wroker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, 
     Assert(*realNum == cur_pos);
 }
 
-void redo_get_wroker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
+void redo_get_worker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
 {
     PageRedoWorker *redoWorker = NULL;
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));

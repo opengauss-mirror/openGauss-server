@@ -31,7 +31,6 @@
 #include "access/xlogutils.h"
 #include "catalog/pg_tablespace.h"
 #include "storage/standby.h"
-#include "access/extreme_rto/page_redo.h"
 #include "access/ustore/knl_uredo.h"
 #include "access/ustore/knl_uextremeredo.h"
 #include "access/ustore/knl_upage.h"
@@ -108,7 +107,7 @@ static XLogRecParseState *UHeapXlogInsertParseBlock(XLogReaderState *record, uin
         return NULL;
     }
 
-    if (!extreme_rto::RedoWorkerIsUndoSpaceWorker()) {
+    if (!ExtremeRedoWorkerIsUndoSpaceWorker()) {
         XLogRecSetBlockDataState(record, UHEAP_INSERT_ORIG_BLOCK_NUM, recordstatehead);
     } else {
         XLogRecSetUHeapUndoBlockState(record, UHEAP_UNDO_ORIG_BLOCK_NUM, recordstatehead);
@@ -127,7 +126,7 @@ static XLogRecParseState *UHeapXlogDeleteParseBlock(XLogReaderState *record, uin
         return NULL;
     }
 
-    if (!extreme_rto::RedoWorkerIsUndoSpaceWorker()) {
+    if (!ExtremeRedoWorkerIsUndoSpaceWorker()) {
         XLogRecSetBlockDataState(record, UHEAP_DELETE_ORIG_BLOCK_NUM, recordstatehead);
     } else {
         XLogRecSetUHeapUndoBlockState(record, UHEAP_UNDO_ORIG_BLOCK_NUM, recordstatehead);
@@ -154,7 +153,7 @@ static XLogRecParseState *UHeapXlogUpdateParseBlock(XLogReaderState *record, uin
         return NULL;
     }
 
-    if (!extreme_rto::RedoWorkerIsUndoSpaceWorker()) {
+    if (!ExtremeRedoWorkerIsUndoSpaceWorker()) {
         XLogRecSetBlockDataState(record, UHEAP_UPDATE_NEW_BLOCK_NUM, recordstatehead);
         XLogRecSetAuxiBlkNumState(&recordstatehead->blockparse.extra_rec.blockdatarec, oldblk, InvalidForkNumber);
         if (oldblk != newblk) {
@@ -185,7 +184,7 @@ static XLogRecParseState *UHeapXlogMultiInsertParseBlock(XLogReaderState *record
         return NULL;
     }
 
-    if (!extreme_rto::RedoWorkerIsUndoSpaceWorker()) {
+    if (!ExtremeRedoWorkerIsUndoSpaceWorker()) {
         XLogRecSetBlockDataState(record, UHEAP_MULTI_INSERT_ORIG_BLOCK_NUM, recordstatehead);
     } else {
         XLogRecSetUHeapUndoBlockState(record, UHEAP_UNDO_ORIG_BLOCK_NUM, recordstatehead);

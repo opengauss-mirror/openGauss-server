@@ -71,6 +71,28 @@ void PRInitRedoItemEntry(RedoItemHashEntry *redoItemHashEntry)
     redoItemHashEntry->tail = NULL;
 }
 
+uint32 RedoItemTagHash(const void *key, Size keysize)
+{
+    RedoItemTag redoItemTag = *(const RedoItemTag *)key;
+    redoItemTag.rNode.opt = DefaultFileNodeOpt;
+    return DatumGetUInt32(hash_any((const unsigned char *)&redoItemTag, (int)keysize));
+}
+
+int RedoItemTagMatch(const void *left, const void *right, Size keysize)
+{
+    const RedoItemTag *leftKey = (const RedoItemTag *)left;
+    const RedoItemTag *rightKey = (const RedoItemTag *)right;
+    Assert(keysize == sizeof(RedoItemTag));
+
+    /* we just care whether the result is 0 or not */
+    if (RelFileNodeEquals(leftKey->rNode, rightKey->rNode) && leftKey->forkNum == rightKey->forkNum &&
+        leftKey->blockNum == rightKey->blockNum) {
+        return 0;
+    }
+
+    return 1;
+}
+
 HTAB *PRRedoItemHashInitialize(MemoryContext context)
 {
     HASHCTL ctl;

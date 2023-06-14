@@ -3027,6 +3027,13 @@ int PostmasterMain(int argc, char* argv[])
             }
             ereport(LOG, (errmsg("[SS reform] Success: node:%d wait for PRIMARY:%d to finish 1st reform",
                 g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
+
+            while (SS_OFFICIAL_RECOVERY_NODE && SS_CLUSTER_NOT_NORAML) {
+                pg_usleep(SLEEP_ONE_SEC);
+                SSReadControlFile(REFORM_CTRL_PAGE);
+                ereport(WARNING, (errmsg("[on-demand] node%d is last primary node, waiting for on-demand recovery done",
+                    g_instance.attr.attr_storage.dms_attr.instance_id)));
+            }
         }
     }
 
@@ -3062,8 +3069,6 @@ int PostmasterMain(int argc, char* argv[])
             DMSInit();
         }
     }
-
-    
 
     /*
      * We're ready to rock and roll...
@@ -4001,7 +4006,8 @@ static int ServerLoop(void)
             (AutoVacuumingActive() || t_thrd.postmaster_cxt.start_autovac_launcher) && pmState == PM_RUN &&
             !dummyStandbyMode && u_sess->attr.attr_common.upgrade_mode != 1 &&
             !g_instance.streaming_dr_cxt.isInSwitchover &&
-            !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM) {
+            !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM &&
+            !SS_IN_ONDEMAND_RECOVERY) {
             g_instance.pid_cxt.AutoVacPID = initialize_util_thread(AUTOVACUUM_LAUNCHER);
 
             if (g_instance.pid_cxt.AutoVacPID != 0)
@@ -6622,29 +6628,6 @@ dms_demote:
 }
 
 /*
- * Reaper -- get current time.
- */
-static void GetTimeNowForReaperLog(char* nowTime, int timeLen)
-{
-    time_t formatTime;
-    struct timeval current = {0};
-    const int tmpBufSize = 32;
-    char tmpBuf[tmpBufSize] = {0};
-
-    if (nowTime == NULL || timeLen == 0) {
-        return;
-    }
-
-    (void)gettimeofday(&current, NULL);
-    formatTime = current.tv_sec;
-    struct tm* pTime = localtime(&formatTime);
-    strftime(tmpBuf, sizeof(tmpBuf), "%Y-%m-%d %H:%M:%S", pTime);
-
-    errno_t rc = sprintf_s(nowTime, timeLen - 1, "%s.%ld ", tmpBuf, current.tv_usec / 1000);
-    securec_check_ss(rc, "\0", "\0");
-}
-
-/*
  * Reaper -- encap reaper prefix log.
  */
 static char* GetReaperLogPrefix(char* buf, int bufLen)
@@ -6653,7 +6636,7 @@ static char* GetReaperLogPrefix(char* buf, int bufLen)
     char timeBuf[bufSize] = {0};
     errno_t rc;
 
-    GetTimeNowForReaperLog(timeBuf, bufSize);
+    get_time_now(timeBuf, bufSize);
 
     rc = memset_s(buf, bufLen, 0, bufLen);
     securec_check(rc, "\0", "\0");
@@ -6859,7 +6842,8 @@ static void reaper(SIGNAL_ARGS)
             if (!u_sess->proc_cxt.IsBinaryUpgrade && AutoVacuumingActive() && g_instance.pid_cxt.AutoVacPID == 0 &&
                 !dummyStandbyMode && u_sess->attr.attr_common.upgrade_mode != 1 &&
                 !g_instance.streaming_dr_cxt.isInSwitchover &&
-                !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
+                !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM &&
+                !SS_IN_ONDEMAND_RECOVERY)
                 g_instance.pid_cxt.AutoVacPID = initialize_util_thread(AUTOVACUUM_LAUNCHER);
 
             if (SS_REFORM_PARTNER) {
@@ -7013,8 +6997,10 @@ static void reaper(SIGNAL_ARGS)
                 GetReaperLogPrefix(logBuf, ReaperLogBufSize), wal_get_role_string(get_cur_mode()));
 
             /* at this point we are really open for business */
-            write_stderr("%s LOG: database system is ready to accept connections\n",
-                GetReaperLogPrefix(logBuf, ReaperLogBufSize));
+            if (!SS_REPLAYED_BY_ONDEMAND) {
+                write_stderr("%s LOG: database system is ready to accept connections\n",
+                    GetReaperLogPrefix(logBuf, ReaperLogBufSize));
+            }
 
             continue;
         }
@@ -10014,12 +10000,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
-        if (SS_NORMAL_STANDBY && pmState == PM_RUN) {
+        SSReadControlFile(REFORM_CTRL_PAGE);
+        if (SS_NORMAL_STANDBY && pmState == PM_RUN && !SS_STANDBY_ONDEMAND_RECOVERY) {
             SSDoSwitchover();
         } else {
             ereport(LOG, (errmsg("Current mode is not NORMAL STANDBY, SS switchover command ignored.")));
         }
-        
     }
 
     if ((mode = CheckSwitchoverSignal()) != 0 && WalRcvIsOnline() && DataRcvIsOnline() &&

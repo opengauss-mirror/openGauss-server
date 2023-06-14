@@ -1714,6 +1714,7 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
     g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
+    SSReadControlFile(REFORM_CTRL_PAGE);
     Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     ereport(LOG,
             (errmodule(MOD_DMS),
@@ -1831,6 +1832,57 @@ void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
     t_thrd.postgres_cxt.whereToSendOutput = (int)DestNone;
 }
 
+int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
+{
+    BufferTag* tag = (BufferTag *)block_key;
+
+    Assert(SS_PRIMARY_MODE);
+    // do nothing if not in ondemand recovery
+    if (!SS_IN_ONDEMAND_RECOVERY) {
+        ereport(DEBUG1, (errmsg("[On-demand] ignore redo page request, spc/db/rel/bucket "
+                         "fork-block: %u/%u/%u/%d %d-%u", tag->rnode.spcNode, tag->rnode.dbNode,
+                         tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
+        *redo_status = ONDEMAND_REDO_SKIP;
+        return GS_SUCCESS;;
+    }
+
+    Buffer buffer;
+    SegSpace *spc = NULL;
+    uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    *redo_status = ONDEMAND_REDO_DONE;
+    PG_TRY();
+    {
+        if (IsSegmentPhysicalRelNode(tag->rnode)) {
+            spc = spc_open(tag->rnode.spcNode, tag->rnode.dbNode, false, false);
+            buffer = ReadBufferFast(spc, tag->rnode, tag->forkNum, tag->blockNum, RBM_NORMAL);
+        } else {
+            buffer = ReadBufferWithoutRelcache(tag->rnode, tag->forkNum, tag->blockNum, RBM_NORMAL, NULL, NULL);
+        }
+        ReleaseBuffer(buffer);
+    }
+    PG_CATCH();
+    {
+        t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+        /* Save error info */
+        ErrorData* edata = CopyErrorData();
+        FlushErrorState();
+        FreeErrorData(edata);
+        ereport(PANIC, (errmsg("[On-demand] Error happend when primary redo page for standby, spc/db/rel/bucket "
+                        "fork-block: %u/%u/%u/%d %d-%u", tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode,
+                        tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
+    }
+    PG_END_TRY();
+
+    if (BufferIsInvalid(buffer)) {
+        *redo_status = ONDEMAND_REDO_FAIL;
+    }
+
+    ereport(DEBUG1, (errmsg("[On-demand] redo page for standby done, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, "
+                            "redo status: %d", tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode,
+                            tag->rnode.bucketNode, tag->forkNum, tag->blockNum, *redo_status)));
+    return GS_SUCCESS;;
+}
+
 void DmsInitCallback(dms_callback_t *callback)
 {
     // used in reform
@@ -1850,6 +1902,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->failover_promote_opengauss = CBFailoverPromote;
     callback->reform_start_notify = CBReformStartNotify;
     callback->reform_set_dms_role = CBReformSetDmsRole;
+    callback->opengauss_ondemand_redo_buffer = CBOndemandRedoPageForStandby;
 
     callback->get_page_hash_val = CBPageHashCode;
     callback->read_local_page4transfer = CBEnterLocalPage;

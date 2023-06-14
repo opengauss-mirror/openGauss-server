@@ -1708,6 +1708,14 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     securec_check(rc, "\0", "\0");
     dms_cxt->flush_copy_get_page_failed = false;
 }
+
+static void knl_t_ondemand_xlog_copy_context_init(knl_t_ondemand_xlog_copy_context *ondemand_xlog_copy_cxt)
+{
+    ondemand_xlog_copy_cxt->openLogFile = -1;
+    ondemand_xlog_copy_cxt->openLogSegNo = 0;
+    ondemand_xlog_copy_cxt->openLogOff = 0;
+}
+
 static void knl_t_rc_init(knl_t_rc_context* rc_cxt)
 {
     errno_t rc = EOK;
@@ -1890,6 +1898,7 @@ void knl_thread_init(knl_thread_role role)
     knl_index_advisor_init(&t_thrd.index_advisor_cxt);
     knl_t_sql_patch_init(&t_thrd.sql_patch_cxt);
     knl_t_dms_context_init(&t_thrd.dms_cxt);
+    knl_t_ondemand_xlog_copy_context_init(&t_thrd.ondemand_xlog_copy_cxt);
     KnlTApplyLauncherInit(&t_thrd.applylauncher_cxt);
     KnlTApplyWorkerInit(&t_thrd.applyworker_cxt);
     KnlTPublicationInit(&t_thrd.publication_cxt);

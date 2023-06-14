@@ -37,6 +37,7 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 ONDEMAND_REDO_VERSION_NUM;
 extern const uint32 SRF_FUSION_VERSION_NUM;
 extern const uint32 INNER_UNIQUE_VERSION_NUM;
 extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
@@ -131,6 +132,7 @@ extern const uint32 CREATE_TABLE_AS_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
+extern void SSUpgradeFileBeforeCommit();
 
 #define INPLACE_UPGRADE_PRECOMMIT_VERSION 1
 
@@ -402,6 +404,7 @@ extern bool stack_is_too_deep(void);
 /* in tcop/utility.c */
 extern void PreventCommandIfReadOnly(const char* cmdname);
 extern void PreventCommandDuringRecovery(const char* cmdname);
+extern void PreventCommandDuringSSOndemandRecovery(Node* parseTree);
 
 extern int trace_recovery(int trace_level);
 

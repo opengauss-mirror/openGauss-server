@@ -64,6 +64,7 @@
 #include "access/extreme_rto/page_redo.h"
 #include "access/extreme_rto/dispatcher.h"
 #include "access/extreme_rto/txn_redo.h"
+#include "access/extreme_rto/xlog_read.h"
 #include "pgstat.h"
 #include "access/extreme_rto/batch_redo.h"
 #include "access/multi_redo_api.h"
@@ -2195,12 +2196,12 @@ static void HandleExtremeRtoCascadeStandbyPromote(uint32 trigger)
     pg_atomic_write_u32(&g_dispatcher->rtoXlogBufState.waitRedoDone, 1);
     WakeupRecovery();
     XLogReadManagerResponseSignal(trigger);
-    pg_atomic_write_u32(&(extreme_rto::g_startupTriggerState), TRIGGER_NORMAL);
+    pg_atomic_write_u32(&g_startupTriggerState, TRIGGER_NORMAL);
 }
 
 bool XLogReadManagerCheckSignal()
 {
-    uint32 trigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
+    uint32 trigger = pg_atomic_read_u32(&g_startupTriggerState);
     load_server_mode();
     if (g_dispatcher->smartShutdown || trigger == TRIGGER_PRIMARY || trigger == TRIGGER_SWITCHOVER ||
         (trigger == TRIGGER_FAILOVER && t_thrd.xlog_cxt.server_mode == STANDBY_MODE) ||

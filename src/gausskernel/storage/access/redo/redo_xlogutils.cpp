@@ -52,7 +52,6 @@
 #include "commands/dbcommands.h"
 #include "access/twophase.h"
 #include "access/redo_common.h"
-#include "access/extreme_rto/page_redo.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 
 THR_LOCAL RedoParseManager *g_parseManager = NULL;
@@ -274,7 +273,7 @@ XLogRedoAction XLogCheckBlockDataRedoAction(XLogBlockDataParse *datadecode, Redo
                     if (needRepair && g_instance.pid_cxt.PageRepairPID != 0) {
                         XLogRecPtr pageCurLsn = PageGetLSN(bufferinfo->pageinfo.page);
                         UnlockReleaseBuffer(bufferinfo->buf);
-                        extreme_rto::RecordBadBlockAndPushToRemote(datadecode, LSN_CHECK_FAIL, pageCurLsn,
+                        ExtremeRecordBadBlockAndPushToRemote(datadecode, LSN_CHECK_FAIL, pageCurLsn,
                             bufferinfo->blockinfo.pblk);
                         bufferinfo->buf = InvalidBuffer;
                         bufferinfo->pageinfo = {0};
@@ -914,38 +913,6 @@ void XLogRecSetSegNewPageInfo(XLogBlockSegNewPage *state, char *mainData, Size l
     state->dataLen = len;
 }
 
-
-static inline bool AtomicCompareExchangeBuffer(volatile Buffer *ptr, Buffer *expected, Buffer newval)
-{
-    bool ret = false;
-    Buffer current;
-    current = __sync_val_compare_and_swap(ptr, *expected, newval);
-    ret = (current == *expected);
-    *expected = current;
-    return ret;
-}
-
-static inline Buffer AtomicReadBuffer(volatile Buffer *ptr)
-{
-    return *ptr;
-}
-
-static inline void AtomicWriteBuffer(volatile Buffer* ptr, Buffer val)
-{
-    *ptr = val;
-}
-
-static inline Buffer AtomicExchangeBuffer(volatile Buffer *ptr, Buffer newval)
-{
-    Buffer old;
-    while (true) {
-        old = AtomicReadBuffer(ptr);
-        if (AtomicCompareExchangeBuffer(ptr, &old, newval))
-            break;
-    }
-    return old;
-}
-
 /* add for batch redo mem manager */
 void *XLogMemCtlInit(RedoMemManager *memctl, Size itemsize, int itemnum)
 {
@@ -1164,6 +1131,10 @@ void XLogRedoBufferSetState(RedoBufferManager *buffermanager, RedoMemSlot *buffe
 void XLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, RefOperate *refOperate,
                          InterruptFunc interruptOperte)
 {
+    if (SS_IN_ONDEMAND_RECOVERY) {
+        return OndemandXLogParseBufferInit(parsemanager, buffernum, refOperate, interruptOperte);
+    }
+
     void *allocdata = NULL;
     allocdata = XLogMemCtlInit(&(parsemanager->memctl), (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc)),
                                buffernum);
@@ -1178,6 +1149,11 @@ void XLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, RefOpera
 
 void XLogParseBufferDestory(RedoParseManager *parsemanager)
 {
+    if (SS_IN_ONDEMAND_RECOVERY) {
+        OndemandXLogParseBufferDestory(parsemanager);
+        return;
+    }
+
     g_parseManager = NULL;
     if (parsemanager->parsebuffers != NULL) {
         pfree(parsemanager->parsebuffers);
@@ -1189,6 +1165,10 @@ void XLogParseBufferDestory(RedoParseManager *parsemanager)
 XLogRecParseState *XLogParseBufferAllocList(RedoParseManager *parsemanager, XLogRecParseState *blkstatehead,
                                             void *record)
 {
+    if (SS_IN_ONDEMAND_RECOVERY) {
+        return OndemandXLogParseBufferAllocList(parsemanager, blkstatehead, record);
+    }
+
     RedoMemManager *memctl = &(parsemanager->memctl);
     RedoMemSlot *allocslot = NULL;
     ParseBufferDesc *descstate = NULL;
@@ -1234,11 +1214,16 @@ XLogRecParseState *XLogParseBufferCopy(XLogRecParseState *srcState)
     securec_check(rc, "\0", "\0");
 
     newState->isFullSync = srcState->isFullSync;
+    newState->distributeStatus = srcState->distributeStatus;
     return newState;
 }
 
 void XLogParseBufferRelease(XLogRecParseState *recordstate)
 {
+    if (SS_IN_ONDEMAND_RECOVERY) {
+        OndemandXLogParseBufferRelease(recordstate);
+        return;
+    }
     RedoMemManager *memctl = &(recordstate->manager->memctl);
     ParseBufferDesc *descstate = NULL;
 
@@ -1692,7 +1677,9 @@ void ExtremeRtoFlushBuffer(RedoBufferInfo *bufferinfo, bool updateFsm)
     } else {
         if (bufferinfo->pageinfo.page != NULL) {
             BufferDesc *bufDesc = GetBufferDescriptor(bufferinfo->buf - 1);
-            if (bufferinfo->dirtyflag || XLByteLT(bufDesc->extra->lsn_on_disk, PageGetLSN(bufferinfo->pageinfo.page))) {
+            /* backends may mark buffer dirty already */
+            if (!(bufDesc->state & BM_DIRTY) &&
+                (bufferinfo->dirtyflag || XLByteLT(bufDesc->extra->lsn_on_disk, PageGetLSN(bufferinfo->pageinfo.page)))) {
                 MarkBufferDirty(bufferinfo->buf);
                 if (!bufferinfo->dirtyflag && bufferinfo->blockinfo.forknum == MAIN_FORKNUM) {
                     int mode = WARNING;
@@ -1700,8 +1687,8 @@ void ExtremeRtoFlushBuffer(RedoBufferInfo *bufferinfo, bool updateFsm)
                     mode = PANIC;
 #endif
                     const uint32 shiftSz = 32;
-                    ereport(mode, (errmsg("extreme_rto not mark dirty:lsn %X/%X, lsn_disk %X/%X, \
-                                        lsn_page %X/%X, page %u/%u/%u %u",
+                    ereport(mode, (errmsg("extreme_rto not mark dirty:lsn %X/%X, lsn_disk %X/%X, "
+                                        "lsn_page %X/%X, page %u/%u/%u %u",
                                         (uint32)(bufferinfo->lsn >> shiftSz), (uint32)(bufferinfo->lsn),
                                         (uint32)(bufDesc->extra->lsn_on_disk >> shiftSz),
                                         (uint32)(bufDesc->extra->lsn_on_disk),
@@ -1765,10 +1752,12 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
         ereport(PANIC, (errmsg("XLogBlockRedoForExtremeRTO: redobuffer checkfailed")));
     }
     if (block_valid <= BLOCK_DATA_FSM_TYPE) {
-        GetRedoStartTime(redoCost);
-        Assert(block_valid == g_xlogExtRtoRedoTable[block_valid].block_valid);
-        g_xlogExtRtoRedoTable[block_valid].xlog_redoextrto(blockhead, blockrecbody, bufferinfo);
-        CountRedoTime(redoCost);
+        if (redoaction != BLK_DONE) {
+            GetRedoStartTime(redoCost);
+            Assert(block_valid == g_xlogExtRtoRedoTable[block_valid].block_valid);
+            g_xlogExtRtoRedoTable[block_valid].xlog_redoextrto(blockhead, blockrecbody, bufferinfo);
+            CountRedoTime(redoCost);
+        }
 #ifdef USE_ASSERT_CHECKING
         if (block_valid != BLOCK_DATA_UNDO_TYPE && !bufferinfo->pageinfo.ignorecheck) {
             DoRecordCheck(redoblocktate, PageGetLSN(bufferinfo->pageinfo.page), true);
@@ -1780,6 +1769,33 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
                                  (uint32)(blockhead->end_ptr >> 32), (uint32)(blockhead->end_ptr))));
     }
     return false;
+}
+
+void XlogBlockRedoForOndemandExtremeRTOQuery(XLogRecParseState *redoBlockState, RedoBufferInfo *bufferInfo)
+{
+
+    XLogBlockHead *blockHead = &redoBlockState->blockparse.blockhead;
+    void *blockrecBody = &redoBlockState->blockparse.extra_rec;
+    uint16 blockValid = XLogBlockHeadGetValidInfo(blockHead);
+
+    bool checkValid = XLogBlockRefreshRedoBufferInfo(blockHead, bufferInfo);
+    if (!checkValid) {
+        ereport(PANIC, (errmsg("XLogBlockRedoForOndemandExtremeRTOQuery: redobuffer checkfailed")));
+    }
+    if (blockValid <= BLOCK_DATA_FSM_TYPE) {
+        Assert(blockValid == g_xlogExtRtoRedoTable[blockValid].block_valid);
+        g_xlogExtRtoRedoTable[blockValid].xlog_redoextrto(blockHead, blockrecBody, bufferInfo);
+#ifdef USE_ASSERT_CHECKING
+        if (blockValid != BLOCK_DATA_UNDO_TYPE) {
+            DoRecordCheck(redoBlockState, PageGetLSN(bufferInfo->pageinfo.page), true);
+        }
+#endif
+    } else {
+        ereport(WARNING, (errmsg("XLogBlockRedoForOndemandExtremeRTOQuery: unsuport type %u, lsn %X/%X",
+                                 (uint32)blockValid,
+                                 (uint32)(blockHead->end_ptr >> 32),
+                                 (uint32)(blockHead->end_ptr))));
+    }
 }
 
 static const XLogParseBlock g_xlogParseBlockTable[RM_MAX_ID + 1] = {

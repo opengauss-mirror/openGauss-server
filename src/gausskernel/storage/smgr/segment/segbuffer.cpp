@@ -344,7 +344,7 @@ void SegMarkBufferDirty(Buffer buf)
 #ifdef USE_ASSERT_CHECKING
 void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, BlockNumber blocknum, char *buf)
 {
-    if (!RecoveryInProgress() && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION) {
+    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION) {
         char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
         char *temp_buf = (char *)BUFFERALIGN(origin_buf);
         seg_physical_read(spc, rNode, forknum, blocknum, temp_buf);
@@ -526,8 +526,9 @@ Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
 #endif
     } else {
 #ifdef USE_ASSERT_CHECKING
-        bool need_verify = (!RecoveryInProgress() && ((pg_atomic_read_u32(&bufHdr->state) & BM_VALID) != 0) &&
-            ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION);
+        bool need_verify = (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY &&
+            ((pg_atomic_read_u32(&bufHdr->state) & BM_VALID) != 0) && ENABLE_DSS &&
+            ENABLE_VERIFY_PAGE_VERSION);
         char *past_image = NULL;
         if (need_verify) {
             past_image = (char *)palloc(BLCKSZ);
