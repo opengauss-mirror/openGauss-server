@@ -24,7 +24,6 @@
 #include "access/xlog_basic.h"
 #include "access/xlog_internal.h"
 #include "access/multi_redo_api.h"
-#include "access/extreme_rto/page_redo.h"
 #include "access/parallel_recovery/page_redo.h"
 #include "access/parallel_recovery/dispatcher.h"
 #include "catalog/catalog.h"
@@ -858,7 +857,7 @@ void WaitRepalyFinish()
 {
     /* file repair finish, need clean the invalid page */
     if (IsExtremeRedo()) {
-        extreme_rto::WaitAllReplayWorkerIdle();
+        ExtremeWaitAllReplayWorkerIdle();
     } else if (IsParallelRedo()) {
         parallel_recovery::WaitAllPageWorkersQueueEmpty();
     } else {
@@ -1088,9 +1087,9 @@ void RenameRepairFile(RepairFileKey *key, bool clear_entry)
 
         /* file repair finish, need clean the invalid page */
         if (IsExtremeRedo()) {
-            extreme_rto::DispatchCleanInvalidPageMarkToAllRedoWorker(*key);
-            extreme_rto::DispatchClosefdMarkToAllRedoWorker();
-            extreme_rto::WaitAllReplayWorkerIdle();
+            ExtremeDispatchCleanInvalidPageMarkToAllRedoWorker(*key);
+            ExtremeDispatchClosefdMarkToAllRedoWorker();
+            ExtremeWaitAllReplayWorkerIdle();
         } else if (IsParallelRedo()) {
             if (AmStartupProcess()) {
                 ProcTxnWorkLoad(true);
@@ -1332,8 +1331,8 @@ void UnlinkOldBadFile(char *path, RepairFileKey key)
 {
     /* wait the xlog repaly finish */
     if (IsExtremeRedo()) {
-        extreme_rto::DispatchClosefdMarkToAllRedoWorker();
-        extreme_rto::WaitAllReplayWorkerIdle();
+        ExtremeDispatchClosefdMarkToAllRedoWorker();
+        ExtremeWaitAllReplayWorkerIdle();
     } else if (IsParallelRedo()) {
         parallel_recovery::SendClosefdMarkToAllWorkers();
         parallel_recovery::WaitAllPageWorkersQueueEmpty();

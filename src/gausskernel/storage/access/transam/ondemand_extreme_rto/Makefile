@@ -14,14 +14,14 @@
 # ---------------------------------------------------------------------------------------
 # 
 # Makefile
-#     Makefile for access/transam/extreme_rto
+#     Makefile for access/transam/ondemand_extreme_rto
 # 
 # IDENTIFICATION
-#        src/gausskernel/storage/access/transam/extreme_rto/Makefile
+#        src/gausskernel/storage/access/transam/ondemand_extreme_rto/Makefile
 # 
 # ---------------------------------------------------------------------------------------
 
-subdir = src/gausskernel/storage/access/transam/extreme_rto
+subdir = src/gausskernel/storage/access/transam/ondemand_extreme_rto
 top_builddir = ../../../../../..
 include $(top_builddir)/src/Makefile.global
 

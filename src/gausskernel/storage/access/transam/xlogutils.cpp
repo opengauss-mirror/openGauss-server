@@ -30,7 +30,6 @@
 #include "access/xlogproc.h"
 #include "access/multi_redo_api.h"
 #include "access/parallel_recovery/dispatcher.h"
-#include "access/extreme_rto/page_redo.h"
 #include "catalog/catalog.h"
 #include "catalog/storage_xlog.h"
 #include "miscadmin.h"
@@ -1438,7 +1437,7 @@ void XLogDropRelation(const RelFileNode &rnode, ForkNumber forknum)
 
     /* clear relfilenode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
-        extreme_rto::ClearRecoveryThreadHashTbl(rnode, forknum, 0, false);
+        ExtremeClearRecoveryThreadHashTbl(rnode, forknum, 0, false);
     } else {
         parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forknum, 0, false);
     }
@@ -1513,7 +1512,7 @@ void XLogDropDatabase(Oid dbid)
 
     /* clear dbNode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
-        extreme_rto::BatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
+        ExtremeBatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
     } else {
         parallel_recovery::BatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
     }
@@ -1532,7 +1531,7 @@ void XLogDropSegmentSpace(Oid spcNode, Oid dbNode)
 
     /* clear spcNode and dbNode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
-        extreme_rto::BatchClearRecoveryThreadHashTbl(spcNode, dbNode);
+        ExtremeBatchClearRecoveryThreadHashTbl(spcNode, dbNode);
     } else {
         parallel_recovery::BatchClearRecoveryThreadHashTbl(spcNode, dbNode);
     }
@@ -1554,7 +1553,7 @@ void XLogTruncateRelation(RelFileNode rnode, ForkNumber forkNum, BlockNumber nbl
     /* clear relfilenode match entry of recovery thread hashtbl */
     if (g_instance.pid_cxt.PageRepairPID != 0) {
         if (IsExtremeRedo()) {
-            extreme_rto::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
+            ExtremeClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
         } else {
             parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
         }
@@ -1570,7 +1569,7 @@ void XLogTruncateSegmentSpace(RelFileNode rnode, ForkNumber forkNum, BlockNumber
     /* clear relfilenode match entry of recovery thread hashtbl */
     if (g_instance.pid_cxt.PageRepairPID != 0) {
         if (IsExtremeRedo()) {
-            extreme_rto::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
+            ExtremeClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
         } else {
             parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
         }

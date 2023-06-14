@@ -12,16 +12,16 @@ endif
 ifeq ($(enable_multiple_nodes), yes)
 OBJS = clog.o multixact.o rmgr.o slru.o csnlog.o transam.o twophase.o \
 	twophase_rmgr.o varsup.o double_write.o single_double_write.o seg_double_write.o redo_statistic.o multi_redo_api.o multi_redo_settings.o\
-	xact.o xlog.o xlogfuncs.o \
+	xact.o xlog.o xlogfuncs.o extreme_rto_redo_api.o \
 	xloginsert.o xlogreader.o xlogutils.o cbmparsexlog.o cbmfuncs.o
 else
 OBJS = clog.o gtm_single.o multixact.o rmgr.o slru.o csnlog.o transam.o twophase.o \
 	twophase_rmgr.o varsup.o double_write.o single_double_write.o seg_double_write.o redo_statistic.o multi_redo_api.o multi_redo_settings.o\
-	xact.o xlog.o xlogfuncs.o \
+	xact.o xlog.o xlogfuncs.o extreme_rto_redo_api.o \
 	xloginsert.o xlogreader.o xlogutils.o cbmparsexlog.o cbmfuncs.o
 endif
 
-SUBDIRS = parallel_recovery extreme_rto  
+SUBDIRS = parallel_recovery extreme_rto ondemand_extreme_rto 
     
 include $(top_srcdir)/src/gausskernel/common.mk
 

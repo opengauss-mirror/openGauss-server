@@ -18,13 +18,13 @@
  *
  *
  * IDENTIFICATION
- *        src/include/access/extreme_rto/batch_redo.h
+ *        src/include/access/ondemand_extreme_rto/batch_redo.h
  *
  * ---------------------------------------------------------------------------------------
  */
 
-#ifndef EXTREME_RTO_BATCH_REDO_H
-#define EXTREME_RTO_BATCH_REDO_H
+#ifndef ONDEMAND_EXTREME_RTO_BATCH_REDO_H
+#define ONDEMAND_EXTREME_RTO_BATCH_REDO_H
 
 #include "c.h"
 #include "storage/buf/block.h"
@@ -34,7 +34,7 @@
 #include "access/xlogproc.h"
 #include "access/xlogutils.h"
 
-namespace extreme_rto {
+namespace ondemand_extreme_rto {
 
 #define PAGETYPE_DROP 0x04
 #define PAGETYPE_CREATE 0x02
@@ -68,5 +68,5 @@ extern HTAB *PRRedoItemHashInitialize(MemoryContext context);
 extern  void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
 extern void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
 
-}  // namespace extreme_rto
-#endif /* EXTREME_RTO_BATCH_REDO_H */
+}  // namespace ondemand_extreme_rto
+#endif /* BATCH_REDO_H */

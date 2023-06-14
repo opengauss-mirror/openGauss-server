@@ -20,7 +20,7 @@
  *      records and dispatching them to workers for processing.
  *
  * IDENTIFICATION
- *    src/gausskernel/storage/access/transam/extreme_rto/dispatcher.cpp
+ *    src/gausskernel/storage/access/transam/ondemand_extreme_rto/dispatcher.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -54,14 +54,14 @@
 
 #include "portability/instr_time.h"
 
-#include "access/extreme_rto/dispatcher.h"
-#include "access/extreme_rto/page_redo.h"
+#include "access/ondemand_extreme_rto/dispatcher.h"
+#include "access/ondemand_extreme_rto/page_redo.h"
 #include "access/multi_redo_api.h"
 
-#include "access/extreme_rto/txn_redo.h"
-#include "access/extreme_rto/spsc_blocking_queue.h"
-#include "access/extreme_rto/redo_item.h"
-#include "access/extreme_rto/batch_redo.h"
+#include "access/ondemand_extreme_rto/txn_redo.h"
+#include "access/ondemand_extreme_rto/spsc_blocking_queue.h"
+#include "access/ondemand_extreme_rto/redo_item.h"
+#include "access/ondemand_extreme_rto/batch_redo.h"
 
 #include "catalog/storage.h"
 #include <sched.h>
@@ -90,7 +90,7 @@
 
 extern THR_LOCAL bool redo_oldversion_xlog;
 
-namespace extreme_rto {
+namespace ondemand_extreme_rto {
 LogDispatcher *g_dispatcher = NULL;
 
 static const int XLOG_INFO_SHIFT_SIZE = 4; /* xlog info flag shift size */
@@ -285,8 +285,8 @@ void CheckAlivePageWorkers()
 #ifdef USE_ASSERT_CHECKING
 void InitLsnCheckCtl(XLogRecPtr readRecPtr)
 {
-    g_dispatcher->originLsnCheckAddr = (void *)palloc0(sizeof(LsnCheckCtl) + EXTREME_RTO_ALIGN_LEN);
-    g_dispatcher->lsnCheckCtl = (LsnCheckCtl *)TYPEALIGN(EXTREME_RTO_ALIGN_LEN, g_dispatcher->originLsnCheckAddr);
+    g_dispatcher->originLsnCheckAddr = (void *)palloc0(sizeof(LsnCheckCtl) + ONDEMAND_EXTREME_RTO_ALIGN_LEN);
+    g_dispatcher->lsnCheckCtl = (LsnCheckCtl *)TYPEALIGN(ONDEMAND_EXTREME_RTO_ALIGN_LEN, g_dispatcher->originLsnCheckAddr);
     g_dispatcher->lsnCheckCtl->curLsn = readRecPtr;
     g_dispatcher->lsnCheckCtl->curPosition = 0;
     SpinLockInit(&g_dispatcher->updateLck);
@@ -2390,4 +2390,4 @@ static inline uint32 GetUndoSpaceWorkerId(int zid)
 }
 
 
-}  // namespace extreme_rto
+}  // namespace ondemand_extreme_rto

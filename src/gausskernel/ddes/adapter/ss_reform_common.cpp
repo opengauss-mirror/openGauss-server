@@ -99,18 +99,6 @@ int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
     return -1;
 }
 
-static int emode_for_corrupt_record(int emode, XLogRecPtr RecPtr)
-{
-    if (t_thrd.xlog_cxt.readSource == XLOG_FROM_PG_XLOG && emode == LOG) {
-        if (XLByteEQ(RecPtr, t_thrd.xlog_cxt.lastComplaint)) {
-            emode = DEBUG1;
-        } else {
-            t_thrd.xlog_cxt.lastComplaint = RecPtr;
-        }
-    }
-    return emode;
-}
-
 bool SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XLogRecPtr targetRecPtr, char *buf)
 {
     uint32 preReadOff;
