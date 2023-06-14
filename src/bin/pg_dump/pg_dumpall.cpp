@@ -1685,6 +1685,9 @@ static void dumpRoles(PGconn* conn)
 
         auth_oid = atooid(PQgetvalue(res, i, i_oid));
         rolename = PQgetvalue(res, i, i_rolname);
+        if (strncmp("gs_role_", rolename, strlen("gs_role_")) == 0) {
+            continue;
+        }
 
         resetPQExpBuffer(buf);
 
