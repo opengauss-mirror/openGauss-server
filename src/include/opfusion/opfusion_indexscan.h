@@ -46,8 +46,10 @@ public:
 
     TupleTableSlot* getTupleSlot();
 
+    void ResetIndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamListInfo params);
 private:
     struct IndexScan* m_node;
+    bool m_can_reused;
 };
 
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_INDEXSCAN_H_ */

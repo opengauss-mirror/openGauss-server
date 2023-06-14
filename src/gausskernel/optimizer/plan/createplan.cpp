@@ -2054,12 +2054,13 @@ static void add_distribute_info(PlannerInfo* root, Plan* scanPlan, Index relInde
             Assert(bestPath->locator_type == LOCATOR_TYPE_REPLICATED);
             execNodes = ng_convert_to_exec_nodes(&bestPath->distribution, bestPath->locator_type, RELATION_ACCESS_READ);
         } else {
+#ifdef ENABLE_MULTIPLE_NODES
             List* quals = scanClauses;
 
             /* A hashed table may have filter quals, it's exec nodes are not equal to it's data nodes */
             execNodes = GetRelationNodesByQuals(
                     (void*)root->parse, rte->relid, relIndex, (Node*)quals, RELATION_ACCESS_READ, NULL, false);
-
+#endif
             if (execNodes == NULL) {
                 elog(DEBUG1, "[add_distribute_info] execNodes is NULL. Oid [%u]", rte->relid);
                 Assert(rte->relid < FirstNormalObjectId || IS_PGXC_DATANODE);
@@ -7785,7 +7786,9 @@ Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrateg
     if (qual != NIL && plan_rows >= HAVING_THRESHOLD && !need_stream)
         plan_rows = clamp_row_est(plan_rows * DEFAULT_MATCH_SEL);
 
-    if (plan->exec_nodes->baselocatortype == LOCATOR_TYPE_REPLICATED && is_execute_on_datanodes(plan)) {
+    if (plan->exec_nodes ==NULL){
+        
+    } else if (plan->exec_nodes && plan->exec_nodes->baselocatortype == LOCATOR_TYPE_REPLICATED && is_execute_on_datanodes(plan)) {
         plan->multiple = 1.0;
         plan->plan_rows = plan_rows;
     } else {
@@ -8959,7 +8962,9 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
      * If the subplan already parallelize,
      * add local gather.
      */
-    deparallelize_modifytable(subplans);
+    if (u_sess->opt_cxt.query_dop > 1) {
+        deparallelize_modifytable(subplans);
+    }
 
     foreach (subnode, subplans) {
         Plan* subplan = (Plan*)lfirst(subnode);

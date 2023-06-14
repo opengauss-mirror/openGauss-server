@@ -116,7 +116,7 @@ void UpdateFusion::InitGlobals()
     m_global->m_reloid = getrelid(linitial_int((List*)linitial(m_global->m_planstmt->resultRelations)),
                                   m_global->m_planstmt->rtable);
 
-    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
+    Relation rel = heap_open(m_global->m_reloid, RowExclusiveLock);
     m_global->m_table_type = RelationIsUstoreFormat(rel) ? TAM_USTORE : TAM_HEAP;
     m_global->m_exec_func_ptr = (OpFusionExecfuncType)&UpdateFusion::ExecUpdate;
     m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
@@ -124,7 +124,7 @@ void UpdateFusion::InitGlobals()
     m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
     m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
     hash_col_num = rel->rd_isblockchain ? 1 : 0;
-    heap_close(rel, AccessShareLock);
+    heap_close(rel, NoLock);
 
 #ifdef USE_ASSERT_CHECKING
     if (m_global->m_is_bucket_rel) {
@@ -571,7 +571,7 @@ lreplace:
     /****************
      * step 3: done *
      ****************/
-    ExecCloseIndices(result_rel_info);
+    OpFusionExecCloseIndices(result_rel_info);
     m_local.m_isCompleted = true;
     m_local.m_scan->End(true);
     ExecDoneStepInFusion(m_c_local.m_estate);

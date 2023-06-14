@@ -768,10 +768,13 @@ Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, Jo
      * if it is filter for baserel and cached, or not inner join,
      * we should cache the var's selectivity into relation.
      */
-    if (use_poisson &&
-        ((RatioType_Filter == ratiotype && varratio_cached) || (jointype == JOIN_SEMI) || (jointype == JOIN_ANTI)) &&
-        (!check_scalarop || !is_rangequery_contain_scalarop(clause, rinfo)))
-        get_vardata_for_filter_or_semijoin(root, clause, varRelid, s1, sjinfo, ratiotype);
+    if (u_sess->opfusion_reuse_ctx.opfusionObj == NULL) {
+        if (use_poisson &&
+            ((RatioType_Filter == ratiotype && varratio_cached) || (jointype == JOIN_SEMI) || (jointype == JOIN_ANTI)) &&
+            (!check_scalarop || !is_rangequery_contain_scalarop(clause, rinfo))) {
+                get_vardata_for_filter_or_semijoin(root, clause, varRelid, s1, sjinfo, ratiotype); 
+            }
+    }
 
 #ifdef SELECTIVITY_DEBUG
     ereport(DEBUG4, (errmodule(MOD_OPT_JOIN), (errmsg("clause_selectivity: s1 %f", s1))));

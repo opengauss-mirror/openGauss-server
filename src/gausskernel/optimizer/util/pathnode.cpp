@@ -440,12 +440,7 @@ RemoteQueryExecType SetExectypeForJoinPath(Path* inner_path, Path* outer_path)
 
 RemoteQueryExecType SetBasePathExectype(PlannerInfo* root, RelOptInfo* rel)
 {
-    RangeTblEntry* rte = root->simple_rte_array[rel->relid];
-    if (rte->rtekind == RTE_RELATION && is_sys_table(rte->relid)) {
-        return EXEC_ON_COORDS;
-    } else {
-        return EXEC_ON_DATANODES;
-    }
+    return EXEC_ON_DATANODES;
 }
 
 /*
@@ -2907,9 +2902,10 @@ ResultPath* create_result_path(PlannerInfo *root, RelOptInfo *rel, List* quals,
         pathnode->path.total_cost = u_sess->attr.attr_sql.cpu_tuple_cost;
         pathnode->path.stream_cost = 0;
         pathnode->path.exec_type = EXEC_ON_ALL_NODES;
-
+#ifdef ENABLE_MULTIPLE_NODES
         Distribution* distribution = ng_get_default_computing_group_distribution();
         ng_set_distribution(&pathnode->path.distribution, distribution);
+#endif
     }
 
     /*

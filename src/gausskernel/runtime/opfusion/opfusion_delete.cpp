@@ -26,6 +26,7 @@
 
 #include "access/tableam.h"
 #include "commands/matview.h"
+#include "opfusion/opfusion_indexscan.h"
 
 DeleteFusion::DeleteFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
@@ -47,7 +48,7 @@ void DeleteFusion::InitLocals(ParamListInfo params)
     m_local.m_tmpvals = NULL;
     m_local.m_tmpisnull = NULL;
 
-    m_c_local.m_estate = CreateExecutorState();
+    m_c_local.m_estate = CreateExecutorStateForOpfusion(m_local.m_localContext, m_local.m_tmpContext);
     m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
 
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
@@ -73,14 +74,14 @@ void DeleteFusion::InitGlobals()
 {
     m_global->m_reloid = getrelid(linitial_int((List*)linitial(m_global->m_planstmt->resultRelations)),
                                   m_global->m_planstmt->rtable);
-    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
+    Relation rel = heap_open(m_global->m_reloid, RowExclusiveLock);
     m_global->m_natts = RelationGetDescr(rel)->natts;
     m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
     m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
     m_global->m_table_type = RelationIsUstoreFormat(rel) ? TAM_USTORE : TAM_HEAP;
     m_global->m_tupDesc->td_tam_ops = GetTableAmRoutine(m_global->m_table_type);
     m_global->m_exec_func_ptr = (OpFusionExecfuncType)&DeleteFusion::ExecDelete;
-    heap_close(rel, AccessShareLock);
+    heap_close(rel, NoLock);
 
 }
 
@@ -283,7 +284,7 @@ bool DeleteFusion::execute(long max_rows, char *completionTag)
     /* ***************
      * step 3: done *
      *************** */
-    ExecCloseIndices(result_rel_info);
+    OpFusionExecCloseIndices(result_rel_info);
     m_local.m_isCompleted = true;
     m_local.m_scan->End(true);
     ExecDoneStepInFusion(m_c_local.m_estate);
@@ -296,7 +297,45 @@ bool DeleteFusion::execute(long max_rows, char *completionTag)
             snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "DELETE %ld", nprocessed);
     }
     securec_check_ss(errorno, "\0", "\0");
+    FreeExecutorStateForOpfusion(m_c_local.m_estate);
     u_sess->statement_cxt.current_row_count = nprocessed;
     u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
     return success;
+}
+
+bool DeleteFusion::ResetReuseFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
+{
+    PlannedStmt *curr_plan = (PlannedStmt *)linitial(plantree_list);
+    int rtindex = linitial_int((List*)linitial(curr_plan->resultRelations));
+    Oid curr_relid = getrelid(rtindex, curr_plan->rtable);
+
+    if (curr_relid != m_global->m_reloid) {
+        return false;
+    }
+    m_global->m_planstmt = curr_plan;
+
+    m_local.m_tmpvals = NULL;
+    m_local.m_tmpisnull = NULL;
+    
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
+    
+    m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
+    m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
+
+    initParams(params);
+
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
+    Plan *deletePlan = (Plan *)linitial(node->plans);
+    IndexScan* indexscan = (IndexScan *)JudgePlanIsPartIterator(deletePlan);
+    if(IsA(indexscan, IndexScan) && typeid(*(m_local.m_scan)) == typeid(IndexScanFusion)){
+        ((IndexScanFusion *)m_local.m_scan)->ResetIndexScanFusion(indexscan, m_global->m_planstmt,
+                                                m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+    }else {
+        m_local.m_scan = ScanFusion::getScanFusion((Node*)indexscan, m_global->m_planstmt,
+                                                m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+    }
+
+
+    return true;
 }

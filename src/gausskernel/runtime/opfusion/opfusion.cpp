@@ -114,8 +114,9 @@ void OpFusion::InitGlobals(MemoryContext context, CachedPlanSource *psrc, List *
         cxt = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT, "SharedOpfusionContext", ALLOCSET_DEFAULT_MINSIZE,
             ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
     } else {
-        cxt = AllocSetContextCreate(context, "OpfusionContext", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE, STANDARD_CONTEXT);
+        u_sess->opfusion_cxt = cxt = AllocSetContextCreate(context, "OpfusionContext", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+            cxt = u_sess->opfusion_cxt;
     }
 
     MemoryContext old_context = MemoryContextSwitchTo(cxt);
@@ -661,7 +662,7 @@ static void* TryReuseOpfusionObj(FusionType ftype, MemoryContext context, Cached
      * we save the obj without FusionType check in FusionFactory
      * so must check here
      */
-    if (INSERT_FUSION != ftype) {
+    if (INSERT_FUSION != ftype && DELETE_FUSION != ftype) {
         return NULL;
     }
 
@@ -681,12 +682,14 @@ static void* TryReuseOpfusionObj(FusionType ftype, MemoryContext context, Cached
     }
 
     /* check the resultdesc*/
-    Relation rel = heap_open(rel_oid, AccessShareLock);
-    TupleDesc rel_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
-    heap_close(rel, AccessShareLock);
-    if (!equalTupleDescs(rel_tupDesc, checkOpfusionObj->m_global->m_tupDesc)) {
-        return NULL;
+    Relation rel = heap_open(rel_oid, RowExclusiveLock);
+    if (!opFusionReuseEqualTupleDescs(RelationGetDescr(rel), checkOpfusionObj->m_global->m_tupDesc))
+    {
+       heap_close(rel, NoLock);
+       return NULL;
     }
+    
+    heap_close(rel, NoLock);
 
     /* call specific reset function here*/
     if (!checkOpfusionObj->ResetReuseFusion(context, psrc, plantree_list, params)){
@@ -1471,4 +1474,5 @@ void AtEOXact_OpfusionReuse()
      * the are the sub nodes of the top transaction ctx
      */
     u_sess->opfusion_reuse_ctx.opfusionObj = NULL;
+    u_sess->iud_expr_reuse_ctx = NULL;
 }

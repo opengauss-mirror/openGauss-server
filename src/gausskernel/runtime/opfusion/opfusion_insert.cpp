@@ -231,7 +231,7 @@ static void ExecReleaseResource(Tuple tuple, TupleTableSlot *slot, ResultRelInfo
 {
     tableam_tops_free_tuple(tuple);
     (void)ExecClearTuple(slot);
-    ExecCloseIndices(result_rel_info);
+    OpFusionExecCloseIndices(result_rel_info);
     ExecDoneStepInFusion(estate);
     if (bucket_rel != NULL) {
         bucketCloseRelation(bucket_rel);
@@ -436,7 +436,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
      ************************/
 
     unsigned long nprocessed = (this->*(m_global->m_exec_func_ptr))(rel, result_rel_info);
-    heap_close(rel, RowExclusiveLock);
+    heap_close(rel, NoLock);
 
     /****************
      * step 3: done *
@@ -482,10 +482,13 @@ bool InsertFusion::ResetReuseFusion(MemoryContext context, CachedPlanSource* psr
     InitBaseParam(targetList);
 
     // local
+    m_local.m_reslot->tts_tam_ops = GetTableAmRoutine(m_global->m_table_type);
     m_c_local.m_estate->es_range_table = NIL;
     m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
     m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
     initParams(params);
 
     return true;
+
 }
+
