@@ -40,6 +40,7 @@
 #include <sys/time.h>
 
 #include "access/xlog_internal.h"
+#include "access/xlog.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -541,7 +542,7 @@ void CheckpointerMain(void)
                 } else {
                     CheckPointBuffers(flags, true);
                 }
-            } else if (!do_restartpoint) {
+            } else if (!do_restartpoint && !DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE) {
                 CreateCheckPoint(flags);
                 ckpt_performed = true;
                 if (!bgwriter_first_startup && CheckFpwBeforeFirstCkpt()) {

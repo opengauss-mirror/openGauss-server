@@ -84,6 +84,14 @@ extern volatile uint64 sync_system_identifier;
 #define XLOG_FROM_PG_XLOG (1 << 1) /* Existing file in pg_xlog */
 #define XLOG_FROM_STREAM (1 << 2)  /* Streamed from master */
 
+#define DORADO_STANDBY_CLUSTER (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY && \
+                                g_instance.attr.attr_storage.xlog_file_path != 0)
+#define DORADO_PRIMARY_CLUSTER (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY && \
+                                g_instance.attr.attr_storage.xlog_file_path != 0)
+#define DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE ((t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
+                                                (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
+                                                (g_instance.attr.attr_storage.xlog_file_path != 0))
+
 /*
  * Recovery target type.
  * Only set during a Point in Time recovery, not when standby_mode = on
