@@ -64,6 +64,15 @@ typedef enum {
     STANDBY_SNAPSHOT_READY
 } HotStandbyState;
 
+typedef enum {
+    TRIGGER_NORMAL = 0,
+    TRIGGER_PRIMARY,
+    TRIGGER_STADNBY,
+    TRIGGER_FAILOVER,
+    TRIGGER_SWITCHOVER,
+    TRIGGER_SMARTSHUTDOWN,
+} Enum_TriggeredState;
+
 #define InHotStandby (t_thrd.xlog_cxt.standbyState >= STANDBY_SNAPSHOT_PENDING)
 
 #define DUMMYSTANDBY_CONNECT_INTERVAL 3  // unit second
@@ -814,7 +823,6 @@ extern char* TrimStr(const char* str);
 
 extern void CloseXlogFilesAtThreadExit(void);
 extern void SetLatestXTime(TimestampTz xtime);
-XLogRecord* XLogParallelReadNextRecord(XLogReaderState* xlogreader);
 
 void ResourceManagerStartup(void);
 void ResourceManagerStop(void);
@@ -859,6 +867,14 @@ bool CheckForSwitchoverTrigger(void);
 void HandleCascadeStandbyPromote(XLogRecPtr *recptr);
 void update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_immediately_update = false);
 XLogRecord *ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, int whichChkpt);
+int emode_for_corrupt_record(int emode, XLogRecPtr RecPtr);
+bool timeLineInHistory(TimeLineID tli, List *expectedTLEs);
+Enum_TriggeredState CheckForSatartupStatus(void);
+bool CheckForStandbyTrigger(void);
+void UpdateMinrecoveryInAchive();
+bool NewDataIsInBuf(XLogRecPtr expectedRecPtr);
+bool rescanLatestTimeLine(void);
+int XLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources);
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 

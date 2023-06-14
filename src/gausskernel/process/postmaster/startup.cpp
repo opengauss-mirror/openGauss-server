@@ -37,7 +37,6 @@
 
 #include "gssignal/gs_signal.h"
 #include "access/parallel_recovery/dispatcher.h"
-#include "access/extreme_rto/dispatcher.h"
 #include "replication/dcf_replication.h"
 
 /* Signal handlers */
@@ -404,8 +403,8 @@ bool IsFailoverTriggered(void)
     if (AmStartupProcess()) {
         return t_thrd.startup_cxt.failover_triggered;
     } else {
-        uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
-        if (tgigger == (uint32)extreme_rto::TRIGGER_FAILOVER) {
+        uint32 tgigger = pg_atomic_read_u32(&g_startupTriggerState);
+        if (tgigger == (uint32)TRIGGER_FAILOVER) {
             return true;
         }
     }
@@ -417,8 +416,8 @@ bool IsSwitchoverTriggered(void)
     if (AmStartupProcess()) {
         return t_thrd.startup_cxt.switchover_triggered;
     } else {
-        uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
-        if (tgigger == (uint32)extreme_rto::TRIGGER_SWITCHOVER) {
+        uint32 tgigger = pg_atomic_read_u32(&g_startupTriggerState);
+        if (tgigger == (uint32)TRIGGER_SWITCHOVER) {
             return true;
         }
     }
@@ -430,8 +429,8 @@ bool IsPrimaryTriggered(void)
     if (AmStartupProcess()) {
         return t_thrd.startup_cxt.primary_triggered;
     } else {
-        uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
-        if (tgigger == (uint32)extreme_rto::TRIGGER_PRIMARY) {
+        uint32 tgigger = pg_atomic_read_u32(&g_startupTriggerState);
+        if (tgigger == (uint32)TRIGGER_PRIMARY) {
             return true;
         }
     }
@@ -443,8 +442,8 @@ bool IsStandbyTriggered(void)
     if (AmStartupProcess()) {
         return t_thrd.startup_cxt.standby_triggered;
     } else {
-        uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
-        if (tgigger == (uint32)extreme_rto::TRIGGER_STADNBY) {
+        uint32 tgigger = pg_atomic_read_u32(&g_startupTriggerState);
+        if (tgigger == (uint32)TRIGGER_STADNBY) {
             return true;
         }
     }

@@ -31,19 +31,17 @@
 
 #include "access/multi_redo_settings.h"
 #include "access/multi_redo_api.h"
-#include "access/extreme_rto/dispatcher.h"
 #include "access/parallel_recovery/dispatcher.h"
-#include "access/extreme_rto/page_redo.h"
 #include "access/parallel_recovery/page_redo.h"
 #include "access/xlog_internal.h"
 
 bool g_supportHotStandby = true;   /* don't support consistency view */
-
+uint32 g_startupTriggerState = TRIGGER_NORMAL;
 
 void StartUpMultiRedo(XLogReaderState *xlogreader, uint32 privateLen)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::StartRecoveryWorkers(xlogreader, privateLen);
+        ExtremeStartRecoveryWorkers(xlogreader, privateLen);
     } else if (IsParallelRedo()) {
         parallel_recovery::StartRecoveryWorkers(xlogreader->ReadRecPtr);
     }
@@ -51,44 +49,14 @@ void StartUpMultiRedo(XLogReaderState *xlogreader, uint32 privateLen)
 
 bool IsMultiThreadRedoRunning()
 {
-    return (get_real_recovery_parallelism() > 1 &&
-            (extreme_rto::g_dispatcher != 0 || parallel_recovery::g_dispatcher != 0));
-}
-
-bool IsExtremeRtoRunning()
-{
-    return (get_real_recovery_parallelism() > 1 && extreme_rto::g_dispatcher != 0 &&
-            extreme_rto::g_dispatcher->pageLineNum > 0);
-}
-
-
-bool IsExtremeRtoSmartShutdown()
-{
-    if (!IsExtremeRtoRunning()) {
-        return false;
-    }
-
-    if (extreme_rto::g_dispatcher->smartShutdown) {
-        extreme_rto::g_dispatcher->smartShutdown =false;
-        return true;
-    }
-    return false;
-}
-
-void ExtremeRtoRedoManagerSendEndToStartup()
-{
-    if (!IsExtremeRtoRunning()) {
-        return;
-    }
-
-    extreme_rto::g_redoEndMark.record.isDecode = true;
-    extreme_rto::PutRecordToReadQueue((XLogReaderState *)&extreme_rto::g_redoEndMark.record);
+    return ((get_real_recovery_parallelism() > 1 && parallel_recovery::g_dispatcher != 0) || 
+        IsExtremeMultiThreadRedoRunning());
 }
 
 void DispatchRedoRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::DispatchRedoRecordToFile(record, expectedTLIs, recordXTime);
+        ExtremeDispatchRedoRecordToFile(record, expectedTLIs, recordXTime);
     } else if (IsParallelRedo()) {
         parallel_recovery::DispatchRedoRecordToFile(record, expectedTLIs, recordXTime);
     } else {
@@ -112,7 +80,7 @@ void DispatchRedoRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz
 void GetThreadNameIfMultiRedo(int argc, char *argv[], char **threadNamePtr)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::GetThreadNameIfPageRedoWorker(argc, argv, threadNamePtr);
+        ExtremeGetThreadNameIfPageRedoWorker(argc, argv, threadNamePtr);
     } else if (IsParallelRedo()) {
         parallel_recovery::GetThreadNameIfPageRedoWorker(argc, argv, threadNamePtr);
     }
@@ -121,7 +89,7 @@ void GetThreadNameIfMultiRedo(int argc, char *argv[], char **threadNamePtr)
 PGPROC *MultiRedoThreadPidGetProc(ThreadId pid)
 {
     if (IsExtremeRedo()) {
-        return extreme_rto::StartupPidGetProc(pid);
+        return ExtremeStartupPidGetProc(pid);
     } else {
         return parallel_recovery::StartupPidGetProc(pid);
     }
@@ -130,7 +98,7 @@ PGPROC *MultiRedoThreadPidGetProc(ThreadId pid)
 void MultiRedoUpdateStandbyState(HotStandbyState newState)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::UpdateStandbyState(newState);
+        ExtremeUpdateStandbyState(newState);
     } else if (IsParallelRedo()) {
         parallel_recovery::UpdateStandbyState(newState);
     }
@@ -139,14 +107,14 @@ void MultiRedoUpdateStandbyState(HotStandbyState newState)
 void MultiRedoUpdateMinRecovery(XLogRecPtr newMinRecoveryPoint)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::UpdateMinRecoveryForTrxnRedoThd(newMinRecoveryPoint);
+        ExtremeUpdateMinRecoveryForTrxnRedoThd(newMinRecoveryPoint);
     }
 }
 
 uint32 MultiRedoGetWorkerId()
 {
     if (IsExtremeRedo()) {
-        return extreme_rto::GetMyPageRedoWorkerIdWithLock();
+        return ExtremeGetMyPageRedoWorkerIdWithLock();
     } else if (IsParallelRedo()) {
         return parallel_recovery::GetMyPageRedoWorkerOrignId();
     } else {
@@ -175,7 +143,7 @@ bool IsAllPageWorkerExit()
 void SetPageRedoWorkerIndex(int index)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::g_redoWorker->index = index;
+        ExtremeSetPageRedoWorkerIndex(index);
     } else if (IsParallelRedo()) {
         parallel_recovery::g_redoWorker->index = index;
     }
@@ -184,7 +152,7 @@ void SetPageRedoWorkerIndex(int index)
 int GetPageRedoWorkerIndex(int index)
 {
     if (IsExtremeRedo()) {
-        return extreme_rto::g_redoWorker->index;
+        return ExtremeGetPageRedoWorkerIndex();
     } else if (IsParallelRedo()) {
         return parallel_recovery::g_redoWorker->index;
     } else {
@@ -226,7 +194,7 @@ void ProcTxnWorkLoad(bool force)
 void SetMyPageRedoWorker(knl_thread_arg *arg)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::g_redoWorker = (extreme_rto::PageRedoWorker *)arg->payload;
+        ExtremeSetMyPageRedoWorker(arg);
     } else if (IsParallelRedo()) {
         parallel_recovery::g_redoWorker = (parallel_recovery::PageRedoWorker *)arg->payload;
     }
@@ -236,7 +204,7 @@ void SetMyPageRedoWorker(knl_thread_arg *arg)
 uint32 GetMyPageRedoWorkerId()
 {
     if (IsExtremeRedo()) {
-        return extreme_rto::g_redoWorker->id;
+        return ExtremeGetMyPageRedoWorkerId();
     } else if (IsParallelRedo()) {
         return parallel_recovery::g_redoWorker->id;
     } else {
@@ -249,7 +217,7 @@ void MultiRedoMain()
     pgstat_report_appname("PageRedo");
     pgstat_report_activity(STATE_IDLE, NULL);
     if (IsExtremeRedo()) {
-        extreme_rto::ParallelRedoThreadMain();
+        ExtremeParallelRedoThreadMain();
     } else if (IsParallelRedo()) {
         parallel_recovery::PageRedoWorkerMain();
     } else {
@@ -260,7 +228,7 @@ void MultiRedoMain()
 void EndDispatcherContext()
 {
     if (IsExtremeRedo()) {
-        (void)MemoryContextSwitchTo(extreme_rto::g_dispatcher->oldCtx);
+        ExtremeEndDispatcherContext();
 
     } else if (IsParallelRedo()) {
         (void)MemoryContextSwitchTo(parallel_recovery::g_dispatcher->oldCtx);
@@ -275,7 +243,7 @@ void SwitchToDispatcherContext()
 void FreeAllocatedRedoItem()
 {
     if (IsExtremeRedo()) {
-        extreme_rto::FreeAllocatedRedoItem();
+        ExtremeFreeAllocatedRedoItem();
 
     } else if (IsParallelRedo()) {
         parallel_recovery::FreeAllocatedRedoItem();
@@ -285,7 +253,7 @@ void FreeAllocatedRedoItem()
 uint32 GetRedoWorkerCount()
 {
     if (IsExtremeRedo()) {
-        return extreme_rto::GetAllWorkerCount();
+        return ExtremeGetAllWorkerCount();
 
     } else if (IsParallelRedo()) {
         return parallel_recovery::GetPageWorkerCount();
@@ -297,7 +265,7 @@ uint32 GetRedoWorkerCount()
 void **GetXLogInvalidPagesFromWorkers()
 {
     if (IsExtremeRedo()) {
-        return extreme_rto::GetXLogInvalidPagesFromWorkers();
+        return ExtremeGetXLogInvalidPagesFromWorkers();
 
     } else if (IsParallelRedo()) {
         return parallel_recovery::GetXLogInvalidPagesFromWorkers();
@@ -309,7 +277,7 @@ void **GetXLogInvalidPagesFromWorkers()
 void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
 {
     if (IsExtremeRedo()) {
-        return extreme_rto::SendRecoveryEndMarkToWorkersAndWaitForFinish(code);
+        return ExtremeSendRecoveryEndMarkToWorkersAndWaitForFinish(code);
 
     } else if (IsParallelRedo()) {
         return parallel_recovery::SendRecoveryEndMarkToWorkersAndWaitForFinish(code);
@@ -319,27 +287,27 @@ void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
 RedoWaitInfo GetRedoIoEvent(int32 event_id)
 {
     if (IsExtremeRedo()) {
-        return extreme_rto::redo_get_io_event(event_id);
+        return ExtremeRedoGetIoEvent(event_id);
     } else {
         return parallel_recovery::redo_get_io_event(event_id);
     }
 }
 
-void GetRedoWrokerStatistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
+void GetRedoWorkerStatistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
 {
     if (IsExtremeRedo()) {
-        return extreme_rto::redo_get_wroker_statistic(realNum, worker, workerLen);
+        return ExtremeRedoGetWorkerStatistic(realNum, worker, workerLen);
     } else {
-        return parallel_recovery::redo_get_wroker_statistic(realNum, worker, workerLen);
+        return parallel_recovery::redo_get_worker_statistic(realNum, worker, workerLen);
     }
 }
 
 void GetRedoWorkerTimeCount(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::redo_get_wroker_time_count(workerCountInfoList, realNum);
+        ExtremeRedoGetWorkerTimeCount(workerCountInfoList, realNum);
     } else if (IsParallelRedo()) {
-        parallel_recovery::redo_get_wroker_time_count(workerCountInfoList, realNum);
+        parallel_recovery::redo_get_worker_time_count(workerCountInfoList, realNum);
     } else {
         *realNum = 0;
     }

@@ -18,13 +18,13 @@
  *
  *
  * IDENTIFICATION
- *        src/include/access/extreme_rto/dispatcher.h
+ *        src/include/access/ondemand_extreme_rto/dispatcher.h
  *
  * ---------------------------------------------------------------------------------------
  */
 
-#ifndef EXTREME_RTO_DISPATCHER_H
-#define EXTREME_RTO_DISPATCHER_H
+#ifndef ONDEMAND_EXTREME_RTO_DISPATCHER_H
+#define ONDEMAND_EXTREME_RTO_DISPATCHER_H
 
 #include "gs_thread.h"
 #include "postgres.h"
@@ -34,11 +34,11 @@
 #include "nodes/pg_list.h"
 #include "storage/proc.h"
 #include "access/redo_statistic.h"
-#include "access/extreme_rto/redo_item.h"
-#include "access/extreme_rto/page_redo.h"
-#include "access/extreme_rto/txn_redo.h"
+#include "access/ondemand_extreme_rto/redo_item.h"
+#include "access/ondemand_extreme_rto/page_redo.h"
+#include "access/ondemand_extreme_rto/txn_redo.h"
 
-namespace extreme_rto {
+namespace ondemand_extreme_rto {
 
 typedef struct {
     PageRedoWorker *batchThd;   /* BatchRedoThread */
@@ -246,6 +246,6 @@ void CheckCommittingCsnList();
 void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum);
 void DumpDispatcher();
 
-}  // namespace extreme_rto
+}  // namespace ondemand_extreme_rto
 
 #endif

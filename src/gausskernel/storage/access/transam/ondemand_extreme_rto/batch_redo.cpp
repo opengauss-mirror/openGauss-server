@@ -16,7 +16,7 @@
  * batch_redo.cpp
  *
  * IDENTIFICATION
- *    src/gausskernel/storage/access/transam/extreme_rto/batch_redo.cpp
+ *    src/gausskernel/storage/access/transam/ondemand_extreme_rto/batch_redo.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -36,14 +36,14 @@
 #include "storage/smgr/relfilenode_hash.h"
 #include "utils/relmapper.h"
 
-#include "access/extreme_rto/batch_redo.h"
-#include "access/extreme_rto/redo_item.h"
-#include "access/extreme_rto/dispatcher.h"
-#include "access/extreme_rto/page_redo.h"
+#include "access/ondemand_extreme_rto/batch_redo.h"
+#include "access/ondemand_extreme_rto/redo_item.h"
+#include "access/ondemand_extreme_rto/dispatcher.h"
+#include "access/ondemand_extreme_rto/page_redo.h"
 
 #include "access/xlogproc.h"
 
-namespace extreme_rto {
+namespace ondemand_extreme_rto {
 static inline void PRXLogRecGetBlockTag(XLogRecParseState *recordBlockState, RelFileNode *rnode, BlockNumber *blknum,
                                         ForkNumber *forknum)
 {
@@ -337,4 +337,4 @@ void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash)
     }
 }
 
-}  // namespace extreme_rto
+}  // namespace ondemand_extreme_rto

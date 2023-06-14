@@ -52,7 +52,6 @@
 #include "commands/dbcommands.h"
 #include "access/twophase.h"
 #include "access/redo_common.h"
-#include "access/extreme_rto/page_redo.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 
 THR_LOCAL RedoParseManager *g_parseManager = NULL;
@@ -274,7 +273,7 @@ XLogRedoAction XLogCheckBlockDataRedoAction(XLogBlockDataParse *datadecode, Redo
                     if (needRepair && g_instance.pid_cxt.PageRepairPID != 0) {
                         XLogRecPtr pageCurLsn = PageGetLSN(bufferinfo->pageinfo.page);
                         UnlockReleaseBuffer(bufferinfo->buf);
-                        extreme_rto::RecordBadBlockAndPushToRemote(datadecode, LSN_CHECK_FAIL, pageCurLsn,
+                        ExtremeRecordBadBlockAndPushToRemote(datadecode, LSN_CHECK_FAIL, pageCurLsn,
                             bufferinfo->blockinfo.pblk);
                         bufferinfo->buf = InvalidBuffer;
                         bufferinfo->pageinfo = {0};

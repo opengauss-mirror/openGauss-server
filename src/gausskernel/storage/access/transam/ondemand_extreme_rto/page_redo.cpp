@@ -61,12 +61,12 @@
 #include <sched.h>
 #include "commands/dbcommands.h"
 #include "commands/tablespace.h"
-#include "access/extreme_rto/page_redo.h"
-#include "access/extreme_rto/dispatcher.h"
-#include "access/extreme_rto/txn_redo.h"
-#include "access/extreme_rto/xlog_read.h"
+#include "access/ondemand_extreme_rto/page_redo.h"
+#include "access/ondemand_extreme_rto/dispatcher.h"
+#include "access/ondemand_extreme_rto/txn_redo.h"
+#include "access/ondemand_extreme_rto/xlog_read.h"
 #include "pgstat.h"
-#include "access/extreme_rto/batch_redo.h"
+#include "access/ondemand_extreme_rto/batch_redo.h"
 #include "access/multi_redo_api.h"
 #include "replication/walreceiver.h"
 #include "replication/datareceiver.h"
@@ -93,7 +93,7 @@
 #define STATIC static
 #endif
 
-namespace extreme_rto {
+namespace ondemand_extreme_rto {
 static const int MAX_PARSE_BUFF_NUM = PAGE_WORK_QUEUE_SIZE * 10 * 3;
 static const int MAX_LOCAL_BUFF_NUM = PAGE_WORK_QUEUE_SIZE * 10 * 3;
 
@@ -189,9 +189,9 @@ bool RedoWorkerIsUndoSpaceWorker()
 /* Run from the dispatcher thread. */
 PageRedoWorker *CreateWorker(uint32 id)
 {
-    PageRedoWorker *tmp = (PageRedoWorker *)palloc0(sizeof(PageRedoWorker) + EXTREME_RTO_ALIGN_LEN);
+    PageRedoWorker *tmp = (PageRedoWorker *)palloc0(sizeof(PageRedoWorker) + ONDEMAND_EXTREME_RTO_ALIGN_LEN);
     PageRedoWorker *worker;
-    worker = (PageRedoWorker *)TYPEALIGN(EXTREME_RTO_ALIGN_LEN, tmp);
+    worker = (PageRedoWorker *)TYPEALIGN(ONDEMAND_EXTREME_RTO_ALIGN_LEN, tmp);
     worker->selfOrinAddr = tmp;
     worker->id = id;
     worker->index = 0;
@@ -1849,8 +1849,8 @@ void XLogForceFinish(XLogReaderState *xlogreader, TermFileData *term_file)
     uint32 termId = term_file->term;
     XLogSegNo lastRplSegNo;
 
-    pg_atomic_write_u32(&(extreme_rto::g_recordbuffer->readWorkerState), extreme_rto::WORKER_STATE_STOPPING);
-    while (pg_atomic_read_u32(&(extreme_rto::g_recordbuffer->readWorkerState)) != WORKER_STATE_STOP) {
+    pg_atomic_write_u32(&(ondemand_extreme_rto::g_recordbuffer->readWorkerState), ondemand_extreme_rto::WORKER_STATE_STOPPING);
+    while (pg_atomic_read_u32(&(ondemand_extreme_rto::g_recordbuffer->readWorkerState)) != WORKER_STATE_STOP) {
         RedoInterruptCallBack();
     };
     ShutdownWalRcv();
@@ -1920,7 +1920,7 @@ void CleanUpReadPageWorkerQueue()
     do {
         DoCleanUpReadPageWorkerQueue(queue);
         RedoInterruptCallBack();
-        state = pg_atomic_read_u32(&extreme_rto::g_dispatcher->rtoXlogBufState.readPageWorkerState);
+        state = pg_atomic_read_u32(&ondemand_extreme_rto::g_dispatcher->rtoXlogBufState.readPageWorkerState);
     } while (state != WORKER_STATE_EXIT);
     /* Processing the state change after the queue is cleared */
     DoCleanUpReadPageWorkerQueue(queue);
@@ -2180,7 +2180,7 @@ void WaitPageReadWorkerExit()
 {
     uint32 state;
     do {
-        state = pg_atomic_read_u32(&extreme_rto::g_dispatcher->rtoXlogBufState.readPageWorkerState);
+        state = pg_atomic_read_u32(&ondemand_extreme_rto::g_dispatcher->rtoXlogBufState.readPageWorkerState);
         RedoInterruptCallBack();
     } while (state != WORKER_STATE_EXIT);
 }
@@ -2324,7 +2324,7 @@ void XLogReadManagerMain()
 
             if (failSource & XLOG_FROM_STREAM) {
                 ShutdownWalRcv();
-                pg_atomic_write_u32(&(extreme_rto::g_dispatcher->rtoXlogBufState.failSource), 0);
+                pg_atomic_write_u32(&(ondemand_extreme_rto::g_dispatcher->rtoXlogBufState.failSource), 0);
             }
         }
         pg_usleep(sleepShortTime);
@@ -3011,4 +3011,4 @@ void SeqCheckRemoteReadAndRepairPage()
     }
 }
 
-}  // namespace extreme_rto
+}  // namespace ondemand_extreme_rto
