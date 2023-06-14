@@ -483,7 +483,6 @@ function install_gaussdb()
     if [ $? -ne 0 ]; then
         die "make install failed."
     fi
-
     ## check build specification
     spec="gaussdbkernel"
     if ( cat $SCRIPT_DIR/gauss.spec | grep 'PRODUCT' | grep 'GaussDB Kernel' >/dev/null 2>&1 ); then

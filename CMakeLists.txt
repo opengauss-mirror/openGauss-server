@@ -96,3 +96,28 @@ execute_process(COMMAND mkdir ${CMAKE_BINARY_DIR}/libsimsearch)
 install(DIRECTORY ${CMAKE_BINARY_DIR}/proc_srclib DESTINATION lib/postgresql)
 install(DIRECTORY ${CMAKE_BINARY_DIR}/pg_plugin DESTINATION lib/postgresql)
 install(DIRECTORY ${CMAKE_BINARY_DIR}/libsimsearch DESTINATION lib)
+
+if(EXISTS ${CMAKE_SOURCE_DIR}/contrib/dolphin)
+    install(CODE "execute_process(COMMAND bash cmake.sh WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/contrib/dolphin)")
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin.control
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.1.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.0.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/upgrade_script/dolphin--1.0--1.1.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/rollback_script/dolphin--1.1--1.0.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/openGauss_expr_dolphin.ir
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/tmp_build/lib/dolphin.so
+        DESTINATION lib/postgresql
+    )
+endif()
