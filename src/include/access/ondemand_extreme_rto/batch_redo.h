@@ -46,6 +46,10 @@ namespace ondemand_extreme_rto {
 #define INIT_REDO_ITEM_TAG(a, xx_rnode, xx_forkNum, xx_blockNum) \
     ((a).rNode = (xx_rnode), (a).forkNum = (xx_forkNum), (a).blockNum = (xx_blockNum))
 
+#define XlogTrackTableHashPartition(hashcode) ((hashcode) % NUM_XLOG_TRACK_PARTITIONS)
+#define XlogTrackMappingPartitionLock(hashcode) \
+    (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstXlogTrackLock + XlogTrackTableHashPartition(hashcode)].lock)
+
 /*
  * Note: if there are any pad bytes in the struct, INIT_RedoItemTag have
  * to be fixed to zero them, since this struct is used as a hash key.
@@ -61,12 +65,14 @@ typedef struct redoitemhashentry {
     XLogRecParseState *head;
     XLogRecParseState *tail;
     int redoItemNum;
+    bool redoDone;
 } RedoItemHashEntry;
 
 extern void PRPrintRedoItemHashTab(HTAB *redoItemHash);
-extern HTAB *PRRedoItemHashInitialize(MemoryContext context);
+extern HTAB **PRRedoItemHashInitialize(MemoryContext context);
 extern  void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
 extern void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
+extern uint32 XlogTrackTableHashCode(RedoItemTag *tagPtr);
 
 }  // namespace ondemand_extreme_rto
-#endif /* BATCH_REDO_H */
+#endif /* ONDEMAND_EXTREME_RTO_BATCH_REDO_H */

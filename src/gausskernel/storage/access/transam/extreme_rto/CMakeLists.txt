@@ -10,7 +10,8 @@ set(TGT_extreme_rto_INC
     ${LIBCGROUP_INCLUDE_PATH}
     ${PROJECT_SRC_DIR}/include/libcomm
     ${ZLIB_INCLUDE_PATH}
-    ${LIBCURL_INCLUDE_PATH} 
+    ${LIBCURL_INCLUDE_PATH}
+    ${DCF_INCLUDE_PATH}
 )
 
 set(extreme_rto_DEF_OPTIONS ${MACRO_OPTIONS})

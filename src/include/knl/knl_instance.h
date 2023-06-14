@@ -741,6 +741,8 @@ typedef struct knl_g_parallel_redo_context {
     char* ali_buf;
     XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoCpuBindControl redoCpuBindcontrl;
+
+    HTAB **redoItemHash; /* used in ondemand extreme RTO */
 } knl_g_parallel_redo_context;
 
 typedef struct knl_g_heartbeat_context {
@@ -827,7 +829,7 @@ typedef struct knl_g_comm_context {
     long lastArchiveRcvTime;
     void* pLogCtl;
     bool rejectRequest;
-
+    MemoryContext redoItemCtx;
 #ifdef USE_SSL
     libcomm_sslinfo* libcomm_data_port_list;
     libcomm_sslinfo* libcomm_ctrl_port_list;

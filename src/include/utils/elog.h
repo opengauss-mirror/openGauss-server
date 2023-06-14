@@ -611,8 +611,13 @@ extern void write_stderr(const char* fmt, ...)
        the supplied arguments. */
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 
-extern void getElevelAndSqlstate(int* eLevel, int* sqlState);
+extern void write_stderr_with_prefix(const char* fmt, ...)
+    /* This extension allows gcc to check the format string for consistency with
+       the supplied arguments. */
+    __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 
+extern void getElevelAndSqlstate(int* eLevel, int* sqlState);
+extern void get_time_now(char* nowTime, int timeLen);
 void freeSecurityFuncSpace(char* charList, ...);
 
 extern void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)

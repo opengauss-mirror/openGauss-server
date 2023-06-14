@@ -420,5 +420,6 @@ extern bool StartBufferIO(BufferDesc* buf, bool forInput);
 extern Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc *bufDesc, const XLogPhyBlock *pblk);
 extern void ReadBuffer_common_for_check(ReadBufferMode readmode, BufferDesc* buf_desc,
     const XLogPhyBlock *pblk, Block bufBlock);
-
+extern BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersistence,
+    ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode);
 #endif

@@ -2448,7 +2448,7 @@ void ProcSendSignal(ThreadId pid)
 {
     PGPROC* proc = NULL;
 
-    if (RecoveryInProgress()) {
+    if (RecoveryInProgress() || SS_IN_ONDEMAND_RECOVERY) {
         ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
 
         /*

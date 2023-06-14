@@ -3356,6 +3356,12 @@ typedef struct knl_t_dms_context {
     bool flush_copy_get_page_failed; //used in flush copy
 } knl_t_dms_context;
 
+typedef struct knl_t_ondemand_xlog_copy_context {
+    int openLogFile;
+    XLogSegNo openLogSegNo;
+    uint32 openLogOff;
+} knl_t_ondemand_xlog_copy_context;
+
 /* thread context. */
 typedef struct knl_thrd_context {
     knl_thread_role role;
@@ -3504,6 +3510,7 @@ typedef struct knl_thrd_context {
     knl_t_cfs_shrinker_context cfs_shrinker_cxt;
     knl_t_sql_patch_context sql_patch_cxt;
     knl_t_dms_context dms_cxt;
+    knl_t_ondemand_xlog_copy_context ondemand_xlog_copy_cxt;
     knl_t_rc_context rc_cxt;
 } knl_thrd_context;
 

@@ -105,6 +105,7 @@ XLogReaderState *XLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_d
 
     state->max_block_id = -1;
     state->isPRProcess = false;
+    state->preReadBuf = NULL;
 
     /*
      * Permanently allocate readBuf.  We do it this way, rather than just

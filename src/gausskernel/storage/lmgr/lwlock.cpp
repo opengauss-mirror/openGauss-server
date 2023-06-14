@@ -196,7 +196,8 @@ static const char *BuiltinTrancheNames[] = {
     "FileRepairHashTblLock",
     "ReplicationOriginLock",
     "AuditIndextblLock",
-    "PCABufferContentLock"
+    "PCABufferContentLock",
+    "XlogTrackPartLock"
 };
 
 static void RegisterLWLockTranches(void);
@@ -436,6 +437,9 @@ int NumLWLocks(void)
     /* for barrier preparse hashtbl */
     numLocks += 1;
 
+    /* for xlog track hash table */
+    numLocks += NUM_XLOG_TRACK_PARTITIONS;
+
     /*
      * Add any requested by loadable modules; for backwards-compatibility
      * reasons, allocate at least NUM_USER_DEFINED_LWLOCKS of them even if
@@ -644,6 +648,10 @@ static void InitializeLWLocks(int numLocks)
 
     for (id = 0; id < NUM_STANDBY_STMTHIST_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_STANDBY_STMTHIST);
+    }
+
+    for (id = 0; id < NUM_XLOG_TRACK_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_XLOG_TRACK_PARTITION);
     }
 
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);

@@ -76,6 +76,7 @@
 #include "gssignal/gs_signal.h"
 #include "utils/atomic.h"
 #include "pgstat.h"
+#include "ddes/dms/ss_reform_common.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -113,7 +114,6 @@ static void **CollectStatesFromWorkers(GetStateFunc);
 static void GetSlotIds(XLogReaderState *record);
 static void GetUndoSlotIds(XLogReaderState *record);
 STATIC LogDispatcher *CreateDispatcher();
-static void DestroyRecoveryWorkers();
 static void SSDestroyRecoveryWorkers();
 
 static void DispatchRecordWithPages(XLogReaderState *, List *);
@@ -168,10 +168,6 @@ static inline uint32 GetUndoSpaceWorkerId(int zid);
 static XLogReaderState *GetXlogReader(XLogReaderState *readerState);
 void CopyDataFromOldReader(XLogReaderState *newReaderState, const XLogReaderState *oldReaderState);
 void SendSingalToPageWorker(int signal);
-
-#ifdef USE_ASSERT_CHECKING
-bool CheckBufHasSpaceToDispatch(XLogRecPtr endRecPtr);
-#endif
 
 /* dispatchTable must consistent with RmgrTable */
 static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
@@ -436,14 +432,20 @@ void StartRecoveryWorkers(XLogReaderState *xlogreader, uint32 privateLen)
         CheckAlivePageWorkers();
         g_dispatcher = CreateDispatcher();
         g_dispatcher->oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
-        g_dispatcher->maxItemNum = (get_batch_redo_num() + 4) * PAGE_WORK_QUEUE_SIZE *
-                                   ITEM_QUQUE_SIZE_RATIO;  // 4: a startup, readmanager, txnmanager, txnworker
+        g_instance.comm_cxt.redoItemCtx = AllocSetContextCreate((MemoryContext)g_instance.instance_context,
+            "redoItemSharedMemory",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE,
+            SHARED_CONTEXT);
+        g_instance.comm_cxt.predo_cxt.redoItemHash = PRRedoItemHashInitialize(g_instance.comm_cxt.redoItemCtx);
+        g_dispatcher->maxItemNum = ((get_batch_redo_num() + 4) * PAGE_WORK_QUEUE_SIZE) * ITEM_QUQUE_SIZE_RATIO;
+        uint32 maxParseBufNum = (uint32)((uint64)g_instance.attr.attr_storage.dms_attr.ondemand_recovery_mem_size *
+            1024 / (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc) + sizeof(RedoMemSlot)));
+        g_dispatcher->maxItemNum = 4 * PAGE_WORK_QUEUE_SIZE * ITEM_QUQUE_SIZE_RATIO + maxParseBufNum;
+        XLogParseBufferInitFunc(&(g_dispatcher->parseManager), maxParseBufNum, &recordRefOperate, RedoInterruptCallBack);
         /* alloc for record readbuf */
-        if (ENABLE_DMS && ENABLE_DSS) {
-            SSAllocRecordReadBuffer(xlogreader, privateLen);
-        } else {
-            AllocRecordReadBuffer(xlogreader, privateLen);
-        }
+        SSAllocRecordReadBuffer(xlogreader, privateLen);
         StartPageRedoWorkers(get_real_recovery_parallelism());
 
         ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
@@ -663,57 +665,13 @@ static void StopRecoveryWorkers(int code, Datum arg)
     pg_atomic_write_u32(&g_dispatcher->rtoXlogBufState.readWorkerState, WORKER_STATE_EXIT);
     ShutdownWalRcv();
     FreeAllocatedRedoItem();
-    if (ENABLE_DSS && ENABLE_DMS) {
-        SSDestroyRecoveryWorkers();
-    } else {
-        DestroyRecoveryWorkers();
-    }
+    SSDestroyRecoveryWorkers();
     g_startupTriggerState = TRIGGER_NORMAL;
     g_readManagerTriggerFlag = TRIGGER_NORMAL;
     ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("parallel redo(startup) thread exit")));
 }
 
 /* Run from the dispatcher thread. */
-static void DestroyRecoveryWorkers()
-{
-    if (g_dispatcher != NULL) {
-        SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
-        for (uint32 i = 0; i < g_dispatcher->pageLineNum; i++) {
-            DestroyPageRedoWorker(g_dispatcher->pageLines[i].batchThd);
-            DestroyPageRedoWorker(g_dispatcher->pageLines[i].managerThd);
-            for (uint32 j = 0; j < g_dispatcher->pageLines[i].redoThdNum; j++) {
-                DestroyPageRedoWorker(g_dispatcher->pageLines[i].redoThd[j]);
-            }
-            if (g_dispatcher->pageLines[i].chosedRTIds != NULL) {
-                pfree(g_dispatcher->pageLines[i].chosedRTIds);
-            }
-        }
-        DestroyPageRedoWorker(g_dispatcher->trxnLine.managerThd);
-        DestroyPageRedoWorker(g_dispatcher->trxnLine.redoThd);
-
-        DestroyPageRedoWorker(g_dispatcher->readLine.managerThd);
-        DestroyPageRedoWorker(g_dispatcher->readLine.readThd);
-        pfree(g_dispatcher->rtoXlogBufState.readsegbuf);
-        pfree(g_dispatcher->rtoXlogBufState.readBuf);
-        pfree(g_dispatcher->rtoXlogBufState.errormsg_buf);
-        pfree(g_dispatcher->rtoXlogBufState.readprivate);
-#ifdef USE_ASSERT_CHECKING
-        if (g_dispatcher->originLsnCheckAddr != NULL) {
-            pfree(g_dispatcher->originLsnCheckAddr);
-            g_dispatcher->originLsnCheckAddr = NULL;
-            g_dispatcher->lsnCheckCtl = NULL;
-        }
-#endif
-        if (get_real_recovery_parallelism() > 1) {
-            (void)MemoryContextSwitchTo(g_dispatcher->oldCtx);
-            MemoryContextDelete(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
-            g_instance.comm_cxt.predo_cxt.parallelRedoCtx = NULL;
-        }
-        g_dispatcher = NULL;
-        SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
-    }
-}
-
 static void SSDestroyRecoveryWorkers()
 {
     if (g_dispatcher != NULL) {
@@ -826,18 +784,6 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
         } else {
             fatalerror = true;
         }
-#ifdef USE_ASSERT_CHECKING
-        uint64 waitCount = 0;
-        while (!CheckBufHasSpaceToDispatch(record->EndRecPtr)) {
-            RedoInterruptCallBack();
-            waitCount++;
-            if ((waitCount & PRINT_ALL_WAIT_COUNT) == PRINT_ALL_WAIT_COUNT) {
-                ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                              errmsg("DispatchRedoRecordToFile:replayedLsn:%lu, blockcnt:%lu, readEndLSN:%lu",
-                                     GetXLogReplayRecPtr(NULL, NULL), waitCount, record->EndRecPtr)));
-            }
-        }
-#endif
         ResetChosedPageLineList();
         if (fatalerror != true) {
 #ifdef ENABLE_UT
@@ -896,6 +842,14 @@ static void DispatchToOnePageWorker(XLogReaderState *record, const RelFileNode r
 {
     /* for bcm different attr need to dispath to the same page redo thread */
     uint32 slotId = GetSlotId(rnode, 0, 0, GetBatchCount());
+    RedoItem *item = GetRedoItemPtr(record);
+    ReferenceRedoItem(item);
+    AddPageRedoItem(g_dispatcher->pageLines[slotId].batchThd, item);
+}
+
+static void DispatchToSpecificOnePageWorker(XLogReaderState *record, uint32 slotId, List *expectedTLIs)
+{
+    Assert(slotId <= GetBatchCount());
     RedoItem *item = GetRedoItemPtr(record);
     ReferenceRedoItem(item);
     AddPageRedoItem(g_dispatcher->pageLines[slotId].batchThd, item);
@@ -980,25 +934,7 @@ static bool DispatchXLogRecord(XLogReaderState *record, List *expectedTLIs, Time
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
 
     if (IsCheckPoint(record)) {
-        RedoItem *item = GetRedoItemPtr(record);
-        item->needImmediateCheckpoint = g_dispatcher->needImmediateCheckpoint;
-        item->record.isFullSync = g_dispatcher->needFullSyncCheckpoint;
-        g_dispatcher->needImmediateCheckpoint = false;
-        g_dispatcher->needFullSyncCheckpoint = false;
-        ReferenceRedoItem(item);
-        for (uint32 i = 0; i < g_dispatcher->pageLineNum; ++i) {
-            /*
-             * A check point record may save a recovery restart point or
-             * update the timeline.
-             */
-            ReferenceRedoItem(item);
-            AddPageRedoItem(g_dispatcher->pageLines[i].batchThd, item);
-        }
-        /* ensure eyery pageworker is receive recored to update pageworker Lsn
-         * trxn record's recordtime must set , see SetLatestXTime
-         */
-        AddTxnRedoItem(g_dispatcher->trxnLine.managerThd, item);
-
+        return isNeedFullSync;
     } else if ((info == XLOG_FPI) || (info == XLOG_FPI_FOR_HINT)) {
         DispatchRecordWithPages(record, expectedTLIs);
     } else {
@@ -1198,36 +1134,30 @@ static void DispatchRecordBySegHeadBuffer(XLogReaderState* record, List* expecte
     DispatchToOnePageWorker(record, rnode, expectedTLIs);
 }
 
-static void DispatchNblocksRecord(XLogReaderState* record, List* expectedTLIs)
-{
-    XLogDataSegmentExtend *dataSegExtendInfo = (XLogDataSegmentExtend *)XLogRecGetBlockData(record, 0, NULL);
-
-    RelFileNode rnode;
-    XLogRecGetBlockTag(record, 0, &rnode, NULL, NULL);
-    rnode.relNode = dataSegExtendInfo->main_fork_head;
-    rnode.bucketNode = SegmentBktId;
-    
-    DispatchToOnePageWorker(record, rnode, expectedTLIs);
-}
-
 static bool DispatchSegpageSmgrRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
 
-    /* Sync to all pageworkers so that ensure prepare the metadata before using the data-buffer */
-    if (info == XLOG_SEG_ATOMIC_OPERATION || info == XLOG_SEG_CREATE_EXTENT_GROUP || info == XLOG_SEG_INIT_MAPPAGE ||
-        info == XLOG_SEG_INIT_INVRSPTR_PAGE || info == XLOG_SEG_ADD_NEW_GROUP || info == XLOG_SEG_SPACE_SHRINK ||
-        info == XLOG_SEG_SPACE_DROP || info == XLOG_SEG_NEW_PAGE) {
-        DispatchRecordWithoutPage(record, expectedTLIs);
-    } else if (info == XLOG_SEG_SEGMENT_EXTEND) {
-        DispatchNblocksRecord(record, expectedTLIs);
-    } else if (info == XLOG_SEG_TRUNCATE) {
-        DispatchRecordBySegHeadBuffer(record, expectedTLIs, 0);
-    } else {
-        ereport(PANIC,
+    switch (info) {
+        case XLOG_SEG_ATOMIC_OPERATION:
+        case XLOG_SEG_SEGMENT_EXTEND:
+        case XLOG_SEG_CREATE_EXTENT_GROUP:
+        case XLOG_SEG_INIT_MAPPAGE:
+        case XLOG_SEG_INIT_INVRSPTR_PAGE:
+        case XLOG_SEG_ADD_NEW_GROUP:
+        case XLOG_SEG_SPACE_SHRINK:
+        case XLOG_SEG_SPACE_DROP:
+        case XLOG_SEG_NEW_PAGE:
+            DispatchToSpecificOnePageWorker(record, 0, expectedTLIs);
+            break;
+        case XLOG_SEG_TRUNCATE:
+            DispatchRecordBySegHeadBuffer(record, expectedTLIs, 0);
+            break;
+        default:
+            ereport(PANIC,
                 (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE] xlog info %u doesn't belong to segpage.", info)));
+                errmsg("[SS][REDO_LOG_TRACE] xlog info %u doesn't belong to segpage.", info)));
     }
 
     return isNeedFullSync;
@@ -1622,27 +1552,6 @@ void SetLsnCheckInfo(uint64 curPosition, XLogRecPtr curLsn)
 #endif /* __x86_64__ */
 }
 
-bool CheckBufHasSpaceToDispatch(XLogRecPtr endRecPtr)
-{
-    uint64 curPosition;
-    XLogRecPtr curLsn;
-    GetLsnCheckInfo(&curPosition, &curLsn);
-
-    XLogRecPtr endPtr = endRecPtr;
-    if (endPtr % XLogSegSize == 0) {
-        XLByteAdvance(endPtr, SizeOfXLogLongPHD);
-    } else if (endPtr % XLOG_BLCKSZ == 0) {
-        XLByteAdvance(endPtr, SizeOfXLogShortPHD);
-    }
-
-    uint32 len = (uint32)(endPtr - curLsn);
-    if (len < LSN_CHECK_BUF_SIZE) {
-        return true;
-    }
-
-    return false;
-}
-
 bool PushCheckLsn()
 {
     uint64 curPosition;
@@ -1935,6 +1844,96 @@ void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
 #endif
         (void)RegisterRedoInterruptCallBack(g_dispatcher->oldStartupIntrruptFunc);
     }
+}
+
+void SendRecoveryEndMarkToWorkersAndWaitForReach(int code)
+{
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+        errmsg("[SS][REDO_LOG_TRACE] On-demand recovery dispatch finish, send RecoveryEndMark to workers, code: %d", 
+            code)));
+    if ((get_real_recovery_parallelism() > 1) && (GetBatchCount() > 0)) {
+        WaitPageRedoWorkerReachLastMark(g_dispatcher->readLine.readPageThd);
+        PageRedoPipeline *pl = g_dispatcher->pageLines;
+
+        /* Read finish, need to check if can go to Phase two */
+        XLogRecPtr lastReadEndPtr = g_dispatcher->readLine.readPageThd->lastReplayedEndRecPtr;
+
+        /* Wait for trxn finished replay and redo hash table complete */
+        while (true) {
+            XLogRecPtr trxnCompletePtr = GetCompletedRecPtr(g_dispatcher->trxnLine.redoThd);
+            XLogRecPtr pageMngrCompletePtr = InvalidXLogRecPtr;
+            for (uint32 i = 0; i < g_dispatcher->allWorkersCnt; ++i) {
+                if (g_dispatcher->allWorkers[i]->role == REDO_PAGE_MNG) {
+                    XLogRecPtr tmpStart = MAX_XLOG_REC_PTR;
+                    XLogRecPtr tmpEnd = MAX_XLOG_REC_PTR;
+                    GetCompletedReadEndPtr(g_dispatcher->allWorkers[i], &tmpStart, &tmpEnd);
+                    if (XLByteLT(tmpEnd, pageMngrCompletePtr) || pageMngrCompletePtr == InvalidXLogRecPtr) {
+                        pageMngrCompletePtr = tmpEnd;
+                    }
+                }
+            }
+            ereport(LOG, (errmsg("[SS][REDO_LOG_TRACE] lastReadXact: %lu, trxnComplete: %lu, pageMgrComplele: %lu",
+                        lastReadEndPtr, trxnCompletePtr, pageMngrCompletePtr)));
+            if (XLByteEQ(trxnCompletePtr, lastReadEndPtr) && XLByteEQ(pageMngrCompletePtr, lastReadEndPtr)) {
+                break;
+            }
+
+            long sleeptime = 5 * 1000;
+            pg_usleep(sleeptime);
+        }
+        /* we only send end mark but don't wait */
+        for (uint32 i = 0; i < g_dispatcher->pageLineNum; i++) {
+            SendPageRedoEndMark(pl[i].batchThd);
+        }
+        SendPageRedoEndMark(g_dispatcher->trxnLine.managerThd);
+
+        /* Stop Read Thrd only */
+        pg_atomic_write_u32(&(g_dispatcher->rtoXlogBufState.xlogReadManagerState), READ_MANAGER_STOP);
+        WaitPageRedoWorkerReachLastMark(g_dispatcher->readLine.managerThd);
+        WaitPageRedoWorkerReachLastMark(g_dispatcher->readLine.readThd);
+        LsnUpdate();
+        XLogRecPtr lastReplayed = GetXLogReplayRecPtr(NULL);
+        ereport(LOG, (errmsg("[SS][REDO_LOG_TRACE] Current LastReplayed: %lu", lastReplayed)));
+        (void)RegisterRedoInterruptCallBack(g_dispatcher->oldStartupIntrruptFunc);
+    }
+}
+
+void WaitRedoFinish()
+{
+    /* make pmstate as run so db can accept service from now */
+    g_instance.fatal_error = false;
+    g_instance.demotion = NoDemote;
+    pmState = PM_RUN;
+    write_stderr_with_prefix("[On-demand] LOG: database system is ready to accept connections");
+
+    SpinLockAcquire(&t_thrd.shemem_ptr_cxt.XLogCtl->info_lck);
+    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone = true;
+    SpinLockRelease(&t_thrd.shemem_ptr_cxt.XLogCtl->info_lck);
+
+    /* for other nodes in cluster */
+    g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_RECOVERY;
+    SSSaveReformerCtrl();
+
+#ifdef USE_ASSERT_CHECKING
+    XLogRecPtr minStart = MAX_XLOG_REC_PTR;
+    XLogRecPtr minEnd = MAX_XLOG_REC_PTR;
+    GetReplayedRecPtr(&minStart, &minEnd);
+    ereport(LOG, (errmsg("[SS][REDO_LOG_TRACE] Current LastReplayed: %lu", minEnd)));
+#endif
+
+    PageRedoPipeline *pl = g_dispatcher->pageLines;
+    for (uint32 i = 0; i < g_dispatcher->pageLineNum; i++) {
+        WaitPageRedoWorkerReachLastMark(pl[i].batchThd);
+    }
+    WaitPageRedoWorkerReachLastMark(g_dispatcher->trxnLine.managerThd);
+    XLogParseBufferDestoryFunc(&(g_dispatcher->parseManager));
+    LsnUpdate();
+#ifdef USE_ASSERT_CHECKING
+    AllItemCheck();
+#endif
+    SpinLockAcquire(&t_thrd.shemem_ptr_cxt.XLogCtl->info_lck);
+    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone = true;
+    SpinLockRelease(&t_thrd.shemem_ptr_cxt.XLogCtl->info_lck);
 }
 
 /* Run from each page worker and the txn worker thread. */

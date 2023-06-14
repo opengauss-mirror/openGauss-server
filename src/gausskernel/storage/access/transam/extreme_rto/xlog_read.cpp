@@ -552,7 +552,7 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
         if (readSource & XLOG_FROM_STREAM) {
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
-            if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
+            if (ENABLE_DMS && ENABLE_DSS) {
                 readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
                     xlogreader->readBuf, readTLI, NULL);
             } else {

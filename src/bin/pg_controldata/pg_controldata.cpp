@@ -84,6 +84,20 @@ static const char* dbState(DBState state)
     return _("unrecognized status code");
 }
 
+static const char* SSClusterState(SSGlobalClusterState state) {
+    switch (state) {
+        case CLUSTER_IN_ONDEMAND_BUILD:
+            return _("in on-demand build");
+        case CLUSTER_IN_ONDEMAND_RECOVERY:
+            return _("in on-demand recovery");
+        case CLUSTER_NORMAL:
+            return _("normal");
+        default:
+            break;
+    }
+    return _("unrecognized status code");
+}
+
 static const char* wal_level_str(WalLevel wal_level)
 {
     switch (wal_level) {
@@ -244,8 +258,11 @@ static void display_last_page(ss_reformer_ctrl_t reformerCtrl, int last_page_id)
                  "is expecting.  The results below are untrustworthy.\n\n"));
     }
     printf(_("\nreformer data (last page id %d)\n\n"), last_page_id);
+    printf(_("Reform control version number:        %u\n"), reformerCtrl.version);
     printf(_("Stable instances list:                %lu\n"), reformerCtrl.list_stable);
     printf(_("Primary instance ID:                  %d\n"), reformerCtrl.primaryInstId);
+    printf(_("Recovery instance ID:                 %d\n"), reformerCtrl.recoveryInstId);
+    printf(_("Cluster status:                       %s\n"), SSClusterState(reformerCtrl.clusterStatus));
 }
 
 int main(int argc, char* argv[])
@@ -390,7 +407,7 @@ int main(int argc, char* argv[])
                 exit_safely(2);
             }
             display_control_page(ControlFile, display_id, display_all);
-        }   
+        }
 
         /* get the last page from the the pg_control in shared storage mode */
         if (enable_dss && display_id > MAX_INSTANCEID) {

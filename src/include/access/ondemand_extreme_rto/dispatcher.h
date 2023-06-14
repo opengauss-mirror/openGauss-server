@@ -165,6 +165,7 @@ typedef struct {
     volatile bool recoveryStop;
     volatile XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoTimeCost *startupTimeCost;
+    RedoParseManager parseManager;
 } LogDispatcher;
 
 typedef struct {
@@ -185,6 +186,7 @@ const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
 extern RedoItem g_redoEndMark;
 extern RedoItem g_terminateMark;
 extern uint32 g_readManagerTriggerFlag;
+extern RefOperate recordRefOperate;
 
 inline int get_batch_redo_num()
 {
@@ -215,6 +217,8 @@ void FreeRedoItem(RedoItem *item);
 
 /* Dispatcher phases. */
 void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code);
+void SendRecoveryEndMarkToWorkersAndWaitForReach(int code);
+void WaitRedoFinish();
 
 /* Dispatcher states. */
 int GetDispatcherExitCode();

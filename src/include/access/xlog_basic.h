@@ -99,6 +99,7 @@
  * The XLog directory and control file (relative to $PGDATA)
  */
 #define SS_XLOGDIR (g_instance.datadir_cxt.xlogDir)
+#define SS_XLOGRECOVERYDIR (g_instance.dms_cxt.SSRecoveryInfo.recovery_xlogDir)
 #define XLOGDIR "pg_xlog"
 #define ARCHIVEDIR "pg_xlog/archive_status"
 #define XLOG_CONTROL_FILE (g_instance.datadir_cxt.controlPath)
