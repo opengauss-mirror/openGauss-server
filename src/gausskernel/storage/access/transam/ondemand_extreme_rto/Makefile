@@ -26,6 +26,6 @@ top_builddir = ../../../../../..
 include $(top_builddir)/src/Makefile.global
 
 OBJS = dispatcher.o page_redo.o posix_semaphore.o redo_item.o \
-	spsc_blocking_queue.o txn_redo.o batch_redo.o xlog_read.o
+	spsc_blocking_queue.o txn_redo.o batch_redo.o xlog_read.o redo_utils.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -170,6 +170,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_access_rmgrdesc>
     $<TARGET_OBJECTS:gausskernel_storage_access_transam_parallel_recovery>
     $<TARGET_OBJECTS:gausskernel_storage_access_transam_extreme_rto>
+    $<TARGET_OBJECTS:gausskernel_storage_access_transam_ondemand_extreme_rto>
     $<TARGET_OBJECTS:gausskernel_storage_access_transam>
     $<TARGET_OBJECTS:gausskernel_storage_access_obs>
     $<TARGET_OBJECTS:gausskernel_storage_access_hash>

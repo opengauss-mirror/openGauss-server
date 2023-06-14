@@ -330,6 +330,7 @@ ProcessConfigFile(GucContext context)
                     case MASTER_THREAD: {
                         if (strcmp(item->name, "upgrade_mode") == 0) {
                             if (strcmp(pre_value, "0") != 0 && strcmp(post_value, "0") == 0) {
+                                SSUpgradeFileBeforeCommit();
                                 pg_atomic_write_u32(&WorkingGrandVersionNum, GRAND_VERSION_NUM);
                             }
                         }

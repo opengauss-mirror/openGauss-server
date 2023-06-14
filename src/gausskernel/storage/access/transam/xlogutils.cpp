@@ -513,6 +513,10 @@ static void CollectInvalidPagesStates(uint32 *nstates_ptr, InvalidPagesState ***
 /* Complain about any remaining invalid-page entries */
 void XLogCheckInvalidPages(void)
 {
+    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_RECOVERY_DONE) {
+        return;
+    }
+
     bool foundone = false;
     if (t_thrd.xlog_cxt.forceFinishHappened) {
         ereport(WARNING,
@@ -671,7 +675,7 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
         if (pageisvalid) {
             if (readmethod != WITH_LOCAL_CACHE) {
                 if (mode != RBM_ZERO_AND_LOCK && mode != RBM_ZERO_AND_CLEANUP_LOCK) {
-                    if (ENABLE_DMS)
+                    if (ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY)
                         LockBuffer(buf, BUFFER_LOCK_SHARE);
                     else if (get_cleanup_lock)
                         LockBufferForCleanup(buf);
@@ -698,7 +702,7 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
             return BLK_DONE;
         } else {
             if (readmethod != WITH_LOCAL_CACHE && mode != RBM_ZERO_AND_LOCK && mode != RBM_ZERO_AND_CLEANUP_LOCK &&
-                ENABLE_DMS) {
+                ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY) {
                 Assert(!CheckPageNeedSkipInRecovery(buf));
                 LockBuffer(buf, BUFFER_LOCK_UNLOCK);
                 if (get_cleanup_lock) {

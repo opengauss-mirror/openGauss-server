@@ -33,4 +33,4 @@ XLogRecord* XLogParallelReadNextRecord(XLogReaderState* xlogreader);
 XLogRecord *ReadNextXLogRecord(XLogReaderState **xlogreaderptr, int emode);
 
 }  // namespace ondemand_extreme_rto
-#endif /* XLOG_READ_H */
+#endif /* ONDEMAND_EXTREME_RTO_XLOG_READ_H */

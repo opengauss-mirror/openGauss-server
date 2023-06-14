@@ -43,6 +43,8 @@
 
 #include "access/xlogproc.h"
 
+extern uint32 hashquickany(uint32 seed, register const unsigned char *data, register int len);
+
 namespace ondemand_extreme_rto {
 static inline void PRXLogRecGetBlockTag(XLogRecParseState *recordBlockState, RelFileNode *rnode, BlockNumber *blknum,
                                         ForkNumber *forknum)
@@ -64,11 +66,17 @@ static inline void PRXLogRecGetBlockTag(XLogRecParseState *recordBlockState, Rel
     }
 }
 
+uint32 XlogTrackTableHashCode(RedoItemTag *tagPtr)
+{
+    return hashquickany(0xFFFFFFFF, (unsigned char *)tagPtr, sizeof(RedoItemTag));
+}
+
 void PRInitRedoItemEntry(RedoItemHashEntry *redoItemHashEntry)
 {
     redoItemHashEntry->redoItemNum = 0;
     redoItemHashEntry->head = NULL;
     redoItemHashEntry->tail = NULL;
+    redoItemHashEntry->redoDone = false;
 }
 
 uint32 RedoItemTagHash(const void *key, Size keysize)
@@ -93,10 +101,11 @@ int RedoItemTagMatch(const void *left, const void *right, Size keysize)
     return 1;
 }
 
-HTAB *PRRedoItemHashInitialize(MemoryContext context)
+HTAB **PRRedoItemHashInitialize(MemoryContext context)
 {
     HASHCTL ctl;
-    HTAB *hTab = NULL;
+    int batchNum = get_batch_redo_num();
+    HTAB **hTab = (HTAB **)MemoryContextAllocZero(context, batchNum * sizeof(HTAB *));
 
     /*
      * create hashtable that indexes the redo items
@@ -108,14 +117,17 @@ HTAB *PRRedoItemHashInitialize(MemoryContext context)
     ctl.entrysize = sizeof(RedoItemHashEntry);
     ctl.hash = RedoItemTagHash;
     ctl.match = RedoItemTagMatch;
-    hTab = hash_create("Redo item hash by relfilenode and blocknum", INITredoItemHashSIZE, &ctl,
-                       HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
+    for (int i = 0; i < batchNum; i++) {
+        hTab[i] = hash_create("Redo item hash by relfilenode and blocknum", INITredoItemHashSIZE, &ctl,
+            HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_SHRCTX | HASH_COMPARE);
+    }
 
     return hTab;
 }
 
 void PRRegisterBlockInsertToList(RedoItemHashEntry *redoItemHashEntry, XLogRecParseState *record)
 {
+    ReferenceRecParseState(record);
     if (redoItemHashEntry->tail != NULL) {
         redoItemHashEntry->tail->nextrecord = record;
         redoItemHashEntry->tail = record;

@@ -35,6 +35,13 @@
 #include "access/redo_statistic.h"
 #include "access/extreme_rto_redo_api.h"
 
+#ifdef ENABLE_LITE_MODE
+#define ENABLE_ONDEMAND_RECOVERY false
+#else
+#define ENABLE_ONDEMAND_RECOVERY (ENABLE_DMS && IsExtremeRedo() \
+    && g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery)
+#endif
+
 typedef enum {
     NOT_PAGE_REDO_THREAD,
     PAGE_REDO_THREAD_EXIT_NORMAL,

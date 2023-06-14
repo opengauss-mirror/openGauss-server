@@ -4285,6 +4285,54 @@ static void append_with_tabs(StringInfo buf, const char* str)
 }
 
 /*
+ * Reaper -- get current time.
+ */
+void get_time_now(char* nowTime, int timeLen)
+{
+    time_t formatTime;
+    struct timeval current = {0};
+    const int tmpBufSize = 32;
+    char tmpBuf[tmpBufSize] = {0};
+
+    if (nowTime == NULL || timeLen == 0) {
+        return;
+    }
+
+    (void)gettimeofday(&current, NULL);
+    formatTime = current.tv_sec;
+    struct tm* pTime = localtime(&formatTime);
+    strftime(tmpBuf, sizeof(tmpBuf), "%Y-%m-%d %H:%M:%S", pTime);
+
+    errno_t rc = sprintf_s(nowTime, timeLen - 1, "%s.%ld ", tmpBuf, current.tv_usec / 1000);
+    securec_check_ss(rc, "\0", "\0");
+}
+
+void write_stderr_with_prefix(const char* fmt, ...)
+{
+    va_list ap;
+    const int timeBufSize = 256;
+    const int bufSize = 2048;
+    char timeBuf[timeBufSize] = {0};
+    char buf[bufSize] = {0};
+
+    /* syslogger thread can not write log into pipe */
+    if (t_thrd.role == SYSLOGGER) {
+        return;
+    }
+
+    get_time_now(timeBuf, timeBufSize);
+
+    fmt = _(fmt);
+    va_start(ap, fmt);
+    errno_t rc = sprintf_s(buf, bufSize - 1, "%s[%lu] %s\n", timeBuf, t_thrd.proc_cxt.MyProcPid, fmt);
+    securec_check_ss(rc, "\0", "\0");
+
+    vfprintf(stderr, buf, ap);
+    fflush(stderr);
+    va_end(ap);
+}
+
+/*
  * Write errors to stderr (or by equal means when stderr is
  * not available). Used before ereport/elog can be used
  * safely (memory context, GUC load etc)

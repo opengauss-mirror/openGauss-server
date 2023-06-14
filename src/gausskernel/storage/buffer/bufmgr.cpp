@@ -84,6 +84,7 @@
 #include "tde_key_management/tde_key_storage.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_common_attr.h"
+#include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_transaction.h"
 
 const int ONE_MILLISECOND = 1;
@@ -2155,7 +2156,8 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
     Block bufBlock = BufHdrGetBlock(buf_desc);
 
 #ifdef USE_ASSERT_CHECKING
-    bool need_verify = (!RecoveryInProgress() && ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0) && ENABLE_VERIFY_PAGE_VERSION);
+    bool need_verify = (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY &&
+        ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0) && ENABLE_VERIFY_PAGE_VERSION);
     char *past_image = NULL;
     if (need_verify) {
         past_image = (char *)palloc(BLCKSZ);
@@ -2346,8 +2348,11 @@ found_branch:
                     }
                     LockBufferForCleanup(BufferDescriptorGetBuffer(bufHdr));
                 }
+
+                if (t_thrd.role != PAGEREDO && SS_ONDEMAND_BUILD_DONE && SS_PRIMARY_MODE) {
+                    bufHdr = RedoForOndemandExtremeRTOQuery(bufHdr, relpersistence, forkNum, blockNum, mode);
+                }
             }
-            
             return BufferDescriptorGetBuffer(bufHdr);
         }
 
@@ -2409,6 +2414,18 @@ found_branch:
 
     /* DMS: Try get page remote */
     if (ENABLE_DMS) {
+        // standby node must notify primary node for prepare lastest page in ondemand recovery
+        if (SS_STANDBY_ONDEMAND_RECOVERY) {
+            while (!SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
+                SSReadControlFile(REFORM_CTRL_PAGE);
+                if (SS_STANDBY_ONDEMAND_NORMAL) {
+                    break; // ondemand recovery finish, skip
+                } else if (SS_STANDBY_ONDEMAND_BUILD) {
+                    return 0; // in new reform
+                }
+                // still need requset page
+            }
+        }
         MarkReadHint(bufHdr->buf_id, relpersistence, isExtend, pblk);
         if (mode != RBM_FOR_REMOTE && relpersistence != RELPERSISTENCE_TEMP && !isLocalBuf) {
             Assert(!(pg_atomic_read_u32(&bufHdr->state) & BM_VALID));

@@ -40,10 +40,13 @@
 
 namespace ondemand_extreme_rto {
 
-static const uint32 PAGE_WORK_QUEUE_SIZE = 8192;
+#define ONDEMAND_DISTRIBUTE_RATIO 0.9
+
+static const uint32 PAGE_WORK_QUEUE_SIZE = 2097152;
 
 static const uint32 ONDEMAND_EXTREME_RTO_ALIGN_LEN = 16; /* need 128-bit aligned */
 static const uint32 MAX_REMOTE_READ_INFO_NUM = 100;
+static const uint32 ADVANCE_GLOBALLSN_INTERVAL = 1; /* unit second */
 
 typedef enum {
     REDO_BATCH,
@@ -181,8 +184,6 @@ struct PageRedoWorker {
     RedoParseManager parseManager;
     RedoBufferManager bufferManager;
     RedoTimeCost timeCostList[TIME_COST_NUM];
-    uint32 remoteReadPageNum;
-    HTAB *badPageHashTbl;
     char page[BLCKSZ];
     XLogBlockDataParse *curRedoBlockState;
 };
@@ -214,6 +215,7 @@ void WaitPageRedoWorkerReachLastMark(PageRedoWorker *worker);
 /* Redo processing. */
 void AddPageRedoItem(PageRedoWorker *worker, void *item);
 
+uint64 GetCompletedRecPtr(PageRedoWorker *worker);
 void UpdatePageRedoWorkerStandbyState(PageRedoWorker *worker, HotStandbyState newState);
 
 /* Redo end states. */
@@ -225,7 +227,9 @@ PageRedoWorker *CreateWorker(uint32 id);
 extern void UpdateRecordGlobals(RedoItem *item, HotStandbyState standbyState);
 void ReferenceRedoItem(void *item);
 void DereferenceRedoItem(void *item);
-void PushToWorkerLsn(bool force);
+void ReferenceRecParseState(XLogRecParseState *recordstate);
+void DereferenceRecParseState(XLogRecParseState *recordstate);
+void PushToWorkerLsn();
 void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 void SetReadBufferForExtRto(XLogReaderState *state, XLogRecPtr pageptr, int reqLen);
 void DumpExtremeRtoReadBuf();
@@ -240,19 +244,6 @@ void DispatchClosefdMarkToAllRedoWorker();
 void DispatchCleanInvalidPageMarkToAllRedoWorker(RepairFileKey key);
 
 const char *RedoWokerRole2Str(RedoRole role);
-
-
-/* block or file repair function */
-HTAB* BadBlockHashTblCreate();
-void RepairPageAndRecoveryXLog(BadBlockRecEnt *page_info, const char *page);
-void CheckRemoteReadAndRepairPage(BadBlockRecEnt *entry);
-void ClearSpecificsPageEntryAndMem(BadBlockRecEnt *entry);
-void ClearRecoveryThreadHashTbl(const RelFileNode &node, ForkNumber forknum, BlockNumber minblkno,
-    bool segment_shrink);
-void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
-void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
-    XLogRecPtr old_lsn, XLogPhyBlock pblk);
-void SeqCheckRemoteReadAndRepairPage();
 
 }  // namespace ondemand_extreme_rto
 #endif

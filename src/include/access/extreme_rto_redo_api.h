@@ -27,6 +27,7 @@
 
 #include "access/xlogproc.h"
 #include "access/redo_statistic.h"
+#include "access/ondemand_extreme_rto/redo_utils.h"
 
 typedef enum {
     DEFAULT_EXTREME_RTO,

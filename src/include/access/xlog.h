@@ -541,6 +541,8 @@ typedef struct XLogCtlData {
     bool SharedRecoveryInProgress;
 
     bool IsRecoveryDone;
+    bool IsOnDemandBuildDone;
+    bool IsOnDemandRecoveryDone;
 
     /*
      * SharedHotStandbyActive indicates if we're still in crash or archive
@@ -871,6 +873,8 @@ void UpdateMinrecoveryInAchive();
 bool NewDataIsInBuf(XLogRecPtr expectedRecPtr);
 bool rescanLatestTimeLine(void);
 int XLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources);
+int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
+    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path);
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 
