@@ -7786,9 +7786,9 @@ Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrateg
     if (qual != NIL && plan_rows >= HAVING_THRESHOLD && !need_stream)
         plan_rows = clamp_row_est(plan_rows * DEFAULT_MATCH_SEL);
 
-    if (plan->exec_nodes ==NULL){
+    if (plan->exec_nodes ==NULL) {
         
-    } else if (plan->exec_nodes && plan->exec_nodes->baselocatortype == LOCATOR_TYPE_REPLICATED && is_execute_on_datanodes(plan)) {
+    } else if (plan->exec_nodes->baselocatortype == LOCATOR_TYPE_REPLICATED && is_execute_on_datanodes(plan)) {
         plan->multiple = 1.0;
         plan->plan_rows = plan_rows;
     } else {

@@ -4829,8 +4829,7 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
      * fortuitous, but it's not so unreasonable --- a constant expression does
      * not depend on context, by definition, n'est ce pas?
      */
-    if (isFusion && estate->es_per_tuple_exprcontext == NULL)
-    {
+    if (isFusion && estate->es_per_tuple_exprcontext == NULL) {
         MakePerTupleExprContextForOpFusion(estate);
     }
     ExprContext* econtext = GetPerTupleExprContext(estate);
@@ -4860,9 +4859,7 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
     }
 
     /* Release all the junk we just created */
-    if (isFusion) {
-
-    } else {
+    if (!isFusion) {
         FreeExecutorState(estate);
     }
 

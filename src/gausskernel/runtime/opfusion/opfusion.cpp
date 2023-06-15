@@ -114,7 +114,7 @@ void OpFusion::InitGlobals(MemoryContext context, CachedPlanSource *psrc, List *
         cxt = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT, "SharedOpfusionContext", ALLOCSET_DEFAULT_MINSIZE,
             ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
     } else {
-        u_sess->opfusion_cxt = cxt = AllocSetContextCreate(context, "OpfusionContext", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+        u_sess->opfusion_cxt = AllocSetContextCreate(context, "OpfusionContext", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
             ALLOCSET_DEFAULT_MAXSIZE);
             cxt = u_sess->opfusion_cxt;
     }
@@ -683,8 +683,7 @@ static void* TryReuseOpfusionObj(FusionType ftype, MemoryContext context, Cached
 
     /* check the resultdesc*/
     Relation rel = heap_open(rel_oid, RowExclusiveLock);
-    if (!opFusionReuseEqualTupleDescs(RelationGetDescr(rel), checkOpfusionObj->m_global->m_tupDesc))
-    {
+    if (!opFusionReuseEqualTupleDescs(RelationGetDescr(rel), checkOpfusionObj->m_global->m_tupDesc)) {
        heap_close(rel, NoLock);
        return NULL;
     }

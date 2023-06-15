@@ -369,8 +369,7 @@ static bool checkExpr(Node *node, bool is_first)
             if (!checkFlinfo(node, &is_nextval)) {
                 return false;
             }
-            if (is_nextval)
-            {
+            if (is_nextval) {
                 return true;
             }
             bool found_ptr = true;
@@ -1144,21 +1143,20 @@ FusionType getDeleteFusionType(List *stmt_list, ParamListInfo params)
         return ttype;
     }
 
-
-        IndexScan* indexscan = (IndexScan *)deletePlan;
-        /* check relation */
-        Index res_rel_idx = linitial_int((List*)linitial(plannedstmt->resultRelations));
-        Oid relid = getrelid(res_rel_idx, plannedstmt->rtable);
-        Relation rel = heap_open(relid, RowExclusiveLock);
-        if (checkDMLRelation(rel, plannedstmt, false, indexscan->scan.isPartTbl)) {
-            heap_close(rel, NoLock);
-            return NOBYPASS_DML_RELATION_NOT_SUPPORT;
-        }
-        if (checkPartitionType(rel)) {
-            heap_close(rel, NoLock);
-            return NOBYPASS_PARTITION_TYPE_NOT_SUPPORT;
-        }
+    IndexScan* indexscan = (IndexScan *)deletePlan;
+    /* check relation */
+    Index res_rel_idx = linitial_int((List*)linitial(plannedstmt->resultRelations));
+    Oid relid = getrelid(res_rel_idx, plannedstmt->rtable);
+    Relation rel = heap_open(relid, RowExclusiveLock);
+    if (checkDMLRelation(rel, plannedstmt, false, indexscan->scan.isPartTbl)) {
         heap_close(rel, NoLock);
+        return NOBYPASS_DML_RELATION_NOT_SUPPORT;
+    }
+    if (checkPartitionType(rel)) {
+        heap_close(rel, NoLock);
+        return NOBYPASS_PARTITION_TYPE_NOT_SUPPORT;
+    }
+    heap_close(rel, NoLock);
 
     /* check the number of partitions */
     if (indexscan->scan.isPartTbl) {

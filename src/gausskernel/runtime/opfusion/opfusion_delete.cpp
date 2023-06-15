@@ -328,14 +328,13 @@ bool DeleteFusion::ResetReuseFusion(MemoryContext context, CachedPlanSource* psr
     ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
     Plan *deletePlan = (Plan *)linitial(node->plans);
     IndexScan* indexscan = (IndexScan *)JudgePlanIsPartIterator(deletePlan);
-    if(IsA(indexscan, IndexScan) && typeid(*(m_local.m_scan)) == typeid(IndexScanFusion)){
+    if (IsA(indexscan, IndexScan) && typeid(*(m_local.m_scan)) == typeid(IndexScanFusion)) {
         ((IndexScanFusion *)m_local.m_scan)->ResetIndexScanFusion(indexscan, m_global->m_planstmt,
                                                 m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
-    }else {
+    } else {
         m_local.m_scan = ScanFusion::getScanFusion((Node*)indexscan, m_global->m_planstmt,
                                                 m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
     }
-
 
     return true;
 }

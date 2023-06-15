@@ -489,6 +489,5 @@ bool InsertFusion::ResetReuseFusion(MemoryContext context, CachedPlanSource* psr
     initParams(params);
 
     return true;
-
 }
 
