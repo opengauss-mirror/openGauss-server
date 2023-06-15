@@ -5094,15 +5094,15 @@ static void processCancelRequest(Port* port, void* pkt)
             ereport(WARNING, (errmsg("Receive invalid cancel key, which suppose to be thread pool mode.")));
         }
     } else {
-        int backendSlot = 0;
+        int backend_slot = 0;
         // get thread id from logic thread id
-        backendSlot = (int)ntohl(canc->backendPID);
-        Backend* bn = GetBackend(backendSlot);
+        backend_slot = (int)ntohl(canc->backendPID);
+        Backend* bn = GetBackend(g_instance.proc_base_all_procs[backend_slot]->backendSlot);
 
         if (bn == NULL || bn->pid == 0 || bn->pid == InvalidTid) {
             ereport(LOG,
                 (errmsg(
-                    "Don't found the match process, the backend slot(%d), pid(%lu)", backendSlot, bn ? bn->pid : 0)));
+                    "Don't found the match process, the backend slot(%d), pid(%lu)", backend_slot, bn ? bn->pid : 0)));
             return;
         }
 
@@ -10221,6 +10221,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
         ereport(LOG,
             (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
                 wal_get_role_string(get_cur_mode()))));
+
+        /* if enable remote execute, refesh conninfo */
+        if (SS_NORMAL_STANDBY && g_instance.attr.attr_sql.enableRemoteExcute) {
+            SSStandbySetLibpqswConninfo();
+        }
     }
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP)) {

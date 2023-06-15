@@ -111,5 +111,6 @@ int SSProcessDropSegSpace(char *data, uint32 len);
 int SSCheckDbBackends(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);
 int SSCheckDbBackendsAck(char *data, unsigned int len);
 bool SSCheckDbBackendsFromAllStandby(Oid dbid);
+void SSStandbyUpdateRedirectInfo();
 
 #endif

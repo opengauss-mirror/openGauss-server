@@ -18,13 +18,18 @@
 
 #include <sys/time.h>
 #include "libpq/libpq-int.h"
+#include "libpq/pqformat.h"
 #include "replication/libpqsw.h"
 #include "replication/walreceiver.h"
 #include "utils/postinit.h"
 #include "optimizer/planner.h"
+#include "executor/lightProxy.h"
 #include "nodes/parsenodes_common.h"
 #include "commands/prepare.h"
+#include "commands/sqladvisor.h"
 #include "tcop/tcopprot.h"
+#include "utils/snapmgr.h"
+#include "ddes/dms/ss_transaction.h"
 
 #ifdef HAVE_NETINET_TCP_H
 #include <netinet/tcp.h>
@@ -54,9 +59,11 @@ void libpqsw_disconnect(void);
 bool libpqsw_send_pbe(const char* buffer, size_t buffer_size);
 bool libpqsw_begin_command(const char* commandTag);
 bool libpqsw_end_command(const char* commandTag);
+bool libpqsw_fetch_command(const char* commandTag);
 void libpqsw_set_redirect(bool redirect);
 void libpqsw_set_command_tag(const char* commandTag);
 void libpqsw_set_set_command(bool set_command);
+static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *query_list, PhaseType ptype);
 
 static void libpqsw_set_already_connected()
 {
@@ -131,7 +138,7 @@ const StringInfo RedirectMessageManager::get_merge_message(RedirectMessage* msg)
     if (result->len > 0 && libpqsw_log_enable()) {
         StringInfo trace_msg = makeStringInfo();
         output_messages(trace_msg, msg);
-        libpqsw_trace("%s", trace_msg->data);
+        libpqsw_trace("[QUEUED MSG] %s", trace_msg->data);
         DestroyStringInfo(trace_msg);
     }
     return result;
@@ -169,6 +176,9 @@ bool enable_remote_excute()
 
     volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
     ServerMode serverMode = hashmdata->current_mode;
+    if (ENABLE_DMS) {
+        return SS_STANDBY_MODE;
+    }
     return serverMode == STANDBY_MODE;
 }
 
@@ -187,10 +197,10 @@ static bool libpqsw_receive(bool transfer = true)
     PGresult* result = NULL;
     PGresult* lastResult = NULL;
     bool retStatus = true;
-    
     conn->inStart = 0;
     conn->inEnd = 0;
     conn->inCursor = 0;
+    bool skip = false;
     libpqsw_transfer_standby_func transfer_func = transfer ? internal_putbytes : libpqsw_skip_master_message;
 
     while ((result = libpqsw_get_result(conn, transfer_func)) != NULL) {
@@ -211,7 +221,13 @@ static bool libpqsw_receive(bool transfer = true)
             }
         }
         lastResult = result;
-        if (0 < conn->inStart) {
+        skip = false;
+        if (SS_STANDBY_MODE && !(get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_SIMPLE_Q) &&
+            libpqsw_begin_command(result->cmdStatus)) {
+            skip = true;
+        }
+
+        if (0 < conn->inStart && !skip) {
             transfer_func(conn->inBuffer, conn->inStart);
         }
         /* Left-justify any data in the buffer to make room */
@@ -237,30 +253,44 @@ static bool libpqsw_receive(bool transfer = true)
     if (0 < conn->inEnd) {
         transfer_func(conn->inBuffer, conn->inEnd);
     }
+
+    if ((get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_WRITE_REDIRECT) && retStatus) {
+        get_redirect_manager()->ss_standby_state |= SS_STANDBY_RES_OK_REDIRECT;
+    }
+
     PQclear(lastResult);
     pq_flush();
     return true;
 }
 
+void libpqsw_create_conn()
+{
+    uint32 ss_standby_state = get_redirect_manager()->ss_standby_state;
+    RedirectState temp_state = get_redirect_manager()->state;
+    libpqsw_disconnect();
+    get_redirect_manager()->ss_standby_state = ss_standby_state;
+    get_redirect_manager()->state = temp_state;
+    if (SS_STANDBY_MODE) {
+        if (strlen(g_instance.dms_cxt.conninfo) == 0) {
+            ereport(ERROR, (errmsg("Conninfo of primary node to transfer write request is NULL!")));
+        }
+        libpqsw_connect((char *)(g_instance.dms_cxt.conninfo), u_sess->proc_cxt.MyProcPort->database_name,
+            u_sess->proc_cxt.MyProcPort->user_name);
+    } else {
+        libpqsw_connect((char *)(t_thrd.walreceiverfuncs_cxt.WalRcv->conninfo),
+            u_sess->proc_cxt.MyProcPort->database_name, u_sess->proc_cxt.MyProcPort->user_name);
+    }
+    libpqsw_set_already_connected();
+}
+
 /*
 * this function will transfer msg to master, we support simple & extend query here.
 */
-static bool libpqsw_remote_excute_sql(int retry, const char* sql, uint32 size, const char *dbName,
-    const char *userName, const char *commandTag, bool waitResult, bool transfer)
+static bool libpqsw_remote_excute_sql(int retry, const char *sql, uint32 size, const char *commandTag, bool waitResult,
+    bool transfer)
 {
     if (get_sw_cxt()->streamConn == NULL) {
-        libpqsw_disconnect();
-        char conninfo[MAXCONNINFO];
-        errno_t rc = EOK;
-
-        rc = memset_s(conninfo, MAXCONNINFO, 0, MAXCONNINFO);
-        securec_check(rc, "\0", "\0");
-
-        /* Fetch information required to start streaming */
-        rc = strncpy_s(conninfo, MAXCONNINFO, (char*)(t_thrd.walreceiverfuncs_cxt.WalRcv->conninfo), MAXCONNINFO - 1);
-        securec_check(rc, "\0", "\0");
-        libpqsw_connect(conninfo, dbName, userName);
-        libpqsw_set_already_connected();
+        libpqsw_create_conn();
     } else if(PQstatus(get_sw_cxt()->streamConn) != CONNECTION_OK) {
         libpqsw_disconnect();
         ereport(ERROR,
@@ -278,11 +308,11 @@ static bool libpqsw_remote_excute_sql(int retry, const char* sql, uint32 size, c
         }
     } else {
         // send failed, so we need retry!
+        uint32 ss_standby_state = get_redirect_manager()->ss_standby_state;
         libpqsw_disconnect();
+        get_redirect_manager()->ss_standby_state = ss_standby_state;
         if (retry > 0) {
-            return libpqsw_remote_excute_sql(retry - 1, sql, size,
-                    dbName, userName, commandTag,
-                    waitResult, transfer);
+            return libpqsw_remote_excute_sql(retry - 1, sql, size, commandTag, waitResult, transfer);
         }
         ereport(ERROR,
             (errcode(ERRCODE_CONNECTION_RESET_BY_PEER),
@@ -366,7 +396,7 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
     } else if (libpqsw_begin_command(commandTag) || libpqsw_remote_in_transaction()) {
         libpqsw_set_transaction(true);
         need_redirect = true;
-    } else if(libpqsw_redirect()) {
+    } else if (libpqsw_redirect()) {
         need_redirect = true;
     } else {
         if (strcmp(commandTag, "SET") == 0) {
@@ -403,6 +433,7 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
 static void libpqsw_after_redirect()
 {
     if (!libpqsw_remote_in_transaction()) {
+        PopActiveSnapshot();
         finish_xact_command();
         libpqsw_set_transaction(false);
     }
@@ -488,12 +519,8 @@ static void libpqsw_inner_excute_pbe(bool waitResult, bool updateFlag)
         RedirectMessage* redirect_msg = (RedirectMessage*)lfirst(message);
         const StringInfo pbe_send_message = message_manager->get_merge_message(redirect_msg);
         redirect_msg->cur_pos = 0;
-        const char* db_name = u_sess->proc_cxt.MyProcPort->database_name;
-        const char* username = u_sess->proc_cxt.MyProcPort->user_name;
         (void)libpqsw_remote_excute_sql(0, pbe_send_message->data,
             pbe_send_message->len,
-            db_name,
-            username,
             redirect_msg->commandTag,
             waitResult,
             redirect_msg->type == RT_NORMAL);
@@ -508,6 +535,20 @@ static inline int libpqsw_connection_status() {
     return get_sw_cxt()->streamConn == NULL ? -1 : get_sw_cxt()->streamConn->xactStatus;
 }
 
+static inline void libpqsw_print_trace_log(int qtype, const char* stmt, const char* query)
+{
+    libpqsw_trace("[TRACE] %c: portal=%s, stmt=%s, trans:%d, redirect:%s, remote:%s, local:%s, sstate:%x, need end:%s",
+        qtype,
+        stmt,
+        query,
+        libpqsw_connection_status(),
+        libpqsw_get_redirect() ? "true" : "false",
+        libpqsw_remote_in_transaction() ? "true" : "false",
+        libpqsw_get_transaction() ? "true" : "false",
+        SS_STANDBY_MODE ? get_redirect_manager()->ss_standby_state : 0,
+        libpqsw_need_end() ? "true" : "false");
+}
+
 /*
 * only support P msg.
 */
@@ -515,7 +556,7 @@ static inline void libpqsw_trace_p_msg(int qtype, StringInfo msg)
 {
     const char* stmt = msg->data;
     const char* query = msg->data + strlen(stmt) + 1;
-    libpqsw_trace("P: stmt=%s, query=%s", stmt, query);
+    libpqsw_print_trace_log(qtype, stmt, query);
 }
 
 /*
@@ -525,9 +566,7 @@ static inline void libpqsw_trace_b_msg(int qtype, StringInfo msg)
 {
     const char* portal = msg->data;
     const char* stmt = msg->data + strlen(portal) + 1;
-    libpqsw_trace("B: portal=%s, stmt=%s, trans:%d", portal, stmt,
-        libpqsw_connection_status()
-        );
+    libpqsw_print_trace_log(qtype, portal, stmt);
 }
 
 /*
@@ -538,11 +577,7 @@ static inline void libpqsw_trace_u_msg(int qtype, StringInfo msg)
     int batch_count = ntohl(*(uint32*)(msg->data));
     const char* portal = msg->data + 4;
     const char* stmt = msg->data + 4 + strlen(portal) + 1;
-    libpqsw_trace("U: portal=%s, stmt=%s, trans:%d, count:%d",
-        portal,
-        stmt,
-        libpqsw_connection_status(),
-        batch_count);
+    libpqsw_print_trace_log(qtype, portal, stmt);
 }
 
 /*
@@ -550,14 +585,10 @@ static inline void libpqsw_trace_u_msg(int qtype, StringInfo msg)
 */
 static inline void libpqsw_trace_c_msg(int qtype, StringInfo msg)
 {
-    unsigned char close_type = (unsigned char)(msg->data[0]);
+    char close_type[] = {0, 0};
+    close_type[0] = (unsigned char)(msg->data[0]);
     const char* close_target = msg->data + 1;
-    libpqsw_trace("C: close_type=%c, target_name=%s, trans:%d, redirect:%s, remote:%s",
-        close_type,
-        close_target,
-        libpqsw_connection_status(),
-        libpqsw_redirect() ? "true" : "false",
-        libpqsw_remote_in_transaction() ? "true" : "false");
+    libpqsw_print_trace_log(qtype, close_type, close_target);
 }
 
 /*
@@ -565,13 +596,9 @@ static inline void libpqsw_trace_c_msg(int qtype, StringInfo msg)
 */
 static inline void libpqsw_trace_other_msg(int qtype, StringInfo msg)
 {
-    libpqsw_trace("%c: %d data=%s, size=%d, trans:%d, redirect:%s",
-        qtype,
-        qtype,
-        msg->data == NULL ? "" : msg->data,
-        msg->len,
-        libpqsw_connection_status(),
-        libpqsw_redirect() ? "true" : "false");
+    const char* portal = msg->data;
+    const char* stmt = "OTHER";
+    libpqsw_print_trace_log(qtype, portal, stmt);
 }
 
 static inline void libpqsw_trace_empty_msg(int qtype, StringInfo msg)
@@ -606,39 +633,77 @@ static trace_msg_func get_msg_trace_func(int qtype)
     return cur_func;
 }
 
-static CachedPlanSource* libpqsw_get_plancache(StringInfo msg)
+static CachedPlanSource* libpqsw_get_plancache(StringInfo msg, int qtype)
 {
-    const char* stmt = msg->data + strlen(msg->data) + 1;
+    const char* stmt = NULL;
+    const char* portal_name = NULL;
     CachedPlanSource* psrc = NULL;
+    int batch_count;
+
+    StringInfo temp_message = makeStringInfo();
+    copyStringInfo(temp_message, msg);
+
+    if (qtype == 'P') {
+        stmt = pq_getmsgstring(temp_message);
+    } else if (qtype == 'B') {
+        portal_name = pq_getmsgstring(temp_message);
+        stmt = pq_getmsgstring(temp_message);
+    } else if (qtype == 'U') {
+        batch_count = pq_getmsgint(temp_message, 4);
+        portal_name = pq_getmsgstring(temp_message);
+        stmt = pq_getmsgstring(temp_message);
+    }
+
     if (strlen(stmt) != 0) {
-        PreparedStatement *pstmt = FetchPreparedStatement(stmt, false, false);
+        PreparedStatement *pstmt = FetchPreparedStatement(stmt, true, true);
         if (pstmt != NULL) {
             psrc = pstmt->plansource;
         }
     } else {
         psrc = u_sess->pcache_cxt.unnamed_stmt_psrc;
     }
-    if (psrc == NULL) {
-        libpqsw_warn("we can't find cached plan, stmt=%s", stmt);
+
+    if (temp_message != NULL) {
+        if (temp_message->data != NULL)
+            pfree_ext(temp_message->data);
+        pfree_ext(temp_message);
     }
+
+    if (psrc == NULL) {
+        int tempdest = t_thrd.postgres_cxt.whereToSendOutput;
+        t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+        libpqsw_warn("we can't find cached plan, stmt=%s", stmt);
+        t_thrd.postgres_cxt.whereToSendOutput = tempdest;
+    } else {
+        libpqsw_warn("we find cached plan, command tag=%s", psrc->commandTag);
+    }
+
     return psrc;
 }
 /*
 * if B message begin, we need search local plancache to query if
 * it is start transaction command.
 */
-static bool libpqsw_process_bind_message(StringInfo msg)
+static void libpqsw_process_bind_message(StringInfo msg)
 {
     if (get_redirect_manager()->messages_manager.message_empty()
         && libpqsw_remote_in_transaction()) {
         libpqsw_set_transaction(true);
-        return true;
+        return;
     }
-    CachedPlanSource* psrc = libpqsw_get_plancache(msg);
+
+    if (libpqsw_get_transaction() || libpqsw_get_set_command()) {
+        return;
+    }
+
+    CachedPlanSource* psrc = libpqsw_get_plancache(msg, 'B');
     if (psrc == NULL) {
-        return false;
+        return;
     }
-    return libpqsw_before_redirect(psrc->commandTag, psrc->query_list, psrc->query_string);
+    (void)libpqsw_before_redirect(psrc->commandTag, psrc->query_list, psrc->query_string);
+    if (SS_STANDBY_MODE && libpqsw_get_transaction()) {
+        (void)libpqsw_need_localexec_forSimpleQuery(psrc->commandTag, psrc->query_list, LIBPQ_SW_BIND);
+    }
 }
 
 /*
@@ -646,19 +711,26 @@ static bool libpqsw_process_bind_message(StringInfo msg)
 */
 static void libpqsw_process_transfer_message(int qtype, StringInfo msg)
 {
-    if (libpqsw_redirect()) {
-        // we need update commandTag
-        if (qtype == 'B') {
-            CachedPlanSource* psrc = libpqsw_get_plancache(msg);
-            if (psrc != NULL) {
-                libpqsw_set_command_tag(psrc->commandTag);
-                libpqsw_before_redirect(psrc->commandTag, psrc->query_list, psrc->query_string);
+    if (libpqsw_redirect() && (qtype == 'B')) {
+        CachedPlanSource* psrc = libpqsw_get_plancache(msg, qtype);
+        if (psrc != NULL) {
+            libpqsw_set_command_tag(psrc->commandTag);
+            libpqsw_before_redirect(psrc->commandTag, psrc->query_list, psrc->query_string);
+            if (SS_STANDBY_MODE && libpqsw_get_transaction()) {
+                (void)libpqsw_need_localexec_forSimpleQuery(psrc->commandTag, psrc->query_list, LIBPQ_SW_BIND);
             }
         }
         return;
     }
+
     if (qtype == 'U') {
         libpqsw_set_batch(true);
+        if (SS_STANDBY_MODE && libpqsw_get_transaction()) {
+            CachedPlanSource* psrc = libpqsw_get_plancache(msg, qtype);
+            if (psrc != NULL) {
+                (void)libpqsw_need_localexec_forSimpleQuery(psrc->commandTag, psrc->query_list, LIBPQ_SW_BIND);
+            }
+        }
     } else if (qtype == 'B') {
         libpqsw_process_bind_message(msg);
     } else if (qtype == 'E') {
@@ -668,6 +740,129 @@ static void libpqsw_process_transfer_message(int qtype, StringInfo msg)
     } else {
         // nothing to do
     }
+}
+
+static bool libpqsw_need_localexec_withinPBE(int qtype, StringInfo msg, bool afterpush, bool remote_execute)
+{
+    bool ret = false;
+    RedirectManager* redirect_manager = get_redirect_manager();
+    /* For B E and Select, no push */
+    if ((redirect_manager->ss_standby_state & SS_STANDBY_REQ_SELECT) && !afterpush &&
+        ((qtype != 'S') || (qtype == 'S' && redirect_manager->messages_manager.message_empty()))) {
+        ret = true;
+        return ret;
+    }
+
+    /* For B E */
+    if ((redirect_manager->ss_standby_state & (SS_STANDBY_REQ_BEGIN | SS_STANDBY_REQ_END)) && afterpush &&
+        !remote_execute) {
+        ret = true;
+        return ret;
+    }
+
+    /* For S */
+    if (remote_execute) {
+        if (redirect_manager->ss_standby_state & (SS_STANDBY_REQ_BEGIN | SS_STANDBY_REQ_END)) {
+            ret = true;
+        }
+
+        if (redirect_manager->ss_standby_state & SS_STANDBY_RES_OK_REDIRECT) {
+            /* for write request and master response OK, need fetch info from master */
+            SSStandbyUpdateRedirectInfo();
+            SetTxnInfoForSSLibpqsw(redirect_manager->ss_standby_sxid, redirect_manager->ss_standby_scid);
+            redirect_manager->ss_standby_state &= ~(SS_STANDBY_RES_OK_REDIRECT | SS_STANDBY_REQ_WRITE_REDIRECT);
+        }
+    }
+
+    return ret;
+}
+
+/* for simple query, just trxn and select */
+static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *query_list, PhaseType ptype)
+{
+    bool ret = false;
+    RedirectManager* redirect_manager = get_redirect_manager();
+    redirect_manager->ss_standby_state &=
+        ~(SS_STANDBY_REQ_SELECT | SS_STANDBY_REQ_BEGIN | SS_STANDBY_REQ_END | SS_STANDBY_REQ_SIMPLE_Q);
+    if (!libpqsw_get_transaction() || !SS_STANDBY_MODE) {
+        return ret;
+    }
+
+    if (ptype == LIBPQ_SW_QUERY && (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag))) {
+        redirect_manager->ss_standby_state &= ~(SS_STANDBY_REQ_WRITE_REDIRECT | SS_STANDBY_RES_OK_REDIRECT);
+        redirect_manager->ss_standby_state |= SS_STANDBY_REQ_SIMPLE_Q;
+        return ret;
+    }
+
+    if (libpqsw_begin_command(commandTag)) {
+        redirect_manager->ss_standby_state &= ~(SS_STANDBY_REQ_WRITE_REDIRECT | SS_STANDBY_RES_OK_REDIRECT);
+        redirect_manager->ss_standby_state |= SS_STANDBY_REQ_BEGIN;
+        ret = true;
+    } else if (libpqsw_end_command(commandTag)) {
+        redirect_manager->ss_standby_state &= ~(SS_STANDBY_REQ_WRITE_REDIRECT | SS_STANDBY_RES_OK_REDIRECT);
+        redirect_manager->ss_standby_state |= SS_STANDBY_REQ_END;
+        ret = true;
+    } else if (query_list != NIL) {
+        TableConstraint tableConstraint;
+        initTableConstraint(&tableConstraint);
+        checkQuery(query_list, &tableConstraint);
+        if (tableConstraint.isHasFunction) {
+            libpqsw_trace("we find sql query list contains temptable %d, function %d", tableConstraint.isHasTempTable,
+                tableConstraint.isHasFunction);
+            get_redirect_manager()->ss_standby_state |= SS_STANDBY_REQ_WRITE_REDIRECT;
+            return ret;
+        }
+
+        ListCell* remote_lc = NULL;
+        foreach (remote_lc, query_list) {
+            Query* tmp_query = (Query*)lfirst(remote_lc);
+            if (libpqsw_fetch_command(commandTag) || queryIsReadOnly(tmp_query)) {
+                redirect_manager->ss_standby_state |= SS_STANDBY_REQ_SELECT;
+                libpqsw_set_end(true);
+                ret = true;
+                libpqsw_trace("we find new local-only execute sql by query_list:%s", commandTag);
+                return ret;
+            }
+        }
+
+        /* Don't support DDL with in transaction */
+        if ((get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_WRITE_REDIRECT) &&
+            set_command_type_by_commandTag(commandTag) == CMD_DDL) {
+            ereport(ERROR, (errmsg("The multi-write feature doesn't support DDL within transaction!")));
+        }
+    }
+    libpqsw_set_end(false);
+
+    return ret;
+}
+
+bool libpqsw_is_begin()
+{
+    if (!g_instance.attr.attr_sql.enableRemoteExcute || !SS_STANDBY_MODE) {
+        return false;
+    }
+
+    return libpqsw_get_transaction() &&
+        (get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_BEGIN);
+}
+
+bool libpqsw_is_end()
+{
+    if (!g_instance.attr.attr_sql.enableRemoteExcute || !SS_STANDBY_MODE) {
+        return false;
+    }
+
+    return libpqsw_get_transaction() &&
+        (get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_END);
+}
+
+bool libpqsw_only_localrun()
+{
+    if (!g_instance.attr.attr_sql.enableRemoteExcute || !SS_STANDBY_MODE) {
+        return false;
+    }
+
+    return libpqsw_get_transaction() && (get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_SELECT);
 }
 
 /*
@@ -689,6 +884,11 @@ bool libpqsw_process_message(int qtype, StringInfo msg)
     if (!redirect_manager->get_remote_excute()) {
         return false;
     }
+
+    if (libpqsw_remote_in_transaction() && !libpqsw_get_transaction()) {
+        libpqsw_set_transaction(true);
+    }
+
     trace_msg_func trace_func = get_msg_trace_func(qtype);
     trace_func(qtype, msg);
 	// the extend query start msg
@@ -732,6 +932,11 @@ bool libpqsw_process_message(int qtype, StringInfo msg)
         return false;
     }
 
+    /* for select in pbe and in trxn */
+    if (SS_STANDBY_MODE && libpqsw_need_localexec_withinPBE(qtype, msg, false, false)) {
+        return false;
+    }
+
     ready_to_excute = redirect_manager->push_message(qtype, msg, false, RT_NORMAL);
     if (ready_to_excute) {
         libpqsw_inner_excute_pbe(true, true);
@@ -739,6 +944,12 @@ bool libpqsw_process_message(int qtype, StringInfo msg)
         libpqsw_set_redirect(false);
         libpqsw_set_set_command(false);
     }
+
+    /* for begin in pbe and in trxn */
+    if (SS_STANDBY_MODE && libpqsw_need_localexec_withinPBE(qtype, msg, true, ready_to_excute)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -747,6 +958,14 @@ bool libpqsw_process_parse_message(const char* commandTag, List* query_list)
 {
     libpqsw_set_command_tag(commandTag);
     bool need_redirect = libpqsw_before_redirect(commandTag, query_list, NULL);
+
+    if (need_redirect && SS_STANDBY_MODE &&
+        libpqsw_need_localexec_forSimpleQuery(commandTag, query_list, LIBPQ_SW_PARSE)) {
+        if (get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_SELECT) {
+            need_redirect = false;
+        }
+    }
+
     if (need_redirect) {
         libpqsw_set_end(false);
     } else {
@@ -761,17 +980,27 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
 {
     libpqsw_set_command_tag(commandTag);
     bool need_redirect = libpqsw_before_redirect(commandTag, query_list, query_string);
-    if (need_redirect) {
+    if (need_redirect && !libpqsw_need_localexec_forSimpleQuery(commandTag, query_list, LIBPQ_SW_QUERY)) {
         StringInfo curMsg = makeStringInfo();
         initStringInfo(curMsg);
         appendStringInfoString(curMsg, query_string);
         appendStringInfoChar(curMsg, 0);
         if(get_redirect_manager()->push_message('Q', curMsg, true, RT_NORMAL)) {
-            libpqsw_inner_excute_pbe(true, true);
+            if (SS_STANDBY_MODE) {
+                libpqsw_inner_excute_pbe(true, false);
+            } else {
+                libpqsw_inner_excute_pbe(true, true);
+            }
         }
         // because we are not skip Q message process, so send_ready_for_query will be true after transfer.
         // but after transter, master will send Z message for front, so we not need to this flag.
         libpqsw_set_end(false);
+        if (SS_STANDBY_MODE && (get_redirect_manager()->ss_standby_state & SS_STANDBY_RES_OK_REDIRECT)) {
+            /* for write request and master response OK, need fetch info from master */
+            SSStandbyUpdateRedirectInfo();
+            SetTxnInfoForSSLibpqsw(get_redirect_manager()->ss_standby_sxid, get_redirect_manager()->ss_standby_scid);
+            get_redirect_manager()->ss_standby_state &= ~(SS_STANDBY_RES_OK_REDIRECT | SS_STANDBY_REQ_WRITE_REDIRECT);
+        }
     } else {
         // we need send_ready_for_query for init.
         libpqsw_set_end(true);
@@ -787,6 +1016,11 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
     }
     libpqsw_set_set_command(false);
     libpqsw_set_redirect(false);
+
+    if (get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_SELECT) {
+        need_redirect = false;
+    }
+
     return need_redirect;
 }
 
@@ -800,6 +1034,12 @@ bool libpqsw_begin_command(const char* commandTag)
 bool libpqsw_end_command(const char* commandTag)
 {
     return commandTag != NULL && (strcmp(commandTag, "COMMIT") == 0 || strcmp(commandTag, "ROLLBACK") == 0);
+}
+
+// is fetch commandTag
+bool libpqsw_fetch_command(const char* commandTag)
+{
+    return commandTag != NULL && (strcmp(commandTag, "FETCH") == 0);
 }
 
 // set commandTag
@@ -886,6 +1126,12 @@ bool libpqsw_connect(char* conninfo, const char *dbName, const char* userName)
                     PQerrorMessage(get_sw_cxt()->streamConn))));
     }
     libpqsw_info("Connecting to remote server :%s ...success!", conninfoRepl);
+
+    if (SS_STANDBY_MODE) {
+        get_redirect_manager()->server_proc_slot = get_sw_cxt()->streamConn->be_pid;
+        Assert(get_redirect_manager()->server_proc_slot != 0);
+    }
+
     libpqsw_session_never_timout(get_sw_cxt()->streamConn);
     libpqsw_process_port_trace();
     return true;
@@ -1077,4 +1323,3 @@ bool libpqsw_send_pbe(const char* buffer, size_t buffer_size)
     conn->asyncStatus = PGASYNC_BUSY;
     return result;
 }
-

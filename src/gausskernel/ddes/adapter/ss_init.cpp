@@ -65,6 +65,10 @@ static void scanURL(dms_profile_t* profile, char* ipportstr, int index)
             errmsg("invalid ip string: %s", ipstr)));
     }
     profile->inst_net_addr[index].port = (uint16)pg_strtoint32(portstr);
+
+    ret = strcpy_s(g_instance.dms_cxt.dmsInstAddr[index], DMS_MAX_IP_LEN, ipstr);
+    securec_check(ret, "", "");
+
     profile->inst_map |= ((uint64)1 << index);
 
     return;
@@ -409,6 +413,13 @@ void DMSInit()
             errmsg("failed to initialize dms, errno: %d, reason: %s", err, msg)));
     }
     g_instance.dms_cxt.dmsInited = true;
+
+    for (int i = profile.inst_cnt; i < MAX_REPLNODE_NUM; i++) {
+        rc = memset_s(g_instance.dms_cxt.dmsInstAddr[i], IP_LEN, '\0', IP_LEN);
+        securec_check(rc, "", "");
+    }
+    rc = memset_s(g_instance.dms_cxt.conninfo, MAXCONNINFO, '\0', MAXCONNINFO);
+    securec_check(rc, "", "");
 }
 
 void GetSSLogPath(char *sslog_path)

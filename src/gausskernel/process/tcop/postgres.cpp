@@ -2677,10 +2677,14 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
 
         }
 
-        if (libpqsw_redirect()) {
+        if (libpqsw_redirect() && !SS_STANDBY_MODE) {
             // quick transfer to master
             libpqsw_trace("we find new transfer cmdtag:%s sql:%s", commandTag, query_string);
             libpqsw_process_query_message(commandTag, NULL, query_string);
+            if (snapshot_set != false) {
+                PopActiveSnapshot();
+            }
+            finish_xact_command();
             return;
         }
 
@@ -2789,10 +2793,17 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
 
         if (libpqsw_process_query_message(commandTag, querytree_list, query_string, query_string_len)) {
             libpqsw_trace("we find new transfer cmdtag:%s, sql:%s", commandTag, query_string);
-            CommandCounterIncrement();
-            finish_xact_command();
-            MemoryContextReset(OptimizerContext);
-            return;
+            if (SS_STANDBY_MODE && (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag))) {
+                libpqsw_trace("libpq send sql at my side as well:%s", query_string);
+            } else {
+                if (snapshot_set != false) {
+                    PopActiveSnapshot();
+                }
+                CommandCounterIncrement();
+                finish_xact_command();
+                MemoryContextReset(OptimizerContext);
+                return;
+            }
         }
 
         plantree_list = pg_plan_queries(querytree_list, 0, NULL);
@@ -3901,7 +3912,7 @@ pass_parsing:
                   need_redirect ? "transfer" : "select",
                   psrc->commandTag == NULL ? "" : psrc->commandTag,
                   psrc->query_string);
-    if (!need_redirect && t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
+    if ((!need_redirect || libpqsw_is_begin()) && t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
         pq_putemptymessage('1');
     }
 
@@ -5050,7 +5061,7 @@ static void exec_bind_message(StringInfo input_message)
     /*
      * Send BindComplete.
      */
-    if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
+    if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote && !libpqsw_is_end())
         pq_putemptymessage('2');
 
     /*
@@ -8017,7 +8028,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         Port* MyProcPort = u_sess->proc_cxt.MyProcPort;
         if (MyProcPort && MyProcPort->protocol_config->fn_send_cancel_key) {
-            MyProcPort->protocol_config->fn_send_cancel_key((int32)t_thrd.proc_cxt.MyPMChildSlot,
+            MyProcPort->protocol_config->fn_send_cancel_key((int32)t_thrd.proc->pgprocno,
                                                             (int32)t_thrd.proc_cxt.MyCancelKey);
         }
 
@@ -9406,7 +9417,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 statement_init_metric_context();
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
-                if (libpqsw_redirect() || libpqsw_get_set_command()) {
+                if ((libpqsw_redirect() || libpqsw_get_set_command()) && !libpqsw_only_localrun()) {
                     get_redirect_manager()->push_message(firstchar,
                         &input_message,
                         true,

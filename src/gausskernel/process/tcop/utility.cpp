@@ -2713,6 +2713,10 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                         }
                     }
                     FreeSavepointList();
+
+                    if (SS_STANDBY_MODE && g_instance.attr.attr_sql.enableRemoteExcute) {
+                        ClearTxnInfoForSSLibpqsw();
+                    }
                     break;
 
                 case TRANS_STMT_PREPARE:

@@ -8443,3 +8443,15 @@ void BeginTxnForAutoCommitOff()
         s->blockState = TBLOCK_INPROGRESS;
     }
 }
+
+void SetTxnInfoForSSLibpqsw(TransactionId xid, CommandId cid)
+{
+    CurrentTransactionState->transactionId = xid;
+    SnapshotSetCommandId(cid);
+}
+
+void ClearTxnInfoForSSLibpqsw()
+{
+    CurrentTransactionState->transactionId = InvalidTransactionId;
+    SnapshotSetCommandId(0);
+}

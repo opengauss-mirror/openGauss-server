@@ -852,6 +852,7 @@ void InitProcess(void)
     t_thrd.proc->globalSessionId = t_thrd.fake_session->globalSessionId;
     /* backendId, databaseId and roleId will be filled in later */
     t_thrd.proc->backendId = InvalidBackendId;
+    t_thrd.proc->backendSlot = -1;
     t_thrd.proc->databaseId = InvalidOid;
     t_thrd.proc->roleId = InvalidOid;
     t_thrd.proc->gtt_session_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */

@@ -30,6 +30,7 @@
 #include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/sinvaladt.h"
+#include "replication/libpqsw.h"
 
 void SSStandbyGlobalInvalidSharedInvalidMessages(const SharedInvalidationMessage* msg, Oid tsid);
 
@@ -720,4 +721,33 @@ void SSStandbyGlobalInvalidSharedInvalidMessages(const SharedInvalidationMessage
             }
         }
     }
+}
+
+/* Send to master to update my transaction state or snapshot info */
+void SSStandbyUpdateRedirectInfo()
+{
+    dms_opengauss_txn_sw_info_t dms_sw_info;
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+
+    RedirectManager* redirect_manager = get_redirect_manager();
+    dms_sw_info.sxid = redirect_manager->ss_standby_sxid;
+    dms_sw_info.scid = redirect_manager->ss_standby_scid;
+    dms_sw_info.server_proc_slot = redirect_manager->server_proc_slot;
+
+    do {
+        dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
+        if (dms_request_opengauss_txn_of_master(&dms_ctx, &dms_sw_info) == DMS_SUCCESS) {
+            break;
+        }
+
+        if (SS_IN_REFORM) {
+            return;
+        }
+
+        pg_usleep(USECS_PER_SEC);
+    } while (true);
+
+    redirect_manager->ss_standby_sxid = dms_sw_info.sxid;
+    redirect_manager->ss_standby_scid = dms_sw_info.scid;
 }

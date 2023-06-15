@@ -47,3 +47,4 @@ void SSClearSegCache();
 int SSCancelTransactionOfAllStandby(SSBroadcastOp type);
 int SSProcessCancelTransaction(SSBroadcastOp type);
 int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path);
+void SSStandbySetLibpqswConninfo();
