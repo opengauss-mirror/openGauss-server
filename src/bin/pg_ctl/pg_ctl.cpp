@@ -7246,13 +7246,11 @@ static int get_instance_id(void)
 static int ss_get_primary_id(void)
 {
     if (instance_config.dss.socketpath == NULL) {
-        pg_log(PG_WARNING, _("socketpath cannot be NULL when enable dss\n"));
-        exit(1);
+        return -1;
     }
 
     if (instance_config.dss.vgname == NULL) {
-        pg_log(PG_WARNING, _("the DATADIR is not correct with enable dss\n"));
-        exit(1);
+        return -1;
     }
 
     int fd = -1;
