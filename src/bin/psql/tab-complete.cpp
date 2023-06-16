@@ -1002,7 +1002,7 @@ static char** PsqlCompletion(const char *text, int start, int end)
     else if (pg_strcasecmp(PREV5_WD, "ALTER") == 0 && pg_strcasecmp(PREV4_WD, "INDEX") == 0 &&
              (pg_strcasecmp(PREV2_WD, "SET") == 0 || pg_strcasecmp(PREV2_WD, "RESET") == 0) &&
              pg_strcasecmp(PREV_WD, "(") == 0) {
-        static const char* const listIndexOptions[] = {"fillfactor", "fastupdate", NULL};
+        static const char* const listIndexOptions[] = {"fillfactor", "fastupdate", "deduplication", NULL};
 
         COMPLETE_WITH_LIST(listIndexOptions);
     }

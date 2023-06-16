@@ -1268,7 +1268,7 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
         /* XLOG stuff */
         if (RelationNeedsWAL(rel)) {
             xl_btree_insert xlrec;
-            xl_btree_metadata xlmeta;
+            xl_btree_metadata_old xlmeta;
             uint8 xlinfo;
             XLogRecPtr recptr;
             IndexTupleData trunctuple;
@@ -1304,7 +1304,7 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
                 xlmeta.fastlevel = metad->btm_fastlevel;
 
                 XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
-                XLogRegisterBufData(2, (char *)&xlmeta, sizeof(xl_btree_metadata));
+                XLogRegisterBufData(2, (char *)&xlmeta, sizeof(xl_btree_metadata_old));
                 xlinfo = XLOG_UBTREE_INSERT_META;
             }
 
@@ -2538,7 +2538,7 @@ static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
     if (RelationNeedsWAL(rel)) {
         xl_btree_newroot xlrec;
         XLogRecPtr recptr;
-        xl_btree_metadata md;
+        xl_btree_metadata_old md;
 
         xlrec.rootblk = rootblknum;
         xlrec.level = metad->btm_level;
@@ -2557,7 +2557,7 @@ static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
         md.fastroot = rootblknum;
         md.fastlevel = metad->btm_level;
 
-        XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata));
+        XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata_old));
 
         /*
          * Direct access to page is not good but faster - we should implement

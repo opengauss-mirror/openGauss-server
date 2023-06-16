@@ -613,8 +613,8 @@ explain (costs off) select * from gpi_index_test t1 cross join gpi_index_test1 t
 select * from gpi_index_test t1 cross join gpi_index_test1 t2 where t1.a > t2.b and (t1.a + t2.b = 100) and t1.c = 'test_my' order by t1.b;
   a  |  b  |    c    | a  | b  |       c        
 -----+-----+---------+----+----+----------------
-  60 |  60 | test_my | 50 | 40 | test_my
   60 |  60 | test_my | 40 | 40 | gpi_index_test
+  60 |  60 | test_my | 50 | 40 | test_my
  100 | 100 | test_my |  0 |  0 | gpi_index_test
 (3 rows)
 

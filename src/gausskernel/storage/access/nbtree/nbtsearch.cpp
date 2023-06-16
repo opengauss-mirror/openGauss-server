@@ -30,12 +30,18 @@
 #include "gstrace/access_gstrace.h"
 #include "catalog/pg_proc.h"
 
+static int32 btree_compare_heap_tid(Relation rel, BTScanInsert itup_key, IndexTuple itup, int num_tuple_attrs);
 static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
 static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup, Oid partOid,
     int2 bucketid);
 static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir);
 static bool _bt_endpoint(IndexScanDesc scan, ScanDirection dir);
-static void _bt_check_natts_correct(const Relation index, Page page, OffsetNumber offnum);
+static void _bt_check_natts_correct(const Relation index, bool heapkeyspace, Page page, OffsetNumber offnum);
+
+static int btree_setup_posting_items(BTScanOpaque so, int itemIndex, OffsetNumber offnum, ItemPointer heapTid,
+                                     IndexTuple itup);
+static void btree_save_posting_item(BTScanOpaque so, int itemIndex, OffsetNumber offnum, ItemPointer heapTid,
+                                    int tupleOffset);
 
 /*
  *	_bt_search() -- Search the tree for a particular scankey,
@@ -57,7 +63,7 @@ static void _bt_check_natts_correct(const Relation index, Page page, OffsetNumbe
  * to be created and returned.	When access = BT_READ, an empty index
  * will result in *bufP being set to InvalidBuffer.
  */
-BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffer *bufP, int access, bool needStack)
+BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, bool needStack)
 {
     BTStack stack_in = NULL;
     int page_access = BT_READ;
@@ -91,7 +97,7 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
          * if the leaf page is split and we insert to the parent page).  But
          * this is a good opportunity to finish splits of internal pages too.
          */
-        *bufP = _bt_moveright(rel, *bufP, keysz, scankey, nextkey, (access == BT_WRITE), stack_in, page_access);
+        *bufP = _bt_moveright(rel, key, *bufP, (access == BT_WRITE), stack_in, page_access);
 
         /* if this is a leaf page, we're done */
         page = BufferGetPage(*bufP);
@@ -103,7 +109,8 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
          * Find the appropriate item on the internal page, and get the child
          * page that it points to.
          */
-        offnum = _bt_binsrch(rel, *bufP, keysz, scankey, nextkey);
+        int posting_off = 0;
+        offnum = _bt_binsrch(rel, key, *bufP, &posting_off);
         itemid = PageGetItemId(page, offnum);
         itup = (IndexTuple)PageGetItem(page, itemid);
         blkno = BTreeInnerTupleGetDownLink(itup);
@@ -158,9 +165,8 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
 		 * but before we acquired a write lock.  If it has, we may need to
 		 * move right to its new sibling.  Do that.
 		 */
-		*bufP = _bt_moveright(rel, *bufP, keysz, scankey, nextkey, true, stack_in, BT_WRITE);
+		*bufP = _bt_moveright(rel, key, *bufP, true, stack_in, BT_WRITE);
 	}
-
 
     return stack_in;
 }
@@ -195,7 +201,7 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
  * 'access'.  If we move right, we release the buffer and lock and acquire
  * the same on the right sibling.  Return value is the buffer we stop at.
  */
-Buffer _bt_moveright(Relation rel, Buffer buf, int keysz, ScanKey scankey, bool nextkey, bool forupdate, BTStack stack,
+Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate, BTStack stack,
                      int access)
 {
     Page page;
@@ -217,7 +223,7 @@ Buffer _bt_moveright(Relation rel, Buffer buf, int keysz, ScanKey scankey, bool 
      * We also have to move right if we followed a link that brought us to a
      * dead page.
      */
-    cmpval = nextkey ? 0 : 1;
+    cmpval = key->nextkey ? 0 : 1;
 
     for (;;) {
         page = BufferGetPage(buf);
@@ -249,7 +255,7 @@ Buffer _bt_moveright(Relation rel, Buffer buf, int keysz, ScanKey scankey, bool 
             continue;
         }
 
-        if (P_IGNORE(opaque) || _bt_compare(rel, keysz, scankey, page, P_HIKEY) >= cmpval) {
+        if (P_IGNORE(opaque) || _bt_compare(rel, key, page, P_HIKEY) >= cmpval) {
             /* step right one page */
             buf = _bt_relandgetbuf(rel, buf, opaque->btpo_next, access);
             continue;
@@ -263,6 +269,40 @@ Buffer _bt_moveright(Relation rel, Buffer buf, int keysz, ScanKey scankey, bool 
                         errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
 
     return buf;
+}
+
+static int btree_binsrch_posting(BTScanInsert key, Page page, OffsetNumber offnum)
+{   
+    ItemId itemid = PageGetItemId(page, offnum);
+	IndexTuple tuple = (IndexTuple) PageGetItem(page, itemid);
+    if (!btree_tuple_is_posting(tuple)) {
+        return 0;
+    }
+
+    Assert(key->heapkeyspace && key->allequalimage);
+	
+	if (ItemIdIsDead(itemid)) {
+        return -1;
+    }
+
+    int low = 0;
+    int high = btree_tuple_get_nposting(tuple);
+	Assert(high >= 2);
+
+    int mid;
+	while (high > low) {
+		mid = low + ((high - low) / 2);
+		int result = ItemPointerCompare(key->scantid, btree_tuple_get_posting_n(tuple, mid));
+		if (result > 0) {
+            low = mid + 1;
+        } else if (result < 0) {
+            high = mid;
+        } else {
+            return mid;
+        }
+	}
+
+	return low;
 }
 
 /*
@@ -292,7 +332,7 @@ Buffer _bt_moveright(Relation rel, Buffer buf, int keysz, ScanKey scankey, bool 
  * the given page.	_bt_binsrch() has no lock or refcount side effects
  * on the buffer.
  */
-OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz, ScanKey scankey, bool nextkey)
+OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf, int *posting_off)
 {
     Page page;
     BTPageOpaqueInternal opaque;
@@ -301,6 +341,9 @@ OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz, ScanKey scankey, b
 
     page = BufferGetPage(buf);
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+
+    Assert(!key->nextkey || key->scantid == NULL);
+    Assert(*posting_off == 0);
 
     low = P_FIRSTDATAKEY(opaque);
     high = PageGetMaxOffsetNumber(page);
@@ -328,17 +371,21 @@ OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz, ScanKey scankey, b
      */
     high++; /* establish the loop invariant for high */
 
-    cmpval = (int32)(!nextkey); /* select comparison value */
+    cmpval = (int32)(!key->nextkey); /* select comparison value */
 
     while (high > low) {
         OffsetNumber mid = (uint16)(((int32)low + (int32)high) / 2);
 
         /* We have low <= mid < high, so mid points at a real slot */
-        result = _bt_compare(rel, keysz, scankey, page, mid);
+        result = _bt_compare(rel, key, page, mid);
         if (result >= cmpval)
             low = mid + 1;
         else
             high = mid;
+
+        if (result == 0 && key->scantid != NULL) {
+            *posting_off = btree_binsrch_posting(key, page, mid);
+        }
     }
 
     /*
@@ -386,14 +433,17 @@ OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz, ScanKey scankey, b
  * See backend/access/nbtree/README for details.
  * ----------
  */
-int32 _bt_compare(Relation rel, int keysz, ScanKey scankey, Page page, OffsetNumber offnum)
+int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum)
 {
     IndexTuple itup;
     BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+    int num_compare_keys;
+    int num_tuple_attrs;
+    int32 result;
     /*
      * Check tuple has correct number of attributes.
      */
-    _bt_check_natts_correct(rel, page, offnum);
+    _bt_check_natts_correct(rel, key->heapkeyspace, page, offnum);
 
     /*
      * Force result ">" if target item is first data item on an internal page
@@ -404,6 +454,7 @@ int32 _bt_compare(Relation rel, int keysz, ScanKey scankey, Page page, OffsetNum
 
     TupleDesc itupdesc = RelationGetDescr(rel);
     itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
+    num_tuple_attrs = BTREE_TUPLE_GET_NUM_OF_ATTS(itup, rel);
 
     /*
      * The scan key is set up with the attribute number associated with each
@@ -416,10 +467,12 @@ int32 _bt_compare(Relation rel, int keysz, ScanKey scankey, Page page, OffsetNum
      * initial setup for the index scan had better have gotten it right (see
      * _bt_first).
      */
-    for (int i = 0; i < keysz; i++, scankey++) {
+    ScanKey scankey = key->scankeys;
+    num_compare_keys = Min(num_tuple_attrs, key->keysz);
+    Assert(!btree_tuple_is_posting(itup) || key->allequalimage);
+    for (int i = 0; i < num_compare_keys; i++, scankey++) {
         Datum datum;
         bool isNull = false;
-        int32 result;
 
         datum = index_getattr(itup, scankey->sk_attno, itupdesc, &isNull);
 
@@ -466,7 +519,44 @@ int32 _bt_compare(Relation rel, int keysz, ScanKey scankey, Page page, OffsetNum
             return result;
     }
 
-    /* if we get here, the keys are equal */
+    if (!key->heapkeyspace) {
+        return 0;
+    }
+
+    return btree_compare_heap_tid(rel, key, itup, num_tuple_attrs);
+}
+
+static int32 btree_compare_heap_tid(Relation rel, BTScanInsert itup_key, IndexTuple itup, int num_tuple_attrs)
+{
+    if (itup_key->keysz > num_tuple_attrs) {
+        return 1;
+    }
+
+    ItemPointer heap_tid = btree_tuple_get_heap_tid(itup);
+    if (itup_key->scantid == NULL) {
+        if (itup_key->heapkeyspace && !itup_key->pivotsearch && itup_key->keysz == num_tuple_attrs && heap_tid == NULL)
+            return 1;
+
+        return 0;
+    }
+
+    Assert(itup_key->keysz == IndexRelationGetNumberOfKeyAttributes(rel));
+    if (heap_tid == NULL)
+        return 1;
+
+    Assert(num_tuple_attrs >= IndexRelationGetNumberOfKeyAttributes(rel));
+
+    int32 result = ItemPointerCompare(itup_key->scantid, heap_tid);
+
+    if (result <= 0 || !btree_tuple_is_posting(itup)) {
+        return result;
+    } else {
+        result = ItemPointerCompare(itup_key->scantid, btree_tuple_get_max_heap_tid(itup));
+        if (result > 0) {
+            return 1;
+        }
+    }
+
     return 0;
 }
 
@@ -499,8 +589,8 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
     StrategyNumber strat;
     bool nextkey = false;
     bool goback = false;
+    BTScanInsertData inskey;
     ScanKey startKeys[INDEX_MAX_KEYS];
-    ScanKeyData scankeys[INDEX_MAX_KEYS];
     ScanKeyData notnullkeys[INDEX_MAX_KEYS];
     int keysCount = 0;
     int i;
@@ -715,7 +805,7 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
             Assert(subkey->sk_flags & SK_ROW_MEMBER);
             if (subkey->sk_flags & SK_ISNULL)
                 return false;
-            scankeys[i] = *subkey;
+            inskey.scankeys[i] = *subkey;
 
             /*
              * If the row comparison is the last positioning key we accepted,
@@ -745,7 +835,7 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
                     if (subkey->sk_flags & SK_ISNULL)
                         break; /* can't use null keys */
                     Assert(keysCount < INDEX_MAX_KEYS);
-                    scankeys[keysCount] = *subkey;
+                    inskey.scankeys[keysCount] = *subkey;
                     keysCount++;
                     if (subkey->sk_flags & SK_ROW_END) {
                         used_all_subkeys = true;
@@ -785,7 +875,7 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
                 FmgrInfo *procinfo = NULL;
 
                 procinfo = index_getprocinfo(rel, cur->sk_attno, BTORDER_PROC);
-                ScanKeyEntryInitializeWithInfo(scankeys + i, cur->sk_flags, cur->sk_attno, InvalidStrategy,
+                ScanKeyEntryInitializeWithInfo(inskey.scankeys + i, cur->sk_flags, cur->sk_attno, InvalidStrategy,
                                                cur->sk_subtype, cur->sk_collation, procinfo, cur->sk_argument);
             } else {
                 RegProcedure cmp_proc;
@@ -796,7 +886,7 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
                                     errmsg("missing support function %d(%u,%u) for attribute %d of index \"%s\"",
                                            BTORDER_PROC, rel->rd_opcintype[i], cur->sk_subtype, cur->sk_attno,
                                            RelationGetRelationName(rel))));
-                ScanKeyEntryInitialize(scankeys + i, cur->sk_flags, cur->sk_attno, InvalidStrategy, cur->sk_subtype,
+                ScanKeyEntryInitialize(inskey.scankeys + i, cur->sk_flags, cur->sk_attno, InvalidStrategy, cur->sk_subtype,
                                        cur->sk_collation, cmp_proc, cur->sk_argument);
             }
         }
@@ -890,11 +980,18 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
             return false;
     }
 
+	btree_meta_version(rel, &inskey.heapkeyspace, &inskey.allequalimage);
+	inskey.anynullkeys = false; /* unused */
+	inskey.nextkey = nextkey;
+	inskey.pivotsearch = false;
+	inskey.scantid = NULL;
+	inskey.keysz = keysCount;
+
     /*
      * Use the manufactured insertion scan key to descend the tree and
      * position ourselves on the target leaf page.
      */
-    (void)_bt_search(rel, keysCount, scankeys, nextkey, &buf, BT_READ, false);
+    (void)_bt_search(rel, &inskey, &buf, BT_READ, false);
 
     /*
      * don't need to keep the stack around...
@@ -924,7 +1021,8 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
     so->markItemIndex = -1; /* ditto */
 
     /* position to the precise item on the page */
-    offnum = _bt_binsrch(rel, buf, keysCount, scankeys, nextkey);
+    int posting_off = 0;
+    offnum = _bt_binsrch(rel, &inskey, buf, &posting_off);
 
     /*
      * If nextkey = false, we are positioned at the first item >= scan key, or
@@ -1101,13 +1199,24 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
         while (offnum <= maxoff) {
             itup = _bt_checkkeys(scan, page, offnum, dir, &continuescan);
             if (itup != NULL) {
-                /* Get partition oid for global partition index. */
-                partOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, itup) : heapOid;
-                /* Get bucketid for crossbucket index. */
-                bucketid = scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, itup) : InvalidBktId;
-                /* tuple passes all scan key conditions, so remember it */
-                _bt_saveitem(so, itemIndex, offnum, itup, partOid, bucketid);
-                itemIndex++;
+                if (!btree_tuple_is_posting(itup)) {
+                    /* Get partition oid for global partition index. */
+                    partOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, itup) : heapOid;
+                    /* Get bucketid for crossbucket index. */
+                    bucketid =
+                        scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, itup) : InvalidBktId;
+                    /* tuple passes all scan key conditions, so remember it */
+                    _bt_saveitem(so, itemIndex, offnum, itup, partOid, bucketid);
+                    itemIndex++;
+                } else {
+                    int tuple_offset =
+                        btree_setup_posting_items(so, itemIndex, offnum, btree_tuple_get_posting_n(itup, 0), itup);
+                    itemIndex++;
+                    for (int i = 1; i < btree_tuple_get_nposting(itup); i++) {
+                        btree_save_posting_item(so, itemIndex, offnum, btree_tuple_get_posting_n(itup, i), tuple_offset);
+                        itemIndex++;
+                    }
+                }
             }
             if (!continuescan) {
                 /* there can't be any more matches, so stop */
@@ -1118,24 +1227,37 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
             offnum = OffsetNumberNext(offnum);
         }
 
-        Assert(itemIndex <= MaxIndexTuplesPerPage);
+        Assert(itemIndex <= MAX_TIDS_PER_BTREE_PAGE);
         so->currPos.firstItem = 0;
         so->currPos.lastItem = itemIndex - 1;
         so->currPos.itemIndex = 0;
     } else {
         /* load items[] in descending order */
-        itemIndex = MaxIndexTuplesPerPage;
+        itemIndex = MAX_TIDS_PER_BTREE_PAGE;
 
         offnum = Min(offnum, maxoff);
 
         while (offnum >= minoff) {
             itup = _bt_checkkeys(scan, page, offnum, dir, &continuescan);
+
             if (itup != NULL) {
-                partOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, itup) : heapOid;
-                bucketid = scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, itup) : InvalidBktId;
-                /* tuple passes all scan key conditions, so remember it */
-                itemIndex--;
-                _bt_saveitem(so, itemIndex, offnum, itup, partOid, bucketid);
+                if (!btree_tuple_is_posting(itup)) {
+                    partOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, itup) : heapOid;
+                    bucketid =
+                        scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, itup) : InvalidBktId;
+                    /* tuple passes all scan key conditions, so remember it */
+                    itemIndex--;
+                    _bt_saveitem(so, itemIndex, offnum, itup, partOid, bucketid);
+                } else {
+                    itemIndex--;
+                    int tuple_offset =
+                        btree_setup_posting_items(so, itemIndex, offnum, btree_tuple_get_posting_n(itup, 0), itup);
+                    for (int i = 1; i < btree_tuple_get_nposting(itup); i++) {
+                        itemIndex--;
+                        btree_save_posting_item(so, itemIndex, offnum, btree_tuple_get_posting_n(itup, i),
+                                                tuple_offset);
+                    }
+                }
             }
             if (!continuescan) {
                 /* there can't be any more matches, so stop */
@@ -1148,8 +1270,8 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
 
         Assert(itemIndex >= 0);
         so->currPos.firstItem = itemIndex;
-        so->currPos.lastItem = MaxIndexTuplesPerPage - 1;
-        so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
+        so->currPos.lastItem = MAX_TIDS_PER_BTREE_PAGE - 1;
+        so->currPos.itemIndex = MAX_TIDS_PER_BTREE_PAGE - 1;
     }
 
     return (so->currPos.firstItem <= so->currPos.lastItem);
@@ -1160,6 +1282,8 @@ static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, co
     int2 bucketid)
 {
     BTScanPosItem *currItem = &so->currPos.items[itemIndex];
+
+    Assert(!btree_tuple_is_pivot(itup) && !btree_tuple_is_posting(itup));
 
     currItem->heapTid = itup->t_tid;
     currItem->indexOffset = offnum;
@@ -1632,8 +1756,8 @@ bool _bt_gettuple_internal(IndexScanDesc scan, ScanDirection dir)
                  * just forget any excess entries.
                  */
                 if (so->killedItems == NULL)
-                    so->killedItems = (int *)palloc(MaxIndexTuplesPerPage * sizeof(int));
-                if (so->numKilled < MaxIndexTuplesPerPage)
+                    so->killedItems = (int *)palloc(MAX_TIDS_PER_BTREE_PAGE * sizeof(int));
+                if (so->numKilled < MAX_TIDS_PER_BTREE_PAGE)
                     so->killedItems[so->numKilled++] = so->currPos.itemIndex;
             }
 
@@ -1653,9 +1777,9 @@ bool _bt_gettuple_internal(IndexScanDesc scan, ScanDirection dir)
 }
 
 /* Check tuple has correct number of attributes */
-static void _bt_check_natts_correct(const Relation index, Page page, OffsetNumber offnum)
+static void _bt_check_natts_correct(const Relation index, bool heapkeyspace, Page page, OffsetNumber offnum)
 {
-    if (unlikely(!_bt_check_natts(index, page, offnum))) {
+    if (unlikely(!_bt_check_natts(index, heapkeyspace, page, offnum))) {
         ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
                 errmsg("tuple has wrong number of attributes in index \"%s\"", RelationGetRelationName(index))));
@@ -1665,7 +1789,7 @@ static void _bt_check_natts_correct(const Relation index, Page page, OffsetNumbe
 /*
  * Check if index tuple have appropriate number of attributes.
  */
-bool _bt_check_natts(const Relation index, Page page, OffsetNumber offnum)
+bool _bt_check_natts(const Relation index, bool heapkeyspace, Page page, OffsetNumber offnum)
 {
     int16 natts = IndexRelationGetNumberOfAttributes(index);
     int16 nkeyatts = IndexRelationGetNumberOfKeyAttributes(index);
@@ -1681,24 +1805,87 @@ bool _bt_check_natts(const Relation index, Page page, OffsetNumber offnum)
 
     itemid = PageGetItemId(page, offnum);
     itup = (IndexTuple)PageGetItem(page, itemid);
+    int num_tuple_attrs = BTREE_TUPLE_GET_NUM_OF_ATTS(itup, index);
+
+    if (!heapkeyspace && btree_tuple_is_posting(itup))
+        return false;
+
+    if (btree_tuple_is_posting(itup) && (ItemPointerGetOffsetNumberNoCheck(&itup->t_tid) & BT_PIVOT_HEAP_TID_ATTR) != 0)
+        return false;
+
+    if (natts != nkeyatts && btree_tuple_is_posting(itup))
+        return false;
 
     if (P_ISLEAF(opaque) && offnum >= P_FIRSTDATAKEY(opaque)) {
+        if (btree_tuple_is_pivot(itup))
+            return false;
         /*
          * Regular leaf tuples have as every index attributes
          */
-        return (BTreeTupleGetNAtts(itup, index) == natts);
+        return num_tuple_attrs == natts;
     } else if (!P_ISLEAF(opaque) && offnum == P_FIRSTDATAKEY(opaque)) {
+        if (heapkeyspace) {
+            return num_tuple_attrs == 0;
+        }
         /*
          * Leftmost tuples on non-leaf pages have no attributes, or haven't
          * INDEX_ALT_TID_MASK set in pg_upgraded indexes.
          */
-        return (BTreeTupleGetNAtts(itup, index) == 0 || ((itup->t_info & INDEX_ALT_TID_MASK) == 0));
+        return (num_tuple_attrs == 0 || ((itup->t_info & INDEX_ALT_TID_MASK) == 0));
     } else {
         /*
          * Pivot tuples stored in non-leaf pages and hikeys of leaf pages
          * contain only key attributes
          */
-        return (BTreeTupleGetNAtts(itup, index) == nkeyatts);
+        if (!heapkeyspace) {
+            return (num_tuple_attrs == nkeyatts);
+        }
     }
+
+    Assert(heapkeyspace);
+
+	if (!btree_tuple_is_pivot(itup))
+		return false;
+	if (btree_tuple_get_heap_tid(itup) != NULL && num_tuple_attrs != nkeyatts)
+		return false;
+    
+    return num_tuple_attrs > 0 && num_tuple_attrs <= nkeyatts;
 }
 
+static int btree_setup_posting_items(BTScanOpaque so, int item_idx, OffsetNumber offnum, ItemPointer heap_tid,
+                                     IndexTuple tuple)
+{
+    BTScanPosItem *curr_item = &so->currPos.items[item_idx];
+
+    Assert(btree_tuple_is_posting(tuple));
+
+    curr_item->heapTid = *heap_tid;
+    curr_item->indexOffset = offnum;
+    if (so->currTuples) {
+        Size itupsz = btree_tuple_get_posting_off(tuple);
+        itupsz = MAXALIGN(itupsz);
+        curr_item->tupleOffset = so->currPos.nextTupleOffset;
+        IndexTuple base = (IndexTuple)(so->currTuples + so->currPos.nextTupleOffset);
+        errno_t rc = memcpy_s(base, itupsz, tuple, itupsz);
+        securec_check(rc, "", "");
+        base->t_info &= ~INDEX_SIZE_MASK;
+        base->t_info |= itupsz;
+        so->currPos.nextTupleOffset += itupsz;
+
+        return curr_item->tupleOffset;
+    }
+
+    return 0;
+}
+
+static void btree_save_posting_item(BTScanOpaque so, int item_idx, OffsetNumber offnum, ItemPointer heap_tid,
+                                    int tuple_offset)
+{
+    BTScanPosItem *curr_item = &so->currPos.items[item_idx];
+
+    curr_item->heapTid = *heap_tid;
+    curr_item->indexOffset = offnum;
+
+    if (so->currTuples)
+        curr_item->tupleOffset = tuple_offset;
+}

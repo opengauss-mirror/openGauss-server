@@ -285,7 +285,8 @@ WHERE p2.opfmethod = p1.oid AND p3.amprocfamily = p2.oid AND
            p4.amproclefttype = p3.amproclefttype AND
            p4.amprocrighttype = p3.amprocrighttype)
     NOT BETWEEN
-      (CASE WHEN p1.amname IN ('btree', 'gist', 'gin', 'ubtree') THEN p1.amsupport - 1
+      (CASE WHEN p1.amname IN ('gist', 'gin') THEN p1.amsupport - 1
+            WHEN p1.amname IN ('btree', 'ubtree') THEN p1.amsupport - 2
             ELSE p1.amsupport END)
       AND p1.amsupport;
 
@@ -305,9 +306,18 @@ SELECT amname, opcname, count(*)
 FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
      LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
-WHERE am.amname = 'btree' OR am.amname = 'gist' OR am.amname = 'gin' OR am.amname = 'ubtree'
+WHERE am.amname = 'gist' OR am.amname = 'gin'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING (count(*) != amsupport AND count(*) != amsupport - 1)
+    OR amprocfamily IS NULL;
+
+SELECT amname, opcname, count(*)
+FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
+     LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
+         amproclefttype = amprocrighttype AND amproclefttype = opcintype
+WHERE am.amname = 'btree' OR am.amname = 'ubtree'
+GROUP BY amname, amsupport, opcname, amprocfamily
+HAVING (count(*) != amsupport AND count(*) != amsupport - 1 and count(*) != amsupport - 2)
     OR amprocfamily IS NULL;
 
 -- Unfortunately, we can't check the amproc link very well because the
@@ -347,6 +357,9 @@ WHERE p3.opfmethod = (SELECT oid FROM pg_am WHERE amname = 'btree')
           WHEN amprocnum = 2
           THEN prorettype != 'void'::regtype OR proretset OR pronargs != 1
                OR proargtypes[0] != 'internal'::regtype
+          WHEN amprocnum = 3
+          THEN prorettype != 'boolean'::regtype OR proretset OR pronargs != 1
+               OR amproclefttype != amprocrighttype
           ELSE true END);
 
 -- For hash we can also do a little better: the support routines must be

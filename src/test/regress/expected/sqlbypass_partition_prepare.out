@@ -69,8 +69,8 @@ explain execute p13(0,0);
 execute p13(0,0);
  col1 | col2 |     col3     
 ------+------+--------------
-    0 |    0 | test_insert3
     0 |    0 | aaaaaaa
+    0 |    0 | test_insert3
 (2 rows)
 
 execute p13(10,0);
@@ -110,8 +110,8 @@ explain execute p13(0,0);
 execute p13(0,0);
  col1 | col2 |     col3     
 ------+------+--------------
-    0 |    0 | test_insert3
     0 |    0 | aaaaaaa
+    0 |    0 | test_insert3
 (2 rows)
 
 reset enable_indexonlyscan;
@@ -545,8 +545,8 @@ execute p1022(0,null);
     0 |    7 | test
     0 |    8 | test
     0 |    9 | test
-    0 |   10 | test
     0 |   10 | aaaaaaa
+    0 |   10 | test
     0 |   11 | test
     0 |   12 | test
     0 |   13 | test
@@ -556,8 +556,8 @@ execute p1022(0,null);
     0 |   17 | test
     0 |   18 | test
     0 |   19 | test
-    0 |   20 | test
     0 |   20 | aaaaaaa
+    0 |   20 | test
     0 |   21 | test
     0 |   22 | test
     0 |   23 | test
@@ -567,8 +567,8 @@ execute p1022(0,null);
     0 |   27 | test
     0 |   28 | test
     0 |   29 | test
-    0 |   30 | test
     0 |   30 | aaaaaaa
+    0 |   30 | test
     0 |   31 | test
     0 |   32 | test
     0 |   33 | test
@@ -578,8 +578,8 @@ execute p1022(0,null);
     0 |   37 | test
     0 |   38 | test
     0 |   39 | test
-    0 |   40 | test
     0 |   40 | aaaaaaa
+    0 |   40 | test
     0 |   41 | test
     0 |   42 | test
     0 |   43 | test
@@ -589,8 +589,8 @@ execute p1022(0,null);
     0 |   47 | test
     0 |   48 | test
     0 |   49 | test
-    0 |   50 | test
     0 |   50 | aaaaaaa
+    0 |   50 | test
     0 |   51 | test
     0 |   52 | test
     0 |   53 | test
@@ -600,8 +600,8 @@ execute p1022(0,null);
     0 |   57 | test
     0 |   58 | test
     0 |   59 | test
-    0 |   60 | test
     0 |   60 | aaaaaaa
+    0 |   60 | test
     0 |   61 | test
     0 |   62 | test
     0 |   63 | test
@@ -611,8 +611,8 @@ execute p1022(0,null);
     0 |   67 | test
     0 |   68 | test
     0 |   69 | test
-    0 |   70 | test
     0 |   70 | aaaaaaa
+    0 |   70 | test
     0 |   71 | test
     0 |   72 | test
     0 |   73 | test
@@ -622,8 +622,8 @@ execute p1022(0,null);
     0 |   77 | test
     0 |   78 | test
     0 |   79 | test
-    0 |   80 | test
     0 |   80 | aaaaaaa
+    0 |   80 | test
     0 |   81 | test
     0 |   82 | test
     0 |   83 | test
@@ -633,8 +633,8 @@ execute p1022(0,null);
     0 |   87 | test
     0 |   88 | test
     0 |   89 | test
-    0 |   90 | test
     0 |   90 | aaaaaaa
+    0 |   90 | test
     0 |   91 | test
     0 |   92 | test
     0 |   93 | test
@@ -644,8 +644,8 @@ execute p1022(0,null);
     0 |   97 | test
     0 |   98 | test
     0 |   99 | test
-    0 |  100 | test
     0 |  100 | aaaaaaa
+    0 |  100 | test
 (112 rows)
 
 prepare p1023 as select * from  test_bypass_sql_partition where col1=$1 limit $2 offset $3;

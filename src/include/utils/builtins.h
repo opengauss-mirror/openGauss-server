@@ -1821,6 +1821,11 @@ extern Datum pg_replication_origin_xact_reset(PG_FUNCTION_ARGS);
 extern Datum pg_replication_origin_xact_setup(PG_FUNCTION_ARGS);
 extern Datum pg_show_replication_origin_status(PG_FUNCTION_ARGS);
 
+/* datum.cpp */
+extern Datum btequalimage(PG_FUNCTION_ARGS);
+/* varlena.cpp */
+extern Datum btvarstrequalimage(PG_FUNCTION_ARGS);
+
 /* pg_publication.cpp */
 extern Datum pg_get_publication_tables(PG_FUNCTION_ARGS);
 

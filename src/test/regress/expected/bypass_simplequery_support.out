@@ -135,9 +135,9 @@ explain select * from test_bypass_sq1 where col1=0 and col2=0;
 select * from test_bypass_sq1 where col1=0 and col2=0;
  col1 | col2 |     col3     
 ------+------+--------------
-    0 |    0 | test_insert3
-    0 |    0 | test_insert2
     0 |    0 | test_insert
+    0 |    0 | test_insert2
+    0 |    0 | test_insert3
 (3 rows)
 
 explain select col1,col2 from test_bypass_sq1 where col1>0 and col2>0 order by col1,col2;
@@ -349,9 +349,9 @@ explain select * from test_bypass_sq1 where col1 is not null and col2 = 0 order 
 select * from test_bypass_sq1 where col1 is not null and col2 = 0 order by col1;
  col1 | col2 |     col3     
 ------+------+--------------
-    0 |    0 | test_insert3
-    0 |    0 | test_insert2
     0 |    0 | test_insert
+    0 |    0 | test_insert2
+    0 |    0 | test_insert3
 (3 rows)
 
 explain update test_bypass_sq1 set col2=col2-1,col3='test_update' where col1=0 and col2=0;
@@ -468,8 +468,8 @@ select * from test_bypass_sq1 where col2=2 order by col1;
  col1 | col2 |    col3     
 ------+------+-------------
     1 |    2 | test_insert
-    1 |    2 | 
     1 |    2 | test_insert
+    1 |    2 | 
 (3 rows)
 
 explain select col1,col2 from test_bypass_sq1 where col1>0 order by col1;
@@ -797,8 +797,8 @@ explain select * from test_bypass_sq1 where col1=3 and col2=3 for update;
 select * from test_bypass_sq1 where col1=3 and col2=3 for update;
  col1 | col2 |     col3     
 ------+------+--------------
-    3 |    3 | 
     3 |    3 | test_insert3
+    3 |    3 | 
 (2 rows)
 
 explain select * from test_bypass_sq1 where col3='test_update2';
@@ -820,11 +820,11 @@ explain select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 limi
 (4 rows)
 
 select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 limit 3 offset 3;
- col1 | col2 |    col3     
-------+------+-------------
+ col1 | col2 |     col3     
+------+------+--------------
     2 |    1 | test_update
     2 |    1 | test_update
-    3 |    3 | 
+    3 |    3 | test_insert3
 (3 rows)
 
 select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 limit 3 offset 30;
@@ -876,8 +876,8 @@ select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 offset 3;
 ------+------+--------------
     2 |    1 | test_update
     2 |    1 | test_update
-    3 |    3 | 
     3 |    3 | test_insert3
+    3 |    3 | 
 (4 rows)
 
 select * from test_bypass_sq1 where col1>0  order by col1 for update limit 3 offset 30;
@@ -938,8 +938,8 @@ insert into test_bypass_sq1 values (null,null,null);
 select * from test_bypass_sq1 where col1=3;
  col1 | col2 |     col3     
 ------+------+--------------
-    3 |    3 | 
     3 |    3 | test_insert3
+    3 |    3 | 
 (2 rows)
 
 explain select col1,col2 from test_bypass_sq1 order by col1 desc;
@@ -1398,14 +1398,14 @@ explain select * from test_bypass_sq3 where col1 = 1 order by col2;
 select * from test_bypass_sq3 where col1 = 1 limit 1;
  col1 | col2 | col3 
 ------+------+------
-    1 |    1 | 
+    1 |    3 | 
 (1 row)
 
 select col2 from test_bypass_sq3 where col1 = 1 for update;
  col2 
 ------
-    1
     3
+    1
 (2 rows)
 
 update test_bypass_sq3 set col2 = col2*3 where col1 = 1;

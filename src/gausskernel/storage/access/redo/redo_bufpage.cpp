@@ -187,7 +187,7 @@ void PageIndexMultiDelete(Page page, OffsetNumber *itemnos, int nitems)
     /* this will catch invalid or out-of-order itemnos[] */
     if (nextitm != nitems)
         ereport(ERROR, (errcode(ERRCODE_INVALID_ROW_COUNT_IN_RESULT_OFFSET_CLAUSE),
-                        errmsg("incorrect index offsets supplie")));
+                        errmsg("incorrect index offsets supplie, nitems %d, next_item %d", nitems, nextitm)));
 
     if (totallen > (Size)(pdSpecial - pdLower))
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("corrupted item lengths: total %u, available space %d",
@@ -309,6 +309,66 @@ void PageIndexTupleDelete(Page page, OffsetNumber offnum)
                 ii->lp_off += size;
         }
     }
+}
+
+bool page_index_tuple_overwrite(Page page, OffsetNumber offnum, Item new_item, Size new_size)
+{
+    PageHeader page_header = (PageHeader)page;
+    errno_t rc;
+
+    Offset pd_lower = page_header->pd_lower;
+    Offset pd_upper = page_header->pd_upper;
+    Offset pd_special = page_header->pd_special;
+
+    if ((unsigned int)pd_lower < SizeOfPageHeaderData || pd_lower > pd_upper || pd_upper > pd_special ||
+        pd_special > BLCKSZ || (unsigned int)pd_special != MAXALIGN(pd_special))
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("corrupted page pointers: lower = %u, upper = %u, special = %u", pd_lower, pd_upper,
+                               pd_special)));
+
+    int count = PageGetMaxOffsetNumber(page);
+    if ((int)offnum <= 0 || (int)offnum > count)
+        elog(ERROR, "invalid index offnum: %u", offnum);
+
+    ItemId item_id = PageGetItemId(page, offnum);
+    Assert(ItemIdHasStorage(item_id));
+    Size old_size = ItemIdGetLength(item_id);
+    unsigned offset = ItemIdGetOffset(item_id);
+    if (offset < (unsigned int)pd_upper || (offset + old_size) > (unsigned int)pd_special || offset != (unsigned int)MAXALIGN(offset))
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("corrupted line pointer: offset = %u, size = %u", offset, (unsigned int)old_size)));
+
+    Size aligned_old_size = MAXALIGN(old_size);
+    Size aligned_new_size = MAXALIGN(new_size);
+    if (aligned_new_size > (Size)(aligned_old_size + (pd_upper - pd_lower)))
+        return false;
+
+    int size_diff = (int)(aligned_old_size - aligned_new_size);
+    if (size_diff != 0) {
+        char *addr = (char *)page + pd_upper;
+        size_t tuples_size = offset - pd_upper;
+        if (tuples_size) {
+            rc = memmove_s(addr + size_diff, tuples_size, addr, tuples_size);
+            securec_check(rc, "", "");
+        }
+
+        page_header->pd_upper += size_diff;
+
+        for (int i = FirstOffsetNumber; i <= count; i++) {
+            ItemId ii = PageGetItemId(page_header, i);
+
+            if (ItemIdHasStorage(ii) && ItemIdGetOffset(ii) <= offset)
+                ii->lp_off += size_diff;
+        }
+    }
+
+    item_id->lp_off = offset + size_diff;
+    item_id->lp_len = new_size;
+
+    rc = memcpy_s(PageGetItem(page, item_id), new_size, new_item, new_size);
+    securec_check(rc, "", "");
+
+    return true;
 }
 
 /*

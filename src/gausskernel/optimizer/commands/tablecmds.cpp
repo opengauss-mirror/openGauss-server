@@ -18342,7 +18342,7 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
         }
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX: {
-            ForbidUserToSetDefinedIndexOptions(defList);
+            ForbidUserToSetDefinedIndexOptions(rel, defList);
             Assert(oldRelHasUids == false);
             relOpt = index_reloptions(rel->rd_am->amoptions, newOptions, true);
             break;

@@ -208,7 +208,6 @@ static void InsertToBtree(VectorBatch *vecScanBatch, BTBuildState &buildstate, I
 void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, const bool* isnull)
 {
     bool is_unique = false;
-    ScanKey itup_scankey;
     BTStack stack;
     Buffer buf;
     IndexTuple itup;
@@ -233,14 +232,12 @@ void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, cons
 
     buf = element.buffer;
     stack = element.btStack;
-    itup_scankey = element.itupScanKey;
 
     /* release buffer. */
     _bt_relbuf(index, buf);
 
     /* be tidy */
     _bt_freestack(stack);
-    _bt_freeskey(itup_scankey);
 
     if (cudescScan != NULL) {
         cudescScan->Destroy();

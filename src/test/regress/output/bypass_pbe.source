@@ -5,72 +5,72 @@ SET ROLE tom PASSWORD 'tom@1234';
 \! chmod -R 700 @abs_bindir@/../jre
 \! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_test/gsjdbc400.jar:@abs_builddir@/jdbc_test/bypass_pbe/. BypassPbe @portstring@ 2>&1
 Connection succeed!
-name=name20
-
-name=name19
-
-name=name18
-
-name=name17
-
-name=name16
-
-name=name15
-
-break of a resultset of pstmt1
-id=40
-
-id=39
-
-id=38
-
-id=37
-
-id=36
-
-id=35
-
-break of a resultset of pstmt2
-start E1E1
-name=name14
-
-name=name13
+name=name11
 
 name=name12
 
-name=name11
+name=name13
 
-end E1E1
-start E2E2
-id=34
+name=name14
 
-id=33
+name=name15
+
+name=name16
+
+break of a resultset of pstmt1
+id=31
 
 id=32
 
-id=31
+id=33
+
+id=34
+
+id=35
+
+id=36
+
+break of a resultset of pstmt2
+start E1E1
+name=name17
+
+name=name18
+
+name=name19
+
+name=name20
+
+end E1E1
+start E2E2
+id=37
+
+id=38
+
+id=39
+
+id=40
 
 end E2E2
 start OFFSET 1 LIMIT 10 E2
-name=name11
+name=name20
 
-name=name11
+name=name20
 
-name=name11
+name=name20
 
-name=name11
+name=name20
 
-name=name11
+name=name20
 
-name=name11
+name=name20
 
-name=name11
+name=name20
 
-name=name11
+name=name20
 
-name=name11
+name=name20
 
-name=name11
+name=name20
 
 end OFFSET 1 LIMIT 10 E2
 aff_row=10
@@ -134,16 +134,16 @@ id=67,class=6,name=name67
 id=68,class=6,name=name68
 id=69,class=6,name=name69
 id=70,class=6,name=name70
-id=20,class=1,name=name_k
-id=19,class=1,name=name_k
-id=18,class=1,name=name_k
-id=17,class=1,name=name_k
-id=16,class=1,name=name_k
-id=15,class=1,name=name_k
-id=14,class=1,name=name_k
-id=13,class=1,name=name_k
-id=12,class=1,name=name_k
 id=11,class=1,name=name_k
+id=12,class=1,name=name_k
+id=13,class=1,name=name_k
+id=14,class=1,name=name_k
+id=15,class=1,name=name_k
+id=16,class=1,name=name_k
+id=17,class=1,name=name_k
+id=18,class=1,name=name_k
+id=19,class=1,name=name_k
+id=20,class=1,name=name_k
 c2=2
 
 c2=3

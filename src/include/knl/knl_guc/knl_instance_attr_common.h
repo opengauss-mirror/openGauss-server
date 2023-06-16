@@ -105,6 +105,7 @@ typedef struct knl_instance_attr_common {
     int stream_cluster_run_mode;
     bool light_comm;
     bool enable_expr_fusion;
+    bool enable_default_index_deduplication;
 } knl_instance_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_COMMON_H_ */

@@ -506,6 +506,7 @@ extern Size PageGetExactFreeSpace(Page page);
 extern Size PageGetHeapFreeSpace(Page page);
 extern void PageIndexTupleDelete(Page page, OffsetNumber offset);
 extern void PageIndexMultiDelete(Page page, OffsetNumber* itemnos, int nitems);
+extern bool page_index_tuple_overwrite(Page page, OffsetNumber offnum, Item new_item, Size new_size);
 
 extern void PageReinitWithDict(Page page, Size dictSize);
 extern bool PageFreeDict(Page page);

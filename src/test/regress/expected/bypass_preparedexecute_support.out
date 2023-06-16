@@ -54,9 +54,9 @@ explain execute p13(0,0);
 execute p13(0,0);
  col1 | col2 |     col3     
 ------+------+--------------
-    0 |    0 | 
-    0 |    0 | test_insert3
     0 |    0 | test_insert
+    0 |    0 | test_insert3
+    0 |    0 | 
 (3 rows)
 
 prepare p13 as select col1,col2 from test_bypass_sq1 where col1=$1 and col2=$2;
@@ -73,18 +73,18 @@ explain execute p13(0,0);
 execute p13(0,0);
  col1 | col2 |     col3     
 ------+------+--------------
-    0 |    0 | 
-    0 |    0 | test_insert3
     0 |    0 | test_insert
+    0 |    0 | test_insert3
+    0 |    0 | 
 (3 rows)
 
 set enable_indexonlyscan=off;
 execute p13(0,0);
  col1 | col2 |     col3     
 ------+------+--------------
-    0 |    0 | 
-    0 |    0 | test_insert3
     0 |    0 | test_insert
+    0 |    0 | test_insert3
+    0 |    0 | 
 (3 rows)
 
 reset enable_indexonlyscan;
@@ -679,8 +679,8 @@ execute p26 (0);
  col1 | col2 
 ------+------
     0 |     
-    1 |    1
     1 |     
+    1 |    1
     2 |    2
     3 |    3
     3 |    3
@@ -829,7 +829,7 @@ execute p27(0);
 execute p27(1);
  col1 | col2 
 ------+------
-    1 |    1
+    1 |     
 (1 row)
 
 prepare p270 as select * from test_bypass_sq2 where col1 = $1 for update limit 1;
@@ -842,14 +842,14 @@ execute p270(0);
 execute p270(1);
  col1 | col2 
 ------+------
-    1 |    1
+    1 |     
 (1 row)
 
 prepare p271 as select * from test_bypass_sq2 where col1 > $1 order by col1 limit 2 offset 1;
 execute p271(0);
  col1 | col2 
 ------+------
-    1 |     
+    1 |    1
     2 |    2
 (2 rows)
 

@@ -246,6 +246,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_dcf                                       | bool    |      |           | 
  enable_debug_vacuum                              | bool    |      |           | 
  enable_default_cfunc_libpath                     | bool    |      |           | 
+ enable_default_index_deduplication               | bool    |      |           | 
  enable_default_ustore_table                      | bool    |      |           | 
  enable_defer_calculate_snapshot                  | bool    |      |           | 
  enable_delta_store                               | bool    |      |           | 
