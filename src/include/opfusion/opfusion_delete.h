@@ -38,6 +38,7 @@ public:
     void InitLocals(ParamListInfo params);
 
     void InitGlobals();
+    bool ResetReuseFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params);
 private:
     struct DeleteFusionLocaleVariable {
         EState* m_estate;

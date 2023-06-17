@@ -6,9 +6,10 @@ CREATE SEQUENCE CURRVAL_SEQUENCE_009 INCREMENT BY 100 START WITH 1;
 explain (costs off) INSERT INTO SEQ_CURRVAL_TABLE_009 VALUES('nextval',nextval('CURRVAL_SEQUENCE_009'));
            QUERY PLAN            
 ---------------------------------
+ [Bypass]
  Insert on seq_currval_table_009
    ->  Result
-(2 rows)
+(3 rows)
 
 INSERT INTO SEQ_CURRVAL_TABLE_009 VALUES('nextval',nextval('CURRVAL_SEQUENCE_009'));
 INSERT INTO SEQ_CURRVAL_TABLE_009 VALUES('nextval',nextval('CURRVAL_SEQUENCE_009'));

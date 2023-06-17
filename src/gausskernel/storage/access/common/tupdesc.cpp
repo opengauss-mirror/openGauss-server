@@ -664,6 +664,112 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
     return compareInitdefvals(tupdesc1, tupdesc2);
 }
 
+bool opFusionReuseEqualTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
+{
+    int i;
+
+    if (tupdesc1->natts != tupdesc2->natts) {
+        return false;
+    }
+    if (tupdesc1->tdtypeid != tupdesc2->tdtypeid) {
+        return false;
+    }
+    if (tupdesc1->tdhasoid != tupdesc2->tdhasoid) {
+        return false;
+    }
+
+    if (tupdesc1->tdisredistable != tupdesc2->tdisredistable) {
+        return false;
+    }
+
+    if (tupdesc1->td_tam_ops != tupdesc2->td_tam_ops) {
+        return false;
+    }
+
+    for (i = 0; i < tupdesc1->natts; i++) {
+        Form_pg_attribute attr1 = &tupdesc1->attrs[i];
+        Form_pg_attribute attr2 = &tupdesc2->attrs[i];
+
+        /*
+         * We do not need to check every single field here: we can disregard
+         * attrelid and attnum (which were used to place the row in the attrs
+         * array in the first place).  It might look like we could dispense
+         * with checking attlen/attbyval/attalign, since these are derived
+         * from atttypid; but in the case of dropped columns we must check
+         * them (since atttypid will be zero for all dropped columns) and in
+         * general it seems safer to check them always.
+         *
+         * attcacheoff must NOT be checked since it's possibly not set in both
+         * copies.
+         */
+        if (strcmp(NameStr(attr1->attname), NameStr(attr2->attname)) != 0) {
+            return false;
+        }
+
+        if (attr1->attnum != attr2->attnum) {
+            return false;
+        }
+
+        const bool cl_skip = IsClientLogicType(attr1->atttypid) && (Oid)attr1->atttypmod == attr2->atttypid;
+        if (attr1->atttypid != attr2->atttypid && !cl_skip) {
+            return false;
+        }
+        if (attr1->attstattarget != attr2->attstattarget) {
+            return false;
+        }
+        if (attr1->attlen != attr2->attlen) {
+            return false;
+        }
+        if (attr1->attndims != attr2->attndims) {
+            return false;
+        }
+        if (attr1->atttypmod != attr2->atttypmod && !cl_skip) {
+            return false;
+        }
+        if (attr1->attbyval != attr2->attbyval) {
+            return false;
+        }
+        if (attr1->attstorage != attr2->attstorage && !cl_skip) {
+            return false;
+        }
+        if (attr1->attkvtype != attr2->attkvtype) {
+            return false;
+        }
+        if (attr1->attcmprmode != attr2->attcmprmode) {
+            return false;
+        }
+        if (attr1->attalign != attr2->attalign) {
+            return false;
+        }
+        if (attr2->attnotnull) {
+            return false;
+        }
+        if (attr2->atthasdef) {
+            return false;
+        }
+        if (attr1->attisdropped != attr2->attisdropped) {
+            return false;
+        }
+        if (attr1->attislocal != attr2->attislocal) {
+            return false;
+        }
+        if (attr1->attinhcount != attr2->attinhcount) {
+            return false;
+        }
+        if (attr1->attcollation != attr2->attcollation && !cl_skip) {
+            return false;
+        }
+        /* attacl, attoptions and attfdwoptions are not even present... */
+    }
+
+    if (tupdesc2->constr != NULL) {
+        return false;
+    }
+
+    /* compare the attinitdefval */
+    return compareInitdefvals(tupdesc1, tupdesc2);
+}
+
 static bool ComparePgAttribute(Form_pg_attribute attr1, Form_pg_attribute attr2)
 {
     /*

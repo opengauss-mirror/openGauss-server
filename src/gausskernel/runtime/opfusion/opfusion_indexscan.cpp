@@ -102,6 +102,7 @@ IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamLi
     setAttrNo();
     Relation dummyIndex = NULL;
     ExeceDoneInIndexFusionConstruct(m_node->scan.isPartTbl, &m_parentRel, &m_partRel, &dummyIndex, &m_rel);
+    m_can_reused = false;
 }
 
 
@@ -171,7 +172,11 @@ void IndexScanFusion::Init(long max_rows)
     }
 
     m_epq_indexqual = m_node->indexqualorig;
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, m_rel->rd_tam_ops);
+    if (m_can_reused && m_reslot != NULL) {
+        ExecSetSlotDescriptor(m_reslot, m_tupDesc); 
+    } else {
+        m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, m_rel->rd_tam_ops);
+    }
 }
 
 HeapTuple IndexScanFusion::getTuple()
@@ -255,7 +260,6 @@ void IndexScanFusion::End(bool isCompleted)
         return;
 
     if (m_reslot != NULL) {
-        (void)ExecClearTuple(m_reslot);
         m_reslot = NULL;
     }
     if (m_scandesc != NULL) {
@@ -288,4 +292,48 @@ void IndexScanFusion::End(bool isCompleted)
         m_rel = NULL;
     }
 
+}
+void IndexScanFusion::ResetIndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamListInfo params)
+{
+    m_node = node;
+    m_keyInit = false;
+    m_keyNum = list_length(node->indexqual);
+    
+    m_scanKeys = (ScanKey)palloc0(m_keyNum * sizeof(ScanKeyData));
+
+    /* init params */
+    m_paramLoc = NULL;
+    m_paramNum = 0;
+    if (params != NULL) {
+        m_paramLoc = (ParamLoc*)palloc0(m_keyNum * sizeof(ParamLoc));
+
+        ListCell* lc = NULL;
+        int i = 0;
+        foreach (lc, node->indexqual) {
+            if (IsA(lfirst(lc), NullTest)) {
+                i++;
+                continue;
+            }
+
+            Assert(IsA(lfirst(lc), OpExpr));
+
+            OpExpr* opexpr = (OpExpr*)lfirst(lc);
+            Expr* var = (Expr*)lsecond(opexpr->args);
+
+            if (IsA(var, RelabelType)) {
+                var = ((RelabelType*)var)->arg;
+            }
+
+            if (IsA(var, Param)) {
+                Param* param = (Param*)var;
+                m_paramLoc[m_paramNum].paramId = param->paramid;
+                m_paramLoc[m_paramNum++].scanKeyIndx = i;
+            }
+            i++;
+        }
+    }
+    m_targetList = m_node->scan.plan.targetlist;
+
+    setAttrNo();
+    m_can_reused = true;
 }

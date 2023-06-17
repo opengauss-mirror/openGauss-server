@@ -2913,6 +2913,7 @@ typedef struct knl_session_context {
     knl_u_dolphin_errdata_context dolphin_errdata_ctx;
 
     knl_u_opfusion_reuse_context opfusion_reuse_ctx;
+    MemoryContext iud_expr_reuse_ctx;
 
     /*
      * Initialize context which records time for client connection establish.
@@ -2924,6 +2925,8 @@ typedef struct knl_session_context {
     knl_u_ndp_context ndp_cxt;
 
     knl_u_hook_context hook_cxt;
+
+    MemoryContext opfusion_cxt;
 
     /* The datetime cache in current transaction. */
     TimestampTz cache_ts = 0;
