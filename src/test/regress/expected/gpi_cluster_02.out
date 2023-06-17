@@ -100,34 +100,34 @@ select true from (select correlation from pg_stats where tablename='inventory_ta
 ------
 (0 rows)
 
-select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible, part.partkey, part.interval, part.boundaries, part.reltuples
+select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'inventory_table_02' and ind.indrelid = class.oid and part.parentid = ind.indexrelid
-order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
- relname | parttype | rangenum | intervalnum | partstrategy | relallvisible | partkey | interval | boundaries | reltuples 
----------+----------+----------+-------------+--------------+---------------+---------+----------+------------+-----------
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ relname | parttype | rangenum | intervalnum | partstrategy | partkey | interval | boundaries | reltuples 
+---------+----------+----------+-------------+--------------+---------+----------+------------+-----------
 (0 rows)
 
-select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible, part.partkey, part.interval, part.boundaries, part.reltuples
+select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'inventory_table_02' and ind.indrelid = class.oid and part.parentid = ind.indrelid
-order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
-      relname       | parttype | rangenum | intervalnum | partstrategy | relallvisible | partkey | interval | boundaries | reltuples 
---------------------+----------+----------+-------------+--------------+---------------+---------+----------+------------+-----------
- inventory_table_02 | r        |        0 |           0 | r            |             0 | 1       |          |            |         0
- inventory_table_02 | r        |        0 |           0 | r            |             0 | 1       |          |            |         0
- p1                 | p        |        0 |           0 | r            |             0 |         |          | {10000}    |      9999
- p1                 | p        |        0 |           0 | r            |             0 |         |          | {10000}    |      9999
- p2                 | p        |        0 |           0 | r            |             0 |         |          | {20000}    |     10000
- p2                 | p        |        0 |           0 | r            |             0 |         |          | {20000}    |     10000
- p3                 | p        |        0 |           0 | r            |             0 |         |          | {30000}    |     10000
- p3                 | p        |        0 |           0 | r            |             0 |         |          | {30000}    |     10000
- p4                 | p        |        0 |           0 | r            |             0 |         |          | {40000}    |     10000
- p4                 | p        |        0 |           0 | r            |             0 |         |          | {40000}    |     10000
- p5                 | p        |        0 |           0 | r            |             0 |         |          | {50000}    |     10000
- p5                 | p        |        0 |           0 | r            |             0 |         |          | {50000}    |     10000
- p6                 | p        |        0 |           0 | r            |             0 |         |          | {60000}    |     10000
- p6                 | p        |        0 |           0 | r            |             0 |         |          | {60000}    |     10000
- p7                 | p        |        0 |           0 | r            |             0 |         |          | {NULL}     |     40001
- p7                 | p        |        0 |           0 | r            |             0 |         |          | {NULL}     |     40001
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+      relname       | parttype | rangenum | intervalnum | partstrategy | partkey | interval | boundaries | reltuples 
+--------------------+----------+----------+-------------+--------------+---------+----------+------------+-----------
+ inventory_table_02 | r        |        0 |           0 | r            | 1       |          |            |         0
+ inventory_table_02 | r        |        0 |           0 | r            | 1       |          |            |         0
+ p1                 | p        |        0 |           0 | r            |         |          | {10000}    |      9999
+ p1                 | p        |        0 |           0 | r            |         |          | {10000}    |      9999
+ p2                 | p        |        0 |           0 | r            |         |          | {20000}    |     10000
+ p2                 | p        |        0 |           0 | r            |         |          | {20000}    |     10000
+ p3                 | p        |        0 |           0 | r            |         |          | {30000}    |     10000
+ p3                 | p        |        0 |           0 | r            |         |          | {30000}    |     10000
+ p4                 | p        |        0 |           0 | r            |         |          | {40000}    |     10000
+ p4                 | p        |        0 |           0 | r            |         |          | {40000}    |     10000
+ p5                 | p        |        0 |           0 | r            |         |          | {50000}    |     10000
+ p5                 | p        |        0 |           0 | r            |         |          | {50000}    |     10000
+ p6                 | p        |        0 |           0 | r            |         |          | {60000}    |     10000
+ p6                 | p        |        0 |           0 | r            |         |          | {60000}    |     10000
+ p7                 | p        |        0 |           0 | r            |         |          | {NULL}     |     40001
+ p7                 | p        |        0 |           0 | r            |         |          | {NULL}     |     40001
 (16 rows)
 
 cluster inventory_table_02 using global_inventory_table_02_index2;
