@@ -425,7 +425,7 @@ static int SetPrimaryIdOnStandby(int primary_id)
 
 /* called on both new primary and all standby nodes to refresh status */
 static int CBSaveStableList(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
-                            unsigned int save_ctrl)
+                            unsigned long long list_in, unsigned int save_ctrl)
 {
     int primary_id = (int)reformer_id;
     g_instance.dms_cxt.SSReformerControl.primaryInstId = primary_id;
@@ -827,7 +827,7 @@ static int CBSetBufLoadStatus(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dm
     return DMS_SUCCESS;
 }
 
-static void *CBGetHandle(unsigned int *db_handle_index)
+static void *CBGetHandle(unsigned int *db_handle_index, dms_session_type_e session_type)
 {
     void *db_handle = g_instance.proc_base->allProcs[g_instance.dms_cxt.dmsProcSid];
     *db_handle_index = pg_atomic_fetch_add_u32(&g_instance.dms_cxt.dmsProcSid, 1);
