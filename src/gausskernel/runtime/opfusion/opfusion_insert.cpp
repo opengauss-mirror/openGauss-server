@@ -399,7 +399,8 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     InitResultRelInfo(result_rel_info, rel, 1, 0);
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        ExecOpenIndices(result_rel_info, true);
+        bool speculative = m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore;
+        ExecOpenIndices(result_rel_info, speculative);
     }
 
     init_gtt_storage(CMD_INSERT, result_rel_info);
