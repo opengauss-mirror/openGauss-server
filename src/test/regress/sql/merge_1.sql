@@ -472,5 +472,41 @@ WHEN NOT MATCHED THEN
 
 SELECT * FROM products_row ORDER BY 1;
 
+--error scene for values clause on merge into
+drop table if exists hadoop_mrs_node_info;
+create table hadoop_mrs_node_info(id varchar(50), ip varchar(50), role varchar(50), service varchar(50), createtime timestamp default pg_systimestamp(), 
+updatetime timestamp default pg_systimestamp(), clustername varchar(50), status varchar(50), clusterid varchar(50));
+
+insert into hadoop_mrs_node_info(id, ip, role, service, clustername, status, clusterid) values('id', 'ip', 'role', 'service', 'clustername', 'status', 'clusterid');
+
+merge into hadoop_mrs_node_info t1 using(values("id", "ip", "role", "service", "clustername", "status")
+	) as obj (
+			id,
+			ip,
+			role,
+			service,
+			clustername,
+			status
+	)
+	on (t1.clustername = obj.clustername
+	and t1.service = obj.service
+	and t1.role = obj.role
+	and t1.ip = obj.ip
+	)
+	when matched then
+	update set
+	status = obj.status
+	when not matched then
+	insert(id, ip, role,
+	service,
+	clustername, status
+	)
+	values(obj.id,
+		obj.ip,
+		obj.role,
+		obj.service,
+		obj.clustername,
+		obj.status);
+
 -- clean up
 DROP SCHEMA mergeinto_1 CASCADE;

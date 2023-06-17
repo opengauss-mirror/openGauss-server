@@ -129,14 +129,18 @@ static void transformMergeJoinClause(ParseState* pstate, Node* merge)
         ParseNamespaceItem* nitem1 = (ParseNamespaceItem*)lfirst(cell1);
         RangeTblEntry* entry1 = nitem1->p_rte;
 
-        foreach (cell2, pstate->p_relnamespace) {
-            ParseNamespaceItem* nitem2 = (ParseNamespaceItem*)lfirst(cell2);
-            RangeTblEntry* entry2 = nitem2->p_rte;
-
-            if (entry1->relid == entry2->relid) {
-                continue;
-            }
+        if (pstate->p_relnamespace == NULL) {
             pstate->p_relnamespace = lappend(pstate->p_relnamespace, lfirst(cell1));
+        } else {
+            foreach (cell2, pstate->p_relnamespace) {
+                ParseNamespaceItem* nitem2 = (ParseNamespaceItem*)lfirst(cell2);
+                RangeTblEntry* entry2 = nitem2->p_rte;
+
+                if (entry1->relid == entry2->relid) {
+                    continue;
+                }
+                pstate->p_relnamespace = lappend(pstate->p_relnamespace, lfirst(cell1));
+            }
         }
     }
 }
@@ -1015,11 +1019,14 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
      * Note: Also, ExclusiveLock other than RowExclusiveLock is used for MERGE for now.
      * There are chances to use RowExclusiveLock to optimize the parallel performance
      * when the concurrent updates to be handled properly in the future.
+     *
+     * For LATERAL subquery, we can't add left-side RTE to pstate->p_varnamespace, which
+     * will be handled specifically when transform JoinExpr in transformMergeJoinClause.
      */
     qry->resultRelation = setTargetTable(pstate,
         stmt->relation,
         false, /* do not expand inheritance */
-        true,
+        false,
         targetPerms);
 
     checkUnsupportedCases(pstate, stmt);
@@ -1051,8 +1058,12 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
      *
      * 2. rewriteTargetListMerge() requires the RTE of the underlying join in
      * order to add junk CTID and TABLEOID attributes.
+     *
+     * 3. After transform joinexpr, we need add left-side RTE to pstate->p_varnamespace,
+     * because the update or insert clause of merge may refer to columns of target table.
      */
     transformMergeJoinClause(pstate, (Node*)joinexpr);
+    addRTEtoQuery(pstate, rt_fetch(qry->resultRelation, pstate->p_rtable), false, false, true);
 
     /* get var that used in ON clause, then use it to check some restriction */
     join_var_list = pull_var_clause((Node*)pstate->p_joinlist, PVC_REJECT_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
