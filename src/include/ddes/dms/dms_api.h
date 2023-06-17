@@ -189,6 +189,7 @@ typedef struct st_dms_xmap_ctx {
 typedef struct st_dms_context {
     unsigned int inst_id;   // current instance id
     unsigned int sess_id;   // current session id
+    unsigned int rmid;      // current rm id
     dms_session_e sess_type;  // request page: recovery session flag
     void *db_handle;
     unsigned char is_try;
@@ -233,6 +234,12 @@ typedef struct dms_opengauss_txn_snapshot {
     unsigned long long snapshotcsn;
     unsigned long long localxmin;
 } dms_opengauss_txn_snapshot_t;
+
+typedef struct dms_opengauss_txn_sw_info {
+    unsigned long long sxid;        // transaction id of master, used for standby write feature
+    unsigned int scid;              // command id of master, used for standby write feature
+    unsigned int server_proc_slot;  // backend slot of master, used for standby write feature
+} dms_opengauss_txn_sw_info_t;
 
 typedef enum dms_opengauss_lock_req_type {
     SHARED_INVAL_MSG,
@@ -475,6 +482,13 @@ typedef enum en_dms_status {
     DMS_STATUS_IN = 3
 } dms_status_t;             // used in database startup
 
+typedef enum st_dms_session_type {
+    DMS_SESSION_TYPE_NONE = 0,
+    DMS_SESSION_TYPE_WORKER = 1,
+    DMS_SESSION_TYPE_FULL_RCY = 2,
+    DMS_SESSION_TYPE_FULL_RCY_PARAL = 3,
+}dms_session_type_e;
+
 #define DCS_BATCH_BUF_SIZE (1024 * 30)
 #define DCS_RLS_OWNER_BATCH_SIZE (DCS_BATCH_BUF_SIZE / DMS_PAGEID_SIZE)
 typedef struct st_dcs_batch_buf {
@@ -485,7 +499,7 @@ typedef struct st_dcs_batch_buf {
 
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
 typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
-    unsigned int save_ctrl);
+    unsigned long long list_in, unsigned int save_ctrl);
 typedef int(*dms_get_dms_status)(void *db_handle);
 typedef void(*dms_set_dms_status)(void *db_handle, int status);
 typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned char smon_chk,
@@ -528,7 +542,7 @@ typedef void(*dms_leave_local_page)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
 typedef void(*dms_get_pageid)(dms_buf_ctrl_t *buf_ctrl, char **pageid, unsigned int *size);
 typedef char *(*dms_get_page)(dms_buf_ctrl_t *buf_ctrl);
 typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner);
-typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index);
+typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index, dms_session_type_e session_type);
 typedef void (*dms_release_db_handle)(void *db_handle);
 typedef void *(*dms_stack_push_cr_cursor)(void *db_handle);
 typedef void (*dms_stack_pop_cr_cursor)(void *db_handle);
