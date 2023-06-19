@@ -3302,6 +3302,33 @@ void pgstat_couple_decouple_session(bool is_couple)
     pgstat_increment_changecount_after(beentry);
 }
 
+static void clear_backend_entry(volatile PgBackendStatus* beentry)
+{
+    /*
+     * Clear status entry, following the protocol of bumping st_changecount
+     * before and after.  We use a volatile pointer here to ensure the
+     * compiler doesn't try to get cute.
+     */
+    pgstat_increment_changecount_before(beentry);
+
+    beentry->st_procpid = 0;   /* mark pid invalid */
+    beentry->st_sessionid = 0; /* mark sessionid invalid */
+    beentry->globalSessionId.sessionId = 0;
+    beentry->globalSessionId.nodeId = 0;
+    beentry->globalSessionId.seq = 0;
+
+    /*
+     * make sure st_changecount is an even before release it.
+     *
+     * In case some thread was interrupted by SIGTERM at any time with a mess st_changecount
+     * in PgBackendStatus, PgstatCollectorMain may hang-up in waiting its change to even and
+     * can not exit after receiving SIGTERM signal
+     */
+    do {
+        pgstat_increment_changecount_after(beentry);
+    } while ((beentry->st_changecount & 1) != 0);
+}
+
 /*
  * Shut down a single backend's statistics reporting at process exit.
  *
@@ -3328,29 +3355,18 @@ static void pgstat_beshutdown_hook(int code, Datum arg)
     if (OidIsValid(u_sess->proc_cxt.MyDatabaseId))
         pgstat_report_stat(true);
 
-    /*
-     * Clear my status entry, following the protocol of bumping st_changecount
-     * before and after.  We use a volatile pointer here to ensure the
-     * compiler doesn't try to get cute.
-     */
-    pgstat_increment_changecount_before(beentry);
-
-    beentry->st_procpid = 0;   /* mark pid invalid */
-    beentry->st_sessionid = 0; /* mark sessionid invalid */
-    beentry->globalSessionId.sessionId = 0;
-    beentry->globalSessionId.nodeId = 0;
-    beentry->globalSessionId.seq = 0;
+    /* Clear my status entry */
+    clear_backend_entry(beentry);
 
     /*
-     * make sure st_changecount is an even before release it.
-     *
-     * In case some thread was interrupted by SIGTERM at any time with a mess st_changecount
-     * in PgBackendStatus, PgstatCollectorMain may hang-up in waiting its change to even and
-     * can not exit after receiving SIGTERM signal
+     * Thread pool worker also needs to clear
+     * t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1]
      */
-    do {
-        pgstat_increment_changecount_after(beentry);
-    } while ((beentry->st_changecount & 1) != 0);
+    if (IS_THREAD_POOL_WORKER && t_thrd.proc_cxt.MyBackendId != InvalidBackendId &&
+        beentry != &t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1]) {
+        clear_backend_entry(&t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1]);
+        WaitUntilLWLockInfoNeverAccess(&t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1]);
+    }
 
     /*
      * handle below cases:
@@ -8267,6 +8283,12 @@ static void endMySessionTimeEntry(int code, Datum arg)
 {
     DetachMySessionTimeEntry(t_thrd.shemem_ptr_cxt.mySessionTimeEntry);
 
+    if (IS_THREAD_POOL_WORKER && t_thrd.proc_cxt.MyBackendId != InvalidBackendId &&
+        t_thrd.shemem_ptr_cxt.mySessionTimeEntry !=
+        &t_thrd.shemem_ptr_cxt.sessionTimeArray[t_thrd.proc_cxt.MyBackendId - 1]) {
+        DetachMySessionTimeEntry(&t_thrd.shemem_ptr_cxt.sessionTimeArray[t_thrd.proc_cxt.MyBackendId - 1]);
+    }
+
     /* don't bother this entry any more. */
     t_thrd.shemem_ptr_cxt.mySessionTimeEntry = NULL;
 }
@@ -8509,6 +8531,12 @@ static void endMySessionStatEntry(int code, Datum arg)
     /* mark my entry not active. */
     t_thrd.shemem_ptr_cxt.mySessionStatEntry->isValid = false;
 
+    if (IS_THREAD_POOL_WORKER && t_thrd.proc_cxt.MyBackendId != InvalidBackendId &&
+        t_thrd.shemem_ptr_cxt.mySessionStatEntry !=
+        &t_thrd.shemem_ptr_cxt.sessionStatArray[t_thrd.proc_cxt.MyBackendId - 1]) {
+        t_thrd.shemem_ptr_cxt.sessionStatArray[t_thrd.proc_cxt.MyBackendId - 1].isValid = false;
+    }
+
     /* don't bother this entry any more. */
     t_thrd.shemem_ptr_cxt.mySessionStatEntry = NULL;
 }
@@ -8743,6 +8771,12 @@ static void endMySessionMemoryEntry(int code, Datum arg)
 
     /* mark my entry not active. */
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->isValid = false;
+
+    if (IS_THREAD_POOL_WORKER && t_thrd.proc_cxt.MyBackendId != InvalidBackendId &&
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry !=
+        &t_thrd.shemem_ptr_cxt.sessionMemoryArray[t_thrd.proc_cxt.MyBackendId - 1]) {
+        t_thrd.shemem_ptr_cxt.sessionMemoryArray[t_thrd.proc_cxt.MyBackendId - 1].isValid = false;
+    }
 
     /* don't bother this entry any more. */
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry = NULL;
