@@ -23,6 +23,8 @@
 #include "pg_backup_db.h"
 #include "dumpmem.h"
 #include "dumputils.h"
+#include "catalog/pg_database.h"
+#include "catalog/pg_extension.h"
 
 /* Database Security: Data importing/dumping support AES128. */
 #include "compress_io.h"
@@ -2687,6 +2689,9 @@ static void _doSetFixedOutputState(ArchiveHandle* AH)
     if (!AH->publicArc.std_strings)
         (void)ahprintf(AH, "SET escape_string_warning = off;\n");
 
+    if (findDBCompatibility(&AH->publicArc, PQdb(GetConnection(&AH->publicArc))) && hasSpecificExtension(&AH->publicArc, "dolphin"))
+        (void)ahprintf(AH, "SET dolphin.sql_mode = 'sql_mode_full_group,pipes_as_concat,ansi_quotes,pad_char_to_full_length';\n");
+
     (void)ahprintf(AH, "\n");
 }
 
@@ -5091,3 +5096,68 @@ size_t gzread_file(void *buf, unsigned len, gzFile fp)
 }
 #endif
 
+bool findDBCompatibility(Archive* fout, const char* databasename)
+{
+    PGresult* res = NULL;
+    int ntups = 0;
+    const char* datcompatibility = NULL;
+    bool isHasDatcompatibility = true;
+    ArchiveHandle* AH = (ArchiveHandle*)fout;
+    bool isBcompatibility = false;
+    
+    isHasDatcompatibility = is_column_exists(AH->connection, DatabaseRelationId, "datcompatibility");
+    if (!isHasDatcompatibility) {
+        return isBcompatibility;
+    }
+
+    PQExpBuffer query = createPQExpBuffer();
+
+    resetPQExpBuffer(query);
+    appendPQExpBuffer(query, "SELECT datcompatibility from pg_catalog.pg_database where datname = ");
+    appendStringLiteralAH(query, databasename, fout);
+    
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    ntups = PQntuples(res);
+    if (ntups == 0) {
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        return isBcompatibility;
+    }
+
+    datcompatibility = PQgetvalue(res, 0, PQfnumber(res, "datcompatibility"));
+    if (strcasecmp(datcompatibility, "B") == 0) {
+        isBcompatibility =  true;
+    }
+
+    PQclear(res);
+    destroyPQExpBuffer(query);
+    return isBcompatibility;
+}
+
+/*
+ * check if current database has specific extension whose name is provided by parameter
+ */
+bool hasSpecificExtension(Archive* fout, const char* extensionName)
+{
+    PGresult *res = NULL;
+    int ntups = 0;
+    bool hasExtnameColumn = true;
+    ArchiveHandle *AH = (ArchiveHandle *)fout;
+
+    hasExtnameColumn = is_column_exists(AH->connection, ExtensionRelationId, "extname");
+    if (!hasExtnameColumn) {
+        return false;
+    }
+
+    PQExpBuffer query = createPQExpBuffer();
+
+    resetPQExpBuffer(query);
+    appendPQExpBuffer(query, "SELECT extname from pg_catalog.pg_extension where extname = ");
+    appendStringLiteralAH(query, extensionName, fout);
+
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    ntups = PQntuples(res);
+    PQclear(res);
+    destroyPQExpBuffer(query);
+    return ntups != 0;
+}

@@ -54,7 +54,6 @@
 #include "catalog/pg_cast.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_database.h"
-#include "catalog/pg_extension.h"
 #include "catalog/pg_default_acl.h"
 #include "catalog/pg_event_trigger.h"
 #include "catalog/pg_largeobject.h"
@@ -501,7 +500,6 @@ static void get_role_password();
 static void get_encrypt_key();
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo);
 static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxInfo* indxinfo, bool isBcompatibility);
-static bool findDBCompatibility(Archive* fout, const char* databasename);
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
 static bool IsPlainFormat();
 static bool needIgnoreSequence(TableInfo* tbinfo);
@@ -509,7 +507,6 @@ inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
 #ifdef DUMPSYSLOG
 static void ReceiveSyslog(PGconn* conn, const char* current_path);
 #endif
-static bool hasSpecificExtension(Archive* fout, const char* databasename);
 
 #ifdef GSDUMP_LLT
 bool lltRunning = true;
@@ -20937,44 +20934,6 @@ static void dumpConstraintForForeignTbl(Archive* fout, ConstraintInfo* coninfo)
  *	  write out to fout a user-defined constraint
  */
 
-static bool findDBCompatibility(Archive* fout, const char* databasename)
-{
-    PGresult* res = NULL;
-    int ntups = 0;
-    const char* datcompatibility = NULL;
-    bool isHasDatcompatibility = true;
-    ArchiveHandle* AH = (ArchiveHandle*)fout;
-    bool isBcompatibility = false;
-    
-    isHasDatcompatibility = is_column_exists(AH->connection, DatabaseRelationId, "datcompatibility");
-    if (!isHasDatcompatibility) {
-        return isBcompatibility;
-    }
-
-    PQExpBuffer query = createPQExpBuffer();
-
-    resetPQExpBuffer(query);
-    appendPQExpBuffer(query, "SELECT datcompatibility from pg_catalog.pg_database where datname = ");
-    appendStringLiteralAH(query, databasename, fout);
-    
-    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-    ntups = PQntuples(res);
-    if (ntups == 0) {
-        PQclear(res);
-        destroyPQExpBuffer(query);
-        return isBcompatibility;
-    }
-
-    datcompatibility = PQgetvalue(res, 0, PQfnumber(res, "datcompatibility"));
-    if (strcasecmp(datcompatibility, "B") == 0) {
-        isBcompatibility =  true;
-    }
-
-    PQclear(res);
-    destroyPQExpBuffer(query);
-    return isBcompatibility;
-}
-
 static void dumpConstraint(Archive* fout, ConstraintInfo* coninfo)
 {
     TableInfo* tbinfo = NULL;
@@ -23550,32 +23509,4 @@ static bool needIgnoreSequence(TableInfo* tbinfo)
         }
     }
     return false;
-}
-
-/*
- * check if current database has specific extension whose name is provided by parameter
- */
-static bool hasSpecificExtension(Archive* fout, const char* extensionName)
-{
-    PGresult *res = NULL;
-    int ntups = 0;
-    bool hasExtnameColumn = true;
-    ArchiveHandle *AH = (ArchiveHandle *)fout;
-
-    hasExtnameColumn = is_column_exists(AH->connection, ExtensionRelationId, "extname");
-    if (!hasExtnameColumn) {
-        return false;
-    }
-
-    PQExpBuffer query = createPQExpBuffer();
-
-    resetPQExpBuffer(query);
-    appendPQExpBuffer(query, "SELECT extname from pg_catalog.pg_extension where extname = ");
-    appendStringLiteralAH(query, extensionName, fout);
-
-    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-    ntups = PQntuples(res);
-    PQclear(res);
-    destroyPQExpBuffer(query);
-    return ntups != 0;
 }
