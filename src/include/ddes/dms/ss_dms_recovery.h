@@ -86,6 +86,7 @@ typedef struct ss_recovery_info {
     bool startup_need_exit_normally;        //used in alive failover
     bool recovery_trapped_in_page_request;   //used in alive failover
     bool in_ondemand_recovery;
+    bool dorado_sharestorage_inited;        // used in dorado mode
 } ss_recovery_info_t;
 
 extern bool SSRecoveryNodes();
