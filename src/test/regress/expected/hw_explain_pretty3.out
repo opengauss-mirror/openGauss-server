@@ -29,10 +29,11 @@ create table aa_t2 (id int, num int);
 explain analyze insert into aa_t2 select * from aa_t1;
                                                QUERY PLAN                                                
 ---------------------------------------------------------------------------------------------------------
+ [Bypass]
 --? Insert on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
-(3 rows)
+(4 rows)
 
 select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
  relname | reltuples | relpages 
@@ -45,10 +46,11 @@ select relname, reltuples, relpages from pg_class where relname='aa_t1' or relna
 explain analyze insert into aa_t2 select * from aa_t1;
                                                QUERY PLAN                                                
 ---------------------------------------------------------------------------------------------------------
+ [Bypass]
 --? Insert on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
-(3 rows)
+(4 rows)
 
 select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
  relname | reltuples | relpages 
@@ -62,10 +64,11 @@ select relname, reltuples, relpages from pg_class where relname='aa_t1' or relna
 explain analyze create table aa_t3 as select * from aa_t2;
                                                QUERY PLAN                                                
 ---------------------------------------------------------------------------------------------------------
+ [Bypass]
 --? Insert on aa_t3  (cost=.* rows=2149 width=8) (actual time=.* rows=4 loops=1)
 --?   ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=4 loops=1)
 --? Total runtime: .* ms
-(3 rows)
+(4 rows)
 
 select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' or relname='aa_t3' order by relname;
  relname | reltuples | relpages 
@@ -303,10 +306,11 @@ start transaction;
 explain analyze create table aa_t3 as select * from aa_t2;
                                                QUERY PLAN                                                
 ---------------------------------------------------------------------------------------------------------
+ [Bypass]
 --? Insert on aa_t3  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
-(3 rows)
+(4 rows)
 
 -- aa_t3 no
 explain analyze select num, count(*) from aa_t3 group by num;

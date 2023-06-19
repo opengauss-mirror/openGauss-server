@@ -20,50 +20,55 @@ analyze distribute_source_hash_02;
 explain (verbose on, costs off) insert into distribute_target_hash_01 select * from distribute_source_hash_01;
                                                 QUERY PLAN                                                
 ----------------------------------------------------------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.distribute_target_hash_01
    ->  Seq Scan on distribute_dml.distribute_source_hash_01
          Output: distribute_source_hash_01.c1, distribute_source_hash_01.c2, distribute_source_hash_01.c3
-(3 rows)
+(4 rows)
 
 insert into distribute_target_hash_01 select * from distribute_source_hash_01;
 -- hash source doesn't match target distribute keys
 explain (verbose on, costs off) insert into distribute_target_hash_02 select * from distribute_source_hash_01;
                                                 QUERY PLAN                                                
 ----------------------------------------------------------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.distribute_target_hash_02
    ->  Seq Scan on distribute_dml.distribute_source_hash_01
          Output: distribute_source_hash_01.c1, distribute_source_hash_01.c2, distribute_source_hash_01.c3
-(3 rows)
+(4 rows)
 
 insert into distribute_target_hash_02 select * from distribute_source_hash_01;
 -- replicate target, hashed source
 explain (verbose on, costs off) insert into distribute_target_replication_01 select * from distribute_source_hash_01;
                                                 QUERY PLAN                                                
 ----------------------------------------------------------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.distribute_target_replication_01
    ->  Seq Scan on distribute_dml.distribute_source_hash_01
          Output: distribute_source_hash_01.c1, distribute_source_hash_01.c2, distribute_source_hash_01.c3
-(3 rows)
+(4 rows)
 
 insert into distribute_target_replication_01 select * from distribute_source_hash_01;
 -- replicate source, hashed target
 explain (verbose on, costs off) insert into distribute_target_hash_01 select * from distribute_source_replication_01;
                                                           QUERY PLAN                                                           
 -------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.distribute_target_hash_01
    ->  Seq Scan on distribute_dml.distribute_source_replication_01
          Output: distribute_source_replication_01.c1, distribute_source_replication_01.c2, distribute_source_replication_01.c3
-(3 rows)
+(4 rows)
 
 insert into distribute_target_hash_02 select * from distribute_source_replication_01;
 -- replicate source, replicate target
 explain (verbose on, costs off) insert into distribute_target_replication_01 select * from distribute_source_replication_01;
                                                           QUERY PLAN                                                           
 -------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.distribute_target_replication_01
    ->  Seq Scan on distribute_dml.distribute_source_replication_01
          Output: distribute_source_replication_01.c1, distribute_source_replication_01.c2, distribute_source_replication_01.c3
-(3 rows)
+(4 rows)
 
 insert into distribute_target_replication_01 select * from distribute_source_replication_01;
 -- join source
@@ -387,10 +392,11 @@ insert into stream_UI_diskey1 select generate_series(1,100) from src;
 explain (verbose on, costs off) insert into stream_UI_diskey1 select b1 + 100 from stream_UI_diskey1;
                          QUERY PLAN                          
 -------------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.stream_ui_diskey1
    ->  Seq Scan on distribute_dml.stream_ui_diskey1
          Output: (distribute_dml.stream_ui_diskey1.b1 + 100)
-(3 rows)
+(4 rows)
 
 insert into stream_UI_diskey1 select b1 + 100 from stream_UI_diskey1;
 select count(*) from stream_UI_diskey1 where b1 = 100;
@@ -417,51 +423,57 @@ create table insert_tb2 (a int, b int, c int);
 explain (costs off, verbose on) insert into insert_tb1  select * from insert_tb2;
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
-(3 rows)
+(4 rows)
 
 --Need redistribute
 explain (costs off, verbose on) insert into insert_tb1 (a, c) select a, c from insert_tb2;
                         QUERY PLAN                         
 -----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: insert_tb2.a, NULL::integer, insert_tb2.c
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) insert into insert_tb1 (b, c) select a, c from insert_tb2;
                         QUERY PLAN                         
 -----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: NULL::integer, insert_tb2.a, insert_tb2.c
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) insert into insert_tb1 (a, b, c) select b, a, c from insert_tb2;
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: insert_tb2.b, insert_tb2.a, insert_tb2.c
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) insert into insert_tb1 (b, a, c) select b, a, c from insert_tb2;
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) insert into insert_tb1 (b, a, c) select a, b, c from insert_tb2;
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: insert_tb2.b, insert_tb2.a, insert_tb2.c
-(3 rows)
+(4 rows)
 
 drop table insert_tb1;
 drop table insert_tb2;
@@ -470,10 +482,11 @@ create table insert_tb2 (a int, b int, c int);
 explain (costs off, verbose on) insert into insert_tb1  select * from insert_tb2;
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) delete from insert_tb1 where (a, b ,c) in (select * from insert_tb2);
                                                        QUERY PLAN                                                       
@@ -546,34 +559,38 @@ create table insert_tb2 (a int, b int, c int);
 explain (costs off, verbose on) insert into insert_tb1  select * from insert_tb2;
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) insert into insert_tb1 (a, b, c) select b, a, c from insert_tb2;
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: insert_tb2.b, insert_tb2.a, insert_tb2.c
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) insert into insert_tb1 (b, a, c) select b, a, c from insert_tb2;
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb1
    ->  Seq Scan on distribute_dml.insert_tb2
          Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) insert into insert_tb2 select * from insert_tb1;
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
  Insert on distribute_dml.insert_tb2
    ->  Seq Scan on distribute_dml.insert_tb1
          Output: insert_tb1.a, insert_tb1.b, insert_tb1.c
-(3 rows)
+(4 rows)
 
 drop table insert_tb1;
 drop table insert_tb2;
@@ -729,10 +746,11 @@ explain (verbose on, costs off)
 insert into pg_description select * from tmp_description;
                                                        QUERY PLAN                                                        
 -------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
  Insert on pg_catalog.pg_description
    ->  Seq Scan on distribute_dml.tmp_description
          Output: tmp_description.objoid, tmp_description.classoid, tmp_description.objsubid, tmp_description.description
-(3 rows)
+(4 rows)
 
 drop table tmp_description;
 --data distribute skew functions and view 

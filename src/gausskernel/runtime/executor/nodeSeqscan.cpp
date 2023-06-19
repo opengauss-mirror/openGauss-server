@@ -186,8 +186,6 @@ void Start_Prefetch(TableScanDesc scan, SeqScanAccessor* p_accessor, ScanDirecti
     p_accessor->sa_last_prefbf = last;
 }
 
-static TupleTableSlot* SeqNext(SeqScanState* node);
-
 static void ExecInitNextPartitionForSeqScan(SeqScanState* node);
 
 template<TableAmType type, bool hashBucket, bool pushdown>
@@ -249,7 +247,7 @@ void seq_scan_getnext(TableScanDesc scan,  TupleTableSlot* slot, ScanDirection d
  *		This is a workhorse for ExecSeqScan
  * ----------------------------------------------------------------
  */
-static TupleTableSlot* SeqNext(SeqScanState* node)
+TupleTableSlot* SeqNext(SeqScanState* node)
 {
     TableScanDesc scanDesc;
     EState* estate = NULL;

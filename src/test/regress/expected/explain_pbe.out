@@ -4094,10 +4094,11 @@ insert into openGauss9999999_t1 values (1,1),(20,20);
 explain analyze create table openGauss9999999_t2 as select * from openGauss9999999_t1;
                                                       QUERY PLAN                                                       
 -----------------------------------------------------------------------------------------------------------------------
+ [Bypass]
 --? Insert on opengauss9999999_t2  (cost=.* rows=.* width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on opengauss9999999_t1  (cost=.* rows=.* width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
-(3 rows)
+(4 rows)
 
 drop table openGauss9999999_t2;
 drop table openGauss9999999_t1;

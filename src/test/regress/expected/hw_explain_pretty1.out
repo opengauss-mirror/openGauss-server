@@ -37,18 +37,20 @@ CONTEXT:  PL/pgSQL function test_explain_param(integer) line 2 at SQL statement
 explain (costs off, analyze on) insert into explain_table_01 select * from explain_table_01;
 --?.*
 --?.*
+ [Bypass]
 --? Insert on explain_table_01 (actual time=.* rows=5 loops=1)
 --?   ->  Seq Scan on explain_table_01 (actual time=[\d+.\d+\,\d+\.\d+]\.\.[\d+\.\d+\,\d+\.\d+] rows=5 loops=1)
 --? Total runtime:.*
-(3 rows)
+(4 rows)
 
 explain (costs off, analyze on) insert into explain_table_01 select * from explain_table_02;
 --?.*
 --?.*
+ [Bypass]
 --? Insert on explain_table_01 (actual time=.* rows=4 loops=1)
 --?   ->  Seq Scan on explain_table_02 (actual time=[\d+.\d+\,\d+\.\d+]\.\.[\d+\.\d+\,\d+\.\d+] rows=4 loops=1)
 --? Total runtime:.*
-(3 rows)
+(4 rows)
 
 explain (costs off, analyze on) insert into explain_table_03 select * from explain_table_03;
 --?.*
