@@ -1787,6 +1787,11 @@ static int CBMarkNeedFlush(void *db_handle, char *pageid)
 
 void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
 {
+    /* in dorado mode, we need to wait sharestorageinit finished */
+    while (!g_instance.dms_cxt.SSRecoveryInfo.dorado_sharestorage_inited &&
+            g_instance.attr.attr_storage.xlog_file_path != 0) {
+        pg_usleep(REFORM_WAIT_TIME);
+    }
     IsUnderPostmaster = true;
     // to add cnt, avoid postmain execute proc_exit to free shmem now
     (void)pg_atomic_add_fetch_u32(&g_instance.dms_cxt.inDmsThreShmemInitCnt, 1);

@@ -18735,6 +18735,10 @@ void ShareStorageInit()
             securec_check_ss(errorno, "", "");
             UpdatePostgresqlFile("xlog_file_size", option);
         }
+
+        if (ENABLE_DMS) {
+            g_instance.dms_cxt.SSRecoveryInfo.dorado_sharestorage_inited = true;
+        }
     }
 }
 
