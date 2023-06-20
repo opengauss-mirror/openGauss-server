@@ -2449,7 +2449,9 @@ static bool is_indexable_operator(Oid expr_op, Oid opfamily, bool indexkey_on_le
         if (expr_op == InvalidOid)
             return false;
     }
-
+    if (expr_op == INT4EQOID && opfamily == INTEGER_BTREE_FAM_OID) {
+        return true;
+    }
     /* OK if the (commuted) operator is a member of the index's opfamily */
     return op_in_opfamily(expr_op, opfamily);
 }

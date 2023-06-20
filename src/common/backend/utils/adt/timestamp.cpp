@@ -206,6 +206,64 @@ static char* anytimestamp_typmodout(bool istz, int32 typmod)
  *	 USER I/O ROUTINES														 *
  *****************************************************************************/
 
+/* TimestampTypeCheck()
+ * Check timestamp format, and convert to internal timestamp format.
+ */
+bool TimestampTypeCheck(char* str, bool can_ignore, struct pg_tm* tm, Timestamp &result, fsec_t &fsec, int &dterr)
+{
+    int tz;
+    int dtype;
+    int nf;
+    char* field[MAXDATEFIELDS];
+    int ftype[MAXDATEFIELDS];
+    char workbuf[MAXDATELEN + MAXDATEFIELDS];
+    dterr = ParseDateTime(str, workbuf, sizeof(workbuf), field, ftype, MAXDATEFIELDS, &nf);
+    if (dterr == 0)
+        dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz);
+    if (dterr != 0) {
+        DateTimeParseError(dterr, str, "timestamp", can_ignore);
+        /*
+         * if error ignorable, function DateTimeParseError reports warning instead, then return current timestamp.
+         */
+        return true;
+    }
+
+    switch (dtype) {
+        case DTK_DATE:
+            if (tm2timestamp(tm, fsec, NULL, &result) != 0)
+                ereport(ERROR,
+                    (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range: \"%s\"", str)));
+            break;
+
+        case DTK_EPOCH:
+            result = SetEpochTimestamp();
+            break;
+
+        case DTK_LATE:
+            TIMESTAMP_NOEND(result);
+            break;
+
+        case DTK_EARLY:
+            TIMESTAMP_NOBEGIN(result);
+            break;
+
+        case DTK_INVALID:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("date/time value \"%s\" is no longer supported", str)));
+
+            TIMESTAMP_NOEND(result);
+            break;
+
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("unexpected dtype %d while parsing timestamp \"%s\"", dtype, str)));
+            TIMESTAMP_NOEND(result);
+    }
+    return false;
+}
+
 /* timestamp_in()
  * Convert a string to internal form.
  */
@@ -220,13 +278,7 @@ Datum timestamp_in(PG_FUNCTION_ARGS)
     Timestamp result;
     fsec_t fsec;
     struct pg_tm tt, *tm = &tt;
-    int tz;
-    int dtype;
-    int nf;
     int dterr;
-    char* field[MAXDATEFIELDS];
-    int ftype[MAXDATEFIELDS];
-    char workbuf[MAXDATELEN + MAXDATEFIELDS];
     char* timestamp_fmt = NULL;
 
     /*
@@ -239,60 +291,14 @@ Datum timestamp_in(PG_FUNCTION_ARGS)
         }
 
         /* the following logic shared from to_timestamp(). */
-        tz = 0;
+        int tz = 0;
         to_timestamp_from_format(tm, &fsec, str, (void*)timestamp_fmt);
 
         if (tm2timestamp(tm, fsec, &tz, &result) != 0) {
             ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
         }
-    } else {
-        /*
-         * default pg date formatting parsing.
-         */
-        dterr = ParseDateTime(str, workbuf, sizeof(workbuf), field, ftype, MAXDATEFIELDS, &nf);
-        if (dterr == 0)
-            dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz);
-        if (dterr != 0) {
-            DateTimeParseError(dterr, str, "timestamp", fcinfo->can_ignore);
-            /*
-             * if error ignorable, function DateTimeParseError reports warning instead, then return current timestamp.
-             */
-            PG_RETURN_TIMESTAMP(GetCurrentTimestamp());
-        }
-
-        switch (dtype) {
-            case DTK_DATE:
-                if (tm2timestamp(tm, fsec, NULL, &result) != 0)
-                    ereport(ERROR,
-                        (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range: \"%s\"", str)));
-                break;
-
-            case DTK_EPOCH:
-                result = SetEpochTimestamp();
-                break;
-
-            case DTK_LATE:
-                TIMESTAMP_NOEND(result);
-                break;
-
-            case DTK_EARLY:
-                TIMESTAMP_NOBEGIN(result);
-                break;
-
-            case DTK_INVALID:
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("date/time value \"%s\" is no longer supported", str)));
-
-                TIMESTAMP_NOEND(result);
-                break;
-
-            default:
-                ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("unexpected dtype %d while parsing timestamp \"%s\"", dtype, str)));
-                TIMESTAMP_NOEND(result);
-        }
+    } else if (TimestampTypeCheck(str, fcinfo->can_ignore, tm, result, fsec, dterr)){
+        PG_RETURN_TIMESTAMP(GetCurrentTimestamp());
     }
 
     /*
@@ -302,6 +308,43 @@ Datum timestamp_in(PG_FUNCTION_ARGS)
     PG_RETURN_TIMESTAMP(result);
 }
 
+Datum input_timestamp_in(char* str, Oid typioparam, int32 typmod, bool can_ignore)
+{
+    if (str == NULL) {
+        return (Datum)0;
+    }
+#ifdef NOT_USED
+    Oid typelem = typioparam;
+#endif
+    Timestamp result;
+    fsec_t fsec;
+    struct pg_tm tt, *tm = &tt;
+    int dterr;
+    char workbuf[MAXDATELEN + MAXDATEFIELDS];
+
+    if (u_sess->attr.attr_common.enable_iud_fusion) {
+        dterr = ParseIudDateTime(str, tm, &fsec);
+        if (dterr == 0) {
+            if (tm2timestamp(tm, fsec, NULL, &result) != 0) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range: \"%s\"", str)));
+            }
+            AdjustTimestampForTypmod(&result, typmod);
+            PG_RETURN_TIMESTAMP(result);
+        }
+        
+    }
+    
+    if (TimestampTypeCheck(str, can_ignore, tm, result, fsec, dterr)){
+        PG_RETURN_TIMESTAMP(GetCurrentTimestamp());
+    }
+
+    /*
+     * the following logic is unified for timestamp parsing.
+     */
+    AdjustTimestampForTypmod(&result, typmod);
+    PG_RETURN_TIMESTAMP(result);
+}
 /* timestamp_out()
  * Convert a timestamp to external form.
  */

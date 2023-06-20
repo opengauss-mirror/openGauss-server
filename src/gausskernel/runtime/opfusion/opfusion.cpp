@@ -1053,8 +1053,18 @@ Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum 
             return OidFunctionCall1(functionId, arg[0]);
         case 2:
             return OidFunctionCall2(functionId, arg[0], arg[1]);
-        case 3:
-            return OidFunctionCall3(functionId, arg[0], arg[1], arg[2]);
+        case 3:{
+            switch (functionId) {
+                case F_BPCHAR:
+                    return opfusion_bpchar(arg[0], arg[1], arg[2]);
+                    break;
+                case F_VARCHAR:
+                    return opfusion_varchar(arg[0], arg[1], arg[2]);
+                    break;
+                default:
+                    return OidFunctionCall3(functionId, arg[0], arg[1], arg[2]);
+            }
+        }
         case 4:
             return OidFunctionCall4(functionId, arg[0], arg[1], arg[2], arg[3]);
         default: {

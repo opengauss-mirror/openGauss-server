@@ -274,6 +274,8 @@ extern int ParseDateTime(
     const char* timestr, char* workbuf, size_t buflen, char** field, int* ftype, int maxfields, int* numfields);
 extern int DecodeDateTime(char** field, int* ftype, int nf, int* dtype, struct pg_tm* tm, fsec_t* fsec, int* tzp);
 extern int DecodeTimeOnly(char** field, int* ftype, int nf, int* dtype, struct pg_tm* tm, fsec_t* fsec, int* tzp);
+extern int ParseIudDateTime(char* str, struct pg_tm* tm, fsec_t* fsec);
+extern int ParseIudDateOnly(char* str, struct pg_tm* tm);
 extern int DecodeInterval(
     char** field, const int* ftype, int nf, int range, int* dtype, struct pg_tm* tm, fsec_t* fsec);
 extern int DecodeISO8601Interval(char* str, int* dtype, struct pg_tm* tm, fsec_t* fsec);
