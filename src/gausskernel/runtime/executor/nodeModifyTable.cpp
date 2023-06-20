@@ -2228,14 +2228,6 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         bool update_indexes = false;
         LockTupleMode lockmode;
 
-        /* acquire Form_pg_attrdef ad_on_update */
-        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
-            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, tupleid, oldPartitionOid, bucketid);
-            if (!update_fix_result) {
-                tuple = slot->tts_tuple;
-            }
-        }
-
         /*
          * Check the constraints of the tuple
          *
@@ -2254,6 +2246,14 @@ lreplace:
         if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_generated_stored) {
             ExecComputeStoredGenerated(result_rel_info, estate, slot, tuple, CMD_UPDATE);
             tuple = slot->tts_tuple;
+        }
+
+        /* acquire Form_pg_attrdef ad_on_update */
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
+            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, tupleid, oldPartitionOid, bucketid);
+            if (!update_fix_result) {
+                tuple = slot->tts_tuple;
+            }
         }
 
         if (result_relation_desc->rd_att->constr) {
