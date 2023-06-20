@@ -1013,7 +1013,7 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
         return NOBYPASS_PARTITION_BYPASS_NOT_OPEN;
     }
     if (RELATION_IS_PARTITIONED(rel) && ftype == INSERT_SUB_FUSION) {
-        heap_close(rel, AccessShareLock);
+        heap_close(rel, NoLock);
         return NOBYPASS_PARTITION_BYPASS_NOT_OPEN;
     }
     if (RELATION_IS_PARTITIONED(rel) && ENABLE_GPC) {
