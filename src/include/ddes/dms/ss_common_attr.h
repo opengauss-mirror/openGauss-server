@@ -63,6 +63,8 @@
 
 #define SS_STANDBY_MODE (SS_NORMAL_STANDBY || SS_REFORM_PARTNER)
 
+#define SS_STANDBY_MODE_WITH_REMOTE_EXECUTE (SS_STANDBY_MODE && g_instance.attr.attr_sql.enableRemoteExcute)
+
 #define SS_IN_REFORM (ENABLE_DMS && g_instance.dms_cxt.SSReformInfo.in_reform == true)
 
 #define SS_IN_FLUSHCOPY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == true)

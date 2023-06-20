@@ -91,6 +91,10 @@ CommandId HeapTupleHeaderGetCmin(HeapTupleHeader tup, Page page)
 
     Assert(TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tup)));
 
+    if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
+        return cid;
+    }
+
     if (tup->t_infomask & HEAP_COMBOCID)
         return GetRealCmin(cid);
     else
@@ -102,6 +106,10 @@ CommandId HeapTupleGetCmin(HeapTuple tup)
     CommandId cid = HeapTupleHeaderGetRawCommandId(htup);
 
     Assert(TransactionIdIsCurrentTransactionId(HeapTupleGetRawXmin(tup)));
+
+    if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
+        return cid;
+    }
 
     if (htup->t_infomask & HEAP_COMBOCID)
         return GetRealCmin(cid);
@@ -116,6 +124,10 @@ CommandId HeapTupleGetCmax(HeapTuple tup)
 
     Assert(TransactionIdIsCurrentTransactionId(HeapTupleGetUpdateXid(tup)));
 
+    if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
+        return cid;
+    }
+
     if (htup->t_infomask & HEAP_COMBOCID)
         return GetRealCmax(cid);
     else
@@ -127,6 +139,10 @@ CommandId HeapTupleHeaderGetCmax(HeapTupleHeader tup, Page page)
     CommandId cid = HeapTupleHeaderGetRawCommandId(tup);
 
     Assert(TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetUpdateXid(page, tup)));
+
+    if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
+        return cid;
+    }
 
     if (tup->t_infomask & HEAP_COMBOCID)
         return GetRealCmax(cid);
@@ -140,6 +156,9 @@ bool CheckStreamCombocid(HeapTupleHeader tup, CommandId current_cid, Page page)
     CommandId cid = HeapTupleHeaderGetRawCommandId(tup);
 
     Assert(TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tup)));
+    if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
+        return false;
+    }
 
     /*
      * the top consumer may change its combocid information but cannot

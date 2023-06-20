@@ -2714,8 +2714,11 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                     }
                     FreeSavepointList();
 
-                    if (SS_STANDBY_MODE && g_instance.attr.attr_sql.enableRemoteExcute) {
+                    if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
                         ClearTxnInfoForSSLibpqsw();
+                        if (libpqsw_get_transaction()) {
+                            libpqsw_set_transaction(false);
+                        }
                     }
                     break;
 
