@@ -687,5 +687,24 @@ select prosrc from pg_proc where proname='test_bt_b';
 select test_bt_b();
 drop procedure test_bt_b;
 
+-- test variadic
+CREATE procedure pro(variadic my_args text[])
+    AS
+DECLARE
+    result_text text;
+BEGIN
+    result_text := '';
+    FOR i IN 1..array_length(my_args, 1) LOOP
+        result_text := result_text || my_args[i] || ' ';
+        raise notice '%',result_text;
+    END LOOP;
+END;
+/
+
+call pro('Hello', 'World', 'from', 'OpenGauss');
+select pro('Hello', 'World', 'from', 'OpenGauss');
+
+drop procedure pro;
+
 \c regression;
 drop database IF EXISTS pl_test_pkg_define;
