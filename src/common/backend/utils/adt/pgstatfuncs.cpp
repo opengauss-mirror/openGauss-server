@@ -8856,7 +8856,6 @@ Datum ss_buffer_ctrl(PG_FUNCTION_ARGS)
          */
         for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
             bufHdr = GetBufferDescriptor(i);
-            LWLockAcquire(bufHdr->content_lock, LW_SHARED);
             buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
             fctx->record[i].bufferid = i + 1;
             fctx->record[i].is_remote_dirty = buf_ctrl->is_remote_dirty;
@@ -8871,7 +8870,6 @@ Datum ss_buffer_ctrl(PG_FUNCTION_ARGS)
             fctx->record[i].pblk_lsn = buf_ctrl->pblk_lsn;
             fctx->record[i].seg_fileno = buf_ctrl->seg_fileno;
             fctx->record[i].seg_blockno = buf_ctrl->seg_blockno;
-            LWLockRelease(bufHdr->content_lock);
         }
 
         for (i = NUM_BUFFER_PARTITIONS; --i >= 0;)
