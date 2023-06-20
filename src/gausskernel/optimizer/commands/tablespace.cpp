@@ -2503,11 +2503,12 @@ bool IsPathContainsSymlink(char* path)
 
         *ptr = '\0';
         rc = memset_s(&statbuf, sizeof(statbuf), 0, sizeof(statbuf));
-        if (rc != EOK) {
-            continue;
-        }
+        securec_check(rc, "\0", "\0");
 
         if (lstat(path, &statbuf) == 0 && S_ISLNK(statbuf.st_mode)) {
+            if (!isLast) {
+                *ptr = '/';
+            }
             return true;
         }
 
