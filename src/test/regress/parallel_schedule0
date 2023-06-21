@@ -1088,3 +1088,5 @@ test: user_host_test
 
 # test for new_expr_by_flatten
 test: enable_expr_fusion_flatten
+# test for on update timestamp and generated column
+test: on_update_session1 on_update_session2
