@@ -54,6 +54,12 @@ bool libpqsw_need_end();
 void libpqsw_set_end(bool is_end);
 /* query if enable redirect*/
 bool libpqsw_redirect();
+/* query if only set redirect*/
+bool libpqsw_get_redirect();
+/* query if in transaction */
+bool libpqsw_get_transaction();
+/* set in transaction status */
+void libpqsw_set_transaction(bool transaction);
 /* udpate redirect flag */
 void libpqsw_set_redirect(bool redirect);
 //Judge if enable remote_excute.
@@ -77,6 +83,7 @@ bool libpqsw_is_begin();
 bool libpqsw_is_end();
 bool libpqsw_only_localrun();
 void libpqsw_create_conn();
+void libpqsw_trace_q_msg(const char* commandTag, const char* queryString);
 
 #ifdef _cplusplus
 }

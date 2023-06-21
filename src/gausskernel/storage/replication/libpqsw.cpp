@@ -330,7 +330,7 @@ RedirectManager* get_redirect_manager()
 }
 
 // get is transaction state
-static bool libpqsw_get_transaction()
+bool libpqsw_get_transaction()
 {
     return get_redirect_manager()->state.transaction;
 }
@@ -368,7 +368,7 @@ void libpqsw_cleanup(int code, Datum arg)
 
 
 // set is in transaction insert
-static void libpqsw_set_transaction(bool transaction)
+void libpqsw_set_transaction(bool transaction)
 {
     if (transaction != get_redirect_manager()->state.transaction) {
         libpqsw_trace("transaction status change, current commit status:%s", transaction ? "begin": "end");
@@ -396,7 +396,7 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
     } else if (libpqsw_begin_command(commandTag) || libpqsw_remote_in_transaction()) {
         libpqsw_set_transaction(true);
         need_redirect = true;
-    } else if (libpqsw_redirect()) {
+    } else if (libpqsw_redirect() || libpqsw_end_command(commandTag)) {
         need_redirect = true;
     } else {
         if (strcmp(commandTag, "SET") == 0) {
@@ -416,9 +416,6 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
             if (!queryIsReadOnly(tmp_query)) {
                 need_redirect = true;
                 libpqsw_set_redirect(true);
-                if (query_string != NULL) {
-                    libpqsw_trace("we find new transfer sql by query_list:%s", query_string);
-                }
                 break;
             }
         }
@@ -535,18 +532,22 @@ static inline int libpqsw_connection_status() {
     return get_sw_cxt()->streamConn == NULL ? -1 : get_sw_cxt()->streamConn->xactStatus;
 }
 
-static inline void libpqsw_print_trace_log(int qtype, const char* stmt, const char* query)
+static inline void libpqsw_print_trace_log(int qtype, const char* stmt, const char* query, const char* prefix = NULL)
 {
-    libpqsw_trace("[TRACE] %c: portal=%s, stmt=%s, trans:%d, redirect:%s, remote:%s, local:%s, sstate:%x, need end:%s",
+    char* mask_string = NULL;
+    MASK_PASSWORD_START(mask_string, query);
+    libpqsw_trace("%s %c: portal=%s, stmt=%s, trans:%d, redirect:%s, remote:%s, local:%s, sstate:%x, need end:%s",
+        (prefix == NULL) ? "[TRACE]" : prefix,
         qtype,
         stmt,
-        query,
+        mask_string,
         libpqsw_connection_status(),
         libpqsw_get_redirect() ? "true" : "false",
         libpqsw_remote_in_transaction() ? "true" : "false",
         libpqsw_get_transaction() ? "true" : "false",
         SS_STANDBY_MODE ? get_redirect_manager()->ss_standby_state : 0,
         libpqsw_need_end() ? "true" : "false");
+    MASK_PASSWORD_END(mask_string, query);
 }
 
 /*
@@ -604,6 +605,13 @@ static inline void libpqsw_trace_other_msg(int qtype, StringInfo msg)
 static inline void libpqsw_trace_empty_msg(int qtype, StringInfo msg)
 {
     // nothing to do.
+}
+
+void libpqsw_trace_q_msg(const char* commandTag, const char* queryString)
+{
+    const char* prefix = "we find new transfer request:[TRACE]";
+    int qtype = 'Q';
+    libpqsw_print_trace_log(qtype, commandTag, queryString, prefix);
 }
 
 typedef void (*trace_msg_func)(int qtype, StringInfo info);
@@ -803,6 +811,17 @@ static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *
         redirect_manager->ss_standby_state |= SS_STANDBY_REQ_END;
         ret = true;
     } else if (query_list != NIL) {
+        /* Don't support DDL with in transaction */
+        if (set_command_type_by_commandTag(commandTag) == CMD_DDL) {
+            if (libpqsw_fetch_command(commandTag)) {
+                get_redirect_manager()->ss_standby_state |= SS_STANDBY_REQ_WRITE_REDIRECT;
+                return ret;
+            } else {
+                libpqsw_disconnect();
+                ereport(ERROR, (errmsg("The multi-write feature doesn't support DDL within transaction!")));
+            }
+        }
+
         TableConstraint tableConstraint;
         initTableConstraint(&tableConstraint);
         checkQuery(query_list, &tableConstraint);
@@ -816,19 +835,13 @@ static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *
         ListCell* remote_lc = NULL;
         foreach (remote_lc, query_list) {
             Query* tmp_query = (Query*)lfirst(remote_lc);
-            if (libpqsw_fetch_command(commandTag) || queryIsReadOnly(tmp_query)) {
+            if (queryIsReadOnly(tmp_query)) {
                 redirect_manager->ss_standby_state |= SS_STANDBY_REQ_SELECT;
                 libpqsw_set_end(true);
                 ret = true;
                 libpqsw_trace("we find new local-only execute sql by query_list:%s", commandTag);
                 return ret;
             }
-        }
-
-        /* Don't support DDL with in transaction */
-        if ((get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_WRITE_REDIRECT) &&
-            set_command_type_by_commandTag(commandTag) == CMD_DDL) {
-            ereport(ERROR, (errmsg("The multi-write feature doesn't support DDL within transaction!")));
         }
     }
     libpqsw_set_end(false);
@@ -1039,7 +1052,8 @@ bool libpqsw_end_command(const char* commandTag)
 // is fetch commandTag
 bool libpqsw_fetch_command(const char* commandTag)
 {
-    return commandTag != NULL && (strcmp(commandTag, "FETCH") == 0);
+    return commandTag != NULL &&
+        (strcmp(commandTag, "FETCH") == 0 || strstr(commandTag, "CURSOR") != NULL || strcmp(commandTag, "MOVE") == 0);
 }
 
 // set commandTag

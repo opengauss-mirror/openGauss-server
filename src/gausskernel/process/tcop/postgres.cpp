@@ -2677,15 +2677,15 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
 
         }
 
-        if (libpqsw_redirect() && !SS_STANDBY_MODE) {
-            // quick transfer to master
-            libpqsw_trace("we find new transfer cmdtag:%s sql:%s", commandTag, query_string);
-            libpqsw_process_query_message(commandTag, NULL, query_string);
-            if (snapshot_set != false) {
-                PopActiveSnapshot();
+        if (libpqsw_get_redirect()) {
+            if (libpqsw_process_query_message(commandTag, NULL, query_string)) {
+                libpqsw_trace_q_msg(commandTag, query_string);
+                if (snapshot_set) {
+                    PopActiveSnapshot();
+                }
+                finish_xact_command();
+                return;
             }
-            finish_xact_command();
-            return;
         }
 
         BeginCommand(commandTag, dest);
@@ -2800,9 +2800,9 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         }
 
         if (libpqsw_process_query_message(commandTag, querytree_list, query_string, query_string_len)) {
-            libpqsw_trace("we find new transfer cmdtag:%s, sql:%s", commandTag, query_string);
+            libpqsw_trace_q_msg(commandTag, query_string);
             if (SS_STANDBY_MODE && (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag))) {
-                libpqsw_trace("libpq send sql at my side as well:%s", query_string);
+                libpqsw_trace("libpq send sql at my side as well:%s", commandTag);
             } else {
                 if (snapshot_set != false) {
                     PopActiveSnapshot();
