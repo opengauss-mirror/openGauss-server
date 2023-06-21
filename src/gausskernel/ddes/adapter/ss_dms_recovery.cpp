@@ -145,6 +145,10 @@ bool SSRecoveryApplyDelay()
         return false;
     }
     
+    if (DORADO_STANDBY_CLUSTER) {
+        return true;
+    }
+
     while (g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag) {
         /* might change the trigger file's location */
         RedoInterruptCallBack();
