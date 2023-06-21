@@ -18048,9 +18048,10 @@ bool static transformTableCompressedOptions(Relation rel, bytea* relOption, List
     }
     if (newCompressOpt->compressPreallocChunks >= BLCKSZ / newCompressOpt->compressChunkSize) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), 
-                        errmsg("invalid compress_prealloc_chunks %u, must be less than %u",
+                        errmsg("invalid compress_prealloc_chunks %u, must be less than %u for %s",
                                 newCompressOpt->compressPreallocChunks,
-                                BLCKSZ / newCompressOpt->compressChunkSize)));
+                                BLCKSZ / newCompressOpt->compressChunkSize,
+                                RelationGetRelationName(rel))));
     }
 
     return true;

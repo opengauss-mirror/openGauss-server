@@ -91,7 +91,7 @@ DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_cbc_
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2 SET (compresstype = 1, compress_chunk_size = 4096, compress_prealloc_chunks = 2); -- fail
-ERROR:  invalid compress_prealloc_chunks 2, must be less than 2
+ERROR:  invalid compress_prealloc_chunks 2, must be less than 2 for uncompress_astore_to_compresstype_1_ccs_4096_cpc_2
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2;
 -- set compressed options of column table
 CREATE TABLE alter_compress_params_schema.alter_column_table_compressed_options (id int, value varchar) WITH (ORIENTATION = column);
