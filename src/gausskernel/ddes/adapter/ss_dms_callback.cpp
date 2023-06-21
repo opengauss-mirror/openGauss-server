@@ -56,6 +56,12 @@ void SSWakeupRecovery(void)
     uint32 thread_num = (uint32)g_instance.ckpt_cxt_ctl->pgwr_procs.num;
     /* need make sure pagewriter started first */
     bool need_recovery = true;
+
+    if (DORADO_STANDBY_CLUSTER) {
+        g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
+        return;
+    }
+
     while (pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) != thread_num) {
         if (!RecoveryInProgress()) {
             need_recovery = false;
@@ -370,6 +376,9 @@ static void CBSwitchoverResult(void *db_handle, int result)
     } else {
         /* abort and restore state */
         g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
+        if (DORADO_STANDBY_CLUSTER) {
+            g_instance.dms_cxt.SSReformInfo.in_reform = false;
+        }
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS switchover] Switchover failed, errno: %d.", result)));
     }
 }

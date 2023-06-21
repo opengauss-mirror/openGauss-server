@@ -766,7 +766,7 @@ static ServerMode get_runmode(void)
     if (!strncmp(run_mode, "Cascade Standby", MAXRUNMODE))
         return CASCADE_STANDBY_MODE;
     if (!strncmp(run_mode, "Main Standby", MAXRUNMODE))
-        return STANDBY_MODE;
+        return MAIN_STANDBY_MODE;
     if (!strncmp(run_mode, "Pending", MAXRUNMODE))
         return PENDING_MODE;
     if (!strncmp(run_mode, "Unknown", MAXRUNMODE))
@@ -2582,8 +2582,6 @@ static void do_switchover(uint32 term)
     int ret;
     char term_path[MAXPGPATH];
 
-    bool is_cluster_standby = ss_read_dorado_config();
-
     pg_log(PG_WARNING, _("switchover term (%u)\n"), term);
 
     ret = snprintf_s(term_path, MAXPGPATH, MAXPGPATH - 1, "%s/term_file", pg_data);
@@ -2623,10 +2621,8 @@ static void do_switchover(uint32 term)
     }
 
     origin_run_mode = run_mode = get_runmode();
-    instance_config.dss.instance_id = get_instance_id();
 
-    if ((run_mode == PRIMARY_MODE && !is_cluster_standby) ||
-            (instance_config.dss.instance_id == ss_get_primary_id() && is_cluster_standby)) {
+    if ((run_mode == PRIMARY_MODE || run_mode == MAIN_STANDBY_MODE)) {
         pg_log(PG_WARNING, _("switchover completed (%s)\n"), pg_data);
         return;
     } else if (UNKNOWN_MODE == run_mode) {
@@ -2716,38 +2712,25 @@ static void do_switchover(uint32 term)
                     exit(1);
                 }
             }
-            /* 
-            * in share storage dorado cluster,the server mode of standby cluster not have primary 
-            * we can determine whether it is completed by reading the node ID and primaryid 
+
+            if ((run_mode = get_runmode()) == origin_run_mode) {
+                pg_log(PG_PRINT, ".");
+                pg_usleep(1000000); /* 1 sec */
+            }
+            /*
+            * we query the status of server, if connection is failed, it will
+            * retry 3 times.
             */
-            if (is_cluster_standby) {
-                if (instance_config.dss.instance_id != ss_get_primary_id()) {
-                    pg_log(PG_PRINT, ".");
-                    pg_usleep(1000000); /* 1 sec */
-                } else {
-                    break;
-                }
+            else if (failed_count < 3) {
+                failed_count++;
+                pg_log(PG_PRINT, ".");
+                pg_usleep(1000000); /* 1 sec */
             } else {
-                if ((run_mode = get_runmode()) == origin_run_mode) {
-                    pg_log(PG_PRINT, ".");
-                    pg_usleep(1000000); /* 1 sec */
-                }
-                /*
-                * we query the status of server, if connection is failed, it will
-                * retry 3 times.
-                */
-                else if (failed_count < 3) {
-                    failed_count++;
-                    pg_log(PG_PRINT, ".");
-                    pg_usleep(1000000); /* 1 sec */
-                } else {
-                    break;
-                }
+                break;
             }
         }
         pg_log(PG_PRINT, _("\n"));
-        if ((!is_cluster_standby && origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE) ||
-            (is_cluster_standby && instance_config.dss.instance_id != ss_get_primary_id()) || 
+        if ((origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE && run_mode != MAIN_STANDBY_MODE) ||
             (origin_run_mode == CASCADE_STANDBY_MODE && run_mode != STANDBY_MODE)) {
             pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status.\n"), wait_seconds);
         } else {

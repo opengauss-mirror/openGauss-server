@@ -10562,7 +10562,7 @@ void StartupXLOG(void)
     }
 #endif
 
-    if (ENABLE_DMS && ENABLE_REFORM && !SS_PRIMARY_DEMOTED) {
+    if (ENABLE_DMS && ENABLE_REFORM && !SS_PRIMARY_DEMOTED && !DORADO_STANDBY_CLUSTER) {
         DMSWaitReform();
     }
 }

@@ -10082,6 +10082,26 @@ static void sigusr1_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
         }
 
+        if (g_instance.pid_cxt.UndoLauncherPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
+        }
+#ifndef ENABLE_MULTIPLE_NODES
+        if (g_instance.pid_cxt.ApplyLauncerPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
+        }
+#endif
+        if (g_instance.pid_cxt.GlobalStatsPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.UndoRecyclerPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.FaultMonitorPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.FaultMonitorPID, SIGTERM);
+        }
+
         pmState = PM_WAIT_BACKENDS;
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
