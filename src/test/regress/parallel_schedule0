@@ -1084,3 +1084,6 @@ test: alter_foreign_schema
 test: slow_sql
 # test user@host
 test: user_host_test
+
+# test for on update timestamp and generated column
+test: on_update_session1 on_update_session2
