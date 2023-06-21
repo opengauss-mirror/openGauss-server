@@ -8,6 +8,22 @@ drop schema if exists plpgsql_array_interface;
 create schema plpgsql_array_interface;
 set current_schema = plpgsql_array_interface;
 
+-- must be call in procedure --
+select array_varchar_exists(array['1', '2'], '3');
+select array_varchar_next(array['1','2'], '3');
+select array_varchar_prior(array['1','2'], '3');
+select array_varchar_first(array['1','2']);
+select array_varchar_last(array['1','2']);
+select array_varchar_deleteidx(array['1','2'], '3');
+
+select array_integer_exists(array[1, 2], 3);
+select array_integer_next(array[1, 2], 3);
+select array_integer_prior(array[1, 2], 3);
+select array_integer_first(array[1, 2]);
+select array_integer_last(array[1, 2]);
+select array_integer_deleteidx(array[1, 2], 3);
+
+
 -- test array interface count --
 create or replace procedure array_interface_p1()
 as

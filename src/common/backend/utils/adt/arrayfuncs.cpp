@@ -1830,7 +1830,8 @@ Datum array_varchar_exists(PG_FUNCTION_ARGS)
         PG_RETURN_BOOL(false);
     }
     Datum index_datum = PG_GETARG_DATUM(1);
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL || 
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_varchar_exists must be call in procedure")));
     }
@@ -1864,7 +1865,8 @@ Datum array_integer_exists(PG_FUNCTION_ARGS)
         PG_RETURN_BOOL(false);
     }
     Datum index_datum = PG_GETARG_DATUM(1);
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_integer_exists must be call in procedure")));
     }
@@ -2009,7 +2011,8 @@ Datum array_varchar_next(PG_FUNCTION_ARGS)
 
     int index = 0;
     Datum index_datum = PG_GETARG_DATUM(1);
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_varchar_next must be call in procedure")));
     }
@@ -2059,7 +2062,8 @@ Datum array_varchar_prior(PG_FUNCTION_ARGS)
     
     int index = 0;
     Datum index_datum = PG_GETARG_DATUM(1);
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_varchar_prior must be call in procedure")));
     }
@@ -2104,7 +2108,8 @@ Datum array_varchar_first(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
     
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_varchar_first must be call in procedure")));
     }
@@ -2151,7 +2156,8 @@ Datum array_integer_next(PG_FUNCTION_ARGS)
     }
 
     Datum index_datum = PG_GETARG_DATUM(1);
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_integer_next must be call in procedure")));
     }
@@ -2208,7 +2214,8 @@ Datum array_integer_prior(PG_FUNCTION_ARGS)
     }
     
     Datum index_datum = PG_GETARG_DATUM(1);
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_integer_prior must be call in procedure")));
     }
@@ -2261,7 +2268,8 @@ Datum array_integer_first(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
     
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_integer_first must be call in procedure")));
     }
@@ -2305,7 +2313,8 @@ Datum array_integer_last(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
     
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_integer_last must be call in procedure")));
     }
@@ -2330,7 +2339,8 @@ Datum array_varchar_last(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
     
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_varchar_last must be call in procedure")));
     }
@@ -2386,7 +2396,8 @@ Datum array_integer_deleteidx(PG_FUNCTION_ARGS)
     }
 
     Datum index_datum = PG_GETARG_DATUM(1);
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_integer_deleteidx must be call in procedure")));
     }
@@ -2411,7 +2422,8 @@ Datum array_varchar_deleteidx(PG_FUNCTION_ARGS)
     }
 
     Datum index_datum = PG_GETARG_DATUM(1);
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_varchar_deleteidx must be call in procedure")));
     }
@@ -2618,7 +2630,8 @@ Datum array_indexby_delete(PG_FUNCTION_ARGS)
     checkEnv();
     ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
     ArrayType* array = construct_empty_array(ARR_ELEMTYPE(v));
-    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_indexby_delete must be call in procedure")));
     }
