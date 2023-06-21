@@ -9709,12 +9709,19 @@ Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, 
         ReportPartitionOpenError(relation, partition_id);
     }
 
+    Assert(RelationIsPartitioned(relation));
+    /* subpartition table open subpartition, which is judged by partitionOpen() */
     if (RelationIsSubPartitioned(relation) && relation->rd_id != parentid) {
         /* partition_id is subpartition oid */
         p = SubPartitionOidGetPartition(relation, partition_id, lockmode);
         Assert(relation->rd_id == partid_get_parentid(p->pd_part->parentid));
         return p;
     }
+    if (relation->rd_id != parentid)
+        ereport(ERROR,
+                (errcode(ERRCODE_PARTITION_ERROR),
+                 errmsg("partition %u does not exist on relation \"%s\"", partitionOid,
+                         RelationGetRelationName(relation))));
 
     /*
      * If we are executing select for update/share operation,
@@ -9852,6 +9859,8 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
         return NULL;
     }
 
+    Assert(RelationIsPartitioned(relation));
+    /* subpartition table open subpartition, which is judged by tryPartitionOpen() */
     if (RelationIsSubPartitioned(relation) && relation->rd_id != parentid) {
         if (!SearchSysCacheExists1(PARTRELID, ObjectIdGetDatum(partition_id))) {
             return NULL;
@@ -9861,6 +9870,8 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
         Assert(relation->rd_id == partid_get_parentid(p->pd_part->parentid));
         return p;
     }
+    if (relation->rd_id != parentid)
+        return NULL;
 
     /*
      * If we are executing select for update/share operation,

@@ -100,11 +100,38 @@ SELECT pg_partition_size('range_list_sales', 'customer1') =
     pg_partition_size('range_list_sales', 'customer1_channel2') +
     pg_partition_size('range_list_sales', 'customer1_channel3') +
     pg_partition_size('range_list_sales', 'customer1_channel4');
+-- (oid, oid)
+SELECT (SELECT pg_partition_size('range_list_sales'::regclass::oid, oid) from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1')
+    =
+    (SELECT sum(pg_partition_size('range_list_sales'::regclass::oid, oid)) from pg_partition where parentid in (SELECT oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1'));
 -- should be equal
 SELECT pg_partition_size('range_list_sales', 'customer4') = pg_partition_size('range_list_sales', 'customer4_channel1');
 
 -- invalid parameter, error
 SELECT pg_partition_size('range_list_sales', 'parttemp');
+
+create table test_pg_partition_size2 (a int);
+create table test_pg_partition_size3 (a int, b int)
+partition by range (a)
+subpartition by hash (b)
+(
+    partition p1 values less than (4)
+        (subpartition sp1)
+);
+--ERROR regular table
+select pg_partition_size('test_pg_partition_size2', 'customer1')>0;
+select pg_partition_size('test_pg_partition_size2', 'customer1_channel1')>0;
+select pg_partition_size('test_pg_partition_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1';
+select pg_partition_size('test_pg_partition_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 
+    (select oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1') and relname = 'customer1_channel1';
+--ERROR partitioned table does not match the partition
+select pg_partition_size('test_pg_partition_size3', 'range_list_sales')>0;
+select pg_partition_size('test_pg_partition_size3', 'customer1')>0;
+select pg_partition_size('test_pg_partition_size3', 'customer1_channel1')>0;
+select pg_partition_size('test_pg_partition_size3'::regclass::oid, 'range_list_sales'::regclass::oid)>0;
+select pg_partition_size('test_pg_partition_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1';
+select pg_partition_size('test_pg_partition_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 
+    (select oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1') and relname = 'customer1_channel1';
 
 -- 6. pg_partition_indexes_size
 SELECT pg_partition_indexes_size('range_list_sales', 'customer1');
@@ -122,10 +149,33 @@ SELECT pg_partition_indexes_size('range_list_sales', 'customer1') =
     pg_partition_indexes_size('range_list_sales', 'customer1_channel2') +
     pg_partition_indexes_size('range_list_sales', 'customer1_channel3') +
     pg_partition_indexes_size('range_list_sales', 'customer1_channel4');
+-- (oid, oid)
+SELECT (SELECT pg_partition_indexes_size('range_list_sales'::regclass::oid, oid) from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1')
+    =
+    (SELECT sum(pg_partition_indexes_size('range_list_sales'::regclass::oid, oid)) from pg_partition where parentid in (SELECT oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1'));
 -- should be equal
 SELECT pg_partition_indexes_size('range_list_sales', 'customer4') = pg_partition_indexes_size('range_list_sales', 'customer4_channel1');
 
+CREATE INDEX test_pg_partition_size2_idx ON test_pg_partition_size2(a);
+CREATE INDEX test_pg_partition_size3_idx ON test_pg_partition_size3(a) LOCAL;
+--ERROR regular table
+select pg_partition_indexes_size('test_pg_partition_size2', 'customer1')>0;
+select pg_partition_indexes_size('test_pg_partition_size2', 'customer1_channel1')>0;
+select pg_partition_indexes_size('test_pg_partition_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1';
+select pg_partition_indexes_size('test_pg_partition_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 
+    (select oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1') and relname = 'customer1_channel1';
+--ERROR partitioned table does not match the partition
+select pg_partition_indexes_size('test_pg_partition_size3', 'range_list_sales')>0;
+select pg_partition_indexes_size('test_pg_partition_size3', 'customer1')>0;
+select pg_partition_indexes_size('test_pg_partition_size3', 'customer1_channel1')>0;
+select pg_partition_indexes_size('test_pg_partition_size3'::regclass::oid, 'range_list_sales'::regclass::oid)>0;
+select pg_partition_indexes_size('test_pg_partition_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1';
+select pg_partition_indexes_size('test_pg_partition_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 
+    (select oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1') and relname = 'customer1_channel1';
+
 -- finish, clean
+DROP TABLE test_pg_partition_size2;
+DROP TABLE test_pg_partition_size3;
 DROP TABLE range_list_sales;
 DROP SCHEMA hw_subpartition_size CASCADE;
 RESET CURRENT_SCHEMA;
