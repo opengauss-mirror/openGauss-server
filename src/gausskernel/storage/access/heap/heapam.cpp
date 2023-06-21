@@ -6071,6 +6071,14 @@ void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
                 errmsg("All built-in functions are hard coded, and they should not be updated.")));
     }
 
+    /* All attribute of system table columns are hard coded, and thus they should not be updated */
+    Oid attrelid = ((Form_pg_attribute)GETSTRUCT(tup))->attrelid;
+    if (u_sess->attr.attr_common.IsInplaceUpgrade == false && IsAttributeRelation(relation) &&
+        IsSystemObjOid(attrelid)) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("All attribute of system table columns are hard coded, and they should not be updated.")));
+    }
+
     result = heap_update(relation,
         NULL,
         otid,
