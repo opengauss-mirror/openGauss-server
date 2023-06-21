@@ -275,6 +275,23 @@ select pg_partition_size('test_pg_partition_size', 19000)>0;
 --ERROR
 select pg_partition_size('test_pg_partition_size', 'test_pg_partition_size_p2')>0;
 
+create table test_pg_partition_size2 (a int);
+create table test_pg_partition_size3 (a int)
+partition by range (a)
+(
+	partition p1 values less than (4)
+);
+--ERROR regular table
+select pg_partition_size('test_pg_partition_size2', 'test_pg_partition_size_p1')>0;
+select pg_partition_size('test_pg_partition_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 'test_pg_partition_size'::regclass and relname='test_pg_partition_size_p1';
+--ERROR partitioned table does not match the partition
+select pg_partition_size('test_pg_partition_size3', 'test_pg_partition_size2')>0;
+select pg_partition_size('test_pg_partition_size3', 'test_pg_partition_size_p1')>0;
+select pg_partition_size('test_pg_partition_size3'::regclass::oid, 'test_pg_partition_size2'::regclass::oid)>0;
+select pg_partition_size('test_pg_partition_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 'test_pg_partition_size'::regclass and relname='test_pg_partition_size_p1';
+
+drop table test_pg_partition_size3;
+drop table test_pg_partition_size2;
 drop table test_pg_partition_size;
 
 
@@ -296,6 +313,32 @@ select pg_partition_indexes_size('test_pg_partition_indexes_size', 19000)>0;
 --ERROR
 select pg_partition_indexes_size('test_pg_partition_indexes_size', 'test_pg_partition_indexes_size_p2')>0;
 
+create table test_pg_partition_indexes_size2 (a int);
+create table test_pg_partition_indexes_size3 (a int)
+partition by range (a)
+(
+	partition p1 values less than (4)
+);
+insert into test_pg_partition_indexes_size3 values (1);
+
+-- no local partition index, return 0
+select pg_partition_indexes_size('test_pg_partition_indexes_size3', 'p1');
+select pg_partition_indexes_size('test_pg_partition_indexes_size3'::regclass::oid, 12345::oid);
+
+create index test_pg_partition_indexes_size3_index on test_pg_partition_indexes_size3 (a) local;
+select pg_partition_indexes_size('test_pg_partition_indexes_size3', 'p1')>0;
+
+--ERROR regular table
+select pg_partition_indexes_size('test_pg_partition_indexes_size2', 'test_pg_partition_indexes_size_p1')>0;
+select pg_partition_indexes_size('test_pg_partition_indexes_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 'test_pg_partition_indexes_size'::regclass and relname='test_pg_partition_indexes_size_p1';
+--ERROR partitioned table does not match the partition
+select pg_partition_indexes_size('test_pg_partition_indexes_size3', 'test_pg_partition_indexes_size2')>0;
+select pg_partition_indexes_size('test_pg_partition_indexes_size3', 'test_pg_partition_indexes_size_p1')>0;
+select pg_partition_indexes_size('test_pg_partition_indexes_size3'::regclass::oid, 'test_pg_partition_indexes_size2'::regclass::oid)>0;
+select pg_partition_indexes_size('test_pg_partition_indexes_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 'test_pg_partition_indexes_size'::regclass and relname='test_pg_partition_indexes_size_p1';
+
+drop table test_pg_partition_indexes_size3;
+drop table test_pg_partition_indexes_size2;
 drop table test_pg_partition_indexes_size;
 
 
