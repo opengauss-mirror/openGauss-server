@@ -1508,6 +1508,13 @@ static int64 calculate_partition_size(Oid partTableOid, Oid partOid)
         return 0;
     }
 
+    if (!RelationIsPartitioned(partTableRel)) {
+        relation_close(partTableRel, AccessShareLock);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_TABLE),
+                 errmsg("relation %u is not a partitioned table", partTableOid)));
+    }
+
     if (!RelationIsSubPartitioned(partTableRel)) {
         partition = partitionOpen(partTableRel, partOid, AccessShareLock);
         partRel = partitionGetRelation(partTableRel, partition);
@@ -1627,6 +1634,13 @@ static int64 calculate_partition_indexes_size(Oid partTableOid, Oid partOid)
 
     if (partTableRel == NULL) {
         return 0;
+    }
+
+    if (!RelationIsPartitioned(partTableRel)) {
+        relation_close(partTableRel, AccessShareLock);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_TABLE),
+                 errmsg("relation %u is not a partitioned table", partTableOid)));
     }
 
     List *partOidList = NIL;
