@@ -26,19 +26,8 @@
 
 #include "access/xlogproc.h"
 
-#define PARSEBUFFER_SIZE (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc))
-#define ONDEMAND_MAX_PARSEBUFF_PREPALLOC ((1024 * 1024 * 1024 - 1) / PARSEBUFFER_SIZE)
-#define ONDEMAND_MAX_PARSESIZE_PREPALLOC (ONDEMAND_MAX_PARSEBUFF_PREPALLOC * PARSEBUFFER_SIZE)
-#define ONDEMAND_MAX_PARSEBUFF_ALLOCSIZE 100    // 100GB
-
-typedef struct
-{
-    int allocNum;
-    void *allocEntry[ONDEMAND_MAX_PARSEBUFF_ALLOCSIZE];
-    void *memslotEntry;
-} OndemandParseAllocCtrl;
-
-
+Size OndemandRecoveryShmemSize(void);
+void OndemandRecoveryShmemInit(void);
 void OndemandXLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, RefOperate *refOperate,
     InterruptFunc interruptOperte);
 void OndemandXLogParseBufferDestory(RedoParseManager *parsemanager);
