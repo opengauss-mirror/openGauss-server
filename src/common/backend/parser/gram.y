@@ -30555,6 +30555,20 @@ check_outarg_info(const bool *have_assigend, const char *argmodes,const int proa
 	}
 }
 
+static bool HasVariadic(int nargs, const char* argmodes)
+{
+	if (!argmodes) {
+		return false;
+	}
+
+	for (int i = nargs - 1; i >= 0; --i) {
+		if (argmodes[i] == FUNC_PARAM_VARIADIC) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // Added CALL for procedure and function
 static Node *
 makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
@@ -30629,15 +30643,16 @@ makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
 		return NULL;
 	}
 
+	/* get the all args informations, only "in" parameters if p_argmodes is null */
+	narg = get_func_arg_info(proctup, &p_argtypes, &p_argnames, &p_argmodes);
+	bool hasVariadic = HasVariadic(narg, p_argmodes);
+
 #ifndef ENABLE_MULTIPLE_NODES
-	if (!has_overload_func && !enable_out_param_override())
+	if (!hasVariadic && !has_overload_func && !enable_out_param_override())
 #else
-        if (!has_overload_func)
+        if (!hasVariadic && !has_overload_func)
 #endif
 	{
-		/* get the all args informations, only "in" parameters if p_argmodes is null */
-		narg = get_func_arg_info(proctup,&p_argtypes,&p_argnames,&p_argmodes);
-
 		/* get the all "in" parameters, except "out" or "table_colums" parameters */
 		ntable_colums = get_table_modes(narg, p_argmodes);
 		narg -= ntable_colums;
