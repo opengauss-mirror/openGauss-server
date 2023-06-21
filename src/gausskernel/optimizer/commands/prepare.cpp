@@ -1982,7 +1982,7 @@ bool quickPlanner(List* querytree_list, Node* parsetree, const char*queryString,
     }
     StringInfo select_sql  = makeStringInfo();
     deparse_query((Query*)query, select_sql, NIL, false, false);
-    if (select_sql->len >= plancache_namesize) {
+    if (select_sql->len >= (int)plancache_namesize) {
         return false;
     }
     PreparedStatement *entry = NULL;

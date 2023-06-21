@@ -694,6 +694,7 @@ void SSDoXLogCopyFromLocal(XLogRecPtr copyEnd)
     uint32 shiftSize = 32;
     ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.shareStorageXLogCtl;
     uint64 xlogFileSize = static_cast<uint64>(g_instance.attr.attr_storage.xlog_file_size);
+    UNUSED(xlogFileSize);
 
     GetWritePermissionSharedStorage();
     ReadShareStorageCtlInfo(ctlInfo);

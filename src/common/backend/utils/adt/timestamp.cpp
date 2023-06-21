@@ -321,6 +321,7 @@ Datum input_timestamp_in(char* str, Oid typioparam, int32 typmod, bool can_ignor
     struct pg_tm tt, *tm = &tt;
     int dterr;
     char workbuf[MAXDATELEN + MAXDATEFIELDS];
+    UNUSED(workbuf);
 
     if (u_sess->attr.attr_common.enable_iud_fusion) {
         dterr = ParseIudDateTime(str, tm, &fsec);

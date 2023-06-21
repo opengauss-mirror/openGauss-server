@@ -1099,7 +1099,7 @@ opt_AllocSetCheck(MemoryContext context)
 
             /* single-chunk block? */
             if (chsize > set->allocChunkLimit &&
-                chsize + ALLOC_CHUNKHDRSZ != blk_used)
+                chsize + ALLOC_CHUNKHDRSZ != (Size)blk_used)
                 elog(WARNING, "problem in alloc set %s: bad single-chunk %p in block %p",
                      name, chunk, block);
 
@@ -1127,7 +1127,7 @@ opt_AllocSetCheck(MemoryContext context)
             bpoz += ALLOC_CHUNKHDRSZ + chsize;
         }
 
-        if ((blk_data + (nchunks * ALLOC_CHUNKHDRSZ)) != blk_used)
+        if ((blk_data + (nchunks * (long)ALLOC_CHUNKHDRSZ)) != blk_used)
             elog(WARNING, "problem in alloc set %s: found inconsistent memory block %p",
                  name, block);
     }

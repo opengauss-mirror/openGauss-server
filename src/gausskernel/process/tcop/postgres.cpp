@@ -1445,7 +1445,7 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
  * Check whether the query is insert multiple values query.
  * In the insert query, only one RTE_VALUES in the ratble is a multi-values query..
  */
-static bool is_insert_multiple_values_query_in_gtmfree(Query* query)
+__attribute__((unused)) static bool is_insert_multiple_values_query_in_gtmfree(Query* query)
 {
     if (query->commandType != CMD_INSERT || !g_instance.attr.attr_storage.enable_gtm_free) {
         return false;

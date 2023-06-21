@@ -14,6 +14,8 @@
  * -------------------------------------------------------------------------
  */
 
+#include <inttypes.h>
+
 #include "access/ustore/undo/knl_uundozone.h"
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/ustore/undo/knl_uundotxn.h"
@@ -814,7 +816,7 @@ reallocate_zone:
         }
         int bitMapIdx = (zid - (int)upersistence * PERSIST_ZONE_COUNT) / BITS_PER_BITMAPWORD;
         if (!UndoZoneGroup::UndoZoneInUse(zid, upersistence)) {
-            ereport(PANIC, (errmsg(UNDOFORMAT("undo zone %d not inuse, bitmap word %u."),
+            ereport(PANIC, (errmsg(UNDOFORMAT("undo zone %d not inuse, bitmap word %" PRIu64"."),
                 zid, g_instance.undo_cxt.uZoneBitmap[i]->words[bitMapIdx])));
         }
         UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, true);
@@ -823,13 +825,13 @@ reallocate_zone:
         }
         if (uzone->GetPersitentLevel() != upersistence) {
             ereport(PANIC, (errmodule(MOD_UNDO),
-                errmsg(UNDOFORMAT("zone %d uzonePersistence %d, upersistance %d, bitmap word %u"),
+                errmsg(UNDOFORMAT("zone %d uzonePersistence %d, upersistance %d, bitmap word %" PRIu64"."),
                     zid, uzone->GetPersitentLevel(), upersistence,
                     g_instance.undo_cxt.uZoneBitmap[i]->words[bitMapIdx])));
         }
         if (!uzone->Detached()) {
             ereport(WARNING, (errmodule(MOD_UNDO),
-                errmsg(UNDOFORMAT("zone %d attached pid %lu, cur pid %lu, bitmap word %u"),
+                errmsg(UNDOFORMAT("zone %d attached pid %lu, cur pid %lu, bitmap word %" PRIu64"."),
                     zid, uzone->GetAttachPid(), u_sess->attachPid,
                     g_instance.undo_cxt.uZoneBitmap[i]->words[bitMapIdx])));
             retry_times++;

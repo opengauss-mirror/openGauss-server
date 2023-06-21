@@ -2717,6 +2717,7 @@ static bool IsPrimary(PGconn* conn)
     char* val = NULL;
     char run_mode[MAXRUNMODE] = {0};
     GaussState state;
+    UNUSED(state);
     errno_t tnRet = EOK;
 
     if (PQstatus(conn) != CONNECTION_OK) {

@@ -2265,6 +2265,7 @@ void ReThrowError(ErrorData* edata)
     if (DB_IS_CMPT(B_FORMAT)) {
         if (edata->elevel == WARNING) {
             EmitErrorReport();
+            exit(1);
         } else {
             PG_RE_THROW();
         }

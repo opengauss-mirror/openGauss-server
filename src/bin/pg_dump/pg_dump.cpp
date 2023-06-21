@@ -834,7 +834,7 @@ int main(int argc, char** argv)
     if (!SetUppercaseAttributeNameToOff(((ArchiveHandle*)fout)->connection)) {
         (void)remove(filename);
         GS_FREE(filename);
-        exit_horribly(NULL, "set uppercase_attribute_name to off failed.\n", progname);
+        exit_horribly(NULL, "%s set uppercase_attribute_name to off failed.\n", progname);
     }
 #endif
 
