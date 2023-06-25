@@ -486,13 +486,7 @@ void DMSUninit()
 int32 DMSWaitReform()
 {
     uint32 has_offline; /* currently not used in openGauss */
-    int ret = dms_wait_reform(&has_offline);
-    if (ret) {
-        while (g_instance.dms_cxt.SSReformInfo.in_reform) {
-            pg_usleep(5000L);
-        }
-    }
-    return ret;
+    return dms_wait_reform(&has_offline);
 }
 
 static bool DMSReformCheckStartup()
@@ -530,4 +524,15 @@ bool DMSWaitInitStartup()
     }
 
     return true;
+}
+
+void StartupWaitReform()
+{
+    while (g_instance.dms_cxt.SSReformInfo.in_reform) {
+        if (dms_reform_failed() || dms_reform_last_failed()) {
+            ereport(LOG, (errmsg("[SS reform] reform failed, startup no need wait.")));
+            break;
+        }
+        pg_usleep(5000L);
+    }
 }

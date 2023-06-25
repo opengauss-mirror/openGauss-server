@@ -100,11 +100,6 @@ bool SSRecoveryNodes()
 {
     bool result = false;
     while (true) {
-        if (dms_reform_failed()) {
-            SSWaitStartupExit();
-            result = false;
-            break;
-        }
         /** why use lock:
          * time1 startup thread: update IsRecoveryDone, not finish UpdateControlFile
          * time2 reform_proc: finish reform, think ControlFile is ok
@@ -132,6 +127,12 @@ bool SSRecoveryNodes()
          */
         if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
             result = true;
+            break;
+        }
+
+        if (dms_reform_failed()) {
+            SSWaitStartupExit();
+            result = false;
             break;
         }
         pg_usleep(REFORM_WAIT_TIME);
