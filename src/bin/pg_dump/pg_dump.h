@@ -257,6 +257,7 @@ typedef struct _tableInfo {
     DumpId autoincconstraint;
     DumpId autoincindex;
     char* autoinc_seqname;
+    char* viewsecurity;
 #ifdef PGXC
     /* PGXC table locator Data */
     char pgxclocatortype;  /* Type of PGXC table locator */

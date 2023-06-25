@@ -690,7 +690,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <boolean> OptRelative
 %type <boolean> OptGPI
 %type <str>		OptTableSpace OptConsTableSpace OptConsTableSpaceWithEmpty OptTableSpaceOwner LoggingStr size_clause OptMaxSize OptDatafileSize OptReuse OptAuto OptNextStr OptDatanodeName
-%type <ival>	opt_check_option
+%type <ival>	opt_check_option view_security_expression view_security_option
 
 %type <str>		opt_provider security_label
 
@@ -925,7 +925,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN SIBLINGS
 	SIMILAR SIMPLE SIZE SKIP SLAVE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START STARTS STARTWITH
 	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBPARTITION SUBPARTITIONS SUBSCRIPTION SUBSTRING
-	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR STARTING
+	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR STARTING SQL_P
 
 	TABLE TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
 	TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
@@ -15966,6 +15966,24 @@ invoker_rights:	 AUTHID DEFINER
                     }
 				}
 			;
+view_security_option: DEFINER
+				{
+					$$ = VIEW_SQL_SECURITY_DEFINER;
+				}
+				| INVOKER
+				{
+					$$ = VIEW_SQL_SECURITY_INVOKER;
+				}
+			;
+view_security_expression: SQL_P SECURITY view_security_option
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT) {
+						$$ = $3;
+					} else {
+						parser_yyerror("not support SQL SECURITY EXPRESSION");
+					}
+				}
+			;
 
 definer_expression: DEFINER '=' UserId
 				{
@@ -17583,6 +17601,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->sql_statement = NULL;
 					n->is_alter = true;
 					n->withCheckOption = (ViewCheckOption)$7;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					$$ = (Node *) n;
 				}
 			| ALTER definer_expression VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
@@ -17603,7 +17622,51 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->replace = true;
 					n->sql_statement = NULL;
 					n->is_alter = true;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					n->withCheckOption = (ViewCheckOption)$8;
+					$$ = (Node *) n;
+				}
+			| ALTER view_security_expression VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
+				{
+#ifndef ENABLE_MULTIPLE_NODES
+					if (u_sess->attr.attr_sql.sql_compatibility !=  B_FORMAT)
+#endif
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("ALTER VIEW AS is not supported.")));
+					}
+					ViewStmt *n = makeNode(ViewStmt);
+					n->view = $4;
+					n->aliases = $5;
+					n->query = $7;
+					n->replace = true;
+					n->sql_statement = NULL;
+					n->is_alter = true;
+					n->viewSecurityOption = (ViewSecurityOption)$2;
+					n->withCheckOption = (ViewCheckOption)$8;
+					$$ = (Node *) n;
+				}
+			| ALTER definer_expression view_security_expression VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
+				{
+#ifndef ENABLE_MULTIPLE_NODES
+					if (u_sess->attr.attr_sql.sql_compatibility !=  B_FORMAT)
+#endif
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("ALTER VIEW AS is not supported.")));
+					}
+					ViewStmt *n = makeNode(ViewStmt);
+					n->definer = $2;
+					n->view = $5;
+					n->aliases = $6;
+					n->query = $8;
+					n->replace = true;
+					n->sql_statement = NULL;
+					n->is_alter = true;
+					n->viewSecurityOption = (ViewSecurityOption)$3;
+					n->withCheckOption = (ViewCheckOption)$9;
 					$$ = (Node *) n;
 				}
 			| ALTER MATERIALIZED VIEW qualified_name RENAME TO name
@@ -19039,6 +19102,7 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->options = $6;
 					n->sql_statement = NULL;
 					n->withCheckOption = (ViewCheckOption)$9;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					$$ = (Node *) n;
 				}
 		| CREATE OR REPLACE OptTemp VIEW qualified_name opt_column_list opt_reloptions
@@ -19053,6 +19117,7 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->options = $8;
 					n->sql_statement = NULL;
 					n->withCheckOption = (ViewCheckOption)$11;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					$$ = (Node *) n;
 				}
 		| CREATE opt_or_replace definer_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
@@ -19068,6 +19133,53 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->options = $8;
 					n->sql_statement = NULL;
 					n->withCheckOption = (ViewCheckOption)$11;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
+					$$ = (Node *) n;
+				}
+		| CREATE view_security_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
+				AS SelectStmt opt_check_option
+				{
+					ViewStmt *n = makeNode(ViewStmt);
+					n->view = $5;
+					n->view->relpersistence = $3;
+					n->aliases = $6;
+					n->query = $9;
+					n->replace = false;
+					n->options = $7;
+					n->sql_statement = NULL;
+					n->withCheckOption = (ViewCheckOption)$10;
+					n->viewSecurityOption = (ViewSecurityOption)$2;
+					$$ = (Node *) n;
+				}
+		| CREATE OR REPLACE view_security_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
+				AS SelectStmt opt_check_option
+				{
+					ViewStmt *n = makeNode(ViewStmt);
+					n->view = $7;
+					n->view->relpersistence = $5;
+					n->aliases = $8;
+					n->query = $11;
+					n->replace = true;
+					n->options = $9;
+					n->sql_statement = NULL;
+					n->withCheckOption = (ViewCheckOption)$12;
+					n->viewSecurityOption = (ViewSecurityOption)$4;
+					$$ = (Node *) n;
+				}
+		| CREATE opt_or_replace definer_expression view_security_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
+				AS SelectStmt opt_check_option
+				{
+					ViewStmt *n = makeNode(ViewStmt);
+					n->definer = $3;
+					n->view = $7;
+					n->view->relpersistence = $5;
+					n->aliases = $8;
+					n->query = $11;
+					n->replace = $2;
+					n->options = $9;
+					n->sql_statement = NULL;
+					n->withCheckOption = (ViewCheckOption)$12;
+					n->viewSecurityOption = (ViewSecurityOption)$4;
 					$$ = (Node *) n;
 				}
 		;
@@ -28903,6 +29015,7 @@ unreserved_keyword:
 			| SPACE
 			| SPILL
 			| SPLIT
+			| SQL_P
 			| STABLE
 			| STANDALONE_P
                         | START
