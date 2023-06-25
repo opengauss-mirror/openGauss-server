@@ -673,7 +673,6 @@ void print_all_stack()
     PG_CATCH();
     {
         /* Must reset elog.c's state */
-        (void)MemoryContextSwitchTo(g_instance.stat_cxt.GsStackContext);
         ErrorData* edata = CopyErrorData();
         FlushErrorState();
         appendStringInfo(&result, "%s", edata->message);

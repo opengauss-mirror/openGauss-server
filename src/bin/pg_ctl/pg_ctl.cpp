@@ -2737,8 +2737,14 @@ static void do_switchover(uint32 term)
             pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status or backtrack log.\n"), wait_seconds);
 
             if ((sofile = fopen(switchover_timeout_file, "w")) == NULL) {
-                pg_log(
-                    PG_WARNING, _(" could not create switchover timeout signal file \"%s\": %s\n"), switchover_timeout_file, strerror(errno));
+                pg_log(PG_WARNING, _(" could not create switchover timeout signal file \"%s\": %s\n"),
+                       switchover_timeout_file, strerror(errno));
+                exit(1);
+            }
+            if (fclose(sofile)) {
+                pg_log(PG_WARNING, _(" could not write switchover timeout signal file \"%s\": %s\n"), switchover_timeout_file,
+                       strerror(errno));
+                sofile = NULL;
                 exit(1);
             }
             sig = SIGUSR1;
