@@ -44,5 +44,6 @@ bool DMSWaitInitStartup();
 void DMSInitLogger();
 void DMSRefreshLogger(char *log_field, unsigned long long *value);
 void GetSSLogPath(char *sslog_path);
+void StartupWaitReform();
 
 #endif
