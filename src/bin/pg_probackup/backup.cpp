@@ -2716,8 +2716,6 @@ static bool IsPrimary(PGconn* conn)
     const char* sql_string = "select local_role from pg_stat_get_stream_replications();";
     char* val = NULL;
     char run_mode[MAXRUNMODE] = {0};
-    GaussState state;
-    UNUSED(state);
     errno_t tnRet = EOK;
 
     if (PQstatus(conn) != CONNECTION_OK) {

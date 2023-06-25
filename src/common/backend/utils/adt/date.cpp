@@ -231,8 +231,6 @@ Datum input_date_in(char* str, bool can_ignore)
     int dterr;
     fsec_t fsec;
     struct pg_tm tt, *tm = &tt;
-    char* date_fmt = NULL;
-    UNUSED(date_fmt);
 
     if (u_sess->attr.attr_common.enable_iud_fusion) {
         dterr = ParseIudDateOnly(str, tm);

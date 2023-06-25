@@ -3841,8 +3841,9 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     ListCell* l = NULL;
     int i;
 #ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NDOES
     PlanState* saved_remote_rel_info = NULL;
-    UNUSED(saved_remote_rel_info);
+#endif
 #endif
     int resultRelationNum = list_length((List*)linitial(node->resultRelations));
 
