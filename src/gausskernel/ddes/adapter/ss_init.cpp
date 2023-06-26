@@ -41,6 +41,7 @@
 
 #define FIXED_NUM_OF_INST_IP_PORT 3
 #define BYTES_PER_KB 1024
+#define NON_PROC_NUM 4
 
 
 const int MAX_CPU_STR_LEN = 5;
@@ -389,6 +390,13 @@ void DMSInit()
     }
     if (dms_register_thread_init(DmsCallbackThreadShmemInit)) {
         ereport(FATAL, (errmsg("failed to register dms memcxt callback!")));
+    }
+
+    uint32 TotalProcs = (uint32)(GLOBAL_ALL_PROCS);
+    uint32 MesMaxRooms = dms_get_mes_max_watting_rooms();
+    if (TotalProcs + NON_PROC_NUM >= MesMaxRooms) {
+        ereport(FATAL, (errmsg("The thread ID range is too large when dms enable. Please set the related GUC "
+                               "parameters to a smaller value.")));
     }
 
     dms_profile_t profile;
