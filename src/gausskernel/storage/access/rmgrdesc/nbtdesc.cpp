@@ -80,6 +80,14 @@ const char* btree_type_name(uint8 subtype)
             return "bt_reuse_page";
             break;
         }
+        case XLOG_BTREE_INSERT_POST: {
+            return "bt_insert_post";
+            break;
+        }
+        case XLOG_BTREE_DEDUP: {
+            return "bt_dedup";
+            break;
+        }
         default:
             return "unkown_type";
             break;
@@ -90,6 +98,7 @@ void btree_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool is_dedup_upgrade = (XLogRecGetInfo(record) & BTREE_DEDUPLICATION_FLAG) != 0;
 
     switch (info) {
         case XLOG_BTREE_INSERT_LEAF: {
@@ -113,21 +122,32 @@ void btree_desc(StringInfo buf, XLogReaderState *record)
             break;
         }
         case XLOG_BTREE_SPLIT_L: {
-            xl_btree_split *xlrec = (xl_btree_split *)rec;
-
-            appendStringInfo(buf, "split left: ");
-            appendStringInfo(buf, "level %u; firstright %u; new off %u", xlrec->level, (uint32)xlrec->firstright,
-                             (uint32)xlrec->newitemoff);
+            if (!is_dedup_upgrade) {
+                xl_btree_split *xlrec = (xl_btree_split *)rec;
+                appendStringInfo(buf, "split left: ");
+                appendStringInfo(buf, "level %u; firstright %u; new off %u", xlrec->level, (uint32)xlrec->firstright,
+                                 (uint32)xlrec->newitemoff);
+            } else {
+                xl_btree_split_posting *xlrec = (xl_btree_split_posting *)rec;
+                appendStringInfo(buf, "split left: ");
+                appendStringInfo(buf, "level %u; firstright %u; new off %u; posting off %u", xlrec->level,
+                                 (uint32)xlrec->firstright, (uint32)xlrec->newitemoff, (uint32)xlrec->posting_off);
+            }
             break;
         }
         case XLOG_BTREE_SPLIT_R: {
-            xl_btree_split *xlrec = (xl_btree_split *)rec;
+            if (!is_dedup_upgrade) {
+                xl_btree_split *xlrec = (xl_btree_split *)rec;
+                appendStringInfo(buf, "split right: ");
 
-            appendStringInfo(buf, "split right: ");
-
-            appendStringInfo(buf, "level %u; firstright %u; new off %u", xlrec->level, (uint32)xlrec->firstright,
-                             (uint32)xlrec->newitemoff);
-
+                appendStringInfo(buf, "level %u; firstright %u; new off %u", xlrec->level, (uint32)xlrec->firstright,
+                                 (uint32)xlrec->newitemoff);
+            } else {
+                xl_btree_split_posting *xlrec = (xl_btree_split_posting *)rec;
+                appendStringInfo(buf, "split right: ");
+                appendStringInfo(buf, "level %u; firstright %u; new off %u; posting off %u", xlrec->level,
+                                 (uint32)xlrec->firstright, (uint32)xlrec->newitemoff, (uint32)xlrec->posting_off);
+            }
             break;
         }
         case XLOG_BTREE_SPLIT_L_ROOT: {
@@ -149,9 +169,16 @@ void btree_desc(StringInfo buf, XLogReaderState *record)
             break;
         }
         case XLOG_BTREE_VACUUM: {
-            xl_btree_vacuum *xlrec = (xl_btree_vacuum *)rec;
+            if (!is_dedup_upgrade) {
+                xl_btree_vacuum *xlrec = (xl_btree_vacuum *)rec;
+                
+                appendStringInfo(buf, "vacuum: lastBlockVacuumed %u ", xlrec->lastBlockVacuumed);
+            } else {
+                xl_btree_vacuum_posting *xlrec = (xl_btree_vacuum_posting *)rec;
 
-            appendStringInfo(buf, "vacuum: lastBlockVacuumed %u ", xlrec->lastBlockVacuumed);
+                appendStringInfo(buf, "vacuum: lastBlockVacuumed %u; num_deleted: %hu; num_updated: %hu",
+                                 xlrec->lastBlockVacuumed, xlrec->num_deleted, xlrec->num_updated);
+            }
             break;
         }
         case XLOG_BTREE_DELETE: {
@@ -206,6 +233,20 @@ void btree_desc(StringInfo buf, XLogReaderState *record)
                                  xlrec->node.dbNode, xlrec->node.relNode, bucket_id, xlrec->latestRemovedXid);
             }
             break;
+        }
+        case XLOG_BTREE_INSERT_POST: {
+            xl_btree_insert *xlrec = (xl_btree_insert *)rec;
+
+            appendStringInfo(buf, "insert leaf posting: ");
+            appendStringInfo(buf, "off %u", (uint32)xlrec->offnum);
+            break;
+        }
+        case XLOG_BTREE_DEDUP:{
+            xl_btree_dedup *xlrec = (xl_btree_dedup *) rec;
+
+            appendStringInfo(buf, "btree dedup: ");
+			appendStringInfo(buf, "num_intervals %u", xlrec->num_intervals);
+			break;
         }
         default:
             appendStringInfo(buf, "UNKNOWN");

@@ -974,11 +974,13 @@ void Btree2XlogShiftBaseOperatorPage(RedoBufferInfo* buffer, void* recorddata);
 
 void BtreeRestoreMetaOperatorPage(RedoBufferInfo* metabuf, void* recorddata, Size datalen);
 void BtreeXlogInsertOperatorPage(RedoBufferInfo* buffer, void* recorddata, void* data, Size datalen);
+void btree_xlog_insert_posting_operator_page(RedoBufferInfo* buffer, void* recorddata, void* data, Size datalen);
+
 void BtreeXlogSplitOperatorRightpage(
     RedoBufferInfo* rbuf, void* recorddata, BlockNumber leftsib, BlockNumber rnext, void* blkdata, Size datalen);
 void BtreeXlogSplitOperatorNextpage(RedoBufferInfo* buffer, BlockNumber rightsib);
-void BtreeXlogSplitOperatorLeftpage(
-    RedoBufferInfo* lbuf, void* recorddata, BlockNumber rightsib, bool onleft, void* blkdata, Size datalen);
+void BtreeXlogSplitOperatorLeftpage(RedoBufferInfo *lbuf, void *recorddata, BlockNumber rightsib, bool onleft,
+                                    bool is_dedup, void *blkdata, Size datalen);
 void BtreeXlogVacuumOperatorPage(RedoBufferInfo* redobuffer, void* recorddata, void* blkdata, Size len);
 void BtreeXlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, Size recorddatalen);
 void btreeXlogDeletePageOperatorRightpage(RedoBufferInfo* buffer, void* recorddata);

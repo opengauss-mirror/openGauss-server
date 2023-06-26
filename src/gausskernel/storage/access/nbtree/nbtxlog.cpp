@@ -225,7 +225,7 @@ static void _bt_clear_incomplete_split(XLogReaderState *record, uint8 block_id)
     }
 }
 
-static void btree_xlog_insert(bool isleaf, bool ismeta, XLogReaderState *record, bool issplitupgrade)
+static void btree_xlog_insert(bool isleaf, bool ismeta, XLogReaderState *record, bool issplitupgrade, bool is_posting)
 {
     xl_btree_insert *xlrec = (xl_btree_insert *)XLogRecGetData(record);
     RelFileNode rnode;
@@ -259,7 +259,13 @@ static void btree_xlog_insert(bool isleaf, bool ismeta, XLogReaderState *record,
         Size datalen;
 
         datapos = XLogRecGetBlockData(record, BTREE_INSERT_ORIG_BLOCK_NUM, &datalen);
-        BtreeXlogInsertOperatorPage(&buffer, (void *)xlrec, (void *)datapos, datalen);
+
+        if (!is_posting) {
+            BtreeXlogInsertOperatorPage(&buffer, (void *)xlrec, (void *)datapos, datalen);
+        } else {
+            Assert(isleaf);
+            btree_xlog_insert_posting_operator_page(&buffer, (void *)xlrec, (void *)datapos, datalen);
+        }
         MarkBufferDirty(buffer.buf);
     }
 
@@ -289,7 +295,7 @@ static void btree_xlog_insert(bool isleaf, bool ismeta, XLogReaderState *record,
     }
 }
 
-static void btree_xlog_split_update(bool onleft, bool isroot, XLogReaderState *record)
+static void btree_xlog_split_update(bool onleft, bool isroot, bool is_dedup, XLogReaderState *record)
 {
     Size datalen;
     char *datapos = NULL;
@@ -304,7 +310,7 @@ static void btree_xlog_split_update(bool onleft, bool isroot, XLogReaderState *r
         rnext = P_NONE;
     }
 
-    xl_btree_split *xlrec = (xl_btree_split *)XLogRecGetData(record);
+    xl_btree_split_posting *xlrec = (xl_btree_split_posting *)XLogRecGetData(record);
     bool isleaf = (xlrec->level == 0);
 
     if (!isleaf) {
@@ -322,7 +328,7 @@ static void btree_xlog_split_update(bool onleft, bool isroot, XLogReaderState *r
     RedoBufferInfo lbuf;
     if (XLogReadBufferForRedo(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &lbuf) == BLK_NEEDS_REDO) {
         datapos = XLogRecGetBlockData(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &datalen);
-        BtreeXlogSplitOperatorLeftpage(&lbuf, (void *)xlrec, rightsib, onleft, (void *)datapos, datalen);
+        BtreeXlogSplitOperatorLeftpage(&lbuf, (void *)xlrec, rightsib, onleft, is_dedup, (void *)datapos, datalen);
         MarkBufferDirty(lbuf.buf);
     }
 
@@ -344,15 +350,15 @@ static void btree_xlog_split_update(bool onleft, bool isroot, XLogReaderState *r
     }
 }
 
-static void btree_xlog_split(bool onleft, bool isroot, XLogReaderState *record, bool issplitupgrade)
+static void btree_xlog_split(bool onleft, bool isroot, XLogReaderState *record, bool issplitupgrade, bool is_dedup_upgrade)
 {
     if (issplitupgrade) {
-        btree_xlog_split_update(onleft, isroot, record);
+        btree_xlog_split_update(onleft, isroot, is_dedup_upgrade, record);
         return;
     }
 
     XLogRecPtr lsn = record->EndRecPtr;
-    xl_btree_split *xlrec = (xl_btree_split *)XLogRecGetData(record);
+    xl_btree_split_posting *xlrec = (xl_btree_split_posting *)XLogRecGetData(record);
     bool isleaf = (xlrec->level == 0);
     RedoBufferInfo lbuf;
     RedoBufferInfo rbuf;
@@ -433,6 +439,8 @@ static void btree_xlog_split(bool onleft, bool isroot, XLogReaderState *record, 
         Size newitemsz = 0;
         Page newlpage;
         OffsetNumber leftoff;
+        IndexTuple new_posting = NULL;
+        OffsetNumber replace_posting_off = InvalidOffsetNumber;
 
         datapos = XLogRecGetBlockData(record, 0, &datalen);
 
@@ -445,11 +453,19 @@ static void btree_xlog_split(bool onleft, bool isroot, XLogReaderState *record, 
             datalen -= left_hikeysz;
         }
 
-        if (onleft) {
+        if (onleft || (is_dedup_upgrade && xlrec->posting_off != 0)) {
             newitem = (Item)datapos;
             newitemsz = MAXALIGN(IndexTupleSize(newitem));
             datapos += newitemsz;
             datalen -= newitemsz;
+
+            if (is_dedup_upgrade && xlrec->posting_off != 0) {
+                replace_posting_off = OffsetNumberPrev(xlrec->newitemoff);
+                newitem = (Item)CopyIndexTuple((IndexTuple)newitem);
+                ItemId itemid = PageGetItemId(lpage, replace_posting_off);
+                IndexTuple orig_posting = (IndexTuple)PageGetItem(lpage, itemid);
+                new_posting = btree_dedup_swap_posting((IndexTuple)newitem, orig_posting, xlrec->posting_off);
+            }
         }
 
         Assert(datalen == 0);
@@ -470,8 +486,16 @@ static void btree_xlog_split(bool onleft, bool isroot, XLogReaderState *record, 
             Size itemsz;
             Item item;
 
-            /* add the new item if it was inserted on left page */
-            if (onleft && off == xlrec->newitemoff) {
+            /* Add replacement posting list when required */
+			if (off == replace_posting_off)
+			{
+                Assert(onleft || xlrec->firstright == xlrec->newitemoff);
+                if (PageAddItem(newlpage, (Item)new_posting, MAXALIGN(IndexTupleSize(new_posting)), leftoff, false,
+                                false) == InvalidOffsetNumber)
+                    elog(ERROR, "failed to add new posting list item to left page after split");
+                leftoff = OffsetNumberNext(leftoff);
+                continue;
+            } else if (onleft && off == xlrec->newitemoff) {
                 if (PageAddItem(newlpage, newitem, newitemsz, leftoff, false, false) == InvalidOffsetNumber)
                     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                                     errmsg("failed to add new item to left page after split")));
@@ -541,9 +565,87 @@ static void btree_xlog_split(bool onleft, bool isroot, XLogReaderState *record, 
     log_incomplete_split(&rnode, leftsib, rightsib, leftpblk, rightpblk, isroot);
 }
 
-static void btree_xlog_vacuum(XLogReaderState *record)
+static void btree_xlog_dedup(XLogReaderState *record)
 {
-    xl_btree_vacuum *xlrec = (xl_btree_vacuum *)XLogRecGetData(record);
+    XLogRecPtr lsn = record->EndRecPtr;
+    xl_btree_dedup *xlrec = (xl_btree_dedup *)XLogRecGetData(record);
+    RedoBufferInfo redobuf;
+
+    if (XLogReadBufferForRedo(record, 0, &redobuf) == BLK_NEEDS_REDO) {
+        char *ptr = XLogRecGetBlockData(record, 0, NULL);
+        Page page = redobuf.pageinfo.page;
+        BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+        BTDedupState state = (BTDedupState)palloc(sizeof(BTDedupStateData));
+
+        state->deduplicate = true;
+        state->num_max_items = 0;
+        state->max_posting_size = BTREE_MAX_ITEM_SIZE(page);
+        state->base = NULL;
+        state->base_off = InvalidOffsetNumber;
+        state->base_tuple_size = 0;
+        state->heap_tids = (ItemPointer)palloc(state->max_posting_size);
+        state->num_heap_tids = 0;
+        state->num_items = 0;
+        state->size_freed = 0;
+        state->num_intervals = 0;
+
+        OffsetNumber minoff = P_FIRSTDATAKEY(opaque);
+        OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
+        Page newpage = PageGetTempPageCopySpecial(page);
+
+        if (!P_RIGHTMOST(opaque)) {
+            ItemId itemid = PageGetItemId(page, P_HIKEY);
+            Size itemsz = ItemIdGetLength(itemid);
+            IndexTuple item = (IndexTuple)PageGetItem(page, itemid);
+
+            if (PageAddItem(newpage, (Item)item, itemsz, P_HIKEY, false, false) == InvalidOffsetNumber) {
+                elog(ERROR, "deduplication failed to add highkey");
+            }
+        }
+
+        BTDedupInterval intervals = (BTDedupInterval)ptr;
+        for (OffsetNumber offnum = minoff; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
+            ItemId itemid = PageGetItemId(page, offnum);
+            IndexTuple itup = (IndexTuple)PageGetItem(page, itemid);
+
+            if (offnum == minoff) {
+                btree_dedup_begin(state, itup, offnum);
+            } else if (state->num_intervals < xlrec->num_intervals &&
+                       state->base_off == intervals[state->num_intervals].base_off &&
+                       state->num_items < intervals[state->num_intervals].num_items) {
+                if (!btree_dedup_merge(state, itup)) {
+                    elog(ERROR, "deduplication failed to add heap tid to pending posting list");
+                }
+            } else {
+                btree_dedup_end(newpage, state);
+                btree_dedup_begin(state, itup, offnum);
+            }
+        }
+
+        btree_dedup_end(newpage, state);
+        Assert(state->num_intervals == xlrec->num_intervals);
+        Assert(memcmp(state->intervals, intervals, state->num_intervals * sizeof(BTDedupIntervalData)) == 0);
+
+        if (P_HAS_GARBAGE(opaque)) {
+            BTPageOpaqueInternal nopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(newpage);
+            nopaque->btpo_flags &= ~BTP_HAS_GARBAGE;
+        }
+
+        PageRestoreTempPage(newpage, page);
+        PageSetLSN(page, lsn);
+        MarkBufferDirty(redobuf.buf);
+
+        pfree(state->heap_tids);
+        pfree(state);
+    }
+
+    if (BufferIsValid(redobuf.buf))
+        UnlockReleaseBuffer(redobuf.buf);
+}
+
+static void btree_xlog_vacuum(XLogReaderState *record, bool is_dedup_upgrade)
+{
+    xl_btree_vacuum_posting *xlrec = (xl_btree_vacuum_posting *)XLogRecGetData(record);
     RedoBufferInfo redobuf;
 
     /*
@@ -553,10 +655,55 @@ static void btree_xlog_vacuum(XLogReaderState *record)
     if (XLogReadBufferForRedoExtended(record, BTREE_VACUUM_ORIG_BLOCK_NUM, RBM_NORMAL, true, &redobuf) ==
         BLK_NEEDS_REDO) {
         char *ptr = NULL;
-        Size len;
+        Size len = 0;
 
         ptr = XLogRecGetBlockData(record, BTREE_VACUUM_ORIG_BLOCK_NUM, &len);
-        BtreeXlogVacuumOperatorPage(&redobuf, (void *)xlrec, (void *)ptr, len);
+
+        if (is_dedup_upgrade) {
+            uint16 update_len PG_USED_FOR_ASSERTS_ONLY = 0;
+            uint16 delete_len = (xlrec->num_deleted * sizeof(OffsetNumber));
+            if (xlrec->num_updated > 0) {
+                Page page = redobuf.pageinfo.page;
+                OffsetNumber *updated_offsets = (OffsetNumber *)(ptr + xlrec->num_deleted * sizeof(OffsetNumber));
+                xl_btree_update *updates =
+                    (xl_btree_update *)((char *)updated_offsets + xlrec->num_updated * sizeof(OffsetNumber));
+                update_len += (xlrec->num_updated * sizeof(OffsetNumber));
+
+                for (int i = 0; i < xlrec->num_updated; i++) {
+                    ItemId itemid = PageGetItemId(page, updated_offsets[i]);
+                    IndexTuple orig_tuple = (IndexTuple)PageGetItem(page, itemid);
+
+                    Size deleted_tids_size = updates->num_deleted_tids * sizeof(uint16);
+                    BTVacuumPosting vac_posting = (BTVacuumPosting)palloc(offsetof(BTVacuumPostingData, delete_tids) +
+                                                                          deleted_tids_size);
+                    vac_posting->updated_offset = updated_offsets[i];
+                    vac_posting->itup = orig_tuple;
+                    vac_posting->num_deleted_tids = updates->num_deleted_tids;
+                    errno_t rc = memcpy_s(vac_posting->delete_tids,
+                                          deleted_tids_size, (char *) updates + SizeOfBtreeUpdate, deleted_tids_size);
+                    securec_check(rc, "", "");
+
+                    btree_dedup_update_posting(vac_posting);
+
+                    Size itemsz = MAXALIGN(IndexTupleSize(vac_posting->itup));
+                    if (!page_index_tuple_overwrite(page, updated_offsets[i], (Item)vac_posting->itup, itemsz))
+                        elog(PANIC, "failed to update partially dead item");
+
+                    pfree(vac_posting->itup);
+                    pfree(vac_posting);
+
+                    update_len += (SizeOfBtreeUpdate + deleted_tids_size);
+
+                    updates = (xl_btree_update *)((char *)updates + SizeOfBtreeUpdate + deleted_tids_size);
+                }
+            }
+
+            Assert(len == (update_len + delete_len));
+            BtreeXlogVacuumOperatorPage(&redobuf, (void *)xlrec, (void *)ptr, delete_len);
+        } else {
+            BtreeXlogVacuumOperatorPage(&redobuf, (void *)xlrec, (void *)ptr, len);
+        }
+
         MarkBufferDirty(redobuf.buf);
     }
     if (BufferIsValid(redobuf.buf))
@@ -936,31 +1083,32 @@ void btree_redo(XLogReaderState *record)
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     bool issplitupgrade = (XLogRecGetInfo(record) & BTREE_SPLIT_UPGRADE_FLAG) != 0;
     bool isdelupgrade = (XLogRecGetInfo(record) & BTREE_DELETE_UPGRADE_FLAG) != 0;
+    bool is_dedup_upgrade = (XLogRecGetInfo(record) & BTREE_DEDUPLICATION_FLAG) != 0;
 
     switch (info) {
         case XLOG_BTREE_INSERT_LEAF:
-            btree_xlog_insert(true, false, record, issplitupgrade);
+            btree_xlog_insert(true, false, record, issplitupgrade, false);
             break;
         case XLOG_BTREE_INSERT_UPPER:
-            btree_xlog_insert(false, false, record, issplitupgrade);
+            btree_xlog_insert(false, false, record, issplitupgrade, false);
             break;
         case XLOG_BTREE_INSERT_META:
-            btree_xlog_insert(false, true, record, issplitupgrade);
+            btree_xlog_insert(false, true, record, issplitupgrade, false);
             break;
         case XLOG_BTREE_SPLIT_L:
-            btree_xlog_split(true, false, record, issplitupgrade);
+            btree_xlog_split(true, false, record, issplitupgrade, is_dedup_upgrade);
             break;
         case XLOG_BTREE_SPLIT_R:
-            btree_xlog_split(false, false, record, issplitupgrade);
+            btree_xlog_split(false, false, record, issplitupgrade, is_dedup_upgrade);
             break;
         case XLOG_BTREE_SPLIT_L_ROOT:
-            btree_xlog_split(true, true, record, issplitupgrade);
+            btree_xlog_split(true, true, record, issplitupgrade, is_dedup_upgrade);
             break;
         case XLOG_BTREE_SPLIT_R_ROOT:
-            btree_xlog_split(false, true, record, issplitupgrade);
+            btree_xlog_split(false, true, record, issplitupgrade, is_dedup_upgrade);
             break;
         case XLOG_BTREE_VACUUM:
-            btree_xlog_vacuum(record);
+            btree_xlog_vacuum(record, is_dedup_upgrade);
             break;
         case XLOG_BTREE_DELETE:
             btree_xlog_delete(record);
@@ -985,6 +1133,12 @@ void btree_redo(XLogReaderState *record)
             break;
         case XLOG_BTREE_REUSE_PAGE:
             btree_xlog_reuse_page(record);
+            break;
+        case XLOG_BTREE_INSERT_POST:
+            btree_xlog_insert(true, false, record, issplitupgrade, true);
+            break;
+        case XLOG_BTREE_DEDUP:
+            btree_xlog_dedup(record);
             break;
         default:
             ereport(PANIC, (errmsg("btree_redo: unknown op code %hhu", info)));

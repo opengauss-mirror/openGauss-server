@@ -341,6 +341,7 @@ typedef enum CompressTypeOption {
 typedef struct StdRdOptions {
     int32 vl_len_;           /* varlena header (do not touch directly!) */
     int fillfactor;          /* page fill factor in percent (0..100) */
+    bool deduplication;
     AutoVacOpts autovacuum;  /* autovacuum-related options */
     bool security_barrier;   /* for views */
     bool enable_rowsecurity; /* enable row level security or not */

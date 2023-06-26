@@ -93,11 +93,11 @@ void UBTreeRestoreMetaOperatorPage(RedoBufferInfo *metabuf, void *recorddata, Si
     Page metapg = metabuf->pageinfo.page;
     BTMetaPageData *md = NULL;
     UBTPageOpaqueInternal pageop;
-    xl_btree_metadata *xlrec = NULL;
+    xl_btree_metadata_old *xlrec = NULL;
 
-    Assert(datalen == sizeof(xl_btree_metadata));
+    Assert(datalen == sizeof(xl_btree_metadata_old));
     Assert(metabuf->blockinfo.blkno == BTREE_METAPAGE);
-    xlrec = (xl_btree_metadata *)ptr;
+    xlrec = (xl_btree_metadata_old *)ptr;
 
     metapg = metabuf->pageinfo.page;
 
@@ -105,7 +105,7 @@ void UBTreeRestoreMetaOperatorPage(RedoBufferInfo *metabuf, void *recorddata, Si
 
     md = BTPageGetMeta(metapg);
     md->btm_magic = BTREE_MAGIC;
-    md->btm_version = BTREE_VERSION;
+    md->btm_version = UBTREE_VERSION;
     md->btm_root = xlrec->root;
     md->btm_level = xlrec->level;
     md->btm_fastroot = xlrec->fastroot;

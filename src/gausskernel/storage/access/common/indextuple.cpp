@@ -526,10 +526,15 @@ IndexTuple index_truncate_tuple(TupleDesc tupleDescriptor, IndexTuple olditup, i
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
     IndexTuple newitup;
+    int indnatts = tupleDescriptor->natts;
 
-    Assert(tupleDescriptor->natts <= INDEX_MAX_KEYS);
+    Assert(indnatts <= INDEX_MAX_KEYS);
     Assert(new_indnatts > 0);
-    Assert(new_indnatts < tupleDescriptor->natts);
+    Assert(new_indnatts <= indnatts);
+
+    if (new_indnatts == indnatts) {
+        return CopyIndexTuple(olditup);
+    }
 
     index_deform_tuple(olditup, tupleDescriptor, values, isnull);
 

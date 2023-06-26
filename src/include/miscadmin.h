@@ -37,6 +37,8 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 NBTREE_INSERT_OPTIMIZATION_VERSION_NUM;
+extern const uint32 NBTREE_DEDUPLICATION_VERSION_NUM;
 extern const uint32 ONDEMAND_REDO_VERSION_NUM;
 extern const uint32 SRF_FUSION_VERSION_NUM;
 extern const uint32 INNER_UNIQUE_VERSION_NUM;

@@ -1073,6 +1073,17 @@ static void assignProcTypes(OpFamilyMember* member, Oid amoid, Oid typeoid)
             /*
              * Can't infer lefttype/righttype from proc, so use default rule
              */
+        } else if (member->number == BTEQUALIMAGE_PROC) {
+            if (procform->pronargs != 1)
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                                errmsg("btree equal image functions must have one argument")));
+            if (procform->prorettype != BOOLOID)
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                                errmsg("btree equal image functions must return boolean")));
+
+            if (member->lefttype != member->righttype)
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                                errmsg("btree equal image functions must not be cross-type")));
         }
     } else if (amoid == HASH_AM_OID) {
         if (procform->pronargs != 1)

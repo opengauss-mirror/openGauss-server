@@ -794,7 +794,7 @@ static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats
         _bt_checkbuffer_valid(rel, buf);
         LockBufferForCleanup(buf);
         _bt_checkpage(rel, buf);
-        _bt_delitems_vacuum(rel, buf, NULL, 0, vstate.lastBlockVacuumed);
+        _bt_delitems_vacuum(rel, buf, NULL, 0, NULL, 0, vstate.lastBlockVacuumed);
         _bt_relbuf(rel, buf);
     }
 

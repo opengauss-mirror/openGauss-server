@@ -75,13 +75,16 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92901;
+const uint32 GRAND_VERSION_NUM = 92902;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 NBTREE_INSERT_OPTIMIZATION_VERSION_NUM = 92902;
+const uint32 NBTREE_DEDUPLICATION_VERSION_NUM = 92902;
 const uint32 ONDEMAND_REDO_VERSION_NUM = 92901;
+
 const uint32 SRF_FUSION_VERSION_NUM = 92847;
 const uint32 INDEX_HINT_VERSION_NUM = 92845;
 const uint32 INNER_UNIQUE_VERSION_NUM = 92845;
@@ -161,6 +164,7 @@ const uint32 CLIENT_ENCRYPTION_PROC_VERSION_NUM = 92383;
 const uint32 COMMENT_PROC_VERSION_NUM = 92372;
 const uint32 SEGMENT_PAGE_VERSION_NUM = 92360;
 const uint32 HINT_ENHANCEMENT_VERSION_NUM = 92359;
+
 const uint32 GENERATED_COL_VERSION_NUM = 92355;
 const uint32 INPLACE_UPDATE_VERSION_NUM = 92350;
 const uint32 BACKEND_VERSION_PRE_END_NUM = 92350;
