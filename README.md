@@ -717,7 +717,7 @@ sh build.sh -m debug -3rd /sdc/binarylibs -pkg           # 生成debug版本的o
 
 - WeLink：开发者的交流平台。
 - IRC频道：`#opengauss-meeting`（仅用于会议纪要）。
-- 邮件列表：https://opengauss.org/zh/community/onlineCommunication.html
+- 邮件列表：https://opengauss.org/zh/community/onlineCommunication/
 
 ## 贡献
 
