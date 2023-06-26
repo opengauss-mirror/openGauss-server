@@ -571,7 +571,7 @@ lreplace:
     /****************
      * step 3: done *
      ****************/
-    OpFusionExecCloseIndices(result_rel_info);
+    ExecCloseIndices(result_rel_info);
     m_local.m_isCompleted = true;
     m_local.m_scan->End(true);
     ExecDoneStepInFusion(m_c_local.m_estate);

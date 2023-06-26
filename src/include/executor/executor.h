@@ -644,7 +644,6 @@ extern Partition ExecOpenScanParitition(
 
 extern void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative);
 extern void ExecCloseIndices(ResultRelInfo* resultRelInfo);
-extern void OpFusionExecCloseIndices(ResultRelInfo* resultRelInfo);
 extern List* ExecInsertIndexTuples(
     TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel,
     Partition p, int2 bucketId, bool* conflict, Bitmapset *modifiedIdxAttrs, bool inplaceUpdated = false);
