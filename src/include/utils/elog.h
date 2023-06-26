@@ -260,6 +260,7 @@ extern int signal_schema_name(const char *schema_name);
 extern int signal_table_name(const char *table_name);
 extern int signal_column_name(const char *column_name);
 extern int signal_cursor_name(const char *cursor_name);
+extern int signal_is_signal(int is_signal);
 
 extern void save_error_message(void);
 
@@ -535,6 +536,7 @@ typedef struct ErrorData {
     char* column_name;     /* column_name for signal/resignal */
     char* cursor_name;     /* cursor_name for signal/resignal */
     bool is_warnings_throw;
+    int is_signal;
 } ErrorData;
 
 /* The error data from remote */
@@ -570,12 +572,33 @@ typedef struct ErrorDataArea {
     uint64 *current_edata_count_by_level;
 } ErrorDataArea;
 
+typedef struct {
+    enum_dolphin_error_level elevel;
+    char *sqlstatestr;
+    char *class_origin;
+    char *subclass_origin;
+    char *constraint_catalog;
+    char *constraint_schema;
+    char *constraint_name;
+    char *catalog_name;
+    char *schema_name;
+    char *table_name;
+    char *column_name;
+    char *cursor_name;
+    char *errorcode;
+    char *message_text;
+} DolphinErrorData;
+
+extern enum_dolphin_error_level errorLevelToDolphin(int elevel);
 extern ErrorDataArea *initErrorDataArea();
-extern void resetErrorDataArea(bool);
+extern void resetErrorDataArea(bool, bool);
 extern void pushErrorData(ErrorData *);
+extern void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to);
+extern void copyDiffErrorDataArea(ErrorDataArea *from, ErrorDataArea *to, ErrorData *edata);
 extern uint64 SqlErrorDataErrorCount();
 extern uint64 SqlErrorDataWarnCount();
 extern int SqlErrorDataCount();
+extern int getUserVarVal(char* str);
 
 /* GUC-configurable parameters */
 

@@ -2411,6 +2411,7 @@ typedef struct knl_u_dolphin_errdata_context {
     ErrorDataArea *errorDataArea;  // only for b database, using in show warnings,show errors
     ErrorDataArea *lastErrorDataArea;
     bool sql_note;
+    bool handler_active = false;
     int max_error_count;
 } knl_u_dolphin_errdata_context;
 

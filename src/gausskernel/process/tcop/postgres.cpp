@@ -2457,7 +2457,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         t_thrd.postgres_cxt.debug_query_string = sql_query_string;
     }
 
-    resetErrorDataArea(true);
+    resetErrorDataArea(true, false);
     instr_stmt_report_start_time();
 
     /*
@@ -9444,7 +9444,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     u_sess->exec_cxt.RetryController->CacheStmtName(stmt_name);
                 }
 
-            resetErrorDataArea(true);
+            resetErrorDataArea(true, false);
             } break;
 
             case 'B': /* bind */

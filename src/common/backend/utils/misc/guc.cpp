@@ -9641,7 +9641,7 @@ TupleDesc GetPGVariableResultDesc(const char* name)
     } else if (guc_name_compare(name, "show_warnings") == 0 || guc_name_compare(name, "show_errors") == 0) {
         tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);
     } else if (guc_name_compare(name, "show_warnings_count") == 0 || guc_name_compare(name, "show_errors_count") == 0) {
         tupdesc = CreateTemplateTupleDesc(1, false);

@@ -91,6 +91,7 @@
 #include "utils/pl_package.h"
 #include "catalog/pg_streaming_fn.h"
 #include "mb/pg_wchar.h"
+#include "utils/varbit.h"
 
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -340,6 +341,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	LockClauseStrength lockstrength;
 	CharsetCollateOptions *charsetcollateopt;
 	OnDuplicateAction onduplicate;
+	struct CondInfo*	condinfo;
 }
 
 %type <node>	stmt schema_stmt
@@ -366,7 +368,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 		DropAssertStmt DropSynonymStmt DropTrigStmt DropRuleStmt DropCastStmt DropRoleStmt DropRlsPolicyStmt
 		DropUserStmt DropdbStmt DropTableSpaceStmt DropDataSourceStmt DropDirectoryStmt DropFdwStmt
 		DropForeignServerStmt DropUserMappingStmt ExplainStmt ExecDirectStmt FetchStmt
-		GrantStmt GrantRoleStmt GrantDbStmt IndexStmt InsertStmt ListenStmt LoadStmt
+		GetDiagStmt GrantStmt GrantRoleStmt GrantDbStmt IndexStmt InsertStmt ListenStmt LoadStmt
 		LockStmt NotifyStmt ExplainableStmt PreparableStmt
 		CreateFunctionStmt CreateEventStmt CreateProcedureStmt CreatePackageStmt CreatePackageBodyStmt  AlterFunctionStmt AlterProcedureStmt ReindexStmt RemoveAggrStmt
 		RemoveFuncStmt RemoveOperStmt RemovePackageStmt RenameStmt RevokeStmt RevokeRoleStmt RevokeDbStmt
@@ -825,6 +827,11 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <str>  comment_opt
 %type <trgcharacter> trigger_order
 %type <str> delimiter_str_name delimiter_str_names
+
+%type <ival>	statement_information_item_name condition_information_item_name
+%type <condinfo> statement_information_item condition_information_item
+%type <node>	condition_number
+%type <list>	condition_information statement_information
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -854,20 +861,20 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_INTEGER BIT BLANKS
 	BLOB_P BLOCKCHAIN BODY_P BOGUS BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
-	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CHAIN CHANGE CHAR_P
-	CHARACTER CHARACTERISTICS CHARACTERSET CHARSET CHECK CHECKPOINT CLASS CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
-	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COLUMNS COMMENT COMMENTS COMMIT CONSISTENT
-	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPLETION COMPRESS CONCURRENTLY CONDITION CONFIGURATION CONNECTION CONSTANT CONSTRAINT CONSTRAINTS
+	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CATALOG_NAME CHAIN CHANGE CHAR_P
+	CHARACTER CHARACTERISTICS CHARACTERSET CHARSET CHECK CHECKPOINT CLASS CLASS_ORIGIN CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
+	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COLUMN_NAME COLUMNS COMMENT COMMENTS COMMIT
+	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPLETION COMPRESS CONCURRENTLY CONDITION CONFIGURATION CONNECTION CONSISTENT CONSTANT CONSTRAINT CONSTRAINT_CATALOG CONSTRAINT_NAME CONSTRAINT_SCHEMA CONSTRAINTS
 	CONTENT_P CONTINUE_P CONTVIEW CONVERSION_P CONVERT_P CONNECT COORDINATOR COORDINATORS COPY COST CREATE
 	CROSS CSN CSV CUBE CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
-	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
+	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CURSOR_NAME CYCLE
 	SHRINK USE_P
 
 	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DAY_HOUR_P DAY_MINUTE_P DAY_SECOND_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
 /* PGXC_BEGIN */
-	DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
+	DIAGNOSTICS DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
 /* PGXC_END */
 	DROP DUPLICATE DISCONNECT DUMPFILE
 
@@ -879,7 +886,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	FEATURES // DB4AI
 	FREEZE FROM FULL FUNCTION FUNCTIONS
 
-	GENERATED GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
+	GENERATED GET GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
 
 	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P HOUR_MINUTE_P HOUR_SECOND_P
 
@@ -896,8 +903,9 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
 	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
-	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
-	MODEL // DB4AI
+	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE 
+	MODEL MODIFY_P MONTH_P MOVE MOVEMENT MYSQL_ERRNO
+	// DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
 	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
 
@@ -918,16 +926,16 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE RECYCLEBIN REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEAT REPEATABLE REPLACE REPLICA
-	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
-	ROTATION ROW ROWNUM ROWS ROWTYPE_P RULE
+	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
+	ROTATION ROW ROW_COUNT ROWNUM ROWS ROWTYPE_P RULE
 
-	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
+	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCHEMA_NAME SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN SIBLINGS
-	SIMILAR SIMPLE SIZE SKIP SLAVE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START STARTS STARTWITH
-	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBPARTITION SUBPARTITIONS SUBSCRIPTION SUBSTRING
+	SIMILAR SIMPLE SIZE SKIP SLAVE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STACKED_P STANDALONE_P START STARTS STARTWITH
+	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBCLASS_ORIGIN SUBPARTITION SUBPARTITIONS SUBSCRIPTION SUBSTRING
 	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR STARTING SQL_P
 
-	TABLE TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
+	TABLE TABLE_NAME TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
 	TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TSFIELD TSTAG TSTIME TYPE_P TYPES_P
 
@@ -1290,6 +1298,7 @@ stmt :
 			| ExecDirectStmt
 			| ExplainStmt
 			| FetchStmt
+			| GetDiagStmt
 			| GrantStmt
 			| GrantRoleStmt
 			| GrantDbStmt
@@ -3382,6 +3391,138 @@ constraints_set_mode:
 			| IMMEDIATE								{ $$ = FALSE; }
 		;
 
+/*****************************************************************************
+ *
+ * GET DIAGNOSTICS STATEMENT
+ *
+ *****************************************************************************/
+
+GetDiagStmt: 	GET getdiag_area_opt DIAGNOSTICS statement_information
+					{
+						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+							ereport(errstate, (errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Un-support feature"),
+								errdetail("get diagitem syntax is supported only in B compatibility")));
+						}
+						GetDiagStmt *n = makeNode(GetDiagStmt);
+						n->condInfo = $4;
+						n->hasCondNum = false;
+						n->condNum = NULL;
+
+						$$ = (Node *)n;
+					}
+				| GET getdiag_area_opt DIAGNOSTICS CONDITION condition_number condition_information
+					{
+						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+							ereport(errstate, (errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Un-support feature"),
+								errdetail("get diagitem syntax is supported only in B compatibility")));
+						}
+						GetDiagStmt *n = makeNode(GetDiagStmt);
+						n->condInfo = $6;
+						n->hasCondNum = true;
+						n->condNum = list_make1($5);
+
+						$$ = (Node *)n;
+					}
+				;
+
+getdiag_area_opt:
+				| CURRENT_P
+				| STACKED_P
+					{
+						const char* message = "GET STACKED DIAGNOSTICS when handler not active.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(ERROR,
+						(errcode(ERRCODE_STACKED_DIAGNOSTICS_ACCESSED_WITHOUT_ACTIVE_HANDLER),
+							errmsg("GET STACKED DIAGNOSTICS when handler not active.")));
+					}
+				;
+
+statement_information:
+				statement_information_item
+					{
+						$$ = list_make1($1);
+					}
+				| statement_information ',' statement_information_item
+					{
+						$$ = lappend($1, $3);
+					}
+				;
+
+statement_information_item:
+				uservar_name '=' statement_information_item_name
+					{
+						CondInfo* n = (CondInfo *)palloc(sizeof(CondInfo));
+
+						n->target = list_make1($1);
+						n->kind = $3;
+
+						$$ = n;
+					}
+				;
+
+statement_information_item_name:
+				NUMBER_P					{ $$ = COND_INFO_NUMBER; }
+				| ROW_COUNT				{ $$ = COND_INFO_ROW_COUNT; }
+				;
+
+condition_number:
+				ICONST						{ $$ = makeIntConst($1, @1); }
+				| FCONST					{ $$ = makeIntConst((atof($1) + 0.5), @1); }
+				| SCONST					{ $$ = makeIntConst((atof($1) + 0.5), @1); }
+				| BCONST					
+					{
+						Datum val = DirectFunctionCall1(bittoint4, DirectFunctionCall3(bit_in, CStringGetDatum($1), ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1)));
+						$$ = makeIntConst(DatumGetInt32(val), @1);
+					}
+				| TRUE_P					{ $$ = makeIntConst(TRUE, @1); }
+				| FALSE_P					{ $$ = makeIntConst(FALSE, @1); }
+				| NULL_P					{ $$ = makeIntConst(FALSE, @1); }
+				| uservar_name				{ $$ = $1; }
+				| IDENT						{ $$ = makeIntConst((atof($1) + 0.5), @1); }
+				;
+
+condition_information:
+				condition_information_item
+					{
+						$$ = list_make1($1);
+					}
+				| condition_information ',' condition_information_item
+					{
+						$$ = lappend($1, $3);
+					}
+				;
+
+condition_information_item:
+				uservar_name '=' condition_information_item_name
+					{
+						CondInfo* n = (CondInfo *)palloc(sizeof(CondInfo));
+
+						n->target = list_make1($1);
+						n->kind = $3;
+
+						$$ = n;
+					}
+				;
+
+condition_information_item_name:
+				CLASS_ORIGIN				{ $$ = COND_INFO_CLASS_ORIGIN; }
+				| SUBCLASS_ORIGIN			{ $$ = COND_INFO_SUBCLASS_ORIGIN; }
+				| CONSTRAINT_CATALOG		{ $$ = COND_INFO_CONSTRAINT_CATALOG; }
+				| CONSTRAINT_SCHEMA			{ $$ = COND_INFO_CONSTRAINT_SCHEMA; }
+				| CONSTRAINT_NAME			{ $$ = COND_INFO_CONSTRAINT_NAME; }
+				| CATALOG_NAME				{ $$ = COND_INFO_CATALOG_NAME; }
+				| SCHEMA_NAME				{ $$ = COND_INFO_SCHEMA_NAME; }
+				| TABLE_NAME				{ $$ = COND_INFO_TABLE_NAME; }
+				| COLUMN_NAME				{ $$ = COND_INFO_COLUMN_NAME; }
+				| CURSOR_NAME				{ $$ = COND_INFO_CURSOR_NAME; }
+				| MESSAGE_TEXT				{ $$ = COND_INFO_MESSAGE_TEXT; }
+				| MYSQL_ERRNO				{ $$ = COND_INFO_MYSQL_ERRNO; }
+				| RETURNED_SQLSTATE			{ $$ = COND_INFO_RETURNED_SQLSTATE; }
+				;
 /*****************************************************************************
  *
  * SHUTDOWN STATEMENT
@@ -28660,6 +28801,7 @@ unreserved_keyword:
 			| CASCADE
 			| CASCADED
 			| CATALOG_P
+			| CATALOG_NAME
 			| CHAIN
 			| CHANGE
 			| CHARACTERISTICS
@@ -28667,6 +28809,7 @@ unreserved_keyword:
 			| CHARSET
 			| CHECKPOINT
 			| CLASS
+			| CLASS_ORIGIN
 			| CLEAN
 			| CLIENT
             | CLIENT_MASTER_KEY
@@ -28676,6 +28819,7 @@ unreserved_keyword:
 			| CLUSTER
             | COLUMN_ENCRYPTION_KEY
             | COLUMN_ENCRYPTION_KEYS
+			| COLUMN_NAME
 			| COLUMNS
 			| COMMENT
 			| COMMENTS
@@ -28687,10 +28831,13 @@ unreserved_keyword:
 			| COMPRESS
 			| CONDITION
 			| CONFIGURATION
-                        | CONNECT
+			| CONNECT
 			| CONNECTION
 			| CONSISTENT
 			| CONSTANT
+			| CONSTRAINT_CATALOG
+			| CONSTRAINT_NAME
+			| CONSTRAINT_SCHEMA
 			| CONSTRAINTS
 			| CONTENT_P
 			| CONTINUE_P
@@ -28705,6 +28852,7 @@ unreserved_keyword:
 			| CUBE
 			| CURRENT_P
 			| CURSOR
+			| CURSOR_NAME
 			| CYCLE
 			| DATA_P
 			| DATABASE
@@ -28728,6 +28876,7 @@ unreserved_keyword:
 			| DELIMITERS
 			| DELTA
 			| DETERMINISTIC
+			| DIAGNOSTICS
 			| DICTIONARY
 			| DIRECT
 			| DIRECTORY
@@ -28792,6 +28941,7 @@ unreserved_keyword:
 			| FUNCTION
 			| FUNCTIONS
 			| GENERATED
+			| GET
 			| GLOBAL
 			| GRANTED
 			| HANDLER
@@ -28867,6 +29017,7 @@ unreserved_keyword:
 			| MAXSIZE
 			| MAXTRANS
 			| MERGE
+			| MESSAGE_TEXT
 			| MINEXTENTS
 			| MINUTE_P
 			| MINUTE_SECOND_P
@@ -28876,6 +29027,7 @@ unreserved_keyword:
 			| MONTH_P
 			| MOVE
 			| MOVEMENT
+			| MYSQL_ERRNO
 			| NAME_P
 			| NAMES
 			| NEXT
@@ -28972,6 +29124,7 @@ unreserved_keyword:
 			| RESTART
 			| RESTRICT
 			| RETURN
+			| RETURNED_SQLSTATE
 			| RETURNS
 			| REUSE
 			| REVOKE
@@ -28980,6 +29133,7 @@ unreserved_keyword:
 			| ROLLBACK
 			| ROLLUP
 			| ROTATION
+			| ROW_COUNT
 			| ROWS
 			| ROWTYPE_P
 			| RULE
@@ -28987,6 +29141,7 @@ unreserved_keyword:
 			| SAVEPOINT
 			| SCHEDULE
 			| SCHEMA
+			| SCHEMA_NAME
 			| SCROLL
 			| SEARCH
 			| SECOND_P
@@ -29017,6 +29172,7 @@ unreserved_keyword:
 			| SPLIT
 			| SQL_P
 			| STABLE
+			| STACKED_P
 			| STANDALONE_P
                         | START
 			| STARTING
@@ -29030,9 +29186,10 @@ unreserved_keyword:
 			| STORE_P
 			| STORED
 			| STRATIFY
-                        | STREAM
+			| STREAM
 			| STRICT_P
 			| STRIP_P
+			| SUBCLASS_ORIGIN
 			| SUBPARTITION
 			| SUBPARTITIONS
 			| SUBSCRIPTION
@@ -29040,6 +29197,7 @@ unreserved_keyword:
 			| SYSID
 			| SYS_REFCURSOR					{ $$ = "refcursor"; }
 			| SYSTEM_P
+			| TABLE_NAME
 			| TABLES
 			| TABLESPACE
 			| TARGET

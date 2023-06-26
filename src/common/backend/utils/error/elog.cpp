@@ -483,6 +483,17 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
     /* default module name will be used */
     edata->mod_id = MOD_MAX;
     edata->backtrace_log = NULL;
+    edata->sqlstate = NULL;
+    edata->class_origin = NULL;
+    edata->subclass_origin = NULL;
+    edata->cons_catalog = NULL;
+    edata->cons_schema = NULL;
+    edata->cons_name = NULL;
+    edata->catalog_name = NULL;
+    edata->schema_name = NULL;
+    edata->table_name = NULL;
+    edata->column_name = NULL;
+    edata->cursor_name = NULL;
 
     t_thrd.log_cxt.recursion_depth--;
     return true;
@@ -1396,6 +1407,18 @@ int signal_is_warnings_throw(bool is_warning_throw)
     CHECK_STACK_DEPTH();
 
     edata->is_warnings_throw = is_warning_throw;
+
+    return 0; /* return value does not matter */
+}
+
+int signal_is_signal(int is_signal)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    edata->is_signal = is_signal;
 
     return 0; /* return value does not matter */
 }
@@ -3904,7 +3927,7 @@ void send_message_to_frontend(ErrorData* edata)
     )
         return;
 
-    if (DB_IS_CMPT(B_FORMAT)) {
+    if (DB_IS_CMPT(B_FORMAT) && edata->sqlerrcode != ERRCODE_STACKED_DIAGNOSTICS_ACCESSED_WITHOUT_ACTIVE_HANDLER) {
         pushErrorData(edata);
     }
 
@@ -5761,12 +5784,6 @@ static void write_asplog(char *data, int len, bool end)
     }
 }
 
-typedef struct {
-    enum_dolphin_error_level elevel;
-    int errorcode;
-    char *message;
-} DolphinErrorData;
-
 ErrorDataArea *initErrorDataArea()
 {
     ErrorDataArea *errorDataArea = (ErrorDataArea *)palloc0(sizeof(ErrorDataArea));
@@ -5782,12 +5799,47 @@ ErrorDataArea *initErrorDataArea()
 void cleanErrorDataArea(ErrorDataArea *errorDataArea)
 {
     Assert(errorDataArea != NULL);
-    list_free_deep(errorDataArea->sqlErrorDataList);
+    MemoryContext oldcontext;
+
+    oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
+
+    ListCell *lc = NULL;
+    foreach (lc, errorDataArea->sqlErrorDataList) {
+        DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
+        if (eData->errorcode)
+            pfree_ext(eData->errorcode);
+        if (eData->sqlstatestr)
+            pfree_ext(eData->sqlstatestr);
+        if (eData->class_origin)
+            pfree_ext(eData->class_origin);
+        if (eData->subclass_origin)
+            pfree_ext(eData->subclass_origin);
+        if (eData->constraint_catalog)
+            pfree_ext(eData->constraint_catalog);
+        if (eData->constraint_schema)
+            pfree_ext(eData->constraint_schema);
+        if (eData->constraint_name)
+            pfree_ext(eData->constraint_name);
+        if (eData->catalog_name)
+            pfree_ext(eData->catalog_name);
+        if (eData->schema_name)
+            pfree_ext(eData->schema_name);
+        if (eData->table_name)
+            pfree_ext(eData->table_name);
+        if (eData->column_name)
+            pfree_ext(eData->column_name);
+        if (eData->cursor_name)
+            pfree_ext(eData->cursor_name);
+        if (eData->message_text)
+            pfree_ext(eData->message_text);
+    }
+    list_free_ext(errorDataArea->sqlErrorDataList);
     errorDataArea->sqlErrorDataList = NIL;
     errorDataArea->current_edata_count = 0;
     for (int i = 0; i <= enum_dolphin_error_level::B_END; i++) {
         errorDataArea->current_edata_count_by_level[i] = 0;
     }
+    MemoryContextSwitchTo(oldcontext);
 }
 
 void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to)
@@ -5804,8 +5856,19 @@ void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to)
         DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
         DolphinErrorData *newErrData = (DolphinErrorData *)palloc(sizeof(DolphinErrorData));
         newErrData->elevel = eData->elevel;
-        newErrData->errorcode = eData->errorcode;
-        newErrData->message = pstrdup(eData->message);
+        newErrData->errorcode = pstrdup(eData->errorcode);
+        newErrData->sqlstatestr = pstrdup(eData->sqlstatestr);
+        newErrData->message_text = pstrdup(eData->message_text);
+        newErrData->class_origin = pstrdup(eData->class_origin);
+        newErrData->subclass_origin = pstrdup(eData->subclass_origin);
+        newErrData->constraint_catalog = pstrdup(eData->constraint_catalog);
+        newErrData->constraint_schema = pstrdup(eData->constraint_schema);
+        newErrData->constraint_name = pstrdup(eData->constraint_name);
+        newErrData->catalog_name = pstrdup(eData->catalog_name);
+        newErrData->schema_name = pstrdup(eData->schema_name);
+        newErrData->table_name = pstrdup(eData->table_name);
+        newErrData->column_name = pstrdup(eData->column_name);
+        newErrData->cursor_name = pstrdup(eData->cursor_name);
         to->sqlErrorDataList = lappend(to->sqlErrorDataList, newErrData);
     }
     to->current_edata_count = from->current_edata_count;
@@ -5814,8 +5877,87 @@ void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to)
     }
     MemoryContextSwitchTo(oldcontext);
 }
+bool strcompare(char* str1, char* str2)
+{
+    if(str1 != NULL) {
+        if (str2 != NULL) {
+            if (strcmp(str1, str2) != 0) {
+                return false;
+            }
+        } else {
+            return true;
+        }
+    } else {
+        if (str2 != NULL) {
+            return false;
+        }
+    }
+    return true;
+}
+bool compareErrorData(DolphinErrorData* err1, ErrorData* err2)
+{
+    if (err1->elevel != errorLevelToDolphin(err2->elevel))
+        return false;
+    int errcode = MAKE_SQLSTATE(err1->errorcode[0],
+                                err1->errorcode[1],
+                                err1->errorcode[2],
+                                err1->errorcode[3],
+                                err1->errorcode[4]);
+    if((errcode == err2->sqlerrcode) && strcompare(err1->class_origin,err2->class_origin)
+        && strcompare(err1->subclass_origin,err2->subclass_origin) && strcompare(err1->constraint_catalog,err2->cons_catalog)
+        && strcompare(err1->constraint_schema,err2->cons_schema) && strcompare(err1->constraint_name,err2->cons_name)
+        && strcompare(err1->catalog_name,err2->catalog_name) && strcompare(err1->schema_name,err2->schema_name)
+        && strcompare(err1->table_name,err2->table_name) && strcompare(err1->column_name,err2->column_name)
+        && strcompare(err1->cursor_name,err2->cursor_name) && strcompare(err1->message_text,err2->message))
+        return true;
+    else
+        return false;
+}
 
-void resetErrorDataArea(bool stacked)
+void copyDiffErrorDataArea(ErrorDataArea *from, ErrorDataArea *to, ErrorData *edata)
+{
+    cleanErrorDataArea(to);
+    bool is_same = false;
+    MemoryContext oldcontext;
+    int count = 0;
+
+    oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
+
+    ListCell *lc = NULL;
+    lc = list_head(from->sqlErrorDataList);
+    foreach (lc, from->sqlErrorDataList) {
+        DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
+        is_same = compareErrorData(eData, edata);
+        if (is_same)
+            continue;
+        DolphinErrorData *newErrData = (DolphinErrorData *)palloc(sizeof(DolphinErrorData));
+        newErrData->elevel = eData->elevel;
+        newErrData->errorcode = pstrdup(eData->errorcode);
+        newErrData->sqlstatestr = pstrdup(eData->sqlstatestr);
+        newErrData->message_text = pstrdup(eData->message_text);
+        newErrData->class_origin = pstrdup(eData->class_origin);
+        newErrData->subclass_origin = pstrdup(eData->subclass_origin);
+        newErrData->constraint_catalog = pstrdup(eData->constraint_catalog);
+        newErrData->constraint_schema = pstrdup(eData->constraint_schema);
+        newErrData->constraint_name = pstrdup(eData->constraint_name);
+        newErrData->catalog_name = pstrdup(eData->catalog_name);
+        newErrData->schema_name = pstrdup(eData->schema_name);
+        newErrData->table_name = pstrdup(eData->table_name);
+        newErrData->column_name = pstrdup(eData->column_name);
+        newErrData->cursor_name = pstrdup(eData->cursor_name);
+        count++;
+        to->sqlErrorDataList = lappend(to->sqlErrorDataList, newErrData);
+    }
+    if (count != 0) {
+        to->current_edata_count = count;
+        for (int i = 0; i <= enum_dolphin_error_level::B_END; i++) {
+            to->current_edata_count_by_level[i] = from->current_edata_count_by_level[i];
+        }
+    }
+    MemoryContextSwitchTo(oldcontext);
+}
+
+void resetErrorDataArea(bool stacked, bool handler_active)
 {
     /* reset all count to zero and list to null */
     MemoryContext oldcontext;
@@ -5823,7 +5965,9 @@ void resetErrorDataArea(bool stacked)
     ErrorDataArea *errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
     ErrorDataArea *lastErrorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
     if (stacked) {
-        copyErrorDataArea(errorDataArea, lastErrorDataArea);
+        if (!handler_active) {
+            copyErrorDataArea(errorDataArea, lastErrorDataArea);
+        }
     } else {
         cleanErrorDataArea(lastErrorDataArea);
     }
@@ -5845,6 +5989,13 @@ enum_dolphin_error_level errorLevelToDolphin(int elevel)
 void pushErrorData(ErrorData *edata)
 {
     MemoryContext oldcontext;
+    if (edata->is_signal == PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITHOUT_SQLSTATE) {
+        /* resignal without sqlstate */
+        resetErrorDataArea(false, u_sess->dolphin_errdata_ctx.handler_active);
+    } else if (edata->is_signal == PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITH_SQLSTATE) {
+        /* resignal sqlstate */
+        copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
+    }
     ErrorDataArea *errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
     oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
     if (u_sess->dolphin_errdata_ctx.max_error_count >= SqlErrorDataCount()) {
@@ -5852,14 +6003,54 @@ void pushErrorData(ErrorData *edata)
             errorLevelToDolphin(edata->elevel) != enum_dolphin_error_level::B_NOTE) {
             DolphinErrorData *dolphinErrorData = (DolphinErrorData *)palloc(sizeof(DolphinErrorData));
             dolphinErrorData->elevel = errorLevelToDolphin(edata->elevel);
-            dolphinErrorData->errorcode = edata->sqlerrcode;
-            dolphinErrorData->message = pstrdup(edata->message);
+            
+            const char* cls = plpgsql_get_sqlstate(edata->sqlerrcode);
+            char* class_origin = NULL;
+            char* subclass_origin = NULL;
+            if (((cls[0] >= '0' && cls[0] <= '4') || (cls[0] >= 'A' && cls[0] <= 'H')) &&
+                ((cls[1] >= '0' && cls[1] <= '9') || (cls[1] >= 'A' && cls[1] <= 'Z'))) {
+                class_origin = pstrdup("ISO 9075");
+                subclass_origin = pstrdup("ISO 9075");
+            } else {
+                class_origin = pstrdup("MySQL");
+                if (!memcmp(cls + 2, "000", strlen("000"))) {
+                    subclass_origin = pstrdup("ISO 9075");
+                } else {
+                    subclass_origin = pstrdup("MySQL");
+                }
+            }
+            if (edata->is_signal > 0) {
+                dolphinErrorData->class_origin = pstrdup(edata->class_origin);
+                dolphinErrorData->subclass_origin = pstrdup(edata->subclass_origin);
+                dolphinErrorData->sqlstatestr = pstrdup(edata->sqlstate);
+                char sqlerrcode [128];
+                int ret = sprintf_s(sqlerrcode, 128, "%d", edata->sqlerrcode);
+                securec_check_ss_c(ret, "\0", "\0");
+                dolphinErrorData->errorcode = pstrdup(sqlerrcode);
+            } else {
+                dolphinErrorData->class_origin = pstrdup(class_origin);
+                dolphinErrorData->subclass_origin = pstrdup(subclass_origin);
+                dolphinErrorData->errorcode = pstrdup(plpgsql_get_sqlstate(edata->sqlerrcode));
+                dolphinErrorData->sqlstatestr = pstrdup(plpgsql_get_sqlstate(edata->sqlerrcode));
+            }
+            dolphinErrorData->message_text = pstrdup(edata->message);
+            dolphinErrorData->constraint_catalog = pstrdup(edata->cons_catalog);
+            dolphinErrorData->constraint_schema = pstrdup(edata->cons_schema);
+            dolphinErrorData->constraint_name = pstrdup(edata->cons_name);
+            dolphinErrorData->catalog_name = pstrdup(edata->catalog_name);
+            dolphinErrorData->schema_name = pstrdup(edata->schema_name);
+            dolphinErrorData->table_name = pstrdup(edata->table_name);
+            dolphinErrorData->column_name = pstrdup(edata->column_name);
+            dolphinErrorData->cursor_name = pstrdup(edata->cursor_name);
             errorDataArea->sqlErrorDataList = lappend(errorDataArea->sqlErrorDataList, dolphinErrorData);
             errorDataArea->current_edata_count++;
             errorDataArea->current_edata_count_by_level[errorLevelToDolphin(edata->elevel)]++;
         }
     }
     MemoryContextSwitchTo(oldcontext);
+    if(edata->is_signal == PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITHOUT_SQLSTATE || edata->is_signal == PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITH_SQLSTATE) {
+        copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
+    }
 }
 
 int32 SqlErrorDataErrorCount(ErrorDataArea *errorDataArea)
@@ -5895,7 +6086,7 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isSh
     /* need a tuple descriptor representing three TEXT columns */
     tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);
 
     /* prepare for projection of tuples */
@@ -5922,7 +6113,7 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isSh
         }
         Assert(lc != NULL);
         DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
-        values[1] = Int32GetDatum(eData->errorcode);
+        values[1] = CStringGetTextDatum(eData->errorcode);
 
         if (isShowErrors) {
             if (eData->elevel == enum_dolphin_error_level::B_ERROR) {
@@ -5946,8 +6137,8 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isSh
             }
         }
 
-        if (eData->message) {
-            values[2] = CStringGetTextDatum(eData->message);
+        if (eData->message_text) {
+            values[2] = CStringGetTextDatum(eData->message_text);
         } else {
             values[2] = CStringGetTextDatum("");
         }
@@ -5957,6 +6148,7 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isSh
 
         /* clean up */
         pfree(DatumGetPointer(values[0]));
+        pfree(DatumGetPointer(values[1]));
         pfree(DatumGetPointer(values[2]));
     }
     end_tup_output(tstate);
@@ -5984,5 +6176,193 @@ void gramShowWarningsErrorsCount(DestReceiver *dest, bool isShowErrors)
     }
     do_tup_output(tstate, values, 1, isnull, 1);
     end_tup_output(tstate);
+    copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
+}
+
+int getUserVarVal(char* str)
+{
+    bool found = false;
+    GucUserParamsEntry* entry = NULL;
+    int condition_number = 0;
+    if (u_sess->utils_cxt.set_user_params_htab != NULL) {
+        entry = (GucUserParamsEntry*)hash_search(u_sess->utils_cxt.set_user_params_htab, str, HASH_FIND, &found);
+        if (found) {
+            entry = (GucUserParamsEntry*)hash_search(u_sess->utils_cxt.set_user_params_htab, str, HASH_ENTER, &found);
+            if (entry != NULL) {
+                Const* con = entry->value;
+                Datum constval = con->constvalue;
+                Oid consttype = con->consttype;
+                switch(consttype) {
+                    case INT1OID:
+                    case INT2OID:
+                    case INT4OID:
+                    case INT8OID:
+                        {
+                            condition_number = DatumGetInt64(constval);
+                        } break;
+                    case TEXTOID:
+                        {
+                            condition_number = (atof(TextDatumGetCString(constval)) + 0.5);
+                        }  break;
+                    case FLOAT4OID:
+                    case FLOAT8OID:
+                        {
+                            float8 value = DatumGetFloat8(constval);
+                            char *value_str = DatumGetCString(DirectFunctionCall1(float8out, Float8GetDatum(value)));
+                            condition_number = (atof(value_str) + 0.5);
+                        } break;
+                    case BOOLOID:
+                        {
+                            bool value = DatumGetBool(constval);
+                            if (value) {
+                                condition_number = 1;
+                            } else {
+                                condition_number = 0;
+                            }
+                        } break;
+                    default:
+                        break;
+                }
+            }
+        }
+    }
+    return condition_number;
+}
+
+int getConditionNum(List* condNum)
+{
+    int condition_number = 0;
+    ListCell* valueCell = NULL;
+    Node* n = NULL;
+    foreach(valueCell, condNum) {
+        n = (Node*)lfirst(valueCell);
+
+        switch(nodeTag(n)) {
+            case T_A_Const: {
+                A_Const *a_const = (A_Const*)n;
+                Value* v = &a_const->val;
+                if (v->type == T_Integer) {
+                    condition_number = intVal(v);
+                }
+            } break;
+            case T_UserVar: {
+                UserVar* uv = (UserVar*)n;
+                condition_number = getUserVarVal(uv->name);
+            } break;
+            default:
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_CONDITION_NUMBER),
+                        errmsg("Invalid condition number.")));
+                break;
+        }
+    }
+    return condition_number;
+}
+
+void getDiagnosticsInfo(List* condInfo, bool hasCondNum, List* condNum)
+{
+    ListCell *lc = NULL;
+    StringInfoData buf;
+    ErrorDataArea *errorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
+    int condCount = list_length(errorDataArea->sqlErrorDataList);
+    int ret = 0;
+
+    initStringInfo(&buf);
+
+    /* condition number */
+    if (hasCondNum) {
+        int conditionNum = getConditionNum(condNum);
+
+        if (conditionNum < 1 || conditionNum > condCount) {
+            ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+            edata->elevel = ERROR;
+            edata->sqlerrcode = ERRCODE_INVALID_CONDITION_NUMBER;
+            edata->message = "Invalid condition number";
+            edata->class_origin = edata->sqlstate = edata->subclass_origin = edata->cons_catalog = edata->cons_schema = NULL;
+            edata->cons_name = edata->catalog_name = edata->schema_name = edata->table_name = edata->column_name = edata->cursor_name = NULL;
+            copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
+            pushErrorData(edata);
+            FreeStringInfo(&buf);
+            return;
+        }
+        int currIdx = 0;
+        DolphinErrorData* eData = (DolphinErrorData *)list_nth(errorDataArea->sqlErrorDataList, conditionNum - 1);
+        foreach(lc, condInfo) {
+            CondInfo *cond = (CondInfo*)lfirst(lc);
+            UserVar *uv = (UserVar *)lfirst(list_head(cond->target));
+
+            switch(cond->kind) {
+                case COND_INFO_CLASS_ORIGIN:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->class_origin);
+                    break;
+                case COND_INFO_SUBCLASS_ORIGIN:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->subclass_origin);
+                    break;
+                case COND_INFO_CONSTRAINT_CATALOG:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->constraint_catalog);
+                    break;
+                case COND_INFO_CONSTRAINT_SCHEMA:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->constraint_schema);
+                    break;
+                case COND_INFO_CONSTRAINT_NAME:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->constraint_name);
+                    break;
+                case COND_INFO_CATALOG_NAME:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->catalog_name);
+                    break;
+                case COND_INFO_SCHEMA_NAME:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->schema_name);
+                    break;
+                case COND_INFO_TABLE_NAME:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->table_name);
+                    break;
+                case COND_INFO_COLUMN_NAME:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->column_name);
+                    break;
+                case COND_INFO_CURSOR_NAME:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->cursor_name);
+                    break;
+                case COND_INFO_MESSAGE_TEXT:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->message_text);
+                    break;
+                case COND_INFO_MYSQL_ERRNO:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->errorcode);
+                    break;
+                case COND_INFO_RETURNED_SQLSTATE:
+                    appendStringInfo(&buf, "set @%s = '%s';", uv->name, eData->sqlstatestr);
+                    break;
+                default:
+                    break;
+            }
+        }
+    } else {
+        lc = list_head(condInfo);
+        foreach(lc, condInfo) {
+            CondInfo *cond = (CondInfo*)lfirst(lc);
+            UserVar *uv = (UserVar *)lfirst(list_head(cond->target));
+
+            switch(cond->kind) {
+                case COND_INFO_NUMBER:
+                    appendStringInfo(&buf, "set @%s = %d;", uv->name, condCount);
+                    break;
+                case COND_INFO_ROW_COUNT:
+                    appendStringInfo(&buf, "set @%s = %ld;", uv->name, u_sess->statement_cxt.current_row_count);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+    if ((ret = SPI_connect()) != SPI_OK_CONNECT) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("SPI_connect failed: %s", SPI_result_code_string(ret))));
+    }
+    ret = SPI_execute(buf.data, false, 0);
+    if (ret != SPI_OK_UTILITY) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SPI_EXECUTE_FAILURE),
+                    errmsg("SPI_execute execute job interval fail, job_id: %d.", ret)));
+    }
+    SPI_finish();
+    FreeStringInfo(&buf);
     copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
 }

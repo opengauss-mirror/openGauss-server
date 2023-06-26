@@ -2338,5 +2338,39 @@ typedef struct CreateSetStmt {
     TypeName *typname;  /* type of column */
 } CreateSetStmt;
 
+/* ----------------------
+ *	Get Diagnostics Statement
+ * ----------------------
+ */
+enum {
+    COND_INFO_NUMBER,
+    COND_INFO_ROW_COUNT,
+    COND_INFO_CLASS_ORIGIN,
+    COND_INFO_SUBCLASS_ORIGIN,
+    COND_INFO_CONSTRAINT_CATALOG,
+    COND_INFO_CONSTRAINT_SCHEMA,
+    COND_INFO_CONSTRAINT_NAME,
+    COND_INFO_CATALOG_NAME,
+    COND_INFO_SCHEMA_NAME,
+    COND_INFO_TABLE_NAME,
+    COND_INFO_COLUMN_NAME,
+    COND_INFO_CURSOR_NAME,
+    COND_INFO_MESSAGE_TEXT,
+    COND_INFO_MYSQL_ERRNO,
+    COND_INFO_RETURNED_SQLSTATE
+};
+
+typedef struct CondInfo {
+    NodeTag type;
+    List *target;
+    int kind;
+} CondInfo;
+
+typedef struct GetDiagStmt {
+    NodeTag type;
+    List *condInfo;
+    bool hasCondNum;
+    List *condNum;
+} GetDiagStmt;
 #endif /* PARSENODES_H */
 

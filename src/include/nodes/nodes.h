@@ -832,9 +832,10 @@ typedef enum NodeTag {
     T_UserVar,
     T_CharsetCollateOptions,
     T_FunctionSources,
-
     /* ndpplugin tag */
-    T_NdpScanCondition
+    T_NdpScanCondition,
+    T_CondInfo,
+    T_GetDiagStmt
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */
