@@ -1267,14 +1267,14 @@ bool SsIsSkipPath(const char* dirname, bool needskipall)
     } else {
         /* skip other node pg_xlog except primary */
         if (IsBeginWith(dirname, "pg_xlog") > 0) { 
-            int dirNameLen = strlen("pg_xlog");
+            size_t dirNameLen = strlen("pg_xlog");
             char instanceId[MAX_INSTANCEID_LEN] = {0};
             errno_t rc = EOK;
             rc = snprintf_s(instanceId, sizeof(instanceId), sizeof(instanceId) - 1, "%d",
                                 instance_config.dss.instance_id);
             securec_check_ss_c(rc, "\0", "\0");
             /* not skip pg_xlog directory in file systerm */
-            if (strlen(dirname) > dirNameLen && strcmp(dirname + dirNameLen, instanceId) != 0) 
+            if (strlen(dirname) > dirNameLen && strcmp(dirname + dirNameLen, instanceId) != 0)
                 return true;
         }
     }

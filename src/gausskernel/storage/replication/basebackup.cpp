@@ -1239,7 +1239,7 @@ bool IsSkipDir(const char * dirName)
     
         /* skip other node pg_xlog except primary */
         if (IsBeginWith(dirName, "pg_xlog") > 0) { 
-            int dirNameLen = strlen("pg_xlog");
+            size_t dirNameLen = strlen("pg_xlog");
             char instance_id[MAX_INSTANCEID_LEN];
             errno_t rc = EOK;
             rc = snprintf_s(instance_id, sizeof(instance_id), sizeof(instance_id) - 1, "%d",
@@ -1540,12 +1540,13 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                                         errmsg("symbolic link \"%s\" target is too long", pathbuf)));
                     linkpath[MAXPGPATH - 1] = '\0';
 
-                    if (!sizeonly)
+                    if (!sizeonly){
                         if (ENABLE_DSS && is_dss_file(pathbuf)) {
                             _tarWriteHeader(pathbuf, linkpath, &statbuf);
                         } else {
-                            _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);    
+                            _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
                         }
+                    }
 #else
 
                     /*
@@ -1636,12 +1637,13 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                 ereport(ERROR,
                         (errcode(ERRCODE_NAME_TOO_LONG), errmsg("symbolic link \"%s\" target is too long", pathbuf)));
             linkpath[rllen] = '\0';
-            if (!sizeonly)
+            if (!sizeonly){
                 if (ENABLE_DSS && is_dss_file(pathbuf)) {
                     _tarWriteHeader(pathbuf, linkpath, &statbuf);
                 } else {
-                    _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);    
+                    _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
                 }
+            }
             size += BUILD_PATH_LEN; /* Size of the header just added */
 #else
 
@@ -1662,12 +1664,13 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
              * Store a directory entry in the tar file so we can get the
              * permissions right.
              */
-            if (!sizeonly)
+            if (!sizeonly){
                 if (ENABLE_DSS && is_dss_file(pathbuf)) {
                     _tarWriteHeader(pathbuf, NULL, &statbuf);
                 } else {
-                    _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);    
+                    _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);
                 }
+            }
             size += BUILD_PATH_LEN; /* Size of the header just added */
 
             /*

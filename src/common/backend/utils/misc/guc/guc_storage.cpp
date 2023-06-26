@@ -216,7 +216,7 @@ static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source);
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
 static bool check_ss_enable_ondemand_recovery(bool* newval, void** extra, GucSource source);
-static void assign_ss_enable_aio(bool newval, void *extra);
+
 #ifdef USE_ASSERT_CHECKING
 static void assign_ss_enable_verify_page(bool newval, void *extra);
 #endif

@@ -556,7 +556,7 @@ extern void UpdateErrorData(ErrorData* edata, ErrorData* newData);
 extern void FreeErrorData(ErrorData* edata);
 extern void FlushErrorState(void);
 extern void FlushErrorStateWithoutDeleteChildrenContext(void);
-extern void ReThrowError(ErrorData* edata) __attribute__((noreturn));
+extern void ReThrowError(ErrorData* edata);
 extern void pg_re_throw(void) __attribute__((noreturn));
 extern void PgRethrowAsFatal(void);
 extern char* pg_strdup(const char* in);

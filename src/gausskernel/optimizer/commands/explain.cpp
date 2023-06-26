@@ -2029,7 +2029,7 @@ static void ExplainNode(
     bool haschildren = false;
     int plan_node_id = planstate->plan->plan_node_id;
     int parentid = planstate->plan->parent_node_id;
-    StringInfo tmpName;
+    StringInfo tmpName = nullptr;
     bool from_datanode = false;
     bool old_dn_flag = false;
 
@@ -2170,7 +2170,7 @@ static void ExplainNode(
             if (es->format == EXPLAIN_FORMAT_TEXT) {
                 appendStringInfo(es->str, " on %s", indexname);
                 if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL) {
-                    StringInfo tmpName = &es->planinfo->m_planInfo->m_pname;
+                    tmpName = &es->planinfo->m_planInfo->m_pname;
                     appendStringInfo(tmpName, " using %s", indexname);
                 }
             } else {

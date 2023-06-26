@@ -1125,8 +1125,7 @@ static int32 SSRebuildBuf(BufferDesc *buf_desc, unsigned char thread_index)
     dms_ctrl_info_t ctrl_info = { 0 };
     ctrl_info.ctrl = *buf_ctrl;
     ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
-    ctrl_info.is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false; 
-    unsigned char release = false; // not used in openGauss, just adapt interface
+    ctrl_info.is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;
     int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index);
     if (ret != DMS_SUCCESS) {
         ereport(WARNING, (errmsg("Failed to rebuild page, rel:%u/%u/%u/%d, forknum:%d, blocknum:%u.",
@@ -1783,7 +1782,6 @@ static int CBMarkNeedFlush(void *db_handle, char *pageid)
 {
     bool valid = false;
     BufferDesc *buf_desc = NULL;
-    dms_buf_ctrl_t *buf_ctrl = NULL;
     BufferTag *tag = (BufferTag *)pageid;
 
     SSGetBufferDesc(pageid, &valid, &buf_desc);

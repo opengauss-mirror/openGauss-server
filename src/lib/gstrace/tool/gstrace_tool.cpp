@@ -31,6 +31,7 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#include <inttypes.h>
 #include "securec.h"
 #include "securec_check.h"
 
@@ -926,7 +927,7 @@ trace_msg_code DumpFileParser::parse()
         ret = readAndParseDump(startSlot, &reversedNumRecsFormatted);
         totNumRecsFormatted += reversedNumRecsFormatted;
     }
-    printf("Found %llu trace records and formatted %llu of them(most recent)\n",
+    printf("Found %" PRIu64" trace records and formatted %" PRIu64" of them(most recent)\n",
            (uint64_t)trc_infra.g_Counter, totNumRecsFormatted);
 
     return ret;
@@ -1245,7 +1246,7 @@ static trace_msg_code readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t co
         }
     }
 
-    printf("Found %llu trace records and formatted %llu of them\n", counter, totalNumRecs);
+    printf("Found %" PRIu64" trace records and formatted %" PRIu64" of them\n", counter, totalNumRecs);
     return ret;
 }
 
@@ -1283,7 +1284,7 @@ static trace_msg_code formatTrcDumpFile(const char* inputPath, const char* outpu
 
         uint64_t maxSlots = trc_cfg.size / SLOT_SIZE;
         if (trc_infra.g_slot_count > maxSlots) {
-            printf("Trace has wrapped.Dumped and formatted files contain only the most recent %llu records\n", maxSlots);
+            printf("Trace has wrapped.Dumped and formatted files contain only the most recent %" PRIu64" records\n", maxSlots);
         }
 
         ret = readAndFormatTrcRec(fdInput, fdOutput, MIN(maxSlots, trc_infra.g_Counter));

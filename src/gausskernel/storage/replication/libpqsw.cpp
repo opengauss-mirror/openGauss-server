@@ -575,7 +575,6 @@ static inline void libpqsw_trace_b_msg(int qtype, StringInfo msg)
 */
 static inline void libpqsw_trace_u_msg(int qtype, StringInfo msg)
 {
-    int batch_count = ntohl(*(uint32*)(msg->data));
     const char* portal = msg->data + 4;
     const char* stmt = msg->data + 4 + strlen(portal) + 1;
     libpqsw_print_trace_log(qtype, portal, stmt);
