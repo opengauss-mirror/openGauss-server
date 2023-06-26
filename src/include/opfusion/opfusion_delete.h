@@ -49,4 +49,52 @@ private:
     DeleteFusionLocaleVariable m_c_local;
 };
 
+class DeleteSubFusion : public OpFusion {
+    public:
+    DeleteSubFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params);
+
+    ~DeleteSubFusion(){};
+
+    bool execute(long max_rows, char* completionTag);
+
+    void InitLocals(ParamListInfo params);
+
+    void InitGlobals();
+    void refreshParameterIfNecessary();
+    private:
+
+    unsigned long ExecDelete(Relation rel, ResultRelInfo* resultRelInfo);
+    TupleTableSlot* delete_real(Relation fake_relation, TupleTableSlot* slot, EState* estate, bool canSetTag);
+
+    struct VarLoc {
+        int varNo;
+        int scanKeyIndx;
+    };
+    struct DeleteSubFusionGlobalVariable {
+        int m_targetParamNum;
+
+        int m_targetConstNum;
+
+        ConstLoc* m_targetConstLoc;
+
+        int m_varNum;
+
+        VarLoc* m_targetVarLoc;
+    };
+    DeleteSubFusionGlobalVariable* m_c_global;
+
+    struct DeleteSubFusionLocaleVariable {
+        EState* m_estate; /* Top estate*/
+        Datum* m_curVarValue;
+        bool* m_curVarIsnull;
+        Plan* m_plan;
+        SeqScan* m_ss_plan;
+        PlanState* m_ps;
+        SeqScanState* m_sub_ps;
+        ModifyTableState* m_mt_state;
+    };
+
+    DeleteSubFusionLocaleVariable m_c_local;
+};
+
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_DELETE_H_ */

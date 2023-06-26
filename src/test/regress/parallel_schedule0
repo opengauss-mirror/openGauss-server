@@ -224,6 +224,7 @@ test: single_node_update
 #test single_node_namespace
 #test: single_node_prepared_xacts 
 #test: single_node_delete
+test: single_node_delete_optimize
 
 # ----------
 # Another group of parallel tests
