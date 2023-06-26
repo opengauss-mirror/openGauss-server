@@ -833,6 +833,7 @@ typedef struct st_dms_profile {
     unsigned char scrlock_server_bind_core_start;
     unsigned char scrlock_server_bind_core_end;
     unsigned char parallel_thread_num;
+    unsigned int max_wait_time;
 } dms_profile_t;
 
 typedef struct st_logger_param {
@@ -846,11 +847,16 @@ typedef struct st_logger_param {
     ((ctrl)->lock_mode == DMS_LOCK_SHARE))
 #define DMS_BUF_CTRL_NOT_LOCK(ctrl)  ((ctrl)->lock_mode == DMS_LOCK_NULL)
 
+typedef enum en_dms_info_id {
+    DMS_INFO_REFORM_CURRENT = 0,
+    DMS_INFO_REFORM_LAST = 1,
+} dms_info_id_e;
+
 #define DMS_LOCAL_MAJOR_VER_WEIGHT  1000000
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           73
+#define DMS_LOCAL_VERSION           76
 
 #ifdef __cplusplus
 }
