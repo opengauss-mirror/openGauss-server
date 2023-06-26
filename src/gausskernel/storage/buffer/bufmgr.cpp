@@ -2032,7 +2032,11 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                 pgstat_count_buffer_read_time(INSTR_TIME_GET_MICROSEC(io_time));
                 INSTR_TIME_ADD(u_sess->instr_cxt.pg_buffer_usage->blk_read_time, io_time);
                 pgstatCountBlocksReadTime4SessionLevel(INSTR_TIME_GET_MICROSEC(io_time));
-            } 
+            } else {
+                INSTR_TIME_SET_CURRENT(io_time);
+                INSTR_TIME_SUBTRACT(io_time, io_start);
+                pgstatCountBlocksReadTime4SessionLevel(INSTR_TIME_GET_MICROSEC(io_time));
+            }
 
             /* check for garbage data */
             if (rdStatus == SMGR_RD_CRC_ERROR) {

@@ -1300,28 +1300,7 @@ void ExecCloseIndices(ResultRelInfo* resultRelInfo)
      * such stuff will be cleaned up automatically in FreeExecutorState.
      */
 }
-void OpFusionExecCloseIndices(ResultRelInfo* resultRelInfo)
-{
-    int i;
-    int numIndices;
-    RelationPtr indexDescs;
 
-    numIndices = resultRelInfo->ri_NumIndices;
-    indexDescs = resultRelInfo->ri_IndexRelationDescs;
-
-    for (i = 0; i < numIndices; i++) {
-        if (indexDescs[i] == NULL)
-            continue; /* shouldn't happen? */
-
-        /* Drop lock acquired by ExecOpenIndices */
-        index_close(indexDescs[i], NoLock);
-    }
-
-    /*
-     * XXX should free indexInfo array here too?  Currently we assume that
-     * such stuff will be cleaned up automatically in FreeExecutorState.
-     */
-}
 /*
  * Copied from ExecInsertIndexTuples
  */

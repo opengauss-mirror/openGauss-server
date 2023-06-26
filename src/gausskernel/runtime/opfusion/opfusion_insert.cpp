@@ -241,7 +241,7 @@ static void ExecReleaseResource(Tuple tuple, TupleTableSlot *slot, ResultRelInfo
 {
     tableam_tops_free_tuple(tuple);
     (void)ExecClearTuple(slot);
-    OpFusionExecCloseIndices(result_rel_info);
+    ExecCloseIndices(result_rel_info);
     ExecDoneStepInFusion(estate);
     if (bucket_rel != NULL) {
         bucketCloseRelation(bucket_rel);
