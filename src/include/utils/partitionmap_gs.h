@@ -508,7 +508,7 @@ extern bool EqualPartitonMap(const PartitionMap* partMap1, const PartitionMap* p
 
 bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValues, int partkeyColumnNum, int partSeq);
 
-extern int comparePartitionKey(RangePartitionMap* partMap, Const** values1, Const** values2, int partKeyNum);
+extern int comparePartitionKey(RangePartitionMap* partMap, Const** partkey_value, Const** partkey_bound, int partKeyNum);
 
 extern int lookupHBucketid(oidvector *buckets, int low, int2 bucket_id);
 

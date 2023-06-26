@@ -4025,8 +4025,140 @@ CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_c
         partition p3 values less than(MAXVALUE)
 ); -- ERROR
 ERROR:  partition bound of partition "p2" is too low
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY RANGE(part) (
+        partition p1 values less than('楂樻柉DB'),
+        partition p2 values less than(_gbk'高斯db'),
+        partition p3 values less than(MAXVALUE)
+); -- ERROR
+ERROR:  partition bound of partition "p2" is too low
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY LIST(part) (
+        partition p1 values('高斯DB'),
+        partition p2 values('高斯db')
+); -- ERROR
+ERROR:  list partition p1 and p2 has overlapped value
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY RANGE(part) (
+        PARTITION pass START('高斯DB') END('高斯db'),
+        PARTITION excellent START('高斯db') END(MAXVALUE)
+); -- unsupported
+ERROR:  datatype of column "part" is unsupported for partition key in start/end clause.
+HINT:  Valid datatypes are: smallint, int, bigint, float4/real, float8/double, numeric, date and timestamp [with time zone].
 -- -- -- utf8mb4
-CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_bin, a int)
+CREATE TABLE t_multi_charset_partkey (part text collate utf8mb4_bin, a int)
+    PARTITION BY HASH(part) (
+        partition p1,
+        partition p2,
+        partition p3,
+        partition p4
+);
+-- -- -- insert
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯DB', 1);
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯db', 2);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯DB1', 3);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯db1', 4);
+-- -- -- select
+SELECT * FROM t_multi_charset_partkey PARTITION(p1) order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+ 楂樻柉db | 2
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION(p2) order by 1,2;
+  part   | a 
+---------+---
+ 高斯db1 | 4
+(1 row)
+
+SELECT * FROM t_multi_charset_partkey PARTITION(p3) order by 1,2;
+ part | a 
+------+---
+(0 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_gbk'高斯db') order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+ 楂樻柉db | 2
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_utf8mb4'高斯DB1') order by 1,2;
+  part   | a 
+---------+---
+ 高斯DB1 | 3
+(1 row)
+
+-- -- -- partition pruning
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: a
+   ->  Partitioned Seq Scan on t_multi_charset_partkey
+         Filter: (part = '楂樻柉DB'::text COLLATE utf8mb4_bin)
+         Selected Partitions:  1
+(5 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+(1 row)
+
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db1' order by 1,2;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: a
+   ->  Partitioned Seq Scan on t_multi_charset_partkey
+         Filter: (part = '高斯db1'::text)
+         Selected Partitions:  2
+(5 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db1' order by 1,2;
+  part   | a 
+---------+---
+ 高斯db1 | 4
+(1 row)
+
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2; -- ALL PARTS
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: part COLLATE utf8mb4_bin, a
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on t_multi_charset_partkey
+               Filter: ((part)::text = '楂樻柉DB'::text)
+               Selected Partitions:  1..4
+(7 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+ 楂樻柉db | 2
+(2 rows)
+
+-- -- -- partiton ddl
+ALTER TABLE t_multi_charset_partkey SPLIT PARTITION p1 AT ( '高斯DB' ) INTO ( PARTITION p1, PARTITION p4); -- not support
+ERROR:  can not split LIST/HASH partition table
+ALTER TABLE t_multi_charset_partkey RENAME PARTITION FOR(_gbk'高斯db') TO newp1;
+SELECT * FROM t_multi_charset_partkey PARTITION(newp1) order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+ 楂樻柉db | 2
+(2 rows)
+
+DROP TABLE t_multi_charset_partkey;
+-- -- -- utf8mb4
+CREATE TABLE t_multi_charset_partkey (part text collate utf8mb4_bin, a int)
     PARTITION BY RANGE(part) (
         partition p1 values less than('楂樻柉DB'),
         partition p2 values less than('楂樻柉db'),
@@ -4069,15 +4201,27 @@ SELECT * FROM t_multi_charset_partkey PARTITION(p5) order by 1,2;
  高斯db | 4
 (1 row)
 
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_gbk'高斯db') order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉db | 2
+(1 row)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_utf8mb4'高斯DB') order by 1,2;
+  part  | a 
+--------+---
+ 高斯DB | 3
+(1 row)
+
 -- -- -- partition pruning
 EXPLAIN (costs off)
 SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Sort
    Sort Key: a
    ->  Partitioned Seq Scan on t_multi_charset_partkey
-         Filter: ((part)::text = '楂樻柉DB'::text COLLATE utf8mb4_bin)
+         Filter: (part = '楂樻柉DB'::text COLLATE utf8mb4_bin)
          Selected Partitions:  2
 (5 rows)
 
@@ -4094,7 +4238,7 @@ SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db' order by 1,2
  Sort
    Sort Key: a
    ->  Partitioned Seq Scan on t_multi_charset_partkey
-         Filter: ((part)::text = '高斯db'::text)
+         Filter: (part = '高斯db'::text)
          Selected Partitions:  5
 (5 rows)
 
@@ -4122,6 +4266,135 @@ SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chin
 ----------+---
  楂樻柉DB | 1
  楂樻柉db | 2
+(2 rows)
+
+-- -- -- partiton ddl
+ALTER TABLE t_multi_charset_partkey SPLIT PARTITION FOR(_gbk'高斯DB') AT (_gbk'高斯DB1 ') INTO (PARTITION p2_1, PARTITION p2_2);
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯DB1', 1);
+SELECT * FROM t_multi_charset_partkey PARTITION(p2_1) order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+(1 row)
+
+SELECT * FROM t_multi_charset_partkey PARTITION(p2_2) order by 1,2;
+   part    | a 
+-----------+---
+ 楂樻柉DB1 | 1
+(1 row)
+
+ALTER TABLE t_multi_charset_partkey RENAME PARTITION FOR(_gbk'高斯db') TO p3_1;
+SELECT * FROM t_multi_charset_partkey PARTITION(p3_1) order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉db | 2
+(1 row)
+
+DROP TABLE t_multi_charset_partkey;
+-- -- -- utf8mb4
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_unicode_ci, part2 varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY LIST COLUMNS(part, part2) (
+        partition p1 values in(('楂樻柉DB', '楂樻柉db')),
+        partition p2 values in(('高斯db', '高斯DB'))
+);
+-- -- -- insert
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯DB', _gbk'高斯DB', 1);
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯db', _gbk'高斯db', 2);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯DB', _utf8mb4'高斯DB', 3);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯db', _utf8mb4'高斯db', 4);
+-- -- -- select
+SELECT * FROM t_multi_charset_partkey PARTITION(p1) order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION(p2) order by 1,2;
+  part  | part2  | a 
+--------+--------+---
+ 高斯DB | 高斯DB | 3
+ 高斯db | 高斯db | 4
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_gbk'高斯DB', _gbk'高斯db') order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_utf8mb4'高斯db', _utf8mb4'高斯db') order by 1,2;
+  part  | part2  | a 
+--------+--------+---
+ 高斯DB | 高斯DB | 3
+ 高斯db | 高斯db | 4
+(2 rows)
+
+-- -- -- partition pruning
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Sort
+   Sort Key: part2 COLLATE utf8mb4_general_ci
+   ->  Partitioned Seq Scan on t_multi_charset_partkey
+         Filter: ((part)::text = '楂樻柉DB'::text COLLATE utf8mb4_unicode_ci)
+         Selected Partitions:  1
+(5 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
+(2 rows)
+
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db' order by 1,2;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: part2 COLLATE utf8mb4_general_ci
+   ->  Partitioned Seq Scan on t_multi_charset_partkey
+         Filter: ((part)::text = '高斯db'::text)
+         Selected Partitions:  2
+(5 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db' order by 1,2;
+  part  | part2  | a 
+--------+--------+---
+ 高斯DB | 高斯DB | 3
+ 高斯db | 高斯db | 4
+(2 rows)
+
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2; -- ALL PARTS
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Sort Key: part COLLATE utf8mb4_unicode_ci, part2 COLLATE utf8mb4_general_ci
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Seq Scan on t_multi_charset_partkey
+               Filter: ((part)::text = '楂樻柉DB'::text)
+               Selected Partitions:  1..2
+(7 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
+(2 rows)
+
+-- -- -- partiton ddl
+ALTER TABLE t_multi_charset_partkey RENAME PARTITION FOR(_gbk'高斯DB', _gbk'高斯db') TO p1_1;
+SELECT * FROM t_multi_charset_partkey PARTITION(p1_1) order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
 (2 rows)
 
 DROP TABLE t_multi_charset_partkey;

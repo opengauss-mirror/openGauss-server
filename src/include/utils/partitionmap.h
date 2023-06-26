@@ -136,11 +136,11 @@ extern int GetSubPartitionNumber(Relation rel);
 
 extern bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid);
 
-extern int constCompare_constType(Const* value1, Const* value2);
+extern int constCompare_constType(Const* value1, Const* value2, Oid collation);
 
 extern bool partitionHasToast(Oid partOid);
 
-extern void constCompare(Const* value1, Const* value2, int& compare);
+extern void constCompare(Const* value1, Const* value2, Oid collation, int& compare);
 
 extern struct ListPartElement* CopyListElements(ListPartElement* src, int elementNum);
 extern struct HashPartElement* CopyHashElements(HashPartElement* src, int elementNum, int partkeyNum);
