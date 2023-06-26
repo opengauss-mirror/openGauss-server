@@ -184,7 +184,7 @@ static void RelationInitPartitionMapExtended(Relation relation, bool isSubPartit
         (compare) = interval_cmp_internal((arg1), (arg2)); \
     } while (0)
 
-#define constCompare_baseType(value1, value2, compare)                                                                 \
+#define constCompare_baseType(value1, value2, collation, compare)                                                      \
     do {                                                                                                               \
         switch ((value1)->consttype) {                                                                                 \
             case INT2OID:                                                                                              \
@@ -219,26 +219,23 @@ static void RelationInitPartitionMapExtended(Relation relation, bool isSubPartit
                 break;                                                                                                 \
             case BPCHAROID:                                                                                            \
                 Assert((value2)->consttype == BPCHAROID);                                                              \
-                Assert((value1)->constcollid == (value2)->constcollid);                                                \
                 bpchar_cmp_partition(DatumGetBpCharP((value1)->constvalue),                                            \
                     DatumGetBpCharP((value2)->constvalue),                                                             \
-                    (value1)->constcollid,                                                                             \
+                    (collation),                                                                                       \
                     (compare));                                                                                        \
                 break;                                                                                                 \
             case VARCHAROID:                                                                                           \
                 Assert((value2)->consttype == VARCHAROID);                                                             \
-                Assert((value1)->constcollid == (value2)->constcollid);                                                \
                 text_cmp_partition(DatumGetTextP((value1)->constvalue),                                                \
                     DatumGetTextP((value2)->constvalue),                                                               \
-                    (value1)->constcollid,                                                                             \
+                    (collation),                                                                                       \
                     (compare));                                                                                        \
                 break;                                                                                                 \
             case TEXTOID:                                                                                              \
                 Assert((value2)->consttype == TEXTOID);                                                                \
-                Assert((value1)->constcollid == (value2)->constcollid);                                                \
                 text_cmp_partition(DatumGetTextP((value1)->constvalue),                                                \
                     DatumGetTextP((value2)->constvalue),                                                               \
-                    (value1)->constcollid,                                                                             \
+                    (collation),                                                                                       \
                     (compare));                                                                                        \
                 break;                                                                                                 \
             case DATEOID:                                                                                              \
@@ -266,7 +263,7 @@ static void RelationInitPartitionMapExtended(Relation relation, bool isSubPartit
                     DatumGetIntervalP((value1)->constvalue), DatumGetIntervalP((value2)->constvalue), (compare));      \
                 break;                                                                                                 \
             default:                                                                                                   \
-                (compare) = constCompare_constType((value1), (value2));                                                \
+                (compare) = constCompare_constType((value1), (value2), (collation));                                   \
                 break;                                                                                                 \
         }                                                                                                              \
     } while (0)
@@ -277,7 +274,7 @@ static void RelationInitPartitionMapExtended(Relation relation, bool isSubPartit
  * @Param[OUT] value2: right value to compare
  * @See also:
  */
-void constCompare(Const* value1, Const* value2, int& compare)
+void constCompare(Const* value1, Const* value2, Oid collation, int& compare)
 {
     if (t_thrd.utils_cxt.gValueCompareContext == NULL) {
         /*
@@ -302,9 +299,9 @@ void constCompare(Const* value1, Const* value2, int& compare)
     PG_TRY();
     {
         if (value1->consttype == value2->consttype) {
-            constCompare_baseType(value1, value2, compare);
+            constCompare_baseType(value1, value2, collation, compare);
         } else {
-            compare = constCompare_constType(value1, value2);
+            compare = constCompare_constType(value1, value2, collation);
         }
     }
     PG_CATCH();
@@ -2426,8 +2423,8 @@ Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* part
             decre_partmap_refcount(partMap);
             return result;
         }
-        hash_value = hashValueCombination(hash_value, partKeyValue[i]->consttype, partKeyValue[i]->constvalue, false,
-                                          LOCATOR_TYPE_HASH);
+        hash_value = hashValueCombination(hash_value, partKeyValue[i]->consttype, partKeyValue[i]->constvalue,
+            false, LOCATOR_TYPE_HASH, partKeyValue[i]->constcollid);
         i++;
     }
 
@@ -2803,7 +2800,7 @@ int partOidGetPartSequence(Relation rel, Oid partOid)
  * @return 0: value1==value2   1:value1>vlaue2    -1:value1<value2
  */
 
-int constCompare_constType(Const* value1, Const* value2)
+int constCompare_constType(Const* value1, Const* value2, Oid collation)
 {
     EState* estate = NULL;
     ExprContext* econtext = NULL;
@@ -2820,13 +2817,12 @@ int constCompare_constType(Const* value1, Const* value2)
     eqExpr = (Expr*)makeSimpleA_Expr(AEXPR_OP, "=", (Node*)value1, (Node*)value2, -1);
 
     eqExpr = (Expr*)transformExpr(pstate, (Node*)eqExpr, EXPR_KIND_PARTITION_EXPRESSION);
-    assign_expr_collations(pstate, (Node*)eqExpr);
+    ((OpExpr*)eqExpr)->inputcollid = collation;
 
     gtExpr = (Expr*)makeSimpleA_Expr(AEXPR_OP, ">", (Node*)value1, (Node*)value2, -1);
 
     gtExpr = (Expr*)transformExpr(pstate, (Node*)gtExpr, EXPR_KIND_PARTITION_EXPRESSION);
-    ((OpExpr*)gtExpr)->inputcollid = value1->constcollid;
-    assign_expr_collations(pstate, (Node*)gtExpr);
+    ((OpExpr*)gtExpr)->inputcollid = collation;
 
     estate = CreateExecutorState();
     econtext = GetPerTupleExprContext(estate);
@@ -3125,7 +3121,9 @@ Const **transformConstIntoPartkeyType(FormData_pg_attribute *attrs, int2vector *
     for (int i = 0; i < len; i++) {
         partKeyPos = partitionKey->values[i];
 
-        if (likely(attrs[partKeyPos - 1].atttypid == boundary[i]->consttype) || boundary[i]->ismaxvalue) {
+        if ((likely(attrs[partKeyPos - 1].atttypid == boundary[i]->consttype) &&
+            likely(attrs[partKeyPos - 1].attcollation == boundary[i]->constcollid)) ||
+            boundary[i]->ismaxvalue) {
             continue;
         }
 

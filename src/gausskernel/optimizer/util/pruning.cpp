@@ -1180,6 +1180,13 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr
         return result;
     }
 
+    /* Do not pruning if collation of operator is different from collation of partkey. */
+    if (((Var*)larg)->varcollid != arrayExpr->inputcollid) {
+        result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;
+        return result;
+    }
+
     if (T_ArrayExpr == nodeTag(rarg)) {
         List* eleList = NULL;
         ListCell* element = NULL;
@@ -1332,6 +1339,13 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr(PartitionType partTy
 
     if (T_Var != nodeTag(larg) || (T_ArrayExpr != nodeTag(rarg) && T_Const != nodeTag(rarg))) {
         result = makeNode(PruningResult);
+        result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;
+        return result;
+    }
+
+    /* Do not pruning if collation of operator is different from collation of partkey. */
+    if (((Var*)larg)->varcollid != arrayExpr->inputcollid) {
         result->state = PRUNING_RESULT_FULL;
         result->isPbeSinlePartition = false;
         return result;
@@ -1570,6 +1584,13 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
             result->isPbeSinlePartition = false;
             return result;
         }
+    }
+
+    /* Do not pruning if collation of operator is different from collation of partkey. */
+    if (varArg->varcollid != expr->inputcollid) {
+        result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;
+        return result;
     }
 
     /* Var's column MUST belongs to parition key columns */
@@ -1862,6 +1883,13 @@ static PruningResult* recordEqualFromOpExpr(PartitionType partType, const OpExpr
             result->isPbeSinlePartition = false;
             return result;
         }
+    }
+
+    /* Do not pruning if collation of operator is different from collation of partkey. */
+    if (varArg->varcollid != expr->inputcollid) {
+        result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;
+        return result;
     }
 
     PruningResult* res = RecordEqualFromOpExprPart(partType, context, opName, constMax, varArg, attrOffset, result, paramArg, exprPart, constArg, boundary);
@@ -2420,8 +2448,8 @@ static void cleanPruningBottom(PruningContext *context, PartitionIdentifier* bot
         RangeElement* range = partMap->rangeElements + i;
         int compare = 0;
 
-        compare = partitonKeyCompare(&value, range->boundary, 1);
-        if (compare >= 0) {
+        compare = partitonKeyCompare(range->boundary, &value, 1);
+        if (compare <= 0) {
             continue;
         } else {
             break;
@@ -2453,8 +2481,8 @@ static void cleanPruningTop(PruningContext *context, PartitionIdentifier* topSeq
         RangeElement* range = partMap->rangeElements + i;
         int compare = 0;
 
-        compare = partitonKeyCompare(&value, range->boundary, 1);
-        if (compare <= 0) {
+        compare = partitonKeyCompare(range->boundary, &value, 1);
+        if (compare >= 0) {
             continue;
         } else {
             break;
@@ -2740,7 +2768,7 @@ static bool PartialListBoundaryMatched(ListPartElement* part, List* keyPos, Cons
         ListCell* keyCell = NULL;
         foreach(keyCell, keyPos) {
             int id = lfirst_int(keyCell);
-            if (ConstCompareWithNull(keyValue[id], bound->values[id]) != 0) {
+            if (ConstCompareWithNull(keyValue[id], bound->values[id], bound->values[id]->constcollid) != 0) {
                 break;
             }
         }

@@ -22803,6 +22803,30 @@ Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval, bool 
         return NULL;
     }
 
+    /* convert source const's charset to target partkey's charset */
+    if (!partkeyIsFunc && DB_IS_CMPT(B_FORMAT) && OidIsValid(attrs->attcollation)) {
+        assign_expr_collations(NULL, expr);
+        if (attrs->attcollation != exprCollation(expr)) {
+            int attcharset = get_valid_charset_by_collation(attrs->attcollation);
+            expr = coerce_to_target_charset(expr, attcharset, target_oid, target_mod, attrs->attcollation);
+
+            Assert(expr != NULL);
+            if (!IsA(expr, Const)) {
+                expr = (Node*)evaluate_expr((Expr*)expr, target_oid, target_mod, attrs->attcollation);
+            } else if (attrs->attcollation != exprCollation(expr)) {
+                if (expr == (Node*)src) {
+                    /* We are not sure where src comes from, avoid set src->constcollid directly. */
+                    expr = (Node*)copyObject((void*)src);
+                }
+                /*
+                 * The expr is used to compute hash or compare it with the partition boundary.
+                 * Set the correct collation to ensure the correctness of the partition pruning and routing.
+                 */
+                exprSetCollation(expr, attrs->attcollation);
+            }
+        }
+    }
+
     switch (nodeTag(expr)) {
         /* do nothing for Const */
         case T_Const:
@@ -22986,7 +23010,7 @@ static void sqlcmd_check_list_partition_have_duplicate_values(List** key_values_
     ListCell* c2 = NULL;
     for (int k = 0; k < bound_idx; ++k) {
         forboth (c1, key_values_array[part_idx][bound_idx], c2, key_values_array[part_idx][k]) {
-            if (ConstCompareWithNull((Const*)lfirst(c1), (Const*)lfirst(c2)) != 0) {
+            if (ConstCompareWithNull((Const*)lfirst(c1), (Const*)lfirst(c2), ((Const*)lfirst(c2))->constcollid) != 0) {
                 break;
             }
         }
@@ -23012,7 +23036,7 @@ static void sqlcmd_check_two_list_partition_values_overlapped(List** key_values_
             Assert(!(con1->ismaxvalue && con2->ismaxvalue));
             break;
         }
-        if (ConstCompareWithNull(con1, con2) != 0) {
+        if (ConstCompareWithNull(con1, con2, con2->constcollid) != 0) {
             break;
         }
     }
@@ -23562,7 +23586,7 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
         RangePartitionMap *partMap = (RangePartitionMap *)rel->partMap;
         Const *curBound = (Const *)copyObject(partMap->rangeElements[partNum - 1].boundary[0]);
         Const *val = partDef->curStartVal;
-        if (!curBound->ismaxvalue && val != NULL && partitonKeyCompare(&val, &curBound, 1) != 0) {
+        if (!curBound->ismaxvalue && val != NULL && partitonKeyCompare(&curBound, &val, 1) != 0) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                 errmsg("start value of partition \"%s\" NOT EQUAL up-boundary of last partition.",
                 partDef->partitionInitName ? partDef->partitionInitName : partDef->partitionName)));
@@ -27927,14 +27951,14 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
         // check the first dest partition boundary
         if (srcPartIndex != 0) {
             if (!partMap->rangeElements[srcPartIndex].isInterval) {
-                compare = comparePartitionKey(partMap, partMap->rangeElements[srcPartIndex - 1].boundary,
-                                              (Const**)lfirst(list_head(destPartBoundaryList)), partKeyNum);
+                compare = comparePartitionKey(partMap, (Const**)lfirst(list_head(destPartBoundaryList)),
+                    partMap->rangeElements[srcPartIndex - 1].boundary, partKeyNum);
             } else {
                 Const** partKeyValue = (Const**)lfirst(list_head(destPartBoundaryList));
                 RangeElement& srcPartition = partMap->rangeElements[srcPartIndex];
-                compare = -ValueCmpLowBoudary(partKeyValue, &srcPartition, partMap->intervalValue);
+                compare = ValueCmpLowBoudary(partKeyValue, &srcPartition, partMap->intervalValue);
             }
-            if (compare >= 0) {
+            if (compare <= 0) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_OPERATION),
                         errmsg("the bound of the first resulting partition is too low")));
