@@ -3998,6 +3998,7 @@ int main(int argc, char* argv[])
     char encrypt_pwd_real_path[PATH_MAX] = {0};
     char cipher_key_file[MAXPGPATH] = {0};
     char rand_file[MAXPGPATH] = {0};
+    char cwd[MAXPGPATH];
 
 #ifdef WIN32
     char* restrict_env = NULL;
@@ -4029,6 +4030,14 @@ int main(int argc, char* argv[])
     check_input_spec_char(argv[0]);
     progname = get_progname(argv[0]);
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_initdb"));
+
+    if (getcwd(cwd, MAXPGPATH) == NULL) {
+        char errBuffer[ERROR_LIMIT_LEN];
+        write_stderr(_("%s: Could not identify current directory: %s\n"),
+            progname,
+            pqStrerror(errno, errBuffer, ERROR_LIMIT_LEN));
+        exit(1);
+    }
 
     if (argc > 1) {
         if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-?") == 0) {
@@ -4654,7 +4663,7 @@ int main(int argc, char* argv[])
 
     // dss device init
     if (dss_device_init(socketpath, enable_dss) != DSS_SUCCESS) {
-        write_stderr(_("failed to init dss device"));
+        write_stderr(_("failed to init dss device.\n"));
         exit_nicely();
     }
 
@@ -4775,8 +4784,39 @@ int main(int argc, char* argv[])
         }
     }
 
-    if (ss_issharedstorage && (ss_check_shareddir(vgdata))) {
-        ss_need_mkclusterdir = false;
+    if (ss_issharedstorage) {
+        int ret = ss_check_shareddir(vgdata, ss_nodeid, &ss_need_mkclusterdir);
+        if (ret != 0) {
+            write_stderr("ERROR: %s: shared storage initdb failed because of the following error:\n");
+            if (ret & ERROR_INSTANCEDIR_EXISTS) {
+                write_stderr(_("ERROR: [*]shared storage files of instance %d in the directory \"%s\" already exists\n"), ss_nodeid, vgdata);
+                write_stderr(_("If you want to create a new shared storage instance, either remove shared storage "
+                               "files of instance %d in the directory \"%s\" or run %s with other instance id.\n"),
+                    ss_nodeid,
+                    vgdata,
+                    progname);
+            }
+
+            /* primary node, but no need make cluster dirs */
+            if (ret & ERROR_CLUSTERDIR_EXISTS_BY_PRIMARY) {
+                write_stderr(_("ERROR: [*]shared storage files of cluster in the directory \"%s\" already exists\n"), vgdata);
+                write_stderr(_("You need clear all shared storages files in the directory \"%s\" before init instance 0.\n"), vgdata);
+            }
+
+            /* not primary node, but need make cluster dirs */
+            if (ret & ERROR_CLUSTERDIR_NO_EXISTS_BY_STANDBY) {
+                write_stderr(_("ERROR: [*]shared storage files of cluster in the directory \"%s\" does not exist\n"), vgdata);
+                write_stderr(_("You need check storage files in the directory \"%s\" when init instance 0.\n"), vgdata);
+            }
+
+            /* cluster dir is not complete */
+            if (ret & ERROR_CLUSTERDIR_INCOMPLETE) {
+                write_stderr(_("ERROR: [*]shared storage files of cluster in the directory \"%s\" is not completed\n"), vgdata);
+                write_stderr(_("You need check if the storage files in the directory \"%s\" is completed.\n"), vgdata);
+            }
+            
+            exit(1);
+        }
     }
 
     /* Create transaction log symlink, if required */
