@@ -1134,3 +1134,23 @@ select 'fdsfdfg#@$'::text::cc2_type;
 
 drop type cc1_type cascade;
 drop type cc2_type cascade;
+
+CREATE OR REPLACE PROCEDURE test_debug1 ( IN x INT)
+AS
+BEGIN
+INSERT INTO t1 (a) VALUES (x);
+DELETE FROM t1 WHERE a = x;
+END;
+/
+
+do $$
+declare
+    funcoid bigint;
+begin
+    select oid from pg_proc into funcoid where proname = 'test_debug1';
+    drop function test_debug1;
+    select dbe_pldebugger.turn_on(funcoid);
+end;
+$$;
+
+drop function test_debug1;

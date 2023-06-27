@@ -2109,3 +2109,24 @@ NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function cc2_in(cstring)
 drop cascades to function cc2_out(cc2_type)
 drop cascades to function cc2_out_bad(cc2_type)
+CREATE OR REPLACE PROCEDURE test_debug1 ( IN x INT)
+AS
+BEGIN
+INSERT INTO t1 (a) VALUES (x);
+DELETE FROM t1 WHERE a = x;
+END;
+/
+do $$
+declare
+    funcoid bigint;
+begin
+    select oid from pg_proc into funcoid where proname = 'test_debug1';
+    drop function test_debug1;
+    select dbe_pldebugger.turn_on(funcoid);
+end;
+$$;
+--?ERROR:  function with oid.*
+CONTEXT:  referenced column: turn_on
+SQL statement "select dbe_pldebugger.turn_on(funcoid)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+drop function test_debug1;

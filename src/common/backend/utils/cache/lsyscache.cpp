@@ -1531,7 +1531,7 @@ char* get_func_langname(Oid funcid)
     Relation relation = heap_open(ProcedureRelationId, NoLock);
     tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
     if (!HeapTupleIsValid(tp)) {
-        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("function with oid %u does not exist", funcid)));
     }
     Datum datum = heap_getattr(tp, Anum_pg_proc_prolang, RelationGetDescr(relation), &isNull);
     langoid = DatumGetObjectId(datum);
