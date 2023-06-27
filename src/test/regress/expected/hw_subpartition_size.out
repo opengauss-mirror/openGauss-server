@@ -187,6 +187,15 @@ SELECT pg_partition_size('range_list_sales', 'customer1') =
  t
 (1 row)
 
+-- (oid, oid)
+SELECT (SELECT pg_partition_size('range_list_sales'::regclass::oid, oid) from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1')
+    =
+    (SELECT sum(pg_partition_size('range_list_sales'::regclass::oid, oid)) from pg_partition where parentid in (SELECT oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1'));
+ ?column? 
+----------
+ t
+(1 row)
+
 -- should be equal
 SELECT pg_partition_size('range_list_sales', 'customer4') = pg_partition_size('range_list_sales', 'customer4_channel1');
  ?column? 
@@ -198,6 +207,38 @@ SELECT pg_partition_size('range_list_sales', 'customer4') = pg_partition_size('r
 SELECT pg_partition_size('range_list_sales', 'parttemp');
 ERROR:  partition "parttemp" does not exist
 CONTEXT:  referenced column: pg_partition_size
+create table test_pg_partition_size2 (a int);
+create table test_pg_partition_size3 (a int, b int)
+partition by range (a)
+subpartition by hash (b)
+(
+    partition p1 values less than (4)
+        (subpartition sp1)
+);
+--ERROR regular table
+select pg_partition_size('test_pg_partition_size2', 'customer1')>0;
+ERROR:  partition "customer1" does not exist
+select pg_partition_size('test_pg_partition_size2', 'customer1_channel1')>0;
+ERROR:  partition "customer1_channel1" does not exist
+select pg_partition_size('test_pg_partition_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1';
+--?ERROR:  relation .* is not a partitioned table
+select pg_partition_size('test_pg_partition_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 
+    (select oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1') and relname = 'customer1_channel1';
+--?ERROR:  relation .* is not a partitioned table
+--ERROR partitioned table does not match the partition
+select pg_partition_size('test_pg_partition_size3', 'range_list_sales')>0;
+ERROR:  partition "range_list_sales" does not exist
+select pg_partition_size('test_pg_partition_size3', 'customer1')>0;
+ERROR:  partition "customer1" does not exist
+select pg_partition_size('test_pg_partition_size3', 'customer1_channel1')>0;
+ERROR:  partition "customer1_channel1" does not exist
+select pg_partition_size('test_pg_partition_size3'::regclass::oid, 'range_list_sales'::regclass::oid)>0;
+--?ERROR:  .* is not a partition/subpartition of subpartitioned table .*
+select pg_partition_size('test_pg_partition_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1';
+--?ERROR:  .* is not a partition/subpartition of subpartitioned table .*
+select pg_partition_size('test_pg_partition_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 
+    (select oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1') and relname = 'customer1_channel1';
+--?ERROR:  .* is not a partition/subpartition of subpartitioned table .*
 -- 6. pg_partition_indexes_size
 SELECT pg_partition_indexes_size('range_list_sales', 'customer1');
  pg_partition_indexes_size 
@@ -234,6 +275,15 @@ SELECT pg_partition_indexes_size('range_list_sales', 'customer1') =
  t
 (1 row)
 
+-- (oid, oid)
+SELECT (SELECT pg_partition_indexes_size('range_list_sales'::regclass::oid, oid) from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1')
+    =
+    (SELECT sum(pg_partition_indexes_size('range_list_sales'::regclass::oid, oid)) from pg_partition where parentid in (SELECT oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1'));
+ ?column? 
+----------
+ t
+(1 row)
+
 -- should be equal
 SELECT pg_partition_indexes_size('range_list_sales', 'customer4') = pg_partition_indexes_size('range_list_sales', 'customer4_channel1');
  ?column? 
@@ -241,7 +291,35 @@ SELECT pg_partition_indexes_size('range_list_sales', 'customer4') = pg_partition
  t
 (1 row)
 
+CREATE INDEX test_pg_partition_size2_idx ON test_pg_partition_size2(a);
+CREATE INDEX test_pg_partition_size3_idx ON test_pg_partition_size3(a) LOCAL;
+--ERROR regular table
+select pg_partition_indexes_size('test_pg_partition_size2', 'customer1')>0;
+ERROR:  partition "customer1" does not exist
+select pg_partition_indexes_size('test_pg_partition_size2', 'customer1_channel1')>0;
+ERROR:  partition "customer1_channel1" does not exist
+select pg_partition_indexes_size('test_pg_partition_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1';
+--?ERROR:  relation .* is not a partitioned table
+select pg_partition_indexes_size('test_pg_partition_size2'::regclass::oid, oid)>0 from pg_partition where parentid = 
+    (select oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1') and relname = 'customer1_channel1';
+--?ERROR:  relation .* is not a partitioned table
+--ERROR partitioned table does not match the partition
+select pg_partition_indexes_size('test_pg_partition_size3', 'range_list_sales')>0;
+ERROR:  partition "range_list_sales" does not exist
+select pg_partition_indexes_size('test_pg_partition_size3', 'customer1')>0;
+ERROR:  partition "customer1" does not exist
+select pg_partition_indexes_size('test_pg_partition_size3', 'customer1_channel1')>0;
+ERROR:  partition "customer1_channel1" does not exist
+select pg_partition_indexes_size('test_pg_partition_size3'::regclass::oid, 'range_list_sales'::regclass::oid)>0;
+--?ERROR:  .* is not a partition/subpartition of subpartitioned table .*
+select pg_partition_indexes_size('test_pg_partition_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1';
+--?ERROR:  .* is not a partition/subpartition of subpartitioned table .*
+select pg_partition_indexes_size('test_pg_partition_size3'::regclass::oid, oid)>0 from pg_partition where parentid = 
+    (select oid from pg_partition where parentid = 'range_list_sales'::regclass and relname='customer1') and relname = 'customer1_channel1';
+--?ERROR:  .* is not a partition/subpartition of subpartitioned table .*
 -- finish, clean
+DROP TABLE test_pg_partition_size2;
+DROP TABLE test_pg_partition_size3;
 DROP TABLE range_list_sales;
 DROP SCHEMA hw_subpartition_size CASCADE;
 RESET CURRENT_SCHEMA;
