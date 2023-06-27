@@ -1,0 +1,162 @@
+drop table if exists t_multi_node_write_0001;
+NOTICE:  table "t_multi_node_write_0001" does not exist, skipping
+create table t_multi_node_write_0001(id int) with(segment=on);
+begin;
+insert into t_multi_node_write_0001 values(1);
+insert into t_multi_node_write_0001 values(3);
+insert into t_multi_node_write_0001 values(4);
+update t_multi_node_write_0001 set id = 99 where id = 3;
+delete from t_multi_node_write_0001 where id = 4;
+select * from t_multi_node_write_0001;
+ id 
+----
+  1
+ 99
+(2 rows)
+
+end;
+start transaction;
+cursor cursor_multi_node_write_0018 for select relname,reltype,relowner from pg_class order by 1 limit 5;
+move forward 1 from cursor_multi_node_write_0018;
+fetch forward 3 from cursor_multi_node_write_0018;
+          relname          | reltype | relowner 
+---------------------------+---------+----------
+--? _pg_foreign_servers.*
+--? _pg_foreign_table_columns.*
+--? _pg_foreign_tables.*
+(3 rows)
+
+close cursor_multi_node_write_0018;
+end;
+begin;
+select * from t_multi_node_write_0001;
+ id 
+----
+  1
+ 99
+(2 rows)
+
+insert into t_multi_node_write_0001 values(5);
+select * from t_multi_node_write_0001;
+ id 
+----
+  1
+ 99
+  5
+(3 rows)
+
+end;
+insert into t_multi_node_write_0001 values(6);
+select * from t_multi_node_write_0001;
+ id 
+----
+  1
+ 99
+  5
+  6
+(4 rows)
+
+create table t1(a int) with(segment=on);
+begin;
+insert into t1 values(123);
+update t1 set a = 'a';
+ERROR:  invalid input syntax for integer: "a"
+LINE 1: update t1 set a = 'a';
+                          ^
+CONTEXT:  referenced column: a
+insert into t1 values(12345);
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+end;
+select * from t1;
+ a 
+---
+(0 rows)
+
+begin;
+rollback;
+drop table if exists t01;
+NOTICE:  table "t01" does not exist, skipping
+begin;
+lock table t_multi_node_write_0001;
+ERROR:  The multi-write feature doesn't support DDL within transaction!
+end;
+drop table if exists account;
+NOTICE:  table "account" does not exist, skipping
+create table account(id int,transaction_id int,balance float) with(segment=on);
+begin;
+insert into account(id,transaction_id,balance) values (0,0,100),(0,1,200),(1,0,300),(1,1,300);
+savepoint mypoint;
+insert into account(id,transaction_id,balance) values (2,1,400),(2,2,500),(3,3,300),(3,4,600);
+select * from account order by 1;
+ id | transaction_id | balance 
+----+----------------+---------
+  0 |              0 |     100
+  0 |              1 |     200
+  1 |              0 |     300
+  1 |              1 |     300
+  2 |              1 |     400
+  2 |              2 |     500
+  3 |              3 |     300
+  3 |              4 |     600
+(8 rows)
+
+rollback to savepoint mypoint;
+insert into account(id,transaction_id,balance) values (4,1,700),(4,2,800),(5,3,300),(5,4,900);
+commit;
+select * from account;
+ id | transaction_id | balance 
+----+----------------+---------
+  0 |              0 |     100
+  0 |              1 |     200
+  1 |              0 |     300
+  1 |              1 |     300
+  4 |              1 |     700
+  4 |              2 |     800
+  5 |              3 |     300
+  5 |              4 |     900
+(8 rows)
+
+drop table if exists account;
+create table account(id int,transaction_id int,balance float) with(segment=on);
+begin;
+insert into account(id,transaction_id,balance) values (0,0,100),(0,1,200),(1,0,300),(1,1,300);
+savepoint mypoint;
+insert into account(id,transaction_id,balance) values (2,1,400),(2,2,500),(3,3,300),(3,4,600);
+select * from account order by 1;
+ id | transaction_id | balance 
+----+----------------+---------
+  0 |              0 |     100
+  0 |              1 |     200
+  1 |              0 |     300
+  1 |              1 |     300
+  2 |              1 |     400
+  2 |              2 |     500
+  3 |              3 |     300
+  3 |              4 |     600
+(8 rows)
+
+release savepoint mypoint;
+insert into account(id,transaction_id,balance) values (4,1,700),(4,2,800),(5,3,300),(5,4,900);
+select * from account;
+ id | transaction_id | balance 
+----+----------------+---------
+  0 |              0 |     100
+  0 |              1 |     200
+  1 |              0 |     300
+  1 |              1 |     300
+  2 |              1 |     400
+  2 |              2 |     500
+  3 |              3 |     300
+  3 |              4 |     600
+  4 |              1 |     700
+  4 |              2 |     800
+  5 |              3 |     300
+  5 |              4 |     900
+(12 rows)
+
+rollback;
+select * from account;
+ id | transaction_id | balance 
+----+----------------+---------
+(0 rows)
+

@@ -2801,7 +2801,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
 
         if (libpqsw_process_query_message(commandTag, querytree_list, query_string, query_string_len)) {
             libpqsw_trace_q_msg(commandTag, query_string);
-            if (SS_STANDBY_MODE && (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag))) {
+            if (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag)) {
                 libpqsw_trace("libpq send sql at my side as well:%s", commandTag);
             } else {
                 if (snapshot_set != false) {

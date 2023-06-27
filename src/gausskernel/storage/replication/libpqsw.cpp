@@ -63,6 +63,9 @@ bool libpqsw_fetch_command(const char* commandTag);
 void libpqsw_set_redirect(bool redirect);
 void libpqsw_set_command_tag(const char* commandTag);
 void libpqsw_set_set_command(bool set_command);
+bool libpqsw_special_command(const char* commandTag);
+bool libpqsw_savepoint_command(const char* commandTag);
+static void libpqsw_check_savepoint(List *query_list, bool *have_savepoint);
 static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *query_list, PhaseType ptype);
 
 static void libpqsw_set_already_connected()
@@ -251,7 +254,11 @@ static bool libpqsw_receive(bool transfer = true)
         }  
     }
     if (0 < conn->inEnd) {
-        transfer_func(conn->inBuffer, conn->inEnd);
+        if (u_sess->attr.attr_common.enable_full_encryption && *(conn->inBuffer) == 'Z') {
+            get_redirect_manager()->state.client_enable_ce = true;
+        } else {
+            transfer_func(conn->inBuffer, conn->inEnd);
+        }
     }
 
     if ((get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_WRITE_REDIRECT) && retStatus) {
@@ -386,6 +393,7 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
         commandTag = "";
     }
     bool need_redirect = false;
+    redirect_manager->state.have_savepoint= false;
     if (!libpqsw_enable_autocommit()) {
         if (strcmp(commandTag, "SET") == 0) {
             libpqsw_set_set_command(true);
@@ -394,6 +402,12 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
         libpqsw_set_transaction(true);
         need_redirect = true;
     } else if (libpqsw_begin_command(commandTag) || libpqsw_remote_in_transaction()) {
+        if (!SS_STANDBY_MODE && set_command_type_by_commandTag(commandTag) == CMD_DDL &&
+            !libpqsw_fetch_command(commandTag)) {
+            libpqsw_disconnect();
+            ereport(ERROR, (errmsg("The multi-write feature doesn't support DDL within transaction!")));
+        }
+        libpqsw_check_savepoint(query_list, &(redirect_manager->state.have_savepoint));
         libpqsw_set_transaction(true);
         need_redirect = true;
     } else if (libpqsw_redirect() || libpqsw_end_command(commandTag)) {
@@ -784,6 +798,25 @@ static bool libpqsw_need_localexec_withinPBE(int qtype, StringInfo msg, bool aft
     return ret;
 }
 
+static void libpqsw_check_savepoint(List *query_list, bool *have_savepoint)
+{
+    if (query_list == NIL) {
+        return;
+    }
+
+    ListCell* lc = NULL;
+    foreach (lc, query_list) {
+        Query* query = castNode(Query, lfirst(lc));
+        if (query->commandType == CMD_UTILITY && query->utilityStmt != NULL) {
+            TransactionStmt* stmt = (TransactionStmt*)(query->utilityStmt);
+            if (stmt->kind == TRANS_STMT_ROLLBACK_TO) {
+                *have_savepoint = true;
+                return;
+            }
+        }
+    }
+}
+
 /* for simple query, just trxn and select */
 static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *query_list, PhaseType ptype)
 {
@@ -796,22 +829,27 @@ static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *
     }
 
     if (ptype == LIBPQ_SW_QUERY && (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag))) {
-        redirect_manager->ss_standby_state &= ~(SS_STANDBY_REQ_WRITE_REDIRECT | SS_STANDBY_RES_OK_REDIRECT);
+        redirect_manager->ss_standby_state &=
+            ~(SS_STANDBY_REQ_WRITE_REDIRECT | SS_STANDBY_RES_OK_REDIRECT | SS_STANDBY_REQ_SAVEPOINT);
         redirect_manager->ss_standby_state |= SS_STANDBY_REQ_SIMPLE_Q;
         return ret;
     }
 
     if (libpqsw_begin_command(commandTag)) {
-        redirect_manager->ss_standby_state &= ~(SS_STANDBY_REQ_WRITE_REDIRECT | SS_STANDBY_RES_OK_REDIRECT);
+        redirect_manager->ss_standby_state &=
+            ~(SS_STANDBY_REQ_WRITE_REDIRECT | SS_STANDBY_RES_OK_REDIRECT | SS_STANDBY_REQ_SAVEPOINT);
         redirect_manager->ss_standby_state |= SS_STANDBY_REQ_BEGIN;
         ret = true;
     } else if (libpqsw_end_command(commandTag)) {
-        redirect_manager->ss_standby_state &= ~(SS_STANDBY_REQ_WRITE_REDIRECT | SS_STANDBY_RES_OK_REDIRECT);
+        redirect_manager->ss_standby_state &=
+            ~(SS_STANDBY_REQ_WRITE_REDIRECT | SS_STANDBY_RES_OK_REDIRECT | SS_STANDBY_REQ_SAVEPOINT);
         redirect_manager->ss_standby_state |= SS_STANDBY_REQ_END;
         ret = true;
+    } else if (libpqsw_savepoint_command(commandTag)) {
+        redirect_manager->ss_standby_state |= SS_STANDBY_REQ_SAVEPOINT;
     } else if (query_list != NIL) {
         /* Don't support DDL with in transaction */
-        if (set_command_type_by_commandTag(commandTag) == CMD_DDL) {
+        if (set_command_type_by_commandTag(commandTag) == CMD_DDL || libpqsw_special_command(commandTag)) {
             if (libpqsw_fetch_command(commandTag)) {
                 get_redirect_manager()->ss_standby_state |= SS_STANDBY_REQ_WRITE_REDIRECT;
                 return ret;
@@ -834,7 +872,7 @@ static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *
         ListCell* remote_lc = NULL;
         foreach (remote_lc, query_list) {
             Query* tmp_query = (Query*)lfirst(remote_lc);
-            if (queryIsReadOnly(tmp_query)) {
+            if (queryIsReadOnly(tmp_query) && !(redirect_manager->ss_standby_state & SS_STANDBY_REQ_SAVEPOINT)) {
                 redirect_manager->ss_standby_state |= SS_STANDBY_REQ_SELECT;
                 libpqsw_set_end(true);
                 ret = true;
@@ -891,6 +929,10 @@ bool libpqsw_only_localrun()
 */
 bool libpqsw_process_message(int qtype, StringInfo msg)
 {
+    if (IsAbortedTransactionBlockState()) {
+        return false;
+    }
+
     RedirectManager* redirect_manager = get_redirect_manager();
 	//if disable remote excute
     if (!redirect_manager->get_remote_excute()) {
@@ -990,6 +1032,10 @@ bool libpqsw_process_parse_message(const char* commandTag, List* query_list)
 bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string,
     size_t query_string_len)
 {
+    if (IsAbortedTransactionBlockState()) {
+        return false;
+    }
+
     libpqsw_set_command_tag(commandTag);
     bool need_redirect = libpqsw_before_redirect(commandTag, query_list, query_string);
     if (need_redirect && !libpqsw_need_localexec_forSimpleQuery(commandTag, query_list, LIBPQ_SW_QUERY)) {
@@ -997,8 +1043,12 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
         initStringInfo(curMsg);
         appendStringInfoString(curMsg, query_string);
         appendStringInfoChar(curMsg, 0);
-        if(get_redirect_manager()->push_message('Q', curMsg, true, RT_NORMAL)) {
-            if (SS_STANDBY_MODE) {
+        RedirectType type = RT_NORMAL;
+        if (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag)) {
+            type = RT_TXN_STATUS;
+        }
+        if (get_redirect_manager()->push_message('Q', curMsg, true, type)) {
+            if (SS_STANDBY_MODE || libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag)) {
                 libpqsw_inner_excute_pbe(true, false);
             } else {
                 libpqsw_inner_excute_pbe(true, true);
@@ -1006,7 +1056,12 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
         }
         // because we are not skip Q message process, so send_ready_for_query will be true after transfer.
         // but after transter, master will send Z message for front, so we not need to this flag.
-        libpqsw_set_end(false);
+        if (get_redirect_manager()->state.client_enable_ce || libpqsw_end_command(commandTag) ||
+            libpqsw_begin_command(commandTag)) {
+            libpqsw_set_end(true);
+        } else {
+            libpqsw_set_end(false);
+        }
         if (SS_STANDBY_MODE && (get_redirect_manager()->ss_standby_state & SS_STANDBY_RES_OK_REDIRECT)) {
             /* for write request and master response OK, need fetch info from master */
             SSStandbyUpdateRedirectInfo();
@@ -1045,7 +1100,8 @@ bool libpqsw_begin_command(const char* commandTag)
 // is end transaction command
 bool libpqsw_end_command(const char* commandTag)
 {
-    return commandTag != NULL && (strcmp(commandTag, "COMMIT") == 0 || strcmp(commandTag, "ROLLBACK") == 0);
+    return commandTag != NULL && (strcmp(commandTag, "COMMIT") == 0 ||
+        (strcmp(commandTag, "ROLLBACK") == 0 && !(get_redirect_manager()->state.have_savepoint)));
 }
 
 // is fetch commandTag
@@ -1053,6 +1109,18 @@ bool libpqsw_fetch_command(const char* commandTag)
 {
     return commandTag != NULL &&
         (strcmp(commandTag, "FETCH") == 0 || strstr(commandTag, "CURSOR") != NULL || strcmp(commandTag, "MOVE") == 0);
+}
+
+// is special commandTag need forbid redirect
+bool libpqsw_special_command(const char* commandTag)
+{
+    return commandTag != NULL && strcmp(commandTag, "LOCK TABLE") == 0;
+}
+
+// is special commandTag need forbid redirect
+bool libpqsw_savepoint_command(const char* commandTag)
+{
+    return commandTag != NULL && strcmp(commandTag, "SAVEPOINT") == 0;
 }
 
 // set commandTag

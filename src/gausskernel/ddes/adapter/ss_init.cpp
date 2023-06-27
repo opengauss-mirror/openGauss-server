@@ -420,6 +420,12 @@ void DMSInit()
     }
     rc = memset_s(g_instance.dms_cxt.conninfo, MAXCONNINFO, '\0', MAXCONNINFO);
     securec_check(rc, "", "");
+
+#ifdef USE_ASSERT_CHECKING
+    if (!ENABLE_REFORM && SS_NORMAL_STANDBY) {
+        SSStandbySetLibpqswConninfo();
+    }
+#endif
 }
 
 void GetSSLogPath(char *sslog_path)
@@ -536,3 +542,4 @@ void StartupWaitReform()
         pg_usleep(5000L);
     }
 }
+

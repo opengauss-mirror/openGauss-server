@@ -77,6 +77,7 @@
 #include "replication/walsender.h"
 #include "replication/syncrep.h"
 #include "replication/origin.h"
+#include "replication/libpqsw.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/procarray.h"

@@ -1,0 +1,4 @@
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode2/ -c "enable_remote_excute=on" > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode2 > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode2 > /dev/null 2>&1
+\! sleep 5
