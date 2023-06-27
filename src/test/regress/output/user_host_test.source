@@ -111,7 +111,7 @@ revoke insert on test2 from 'test_user_host'@'127.0.%';
 --?.*
 --?.*
 --?.*
-\! sleep 5
+\! sleep 2
 --?.*
 gsql: FATAL:  Invalid username/password,login denied.
 --?.*
@@ -123,8 +123,6 @@ gsql: FATAL:  Invalid username/password,login denied.
 --?.*
 DROP ROLE
 --?.*
-\! sleep 5
---?.*
        current_user       
 --------------------------
  test_user_host@127.0.0.%
@@ -132,8 +130,6 @@ DROP ROLE
 
 --?.*
 DROP ROLE
---?.*
-\! sleep 5
 --?.*
       current_user      
 ------------------------
@@ -144,5 +140,11 @@ DROP ROLE
  a 
 ---
  1
+(1 row)
+
+--?.*
+       current_user        
+---------------------------
+ test_user_host2@localhost
 (1 row)
 

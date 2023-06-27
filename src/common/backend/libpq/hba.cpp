@@ -2418,7 +2418,7 @@ char* MatchOtherUserHostName(const char* rolname, char* userHostName)
     return firstPrivName;
 }
 
-char* GenUserHostName(hbaPort* port, const char* role)
+char* GenUserHostName(hbaPort* port, const char* role, char** localhost)
 {
     if (!port)
         ereport(ERROR,(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),errmsg("The MyProcPort can't be NULL")));
@@ -2431,7 +2431,13 @@ char* GenUserHostName(hbaPort* port, const char* role)
                   sizeof(remoteHostname));
     errno_t rc = snprintf_s(userHostName, sizeof(userHostName), sizeof(userHostName) - 1, "%s@%s", role, remoteHostname);
     securec_check_ss(rc, "", "");
-    return pstrdup(userHostName);
+    char* returnUserHost = pstrdup(userHostName);
+    if (pg_strcasecmp(remoteHostname, "127.0.0.1") == 0) {
+        rc = snprintf_s(userHostName, sizeof(userHostName), sizeof(userHostName) - 1, "%s@localhost", role);
+        securec_check_ss(rc, "", "");
+        *localhost = pstrdup(userHostName);
+    }
+    return returnUserHost;
 }
 
 extern char* GetDatabaseCompatibility(const char* dbname);
@@ -2439,14 +2445,19 @@ HeapTuple SearchUserHostName(const char* userName, Oid* oid)
 {
     char* userHostName = NULL;
     HeapTuple roleTup = NULL;
-    if (u_sess->attr.attr_common.b_compatibility_user_host_auth && !OidIsValid(u_sess->proc_cxt.MyDatabaseId) && u_sess->proc_cxt.MyProcPort) {
+    if (u_sess->attr.attr_common.b_compatibility_user_host_auth && (!OidIsValid(u_sess->proc_cxt.MyDatabaseId) || u_sess->proc_cxt.check_auth) && u_sess->proc_cxt.MyProcPort) {
         bool isBFormat = false;
         char* dbCompatibility = GetDatabaseCompatibility(u_sess->proc_cxt.MyProcPort->database_name);
         if (dbCompatibility)
             isBFormat = (pg_strcasecmp(dbCompatibility, "B") == 0);
         if (isBFormat) {
-            userHostName = GenUserHostName(u_sess->proc_cxt.MyProcPort, userName);
+            char* localhost = NULL;
+            userHostName = GenUserHostName(u_sess->proc_cxt.MyProcPort, userName, &localhost);
             roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(userHostName));
+            if (localhost && !roleTup) {
+                roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(localhost));
+                pfree_ext(localhost);
+            }
             if (!roleTup) {
                 char* matchName = MatchOtherUserHostName(userName, userHostName);
                 if (matchName) {
