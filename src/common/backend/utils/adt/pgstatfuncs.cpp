@@ -8806,6 +8806,11 @@ Datum ss_buffer_ctrl(PG_FUNCTION_ARGS)
     TupleDesc tupledesc;
     HeapTuple tuple;
 
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("This function is not supported while DMS and DSS disable")));
+    }
+
     if (SRF_IS_FIRSTCALL()) {
         int i;
         BufferDesc* bufHdr = NULL;
