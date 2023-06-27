@@ -2805,6 +2805,7 @@ typedef struct knl_t_storage_context {
     int timeoutRemoteOpera;
     char* PcaBufferBlocks;
     dms_buf_ctrl_t* dmsBufCtl;
+    char* ondemandXLogMem;
 } knl_t_storage_context;
 
 typedef struct knl_t_port_context {

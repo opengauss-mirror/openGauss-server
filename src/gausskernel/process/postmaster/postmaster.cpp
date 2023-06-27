@@ -3349,6 +3349,22 @@ static void CheckExtremeRtoGUCConflicts(void)
                     TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM, MAX_RECOVERY_THREAD_NUM)));
     }
 #endif
+
+    if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {
+        if (!g_instance.attr.attr_storage.dms_attr.enable_dms) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("ondemand extreme rto only support in shared storage mode."),
+                    errhint("Either turn on ss_enable_dms, or turn off ss_enable_ondemand_recovery.")));
+        }
+
+        if (g_instance.attr.attr_storage.recovery_parse_workers <= 1) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("extreme rto param should be set in ondemand extreme rto mode."),
+                    errhint("Either turn off ss_enable_ondemand_recovery, or set extreme rto param.")));
+        }
+    }
 }
 static void CheckRecoveryParaConflict()
 {

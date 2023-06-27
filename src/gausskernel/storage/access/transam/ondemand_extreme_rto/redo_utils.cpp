@@ -27,48 +27,46 @@
 #include "access/ondemand_extreme_rto/redo_utils.h"
 #include "storage/lock/lwlock.h"
 
+Size OndemandRecoveryShmemSize(void)
+{
+    Size size = 0;
+
+    size = add_size(size, (Size)g_instance.attr.attr_storage.dms_attr.ondemand_recovery_mem_size << BITS_IN_KB);
+
+    return size;
+}
+
+void OndemandRecoveryShmemInit(void)
+{
+    bool found = false;
+    t_thrd.storage_cxt.ondemandXLogMem =
+        (char *)ShmemInitStruct("Ondemand Recovery HashMap", OndemandRecoveryShmemSize(), &found);
+
+    if (!found) {
+        /* The memory of the memset sometimes exceeds 2 GB. so, memset_s cannot be used. */
+        MemSet(t_thrd.storage_cxt.ondemandXLogMem, 0, OndemandRecoveryShmemSize());
+    }
+}
+
 /* add for batch redo mem manager */
 void *OndemandXLogMemCtlInit(RedoMemManager *memctl, Size itemsize, int itemnum)
 {
-    void *allocdata = NULL;
-    RedoMemSlot *nextfreeslot = NULL;
-    OndemandParseAllocCtrl *ctrl;
-    Assert(PARSEBUFFER_SIZE == itemsize);
+    Size dataSize = (itemsize + sizeof(RedoMemSlot)) * itemnum;
 
-    allocdata = (void *)palloc(sizeof(OndemandParseAllocCtrl));
-    ctrl = (OndemandParseAllocCtrl *)allocdata;
-    ctrl->allocNum = itemnum / ONDEMAND_MAX_PARSEBUFF_PREPALLOC;
-    if ((int)(ctrl->allocNum * ONDEMAND_MAX_PARSEBUFF_PREPALLOC) != itemnum) {
-        ctrl->allocNum++;
-    }
-    ctrl->memslotEntry = (void *)palloc(sizeof(RedoMemSlot) * itemnum);
+    Assert(t_thrd.storage_cxt.ondemandXLogMem != NULL);
+    Assert(dataSize <= OndemandRecoveryShmemSize());
 
-    // palloc all parse mem entry
-    for (int i = 0; i < ctrl->allocNum; i++) {
-        ctrl->allocEntry[i] = (void *)palloc(ONDEMAND_MAX_PARSESIZE_PREPALLOC);
-        if (ctrl->allocEntry[i] == NULL) {
-            ereport(PANIC,
-                    (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                     errmsg("[SS] XLogMemCtlInit Allocated buffer failed!, totalblknum:%d, itemsize:%lu",
-                     itemnum, itemsize)));
-            /* panic */
-        }
-        errno_t rc = memset_s(ctrl->allocEntry[i], ONDEMAND_MAX_PARSESIZE_PREPALLOC, 0,
-            ONDEMAND_MAX_PARSESIZE_PREPALLOC);
-        securec_check(rc, "\0", "\0");
-    }
     memctl->totalblknum = itemnum;
     memctl->usedblknum = 0;
     memctl->itemsize = itemsize;
-    memctl->memslot = (RedoMemSlot *)ctrl->memslotEntry;
-    nextfreeslot = memctl->memslot;
+    memctl->memslot = (RedoMemSlot *)(t_thrd.storage_cxt.ondemandXLogMem + (itemsize * itemnum));
     for (int i = memctl->totalblknum; i > 0; --i) {
         memctl->memslot[i - 1].buf_id = i; /*  start from 1 , 0 is invalidbuffer */
         memctl->memslot[i - 1].freeNext = i - 1;
     }
     memctl->firstfreeslot = memctl->totalblknum;
     memctl->firstreleaseslot = InvalidBuffer;
-    return allocdata;
+    return (void *)t_thrd.storage_cxt.ondemandXLogMem;
 }
 
 RedoMemSlot *OndemandXLogMemAlloc(RedoMemManager *memctl)
@@ -136,24 +134,9 @@ void OndemandXLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, 
 void OndemandXLogParseBufferDestory(RedoParseManager *parsemanager)
 {
     g_parseManager = NULL;
-    OndemandParseAllocCtrl *ctrl = (OndemandParseAllocCtrl *)parsemanager->parsebuffers;
-
-    if (ctrl != NULL) {
-        for (int i = 0; i < ctrl->allocNum; i++) {
-            pfree(ctrl->allocEntry[i]);
-        }
-        pfree(ctrl->memslotEntry);
-        pfree(ctrl);
-        parsemanager->parsebuffers = NULL;
-    }
+    // do not free parsebuffers, which is managed in shared memory
+    parsemanager->parsebuffers = NULL;
     parsemanager->memctl.isInit = false;
-}
-
-ParseBufferDesc *OndemandGetParseMemSlot(OndemandParseAllocCtrl *ctrl, int itemIndex)
-{
-    int entryIndex = itemIndex / ONDEMAND_MAX_PARSEBUFF_PREPALLOC;
-    int entryOffset = (itemIndex - (entryIndex * ONDEMAND_MAX_PARSEBUFF_PREPALLOC)) * PARSEBUFFER_SIZE;
-    return (ParseBufferDesc *)((char *)ctrl->allocEntry[entryIndex] + entryOffset);
 }
 
 XLogRecParseState *OndemandXLogParseBufferAllocList(RedoParseManager *parsemanager, XLogRecParseState *blkstatehead,
@@ -175,7 +158,7 @@ XLogRecParseState *OndemandXLogParseBufferAllocList(RedoParseManager *parsemanag
     pg_read_barrier();
     Assert(allocslot->buf_id != InvalidBuffer);
     Assert(memctl->itemsize == (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc)));
-    descstate = OndemandGetParseMemSlot((OndemandParseAllocCtrl *)parsemanager->parsebuffers, allocslot->buf_id - 1);
+    descstate = (ParseBufferDesc *)((char *)parsemanager->parsebuffers + memctl->itemsize * (allocslot->buf_id - 1));
     descstate->buff_id = allocslot->buf_id;
     Assert(descstate->state == 0);
     descstate->state = 1;
