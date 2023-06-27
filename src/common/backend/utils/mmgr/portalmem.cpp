@@ -570,7 +570,7 @@ void PortalDrop(Portal portal, bool isTopCommit)
     PortalReleaseCachedPlan(portal);
 
     /*if cursor record row type*/
-    if (portal->name[0] != '\0' && u_sess->plsql_cxt.CursorRecordTypeList) {
+    if (portal->name[0] != '\0' && u_sess->plsql_cxt.CursorRecordTypeList && IsTransactionBlock()) {
         CursorRecordTypeUnbind(portal->name);
     }
 
@@ -1407,24 +1407,35 @@ HoldPinnedPortals(bool is_rollback)
 static void CursorRecordTypeUnbind(const char* portal_name)
 {
     ListCell* cell = NULL;
+    ListCell* pnext = NULL;
     MemoryContext old = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
     ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
-    List* temp_list = list_copy(u_sess->plsql_cxt.CursorRecordTypeList);
-    foreach(cell,temp_list) {
-        CursorRecordType* var = (CursorRecordType*)lfirst(cell);
-        if (strcmp(portal_name,var->cursor_name) == 0) {
-            Relation rel = relation_open(var->type_oid,AccessShareLock);
-            if (rel->rd_refcnt > 1) {
-                RelationDecrementReferenceCount(rel);
+    PG_TRY();
+    {
+        t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
+        for (cell = list_head(u_sess->plsql_cxt.CursorRecordTypeList); cell != NULL; cell = pnext) {
+            pnext = lnext(cell);
+            CursorRecordType* var = (CursorRecordType*)lfirst(cell);
+            if (strcmp(portal_name,var->cursor_name) == 0) {
+                Relation rel = relation_open(var->type_oid,AccessShareLock);
+                if (rel->rd_refcnt > 1) {
+                    RelationDecrementReferenceCount(rel);
+                }
+                relation_close(rel,AccessShareLock);
+                u_sess->plsql_cxt.CursorRecordTypeList = list_delete_ptr(u_sess->plsql_cxt.CursorRecordTypeList,var);
+                pfree(var->cursor_name);
+                pfree(var);
             }
-            relation_close(rel,AccessShareLock);
-            u_sess->plsql_cxt.CursorRecordTypeList = list_delete_ptr(u_sess->plsql_cxt.CursorRecordTypeList,var);
-            pfree(var->cursor_name);
-            pfree(var);
         }
     }
-    list_free(temp_list);
+    PG_CATCH();
+    {
+        t_thrd.utils_cxt.CurrentResourceOwner = save;
+        (void)MemoryContextSwitchTo(old);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
     t_thrd.utils_cxt.CurrentResourceOwner = save;
     (void)MemoryContextSwitchTo(old);
 }
