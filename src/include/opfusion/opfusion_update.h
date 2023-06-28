@@ -40,6 +40,11 @@ public:
     void InitGlobals();
 
     void refreshTargetParameterIfNecessary();
+
+    void InitBaseParam(List* targetList);
+
+    bool ResetReuseFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params);
+
 private:
     HeapTuple heapModifyTuple(HeapTuple tuple);
 
