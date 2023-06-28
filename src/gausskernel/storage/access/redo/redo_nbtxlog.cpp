@@ -1141,7 +1141,8 @@ static void BtreeXlogVacuumBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
         blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
 
         if (is_dedup_upgrade) {
-            btree_xlog_vacuum_posting_operator_page(bufferinfo, (void *)maindata, (void *)blkdata, blkdatalen, &blkdatalen);
+            btree_xlog_vacuum_posting_operator_page(bufferinfo, (void *)maindata, (void *)blkdata, blkdatalen, &deldatalen);
+            BtreeXlogVacuumOperatorPage(bufferinfo, (void *)maindata, (void *)blkdata, deldatalen);
         } else {
             BtreeXlogVacuumOperatorPage(bufferinfo, (void *)maindata, (void *)blkdata, blkdatalen);
         }
