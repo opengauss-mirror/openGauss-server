@@ -711,6 +711,9 @@ void pg_stat_get_stat_list(List** stat_list, uint32* statFlag_ref, Oid relid)
     } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
         *statFlag_ref = relid;
         *stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
+    } else if (isPartitionObject(relid, PART_OBJ_TYPE_TABLE_PARTITION, true)) {
+        *statFlag_ref = partid_get_parentid(relid);
+        *stat_list = list_make1_oid(relid);
     } else {
         *statFlag_ref = InvalidOid;
         *stat_list = list_make1_oid(relid);
