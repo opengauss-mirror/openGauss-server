@@ -986,10 +986,15 @@ void gs_memprot_init(Size size)
     if (g_instance.attr.attr_memory.enable_memory_limit && maxChunksPerProcess == 0) {
         maxSharedMemory = size >> BITS_IN_MB;
 
+#ifdef ENABLE_MULTIPLE_NODES
         Assert(g_instance.attr.attr_sql.udf_memory_limit >= UDF_DEFAULT_MEMORY);
+        int udf_memory = g_instance.attr.attr_sql.udf_memory_limit - UDF_DEFAULT_MEMORY;
+#else
+        int udf_memory = 0;
+#endif
         /* remove cstore buffer */
         int avail_mem = g_instance.attr.attr_memory.max_process_memory - g_instance.attr.attr_storage.cstore_buffers -
-                        (g_instance.attr.attr_sql.udf_memory_limit - UDF_DEFAULT_MEMORY) - (size >> BITS_IN_KB);
+                        udf_memory - (size >> BITS_IN_KB);
 
         if (avail_mem < MIN_PROCESS_LIMIT) {
             ereport(WARNING,
