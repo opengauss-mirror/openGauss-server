@@ -18029,6 +18029,11 @@ bool static transformTableCompressedOptions(Relation rel, bytea* relOption, List
                                 errmsg("compress_level=0, compress_chunk_size=4096, compress_prealloc_chunks=0, compress_byte_convert=false, compress_diff_convert=false should be set when compresstype=0")));
     }
 
+    if (newCompressOpt->compressType == COMPRESS_TYPE_PGZSTD) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("row-compression feature current not support algorithm is PGZSTD.")));
+    }
+
     if (newCompressOpt->compressType != COMPRESS_TYPE_ZSTD && newCompressOpt->compressLevel != 0) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
             errmsg("compress_level should be used with ZSTD algorithm."))); 
