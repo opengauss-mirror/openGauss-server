@@ -34,6 +34,7 @@ typedef struct BACKTRACE_INFO {
 Datum gs_stack(PG_FUNCTION_ARGS);
 extern void print_stack(SIGNAL_ARGS);
 void InitGsStack();
+void print_all_stack();
 void get_stack_and_write_result();
 void check_and_process_gs_stack();
 void get_stack_according_to_tid(ThreadId tid, StringInfoData* call_stack);

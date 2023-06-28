@@ -6,6 +6,7 @@ multi_standby_single/inc_build_reconnect
 #multi_standby_single/sync_commit
 #multi_standby_single/quorum
 multi_standby_single/switchover
+multi_standby_single/switchover_timeout
 multi_standby_single/failover
 multi_standby_single/params
 multi_standby_single/xlog_redo_apply_delay
