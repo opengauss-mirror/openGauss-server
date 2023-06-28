@@ -106,10 +106,10 @@ create table force_vt_tb1_col (a char(10),b varchar(10)) with (orientation=colum
 insert into force_vt_tb1_col values('零0','零1二3');
 insert into force_vt_tb1_col values('','');
 insert into force_vt_tb1_col values('0','0');
-select length(a),a,length(b),b from force_vt_tb1 order by 1;
+select length(a),a,length(b),b from force_vt_tb1_col order by 1;
 set enable_codegen to true;
 set codegen_cost_threshold to 0;
-select length(a),a,length(b),b from force_vt_tb1 order by 1;
+select length(a),a,length(b),b from force_vt_tb1_col order by 1;
 
 drop table force_vt_tb1;
 drop table force_vt_tb1_col;
