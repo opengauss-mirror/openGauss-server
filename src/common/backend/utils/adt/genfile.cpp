@@ -33,6 +33,7 @@
 #include "replication/basebackup.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/relfilenodemap.h"
 #include "utils/relmapper.h"
 #include "utils/timestamp.h"
 #include "utils/lsyscache.h"
@@ -760,7 +761,14 @@ Datum compress_ratio_info(PG_FUNCTION_ARGS)
 
     // get complete RelFileNode
     RelFileNodeForkNum relfilenode = relpath_to_filenode(path);
-    Relation relation = try_relation_open(relfilenode.rnode.node.relNode, AccessShareLock);
+
+    // get Oid by RelFileNode
+    Oid relid = DatumGetObjectId(DirectFunctionCall2Coll(
+                                        pg_filenode_relation, 
+                                        InvalidOid, 
+                                        ObjectIdGetDatum(relfilenode.rnode.node.spcNode), 
+                                        ObjectIdGetDatum(relfilenode.rnode.node.relNode)));
+    Relation relation = try_relation_open(relid, AccessShareLock);
     if (!RelationIsValid(relation)) {
         PG_RETURN_NULL();
     }
@@ -781,7 +789,12 @@ Datum compress_ratio_info(PG_FUNCTION_ARGS)
         ListCell *cell;
         RelFileNode rnode = relfilenode.rnode.node;
         foreach (cell, partid_list) {
-            rnode.relNode = lfirst_oid(cell);
+            rnode.relNode = DatumGetObjectId(DirectFunctionCall1Coll(pg_partition_filenode, 
+                                                                    InvalidOid, 
+                                                                    ObjectIdGetDatum(lfirst_oid(cell))));
+            if (!rnode.relNode) {
+                PG_RETURN_NULL();
+            }
             char *sub_path = relpathbackend(rnode, InvalidBackendId, MAIN_FORKNUM);
             compress_ratio_info_single(sub_path, &file_count, &logic_size, &physic_size);
             pfree(sub_path);
@@ -791,7 +804,12 @@ Datum compress_ratio_info(PG_FUNCTION_ARGS)
         ListCell *cell;
         RelFileNode rnode = relfilenode.rnode.node;
         foreach (cell, subpartid_list) {
-            rnode.relNode = lfirst_oid(cell);
+            rnode.relNode = DatumGetObjectId(DirectFunctionCall1Coll(pg_partition_filenode, 
+                                                                    InvalidOid, 
+                                                                    ObjectIdGetDatum(lfirst_oid(cell))));
+            if (!rnode.relNode) {
+                PG_RETURN_NULL();
+            }
             char *sub_path = relpathbackend(rnode, InvalidBackendId, MAIN_FORKNUM);
             compress_ratio_info_single(sub_path, &file_count, &logic_size, &physic_size);
             pfree(sub_path);
@@ -918,7 +936,13 @@ Datum compress_statistic_info(PG_FUNCTION_ARGS)
 
     // get complete RelFileNode
     RelFileNodeForkNum relfilenode = relpath_to_filenode(path);
-    Relation relation = try_relation_open(relfilenode.rnode.node.relNode, AccessShareLock);
+
+    // get Oid by RelFileNode
+    Oid relid = DatumGetObjectId(DirectFunctionCall2Coll(pg_filenode_relation, 
+                                                        InvalidOid, 
+                                                        ObjectIdGetDatum(relfilenode.rnode.node.spcNode), 
+                                                        ObjectIdGetDatum(relfilenode.rnode.node.relNode)));
+    Relation relation = try_relation_open(relid, AccessShareLock);
     if (!RelationIsValid(relation)) {
         PG_RETURN_NULL();
     }
@@ -949,7 +973,12 @@ Datum compress_statistic_info(PG_FUNCTION_ARGS)
         ListCell *cell;
         RelFileNode rnode = relfilenode.rnode.node;
         foreach (cell, partid_list) {
-            rnode.relNode = lfirst_oid(cell);
+            rnode.relNode = DatumGetObjectId(DirectFunctionCall1Coll(pg_partition_filenode, 
+                                                                    InvalidOid, 
+                                                                    ObjectIdGetDatum(lfirst_oid(cell))));
+            if (!rnode.relNode) {
+                PG_RETURN_NULL();
+            }
             char *sub_path = relpathbackend(rnode, InvalidBackendId, MAIN_FORKNUM);
             compress_statistic_info_single(sub_path, step, &extent_count, &dispersion_count, &void_count);
             pfree(sub_path);
@@ -959,7 +988,12 @@ Datum compress_statistic_info(PG_FUNCTION_ARGS)
         ListCell *cell;
         RelFileNode rnode = relfilenode.rnode.node;
         foreach (cell, subpartid_list) {
-            rnode.relNode = lfirst_oid(cell);
+            rnode.relNode = DatumGetObjectId(DirectFunctionCall1Coll(pg_partition_filenode, 
+                                                                    InvalidOid, 
+                                                                    ObjectIdGetDatum(lfirst_oid(cell))));
+            if (!rnode.relNode) {
+                PG_RETURN_NULL();
+            }
             char *sub_path = relpathbackend(rnode, InvalidBackendId, MAIN_FORKNUM);
             compress_statistic_info_single(sub_path, step, &extent_count, &dispersion_count, &void_count);
             pfree(sub_path);

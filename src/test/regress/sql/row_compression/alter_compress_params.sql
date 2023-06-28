@@ -342,6 +342,18 @@ DROP TABLE alter_compress_params_schema.uncompressed_subpartitioned_all_options;
 
 
 -- set compressed options of compressed table 
+CREATE OR REPLACE FUNCTION compress_func_findpath(character varying)
+  RETURNS character varying
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  relpath character varying;
+begin
+  relpath = (select pg_relation_filepath(relname::regclass) from pg_class where relname =  $1);
+  return relpath;
+end;
+$BODY$;
 CREATE TABLE alter_compress_params_schema.compressed_table_compresstype_2_cl_30 (id int, c1 text) with (compresstype  = 1);
 INSERT INTO alter_compress_params_schema.compressed_table_compresstype_2_cl_30 SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
 ALTER TABLE alter_compress_params_schema.compressed_table_compresstype_2_cl_30 SET (compresstype = 2, compress_level = 30);
@@ -360,6 +372,8 @@ CHECKPOINT;
 SELECT * FROM alter_compress_params_schema.all_options_table_compresstype_1_cpc_1;
 SELECT chunk_size, algorithm FROM pg_catalog.compress_address_header('alter_compress_params_schema.all_options_table_compresstype_1_cpc_1', 0);
 SELECT nchunks, chunknos FROM pg_catalog.compress_address_details('alter_compress_params_schema.all_options_table_compresstype_1_cpc_1', 0);
+SELECT count(*) FROM compress_ratio_info(compress_func_findpath('alter_compress_params_schema.all_options_table_compresstype_1_cpc_1'));
+SELECT count(*) FROM compress_statistic_info(compress_func_findpath('alter_compress_params_schema.all_options_table_compresstype_1_cpc_1'), 1);
 DROP TABLE alter_compress_params_schema.all_options_table_compresstype_1_cpc_1;
 
 CREATE TABLE alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512
@@ -383,12 +397,15 @@ INSERT INTO alter_compress_params_schema.compressed_partitioned_compresstype_2_c
 INSERT INTO alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512 SELECT generate_series(1, 10), 'session3 item', '2021-08-01 00:00:00', 1000, '733';
 INSERT INTO alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512 SELECT generate_series(1, 10), 'session4 item', '2021-11-01 00:00:00', 1000, '744';
 ALTER TABLE alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512 SET (compresstype  = 2, compress_level = 30, compress_chunk_size = 512);
+CHECKPOINT;
 select relname, reloptions from pg_partition where relname = 'compressed_partitioned_compresstype_2_cl_30_ccs_512_season1';
 select relname, reloptions from pg_partition where relname = 'compressed_partitioned_compresstype_2_cl_30_ccs_512_season2';
 select relname, reloptions from pg_partition where relname = 'compressed_partitioned_compresstype_2_cl_30_ccs_512_season3';
 select relname, reloptions from pg_partition where relname = 'compressed_partitioned_compresstype_2_cl_30_ccs_512_season4';
 \d+ alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512
 SELECT count(*) FROM alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512;
+SELECT count(*) FROM compress_ratio_info(compress_func_findpath('alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512'));
+SELECT count(*) FROM compress_statistic_info(compress_func_findpath('alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512'), 1);
 DROP TABLE alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512;
 
 CREATE TABLE alter_compress_params_schema.all_options_partitioned_compresstype_1_cpc_1
@@ -412,6 +429,7 @@ INSERT INTO alter_compress_params_schema.all_options_partitioned_compresstype_1_
 INSERT INTO alter_compress_params_schema.all_options_partitioned_compresstype_1_cpc_1 SELECT generate_series(1, 10), 'session3 item', '2021-08-01 00:00:00', 1000, '733';
 INSERT INTO alter_compress_params_schema.all_options_partitioned_compresstype_1_cpc_1 SELECT generate_series(1, 10), 'session4 item', '2021-11-01 00:00:00', 1000, '744';
 ALTER TABLE alter_compress_params_schema.all_options_partitioned_compresstype_1_cpc_1 SET (compresstype = 1, compress_level = 0, compress_chunk_size = 4096, compress_prealloc_chunks = 1, compress_byte_convert = false, compress_diff_convert = false);
+CHECKPOINT;
 select relname, reloptions from pg_partition where relname = 'all_options_partitioned_compresstype_1_cpc_1_season1';
 select relname, reloptions from pg_partition where relname = 'all_options_partitioned_compresstype_1_cpc_1_season2';
 select relname, reloptions from pg_partition where relname = 'all_options_partitioned_compresstype_1_cpc_1_season3';
@@ -445,12 +463,15 @@ INSERT INTO alter_compress_params_schema.all_options_subpartitioned_compresstype
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1 values ('201903', '1',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1 values ('201903', '2',  generate_series(1, 10));
 ALTER TABLE alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1 SET (compresstype = 1, compress_level = 0, compress_chunk_size = 4096, compress_prealloc_chunks = 1, compress_byte_convert = false, compress_diff_convert = false);
+CHECKPOINT;
 select relname, reloptions from pg_partition where relname = 'all_options_subpartitioned_compresstype_1_cpc_1_201901_a';
 select relname, reloptions from pg_partition where relname = 'all_options_subpartitioned_compresstype_1_cpc_1_201901_b';
 select relname, reloptions from pg_partition where relname = 'all_options_subpartitioned_compresstype_1_cpc_1_201902_a';
 select relname, reloptions from pg_partition where relname = 'all_options_subpartitioned_compresstype_1_cpc_1_201902_b';
 \d+ alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1
 SELECT count(*) FROM alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1;
+SELECT count(*) FROM compress_ratio_info(compress_func_findpath('alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1'));
+SELECT count(*) FROM compress_statistic_info(compress_func_findpath('alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1'), 1);
 DROP TABLE alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1;
 
 -- set compressed table to uncompressed table

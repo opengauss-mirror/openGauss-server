@@ -2047,6 +2047,7 @@ Datum pg_partition_filenode(PG_FUNCTION_ARGS)
         case PART_OBJ_TYPE_TABLE_PARTITION:
         case PART_OBJ_TYPE_INDEX_PARTITION:
         case PART_OBJ_TYPE_TOAST_TABLE:
+        case PART_OBJ_TYPE_TABLE_SUB_PARTITION:
             // okay, these have storage
             if (partRelForm->relfilenode)
                 result = partRelForm->relfilenode;
