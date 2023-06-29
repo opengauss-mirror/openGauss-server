@@ -239,14 +239,19 @@ PID_TYPE psql_ss_start_test(
     /* If the .sql file does not exist, then record the error in diff summary
      * file and cont */
     if (!file_exists(infile)) {
-        FILE* fp = fopen(difffilename, "a");
+        /* check if exist in sql dir for source file */
+        snprintf(infile, sizeof(infile), "%s/sql/%s.sql", inputdir, testname);
+        if (!file_exists(infile)) {
+            FILE* fp = fopen(difffilename, "a");
 
-        if (fp) {
-            (void)fprintf(fp, "\n[%s]: No such file or directory!!\n", infile);
-            fclose(fp);
-        } else
-            fprintf(stderr, _("\n COULD NOT OPEN [%s]!!!!\n"), difffilename);
+            if (fp) {
+                (void)fprintf(fp, "\n[%s]: No such file or directory!!\n", infile);
+                fclose(fp);
+            } else
+                fprintf(stderr, _("\n COULD NOT OPEN [%s]!!!!\n"), difffilename);
+        }
     }
+
     if (!is_stanby) {
         (void)snprintf(outfile, sizeof(outfile), "%s/results/ss_wr/%s.out", outputdir, testname);
 

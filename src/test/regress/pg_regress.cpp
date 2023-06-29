@@ -2235,6 +2235,24 @@ static void config_dn(bool standby)
             fputs(buf, pg_conf);
         }
 
+        if (ss_standby_read) {
+            if (i == 0) {
+                (void)snprintf(buf, sizeof(buf),
+                    "replconninfo1 = 'localhost=127.0.0.1 localport=%d localheartbeatport=%d remotehost=127.0.0.1 "
+                    "remoteport=%d remoteheartbeatport=%d'\n",
+                    myinfo.dn_primary_port[i], myinfo.dn_primary_port[i] + 1, myinfo.dn_primary_port[i + 1],
+                    myinfo.dn_primary_port[i + 1] + 1);
+                fputs(buf, pg_conf);
+            } else {
+                (void)snprintf(buf, sizeof(buf),
+                    "replconninfo1 = 'localhost=127.0.0.1 localport=%d localheartbeatport=%d remotehost=127.0.0.1 "
+                    "remoteport=%d remoteheartbeatport=%d'\n",
+                    myinfo.dn_primary_port[i], myinfo.dn_primary_port[i] + 1, myinfo.dn_primary_port[0],
+                    myinfo.dn_primary_port[0] + 1);
+                fputs(buf, pg_conf);
+            }
+        }
+
         if (temp_config != NULL) {
             FILE* extra_conf = NULL;
             char line_buf[1024];
@@ -5747,7 +5765,7 @@ static int initialize_myinfo(
     datanode_stream_ctl_port = (int*)malloc(sizeof(int) * datanode_num);
     datanode_sctp_port = (int*)malloc(sizeof(int) * datanode_num);
 
-    if (standby_defined) {
+    if (standby_defined || ss_standby_read) {
         dns_port = (int*)malloc(sizeof(int) * datanode_num);
         dns_ctl_port = (int*)malloc(sizeof(int) * datanode_num);
         dns_sctp_port = (int*)malloc(sizeof(int) * datanode_num);
@@ -5770,7 +5788,7 @@ static int initialize_myinfo(
         datanode_sctp_port[i] = init_port++;  // Reserve sctp port for datanode.
         datanode_stream_ctl_port[i] = init_port++;
 
-        if (standby_defined) {
+        if (standby_defined || ss_standby_read) {
             dns_port[i] = init_port++;
             init_port++;
             dns_sctp_port[i] = init_port++;
