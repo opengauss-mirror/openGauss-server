@@ -1653,19 +1653,22 @@ static void XLogWalRcvSendHSFeedback(void)
     if (!HotStandbyActive())
         return;
 
-    /*
-     * Make the expensive call to get the oldest xmin once we are certain
-     * everything else has been checked.
-     */
+    if (u_sess->attr.attr_storage.hot_standby_feedback) {
 #ifndef ENABLE_MULTIPLE_NODES
-    /* Get updated RecentGlobalXmin */
-    GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, true, true);
+        /* Get updated RecentGlobalXmin */
+        GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, true, true);
 #endif
-    if (u_sess->attr.attr_storage.hot_standby_feedback)
+
+        /*
+         * Make the expensive call to get the oldest xmin once we are certain
+         * everything else has been checked.
+         */
         xmin = GetOldestXmin(NULL);
-    else
+    } else {
         xmin = InvalidTransactionId;
+    }
     t_thrd.pgxact->xmin = InvalidTransactionId;
+
     /*
      * Always send feedback message.
      */
