@@ -2770,6 +2770,8 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
             }
 
             DestReceiver *dest = CreateDestReceiver(canSetTag ? u_sess->SPI_cxt._current->dest : DestNone);
+            if (u_sess->SPI_cxt._current->dest == DestSqlProcSPI && u_sess->hook_cxt.pluginSpiReciverParamHook)
+                ((SpiReciverParamHook)u_sess->hook_cxt.pluginSpiReciverParamHook)(dest,plan);
 
             if (IsA(stmt, PlannedStmt) && ((PlannedStmt *)stmt)->utilityStmt == NULL) {
                 QueryDesc *qdesc = NULL;

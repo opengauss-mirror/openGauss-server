@@ -2747,6 +2747,10 @@ typedef struct knl_u_hook_context {
     void *pluginCCHashEqFuncs;
     void *plpgsqlParserSetHook;
     void *coreYYlexHook;
+    void *pluginProcDestReciverHook;
+    void *pluginSpiReciverParamHook;
+    void *pluginSpiExecuteMultiResHook;
+    void *pluginMultiResExceptionHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

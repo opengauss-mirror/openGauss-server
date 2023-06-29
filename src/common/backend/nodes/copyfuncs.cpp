@@ -7135,6 +7135,16 @@ static SubPartitionPruningResult *_copySubPartitionPruningResult(const SubPartit
     COPY_NODE_FIELD(ls_selectedSubPartitionnos);
     return newnode;
 }
+/*Dolphin call stmt copy*/
+
+static DolphinCallStmt *_copyDolphinCallStmt(const DolphinCallStmt *from)
+{
+    DolphinCallStmt* newnode = makeNode(DolphinCallStmt);
+    COPY_NODE_FIELD(funccall);
+    COPY_NODE_FIELD(funcexpr);
+    COPY_NODE_FIELD(outargs);
+    return newnode;
+}
 
 /* ==================partial node copy ================================= */
 
@@ -8812,6 +8822,9 @@ void* copyObject(const void* from)
             break;
         case T_GetDiagStmt:
             retval = _copyGetDiagStmt((GetDiagStmt *)from);
+            break;
+        case T_DolphinCallStmt:
+            retval = _copyDolphinCallStmt((DolphinCallStmt *)from);
             break;
         default:
             ereport(ERROR,

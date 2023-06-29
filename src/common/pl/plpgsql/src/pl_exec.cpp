@@ -74,6 +74,9 @@
 
 extern bool checkRecompileCondition(CachedPlanSource* plansource);
 static const char* const raise_skip_msg = "RAISE";
+typedef int (*SpiExecuteMultiResHook)(PLpgSQL_execstate* estate, PLpgSQL_expr* expr,
+    PLpgSQL_stmt_execsql* plstmt, ParamListInfo paramLI, long tcount, bool* multi_res);
+typedef void (*SpiMultiResExceptionHook)();
 typedef struct {
     int nargs;       /* number of arguments */
     Oid* types;      /* types of arguments */
@@ -2802,6 +2805,8 @@ static void exec_exception_cleanup(PLpgSQL_execstate* estate, ExceptionContext *
     }
     context->cur_edata =  edata;
 
+    if (u_sess->hook_cxt.pluginMultiResExceptionHook)
+        ((SpiMultiResExceptionHook)u_sess->hook_cxt.pluginMultiResExceptionHook)();
     if (context->hasReleased) {
         ereport(FATAL,
                 (errmsg("exception happens after current savepoint released error message is: %s",
@@ -6776,6 +6781,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     PLpgSQL_expr* expr = stmt->sqlstmt;
     Cursor_Data* saved_cursor_data = NULL;
     bool has_alloc = false;
+    bool multi_res_return = false;
 
     TransactionId oldTransactionId = SPI_get_top_transaction_id();
  
@@ -6876,7 +6882,11 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     /*
      * Execute the plan
      */
-    rc = SPI_execute_plan_with_paramlist(expr->plan, paramLI, estate->readonly_func, tcount);
+    if (u_sess->hook_cxt.pluginSpiExecuteMultiResHook)
+        rc = ((SpiExecuteMultiResHook)(u_sess->hook_cxt.pluginSpiExecuteMultiResHook))
+            (estate, expr, stmt, paramLI, tcount, &multi_res_return);
+    else
+        rc = SPI_execute_plan_with_paramlist(expr->plan, paramLI, estate->readonly_func, tcount);
 #ifdef ENABLE_MULTIPLE_NODES
     if (checkAdivsorState() && checkSPIPlan(expr->plan)) {
         collectDynWithArgs(expr->query, paramLI, expr->plan->cursor_options);
@@ -6977,7 +6987,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     estate->eval_lastoid = u_sess->SPI_cxt.lastoid;
 
     /* Process INTO if present */
-    if (stmt->into) {
+    if (stmt->into && !multi_res_return) {
         SPITupleTable* tuptab = SPI_tuptable;
         uint32 n = SPI_processed;
         PLpgSQL_rec* rec = NULL;
