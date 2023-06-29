@@ -95,10 +95,20 @@ static void GetHugepageSize(Size* hugepageSize, int* flag)
     }
     int flagLocal = SHM_HUGETLB;
 
-#if defined(MAP_HUGE_MASK) && defined(MAP_HUGE_SHIFT)
-    int shift = pg_leftmost_one_pos64(sizeLocal - 1) + 1;
-    flagLocal |= (shift & MAP_HUGE_MASK) << MAP_HUGE_SHIFT;
+    /* hardcode in case of using huge page in os whose linux kernel version is before 3.8 */
+#ifndef MAP_HUGE_MASK
+    int map_huge_mask = 0x3f;
+#else
+    int map_huge_mask = MAP_HUGE_MASK;
 #endif
+#ifndef MAP_HUGE_SHIFT
+    int map_huge_shift = 26;
+#else
+    int map_huge_shift = MAP_HUGE_SHIFT;
+#endif
+
+    int shift = pg_leftmost_one_pos64(sizeLocal - 1) + 1;
+    flagLocal |= (shift & map_huge_mask) << map_huge_shift;
 
     *hugepageSize = sizeLocal;
     *flag = flagLocal;
@@ -126,6 +136,9 @@ static void* InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size)
     void* memAddress = NULL;
 
     if (g_instance.attr.attr_storage.enable_huge_pages) {
+#ifndef SHM_HUGETLB
+        ereport(FATAL, (errmsg("Parameter enable_huge_pages cannot set to on since operating system doesn't support")));
+#endif
         Size hugepageSize;
         Size allocSize = size;
         int hugepageFlag;
