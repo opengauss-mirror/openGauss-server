@@ -543,7 +543,8 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
-                ret = DMS_ERROR;
+                *buf_ctrl = NULL;
+                ret = DMS_SUCCESS;
                 break;
             }
 
@@ -553,7 +554,8 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
-                ret = DMS_ERROR;
+                *buf_ctrl = NULL;
+                ret = DMS_SUCCESS;
                 break;
             }
 
