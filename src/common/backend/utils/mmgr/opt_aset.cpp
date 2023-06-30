@@ -344,8 +344,8 @@ MemoryContext opt_AllocSetContextCreate(MemoryContext parent, const char* name, 
     block->endptr = ((char*)context) + firstBlockSize;
     block->allocSize = firstBlockSize;
     
-    context->totalSpace += firstBlockSize;
-    context->freeSpace += block->endptr - block->freeptr;
+    context->totalSpace = firstBlockSize;
+    context->freeSpace = block->endptr - block->freeptr;
     
     block->prev = NULL;
     block->next = NULL;

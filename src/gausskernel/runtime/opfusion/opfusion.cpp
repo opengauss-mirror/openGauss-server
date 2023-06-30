@@ -662,7 +662,7 @@ static void* TryReuseOpfusionObj(FusionType ftype, MemoryContext context, Cached
      * we save the obj without FusionType check in FusionFactory
      * so must check here
      */
-    if (INSERT_FUSION != ftype && DELETE_FUSION != ftype) {
+    if (INSERT_FUSION != ftype && DELETE_FUSION != ftype && UPDATE_FUSION != ftype) {
         return NULL;
     }
 
