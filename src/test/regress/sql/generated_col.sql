@@ -669,3 +669,8 @@ DROP TABLE gtest2;
 DROP TABLE gtest3;
 DROP TABLE gtest10;
 
+
+CREATE USER grant_attr_user1 PASSWORD 'gauss@123';
+GRANT select (prosrc) on pg_proc to grant_attr_user1;
+revoke select (prosrc)  on pg_proc from grant_attr_user1;
+drop user grant_attr_user1 cascade;
