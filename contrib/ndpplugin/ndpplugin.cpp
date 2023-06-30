@@ -301,11 +301,7 @@ static bool NdpScanGetPage(NdpScanDesc ndpScan)
         Assert(req >= resp);
 
         if (ndpScan->handledBlock < ndpScan->nBlock) {
-#ifdef ENABLE_SSL
             if ((req - resp) >= NDP_MAX_AWAIT_REQUEST) {
-#else
-            if ((req - resp) >= NDP_MAX_AWAIT_REQUEST || g_ndp_instance.pageContext->Empty()) {
-#endif
                 pg_usleep(NDP_RPC_WAIT_USEC);
             } else {
                 NdpScanTryPushDownScan((HeapScanDesc)ndpScan->scan, ndpScan);
