@@ -99,6 +99,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  candidate_buf_percent_target                     | real    |      | 0.1       | 0.85
  catchup2normal_wait_time                         | integer | ms   | -1        | 10000
  cgroup_name                                      | string  |      |           | 
+ character_set_connection                         | string  |      |           | 
  check_function_bodies                            | bool    |      |           | 
  check_implicit_conversions                       | bool    |      |           | 
  checkpoint_completion_target                     | real    |      | 0         | 1
@@ -113,6 +114,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  cn_send_buffer_size                              | integer | kB   | 8         | 128
  codegen_cost_threshold                           | integer |      | 0         | 2147483647
  codegen_strategy                                 | enum    |      |           | 
+ collation_connection                             | string  |      |           | 
  commit_delay                                     | integer |      | 0         | 100000
  commit_siblings                                  | integer |      | 0         | 1000
  comm_proxy_attr                                  | string  |      |           | 

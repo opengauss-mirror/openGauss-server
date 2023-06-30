@@ -505,6 +505,8 @@ static void knl_u_mb_init(knl_u_mb_context* mb_cxt)
     mb_cxt->ToClientConvProc = NULL;
     mb_cxt->ClientEncoding = &pg_enc2name_tbl[PG_SQL_ASCII];
     mb_cxt->DatabaseEncoding = &pg_enc2name_tbl[PG_SQL_ASCII];
+    mb_cxt->character_set_connection = &pg_enc2name_tbl[PG_SQL_ASCII];
+    mb_cxt->collation_connection = InvalidOid;
     mb_cxt->PlatformEncoding = NULL;
     mb_cxt->backend_startup_complete = false;
     mb_cxt->pending_client_encoding = PG_SQL_ASCII;

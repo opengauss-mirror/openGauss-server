@@ -622,6 +622,7 @@ typedef struct ExprEvalStep
 		struct
 		{
 			PrefixKey* pkey;
+			int encoding;
 		}			 prefix_key;
 
 		/* for EEOP_GROUPING_ID* */

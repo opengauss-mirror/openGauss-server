@@ -81,7 +81,7 @@ typedef FormData_pg_set *Form_pg_set;
 #define SETNAMELEN  (255)
 #define SETLABELDELIMIT ","
 
-extern void SetValuesCreate(Oid setTypeOid, List *vals);
+extern void SetValuesCreate(Oid setTypeOid, List *vals, Oid collation);
 extern void SetValuesDelete(Oid setTypeOid);
 extern Datum GetSetDefineStr(Oid settypid);
 

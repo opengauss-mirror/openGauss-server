@@ -80,7 +80,7 @@
 #include "c.h"
 #include "pgstat.h"
 #include "catalog/pg_proc_fn.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
 
 #ifdef ENABLE_MULTIPLE_NODES
 #include "streaming/planner.h"
@@ -4078,18 +4078,30 @@ Oid get_collation_oid_with_lower_name(const char* collation_name, int charset)
     char* lower_coll_name = pstrdup(collation_name);
     lower_coll_name = pg_strtolower(lower_coll_name);
     if (charset == PG_INVALID_ENCODING) {
+        /* while charset is invalid, search collation by name only and don't care it's charset */
         CatCList* list = NULL;
         HeapTuple coll_tup;
-        list = SearchSysCacheList1(COLLNAMEENCNSP, PointerGetDatum(lower_coll_name));
+
+        /* use origin collation name, search for all collate */
+        list = SearchSysCacheList1(COLLNAMEENCNSP, PointerGetDatum(collation_name));
         if (list->n_members == 1) {
             coll_tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(list, 0);
             colloid = HeapTupleGetOid(coll_tup);
+        } else if (list->n_members == 0) {
+            ReleaseSysCacheList(list);
+            /* use lower collation name, search for b format colaltion again */
+            list = SearchSysCacheList1(COLLNAMEENCNSP, PointerGetDatum(lower_coll_name));
+            if (list->n_members == 1) {
+                coll_tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(list, 0);
+                colloid = HeapTupleGetOid(coll_tup);
+            }
         }
         ReleaseSysCacheList(list);
     } else {
         colloid = GetSysCacheOid3(COLLNAMEENCNSP, PointerGetDatum(lower_coll_name),
             Int32GetDatum(charset), ObjectIdGetDatum(PG_CATALOG_NAMESPACE));
     }
+    pfree_ext(lower_coll_name);
 
     return colloid;
 }

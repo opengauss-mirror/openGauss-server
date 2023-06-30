@@ -1011,8 +1011,11 @@ extern void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len);
 extern int text_instr_3args(text* textStr, text* textStrToSearch, int32 beginIndex);
 extern int text_instr_4args(text* textStr, text* textStrToSearch, int32 beginIndex, int occurTimes);
 extern int32 text_length(Datum str);
+extern int32 text_length_with_encoding(Datum str, int encoding);
 extern int text_cmp(text* arg1, text* arg2, Oid collid);
 extern text* text_substring(Datum str, int32 start, int32 length, bool length_not_specified);
+extern text* text_substring_with_encoding(
+    Datum str, int32 start, int32 length, bool length_not_specified, int encoding);
 extern Datum instr_3args(PG_FUNCTION_ARGS);
 extern Datum instr_4args(PG_FUNCTION_ARGS);
 extern Datum byteain(PG_FUNCTION_ARGS);
@@ -1105,6 +1108,7 @@ extern Datum bytea_string_agg_finalfn(PG_FUNCTION_ARGS);
 extern Datum string_agg_transfn(PG_FUNCTION_ARGS);
 extern Datum string_agg_finalfn(PG_FUNCTION_ARGS);
 extern Datum checksumtext_agg_transfn(PG_FUNCTION_ARGS);
+extern Oid binary_need_transform_typeid(Oid tyeoid, Oid* collation);
 
 extern Datum group_concat_transfn(PG_FUNCTION_ARGS);
 extern Datum group_concat_finalfn(PG_FUNCTION_ARGS);

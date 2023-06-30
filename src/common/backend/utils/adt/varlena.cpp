@@ -42,7 +42,7 @@
 #include "executor/node/nodeSort.h"
 #include "pgxc/groupmgr.h"
 #include "openssl/evp.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
 #include "catalog/pg_collation_fn.h"
 
 #define SUBSTR_WITH_LEN_OFFSET 2
@@ -675,6 +675,7 @@ Oid binary_need_transform_typeid(Oid typeoid, Oid* collation)
         switch (typeoid) {
             /* binary type no need to transform */
             case BLOBOID:
+            case BYTEAOID:
                 break;
             /* string type need to transform to binary type */
             case TEXTOID:
@@ -857,6 +858,25 @@ int32 text_length(Datum str)
         int32 result = 0;
 
         result = pg_mbstrlen_with_len(VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t));
+        if ((Pointer)(t) != (Pointer)(str))
+            pfree_ext(t);
+
+        PG_RETURN_INT32(result);
+    }
+}
+
+int32 text_length_with_encoding(Datum str, int encoding)
+{
+    Assert(PG_VALID_ENCODING(encoding));
+
+    /* fastpath when max encoding length is one */
+    if (pg_encoding_max_length(encoding) == 1)
+        PG_RETURN_INT32(toast_raw_datum_size(str) - VARHDRSZ);
+    else {
+        text* t = DatumGetTextPP(str);
+        int32 result = 0;
+
+        result = pg_encoding_mbstrlen_with_len(VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t), encoding);
         if ((Pointer)(t) != (Pointer)(str))
             pfree_ext(t);
 
@@ -1340,6 +1360,22 @@ text* text_substring(Datum str, int32 start, int32 length, bool length_not_speci
 
     /* not reached: suppress compiler warning */
     return NULL;
+}
+
+text* text_substring_with_encoding(Datum str, int32 start, int32 length, bool length_not_specified, int encoding)
+{
+    Assert(encoding != PG_INVALID_ENCODING);
+
+    int db_encoding = GetDatabaseEncoding();
+    if (encoding == db_encoding) {
+        return text_substring(str, start, length, length_not_specified);
+    }
+
+    text* result = NULL;
+    DB_ENCODING_SWITCH_TO(encoding);
+    result = text_substring(str, start, length, length_not_specified);
+    DB_ENCODING_SWITCH_BACK(db_encoding);
+    return result;
 }
 
 // adapt A db's substr(text str,integer start,integer length)
@@ -1974,17 +2010,16 @@ Datum texteq(PG_FUNCTION_ARGS)
     Datum arg2 = PG_GETARG_DATUM(1);
     bool result = false;
 
-    Oid collid = PG_GET_COLLATION();
-    if (is_b_format_collation(collid)) {
-        result = texteq_with_collation(fcinfo);
-        PG_RETURN_BOOL(result);
-    }
-
     if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg1)) || VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg2))) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("texteq could not support more than 1GB clob/blob data")));
     }
     Size len1, len2;
+
+    if (is_b_format_collation(PG_GET_COLLATION())) {
+        result = texteq_with_collation(fcinfo);
+        PG_RETURN_BOOL(result);
+    }
 
     /*
      * Since we only care about equality or not-equality, we can avoid all the
@@ -2164,7 +2199,6 @@ Datum text_gt(PG_FUNCTION_ARGS)
     FUNC_CHECK_HUGE_POINTER(false, arg1, "text_gt()");
 
     bool result = false;
-
     result = (text_cmp(arg1, arg2, PG_GET_COLLATION()) > 0);
 
     PG_FREE_IF_COPY(arg1, 0);
@@ -2180,7 +2214,6 @@ Datum text_ge(PG_FUNCTION_ARGS)
     FUNC_CHECK_HUGE_POINTER(false, arg1, "text_ge()");
 
     bool result = false;
-
     result = (text_cmp(arg1, arg2, PG_GET_COLLATION()) >= 0);
 
     PG_FREE_IF_COPY(arg1, 0);

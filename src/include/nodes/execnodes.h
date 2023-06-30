@@ -2731,6 +2731,13 @@ typedef struct UserSetElemState {
     UserSetElem* use;
     ExprState* instate;
 } UserSetElemState;
+
+typedef struct PrefixKeyState {
+    ExprState xprstate;
+    ExprState* arg; /* state of my child node */
+    int encoding;
+} PrefixKeyState;
+
 /* ----------------
  *		GroupingFuncExprState node
  *

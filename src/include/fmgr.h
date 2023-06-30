@@ -565,7 +565,7 @@ typedef struct {
 } CFunInfo;
 
 /* Special cases for convenient invocation of datatype I/O functions. */
-extern Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, bool can_ignore = false);
+extern Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, bool can_ignore = false, Oid collation = InvalidOid);
 extern Datum InputFunctionCallForDateType(
     FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, char* date_time_fmt);
 extern Datum OidInputFunctionCall(Oid functionId, char* str, Oid typioparam, int32 typmod, bool can_ignore = false);
@@ -575,6 +575,7 @@ extern Datum ReceiveFunctionCall(FmgrInfo* flinfo, fmStringInfo buf, Oid typiopa
 extern Datum OidReceiveFunctionCall(Oid functionId, fmStringInfo buf, Oid typioparam, int32 typmod);
 extern bytea* SendFunctionCall(FmgrInfo* flinfo, Datum val);
 extern bytea* OidSendFunctionCall(Oid functionId, Datum val);
+extern Datum OidInputFunctionCallColl(Oid functionId, char* str, Oid typioparam, int32 typmod, Oid collation);
 
 /*
  * Routines in fmgr.c

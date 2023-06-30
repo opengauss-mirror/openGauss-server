@@ -878,7 +878,8 @@ ObjectAddress DefineDomain(CreateDomainStmt* stmt)
                      * Cook the constr->raw_expr into an expression. Note:
                      * name is strictly for error message
                      */
-                    defaultExpr = cookDefault(pstate, constr->raw_expr, basetypeoid, basetypeMod, domainName, 0);
+                    defaultExpr = cookDefault(pstate, constr->raw_expr, basetypeoid, basetypeMod,
+                        baseType->typcollation, domainName, 0);
 
                     /*
                      * If the expression is just a NULL constant, we treat it
@@ -1318,11 +1319,11 @@ ObjectAddress DefineSet(CreateSetStmt *stmt)
         -1,                              /* typMod (Domains only) */
         0,                               /* Array dimensions of typbasetype */
         false,                           /* Type NOT NULL */
-        InvalidOid);                     /* type's collation */
+        100);                            /* type's collation */
 
     /* Enter the set's values into pg_set */
     setTypeOid=address.objectId;
-    SetValuesCreate(setTypeOid, stmt->typname->typmods);
+    SetValuesCreate(setTypeOid, stmt->typname->typmods, stmt->set_collation);
     stmt->typname->typeOid = setTypeOid;
     stmt->typname->typmods = NIL;
     return address;
@@ -2278,8 +2279,8 @@ ObjectAddress AlterDomainDefault(List* names, Node* defaultRaw)
          * Cook the colDef->raw_expr into an expression. Note: Name is
          * strictly for error message
          */
-        defaultExpr =
-            cookDefault(pstate, defaultRaw, typTup->typbasetype, typTup->typtypmod, NameStr(typTup->typname), 0);
+        defaultExpr = cookDefault(pstate, defaultRaw, typTup->typbasetype, typTup->typtypmod,
+            typTup->typcollation, NameStr(typTup->typname), 0);
         /*
          * If the expression is just a NULL constant, we treat the command
          * like ALTER ... DROP DEFAULT.  (But see note for same test in

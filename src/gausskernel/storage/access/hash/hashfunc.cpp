@@ -29,8 +29,8 @@
 #include "knl/knl_variable.h"
 
 #include "access/hash.h"
+#include "catalog/gs_collation.h"
 
-#include "catalog/gs_utf8_collation.h"
 #ifdef PGXC
 #include "catalog/pg_type.h"
 #include "utils/builtins.h"
@@ -170,10 +170,11 @@ Datum hashtext(PG_FUNCTION_ARGS)
     FUNC_CHECK_HUGE_POINTER(false, key, "hashtext()");
 
     if (is_b_format_collation(collid)) {
-        result = hash_text_by_builtin_colltions((unsigned char *)VARDATA_ANY(key), VARSIZE_ANY_EXHDR(key), collid);
+        result = hash_text_by_builtin_collations((unsigned char *)VARDATA_ANY(key), VARSIZE_ANY_EXHDR(key), collid);
         PG_FREE_IF_COPY(key, 0);
         return result;
     }
+
 #ifdef PGXC
     if (g_instance.attr.attr_sql.string_hash_compatible) {
         result = hash_any((unsigned char *)VARDATA_ANY(key), bcTruelen(key));

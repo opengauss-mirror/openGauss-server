@@ -26,10 +26,12 @@
 #include "miscadmin.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
+#include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
 #include "mb/pg_wchar.h"
+#include "parser/parse_utilcmd.h"
 /*
  * DATESTYLE
  */
@@ -824,6 +826,79 @@ bool check_client_encoding(char** newval, void** extra, GucSource source)
     return true;
 }
 
+bool check_charset_connection(char** newval, void** extra, GucSource source)
+{
+    if (strcmp(*newval, "") == 0) {
+        return true;
+    }
+
+    int charset = pg_valid_client_encoding(*newval);
+    if (!PG_VALID_ENCODING(charset)) {
+        return false;
+    }
+    /* Get the canonical name (no aliases, uniform case) */
+    const char* canonical_name = pg_encoding_to_char(charset);
+
+    if (strcmp(*newval, canonical_name) != 0 && strcmp(*newval, "UNICODE") != 0) {
+        pfree(*newval);
+        *newval = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), canonical_name);
+        if (!*newval) {
+            return false;
+        }
+    }
+
+    /*
+     * Save the charset's ID in *extra, for use by assign_charset_connection.
+     */
+    *extra = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(int));
+    if (!*extra) {
+        return false;
+    }
+    *((int*)*extra) = charset;
+
+    return true;
+}
+
+bool check_collation_connection(char** newval, void** extra, GucSource source)
+{
+    if (strcmp(*newval, "") == 0) {
+        return true;
+    }
+
+    if (!u_sess->mb_cxt.backend_startup_complete) {
+        *extra = (void*)MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), *newval);
+        if (!*extra) {
+            return false;
+        }
+        return true;
+    }
+
+    Oid collid = get_collation_oid_with_lower_name(*newval, PG_INVALID_ENCODING);
+    if (!OidIsValid(collid)) {
+        return false;
+    }
+
+    char* coll_name = get_collation_name(collid);
+    if (strcmp(*newval, coll_name) != 0) {
+        pfree(*newval);
+        *newval = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), coll_name);
+        if (!*newval) {
+            pfree_ext(coll_name);
+            return false;
+        }
+    }
+    /*
+     * Save the collate's ID in *extra, for use by assign_collation_connection.
+     */
+    *extra = (void*)MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), coll_name);
+    if (!*extra) {
+        pfree_ext(coll_name);
+        return false;
+    }
+    pfree_ext(coll_name);
+    return true;
+}
+
 void assign_client_encoding(const char* newval, void* extra)
 {
     if (extra == NULL) {
@@ -834,6 +909,48 @@ void assign_client_encoding(const char* newval, void* extra)
     /* We do not expect an error if PrepareClientEncoding succeeded */
     if (SetClientEncoding(encoding) < 0)
         elog(LOG, "SetClientEncoding(%d) failed", encoding);
+}
+
+void assign_charset_connection(const char* newval, void* extra)
+{
+    if (extra == NULL) {
+        return;
+    }
+
+    if (!u_sess->mb_cxt.backend_startup_complete) {
+        return;
+    }
+
+    if (!ENABLE_MULTI_CHARSET) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                 errmsg("character_set_connection can be changed when b_format_behavior_compat_options contains enable_multi_charset option")));
+    }
+    int charset = *((int*)extra);
+    u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[charset];
+
+    Oid collid = get_default_collation_by_charset(charset);
+    u_sess->mb_cxt.collation_connection = collid;
+}
+
+void assign_collation_connection(const char* newval, void* extra)
+{
+    if (extra == NULL) {
+        return;
+    }
+
+    if (!u_sess->mb_cxt.backend_startup_complete) {
+        return;
+    }
+
+    if (!ENABLE_MULTI_CHARSET) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                 errmsg("collation_connection can be changed when b_format_behavior_compat_options contains enable_multi_charset option")));
+    }
+    Oid collid = get_collation_oid_with_lower_name((char*)extra, PG_INVALID_ENCODING);
+    u_sess->mb_cxt.collation_connection = collid;
+
+    int charset = get_charset_by_collation(collid);
+    u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[charset];
 }
 
 /*
@@ -1019,3 +1136,23 @@ const char* show_role(void)
     return u_sess->attr.attr_common.role_string ? u_sess->attr.attr_common.role_string : "none";
 }
 
+const char* show_charset_connection(void)
+{
+    return GetCharsetConnectionName();
+}
+
+const char* show_collation_connection(void)
+{
+    Oid collid = GetCollationConnection();
+    if (OidIsValid(collid)) {
+        HeapTuple tp = SearchSysCache1(COLLOID, ObjectIdGetDatum(collid));
+        if (HeapTupleIsValid(tp)) {
+            Form_pg_collation colltup = (Form_pg_collation)GETSTRUCT(tp);
+            char* result = MemoryContextStrdup(
+                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), NameStr(colltup->collname));
+            ReleaseSysCache(tp);
+            return result;
+        }
+    }
+    return "";
+}
