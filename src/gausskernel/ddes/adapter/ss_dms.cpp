@@ -126,6 +126,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_refresh_logger));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_validate_drc));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_reform_req_opengauss_ondemand_redo_buffer));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_mes_max_watting_rooms));
     g_ss_dms_func.inited = true;
     return DMS_SUCCESS;
 }
@@ -338,4 +339,9 @@ int dms_reform_req_opengauss_ondemand_redo_buffer(dms_context_t *dms_ctx, void *
     int *redo_status)
 {
     return g_ss_dms_func.dms_reform_req_opengauss_ondemand_redo_buffer(dms_ctx, block_key, key_len, redo_status);
+}
+
+unsigned int dms_get_mes_max_watting_rooms(void)
+{
+    return g_ss_dms_func.dms_get_mes_max_watting_rooms();
 }
