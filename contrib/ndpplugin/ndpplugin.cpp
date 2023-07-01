@@ -301,11 +301,7 @@ static bool NdpScanGetPage(NdpScanDesc ndpScan)
         Assert(req >= resp);
 
         if (ndpScan->handledBlock < ndpScan->nBlock) {
-#ifdef ENABLE_SSL
             if ((req - resp) >= NDP_MAX_AWAIT_REQUEST) {
-#else
-            if ((req - resp) >= NDP_MAX_AWAIT_REQUEST || g_ndp_instance.pageContext->Empty()) {
-#endif
                 pg_usleep(NDP_RPC_WAIT_USEC);
             } else {
                 NdpScanTryPushDownScan((HeapScanDesc)ndpScan->scan, ndpScan);
@@ -317,7 +313,7 @@ static bool NdpScanGetPage(NdpScanDesc ndpScan)
         if (resp < req) {
             pg_usleep(NDP_RPC_WAIT_USEC);
         // if normal page finish, io request failed, pages been added to normal queue, can't return directly.
-        } else if (ndpScan->normalPagesId->Empty() && !NdpScanGetPageQueue(ndpScan)) {
+        } else if (ndpScan->normalPagesId->Empty() && ndpScan->respIO->Empty()) {
             return false;
         }
 #else
@@ -861,10 +857,6 @@ Tuple NdpScanGetTuple(TableScanDesc sscan, ScanDirection dir, TupleTableSlot* sl
     }
     PG_CATCH();
     {
-        // wait all callback return
-        while (pg_atomic_read_u32(&ndpScan->reqCount) != pg_atomic_read_u32(&ndpScan->respCount)) {
-            pg_usleep(NDP_RPC_WAIT_USEC);
-        }
         delete ndpScan;
         sscan->ndp_ctx = nullptr;
         PG_RE_THROW();

@@ -246,14 +246,20 @@ static void MbCutString(int encoding, char* str, int limitLen)
 }
 
 template <bool needCutString>
-static void AttributeOutFixed(CopyState cstate, char* string, FieldDesc* desc)
+static void AttributeOutFixed(CopyState cstate, char* string, FieldDesc* desc,
+    int str_encoding, FmgrInfo *convert_finfo)
 {
     char* ptr = NULL;
     int len;
     StringInfo outbuf = cstate->fe_msgbuf;
 
     if (cstate->need_transcoding)
-        ptr = pg_server_to_any(string, strlen(string), cstate->file_encoding);
+        if (str_encoding == GetDatabaseEncoding()) {
+            ptr = pg_server_to_any(string, strlen(string), cstate->file_encoding, (void*)convert_finfo);
+        } else {
+            ptr = try_fast_encoding_conversion(
+                string, strlen(string), str_encoding, cstate->file_encoding, (void*)convert_finfo);
+        }
     else
         ptr = string;
 
@@ -325,11 +331,12 @@ void FixedRowOut(CopyState cstate, Datum* values, const bool* nulls)
         bool isnull = nulls[attnum - 1];
 
         if (isnull) {
-            AttributeOutFixed<false>(cstate, descs[i].nullString, descs + i);
+            AttributeOutFixed<false>(cstate, descs[i].nullString, descs + i, GetDatabaseEncoding(), NULL);
         } else {
             string = OutputFunctionCall(&out_functions[attnum - 1], value);
             Assert(string != NULL);
-            AttributeOutFixed<false>(cstate, string, descs + i);
+            AttributeOutFixed<false>(cstate, string, descs + i,
+                cstate->attr_encodings[attnum - 1], &cstate->out_convert_funcs[attnum - 1]);
         }
     }
 }
@@ -353,7 +360,7 @@ void PrintFixedHeader(CopyState cstate)
         int attnum = formatter->fieldDesc[i].attnum;
 
         colname = pstrdup(NameStr(attr[attnum - 1].attname));
-        AttributeOutFixed<true>(cstate, colname, descs + i);
+        AttributeOutFixed<true>(cstate, colname, descs + i, GetDatabaseEncoding(), NULL);
         pfree_ext(colname);
     }
 }

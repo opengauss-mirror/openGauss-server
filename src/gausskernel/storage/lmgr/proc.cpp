@@ -852,6 +852,7 @@ void InitProcess(void)
     t_thrd.proc->globalSessionId = t_thrd.fake_session->globalSessionId;
     /* backendId, databaseId and roleId will be filled in later */
     t_thrd.proc->backendId = InvalidBackendId;
+    t_thrd.proc->backendSlot = -1;
     t_thrd.proc->databaseId = InvalidOid;
     t_thrd.proc->roleId = InvalidOid;
     t_thrd.proc->gtt_session_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */
@@ -2448,7 +2449,7 @@ void ProcSendSignal(ThreadId pid)
 {
     PGPROC* proc = NULL;
 
-    if (RecoveryInProgress()) {
+    if (RecoveryInProgress() || SS_IN_ONDEMAND_RECOVERY) {
         ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
 
         /*
@@ -3198,14 +3199,14 @@ TimestampTz GetStatementFinTime()
 
 AlarmCheckResult ConnectionOverloadChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     if (!IS_PGXC_COORDINATOR) {
         return ALM_ACR_UnKnown;
     }
 #endif
 
     int connectionLimit =
-        int(u_sess->attr.attr_common.ConnectionAlarmRate * g_instance.shmem_cxt.MaxConnections);
+        int(u_sess->attr.attr_common.ConnectionAlarmRate * g_instance.attr.attr_network.MaxConnections);
     SpinLockAcquire(&g_instance.conn_cxt.ConnCountLock);
     int currentConnections = g_instance.conn_cxt.CurConnCount;
     SpinLockRelease(&g_instance.conn_cxt.ConnCountLock);

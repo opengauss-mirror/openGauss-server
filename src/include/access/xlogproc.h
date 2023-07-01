@@ -111,6 +111,7 @@ typedef struct {
 typedef struct {
     Buffer buff_id;
     pg_atomic_uint32 state;
+    pg_atomic_uint32 refcount;
 } ParseBufferDesc;
 
 #define RedoBufferSlotGetBuffer(bslot) ((bslot)->buf_id)
@@ -687,7 +688,12 @@ typedef struct
 	RefOperate *refOperate;
 }RedoParseManager;
 
-
+typedef enum {
+    XLOG_NO_DISTRIBUTE,
+    XLOG_HEAD_DISTRIBUTE,
+    XLOG_MID_DISTRIBUTE,
+    XLOG_TAIL_DISTRIBUTE,
+} XlogDistributePos;
 
 typedef struct {
     void* nextrecord;
@@ -695,6 +701,7 @@ typedef struct {
     RedoParseManager* manager;
     void* refrecord; /* origin dataptr, for mem release */
     bool isFullSync;
+    XlogDistributePos distributeStatus;
 } XLogRecParseState;
 
 typedef struct XLogBlockRedoExtreRto {
@@ -908,7 +915,36 @@ extern AbnormalProcFunc g_AbFunList[ABNORMAL_NUM];
 #define ADD_ABNORMAL_POSITION(pos)
 #endif
 
+static inline bool AtomicCompareExchangeBuffer(volatile Buffer *ptr, Buffer *expected, Buffer newval)
+{
+    bool ret = false;
+    Buffer current;
+    current = __sync_val_compare_and_swap(ptr, *expected, newval);
+    ret = (current == *expected);
+    *expected = current;
+    return ret;
+}
 
+static inline Buffer AtomicReadBuffer(volatile Buffer *ptr)
+{
+    return *ptr;
+}
+
+static inline void AtomicWriteBuffer(volatile Buffer* ptr, Buffer val)
+{
+    *ptr = val;
+}
+
+static inline Buffer AtomicExchangeBuffer(volatile Buffer *ptr, Buffer newval)
+{
+    Buffer old;
+    while (true) {
+        old = AtomicReadBuffer(ptr);
+        if (AtomicCompareExchangeBuffer(ptr, &old, newval))
+            break;
+    }
+    return old;
+}
 
 void HeapXlogCleanOperatorPage(
     RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen, Size* freespace, bool repairFragmentation);
@@ -938,11 +974,13 @@ void Btree2XlogShiftBaseOperatorPage(RedoBufferInfo* buffer, void* recorddata);
 
 void BtreeRestoreMetaOperatorPage(RedoBufferInfo* metabuf, void* recorddata, Size datalen);
 void BtreeXlogInsertOperatorPage(RedoBufferInfo* buffer, void* recorddata, void* data, Size datalen);
+void btree_xlog_insert_posting_operator_page(RedoBufferInfo* buffer, void* recorddata, void* data, Size datalen);
+
 void BtreeXlogSplitOperatorRightpage(
     RedoBufferInfo* rbuf, void* recorddata, BlockNumber leftsib, BlockNumber rnext, void* blkdata, Size datalen);
 void BtreeXlogSplitOperatorNextpage(RedoBufferInfo* buffer, BlockNumber rightsib);
-void BtreeXlogSplitOperatorLeftpage(
-    RedoBufferInfo* lbuf, void* recorddata, BlockNumber rightsib, bool onleft, void* blkdata, Size datalen);
+void BtreeXlogSplitOperatorLeftpage(RedoBufferInfo *lbuf, void *recorddata, BlockNumber rightsib, bool onleft,
+                                    bool is_dedup, void *blkdata, Size datalen);
 void BtreeXlogVacuumOperatorPage(RedoBufferInfo* redobuffer, void* recorddata, void* blkdata, Size len);
 void BtreeXlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, Size recorddatalen);
 void btreeXlogDeletePageOperatorRightpage(RedoBufferInfo* buffer, void* recorddata);
@@ -1204,6 +1242,7 @@ extern XLogRecParseState* xact_redo_parse_to_block(XLogReaderState* record, uint
 
 extern bool XLogBlockRedoForExtremeRTO(XLogRecParseState* redoblocktate, RedoBufferInfo *bufferinfo, 
                                                       bool notfound, RedoTimeCost &readBufCost, RedoTimeCost &redoCost);
+extern void XlogBlockRedoForOndemandExtremeRTOQuery(XLogRecParseState *redoBlockState, RedoBufferInfo *bufferInfo);
 void XLogBlockParseStateRelease_debug(XLogRecParseState* recordstate, const char *func, uint32 line);
 #define XLogBlockParseStateRelease(recordstate)  XLogBlockParseStateRelease_debug(recordstate, __FUNCTION__, __LINE__)
 #ifdef USE_ASSERT_CHECKING

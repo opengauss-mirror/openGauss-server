@@ -426,7 +426,8 @@ Plan* CheckAndGetNdpPlan(PlannedStmt* stmt, SeqScan* scan, Plan* parent)
     // 1. check scan, should check Scan::tableRows or Plan::plan_rows?
     if (scan->plan.exec_type != EXEC_ON_DATANODES
         || !CheckNdpSupportListType(scan->plan.targetlist)
-        || !CheckNdpSupportListType(scan->plan.qual)) {
+        || !CheckNdpSupportListType(scan->plan.qual)
+        || scan->isPartTbl) {
         return nullptr;
     }
     node = (Plan*)scan;
@@ -454,6 +455,11 @@ Plan* CheckAndGetNdpPlan(PlannedStmt* stmt, SeqScan* scan, Plan* parent)
 
     // 5. if seqscan is under merge join, do not push down
     if (parent && IsA(parent, MergeJoin)) {
+        return nullptr;
+    }
+
+    // 6. if seqscan is under limit, do not push down
+    if (parent && IsA(parent, Limit)) {
         return nullptr;
     }
 

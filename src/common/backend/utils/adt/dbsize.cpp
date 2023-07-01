@@ -253,6 +253,11 @@ static int64 calculate_database_size(Oid dbOid)
     return totalsize;
 }
 
+int64 pg_cal_database_size_oid(Oid dbOid)
+{
+    return (int64)(calculate_database_size(dbOid));
+}
+
 /*
  * @Description: calculate the compress ratio of the column-partition relation.
  * @in onerel: the relation.
@@ -1503,6 +1508,13 @@ static int64 calculate_partition_size(Oid partTableOid, Oid partOid)
         return 0;
     }
 
+    if (!RelationIsPartitioned(partTableRel)) {
+        relation_close(partTableRel, AccessShareLock);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_TABLE),
+                 errmsg("relation %u is not a partitioned table", partTableOid)));
+    }
+
     if (!RelationIsSubPartitioned(partTableRel)) {
         partition = partitionOpen(partTableRel, partOid, AccessShareLock);
         partRel = partitionGetRelation(partTableRel, partition);
@@ -1622,6 +1634,13 @@ static int64 calculate_partition_indexes_size(Oid partTableOid, Oid partOid)
 
     if (partTableRel == NULL) {
         return 0;
+    }
+
+    if (!RelationIsPartitioned(partTableRel)) {
+        relation_close(partTableRel, AccessShareLock);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_TABLE),
+                 errmsg("relation %u is not a partitioned table", partTableOid)));
     }
 
     List *partOidList = NIL;
@@ -2028,6 +2047,7 @@ Datum pg_partition_filenode(PG_FUNCTION_ARGS)
         case PART_OBJ_TYPE_TABLE_PARTITION:
         case PART_OBJ_TYPE_INDEX_PARTITION:
         case PART_OBJ_TYPE_TOAST_TABLE:
+        case PART_OBJ_TYPE_TABLE_SUB_PARTITION:
             // okay, these have storage
             if (partRelForm->relfilenode)
                 result = partRelForm->relfilenode;

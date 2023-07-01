@@ -14,11 +14,12 @@
  *
  * -------------------------------------------------------------------------
  */
-#include "postgres.h"
+#include "postgres.h" 
 #include "knl/knl_variable.h"
-
+#include "access/printtup.h"
 #include "access/xact.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_proc.h"
 #include "commands/createas.h"
 #include "commands/prepare.h"
 #include "executor/lightProxy.h"
@@ -555,7 +556,6 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
     }
 
     /* Prepare the expressions for execution */
-    exprstates = ExecPrepareExprList(params, estate);
 
     paramLI = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + num_params * sizeof(ParamExternData));
     /* we have static list of params, so no hooks needed */
@@ -567,19 +567,41 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
     paramLI->numParams = num_params;
     paramLI->uParamInfo = DEFUALT_INFO;
     paramLI->params_lazy_bind = false;
-
-    i = 0;
-    foreach (l, exprstates) {
-        ExprState* n = (ExprState*)lfirst(l);
-        ParamExternData* prm = &paramLI->params[i];
-
-        prm->ptype = param_types[i];
-        prm->pflags = PARAM_FLAG_CONST;
-        prm->value = ExecEvalExprSwitchContext(n, GetPerTupleExprContext(estate), &prm->isnull);
-        prm->tabInfo = NULL;
-
-        i++;
+    bool isInsertConst = IsA(psrc->raw_parse_tree, InsertStmt);
+    foreach (l, params) {
+        if (!IsA(lfirst(l), Const)) {
+            isInsertConst = false;
+            break;
+        }
     }
+    i = 0;
+    if (isInsertConst) {
+        foreach (l, params) {
+            Const* e = (Const*)lfirst(l);
+            ParamExternData* prm = &paramLI->params[i];
+
+            prm->ptype = param_types[i];
+            prm->pflags = PARAM_FLAG_CONST;
+            prm->value = e->constvalue;
+            prm->isnull = e->constisnull;
+            prm->tabInfo = NULL;
+            i++;
+        }
+    } else {
+        exprstates = ExecPrepareExprList(params, estate);
+        foreach (l, exprstates) {
+            ExprState* n = (ExprState*)lfirst(l);
+            ParamExternData* prm = &paramLI->params[i];
+
+            prm->ptype = param_types[i];
+            prm->pflags = PARAM_FLAG_CONST;
+            prm->value = ExecEvalExprSwitchContext(n, GetPerTupleExprContext(estate), &prm->isnull);
+            prm->tabInfo = NULL;
+
+            i++;
+        }
+    }
+    
 
     return paramLI;
 }
@@ -1790,4 +1812,332 @@ bool checkRecompileCondition(CachedPlanSource* plansource)
         }
     }
     return false;
+}
+
+typedef struct {
+    int* nargs;
+    Oid** args;
+    List** constargs;
+    bool* ret;
+} substitute_const_with_parameters_context;
+
+static Node* substitute_const_with_parameters_mutator(Node* node, substitute_const_with_parameters_context* context)
+{
+    if (node == NULL)
+        return NULL;
+    if (*context->ret) {
+        return NULL;
+    }
+    if (IsA(node, OpExpr) && list_length(((OpExpr*)node)->args) == 2) {
+        OpExpr* op_expr = (OpExpr*)node;
+        Node* arg1 = (Node*)linitial(op_expr->args);
+        Node* arg2 = (Node*)lsecond(op_expr->args);
+
+        /* We only support parameter is const and operator is less than or less equal. */
+        if (IsA(arg1, Const) && IsA(arg2, Const)) {
+            *context->ret = true;
+            return node;
+        }
+    }
+    if (IsA(node, FuncExpr)) {
+        FuncExpr* func_expr = (FuncExpr*)node;
+        if (func_expr->funcid >= DB4AI_PREDICT_BY_BOOL_OID && func_expr->funcid <= DB4AI_EXPLAIN_MODEL_OID) {
+            *context->ret = true;
+            return NULL;
+        }
+    }
+    if (IsA(node, UserVar)) {
+        *context->ret = true;
+        return NULL;
+    }
+    if (IsA(node, Const)) {
+        Const* con = (Const*)node;
+        Param* param = makeNode(Param);
+        param->paramkind = PARAM_EXTERN;
+        param->paramid = *context->nargs + 1;
+        param->paramtype = con->consttype;
+        param->paramtypmod = con->consttypmod;
+        param->paramcollid = con->constcollid;
+        param->location = con->location;
+        if (*context->args) {
+            *context->args = (Oid*)repalloc(*context->args, param->paramid * sizeof(Oid));
+        } else {
+            *context->args = (Oid*)palloc(param->paramid * sizeof(Oid));
+        }
+        errno_t rc = memset_s(*context->args + *context->nargs, sizeof(Oid), 0, sizeof(Oid));
+        securec_check(rc, "\0", "\0");
+        (*context->args)[param->paramid - 1] = param->paramtype;
+        *context->constargs = lappend(*context->constargs, con);
+        (*context->nargs)++;
+        return (Node*)param;
+    }
+    return expression_tree_mutator(
+        node, (Node* (*)(Node*, void*)) substitute_const_with_parameters_mutator, (void*)context);
+}
+
+static Query* substitute_const_with_parameters(Query* expr, int* nargs, Oid** param_types, List** paramListInfo, bool* ret)
+{
+    substitute_const_with_parameters_context context;
+
+    context.nargs = nargs;
+    *context.nargs = 0;
+    context.args = param_types;
+    context.constargs = paramListInfo;
+    context.ret = ret;
+    return query_tree_mutator(expr, (Node* (*)(Node*, void*)) substitute_const_with_parameters_mutator, &context, 0);
+}
+
+static ParamListInfo PrepareParamsFromConsts(CachedPlanSource* psrc, List* params, const char* queryString)
+{
+    Oid* param_types = psrc->param_types;
+    int num_params = psrc->num_params;
+    int nparams = list_length(params);
+    ParamListInfo paramLI;
+    ListCell* l = NULL;
+    int i = 0;
+
+    if (nparams != num_params)
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("wrong number of parameters for prepared statement \"%s\"", psrc->stmt_name),
+                errdetail("Expected %d parameters but got %d.", num_params, nparams)));
+
+    /* Quick exit if no parameters */
+    if (num_params == 0)
+        return NULL;
+
+    /*
+     * We have to run parse analysis for the expressions.  Since the parser is
+     * not cool about scribbling on its input, copy first.
+     */
+    params = (List*)copyObject(params);
+
+    /* Prepare the expressions for execution */
+
+    paramLI = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + num_params * sizeof(ParamExternData));
+    /* we have static list of params, so no hooks needed */
+    paramLI->paramFetch = NULL;
+    paramLI->paramFetchArg = NULL;
+    paramLI->parserSetup = NULL;
+    paramLI->parserSetupArg = NULL;
+    paramLI->params_need_process = false;
+    paramLI->numParams = num_params;
+    paramLI->uParamInfo = DEFUALT_INFO;
+    paramLI->params_lazy_bind = false;
+    
+    foreach (l, params) {
+        Const* e = (Const*)lfirst(l);
+        ParamExternData* prm = &paramLI->params[i];
+
+        prm->ptype = param_types[i];
+        prm->pflags = PARAM_FLAG_CONST;
+        prm->value = e->constvalue;
+        prm->isnull = e->constisnull;
+        prm->tabInfo = NULL;
+        i++;
+    }
+    return paramLI;
+}
+
+bool quickPlanner(List* querytree_list, Node* parsetree, const char*queryString, CommandDest dest, char* completionTag)
+{
+    if (!u_sess->attr.attr_common.enable_iud_fusion) {
+        return false;
+    }
+    if (querytree_list == NULL || querytree_list->length != 1) {
+        return false;
+    }
+    Query* query = (Query*)linitial(querytree_list);
+    if (query->hasSubLinks || (query->rtable == NULL || query->rtable->length != 1) || query->groupClause != NULL) {
+        return false;
+    }
+    if (query->commandType != CMD_UPDATE && query->commandType != CMD_DELETE) {
+        return false;
+    }
+    RangeTblEntry* rte = (RangeTblEntry*)linitial(query->rtable);
+    if (rte == NULL || rte->ispartrel) {
+        return false;
+    }
+    constexpr uint32 plancache_namesize = 64; 
+    if (strlen(queryString) >= plancache_namesize) {
+        return false;
+    }
+    int nargs;
+    Oid* param_types = NULL;
+    List* paramListInfo = NULL;
+    CachedPlan* cplan = NULL;
+    List* plan_list = NIL;
+    ParamListInfo paramLI;
+    EState* estate = NULL;
+    Portal portal;
+    int eflags;
+    long count;
+    bool ret = false;
+    query = substitute_const_with_parameters(query, &nargs, &param_types, &paramListInfo, &ret);
+    if (ret) {
+        return false;
+    }
+    if (paramListInfo == NULL || paramListInfo->length == 0) {
+        return false;
+    }
+    StringInfo select_sql  = makeStringInfo();
+    deparse_query((Query*)query, select_sql, NIL, false, false);
+    if (select_sql->len >= (int)plancache_namesize) {
+        return false;
+    }
+    PreparedStatement *entry = NULL;
+    entry = FetchPreparedStatement(select_sql->data, false, false);
+    CachedPlanSource* psrc = NULL;
+    DestReceiver* receiver = CreateDestReceiver(dest);
+    /* Create a new portal to run the query in */
+    portal = CreateNewPortal();
+    /* Don't display the portal in pg_cursors, it is for internal use only */
+    portal->visible = false;
+    if (dest == DestRemote) {
+        SetRemoteDestReceiverParams(receiver, portal);
+    }
+    MemoryContext oldcxt = MemoryContextSwitchTo(PortalGetHeapMemory(portal));
+    if (entry == NULL) {
+        // MemoryContext oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+        psrc = CreateCachedPlan((Node*)parsetree,
+        select_sql->data,
+#ifdef PGXC
+        select_sql->data,
+#endif
+        CreateCommandTag((Node*)parsetree));
+        MemoryContextSwitchTo(oldcxt);
+        List* new_querytree_list = NULL;
+        new_querytree_list = list_make1(query);
+        CompleteCachedPlan(psrc, new_querytree_list, NULL,  param_types, NULL, nargs, NULL, NULL, 0, true, select_sql->data);
+        StorePreparedStatement(select_sql->data, psrc, true);
+        entry = FetchPreparedStatement(select_sql->data, false, false);
+        if (entry == NULL) {
+            MemoryContextSwitchTo(oldcxt);
+            return false;
+        }
+    }
+    psrc = entry->plansource;
+    if (!psrc->is_valid) {
+        DropPreparedStatement(entry->stmt_name, true);
+        return false;
+    }
+    if (nargs != entry->plansource->num_params) {
+        DropPreparedStatement(entry->stmt_name, true);
+        return false;
+    }
+    for (int i = 0; i < nargs; i++) {
+        if (entry->plansource->param_types[i] != param_types[i]) {
+            DropPreparedStatement(entry->stmt_name, true);
+            return false;
+        }
+    }
+    if (entry->plansource->num_params > 0) {
+        paramLI = PrepareParamsFromConsts(psrc, paramListInfo, queryString);
+    }
+
+    OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
+
+    PG_TRY();
+    {
+        if (psrc->opFusionObj != NULL) {
+            Assert(psrc->cplan == NULL);
+            (void)RevalidateCachedQuery(psrc);
+        }
+    }
+    PG_CATCH();
+    {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("Invalid Param in QuickPlanner")));
+        DropPreparedStatement(entry->stmt_name, true);
+        return false;
+    }
+    PG_END_TRY();
+        if (psrc->opFusionObj != NULL) {
+            OpFusion *opFusionObj = (OpFusion *)(psrc->opFusionObj);
+            if (opFusionObj->IsGlobal()) {
+                opFusionObj = (OpFusion *)OpFusion::FusionFactory(opFusionObj->m_global->m_type,
+                                                                u_sess->cache_mem_cxt, psrc, NULL, paramLI);
+                Assert(opFusionObj != NULL);
+            }
+            opFusionObj->setPreparedDestReceiver(receiver);
+            opFusionObj->useOuterParameter(paramLI);
+            opFusionObj->setCurrentOpFusionObj(opFusionObj);
+
+            CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
+            bool needBucketId = cps != NULL && cps->gplan;
+            if (needBucketId) {
+                setCachedPlanBucketId(cps->gplan, paramLI);
+            }
+
+            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, false, NULL)) {
+                MemoryContextSwitchTo(oldcxt);
+                return true;
+            }
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Bypass process Failed")));
+        }
+    PG_TRY();
+    {
+        /* Copy the plan's saved query string into the portal's memory */
+        char* query_string = MemoryContextStrdup(PortalGetHeapMemory(portal), entry->plansource->query_string);
+
+        /* Replan if needed, and increment plan refcount for portal */
+        if (ENABLE_CACHEDPLAN_MGR) {
+            cplan = GetWiseCachedPlan(psrc, paramLI, false);
+        } else {
+            cplan = GetCachedPlan(psrc, paramLI, false);
+        }
+
+        plan_list = cplan->stmt_list;
+
+        /* 
+        * Now we can define the portal.
+        *
+        * DO NOT put any code that could possibly throw an error between the
+        * above GetCachedPlan call and here.
+        */
+        PortalDefineQuery(portal, NULL, query_string, entry->plansource->commandTag, plan_list, cplan);
+        portal->nextval_default_expr_type = psrc->nextval_default_expr_type;
+
+        /* incase change shared plan in execute stage */
+        CopyPlanForGPCIfNecessary(entry->plansource, portal);
+    }
+    PG_CATCH();
+    {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("Invalid Param in QuickPlanner2")));
+        DropPreparedStatement(entry->stmt_name, true);
+        return false;
+    }
+    PG_END_TRY();
+    /* Plain old EXECUTE */
+    eflags = 0;
+    count = FETCH_ALL;
+    if (OpFusion::IsSqlBypass(psrc, plan_list)) {
+        psrc->opFusionObj =
+            OpFusion::FusionFactory(OpFusion::getFusionType(cplan, paramLI, NULL),
+                                    u_sess->cache_mem_cxt, psrc, NULL, paramLI);
+        psrc->is_checked_opfusion = true;
+        if (psrc->opFusionObj != NULL) {
+            ((OpFusion*)psrc->opFusionObj)->setPreparedDestReceiver(receiver);
+            ((OpFusion*)psrc->opFusionObj)->useOuterParameter(paramLI);
+            ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
+
+            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, false, NULL)) {
+                MemoryContextSwitchTo(oldcxt);
+                return true;
+            }
+            Assert(0);
+        }
+    }
+    MemoryContextSwitchTo(oldcxt);
+    /*
+     * Run the portal as appropriate.
+     */
+    PortalStart(portal, paramLI, eflags, GetActiveSnapshot());
+
+    (void)PortalRun(portal, count, false, receiver, receiver, completionTag);
+
+    PortalDrop(portal, false);
+
+    if (estate != NULL)
+        FreeExecutorState(estate);
+    return true;
 }

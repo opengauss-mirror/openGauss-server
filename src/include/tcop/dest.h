@@ -111,8 +111,9 @@ typedef enum {
     DestTrainModel,             /* results send to DB4AI model warehouse */
 
     DestBatchHybrid,
-    DestTransientRel            /* results sent to transient relation */
+    DestTransientRel,            /* results sent to transient relation */
 
+    DestSqlProcSPI             /* results sent result to libpq with spi executor */ 
 } CommandDest;
 
 class VectorBatch;

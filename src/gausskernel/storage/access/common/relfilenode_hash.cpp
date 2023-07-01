@@ -24,7 +24,6 @@
 #include "storage/buf/buf_internals.h"
 #include "access/cbmparsexlog.h"
 #include "replication/reorderbuffer.h"
-#include "access/extreme_rto/batch_redo.h"
 #include "replication/datareceiver.h"
 #include "pgstat.h"
 #include "storage/smgr/relfilenode_hash.h"
@@ -152,28 +151,6 @@ int CBMPageTagMatch(const void *left, const void *right, Size keysize)
 
     /* we just care whether the result is 0 or not */
     if (RelFileNodeEquals(leftKey->rNode, rightKey->rNode) && leftKey->forkNum == rightKey->forkNum) {
-        return 0;
-    }
-
-    return 1;
-}
-
-uint32 RedoItemTagHash(const void *key, Size keysize)
-{
-    extreme_rto::RedoItemTag redoItemTag = *(const extreme_rto::RedoItemTag *)key;
-    redoItemTag.rNode.opt = DefaultFileNodeOpt;
-    return DatumGetUInt32(hash_any((const unsigned char *)&redoItemTag, (int)keysize));
-}
-
-int RedoItemTagMatch(const void *left, const void *right, Size keysize)
-{
-    const extreme_rto::RedoItemTag *leftKey = (const extreme_rto::RedoItemTag *)left;
-    const extreme_rto::RedoItemTag *rightKey = (const extreme_rto::RedoItemTag *)right;
-    Assert(keysize == sizeof(extreme_rto::RedoItemTag));
-
-    /* we just care whether the result is 0 or not */
-    if (RelFileNodeEquals(leftKey->rNode, rightKey->rNode) && leftKey->forkNum == rightKey->forkNum &&
-        leftKey->blockNum == rightKey->blockNum) {
         return 0;
     }
 

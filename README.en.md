@@ -560,7 +560,7 @@ Check out how openGauss implements open governance [works](https://gitee.com/ope
 
 - WeLink- Communication platform for developers.
 - IRC channel at `#opengauss-meeting` (only for meeting minutes logging purpose)
-- Mailing-list: <https://opengauss.org/zh/community/onlineCommunication.html>
+- Mailing-list: <https://opengauss.org/zh/community/onlineCommunication/>
 
 ## Contribution
 

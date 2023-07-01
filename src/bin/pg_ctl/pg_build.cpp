@@ -1267,14 +1267,14 @@ bool SsIsSkipPath(const char* dirname, bool needskipall)
     } else {
         /* skip other node pg_xlog except primary */
         if (IsBeginWith(dirname, "pg_xlog") > 0) { 
-            int dirNameLen = strlen("pg_xlog");
+            size_t dirNameLen = strlen("pg_xlog");
             char instanceId[MAX_INSTANCEID_LEN] = {0};
             errno_t rc = EOK;
             rc = snprintf_s(instanceId, sizeof(instanceId), sizeof(instanceId) - 1, "%d",
                                 instance_config.dss.instance_id);
             securec_check_ss_c(rc, "\0", "\0");
             /* not skip pg_xlog directory in file systerm */
-            if (strlen(dirname) > dirNameLen && strcmp(dirname + dirNameLen, instanceId) != 0) 
+            if (strlen(dirname) > dirNameLen && strcmp(dirname + dirNameLen, instanceId) != 0)
                 return true;
         }
     }
@@ -1433,6 +1433,7 @@ static void DeleteSubDataDir(const char* dirname)
             } else if (S_ISREG(st.st_mode)) {
                 if (strcmp(de->d_name, "postgresql.conf") == 0 || strcmp(de->d_name, "pg_ctl.lock") == 0 ||
                     strcmp(de->d_name, "postgresql.conf.lock") == 0 || strcmp(de->d_name, "postgresql.conf.bak.old") == 0 ||
+                    strcmp(de->d_name, "postgresql.conf.bak") == 0 || strcmp(de->d_name, "postgresql.conf.guc.bak") == 0 ||
                     strcmp(de->d_name, "build_completed.start") == 0 || strcmp(de->d_name, "gs_build.pid") == 0 ||
                     strcmp(de->d_name, "postmaster.opts") == 0 || strcmp(de->d_name, "gaussdb.state") == 0 ||
                     strcmp(de->d_name, "disc_readonly_test") == 0 || strcmp(de->d_name, ssl_cert_file) == 0 ||

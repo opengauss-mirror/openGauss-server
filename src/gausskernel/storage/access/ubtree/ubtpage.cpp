@@ -71,7 +71,7 @@ void UBTreeInitMetaPage(Page page, BlockNumber rootbknum, uint32 level)
 
     metad = BTPageGetMeta(page);
     metad->btm_magic = BTREE_MAGIC;
-    metad->btm_version = BTREE_VERSION;
+    metad->btm_version = UBTREE_VERSION;
     metad->btm_root = rootbknum;
     metad->btm_level = level;
     metad->btm_fastroot = rootbknum;
@@ -137,7 +137,7 @@ Buffer UBTreeGetRoot(Relation rel, int access)
         metad = (BTMetaPageData*)rel->rd_amcache;
         /* We shouldn't have cached it if any of these fail */
         Assert(metad->btm_magic == BTREE_MAGIC);
-        Assert(metad->btm_version == BTREE_VERSION);
+        Assert(metad->btm_version == UBTREE_VERSION);
         Assert(metad->btm_root != P_NONE);
 
         rootblkno = metad->btm_fastroot;
@@ -212,10 +212,10 @@ Buffer UBTreeGetRoot(Relation rel, int access)
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                 errmsg("index \"%s\" is not a btree", RelationGetRelationName(rel))));
 
-    if (metad->btm_version != BTREE_VERSION)
+    if (metad->btm_version != UBTREE_VERSION)
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                 errmsg("version mismatch in index \"%s\": file version %u, code version %d",
-                       RelationGetRelationName(rel), metad->btm_version, BTREE_VERSION)));
+                       RelationGetRelationName(rel), metad->btm_version, UBTREE_VERSION)));
 
     /* if no root page initialized yet, do it */
     if (metad->btm_root == P_NONE) {
@@ -276,7 +276,7 @@ Buffer UBTreeGetRoot(Relation rel, int access)
         /* XLOG stuff */
         if (RelationNeedsWAL(rel)) {
             xl_btree_newroot xlrec;
-            xl_btree_metadata md;
+            xl_btree_metadata_old md;
             XLogRecPtr recptr;
 
             XLogBeginInsert();
@@ -288,7 +288,7 @@ Buffer UBTreeGetRoot(Relation rel, int access)
             md.fastroot = rootblkno;
             md.fastlevel = 0;
 
-            XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata));
+            XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata_old));
 
             xlrec.rootblk = rootblkno;
             xlrec.level = 0;
@@ -1347,7 +1347,7 @@ static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsi
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
         xl_btree_unlink_page xlrec;
-        xl_btree_metadata xlmeta;
+        xl_btree_metadata_old xlmeta;
         uint8 xlinfo;
         XLogRecPtr recptr;
 
@@ -1380,7 +1380,7 @@ static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsi
             xlmeta.fastroot = metad->btm_fastroot;
             xlmeta.fastlevel = metad->btm_fastlevel;
 
-            XLogRegisterBufData(4, (char *)&xlmeta, sizeof(xl_btree_metadata));
+            XLogRegisterBufData(4, (char *)&xlmeta, sizeof(xl_btree_metadata_old));
             xlinfo = XLOG_UBTREE_UNLINK_PAGE_META;
         } else {
             xlinfo = XLOG_UBTREE_UNLINK_PAGE;

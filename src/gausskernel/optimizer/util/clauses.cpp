@@ -4726,6 +4726,57 @@ static void sql_inline_error_callback(void* arg)
     errcontext("SQL function \"%s\" during inlining", callback_arg->proname);
 }
 
+ExprContext* MakePerTupleExprContextForOpFusion(EState* estate)
+{
+    ExprContext* econtext = NULL;
+    MemoryContext oldcontext;
+
+    /* Create the ExprContext node within the per-query memory context */
+    oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+
+    econtext = makeNode(ExprContext);
+
+    /* Initialize fields of ExprContext */
+    econtext->ecxt_scantuple = NULL;
+    econtext->ecxt_innertuple = NULL;
+    econtext->ecxt_outertuple = NULL;
+
+    econtext->ecxt_per_query_memory = estate->es_query_cxt;
+
+    /*
+     * Create working memory for expression evaluation in this context.
+     */
+    econtext->ecxt_per_tuple_memory = u_sess->iud_expr_reuse_ctx;
+    econtext->ecxt_param_exec_vals = estate->es_param_exec_vals;
+    econtext->ecxt_param_list_info = estate->es_param_list_info;
+
+    econtext->ecxt_aggvalues = NULL;
+    econtext->ecxt_aggnulls = NULL;
+
+    econtext->caseValue_datum = (Datum)0;
+    econtext->caseValue_isNull = true;
+
+    econtext->domainValue_datum = (Datum)0;
+    econtext->domainValue_isNull = true;
+
+    econtext->ecxt_estate = estate;
+
+    econtext->ecxt_callbacks = NULL;
+    econtext->plpgsql_estate = NULL;
+
+    /*
+     * Link the ExprContext into the EState to ensure it is shut down when the
+     * EState is freed.  Because we use lcons(), shutdowns will occur in
+     * reverse order of creation, which may not be essential but can't hurt.
+     */
+    estate->es_exprcontexts = lcons(econtext, estate->es_exprcontexts);
+
+    MemoryContextSwitchTo(oldcontext);
+    estate->es_per_tuple_exprcontext = econtext;
+
+    return econtext;
+}
+
 /*
  * evaluate_expr: pre-evaluate a constant expression
  *
@@ -4743,11 +4794,20 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
     bool const_is_null = false;
     int16 resultTypLen;
     bool resultTypByVal = false;
-
+    bool isFusion = false;
+    if (u_sess->iud_expr_reuse_ctx == NULL) {
+         u_sess->iud_expr_reuse_ctx = AllocSetContextCreate(u_sess->top_transaction_mem_cxt, "IudExprReuseContext", ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    }
     /*
      * To use the executor, we need an EState.
      */
-    estate = CreateExecutorState();
+     if (u_sess->iud_expr_reuse_ctx != NULL) {
+        estate = CreateExecutorState();
+        isFusion = true;
+    } else {
+        estate = CreateExecutorState();
+    }
 
     /* We can use the estate's working context to avoid memory leaks. */
     oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
@@ -4769,6 +4829,9 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
      * fortuitous, but it's not so unreasonable --- a constant expression does
      * not depend on context, by definition, n'est ce pas?
      */
+    if (isFusion && estate->es_per_tuple_exprcontext == NULL) {
+        MakePerTupleExprContextForOpFusion(estate);
+    }
     ExprContext* econtext = GetPerTupleExprContext(estate);
     if (econtext != NULL) {
         econtext->can_ignore = can_ignore;
@@ -4796,7 +4859,9 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
     }
 
     /* Release all the junk we just created */
-    FreeExecutorState(estate);
+    if (!isFusion) {
+        FreeExecutorState(estate);
+    }
 
     /*
      * Make the constant result node.

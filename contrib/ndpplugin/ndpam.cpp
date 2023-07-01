@@ -267,21 +267,17 @@ NdpRetCode NdpIoSlot::GetResp(NdpPageHeader& pages, int& pageNum, BlockNumber& s
     pageNum = 0;
 
     if (respRet != NdpRetCode::NDP_OK) {
-        ereport(WARNING, (errmsg("rpc response status is illegal %d,  RPC status %d",
-                                 static_cast<int>(respRet), static_cast<int>(rpcStatus))));
         return respRet;
     }
 
     auto rpcResp = reinterpret_cast<NdpIOResponse*>(respMsg.data);
     if (rpcResp == nullptr) {
-        ereport(WARNING, (errmsg("rpc response is null.")));
         return NdpRetCode::NDP_RETURN_FAILED;
     }
 #ifdef ENABLE_SSL
     resp = reinterpret_cast<NdpIOResponse*>(respMsg.data);
 #endif
     if (rpcResp->status != 0) {
-        ereport(WARNING, (errmsg("backend handle IO failed, status is %u.", resp->status)));
         return NdpRetCode::NDP_RETURN_STATUS_ERROR;
     }
 
@@ -374,6 +370,10 @@ NdpRetCode NdpScanDescData::Init(ScanState* sstate, TableScanDesc sscan)
 
 NdpScanDescData::~NdpScanDescData()
 {
+    // wait all callback return
+    while (pg_atomic_read_u32(&reqCount) != pg_atomic_read_u32(&respCount)) {
+        pg_usleep(NDP_RPC_WAIT_USEC);
+    }
 #ifdef NDP_ASYNC_RPC
     if (respIO) {
         NdpIoSlot* tmpIO = nullptr;
@@ -837,6 +837,16 @@ NdpRetCode NdpScanChannel::SendIo(NdpIoSlot* req, NdpScanDesc ndpScan)
 
 NdpAdminRequest* NdpScanChannel::ConstructPlanReq(NdpScanDesc ndpScan)
 {
+    if (IsA(ndpScan->cond->plan, Agg)) {
+        Agg* agg = (Agg*)ndpScan->cond->plan;
+        if (agg->grp_collations == NULL && agg->numCols > 0) {
+            agg->grp_collations = (unsigned int*)palloc(sizeof(unsigned int) * agg->numCols);
+            for (int i = 0; i < agg->numCols; i++) {
+                agg->grp_collations[i] = InvalidOid;
+            }
+        }
+    }
+
     char* str = nodeToString(ndpScan->cond->plan);
     int len = strlen(str) + 1;
     if (len == 1) {

@@ -83,7 +83,7 @@ typedef struct BucketPruningResult {
     Bitmapset* buckets;
 } BucketPruningResult;
 
-static List* BucketPruningMain(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte, List* restrictInfo);
+static List* BucketPruningMain(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte, List* restrictInfo)  __attribute__((unused));
 static BucketPruningContext* makePruningContext(
     PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte, List* restrictInfo);
 static Expr* RestrictInfoGetExpr(List* restrictInfo);

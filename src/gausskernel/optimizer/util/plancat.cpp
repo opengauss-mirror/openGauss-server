@@ -57,6 +57,7 @@
 #include "utils/selfuncs.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "utils/fmgroids.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -1785,7 +1786,8 @@ static bool InstrAsPatternMatch(Oid* operatorid, List** args)
 Selectivity restriction_selectivity(PlannerInfo* root, Oid operatorid, List* args, Oid inputcollid, int varRelid)
 {
     float8 result;
-
+    int tmp_encoding = PG_INVALID_ENCODING;
+    int db_encoding = PG_INVALID_ENCODING;
     bool useInstrOpt = false;
     if (ENABLE_SQL_BETA_FEATURE(SEL_EXPR_INSTR)) {
         useInstrOpt = InstrAsPatternMatch(&operatorid, &args);
@@ -1798,13 +1800,36 @@ Selectivity restriction_selectivity(PlannerInfo* root, Oid operatorid, List* arg
      */
     if (!oprrest)
         return (Selectivity)0.5;
+    if (oprrest == F_SCALARLTSEL) {
+        result = scalarltsel_internal(root, operatorid, args, varRelid);
+    } else {
+        result = DatumGetFloat8(OidFunctionCall4Coll(oprrest, inputcollid, PointerGetDatum(root),
+                                                     ObjectIdGetDatum(operatorid), PointerGetDatum(args),
+                                                     Int32GetDatum(varRelid)));
+    }
 
-    result = DatumGetFloat8(OidFunctionCall4Coll(oprrest,
-        inputcollid,
-        PointerGetDatum(root),
-        ObjectIdGetDatum(operatorid),
-        PointerGetDatum(args),
-        Int32GetDatum(varRelid)));
+    if (DB_IS_CMPT(B_FORMAT)) {
+        tmp_encoding = get_valid_charset_by_collation(inputcollid);
+        db_encoding = GetDatabaseEncoding();
+    }
+
+    if (tmp_encoding != db_encoding) {
+        DB_ENCODING_SWITCH_TO(tmp_encoding);
+        result = DatumGetFloat8(OidFunctionCall4Coll(oprrest,
+            inputcollid,
+            PointerGetDatum(root),
+            ObjectIdGetDatum(operatorid),
+            PointerGetDatum(args),
+            Int32GetDatum(varRelid)));
+        DB_ENCODING_SWITCH_BACK(db_encoding);
+    } else {
+        result = DatumGetFloat8(OidFunctionCall4Coll(oprrest,
+            inputcollid,
+            PointerGetDatum(root),
+            ObjectIdGetDatum(operatorid),
+            PointerGetDatum(args),
+            Int32GetDatum(varRelid)));
+    }
 
     if (useInstrOpt) {
         list_free_ext(args);

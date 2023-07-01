@@ -173,6 +173,7 @@ typedef struct ReplicationSlot {
     ArchiveConfig* archive_config;
     bool is_recovery;
     char* extra_content;
+    TimestampTz last_xmin_change_time;
 } ReplicationSlot;
 
 typedef struct ArchiveSlotConfig {

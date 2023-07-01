@@ -16,6 +16,7 @@
 
 #include "nodes/execnodes.h"
 
+extern TupleTableSlot* SeqNext(SeqScanState* node);
 extern SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags);
 extern void ExecEndSeqScan(SeqScanState* node);
 extern void ExecSeqMarkPos(SeqScanState* node);

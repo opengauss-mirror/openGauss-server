@@ -406,6 +406,7 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
 
         case T_VecSort:
         case T_Sort:
+        case T_SortGroup:
             if (walk_plan_node_fields((Plan*)node, walker, context))
                 return true;
             /* Other fields are simple counts and lists of indexes and oids. */

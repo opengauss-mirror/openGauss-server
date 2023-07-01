@@ -164,7 +164,11 @@ static Node* variable_paramref_hook(ParseState* pstate, ParamRef* pref)
     param->paramid = paramno;
     param->paramtype = *pptype;
     param->paramtypmod = -1;
-    param->paramcollid = get_typcollation(param->paramtype);
+    if (OidIsValid(GetCollationConnection()) && IsSupportCharsetType(param->paramtype)) {
+        param->paramcollid = GetCollationConnection();
+    } else {
+        param->paramcollid = get_typcollation(param->paramtype);
+    }
     param->location = pref->location;
     param->tableOfIndexTypeList = NULL;
 

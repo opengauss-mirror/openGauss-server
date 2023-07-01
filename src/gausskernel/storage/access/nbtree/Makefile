@@ -9,7 +9,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
-OBJS = nbtcompare.o nbtinsert.o nbtpage.o nbtree.o nbtsearch.o \
+OBJS = nbtcompare.o nbtdedup.o nbtinsert.o nbtpage.o nbtree.o nbtsearch.o \
        nbtutils.o nbtsort.o nbtxlog.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -1239,7 +1239,7 @@ bool IsSkipDir(const char * dirName)
     
         /* skip other node pg_xlog except primary */
         if (IsBeginWith(dirName, "pg_xlog") > 0) { 
-            int dirNameLen = strlen("pg_xlog");
+            size_t dirNameLen = strlen("pg_xlog");
             char instance_id[MAX_INSTANCEID_LEN];
             errno_t rc = EOK;
             rc = snprintf_s(instance_id, sizeof(instance_id), sizeof(instance_id) - 1, "%d",
@@ -1433,6 +1433,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
         /* For gs_backup, we should not skip these files */
             if (strcmp(pathbuf, "./pg_ctl.lock") == 0 || strcmp(pathbuf, "./postgresql.conf.lock") == 0 ||
                 strcmp(pathbuf, "./postgresql.conf.bak") == 0 || strcmp(pathbuf, "./postgresql.conf") == 0 ||
+                strcmp(de->d_name, "postgresql.conf.guc.bak") == 0 ||
                 strcmp(pathbuf, "./postgresql.conf.bak.old") == 0) {
                 continue;
             }
@@ -1539,12 +1540,13 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                                         errmsg("symbolic link \"%s\" target is too long", pathbuf)));
                     linkpath[MAXPGPATH - 1] = '\0';
 
-                    if (!sizeonly)
+                    if (!sizeonly){
                         if (ENABLE_DSS && is_dss_file(pathbuf)) {
                             _tarWriteHeader(pathbuf, linkpath, &statbuf);
                         } else {
-                            _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);    
+                            _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
                         }
+                    }
 #else
 
                     /*
@@ -1635,12 +1637,13 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                 ereport(ERROR,
                         (errcode(ERRCODE_NAME_TOO_LONG), errmsg("symbolic link \"%s\" target is too long", pathbuf)));
             linkpath[rllen] = '\0';
-            if (!sizeonly)
+            if (!sizeonly){
                 if (ENABLE_DSS && is_dss_file(pathbuf)) {
                     _tarWriteHeader(pathbuf, linkpath, &statbuf);
                 } else {
-                    _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);    
+                    _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
                 }
+            }
             size += BUILD_PATH_LEN; /* Size of the header just added */
 #else
 
@@ -1661,12 +1664,13 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
              * Store a directory entry in the tar file so we can get the
              * permissions right.
              */
-            if (!sizeonly)
+            if (!sizeonly){
                 if (ENABLE_DSS && is_dss_file(pathbuf)) {
                     _tarWriteHeader(pathbuf, NULL, &statbuf);
                 } else {
-                    _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);    
+                    _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);
                 }
+            }
             size += BUILD_PATH_LEN; /* Size of the header just added */
 
             /*
@@ -2186,9 +2190,16 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
     /* send the pkg header containing msg like file size */
     _tarWriteHeader(tarfilename, NULL, statbuf);
     
+    /* Because pg_control file is shared in all instance when dss is enabled. Here pg_control of primary id
+     * need to send to main standby in standby cluster, so we must seek a postion accoring to primary id.
+     * Then content of primary id will be read.
+     */
     if (ENABLE_DSS && strcmp(tarfilename, XLOG_CONTROL_FILE) == 0) {
         int read_size = BUFFERALIGN(sizeof(ControlFileData));
         statbuf->st_size = read_size;
+        int primary_id = SSGetPrimaryInstId();
+        off_t seekpos = (off_t)BLCKSZ * primary_id;
+        fseek(fp, seekpos, SEEK_SET);
     }
     
     while ((cnt = fread(t_thrd.basebackup_cxt.buf_block, 1, Min(TAR_SEND_SIZE, statbuf->st_size - len), fp)) > 0) {

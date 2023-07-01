@@ -390,7 +390,7 @@ static List *ExtractSubPartitionIdf(IndexStmt* stmt, List *subPartitionOidList, 
         foreach(lc2, idxPartdef->sublist) {
             RangePartitionindexDefState *idxSubPartdef = (RangePartitionindexDefState*)lfirst(lc2);
             if (idxSubPartdef->tablespace == NULL) {
-                idxSubPartdef->tablespace = strdup(idxPartdef->tablespace);
+                idxSubPartdef->tablespace = pstrdup(idxPartdef->tablespace);
             }
         }
     }
@@ -695,6 +695,7 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
     List* partitiontspList = NIL;
     char relPersistence;
     bool concurrent;
+    bool has_dedup_opt = false;
     ObjectAddress address;
     StdRdOptions* index_relopts;
     int8 indexsplitMethod = INDEXSPLIT_NO_DEFAULT;
@@ -754,6 +755,10 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
     foreach (cell, stmt->options) {
         DefElem *defElem = (DefElem *)lfirst(cell);
         SetOneOfCompressOption(defElem, &indexCreateSupport);
+
+        if (pg_strcasecmp(defElem->defname, "deduplication") == 0){
+            has_dedup_opt = true;
+        }
     }
 
     CheckCompressOption(&indexCreateSupport);
@@ -781,6 +786,9 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         }
         if (strcmp(stmt->accessMethod, "ubtree") != 0) {
             elog(ERROR, "%s index is not supported for ustore", (stmt->accessMethod));
+        }
+        if (has_dedup_opt) {
+            elog(ERROR, "Index deduplication is not supported for ustore.");
         }
         if (stmt->deferrable == true) {
             ereport(ERROR,
@@ -897,6 +905,10 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Global partition index does not support WHERE clause.")));
+        } else if (has_dedup_opt) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Index deduplication is not supported for partition table.")));
         }
     }
 

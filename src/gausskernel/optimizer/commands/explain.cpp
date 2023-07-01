@@ -166,6 +166,7 @@ static void show_merge_append_keys(MergeAppendState* mstate, List* ancestors, Ex
 static void show_merge_sort_keys(PlanState* state, List* ancestors, ExplainState* es);
 static void show_startwith_pseudo_entries(PlanState* state, List* ancestors, ExplainState* es);
 static void show_sort_info(SortState* sortstate, ExplainState* es);
+static void show_sort_group_info(SortGroupState *state, ExplainState *es);
 static void show_hash_info(HashState* hashstate, ExplainState* es);
 static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es);
 static void show_tidbitmap_info(BitmapHeapScanState *planstate, ExplainState *es);
@@ -269,7 +270,7 @@ static bool show_scan_distributekey(const Plan* plan)
 }
 #endif   /* ENABLE_MULTIPLE_NODES */
 static void show_unique_check_info(PlanState *planstate, ExplainState *es);
-static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate);
+static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate, StringInfo str, bool is_pretty);
 
 /*
  * ExplainQuery -
@@ -2028,7 +2029,7 @@ static void ExplainNode(
     bool haschildren = false;
     int plan_node_id = planstate->plan->plan_node_id;
     int parentid = planstate->plan->parent_node_id;
-    StringInfo tmpName;
+    StringInfo tmpName = nullptr;
     bool from_datanode = false;
     bool old_dn_flag = false;
 
@@ -2169,7 +2170,7 @@ static void ExplainNode(
             if (es->format == EXPLAIN_FORMAT_TEXT) {
                 appendStringInfo(es->str, " on %s", indexname);
                 if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL) {
-                    StringInfo tmpName = &es->planinfo->m_planInfo->m_pname;
+                    tmpName = &es->planinfo->m_planInfo->m_pname;
                     appendStringInfo(tmpName, " using %s", indexname);
                 }
             } else {
@@ -2395,6 +2396,11 @@ static void ExplainNode(
             appendStringInfo(tmpName, " stream_level:%d ", stream_plan->stream_level);
     }
 
+    /* explain ndpplugin activities */
+    if (ndp_pushdown_hook) {
+        show_ndpplugin_statistic(es, planstate, tmpName, is_pretty);
+    }
+
     if (is_pretty) {
 
         StringInfoData pretty_plan_name;
@@ -2495,11 +2501,6 @@ static void ExplainNode(
             PredGetInfo(plan, es);
 #endif
         }
-    }
-
-    /* explain ndpplugin activities */
-    if (ndp_pushdown_hook) {
-        show_ndpplugin_statistic(es, planstate);
     }
 
     /*
@@ -2882,6 +2883,13 @@ static void ExplainNode(
             show_sort_info((SortState*)planstate, es);
             show_llvm_info(planstate, es);
             break;
+        case T_SortGroup: {
+            SortGroup *plan = (SortGroup *)planstate->plan;
+            show_sort_group_keys(planstate, "Sorted Group Key", plan->numCols, plan->sortColIdx, plan->sortOperators,
+                                 plan->collations, plan->nullsFirst, ancestors, es);
+            show_sort_group_info(castNode(SortGroupState, planstate), es);
+            break;
+        }
         case T_MergeAppend:
             show_merge_append_keys((MergeAppendState*)planstate, ancestors, es);
             break;
@@ -4323,6 +4331,28 @@ static void show_sort_info(SortState* sortstate, ExplainState* es)
 
                 show_detail_sortinfo(es, sortMethod, spaceType, sortstate->spaceUsed);
             }
+        }
+    }
+}
+
+/*
+ * If it's EXPLAIN ANALYZE, show stats for a SortGroupState
+ */
+static void show_sort_group_info(SortGroupState *state, ExplainState *es)
+{
+    if (!es->analyze)
+        return;
+    if (state->sort_Done && state->state != NULL) {
+        int64 spaceUsed = Max(1, state->spaceUsed / 1024);
+        if (es->format == EXPLAIN_FORMAT_TEXT) {
+            if (es->str->len == 0 || es->str->data[es->str->len - 1] == '\n')
+                appendStringInfoSpaces(es->str, es->indent * 2);
+            appendStringInfo(es->str, "Space Used: %s : " INT64_FORMAT "kB\n", state->spaceType,
+                             spaceUsed);
+        } 
+        else {
+            ExplainPropertyInteger("Sort Space Used(kB)", spaceUsed, es);
+            ExplainPropertyText("Sort Space Type", state->spaceType, es);
         }
     }
 }
@@ -10925,7 +10955,7 @@ static void show_unique_check_info(PlanState *planstate, ExplainState *es)
     }
 }
 
-static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate)
+static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate, StringInfo str, bool is_pretty)
 {
     Plan* plan = planstate->plan;
     if (!plan->ndp_pushdown_optimized &&
@@ -10938,7 +10968,12 @@ static void show_ndpplugin_statistic(ExplainState *es, PlanState* planstate)
     if (desc && !desc->ndp_pushdown_optimized) {
         return;
     }
-    appendStringInfo(es->str, " NDPpushdown");
+
+    if (is_pretty) {
+        appendStringInfo(str, " NDPpushdown");
+    } else {
+        appendStringInfo(es->str, " NDPpushdown");
+    }
 
     if (!es->analyze) {
         return;

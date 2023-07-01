@@ -172,6 +172,7 @@ static FORCE_INLINE void ExecAggPlainTransByRef(AggState *aggstate, AggStatePerT
 static FORCE_INLINE void ExecAggCollectPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
     AggStatePerGroup pergroup, MemoryContext aggcontext, int setno);
 
+static void CheckVarSlotCompatibility(TupleTableSlot *slot,  int attnum, Oid vartype);
 /*
  * Prepare ExprState for interpreted execution.
  */
@@ -204,6 +205,7 @@ ExecReadyInterpretedExpr(ExprState *state)
 	 */
 	state->flags |= EEO_FLAG_INTERPRETER_INITIALIZED;
 
+	state->evalfunc = ExecInterpExprStillValid;
 	/*
 	 * Select fast-path evalfuncs for very simple expressions.  "Starting up"
 	 * the full interpreter is a measurable overhead for these, and these
@@ -281,7 +283,7 @@ ExecReadyInterpretedExpr(ExprState *state)
 	state->evalfunc = ExecInterpExpr;
 }
 
-static bool IsTableOfFunc(Oid funcOid)
+bool IsTableOfFunc(Oid funcOid)
 {
     const Oid array_function_start_oid = 7881;
     const Oid array_function_end_oid = 7892;
@@ -302,6 +304,8 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
     bool is_have_huge_clob = false;
 	bool needResetErrMsg = op->d.func.needResetErrMsg;
+    int func_encoding = PG_INVALID_ENCODING;
+    int db_encoding = PG_INVALID_ENCODING;
 
 	if(!u_sess->SPI_cxt.is_allow_commit_rollback){
 		if(fcinfo->context){
@@ -328,6 +332,11 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
         fcinfo->swinfo.sw_econtext = (Node *)econtext;
         fcinfo->swinfo.sw_exprstate = (Node *)linitial(op->d.func.args);
         fcinfo->swinfo.sw_is_flt_frame = true;
+    }
+
+    if (DB_IS_CMPT(B_FORMAT)) {
+        func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+        db_encoding = GetDatabaseEncoding();
     }
 
     i = 0;
@@ -405,7 +414,13 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
     if (u_sess->instr_cxt.global_instr != NULL && fcinfo->flinfo->fn_addr == plpgsql_call_handler) {
         StreamInstrumentation* save_global_instr = u_sess->instr_cxt.global_instr;
         u_sess->instr_cxt.global_instr = NULL;
-        *op->resvalue = op->d.func.fn_addr(fcinfo);
+        if (func_encoding != db_encoding) {
+            DB_ENCODING_SWITCH_TO(func_encoding);
+            *op->resvalue = op->d.func.fn_addr(fcinfo);
+            DB_ENCODING_SWITCH_BACK(db_encoding);
+        } else {
+            *op->resvalue = op->d.func.fn_addr(fcinfo);
+        }
         u_sess->instr_cxt.global_instr = save_global_instr;
     } else {
         if (fcinfo->argTypes[0] == CLOBOID && fcinfo->argTypes[1] == CLOBOID && fcinfo->flinfo->fn_addr == textcat) {
@@ -418,8 +433,14 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
                 struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[1]));
                 fcinfo->arg[1] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
             }
-        }    
-        *op->resvalue = op->d.func.fn_addr(fcinfo);
+        }
+        if (func_encoding != db_encoding) {
+            DB_ENCODING_SWITCH_TO(func_encoding);
+            *op->resvalue = op->d.func.fn_addr(fcinfo);
+            DB_ENCODING_SWITCH_BACK(db_encoding);
+        } else {
+            *op->resvalue = op->d.func.fn_addr(fcinfo);
+        }
     }
 	*op->resnull = fcinfo->isnull;
 
@@ -522,6 +543,10 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 		&&CASE_EEOP_ASSIGN_TMP_MAKE_RO,
 		&&CASE_EEOP_CONST,
 		&&CASE_EEOP_FUNCEXPR,
+        &&CASE_EEOP_FUNCEXPR_STRICT,
+        &&CASE_EEOP_FUNCEXPR_FUSAGE,
+        &&CASE_EEOP_FUNCEXPR_STRICT_FUSAGE,
+        &&CASE_EEOP_FUNCEXPR_MAKE_FUNCTION_RESULT,
 		&&CASE_EEOP_BOOL_AND_STEP_FIRST,
 		&&CASE_EEOP_BOOL_AND_STEP,
 		&&CASE_EEOP_BOOL_AND_STEP_LAST,
@@ -859,12 +884,99 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 		 * somehow.  The extra line of code can save a useless register spill
 		 * and reload across the function call.
 		 */
-		EEO_CASE(EEOP_FUNCEXPR)
-		{
-			ExecMakeFunctionResultNoSets(state, op, econtext);
+        EEO_CASE(EEOP_FUNCEXPR)
+        {
+            // ExecMakeFunctionResultNoSets(state, op, econtext);
+            FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
+            Datum d;
 
-			EEO_NEXT();
-		}
+            int func_encoding = PG_INVALID_ENCODING;
+            int db_encoding = PG_INVALID_ENCODING;
+
+            if (DB_IS_CMPT(B_FORMAT)) {
+                func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+                db_encoding = GetDatabaseEncoding();
+            }
+
+            if (econtext) {
+                fcinfo->can_ignore = econtext->can_ignore;
+            }
+
+            fcinfo->isnull = false;
+            if (func_encoding != db_encoding) {
+                DB_ENCODING_SWITCH_TO(func_encoding);
+                d = op->d.func.fn_addr(fcinfo);
+                DB_ENCODING_SWITCH_BACK(db_encoding);
+            } else {
+                d = op->d.func.fn_addr(fcinfo);
+            }
+            *op->resvalue = d;
+            *op->resnull = fcinfo->isnull;
+
+            EEO_NEXT();
+        }
+
+        EEO_CASE(EEOP_FUNCEXPR_STRICT)
+        {
+            FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
+            int nargs = op->d.func.nargs;
+            Datum d;
+
+            int func_encoding = PG_INVALID_ENCODING;
+            int db_encoding = PG_INVALID_ENCODING;
+
+            if (DB_IS_CMPT(B_FORMAT)) {
+                func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+                db_encoding = GetDatabaseEncoding();
+            }
+
+            if (econtext) {
+                fcinfo->can_ignore = econtext->can_ignore;
+            }
+
+            /* strict function, so check for NULL args */
+            for (int argno = 0; argno < nargs; argno++) {
+                if (fcinfo->argnull[argno]) {
+                    *op->resnull = true;
+                    goto strictfail;
+                }
+            }
+            fcinfo->isnull = false;
+            if (func_encoding != db_encoding) {
+                DB_ENCODING_SWITCH_TO(func_encoding);
+                d = op->d.func.fn_addr(fcinfo);
+                DB_ENCODING_SWITCH_BACK(db_encoding);
+            } else {
+                d = op->d.func.fn_addr(fcinfo);
+            }
+            *op->resvalue = d;
+            *op->resnull = fcinfo->isnull;
+
+        strictfail:
+            EEO_NEXT();
+        }
+
+        EEO_CASE(EEOP_FUNCEXPR_FUSAGE)
+        {
+            /* not common enough to inline */
+            ExecEvalFuncExprFusage(op, econtext);
+
+            EEO_NEXT();
+        }
+
+        EEO_CASE(EEOP_FUNCEXPR_STRICT_FUSAGE)
+        {
+            /* not common enough to inline */
+            ExecEvalFuncExprStrictFusage(op, econtext);
+
+            EEO_NEXT();
+        }
+
+        EEO_CASE(EEOP_FUNCEXPR_MAKE_FUNCTION_RESULT)
+        {
+            ExecMakeFunctionResultNoSets(state, op, econtext);
+            EEO_NEXT();
+        }
 
 		/*
 		 * If any of its clauses is FALSE, an AND's result is FALSE regardless
@@ -2030,7 +2142,8 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
                 *op->resvalue = (Datum)0;
                 *op->resnull = true;
             } else {
-                *op->resvalue = PointerGetDatum(text_substring(*op->resvalue, 1, op->d.prefix_key.pkey->length, false));
+                *op->resvalue = PointerGetDatum(text_substring_with_encoding(
+                    *op->resvalue, 1, op->d.prefix_key.pkey->length, false, op->d.prefix_key.encoding));
                 *op->resnull = false;
             }
 
@@ -2048,6 +2161,70 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 out:
 	*isnull = state->resnull;
 	return state->resvalue;
+}
+
+/*
+ * Expression evaluation callback that performs extra checks before executing
+ * the expression. Declared extern so other methods of execution can use it
+ * too.
+ */
+Datum ExecInterpExprStillValid(ExprState *state, ExprContext *econtext, bool *isNull, ExprDoneCond* isDone)
+{
+    /*
+     * First time through, check whether attribute matches Var.  Might not be
+     * ok anymore, due to schema changes.
+     */
+    CheckExprStillValid(state, econtext);
+
+    /* skip the check during further executions */
+    state->evalfunc = (ExprStateEvalFunc)state->evalfunc_private;
+
+    /* and actually execute */
+    return state->evalfunc(state, econtext, isNull, isDone);
+}
+
+/*
+ * Check that an expression is still valid in the face of potential schema
+ * changes since the plan has been created.
+ */
+void CheckExprStillValid(ExprState *state, ExprContext *econtext)
+{
+    TupleTableSlot *innerslot;
+    TupleTableSlot *outerslot;
+    TupleTableSlot *scanslot;
+
+    innerslot = econtext->ecxt_innertuple;
+    outerslot = econtext->ecxt_outertuple;
+    scanslot = econtext->ecxt_scantuple;
+
+    for (int i = 0; i < state->steps_len; i++) {
+        ExprEvalStep *op = &state->steps[i];
+
+        switch (ExecEvalStepOp(state, op)) {
+            case EEOP_INNER_VAR: {
+                int attnum = op->d.var.attnum;
+
+                CheckVarSlotCompatibility(innerslot, attnum + 1, op->d.var.vartype);
+                break;
+            }
+
+            case EEOP_OUTER_VAR: {
+                int attnum = op->d.var.attnum;
+
+                CheckVarSlotCompatibility(outerslot, attnum + 1, op->d.var.vartype);
+                break;
+            }
+
+            case EEOP_SCAN_VAR: {
+                int attnum = op->d.var.attnum;
+
+                CheckVarSlotCompatibility(scanslot, attnum + 1, op->d.var.vartype);
+                break;
+            }
+            default:
+                break;
+        }
+    }
 }
 
 /*
@@ -2302,6 +2479,61 @@ ExecEvalStepOp(ExprState *state, ExprEvalStep *op)
 	return (ExprEvalOp) op->opcode;
 }
 
+/*
+ * Evaluate EEOP_FUNCEXPR_FUSAGE
+ */
+void ExecEvalFuncExprFusage(ExprEvalStep *op, ExprContext *econtext)
+{
+    FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
+    PgStat_FunctionCallUsage fcusage;
+    Datum d;
+
+    if (econtext) {
+        fcinfo->can_ignore = econtext->can_ignore;
+    }
+
+    pgstat_init_function_usage(fcinfo, &fcusage);
+
+    fcinfo->isnull = false;
+    d = op->d.func.fn_addr(fcinfo);
+    *op->resvalue = d;
+    *op->resnull = fcinfo->isnull;
+
+    pgstat_end_function_usage(&fcusage, true);
+}
+
+/*
+ * Evaluate EEOP_FUNCEXPR_STRICT_FUSAGE
+ */
+void ExecEvalFuncExprStrictFusage(ExprEvalStep *op, ExprContext *econtext)
+{
+
+    FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
+    PgStat_FunctionCallUsage fcusage;
+    int nargs = op->d.func.nargs;
+    Datum d;
+
+    if (econtext) {
+        fcinfo->can_ignore = econtext->can_ignore;
+    }
+
+    /* strict function, so check for NULL args */
+    for (int argno = 0; argno < nargs; argno++) {
+        if (fcinfo->argnull[argno]) {
+            *op->resnull = true;
+            return;
+        }
+    }
+
+    pgstat_init_function_usage(fcinfo, &fcusage);
+
+    fcinfo->isnull = false;
+    d = op->d.func.fn_addr(fcinfo);
+    *op->resvalue = d;
+    *op->resnull = fcinfo->isnull;
+
+    pgstat_end_function_usage(&fcusage, true);
+}
 
 /*
  * Out-of-line helper functions for complex instructions.
@@ -4299,4 +4531,51 @@ static FORCE_INLINE void ExecAggCollectPlainTransByRef(AggState *aggstate, AggSt
     pergroup->collectValueIsNull = fcinfo->isnull;
 
     MemoryContextSwitchTo(oldContext);
+}
+
+static void
+CheckVarSlotCompatibility(TupleTableSlot *slot, int attnum, Oid vartype)
+{
+	/*
+	 * What we have to check for here is the possibility of an attribute
+	 * having been dropped or changed in type since the plan tree was created.
+	 * Ideally the plan will get invalidated and not re-used, but just in
+	 * case, we keep these defenses.  Fortunately it's sufficient to check
+	 * once on the first time through.
+	 *
+	 * Note: ideally we'd check typmod as well as typid, but that seems
+	 * impractical at the moment: in many cases the tupdesc will have been
+	 * generated by ExecTypeFromTL(), and that can't guarantee to generate an
+	 * accurate typmod in all cases, because some expression node types don't
+	 * carry typmod.  Fortunately, for precisely that reason, there should be
+	 * no places with a critical dependency on the typmod of a value.
+	 *
+	 * System attributes don't require checking since their types never
+	 * change.
+	 */
+    if (attnum > 0) {
+        TupleDesc slot_tupdesc = slot->tts_tupleDescriptor;
+        Form_pg_attribute attr;
+
+        if (attnum > slot_tupdesc->natts)	/* should never happen */
+            elog(ERROR, "attribute number %d exceeds number of columns %d",
+                attnum, slot_tupdesc->natts);
+
+        attr = TupleDescAttr(slot_tupdesc, attnum - 1);
+
+        if (attr->attisdropped)
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_COLUMN),
+                    errmsg("attribute %d of type %s has been dropped",
+                        attnum, format_type_be(slot_tupdesc->tdtypeid))));
+
+        if (vartype != attr->atttypid)
+            ereport(ERROR,
+                (errcode(ERRCODE_DATATYPE_MISMATCH),
+                    errmsg("attribute %d of type %s has wrong type",
+                        attnum, format_type_be(slot_tupdesc->tdtypeid)),
+                    errdetail("Table has type %s, but query expects %s.",
+                        format_type_be(attr->atttypid),
+                            format_type_be(vartype))));
+    }
 }

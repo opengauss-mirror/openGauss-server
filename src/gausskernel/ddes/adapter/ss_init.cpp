@@ -41,6 +41,7 @@
 
 #define FIXED_NUM_OF_INST_IP_PORT 3
 #define BYTES_PER_KB 1024
+#define NON_PROC_NUM 4
 
 
 const int MAX_CPU_STR_LEN = 5;
@@ -65,6 +66,10 @@ static void scanURL(dms_profile_t* profile, char* ipportstr, int index)
             errmsg("invalid ip string: %s", ipstr)));
     }
     profile->inst_net_addr[index].port = (uint16)pg_strtoint32(portstr);
+
+    ret = strcpy_s(g_instance.dms_cxt.dmsInstAddr[index], DMS_MAX_IP_LEN, ipstr);
+    securec_check(ret, "", "");
+
     profile->inst_map |= ((uint64)1 << index);
 
     return;
@@ -391,6 +396,13 @@ void DMSInit()
         ereport(FATAL, (errmsg("failed to register dms memcxt callback!")));
     }
 
+    uint32 TotalProcs = (uint32)(GLOBAL_ALL_PROCS);
+    uint32 MesMaxRooms = dms_get_mes_max_watting_rooms();
+    if (TotalProcs + NON_PROC_NUM >= MesMaxRooms) {
+        ereport(FATAL, (errmsg("The thread ID range is too large when dms enable. Please set the related GUC "
+                               "parameters to a smaller value.")));
+    }
+
     dms_profile_t profile;
     errno_t rc = memset_s(&profile, sizeof(dms_profile_t), 0, sizeof(dms_profile_t));
     securec_check(rc, "\0", "\0");
@@ -409,6 +421,19 @@ void DMSInit()
             errmsg("failed to initialize dms, errno: %d, reason: %s", err, msg)));
     }
     g_instance.dms_cxt.dmsInited = true;
+
+    for (int i = profile.inst_cnt; i < MAX_REPLNODE_NUM; i++) {
+        rc = memset_s(g_instance.dms_cxt.dmsInstAddr[i], IP_LEN, '\0', IP_LEN);
+        securec_check(rc, "", "");
+    }
+    rc = memset_s(g_instance.dms_cxt.conninfo, MAXCONNINFO, '\0', MAXCONNINFO);
+    securec_check(rc, "", "");
+
+#ifdef USE_ASSERT_CHECKING
+    if (!ENABLE_REFORM && SS_NORMAL_STANDBY) {
+        SSStandbySetLibpqswConninfo();
+    }
+#endif
 }
 
 void GetSSLogPath(char *sslog_path)
@@ -471,6 +496,7 @@ void DMSUninit()
     dms_uninit();
 }
 
+// order: DMS reform finish -> CBReformDoneNotify finish -> startup exit (if has)
 int32 DMSWaitReform()
 {
     uint32 has_offline; /* currently not used in openGauss */
@@ -513,3 +539,15 @@ bool DMSWaitInitStartup()
 
     return true;
 }
+
+void StartupWaitReform()
+{
+    while (g_instance.dms_cxt.SSReformInfo.in_reform) {
+        if (dms_reform_failed() || dms_reform_last_failed()) {
+            ereport(LOG, (errmsg("[SS reform] reform failed, startup no need wait.")));
+            break;
+        }
+        pg_usleep(5000L);
+    }
+}
+

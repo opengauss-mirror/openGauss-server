@@ -56,6 +56,9 @@ static void btvacuumpage(BTVacState *vstate, BlockNumber blkno, BlockNumber orig
 
 static IndexTuple btgetindextuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset);
 
+static BTVacuumPosting btree_vacuum_posting(BTVacState *vac_state, IndexTuple posting, OffsetNumber updated_offset,
+                                            int *num_remaining, Oid part_oid, int2 block_id);
+
 IndexAmRoutine *get_index_amroutine_for_nbtree()
 {
     IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
@@ -206,7 +209,7 @@ void btbuildempty_internal(Relation index)
     /* Ensure rd_smgr is open (could have been closed by relcache flush!) */
     RelationOpenSmgr(index);
 
-    _bt_initmetapage(metapage, P_NONE, 0);
+    _bt_initmetapage(metapage, P_NONE, 0, btree_allequalimage(index, false), IsSystemRelation(index));
 
     /*
      * Write the page and log it.  It might seem that an immediate sync
@@ -897,7 +900,7 @@ static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, In
         _bt_checkbuffer_valid(rel, buf);
         LockBufferForCleanup(buf);
         _bt_checkpage(rel, buf);
-        _bt_delitems_vacuum(rel, buf, NULL, 0, vstate.lastBlockVacuumed);
+        _bt_delitems_vacuum(rel, buf, NULL, 0, NULL, 0,vstate.lastBlockVacuumed);
         _bt_relbuf(rel, buf);
     }
 
@@ -980,8 +983,12 @@ restart:
         /* Half-dead, try to delete */
         delete_now = true;
     } else if (P_ISLEAF(opaque)) {
-        OffsetNumber deletable[MaxOffsetNumber];
-        int ndeletable;
+        OffsetNumber deletable[MaxIndexTuplesPerPage];
+        BTVacuumPosting updatable[MaxIndexTuplesPerPage];
+        int num_deletable = 0;
+        int num_updatable = 0;
+        int num_dead_heap_tids = 0;
+        int num_live_heap_tids = 0;
         OffsetNumber offnum, minoff, maxoff;
 
         /*
@@ -1017,7 +1024,6 @@ restart:
          * Scan over all items to see which ones need deleted according to the
          * callback function.
          */
-        ndeletable = 0;
         minoff = P_FIRSTDATAKEY(opaque);
         maxoff = PageGetMaxOffsetNumber(page);
         if (callback) {
@@ -1054,17 +1060,37 @@ restart:
                 if (RelationIsCrossBucketIndex(rel)) {
                     bktId = index_getattr_bucketid(rel, itup);
                 }
-                if (callback(htup, callback_state, partOid, bktId)) {
-                    deletable[ndeletable++] = offnum;
+                Assert(!btree_tuple_is_pivot(itup));
+                if (!btree_tuple_is_posting(itup)) {
+                    if (callback(htup, callback_state, partOid, bktId)) {
+                        deletable[num_deletable++] = offnum;
+                        num_dead_heap_tids++;
+                    } else {
+                        num_live_heap_tids++;
+                    }
+                } else {
+                    Assert(t_thrd.proc->workingVersionNum >= NBTREE_DEDUPLICATION_VERSION_NUM);
+                    int num_remaining;
+                    BTVacuumPosting vac_posting = btree_vacuum_posting(vstate, itup, offnum, &num_remaining, partOid, bktId);
+
+                    if (vac_posting == NULL) {
+                        Assert(num_remaining == btree_tuple_get_nposting(itup));
+                    } else if (num_remaining > 0) {
+                        Assert(num_remaining < btree_tuple_get_nposting(itup));
+                        updatable[num_updatable++] = vac_posting;
+                        num_dead_heap_tids += btree_tuple_get_nposting(itup) - num_remaining;
+                    } else {
+                        Assert(num_remaining == 0);
+                        deletable[num_deletable++] = offnum;
+                        num_dead_heap_tids += btree_tuple_get_nposting(itup);
+                        pfree(vac_posting);
+                    }
+                    num_live_heap_tids += num_remaining;
                 }
             }
         }
 
-        /*
-         * Apply any needed deletes.  We issue just one _bt_delitems_vacuum()
-         * call per page, so as to minimize WAL traffic.
-         */
-        if (ndeletable > 0) {
+        if (num_deletable > 0 || num_updatable > 0) {
             /*
              * Notice that the issued XLOG_BTREE_VACUUM WAL record includes an
              * instruction to the replay code to get cleanup lock on all pages
@@ -1076,7 +1102,10 @@ restart:
              * doesn't seem worth the amount of bookkeeping it'd take to avoid
              * that.
              */
-            _bt_delitems_vacuum(rel, buf, deletable, ndeletable, vstate->lastBlockVacuumed);
+            Assert(num_dead_heap_tids >= Max(num_deletable, 1));
+            Assert(num_deletable > 0 || updatable > 0);
+            _bt_delitems_vacuum(rel, buf, deletable, num_deletable, updatable, num_updatable,
+                                vstate->lastBlockVacuumed);
 
             /*
              * Remember highest leaf page number we've issued a
@@ -1086,10 +1115,14 @@ restart:
                 vstate->lastBlockVacuumed = blkno;
             }
 
-            stats->tuples_removed += ndeletable;
+            stats->tuples_removed += num_dead_heap_tids;
             /* must recompute maxoff */
             maxoff = PageGetMaxOffsetNumber(page);
+
+			for (int i = 0; i < num_updatable; i++)
+				pfree(updatable[i]);
         } else {
+            Assert(num_dead_heap_tids == 0);
             /*
              * If the page has been split during this vacuum cycle, it seems
              * worth expending a write to clear btpo_cycleid even if we don't
@@ -1112,9 +1145,13 @@ restart:
          */
         if (minoff > maxoff) {
             delete_now = (blkno == orig_blkno);
+        } else if (callback) {
+            stats->num_index_tuples += num_live_heap_tids;
         } else {
             stats->num_index_tuples += maxoff - minoff + 1;
         }
+
+        Assert(!delete_now || num_live_heap_tids == 0);
     }
 
     if (delete_now) {
@@ -1188,11 +1225,13 @@ IndexBuildResult *btmerge_internal(Relation dstIdxRel, List *srcIdxRelScans, Lis
     BTOrderedIndexListElement *ele = NULL;
     TupleDesc tupdes = RelationGetDescr(dstIdxRel);
     int keysz = IndexRelationGetNumberOfKeyAttributes(dstIdxRel);
-    ScanKey indexScanKey = _bt_mkscankey_nodata(dstIdxRel);
+    BTScanInsert itup_key = _bt_mkscankey(dstIdxRel, NULL);
     BTWriteState wstate;
     BTPageState *state = NULL;
     IndexBuildResult *result = NULL;
     double indextuples = 0;
+
+    itup_key->allequalimage = btree_allequalimage(dstIdxRel, true);
 
     /*
      * 2 steps:
@@ -1209,11 +1248,13 @@ IndexBuildResult *btmerge_internal(Relation dstIdxRel, List *srcIdxRelScans, Lis
         offset_itup = (BlockNumber)lfirst_int(cell2);
 
         load_itup = btgetindextuple(srcIdxRelScan, dir, offset_itup);
-        orderedTupleList = insert_ordered_index(orderedTupleList, tupdes, indexScanKey, keysz, load_itup, offset_itup,
+        orderedTupleList = insert_ordered_index(orderedTupleList, tupdes, itup_key->scankeys, keysz, load_itup, offset_itup,
                                                 srcIdxRelScan);
     }
 
+    wstate.heap = NULL;
     wstate.index = dstIdxRel;
+    wstate.inskey = itup_key;
     /*
      * We need to log index creation in WAL iff WAL archiving/streaming is
      * enabled UNLESS the index isn't WAL-logged anyway.
@@ -1242,7 +1283,7 @@ IndexBuildResult *btmerge_internal(Relation dstIdxRel, List *srcIdxRelScans, Lis
             }
 
             // add index tuple load_itup, remove it from orderedTupleList
-            _bt_buildadd(&wstate, state, load_itup);
+            _bt_buildadd(&wstate, state, load_itup, 0);
             indextuples += 1;
             orderedTupleList = list_delete_first(orderedTupleList);
             pfree(ele);
@@ -1250,16 +1291,16 @@ IndexBuildResult *btmerge_internal(Relation dstIdxRel, List *srcIdxRelScans, Lis
             // load next index tuple
             load_itup = btgetindextuple(srcIdxRelScan, dir, offset_itup);
             // insert load index tuple into orderedTupleList
-            orderedTupleList = insert_ordered_index(orderedTupleList, tupdes, indexScanKey, keysz, load_itup,
+            orderedTupleList = insert_ordered_index(orderedTupleList, tupdes, itup_key->scankeys, keysz, load_itup,
                                                     offset_itup, srcIdxRelScan);
         }
     };
 
-    // clean up
-    _bt_freeskey(indexScanKey);
-
     /* Close down final pages and write the metapage */
     _bt_uppershutdown(&wstate, state);
+
+    // clean up
+    pfree(itup_key);
 
     /*
      * If the index is WAL-logged, we must fsync it down to disk before it's
@@ -1321,4 +1362,32 @@ static IndexTuple btgetindextuple(IndexScanDesc scan, ScanDirection dir, BlockNu
         ItemPointerSetBlockNumber(&(itup->t_tid), dest_blkno);
     }
     return scan->xs_itup;
+}
+
+static BTVacuumPosting btree_vacuum_posting(BTVacState *vac_state, IndexTuple posting, OffsetNumber updated_offset,
+                                            int *num_remaining, Oid part_oid, int2 block_id)
+{
+    int num_live = 0;
+    int num_item = btree_tuple_get_nposting(posting);
+    ItemPointer items = btree_tuple_get_posting(posting);
+    BTVacuumPosting vacposting = NULL;
+
+    for (int i = 0; i < num_item; i++) {
+        if (!vac_state->callback(items + i, vac_state->callback_state, part_oid, block_id)) {
+            num_live++;
+        } else if (vacposting == NULL) {
+            vacposting = (BTVacuumPosting)palloc(offsetof(BTVacuumPostingData, delete_tids) + num_item * sizeof(uint16));
+
+            vacposting->itup = posting;
+            vacposting->updated_offset = updated_offset;
+            vacposting->num_deleted_tids = 0;
+            vacposting->delete_tids[vacposting->num_deleted_tids++] = i;
+        } else {
+            /* Second or subsequent dead table TID */
+            vacposting->delete_tids[vacposting->num_deleted_tids++] = i;
+        }
+    }
+
+    *num_remaining = num_live;
+    return vacposting;
 }

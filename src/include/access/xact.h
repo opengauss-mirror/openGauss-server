@@ -560,5 +560,7 @@ extern void XactCleanExceptionSubTransaction(SubTransactionId head);
 extern char* GetCurrentTransactionName();
 extern List* GetTransactionList(List *head);
 extern void BeginTxnForAutoCommitOff();
+extern void SetTxnInfoForSSLibpqsw(TransactionId xid, CommandId cid);
+extern void ClearTxnInfoForSSLibpqsw();
 extern bool IsTransactionInProgressState();
 #endif /* XACT_H */

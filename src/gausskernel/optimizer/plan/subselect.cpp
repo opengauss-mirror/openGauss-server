@@ -3302,6 +3302,7 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
         case T_Hash:
         case T_Material:
         case T_Sort:
+        case T_SortGroup:
         case T_Unique:
         case T_SetOp:
         case T_Group:

@@ -467,10 +467,11 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->sql_ignore_strategy_val = 0;
 
     utils_cxt->int4output_buffer = (char*)palloc0(32);
-    utils_cxt->int8output_buffer = (char*)palloc0(64);
+    utils_cxt->int8output_buffer = (char*)palloc0(128);
     utils_cxt->int16output_buffer = (char*)palloc0(128);
     utils_cxt->varcharoutput_buffer = (char*)palloc0(256);
     utils_cxt->numericoutput_buffer = (char*)palloc0(64);
+    utils_cxt->dateoutput_buffer = (char*)palloc0(MAXDATELEN + 1);
 
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
 
@@ -504,6 +505,8 @@ static void knl_u_mb_init(knl_u_mb_context* mb_cxt)
     mb_cxt->ToClientConvProc = NULL;
     mb_cxt->ClientEncoding = &pg_enc2name_tbl[PG_SQL_ASCII];
     mb_cxt->DatabaseEncoding = &pg_enc2name_tbl[PG_SQL_ASCII];
+    mb_cxt->character_set_connection = &pg_enc2name_tbl[PG_SQL_ASCII];
+    mb_cxt->collation_connection = InvalidOid;
     mb_cxt->PlatformEncoding = NULL;
     mb_cxt->backend_startup_complete = false;
     mb_cxt->pending_client_encoding = PG_SQL_ASCII;
@@ -611,6 +614,7 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->gsqlRemainCopyNum = 0;
     proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;
     proc_cxt->registerExclusiveHandlerdone = false;
+    proc_cxt->check_auth = false;
 }
 
 static void knl_u_time_init(knl_u_time_context* time_cxt)
@@ -1091,6 +1095,13 @@ static void knl_u_dolphin_errdata_init(knl_u_dolphin_errdata_context *dolphin_er
     dolphin_errdata_context->max_error_count = 64;
 }
 
+static void knl_u_opfusion_reuse_init(knl_u_opfusion_reuse_context* opfusion_reuse_ctx) {
+
+    Assert(opfusion_reuse_ctx != NULL);
+
+    opfusion_reuse_ctx->opfusionObj = NULL;
+}
+
 static void knl_u_user_login_init(knl_u_user_login_context* user_login_cxt)
 {
     Assert(user_login_cxt != NULL);
@@ -1476,6 +1487,8 @@ void knl_session_init(knl_session_context* sess_cxt)
     KnlURepOriginInit(&sess_cxt->reporigin_cxt);
 
     knl_u_clientConnTime_init(&sess_cxt->clientConnTime_cxt);
+
+    knl_u_opfusion_reuse_init(&sess_cxt->opfusion_reuse_ctx);
 
     MemoryContextSeal(sess_cxt->top_mem_cxt);
 }

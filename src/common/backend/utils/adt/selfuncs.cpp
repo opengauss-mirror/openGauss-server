@@ -1078,6 +1078,15 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
     Oid opera = PG_GETARG_OID(1);
     List* args = (List*)PG_GETARG_POINTER(2);
     int varRelid = PG_GETARG_INT32(3);
+    float8 selec;
+
+    selec = scalarltsel_internal(root, opera, args, varRelid);
+
+    PG_RETURN_FLOAT8(selec);
+}
+
+float8 scalarltsel_internal(PlannerInfo* root, Oid opera, List* args, int varRelid)
+{
     VariableStatData vardata;
     vardata.statsTuple = NULL;
     vardata.freefunc = NULL;
@@ -1095,14 +1104,14 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
      * then punt and return a default estimate.
      */
     if (!get_restriction_variable(root, args, varRelid, &vardata, &other, &varonleft))
-        PG_RETURN_FLOAT8(DEFAULT_INEQ_SEL);
+        return DEFAULT_INEQ_SEL;
 
     /*
      * Can't do anything useful if the something is not a constant, either.
      */
     if (!IsA(other, Const)) {
         ReleaseVariableStats(vardata);
-        PG_RETURN_FLOAT8(DEFAULT_INEQ_SEL);
+        return DEFAULT_INEQ_SEL;
     }
 
     /*
@@ -1111,7 +1120,7 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
      */
     if (((Const*)other)->constisnull) {
         ReleaseVariableStats(vardata);
-        PG_RETURN_FLOAT8(0.0);
+        return 0.0;
     }
     constval = ((Const*)other)->constvalue;
     consttype = ((Const*)other)->consttype;
@@ -1128,7 +1137,7 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
         if (!opera) {
             /* Use default selectivity (should we raise an error instead?) */
             ReleaseVariableStats(vardata);
-            PG_RETURN_FLOAT8(DEFAULT_INEQ_SEL);
+            return DEFAULT_INEQ_SEL;
         }
         isgt = true;
     }
@@ -1137,7 +1146,7 @@ Datum scalarltsel(PG_FUNCTION_ARGS)
 
     ReleaseVariableStats(vardata);
 
-    PG_RETURN_FLOAT8((float8)selec);
+    return (float8)selec;
 }
 
 /*
@@ -4031,6 +4040,8 @@ static double convert_numeric_to_scalar(Datum value, Oid typid)
     switch (typid) {
         case BOOLOID:
             return (double)DatumGetBool(value);
+        case INT1OID:
+            return (double)DatumGetInt8(value);
         case INT2OID:
             return (double)DatumGetInt16(value);
         case INT4OID:
@@ -5733,7 +5744,7 @@ static Pattern_Prefix_Status like_fixed_prefix(
         *prefix_const = string_to_const(match, typeId);
     else
         *prefix_const = string_to_bytea_const(match, match_pos);
-
+    (*prefix_const)->constcollid = patt_const->constcollid;
     if (rest_selec != NULL)
         *rest_selec = like_selectivity(&patt[pos], pattlen - pos, case_insensitive);
 
@@ -5784,6 +5795,7 @@ static Pattern_Prefix_Status regex_fixed_prefix(
     }
 
     *prefix_const = string_to_const(prefix, typeId);
+    (*prefix_const)->constcollid = patt_const->constcollid;
 
     if (rest_selec != NULL) {
         if (exact) {
@@ -5805,6 +5817,38 @@ static Pattern_Prefix_Status regex_fixed_prefix(
         return Pattern_Prefix_Partial;
 }
 
+static Pattern_Prefix_Status like_fixed_prefix_with_encoding(
+    Const* patt_const, bool case_insensitive, Oid collation, Const** prefix_const, Selectivity* rest_selec)
+{
+    Pattern_Prefix_Status result;
+    int tmp_encoding = get_valid_charset_by_collation(patt_const->constcollid);
+    int db_encoding = GetDatabaseEncoding();
+    if (db_encoding == tmp_encoding) {
+        return like_fixed_prefix(patt_const, case_insensitive, collation, prefix_const, rest_selec);
+    }
+
+    DB_ENCODING_SWITCH_TO(tmp_encoding);
+    result = like_fixed_prefix(patt_const, case_insensitive, collation, prefix_const, rest_selec);
+    DB_ENCODING_SWITCH_BACK(db_encoding);
+    return result;
+}
+
+static Pattern_Prefix_Status regex_fixed_prefix_with_encoding(
+    Const* patt_const, bool case_insensitive, Oid collation, Const** prefix_const, Selectivity* rest_selec)
+{
+    Pattern_Prefix_Status result;
+    int tmp_encoding = get_valid_charset_by_collation(patt_const->constcollid);
+    int db_encoding = GetDatabaseEncoding();
+    if (db_encoding == tmp_encoding) {
+        return regex_fixed_prefix(patt_const, case_insensitive, collation, prefix_const, rest_selec);
+    }
+
+    DB_ENCODING_SWITCH_TO(tmp_encoding);
+    result = regex_fixed_prefix(patt_const, case_insensitive, collation, prefix_const, rest_selec);
+    DB_ENCODING_SWITCH_BACK(db_encoding);
+    return result;
+}
+
 Pattern_Prefix_Status pattern_fixed_prefix(
     Const* patt, Pattern_Type ptype, Oid collation, Const** prefix, Selectivity* rest_selec)
 {
@@ -5812,16 +5856,16 @@ Pattern_Prefix_Status pattern_fixed_prefix(
 
     switch (ptype) {
         case Pattern_Type_Like:
-            result = like_fixed_prefix(patt, false, collation, prefix, rest_selec);
+            result = like_fixed_prefix_with_encoding(patt, false, collation, prefix, rest_selec);
             break;
         case Pattern_Type_Like_IC:
-            result = like_fixed_prefix(patt, true, collation, prefix, rest_selec);
+            result = like_fixed_prefix_with_encoding(patt, true, collation, prefix, rest_selec);
             break;
         case Pattern_Type_Regex:
-            result = regex_fixed_prefix(patt, false, collation, prefix, rest_selec);
+            result = regex_fixed_prefix_with_encoding(patt, false, collation, prefix, rest_selec);
             break;
         case Pattern_Type_Regex_IC:
-            result = regex_fixed_prefix(patt, true, collation, prefix, rest_selec);
+            result = regex_fixed_prefix_with_encoding(patt, true, collation, prefix, rest_selec);
             break;
         default:
             ereport(ERROR,
@@ -5830,6 +5874,7 @@ Pattern_Prefix_Status pattern_fixed_prefix(
             result = Pattern_Prefix_None; /* keep compiler quiet */
             break;
     }
+
     return result;
 }
 
@@ -6626,6 +6671,20 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
     Cost* indexTotalCost = (Cost*)PG_GETARG_POINTER(4);
     Selectivity* indexSelectivity = (Selectivity*)PG_GETARG_POINTER(5);
     double* indexCorrelation = (double*)PG_GETARG_POINTER(6);
+
+    btcostestimate_internal(root, path, loop_count, indexStartupCost, indexTotalCost, indexSelectivity, indexCorrelation);
+
+    PG_RETURN_VOID();
+}
+
+Datum ubtcostestimate(PG_FUNCTION_ARGS)
+{
+    return btcostestimate(fcinfo);
+}
+
+void btcostestimate_internal(PlannerInfo *root, IndexPath *path, double loop_count, Cost *indexStartupCost,
+                           Cost *indexTotalCost, Selectivity *indexSelectivity, double *indexCorrelation)
+{
     IndexOptInfo* index = path->indexinfo;
     Oid relid;
     AttrNumber colnum;
@@ -6894,13 +6953,6 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
     }
 
     ReleaseVariableStats(vardata);
-
-    PG_RETURN_VOID();
-}
-
-Datum ubtcostestimate(PG_FUNCTION_ARGS)
-{
-    return btcostestimate(fcinfo);
 }
 
 Datum hashcostestimate(PG_FUNCTION_ARGS)

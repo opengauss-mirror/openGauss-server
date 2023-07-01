@@ -341,6 +341,7 @@ typedef enum CompressTypeOption {
 typedef struct StdRdOptions {
     int32 vl_len_;           /* varlena header (do not touch directly!) */
     int fillfactor;          /* page fill factor in percent (0..100) */
+    bool deduplication;
     AutoVacOpts autovacuum;  /* autovacuum-related options */
     bool security_barrier;   /* for views */
     bool enable_rowsecurity; /* enable row level security or not */
@@ -408,6 +409,7 @@ typedef struct StdRdOptions {
     bool on_commit_delete_rows; /* global temp table */
     PageCompressOpts compress; /* page compress related reloptions. */
     int check_option_offset; /* for views */
+    int view_security_option_offset; /* for views */
     Oid collate; /* table's default collation in b format. */
 } StdRdOptions;
 
@@ -456,7 +458,36 @@ typedef struct StdRdOptions {
 #define RelationGetTargetPageFreeSpacePrune(relation, defaultff) \
     (BLCKSZ * (100 - 0.9 * RelationGetFillFactor(relation, defaultff)) / 100)
 
+/*
+ * RelationHasViewSecurityOption
+ *		Returns true if the relation is a view defined with sql security
+ *		or the cascaded check option.
+ */
+#define RelationHasViewSecurityOption(relation)                                  \
+    ((relation)->rd_options &&                                            \
+     ((StdRdOptions *) (relation)->rd_options)->view_security_option_offset != 0)
 
+/*
+ * RelationHasViewSecurityDefinerOption
+ *		Returns true if the relation is a view defined sql security definer
+ *		option.
+ */
+#define RelationHasViewSecurityDefinerOption(relation)                              \
+    (RelationHasViewSecurityOption(relation) &&                                     \
+     strcmp((char *) (relation)->rd_options +                                       \
+            ((StdRdOptions *) (relation)->rd_options)->view_security_option_offset, \
+            "definer") == 0)
+
+/*
+ * RelationHasViewSecurityInvokerOption
+ *		Returns true if the relation is a view defined with sql security invoker
+ *		option.
+ */
+#define RelationHasViewSecurityInvokerOption(relation)                              \
+    (RelationHasViewSecurityOption(relation) &&                                     \
+     strcmp((char *) (relation)->rd_options +                                       \
+            ((StdRdOptions *) (relation)->rd_options)->view_security_option_offset, \
+            "invoker") == 0)
 /*
  * RelationIsSecurityView
  *		Returns whether the relation is security view, or not

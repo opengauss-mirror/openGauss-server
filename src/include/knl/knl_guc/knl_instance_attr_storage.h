@@ -100,6 +100,8 @@ typedef struct knl_instance_attr_dms {
     bool enable_catalog_centralized;
     bool enable_dss_aio;
     bool enable_verify_page;
+    bool enable_ondemand_recovery;
+    int ondemand_recovery_mem_size;
     int instance_id;
     int recv_msg_pool_size;
     char* interconnect_url;
@@ -207,6 +209,8 @@ typedef struct knl_instance_attr_storage {
 #ifndef ENABLE_MULTIPLE_NODES
     bool enable_save_confirmed_lsn;
 #endif
+    bool enable_huge_pages;
+    int huge_page_size;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

@@ -31,6 +31,7 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "lib/string.h"
 
 /*
  * CollationCreate
@@ -164,4 +165,69 @@ void RemoveCollationById(Oid collationOid)
     systable_endscan(scandesc);
 
     heap_close(rel, RowExclusiveLock);
+}
+
+int get_charset_by_collation(Oid coll_oid)
+{
+    HeapTuple tp = NULL;
+    int result = PG_INVALID_ENCODING;
+
+    /* The collation OID in B format has a rule, through which we can quickly get the charset from the OID. */
+    if (COLLATION_IN_B_FORMAT(coll_oid)) {
+        return FAST_GET_CHARSET_BY_COLL(coll_oid);
+    }
+    
+    if (COLLATION_HAS_INVALID_ENCODING(coll_oid)) {
+        return result;
+    }
+
+    tp = SearchSysCache1(COLLOID, ObjectIdGetDatum(coll_oid));
+    if (!HeapTupleIsValid(tp)) {
+        return result;
+    }
+    Form_pg_collation coll_tup = (Form_pg_collation)GETSTRUCT(tp);
+    result = coll_tup->collencoding;
+    ReleaseSysCache(tp);
+    return result;
+}
+
+int get_valid_charset_by_collation(Oid coll_oid)
+{
+    if (!DB_IS_CMPT(B_FORMAT)) {
+        return GetDatabaseEncoding();
+    }
+    int charset = get_charset_by_collation(coll_oid);
+    if (charset == PG_INVALID_ENCODING) {
+        return GetDatabaseEncoding();
+    }
+    return charset;
+}
+
+Oid get_default_collation_by_charset(int charset, bool report_error)
+{
+    Oid coll_oid = InvalidOid;
+    Relation rel;
+    ScanKeyData key[2];
+    SysScanDesc scan = NULL;
+    HeapTuple tup = NULL;
+
+    rel = heap_open(CollationRelationId, AccessShareLock);
+    ScanKeyInit(&key[0], Anum_pg_collation_collencoding, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(charset));
+    ScanKeyInit(&key[1], Anum_pg_collation_collisdef, BTEqualStrategyNumber, F_BOOLEQ, BoolGetDatum(true));
+
+    scan = systable_beginscan(rel, CollationEncDefIndexId, true, NULL, 2, key);
+
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        coll_oid = HeapTupleGetOid(tup);
+        break;
+    }
+    systable_endscan(scan);
+    heap_close(rel, AccessShareLock);
+
+    if (coll_oid == InvalidOid && report_error) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("default collation for encoding \"%s\" does not exist",
+                    pg_encoding_to_char(charset))));
+    }
+    return coll_oid;
 }

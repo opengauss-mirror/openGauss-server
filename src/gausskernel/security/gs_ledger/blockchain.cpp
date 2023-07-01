@@ -300,6 +300,8 @@ void opfusion_ledger_ExecutorEnd(FusionType fusiontype, Oid relid, const char *q
         case INSERT_FUSION:
         case UPDATE_FUSION:
         case DELETE_FUSION:
+        case INSERT_SUB_FUSION:
+        case DELETE_SUB_FUSION:
             if (is_ledger_usertable(relid)) {
                 ledger_gchain_append(relid, query, relhash);
             }

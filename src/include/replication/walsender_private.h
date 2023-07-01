@@ -156,6 +156,10 @@ typedef struct WalSnd {
     TimestampTz lastRequestTimestamp;
     /* The idx of replication slot */
     int slot_idx;
+    TimestampTz lastReceiveChangeTime;
+    TimestampTz lastWriteChangeTime;
+    TimestampTz lastFlushChangeTime;
+    TimestampTz lastApplyChangeTime;
 } WalSnd;
 
 extern THR_LOCAL WalSnd* MyWalSnd;

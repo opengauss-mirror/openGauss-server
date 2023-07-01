@@ -34,21 +34,21 @@ function test_1()
   echo "begin to switch to standby1"
   #switchover
   switchover_to_standby
-  echo "end of swtich to standby1"
+  echo "end of switch to standby1"
 
   sleep 10
 
   echo "begin to switch to standby2"
   #switchover
   switchover_to_standby2
-  echo "end of swtich to standby2"
+  echo "end of switch to standby2"
 
   sleep 10
 
   echo "begin to switch to standby3"
   #switchover
   switchover_to_standby3
-  echo "end of swtich to standby3"
+  echo "end of switch to standby3"
 
   #echo "begin to switch to standby4"
   #switchover

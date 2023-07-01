@@ -59,6 +59,7 @@ extern ObjectAddress AlterDatabaseOwner(const char* dbname, Oid newOwnerId);
 extern void AlterDatabasePermissionCheck(Oid dboid, const char* dbname);
 extern Oid get_database_oid(const char* dbname, bool missingok);
 extern char* get_database_name(Oid dbid);
+extern int64 pg_cal_database_size_oid(Oid dbOid);
 extern char* get_and_check_db_name(Oid dbid, bool is_ereport = false);
 extern bool have_createdb_privilege(void);
 

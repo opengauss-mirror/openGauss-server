@@ -185,7 +185,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
 
     { DispatchHeap2Record, RmgrRecordInfoValid, RM_HEAP2_ID, XLOG_HEAP2_FREEZE, XLOG_HEAP2_LOGICAL_NEWPAGE },
     { DispatchHeapRecord, RmgrRecordInfoValid, RM_HEAP_ID, XLOG_HEAP_INSERT, XLOG_HEAP_INPLACE },
-    { DispatchBtreeRecord, RmgrRecordInfoValid, RM_BTREE_ID, XLOG_BTREE_INSERT_LEAF, XLOG_BTREE_REUSE_PAGE},
+    { DispatchBtreeRecord, RmgrRecordInfoValid, RM_BTREE_ID, XLOG_BTREE_INSERT_LEAF, XLOG_BTREE_DEDUP },
     { DispatchHashRecord, RmgrRecordInfoValid, RM_HASH_ID, XLOG_HASH_INIT_META_PAGE, XLOG_HASH_VACUUM_ONE_PAGE },
     { DispatchGinRecord, RmgrRecordInfoValid, RM_GIN_ID, XLOG_GIN_CREATE_INDEX, XLOG_GIN_VACUUM_DATA_LEAF_PAGE },
     /* XLOG_GIST_PAGE_DELETE is not used and info isn't continus  */
@@ -1974,7 +1974,7 @@ static void **CollectStatesFromWorkers(GetStateFunc getStateFunc)
         return NULL;
 }
 
-void redo_get_wroker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum)
+void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum)
 {
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
     knl_parallel_redo_state state = g_instance.comm_cxt.predo_cxt.state;
@@ -2017,7 +2017,7 @@ void redo_get_wroker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, 
     Assert(*realNum == cur_pos);
 }
 
-void redo_get_wroker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
+void redo_get_worker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
 {
     PageRedoWorker *redoWorker = NULL;
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));

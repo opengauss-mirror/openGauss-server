@@ -177,7 +177,10 @@ static void CSNLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId *
                                 TransactionId topxid)
 {
     if (SS_STANDBY_MODE) {
+        int tempdest = t_thrd.postgres_cxt.whereToSendOutput;
+        t_thrd.postgres_cxt.whereToSendOutput = DestNone;
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't set csnlog status")));
+        t_thrd.postgres_cxt.whereToSendOutput = tempdest;
         return;
     }
 

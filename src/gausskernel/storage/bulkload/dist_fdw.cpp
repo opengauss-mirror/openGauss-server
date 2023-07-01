@@ -1484,6 +1484,8 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
     ExprState **defexprs;
     MemoryContext oldcontext;
     bool volatile_defexprs = false;
+    FmgrInfo *in_convert_funcs = NULL;
+    int *attr_encodings = NULL;
 
     DistBegin((CopyState)importstate, true, rel, NULL, NULL, attnamelist, options);
     oldcontext = MemoryContextSwitchTo(importstate->copycontext);
@@ -1524,6 +1526,8 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
     accept_empty_str = (bool *)palloc(num_phys_attrs * sizeof(bool));
     defmap = (int *)palloc(num_phys_attrs * sizeof(int));
     defexprs = (ExprState **)palloc(num_phys_attrs * sizeof(ExprState *));
+    attr_encodings = (int*)palloc(num_phys_attrs * sizeof(int));
+    in_convert_funcs = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
 
 #ifdef PGXC
     /* We don't currently allow COPY with non-shippable ROW triggers */
@@ -1536,6 +1540,7 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
 
     /* Output functions are required to convert default values to output form */
     importstate->out_functions = (FmgrInfo *)palloc(num_phys_attrs * sizeof(FmgrInfo));
+    importstate->out_convert_funcs = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
 #endif
 
     for (attnum = 1; attnum <= num_phys_attrs; attnum++) {
@@ -1550,7 +1555,9 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
         else
             getTypeInputInfo(attr[attnum - 1].atttypid, &in_func_oid, &typioparams[attnum - 1]);
         fmgr_info(in_func_oid, &in_functions[attnum - 1]);
-
+        attr_encodings[attnum - 1] = get_valid_charset_by_collation(attr[attnum - 1].attcollation);
+        construct_conversion_fmgr_info(
+            GetDatabaseEncoding(), attr_encodings[attnum - 1], (void*)&in_convert_funcs[attnum - 1]);
         /* Get default info if needed */
         if (!list_member_int(importstate->attnumlist, attnum)) {
             /* attribute is NOT to be copied from input */
@@ -1583,6 +1590,12 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
                         else
                             getTypeOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
                         fmgr_info(out_func_oid, &importstate->out_functions[attnum - 1]);
+                        /* set conversion functions */
+                        construct_conversion_fmgr_info(attr_encodings[attnum - 1], importstate->file_encoding,
+                            (void*)&importstate->out_convert_funcs[attnum - 1]);
+                        if (attr_encodings[attnum - 1] != importstate->file_encoding) {
+                            importstate->need_transcoding = true;
+                        }
                     }
                 } else {
 #endif /* PGXC */
@@ -1608,6 +1621,8 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
     importstate->defexprs = defexprs;
     importstate->volatile_defexprs = volatile_defexprs;
     importstate->num_defaults = num_defaults;
+    importstate->attr_encodings = attr_encodings;
+    importstate->in_convert_funcs = in_convert_funcs;
 
     importstate->filename = pstrdup(filename);
 

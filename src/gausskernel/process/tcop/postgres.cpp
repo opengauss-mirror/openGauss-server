@@ -1445,7 +1445,7 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
  * Check whether the query is insert multiple values query.
  * In the insert query, only one RTE_VALUES in the ratble is a multi-values query..
  */
-static bool is_insert_multiple_values_query_in_gtmfree(Query* query)
+__attribute__((unused)) static bool is_insert_multiple_values_query_in_gtmfree(Query* query)
 {
     if (query->commandType != CMD_INSERT || !g_instance.attr.attr_storage.enable_gtm_free) {
         return false;
@@ -2457,7 +2457,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         t_thrd.postgres_cxt.debug_query_string = sql_query_string;
     }
 
-    resetErrorDataArea(true);
+    resetErrorDataArea(true, false);
     instr_stmt_report_start_time();
 
     /*
@@ -2677,11 +2677,15 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
 
         }
 
-        if (libpqsw_redirect()) {
-            // quick transfer to master
-            libpqsw_trace("we find new transfer cmdtag:%s sql:%s", commandTag, query_string);
-            libpqsw_process_query_message(commandTag, NULL, query_string);
-            return;
+        if (libpqsw_get_redirect()) {
+            if (libpqsw_process_query_message(commandTag, NULL, query_string)) {
+                libpqsw_trace_q_msg(commandTag, query_string);
+                if (snapshot_set) {
+                    PopActiveSnapshot();
+                }
+                finish_xact_command();
+                return;
+            }
         }
 
         BeginCommand(commandTag, dest);
@@ -2755,7 +2759,15 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             querytree_list = pg_analyze_and_rewrite(parsetree, sql_query_string, NULL, 0);
 
         isCollect = checkCollectSimpleQuery(isCollect, querytree_list);
-
+        if (quickPlanner(querytree_list, parsetree, query_string, dest, completionTag)) {
+            CommandCounterIncrement();
+            if (snapshot_set != false)
+                PopActiveSnapshot();
+            finish_xact_command();
+            EndCommand(completionTag, dest);
+            MemoryContextReset(OptimizerContext);
+            break;
+        }
 #ifdef ENABLE_MOT
         /* check cross engine queries and transactions violation for MOT */
         StorageEngineType storageEngineType = SE_TYPE_UNSPECIFIED;
@@ -2788,11 +2800,18 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         }
 
         if (libpqsw_process_query_message(commandTag, querytree_list, query_string, query_string_len)) {
-            libpqsw_trace("we find new transfer cmdtag:%s, sql:%s", commandTag, query_string);
-            CommandCounterIncrement();
-            finish_xact_command();
-            MemoryContextReset(OptimizerContext);
-            return;
+            libpqsw_trace_q_msg(commandTag, query_string);
+            if (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag)) {
+                libpqsw_trace("libpq send sql at my side as well:%s", commandTag);
+            } else {
+                if (snapshot_set != false) {
+                    PopActiveSnapshot();
+                }
+                CommandCounterIncrement();
+                finish_xact_command();
+                MemoryContextReset(OptimizerContext);
+                return;
+            }
         }
 
         plantree_list = pg_plan_queries(querytree_list, 0, NULL);
@@ -3901,7 +3920,7 @@ pass_parsing:
                   need_redirect ? "transfer" : "select",
                   psrc->commandTag == NULL ? "" : psrc->commandTag,
                   psrc->query_string);
-    if (!need_redirect && t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
+    if ((!need_redirect || libpqsw_is_begin()) && t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
         pq_putemptymessage('1');
     }
 
@@ -5050,7 +5069,7 @@ static void exec_bind_message(StringInfo input_message)
     /*
      * Send BindComplete.
      */
-    if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
+    if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote && !libpqsw_is_end())
         pq_putemptymessage('2');
 
     /*
@@ -8017,7 +8036,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         Port* MyProcPort = u_sess->proc_cxt.MyProcPort;
         if (MyProcPort && MyProcPort->protocol_config->fn_send_cancel_key) {
-            MyProcPort->protocol_config->fn_send_cancel_key((int32)t_thrd.proc_cxt.MyPMChildSlot,
+            MyProcPort->protocol_config->fn_send_cancel_key((int32)t_thrd.proc->pgprocno,
                                                             (int32)t_thrd.proc_cxt.MyCancelKey);
         }
 
@@ -9406,7 +9425,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 statement_init_metric_context();
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
-                if (libpqsw_redirect() || libpqsw_get_set_command()) {
+                if ((libpqsw_redirect() || libpqsw_get_set_command()) && !libpqsw_only_localrun()) {
                     get_redirect_manager()->push_message(firstchar,
                         &input_message,
                         true,
@@ -9425,7 +9444,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     u_sess->exec_cxt.RetryController->CacheStmtName(stmt_name);
                 }
 
-            resetErrorDataArea(true);
+            resetErrorDataArea(true, false);
             } break;
 
             case 'B': /* bind */

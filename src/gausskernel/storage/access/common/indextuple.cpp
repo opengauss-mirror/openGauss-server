@@ -422,13 +422,64 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
  */
 void index_deform_tuple(IndexTuple tup, TupleDesc tuple_descriptor, Datum* values, bool* isnull)
 {
-    int i;
+    if (u_sess->attr.attr_common.enable_indexscan_optimization) {
+        int hasnulls = IndexTupleHasNulls(tup);
+        int natts = tuple_descriptor->natts;
+        int attnum;
+        char *tp;
+        int off;
+        bits8 *bp;
+        bool slow = false;
 
-    /* Assert to protect callers who allocate fixed-size arrays */
-    Assert(tuple_descriptor->natts <= INDEX_MAX_KEYS);
+        Assert(natts <= INDEX_MAX_KEYS);
 
-    for (i = 0; i < tuple_descriptor->natts; i++) {
-        values[i] = index_getattr(tup, i + 1, tuple_descriptor, &isnull[i]);
+        bp = (bits8 *)((char *)tup + sizeof(IndexTupleData));
+
+        tp = (char *)tup + IndexInfoFindDataOffset(tup->t_info);
+        off = 0;
+
+        for (attnum = 0; attnum < natts; attnum++) {
+            Form_pg_attribute thisatt = TupleDescAttr(tuple_descriptor, attnum);
+
+            if (hasnulls && att_isnull(attnum, bp)) {
+                values[attnum] = (Datum)0;
+                isnull[attnum] = true;
+                slow = true;
+                continue;
+            }
+
+            isnull[attnum] = false;
+
+            if (!slow && thisatt->attcacheoff >= 0)
+                off = thisatt->attcacheoff;
+            else if (thisatt->attlen == -1) {
+                if (!slow && (uint)off == att_align_nominal(off, thisatt->attalign))
+                    thisatt->attcacheoff = off;
+                else {
+                    off = att_align_pointer(off, thisatt->attalign, -1, tp + off);
+                    slow = true;
+                }
+            } else {
+                off = att_align_nominal(off, thisatt->attalign);
+
+                if (!slow)
+                    thisatt->attcacheoff = off;
+            }
+
+            values[attnum] = fetchatt(thisatt, tp + off);
+
+            off = att_addlength_pointer(off, thisatt->attlen, tp + off);
+
+            if (thisatt->attlen <= 0)
+                slow = true;
+        }
+    } else {
+        int i;
+        Assert(tuple_descriptor->natts <= INDEX_MAX_KEYS);
+
+        for (i = 0; i < tuple_descriptor->natts; i++) {
+            values[i] = index_getattr(tup, i + 1, tuple_descriptor, &isnull[i]);
+        }
     }
 }
 
@@ -475,10 +526,15 @@ IndexTuple index_truncate_tuple(TupleDesc tupleDescriptor, IndexTuple olditup, i
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
     IndexTuple newitup;
+    int indnatts = tupleDescriptor->natts;
 
-    Assert(tupleDescriptor->natts <= INDEX_MAX_KEYS);
+    Assert(indnatts <= INDEX_MAX_KEYS);
     Assert(new_indnatts > 0);
-    Assert(new_indnatts < tupleDescriptor->natts);
+    Assert(new_indnatts <= indnatts);
+
+    if (new_indnatts == indnatts) {
+        return CopyIndexTuple(olditup);
+    }
 
     index_deform_tuple(olditup, tupleDescriptor, values, isnull);
 

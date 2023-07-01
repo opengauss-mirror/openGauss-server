@@ -2499,6 +2499,10 @@ static void ProcessStandbyMessage(void)
             ProcessHadrReplyMessage();
             break;
 
+        case 'b':
+            SendPostmasterSignal(PMSIGNAL_SWITCHOVER_TIMEOUT);
+            break;
+
         default:
             ereport(COMMERROR,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%d\"", msgtype)));
@@ -2863,6 +2867,8 @@ static void ProcessStandbyReplyMessage(void)
     }
     /* use volatile pointer to prevent code rearrangement */
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    TimestampTz now = GetCurrentTimestamp();
+    XLogRecPtr localFlush = GetFlushRecPtr();
 
     /*
      * Update shared state for this WalSender process based on reply data from
@@ -2870,6 +2876,18 @@ static void ProcessStandbyReplyMessage(void)
      */
     {
         SpinLockAcquire(&walsnd->mutex);
+        /*
+         * If reply position is bigger than last one, or equal to local flush,
+         * update change time.
+         */
+        walsnd->lastReceiveChangeTime = XLByteLT(walsnd->receive, reply.receive) ||
+            XLByteEQ(walsnd->receive, localFlush) ? now : walsnd->lastReceiveChangeTime;
+        walsnd->lastWriteChangeTime = XLByteLT(walsnd->write, reply.write) ||
+            XLByteEQ(walsnd->write, localFlush) ? now : walsnd->lastWriteChangeTime;
+        walsnd->lastFlushChangeTime = XLByteLT(walsnd->flush, reply.flush) ||
+            XLByteEQ(walsnd->flush, localFlush) ? now : walsnd->lastFlushChangeTime;
+        walsnd->lastApplyChangeTime = XLByteLT(walsnd->apply, reply.apply) ||
+            XLByteEQ(walsnd->apply, localFlush) ? now : walsnd->lastApplyChangeTime;
         walsnd->receive = reply.receive;
         walsnd->write = reply.write;
         walsnd->flush = reply.flush;
@@ -2926,6 +2944,7 @@ static void PhysicalReplicationSlotNewXmin(TransactionId feedbackXmin)
         slot->data.xmin = feedbackXmin;
         slot->effective_xmin = feedbackXmin;
     }
+    slot->last_xmin_change_time = GetCurrentTimestamp();
     SpinLockRelease(&slot->mutex);
 
     if (changed) {
@@ -4509,6 +4528,10 @@ static void InitWalSnd(void)
             walsnd->lastCalWrite = InvalidXLogRecPtr;
             walsnd->catchupRate = 0;
             walsnd->slot_idx = -1;
+            walsnd->lastReceiveChangeTime = 0;
+            walsnd->lastWriteChangeTime = 0;
+            walsnd->lastFlushChangeTime = 0;
+            walsnd->lastApplyChangeTime = 0;
             SpinLockRelease(&walsnd->mutex);
             /* don't need the lock anymore */
             OwnLatch((Latch *)&walsnd->latch);

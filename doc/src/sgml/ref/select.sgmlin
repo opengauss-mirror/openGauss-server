@@ -71,12 +71,13 @@ SUBPARTITION { ( subpartition_name ) | FOR (  subpartition_value [, ...] )}
 where nlssort_expression_clause can be:
 NLSSORT ( column_name, ' NLS_SORT = { SCHINESE_PINYIN_M | generic_m_ci } ' )
 where index_hints can be:
-FORCE { INDEX | KEY } ( index_name [, ...] )
+{ FORCE | IGNORE } { INDEX | KEY } ( index_name [, ...] )
 | USE { INDEX | KEY } ( [ index_name [, ...] ] )
 NOTICE: [into_option] is only available in CENTRALIZED mode and B-format database.
 NOTICE: [index_hints] is only available in CENTRALIZED mode and B-format database.
 NOTICE: '[ [ START WITH condition ] CONNECT BY condition [ ORDER SIBLINGS BY expression ] ]' is only avaliable in CENTRALIZED mode!
 NOTICE: 'SUBPARTITION { ( subpartition_name ) | FOR (  subpartition_value [, ...] )}' is only avaliable in CENTRALIZED mode!
+NOTICE: expression can be @uservar := expression in CENTRALIZED mode and B-format database.
 </synopsis>
 </refsynopsisdiv>
 </refentry>

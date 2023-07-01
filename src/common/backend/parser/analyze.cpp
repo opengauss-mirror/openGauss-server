@@ -614,7 +614,8 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
     if (nodeTag(parseTree) != T_InsertStmt) {
         result->rightRefState = nullptr;
     }
-    
+
+    PreventCommandDuringSSOndemandRecovery(parseTree);
     return result;
 }
 
@@ -2712,6 +2713,7 @@ static void transformVariableSetStmt(ParseState* pstate, VariableSetStmt* stmt)
         newUserElem->name = userElem->name;
         
         Node *node = transformExprRecurse(pstate, (Node *)userElem->val);
+        assign_expr_collations(pstate, node);
 
         if (IsA(node, UserSetElem)) {
             newUserElem->name = list_concat(newUserElem->name, ((UserSetElem *)node)->name);
@@ -3402,6 +3404,58 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt)
     return qry;
 }
 
+/* Find real target entry and convert its character set in UNION tree. */
+static void convert_set_operation_tree_charset(ParseState* pstate, Node* op_tree,
+    int arg_id, Oid target_collation, int target_charset)
+{
+    if (IsA(op_tree, SetOperationStmt)) {
+        SetOperationStmt* opstmt = (SetOperationStmt*)op_tree;
+        convert_set_operation_tree_charset(pstate, opstmt->larg, arg_id, target_collation, target_charset);
+        convert_set_operation_tree_charset(pstate, opstmt->rarg, arg_id, target_collation, target_charset);
+        return;
+    }
+
+    Assert(IsA(op_tree, RangeTblRef));
+    RangeTblRef* rtr = (RangeTblRef*)op_tree;
+    RangeTblEntry* rte = rt_fetch(rtr->rtindex, pstate->p_rtable);
+    TargetEntry* te = NULL;
+    int n = 0;
+
+    foreach_cell(tmp_cell, rte->subquery->targetList) {
+        te = (TargetEntry*)lfirst(tmp_cell);
+        if (te->resjunk) {
+            continue;
+        }
+        if (++n > arg_id) {
+            break;
+        }
+    }
+
+    te->expr = (Expr*)coerce_to_target_charset(
+        (Node*)te->expr, target_charset, exprType((Node*)te->expr), exprTypmod((Node*)te->expr), target_collation);
+}
+
+/* Converts the character set of the query column on a side of the UNION. */
+static void convert_set_operation_charset(ParseState* pstate, Node* op_tree, TargetEntry* arg,
+    int arg_id, Oid target_collation, int target_charset)
+{
+    Node* arg_expr = (Node*)arg->expr;
+    Oid expr_type = exprType(arg_expr);
+    Oid expr_collation = exprCollation(arg_expr);
+    if (expr_collation == BINARY_COLLATION_OID || expr_collation == target_collation) {
+        return;
+    }
+
+    if (!IsA(arg->expr, SetToDefault)) {
+        arg->expr = (Expr*)coerce_to_target_charset(
+            arg_expr, target_charset, expr_type, exprTypmod(arg_expr), target_collation);
+        return;
+    }
+
+    Assert(IsA(op_tree, SetOperationStmt));
+    convert_set_operation_tree_charset(pstate, op_tree, arg_id, target_collation, target_charset);
+}
+
 /*
  * transformSetOperationTree
  *		Recursively transform leaves and internal nodes of a set-op tree
@@ -3532,6 +3586,7 @@ static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, boo
         ListCell* ltl = NULL;
         ListCell* rtl = NULL;
         const char* context = NULL;
+        int col_id = 0;
 
         context = (stmt->op == SETOP_UNION ? "UNION" : (stmt->op == SETOP_INTERSECT ? "INTERSECT" : "EXCEPT"));
 
@@ -3663,7 +3718,13 @@ static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, boo
              */
             rescolcoll =
                 select_common_collation(pstate, list_make2(lcolnode, rcolnode), (op->op == SETOP_UNION && op->all));
-
+            if (ENABLE_MULTI_CHARSET && rescolcoll != BINARY_COLLATION_OID) {
+                int res_charset = get_valid_charset_by_collation(rescolcoll);
+                convert_set_operation_charset(pstate, op->larg, ltle, col_id, rescolcoll, res_charset);
+                convert_set_operation_charset(pstate, op->rarg, rtle, col_id, rescolcoll, res_charset);
+            }
+            col_id++;
+            
             /* emit results */
             op->colTypes = lappend_oid(op->colTypes, rescoltype);
             op->colTypmods = lappend_int(op->colTypmods, rescoltypmod);
@@ -5125,6 +5186,29 @@ void CheckSelectLocking(Query* qry)
     }
 }
 
+static bool CheckViewBasedOnCstore(Relation targetrel)
+{
+    Assert(RelationIsView(targetrel));
+
+    Query* viewquery = get_view_query(targetrel);
+    ListCell* l = NULL;
+
+    foreach (l, viewquery->jointree->fromlist) {
+        RangeTblRef* rtr = (RangeTblRef*)lfirst(l);
+        RangeTblEntry* base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
+        Relation base_rel = try_relation_open(base_rte->relid, AccessShareLock);
+
+        if (RelationIsColStore(base_rel) || (RelationIsView(base_rel) && CheckViewBasedOnCstore(base_rel))) {
+            heap_close(base_rel, AccessShareLock);
+            return true;
+        }
+
+        heap_close(base_rel, AccessShareLock);
+    }
+
+    return false;
+}
+
 /*
  * Transform a FOR [KEY] UPDATE/SHARE clause
  *
@@ -5187,6 +5271,12 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
                                        "column table \"%s\"", rte->eref->aliasname)));
+                    } else if (RelationIsView(rel) && CheckViewBasedOnCstore(rel)) {
+                        heap_close(rel, AccessShareLock);
+                        ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
+                                       "view \"%s\" based on column table", rte->eref->aliasname)));
                     } else {
                         if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
                             ereport(ERROR,
@@ -5253,7 +5343,14 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                                         errmsg("SELECT FOR UPDATE/SHARE%s cannot be used with column table \"%s\"",
                                                NOKEYUPDATE_KEYSHARE_ERRMSG, rte->eref->aliasname),
                                         parser_errposition(pstate, thisrel->location)));
-                            }else {
+                            } else if (RelationIsView(rel) && CheckViewBasedOnCstore(rel)) {
+                                heap_close(rel, AccessShareLock);
+                                ereport(ERROR,
+                                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                        errmsg("SELECT FOR UPDATE/SHARE%s cannot be used with view \"%s\" based on"
+                                               " column table", NOKEYUPDATE_KEYSHARE_ERRMSG, rte->eref->aliasname),
+                                        parser_errposition(pstate, thisrel->location)));
+                            } else {
                                 if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
                                     ereport(ERROR,
                                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

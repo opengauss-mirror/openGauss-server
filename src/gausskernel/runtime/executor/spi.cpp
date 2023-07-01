@@ -729,6 +729,15 @@ void SPI_restore_connection(void)
     u_sess->SPI_cxt._curid = u_sess->SPI_cxt._connected - 1;
 }
 
+void SPI_restore_connection_on_exception(void)
+{
+    Assert(u_sess->SPI_cxt._connected >= 0);
+    if (u_sess->SPI_cxt._current && u_sess->SPI_cxt._curid > u_sess->SPI_cxt._connected - 1) {
+        MemoryContextResetAndDeleteChildren(u_sess->SPI_cxt._current->execCxt);
+    }
+    u_sess->SPI_cxt._curid = u_sess->SPI_cxt._connected - 1;
+}
+
 #ifdef PGXC
 /* SPI_execute_direct:
  * Runs the 'remote_sql' query string on the node 'nodename'
@@ -1289,7 +1298,11 @@ int SPI_fnumber(TupleDesc tupdesc, const char *fname)
     Form_pg_attribute sys_att;
 
     for (res = 0; res < tupdesc->natts; res++) {
-        if (namestrcmp(&tupdesc->attrs[res].attname, fname) == 0) {
+        if (u_sess->attr.attr_sql.dolphin) {
+            if (namestrcasecmp(&tupdesc->attrs[res].attname, fname) == 0) {
+                return res + 1;
+            }
+        } else if (namestrcmp(&tupdesc->attrs[res].attname, fname) == 0) {
             return res + 1;
         }
     }
@@ -1408,6 +1421,22 @@ Oid SPI_gettypeid(TupleDesc tupdesc, int fnumber)
         return tupdesc->attrs[fnumber - 1].atttypid;
     } else {
         return (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
+    }
+}
+
+Oid SPI_getcollation(TupleDesc tupdesc, int fnumber)
+{
+    SPI_result = 0;
+
+    if (fnumber > tupdesc->natts || fnumber == 0 || fnumber <= FirstLowInvalidHeapAttributeNumber) {
+        SPI_result = SPI_ERROR_NOATTRIBUTE;
+        return InvalidOid;
+    }
+
+    if (fnumber > 0) {
+        return tupdesc->attrs[fnumber - 1].attcollation;
+    } else {
+        return (SystemAttributeDefinition(fnumber, true, false, false))->attcollation;
     }
 }
 
@@ -2757,6 +2786,8 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
             }
 
             DestReceiver *dest = CreateDestReceiver(canSetTag ? u_sess->SPI_cxt._current->dest : DestNone);
+            if (u_sess->SPI_cxt._current->dest == DestSqlProcSPI && u_sess->hook_cxt.pluginSpiReciverParamHook)
+                ((SpiReciverParamHook)u_sess->hook_cxt.pluginSpiReciverParamHook)(dest,plan);
 
             if (IsA(stmt, PlannedStmt) && ((PlannedStmt *)stmt)->utilityStmt == NULL) {
                 QueryDesc *qdesc = NULL;

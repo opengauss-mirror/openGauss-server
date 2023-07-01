@@ -1949,9 +1949,9 @@ end:;
             HeapTupleData del_tuple;
             Buffer del_buffer;
 
-            struct {
+            union {
                 HeapTupleHeaderData hdr;
-                char data[MaxHeapTupleSize];
+                char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
             } tbuf;
             errno_t errorNo = EOK;
             errorNo = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
@@ -2200,14 +2200,6 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         bool update_indexes = false;
         LockTupleMode lockmode;
 
-        /* acquire Form_pg_attrdef ad_on_update */
-        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
-            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, tupleid, oldPartitionOid, bucketid);
-            if (!update_fix_result) {
-                tuple = slot->tts_tuple;
-            }
-        }
-
         /*
          * Check the constraints of the tuple
          *
@@ -2219,6 +2211,14 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
          */
         Assert(RELATION_HAS_BUCKET(result_relation_desc) == (bucketid != InvalidBktId));
 lreplace:
+
+        /* acquire Form_pg_attrdef ad_on_update */
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
+            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, tupleid, oldPartitionOid, bucketid);
+            if (!update_fix_result) {
+                tuple = slot->tts_tuple;
+            }
+        }
 
         /*
          * Compute stored generated columns
@@ -3841,7 +3841,9 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     ListCell* l = NULL;
     int i;
 #ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NDOES
     PlanState* saved_remote_rel_info = NULL;
+#endif
 #endif
     int resultRelationNum = list_length((List*)linitial(node->resultRelations));
 

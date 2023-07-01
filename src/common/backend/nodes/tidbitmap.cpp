@@ -259,6 +259,7 @@ static inline uint32 tbm_hash_complex_key(const void* key, Size keysize)
 #define SH_SCOPE static inline
 #define SH_DEFINE
 #define SH_DECLARE
+#define SH_GROW_FACTOR(size) (uint32)(8.0 / ((log(size) / log(2) - 8) + 8.0 / 7) + 2)
 #include "lib/simplehash.h"
 
 /*
@@ -271,10 +272,10 @@ static inline uint32 tbm_hash_complex_key(const void* key, Size keysize)
  * when GPI or CPI is involved. Both of them requires extra key(s) to create
  * the hashtable (partitionOid and bucketid to be exact).
  */
-TIDBitmap* tbm_create(long maxbytes, bool is_global_part, bool is_crossbucket, bool is_ustore)
+TIDBitmap* tbm_create(long maxbytes, bool is_global_part, bool is_crossbucket, bool is_partitioned, bool is_ustore)
 {
     TIDBitmap* tbm = NULL;
-    bool complex_key = (is_global_part || is_crossbucket);
+    bool complex_key = (is_global_part || is_crossbucket || is_partitioned);
     long nbuckets;
 
     /* Create the TIDBitmap struct and zero all its fields */
@@ -290,7 +291,7 @@ TIDBitmap* tbm_create(long maxbytes, bool is_global_part, bool is_crossbucket, b
      * Otherwise, we use a more cache-friendly hash table to do the
      * trick.
      */
-    if (!complex_key) {
+    if (!complex_key && u_sess->attr.attr_common.enable_indexscan_optimization) {
         tbm_init_handlers<TBM_SIMPLE_HASH>(tbm);
     } else {
         tbm_init_handlers<TBM_DYNAMIC_HASH>(tbm);
@@ -459,12 +460,13 @@ long tbm_calculate_entries(double maxbytes, bool complex_keys)
 TBM_TEMPLATE void tbm_add_tuples(TIDBitmap* tbm, const ItemPointer tids, int ntids, bool recheck, Oid partitionOid, int2 bucketid)
 {
     int i;
+    BlockNumber currblk = InvalidBlockNumber;
+	PagetableEntry *page = NULL;
 
     Assert(!tbm->iterating);
     for (i = 0; i < ntids; i++) {
         BlockNumber blk = ItemPointerGetBlockNumber(tids + i);
         OffsetNumber off = ItemPointerGetOffsetNumber(tids + i);
-        PagetableEntry* page = NULL;
         PagetableEntryNode pageNode = {blk, partitionOid, bucketid};
         int wordnum, bitnum;
 
@@ -476,12 +478,19 @@ TBM_TEMPLATE void tbm_add_tuples(TIDBitmap* tbm, const ItemPointer tids, int nti
                     errmsg("tuple offset out of range: %u", off)));
         }
 
-        if (tbm_page_is_lossy<type>(tbm, pageNode)) {
-            continue; /* whole page is already marked */
+		if (blk != currblk) {
+            if (tbm_page_is_lossy<type>(tbm, pageNode)) {
+                page = NULL;
+            } else {
+                page = tbm_get_pageentry<type>(tbm, pageNode);
+            }
+            currblk = blk;
         }
 
-        page = tbm_get_pageentry<type>(tbm, pageNode);
-
+        if (page == NULL) {
+            continue;
+        }
+					
         if (page->ischunk) {
             /* The page is a lossy chunk header, set bit for itself */
             wordnum = bitnum = 0;
@@ -495,6 +504,7 @@ TBM_TEMPLATE void tbm_add_tuples(TIDBitmap* tbm, const ItemPointer tids, int nti
 
         if (tbm->nentries > tbm->maxentries) {
             tbm_lossify<type>(tbm);
+            currblk = InvalidBlockNumber;
         }
     }
 }
@@ -699,9 +709,18 @@ TBM_TEMPLATE static bool tbm_intersect_page(TIDBitmap* a, PagetableEntry* apage,
                 while (w != 0) {
                     if (w & 1) {
                         PagetableEntryNode pNode = {pg, apage->entryNode.partitionOid, apage->entryNode.bucketid};
-                        if (!tbm_page_is_lossy<type>(b, pNode) && tbm_find_pageentry<type>(b, pNode) == NULL) {
-                            /* Page is not in b at all, lose lossy bit */
-                            neww &= ~((bitmapword)1 << (unsigned int)bitnum);
+                        if (b->simple_pagetable != NULL) {
+                            if (!tbm_page_is_lossy<TBM_SIMPLE_HASH>(b, pNode) &&
+                                tbm_find_pageentry<type>(b, pNode) == NULL) {
+                                /* Page is not in b at all, lose lossy bit */
+                                neww &= ~((bitmapword)1 << (unsigned int)bitnum);
+                            }
+                        } else {
+                            if (!tbm_page_is_lossy<TBM_DYNAMIC_HASH>(b, pNode) &&
+                                tbm_find_pageentry<type>(b, pNode) == NULL) {
+                                /* Page is not in b at all, lose lossy bit */
+                                neww &= ~((bitmapword)1 << (unsigned int)bitnum);
+                            }
                         }
                     }
                     pg++;
@@ -715,33 +734,48 @@ TBM_TEMPLATE static bool tbm_intersect_page(TIDBitmap* a, PagetableEntry* apage,
             }
         }
         return candelete;
-    } else if (tbm_page_is_lossy<type>(b, apage->entryNode)) {
-        /*
-         * Some of the tuples in 'a' might not satisfy the quals for 'b', but
-         * because the page 'b' is lossy, we don't know which ones. Therefore
-         * we mark 'a' as requiring rechecks, to indicate that at most those
-         * tuples set in 'a' are matches.
-         */
-        apage->recheck = true;
-        return false;
-    } else {
-        bool candelete = true;
-
-        bpage = tbm_find_pageentry<type>(b, apage->entryNode);
-        if (bpage != NULL) {
-            /* Both pages are exact, merge at the bit level */
-            Assert(!bpage->ischunk);
-            for (wordnum = 0; wordnum < a->words_per_page; wordnum++) {
-                apage->words[wordnum] &= bpage->words[wordnum];
-                if (apage->words[wordnum] != 0) {
-                    candelete = false;
-                }
-            }
-            apage->recheck = apage->recheck || bpage->recheck;
-        }
-        /* If there is no matching b page, we can just delete the a page */
-        return candelete;
     }
+
+    if (b->simple_pagetable != NULL) {
+        if (tbm_page_is_lossy<TBM_SIMPLE_HASH>(b, apage->entryNode)) {
+            /*
+             * Some of the tuples in 'a' might not satisfy the quals for 'b', but
+             * because the page 'b' is lossy, we don't know which ones. Therefore
+             * we mark 'a' as requiring rechecks, to indicate that at most those
+             * tuples set in 'a' are matches.
+             */
+            apage->recheck = true;
+            return false;
+        }
+
+    } else {
+        if (tbm_page_is_lossy<TBM_DYNAMIC_HASH>(b, apage->entryNode)) {
+            apage->recheck = true;
+            return false;
+        }
+    }
+
+    bool candelete = true;
+
+    if (b->simple_pagetable != NULL) {
+        bpage = tbm_find_pageentry<TBM_SIMPLE_HASH>(b, apage->entryNode);
+    } else {
+        bpage = tbm_find_pageentry<TBM_DYNAMIC_HASH>(b, apage->entryNode);
+    }
+
+    if (bpage != NULL) {
+        /* Both pages are exact, merge at the bit level */
+        Assert(!bpage->ischunk);
+        for (wordnum = 0; wordnum < a->words_per_page; wordnum++) {
+            apage->words[wordnum] &= bpage->words[wordnum];
+            if (apage->words[wordnum] != 0) {
+                candelete = false;
+            }
+        }
+        apage->recheck = apage->recheck || bpage->recheck;
+    }
+    /* If there is no matching b page, we can just delete the a page */
+    return candelete;
 }
 
 /*

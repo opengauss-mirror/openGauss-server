@@ -104,6 +104,48 @@ typedef struct UBTPageOpaqueData {
 
 typedef UBTPageOpaqueData* UBTPageOpaque;
 
+typedef struct BTDedupIntervalData {
+    OffsetNumber base_off;
+    uint16 num_items;
+} BTDedupIntervalData;
+
+typedef BTDedupIntervalData* BTDedupInterval;
+
+typedef struct BTDedupStateData {
+    bool deduplicate;
+    int num_max_items;
+    Size max_posting_size;
+
+    IndexTuple base;
+    OffsetNumber base_off;
+    Size base_tuple_size;
+
+    ItemPointer heap_tids;
+    int num_heap_tids;
+    int num_items;
+    Size size_freed;
+
+    int num_intervals;
+    BTDedupIntervalData intervals[MaxIndexTuplesPerPage];
+} BTDedupStateData;
+
+typedef BTDedupStateData *BTDedupState;
+
+typedef struct BTVacuumPostingData
+{
+    IndexTuple	itup;
+    OffsetNumber updated_offset;
+
+    uint16		num_deleted_tids;
+    uint16		delete_tids[FLEXIBLE_ARRAY_MEMBER];
+} BTVacuumPostingData;
+
+typedef BTVacuumPostingData *BTVacuumPosting;
+
+#define MAX_TIDS_PER_BTREE_PAGE \
+    (int) ((BLCKSZ - SizeOfPageHeaderData - sizeof(BTPageOpaqueData)) / \
+		   sizeof(ItemPointerData))
+
 /* Bits defined in btpo_flags */
 #define BTP_LEAF (1 << 0)        /* leaf page, i.e. not internal page */
 #define BTP_ROOT (1 << 1)        /* root page (has no parent) */
@@ -138,19 +180,24 @@ typedef struct BTMetaPageData {
     uint32 btm_level;         /* tree level of the root page */
     BlockNumber btm_fastroot; /* current "fast" root location */
     uint32 btm_fastlevel;     /* tree level of the "fast" root page */
+    bool btm_allequalimage;
 } BTMetaPageData;
 
 #define BTPageGetMeta(p) ((BTMetaPageData*)PageGetContents(p))
 
 #define BTREE_METAPAGE 0     /* first page is meta */
 #define BTREE_MAGIC 0x053162 /* magic number of btree pages */
-#define BTREE_VERSION 2      /* current version number */
+#define BTREE_VERSION 3      /* current version number */
+#define BTREE_MIN_VERSION 2
+#define BTREE_OLD_VERSION 2  /* old btree version with all meta fields set */
+#define UBTREE_VERSION 2     /* current ubtree version number */
 
 /* Upgrade support for btree split/delete optimization. */
 #define BTREE_SPLIT_DELETE_UPGRADE_VERSION 92136
 #define BTREE_SPLIT_UPGRADE_FLAG 0x01
 #define BTREE_SPLIT_OPAQUE_FLAG 0x01
 #define BTREE_DELETE_UPGRADE_FLAG XLR_BTREE_UPGRADE_FLAG
+#define BTREE_DEDUPLICATION_FLAG 0x04
 
 /*
  * Maximum size of a btree index entry, including its tuple header.
@@ -158,10 +205,15 @@ typedef struct BTMetaPageData {
  * We actually need to be able to fit three items on every page,
  * so restrict any one item to 1/3 the per-page available space.
  */
-#define BTMaxItemSize(page)                                                                          \
-    MAXALIGN_DOWN((PageGetPageSize(page) - MAXALIGN(SizeOfPageHeaderData + 3 * sizeof(ItemIdData)) - \
-                      MAXALIGN(sizeof(BTPageOpaqueData))) /                                          \
-                  3)
+#define BTREE_MAX_ITEM_SIZE(page)                                                                          \
+	(MAXALIGN_DOWN((PageGetPageSize(page) - \
+					MAXALIGN(SizeOfPageHeaderData + 3*sizeof(ItemIdData) + 3*sizeof(ItemPointerData)) - \
+					MAXALIGN(sizeof(BTPageOpaqueData))) / 3))
+
+#define BTREE_MAX_ITEM_SIZE_NO_HEAP_TID(page)                                                                          \
+	MAXALIGN_DOWN((PageGetPageSize(page) - \
+				   MAXALIGN(SizeOfPageHeaderData + 3*sizeof(ItemIdData)) - \
+				   MAXALIGN(sizeof(BTPageOpaqueData))) / 3)
 
 /*
  * The leaf-page fillfactor defaults to 90% but is user-adjustable.
@@ -217,6 +269,7 @@ typedef struct BTMetaPageData {
 #define P_ISLEAF(opaque) ((opaque)->btpo_flags & BTP_LEAF)
 #define P_ISROOT(opaque) ((opaque)->btpo_flags & BTP_ROOT)
 #define P_ISDELETED(opaque) ((opaque)->btpo_flags & BTP_DELETED)
+#define P_ISMETA(opaque) (((opaque)->btpo_flags & BTP_META) != 0)
 #define P_ISHALFDEAD(opaque) ((opaque)->btpo_flags & BTP_HALF_DEAD)
 #define P_IGNORE(opaque) ((opaque)->btpo_flags & (BTP_DELETED | BTP_HALF_DEAD))
 #define P_HAS_GARBAGE(opaque) ((opaque)->btpo_flags & BTP_HAS_GARBAGE)
@@ -271,6 +324,8 @@ typedef struct BTMetaPageData {
 #define XLOG_BTREE_REUSE_PAGE                   \
     0xD0 /* old page is about to be reused from \
           * FSM */
+#define XLOG_BTREE_INSERT_POST 0xE0
+#define XLOG_BTREE_DEDUP 0xF0
 
 
 enum {
@@ -314,6 +369,13 @@ enum {
     BTREE_NEWROOT_META_BLOCK_NUM
 };
 
+typedef struct xl_btree_metadata_old {
+    BlockNumber root;
+    uint32 level;
+    BlockNumber fastroot;
+    uint32 fastlevel;
+} xl_btree_metadata_old;
+
 /*
  * All that we need to regenerate the meta-data page
  */
@@ -322,7 +384,11 @@ typedef struct xl_btree_metadata {
     uint32 level;
     BlockNumber fastroot;
     uint32 fastlevel;
+    uint32 version;
+    bool allequalimage;
 } xl_btree_metadata;
+
+#define SizeOfBtreeMetadataNoAllEqualImage (offsetof(xl_btree_metadata, version) + sizeof(uint32))
 
 /*
  * This is what we need to know about simple (without split) insert.
@@ -377,7 +443,16 @@ typedef struct xl_btree_split {
     OffsetNumber newitemoff; /* new item's offset (if placed on left page) */
 } xl_btree_split;
 
-#define SizeOfBtreeSplit (offsetof(xl_btree_split, newitemoff) + sizeof(OffsetNumber))
+#define SizeOfBtreeSplit sizeof(xl_btree_split)
+
+typedef struct xl_btree_split_posting {
+    uint32 level;
+    OffsetNumber firstright;
+    OffsetNumber newitemoff;
+    uint16 posting_off;
+} xl_btree_split_posting;
+
+#define SizeOfBtreeSplitPosting sizeof(xl_btree_split_posting)
 
 /*
  * This is what we need to know about delete of individual leaf index tuples.
@@ -407,6 +482,18 @@ typedef struct xl_btree_reuse_page {
 
 #define SizeOfBtreeReusePage (sizeof(xl_btree_reuse_page))
 
+typedef struct xl_btree_update {
+    uint16 num_deleted_tids;
+} xl_btree_update;
+
+#define SizeOfBtreeUpdate (sizeof(xl_btree_update))
+
+typedef struct xl_btree_dedup {
+    uint16 num_intervals;
+} xl_btree_dedup;
+
+#define SizeOfBtreeDedup (sizeof(xl_btree_dedup))
+
 /*
  * This is what we need to know about vacuum of individual leaf index tuples.
  * The WAL record can represent deletion of any number of index tuples on a
@@ -435,6 +522,14 @@ typedef struct xl_btree_vacuum {
 } xl_btree_vacuum;
 
 #define SizeOfBtreeVacuum (offsetof(xl_btree_vacuum, lastBlockVacuumed) + sizeof(BlockNumber))
+
+typedef struct xl_btree_vacuum_posting {
+    BlockNumber lastBlockVacuumed;
+    uint16 num_deleted;
+    uint16 num_updated;
+} xl_btree_vacuum_posting;
+
+#define SizeOfBtreeVacuumPosting (offsetof(xl_btree_vacuum_posting, num_updated) + sizeof(uint16))
 
 /*
  * This is what we need to know about deletion of a btree page.  The target
@@ -559,42 +654,154 @@ typedef struct xl_btree_newroot {
  * be large enough to store any number <= INDEX_MAX_KEYS.
  */
 #define INDEX_ALT_TID_MASK INDEX_AM_RESERVED_BIT
-#define BT_RESERVED_OFFSET_MASK 0xF000
+#define BT_STATUS_OFFSET_MASK 0xF000
 #define BT_N_KEYS_OFFSET_MASK 0x0FFF
+#define BT_PIVOT_HEAP_TID_ATTR 0x1000
+#define BT_IS_POSTING 0x2000
 
 /* Get/set downlink block number */
 #define BTreeInnerTupleGetDownLink(itup) ItemPointerGetBlockNumberNoCheck(&((itup)->t_tid))
 #define BTreeInnerTupleSetDownLink(itup, blkno) ItemPointerSetBlockNumber(&((itup)->t_tid), (blkno))
 
-/*
- * Get/set leaf page highkey's link. During the second phase of deletion, the
- * target leaf page's high key may point to an ancestor page (at all other
- * times, the leaf level high key's link is not used).  See the nbtree README
- * for full details.
- */
-#define BTreeTupleGetTopParent(itup) ItemPointerGetBlockNumberNoCheck(&((itup)->t_tid))
-#define BTreeTupleSetTopParent(itup, blkno)                   \
-    do {                                                      \
-        ItemPointerSetBlockNumber(&((itup)->t_tid), (blkno)); \
-        BTreeTupleSetNAtts((itup), 0);                        \
-    } while (0)
+static inline bool btree_tuple_is_pivot(IndexTuple itup)
+{
+    if ((itup->t_info & INDEX_ALT_TID_MASK) == 0) {
+        return false;
+    }
 
-/*
- * Get/set number of attributes within B-tree index tuple. Asserts should be
- * removed when BT_RESERVED_OFFSET_MASK bits will be used.
- */
-#define BTreeTupleGetNAtts(itup, rel)                                                                           \
-    ((itup)->t_info & INDEX_ALT_TID_MASK                                                                        \
-            ? (AssertMacro((ItemPointerGetOffsetNumberNoCheck(&(itup)->t_tid) & BT_RESERVED_OFFSET_MASK) == 0), \
-                  ItemPointerGetOffsetNumberNoCheck(&(itup)->t_tid) & BT_N_KEYS_OFFSET_MASK)                    \
-            : IndexRelationGetNumberOfAttributes(rel))
+    if ((ItemPointerGetOffsetNumberNoCheck(&itup->t_tid) & BT_IS_POSTING) != 0) {
+        return false;
+    }
 
-#define BTreeTupleSetNAtts(itup, n)                                                 \
-    do {                                                                            \
-        (itup)->t_info |= INDEX_ALT_TID_MASK;                                       \
-        Assert(((n) & BT_RESERVED_OFFSET_MASK) == 0);                               \
-        ItemPointerSetOffsetNumber(&(itup)->t_tid, (n) & BT_N_KEYS_OFFSET_MASK);    \
-    } while (0)
+    return true;
+}
+
+static inline bool btree_tuple_is_posting(IndexTuple itup)
+{
+    if ((itup->t_info & INDEX_ALT_TID_MASK) == 0) {
+        return false;
+    }
+
+    if ((ItemPointerGetOffsetNumberNoCheck(&itup->t_tid) & BT_IS_POSTING) == 0) {
+        return false;
+    }
+
+    return true;
+}
+
+static inline void btree_tuple_set_posting(IndexTuple itup, uint16 num_heap_tids, int posting_off)
+{
+    Assert(num_heap_tids > 1);
+    Assert((num_heap_tids & BT_STATUS_OFFSET_MASK) == 0);
+    Assert((size_t)posting_off == MAXALIGN(posting_off));
+    Assert(posting_off < INDEX_SIZE_MASK);
+    Assert(!btree_tuple_is_pivot(itup));
+
+    itup->t_info |= INDEX_ALT_TID_MASK;
+    ItemPointerSetOffsetNumber(&itup->t_tid, (num_heap_tids | BT_IS_POSTING));
+    ItemPointerSetBlockNumber(&itup->t_tid, posting_off);
+}
+
+static inline uint32 btree_tuple_get_posting_off(IndexTuple posting)
+{
+    Assert(btree_tuple_is_posting(posting));
+
+    return ItemPointerGetBlockNumberNoCheck(&posting->t_tid);
+}
+
+static inline ItemPointer btree_tuple_get_posting(IndexTuple posting)
+{
+    return (ItemPointer)((char *)posting + btree_tuple_get_posting_off(posting));
+}
+
+static inline ItemPointer btree_tuple_get_posting_n(IndexTuple posting, int n)
+{
+    return btree_tuple_get_posting(posting) + n;
+}
+
+static inline uint16 btree_tuple_get_nposting(IndexTuple posting)
+{
+    Assert(btree_tuple_is_posting(posting));
+
+    OffsetNumber existing = ItemPointerGetOffsetNumberNoCheck(&posting->t_tid);
+    return (existing & BT_N_KEYS_OFFSET_MASK);
+}
+
+static inline bool btree_do_dedup(Relation heap_rel, Relation index_rel)
+{
+    Assert(index_rel->rd_rel->relkind == RELKIND_INDEX && index_rel->rd_rel->relam == BTREE_AM_OID);
+
+    if (t_thrd.proc->workingVersionNum < NBTREE_DEDUPLICATION_VERSION_NUM) {
+        return false;
+    }
+
+    if (RelationIsPartition(heap_rel)) {
+        return false;
+    }
+
+    if (index_rel->rd_options == NULL) {
+        return g_instance.attr.attr_common.enable_default_index_deduplication;
+    }
+
+    return ((StdRdOptions *)index_rel->rd_options)->deduplication;
+}
+
+static inline ItemPointer btree_tuple_get_heap_tid(IndexTuple itup)
+{
+    if (btree_tuple_is_pivot(itup)) {
+        if ((ItemPointerGetOffsetNumberNoCheck(&itup->t_tid) & BT_PIVOT_HEAP_TID_ATTR) != 0)
+            return (ItemPointer)((char *)itup + IndexTupleSize(itup) - sizeof(ItemPointerData));
+        return NULL;
+    } else if (btree_tuple_is_posting(itup)) {
+        return btree_tuple_get_posting(itup);
+    }
+
+    return &itup->t_tid;
+}
+
+static inline ItemPointer btree_tuple_get_max_heap_tid(IndexTuple itup)
+{
+    Assert(!btree_tuple_is_pivot(itup));
+
+    if (btree_tuple_is_posting(itup)) {
+        uint16 nposting = btree_tuple_get_nposting(itup);
+        return btree_tuple_get_posting_n(itup, nposting - 1);
+    }
+
+    return &itup->t_tid;
+}
+
+#define BTREE_TUPLE_GET_NUM_OF_ATTS(itup, rel)                                                                  \
+    ((btree_tuple_is_pivot(itup)) ? (ItemPointerGetOffsetNumberNoCheck(&(itup)->t_tid) & BT_N_KEYS_OFFSET_MASK) \
+                                  : IndexRelationGetNumberOfAttributes(rel))
+
+static inline void btree_tuple_set_num_of_atts(IndexTuple itup, uint16 nkeyatts, bool heaptid)
+{
+    Assert(nkeyatts <= INDEX_MAX_KEYS);
+    Assert((nkeyatts & BT_STATUS_OFFSET_MASK) == 0);
+    Assert(!heaptid || nkeyatts > 0);
+    Assert(!btree_tuple_is_pivot(itup) || nkeyatts == 0);
+
+    itup->t_info |= INDEX_ALT_TID_MASK;
+
+    if (heaptid)
+        nkeyatts |= BT_PIVOT_HEAP_TID_ATTR;
+
+    /* BT_IS_POSTING bit is deliberately unset here */
+    ItemPointerSetOffsetNumber(&itup->t_tid, nkeyatts);
+    Assert(btree_tuple_is_pivot(itup));
+}
+
+static inline BlockNumber btree_tuple_get_top_parent(IndexTuple leafhikey)
+{
+    return ItemPointerGetBlockNumberNoCheck(&leafhikey->t_tid);
+}
+
+static inline void btree_tuple_set_top_parent(IndexTuple leafhikey, BlockNumber blkno)
+{
+    ItemPointerSetBlockNumber(&leafhikey->t_tid, blkno);
+    btree_tuple_set_num_of_atts(leafhikey, 0, false);
+}
 
 /*
  *	Operator strategy numbers for B-tree have been moved to access/skey.h,
@@ -619,6 +826,7 @@ typedef struct xl_btree_newroot {
 
 #define BTORDER_PROC 1
 #define BTSORTSUPPORT_PROC 2
+#define BTEQUALIMAGE_PROC 3
 
 /*
  *	We need to be able to tell the difference between read and write
@@ -718,7 +926,7 @@ typedef struct BTScanPosData {
     int lastItem;  /* last valid index in items[] */
     int itemIndex; /* current index in items[] */
 
-    BTScanPosItem items[MaxIndexTuplesPerPage]; /* MUST BE LAST */
+    BTScanPosItem items[MAX_TIDS_PER_BTREE_PAGE]; /* MUST BE LAST */
 } BTScanPosData;
 
 typedef BTScanPosData* BTScanPos;
@@ -845,6 +1053,7 @@ typedef BTScanOpaqueData* BTScanOpaque;
  */
 typedef struct BTScanInsertData {
     bool heapkeyspace;
+    bool allequalimage;
     bool anynullkeys;
     bool nextkey;
     bool pivotsearch;                     /* seems not used yet (always false) */
@@ -876,6 +1085,7 @@ typedef struct BTPageState {
     OffsetNumber btps_lastoff;     /* last item offset loaded */
     uint32 btps_level;             /* tree level (0 = leaf) */
     Size btps_full;                /* "full" if less than this much free space */
+    Size btps_lastextra;
     struct BTPageState* btps_next; /* link to parent level, if any */
 } BTPageState;
 
@@ -901,8 +1111,9 @@ typedef struct BTOrderedIndexListElement {
 typedef struct BTCheckElement {
     Buffer buffer;
     BTStack btStack;
-    ScanKey itupScanKey;
+    BTScanInsert itup_key;
     OffsetNumber offset;
+    int posting_off;
     int indnkeyatts;
     bool useFastPath;
     BlockNumber targetBlock;
@@ -1108,9 +1319,8 @@ extern bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUn
 extern Buffer _bt_getstackbuf(Relation rel, BTStack stack);
 extern void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);
 extern void _bt_finish_split(Relation rel, Buffer bbuf, BTStack stack);
-extern IndexTuple _bt_nonkey_truncate(Relation idxrel, IndexTuple olditup);
 extern TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf,
-    OffsetNumber offset, ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool *is_unique, GPIScanDesc gpiDesc,
+    OffsetNumber offset, BTScanInsert itup_key, IndexUniqueCheck checkUnique, bool *is_unique, GPIScanDesc gpiDesc,
     CBIScanDesc cbiScan, CUDescScan* cudesc);
 extern bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
     GPIScanDesc gpiScan, CBIScanDesc cbiScan, CUDescScan* cudescScan, BTCheckElement* element);
@@ -1119,9 +1329,10 @@ extern bool CheckPartitionIsInvisible(GPIScanDesc gpiScan);
 /*
  * prototypes for functions in nbtpage.c
  */
-extern void _bt_initmetapage(Page page, BlockNumber rootbknum, uint32 level);
+extern void _bt_initmetapage(Page page, BlockNumber rootbknum, uint32 level, bool allequalimage, bool is_systable);
 extern Buffer _bt_getroot(Relation rel, int access);
 extern Buffer _bt_gettrueroot(Relation rel);
+extern int _bt_getrootheight(Relation rel);
 extern void _bt_checkbuffer_valid(Relation rel, Buffer buf);
 extern void _bt_checkpage(Relation rel, Buffer buf);
 extern Buffer _bt_getbuf(Relation rel, BlockNumber blkno, int access);
@@ -1130,30 +1341,32 @@ extern void _bt_relbuf(Relation rel, Buffer buf);
 extern void _bt_pageinit(Page page, Size size);
 extern bool _bt_page_recyclable(Page page);
 extern void _bt_delitems_delete(Relation rel, Buffer buf, OffsetNumber* itemnos, int nitems, Relation heapRel);
-extern void _bt_delitems_vacuum(
-    Relation rel, Buffer buf, OffsetNumber* itemnos, int nitems, BlockNumber lastBlockVacuumed);
+extern void _bt_delitems_vacuum(const Relation rel, Buffer buf, OffsetNumber *deletable, int num_deletable,
+                                BTVacuumPosting *updatable, int num_updatable, BlockNumber last_block_vacuumed);
 extern int _bt_pagedel(Relation rel, Buffer buf, BTStack stack);
 extern void _bt_page_localupgrade(Page page);
+extern void btree_meta_version(Relation rel, bool *heapkeyspace, bool *allequalimage);
+
 /*
  * prototypes for functions in nbtsearch.c
  */
 extern BTStack _bt_search(
-    Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffer* bufP, int access, bool needStack = true);
-extern Buffer _bt_moveright(Relation rel, Buffer buf, int keysz, ScanKey scankey, bool nextkey, bool forupdate, BTStack stack, int access);
-extern OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz, ScanKey scankey, bool nextkey);
-extern int32 _bt_compare(Relation rel, int keysz, ScanKey scankey, Page page, OffsetNumber offnum);
+    Relation rel, BTScanInsert key, Buffer* bufP, int access, bool needStack = true);
+extern Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate, BTStack stack, int access);
+extern OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf, int *posting_off);
+extern int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum);
 extern bool _bt_first(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_next(IndexScanDesc scan, ScanDirection dir);
 extern Buffer _bt_walk_left(Relation rel, Buffer buf);
 extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost);
 extern bool _bt_gettuple_internal(IndexScanDesc scan, ScanDirection dir);
-extern bool _bt_check_natts(const Relation index, Page page, OffsetNumber offnum);
+extern bool _bt_check_natts(const Relation index, bool heapkeyspace, Page page, OffsetNumber offnum);
 extern int _bt_getrootheight(Relation rel);
 
 /*
  * prototypes for functions in nbtutils.c
  */
-extern ScanKey _bt_mkscankey(Relation rel, IndexTuple itup);
+extern BTScanInsert _bt_mkscankey(Relation rel, IndexTuple itup);
 extern ScanKey _bt_mkscankey_nodata(Relation rel);
 extern void _bt_freeskey(ScanKey skey);
 extern void _bt_freestack(BTStack stack);
@@ -1184,13 +1397,18 @@ extern void _bt_spooldestroy(BTSpool* btspool);
 extern void _bt_spool(BTSpool *btspool, ItemPointer self, Datum *values, const bool *isnull);
 extern void _bt_leafbuild(BTSpool* btspool, BTSpool* spool2);
 // these 4 functions are move here from nbtsearch.cpp(static functions)
-extern void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup);
+extern void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup, Size truncextra);
 extern void _bt_uppershutdown(BTWriteState* wstate, BTPageState* state);
 BTPageState* _bt_pagestate(BTWriteState* wstate, uint32 level);
 extern bool _bt_index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup, IndexTuple itup2);
 extern List* insert_ordered_index(List* list, TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup,
     BlockNumber heapModifiedOffset, IndexScanDesc srcIdxRelScan);
 extern uint64 uniter_next(pg_atomic_uint64 *curiter, uint32 cycle0, uint32 cycle1);
+extern IndexTuple btree_truncate(Relation rel, IndexTuple lastleft, IndexTuple firstright, BTScanInsert itup_key);
+extern void btree_check_third_page(Relation rel, Relation heap, bool need_heaptid_space, Page page, IndexTuple tuple);
+extern int btree_num_keep_atts_fast(Relation rel, IndexTuple lastleft, IndexTuple firstright);
+extern bool btree_allequalimage(Relation rel, bool debugmessage);
+
 
 /*
  * prototypes for functions in nbtxlog.c
@@ -1208,4 +1426,16 @@ extern void _bt_restore_page(Page page, char* from, int len);
 extern void DumpBtreeDeleteInfo(XLogRecPtr lsn, OffsetNumber offsetList[], uint64 offsetNum);
 extern void btbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
                             void *state);
+
+/*
+ * prototypes for functions in nbtdedup.cpp
+ */
+extern void btree_dedup_page(Relation rel, Relation heapRel, Buffer buf, IndexTuple new_tuple, Size new_tuple_size);
+extern IndexTuple btree_dedup_form_posting(IndexTuple base, ItemPointer heap_tids, int num_heap_tids);
+extern void btree_dedup_begin(BTDedupState state, IndexTuple base, OffsetNumber base_off);
+extern bool btree_dedup_merge(BTDedupState state, IndexTuple itup);
+extern Size btree_dedup_end(Page newpage, BTDedupState state);
+extern void btree_dedup_update_posting(BTVacuumPosting vac_posting);
+extern IndexTuple btree_dedup_swap_posting(IndexTuple newitem, IndexTuple orignal_posting, int posting_off);
+
 #endif /* NBTREE_H */

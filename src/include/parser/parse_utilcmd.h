@@ -52,6 +52,7 @@ typedef struct {
     List* uuids;     /* used for create sequence */
     bool isResizing; /* true if the table is resizing */
     bool ofType;         /* true if statement contains OF typename */
+    Oid rel_coll_id;    /* relation collation oid */
 } CreateStmtContext;
 
 typedef enum TransformTableType { TRANSFORM_INVALID = 0, TRANSFORM_TO_HASHBUCKET, TRANSFORM_TO_NONHASHBUCKET} TransformTableType;
@@ -95,9 +96,8 @@ extern char* getTmptableIndexName(const char* srcSchema, const char* srcIndex);
 extern IndexStmt* generateClonedIndexStmt(
     CreateStmtContext* cxt, Relation source_idx, const AttrNumber* attmap, int attmap_length, Relation rel,
     TransformTableType transformType);
-extern int get_charset_by_collation(Oid colloid);
-extern Oid get_default_collation_by_charset(int charset);
 extern Oid transform_default_collation(const char* collate, int charset, Oid def_coll_oid = InvalidOid,
     bool is_attr = false);
+extern Oid check_collation_by_charset(const char* collate, int charset);
 
 #endif /* PARSE_UTILCMD_H */

@@ -50,6 +50,7 @@
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "commands/tablecmds.h"
+#include "commands/tablespace.h"
 #include "replication/slot.h"
 #include "commands/sec_rls_cmds.h"
 #include "commands/seclabel.h"
@@ -436,6 +437,17 @@ Oid createdb(const CreatedbStmt* stmt)
         if (dst_deftablespace == GLOBALTABLESPACE_OID)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("pg_global cannot be used as default tablespace")));
+
+        Oid defDbtemplate = get_database_oid(dbtemplate, false);
+        uint64 currSize = (uint64)pg_cal_database_size_oid(defDbtemplate);
+        uint64 tablespaceMaxSize = 0;
+        bool isLimit = TableSpaceUsageManager::IsLimited(dst_deftablespace, &tablespaceMaxSize);
+        if (isLimit && (tablespaceMaxSize < currSize)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_RESOURCES), 
+                    errmsg("default database size %lu is bigger than max_size %lu set in tablespace \"%s\".", 
+                            currSize, tablespaceMaxSize, tablespacename)));
+        }
 
         /*
          * If we are trying to change the default tablespace of the template,

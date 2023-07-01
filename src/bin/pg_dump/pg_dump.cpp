@@ -54,7 +54,6 @@
 #include "catalog/pg_cast.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_database.h"
-#include "catalog/pg_extension.h"
 #include "catalog/pg_default_acl.h"
 #include "catalog/pg_event_trigger.h"
 #include "catalog/pg_largeobject.h"
@@ -501,7 +500,6 @@ static void get_role_password();
 static void get_encrypt_key();
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo);
 static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxInfo* indxinfo, bool isBcompatibility);
-static bool findDBCompatibility(Archive* fout, const char* databasename);
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
 static bool IsPlainFormat();
 static bool needIgnoreSequence(TableInfo* tbinfo);
@@ -509,7 +507,6 @@ inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
 #ifdef DUMPSYSLOG
 static void ReceiveSyslog(PGconn* conn, const char* current_path);
 #endif
-static bool hasSpecificExtension(Archive* fout, const char* databasename);
 
 #ifdef GSDUMP_LLT
 bool lltRunning = true;
@@ -837,7 +834,7 @@ int main(int argc, char** argv)
     if (!SetUppercaseAttributeNameToOff(((ArchiveHandle*)fout)->connection)) {
         (void)remove(filename);
         GS_FREE(filename);
-        exit_horribly(NULL, "set uppercase_attribute_name to off failed.\n", progname);
+        exit_horribly(NULL, "%s set uppercase_attribute_name to off failed.\n", progname);
     }
 #endif
 
@@ -6683,6 +6680,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
     int i_parttype = 0;
     int i_relrowmovement = 0;
     int i_relhsblockchain = 0;
+    int i_viewsecurity = 0;
     int1 i_relcmprs = 0;
     SimpleOidListCell* cell = NULL;
     int count = 0;
@@ -6785,9 +6783,14 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "(SELECT pg_catalog.string_agg(node_name,',') AS pgxc_node_names from pgxc_node n where n.oid "
                 "in (select pg_catalog.unnest(nodeoids) from pgxc_class v where v.pcrelid=c.oid) ) , "
 #endif
-                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
-                      "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
-                        "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
+                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(pg_catalog.array_remove"
+                    "(pg_catalog.array_remove(c.reloptions, 'view_sql_security=definer'), 'view_sql_security=invoker'), "
+                        "'check_option=local'), 'check_option=cascaded'), ', ') AS reloptions, "
+                "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
+                    "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
+                "CASE WHEN 'view_sql_security=definer' = ANY (c.reloptions) THEN 'DEFINER'::text "  
+                     "WHEN 'view_sql_security=invoker' = ANY (c.reloptions) THEN 'INVOKER'::text "
+                        "ELSE NULL END AS viewsecurity, "     
                 "pg_catalog.array_to_string(array(SELECT 'toast.' || "
                 "x FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
@@ -6837,9 +6840,14 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "(SELECT pg_catalog.string_agg(node_name,',') AS pgxc_node_names from pgxc_node n where n.oid "
                 "in (select pg_catalog.unnest(nodeoids) from pgxc_class v where v.pcrelid=c.oid) ) , "
 #endif
-                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
-                      "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
-                        "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
+                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(pg_catalog.array_remove"
+                    "(pg_catalog.array_remove(c.reloptions, 'view_sql_security=definer'), 'view_sql_security=invoker'), "
+                        "'check_option=local'), 'check_option=cascaded'), ', ') AS reloptions, "
+                "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
+                    "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
+                "CASE WHEN 'view_sql_security=definer' = ANY (c.reloptions) THEN 'DEFINER'::text "  
+                     "WHEN 'view_sql_security=invoker' = ANY (c.reloptions) THEN 'INVOKER'::text "
+                        "ELSE NULL END AS viewsecurity, "  
                 "pg_catalog.array_to_string(array(SELECT 'toast.' || "
                 "x FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
@@ -7193,6 +7201,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
     i_reltablespace = PQfnumber(res, "reltablespace");
     i_reloptions = PQfnumber(res, "reloptions");
     i_checkoption = PQfnumber(res, "checkoption");
+    i_viewsecurity = PQfnumber(res, "viewsecurity"); 
     i_toastreloptions = PQfnumber(res, "toast_reloptions");
     i_reloftype = PQfnumber(res, "reloftype");
 
@@ -7371,6 +7380,11 @@ TableInfo* getTables(Archive* fout, int* numTables)
             tblinfo[i].checkoption = gs_strdup(PQgetvalue(res, i, i_checkoption));
         tblinfo[i].toast_reloptions = gs_strdup(PQgetvalue(res, i, i_toastreloptions));
 
+        /* b_format database views' sql security options */
+        if (i_viewsecurity == -1 || PQgetisnull(res, i, i_viewsecurity))
+            tblinfo[i].viewsecurity = NULL;
+        else
+            tblinfo[i].viewsecurity = gs_strdup(PQgetvalue(res, i, i_viewsecurity));
         /* other fields were zeroed above */
 
 #ifdef ENABLE_MOT
@@ -18610,7 +18624,11 @@ static void dumpViewSchema(
         appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
 
-    appendPQExpBuffer(q, "CREATE VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
+    appendPQExpBuffer(q, "CREATE ");
+    if (tbinfo->viewsecurity != NULL)
+        appendPQExpBuffer(q, "\n  SQL SECURITY %s \n   ", tbinfo->viewsecurity);
+        
+    appendPQExpBuffer(q, "VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
     if ((tbinfo->reloptions != NULL) && strlen(tbinfo->reloptions) > 0)
         appendPQExpBuffer(q, " WITH (%s)", tbinfo->reloptions);
     appendPQExpBuffer(q, " AS\n    ");
@@ -20936,44 +20954,6 @@ static void dumpConstraintForForeignTbl(Archive* fout, ConstraintInfo* coninfo)
  * dumpConstraint
  *	  write out to fout a user-defined constraint
  */
-
-static bool findDBCompatibility(Archive* fout, const char* databasename)
-{
-    PGresult* res = NULL;
-    int ntups = 0;
-    const char* datcompatibility = NULL;
-    bool isHasDatcompatibility = true;
-    ArchiveHandle* AH = (ArchiveHandle*)fout;
-    bool isBcompatibility = false;
-    
-    isHasDatcompatibility = is_column_exists(AH->connection, DatabaseRelationId, "datcompatibility");
-    if (!isHasDatcompatibility) {
-        return isBcompatibility;
-    }
-
-    PQExpBuffer query = createPQExpBuffer();
-
-    resetPQExpBuffer(query);
-    appendPQExpBuffer(query, "SELECT datcompatibility from pg_catalog.pg_database where datname = ");
-    appendStringLiteralAH(query, databasename, fout);
-    
-    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-    ntups = PQntuples(res);
-    if (ntups == 0) {
-        PQclear(res);
-        destroyPQExpBuffer(query);
-        return isBcompatibility;
-    }
-
-    datcompatibility = PQgetvalue(res, 0, PQfnumber(res, "datcompatibility"));
-    if (strcasecmp(datcompatibility, "B") == 0) {
-        isBcompatibility =  true;
-    }
-
-    PQclear(res);
-    destroyPQExpBuffer(query);
-    return isBcompatibility;
-}
 
 static void dumpConstraint(Archive* fout, ConstraintInfo* coninfo)
 {
@@ -23550,32 +23530,4 @@ static bool needIgnoreSequence(TableInfo* tbinfo)
         }
     }
     return false;
-}
-
-/*
- * check if current database has specific extension whose name is provided by parameter
- */
-static bool hasSpecificExtension(Archive* fout, const char* extensionName)
-{
-    PGresult *res = NULL;
-    int ntups = 0;
-    bool hasExtnameColumn = true;
-    ArchiveHandle *AH = (ArchiveHandle *)fout;
-
-    hasExtnameColumn = is_column_exists(AH->connection, ExtensionRelationId, "extname");
-    if (!hasExtnameColumn) {
-        return false;
-    }
-
-    PQExpBuffer query = createPQExpBuffer();
-
-    resetPQExpBuffer(query);
-    appendPQExpBuffer(query, "SELECT extname from pg_catalog.pg_extension where extname = ");
-    appendStringLiteralAH(query, extensionName, fout);
-
-    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-    ntups = PQntuples(res);
-    PQclear(res);
-    destroyPQExpBuffer(query);
-    return ntups != 0;
 }

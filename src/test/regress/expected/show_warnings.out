@@ -20,15 +20,15 @@ ERROR:  relation "t1" does not exist on datanode1
 LINE 1: insert into t1 values(1,'test');
                     ^
 show warnings limit 1;
- level |   code   |                  message                  
--------+----------+-------------------------------------------
- Error | 16908420 | relation "t1" does not exist on datanode1
+ level | code  |                  message                  
+-------+-------+-------------------------------------------
+ Error | 42P01 | relation "t1" does not exist on datanode1
 (1 row)
 
 show errors limit 1;
- level |   code   |                  message                  
--------+----------+-------------------------------------------
- Error | 16908420 | relation "t1" does not exist on datanode1
+ level | code  |                  message                  
+-------+-------+-------------------------------------------
+ Error | 42P01 | relation "t1" does not exist on datanode1
 (1 row)
 
 show count(*) warnings;
@@ -64,9 +64,9 @@ CONTEXT:  referenced column: test_func
 (1 row)
 
 show warnings;
- level | code |        message         
--------+------+------------------------
- Note  |    0 | TEST CHAR VALUE IS abc
+ level | code  |        message         
+-------+-------+------------------------
+ Note  | 00000 | TEST CHAR VALUE IS abc
 (1 row)
 
 drop table if exists t_showtest;
@@ -87,9 +87,9 @@ drop table if exists t_showtest;
 create table t_showtest(a int, primary key(a));
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_showtest_pkey" for table "t_showtest"
 show warnings;
- level | code |                                            message                                             
--------+------+------------------------------------------------------------------------------------------------
- Note  |    0 | CREATE TABLE / PRIMARY KEY will create implicit index "t_showtest_pkey" for table "t_showtest"
+ level | code  |                                            message                                             
+-------+-------+------------------------------------------------------------------------------------------------
+ Note  | 00000 | CREATE TABLE / PRIMARY KEY will create implicit index "t_showtest_pkey" for table "t_showtest"
 (1 row)
 
 drop table if exists t_showtest;
@@ -98,15 +98,15 @@ ERROR:  column "a" does not exist
 LINE 1: update user set b = 'x' where a = 1;
                                       ^
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 50360452 | column "a" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42703 | column "a" does not exist
 (1 row)
 
 show errors;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 50360452 | column "a" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42703 | column "a" does not exist
 (1 row)
 
 set sql_note=false;
@@ -138,19 +138,19 @@ CONTEXT:  referenced column: pg_advisory_unlock_shared
 (1 row)
 
 show warnings;
-  level  | code |                  message                   
----------+------+--------------------------------------------
- Warning |   64 | you don't own a lock of type ExclusiveLock
- Warning |   64 | you don't own a lock of type ShareLock
- Warning |   64 | you don't own a lock of type ExclusiveLock
- Warning |   64 | you don't own a lock of type ShareLock
+  level  | code  |                  message                   
+---------+-------+--------------------------------------------
+ Warning | 01000 | you don't own a lock of type ExclusiveLock
+ Warning | 01000 | you don't own a lock of type ShareLock
+ Warning | 01000 | you don't own a lock of type ExclusiveLock
+ Warning | 01000 | you don't own a lock of type ShareLock
 (4 rows)
 
 show warnings limit 2, 4;
-  level  | code |                  message                   
----------+------+--------------------------------------------
- Warning |   64 | you don't own a lock of type ExclusiveLock
- Warning |   64 | you don't own a lock of type ShareLock
+  level  | code  |                  message                   
+---------+-------+--------------------------------------------
+ Warning | 01000 | you don't own a lock of type ExclusiveLock
+ Warning | 01000 | you don't own a lock of type ShareLock
 (2 rows)
 
 show enable_thread_pool;

@@ -10,3 +10,4 @@ sync
 encoding
 ddl
 matviews
+change_wal_level

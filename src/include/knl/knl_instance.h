@@ -329,6 +329,8 @@ typedef struct knl_g_stat_context {
 
     struct LRUCache* lru;
     List* fifo;
+    volatile sig_atomic_t switchover_timeout;
+    volatile sig_atomic_t print_stack_flag;
 #endif
 } knl_g_stat_context;
 
@@ -741,6 +743,8 @@ typedef struct knl_g_parallel_redo_context {
     char* ali_buf;
     XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoCpuBindControl redoCpuBindcontrl;
+
+    HTAB **redoItemHash; /* used in ondemand extreme RTO */
 } knl_g_parallel_redo_context;
 
 typedef struct knl_g_heartbeat_context {
@@ -827,7 +831,7 @@ typedef struct knl_g_comm_context {
     long lastArchiveRcvTime;
     void* pLogCtl;
     bool rejectRequest;
-
+    MemoryContext redoItemCtx;
 #ifdef USE_SSL
     libcomm_sslinfo* libcomm_data_port_list;
     libcomm_sslinfo* libcomm_ctrl_port_list;
@@ -1208,6 +1212,8 @@ typedef struct knl_g_dms_context {
     bool resetSyscache;
     bool finishedRecoverOldPrimaryDWFile;
     bool dw_init;
+    char dmsInstAddr[MAX_REPLNODE_NUM][DMS_MAX_IP_LEN];
+    char conninfo[MAXPGPATH];
 } knl_g_dms_context;
 
 typedef struct knl_instance_context {

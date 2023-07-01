@@ -44,6 +44,8 @@ void ConfigRecoveryParallelism()
 
     if (g_instance.attr.attr_storage.recovery_parse_workers > 1) {
         g_instance.comm_cxt.predo_cxt.redoType = EXTREME_REDO;
+        g_extreme_rto_type = g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery ?
+            ONDEMAND_EXTREME_RTO : DEFAULT_EXTREME_RTO;
         g_instance.attr.attr_storage.batch_redo_num = g_instance.attr.attr_storage.recovery_parse_workers;
         uint32 total_recovery_parallelism = g_instance.attr.attr_storage.batch_redo_num * 2 +
                                             g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker *

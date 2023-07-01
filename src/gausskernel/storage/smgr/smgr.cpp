@@ -878,7 +878,8 @@ void smgrmovebuckets(SMgrRelation reln1, SMgrRelation reln2, List *bList)
     (*(smgrsw[reln1->smgr_which].smgr_move_buckets))(reln1->smgr_rnode, reln2->smgr_rnode, bList);
 }
 
-void partition_create_new_storage(Relation rel, Partition part, const RelFileNodeBackend &filenode)
+void partition_create_new_storage(Relation rel, Partition part, const RelFileNodeBackend &filenode,
+    bool keep_old_relfilenode)
 {
     if (RelationIsCrossBucketIndex(rel) || IsCreatingCrossBucketIndex(part)) {
         RelationData dummyrel;
@@ -894,7 +895,7 @@ void partition_create_new_storage(Relation rel, Partition part, const RelFileNod
     /*
      * Schedule unlinking of the old storage at transaction commit.
      */
-    if (!u_sess->attr.attr_storage.enable_recyclebin) {
+    if (!keep_old_relfilenode) {
         PartitionDropStorage(rel, part);
     }
 }
@@ -948,7 +949,7 @@ ScalarToDatum GetTransferFuncByTypeOid(Oid attTypeOid)
             return convertScalarToDatumT<UNKNOWNOID>;
         }
         default: {
-            return convertScalarToDatumT<-2>;
+            return convertScalarToDatumT<((Oid)-2)>;
         }
     }
 }

@@ -1808,12 +1808,12 @@ static RowMarkClause* _readRowMarkClause(void)
 
     READ_UINT_FIELD(rti);
     READ_BOOL_FIELD(forUpdate);
-    IF_EXIST(waitSec) {
-        READ_INT_FIELD(waitSec);
-    }
 
     IF_EXIST(waitPolicy) {
         READ_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    }
+    IF_EXIST(waitSec) {
+        READ_INT_FIELD(waitSec);
     }
     /* convert noWait (true/false) to LockWaitPolicy (LockWaitError/LockWaitBlock) */
     IF_EXIST(noWait) {
@@ -4036,6 +4036,25 @@ static Sort* _readSort(Sort* local_node)
     READ_DONE();
 }
 
+static SortGroup* _readSortGroup(SortGroup* local_node)
+{
+    READ_LOCALS_NULL(SortGroup);
+    READ_TEMP_LOCALS();
+
+    // Read Plan
+    _readPlan(&local_node->plan);
+
+    READ_INT_FIELD(numCols);
+    READ_ATTR_ARRAY(sortColIdx, numCols);
+    READ_OPERATOROID_ARRAY(sortOperators, numCols);
+    READ_OID_ARRAY(collations, numCols);
+
+    READ_OID_ARRAY_BYCONVERT(collations, numCols);
+
+    READ_BOOL_ARRAY(nullsFirst, numCols);
+    READ_DONE();
+}
+
 static Unique* _readUnique(Unique* local_node)
 {
     READ_LOCALS_NULL(Unique);
@@ -6131,6 +6150,18 @@ static CharsetCollateOptions* _readCharsetcollateOptions()
     READ_DONE();
 }
 
+static CharsetClause* _readCharsetClause()
+{
+    READ_LOCALS(CharsetClause);
+
+    READ_NODE_FIELD(arg);
+    READ_INT_FIELD(charset);
+    READ_BOOL_FIELD(is_binary);
+    READ_LOCATION_FIELD(location);
+
+    READ_DONE();
+}
+
 static PrefixKey* _readPrefixKey()
 {
     READ_LOCALS(PrefixKey);
@@ -6366,6 +6397,8 @@ Node* parseNodeString(void)
         return_value = _readSimpleSort(NULL);
     } else if (MATCH("SORT", 4)) {
         return_value = _readSort(NULL);
+    }  else if (MATCH("SORTGROUP", 9)) {
+        return_value = _readSortGroup(NULL);
     } else if (MATCH("UNIQUE", 6)) {
         return_value = _readUnique(NULL);
     } else if (MATCH("PLANNEDSTMT", 11)) {
@@ -6636,6 +6669,8 @@ Node* parseNodeString(void)
         return_value = _readUserVar();
     } else if (MATCH("CHARSETCOLLATE", 14)) {
         return_value = _readCharsetcollateOptions();
+    } else if (MATCH("CHARSET", 7)) {
+        return_value = _readCharsetClause();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

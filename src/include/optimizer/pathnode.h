@@ -24,6 +24,9 @@
 #define FUZZY_FACTOR 1.01
 #define SMALL_FUZZY_FACTOR 1.0000000001
 
+/* micros used in index hints check*/
+#define HINT_MATCH_USE 1
+#define HINT_MATCH_IGNORE 2
 typedef enum {
     COSTS_EQUAL,    /* path costs are fuzzily equal */
     COSTS_BETTER1,  /* first path is cheaper than second */

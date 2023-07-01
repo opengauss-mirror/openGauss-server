@@ -71,15 +71,6 @@ typedef enum {
 } ReadWorkersState;
 
 typedef enum {
-    TRIGGER_NORMAL = 0,
-    TRIGGER_PRIMARY,
-    TRIGGER_STADNBY,
-    TRIGGER_FAILOVER,
-    TRIGGER_SWITCHOVER,
-    TRIGGER_SMARTSHUTDOWN,
-} Enum_TriggeredState;
-
-typedef enum {
     NONE,
     APPLYING,
     APPLIED,
@@ -193,7 +184,6 @@ const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
 const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
 extern RedoItem g_redoEndMark;
 extern RedoItem g_terminateMark;
-extern uint32 g_startupTriggerState;
 extern uint32 g_readManagerTriggerFlag;
 
 inline int get_batch_redo_num()
@@ -251,13 +241,11 @@ void GetReplayedRecPtr(XLogRecPtr *startPtr, XLogRecPtr *endPtr);
 void StartupSendFowarder(RedoItem *item);
 XLogRecPtr GetSafeMinCheckPoint();
 RedoWaitInfo redo_get_io_event(int32 event_id);
-void redo_get_wroker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen);
+void redo_get_worker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen);
 void CheckCommittingCsnList();
-void redo_get_wroker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum);
+void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum);
 void DumpDispatcher();
 
 }  // namespace extreme_rto
-
-extreme_rto::Enum_TriggeredState CheckForSatartupStatus(void);
 
 #endif

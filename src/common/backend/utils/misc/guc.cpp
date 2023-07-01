@@ -80,6 +80,7 @@
 #include "parser/parse_type.h"
 #include "parser/parser.h"
 #include "parser/parse_coerce.h"
+#include "parser/parse_utilcmd.h"
 #include "parser/scansup.h"
 #include "pgstat.h"
 #include "pgxc/route.h"
@@ -430,6 +431,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "sql_use_spacelimit",
     "default_limit_rows",
     "sql_beta_feature",
+    "enable_default_index_deduplication",
 #ifndef ENABLE_MULTIPLE_NODES
     "plsql_show_all_error",
     "uppercase_attribute_name",
@@ -461,6 +463,7 @@ static bool check_default_transaction_isolation(int* newval, void** extra, GucSo
 static bool check_enable_stmt_track(bool* newval, void** extra, GucSource source);
 static bool check_debug_assertions(bool* newval, void** extra, GucSource source);
 static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSetStmt* setstmt);
+static void process_set_names_collate(VariableSetStmt* setstmt, GucAction action);
 static VariableSetStmt* process_set_global_trans_args(ListCell* lcell);
 #ifdef USE_BONJOUR
 static bool check_bonjour(bool* newval, void** extra, GucSource source);
@@ -1675,7 +1678,17 @@ static void InitConfigureNamesBool()
             NULL,
             assign_bbox_coredump,
             NULL},
-
+        {{"enable_default_index_deduplication",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Enables deduplication for btree index by default"),
+            NULL},
+            &g_instance.attr.attr_common.enable_default_index_deduplication,
+            false,
+            NULL,
+            NULL,
+            NULL},
         {{"enable_ffic_log",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -3149,6 +3162,30 @@ static void InitConfigureNamesString()
             check_client_encoding,
             assign_client_encoding,
             NULL},
+        {{"character_set_connection",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Set character_set_connection."),
+            NULL,
+            GUC_IS_NAME | GUC_REPORT},
+            &u_sess->attr.attr_common.character_set_connection,
+            "",
+            check_charset_connection,
+            assign_charset_connection,
+            show_charset_connection},
+        {{"collation_connection",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Set collation_connection."),
+            NULL,
+            GUC_IS_NAME | GUC_REPORT},
+            &u_sess->attr.attr_common.collation_connection,
+            "",
+            check_collation_connection,
+            assign_collation_connection,
+            show_collation_connection},
         {{"safe_data_path",
             PGC_SIGHUP,
             NODE_ALL,
@@ -8887,7 +8924,10 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
     switch (stmt->kind) {
         case VAR_SET_VALUE:
         case VAR_SET_CURRENT:
-
+            if (strcmp(stmt->name, "set_names") == 0) {
+                process_set_names_collate(stmt, action);
+                break;
+            } 
             (void)set_config_option(stmt->name,
                 ExtractSetVariableArgs(stmt),
                 ((superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
@@ -9101,6 +9141,14 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
 
         case VAR_SET_DEFAULT:
         case VAR_RESET:
+            if (strcmp(stmt->name, "set_names") == 0) {
+                GucContext context = (superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
+                    PGC_SUSET : PGC_USERSET;
+                (void)set_config_option("client_encoding", NULL, context, PGC_S_SESSION, action, true, 0);
+                (void)set_config_option("character_set_connection", NULL, context, PGC_S_SESSION, action, true, 0);
+                (void)set_config_option("collation_connection", NULL, context, PGC_S_SESSION, action, true, 0);
+                break;
+            }
             (void)set_config_option(stmt->name, NULL,
                 ((superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
                     PGC_SUSET : PGC_USERSET), PGC_S_SESSION, action, true, 0);
@@ -9641,7 +9689,7 @@ TupleDesc GetPGVariableResultDesc(const char* name)
     } else if (guc_name_compare(name, "show_warnings") == 0 || guc_name_compare(name, "show_errors") == 0) {
         tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);
     } else if (guc_name_compare(name, "show_warnings_count") == 0 || guc_name_compare(name, "show_errors_count") == 0) {
         tupdesc = CreateTemplateTupleDesc(1, false);
@@ -11548,6 +11596,32 @@ static VariableSetStmt* process_set_global_trans_args(ListCell* lcell)
             (errcode(ERRCODE_INVALID_OPERATION),
                 errmsg("unexpected SET GLOBAL TRANSACTION element.")));
     return vss;
+}
+
+static void process_set_names_collate(VariableSetStmt* setstmt, GucAction action)
+{
+    ListCell* stmtarg = list_head(setstmt->args);
+    A_Const* item = (A_Const*)lfirst(stmtarg);
+    char* charset = strVal(&item->val);
+    char* collation = NULL;
+    int encoding = pg_char_to_encoding(charset);
+    if (!PG_VALID_ENCODING(encoding)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("invalid encoding \"%s\" does not exist", charset)));
+    }
+    if ((stmtarg = lnext(stmtarg)) != NULL) {
+        item = (A_Const*)lfirst(stmtarg);
+        collation = strVal(&item->val);
+        (void)check_collation_by_charset(collation, encoding);
+    } else {
+        Oid collid = get_default_collation_by_charset(encoding);
+        collation = get_collation_name(collid);
+    }
+    GucContext context = (superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
+        PGC_SUSET : PGC_USERSET;
+    (void)set_config_option("client_encoding", charset, context, PGC_S_SESSION, action, true, 0);
+    (void)set_config_option("character_set_connection", charset, context, PGC_S_SESSION, action, true, 0);
+    (void)set_config_option("collation_connection", collation, context, PGC_S_SESSION, action, true, 0);
 }
 
 static bool check_gpc_syscache_threshold(bool* newval, void** extra, GucSource source)

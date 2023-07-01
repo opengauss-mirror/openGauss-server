@@ -25,7 +25,7 @@ EXPLAIN (analyze on, costs off, timing off) SELECT count(*) FROM bmscantest WHER
  Aggregate (actual rows=1 loops=1)
    ->  Bitmap Heap Scan on bmscantest (actual rows=20 loops=1)
          Recheck Cond: ((b = 1) AND (a = 1))
-         Rows Removed by Index Recheck: 1257
+         Rows Removed by Index Recheck: 218
 --?         Heap Blocks: exact=.*
          ->  BitmapAnd (actual rows=0 loops=1)
                ->  Bitmap Index Scan on i_bmtest_b (actual rows=1051 loops=1)
@@ -48,7 +48,7 @@ EXPLAIN (analyze on, costs off, timing off) SELECT count(*) FROM bmscantest WHER
  Aggregate (actual rows=1 loops=1)
    ->  Bitmap Heap Scan on bmscantest (actual rows=2201 loops=1)
          Recheck Cond: ((a = 1) OR (b = 1))
-         Rows Removed by Index Recheck: 17287
+         Rows Removed by Index Recheck: 16506
 --?         Heap Blocks: exact=.* lossy=.*
          ->  BitmapOr (actual rows=0 loops=1)
                ->  Bitmap Index Scan on i_bmtest_a (actual rows=1170 loops=1)

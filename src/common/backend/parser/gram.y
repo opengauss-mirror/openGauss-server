@@ -91,6 +91,7 @@
 #include "utils/pl_package.h"
 #include "catalog/pg_streaming_fn.h"
 #include "mb/pg_wchar.h"
+#include "utils/varbit.h"
 
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -340,6 +341,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	LockClauseStrength lockstrength;
 	CharsetCollateOptions *charsetcollateopt;
 	OnDuplicateAction onduplicate;
+	struct CondInfo*	condinfo;
 }
 
 %type <node>	stmt schema_stmt
@@ -366,7 +368,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 		DropAssertStmt DropSynonymStmt DropTrigStmt DropRuleStmt DropCastStmt DropRoleStmt DropRlsPolicyStmt
 		DropUserStmt DropdbStmt DropTableSpaceStmt DropDataSourceStmt DropDirectoryStmt DropFdwStmt
 		DropForeignServerStmt DropUserMappingStmt ExplainStmt ExecDirectStmt FetchStmt
-		GrantStmt GrantRoleStmt GrantDbStmt IndexStmt InsertStmt ListenStmt LoadStmt
+		GetDiagStmt GrantStmt GrantRoleStmt GrantDbStmt IndexStmt InsertStmt ListenStmt LoadStmt
 		LockStmt NotifyStmt ExplainableStmt PreparableStmt
 		CreateFunctionStmt CreateEventStmt CreateProcedureStmt CreatePackageStmt CreatePackageBodyStmt  AlterFunctionStmt AlterProcedureStmt ReindexStmt RemoveAggrStmt
 		RemoveFuncStmt RemoveOperStmt RemovePackageStmt RenameStmt RevokeStmt RevokeRoleStmt RevokeDbStmt
@@ -570,7 +572,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 %type <list>	extract_list timestamp_arg_list overlay_list position_list
 %type <list>	substr_list trim_list
-%type <list>	opt_interval interval_second
+%type <list>	opt_interval interval_second event_interval_unit opt_evtime_unit
 %type <node>	overlay_placing substr_from substr_for
 
 %type <boolean> opt_instead opt_incremental
@@ -690,7 +692,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <boolean> OptRelative
 %type <boolean> OptGPI
 %type <str>		OptTableSpace OptConsTableSpace OptConsTableSpaceWithEmpty OptTableSpaceOwner LoggingStr size_clause OptMaxSize OptDatafileSize OptReuse OptAuto OptNextStr OptDatanodeName
-%type <ival>	opt_check_option
+%type <ival>	opt_check_option view_security_expression view_security_option
 
 %type <str>		opt_provider security_label
 
@@ -825,6 +827,11 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <str>  comment_opt
 %type <trgcharacter> trigger_order
 %type <str> delimiter_str_name delimiter_str_names
+
+%type <ival>	statement_information_item_name condition_information_item_name
+%type <condinfo> statement_information_item condition_information_item
+%type <node>	condition_number
+%type <list>	condition_information statement_information
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -834,7 +841,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
  * DOT_DOT is unused in the core SQL grammar, and so will always provoke
  * parse errors.  It is needed by PL/pgsql.
  */
-%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT UNDERSCORE_CHARSET
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 
@@ -854,20 +861,20 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_INTEGER BIT BLANKS
 	BLOB_P BLOCKCHAIN BODY_P BOGUS BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
-	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CHAIN CHANGE CHAR_P
-	CHARACTER CHARACTERISTICS CHARACTERSET CHARSET CHECK CHECKPOINT CLASS CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
-	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COLUMNS COMMENT COMMENTS COMMIT
-	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPLETION COMPRESS CONCURRENTLY CONDITION CONFIGURATION CONNECTION CONSTANT CONSTRAINT CONSTRAINTS
+	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CATALOG_NAME CHAIN CHANGE CHAR_P
+	CHARACTER CHARACTERISTICS CHARACTERSET CHARSET CHECK CHECKPOINT CLASS CLASS_ORIGIN CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
+	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COLUMN_NAME COLUMNS COMMENT COMMENTS COMMIT
+	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPLETION COMPRESS CONCURRENTLY CONDITION CONFIGURATION CONNECTION CONSISTENT CONSTANT CONSTRAINT CONSTRAINT_CATALOG CONSTRAINT_NAME CONSTRAINT_SCHEMA CONSTRAINTS
 	CONTENT_P CONTINUE_P CONTVIEW CONVERSION_P CONVERT_P CONNECT COORDINATOR COORDINATORS COPY COST CREATE
 	CROSS CSN CSV CUBE CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
-	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
+	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CURSOR_NAME CYCLE
 	SHRINK USE_P
 
-	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
+	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DAY_HOUR_P DAY_MINUTE_P DAY_SECOND_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
 /* PGXC_BEGIN */
-	DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
+	DIAGNOSTICS DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
 /* PGXC_END */
 	DROP DUPLICATE DISCONNECT DUMPFILE
 
@@ -879,9 +886,9 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	FEATURES // DB4AI
 	FREEZE FROM FULL FUNCTION FUNCTIONS
 
-	GENERATED GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
+	GENERATED GET GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
 
-	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P
+	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P HOUR_MINUTE_P HOUR_SECOND_P
 
 	IDENTIFIED IDENTITY_P IF_P IGNORE IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE
 	INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
@@ -896,8 +903,9 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
 	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
-	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
-	MODEL // DB4AI
+	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE 
+	MODEL MODIFY_P MONTH_P MOVE MOVEMENT MYSQL_ERRNO
+	// DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
 	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
 
@@ -918,16 +926,16 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE RECYCLEBIN REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEAT REPEATABLE REPLACE REPLICA
-	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
-	ROTATION ROW ROWNUM ROWS ROWTYPE_P RULE
+	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
+	ROTATION ROW ROW_COUNT ROWNUM ROWS ROWTYPE_P RULE
 
-	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
+	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCHEMA_NAME SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN SIBLINGS
-	SIMILAR SIMPLE SIZE SKIP SLAVE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START STARTS STARTWITH
-	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBPARTITION SUBPARTITIONS SUBSCRIPTION SUBSTRING
-	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR STARTING
+	SIMILAR SIMPLE SIZE SKIP SLAVE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STACKED_P STANDALONE_P START STARTS STARTWITH
+	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBCLASS_ORIGIN SUBPARTITION SUBPARTITIONS SUBSCRIPTION SUBSTRING
+	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR STARTING SQL_P
 
-	TABLE TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
+	TABLE TABLE_NAME TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
 	TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TSFIELD TSTAG TSTIME TYPE_P TYPES_P
 
@@ -942,7 +950,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	XML_P XMLATTRIBUTES XMLCONCAT XMLELEMENT XMLEXISTS XMLFOREST XMLPARSE
 	XMLPI XMLROOT XMLSERIALIZE
 
-	YEAR_P YES_P
+	YEAR_P YEAR_MONTH_P YES_P
 
 	ZONE
 
@@ -970,7 +978,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 			END_OF_PROC
 			EVENT_TRIGGER
 			NOT_IN NOT_BETWEEN NOT_LIKE NOT_ILIKE NOT_SIMILAR
-			FORCE_INDEX USE_INDEX
+			FORCE_INDEX USE_INDEX IGNORE_INDEX
 
 /* Precedence: lowest to highest */
 %nonassoc   COMMENT
@@ -1290,6 +1298,7 @@ stmt :
 			| ExecDirectStmt
 			| ExplainStmt
 			| FetchStmt
+			| GetDiagStmt
 			| GrantStmt
 			| GrantRoleStmt
 			| GrantDbStmt
@@ -2455,15 +2464,31 @@ set_rest_more:  /* Generic SET syntaxes: */
 					n->args = list_make1(makeStringConst($2, @2));
 					$$ = n;
 				}
-			| NAMES opt_encoding
+			| NAMES opt_encoding opt_collate
 				{
 					VariableSetStmt *n = makeNode(VariableSetStmt);
 					n->kind = VAR_SET_VALUE;
-					n->name = "client_encoding";
-					if ($2 != NULL)
-						n->args = list_make1(makeStringConst($2, @2));
-					else
-						n->kind = VAR_SET_DEFAULT;
+					if ($3 != NULL) {
+						if ($2 == NULL) {
+							ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("cannot specify collation without character set"),
+								parser_errposition(@3)));
+						}
+						n->args = list_make2(makeStringConst($2, @2), makeStringConst($3, @3));
+						n->name = "set_names";
+					} else {
+						if ($2 != NULL) {
+							n->args = list_make1(makeStringConst($2, @2));
+						} else {
+							n->kind = VAR_SET_DEFAULT;
+						}
+						if (ENABLE_MULTI_CHARSET) {
+							n->name = "set_names";
+						} else {
+							n->name = "client_encoding";
+						}
+					}
 					$$ = n;
 				}
 			| ROLE ColId_or_Sconst
@@ -3073,6 +3098,8 @@ zone_value:
 
 opt_encoding:
 			Sconst									{ $$ = $1; }
+			| IDENT									{ $$ = $1; }
+			| BINARY								{ $$ = (char*)$1; }
 			| DEFAULT								{ $$ = NULL; }
 			| /*EMPTY*/								{ $$ = NULL; }
 		;
@@ -3382,6 +3409,138 @@ constraints_set_mode:
 			| IMMEDIATE								{ $$ = FALSE; }
 		;
 
+/*****************************************************************************
+ *
+ * GET DIAGNOSTICS STATEMENT
+ *
+ *****************************************************************************/
+
+GetDiagStmt: 	GET getdiag_area_opt DIAGNOSTICS statement_information
+					{
+						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+							ereport(errstate, (errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Un-support feature"),
+								errdetail("get diagitem syntax is supported only in B compatibility")));
+						}
+						GetDiagStmt *n = makeNode(GetDiagStmt);
+						n->condInfo = $4;
+						n->hasCondNum = false;
+						n->condNum = NULL;
+
+						$$ = (Node *)n;
+					}
+				| GET getdiag_area_opt DIAGNOSTICS CONDITION condition_number condition_information
+					{
+						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+							ereport(errstate, (errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Un-support feature"),
+								errdetail("get diagitem syntax is supported only in B compatibility")));
+						}
+						GetDiagStmt *n = makeNode(GetDiagStmt);
+						n->condInfo = $6;
+						n->hasCondNum = true;
+						n->condNum = list_make1($5);
+
+						$$ = (Node *)n;
+					}
+				;
+
+getdiag_area_opt:
+				| CURRENT_P
+				| STACKED_P
+					{
+						const char* message = "GET STACKED DIAGNOSTICS when handler not active.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(ERROR,
+						(errcode(ERRCODE_STACKED_DIAGNOSTICS_ACCESSED_WITHOUT_ACTIVE_HANDLER),
+							errmsg("GET STACKED DIAGNOSTICS when handler not active.")));
+					}
+				;
+
+statement_information:
+				statement_information_item
+					{
+						$$ = list_make1($1);
+					}
+				| statement_information ',' statement_information_item
+					{
+						$$ = lappend($1, $3);
+					}
+				;
+
+statement_information_item:
+				uservar_name '=' statement_information_item_name
+					{
+						CondInfo* n = (CondInfo *)palloc(sizeof(CondInfo));
+
+						n->target = list_make1($1);
+						n->kind = $3;
+
+						$$ = n;
+					}
+				;
+
+statement_information_item_name:
+				NUMBER_P					{ $$ = COND_INFO_NUMBER; }
+				| ROW_COUNT				{ $$ = COND_INFO_ROW_COUNT; }
+				;
+
+condition_number:
+				ICONST						{ $$ = makeIntConst($1, @1); }
+				| FCONST					{ $$ = makeIntConst((atof($1) + 0.5), @1); }
+				| SCONST					{ $$ = makeIntConst((atof($1) + 0.5), @1); }
+				| BCONST					
+					{
+						Datum val = DirectFunctionCall1(bittoint4, DirectFunctionCall3(bit_in, CStringGetDatum($1), ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1)));
+						$$ = makeIntConst(DatumGetInt32(val), @1);
+					}
+				| TRUE_P					{ $$ = makeIntConst(TRUE, @1); }
+				| FALSE_P					{ $$ = makeIntConst(FALSE, @1); }
+				| NULL_P					{ $$ = makeIntConst(FALSE, @1); }
+				| uservar_name				{ $$ = $1; }
+				| IDENT						{ $$ = makeIntConst((atof($1) + 0.5), @1); }
+				;
+
+condition_information:
+				condition_information_item
+					{
+						$$ = list_make1($1);
+					}
+				| condition_information ',' condition_information_item
+					{
+						$$ = lappend($1, $3);
+					}
+				;
+
+condition_information_item:
+				uservar_name '=' condition_information_item_name
+					{
+						CondInfo* n = (CondInfo *)palloc(sizeof(CondInfo));
+
+						n->target = list_make1($1);
+						n->kind = $3;
+
+						$$ = n;
+					}
+				;
+
+condition_information_item_name:
+				CLASS_ORIGIN				{ $$ = COND_INFO_CLASS_ORIGIN; }
+				| SUBCLASS_ORIGIN			{ $$ = COND_INFO_SUBCLASS_ORIGIN; }
+				| CONSTRAINT_CATALOG		{ $$ = COND_INFO_CONSTRAINT_CATALOG; }
+				| CONSTRAINT_SCHEMA			{ $$ = COND_INFO_CONSTRAINT_SCHEMA; }
+				| CONSTRAINT_NAME			{ $$ = COND_INFO_CONSTRAINT_NAME; }
+				| CATALOG_NAME				{ $$ = COND_INFO_CATALOG_NAME; }
+				| SCHEMA_NAME				{ $$ = COND_INFO_SCHEMA_NAME; }
+				| TABLE_NAME				{ $$ = COND_INFO_TABLE_NAME; }
+				| COLUMN_NAME				{ $$ = COND_INFO_COLUMN_NAME; }
+				| CURSOR_NAME				{ $$ = COND_INFO_CURSOR_NAME; }
+				| MESSAGE_TEXT				{ $$ = COND_INFO_MESSAGE_TEXT; }
+				| MYSQL_ERRNO				{ $$ = COND_INFO_MYSQL_ERRNO; }
+				| RETURNED_SQLSTATE			{ $$ = COND_INFO_RETURNED_SQLSTATE; }
+				;
 /*****************************************************************************
  *
  * SHUTDOWN STATEMENT
@@ -14457,6 +14616,13 @@ index_hint_definition:
 				n->indexnames = $3;
 				$$ = (Node*)n;
 			}
+			| IGNORE_INDEX '(' key_usage_list ')'
+			{
+				IndexHintDefinition* n = makeNode(IndexHintDefinition);
+				n->index_type = INDEX_HINT_IGNORE;
+				n->indexnames = $3;
+				$$ = (Node*)n;
+			}
 		;
 
 index_hint_list:
@@ -15086,8 +15252,12 @@ user:
 		ColId                                                                   { $$ = $1; }
 	;
 
+event_interval_unit: opt_interval			{$$ = $1;}
+					| opt_evtime_unit		{$$ = $1;}
+				;
+
 every_interval:
-                Iconst opt_interval			
+                Iconst event_interval_unit			
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15095,7 +15265,7 @@ every_interval:
 					Node *num = makeIntConst($1, @1);
 		            $$ = makeTypeCast(num, t, -1);	
 				}
-				| Sconst opt_interval
+				| Sconst event_interval_unit
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15103,7 +15273,7 @@ every_interval:
 					Node *num = makeStringConst($1, @1);
 					$$ = makeTypeCast(num, t, -1);
 				}
-				| FCONST opt_interval
+				| FCONST event_interval_unit
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15482,9 +15652,9 @@ preserve_opt:   ON COMPLETION PRESERVE
                                 | /*EMPTY*/                     { $$ = NULL; }
                         ;
 
-rename_opt:		RENAME TO qualified_name
+rename_opt:		RENAME TO name
 				{
-					$$ = makeDefElem("rename", (Node *)$3);
+					$$ = makeDefElem("rename", (Node *)makeString($3));
 				}
 				| /*EMPTY*/			{ $$ = NULL; }
 			;
@@ -15953,6 +16123,24 @@ invoker_rights:	 AUTHID DEFINER
                     } else {
                         $$ = false;
                     }
+				}
+			;
+view_security_option: DEFINER
+				{
+					$$ = VIEW_SQL_SECURITY_DEFINER;
+				}
+				| INVOKER
+				{
+					$$ = VIEW_SQL_SECURITY_INVOKER;
+				}
+			;
+view_security_expression: SQL_P SECURITY view_security_option
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT) {
+						$$ = $3;
+					} else {
+						parser_yyerror("not support SQL SECURITY EXPRESSION");
+					}
 				}
 			;
 
@@ -17572,6 +17760,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->sql_statement = NULL;
 					n->is_alter = true;
 					n->withCheckOption = (ViewCheckOption)$7;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					$$ = (Node *) n;
 				}
 			| ALTER definer_expression VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
@@ -17592,7 +17781,51 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->replace = true;
 					n->sql_statement = NULL;
 					n->is_alter = true;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					n->withCheckOption = (ViewCheckOption)$8;
+					$$ = (Node *) n;
+				}
+			| ALTER view_security_expression VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
+				{
+#ifndef ENABLE_MULTIPLE_NODES
+					if (u_sess->attr.attr_sql.sql_compatibility !=  B_FORMAT)
+#endif
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("ALTER VIEW AS is not supported.")));
+					}
+					ViewStmt *n = makeNode(ViewStmt);
+					n->view = $4;
+					n->aliases = $5;
+					n->query = $7;
+					n->replace = true;
+					n->sql_statement = NULL;
+					n->is_alter = true;
+					n->viewSecurityOption = (ViewSecurityOption)$2;
+					n->withCheckOption = (ViewCheckOption)$8;
+					$$ = (Node *) n;
+				}
+			| ALTER definer_expression view_security_expression VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
+				{
+#ifndef ENABLE_MULTIPLE_NODES
+					if (u_sess->attr.attr_sql.sql_compatibility !=  B_FORMAT)
+#endif
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("ALTER VIEW AS is not supported.")));
+					}
+					ViewStmt *n = makeNode(ViewStmt);
+					n->definer = $2;
+					n->view = $5;
+					n->aliases = $6;
+					n->query = $8;
+					n->replace = true;
+					n->sql_statement = NULL;
+					n->is_alter = true;
+					n->viewSecurityOption = (ViewSecurityOption)$3;
+					n->withCheckOption = (ViewCheckOption)$9;
 					$$ = (Node *) n;
 				}
 			| ALTER MATERIALIZED VIEW qualified_name RENAME TO name
@@ -18824,6 +19057,14 @@ TransactionStmt:
 					n->options = $3;
 					$$ = (Node *)n;
 				}
+			| START TRANSACTION WITH CONSISTENT SNAPSHOT
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_START;
+					n->options = NIL;
+					n->with_snapshot = true;
+					$$ = (Node *)n;
+				}
 			| BEGIN_NON_ANOYBLOCK opt_transaction transaction_mode_list_or_empty
 				{
 					TransactionStmt *n = makeNode(TransactionStmt);
@@ -19020,6 +19261,7 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->options = $6;
 					n->sql_statement = NULL;
 					n->withCheckOption = (ViewCheckOption)$9;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					$$ = (Node *) n;
 				}
 		| CREATE OR REPLACE OptTemp VIEW qualified_name opt_column_list opt_reloptions
@@ -19034,6 +19276,7 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->options = $8;
 					n->sql_statement = NULL;
 					n->withCheckOption = (ViewCheckOption)$11;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					$$ = (Node *) n;
 				}
 		| CREATE opt_or_replace definer_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
@@ -19049,6 +19292,53 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->options = $8;
 					n->sql_statement = NULL;
 					n->withCheckOption = (ViewCheckOption)$11;
+					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
+					$$ = (Node *) n;
+				}
+		| CREATE view_security_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
+				AS SelectStmt opt_check_option
+				{
+					ViewStmt *n = makeNode(ViewStmt);
+					n->view = $5;
+					n->view->relpersistence = $3;
+					n->aliases = $6;
+					n->query = $9;
+					n->replace = false;
+					n->options = $7;
+					n->sql_statement = NULL;
+					n->withCheckOption = (ViewCheckOption)$10;
+					n->viewSecurityOption = (ViewSecurityOption)$2;
+					$$ = (Node *) n;
+				}
+		| CREATE OR REPLACE view_security_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
+				AS SelectStmt opt_check_option
+				{
+					ViewStmt *n = makeNode(ViewStmt);
+					n->view = $7;
+					n->view->relpersistence = $5;
+					n->aliases = $8;
+					n->query = $11;
+					n->replace = true;
+					n->options = $9;
+					n->sql_statement = NULL;
+					n->withCheckOption = (ViewCheckOption)$12;
+					n->viewSecurityOption = (ViewSecurityOption)$4;
+					$$ = (Node *) n;
+				}
+		| CREATE opt_or_replace definer_expression view_security_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
+				AS SelectStmt opt_check_option
+				{
+					ViewStmt *n = makeNode(ViewStmt);
+					n->definer = $3;
+					n->view = $7;
+					n->view->relpersistence = $5;
+					n->aliases = $8;
+					n->query = $11;
+					n->replace = $2;
+					n->options = $9;
+					n->sql_statement = NULL;
+					n->withCheckOption = (ViewCheckOption)$12;
+					n->viewSecurityOption = (ViewSecurityOption)$4;
 					$$ = (Node *) n;
 				}
 		;
@@ -25005,7 +25295,7 @@ character_set:
 
 charset_collate_name:
 			ColId									{ $$ = $1; }
-			| BINARY								{ $$ = pg_strdup($1); }
+			| BINARY								{ $$ = "binary"; }
 			| Sconst								{ $$ = $1; }
 		;
 
@@ -25210,6 +25500,47 @@ opt_timezone:
 			| WITHOUT TIME ZONE						{ $$ = FALSE; }
 			| /*EMPTY*/								{ $$ = FALSE; }
 		;
+
+opt_evtime_unit:
+			DAY_HOUR_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR), @1));
+			}
+			| DAY_MINUTE_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE), @1));
+			}
+			| DAY_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| HOUR_MINUTE_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE), @1));
+			}
+			| HOUR_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| MINUTE_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| YEAR_MONTH_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(YEAR) |
+												 INTERVAL_MASK(MONTH), @1));
+			}
 
 opt_interval:
 			YEAR_P
@@ -28246,6 +28577,51 @@ AexprConst: Iconst
 					 */
 					$$ = makeBitStringConst($1, @1);
 				}
+			| UNDERSCORE_CHARSET Sconst
+				{
+					const char* encoding_name = $1;
+					char *original_str = pg_server_to_client($2, strlen($2));
+					int encoding = pg_valid_server_encoding(encoding_name);
+					Assert(encoding >= 0);
+
+					A_Const *con = makeNode(A_Const);
+					con->val.type = T_String;
+					con->val.val.str = original_str;
+					con->location = @2;
+
+					CharsetClause *n = makeNode(CharsetClause);
+					n->arg = (Node *)con;
+					n->charset = encoding;
+					n->is_binary = (strcmp(encoding_name, "binary") == 0);
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| UNDERSCORE_CHARSET BCONST
+				{
+					const char* encoding_name = $1;
+					int encoding = pg_valid_server_encoding(encoding_name);
+					Assert(encoding >= 0);
+
+					CharsetClause *n = makeNode(CharsetClause);
+					n->arg = makeBitStringConst($2, @2);
+					n->charset = encoding;
+					n->is_binary = (strcmp(encoding_name, "binary") == 0);
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| UNDERSCORE_CHARSET XCONST
+				{
+					const char* encoding_name = $1;
+					int encoding = pg_valid_server_encoding(encoding_name);
+					Assert(encoding >= 0);
+
+					CharsetClause *n = makeNode(CharsetClause);
+					n->arg = makeBitStringConst($2, @2);
+					n->charset = encoding;
+					n->is_binary = (strcmp(encoding_name, "binary") == 0);
+					n->location = @1;
+					$$ = (Node *) n;
+				}
 			| func_name Sconst
 				{
 					/* generic type 'literal' syntax */
@@ -28488,6 +28864,7 @@ unreserved_keyword:
 			| CASCADE
 			| CASCADED
 			| CATALOG_P
+			| CATALOG_NAME
 			| CHAIN
 			| CHANGE
 			| CHARACTERISTICS
@@ -28495,6 +28872,7 @@ unreserved_keyword:
 			| CHARSET
 			| CHECKPOINT
 			| CLASS
+			| CLASS_ORIGIN
 			| CLEAN
 			| CLIENT
             | CLIENT_MASTER_KEY
@@ -28504,6 +28882,7 @@ unreserved_keyword:
 			| CLUSTER
             | COLUMN_ENCRYPTION_KEY
             | COLUMN_ENCRYPTION_KEYS
+			| COLUMN_NAME
 			| COLUMNS
 			| COMMENT
 			| COMMENTS
@@ -28515,9 +28894,13 @@ unreserved_keyword:
 			| COMPRESS
 			| CONDITION
 			| CONFIGURATION
-                        | CONNECT
+			| CONNECT
 			| CONNECTION
+			| CONSISTENT
 			| CONSTANT
+			| CONSTRAINT_CATALOG
+			| CONSTRAINT_NAME
+			| CONSTRAINT_SCHEMA
 			| CONSTRAINTS
 			| CONTENT_P
 			| CONTINUE_P
@@ -28532,6 +28915,7 @@ unreserved_keyword:
 			| CUBE
 			| CURRENT_P
 			| CURSOR
+			| CURSOR_NAME
 			| CYCLE
 			| DATA_P
 			| DATABASE
@@ -28540,7 +28924,10 @@ unreserved_keyword:
 			| DATANODES
 			| DATATYPE_CL
 			| DATE_FORMAT_P
+			| DAY_HOUR_P
+			| DAY_MINUTE_P
 			| DAY_P
+			| DAY_SECOND_P
 			| DBCOMPATIBILITY_P
 			| DEALLOCATE
 			| DECLARE
@@ -28552,6 +28939,7 @@ unreserved_keyword:
 			| DELIMITERS
 			| DELTA
 			| DETERMINISTIC
+			| DIAGNOSTICS
 			| DICTIONARY
 			| DIRECT
 			| DIRECTORY
@@ -28616,12 +29004,15 @@ unreserved_keyword:
 			| FUNCTION
 			| FUNCTIONS
 			| GENERATED
+			| GET
 			| GLOBAL
 			| GRANTED
 			| HANDLER
 			| HEADER_P
 			| HOLD
+			| HOUR_MINUTE_P
 			| HOUR_P
+			| HOUR_SECOND_P
 			| IDENTIFIED
 			| IDENTITY_P
 			| IF_P
@@ -28689,14 +29080,17 @@ unreserved_keyword:
 			| MAXSIZE
 			| MAXTRANS
 			| MERGE
+			| MESSAGE_TEXT
 			| MINEXTENTS
 			| MINUTE_P
+			| MINUTE_SECOND_P
 			| MINVALUE
 			| MODE
 			| MODEL      // DB4AI
 			| MONTH_P
 			| MOVE
 			| MOVEMENT
+			| MYSQL_ERRNO
 			| NAME_P
 			| NAMES
 			| NEXT
@@ -28793,6 +29187,7 @@ unreserved_keyword:
 			| RESTART
 			| RESTRICT
 			| RETURN
+			| RETURNED_SQLSTATE
 			| RETURNS
 			| REUSE
 			| REVOKE
@@ -28801,6 +29196,7 @@ unreserved_keyword:
 			| ROLLBACK
 			| ROLLUP
 			| ROTATION
+			| ROW_COUNT
 			| ROWS
 			| ROWTYPE_P
 			| RULE
@@ -28808,6 +29204,7 @@ unreserved_keyword:
 			| SAVEPOINT
 			| SCHEDULE
 			| SCHEMA
+			| SCHEMA_NAME
 			| SCROLL
 			| SEARCH
 			| SECOND_P
@@ -28836,7 +29233,9 @@ unreserved_keyword:
 			| SPACE
 			| SPILL
 			| SPLIT
+			| SQL_P
 			| STABLE
+			| STACKED_P
 			| STANDALONE_P
                         | START
 			| STARTING
@@ -28850,9 +29249,10 @@ unreserved_keyword:
 			| STORE_P
 			| STORED
 			| STRATIFY
-                        | STREAM
+			| STREAM
 			| STRICT_P
 			| STRIP_P
+			| SUBCLASS_ORIGIN
 			| SUBPARTITION
 			| SUBPARTITIONS
 			| SUBSCRIPTION
@@ -28860,6 +29260,7 @@ unreserved_keyword:
 			| SYSID
 			| SYS_REFCURSOR					{ $$ = "refcursor"; }
 			| SYSTEM_P
+			| TABLE_NAME
 			| TABLES
 			| TABLESPACE
 			| TARGET
@@ -28918,6 +29319,7 @@ unreserved_keyword:
 			| WRAPPER
 			| WRITE
 			| XML_P
+			| YEAR_MONTH_P
 			| YEAR_P
 			| YES_P
 			| ZONE
@@ -29331,8 +29733,12 @@ makeStringConst(char *str, int location)
 	else
 	{
 		n->val.type = T_String;
-		n->val.val.str = str;
 		n->location = location;
+		if (NULL == str) {
+			n->val.val.str = str;
+		} else {
+			n->val.val.str = pg_server_to_any(str, strlen(str), GetCharsetConnection());
+		}
 	}
 
 	return (Node *)n;
@@ -30494,6 +30900,20 @@ check_outarg_info(const bool *have_assigend, const char *argmodes,const int proa
 	}
 }
 
+static bool HasVariadic(int nargs, const char* argmodes)
+{
+	if (!argmodes) {
+		return false;
+	}
+
+	for (int i = nargs - 1; i >= 0; --i) {
+		if (argmodes[i] == FUNC_PARAM_VARIADIC) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // Added CALL for procedure and function
 static Node *
 makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
@@ -30568,15 +30988,16 @@ makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
 		return NULL;
 	}
 
+	/* get the all args informations, only "in" parameters if p_argmodes is null */
+	narg = get_func_arg_info(proctup, &p_argtypes, &p_argnames, &p_argmodes);
+	bool hasVariadic = HasVariadic(narg, p_argmodes);
+
 #ifndef ENABLE_MULTIPLE_NODES
-	if (!has_overload_func && !enable_out_param_override())
+	if (!hasVariadic && !has_overload_func && !enable_out_param_override())
 #else
-        if (!has_overload_func)
+        if (!hasVariadic && !has_overload_func)
 #endif
 	{
-		/* get the all args informations, only "in" parameters if p_argmodes is null */
-		narg = get_func_arg_info(proctup,&p_argtypes,&p_argnames,&p_argmodes);
-
 		/* get the all "in" parameters, except "out" or "table_colums" parameters */
 		ntable_colums = get_table_modes(narg, p_argmodes);
 		narg -= ntable_colums;

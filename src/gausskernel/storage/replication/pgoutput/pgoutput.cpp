@@ -47,7 +47,7 @@ static bool pgoutput_origin_filter(LogicalDecodingContext *ctx, RepOriginId orig
 static List *LoadPublications(List *pubnames);
 static void publication_invalidation_cb(Datum arg, int cacheid, uint32 hashvalue);
 static bool ReplconninfoChanged();
-static void GetConninfo(StringInfoData* standbysInfo);
+static bool GetConninfo(StringInfoData* standbysInfo);
 
 /* Entry in the map used to remember which relation schemas we sent. */
 typedef struct RelationSyncEntry {
@@ -178,6 +178,7 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
         if (data->protocol_version >= LOGICALREP_CONNINFO_PROTO_VERSION_NUM) {
             t_thrd.publication_cxt.updateConninfoNeeded = true;
         }
+        t_thrd.publication_cxt.firstTimeSendConninfo = true;
         CacheRegisterThreadSyscacheCallback(PUBLICATIONOID, publication_invalidation_cb, (Datum)0);
 
         /* Initialize relation schema cache. */
@@ -232,19 +233,23 @@ static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *t
     OutputPluginWrite(ctx, true);
 
     /*
-     * Send the newest connecttion information to the subscriber,
+     * Send the newest connection information to the subscriber,
      * when the connection information about the standby changes.
      */
-    if (t_thrd.publication_cxt.updateConninfoNeeded && ReplconninfoChanged()) {
+    if ((t_thrd.publication_cxt.updateConninfoNeeded && ReplconninfoChanged()) ||
+        t_thrd.publication_cxt.firstTimeSendConninfo) {
         StringInfoData standbysInfo;
         initStringInfo(&standbysInfo);
 
-        GetConninfo(&standbysInfo);
-        OutputPluginPrepareWrite(ctx, true);
-        logicalrep_write_conninfo(ctx->out, standbysInfo.data);
-        OutputPluginWrite(ctx, true);
+        /* If there is no standby, don't need to send connection info to subscriber */
+        if (GetConninfo(&standbysInfo)) {
+            OutputPluginPrepareWrite(ctx, true);
+            logicalrep_write_conninfo(ctx->out, standbysInfo.data);
+            OutputPluginWrite(ctx, true);
+        }
 
         FreeStringInfo(&standbysInfo);
+        t_thrd.publication_cxt.firstTimeSendConninfo = false;
     }
 }
 
@@ -339,29 +344,40 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     /* Send the data */
     switch (change->action) {
         case REORDER_BUFFER_CHANGE_INSERT:
-            OutputPluginPrepareWrite(ctx, true);
-            logicalrep_write_insert(ctx->out, relation, &change->data.tp.newtuple->tuple, data->binary);
-            OutputPluginWrite(ctx, true);
+            if (change->data.tp.newtuple != NULL) {
+                OutputPluginPrepareWrite(ctx, true);
+                logicalrep_write_insert(ctx->out, relation, &change->data.tp.newtuple->tuple, data->binary);
+                OutputPluginWrite(ctx, true);
+            }
             break;
         case REORDER_BUFFER_CHANGE_UINSERT:
-            OutputPluginPrepareWrite(ctx, true);
-            logicalrep_write_insert(ctx->out, relation, (HeapTuple)(&change->data.utp.newtuple->tuple), data->binary);
-            OutputPluginWrite(ctx, true);
+            if (change->data.utp.newtuple != NULL) {
+                OutputPluginPrepareWrite(ctx, true);
+                logicalrep_write_insert(ctx->out, relation,
+                    (HeapTuple)(&change->data.utp.newtuple->tuple), data->binary);
+                OutputPluginWrite(ctx, true);
+            }
             break;
         case REORDER_BUFFER_CHANGE_UPDATE: {
-            HeapTuple oldtuple = change->data.tp.oldtuple ? &change->data.tp.oldtuple->tuple : NULL;
+            if (change->data.tp.newtuple != NULL) {
+                HeapTuple oldtuple = change->data.tp.oldtuple ? &change->data.tp.oldtuple->tuple : NULL;
 
-            OutputPluginPrepareWrite(ctx, true);
-            logicalrep_write_update(ctx->out, relation, oldtuple, &change->data.tp.newtuple->tuple, data->binary);
-            OutputPluginWrite(ctx, true);
+                OutputPluginPrepareWrite(ctx, true);
+                logicalrep_write_update(ctx->out, relation, oldtuple, &change->data.tp.newtuple->tuple, data->binary);
+                OutputPluginWrite(ctx, true);
+            }
             break;
         }
         case REORDER_BUFFER_CHANGE_UUPDATE: {
-            HeapTuple oldtuple = change->data.utp.oldtuple ? ((HeapTuple)(&change->data.utp.oldtuple->tuple)) : NULL;
+            if (change->data.utp.newtuple != NULL) {
+                HeapTuple oldtuple = change->data.utp.oldtuple ?
+                    ((HeapTuple)(&change->data.utp.oldtuple->tuple)) : NULL;
 
-            OutputPluginPrepareWrite(ctx, true);
-            logicalrep_write_update(ctx->out, relation, oldtuple, (HeapTuple)(&change->data.utp.newtuple->tuple), data->binary);
-            OutputPluginWrite(ctx, true);
+                OutputPluginPrepareWrite(ctx, true);
+                logicalrep_write_update(ctx->out, relation, oldtuple, (HeapTuple)(&change->data.utp.newtuple->tuple),
+                    data->binary);
+                OutputPluginWrite(ctx, true);
+            }
             break;
         }
         case REORDER_BUFFER_CHANGE_DELETE:
@@ -646,7 +662,8 @@ static void rel_sync_cache_publication_cb(Datum arg, int cacheid, uint32 hashval
     }
 }
 
-static void GetConninfo(StringInfoData* standbysInfo)
+/* Get all primary and standby connection info. If there is no standby, return false, otherwise return true. */
+static bool GetConninfo(StringInfoData* standbysInfo)
 {
     bool primaryJoined = false;
     StringInfoData hosts;
@@ -674,6 +691,9 @@ static void GetConninfo(StringInfoData* standbysInfo)
         }
     }
     appendStringInfo(standbysInfo, "host=%s port=%s", hosts.data, ports.data);
+    FreeStringInfo(&hosts);
+    FreeStringInfo(&ports);
+    return primaryJoined;
 }
 
 static inline bool ReplconninfoChanged()

@@ -1943,6 +1943,41 @@ static void _outSort(StringInfo str, Sort* node)
     out_mem_info(str, &node->mem_info);
 }
 
+static void _outSortGroup(StringInfo str, SortGroup* node)
+{
+    int i;
+
+    WRITE_NODE_TYPE("SORTGROUP");
+
+    _outPlanInfo(str, (Plan*)node);
+
+    WRITE_INT_FIELD(numCols);
+
+    appendStringInfo(str, " :sortColIdx");
+    for (i = 0; i < node->numCols; i++) {
+        appendStringInfo(str, " %d", node->sortColIdx[i]);
+    }
+
+    WRITE_GRPOP_FIELD(sortOperators, numCols);
+
+    appendStringInfo(str, " :collations");
+    for (i = 0; i < node->numCols; i++) {
+        appendStringInfo(str, " %u", node->collations[i]);
+    }
+
+    for (i = 0; i < node->numCols; i++) {
+        if (node->collations[i] >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->collations[i])) {
+            appendStringInfo(str, " :collname ");
+            _outToken(str, get_collation_name(node->collations[i]));
+        }
+    }
+
+    appendStringInfo(str, " :nullsFirst");
+    for (i = 0; i < node->numCols; i++) {
+        appendStringInfo(str, " %s", booltostr(node->nullsFirst[i]));
+    }
+}
+
 static void _outUnique(StringInfo str, Unique* node)
 {
     int i;
@@ -6012,6 +6047,15 @@ static void _outCharsetcollateOptions(StringInfo str, CharsetCollateOptions* nod
     WRITE_STRING_FIELD(collate);
 }
 
+static void _outCharsetClause(StringInfo str, CharsetClause* node)
+{
+    WRITE_NODE_TYPE("CHARSET");
+    WRITE_NODE_FIELD(arg);
+    WRITE_INT_FIELD(charset);
+    WRITE_BOOL_FIELD(is_binary);
+    WRITE_LOCATION_FIELD(location);
+}
+
 static void _outPrefixKey(StringInfo str, PrefixKey* node)
 {
     WRITE_NODE_TYPE("PREFIXKEY");
@@ -6189,6 +6233,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_Sort:
                 _outSort(str, (Sort*)obj);
+                break;
+            case T_SortGroup:
+                _outSortGroup(str, (SortGroup*)obj);
                 break;
             case T_Unique:
                 _outUnique(str, (Unique*)obj);
@@ -6922,6 +6969,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_CharsetCollateOptions:
                 _outCharsetcollateOptions(str, (CharsetCollateOptions*)obj);
+                break;
+            case T_CharsetClause:
+                _outCharsetClause(str, (CharsetClause*)obj);
                 break;
             case T_AutoIncrement:
                 _outAutoIncrement(str, (AutoIncrement*)obj);

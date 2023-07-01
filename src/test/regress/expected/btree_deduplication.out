@@ -1,0 +1,112 @@
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(
+    c1 int,
+    c2 varchar(32),
+    c3 timestamp without time zone
+);
+insert into t1 (c1, c2, c3) select n, 't1' || n, '2020-06-29 21:00:00' from generate_series(1, 25000) n;
+create index idx_dedup_1 on t1 using btree(c3) with (deduplication=on);
+create index idx_dedup_2 on t1 using btree(c3) with (deduplication=off);
+\di+
+--?.*
+--? Schema |    Name     | Type  | .* | Table | .* |       Storage       | Description 
+--?.*
+--? public | idx_dedup_1 | index | .* | t1    | .* | {deduplication=on}  | 
+--? public | idx_dedup_2 | index | .* | t1    | .* | {deduplication=off} | 
+(2 rows)
+
+alter index idx_dedup_1 set (deduplication=off);
+alter index idx_dedup_2 set (deduplication=on);
+\di+
+--?.*
+--? Schema |    Name     | Type  | .* | Table | .* |       Storage       | Description 
+--?.*
+--? public | idx_dedup_1 | index | .* | t1    | .* | {deduplication=off} | 
+--? public | idx_dedup_2 | index | .* | t1    | .* | {deduplication=on}  | 
+(2 rows)
+
+insert into t1 (c1, c2, c3) select n, 't1' || n, '2020-06-29 21:00:00' from generate_series(1, 25000) n;
+\di+
+--?.*
+--? Schema |    Name     | Type  | .*    | Table |  .*    |       Storage       | Description 
+--?.*
+--? public | idx_dedup_1 | index | yyl   | t1    | 736 kB | {deduplication=off} | 
+--? public | idx_dedup_2 | index | yyl   | t1    | 720 kB | {deduplication=on}  | 
+(2 rows)
+
+reindex index idx_dedup_1;
+reindex index idx_dedup_2;
+\di+
+--?.*
+--? Schema |    Name     | Type  | .*    | Table |  .*     |       Storage       | Description 
+--?.*
+--? public | idx_dedup_1 | index | yyl   | t1    | 1112 kB | {deduplication=off} | 
+--? public | idx_dedup_2 | index | yyl   | t1    | 352 kB  | {deduplication=on}  | 
+(2 rows)
+
+alter index idx_dedup_1 set (deduplication=on);
+alter index idx_dedup_2 set (deduplication=off);
+reindex index idx_dedup_1;
+reindex index idx_dedup_2;
+\di+
+--?.*
+--? Schema |    Name     | Type  | .*    | Table |  .*     |       Storage       | Description 
+--?.*
+--? public | idx_dedup_1 | index | yyl   | t1    | 352 kB  | {deduplication=on}  | 
+--? public | idx_dedup_2 | index | yyl   | t1    | 1112 kB | {deduplication=off} | 
+(2 rows)
+
+delete from t1 where c1 > 10 and c1 < 50;
+delete from t1 where c1 > 3000 and c1 < 4000;
+vacuum t1;
+delete from t1;
+vacuum t1;
+drop table if exists t1;
+create table t1(
+    c1 int,
+    c2 varchar(32),
+    c3 timestamp without time zone,
+    c4 int
+) partition by range(c4)
+(
+    partition p1 values less than (10),
+    partition p2 values less than (20),
+    partition p13 values less than (maxvalue)
+);
+insert into t1 (c1, c2, c3, c4) select n, 't1' || n, '2020-01-01 20:35:00', m from generate_series(1, 25000) n, generate_series(0, 29) m;
+create index idx_dedup_1_g on t1 using btree(c3) global with (deduplication=on);
+ERROR:  Index deduplication is not supported for partition table.
+create index idx_dedup_2_g on t1 using btree(c3) global with (deduplication=off);
+ERROR:  Index deduplication is not supported for partition table.
+\di+
+--?.*
+--? Schema | Name | Type | Owner | Table | Size | Storage | Description 
+--?.*
+(0 rows)
+
+drop index idx_dedup_1_g;
+ERROR:  index "idx_dedup_1_g" does not exist
+drop index idx_dedup_2_g;
+ERROR:  index "idx_dedup_2_g" does not exist
+create index idx_dedup_1_l on t1 using btree(c3) local with (deduplication=on);
+ERROR:  Index deduplication is not supported for partition table.
+create index idx_dedup_2_l on t1 using btree(c3) local with (deduplication=off);
+ERROR:  Index deduplication is not supported for partition table.
+\di+
+                          List of relations
+--? Schema | Name | Type | Owner | Table | Size | Storage | Description 
+--?.*
+(0 rows)
+
+delete from t1;
+vacuum t1;
+drop table if exists t1;
+create table t1(
+    c1 int,
+    c2 varchar(32),
+    c3 timestamp without time zone
+) with (storage_type = ustore);
+create index idx_dedup_1 on t1 using ubtree(c3) with (deduplication=on);
+ERROR:  Index deduplication is not supported for ustore.
+drop table if exists t1;

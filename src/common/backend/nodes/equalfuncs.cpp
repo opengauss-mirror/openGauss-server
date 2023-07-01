@@ -1654,6 +1654,7 @@ static bool _equalTransactionStmt(const TransactionStmt* a, const TransactionStm
     COMPARE_SCALAR_FIELD(kind);
     COMPARE_NODE_FIELD(options);
     COMPARE_STRING_FIELD(gid);
+    COMPARE_SCALAR_FIELD(with_snapshot);
 
     return true;
 }
@@ -1713,6 +1714,7 @@ static bool _equalViewStmt(const ViewStmt* a, const ViewStmt* b)
     COMPARE_SCALAR_FIELD(relkind);
     COMPARE_STRING_FIELD(definer);
     COMPARE_SCALAR_FIELD(is_alter);
+    COMPARE_SCALAR_FIELD(viewSecurityOption);
     COMPARE_SCALAR_FIELD(withCheckOption);
 
     return true;
@@ -2360,6 +2362,8 @@ static bool _equalLockStmt(const LockStmt* a, const LockStmt* b)
     COMPARE_NODE_FIELD(relations);
     COMPARE_SCALAR_FIELD(mode);
     COMPARE_SCALAR_FIELD(nowait);
+    COMPARE_SCALAR_FIELD(cancelable);
+    COMPARE_SCALAR_FIELD(isLockTables);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COMPARE_SCALAR_FIELD(waitSec);
     }
@@ -3475,10 +3479,35 @@ static bool _equalCharsetcollateOptions(const CharsetCollateOptions* a, const Ch
     return true;
 }
 
+static bool _equalCharsetClause(const CharsetClause* a, const CharsetClause* b)
+{
+    COMPARE_NODE_FIELD(arg);
+    COMPARE_SCALAR_FIELD(charset);
+    COMPARE_SCALAR_FIELD(is_binary);
+    COMPARE_LOCATION_FIELD(location);
+}
+
 static bool _equalPrefixKey(const PrefixKey* a, const PrefixKey* b)
 {
     COMPARE_NODE_FIELD(arg);
     COMPARE_SCALAR_FIELD(length);
+    return true;
+}
+
+static bool _equalCondInfo(const CondInfo* a, const CondInfo* b)
+{
+    COMPARE_NODE_FIELD(target);
+    COMPARE_SCALAR_FIELD(kind);
+
+    return true;
+}
+
+static bool _equalGetDiagStmt(const GetDiagStmt* a, const GetDiagStmt* b)
+{
+    COMPARE_NODE_FIELD(condInfo);
+    COMPARE_SCALAR_FIELD(hasCondNum);
+    COMPARE_NODE_FIELD(condNum);
+
     return true;
 }
 
@@ -4424,6 +4453,9 @@ bool equal(const void* a, const void* b)
             retval = _equalCharsetcollateOptions((const CharsetCollateOptions *)a,
                                                  (const CharsetCollateOptions *)b);
             break;
+        case T_CharsetClause:
+            retval = _equalCharsetClause((const CharsetClause*) a, (const CharsetClause*) b);
+            break;
         case T_PrefixKey:
             retval = _equalPrefixKey((PrefixKey *)a, (PrefixKey *)b);
             break;
@@ -4446,6 +4478,12 @@ bool equal(const void* a, const void* b)
             break;
         case T_FunctionSources:
             retval = _equalFunctionSources((const FunctionSources *)a, (const FunctionSources *)b);
+            break;
+        case T_CondInfo:
+            retval = _equalCondInfo((const CondInfo *)a, (const CondInfo *)b);
+            break;
+        case T_GetDiagStmt:
+            retval = _equalGetDiagStmt((const GetDiagStmt *)a, (const GetDiagStmt *)b);
             break;
 
         default:

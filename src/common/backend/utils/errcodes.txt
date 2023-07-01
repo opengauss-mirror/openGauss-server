@@ -284,6 +284,10 @@ Section: Class 34 - Invalid Cursor Name
 
 34000    E    ERRCODE_INVALID_CURSOR_NAME                                    invalid_cursor_name
 
+Section: Class 34 - Invalid Condition Number
+
+35000    E    ERRCODE_INVALID_CONDITION_NUMBER                               invalid_condition_number
+
 Section: Class 38 - External Routine Exception
 
 38000    E    ERRCODE_EXTERNAL_ROUTINE_EXCEPTION                             external_routine_exception

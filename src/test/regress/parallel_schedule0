@@ -6,6 +6,9 @@
 # this limits the number of connections needed to run the tests.
 # ----------
 
+# test for index deduplication
+test: btree_deduplication
+
 # This test case is used to monitor GUC parameter information.
 # If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
 #test: recovery_2pc_tools recovery_2pc_tools02
@@ -46,6 +49,7 @@ test: set_system_variables_test
 
 # test for set [session | global] transaction
 test: set_transaction_test
+test: transaction_with_snapshot
 
 # test select into statement
 test: select_into_user_defined_variables
@@ -86,10 +90,13 @@ test: event_dump_audit
 test: single_node_sha
 
 #test b format collation
-test: test_b_format_collate charset_b_format
+test: test_b_format_collate charset_b_format test_b_format_gb_collate
+test: charset_utf8mb4_b_db charset_gbk_b_db
+test: charset_connection_test
+test: add_b_format_behavior_all
 
 # test subpartition
-test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size
+test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size hw_partition_size hw_cstore_partition_size
 test: hw_subpartition_vacuum_partition hw_subpartition_tablespace_global
 test: gs_dump_subpartition
 test: partition_dml_operations partition_minmax partition_pruning hw_partitionno hw_partition_parallel
@@ -223,6 +230,7 @@ test: single_node_update
 #test single_node_namespace
 #test: single_node_prepared_xacts 
 #test: single_node_delete
+test: single_node_delete_optimize
 
 # ----------
 # Another group of parallel tests
@@ -646,10 +654,10 @@ test: select_into subselect_part2 gs_aggregate
 test: holdable_cursor
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
-test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
+test: alter_table_000 alter_table_002 alter_table_003
 #test: alter_table_001 alter_table_modify_ustore
 test: alter_table_modify_ltt alter_table_modify_gtt
-test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
+test: alter_table_modify alter_table_modify_ustore
 
 #test: with
 
@@ -822,6 +830,7 @@ test: vec_window_001
 #test: vec_window_002
 test: vec_numeric_sop_1 vec_numeric_sop_2 vec_numeric_sop_3 vec_numeric_sop_4 vec_numeric_sop_5
 #test: vec_window_end
+test: sortgroup_agg
 
 test: vec_unique_pre vec_bitmap_prepare
 test: vec_unique vec_setop_001 vec_setop_002 vec_setop_003 vec_setop_004 hw_vec_int4 hw_vec_int8 hw_vec_float4 hw_vec_float8
@@ -1004,8 +1013,7 @@ test: gtt_trunc_parallel_dml1 gtt_trunc_parallel_dml2 gtt_trunc_parallel_ddl1 gt
 test: toomanyparams
 
 test: test_astore_multixact
-
-test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test 
+test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test row_compression/alter_compress_params
 # test: row_compression/pg_tablespace_size
 test: row_compression/twophase
 test: row_compression/row_compress_feature pldebugger_shutdown
@@ -1087,3 +1095,5 @@ test: user_host_test
 
 # test for new_expr_by_flatten
 test: enable_expr_fusion_flatten
+# test for on update timestamp and generated column
+test: on_update_session1 on_update_session2

@@ -278,6 +278,7 @@ const char* unit_eight_kB_parameter_list[] = {
     "temp_buffers",
     "wal_buffers",
     "wal_segment_size",
+    "huge_page_size",
 };
 /* the size of page, unit is kB */
 #define PAGE_SIZE 8

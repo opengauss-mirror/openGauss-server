@@ -108,6 +108,14 @@ function real_regresscheck_single()
     $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF
 }
 
+function real_regresscheck_plugin()
+{
+    set_common_env_plugin $1 $2
+    echo ..........
+    echo "$pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF --dbname=contrib_regression --dbcmpt=B dummy"
+    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3    --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF --dbname=contrib_regression --dbcmpt=B
+}
+
 function real_regresscheck_single_audit()
 {
     set_hotpatch_env
@@ -369,6 +377,65 @@ function set_common_env()
     UPGRADE_FROM=92497
 }
 
+function set_common_env_plugin()
+{
+    export CODE_BASE=$ROOT_CODE_PATH/${OPENGS}
+    export CODE_BASE_SRC=$CODE_BASE/src
+    export GAUSSHOME=$PREFIX_HOME
+    REGRESS_PATH=$ROOT_CODE_PATH/contrib/dolphin
+    cp $ROOT_CODE_PATH/src/test/regress/check_enum.py $REGRESS_PATH
+    check_enum
+    REGRESS_PATH=$(cd ${REGRESS_PATH}/; pwd)
+    PGREGRESS_BIN=./${OPENGS}/src/test/regress/pg_regress_single
+    if [ "${ENABLE_MEMORY_CHECK}" = "ON" ];then
+        export ASAN_OPTIONS="unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=/home/$(whoami)/memchk/asan/runlog"
+        export LSAN_OPTIONS="exitcode=0:suppressions=${CODE_BASE}/Tools/memory_check/memleak_ignore"
+        EXTRA_REGRESS_OPTS="--ignore-exitcode --keep-run"
+    fi
+    MAXCONNOPT=""
+    if [ ! "${MAX_CONNECTIONS}" = "" ];then
+        MAXCONNOPT="--max-connections=$(MAX_CONNECTIONS)"
+    fi
+    echo ..........$REGRESS_PATH
+    cp $THIRD_PATH/kernel/dependency/event/comm/lib/* $PREFIX_HOME/lib
+    cp -r $REGRESS_PATH/expected .
+    cp -r $REGRESS_PATH/data .
+    cp ./lib/regress.so $PREFIX_HOME/lib
+    cp ./lib/refint.so $PREFIX_HOME/lib
+    cp ./lib/autoinc.so $PREFIX_HOME/lib
+
+    rm $PREFIX_HOME/lib/libstdc++.so.6
+    DL_PATH=${GAUSSHOME}/lib
+    TOP_DIR=$ROOT_CODE_PATH
+    INPUT_DIR=${REGRESS_PATH}
+    TEMP_INSTALL=${REGRESS_PATH}/tmp_check
+
+    REGCONF=$INPUT_DIR/regress.conf
+    SCHEDULE=$INPUT_DIR/$1
+    TEMP_CONFIG=$INPUT_DIR/$2
+
+    DATA_BASE_DIR=$INPUT_DIR/../../../../privategauss/test/grayscale_upgrade
+    UPGRADE_SCRIPT_DIR=$INPUT_DIR/../grayscale_upgrade
+    OLD_BIN_DIR=$TEMP_INSTALL/bin
+    UPGRADE_SCHEDULE=$INPUT_DIR/upgrade_schedule
+    exception_arm_cases ${ROOT_CODE_PATH} parallel_schedule
+
+    pg_regress_locale_flags=""
+    pg_regress_check="${PGREGRESS_BIN} --inputdir=${INPUT_DIR} --temp-install=${TEMP_INSTALL} --top-builddir=${TOP_DIR} ${pg_regress_locale_flags}"
+    chmod +x ${REGRESS_PATH}/smartmatch.pl
+    rm -rf ./testtablespace && mkdir ./testtablespace
+    test -d /home/$(whoami)/memchk/asan || mkdir -p /home/$(whoami)/memchk/asan
+    #端口
+    if [ "X$p" = "X" ]; then
+        p=35000
+    fi
+
+    echo "--------------------LD_LIBRARY_PATH----------------------------------------------------"
+    echo $LD_LIBRARY_PATH
+    export
+    UPGRADE_FROM=92497
+}
+
 function parse_args()
 {
     #the args start from $8, only aacept args flags is *=[0-9]*|*=true|*=false
@@ -418,6 +485,9 @@ case $DO_CMD in
     --fastcheck_single|fastcheck_single)
         args_val="-d 1 -c 0 -p $p -r 1 "
         real_regresscheck_single parallel_schedule0$part make_fastcheck_postgresql.conf "${args_val}" ;;
+    --plugin_check|plugin_check)
+        args_val="-d 1 -c 0 -p $p -r 1 "
+        real_regresscheck_plugin parallel_schedule_dolphin$part make_check_postgresql.conf "${args_val}" ;;
     --fastcheck_single_audit|fastcheck_single_audit)
         args_val="-d 1 -c 0 -p $p -r 1 "
         real_regresscheck_single_audit security_audit_schedule0$part make_fastcheck_audit_postgresql.conf "${args_val}" ;;

@@ -252,3 +252,26 @@ bool DatumImageEq(Datum value1, Datum value2, bool typByVal, int typLen)
 
     return result;
 }
+
+Datum btequalimage(PG_FUNCTION_ARGS)
+{
+    Assert(PG_NARGS() != 0);
+
+    Oid opcintype = PG_GETARG_OID(0);
+    Oid type[] = {BITOID,    BOOLOID,   BYTEAOID, CHAROID,     DATEOID,    TIMESTAMPOID, TIMESTAMPTZOID, INETOID,
+                  INT2OID,   INT4OID,   INT8OID,  INTERVALOID, MACADDROID, OIDOID,       OIDVECTOROID,   TIMEOID,
+                  TIMETZOID, VARBITOID, TEXTOID,  BPCHAROID,   CASHOID,    UUIDOID,      ANYENUMOID};
+    int size = sizeof(type) / sizeof(type[0]);
+
+    if (opcintype == InvalidOid) {
+        PG_RETURN_BOOL(false);
+    }
+
+    for (int i = 0; i < size; i++) {
+        if (opcintype == type[i]) {
+            PG_RETURN_BOOL(true);
+        }
+    }
+
+    PG_RETURN_BOOL(false);
+}

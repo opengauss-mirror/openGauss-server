@@ -996,9 +996,9 @@ bool UHeapamTupleFetch(Relation relation, Snapshot snapshot, HeapTuple tuple, Bu
 
     UHeapTupleData uheaptupdata;
     UHeapTuple uheaptup = &uheaptupdata;
-    struct {
+    union {
         UHeapDiskTupleData hdr;
-        char data[MaxPossibleUHeapTupleSize];
+        char data[MaxPossibleUHeapTupleSize + sizeof(UHeapDiskTupleData)];
     } tbuf;
 
     errno_t errorNo = EOK;

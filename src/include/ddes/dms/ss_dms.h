@@ -51,14 +51,13 @@ typedef struct st_ss_dms_func {
     int (*dms_request_opengauss_txn_status)(dms_context_t *dms_ctx, unsigned char request, unsigned char *result);
     int (*dms_request_opengauss_txn_snapshot)(dms_context_t *dms_ctx,
                                            dms_opengauss_txn_snapshot_t *dms_txn_snapshot);
+    int (*dms_request_opengauss_txn_of_master)(dms_context_t *dms_ctx,
+                                           dms_opengauss_txn_sw_info_t *dms_txn_swinfo);
     int (*dms_register_thread_init)(dms_thread_init_t thrd_init);
     int (*dms_release_owner)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned char *released);
     int (*dms_wait_reform)(unsigned int *has_offline);
     void (*dms_get_event)(dms_wait_event_t event_type, unsigned long long *event_cnt, unsigned long long *event_time);
-    int (*dms_buf_res_rebuild_drc)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
-                                   unsigned char is_dirty);
-    int (*dms_buf_res_rebuild_drc_parallel)(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index,
-                                            unsigned char for_rebuild);
+    int (*dms_buf_res_rebuild_drc_parallel)(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index);
     int (*dms_is_recovery_session)(unsigned int sid);
     int (*drc_get_page_master_id)(char pageid[DMS_PAGEID_SIZE], unsigned char *master_id);
     int (*dms_register_ssl_decrypt_pwd)(dms_decrypt_pwd_t cb_func);
@@ -80,6 +79,9 @@ typedef struct st_ss_dms_func {
     void (*dms_refresh_logger)(char *log_field, unsigned long long *value);
     void (*dms_validate_drc)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
         unsigned char is_dirty);
+    int (*dms_reform_req_opengauss_ondemand_redo_buffer)(dms_context_t *dms_ctx, void *block_key, unsigned int key_len,
+        int *redo_status);
+    unsigned int (*dms_get_mes_max_watting_rooms)(void);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -98,14 +100,13 @@ int dms_request_opengauss_xid_csn(dms_context_t *dms_ctx, dms_opengauss_xid_csn_
 int dms_request_opengauss_txn_status(dms_context_t *dms_ctx, unsigned char request, unsigned char *result);
 int dms_request_opengauss_txn_snapshot(dms_context_t *dms_ctx,
                                        dms_opengauss_txn_snapshot_t *dms_txn_snapshot);
+int dms_request_opengauss_txn_of_master(dms_context_t *dms_ctx,
+                                       dms_opengauss_txn_sw_info_t *dms_txn_swinfo);
 int dms_register_thread_init(dms_thread_init_t thrd_init);
 int dms_release_owner(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned char *released);
 int dms_wait_reform(unsigned int *has_offline);
 void dms_get_event(dms_wait_event_t event_type, unsigned long long *event_cnt, unsigned long long *event_time);
-int dms_buf_res_rebuild_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
-                            unsigned char is_dirty);
-int dms_buf_res_rebuild_drc_parallel(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index,
-                                    unsigned char for_rebuild);
+int dms_buf_res_rebuild_drc_parallel(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index);
 int dms_is_recovery_session(unsigned int sid);
 int drc_get_page_master_id(char pageid[DMS_PAGEID_SIZE], unsigned char *master_id);
 int dms_register_ssl_decrypt_pwd(dms_decrypt_pwd_t cb_func);
@@ -123,6 +124,9 @@ bool dms_latch_timed_s(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned i
 void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
 void dms_pre_uninit(void);
 void dms_validate_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn, unsigned char is_dirty);
+int dms_reform_req_opengauss_ondemand_redo_buffer(dms_context_t *dms_ctx, void *block_key, unsigned int key_len,
+                                                  int *redo_status);
+unsigned int dms_get_mes_max_watting_rooms(void);
 #ifdef __cplusplus
 }
 #endif

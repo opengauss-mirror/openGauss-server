@@ -643,6 +643,30 @@ void PreventCommandDuringRecovery(const char* cmd_name)
                 errmsg("cannot execute %s during recovery", cmd_name)));
 }
 
+void PreventCommandDuringSSOndemandRecovery(Node* parseTree)
+{
+    switch(nodeTag(parseTree)) {
+        case T_InsertStmt:
+        case T_DeleteStmt:
+        case T_UpdateStmt:
+        case T_SelectStmt:
+        case T_TransactionStmt:
+        case T_VariableSetStmt:
+        case T_VariableShowStmt:
+            break;
+        default:
+            if (SS_IN_ONDEMAND_RECOVERY) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_RUN_TRANSACTION_DURING_RECOVERY),
+                        errmsg("only support INSERT/UPDATE/DELETE/SELECT/SET/SHOW during SS on-demand recovery, "
+                               "command %d", nodeTag(parseTree))));
+            }
+            break;
+    }
+
+    return;
+}
+
 /*
  * CheckRestrictedOperation: throw error for hazardous command if we're
  * inside a security restriction context.
@@ -2654,6 +2678,14 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                      */
                 case TRANS_STMT_BEGIN:
                 case TRANS_STMT_START: {
+                    if (stmt->with_snapshot) {
+                        if (u_sess->utils_cxt.XactIsoLevel == XACT_REPEATABLE_READ) {
+                            GetTransactionSnapshot();
+                        } else {
+                            ereport(WARNING, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("with consistent snapshot only effected in repeatable read mode")));
+                        }
+                    }
                     ListCell* lc = NULL;
                     BeginTransactionBlock();
                     foreach (lc, stmt->options) {
@@ -2681,6 +2713,13 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                         }
                     }
                     FreeSavepointList();
+
+                    if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
+                        ClearTxnInfoForSSLibpqsw();
+                        if (libpqsw_get_transaction()) {
+                            libpqsw_set_transaction(false);
+                        }
+                    }
                     break;
 
                 case TRANS_STMT_PREPARE:
@@ -2787,6 +2826,14 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                 case TRANS_STMT_ROLLBACK:
                     UserAbortTransactionBlock();
                     FreeSavepointList();
+
+                    if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
+                        ClearTxnInfoForSSLibpqsw();
+                        if (libpqsw_get_transaction()) {
+                            libpqsw_set_transaction(false);
+                        }
+                    }
+
                     break;
 
                 case TRANS_STMT_SAVEPOINT: {
@@ -5039,6 +5086,10 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
 
             break;
         }
+        case T_GetDiagStmt: {
+            GetDiagStmt *n = (GetDiagStmt *)parse_tree;
+            getDiagnosticsInfo(n->condInfo, n->hasCondNum, n->condNum);
+        } break;
         default: {
             ProcessUtilitySlow(parse_tree, query_string, params, dest, 
 #ifdef PGXC
@@ -7675,6 +7726,7 @@ static bool is_stmt_allowed_in_locked_mode(Node* parse_tree, const char* query_s
         case T_AlterEventStmt:
         case T_DropEventStmt:
         case T_ShowEventStmt:
+        case T_GetDiagStmt:
             return ALLOW;
 
         default:
@@ -9503,6 +9555,12 @@ const char* CreateCommandTag(Node* parse_tree)
         case T_ShrinkStmt:
             tag = "SHRINK";
             break;
+        case T_GetDiagStmt:
+            tag = "GET DIAGNOSTICS";
+            break;
+        case T_DolphinCallStmt:
+            tag = "CALL";
+            break;    
         default:
             elog(WARNING, "unrecognized node type: %d", (int)nodeTag(parse_tree));
             tag = "?\?\?";
@@ -10317,6 +10375,9 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
         case T_CreateModelStmt: // DB4AI
             lev = LOGSTMT_ALL;
             break;
+        case T_GetDiagStmt:
+            lev = LOGSTMT_ALL;
+            break;
 
         default:
             elog(WARNING, "unrecognized node type: %d", (int)nodeTag(parse_tree));
@@ -10669,7 +10730,9 @@ static void drop_stmt_pre_treatment(
 }
 #endif
 
-char* VariableBlackList[] = {"client_encoding"};
+char* VariableBlackList[] = {
+    "client_encoding"
+};
 
 bool IsVariableinBlackList(const char* name)
 {

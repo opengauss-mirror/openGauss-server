@@ -104,6 +104,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/access DESTINATION include
 else("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/access DESTINATION include/postgresql/server
     PATTERN "extreme_rto" EXCLUDE
+    PATTERN "ondemand_extreme_rto" EXCLUDE
     PATTERN "*.h")
 endif()
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/mb DESTINATION include/postgresql/server)

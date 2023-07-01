@@ -40,9 +40,14 @@ public:
     void InitGlobals();
 
     void refreshParameterIfNecessary();
+
+    virtual bool ResetReuseFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params);
+
 private:
 
     unsigned long ExecInsert(Relation rel, ResultRelInfo* resultRelInfo);
+
+    void InitBaseParam(List* targetList);
 
     struct InsertFusionGlobalVariable {
         /* for func/op expr calculation */
@@ -65,6 +70,55 @@ private:
     };
 
     InsertFusionLocaleVariable m_c_local;
+};
+
+class InsertSubFusion : public OpFusion {
+public:
+    InsertSubFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params);
+
+    ~InsertSubFusion(){};
+
+    bool execute(long max_rows, char* completionTag);
+
+    void InitLocals(ParamListInfo params);
+
+    void InitGlobals();
+
+    void InitPlan();
+
+private:
+
+    unsigned long ExecInsert(Relation rel, ResultRelInfo* resultRelInfo);
+
+    struct VarLoc {
+        int varNo;
+        int scanKeyIndx;
+    };
+    struct InsertSubFusionGlobalVariable {
+        int m_targetParamNum;
+
+        int m_targetConstNum;
+
+        ConstLoc* m_targetConstLoc;
+
+        int m_varNum;
+
+        VarLoc* m_targetVarLoc;
+    };
+    InsertSubFusionGlobalVariable* m_c_global;
+
+    struct InsertSubFusionLocaleVariable {
+        EState* m_estate; /* Top estate*/
+        Datum* m_curVarValue;
+        bool* m_curVarIsnull;
+        Plan* m_plan;
+        SeqScan* m_ss_plan;
+        PlanState* m_ps;
+        SeqScanState* m_sub_ps;
+        ModifyTableState* m_mt_state;
+    };
+
+    InsertSubFusionLocaleVariable m_c_local;
 };
 
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_INSERT_H_ */

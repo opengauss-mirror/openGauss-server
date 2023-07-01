@@ -119,7 +119,7 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     TupleTableSlot* slot = NULL;
     TupleTableSlot* tmpslot = NULL;
     ItemPointer tid;
-    bool isVersionScan = TvIsVersionScan(&node->ss);
+    bool isVersionScan = node->ss.isVersionScan;
     bool isUHeap = false;
 
     /*
@@ -288,24 +288,31 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
  */
 void StoreIndexTuple(TupleTableSlot* slot, IndexTuple itup, TupleDesc itupdesc)
 {
-    int nindexatts = itupdesc->natts;
-    Datum* values = slot->tts_values;
-    bool* isnull = slot->tts_isnull;
-    int i;
+    Assert(slot->tts_tupleDescriptor->natts == itupdesc->natts);
 
-    /*
-     * Note: we must use the tupdesc supplied by the AM in index_getattr, not
-     * the slot's tupdesc, in case the latter has different datatypes (this
-     * happens for btree name_ops in particular).  They'd better have the same
-     * number of columns though, as well as being datatype-compatible which is
-     * something we can't so easily check.
-     */
-    Assert(slot->tts_tupleDescriptor->natts == nindexatts);
+    if (u_sess->attr.attr_common.enable_indexscan_optimization) {
+        (void)ExecClearTuple(slot);
+        index_deform_tuple(itup, itupdesc, slot->tts_values, slot->tts_isnull);
+        ExecStoreVirtualTuple(slot);
+    } else {
+        int nindexatts = itupdesc->natts;
+        Datum *values = slot->tts_values;
+        bool *isnull = slot->tts_isnull;
+        int i;
 
-    (void)ExecClearTuple(slot);
-    for (i = 0; i < nindexatts; i++)
-        values[i] = index_getattr(itup, i + 1, itupdesc, &isnull[i]);
-    ExecStoreVirtualTuple(slot);
+        /*
+         * Note: we must use the tupdesc supplied by the AM in index_getattr, not
+         * the slot's tupdesc, in case the latter has different datatypes (this
+         * happens for btree name_ops in particular).  They'd better have the same
+         * number of columns though, as well as being datatype-compatible which is
+         * something we can't so easily check.
+         */
+
+        (void)ExecClearTuple(slot);
+        for (i = 0; i < nindexatts; i++)
+            values[i] = index_getattr(itup, i + 1, itupdesc, &isnull[i]);
+        ExecStoreVirtualTuple(slot);
+    }
 }
 
 /*
@@ -817,6 +824,7 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
         indexstate->ss.ps.stubType = PST_Scan;
     }
 
+    indexstate->ss.isVersionScan = TvIsVersionScan(&indexstate->ss);
     /*
      * all done.
      */

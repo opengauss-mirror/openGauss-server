@@ -24,8 +24,10 @@ ALTER VIEW [ IF EXISTS ] view_name
     SET ( {view_option_name [= view_option_value]} [, ... ] );
 ALTER VIEW [ IF EXISTS ] view_name
     RESET ( view_option_name [, ... ] );
-ALTER [DEFINER = user] VIEW view_name [ ( column_name [, ...] ) ]
+ALTER [DEFINER = user] [ SQL SECURITY { DEFINER | INVOKER } ] 
+    VIEW view_name [ ( column_name [, ...] ) ]
     AS query;
+NOTICE: SQL SECURITY option is only available in CENTRALIZED mode and B-format database.
 </synopsis>
 </refsynopsisdiv>
 </refentry>

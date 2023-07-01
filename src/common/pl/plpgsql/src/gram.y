@@ -44,6 +44,7 @@
 #include "utils/syscache.h"
 #include "utils/typcache.h"
 #include "knl/knl_session.h"
+#include "utils/varbit.h"
 
 #include <limits.h>
 
@@ -395,9 +396,9 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <list>	case_when_list opt_case_else
 
 %type <boolean>	getdiag_area_opt
-%type <list>	getdiag_list
-%type <diagitem> getdiag_list_item
-%type <ival>	getdiag_item getdiag_target
+%type <list>	getdiag_list condition_information
+%type <diagitem> getdiag_list_item condition_information_item
+%type <ival>	getdiag_item getdiag_target condition_number condition_number_item condition_information_item_name statement_information_item_name
 %type <ival>	varray_var
 %type <ival>	table_var
 %type <ival>	record_var
@@ -424,7 +425,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
  * Some of these are not directly referenced in this file, but they must be
  * here anyway.
  */
-%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT UNDERSCORE_CHARSET
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 
@@ -509,6 +510,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_EXCEPTIONS
 %token <keyword>	K_EXECUTE
 %token <keyword>	K_EXIT
+%token <keyword>	K_FALSE
 %token <keyword>	K_FETCH
 %token <keyword>	K_FIRST
 %token <keyword>	K_FOR
@@ -544,7 +546,8 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_MOVE
 %token <keyword>    K_MULTISET
 %token <keyword>    K_MULTISETS
-%token <keyword>	K_MYSQL_ERRNO
+%token <keyword>    K_MYSQL_ERRNO
+%token <keyword>    K_NUMBER
 %token <keyword>	K_NEXT
 %token <keyword>	K_NO
 %token <keyword>	K_NOT
@@ -597,6 +600,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_TABLE_NAME
 %token <keyword>	K_THEN
 %token <keyword>	K_TO
+%token <keyword>	K_TRUE
 %token <keyword>	K_TYPE
 %token <keyword>	K_UNION
 %token <keyword>	K_UNTIL
@@ -2717,6 +2721,9 @@ stmt_getdiag	: K_GET getdiag_area_opt K_DIAGNOSTICS getdiag_list ';'
                         newp->lineno   = plpgsql_location_to_lineno(@1);
                         newp->is_stacked = $2;
                         newp->diag_items = $4;
+                        newp->has_cond = false;
+                        newp->is_cond_item = false;
+                        newp->cond_number = 0;
                         newp->sqlString = plpgsql_get_curline_query();
 
                         /*
@@ -2729,7 +2736,6 @@ stmt_getdiag	: K_GET getdiag_area_opt K_DIAGNOSTICS getdiag_list ';'
                             switch (ditem->kind)
                             {
                                 /* these fields are disallowed in stacked case */
-                                case PLPGSQL_GETDIAG_ROW_COUNT:
                                 case PLPGSQL_GETDIAG_RESULT_OID:
                                     if (newp->is_stacked) {
                                         const char* message = "diagnostics item is not allowed in GET STACKED DIAGNOSTICS";
@@ -2739,6 +2745,19 @@ stmt_getdiag	: K_GET getdiag_area_opt K_DIAGNOSTICS getdiag_list ';'
                                                  errmsg("diagnostics item %s is not allowed in GET STACKED DIAGNOSTICS",
                                                         plpgsql_getdiag_kindname(ditem->kind)),
                                                  parser_errposition(@1)));
+                                    }
+                                    break;
+                                case PLPGSQL_GETDIAG_ROW_COUNT:
+                                    if (!B_DIAGNOSTICS) {
+                                        if (newp->is_stacked) {
+                                            const char* message = "diagnostics item is not allowed in GET STACKED DIAGNOSTICS";
+                                            InsertErrorMessage(message, plpgsql_yylloc);
+                                            ereport(errstate,
+                                                    (errcode(ERRCODE_SYNTAX_ERROR),
+                                                    errmsg("diagnostics item %s is not allowed in GET STACKED DIAGNOSTICS",
+                                                            plpgsql_getdiag_kindname(ditem->kind)),
+                                                    parser_errposition(@1)));
+                                        }
                                     }
                                     break;
                                 /* these fields are disallowed in current case */
@@ -2757,6 +2776,8 @@ stmt_getdiag	: K_GET getdiag_area_opt K_DIAGNOSTICS getdiag_list ';'
                                                  parser_errposition(@1)));
                                     }
                                     break;
+                                case PLPGSQL_GETDIAG_B_NUMBER:
+                                    break;
                                 default:
                                     const char* message = "unrecognized diagnostic item kind";
                                     InsertErrorMessage(message, plpgsql_yylloc);
@@ -2765,6 +2786,50 @@ stmt_getdiag	: K_GET getdiag_area_opt K_DIAGNOSTICS getdiag_list ';'
                                     break;
                             }
                         }
+
+                        $$ = (PLpgSQL_stmt *)newp;
+                    }
+                | K_GET getdiag_area_opt K_DIAGNOSTICS K_CONDITION condition_number_item condition_information ';'
+                    {
+                        if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+							ereport(errstate, (errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Un-support feature"),
+								errdetail("get diagitem syntax is supported only in B compatibility")));
+						}
+                        PLpgSQL_stmt_getdiag	 *newp;
+
+                        newp = (PLpgSQL_stmt_getdiag *)palloc0(sizeof(PLpgSQL_stmt_getdiag));
+                        newp->cmd_type = PLPGSQL_STMT_GETDIAG;
+                        newp->lineno   = plpgsql_location_to_lineno(@1);
+                        newp->is_stacked = $2;
+                        newp->has_cond = true;
+                        newp->is_cond_item = true;
+                        newp->cond_number = $5;
+                        newp->diag_items = $6;
+                        newp->sqlString = plpgsql_get_curline_query();
+
+                        $$ = (PLpgSQL_stmt *)newp;
+                    }
+                | K_GET getdiag_area_opt K_DIAGNOSTICS K_CONDITION condition_number condition_information ';'
+                    {
+                        if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+							ereport(errstate, (errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Un-support feature"),
+								errdetail("get diagitem syntax is supported only in B compatibility")));
+						}
+                        PLpgSQL_stmt_getdiag	 *newp;
+
+                        newp = (PLpgSQL_stmt_getdiag *)palloc0(sizeof(PLpgSQL_stmt_getdiag));
+                        newp->cmd_type = PLPGSQL_STMT_GETDIAG;
+                        newp->lineno   = plpgsql_location_to_lineno(@1);
+                        newp->is_stacked = $2;
+                        newp->has_cond = true;
+                        newp->is_cond_item = false;
+                        newp->cond_number = $5;
+                        newp->diag_items = $6;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)newp;
                     }
@@ -2801,38 +2866,86 @@ getdiag_list_item : getdiag_target assign_operator getdiag_item
                         newp = (PLpgSQL_diag_item *)palloc(sizeof(PLpgSQL_diag_item));
                         newp->target = $1;
                         newp->kind = $3;
+                        newp->user_ident = NULL;
+
+                        $$ = newp;
+                    }
+                | getdiag_target '=' K_NUMBER
+                    {
+                        if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+							ereport(errstate, (errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Un-support feature"),
+								errdetail("get diagitem syntax is supported only in B compatibility")));
+						}
+                        PLpgSQL_diag_item *newp;
+
+                        newp = (PLpgSQL_diag_item *)palloc(sizeof(PLpgSQL_diag_item));
+                        newp->target = $1;
+                        newp->kind = PLPGSQL_GETDIAG_B_NUMBER;
+                        newp->user_ident = NULL;
+
+                        $$ = newp;
+                    }
+                | SET_USER_IDENT '=' statement_information_item_name
+                    {
+                        if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+							ereport(errstate, (errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Un-support feature"),
+								errdetail("get diagitem syntax is supported only in B compatibility")));
+						}
+                        PLpgSQL_diag_item *newp;
+
+                        newp = (PLpgSQL_diag_item *)palloc(sizeof(PLpgSQL_diag_item));
+                        newp->target = 0;
+                        newp->kind = $3;
+                        newp->user_ident = $1;
 
                         $$ = newp;
                     }
                 ;
 
-getdiag_item :
+getdiag_item :    K_ROW_COUNT
                     {
-                        int	tok = yylex();
+                        $$ = PLPGSQL_GETDIAG_ROW_COUNT;
+                    }
+                | K_RESULT_OID
+                    {
+                        $$ = PLPGSQL_GETDIAG_RESULT_OID;
+                    }
+                | K_PG_EXCEPTION_DETAIL
+                    {
+                        $$ = PLPGSQL_GETDIAG_ERROR_DETAIL;
+                    }
+                | K_PG_EXCEPTION_CONTEXT
+                    {
+                        $$ = PLPGSQL_GETDIAG_ERROR_CONTEXT;
+                    }
+                | K_MESSAGE_TEXT
+                    {
+                        $$ = PLPGSQL_GETDIAG_MESSAGE_TEXT;
+                    }
+                | K_RETURNED_SQLSTATE
+                    {
+                        $$ = PLPGSQL_GETDIAG_RETURNED_SQLSTATE;
+                    }
+                ;
 
-                        if (tok_is_keyword(tok, &yylval,
-                                           K_ROW_COUNT, "row_count"))
-                            $$ = PLPGSQL_GETDIAG_ROW_COUNT;
-                        else if (tok_is_keyword(tok, &yylval,
-                                                K_RESULT_OID, "result_oid"))
-                            $$ = PLPGSQL_GETDIAG_RESULT_OID;
-                        else if (tok_is_keyword(tok, &yylval,
-                                                K_PG_EXCEPTION_DETAIL, "pg_exception_detail"))
-                            $$ = PLPGSQL_GETDIAG_ERROR_DETAIL;
-                        else if (tok_is_keyword(tok, &yylval,
-                                                K_PG_EXCEPTION_HINT, "pg_exception_hint"))
-                            $$ = PLPGSQL_GETDIAG_ERROR_HINT;
-                        else if (tok_is_keyword(tok, &yylval,
-                                                K_PG_EXCEPTION_CONTEXT, "pg_exception_context"))
-                            $$ = PLPGSQL_GETDIAG_ERROR_CONTEXT;
-                        else if (tok_is_keyword(tok, &yylval,
-                                                K_MESSAGE_TEXT, "message_text"))
-                            $$ = PLPGSQL_GETDIAG_MESSAGE_TEXT;
-                        else if (tok_is_keyword(tok, &yylval,
-                                                K_RETURNED_SQLSTATE, "returned_sqlstate"))
-                            $$ = PLPGSQL_GETDIAG_RETURNED_SQLSTATE;
-                        else
-                            yyerror("unrecognized GET DIAGNOSTICS item");
+statement_information_item_name :
+                  K_NUMBER
+                    {
+                        if(u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+                            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("get diagnostic number is only supported in database which dbcompatibility='B'.")));
+                        $$ = PLPGSQL_GETDIAG_B_NUMBER;
+                    }
+                | K_ROW_COUNT
+                    {
+                        if(u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+                            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("get diagnostic number is only supported in database which dbcompatibility='B'.")));
+                        $$ = PLPGSQL_GETDIAG_ROW_COUNT;
                     }
                 ;
 
@@ -2861,6 +2974,94 @@ getdiag_target	: T_DATUM
                         /* just to give a better message than "syntax error" */
                         cword_is_not_variable(&($1), @1);
                     }
+                ;
+
+condition_number_item :
+                  T_DATUM
+                    {
+                        check_assignable($1.datum, @1);
+                        if ($1.datum->dtype == PLPGSQL_DTYPE_ROW ||
+                            $1.datum->dtype == PLPGSQL_DTYPE_REC) {
+                            const char* message = "not a scalar variable";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(errstate,
+                                    (errcode(ERRCODE_SYNTAX_ERROR),
+                                     errmsg("\"%s\" is not a scalar variable",
+                                            NameOfDatum(&($1))),
+                                     parser_errposition(@1)));
+                        }
+                        $$ = $1.dno;
+                    }
+                ;
+
+condition_number : ICONST                           { $$ = $1; }
+                | FCONST                            { $$ = (atof($1) + 0.5); }
+                | SCONST                            { $$ = (atof($1) + 0.5); }
+                | BCONST					
+					{
+						Datum val = DirectFunctionCall1(bittoint4, DirectFunctionCall3(bit_in, CStringGetDatum($1), ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1)));
+						$$ = DatumGetInt32(val);
+					}
+                | K_TRUE                            { $$ = 1; }
+                | K_FALSE                           { $$ = 0; }
+                | K_NULL                            { $$ = 0; }
+                | SET_USER_IDENT
+                    {
+                        $$ = getUserVarVal($1);
+                    }
+                | T_WORD                        { $$ = (atof($1.ident) + 0.5); }
+                ;
+
+condition_information :
+                  condition_information ',' condition_information_item
+                    {
+                        $$ = lappend($1, $3);
+                    }
+                | condition_information_item
+                    {
+                        $$ = list_make1($1);
+                    }
+                ;
+
+condition_information_item :
+                  getdiag_target '=' condition_information_item_name
+                    {
+                        PLpgSQL_diag_item *newp;
+
+                        newp = (PLpgSQL_diag_item *)palloc(sizeof(PLpgSQL_diag_item));
+                        newp->target = $1;
+                        newp->kind = $3;
+                        newp->user_ident = NULL;
+
+                        $$ = newp;
+                    }
+                | SET_USER_IDENT '=' condition_information_item_name
+                    {
+                        PLpgSQL_diag_item *newp;
+
+                        newp = (PLpgSQL_diag_item *)palloc(sizeof(PLpgSQL_diag_item));
+                        newp->target = 0;
+                        newp->kind = $3;
+                        newp->user_ident = $1;
+
+                        $$ = newp;
+                    }
+                ;
+
+condition_information_item_name:
+                  K_CLASS_ORIGIN                    { $$ = PLPGSQL_GETDIAG_B_CLASS_ORIGIN; }
+                | K_SUBCLASS_ORIGIN                 { $$ = PLPGSQL_GETDIAG_B_SUBCLASS_ORIGIN; }
+                | K_CONSTRAINT_CATALOG              { $$ = PLPGSQL_GETDIAG_B_CONSTRAINT_CATALOG; }
+                | K_CONSTRAINT_SCHEMA               { $$ = PLPGSQL_GETDIAG_B_CONSTRAINT_SCHEMA; }
+                | K_CONSTRAINT_NAME                 { $$ = PLPGSQL_GETDIAG_B_CONSTRAINT_NAME; }
+                | K_CATALOG_NAME                    { $$ = PLPGSQL_GETDIAG_B_CATALOG_NAME; }
+                | K_SCHEMA_NAME                     { $$ = PLPGSQL_GETDIAG_B_SCHEMA_NAME; }
+                | K_TABLE_NAME                      { $$ = PLPGSQL_GETDIAG_B_TABLE_NAME; }
+                | K_COLUMN_NAME                     { $$ = PLPGSQL_GETDIAG_B_COLUMN_NAME; }
+                | K_CURSOR_NAME                     { $$ = PLPGSQL_GETDIAG_B_CURSOR_NAME; }
+                | K_MESSAGE_TEXT                    { $$ = PLPGSQL_GETDIAG_B_MESSAGE_TEXT; }
+                | K_MYSQL_ERRNO                     { $$ = PLPGSQL_GETDIAG_B_MYSQL_ERRNO; }
+                | K_RETURNED_SQLSTATE               { $$ = PLPGSQL_GETDIAG_B_RETURNED_SQLSTATE; }
                 ;
 
 table_var		: T_TABLE

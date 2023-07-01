@@ -1312,8 +1312,8 @@ static void AttrDefaultFetch(Relation relation);
 static void CheckConstraintFetch(Relation relation);
 static List* insert_ordered_oid(List* list, Oid datum);
 static void IndexSupportInitialize(Relation relation, oidvector* indclass, StrategyNumber maxSupportNumber,
-    AttrNumber maxAttributeNumber);
-static OpClassCacheEnt* LookupOpclassInfo(Relation relation, Oid operatorClassOid, StrategyNumber numSupport);
+    AttrNumber maxAttributeNumber, bool is_btree_or_ubtree);
+static OpClassCacheEnt* LookupOpclassInfo(Relation relation, Oid operatorClassOid, StrategyNumber numSupport, bool is_btree_or_ubtree);
 static void RelationCacheInitFileRemoveInDir(const char* tblspcpath);
 static void unlink_initfile(const char* initfilename);
 static void meta_rel_init_index_amroutine(Relation relation);
@@ -2663,6 +2663,7 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
     int indnatts;
     int indnkeyatts;
     uint16 amsupport;
+    bool is_btree_or_ubtree;
     errno_t rc;
 
     /*
@@ -2714,6 +2715,11 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
     IndexRelationInitKeyNums(relation);
     indnkeyatts = IndexRelationGetNumberOfKeyAttributes(relation);
     amsupport = aform->amsupport;
+    if(strcmp(aform->amname.data, "btree") == 0 || strcmp(aform->amname.data, "ubtree")) {
+        is_btree_or_ubtree = true;
+    } else {
+        is_btree_or_ubtree = false;
+    }
 
     if (indnkeyatts > INDEX_MAX_KEYS) {
         ereport(
@@ -2794,7 +2800,7 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
      * as zeroes, and are filled on-the-fly when used)
      */
     IndexSupportInitialize(relation,
-        indclass, amsupport, indnkeyatts);
+        indclass, amsupport, indnkeyatts, is_btree_or_ubtree);
 
     /*
      * Similarly extract indoption and copy it to the cache entry
@@ -2832,7 +2838,7 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
  * for the index and access method.
  */
 static void IndexSupportInitialize(Relation relation, oidvector* indclass, StrategyNumber maxSupportNumber,
-    AttrNumber maxAttributeNumber)
+    AttrNumber maxAttributeNumber, bool is_btree_or_ubtree)
 {
     RegProcedure* indexSupport = relation->rd_support;
     Oid* opFamily = relation->rd_opfamily;
@@ -2847,7 +2853,7 @@ static void IndexSupportInitialize(Relation relation, oidvector* indclass, Strat
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("bogus pg_index tuple")));
 
         /* look up the info for this opclass, using a cache */
-        opcentry = LookupOpclassInfo(relation, indclass->values[attIndex], maxSupportNumber);
+        opcentry = LookupOpclassInfo(relation, indclass->values[attIndex], maxSupportNumber, is_btree_or_ubtree);
 
         /* copy cached data into relcache entry */
         opFamily[attIndex] = opcentry->opcfamily;
@@ -2882,7 +2888,7 @@ static void IndexSupportInitialize(Relation relation, oidvector* indclass, Strat
  * be able to flush this cache as well as the contents of relcache entries
  * for indexes.
  */
-static OpClassCacheEnt* LookupOpclassInfo(Relation relation, Oid operatorClassOid, StrategyNumber numSupport)
+static OpClassCacheEnt* LookupOpclassInfo(Relation relation, Oid operatorClassOid, StrategyNumber numSupport, bool is_btree_or_ubtree)
 {
     OpClassCacheEnt* opcentry = NULL;
     bool found = false;
@@ -2911,6 +2917,7 @@ static OpClassCacheEnt* LookupOpclassInfo(Relation relation, Oid operatorClassOi
      * to the u_sess->relcache_cxt.OpClassCache and can not delete, so we will report PANIC.
      */
     START_CRIT_SECTION();
+REBUILD:
     if (!found) {
         /* Need to allocate memory for new entry */
         opcentry->valid = false; /* until known OK */
@@ -2922,6 +2929,13 @@ static OpClassCacheEnt* LookupOpclassInfo(Relation relation, Oid operatorClassOi
         else
             opcentry->supportProcs = NULL;
     } else {
+        if (is_btree_or_ubtree &&
+            ((numSupport == 2 && opcentry->numSupport == 3) || (numSupport == 3 && opcentry->numSupport == 2))) {
+            opcentry = (OpClassCacheEnt *)hash_search(u_sess->relcache_cxt.OpClassCache, (void *)&operatorClassOid,
+                                                    HASH_REMOVE, &found);
+            found = false;
+            goto REBUILD;
+        }
         Assert(numSupport == opcentry->numSupport);
     }
     END_CRIT_SECTION();
@@ -5020,7 +5034,7 @@ RelFileNodeBackend CreateNewRelfilenodePart(Relation parent, Partition part)
         part->newcbi = true;
     }
 
-    partition_create_new_storage(parent, part, newrnode);
+    partition_create_new_storage(parent, part, newrnode, true);
 
     return newrnode;
 }

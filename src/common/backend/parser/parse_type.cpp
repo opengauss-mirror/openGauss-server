@@ -30,11 +30,14 @@
 #include "pgxc/pgxc.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/date.h"
 #include "utils/datum.h"
+#include "utils/fmgrtab.h"
 #include "utils/lsyscache.h"
+#include "utils/timestamp.h"
 #include "utils/syscache.h"
 #include "utils/pl_package.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
 #include "parser/parse_utilcmd.h"
 
 static int32 typenameTypeMod(ParseState* pstate, const TypeName* typname, Type typ);
@@ -654,16 +657,16 @@ Oid LookupCollation(ParseState* pstate, List* collnames, int location)
     return colloid;
 }
 
-static Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation,
+Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation,
     bool is_bin_type, Oid rel_coll_oid)
 {
-    if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid) && !type_is_enum(typeOid)) {
+    if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid) && !type_is_enum(typeOid) && !type_is_set(typeOid)) {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("type %s not support set charset", format_type_be(typeOid))));
     }
 
     Oid result = InvalidOid;
-    if (!OidIsValid(typcollation) && !is_bin_type) {
+    if (!OidIsValid(typcollation) && !is_bin_type && !type_is_set(typeOid)) {
         return InvalidOid;
     } else if (OidIsValid(coldef->collOid)) {
         /* Precooked collation spec, use that */
@@ -729,7 +732,7 @@ Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid, Oi
         check_binary_collation(result, typeOid);
     }
     /* Complain if COLLATE is applied to an uncollatable type */
-    if (OidIsValid(result) && !OidIsValid(typcollation) && !is_bin_type) {
+    if (OidIsValid(result) && !OidIsValid(typcollation) && !is_bin_type && !type_is_set(typeOid)) {
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("collations are not supported by type %s", format_type_be(typeOid)),
@@ -822,7 +825,22 @@ Datum stringTypeDatum(Type tp, char* string, int32 atttypmod, bool can_ignore)
     Oid typioparam = getTypeIOParam(tp);
     Datum result;
 
-    result = OidInputFunctionCall(typinput, string, typioparam, atttypmod, can_ignore);
+    switch (typinput) {
+    case F_DATE_IN:
+        result = input_date_in(string, can_ignore);
+        break;
+    case F_BPCHARIN:
+        result = input_bpcharin(string, typioparam, atttypmod);
+        break;
+    case F_VARCHARIN:
+        result = input_varcharin(string, typioparam, atttypmod);
+        break;
+    case F_TIMESTAMP_IN:
+        result = input_timestamp_in(string, typioparam, atttypmod, can_ignore);
+        break;
+    default:
+        result = OidInputFunctionCall(typinput, string, typioparam, atttypmod, can_ignore);
+    }
 
 #ifdef RANDOMIZE_ALLOCATED_MEMORY
 
@@ -1594,5 +1612,30 @@ Oid LookupTypeInPackage(List* typeNames, const char* typeName, Oid pkgOid, Oid n
 
 bool IsBinaryType(Oid typid)
 {
-    return (typid == BLOBOID) ? true : false;
+    return ((typid) == BLOBOID ||
+            (typid) == BYTEAOID);
+}
+
+void check_type_supports_multi_charset(Oid typid, bool allow_array)
+{
+    switch (typid) {
+        case XMLOID:
+        case JSONOID:
+        case TSVECTOROID:
+        case GTSVECTOROID:
+        case TSQUERYOID:
+        case RECORDOID:
+        case HLL_OID:
+        case HLL_HASHVAL_OID:
+        case HLL_TRANS_OID:
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("multi character set for datatype '%s' is not supported", get_typename(typid))));
+        default:
+            break;
+    }
+
+    if (!allow_array && type_is_array(typid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("multi character set for datatype '%s' is not supported", get_typename(typid))));
+    }
 }

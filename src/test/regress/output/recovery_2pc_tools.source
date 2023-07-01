@@ -99,6 +99,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  candidate_buf_percent_target                     | real    |      | 0.1       | 0.85
  catchup2normal_wait_time                         | integer | ms   | -1        | 10000
  cgroup_name                                      | string  |      |           | 
+ character_set_connection                         | string  |      |           | 
  check_function_bodies                            | bool    |      |           | 
  check_implicit_conversions                       | bool    |      |           | 
  checkpoint_completion_target                     | real    |      | 0         | 1
@@ -113,6 +114,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  cn_send_buffer_size                              | integer | kB   | 8         | 128
  codegen_cost_threshold                           | integer |      | 0         | 2147483647
  codegen_strategy                                 | enum    |      |           | 
+ collation_connection                             | string  |      |           | 
  commit_delay                                     | integer |      | 0         | 100000
  commit_siblings                                  | integer |      | 0         | 1000
  comm_proxy_attr                                  | string  |      |           | 
@@ -246,6 +248,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_dcf                                       | bool    |      |           | 
  enable_debug_vacuum                              | bool    |      |           | 
  enable_default_cfunc_libpath                     | bool    |      |           | 
+ enable_default_index_deduplication               | bool    |      |           | 
  enable_default_ustore_table                      | bool    |      |           | 
  enable_defer_calculate_snapshot                  | bool    |      |           | 
  enable_delta_store                               | bool    |      |           | 
@@ -267,6 +270,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_hashagg                                   | bool    |      |           | 
  enable_hashjoin                                  | bool    |      |           | 
  enable_hdfs_predicate_pushdown                   | bool    |      |           | 
+ enable_huge_pages                                | bool    |      |           | 
  enable_hypo_index                                | bool    |      |           | 
  enable_incremental_catchup                       | bool    |      |           | 
  enable_incremental_checkpoint                    | bool    |      |           | 
@@ -293,6 +297,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_nvm                                       | bool    |      |           | 
  enable_online_ddl_waitlock                       | bool    |      |           | 
  enable_opfusion                                  | bool    |      |           | 
+ enable_opfusion_reuse                            | bool    |      |           | 
  enable_orc_cache                                 | bool    |      |           | 
  enable_page_lsn_check                            | bool    |      |           | 
  enable_partition_opfusion                        | bool    |      |           | 
@@ -309,6 +314,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_segment                                   | bool    |      |           | 
  enableSeparationOfDuty                           | bool    |      |           | 
  enable_seqscan                                   | bool    |      |           | 
+ enable_seqscan_dopcost                           | bool    |      |           | 
  enable_seqscan_fusion                            | bool    |      |           | 
  enable_set_variable_b_format                     | bool    |      |           | 
  enable_show_any_tuples                           | bool    |      |           | 
@@ -318,6 +324,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_sonic_hashjoin                            | bool    |      |           | 
  enable_sonic_optspill                            | bool    |      |           | 
  enable_sort                                      | bool    |      |           | 
+ enable_sortgroup_agg                             | bool    |      |           | 
  enable_startwith_debug                           | bool    |      |           | 
  enable_stmt_track                                | bool    |      |           | 
  enable_stream_replication                        | bool    |      |           | 
@@ -329,6 +336,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_ustore                                    | bool    |      |           | 
  enable_valuepartition_pruning                    | bool    |      |           | 
  enable_vector_engine                             | bool    |      |           | 
+ enable_vector_targetlist                         | bool    |      |           | 
  enable_wal_shipping_compression                  | bool    |      |           | 
  enable_wdr_snapshot                              | bool    |      |           | 
  enable_xlog_prune                                | bool    |      |           | 
@@ -380,9 +388,12 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  hll_max_sparse                                   | integer |      | -1        | 2147483647
  hot_standby                                      | bool    |      |           | 
  hot_standby_feedback                             | bool    |      |           | 
+ huge_page_size                                   | integer | 8kB  | 0         | 1073741823
  ident_file                                       | string  |      |           | 
  idle_in_transaction_session_timeout              | integer | s    | 0         | 86400
  ignore_checksum_failure                          | bool    |      |           | 
+ ignore_feedback_xmin_window                      | integer | ms   | 0         | 2147483647
+ ignore_standby_lsn_window                        | integer | ms   | 0         | 2147483647
  ignore_system_indexes                            | bool    |      |           | 
  incremental_checkpoint_timeout                   | integer | s    | 1         | 3600
  instance_metric_retention_time                   | integer |      | 0         | 3650
@@ -611,6 +622,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_enable_catalog_centralized                    | bool    |      |           | 
  ss_enable_dms                                    | bool    |      |           | 
  ss_enable_dss                                    | bool    |      |           | 
+ ss_enable_ondemand_recovery                      | bool    |      |           | 
  ss_enable_reform                                 | bool    |      |           | 
  ss_enable_scrlock                                | bool    |      |           | 
  ss_enable_scrlock_sleep_mode                     | bool    |      |           | 
@@ -632,6 +644,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_log_max_file_size                             | integer | kB   | 1024      | 4194304
  ssl_renegotiation_limit                          | integer | kB   | 0         | 2147483647
  ss_ock_log_path                                  | string  |      |           | 
+ ss_ondemand_recovery_mem_size                    | integer | kB   | 1048576   | 104857600
  ss_parallel_thread_count                         | integer |      | 0         | 64
  ss_rdma_work_config                              | string  |      |           | 
  ss_recv_msg_pool_size                            | integer | kB   | 1024      | 1048576

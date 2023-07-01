@@ -195,6 +195,7 @@ extern void DecrTupleDescRefCount(TupleDesc tupdesc);
     } while (0)
 
 extern bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2);
+extern bool opFusionReuseEqualTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2);
 extern bool equalDeltaTupleDescs(TupleDesc main_tupdesc, TupleDesc delta_tupdesc);
 
 extern void TupleDescInitEntry(

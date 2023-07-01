@@ -65,6 +65,7 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_HashJoin, "HashJoin"},
     {T_Material, "Material"},
     {T_Sort, "Sort"},
+    {T_SortGroup, "SortGroup"},
     {T_Group, "Group"},
     {T_Agg, "Agg"},
     {T_WindowAgg, "WindowAgg"},
@@ -132,6 +133,7 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_HashJoinState, "HashJoinState"},
     {T_MaterialState, "MaterialState"},
     {T_SortState, "SortState"},
+    {T_SortGroupState, "SortGroupState"},
     {T_GroupState, "GroupState"},
     {T_AggState, "AggState"},
     {T_WindowAggState, "WindowAggState"},
@@ -606,7 +608,11 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_VariableMultiSetStmt, "VariableMultiSetStmt"},
     {T_IndexHintDefinition, "IndexHintDefinition"},
     {T_IndexHintRelationData, "IndexHintRelationData"},
-    {T_FunctionSources, "FunctionSources"}
+    {T_FunctionSources, "FunctionSources"},
+    {T_CondInfo, "CondInfo"},
+    {T_GetDiagStmt, "GetDiagStmt"},
+    {T_DolphinCallStmt, "DolphinCallStmt"},
+    {T_CallContext, "CallContext"}
 };
 
 char* nodeTagToString(NodeTag tag)

@@ -29,6 +29,11 @@
 #define ERROR_LIMIT_LEN 256
 #endif
 
+#define ERROR_INSTANCEDIR_EXISTS 0x01
+#define ERROR_CLUSTERDIR_EXISTS_BY_PRIMARY 0x02
+#define ERROR_CLUSTERDIR_NO_EXISTS_BY_STANDBY 0x04
+#define ERROR_CLUSTERDIR_INCOMPLETE 0x10
+
 #define ARRAY_NUM(a) (sizeof(a) / sizeof((a)[0]))
 
 extern char **replace_token(char **lines, const char *token, const char *replacement);
@@ -42,9 +47,10 @@ extern bool ss_issharedstorage;
 extern bool ss_need_mkclusterdir;
 
 /* check dms url when gs_initdb */
+
 extern bool ss_check_nodedatainfo(bool enable_dss);
-extern bool ss_check_existclusterdir(const char* path);
-extern bool ss_check_shareddir(char* path);
+extern int ss_check_shareddir(char* path, int32 node_id, bool *ss_need_mkclusterdir);
+
 extern void ss_createdir(const char** ss_dirs, int32 num, int32 node_id, const char* pg_data, const char* vgdata_dir, const char* vglog_dir);
 extern void ss_mkdirdir(int32 node_id, const char* pg_data, const char* vgdata_dir, const char* vglog_dir, bool need_mkclusterdir);
 extern char** ss_addnodeparmater(char** conflines);

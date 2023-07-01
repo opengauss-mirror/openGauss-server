@@ -145,6 +145,7 @@ struct PGPROC {
 
     int pgprocno;
     int nodeno;
+    int backendSlot;
 
     /* These fields are zero while a backend is still starting up: */
     BackendId backendId; /* This backend's backend ID (if assigned) */
@@ -345,6 +346,7 @@ typedef struct PGXACT {
                          */
     bool delayChkpt;    /* true if this proc delays checkpoint start;
                          * previously called InCommit */
+    CommandId cid;
 #ifdef __aarch64__
     char padding[PG_CACHE_LINE_SIZE - PGXACT_PAD_OFFSET]; /*padding to 128 bytes*/
 #endif

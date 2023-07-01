@@ -226,7 +226,10 @@ void _bt_leafbuild(BTSpool *btspool, BTSpool *btspool2)
     if (btspool2 != NULL)
         tuplesort_performsort(btspool2->sortstate);
 
+    wstate.heap = btspool->heap;
     wstate.index = btspool->index;
+    wstate.inskey = _bt_mkscankey(wstate.index, NULL);
+    wstate.inskey->allequalimage = btree_allequalimage(wstate.index, true);
 
     /*
      * We need to log index creation in WAL iff WAL archiving/streaming is
@@ -449,6 +452,7 @@ BTPageState *_bt_pagestate(BTWriteState *wstate, uint32 level)
     /* initialize lastoff so first item goes into P_FIRSTKEY */
     state->btps_lastoff = P_HIKEY;
     state->btps_level = level;
+    state->btps_lastextra = 0;
     /* set "full" threshold based on level.  See notes at head of file. */
     if (level > 0) {
         state->btps_full = (BLCKSZ * (100 - BTREE_NONLEAF_FILLFACTOR) / 100);
@@ -508,7 +512,7 @@ static void _bt_sortaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumb
         trunctuple = *itup;
         trunctuple.t_info = sizeof(IndexTupleData);
         if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
-            BTreeTupleSetNAtts(&trunctuple, 0);
+            btree_tuple_set_num_of_atts(&trunctuple, 0, false);
         }
         itup = &trunctuple;
         itemsize = sizeof(IndexTupleData);
@@ -560,13 +564,14 @@ static void _bt_sortaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumb
  * 'last' pointer indicates the last offset added to the page.
  * ----------
  */
-void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
+void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup, Size truncextra)
 {
     Page npage;
     BlockNumber nblkno;
     OffsetNumber last_off;
     Size pgspc;
     Size itupsz;
+    Size last_truncextra = 0;
 
     /*
      * This is a handy place to check for cancel interrupts during the btree
@@ -577,10 +582,15 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
     npage = state->btps_page;
     nblkno = state->btps_blkno;
     last_off = state->btps_lastoff;
+    last_truncextra = state->btps_lastextra;
+    state->btps_lastextra = truncextra;
 
     pgspc = PageGetFreeSpace(npage);
     itupsz = IndexTupleDSize(*itup);
     itupsz = MAXALIGN(itupsz);
+
+    bool is_leaf = (state->btps_level == 0);
+
     /*
      * Check whether the item can fit on a btree page at all. (Eventually, we
      * ought to try to apply TOAST methods if not.) We actually need to be
@@ -592,18 +602,9 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
      * oversize items being inserted into an already-existing index. But
      * during creation of an index, we don't go through there.
      */
-    if (itupsz > (Size)BTMaxItemSize(npage))
-        ereport(ERROR, 
-                (errmodule(MOD_INDEX),
-                 errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                 errmsg("index row size %lu exceeds maximum %lu for index \"%s\"", (unsigned long)itupsz,
-                        (unsigned long)BTMaxItemSize(npage), RelationGetRelationName(wstate->index)),
-                 errhint("Values larger than 1/3 of a buffer page cannot be indexed.\n"
-                         "Consider a function index of an MD5 hash of the value, "
-                         "or use full text indexing."),
-                 errdetail("Block Number: %u, last off: %u.", nblkno, last_off),
-                 errcause("Values larger than 1/3 of a buffer page cannot be indexed."),
-                 erraction("Consider a function index of an MD5 hash of the value, or use full text indexing.")));
+    if (unlikely(itupsz > (Size)BTREE_MAX_ITEM_SIZE(npage))) {
+        btree_check_third_page(wstate->index, wstate->heap, is_leaf, npage, itup);
+    }
 
     /*
      * Check to see if page is "full".	It's definitely full if the item won't
@@ -611,7 +612,8 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
      * fillfactor.	However, we must put at least two items on each page, so
      * disregard fillfactor if we don't have that many.
      */
-    if (pgspc < itupsz || (pgspc < state->btps_full && last_off > P_FIRSTKEY)) {
+    if (pgspc < itupsz + (is_leaf ? MAXALIGN(sizeof(ItemPointerData)) : 0) ||
+        (pgspc + last_truncextra < state->btps_full && last_off > P_FIRSTKEY)) {
         /*
          * Finish off the page and write it out.
          */
@@ -620,8 +622,6 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
         ItemId ii;
         ItemId hii;
         IndexTuple oitup;
-        IndexTuple keytup;
-        BTPageOpaqueInternal opageop = (BTPageOpaqueInternal) PageGetSpecialPointer(opage);
 
         /* Create new page of same level */
         npage = _bt_blnewpage(state->btps_level);
@@ -648,10 +648,10 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
         *hii = *ii;
         ItemIdSetUnused(ii); /* redundant */
         ((PageHeader)opage)->pd_lower -= sizeof(ItemIdData);
-        int indnatts = IndexRelationGetNumberOfAttributes(wstate->index);
-        int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(wstate->index);
 
-        if (indnkeyatts != indnatts && P_ISLEAF(opageop)) {
+        if (is_leaf) {
+            IndexTuple lastleft;
+            IndexTuple truncated;
             /*
              * We truncate included attributes of high key here.  Subsequent
              * insertions assume that hikey is already truncated, and so they
@@ -665,10 +665,17 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
              * have to shift much of tuples memory.  Shift of ItemId's is
              * rather cheap, because they are small.
              */
-            keytup = _bt_nonkey_truncate(wstate->index, oitup);
+
+            ii = PageGetItemId(opage, OffsetNumberPrev(last_off));
+            lastleft = (IndexTuple) PageGetItem(opage, ii);
+            truncated = btree_truncate(wstate->index, lastleft, oitup, wstate->inskey);
             /* delete "wrong" high key, insert keytup as P_HIKEY. */
             PageIndexTupleDelete(opage, P_HIKEY);
-            _bt_sortaddtup(opage, IndexTupleSize(keytup), keytup, P_HIKEY);
+            _bt_sortaddtup(opage, IndexTupleSize(truncated), truncated, P_HIKEY);
+            pfree(truncated);
+
+			hii = PageGetItemId(opage, P_HIKEY);
+			oitup = (IndexTuple) PageGetItem(opage, hii);
         }
         /*
          * Link the old page into its parent, using its minimum key. If we
@@ -679,12 +686,18 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
             state->btps_next = _bt_pagestate(wstate, state->btps_level + 1);
 
         Assert(state->btps_minkey != NULL);
+        Assert((BTREE_TUPLE_GET_NUM_OF_ATTS(state->btps_minkey, wstate->index) <=
+                IndexRelationGetNumberOfKeyAttributes(wstate->index) &&
+                BTREE_TUPLE_GET_NUM_OF_ATTS(state->btps_minkey, wstate->index) > 0) ||
+                P_LEFTMOST((BTPageOpaqueInternal) PageGetSpecialPointer(opage)));
+        Assert(BTREE_TUPLE_GET_NUM_OF_ATTS(state->btps_minkey, wstate->index) == 0 ||
+               !P_LEFTMOST((BTPageOpaqueInternal) PageGetSpecialPointer(opage)));
         if (t_thrd.proc->workingVersionNum < SUPPORT_GPI_VERSION_NUM) {
             ItemPointerSet(&(state->btps_minkey->t_tid), oblkno, P_HIKEY);;
         } else {
             BTreeInnerTupleSetDownLink(state->btps_minkey, oblkno);
         }
-        _bt_buildadd(wstate, state->btps_next, state->btps_minkey);
+        _bt_buildadd(wstate, state->btps_next, state->btps_minkey, 0);
         pfree(state->btps_minkey);
         state->btps_minkey = NULL;
 
@@ -695,7 +708,6 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
          * high key from the page, since we could have replaced it with
          * truncated copy.	See comment above.
          */
-        oitup = (IndexTuple) PageGetItem(opage, PageGetItemId(opage, P_HIKEY));
         state->btps_minkey = CopyIndexTuple(oitup);
 
         /*
@@ -735,7 +747,7 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
         state->btps_minkey = CopyIndexTuple(itup);
         /* _bt_sortaddtup() will perform full truncation later */
         if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
-            BTreeTupleSetNAtts(state->btps_minkey, 0);
+            btree_tuple_set_num_of_atts(state->btps_minkey, 0, false);
         }
     }
 
@@ -789,7 +801,7 @@ void _bt_uppershutdown(BTWriteState *wstate, BTPageState *state)
             } else {
                 BTreeInnerTupleSetDownLink(s->btps_minkey, blkno);
             }
-            _bt_buildadd(wstate, s->btps_next, s->btps_minkey);
+            _bt_buildadd(wstate, s->btps_next, s->btps_minkey, 0);
             pfree(s->btps_minkey);
             s->btps_minkey = NULL;
         }
@@ -819,8 +831,32 @@ void _bt_uppershutdown(BTWriteState *wstate, BTPageState *state)
         metapage = (Page)palloc(BLCKSZ);
     }
     ADIO_END();
-    _bt_initmetapage(metapage, rootblkno, rootlevel);
+    _bt_initmetapage(metapage, rootblkno, rootlevel, wstate->inskey->allequalimage, IsSystemRelation(wstate->index));
     _bt_blwritepage(wstate, metapage, BTREE_METAPAGE);
+}
+
+static void btree_sort_dedup_finish_pending(BTWriteState *wstate, BTPageState *state,
+                                          BTDedupState dstate)
+{
+    Assert(dstate->num_items > 0);
+
+    if (dstate->num_items == 1) {
+        _bt_buildadd(wstate, state, dstate->base, 0);
+    } else {
+        IndexTuple postingtuple;
+        Size truncextra;
+
+        postingtuple = btree_dedup_form_posting(dstate->base, dstate->heap_tids, dstate->num_heap_tids);
+        truncextra = IndexTupleSize(postingtuple) - btree_tuple_get_posting_off(postingtuple);
+
+        _bt_buildadd(wstate, state, postingtuple, truncextra);
+        pfree(postingtuple);
+    }
+
+    dstate->num_max_items = 0;
+    dstate->num_heap_tids = 0;
+    dstate->num_items = 0;
+    dstate->size_freed = 0;
 }
 
 /*
@@ -836,7 +872,7 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
     bool load1 = false;
     TupleDesc tupdes = RelationGetDescr(wstate->index);
     int keysz = IndexRelationGetNumberOfKeyAttributes(wstate->index);
-    ScanKey indexScanKey = NULL;
+    bool isdeduplicated = (wstate->inskey->allequalimage && btree_do_dedup(wstate->heap, wstate->index) && !btspool->isunique);
 
     if (merge) {
         /*
@@ -847,27 +883,69 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
          */
         itup = tuplesort_getindextuple(btspool->sortstate, true);
         itup2 = tuplesort_getindextuple(btspool2->sortstate, true);
-        indexScanKey = _bt_mkscankey_nodata(wstate->index);
 
         for (;;) {
             if (itup == NULL && itup2 == NULL) {
                 break;
             }
-            load1 = _bt_index_tuple_compare(tupdes, indexScanKey, keysz, itup, itup2);
+            load1 = _bt_index_tuple_compare(tupdes, wstate->inskey->scankeys, keysz, itup, itup2);
 
             /* When we see first tuple, create first index page */
             if (state == NULL)
                 state = _bt_pagestate(wstate, 0);
 
             if (load1) {
-                _bt_buildadd(wstate, state, itup);
+                _bt_buildadd(wstate, state, itup, 0);
                 itup = tuplesort_getindextuple(btspool->sortstate, true);
             } else {
-                _bt_buildadd(wstate, state, itup2);
+                _bt_buildadd(wstate, state, itup2, 0);
                 itup2 = tuplesort_getindextuple(btspool2->sortstate, true);
             }
         }
-        _bt_freeskey(indexScanKey);
+    } else if (isdeduplicated) {
+        BTDedupState dstate;
+
+        dstate = (BTDedupState) palloc(sizeof(BTDedupStateData));
+        dstate->deduplicate = true;
+        dstate->num_max_items = 0;
+        dstate->max_posting_size = 0;
+        dstate->base = NULL;
+        dstate->base_off = InvalidOffsetNumber;
+        dstate->base_tuple_size = 0;
+        dstate->heap_tids = NULL;
+        dstate->num_heap_tids = 0;
+        dstate->num_items = 0;
+        dstate->size_freed = 0;
+        dstate->num_intervals = 0;
+
+        while ((itup = tuplesort_getindextuple(btspool->sortstate, true)) != NULL) {
+            if (state == NULL) {
+                state = _bt_pagestate(wstate, 0);
+
+                dstate->max_posting_size = MAXALIGN_DOWN((BLCKSZ * 10 / 100)) -
+                                         sizeof(ItemIdData);
+                Assert(dstate->max_posting_size <= BTREE_MAX_ITEM_SIZE(state->btps_page) &&
+                       dstate->max_posting_size <= INDEX_SIZE_MASK);
+                dstate->heap_tids = (ItemPointer)palloc(dstate->max_posting_size);
+
+                btree_dedup_begin(dstate, CopyIndexTuple(itup), InvalidOffsetNumber);
+            } else if (btree_num_keep_atts_fast(wstate->index, dstate->base, itup) > keysz &&
+                     btree_dedup_merge(dstate, itup)) {
+            } else {
+                btree_sort_dedup_finish_pending(wstate, state, dstate);
+                pfree(dstate->base);
+
+                btree_dedup_begin(dstate, CopyIndexTuple(itup), InvalidOffsetNumber);
+            }
+        }
+
+        if (state) {
+            btree_sort_dedup_finish_pending(wstate, state, dstate);
+            pfree(dstate->base);
+            pfree(dstate->heap_tids);
+        }
+
+        pfree(dstate);
     } else {
         /* merge is unnecessary */
         while ((itup = tuplesort_getindextuple(btspool->sortstate, true)) != NULL) {
@@ -875,7 +953,7 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
             if (state == NULL)
                 state = _bt_pagestate(wstate, 0);
 
-            _bt_buildadd(wstate, state, itup);
+            _bt_buildadd(wstate, state, itup, 0);
         }
     }
 

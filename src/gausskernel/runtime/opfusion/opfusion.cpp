@@ -114,8 +114,9 @@ void OpFusion::InitGlobals(MemoryContext context, CachedPlanSource *psrc, List *
         cxt = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT, "SharedOpfusionContext", ALLOCSET_DEFAULT_MINSIZE,
             ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
     } else {
-        cxt = AllocSetContextCreate(context, "OpfusionContext", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE, STANDARD_CONTEXT);
+        u_sess->opfusion_cxt = AllocSetContextCreate(context, "OpfusionContext", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+            cxt = u_sess->opfusion_cxt;
     }
 
     MemoryContext old_context = MemoryContextSwitchTo(cxt);
@@ -194,6 +195,11 @@ void OpFusion::SaveInGPC(OpFusion *obj)
     rc = memset_s((void *)&obj->m_local, sizeof(OpFusionLocaleVariable), 0, sizeof(OpFusionLocaleVariable));
     securec_check(rc, "\0", "\0");
     MemoryContextSeal(obj->m_global->m_context);
+    /* we can not reuse this obj for opfusion reuse */
+    if (u_sess->opfusion_reuse_ctx.opfusionObj == obj) {
+        u_sess->opfusion_reuse_ctx.opfusionObj = NULL;
+    }
+    
 }
 
 void OpFusion::DropGlobalOpfusion(OpFusion *obj)
@@ -646,6 +652,50 @@ void OpFusion::useOuterParameter(ParamListInfo params)
     m_local.m_outParams = params;
 }
 
+static void* TryReuseOpfusionObj(FusionType ftype, MemoryContext context, CachedPlanSource *psrc,
+    List *plantree_list, ParamListInfo params)
+{
+    if (!u_sess->attr.attr_sql.enable_opfusion_reuse){
+        return NULL;
+    }
+    /* 
+     * we save the obj without FusionType check in FusionFactory
+     * so must check here
+     */
+    if (INSERT_FUSION != ftype && DELETE_FUSION != ftype && UPDATE_FUSION != ftype) {
+        return NULL;
+    }
+
+    OpFusion* checkOpfusionObj = (OpFusion *)u_sess->opfusion_reuse_ctx.opfusionObj;
+    if (psrc != NULL /* not support for cacheplan case */
+        || checkOpfusionObj == NULL
+        || checkOpfusionObj->m_local.m_optype != ftype) {
+        return NULL;
+    }
+
+    /*check the rel id*/
+    PlannedStmt *curr_plan = (PlannedStmt *)linitial(plantree_list);
+    int rtindex = linitial_int((List*)linitial(curr_plan->resultRelations));
+    Oid rel_oid = getrelid(rtindex, curr_plan->rtable);
+    if (rel_oid != checkOpfusionObj->m_global->m_reloid) {
+        return NULL;
+    }
+
+    /* check the resultdesc*/
+    Relation rel = heap_open(rel_oid, RowExclusiveLock);
+    if (!opFusionReuseEqualTupleDescs(RelationGetDescr(rel), checkOpfusionObj->m_global->m_tupDesc)) {
+       heap_close(rel, NoLock);
+       return NULL;
+    }
+    
+    heap_close(rel, NoLock);
+
+    /* call specific reset function here*/
+    if (!checkOpfusionObj->ResetReuseFusion(context, psrc, plantree_list, params)){
+        checkOpfusionObj = NULL;
+    }
+    return (void*)checkOpfusionObj;
+}
 
 void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPlanSource *psrc, List *plantree_list,
     ParamListInfo params)
@@ -657,7 +707,16 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
     if (ftype > BYPASS_OK) {
         return NULL;
     }
-    void *opfusionObj = NULL;
+
+    void *opfusionObj = NULL; 
+    /*
+     * try to reuse opfusion object
+     */
+    opfusionObj = TryReuseOpfusionObj(ftype, context, psrc, plantree_list, params);
+    if (opfusionObj) {
+        return opfusionObj;
+    }
+
     MemoryContext objCxt = NULL;
     bool isShared = psrc && psrc->gpc.status.InShareTable();
     if (isShared) {
@@ -679,6 +738,9 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
             break;
         case DELETE_FUSION:
             opfusionObj = New(objCxt)DeleteFusion(context, psrc, plantree_list, params);
+            break;
+        case DELETE_SUB_FUSION:
+            opfusionObj = New(objCxt)DeleteSubFusion(context, psrc, plantree_list, params);
             break;
         case SELECT_FOR_UPDATE_FUSION:
             opfusionObj = New(objCxt)SelectForUpdateFusion(context, psrc, plantree_list, params);
@@ -706,6 +768,12 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
     }
     if (opfusionObj != NULL && !((OpFusion *)opfusionObj)->m_global->m_is_global)
         ((OpFusion *)opfusionObj)->m_global->m_type = ftype;
+
+    if (u_sess->attr.attr_sql.enable_opfusion_reuse){
+        /* XXX: better to free previous obj */
+        u_sess->opfusion_reuse_ctx.opfusionObj = opfusionObj;
+    }
+
     return opfusionObj;
 }
 
@@ -988,8 +1056,18 @@ Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum 
             return OidFunctionCall1(functionId, arg[0]);
         case 2:
             return OidFunctionCall2(functionId, arg[0], arg[1]);
-        case 3:
-            return OidFunctionCall3(functionId, arg[0], arg[1], arg[2]);
+        case 3:{
+            switch (functionId) {
+                case F_BPCHAR:
+                    return opfusion_bpchar(arg[0], arg[1], arg[2]);
+                    break;
+                case F_VARCHAR:
+                    return opfusion_varchar(arg[0], arg[1], arg[2]);
+                    break;
+                default:
+                    return OidFunctionCall3(functionId, arg[0], arg[1], arg[2]);
+            }
+        }
         case 4:
             return OidFunctionCall4(functionId, arg[0], arg[1], arg[2], arg[3]);
         default: {
@@ -1393,4 +1471,20 @@ void FreeExecutorStateForOpfusion(EState* estate)
         /* FreeExprContext removed the list link for us */
     }
     ResetOpfusionExecutorState(estate);
+}
+
+/*
+ * AtEOXact_OpfusionReuse
+ *
+ * This routine is called during transaction commit or abort (it doesn't
+ * particularly care which). reset the opfusion reuse context
+ */
+void AtEOXact_OpfusionReuse()
+{
+    /* 
+     * no need to delete the memory context
+     * the are the sub nodes of the top transaction ctx
+     */
+    u_sess->opfusion_reuse_ctx.opfusionObj = NULL;
+    u_sess->iud_expr_reuse_ctx = NULL;
 }

@@ -195,6 +195,7 @@ static char recovery_file[MAXPGPATH];
 static char recovery_done_file[MAXPGPATH];
 static char failover_file[MAXPGPATH];
 static char switchover_file[MAXPGPATH];
+static char switchover_timeout_file[MAXPGPATH];
 static char timeout_file[MAXPGPATH];
 static char switchover_status_file[MAXPGPATH];
 static char setrunmode_status_file[MAXPGPATH];
@@ -220,6 +221,9 @@ static char remove_member_file[MAXPGPATH];
 static char change_role_file[MAXPGPATH];
 static char* new_role = "passive";
 static char start_minority_file[MAXPGPATH];
+static int get_instance_id(void);
+static int ss_get_primary_id(void);
+static bool ss_read_dorado_config(void);
 static unsigned int vote_num = 0;
 static unsigned int xmode = 2;
 static char postport_lock_file[MAXPGPATH];
@@ -763,7 +767,7 @@ static ServerMode get_runmode(void)
     if (!strncmp(run_mode, "Cascade Standby", MAXRUNMODE))
         return CASCADE_STANDBY_MODE;
     if (!strncmp(run_mode, "Main Standby", MAXRUNMODE))
-        return STANDBY_MODE;
+        return MAIN_STANDBY_MODE;
     if (!strncmp(run_mode, "Pending", MAXRUNMODE))
         return PENDING_MODE;
     if (!strncmp(run_mode, "Unknown", MAXRUNMODE))
@@ -2618,7 +2622,8 @@ static void do_switchover(uint32 term)
     }
 
     origin_run_mode = run_mode = get_runmode();
-    if (run_mode == PRIMARY_MODE) {
+
+    if ((run_mode == PRIMARY_MODE || run_mode == MAIN_STANDBY_MODE)) {
         pg_log(PG_WARNING, _("switchover completed (%s)\n"), pg_data);
         return;
     } else if (UNKNOWN_MODE == run_mode) {
@@ -2708,14 +2713,15 @@ static void do_switchover(uint32 term)
                     exit(1);
                 }
             }
+
             if ((run_mode = get_runmode()) == origin_run_mode) {
                 pg_log(PG_PRINT, ".");
                 pg_usleep(1000000); /* 1 sec */
             }
             /*
-             * we query the status of server, if connection is failed, it will
-             * retry 3 times.
-             */
+            * we query the status of server, if connection is failed, it will
+            * retry 3 times.
+            */
             else if (failed_count < 3) {
                 failed_count++;
                 pg_log(PG_PRINT, ".");
@@ -2725,9 +2731,28 @@ static void do_switchover(uint32 term)
             }
         }
         pg_log(PG_PRINT, _("\n"));
-        if ((origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE) ||
+        if ((origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE && run_mode != MAIN_STANDBY_MODE) ||
             (origin_run_mode == CASCADE_STANDBY_MODE && run_mode != STANDBY_MODE)) {
-            pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status.\n"), wait_seconds);
+            pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status or backtrack log.\n"), wait_seconds);
+
+            if ((sofile = fopen(switchover_timeout_file, "w")) == NULL) {
+                pg_log(PG_WARNING, _(" could not create switchover timeout signal file \"%s\": %s\n"),
+                       switchover_timeout_file, strerror(errno));
+                exit(1);
+            }
+            if (fclose(sofile)) {
+                pg_log(PG_WARNING, _(" could not write switchover timeout signal file \"%s\": %s\n"), switchover_timeout_file,
+                       strerror(errno));
+                sofile = NULL;
+                exit(1);
+            }
+            sig = SIGUSR1;
+            if (kill((pid_t)pid, sig) != 0) {
+                pg_log(PG_WARNING, _(" could not send switchover timeout signal (PID: %ld): %s\n"), pid, strerror(errno));
+                if (unlink(switchover_timeout_file) != 0)
+                    pg_log(PG_WARNING, _(" could not send switchover timeout signal (PID: %ld): %s\n"), pid, strerror(errno));
+                exit(1);
+            }
         } else {
             pg_log(PG_PROGRESS, _("done\n"));
             pg_log(PG_PROGRESS, _("switchover completed (%s)\n"), pg_data);
@@ -6108,6 +6133,8 @@ void SetConfigFilePath()
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(switchover_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchover", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(switchover_timeout_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchover_timeout", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(primary_file, MAXPGPATH, MAXPGPATH - 1, "%s/primary", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(standby_file, MAXPGPATH, MAXPGPATH - 1, "%s/standby", pg_data);
@@ -7172,4 +7199,141 @@ static void free_ctl()
     FREE_AND_RESET(register_password);
     FREE_AND_RESET(pgha_str);
     FREE_AND_RESET(pgha_opt);
+}
+
+static int get_instance_id(void)
+{
+    PGconn* conn = NULL;
+    PGresult* res = NULL;
+    const char* sql_string = "show ss_instance_id;";
+    char* instid = NULL;
+
+    conn = get_connectionex();
+    if (PQstatus(conn) != CONNECTION_OK) {
+        pg_log(PG_WARNING, _("could not connect to server: %s"), PQerrorMessage(conn));
+        return -1;
+    }
+
+    /* Get local role from the local server. */
+    res = PQexec(conn, sql_string);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        pg_log(PG_WARNING, _("could not get local role from the local server: %s"), PQerrorMessage(conn));
+        close_connection();
+        conn = NULL;
+        return -1;
+    }
+
+    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
+        int ntuples = PQntuples(res);
+        int nfields = PQnfields(res);
+
+        PQclear(res);
+        pg_log(PG_WARNING,
+            _("invalid response from primary server: "
+              "Expected 1 tuple with 1 fields, got %d tuples with %d fields."),
+            ntuples,
+            nfields);
+        close_connection();
+        conn = NULL;
+        return -1;
+    }
+
+    instid = PQgetvalue(res, 0, 0);
+
+    PQclear(res);
+    close_connection();
+    conn = NULL;
+
+    return atoi(instid);
+}
+
+static int ss_get_primary_id(void)
+{
+    if (instance_config.dss.socketpath == NULL) {
+        return -1;
+    }
+
+    if (instance_config.dss.vgname == NULL) {
+        return -1;
+    }
+
+    int fd = -1;
+    int len = 0;
+    int err = 0;
+    struct stat statbuf;
+    char control_file_path[MAXPGPATH];
+
+    err = memset_s(control_file_path, MAXPGPATH, 0, MAXPGPATH);
+    securec_check_c(err, "\0", "\0");
+    err = snprintf_s(control_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", instance_config.dss.vgname);
+    securec_check_ss_c(err, "\0", "\0");
+
+    if (dss_device_init(instance_config.dss.socketpath, true) != DSS_SUCCESS) {
+        pg_log(PG_WARNING, _("failed to init dss device\n"));
+        exit(1);
+    }
+
+    fd = open(control_file_path, O_RDONLY | PG_BINARY, 0);
+    if(fd < 0) {
+        pg_log(PG_WARNING, _("failed to open pg_contol\n"));
+        close(fd);
+        fd = -1;
+        exit(1);
+    }
+
+    if (stat(control_file_path, &statbuf) < 0) {
+        pg_log(PG_WARNING, _("failed to stat pg_contol\n"));
+        close(fd);
+        fd = -1;
+        exit(1);
+    }
+
+    len = statbuf.st_size;
+    char* tmpBuffer = (char*)malloc(len + 1);
+
+    if ((read(fd, tmpBuffer, len)) != len) {
+        close(fd);
+        fd = -1;
+        pg_log(PG_WARNING, _("failed to read pg_contol\n"));
+        exit(1);
+    }
+
+    ss_reformer_ctrl_t* reformerCtrl;
+
+    /* Calculate the offset to obtain the primary_id of the last page */
+    reformerCtrl = (ss_reformer_ctrl_t*)(tmpBuffer + REFORMER_CTL_INSTANCEID * PG_CONTROL_SIZE);
+    return reformerCtrl->primaryInstId;
+}
+
+/*
+* read dorado config, if it is dorado standby cluster,
+* we will get ss_dss_conn_path and ss_dss_vg_name.
+*/
+static bool ss_read_dorado_config(void)
+{
+    char config_file[MAXPGPATH] = {0};
+    char** optlines = NULL;
+    int ret = EOK;
+
+    ret = snprintf_s(config_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
+    securec_check_ss_c(ret, "\0", "\0");
+    config_file[MAXPGPATH - 1] = '\0';
+    optlines = readfile(config_file);
+    char cluster_run_mode[MAXPGPATH] = {0};
+
+    (void)find_guc_optval((const char**)optlines, "cluster_run_mode", cluster_run_mode);
+
+    /* this is not dorado cluster_standby, wo do not need to do anythiny else */
+    if(strncmp(cluster_run_mode, "cluster_standby", sizeof("cluster_standby")) != 0) {
+        return false;
+    }
+
+    instance_config.dss.socketpath = (char*)malloc(sizeof(char) * MAXPGPATH);
+    instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
+    (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", instance_config.dss.socketpath);
+    (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", (char*)instance_config.dss.vgname);
+    freefile(optlines);
+    optlines = NULL;
+    return true;
 }

@@ -86,42 +86,40 @@ static void ValidateStrOptDekCipher(const char *val);
 static void ValidateStrOptCmkId(const char *val);
 
 static relopt_bool boolRelOpts[] = {
-    {{ "autovacuum_enabled", "Enables autovacuum in this relation", RELOPT_KIND_HEAP | RELOPT_KIND_TOAST }, true },
-    {{ "user_catalog_table",
-       "Declare a table as an additional catalog table, e.g. for the purpose of logical replication",
-       RELOPT_KIND_HEAP }, false },
-    {{ "fastupdate", "Enables \"fast update\" feature for this GIN index", RELOPT_KIND_GIN }, true },
-    {{ "security_barrier", "View acts as a row security barrier", RELOPT_KIND_VIEW }, false },
-    {{ "enable_rowsecurity", "Enable row level security or not", RELOPT_KIND_HEAP }, false },
-    {{ "force_rowsecurity", "Row security forced for owners or not", RELOPT_KIND_HEAP }, false },
-    {{"enable_tsdb_delta", "Enables delta table for this timeseries relation", RELOPT_KIND_HEAP}, false},
-    {{ "punctuation_ignore", "Ignore punctuation in zhparser/N-gram text search praser",
-       RELOPT_KIND_ZHPARSER | RELOPT_KIND_NPARSER }, true },
-    {{ "grapsymbol_ignore", "ignore grapsymbol in N-gram text search praser", RELOPT_KIND_NPARSER }, false },
-    {{ "seg_with_duality", "segmente interfacing idle words with duality in zhparser text search praser",
-       RELOPT_KIND_ZHPARSER }, false },
-    {{ "multi_short", "segmente long words to short words in zhparser text search praser", RELOPT_KIND_ZHPARSER },
-     true },
-    {{ "multi_duality", "segmente long words with duality in zhparser text search praser", RELOPT_KIND_ZHPARSER },
-     false },
-    {{ "multi_zmain", "segmente main word from long words in zhparser text search praser", RELOPT_KIND_ZHPARSER },
-     false },
-    {{ "multi_zall", "segmente all word from long words in zhparser text search praser", RELOPT_KIND_ZHPARSER },
-     false },
-    {{ "ignore_enable_hadoop_env", "ignore enable_hadoop_env option", RELOPT_KIND_HEAP }, false },
-    {{ "hashbucket", "Enables hashbucket in this relation", RELOPT_KIND_HEAP }, false },
-    {{ "segment", "Enables segment in this relation", RELOPT_KIND_HEAP}, false},
-    {{ "primarynode", "Enables primarynode for replicatition relation", RELOPT_KIND_HEAP }, false },
-    {{ "on_commit_delete_rows", "global temp table on commit options", RELOPT_KIND_HEAP}, true},
-    {{ "crossbucket", "Enables cross bucket index creation in this index relation", RELOPT_KIND_BTREE}, false },
-    {{ "enable_tde", "enable table's level transparent data encryption", RELOPT_KIND_HEAP }, false },
-    {{ "hasuids", "Enables uids in this relation", RELOPT_KIND_HEAP }, false },
-    {{ "compress_byte_convert", "Whether do byte convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, false},
-    {{ "compress_diff_convert", "Whether do diiffer convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+    {{"autovacuum_enabled", "Enables autovacuum in this relation", RELOPT_KIND_HEAP | RELOPT_KIND_TOAST}, true},
+    {{"user_catalog_table",
+      "Declare a table as an additional catalog table, e.g. for the purpose of logical replication", RELOPT_KIND_HEAP},
      false},
+    {{"fastupdate", "Enables \"fast update\" feature for this GIN index", RELOPT_KIND_GIN}, true},
+    {{"security_barrier", "View acts as a row security barrier", RELOPT_KIND_VIEW}, false},
+    {{"enable_rowsecurity", "Enable row level security or not", RELOPT_KIND_HEAP}, false},
+    {{"force_rowsecurity", "Row security forced for owners or not", RELOPT_KIND_HEAP}, false},
+    {{"enable_tsdb_delta", "Enables delta table for this timeseries relation", RELOPT_KIND_HEAP}, false},
+    {{"punctuation_ignore", "Ignore punctuation in zhparser/N-gram text search praser",
+      RELOPT_KIND_ZHPARSER | RELOPT_KIND_NPARSER},
+     true},
+    {{"grapsymbol_ignore", "ignore grapsymbol in N-gram text search praser", RELOPT_KIND_NPARSER}, false},
+    {{"seg_with_duality", "segmente interfacing idle words with duality in zhparser text search praser",
+      RELOPT_KIND_ZHPARSER},
+     false},
+    {{"multi_short", "segmente long words to short words in zhparser text search praser", RELOPT_KIND_ZHPARSER}, true},
+    {{"multi_duality", "segmente long words with duality in zhparser text search praser", RELOPT_KIND_ZHPARSER}, false},
+    {{"multi_zmain", "segmente main word from long words in zhparser text search praser", RELOPT_KIND_ZHPARSER}, false},
+    {{"multi_zall", "segmente all word from long words in zhparser text search praser", RELOPT_KIND_ZHPARSER}, false},
+    {{"ignore_enable_hadoop_env", "ignore enable_hadoop_env option", RELOPT_KIND_HEAP}, false},
+    {{"hashbucket", "Enables hashbucket in this relation", RELOPT_KIND_HEAP}, false},
+    {{"segment", "Enables segment in this relation", RELOPT_KIND_HEAP}, false},
+    {{"primarynode", "Enables primarynode for replicatition relation", RELOPT_KIND_HEAP}, false},
+    {{"on_commit_delete_rows", "global temp table on commit options", RELOPT_KIND_HEAP}, true},
+    {{"crossbucket", "Enables cross bucket index creation in this index relation", RELOPT_KIND_BTREE}, false},
+    {{"enable_tde", "enable table's level transparent data encryption", RELOPT_KIND_HEAP}, false},
+    {{"hasuids", "Enables uids in this relation", RELOPT_KIND_HEAP}, false},
+    {{"compress_byte_convert", "Whether do byte convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, false},
+    {{"compress_diff_convert", "Whether do diiffer convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+     false},
+    {{"deduplication", "Enables \"deduplication\" feature for btree index", RELOPT_KIND_BTREE}, false},
     /* list terminator */
-    {{NULL}}
-};
+    {{NULL}}};
 
 static relopt_int intRelOpts[] = {
     {{ "fillfactor", "Packs table pages only to this percentage", RELOPT_KIND_HEAP },
@@ -518,6 +516,13 @@ static relopt_string stringRelOpts[] = {
         0,
         true,
         validateWithCheckOption,
+        NULL
+    },
+    {
+        {"view_sql_security", "View has SQL SECURITY OPTION defined (INVOKER or DEFINER).", RELOPT_KIND_VIEW},
+        0,
+        true,
+        validateViewSecurityOption,
         NULL
     },
     /* list terminator */
@@ -1999,7 +2004,9 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "compress_diff_convert", RELOPT_TYPE_BOOL,
           offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)},
         { "check_option", RELOPT_TYPE_STRING, offsetof(StdRdOptions, check_option_offset)},
-        { "collate", RELOPT_TYPE_INT, offsetof(StdRdOptions, collate)}
+        { "view_sql_security", RELOPT_TYPE_STRING, offsetof(StdRdOptions, view_security_option_offset)},
+        { "collate", RELOPT_TYPE_INT, offsetof(StdRdOptions, collate)},
+        { "deduplication", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, deduplication)}
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
@@ -2714,7 +2721,7 @@ void ForbidOutUsersToSetInnerOptions(List *userOptions)
     check_collate_in_options(userOptions);
 }
 
-void ForbidUserToSetDefinedIndexOptions(List *options)
+void ForbidUserToSetDefinedIndexOptions(Relation rel, List *options)
 {
     /* the following option must be in tab[] of default_reloptions(). */
     static const char *unchangedOpt[] = {"crossbucket", "storage_type"};
@@ -2724,6 +2731,23 @@ void ForbidUserToSetDefinedIndexOptions(List *options)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         (errmsg("Un-support feature"),
                          errdetail("Option \"%s\" doesn't allow ALTER", unchangedOpt[firstInvalidOpt]))));
+    }
+
+    static const char *deduplicate_opt[] = {"deduplication"};
+
+    /* Not support alter command with compression option(deduplicate handle,ustore/cstore) */
+    int pos = -1;
+    if (RelationIsUstoreIndex(rel) && FindInvalidOption(options, deduplicate_opt, lengthof(deduplicate_opt), &pos)) {
+        Assert(pos >= 0 && pos < (int)lengthof(deduplicate_opt));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-support feature"),
+                        errdetail("Option \"%s\" is not supported for indexes on ustore table", deduplicate_opt[pos])));
+    }
+
+    if (RelationIsPartitioned(rel) && FindInvalidOption(options, deduplicate_opt, lengthof(deduplicate_opt), &pos)) {
+        Assert(pos >= 0 && pos < (int)lengthof(deduplicate_opt));
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-support feature"),
+                 errdetail("Option \"%s\" is not supported for indexes on partition table", deduplicate_opt[pos])));
     }
 }
 

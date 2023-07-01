@@ -43,6 +43,9 @@ select * from force_vector_test t1, force_vector_test2 t2 where t1.id=t2.id orde
 
 set query_dop=1004;
 explain select count(*) from force_vector_test;
+set enable_seqscan_dopcost = off;
+explain select count(*) from force_vector_test;
+set enable_seqscan_dopcost = on;
 select count(*) from force_vector_test;
 set query_dop=1;
 

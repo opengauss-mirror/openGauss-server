@@ -66,6 +66,7 @@ typedef struct SPICachedPlanStack {
 #define SPI_OPT_NONATOMIC (1 << 0)
 
 typedef List* (*parse_query_func)(const char *query_string, List **query_string_locationlist);
+typedef void (*SpiReciverParamHook)(DestReceiver *self, SPIPlanPtr plan);
 /* in postgres.cpp, avoid include tcopprot.h */
 extern List* raw_parser(const char* query_string, List** query_string_locationlist);
 
@@ -95,6 +96,7 @@ extern void SPI_pop(void);
 extern bool SPI_push_conditional(void);
 extern void SPI_pop_conditional(bool pushed);
 extern void SPI_restore_connection(void);
+extern void SPI_restore_connection_on_exception(void);
 extern int SPI_execute(const char* src, bool read_only, long tcount, bool isCollectParam = false, parse_query_func parser = GetRawParser());
 extern int SPI_execute_plan(SPIPlanPtr plan, Datum* Values, const char* Nulls, bool read_only, long tcount);
 extern int SPI_execute_plan_with_paramlist(SPIPlanPtr plan, ParamListInfo params, bool read_only, long tcount);
@@ -130,6 +132,7 @@ extern char* SPI_getvalue(HeapTuple tuple, TupleDesc tupdesc, int fnumber);
 extern Datum SPI_getbinval(HeapTuple tuple, TupleDesc tupdesc, int fnumber, bool* isnull);
 extern char* SPI_gettype(TupleDesc tupdesc, int fnumber);
 extern Oid SPI_gettypeid(TupleDesc tupdesc, int fnumber);
+extern Oid SPI_getcollation(TupleDesc tupdesc, int fnumber);
 extern char* SPI_getrelname(Relation rel);
 extern char* SPI_getnspname(Relation rel);
 extern void* SPI_palloc(Size size);

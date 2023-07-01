@@ -83,4 +83,5 @@ long SSGetBufSleepTime(int retry_times);
 SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, ForkNumber forkNum,
     BlockNumber blockNo, char *blockbuf);
 void SSUnPinBuffer(BufferDesc* buf_desc);
+bool SSOndemandRequestPrimaryRedo(BufferTag tag);
 #endif

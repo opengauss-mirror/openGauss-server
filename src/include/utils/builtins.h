@@ -447,6 +447,7 @@ extern Datum namegt(PG_FUNCTION_ARGS);
 extern Datum namege(PG_FUNCTION_ARGS);
 extern int namestrcpy(Name name, const char* str);
 extern int namestrcmp(Name name, const char* str);
+extern int namestrcasecmp(Name name, const char* str);
 extern Datum current_user(PG_FUNCTION_ARGS);
 extern Datum session_user(PG_FUNCTION_ARGS);
 extern Datum current_schema(PG_FUNCTION_ARGS);
@@ -945,12 +946,14 @@ extern Datum currtid_byrelname(PG_FUNCTION_ARGS);
 /* varchar.c */
 extern Datum bpcharlenb(PG_FUNCTION_ARGS);
 extern Datum bpcharin(PG_FUNCTION_ARGS);
+extern Datum input_bpcharin(char* str, Oid typioparam, int32 atttypmod);
 extern Datum bpcharout(PG_FUNCTION_ARGS);
 extern Datum bpcharrecv(PG_FUNCTION_ARGS);
 extern Datum bpcharsend(PG_FUNCTION_ARGS);
 extern Datum bpchartypmodin(PG_FUNCTION_ARGS);
 extern Datum bpchartypmodout(PG_FUNCTION_ARGS);
 extern Datum bpchar(PG_FUNCTION_ARGS);
+extern Datum opfusion_bpchar(Datum arg1, Datum arg2, Datum arg3);
 extern Datum char_bpchar(PG_FUNCTION_ARGS);
 extern Datum name_bpchar(PG_FUNCTION_ARGS);
 extern Datum bpchar_name(PG_FUNCTION_ARGS);
@@ -975,6 +978,7 @@ extern Datum bpchar_pattern_ge(PG_FUNCTION_ARGS);
 extern Datum btbpchar_pattern_cmp(PG_FUNCTION_ARGS);
 
 extern Datum varcharin(PG_FUNCTION_ARGS);
+extern Datum input_varcharin(char* str, Oid typioparam, int32 atttypmod);
 extern Datum varcharout(PG_FUNCTION_ARGS);
 extern Datum varcharrecv(PG_FUNCTION_ARGS);
 extern Datum varcharsend(PG_FUNCTION_ARGS);
@@ -982,6 +986,7 @@ extern Datum varchartypmodin(PG_FUNCTION_ARGS);
 extern Datum varchartypmodout(PG_FUNCTION_ARGS);
 extern Datum varchar_transform(PG_FUNCTION_ARGS);
 extern Datum varchar(PG_FUNCTION_ARGS);
+extern Datum opfusion_varchar(Datum arg1, Datum arg2, Datum arg3);
 
 extern Datum nvarchar2in(PG_FUNCTION_ARGS);
 extern Datum nvarchar2out(PG_FUNCTION_ARGS);
@@ -1001,12 +1006,16 @@ extern char* output_text_to_cstring(const text* t);
 extern char* output_int32_to_cstring(int32 value);
 extern char* output_int64_to_cstring(int64 value);
 extern char* output_int128_to_cstring(int128 value);
+extern char* output_date_out(int32 date);
 extern void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len);
 extern int text_instr_3args(text* textStr, text* textStrToSearch, int32 beginIndex);
 extern int text_instr_4args(text* textStr, text* textStrToSearch, int32 beginIndex, int occurTimes);
 extern int32 text_length(Datum str);
+extern int32 text_length_with_encoding(Datum str, int encoding);
 extern int text_cmp(text* arg1, text* arg2, Oid collid);
 extern text* text_substring(Datum str, int32 start, int32 length, bool length_not_specified);
+extern text* text_substring_with_encoding(
+    Datum str, int32 start, int32 length, bool length_not_specified, int encoding);
 extern Datum instr_3args(PG_FUNCTION_ARGS);
 extern Datum instr_4args(PG_FUNCTION_ARGS);
 extern Datum byteain(PG_FUNCTION_ARGS);
@@ -1099,6 +1108,7 @@ extern Datum bytea_string_agg_finalfn(PG_FUNCTION_ARGS);
 extern Datum string_agg_transfn(PG_FUNCTION_ARGS);
 extern Datum string_agg_finalfn(PG_FUNCTION_ARGS);
 extern Datum checksumtext_agg_transfn(PG_FUNCTION_ARGS);
+extern Oid binary_need_transform_typeid(Oid tyeoid, Oid* collation);
 
 extern Datum group_concat_transfn(PG_FUNCTION_ARGS);
 extern Datum group_concat_finalfn(PG_FUNCTION_ARGS);
@@ -1814,6 +1824,11 @@ extern Datum pg_replication_origin_session_setup(PG_FUNCTION_ARGS);
 extern Datum pg_replication_origin_xact_reset(PG_FUNCTION_ARGS);
 extern Datum pg_replication_origin_xact_setup(PG_FUNCTION_ARGS);
 extern Datum pg_show_replication_origin_status(PG_FUNCTION_ARGS);
+
+/* datum.cpp */
+extern Datum btequalimage(PG_FUNCTION_ARGS);
+/* varlena.cpp */
+extern Datum btvarstrequalimage(PG_FUNCTION_ARGS);
 
 /* pg_publication.cpp */
 extern Datum pg_get_publication_tables(PG_FUNCTION_ARGS);

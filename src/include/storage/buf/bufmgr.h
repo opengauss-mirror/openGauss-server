@@ -290,6 +290,8 @@ void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags);
 uint32 WaitBufHdrUnlocked(BufferDesc* buf);
 void WaitIO(BufferDesc *buf);
 void InvalidateBuffer(BufferDesc *buf);
+extern void ReservePrivateRefCountEntry(void);
+extern PrivateRefCountEntry* NewPrivateRefCountEntry(Buffer buffer);
 void LockTwoLWLock(LWLock *new_partition_lock, LWLock *old_partition_lock);
 
 extern void InitBufferPool(void);
@@ -418,5 +420,6 @@ extern bool StartBufferIO(BufferDesc* buf, bool forInput);
 extern Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc *bufDesc, const XLogPhyBlock *pblk);
 extern void ReadBuffer_common_for_check(ReadBufferMode readmode, BufferDesc* buf_desc,
     const XLogPhyBlock *pblk, Block bufBlock);
-
+extern BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersistence,
+    ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode);
 #endif

@@ -64,6 +64,15 @@ typedef enum {
     STANDBY_SNAPSHOT_READY
 } HotStandbyState;
 
+typedef enum {
+    TRIGGER_NORMAL = 0,
+    TRIGGER_PRIMARY,
+    TRIGGER_STADNBY,
+    TRIGGER_FAILOVER,
+    TRIGGER_SWITCHOVER,
+    TRIGGER_SMARTSHUTDOWN,
+} Enum_TriggeredState;
+
 #define InHotStandby (t_thrd.xlog_cxt.standbyState >= STANDBY_SNAPSHOT_PENDING)
 
 #define DUMMYSTANDBY_CONNECT_INTERVAL 3  // unit second
@@ -83,6 +92,14 @@ extern volatile uint64 sync_system_identifier;
 #define XLOG_FROM_ARCHIVE (1 << 0) /* Restored using restore_command */
 #define XLOG_FROM_PG_XLOG (1 << 1) /* Existing file in pg_xlog */
 #define XLOG_FROM_STREAM (1 << 2)  /* Streamed from master */
+
+#define DORADO_STANDBY_CLUSTER (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY && \
+                                g_instance.attr.attr_storage.xlog_file_path != 0)
+#define DORADO_PRIMARY_CLUSTER (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY && \
+                                g_instance.attr.attr_storage.xlog_file_path != 0)
+#define DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE ((t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
+                                                (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
+                                                (g_instance.attr.attr_storage.xlog_file_path != 0))
 
 /*
  * Recovery target type.
@@ -524,6 +541,8 @@ typedef struct XLogCtlData {
     bool SharedRecoveryInProgress;
 
     bool IsRecoveryDone;
+    bool IsOnDemandBuildDone;
+    bool IsOnDemandRecoveryDone;
 
     /*
      * SharedHotStandbyActive indicates if we're still in crash or archive
@@ -740,6 +759,7 @@ extern bool CheckStandbySignal(void);
 extern bool CheckCascadeStandbySignal(void);
 extern bool CheckNormalSignal(void);
 extern int CheckSwitchoverSignal(void);
+extern bool CheckSwitchoverTimeoutSignal(void);
 
 extern void WakeupRecovery(void);
 extern void WakeupDataRecovery(void);
@@ -802,7 +822,6 @@ extern char* TrimStr(const char* str);
 
 extern void CloseXlogFilesAtThreadExit(void);
 extern void SetLatestXTime(TimestampTz xtime);
-XLogRecord* XLogParallelReadNextRecord(XLogReaderState* xlogreader);
 
 void ResourceManagerStartup(void);
 void ResourceManagerStop(void);
@@ -847,6 +866,16 @@ bool CheckForSwitchoverTrigger(void);
 void HandleCascadeStandbyPromote(XLogRecPtr *recptr);
 void update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_immediately_update = false);
 XLogRecord *ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, int whichChkpt);
+int emode_for_corrupt_record(int emode, XLogRecPtr RecPtr);
+bool timeLineInHistory(TimeLineID tli, List *expectedTLEs);
+Enum_TriggeredState CheckForSatartupStatus(void);
+bool CheckForStandbyTrigger(void);
+void UpdateMinrecoveryInAchive();
+bool NewDataIsInBuf(XLogRecPtr expectedRecPtr);
+bool rescanLatestTimeLine(void);
+int XLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources);
+int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
+    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path);
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 

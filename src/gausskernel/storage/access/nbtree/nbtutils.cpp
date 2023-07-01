@@ -39,6 +39,7 @@ static int _bt_compare_array_elements(const void *a, const void *b, void *arg);
 static bool _bt_compare_scankey_args(IndexScanDesc scan, ScanKey op, ScanKey leftarg, ScanKey rightarg, bool *result);
 static bool _bt_fix_scankey_strategy(ScanKey skey, const int16 *indoption);
 static void _bt_mark_scankey_required(ScanKey skey);
+static int btree_num_keep_atts(Relation rel, IndexTuple lastleft, IndexTuple firstright, BTScanInsert itup_key);
 
 /*
  * _bt_mkscankey
@@ -47,14 +48,14 @@ static void _bt_mark_scankey_required(ScanKey skey);
  *
  *		The result is intended for use with _bt_compare().
  */
-ScanKey _bt_mkscankey(Relation rel, IndexTuple itup)
+BTScanInsert _bt_mkscankey(Relation rel, IndexTuple itup)
 {
-    ScanKey skey;
+    BTScanInsert key;
     TupleDesc itupdesc;
     int indnatts PG_USED_FOR_ASSERTS_ONLY;
     int indnkeyatts;
+    int num_tuple_attrs = itup ? BTREE_TUPLE_GET_NUM_OF_ATTS(itup, rel) : 0;
     int16* indoption = NULL;
-    int i;
 
     itupdesc = RelationGetDescr(rel);
     indnatts = IndexRelationGetNumberOfAttributes(rel);
@@ -63,13 +64,29 @@ ScanKey _bt_mkscankey(Relation rel, IndexTuple itup)
 
     Assert(indnkeyatts != 0);
     Assert(indnkeyatts <= indnatts);
-    Assert(BTreeTupleGetNAtts(itup, rel) == indnatts || BTreeTupleGetNAtts(itup, rel) == indnkeyatts);
+    Assert(num_tuple_attrs <= indnatts);
     /*
      * We'll execute search using ScanKey constructed on key columns. Non key
      * (included) columns must be omitted.
      */
-    skey = (ScanKey)palloc(indnkeyatts * sizeof(ScanKeyData));
-    for (i = 0; i < indnkeyatts; i++) {
+    key = (BTScanInsert)palloc(offsetof(BTScanInsertData, scankeys) + indnkeyatts * sizeof(ScanKeyData));
+
+    if (IsSystemRelation(rel) || t_thrd.proc->workingVersionNum < NBTREE_INSERT_OPTIMIZATION_VERSION_NUM) {
+        key->heapkeyspace = false;
+        key->allequalimage = false;
+    } else if (itup) {
+        btree_meta_version(rel, &key->heapkeyspace, &key->allequalimage);
+    } else {
+        key->heapkeyspace = true;
+        key->allequalimage = false;
+    }
+	key->anynullkeys = false;	/* initial assumption */
+	key->nextkey = false;
+	key->pivotsearch = false;
+	key->keysz = Min(indnkeyatts, num_tuple_attrs);
+    key->scantid = key->heapkeyspace && itup ? btree_tuple_get_heap_tid(itup) : NULL;
+
+    for (int i = 0; i < indnkeyatts; i++) {
         FmgrInfo* procinfo = NULL;
         Datum arg;
         bool null = false;
@@ -80,13 +97,20 @@ ScanKey _bt_mkscankey(Relation rel, IndexTuple itup)
          * comparison can be needed.
          */
         procinfo = index_getprocinfo(rel, i + 1, (uint16)BTORDER_PROC);
-        arg = index_getattr(itup, i + 1, itupdesc, &null);
+
+		if (i < num_tuple_attrs)
+			arg = index_getattr(itup, i + 1, itupdesc, &null);
+		else
+		{
+			arg = (Datum) 0;
+			null = true;
+		}
         flags = (null ? SK_ISNULL : 0) | (((uint16)indoption[i]) << SK_BT_INDOPTION_SHIFT);
-        ScanKeyEntryInitializeWithInfo(&skey[i], flags, (AttrNumber)(i + 1), InvalidStrategy, InvalidOid,
+        ScanKeyEntryInitializeWithInfo(&key->scankeys[i], flags, (AttrNumber)(i + 1), InvalidStrategy, InvalidOid,
                                        rel->rd_indcollation[i], procinfo, arg);
     }
 
-    return skey;
+    return key;
 }
 
 /*
@@ -1367,6 +1391,12 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum, Sca
             case F_INT84EQ:
                 test = (int64)datum == (int64)(int32)key->sk_argument;
                 break;
+            case F_INT84LE:
+                test = (int64)datum <= (int64)(int32)key->sk_argument;
+                break;
+            case F_INT84GE:
+                test = (int64)datum >= (int64)(int32)key->sk_argument;
+                break;
             case F_INT4EQ:
                 test = (int32)datum == (int32)key->sk_argument;
                 break;
@@ -1376,6 +1406,22 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum, Sca
             case F_INT4LT:
                 test = (int32)datum < (int32)key->sk_argument;
                 break;
+            case F_INT4LE:
+                test = (int32)datum <= (int32)key->sk_argument;
+                break;
+            case F_INT4GE:
+                test = (int32)datum >= (int32)key->sk_argument;
+                break;
+            case F_DATE_LE:
+                test = (int32)datum <= (int32)key->sk_argument;
+                break;
+            case F_DATE_GE:
+                test = (int32)datum >= (int32)key->sk_argument;
+                break;
+            case F_DATE_EQ:
+                test = (int32)datum == (int32)key->sk_argument;
+                break;
+            
             default:
                 test = DatumGetBool(FunctionCall2Coll(&key->sk_func, key->sk_collation, datum, key->sk_argument));
         }
@@ -1616,9 +1662,36 @@ void _bt_killitems(IndexScanDesc scan, bool haveLock)
         while (offnum <= maxoff) {
             ItemId iid = PageGetItemId(page, offnum);
             IndexTuple ituple = (IndexTuple)PageGetItem(page, iid);
-            Oid currPartOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, ituple) : heapOid;
-            int2 currbktid = scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, ituple) : bucketid;
-            if (ItemPointerEquals(&ituple->t_tid, &kitem->heapTid) && currPartOid == partOid && currbktid == bucketid) {
+
+            bool killtuple = false;
+
+            if (btree_tuple_is_posting(ituple)) {
+                int posting_idx = i + 1;
+                int nposting = btree_tuple_get_nposting(ituple);
+                int j;
+
+                for (j = 0; j < nposting; j++) {
+                    ItemPointer item = btree_tuple_get_posting_n(ituple, j);
+
+                    if (!ItemPointerEquals(item, &kitem->heapTid))
+                        break;
+
+                    if (posting_idx < so->numKilled)
+                        kitem = &so->currPos.items[so->killedItems[posting_idx++]];
+                }
+
+                if (j == nposting)
+                    killtuple = true;
+            } else if (ItemPointerEquals(&ituple->t_tid, &kitem->heapTid)) {
+                Oid currPartOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, ituple) : heapOid;
+                int2 currbktid =
+                    scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, ituple) : bucketid;
+                if (currPartOid == partOid && currbktid == bucketid) {
+                    killtuple = true;
+                }
+            }
+
+            if (killtuple && !ItemIdIsDead(iid)) {
                 /* found the item */
                 ItemIdMarkDead(iid);
                 killedsomething = true;
@@ -1860,19 +1933,178 @@ Datum btoptions(PG_FUNCTION_ARGS)
  *	as hikey or non-leaf page tuple with downlink.  Note that t_tid offset
  *	will be overritten in order to represent number of present tuple attributes.
  */
-IndexTuple _bt_nonkey_truncate(Relation idxrel, IndexTuple olditup)
+IndexTuple btree_truncate(Relation rel, IndexTuple lastleft, IndexTuple firstright, BTScanInsert itup_key)
 {
-    IndexTuple truncated;
-    int nkeyattrs = IndexRelationGetNumberOfKeyAttributes(idxrel);
+    Assert(!btree_tuple_is_pivot(lastleft));
+    Assert(!btree_tuple_is_pivot(firstright));
 
-    /*
-     * We're assuming to truncate only regular leaf index tuples which have
-     * both key and non-key attributes.
-     */
-    Assert(BTreeTupleGetNAtts(olditup, idxrel) == IndexRelationGetNumberOfAttributes(idxrel));
-    truncated = index_truncate_tuple(RelationGetDescr(idxrel), olditup, nkeyattrs);
-    BTreeTupleSetNAtts(truncated, nkeyattrs);
+    TupleDesc itupdesc = RelationGetDescr(rel);
+    int nkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
+    int keepnatts = btree_num_keep_atts(rel, lastleft, firstright, itup_key);
 
-    return truncated;
+#ifdef DEBUG_NO_TRUNCATE
+    keepnatts = nkeyatts + 1;
+#endif
+
+    IndexTuple pivot = index_truncate_tuple(itupdesc, firstright, Min(keepnatts, nkeyatts));
+
+    if (btree_tuple_is_posting(pivot)) {
+        Assert(keepnatts == nkeyatts || keepnatts == nkeyatts + 1);
+        Assert(IndexRelationGetNumberOfAttributes(rel) == nkeyatts);
+        pivot->t_info &= ~INDEX_SIZE_MASK;
+        pivot->t_info |= MAXALIGN(btree_tuple_get_posting_off(firstright));
+    }
+
+    if (keepnatts <= nkeyatts) {
+        btree_tuple_set_num_of_atts(pivot, (uint16)keepnatts, false);
+        return pivot;
+    }
+
+    Size newsize = MAXALIGN(IndexTupleSize(pivot)) + MAXALIGN(sizeof(ItemPointerData));
+    IndexTuple tid_pivot = (IndexTuple)palloc0(newsize);
+
+    errno_t rc = memcpy_s(tid_pivot, newsize, pivot, MAXALIGN(IndexTupleSize(pivot)));
+    securec_check(rc, "", "");
+    pfree(pivot);
+
+    tid_pivot->t_info &= ~INDEX_SIZE_MASK;
+    tid_pivot->t_info |= newsize;
+    btree_tuple_set_num_of_atts(tid_pivot, (uint16)nkeyatts, true);
+    ItemPointer pivot_heaptid = btree_tuple_get_heap_tid(tid_pivot);
+    Assert(pivot_heaptid);
+
+    ItemPointerCopy(btree_tuple_get_max_heap_tid(lastleft), pivot_heaptid);
+
+#ifndef DEBUG_NO_TRUNCATE
+    Assert(ItemPointerCompare(btree_tuple_get_max_heap_tid(lastleft), btree_tuple_get_heap_tid(firstright)) <= 0);
+    Assert(ItemPointerCompare(pivot_heaptid, btree_tuple_get_heap_tid(lastleft)) >= 0);
+    Assert(ItemPointerCompare(pivot_heaptid, btree_tuple_get_heap_tid(firstright)) <= 0);
+#else
+
+    ItemPointerCopy(btree_tuple_get_heap_tid(firstright), pivot_heaptid);
+    ItemPointerSetOffsetNumber(pivot_heaptid, OffsetNumberPrev(ItemPointerGetOffsetNumber(pivot_heaptid)));
+    Assert(ItemPointerCompare(pivot_heaptid, btree_tuple_get_heap_tid(firstright)) < 0);
+#endif
+
+    return tid_pivot;
 }
 
+static int btree_num_keep_atts(Relation rel, IndexTuple lastleft, IndexTuple firstright, BTScanInsert itup_key)
+{
+    int num_key_atts = IndexRelationGetNumberOfKeyAttributes(rel);
+    if (!itup_key->heapkeyspace) {
+        return num_key_atts;
+    }
+
+    TupleDesc itupdesc = RelationGetDescr(rel);
+    int num_keep_atts = 1;
+    ScanKey scankey = itup_key->scankeys;
+
+    for (int attnum = 1; attnum <= num_key_atts; attnum++, scankey++) {
+
+        bool is_null_1, is_null_2;
+        Datum datum1 = index_getattr(lastleft, attnum, itupdesc, &is_null_1);
+        Datum datum2 = index_getattr(firstright, attnum, itupdesc, &is_null_2);
+
+        if (is_null_1 != is_null_2)
+            break;
+
+        if (!is_null_1 && DatumGetInt32(FunctionCall2Coll(&scankey->sk_func, scankey->sk_collation, datum1, datum2)) != 0)
+            break;
+
+        num_keep_atts++;
+    }
+
+    Assert(!itup_key->allequalimage || num_keep_atts == btree_num_keep_atts_fast(rel, lastleft, firstright));
+
+    return num_keep_atts;
+}
+
+int btree_num_keep_atts_fast(Relation rel, IndexTuple lastleft, IndexTuple firstright)
+{
+    int num_key_atts = IndexRelationGetNumberOfKeyAttributes(rel);
+    TupleDesc itup_desc = RelationGetDescr(rel);
+    int num_keep_atts = 1;
+
+    for (int attnum = 1; attnum <= num_key_atts; attnum++) {
+
+        bool is_null_1, is_null_2;
+        Form_pg_attribute att;
+        Datum datum1 = index_getattr(lastleft, attnum, itup_desc, &is_null_1);
+        Datum datum2 = index_getattr(firstright, attnum, itup_desc, &is_null_2);
+        att = TupleDescAttr(itup_desc, attnum - 1);
+
+        if (is_null_1 != is_null_2)
+            break;
+
+        if (!is_null_1 && !DatumImageEq(datum1, datum2, att->attbyval, att->attlen))
+            break;
+
+        num_keep_atts++;
+    }
+
+    return num_keep_atts;
+}
+
+
+void btree_check_third_page(Relation rel, Relation heap, bool need_heaptid_space, Page page, IndexTuple tuple)
+{
+    Size itemsz = MAXALIGN(IndexTupleSize(tuple));
+    if (itemsz <= BTREE_MAX_ITEM_SIZE(page))
+        return;
+
+    if (!need_heaptid_space && itemsz <= BTREE_MAX_ITEM_SIZE_NO_HEAP_TID(page)) {
+        return;
+    }
+
+    if (!P_ISLEAF((BTPageOpaqueInternal)PageGetSpecialPointer(page))) {
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("cannot insert oversized tuple of size %lu on internal page of index \"%s\"",
+                               (unsigned long)itemsz, RelationGetRelationName(rel))));
+    }
+
+    ereport(ERROR,
+			(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+			 errmsg("index row size %lu exceeds maximum %lu for index \"%s\"",
+					(unsigned long)itemsz,
+					(unsigned long)BTREE_MAX_ITEM_SIZE(page),
+                    RelationGetRelationName(rel),
+			 errdetail("Index row references tuple (%u,%hu) in relation \"%s\".",
+					   ItemPointerGetBlockNumber(&tuple->t_tid),
+					   ItemPointerGetOffsetNumber(&tuple->t_tid),
+					   heap ? RelationGetRelationName(heap) : "unknown"),
+			 errhint("Values larger than 1/3 of a buffer page cannot be indexed.\n"
+					 "Consider a function index of an MD5 hash of the value, "
+					 "or use full text indexing."))));
+}
+
+bool btree_allequalimage(Relation rel, bool debugmessage)
+{
+    if (t_thrd.proc->workingVersionNum < NBTREE_DEDUPLICATION_VERSION_NUM ||
+        IndexRelationGetNumberOfAttributes(rel) != IndexRelationGetNumberOfKeyAttributes(rel) || IsSystemRelation(rel))
+        return false;
+
+    bool allequalimage = true;
+
+    for (int i = 0; i < IndexRelationGetNumberOfKeyAttributes(rel); i++) {
+        Oid opfamily = rel->rd_opfamily[i];
+        Oid opcintype = rel->rd_opcintype[i];
+        Oid collation = rel->rd_indcollation[i];
+        Oid equalimage_proc = get_opfamily_proc(opfamily, opcintype, opcintype, BTEQUALIMAGE_PROC);
+
+        if (!OidIsValid(equalimage_proc) ||
+            !DatumGetBool(OidFunctionCall1Coll(equalimage_proc, collation, ObjectIdGetDatum(opcintype)))) {
+            allequalimage = false;
+            break;
+        }
+    }
+
+    if (debugmessage) {
+        if (allequalimage)
+            elog(DEBUG1, "index \"%s\" can safely use deduplication", RelationGetRelationName(rel));
+        else
+            elog(DEBUG1, "index \"%s\" cannot use deduplication", RelationGetRelationName(rel));
+    }
+
+    return allequalimage;
+}

@@ -674,6 +674,7 @@ typedef struct knl_u_utils_context {
     char* int16output_buffer;
     char* varcharoutput_buffer;
     char* numericoutput_buffer;
+    char* dateoutput_buffer;
 
     syscalllock deleMemContextMutex;
 
@@ -930,6 +931,8 @@ typedef struct knl_u_mb_context {
 
     struct pg_enc2name* PlatformEncoding;
 
+    struct pg_enc2name* character_set_connection;
+    Oid collation_connection;
     /*
      * During backend startup we can't set client encoding because we (a)
      * can't look up the conversion functions, and (b) may not know the database
@@ -1229,6 +1232,7 @@ typedef struct knl_u_proc_context {
     char* LabelFile;
     char* TblspcMapFile;
     bool  registerAbortBackupHandlerdone;    /* unterminated backups handler flag */
+    bool check_auth;
 } knl_u_proc_context;
 
 /* maximum possible number of fields in a date string */
@@ -2410,8 +2414,13 @@ typedef struct knl_u_dolphin_errdata_context {
     ErrorDataArea *errorDataArea;  // only for b database, using in show warnings,show errors
     ErrorDataArea *lastErrorDataArea;
     bool sql_note;
+    bool handler_active = false;
     int max_error_count;
 } knl_u_dolphin_errdata_context;
+
+typedef struct knl_u_opfusion_reuse_context {
+    void *opfusionObj;                /* Opfusion cache Object */
+} knl_u_opfusion_reuse_context;
 
 typedef struct knl_u_catalog_context {
     bool nulls[4];
@@ -2740,6 +2749,10 @@ typedef struct knl_u_hook_context {
     void *pluginCCHashEqFuncs;
     void *plpgsqlParserSetHook;
     void *coreYYlexHook;
+    void *pluginProcDestReciverHook;
+    void *pluginSpiReciverParamHook;
+    void *pluginSpiExecuteMultiResHook;
+    void *pluginMultiResExceptionHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {
@@ -2907,6 +2920,9 @@ typedef struct knl_session_context {
     knl_u_rep_origin_context reporigin_cxt;
     knl_u_dolphin_errdata_context dolphin_errdata_ctx;
 
+    knl_u_opfusion_reuse_context opfusion_reuse_ctx;
+    MemoryContext iud_expr_reuse_ctx;
+
     /*
      * Initialize context which records time for client connection establish.
      * This time records start on incommining resuest arrives e.g. poll() invoked to accept() and
@@ -2917,6 +2933,8 @@ typedef struct knl_session_context {
     knl_u_ndp_context ndp_cxt;
 
     knl_u_hook_context hook_cxt;
+
+    MemoryContext opfusion_cxt;
 
     /* The datetime cache in current transaction. */
     TimestampTz cache_ts = 0;

@@ -1394,6 +1394,37 @@ static Sort* _copySort(const Sort* from)
 }
 
 /*
+ * CopySortGroupFields
+ *
+ *		This function copies the fields of the SortGroup node.
+ */
+static void CopySortGroupFields(const SortGroup *from, SortGroup *newnode)
+{
+    CopyPlanFields((const Plan *)from, (Plan *)newnode);
+
+    COPY_SCALAR_FIELD(numCols);
+    COPY_POINTER_FIELD(sortColIdx, from->numCols * sizeof(AttrNumber));
+    COPY_POINTER_FIELD(sortOperators, from->numCols * sizeof(Oid));
+    COPY_POINTER_FIELD(collations, from->numCols * sizeof(Oid));
+    COPY_POINTER_FIELD(nullsFirst, from->numCols * sizeof(bool));
+}
+
+/*
+ * _copySortGroup
+ */
+static SortGroup *_copySortGroup(const SortGroup *from)
+{
+    SortGroup *newnode = makeNode(SortGroup);
+
+    /*
+     * copy node superclass fields
+     */
+    CopySortGroupFields(from, newnode);
+
+    return newnode;
+}
+
+/*
  * _copyGroup
  */
 static Group* _copyGroup(const Group* from)
@@ -5592,6 +5623,7 @@ static TransactionStmt* _copyTransactionStmt(const TransactionStmt* from)
     COPY_NODE_FIELD(options);
     COPY_STRING_FIELD(gid);
     COPY_SCALAR_FIELD(csn);
+    COPY_SCALAR_FIELD(with_snapshot);
 
     return newnode;
 }
@@ -5663,6 +5695,7 @@ static ViewStmt* _copyViewStmt(const ViewStmt* from)
     COPY_SCALAR_FIELD(relkind);
     COPY_STRING_FIELD(definer);
     COPY_SCALAR_FIELD(is_alter);
+    COPY_SCALAR_FIELD(viewSecurityOption);
     COPY_SCALAR_FIELD(withCheckOption);
 
     return newnode;
@@ -6417,6 +6450,7 @@ static LockStmt* _copyLockStmt(const LockStmt* from)
     COPY_SCALAR_FIELD(mode);
     COPY_SCALAR_FIELD(nowait);
     COPY_SCALAR_FIELD(cancelable);
+    COPY_SCALAR_FIELD(isLockTables);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(waitSec);
     }
@@ -7104,6 +7138,16 @@ static SubPartitionPruningResult *_copySubPartitionPruningResult(const SubPartit
     COPY_NODE_FIELD(ls_selectedSubPartitionnos);
     return newnode;
 }
+/*Dolphin call stmt copy*/
+
+static DolphinCallStmt *_copyDolphinCallStmt(const DolphinCallStmt *from)
+{
+    DolphinCallStmt* newnode = makeNode(DolphinCallStmt);
+    COPY_NODE_FIELD(funccall);
+    COPY_NODE_FIELD(funcexpr);
+    COPY_NODE_FIELD(outargs);
+    return newnode;
+}
 
 /* ==================partial node copy ================================= */
 
@@ -7354,12 +7398,43 @@ static AutoIncrement *_copyAutoIncrement(const AutoIncrement *from)
     return newnode;
 }
 
+static CondInfo *_copyCondInfo(const CondInfo *from)
+{
+    CondInfo* newnode = makeNode(CondInfo);
+
+    COPY_NODE_FIELD(target);
+    COPY_SCALAR_FIELD(kind);
+
+    return newnode;
+}
+
+static GetDiagStmt *_copyGetDiagStmt(const GetDiagStmt *from)
+{
+    GetDiagStmt* newnode = makeNode(GetDiagStmt);
+
+    COPY_NODE_FIELD(condInfo);
+    COPY_SCALAR_FIELD(hasCondNum);
+    COPY_NODE_FIELD(condNum);
+
+    return newnode;
+}
+
 static CharsetCollateOptions *_copyCharsetcollateOptions(const CharsetCollateOptions* from)
 {
     CharsetCollateOptions* newnode = makeNode(CharsetCollateOptions);
     COPY_SCALAR_FIELD(cctype);
     COPY_SCALAR_FIELD(charset);
     COPY_STRING_FIELD(collate);
+    return newnode;
+}
+
+static CharsetClause *_copyCharsetClause(const CharsetClause* from)
+{
+    CharsetClause* newnode = makeNode(CharsetClause);
+    COPY_NODE_FIELD(arg);
+    COPY_SCALAR_FIELD(charset);
+    COPY_SCALAR_FIELD(is_binary);
+    COPY_LOCATION_FIELD(location);
     return newnode;
 }
 
@@ -7574,6 +7649,9 @@ void* copyObject(const void* from)
         case T_Sort:
             retval = _copySort((Sort*)from);
             break;
+        case T_SortGroup:
+            retval = _copySortGroup((SortGroup*)from);
+            break;        
         case T_Group:
             retval = _copyGroup((Group*)from);
             break;
@@ -8751,6 +8829,18 @@ void* copyObject(const void* from)
             break;
         case T_FunctionSources:
             retval = _copyFunctionSources((FunctionSources *)from);
+            break;
+        case T_CondInfo:
+            retval = _copyCondInfo((CondInfo *)from);
+            break;
+        case T_GetDiagStmt:
+            retval = _copyGetDiagStmt((GetDiagStmt *)from);
+            break;
+        case T_DolphinCallStmt:
+            retval = _copyDolphinCallStmt((DolphinCallStmt *)from);
+            break;
+        case T_CharsetClause:
+            retval = _copyCharsetClause((CharsetClause *)from);
             break;
         default:
             ereport(ERROR,

@@ -1190,3 +1190,20 @@ end;
 select count(*) from dbe_pldeveloper.gs_errors;
 
 set plsql_show_all_error to off;
+
+delete from DBE_PLDEVELOPER.gs_source;
+create package pac_1139606 is
+procedure pro_1139606();
+function fun_1139606();
+end pac_1139606;
+/
+select name, status, src from DBE_PLDEVELOPER.gs_source;
+delete from DBE_PLDEVELOPER.gs_source;
+
+create package pac_1139606 is
+procedure pro_1139606();
+end pac_1139606;
+/
+select name, status, src from DBE_PLDEVELOPER.gs_source;
+delete from DBE_PLDEVELOPER.gs_source;
+drop package pac_1139606;

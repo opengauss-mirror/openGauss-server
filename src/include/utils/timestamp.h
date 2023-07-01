@@ -129,6 +129,7 @@ extern Datum smalldatetime_send(PG_FUNCTION_ARGS);
 extern Datum smalldatetime_smaller(PG_FUNCTION_ARGS);
 extern Datum smalldatetime_larger(PG_FUNCTION_ARGS);
 extern Datum timestamp_in(PG_FUNCTION_ARGS);
+extern Datum input_timestamp_in(char* str, Oid typioparam, int32 typmod, bool can_ignore);
 extern Datum timestamp_out(PG_FUNCTION_ARGS);
 extern Datum timestamp_recv(PG_FUNCTION_ARGS);
 extern Datum timestamp_send(PG_FUNCTION_ARGS);

@@ -37,6 +37,8 @@ create table t1(a blob);
 
 -- test B format
 \c test_collate_B
+SET b_format_behavior_compat_options = 'enable_multi_charset';
+SHOW b_format_behavior_compat_options;
 
 -- test create table/alter table
 drop table if exists t_collate;
@@ -222,7 +224,7 @@ select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f
 select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1 collate "C";
 select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_bin"
 select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_general_ci";
-select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1;
 
 create table hashjoin1(id int, f1 text, f2 text) collate 'utf8mb4_bin';
 create table hashjoin2(id int, f3 text, f4 text) collate 'utf8mb4_bin';
@@ -248,7 +250,7 @@ select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f
 select tab1.f1, tab2.f1 from test_join1 as tab1, test_join2 as tab2 where tab1.f1 = tab2.f1 collate "C";
 select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_bin"
 select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1 collate "utf8mb4_general_ci";
-select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1;
 
 -- test mergejoin
 set enable_hashjoin=off;
@@ -279,7 +281,7 @@ insert into test_sep_option4 values ('S','S');
 
 select * from test_sep_option1 union select * from test_sep_option2 order by f1;
 select * from test_sep_option3 union select * from test_sep_option4 order by f1;
-select * from test_sep_option1 union select * from test_sep_option3;  -- fail
+select * from test_sep_option1 union select * from test_sep_option3 order by f1;
 
 -- test setop
 drop table if exists test_sep_option1;

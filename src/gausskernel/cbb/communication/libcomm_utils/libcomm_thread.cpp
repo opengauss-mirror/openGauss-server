@@ -2417,7 +2417,7 @@ ThreadId startCommSenderFlow(void)
 #else
     switch ((comm_sender_flower_pid = fork_process())) {
 #endif
-        case -1:
+        case (ThreadId)-1:
             ereport(LOG, (errmsg("could not fork comm sender flower process: %m")));
             return 0;
 #ifndef EXEC_BACKEND
@@ -2454,7 +2454,7 @@ ThreadId startCommReceiverFlow()
 #else
     switch ((comm_receiver_flower_pid = fork_process())) {
 #endif
-        case -1:
+        case (ThreadId)-1:
             ereport(LOG, (errmsg("could not fork comm sender flower process: %m")));
             return 0;
 #ifndef EXEC_BACKEND
@@ -2488,7 +2488,7 @@ ThreadId startCommAuxiliary()
 #else
     switch ((comm_auxiliary_pid = fork_process())) {
 #endif
-        case -1:
+        case (ThreadId)-1:
             ereport(LOG, (errmsg("could not fork comm auxiliary flower process: %m")));
             return 0;
 #ifndef EXEC_BACKEND
@@ -2522,7 +2522,7 @@ ThreadId startCommReceiver(int* tid)
     switch ((comm_receiver_pid = fork_process()))
 #endif
     {
-        case -1:
+        case (ThreadId)-1:
             ereport(LOG, (errmsg("could not fork comm receiver process: %m")));
             return 0;
 #ifndef EXEC_BACKEND

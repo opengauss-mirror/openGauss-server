@@ -297,7 +297,7 @@ extern void ForbidToSetOptionsForUstoreTbl(List *options);
 extern void ForbidToSetOptionsForNotUstoreTbl(List *options);
 extern void ForbidToSetOptionsForRowTbl(List* options);
 extern void ForbidUserToSetDefinedOptions(List* options);
-extern void ForbidUserToSetDefinedIndexOptions(List* options);
+extern void ForbidUserToSetDefinedIndexOptions(Relation rel, List *options);
 extern bool CheckRelOptionValue(Datum options, const char* opt_name);
 extern void forbid_to_set_options_for_timeseries_tbl(List* options);
 extern List* RemoveRelOption(List* options, const char* optName, bool* removed);

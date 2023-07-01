@@ -52,6 +52,7 @@ typedef struct EventTriggerQueryState
 #define AT_REWRITE_DEFAULT_VAL         0x02
 #define AT_REWRITE_COLUMN_REWRITE      0x04
 #define AT_REWRITE_ALTER_OID           0x08
+#define AT_REWRITE_ALTER_COMPRESSION   0x0B
 
 #define currentEventTriggerState ((EventTriggerQueryState*)(u_sess->exec_cxt.EventTriggerState))
 /*

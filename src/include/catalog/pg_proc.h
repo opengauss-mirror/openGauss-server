@@ -174,6 +174,8 @@ typedef FormData_pg_proc *Form_pg_proc;
 
 /* keep the following ordered by OID so that later changes can be made easier */
      /* OIDS 1 - 99 */
+#define VERSIONFUNCOID 89
+#define OPENGAUSSVERSIONFUNCOID 90
 #define TEXTLENOID 1257
 #define EQSELRETURNOID 101
 #define NEQSELRETURNOID 102
@@ -305,6 +307,7 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define INTERVALTOCHARFUNCOID 1768
 #define CONCATFUNCOID 3058
 #define CONCATWSFUNCOID 3059
+#define CONVERTTONOCASEFUNCOID 3198
 #define ANYTOTEXTFORMATFUNCOID 3539
 #define DEFAULTFORMATFUNCOID 3540
 #define INTERVALACCUMFUNCOID 1843

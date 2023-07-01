@@ -35,6 +35,7 @@ typedef enum {
     PMSIGNAL_ADVANCE_STATE_MACHINE,    /* advance postmaster's state machine */
     PMSIGNAL_DEMOTE_PRIMARY,           /* start to demote primary */
     PMSIGNAL_PROMOTE_STANDBY,          /* start to promote standby */
+    PMSIGNAL_SWITCHOVER_TIMEOUT,       /* start to backtrace for switchover */
     PMSIGNAL_UPDATE_WAITING,           /* update waiting status to gaussdb.state */
     PMSIGNAL_UPDATE_PROMOTING,         /* update promoting status to gaussdb.state */
     PMSIGNAL_UPDATE_HAREBUILD_REASON,  /* update ha rebuild reason to gaussdb.state */
@@ -50,7 +51,7 @@ typedef enum {
     PMSIGNAL_START_LOGICAL_READ_WORKER,/* start logical read worker */
     PMSIGNAL_START_PARALLEL_DECODE_WORKER,/* start parallel decoding worker */
     PMSIGNAL_START_APPLY_WORKER,       /* start a apply worker */
-    PMSIGNAL_DMS_TRIGGERFAILOVER,      /* failover for reform */
+    PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS,  /* term backends in alive failover */
     PMSIGNAL_DMS_FAILOVER_STARTUP,     /* start startup thread in alive failover */
     PMSIGNAL_DMS_SWITCHOVER_PROMOTE,   /* dms standby switchover promote */
     PMSIGNAL_DMS_REFORM,               /* dms reform start during PM_RUN */

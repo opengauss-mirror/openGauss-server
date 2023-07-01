@@ -173,6 +173,7 @@ extern void heapDropPartitionIndex(Relation parentIndex, Oid partIndexId);
 extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, PartitionTupleInfo *partTupleInfo);
 
 extern void heap_truncate_one_part(Relation rel , Oid partOid);
+extern Oid getPartitionIdFromTuple(Relation rel, void *tuple, EState* estate, TupleTableSlot* slot, int *partitionno, bool isDDL = false, bool canIgnore = false);
 extern Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool isDDL = false,
     bool canIgnore = false, bool partExprKeyIsNull = true);
 extern Oid heapTupleGetSubPartitionId(Relation rel, void *tuple);
@@ -191,7 +192,7 @@ extern List *AddRelationNewConstraints(Relation rel, List *newColDefaults, List 
 extern List *AddRelClusterConstraints(Relation rel, List *clusterKeys);
 extern Oid StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol, Node* update_expr,
     bool skip_dep = false);
-extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname,
+extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, Oid attcollation, char *attname,
     char generatedCol);
 extern void DeleteRelationTuple(Oid relid);
 extern void DeleteAttributeTuples(Oid relid);

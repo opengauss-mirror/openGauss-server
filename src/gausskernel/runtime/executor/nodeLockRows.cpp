@@ -110,9 +110,9 @@ lnext:
         bool isNull = false;
         bool rowMovement = false;
         HeapTupleData tuple;
-        struct {
+        union {
             HeapTupleHeaderData hdr;
-            char data[MaxHeapTupleSize];
+            char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
         } tbuf;
 
         Buffer buffer;
@@ -321,9 +321,9 @@ lnext:
      * If we need to do EvalPlanQual testing, do so.
      */
     if (epq_started) {
-        struct {
+        union {
             HeapTupleHeaderData hdr;
-            char data[MaxHeapTupleSize];
+            char data[MaxHeapTupleSize + sizeof(HeapTupleHeaderData)];
         } tbuf;
 
         /*

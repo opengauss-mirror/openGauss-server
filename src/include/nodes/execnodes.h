@@ -397,6 +397,8 @@ struct ExprState {
 
 	/* original expression tree, for debugging only */
 	Expr	   *expr;
+    /* private state for an evalfunc */
+    void *evalfunc_private;
 
 	/*
 	 * XXX: following fields only needed during "compilation" (ExecInitExpr);
@@ -487,6 +489,7 @@ typedef struct ProjectionInfo {
     int pi_lastInnerVar;
     int pi_lastOuterVar;
     int pi_lastScanVar;
+    List* pi_projectVarNumbers; 
     List* pi_acessedVarNumbers;
     List* pi_sysAttrList;
     List* pi_lateAceessVarNumbers;
@@ -1738,15 +1741,19 @@ struct ScanBatchResult {
     TupleTableSlot** scanTupleSlotInBatch; /* array size of BatchMaxSize, stores tuples scanned in a page */
 };
 
+struct ScanBatchColAttr {
+    int colId;          /* only save the used cols. */
+    bool lateRead;      /* for project */
+    bool isProject;     /* is project? */
+};
+
 struct ScanBatchState {
-    VectorBatch*    pCurrentBatch;  /* for output in batch */
     VectorBatch*    pScanBatch;     /* batch formed from tuples */
     int             scanTupleSlotMaxNum; /* max row number of tuples can be scanned once */
     int             colNum;
-    int *colId;    /* for qual and project, only save the used cols. */
     int maxcolId;
+    ScanBatchColAttr* colAttr;  /* for qual and project, save attributes. */
     bool *nullflag;  /*indicate the batch has null value for performance */
-    bool *lateRead;  /* for project */
     bool scanfinished; /* last time return with rows, but pages of this partition is read out */
     ScanBatchResult scanBatch;
 };
@@ -1796,6 +1803,7 @@ typedef struct ScanState {
     bool isSampleScan;               /* identify is it table sample scan or not. */
     bool runTimePredicatesReady;
     bool is_scan_end; /* @hdfs Mark whether iterator is over or not, if the scan uses informational constraint. */
+    bool isVersionScan;
 
     int currentSlot; /* current iteration position */
     int part_id;
@@ -2414,6 +2422,21 @@ typedef struct SortState {
     int64* space_size;    /* spill size for temp table */
 } SortState;
 
+struct SortGroupStatePriv;
+/* ----------------
+ *	 SortGroupState information
+ * ----------------
+ */
+typedef struct SortGroupState {
+    ScanState ss;                     /* its first field is NodeTag */
+    int64 bound;                      /* if bounded, how many group are needed */
+    struct SortGroupStatePriv *state; /* private state of nodeSortGroup.c */
+    bool sort_Done;                   /* sort completed yet? */
+    bool *new_group_trigger;          /* indicates new groups where returning tuples */
+    const char *spaceType;            /* type of space spaceUsed represents */
+    int64 spaceUsed;                  /* space used for explain */       
+} SortGroupState;
+
 /* ---------------------
  *	GroupState information
  * -------------------------
@@ -2457,6 +2480,7 @@ typedef struct AggState {
     AggStatePerAgg curperagg;   /* identifies currently active aggregate */
     bool input_done;            /* indicates end of input */
     bool agg_done;              /* indicates completion of Agg scan */
+    bool new_group_trigger;     /* indicates new groups where returning tuples*/
     int projected_set;          /* The last projected grouping set */
     int current_set;            /* The current grouping set being evaluated */
     Bitmapset* grouped_cols;    /* grouped cols in current projection */
@@ -2709,6 +2733,13 @@ typedef struct UserSetElemState {
     UserSetElem* use;
     ExprState* instate;
 } UserSetElemState;
+
+typedef struct PrefixKeyState {
+    ExprState xprstate;
+    ExprState* arg; /* state of my child node */
+    int encoding;
+} PrefixKeyState;
+
 /* ----------------
  *		GroupingFuncExprState node
  *

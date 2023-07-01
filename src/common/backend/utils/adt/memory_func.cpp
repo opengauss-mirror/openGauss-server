@@ -310,6 +310,12 @@ Datum gs_get_thread_memctx_detail(PG_FUNCTION_ARGS)
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, "gs_get_thread_memctx_detail");
     }
 
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("second parameter should not be empty")));
+    }
+
     const ThreadId tid = PG_GETARG_INT64(0);
     char* ctx_name = TextDatumGetCString(PG_GETARG_TEXT_PP(1));
 
@@ -411,6 +417,12 @@ Datum gs_get_session_memctx_detail(PG_FUNCTION_ARGS)
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, "gs_get_session_memctx_detail");
     }
 
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("input parameter should not be empty")));
+    }
+
     char* ctx_name = TextDatumGetCString(PG_GETARG_TEXT_PP(0));
 
     gs_check_context_name_valid(ctx_name);
@@ -474,6 +486,12 @@ Datum gs_get_shared_memctx_detail(PG_FUNCTION_ARGS)
 
     if (!superuser() && !isMonitoradmin(GetUserId())) {
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, "gs_get_shared_memctx_detail");
+    }
+
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("input parameter should not be empty")));
     }
 
     char* ctx_name = TextDatumGetCString(PG_GETARG_TEXT_PP(0));

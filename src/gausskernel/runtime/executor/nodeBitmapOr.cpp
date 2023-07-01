@@ -130,6 +130,7 @@ Node* MultiExecBitmapOr(BitmapOrState* node)
                 result = tbm_create(maxbytes,
                                     RelationIsGlobalIndex(((BitmapIndexScanState *)subnode)->biss_RelationDesc),
                                     RelationIsCrossBucketIndex(((BitmapIndexScanState *)subnode)->biss_RelationDesc),
+                                    RelationIsPartitioned(((BitmapIndexScanState *)subnode)->biss_RelationDesc),
                                     isUstore);
             }
 

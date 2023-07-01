@@ -96,6 +96,7 @@
 #include "utils/selfuncs.h"
 #include "utils/spccache.h"
 #include "utils/tuplesort.h"
+#include "utils/fmgroids.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
@@ -668,7 +669,10 @@ void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathI
      * wiil be equal division to all parallelism thread.
      */
     run_cost += u_sess->opt_cxt.smp_thread_cost * (dop - 1);
-    run_cost += spc_seq_page_cost * baserel->pages / dop;
+    if (u_sess->attr.attr_sql.enable_seqscan_dopcost)
+        run_cost += spc_seq_page_cost * baserel->pages / dop;
+    else
+        run_cost += spc_seq_page_cost * baserel->pages;
     cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
     run_cost += cpu_per_tuple * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples) / dop;
     double cpu_run_cost = 0;
@@ -1032,14 +1036,15 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
      * the fraction of main-table tuples we will have to retrieve) and its
      * correlation to the main-table tuple order.
      */
-    OidFunctionCall7(index->amcostestimate,
-        PointerGetDatum(root),
-        PointerGetDatum(path),
-        Float8GetDatum(loop_count),
-        PointerGetDatum(&indexStartupCost),
-        PointerGetDatum(&indexTotalCost),
-        PointerGetDatum(&indexSelectivity),
-        PointerGetDatum(&indexCorrelation));
+    if (index->amcostestimate == F_BTCOSTESTIMATE) {
+        btcostestimate_internal(root, path, loop_count, &indexStartupCost, &indexTotalCost, &indexSelectivity, &indexCorrelation);
+    } else {
+        OidFunctionCall7(index->amcostestimate, PointerGetDatum(root), PointerGetDatum(path),
+                         Float8GetDatum(loop_count), PointerGetDatum(&indexStartupCost),
+                         PointerGetDatum(&indexTotalCost), PointerGetDatum(&indexSelectivity),
+                         PointerGetDatum(&indexCorrelation));
+    }
+
 
     /*
      * Save amcostestimate's results for possible use in bitmap scan planning.
@@ -2282,6 +2287,120 @@ void cost_sort(Path* path, List* pathkeys, Cost input_cost, double tuples, int w
 }
 
 /*
+ * cost_groupsort
+ *	  Determines and returns the cost of sorting a relation using groupsort,
+ *    not including the cost of reading the input data.
+ */
+static void cost_groupsort(PlannerInfo *root, Cost *startup_cost, Cost *run_cost, double *tuples, int width, Cost comparison_cost,
+                           int sort_mem, double dNumGroups)
+{
+    double totalTuples = *tuples;
+    double input_bytes = relation_byte_size(totalTuples, width, false);
+    double output_bytes;
+    long sort_mem_bytes = sort_mem * 1024L;
+    double remainTuples;
+    double remainGroups;
+    double maxGroups = (double)sort_mem_bytes / BLCKSZ;
+    Cost discard_costs = 0;
+    Cost cpu_costs = 0;
+    Cost disk_costs = 0;
+
+    /* Include the default cost-per-comparison */
+    comparison_cost += 2.0 * u_sess->attr.attr_sql.cpu_operator_cost;
+    
+    if (0 < root->limit_tuples && root->limit_tuples < dNumGroups) {
+        /* estimate how many tuples are discarded directly */
+        remainGroups = root->limit_tuples;
+        double ratio = (remainGroups / dNumGroups);
+        remainTuples = ratio * totalTuples;
+        output_bytes = ratio * input_bytes;      
+    } 
+    else {
+        remainGroups = dNumGroups;
+        remainTuples = totalTuples;
+        output_bytes = input_bytes;
+    }
+
+    /*mustn't do log(0)*/
+    if (remainGroups < 2.0)
+        remainGroups = 2.0;
+    if (remainTuples < 2.0) 
+        remainTuples = 2.0;
+
+    if (remainGroups > maxGroups || remainGroups * width > sort_mem_bytes) {
+        /*
+         * too many groups, or required memory exceeds exceeds work_mem,
+         * don't consider this plan
+         */
+        *startup_cost += g_instance.cost_cxt.disable_cost * g_instance.cost_cxt.disable_cost_enlarge_factor;
+    }
+
+    if (remainTuples < totalTuples) {
+        double discard_tuples = totalTuples - remainTuples;
+        /* 
+         * Assume 0.9 of tuples are discarded directly,
+         * 0.1 tuples are inserted into skiplist first, but discarded by LIMIT N latter 
+         */
+        discard_costs = 0.9 * discard_tuples * comparison_cost +   /*discarded directly*/
+                        0.1 * discard_tuples * comparison_cost * LOG2(remainGroups);  /* discarded by LIMIT N */
+    }
+    
+    if (output_bytes > sort_mem_bytes) {
+        /*
+         * We'll have to use a disk-based sort of all the tuples
+         */
+        double pagesPerGroup = ceil(input_bytes / remainGroups / BLCKSZ);
+        double npages = pagesPerGroup * remainGroups;
+        double npageaccesses;
+
+        /*
+         * CPU costs
+         *
+         * Assume about NUMBER_TUPLES *log2 (NUMBER_GROUPS) comparisons
+         */
+        cpu_costs += comparison_cost * remainTuples * LOG2(remainGroups);
+
+        /* Disk costs */
+        npageaccesses = 2.0 * npages;
+        /* Assume 3/4ths of accesses are sequential, 1/4th are not */
+        disk_costs += npageaccesses * (u_sess->attr.attr_sql.seq_page_cost * 0.75 
+                + u_sess->attr.attr_sql.random_page_cost * 0.25);
+    } else {
+        /* We'll use plain groupsort on all the input tuples */
+        cpu_costs += comparison_cost * remainTuples * LOG2(remainGroups);
+    }
+
+    *startup_cost = discard_costs + cpu_costs + disk_costs;
+    /*
+     * Also charge a small amount (arbitrarily set equal to operator cost) per
+     * extracted tuple. 
+     */
+    
+    *run_cost = u_sess->attr.attr_sql.cpu_operator_cost * remainTuples;
+    *tuples = remainTuples;
+}
+
+/*
+ * cost_sort_group
+ *	  Determines and returns the cost of sorting a relation using groupsort,
+ *    including the cost of reading the input data.
+ */
+void cost_sort_group(Path *path, PlannerInfo *root, Cost input_cost, double tuples, int width,
+                     Cost comparison_cost, int sort_mem, double dNumGroups)
+{
+    Cost startup_cost = 0;
+    Cost run_cost = 0;
+
+    cost_groupsort(root, &startup_cost, &run_cost, &tuples, width, comparison_cost, sort_mem, dNumGroups);
+
+    startup_cost += input_cost;
+
+    path->rows = tuples;
+    path->startup_cost = startup_cost;
+    path->total_cost = startup_cost + run_cost;
+}
+
+/*
  * compute_sort_disk_cost
  *	compute disk spill cost of sort operator
  *
@@ -2601,14 +2720,17 @@ void cost_agg(Path* path, PlannerInfo* root, AggStrategy aggstrategy, const AggC
         /* we aren't grouping */
         total_cost = startup_cost + u_sess->attr.attr_sql.cpu_tuple_cost;
         output_tuples = 1;
-    } else if (aggstrategy == AGG_SORTED) {
+    } else if (aggstrategy == AGG_SORTED || aggstrategy == AGG_SORT_GROUP) {
         /* Here we are able to deliver output on-the-fly */
         startup_cost = input_startup_cost;
         total_cost = input_total_cost;
         /* calcs phrased this way to match HASHED case, see note above */
         total_cost += aggcosts->transCost.startup;
         total_cost += aggcosts->transCost.per_tuple * input_tuples;
-        total_cost += (u_sess->attr.attr_sql.cpu_operator_cost * numGroupCols) * input_tuples;
+        if (aggstrategy != AGG_SORT_GROUP) {
+            /* AGG_SORT_GROUP is not need to to perform grouping comparisons */
+            total_cost += (u_sess->attr.attr_sql.cpu_operator_cost * numGroupCols) * input_tuples;
+        }
         total_cost += aggcosts->finalCost * numGroups;
         total_cost += u_sess->attr.attr_sql.cpu_tuple_cost * numGroups;
         output_tuples = numGroups;

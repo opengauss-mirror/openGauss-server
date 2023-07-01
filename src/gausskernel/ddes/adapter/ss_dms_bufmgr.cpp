@@ -28,6 +28,7 @@
 #include "storage/smgr/segment.h"
 #include "utils/resowner.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
+#include "ddes/dms/ss_reform_common.h"
 #include "securec_check.h"
 #include "miscadmin.h"
 #include "access/double_write.h"
@@ -244,7 +245,7 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
         if ((lsn_on_mem != InvalidXLogRecPtr) && (lsn_on_disk > lsn_on_mem)) {
             RelFileNode rnode = buf_desc->tag.rnode;
             int elevel = WARNING;
-            if (!RecoveryInProgress()) {
+            if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY) {
                 elevel = PANIC;
             }
             ereport(elevel, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
@@ -302,6 +303,15 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
     ClearReadHint(buf_desc->buf_id);
     TerminateBufferIO(buf_desc, false, BM_VALID);
+
+    /*
+     * we need redo items to get lastest page in ondemand recovery
+     */
+    if (t_thrd.role != PAGEREDO && SS_ONDEMAND_BUILD_DONE && SS_PRIMARY_MODE &&
+        !LWLockHeldByMe(buf_desc->content_lock)) {
+        buf_desc = RedoForOndemandExtremeRTOQuery(buf_desc, RELPERSISTENCE_PERMANENT, buf_desc->tag.forkNum,
+            buf_desc->tag.blockNum, read_mode);
+    }
     return buffer;
 }
 
@@ -472,10 +482,60 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
         return buffer;
     }
 
+    // standby node must notify primary node for prepare lastest page in ondemand recovery
+    if (SS_STANDBY_ONDEMAND_RECOVERY) {
+        while (!SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
+            SSReadControlFile(REFORM_CTRL_PAGE);
+            if (SS_STANDBY_ONDEMAND_NORMAL) {
+                break; // ondemand recovery finish, skip
+            } else if (SS_STANDBY_ONDEMAND_BUILD) {
+                return 0; // in new reform
+            }
+            // still need requset page
+        }
+    }
+
     if (!StartReadPage(buf_desc, mode)) {
         return 0;
     }
     return TerminateReadPage(buf_desc, read_mode, OidIsValid(buf_ctrl->pblk_relno) ? &pblk : NULL);
+}
+
+bool SSOndemandRequestPrimaryRedo(BufferTag tag)
+{
+    dms_context_t dms_ctx;
+    int32 redo_status = ONDEMAND_REDO_INVALID;
+
+    if (!SS_STANDBY_ONDEMAND_RECOVERY) {
+        return true;
+    }
+
+    ereport(DEBUG1,
+        (errmodule(MOD_DMS),
+            errmsg("[On-demand] start request primary node redo page, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
+                tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum,
+                tag.blockNum)));
+    InitDmsContext(&dms_ctx);
+    dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
+    if (dms_reform_req_opengauss_ondemand_redo_buffer(&dms_ctx, &tag,
+        (unsigned int)sizeof(BufferTag), &redo_status) != DMS_SUCCESS) {
+        ereport(LOG,
+            (errmodule(MOD_DMS),
+                errmsg("[on-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
+                    "redo statu %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
+                    (int)tag.rnode.opt, tag.forkNum, tag.blockNum, redo_status)));
+        return false;
+    }
+    ereport(DEBUG1,
+        (errmodule(MOD_DMS),
+            errmsg("[On-demand] end request primary node redo page, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, "
+                "redo status %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, tag.rnode.bucketNode,
+                tag.forkNum, tag.blockNum, redo_status)));
+
+    if (redo_status != ONDEMAND_REDO_DONE) {
+        SSReadControlFile(REFORM_CTRL_PAGE);
+    }
+    return true;
 }
 
 bool DmsReleaseOwner(BufferTag buf_tag, int buf_id)
@@ -674,8 +734,18 @@ bool CheckPageNeedSkipInRecovery(Buffer buf)
 dms_session_e DMSGetProcType4RequestPage()
 {
     // proc type used in DMS request page
-    if (AmDmsReformProcProcess() || AmPageRedoProcess() || AmStartupProcess()) {
-        return DMS_SESSION_RECOVER;
+    if (AmDmsReformProcProcess() || (AmPageRedoProcess() && !SS_ONDEMAND_BUILD_DONE) ||
+        (AmStartupProcess() && !SS_ONDEMAND_BUILD_DONE)) {
+        /* When xlog_file_path is not null and enable_dms is set on, main standby always is in recovery.
+         * When pmState is PM_HOT_STANDBY, this case indicates main standby support to read only. So here
+         * DMS_SESSION_RECOVER_HOT_STANDBY will be returned, it indicates that normal threads can access
+         * page in recovery state.
+         */
+        if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
+            return DMS_SESSION_RECOVER_HOT_STANDBY; 
+        } else {
+            return DMS_SESSION_RECOVER;   
+        }
     } else {
         return DMS_SESSION_NORMAL;
     }

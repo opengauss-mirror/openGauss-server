@@ -47,7 +47,7 @@ inline bool CanTupleInertGSC(HeapTuple tuple)
     if (tuple->t_tableOid == InvalidOid) {
         // this is a heapformtuple
         Assert(tuple->tupTableType == HEAP_TUPLE);
-        Assert(tuple->t_bucketId = InvalidBktId);
+        Assert(tuple->t_bucketId == InvalidBktId);
         Assert(tuple->t_self.ip_blkid.bi_hi == InvalidBlockNumber >> 16);
         Assert(tuple->t_self.ip_blkid.bi_lo == (InvalidBlockNumber & 0xffff));
         Assert(tuple->t_self.ip_posid == InvalidOffsetNumber);

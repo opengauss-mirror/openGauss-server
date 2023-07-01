@@ -507,10 +507,11 @@ alter table test_drop_column_1 drop column c;
 explain (verbose true, costs false) insert into test_drop_column_1 select * from test_drop_column_2;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
+ [Bypass]
  Insert on public.test_drop_column_1
    ->  Seq Scan on public.test_drop_column_2
          Output: test_drop_column_2.a, test_drop_column_2.b, NULL::integer
-(3 rows)
+(4 rows)
 
 insert into test_drop_column_1 select * from test_drop_column_2;
 explain (verbose true, costs false) insert into test_drop_column_1 select * from test_drop_column_2 order by 2;
