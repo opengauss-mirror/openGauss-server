@@ -182,6 +182,19 @@ typedef struct st_dms_xid_ctx {
     unsigned long long scn;
 } dms_xid_ctx_t;
 
+typedef struct dms_opengauss_relfilenode {
+    unsigned int spcNode;
+    unsigned int dbNode;
+    unsigned int relNode;
+    signed short bucketNode;
+    unsigned short opt;
+} dms_opengauss_relfilenode_t;
+
+typedef struct st_dms_rfn {
+    dms_opengauss_relfilenode_t rnode;
+    unsigned char inst_id;
+} dms_rfn_t;
+
 typedef struct st_dms_xmap_ctx {
     unsigned int xmap;
     unsigned int dest_id;
@@ -201,6 +214,7 @@ typedef struct st_dms_context {
         dms_drid_t lock_id;
         dms_xid_ctx_t xid_ctx;
         dms_xmap_ctx_t xmap_ctx;
+        dms_rfn_t rfn;
         unsigned char edp_inst;
     };
 } dms_context_t;
@@ -241,6 +255,11 @@ typedef struct dms_opengauss_txn_sw_info {
     unsigned int scid;              // command id of master, used for standby write feature
     unsigned int server_proc_slot;  // backend slot of master, used for standby write feature
 } dms_opengauss_txn_sw_info_t;
+
+typedef struct st_dms_opengauss_page_status_result {
+    int bit_count;
+    unsigned long int page_map[8];
+} dms_opengauss_page_status_result_t;
 
 typedef enum dms_opengauss_lock_req_type {
     SHARED_INVAL_MSG,
@@ -452,6 +471,7 @@ typedef enum en_dms_wait_event {
     DMS_EVT_LATCH_X_REMOTE,
     DMS_EVT_LATCH_S_REMOTE,
     DMS_EVT_ONDEMAND_REDO,
+    DMS_EVT_PAGE_STATUS_INFO,
 
 
     DMS_EVT_COUNT,
@@ -598,6 +618,8 @@ typedef int(*dms_opengauss_lock_buffer)(void *db_handle, int buffer, unsigned ch
 typedef int(*dms_get_txn_snapshot)(void *db_handle, unsigned int xmap, dms_txn_snapshot_t *txn_snapshot);
 typedef int(*dms_get_opengauss_txn_snapshot)(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot);
 typedef int(*dms_get_opengauss_txn_of_master)(void *db_handle, dms_opengauss_txn_sw_info_t *txn_swinfo);
+typedef int(*dms_get_opengauss_page_status)(void *db_handle, dms_opengauss_relfilenode_t *rnode, unsigned int page,
+    int page_num, dms_opengauss_page_status_result_t *page_result);
 typedef void (*dms_log_output)(dms_log_id_t log_type, dms_log_level_t log_level, const char *code_file_name,
     unsigned int code_line_num, const char *module_name, const char *format, ...);
 typedef int (*dms_log_flush)(void *db_handle, unsigned long long *lsn);
@@ -745,6 +767,7 @@ typedef struct st_dms_callback {
     dms_get_txn_snapshot get_txn_snapshot;
     dms_get_opengauss_txn_snapshot get_opengauss_txn_snapshot;
     dms_get_opengauss_txn_of_master get_opengauss_txn_of_master;
+    dms_get_opengauss_page_status get_opengauss_page_status;
     dms_log_output log_output;
     dms_log_flush log_flush;
     dms_process_edp ckpt_edp;
@@ -856,7 +879,7 @@ typedef enum en_dms_info_id {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           76
+#define DMS_LOCAL_VERSION           77
 
 #ifdef __cplusplus
 }

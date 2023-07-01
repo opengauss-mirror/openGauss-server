@@ -96,6 +96,7 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
 bool SSGetOldestXminFromAllStandby();
 int SSGetOldestXmin(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);
 int SSGetOldestXminAck(SSBroadcastXminAck *ack_data);
+void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *pageMap, int *bitCount);
 void SSSendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n);
 void SSBCastDropRelAllBuffer(RelFileNode *rnodes, int rnode_len);
 void SSBCastDropRelRangeBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock);

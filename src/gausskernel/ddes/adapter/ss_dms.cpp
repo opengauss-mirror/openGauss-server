@@ -102,6 +102,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_txn_status));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_txn_snapshot));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_txn_of_master));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_page_status));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_register_thread_init));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_release_owner));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_wait_reform));
@@ -225,6 +226,12 @@ int dms_request_opengauss_txn_snapshot(dms_context_t *dms_ctx, dms_opengauss_txn
 int dms_request_opengauss_txn_of_master(dms_context_t *dms_ctx, dms_opengauss_txn_sw_info_t *dms_txn_swinfo)
 {
     return g_ss_dms_func.dms_request_opengauss_txn_of_master(dms_ctx, dms_txn_swinfo);
+}
+
+int dms_request_opengauss_page_status(dms_context_t *dms_ctx, unsigned int page, int page_num,
+    unsigned long int *page_map, int *bit_count)
+{
+    return g_ss_dms_func.dms_request_opengauss_page_status(dms_ctx, page, page_num, page_map, bit_count);
 }
 
 int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned int len, unsigned char handle_recv_msg,

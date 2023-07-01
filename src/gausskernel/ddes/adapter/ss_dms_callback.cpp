@@ -277,6 +277,25 @@ static int CBGetTxnStatus(void *db_handle, unsigned long long xid, unsigned char
     return DMS_SUCCESS;
 }
 
+#define NDPGETBYTE(x, i) (*((char*)(x) + (int)((i) / BITS_PER_BYTE)))
+#define NDPCLRBIT(x, i) NDPGETBYTE(x, i) &= ~(0x01 << ((i) % BITS_PER_BYTE))
+#define NDPGETBIT(x, i) ((NDPGETBYTE(x, i) >> ((i) % BITS_PER_BYTE)) & 0x01)
+
+static int CBGetPageStatus(void *db_handle, dms_opengauss_relfilenode_t *rnode, unsigned int page,
+    int pagesNum, dms_opengauss_page_status_result_t *page_result)
+{
+    for (uint32 i = page, offset = 0; i != page + pagesNum; ++i, ++offset) {
+        if (NDPGETBIT(page_result->page_map, offset)) {
+            bool cached = IsPageHitBufferPool(*(RelFileNode * )(rnode), MAIN_FORKNUM, i);
+            if (cached) {
+                NDPCLRBIT(page_result->page_map, offset);
+                --page_result->bit_count;
+            }
+        }
+    }
+    return DMS_SUCCESS;
+}
+
 static int CBGetCurrModeAndLockBuffer(void *db_handle, int buffer, unsigned char lock_mode,
     unsigned char *curr_mode)
 {
@@ -1962,6 +1981,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->opengauss_lock_buffer = CBGetCurrModeAndLockBuffer;
     callback->get_opengauss_txn_snapshot = CBGetSnapshotData;
     callback->get_opengauss_txn_of_master = CBGetTxnSwinfo;
+    callback->get_opengauss_page_status = CBGetPageStatus;
 
     callback->log_output = NULL;
 

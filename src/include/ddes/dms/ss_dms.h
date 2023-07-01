@@ -53,6 +53,8 @@ typedef struct st_ss_dms_func {
                                            dms_opengauss_txn_snapshot_t *dms_txn_snapshot);
     int (*dms_request_opengauss_txn_of_master)(dms_context_t *dms_ctx,
                                            dms_opengauss_txn_sw_info_t *dms_txn_swinfo);
+    int (*dms_request_opengauss_page_status)(dms_context_t *dms_ctx, unsigned int page, int page_num,
+                                           unsigned long int *page_map, int *bit_count);
     int (*dms_register_thread_init)(dms_thread_init_t thrd_init);
     int (*dms_release_owner)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned char *released);
     int (*dms_wait_reform)(unsigned int *has_offline);
@@ -102,6 +104,8 @@ int dms_request_opengauss_txn_snapshot(dms_context_t *dms_ctx,
                                        dms_opengauss_txn_snapshot_t *dms_txn_snapshot);
 int dms_request_opengauss_txn_of_master(dms_context_t *dms_ctx,
                                        dms_opengauss_txn_sw_info_t *dms_txn_swinfo);
+int dms_request_opengauss_page_status(dms_context_t *dms_ctx, unsigned int page, int page_num,
+    unsigned long int *page_map, int *bit_count);
 int dms_register_thread_init(dms_thread_init_t thrd_init);
 int dms_release_owner(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned char *released);
 int dms_wait_reform(unsigned int *has_offline);
