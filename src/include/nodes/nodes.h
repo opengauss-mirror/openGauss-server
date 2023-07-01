@@ -833,6 +833,11 @@ typedef enum NodeTag {
     
     /* ndpplugin tag */
     T_NdpScanCondition,
+    T_CondInfo,
+    T_GetDiagStmt,
+    T_DolphinCallStmt,
+    T_CallContext,
+    T_CharsetClause,
 
     /* timescaledb plugin tag */
     T_ModifyTablePath,

@@ -75,12 +75,13 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92901;
+const uint32 GRAND_VERSION_NUM = 92903;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 TIMESCALE_DB_VERSION_NUM = 92901;
 const uint32 SRF_FUSION_VERSION_NUM = 92847;
 const uint32 INDEX_HINT_VERSION_NUM = 92845;
 const uint32 INNER_UNIQUE_VERSION_NUM = 92845;
@@ -183,7 +184,6 @@ const uint32 GTMLITE_VERSION_NUM = 92110;
 const uint32 PREDPUSH_VERSION_NUM = 92096;
 const uint32 SUBLINKPULLUP_VERSION_NUM = 92094;
 const uint32 PARTIALPUSH_VERSION_NUM = 92087;
-const uint32 TIMESCALE_DB_VERSION_NUM = 92901;
 
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;
