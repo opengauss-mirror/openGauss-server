@@ -7430,15 +7430,31 @@ static void parse_field_ms(FormatNode* node, TmFormatConstraint* tm_const, char*
     out->ms *= ms_multi_factor[Min(tmp_len, 3)];
 }
 
+template <int accuracy>
+static void parse_field_usffn(FormatNode* node, TmFormatConstraint* tm_const, char** src_str, TmFromChar* out)
+{
+    int tmp_len = optimized_parse_int_len(&out->us, src_str, accuracy, node, tm_const);
+    if (tmp_len != accuracy) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("The raw data length is not match.")));
+    }
+    out->us *= us_multi_factor[tmp_len];
+}
+
 static void parse_field_usff(FormatNode* node, TmFormatConstraint* tm_const, char** src_str, TmFromChar* out)
 {
     int tmp_len = optimized_parse_int_len(&out->us, src_str, 6, node, tm_const);
     /*
      * tmp_len is the real number of digits exluding head spaces.
      * we have checked US value validation and make that
-     *	  tmp_len is between 1 and 6.
+     * tmp_len is between 1 and 6.
      */
-    Assert(tmp_len >= 1 && tmp_len <= 6);
+    if (tmp_len < 1 || tmp_len > 6) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("The raw data length is not match.")));
+    }
     out->us *= us_multi_factor[tmp_len];
 }
 
@@ -7624,12 +7640,12 @@ static const parse_field parse_field_map[] = {
     parse_field_d,     /* DCH_Day   */
     parse_field_d,     /* DCH_Dy    */
     parse_field_d_int, /* DCH_D     */
-    NULL,              /* DCH_FF1   */
-    NULL,              /* DCH_FF2   */
-    NULL,              /* DCH_FF3   */
-    NULL,              /* DCH_FF4   */
-    NULL,              /* DCH_FF5   */
-    NULL,              /* DCH_FF6   */
+    parse_field_usffn<1>,  /* DCH_FF1   */
+    parse_field_usffn<2>,  /* DCH_FF2   */
+    parse_field_usffn<3>,  /* DCH_FF3   */
+    parse_field_usffn<4>,  /* DCH_FF4   */
+    parse_field_usffn<5>,  /* DCH_FF5   */
+    parse_field_usffn<6>,  /* DCH_FF6   */
 
     /* -----  20~29  ----- */
     parse_field_usff,    /* DCH_FF    */
@@ -7693,12 +7709,12 @@ static const parse_field parse_field_map[] = {
 
     /* -----  70~79  ----- */
     parse_field_d_int, /* DCH_d     */
-    NULL,              /* DCH_ff1   */
-    NULL,              /* DCH_ff2   */
-    NULL,              /* DCH_ff3   */
-    NULL,              /* DCH_ff4   */
-    NULL,              /* DCH_ff5   */
-    NULL,              /* DCH_ff6   */
+    parse_field_usffn<1>,  /* DCH_ff1   */
+    parse_field_usffn<2>,  /* DCH_ff2   */
+    parse_field_usffn<3>,  /* DCH_ff3   */
+    parse_field_usffn<4>,  /* DCH_ff4   */
+    parse_field_usffn<5>,  /* DCH_ff5   */
+    parse_field_usffn<6>,  /* DCH_ff6   */
     parse_field_usff,  /* DCH_ff    */
     NULL,              /* DCH_fx    */
     parse_field_hh24,  /* DCH_hh24  */
