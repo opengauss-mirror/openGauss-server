@@ -384,7 +384,7 @@ lreplace:
             temp_values = m_local.m_reslot->tts_values;
             m_local.m_reslot->tts_values = m_local.m_values;
             bool update_fix_result = ExecComputeStoredUpdateExpr(result_rel_info, m_c_local.m_estate, m_local.m_reslot,
-                                                                 tup, CMD_UPDATE, tupleid, InvalidOid, bucketid);
+                tup, CMD_UPDATE, tupleid, (part == NULL ? InvalidOid : part->pd_id), bucketid);
             if (!update_fix_result) {
                 if (tup != m_local.m_reslot->tts_tuple) {
                     tableam_tops_free_tuple(tup);
