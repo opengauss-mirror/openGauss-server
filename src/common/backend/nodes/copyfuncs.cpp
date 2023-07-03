@@ -2607,6 +2607,9 @@ static Aggref* _copyAggref(const Aggref* from)
     COPY_SCALAR_FIELD(aggkind);
     COPY_SCALAR_FIELD(agglevelsup);
     COPY_LOCATION_FIELD(location);
+    COPY_NODE_FIELD(aggargtypes);
+    COPY_SCALAR_FIELD(aggsplit);
+    COPY_SCALAR_FIELD(aggtranstype);
 
     return newnode;
 }

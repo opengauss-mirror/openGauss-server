@@ -294,6 +294,9 @@ typedef struct Aggref {
     char aggkind;          /* aggregate kind (see pg_aggregate.h) */
     Index agglevelsup;     /* > 0 if agg belongs to outer query */
     int location;          /* token location, or -1 if unknown */
+    List* aggargtypes;     /* type Oids of direct and aggregated args */
+    int aggsplit;          /* expected agg-splitting mode of parent Agg */
+    Oid aggtranstype;      /* type Oid of aggregate's transition value */
 } Aggref;
 
 /*

@@ -2227,6 +2227,18 @@ static Aggref* _readAggref(void)
     READ_LOCATION_FIELD(location);
     READ_TYPEINFO_FIELD(aggtype);
     READ_TYPEINFO_FIELD(aggtrantype);
+    IF_EXIST(aggargtypes)
+    {
+        READ_NODE_FIELD(aggargtypes);
+    }
+    IF_EXIST(aggsplit)
+    {
+        READ_INT_FIELD(aggsplit);
+    }
+    IF_EXIST(aggtranstype)
+    {
+        READ_OID_FIELD(aggtranstype);
+    }
     READ_DONE();
 }
 

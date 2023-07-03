@@ -833,13 +833,25 @@ typedef enum NodeTag {
     T_UserVar,
     T_CharsetCollateOptions,
     T_FunctionSources,
+    
     /* ndpplugin tag */
     T_NdpScanCondition,
     T_CondInfo,
     T_GetDiagStmt,
     T_DolphinCallStmt,
     T_CallContext,
-    T_CharsetClause
+    T_CharsetClause,
+
+    /* timescaledb plugin tag */
+    T_ModifyTablePath,
+    T_AggPath,
+    T_WindowAggPath,
+    T_SortPath,
+    T_MinMaxAggPath,
+    T_GatherPath,
+    T_ForeignKeyCacheInfo,
+    T_Gather
+
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */

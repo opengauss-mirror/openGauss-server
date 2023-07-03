@@ -233,6 +233,8 @@ static bool _equalAggref(const Aggref* a, const Aggref* b)
     COMPARE_SCALAR_FIELD(aggkind);
     COMPARE_SCALAR_FIELD(agglevelsup);
     COMPARE_LOCATION_FIELD(location);
+    COMPARE_NODE_FIELD(aggargtypes);
+    COMPARE_SCALAR_FIELD(aggsplit);
 
     return true;
 }

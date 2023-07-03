@@ -812,6 +812,8 @@ typedef struct RelOptInfo {
     RelOptInfo* base_rel;
 
     unsigned int num_data_nodes = 0; //number of distributing data nodes
+
+    List* partial_pathlist;   /* partial Paths */
 } RelOptInfo;
 
 /*
@@ -885,6 +887,7 @@ typedef struct IndexOptInfo {
     bool amsearchnulls;  /* can AM search for NULL/NOT NULL entries? */
     bool amhasgettuple;  /* does AM have amgettuple interface? */
     bool amhasgetbitmap; /* does AM have amgetbitmap interface? */
+    List* indrestrictinfo;/* parent relation's baserestrictinfo list */
 } IndexOptInfo;
 
 /*

@@ -75,12 +75,13 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92903;
+const uint32 GRAND_VERSION_NUM = 92904;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 TIMESCALE_DB_VERSION_NUM = 92904;
 const uint32 MULTI_CHARSET_VERSION_NUM = 92903;
 const uint32 NBTREE_INSERT_OPTIMIZATION_VERSION_NUM = 92902;
 const uint32 NBTREE_DEDUPLICATION_VERSION_NUM = 92902;
