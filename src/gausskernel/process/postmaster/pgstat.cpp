@@ -1769,7 +1769,15 @@ void pgstat_init_function_usage(FunctionCallInfoData* fcinfo, PgStat_FunctionCal
         hash_ctl.keysize = sizeof(Oid);
         hash_ctl.entrysize = sizeof(PgStat_BackendFunctionEntry);
         hash_ctl.hash = oid_hash;
-        hash_ctl.hcxt = u_sess->stat_cxt.pgStatLocalContext;
+        /*
+         * hence the u_sess->stat_cxt.pgStatFunctions is used for whole session
+         * should use memory context under uess.top_mem_contxt here
+         */
+        hash_ctl.hcxt = AllocSetContextCreate(u_sess->top_mem_cxt,
+                                              "Function stat hash",
+                                              ALLOCSET_SMALL_MINSIZE,
+                                              ALLOCSET_SMALL_INITSIZE,
+                                              ALLOCSET_SMALL_MAXSIZE);
         u_sess->stat_cxt.pgStatFunctions = hash_create(
             "Function stat entries", PGSTAT_FUNCTION_HASH_SIZE, &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
     }

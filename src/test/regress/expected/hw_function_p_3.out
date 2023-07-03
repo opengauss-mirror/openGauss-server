@@ -54,5 +54,43 @@ select pg_table_size('t1');
              0
 (1 row)
 
+--test bug for track function
+CREATE OR REPLACE FUNCTION test_func(a INT) RETURNS INT AS $$
+BEGIN
+    RETURN 10;
+END;
+$$ LANGUAGE plpgsql;
+\c
+set search_path to hw_function_p_3;
+SET track_functions = 'all';
+BEGIN;
+SELECT pg_stat_get_mem_mbytes_reserved(10);
+ pg_stat_get_mem_mbytes_reserved 
+---------------------------------
+ GetFailed
+(1 row)
+
+SELECT test_func(10);
+ test_func 
+-----------
+        10
+(1 row)
+
+COMMIT;
+SELECT test_func(10);
+ test_func 
+-----------
+        10
+(1 row)
+
+SELECT test_func(10);
+ test_func 
+-----------
+        10
+(1 row)
+
+reset track_functions;
+drop function test_func;
+--drop data
 drop schema hw_function_p_3 cascade;
 NOTICE:  drop cascades to table t1
