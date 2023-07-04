@@ -279,6 +279,7 @@ extern Datum int4setle(PG_FUNCTION_ARGS);
 extern Datum int4setge(PG_FUNCTION_ARGS);
 extern Datum findinset(PG_FUNCTION_ARGS);
 extern Datum btint8sortsupport(PG_FUNCTION_ARGS);
+extern void check_duplicate_value_by_collation(List* vals, Oid collation, char type);
 
 /* int.c */
 extern Datum int2in(PG_FUNCTION_ARGS);

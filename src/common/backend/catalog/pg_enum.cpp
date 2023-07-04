@@ -47,7 +47,7 @@ static int sort_order_cmp(const void* p1, const void* p2);
  *
  * vals is a list of Value strings.
  */
-void EnumValuesCreate(Oid enumTypeOid, List* vals)
+void EnumValuesCreate(Oid enumTypeOid, List* vals, Oid collation)
 {
     Relation pg_enum = NULL;
     NameData enumlabel;
@@ -60,6 +60,7 @@ void EnumValuesCreate(Oid enumTypeOid, List* vals)
     HeapTuple tup = NULL;
 
     num_elems = list_length(vals);
+    check_duplicate_value_by_collation(vals, collation, TYPTYPE_ENUM);
 
     /*
      * We do not bother to check the list of values for duplicates --- if you
