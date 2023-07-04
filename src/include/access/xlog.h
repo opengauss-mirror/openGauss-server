@@ -611,6 +611,8 @@ typedef struct XLogCtlData {
     XLogRecPtr remain_segs_start_point;
     bool is_need_log_remain_segs;
     XLogRecPtr remainCommitLsn;
+    
+    bool walrcv_reply_dueto_commit;
 
     slock_t info_lck; /* locks shared variables shown above */
 } XLogCtlData;
@@ -681,6 +683,8 @@ extern void DumpXlogCtl();
 
 extern void CheckRecoveryConsistency(void);
 
+extern void set_walrcv_reply_dueto_commit(bool need_reply);
+bool get_walrcv_reply_dueto_commit(void);
 extern XLogRecPtr GetXLogReplayRecPtrInPending(void);
 extern XLogRecPtr GetStandbyFlushRecPtr(TimeLineID* targetTLI);
 extern XLogRecPtr GetXLogInsertRecPtr(void);

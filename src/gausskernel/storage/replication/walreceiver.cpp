@@ -425,9 +425,11 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         */
         TimestampTz nowtime = GetCurrentTimestamp();
         bool requestReply = WalRecCheckTimeOut(nowtime, *last_recv_timestamp, *ping_sent);
-        if (requestReply) {
+        if (requestReply || get_walrcv_reply_dueto_commit()) {
             *ping_sent = true;
             *last_recv_timestamp = nowtime;
+            requestReply = true;
+            set_walrcv_reply_dueto_commit(false);
         }
 
         XLogWalRcvSendReply(requestReply, requestReply);
