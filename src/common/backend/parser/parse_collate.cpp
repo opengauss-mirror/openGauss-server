@@ -44,6 +44,7 @@
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_collation.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/parse_collate.h"
@@ -1341,4 +1342,27 @@ static void assign_expression_charset(Node* node, Oid target_collation)
     }
 
     return;
+}
+
+void check_duplicate_value_by_collation(List* vals, Oid collation, char type)
+{
+    if (!is_b_format_collation(collation)) {
+        return ;
+    }
+
+    ListCell* lc = NULL;
+    foreach (lc, vals) {
+        ListCell* next_cell = lc->next;
+        char* lab = strVal(lfirst(lc));
+        while(next_cell != NULL) {
+            char* next_lab = strVal(lfirst(next_cell));
+            if (varstr_cmp_by_builtin_collations(lab, strlen(lab), next_lab, strlen(next_lab), collation) == 0) {
+                const char* type_name = NULL;
+                type_name = (type == TYPTYPE_SET) ? "set" : "enum";
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                    errmsg("%s has duplicate key value \"%s\" = \"%s\"", type_name, lab, next_lab)));
+            }
+            next_cell = lnext(next_cell);
+        }
+    }
 }
