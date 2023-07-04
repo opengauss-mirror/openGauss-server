@@ -34,7 +34,6 @@ const uint32 NDP_LOCAL_VERSION_NUM = 4;
 #define BITMAP_SIZE_PER_AU_U64 (BITMAP_SIZE_PER_AU_BYTE / sizeof(uint64))
 
 #define NDPGETBYTE(x, i) (*((char*)(x) + (int)((i) / BITS_PER_BYTE)))
-#define NDPGETBITBYTE(x, i) ((((char)(x)) >> (i)) & 0x01)
 #define NDPCLRBIT(x, i) NDPGETBYTE(x, i) &= ~(0x01 << ((i) % BITS_PER_BYTE))
 #define NDPSETBIT(x, i) NDPGETBYTE(x, i) |= (0x01 << ((i) % BITS_PER_BYTE))
 #define NDPGETBIT(x, i) ((NDPGETBYTE(x, i) >> ((i) % BITS_PER_BYTE)) & 0x01)

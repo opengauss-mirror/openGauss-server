@@ -293,6 +293,7 @@ void InvalidateBuffer(BufferDesc *buf);
 extern void ReservePrivateRefCountEntry(void);
 extern PrivateRefCountEntry* NewPrivateRefCountEntry(Buffer buffer);
 void LockTwoLWLock(LWLock *new_partition_lock, LWLock *old_partition_lock);
+extern bool IsPageHitBufferPool(RelFileNode& node, ForkNumber forkNum, BlockNumber blockNum);
 
 extern void InitBufferPool(void);
 extern void pca_buf_init_ctx();

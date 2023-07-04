@@ -317,6 +317,22 @@ bool SSGetOldestXminFromAllStandby()
     return true;
 }
 
+void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *pageMap, int *bitCount)
+{
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+
+    dms_ctx.rfn.inst_id = (unsigned char)SS_PRIMARY_ID;
+    dms_ctx.rfn.rnode = *(dms_opengauss_relfilenode_t *)(&node);
+
+    if (dms_request_opengauss_page_status(&dms_ctx, page, pagesNum, pageMap, bitCount) != DMS_SUCCESS) {
+        *bitCount = 0;
+        ereport(DEBUG1, (errmsg("SS get page map failed, buffer_id = %u.", page)));
+        return;
+    }
+    ereport(DEBUG1, (errmsg("SS get page map success, buffer_id = %u.", page)));
+}
+
 int SSCheckDbBackends(char *data, uint32 len, char *output_msg, uint32 *output_msg_len)
 {
     if (unlikely(len != sizeof(SSBroadcastDbBackends))) {

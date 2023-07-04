@@ -7332,3 +7332,21 @@ void LockTwoLWLock(LWLock *new_partition_lock, LWLock *old_partition_lock)
         (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
     }
 }
+
+bool IsPageHitBufferPool(RelFileNode& node, ForkNumber forkNum, BlockNumber blockNum)
+{
+    int bufId = 0;
+    BufferTag newTag;
+
+    INIT_BUFFERTAG(newTag, node, forkNum, blockNum);
+    uint32 new_hash = BufTableHashCode(&newTag);
+    LWLock *new_partition_lock = BufMappingPartitionLock(new_hash);
+    /* see if the block is in the buffer pool already */
+    (void)LWLockAcquire(new_partition_lock, LW_SHARED);
+    bufId = BufTableLookup(&newTag, new_hash);
+    LWLockRelease(new_partition_lock);
+    if (bufId != -1) {
+        return true;
+    }
+    return false;
+}
