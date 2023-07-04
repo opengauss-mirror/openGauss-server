@@ -8803,7 +8803,8 @@ void StartupXLOG(void)
      */
     if (ENABLE_DMS && ENABLE_DSS) {
         int src_id = INVALID_INSTANCEID;
-        if (SS_CLUSTER_ONDEMAND_RECOVERY && SS_PRIMARY_MODE) {
+        SSReadControlFile(REFORM_CTRL_PAGE);
+        if ((SS_CLUSTER_ONDEMAND_BUILD || SS_CLUSTER_ONDEMAND_RECOVERY) && SS_PRIMARY_MODE) {
             if (SS_STANDBY_PROMOTING) {
                 ereport(FATAL, (errmsg("Do not allow switchover if on-demand recovery is not finish")));
             }
@@ -8820,9 +8821,8 @@ void StartupXLOG(void)
             } else {
                 src_id = g_instance.attr.attr_storage.dms_attr.instance_id;
             }
-            g_instance.dms_cxt.SSReformerControl.recoveryInstId = src_id;
-            SSSaveReformerCtrl();
         }
+        g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id = src_id;
         SSReadControlFile(src_id);
     } else {
         ReadControlFile();
@@ -9479,10 +9479,14 @@ void StartupXLOG(void)
     }
 
     if (SS_PRIMARY_MODE) {
-        if (ENABLE_ONDEMAND_RECOVERY && t_thrd.xlog_cxt.InRecovery == true) {
+        if (ENABLE_ONDEMAND_RECOVERY && (SS_STANDBY_FAILOVER || SS_PRIMARY_NORMAL_REFORM) &&
+            t_thrd.xlog_cxt.InRecovery == true) {
             g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = true;
-            /* for other nodes in cluster */
+            /* for other nodes in cluster and ondeamnd recovery failed */
             g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_BUILD;
+            g_instance.dms_cxt.SSReformerControl.recoveryInstId = g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id;
+            SetOndemandExtremeRtoMode();
+            ereport(LOG, (errmsg("[On-demand] replayed in extreme rto ondemand recovery mode")));
         } else {
             g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
         }
@@ -11890,7 +11894,7 @@ void CreateCheckPoint(int flags)
     pg_time_t now = (pg_time_t)time(NULL);
     int elapsed_secs = now - t_thrd.checkpoint_cxt.last_truncate_log_time;
 
-    if (!RecoveryInProgress() &&
+    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY &&
         (GTM_FREE_MODE || TransactionIdIsNormal(t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin))) {
         /*
          * Reduce the frequency of trucate CSN log to avoid the probability of lock contention
@@ -19484,6 +19488,6 @@ int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int re
     XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path)
 {
     int read_len = SSReadXLog(xlogreader, targetPagePtr, reqLen, targetRecPtr,
-                              readBuf, readTLI, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlogDir);
+                              readBuf, readTLI, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir);
     return read_len;
 }
