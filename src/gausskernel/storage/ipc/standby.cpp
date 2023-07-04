@@ -288,7 +288,7 @@ void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid, const R
         return;
 
     CommitSeqNo limitXminCSN = InvalidCommitSeqNo;
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         limitXminCSN = CSNLogGetDRCommitSeqNo(latestRemovedXid);
         while (true) {
             CommitSeqNo lastReplayedConflictCSN = (CommitSeqNo)pg_atomic_read_u64(
@@ -1246,7 +1246,7 @@ bool StandbySafeRestartpoint(void)
 {
 #ifdef ENABLE_MULTIPLE_NODES
     ListCell* l = NULL;
-    if (t_thrd.xlog_cxt.committing_csn_list && IS_DISASTER_RECOVER_MODE) {
+    if (t_thrd.xlog_cxt.committing_csn_list && IS_MULTI_DISASTER_RECOVER_MODE) {
         foreach (l, t_thrd.xlog_cxt.committing_csn_list) {
             TransactionId* action = (TransactionId*)lfirst(l);
             if (log_min_messages <= DEBUG4) {

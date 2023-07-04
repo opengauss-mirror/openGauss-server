@@ -1335,7 +1335,7 @@ static void ProcessReplyFlags(void)
 {
 #ifdef ENABLE_MULTIPLE_NODES
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         SpinLockAcquire(&walrcv->mutex);
         if (walrcv->isPauseByTargetBarrier) {
             t_thrd.walreceiver_cxt.reply_message->replyFlags |= IS_PAUSE_BY_TARGET_BARRIER;

@@ -416,7 +416,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     InitSegSpcCache();
 
 #ifdef ENABLE_MULTIPLE_NODES
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         InitDisasterCache();
     }
 #endif

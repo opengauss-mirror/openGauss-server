@@ -163,7 +163,7 @@ void update_stop_barrier()
             securec_check(rc, "\0", "\0");
             ereport(LOG, (errmsg("Get switchover barrierID %s", (char *)walrcv->recoverySwitchoverBarrierId)));
         }
-    } else if (IS_DISASTER_RECOVER_MODE) {
+    } else if (IS_MULTI_DISASTER_RECOVER_MODE) {
         if (strlen(g_instance.csn_barrier_cxt.stopBarrierId) != 0) {
             SpinLockAcquire(&walrcv->mutex);
             rc = strncpy_s((char *)walrcv->recoveryStopBarrierId, MAX_BARRIER_ID_LENGTH,
