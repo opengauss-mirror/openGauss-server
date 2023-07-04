@@ -44,14 +44,16 @@
 #ifdef ENABLE_MULTIPLE_NODES
 #define AM_HADR_CN_WAL_RECEIVER (t_thrd.postmaster_cxt.HaShmData->is_cross_region && \
             t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && IS_PGXC_COORDINATOR)
+
+#define IS_MULTI_DISASTER_RECOVER_MODE \
+    (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
+    g_instance.attr.attr_common.stream_cluster_run_mode == RUN_MODE_STANDBY)
+#else
+#define IS_MULTI_DISASTER_RECOVER_MODE false
 #endif
 
 #define AM_HADR_WAL_RECEIVER (t_thrd.postmaster_cxt.HaShmData->is_cross_region && \
             t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby)
-
-#define IS_DISASTER_RECOVER_MODE \
-    (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
-    g_instance.attr.attr_common.stream_cluster_run_mode == RUN_MODE_STANDBY)
 
 #define IS_CN_DISASTER_RECOVER_MODE \
     (IS_PGXC_COORDINATOR && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \

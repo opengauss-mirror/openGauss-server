@@ -1960,7 +1960,7 @@ Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot)
 
     t_thrd.xact_cxt.useLocalSnapshot = false;
 
-    if ((IS_DISASTER_RECOVER_MODE && !is_exec_dn) ||
+    if ((IS_MULTI_DISASTER_RECOVER_MODE && !is_exec_dn) ||
         (GTM_LITE_MODE &&
          ((is_exec_cn && !force_local_snapshot) ||                                        /* GTM_LITE exec cn */
           (!is_exec_cn && u_sess->utils_cxt.snapshot_source == SNAPSHOT_COORDINATOR)))) { /* GTM_LITE other node */
@@ -3073,7 +3073,7 @@ VirtualTransactionId *GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbO
             }
         }
 #else
-        if (!IS_DISASTER_RECOVER_MODE) {
+        if (!IS_MULTI_DISASTER_RECOVER_MODE) {
             break;
         }
         CommitSeqNo xact_csn = pgxact->csn_dr;
@@ -4033,7 +4033,7 @@ static bool GetPGXCSnapshotData(Snapshot snapshot)
      * If this node is in recovery phase,
      * snapshot has to be taken directly from WAL information.
      */
-    if (!IS_DISASTER_RECOVER_MODE && RecoveryInProgress())
+    if (!IS_MULTI_DISASTER_RECOVER_MODE && RecoveryInProgress())
         return false;
 
     /*
@@ -4104,7 +4104,7 @@ static bool GetSnapshotDataDataNode(Snapshot snapshot)
         GTM_Snapshot gtm_snapshot;
         ereport(DEBUG1,
                 (errmsg("Getting snapshot for autovacuum. Current XID = " XID_FMT, GetCurrentTransactionIdIfAny())));
-        gtm_snapshot = IS_DISASTER_RECOVER_MODE ? GetSnapshotGTMDR() : GetSnapshotGTMLite();
+        gtm_snapshot = IS_MULTI_DISASTER_RECOVER_MODE ? GetSnapshotGTMDR() : GetSnapshotGTMLite();
 
         if (!gtm_snapshot) {
             if (g_instance.status > NoShutdown) {
@@ -4137,7 +4137,7 @@ static bool GetSnapshotDataDataNode(Snapshot snapshot)
         TransactionId save_recentglobalxmin = u_sess->utils_cxt.RecentGlobalXmin;
         snapshot->gtm_snapshot_type =
             u_sess->utils_cxt.is_autovacuum_snapshot ? GTM_SNAPSHOT_TYPE_AUTOVACUUM : GTM_SNAPSHOT_TYPE_GLOBAL;
-        if (IS_DISASTER_RECOVER_MODE) {
+        if (IS_MULTI_DISASTER_RECOVER_MODE) {
             snapshot->snapshotcsn = u_sess->utils_cxt.g_snapshotcsn;
             t_thrd.pgxact->csn_dr = snapshot->snapshotcsn;
             pg_memory_barrier();
@@ -4191,7 +4191,7 @@ static bool GetSnapshotDataCoordinator(Snapshot snapshot)
         ereport(DEBUG1, (errmsg("Getting snapshot. Current XID = " XID_FMT, GetCurrentTransactionIdIfAny())));
     }
 
-    gtm_snapshot = IS_DISASTER_RECOVER_MODE ? GetSnapshotGTMDR() : GetSnapshotGTMLite();
+    gtm_snapshot = IS_MULTI_DISASTER_RECOVER_MODE ? GetSnapshotGTMDR() : GetSnapshotGTMLite();
 
     if (!gtm_snapshot) {
         if (g_instance.status > NoShutdown) {
@@ -4205,7 +4205,7 @@ static bool GetSnapshotDataCoordinator(Snapshot snapshot)
     } else {
         snapshot->gtm_snapshot_type = GTM_SNAPSHOT_TYPE_GLOBAL;
         *u_sess->utils_cxt.g_GTM_Snapshot = *gtm_snapshot;
-        if (IS_DISASTER_RECOVER_MODE) {
+        if (IS_MULTI_DISASTER_RECOVER_MODE) {
             snapshot->snapshotcsn = gtm_snapshot->csn;
             t_thrd.pgxact->csn_dr = snapshot->snapshotcsn;
             LWLockAcquire(XLogMaxCSNLock, LW_SHARED);

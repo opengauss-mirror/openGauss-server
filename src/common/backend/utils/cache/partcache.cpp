@@ -246,7 +246,7 @@ Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool in
     /* Assign value in partitiongetrelation. */
     partition->partMap = NULL;
 
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         TransactionId xmin = HeapTupleGetRawXmin(pg_partition_tuple);
         partition->xmin_csn = CSNLogGetDRCommitSeqNo(xmin);
     } else {

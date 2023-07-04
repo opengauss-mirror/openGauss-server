@@ -657,6 +657,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  standby_shared_buffers_fraction                  | real    |      | 0.1       | 1
  statement_timeout                                | integer | ms   | 0         | 2147483647
  stats_temp_directory                             | string  |      |           | 
+ stream_cluster_run_mode                          | enum    |      |           | 
  string_hash_compatible                           | bool    |      |           | 
  support_batch_bind                               | bool    |      |           | 
  support_extended_features                        | bool    |      |           | 

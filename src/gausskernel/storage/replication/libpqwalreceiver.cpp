@@ -603,7 +603,7 @@ static void NotifyWalSendForMainStandby(uint32 localTerm, uint32 remoteTerm)
             continue;
 
         SpinLockAcquire(&walsnd->mutex);
-        if (IS_DISASTER_RECOVER_MODE && localTerm != remoteTerm) {
+        if (IS_MULTI_DISASTER_RECOVER_MODE && localTerm != remoteTerm) {
             walsnd->isTermChanged = true;
         }
         walsnd->sendKeepalive = true;

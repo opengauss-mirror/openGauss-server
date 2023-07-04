@@ -4264,7 +4264,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
         volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
         if (t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby) {
             /* In distributed streaming dr cluster, shutdown walsender of main standby when term is changed */
-            if (IS_DISASTER_RECOVER_MODE && walsnd->isTermChanged) {
+            if (IS_MULTI_DISASTER_RECOVER_MODE && walsnd->isTermChanged) {
                 ereport(LOG, (errmsg("Shutdown walsender of main standby due to the term change.")));
                 SpinLockAcquire(&walsnd->mutex);
                 walsnd->isTermChanged = false;

@@ -4422,7 +4422,7 @@ static void InitConfigureNamesEnum()
             NULL},
         {{"stream_cluster_run_mode",
             PGC_POSTMASTER,
-            NODE_DISTRIBUTE,
+            NODE_ALL,
             PRESET_OPTIONS,
             gettext_noop("Sets the type of streaming cluster."),
             NULL},
