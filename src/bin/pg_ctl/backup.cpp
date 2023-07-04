@@ -143,7 +143,7 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
 static bool UpdatePaxosIndexFile(unsigned long long paxosIndex);
 static bool DeleteAlreadyDropedFile(const char* path, bool is_table_space);
 static int DeleteUnusedFile(const char* path, unsigned int SegNo, unsigned int fileNode);
-
+static void BeginGetXlogbyStream(char* xlogstart, uint32 timeline, char* sysidentifier, char* xlog_location, uint term, PGresult* res);
 /*
  * tblspaceDirectory is used for saving the table space directory created by
  * full-build. tblspaceNum is the count of table space. The table space directory
@@ -1529,31 +1529,14 @@ static bool BaseBackup(const char* dirname, uint32 term)
         return false;
     }
 
-    show_full_build_process("begin get xlog by xlogstream");
-
     /*
-     * If we're streaming WAL, start the streaming session before we start
-     * receiving the actual data chunks.
-     */
-    if (streamwal) {
-        if (verbose) {
-            pg_log(PG_WARNING, _("starting background WAL receiver\n"));
-        }
-        show_full_build_process("starting walreceiver");
-        bool startSuccess = StartLogStreamer(xlogstart, timeline, sysidentifier, (const char*)xlog_location, term);
-        if (!startSuccess) {
-            pg_log(PG_WARNING, _("start log streamer failed \n"));
-            pg_free(sysidentifier);
-            sysidentifier = NULL;
-            DisconnectConnection();
-            PQclear(res);
-            return false;
-        }
+    * in order to avoid sharing the same dssserver session,
+    * we will not start logstreaming here
+    */
+    if (!instance_config.dss.enable_dss) {
+        BeginGetXlogbyStream(xlogstart, timeline, sysidentifier, xlog_location, term, res);
     }
 
-    /* free sysidentifier after use */
-    pg_free(sysidentifier);
-    sysidentifier = NULL;
     show_full_build_process("begin receive tar files");
 
     /*
@@ -1673,6 +1656,10 @@ static bool BaseBackup(const char* dirname, uint32 term)
         free(motChkptDir);
     }
 #endif
+
+    if (instance_config.dss.enable_dss) {
+        BeginGetXlogbyStream(xlogstart, timeline, sysidentifier, xlog_location, term, res);
+    }
 
     if (bgchild > 0) {
 #ifndef WIN32
@@ -2778,4 +2765,33 @@ bool RenameTblspcDir(char *dataDir)
     pg_log(PG_WARNING, _("rename table space dir success.\n"));
 
     return true;
+}
+
+static void BeginGetXlogbyStream(char* xlogstart, uint32 timeline, char* sysidentifier, char* xlog_location, uint term, PGresult* res)
+{
+    show_full_build_process("begin get xlog by xlogstream");
+    /*
+    * If we're streaming WAL, start the streaming session before we start
+    * receiving the actual data chunks.
+    */
+    if (streamwal) {
+        if (verbose) {
+            pg_log(PG_WARNING, _("starting background WAL receiver\n"));
+        }
+        show_full_build_process("starting walreceiver");
+        bool startSuccess = StartLogStreamer(xlogstart, timeline, sysidentifier, (const char*)xlog_location, term);
+        if (!startSuccess) {
+            pg_log(PG_WARNING, _("start log streamer failed \n"));
+            pg_free(sysidentifier);
+            sysidentifier = NULL;
+            DisconnectConnection();
+            PQclear(res);
+            pg_log(PG_WARNING, _("build failed \n"));
+            exit(1);
+        }
+    }
+
+    /* free sysidentifier after use */
+    pg_free(sysidentifier);
+    sysidentifier = NULL;
 }
