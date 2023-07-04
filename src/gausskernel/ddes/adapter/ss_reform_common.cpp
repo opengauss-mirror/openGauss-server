@@ -187,8 +187,8 @@ void SSGetRecoveryXlogPath()
     errno_t rc = EOK;
     char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
 
-    rc = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.recovery_xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d",
-        dssdir, g_instance.dms_cxt.SSReformerControl.recoveryInstId);
+    rc = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d",
+        dssdir, g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id);
     securec_check_ss(rc, "", "");
 }
 
@@ -282,7 +282,7 @@ loop:
     }
 
     // new params set to initial value
-    new_ctrl->version = REFORM_CTRL_VERSION;;
+    new_ctrl->version = REFORM_CTRL_VERSION;
     new_ctrl->recoveryInstId = INVALID_INSTANCEID;
     new_ctrl->clusterStatus = CLUSTER_NORMAL;
 
