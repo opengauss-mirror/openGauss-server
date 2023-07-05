@@ -1980,11 +1980,11 @@ static int GetListConsumerNodeIdx(ExecBoundary* enBoundary, Const** values, int 
     while (maxId >= minId) {
         midId = ((uint)minId + (uint)maxId) >> 1;
 
-        cmp = partitonKeyCompare(values, enBoundary->eles[midId]->boundary, distLen);
+        cmp = partitonKeyCompare(enBoundary->eles[midId]->boundary, values, distLen);
         if (cmp == 0) {
             hit = midId;
             break;
-        } else if (cmp < 0) {
+        } else if (cmp > 0) {
             maxId = midId - 1;
         } else {
             minId = midId + 1;
@@ -2009,18 +2009,18 @@ static int GetRangeConsumerNodeIdx(ExecBoundary* enBoundary, Const** values, int
     maxId = enBoundary->count - 1;
     minId = 0;
     hit = -1;
-    cmp = partitonKeyCompare(values, enBoundary->eles[maxId]->boundary, distLen);
-    if (cmp >= 0) {
+    cmp = partitonKeyCompare(enBoundary->eles[maxId]->boundary, values, distLen);
+    if (cmp <= 0) {
         hit = -1;
     } else {
         while (maxId > minId) {
             midId = ((uint)minId + (uint)maxId) >> 1;
 
-            cmp = partitonKeyCompare(values, enBoundary->eles[midId]->boundary, distLen);
+            cmp = partitonKeyCompare(enBoundary->eles[midId]->boundary, values, distLen);
             if (cmp == 0) {
                 hit = midId + 1;
                 break;
-            } else if (cmp > 0) {
+            } else if (cmp < 0) {
                 minId = midId + 1;
             } else {
                 maxId = midId;

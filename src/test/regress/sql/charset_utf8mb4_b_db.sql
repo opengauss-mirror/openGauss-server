@@ -1141,9 +1141,61 @@ CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_c
         partition p2 values less than('高斯db'),
         partition p3 values less than(MAXVALUE)
 ); -- ERROR
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY RANGE(part) (
+        partition p1 values less than('楂樻柉DB'),
+        partition p2 values less than(_gbk'高斯db'),
+        partition p3 values less than(MAXVALUE)
+); -- ERROR
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY LIST(part) (
+        partition p1 values('高斯DB'),
+        partition p2 values('高斯db')
+); -- ERROR
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY RANGE(part) (
+        PARTITION pass START('高斯DB') END('高斯db'),
+        PARTITION excellent START('高斯db') END(MAXVALUE)
+); -- unsupported
+
 
 -- -- -- utf8mb4
-CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_bin, a int)
+CREATE TABLE t_multi_charset_partkey (part text collate utf8mb4_bin, a int)
+    PARTITION BY HASH(part) (
+        partition p1,
+        partition p2,
+        partition p3,
+        partition p4
+);
+-- -- -- insert
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯DB', 1);
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯db', 2);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯DB1', 3);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯db1', 4);
+-- -- -- select
+SELECT * FROM t_multi_charset_partkey PARTITION(p1) order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION(p2) order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION(p3) order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_gbk'高斯db') order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_utf8mb4'高斯DB1') order by 1,2;
+-- -- -- partition pruning
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db1' order by 1,2;
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db1' order by 1,2;
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2; -- ALL PARTS
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2;
+-- -- -- partiton ddl
+ALTER TABLE t_multi_charset_partkey SPLIT PARTITION p1 AT ( '高斯DB' ) INTO ( PARTITION p1, PARTITION p4); -- not support
+ALTER TABLE t_multi_charset_partkey RENAME PARTITION FOR(_gbk'高斯db') TO newp1;
+SELECT * FROM t_multi_charset_partkey PARTITION(newp1) order by 1,2;
+DROP TABLE t_multi_charset_partkey;
+
+-- -- -- utf8mb4
+CREATE TABLE t_multi_charset_partkey (part text collate utf8mb4_bin, a int)
     PARTITION BY RANGE(part) (
         partition p1 values less than('楂樻柉DB'),
         partition p2 values less than('楂樻柉db'),
@@ -1162,6 +1214,8 @@ SELECT * FROM t_multi_charset_partkey PARTITION(p2) order by 1,2;
 SELECT * FROM t_multi_charset_partkey PARTITION(p3) order by 1,2;
 SELECT * FROM t_multi_charset_partkey PARTITION(p4) order by 1,2;
 SELECT * FROM t_multi_charset_partkey PARTITION(p5) order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_gbk'高斯db') order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_utf8mb4'高斯DB') order by 1,2;
 -- -- -- partition pruning
 EXPLAIN (costs off)
 SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
@@ -1172,6 +1226,44 @@ SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db' order by 1,2
 EXPLAIN (costs off)
 SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2; -- ALL PARTS
 SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2;
+-- -- -- partiton ddl
+ALTER TABLE t_multi_charset_partkey SPLIT PARTITION FOR(_gbk'高斯DB') AT (_gbk'高斯DB1 ') INTO (PARTITION p2_1, PARTITION p2_2);
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯DB1', 1);
+SELECT * FROM t_multi_charset_partkey PARTITION(p2_1) order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION(p2_2) order by 1,2;
+ALTER TABLE t_multi_charset_partkey RENAME PARTITION FOR(_gbk'高斯db') TO p3_1;
+SELECT * FROM t_multi_charset_partkey PARTITION(p3_1) order by 1,2;
+DROP TABLE t_multi_charset_partkey;
+
+-- -- -- utf8mb4
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_unicode_ci, part2 varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY LIST COLUMNS(part, part2) (
+        partition p1 values in(('楂樻柉DB', '楂樻柉db')),
+        partition p2 values in(('高斯db', '高斯DB'))
+);
+-- -- -- insert
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯DB', _gbk'高斯DB', 1);
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯db', _gbk'高斯db', 2);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯DB', _utf8mb4'高斯DB', 3);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯db', _utf8mb4'高斯db', 4);
+-- -- -- select
+SELECT * FROM t_multi_charset_partkey PARTITION(p1) order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION(p2) order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_gbk'高斯DB', _gbk'高斯db') order by 1,2;
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_utf8mb4'高斯db', _utf8mb4'高斯db') order by 1,2;
+-- -- -- partition pruning
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db' order by 1,2;
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db' order by 1,2;
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2; -- ALL PARTS
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2;
+-- -- -- partiton ddl
+ALTER TABLE t_multi_charset_partkey RENAME PARTITION FOR(_gbk'高斯DB', _gbk'高斯db') TO p1_1;
+SELECT * FROM t_multi_charset_partkey PARTITION(p1_1) order by 1,2;
 DROP TABLE t_multi_charset_partkey;
 
 -- -- -- gbk

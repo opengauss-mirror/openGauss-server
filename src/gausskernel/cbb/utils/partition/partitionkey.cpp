@@ -276,6 +276,7 @@ List* untransformPartitionBoundary(Datum options)
     return result;
 }
 
+/* Use value1's collation first, so the table partition key boundary must be the first parameter! */
 int partitonKeyCompare(Const** value1, Const** value2, int len, bool nullEqual)
 {
     uint8 i = 0;
@@ -321,7 +322,7 @@ int partitonKeyCompare(Const** value1, Const** value2, int len, bool nullEqual)
             break;
         }
 
-        constCompare(v1, v2, compare);
+        constCompare(v1, v2, v1->constcollid, compare);
         if (compare != 0) {
             break;
         }
@@ -447,12 +448,12 @@ bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValue
     return greaterThanBottom && lessThanTop;
 }
 
-int comparePartitionKey(RangePartitionMap* partMap, Const** values1, Const** values2, int partKeyNum)
+int comparePartitionKey(RangePartitionMap* partMap, Const** partkey_value, Const** partkey_bound, int partKeyNum)
 {
     int compare = 0;
 
     incre_partmap_refcount((PartitionMap*)partMap);
-    partitonKeyCompareForRouting(values1, values2, (uint32)partKeyNum, compare);
+    partitonKeyCompareForRouting(partkey_value, partkey_bound, (uint32)partKeyNum, compare);
     decre_partmap_refcount((PartitionMap*)partMap);
 
     return compare;
@@ -784,7 +785,7 @@ void GetPartitionOidListForRTE(RangeTblEntry *rte, RangeVar *relation)
 }
 
 /* function to check whether two partKey are identical */
-int ConstCompareWithNull(Const *c1, Const *c2)
+int ConstCompareWithNull(Const *c1, Const *c2, Oid collation)
 {
     if (constIsNull(c1) && constIsNull(c2)) {
         return 0;
@@ -794,7 +795,7 @@ int ConstCompareWithNull(Const *c1, Const *c2)
     }
 
     int compare = -1;
-    constCompare(c1, c2, compare);
+    constCompare(c1, c2, collation, compare);
 
     return compare;
 }
@@ -813,7 +814,7 @@ int ListPartKeyCompare(PartitionKey* k1, PartitionKey* k2)
     }
     int res;
     for (int i = 0; i < k1->count; i++) {
-        res = ConstCompareWithNull(k1->values[i], k2->values[i]);
+        res = ConstCompareWithNull(k1->values[i], k2->values[i], k2->values[i]->constcollid);
         if (res != 0) {
             return res;
         }

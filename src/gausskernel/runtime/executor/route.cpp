@@ -333,6 +333,7 @@ int SendRouter::CountNodeId(struct RouteMsg* attr)
 
     Oid* col_type = (Oid*)palloc0(dist_keynum * sizeof(Oid));
     int4* col_typemode = (int4*)palloc0(dist_keynum * sizeof(int4));
+    Oid* col_conllation = (Oid*)palloc0(dist_keynum * sizeof(Oid));
     int i = 0;
     int t = 0;
     int dist_idx = list_nth_int(rel_loc_info->partAttrNum, t) - 1;
@@ -341,6 +342,7 @@ int SendRouter::CountNodeId(struct RouteMsg* attr)
             col_type[t] = tupdesc->attrs[i].atttypid;
             Type typ = typeidType(col_type[t]);
             col_typemode[t] = ((Form_pg_type)GETSTRUCT(typ))->typtypmod;
+            col_conllation[t] = tupdesc->attrs[i].attcollation;
             ReleaseSysCache(typ);
             t++;
             if (t >= dist_keynum)
@@ -358,7 +360,8 @@ int SendRouter::CountNodeId(struct RouteMsg* attr)
                                           col_type[i],
                                           GetDatumFromString(col_type[i], col_typemode[i], (char *)lfirst(cell)),
                                           false,
-                                          rel_loc_info->locatorType);
+                                          rel_loc_info->locatorType,
+                                          col_conllation[i]);
         i++;
     }
     if (unlikely(rel_loc_info->buckets_ptr == NULL)) {
@@ -370,6 +373,7 @@ int SendRouter::CountNodeId(struct RouteMsg* attr)
 
     pfree_ext(col_type);
     pfree_ext(col_typemode);
+    pfree_ext(col_conllation);
     heap_close(rel, AccessShareLock);
 
     if ((node_id >= list_length(rel_loc_info->nodeList)) || node_id < 0) {
