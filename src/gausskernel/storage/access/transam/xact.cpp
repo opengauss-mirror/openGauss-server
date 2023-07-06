@@ -2177,8 +2177,24 @@ static TransactionId RecordTransactionAbort(bool isSubXact)
      * subxacts, because we already have the child XID array at hand.  For
      * main xacts, the equivalent happens just after this function returns.
      */
-    if (isSubXact)
-        XidCacheRemoveRunningXids(xid, nchildren, children, latestXid);
+    if (isSubXact) {
+        if (LWLockConditionalAcquire(ProcArrayLock, LW_EXCLUSIVE)) {
+            t_thrd.proc->procArrayGroupMemberXid = xid;
+            t_thrd.proc->procArrayGroupSubXactNXids = nchildren;
+            t_thrd.proc->procArrayGroupSubXactXids = children;
+            t_thrd.proc->procArrayGroupSubXactLatestXid = latestXid;
+            XidCacheRemoveRunningXids(t_thrd.proc, t_thrd.pgxact);
+            
+            /* clear the group member cache after XidCacheRemoveRunningXids*/
+            t_thrd.proc->procArrayGroupMemberXid = InvalidTransactionId;
+            t_thrd.proc->procArrayGroupSubXactNXids = 0;
+            t_thrd.proc->procArrayGroupSubXactXids = NULL;
+            t_thrd.proc->procArrayGroupSubXactLatestXid = InvalidTransactionId;
+            LWLockRelease(ProcArrayLock);
+        } else {
+            ProcArrayGroupClearXid(true, t_thrd.proc, InvalidTransactionId, xid, nchildren, children, latestXid);
+        }
+    }
 
     /* Reset XactLastRecEnd until the next transaction writes something */
     if (!isSubXact)

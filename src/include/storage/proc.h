@@ -214,6 +214,18 @@ struct PGPROC {
      */
     TransactionId procArrayGroupMemberXid;
 
+    int procArrayGroupSubXactNXids;
+
+    TransactionId* procArrayGroupSubXactXids;
+
+    /*
+     * lastestXid amoung subtransaction's xid and it's committed children's,
+     * which can be detemined whether the group member is a subtransaction or
+     * transaction. procArrayGroupSubXactLatestXid != 0 only when the group 
+     * memeber is subtransaction.
+     */
+    TransactionId procArrayGroupSubXactLatestXid;
+
     /* Support for group snapshot getting. */
     bool snapshotGroupMember;
     /* next ProcArray group member waiting for snapshot getting */
