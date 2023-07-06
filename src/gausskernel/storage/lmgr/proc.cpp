@@ -896,6 +896,9 @@ void InitProcess(void)
     /* Initialize fields for group XID clearing. */
     t_thrd.proc->procArrayGroupMember = false;
     t_thrd.proc->procArrayGroupMemberXid = InvalidTransactionId;
+    t_thrd.proc->procArrayGroupSubXactNXids = InvalidTransactionId;
+    t_thrd.proc->procArrayGroupSubXactXids = NULL;
+    t_thrd.proc->procArrayGroupSubXactLatestXid = InvalidTransactionId;
     pg_atomic_init_u32(&t_thrd.proc->procArrayGroupNext, INVALID_PGPROCNO);
 
     /* Initialize fields for group snapshot getting. */
