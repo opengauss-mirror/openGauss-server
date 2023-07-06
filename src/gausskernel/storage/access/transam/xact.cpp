@@ -7426,7 +7426,11 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
     if (RemoveCommittedCsnInfo(xid)) {
         XactLockTableDelete(xid);
     }
-    set_walrcv_reply_dueto_commit(true);
+    if(t_thrd.xlog_cxt.server_mode == STANDBY_MODE ||
+        t_thrd.xlog_cxt.server_mode == CASCADE_STANDBY_MODE ||
+        t_thrd.xlog_cxt.server_mode == STANDBY_CLUSTER_MODE ||
+        t_thrd.xlog_cxt.server_mode == MAIN_STANDBY_MODE)
+        set_walrcv_reply_dueto_commit(true);
 }
 
 /*
