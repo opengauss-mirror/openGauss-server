@@ -15834,8 +15834,7 @@ void set_walrcv_reply_dueto_commit(bool need_reply)
 {
     XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl; 
 
-    if(xlogctl->walrcv_reply_dueto_commit != need_reply)
-        xlogctl->walrcv_reply_dueto_commit = need_reply;
+    xlogctl->walrcv_reply_dueto_commit = need_reply;
 }
 
 bool get_walrcv_reply_dueto_commit(void)
