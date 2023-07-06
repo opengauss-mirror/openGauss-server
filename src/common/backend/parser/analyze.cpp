@@ -4430,10 +4430,20 @@ static Query* transformDeclareCursorStmt(ParseState* pstate, DeclareCursorStmt* 
     }
 
     /*除WITH HOLD游标外，根据DeclareCursorName对使用的row type形成依赖*/
-    if (!(stmt->options & CURSOR_OPT_HOLD)) {
-        u_sess->analyze_cxt.DeclareCursorName = stmt->portalname;
+    PG_TRY();
+    {
+        if (!(stmt->options & CURSOR_OPT_HOLD)) {
+            u_sess->analyze_cxt.DeclareCursorName = stmt->portalname;
+        }
+        result = transformStmt(pstate, stmt->query);
     }
-    result = transformStmt(pstate, stmt->query);
+    PG_CATCH();
+    {
+        u_sess->analyze_cxt.DeclareCursorName = NULL;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
     u_sess->analyze_cxt.DeclareCursorName = NULL;
 
     /* Grammar should not have allowed anything but SELECT */
