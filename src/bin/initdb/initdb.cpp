@@ -4787,7 +4787,7 @@ int main(int argc, char* argv[])
     if (ss_issharedstorage) {
         int ret = ss_check_shareddir(vgdata, ss_nodeid, &ss_need_mkclusterdir);
         if (ret != 0) {
-            write_stderr("ERROR: %s: shared storage initdb failed because of the following error:\n");
+            write_stderr("ERROR: %s: shared storage initdb failed because of the following error:\n", progname);
             if (ret & ERROR_INSTANCEDIR_EXISTS) {
                 write_stderr(_("ERROR: [*]shared storage files of instance %d in the directory \"%s\" already exists\n"), ss_nodeid, vgdata);
                 write_stderr(_("If you want to create a new shared storage instance, either remove shared storage "
