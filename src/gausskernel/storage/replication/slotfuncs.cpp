@@ -239,6 +239,11 @@ Datum pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE) {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("return type must be a row type")));
     }
+
+    if (SS_IN_REFORM || SS_NORMAL_STANDBY) {
+        ereport(ERROR, (errmsg("Operation can't be excuted during reform or on DMS standby node!")));
+    }
+
     /* acquire replication slot, this will check for conflicting names */
     ReplicationSlotCreate(NameStr(*name), RS_PERSISTENT, isDummyStandby, InvalidOid, InvalidXLogRecPtr);
 
@@ -296,6 +301,10 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
 
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE) {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("return type must be a row type")));
+    }
+
+    if (SS_IN_REFORM || SS_NORMAL_STANDBY) {
+        ereport(ERROR, (errmsg("Operation can't be excuted during reform or on DMS standby node!")));
     }
 
     if (for_backup) {
@@ -439,9 +448,8 @@ void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra
  */
 Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 {
-    if (ENABLE_DMS) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Not support create logical replication slot while DMS and DSS enabled")));
+    if (SS_IN_REFORM || SS_NORMAL_STANDBY) {
+        ereport(ERROR, (errmsg("Operation can't be excuted during reform or on DMS standby node!")));
     }
 
     Name name = PG_GETARG_NAME(0);
@@ -494,9 +502,8 @@ Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
  */
 Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
 {
-    if (ENABLE_DMS) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Not support drop replication slot while DMS and DSS enabled")));
+    if (SS_IN_REFORM || SS_NORMAL_STANDBY) {
+        ereport(ERROR, (errmsg("Operation can't be excuted during reform or on DMS standby node!")));
     }
     
     Name name = PG_GETARG_NAME(0);

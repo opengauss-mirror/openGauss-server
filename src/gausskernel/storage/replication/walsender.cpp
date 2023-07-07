@@ -397,6 +397,10 @@ int WalSenderMain(void)
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 
+    if (SS_IN_REFORM || SS_NORMAL_STANDBY) {
+        ereport(ERROR, (errmsg("Can't start replication during reform or on DMS standby mode!")));
+    }
+
     /*
      * Use the recovery target timeline ID during recovery
      */

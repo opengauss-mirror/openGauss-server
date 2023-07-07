@@ -9386,7 +9386,9 @@ void StartupXLOG(void)
     t_thrd.xact_cxt.ShmemVariableCache->xlogMaxCSN = t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo - 1;
     init_instance_slot();
     init_instance_slot_thread();
-    StartupReplicationSlots();
+    if (!ENABLE_DMS || (SS_REFORM_REFORMER && !SS_PRIMARY_DEMOTED)) {
+        StartupReplicationSlots();
+    }
 
     /*
      * Startup logical state, needs to be setup now so we have proper data
