@@ -2455,6 +2455,15 @@ select distinct c3 from test_utf8mb4_bin;
  fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR                                      
 (1 row)
 
+create database b_ascii encoding = 0;
+\c b_ascii
+set client_encoding = utf8;
+select substring_inner('中文中文',2 ,3);
+ERROR:  invalid byte sequence for encoding "UTF8": 0xb8
+select regexp_substr('中文中文','[中]');
+ERROR:  invalid byte sequence for encoding "UTF8": 0xe4
+select substr('中文中文', 2);
+ERROR:  invalid byte sequence for encoding "UTF8": 0xb8
 \c regression
 clean connection to all force for database test_collate_A;
 clean connection to all force for database test_collate_B;

@@ -697,11 +697,18 @@ char* pg_any_to_client(const char* s, int len, int encoding, void* convert_finfo
     if (len <= 0) {
         return (char*)s;
     }
+    int client_encoding = u_sess->mb_cxt.ClientEncoding->encoding;
 
-    if (encoding == u_sess->mb_cxt.ClientEncoding->encoding || encoding == PG_SQL_ASCII) {
+    if (encoding == client_encoding || client_encoding == PG_SQL_ASCII) {
         /*
          * No conversion is needed, but we must still validate the data.
          */
+        return (char*)s;
+    }
+
+    if (encoding == PG_SQL_ASCII) {
+        /* No conversion is possible, but we must validate the result */
+        (void) pg_verify_mbstr(client_encoding, s, len, false);
         return (char*)s;
     }
 
@@ -709,10 +716,10 @@ char* pg_any_to_client(const char* s, int len, int encoding, void* convert_finfo
         return perform_default_encoding_conversion(s, len, false);
     } else if (convert_finfo != NULL) {
         return try_fast_encoding_conversion(
-            (char*)s, len, encoding, u_sess->mb_cxt.ClientEncoding->encoding, convert_finfo);
+            (char*)s, len, encoding, client_encoding, convert_finfo);
     } else {
         return (char*)pg_do_encoding_conversion(
-            (unsigned char*)s, len, encoding, u_sess->mb_cxt.ClientEncoding->encoding);
+            (unsigned char*)s, len, encoding, client_encoding);
     }
 }
 

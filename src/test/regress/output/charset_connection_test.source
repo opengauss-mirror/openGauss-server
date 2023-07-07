@@ -50,7 +50,7 @@ select 'aa' = 'AA';
 
 -- error case
 set names utf8 collate gbk_bin;
-ERROR:  specifying character sets and collations is supported only in B-format database
+ERROR:  collation "gbk_bin" for encoding "UTF8" does not exist
 create database charset_connection_test dbcompatibility 'b';
 \c charset_connection_test
 -- show encoding settings
@@ -106,6 +106,10 @@ select 'aa' = 'AA';
 -- expect error cases
 SET NAMES utf8mb4 COLLATE utf8mb4_general_ci;
 ERROR:  character_set_connection can be changed when b_format_behavior_compat_options contains enable_multi_charset option
+SET NAMES utf8 collate = 'utf8_bin';
+ERROR:  syntax error at or near "="
+LINE 1: SET NAMES utf8 collate = 'utf8_bin';
+                               ^
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options='all'" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
@@ -141,9 +145,6 @@ select 'aa' = 'AA';
 
 --error cases
 SET NAMES 'utf8' COLLATE DEFAULT;
-ERROR:  syntax error at or near "DEFAULT"
-LINE 1: SET NAMES 'utf8' COLLATE DEFAULT;
-                                 ^
 SET NAMES 'gbk' COLLATE 'utf8mb4_bin';
 ERROR:  collation "utf8mb4_bin" for encoding "GBK" does not exist
 SET NAMES utf8 COLLATE gbk_bin;
@@ -273,6 +274,89 @@ select '高斯aa' = '高斯AA';
  ?column? 
 ----------
  t
+(1 row)
+
+-- test default
+set names gbk;
+set names utf8 collate default;
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+set names gbk;
+set names utf8 collate 'default';
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ default
+(1 row)
+
+set names gbk;
+set collation_connection = default;
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+-- test charset = -1
+set collation_connection = 'C';
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ C
+(1 row)
+
+set collation_connection = 'default';
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ default
+(1 row)
+
+set collation_connection = 'POSIX';
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ POSIX
 (1 row)
 
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options=''" >/dev/null 2>&1

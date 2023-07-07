@@ -662,7 +662,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 %type <keyword> character_set
 %type <ival>	charset opt_charset convert_charset default_charset
-%type <str>		collate opt_collate default_collate
+%type <str>		collate opt_collate default_collate set_names_collate
 %type <charsetcollateopt> CharsetCollate charset_collate optCharsetCollate
 
 %type <boolean> opt_varying opt_timezone opt_no_inherit
@@ -2455,7 +2455,7 @@ set_rest_more:  /* Generic SET syntaxes: */
 					n->args = list_make1(makeStringConst($2, @2));
 					$$ = n;
 				}
-			| NAMES opt_encoding opt_collate
+			| NAMES opt_encoding set_names_collate
 				{
 					VariableSetStmt *n = makeNode(VariableSetStmt);
 					n->kind = VAR_SET_VALUE;
@@ -14714,6 +14714,11 @@ collate:
 				$$ = $3;
 			}
 		;
+
+set_names_collate:    COLLATE charset_collate_name		{ $$ = $2; }
+					| COLLATE DEFAULT					{ $$ = NULL; }
+					| /*EMPTY*/							{ $$ = NULL; }
+			;
 
 opt_collate:
 				collate								{ $$ = $1; }
