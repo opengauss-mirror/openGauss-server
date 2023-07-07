@@ -1,0 +1,112 @@
+CREATE DATABASE db_gb18030 TEMPLATE template0 encoding 'GB18030' lc_ctype 'zh_CN.GB18030' lc_collate 'zh_CN.GB18030';
+\c db_gb18030
+create table t (id int,c varchar);
+insert into t values (1,'测试');
+insert into t values (2,'测试玕');
+insert into t values (3,'测试3玕测试4');
+insert into t values (4,'玕测试4');
+insert into t values (5,'乗俓僜刓匼哱圽塡奬媆峔嶾廫慭怽揬昞朶梊榎橽歕沑漒瀄焅燶猏玕琝甛璡痋盶癨瞈砛碶穃竆筡篭糪絓綷縗繺羂耚肻腬臶臷芢蒤薥蚛蝄蟎衆蟎裓覾譢豛赲踈躙輁郳醆鈂鉢鎈鏫閈闬隲頫颸餦馶骪鯸鮘鳿鵟鸤黒齖');
+insert into t values (6,'㐁㐂㐃㐄㐅㐆㐆㐇㐈㐉㐋㐌㐍㐎㐏㐐㐑㐒㐓');
+create table t_stdin (id int,c varchar);
+create table t_csv (id int,c varchar);
+create table t_text (id int,c varchar);
+create table t_fixed (id int,c varchar);
+create table t_binary (id int,c varchar);
+COPY t TO '@abs_srcdir@/data/datanode1/t_csv.data' WITH(FORMAT 'csv');
+COPY t TO '@abs_srcdir@/data/datanode1/t_text.data' WITH(FORMAT 'text');
+COPY t TO '@abs_srcdir@/data/datanode1/t_fixed.data' fixed formatter(id(0,2), c(2,300));
+COPY t TO '@abs_srcdir@/data/datanode1/t_binary.data' WITH(FORMAT 'binary');
+COPY t_csv FROM '@abs_srcdir@/data/datanode1/t_csv.data' WITH(FORMAT 'csv');
+COPY t_text FROM '@abs_srcdir@/data/datanode1/t_text.data' WITH(FORMAT 'text');
+COPY t_fixed FROM '@abs_srcdir@/data/datanode1/t_fixed.data' fixed formatter(id(0,2), c(2,300));
+COPY t_binary FROM '@abs_srcdir@/data/datanode1/t_binary.data' WITH(FORMAT 'binary');
+SELECT * FROM t;
+ id |                                                                                          c                                                                                           
+----+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | 测试
+  2 | 测试玕
+  3 | 测试3玕测试4
+  4 | 玕测试4
+  5 | 乗俓僜刓匼哱圽塡奬媆峔嶾廫慭怽揬昞朶梊榎橽歕沑漒瀄焅燶猏玕琝甛璡痋盶癨瞈砛碶穃竆筡篭糪絓綷縗繺羂耚肻腬臶臷芢蒤薥蚛蝄蟎衆蟎裓覾譢豛赲踈躙輁郳醆鈂鉢鎈鏫閈闬隲頫颸餦馶骪鯸鮘鳿鵟鸤黒齖
+  6 | 㐁㐂㐃㐄㐅㐆㐆㐇㐈㐉㐋㐌㐍㐎㐏㐐㐑㐒㐓
+(6 rows)
+
+SELECT * FROM t_csv;
+ id |                                                                                          c                                                                                           
+----+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | 测试
+  2 | 测试玕
+  3 | 测试3玕测试4
+  4 | 玕测试4
+  5 | 乗俓僜刓匼哱圽塡奬媆峔嶾廫慭怽揬昞朶梊榎橽歕沑漒瀄焅燶猏玕琝甛璡痋盶癨瞈砛碶穃竆筡篭糪絓綷縗繺羂耚肻腬臶臷芢蒤薥蚛蝄蟎衆蟎裓覾譢豛赲踈躙輁郳醆鈂鉢鎈鏫閈闬隲頫颸餦馶骪鯸鮘鳿鵟鸤黒齖
+  6 | 㐁㐂㐃㐄㐅㐆㐆㐇㐈㐉㐋㐌㐍㐎㐏㐐㐑㐒㐓
+(6 rows)
+
+SELECT * FROM t_text;
+ id |                                                                                          c                                                                                           
+----+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | 测试
+  2 | 测试玕
+  3 | 测试3玕测试4
+  4 | 玕测试4
+  5 | 乗俓僜刓匼哱圽塡奬媆峔嶾廫慭怽揬昞朶梊榎橽歕沑漒瀄焅燶猏玕琝甛璡痋盶癨瞈砛碶穃竆筡篭糪絓綷縗繺羂耚肻腬臶臷芢蒤薥蚛蝄蟎衆蟎裓覾譢豛赲踈躙輁郳醆鈂鉢鎈鏫閈闬隲頫颸餦馶骪鯸鮘鳿鵟鸤黒齖
+  6 | 㐁㐂㐃㐄㐅㐆㐆㐇㐈㐉㐋㐌㐍㐎㐏㐐㐑㐒㐓
+(6 rows)
+
+SELECT * FROM t_fixed;
+ id |                                                                                                                                                      c                                                                                                                                                       
+----+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 |                                                                                                                                                                                                                                                                                                         测试
+  2 |                                                                                                                                                                                                                                                                                                       测试玕
+  3 |                                                                                                                                                                                                                                                                                                 测试3玕测试4
+  4 |                                                                                                                                                                                                                                                                                                      玕测试4
+  5 |                                                                                                                         乗俓僜刓匼哱圽塡奬媆峔嶾廫慭怽揬昞朶梊榎橽歕沑漒瀄焅燶猏玕琝甛璡痋盶癨瞈砛碶穃竆筡篭糪絓綷縗繺羂耚肻腬臶臷芢蒤薥蚛蝄蟎衆蟎裓覾譢豛赲踈躙輁郳醆鈂鉢鎈鏫閈闬隲頫颸餦馶骪鯸鮘鳿鵟鸤黒齖
+  6 |                                                                                                                                                                                                                                 㐁㐂㐃㐄㐅㐆㐆㐇㐈㐉㐋㐌㐍㐎㐏㐐㐑㐒㐓
+(6 rows)
+
+SELECT * FROM t_binary;
+ id |                                                                                          c                                                                                           
+----+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | 测试
+  2 | 测试玕
+  3 | 测试3玕测试4
+  4 | 玕测试4
+  5 | 乗俓僜刓匼哱圽塡奬媆峔嶾廫慭怽揬昞朶梊榎橽歕沑漒瀄焅燶猏玕琝甛璡痋盶癨瞈砛碶穃竆筡篭糪絓綷縗繺羂耚肻腬臶臷芢蒤薥蚛蝄蟎衆蟎裓覾譢豛赲踈躙輁郳醆鈂鉢鎈鏫閈闬隲頫颸餦馶骪鯸鮘鳿鵟鸤黒齖
+  6 | 㐁㐂㐃㐄㐅㐆㐆㐇㐈㐉㐋㐌㐍㐎㐏㐐㐑㐒㐓
+(6 rows)
+
+\d t;
+            Table "public.t"
+ Column |       Type        | Modifiers 
+--------+-------------------+-----------
+ id     | integer           | 
+ c      | character varying | 
+
+\d t_csv;
+          Table "public.t_csv"
+ Column |       Type        | Modifiers 
+--------+-------------------+-----------
+ id     | integer           | 
+ c      | character varying | 
+
+\d t_text;
+         Table "public.t_text"
+ Column |       Type        | Modifiers 
+--------+-------------------+-----------
+ id     | integer           | 
+ c      | character varying | 
+
+\d t_fixed;
+         Table "public.t_fixed"
+ Column |       Type        | Modifiers 
+--------+-------------------+-----------
+ id     | integer           | 
+ c      | character varying | 
+
+\d t_binary;
+        Table "public.t_binary"
+ Column |       Type        | Modifiers 
+--------+-------------------+-----------
+ id     | integer           | 
+ c      | character varying | 
+
