@@ -77,7 +77,7 @@ typedef struct LogicalDecodingContext {
      * User-Provided callback for writing/streaming out data.
      */
     LogicalOutputPluginWriterPrepareWrite prepare_write;
-    LogicalOutputPluginWriterWrite write;
+    LogicalOutputPluginWriterWrite do_write;
 
     /*
      * Output buffer.

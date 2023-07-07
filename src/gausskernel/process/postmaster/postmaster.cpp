@@ -4052,7 +4052,7 @@ static int ServerLoop(void)
         if ((u_sess->attr.attr_common.upgrade_mode == 0 ||
             pg_atomic_read_u32(&WorkingGrandVersionNum) >= PUBLICATION_VERSION_NUM) &&
             g_instance.pid_cxt.ApplyLauncerPID == 0 &&
-            pmState == PM_RUN && !dummyStandbyMode && !SS_IN_REFORM) {
+            pmState == PM_RUN && !dummyStandbyMode && !ENABLE_DMS) {
             g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
         }
 #endif
@@ -6891,7 +6891,7 @@ static void reaper(SIGNAL_ARGS)
 #ifndef ENABLE_MULTIPLE_NODES
             if ((u_sess->attr.attr_common.upgrade_mode == 0 ||
                 pg_atomic_read_u32(&WorkingGrandVersionNum) >= PUBLICATION_VERSION_NUM) &&
-                g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode && !SS_IN_REFORM) {
+                g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode && !ENABLE_DMS) {
                 g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
             }
 #endif
@@ -10255,6 +10255,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
         ereport(LOG,
             (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
                 wal_get_role_string(get_cur_mode()))));
+
+        /* Clear replication slot info of SS standby */
+        if (SS_NORMAL_STANDBY) {
+            ResetReplicationSlotsShmem();
+        }
     }
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP)) {
