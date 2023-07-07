@@ -2626,7 +2626,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
     
         /* store tables in segment storage as all possible while initdb */
         if (relpersistence == RELPERSISTENCE_PERMANENT &&
-            (relkind != RELKIND_SEQUENCE && relkind != RELKIND_LARGE_SEQUENCE)) {
+            (relkind != RELKIND_SEQUENCE && relkind != RELKIND_LARGE_SEQUENCE && relkind != RELKIND_TOASTVALUE)) {
             storage_type = SEGMENT_PAGE;
             reloptions = AddSegmentOption(reloptions);
         }
