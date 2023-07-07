@@ -926,7 +926,12 @@ void assign_charset_connection(const char* newval, void* extra)
                  errmsg("character_set_connection can be changed when b_format_behavior_compat_options contains enable_multi_charset option")));
     }
     int charset = *((int*)extra);
-    u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[charset];
+    if (PG_VALID_ENCODING(charset)) {
+        u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[charset];
+    } else {
+        charset = GetDatabaseEncoding();
+        u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[charset];
+    }
 
     Oid collid = get_default_collation_by_charset(charset);
     u_sess->mb_cxt.collation_connection = collid;
@@ -950,7 +955,12 @@ void assign_collation_connection(const char* newval, void* extra)
     u_sess->mb_cxt.collation_connection = collid;
 
     int charset = get_charset_by_collation(collid);
-    u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[charset];
+    if (PG_VALID_ENCODING(charset)) {
+        u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[charset];
+    } else {
+        charset = GetDatabaseEncoding();
+        u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[charset];
+    }
 }
 
 /*

@@ -58,7 +58,7 @@ static void checkSetLableValue(char *label)
     }
 }
 
-void check_duplicate_value_by_collation(List* vals, Oid collation)
+void check_duplicate_value_by_collation(List* vals, Oid collation, char type)
 {
     if (!is_b_format_collation(collation)) {
         return ;
@@ -71,8 +71,10 @@ void check_duplicate_value_by_collation(List* vals, Oid collation)
         while(next_cell != NULL) {
             char* next_lab = strVal(lfirst(next_cell));
             if (varstr_cmp_by_builtin_collations(lab, strlen(lab), next_lab, strlen(next_lab), collation) == 0) {
+                const char* type_name = NULL;
+                type_name = (type == TYPTYPE_SET) ? "set" : "enum";
                 ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                errmsg("set has duplicate key value \"%s\" = \"%s\"", lab, next_lab)));
+                    errmsg("%s has duplicate key value \"%s\" = \"%s\"", type_name, lab, next_lab)));
             }
             next_cell = lnext(next_cell);
         }
@@ -111,7 +113,7 @@ void SetValuesCreate(Oid setTypeOid, List* vals, Oid collation)
      * probably not worth trying harder.
      */
 
-    check_duplicate_value_by_collation(vals, collation);
+    check_duplicate_value_by_collation(vals, collation, TYPTYPE_SET);
 
     pg_set = heap_open(SetRelationId, RowExclusiveLock);
 

@@ -579,6 +579,13 @@ select count(*) from test_utf8mb4_bin group by c2, c3;
 select distinct c2 from test_utf8mb4_bin;
 select distinct c3 from test_utf8mb4_bin;
 
+create database b_ascii encoding = 0;
+\c b_ascii
+set client_encoding = utf8;
+select substring_inner('中文中文',2 ,3);
+select regexp_substr('中文中文','[中]');
+select substr('中文中文', 2);
+
 \c regression
 clean connection to all force for database test_collate_A;
 clean connection to all force for database test_collate_B;
