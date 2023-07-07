@@ -48,7 +48,8 @@ static const char* ss_clusterdirs[] = {"+global",
                                        "+pg_multixact/members",
                                        "+pg_multixact/offsets",
                                        "+pg_twophase",
-                                       "+pg_serial"};
+                                       "+pg_serial",
+                                       "+pg_replslot"};
 
 static const char* ss_instancedirs[] = {"+pg_xlog",
                                         "+pg_doublewrite"
@@ -60,7 +61,6 @@ static const char* ss_instanceowndirs[] = {"base",
                                            "pg_xlog",
                                            "pg_xlog/archive_status",
                                            "undo",
-                                           "pg_replslot",
                                            "pg_stat_tmp",
                                            "pg_errorinfo",
                                            "pg_logical",

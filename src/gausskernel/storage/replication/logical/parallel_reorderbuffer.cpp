@@ -64,6 +64,7 @@
 #include "utils/relcache.h"
 
 #include "utils/relfilenodemap.h"
+#include "storage/file/fio_device.h"
 
 static void ParallelReorderBufferSerializeReserve(ParallelReorderBuffer *rb, Size sz);
 static void ParallelReorderBufferCheckSerializeTXN(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn,
@@ -762,12 +763,14 @@ static void ParallelReorderBufferRestoreCleanup(ParallelReorderBufferTXN *txn, X
     XLogSegNo first = (txn->first_lsn) / XLogSegSize;
     XLogSegNo last = (txn->final_lsn) / XLogSegSize;
 
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
     /* iterate over all possible filenames, and delete them */
     for (XLogSegNo cur = first; cur <= last; cur++) {
         char path[MAXPGPATH];
         XLogRecPtr recptr;
         recptr = (cur * XLogSegSize);
-        errno_t rc = sprintf_s(path, sizeof(path), "pg_replslot/%s/snap/xid-%lu-lsn-%X-%X.snap",
+        errno_t rc = sprintf_s(path, sizeof(path), "%s/%s/snap/xid-%lu-lsn-%X-%X.snap", replslot_path,
             t_thrd.walsender_cxt.slotname, txn->xid, (uint32)(recptr >> 32), uint32(recptr));
         securec_check_ss(rc, "", "");
         if (unlink(path) != 0 && errno != ENOENT) {
@@ -890,6 +893,8 @@ static void ParallelReorderBufferSerializeTXN(ParallelReorderBuffer *prb, Parall
         ParallelReorderBufferSerializeTXN(prb, subtxn, slotId);
     }
 
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
     /* serialize changestream */
     dlist_foreach_modify(change_i, &txn->changes)
     {
@@ -915,7 +920,7 @@ static void ParallelReorderBufferSerializeTXN(ParallelReorderBuffer *prb, Parall
              * so each LSN only maps to a specific WAL record.
              */
 
-            nRet = sprintf_s(path, MAXPGPATH, "pg_replslot/%s/snap/xid-%lu-lsn-%X-%X.snap",
+            nRet = sprintf_s(path, MAXPGPATH, "%s/%s/snap/xid-%lu-lsn-%X-%X.snap", replslot_path,
                              t_thrd.walsender_cxt.slotname, txn->xid, (uint32)(recptr >> 32),
                              (uint32)recptr);
 
@@ -1016,6 +1021,8 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *prb, Para
     txn->nentries_mem = 0;
     Assert(dlist_is_empty(&txn->changes));
 
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
     last_segno = (txn->final_lsn) / XLogSegSize;
     while (restored < (unsigned)g_instance.attr.attr_common.max_changes_in_memory && *segno <= last_segno) {
         if (restored > 0 && g_Logicaldispatcher[slotId].pOptions.max_reorderbuffer_in_memory > 0 &&
@@ -1042,7 +1049,7 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *prb, Para
              * so each LSN only maps to a specific WAL record.
              */
 
-            rc = sprintf_s(path, sizeof(path), "pg_replslot/%s/snap/xid-%lu-lsn-%X-%X.snap",
+            rc = sprintf_s(path, sizeof(path), "%s/%s/snap/xid-%lu-lsn-%X-%X.snap", replslot_path,
                            t_thrd.walsender_cxt.slotname, txn->xid, (uint32)(recptr >> 32),
                            (uint32)recptr);
 

@@ -343,5 +343,7 @@ extern void ReplicationSlotNameForTablesync(Oid suboid, Oid relid, char *syncslo
 extern void ReplicationSlotDropAtPubNode(char *slotname, bool missing_ok);
 extern void LogicalCleanSnapDirectory(bool rebuild);
 extern void CleanMyReplicationSlot();
+void GetReplslotPath(char *path);
+void ResetReplicationSlotsShmem();
 
 #endif /* SLOT_H */
