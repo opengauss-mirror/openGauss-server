@@ -8734,6 +8734,7 @@ void StartupXLOG(void)
     bool RecoveryByPending = false;        /* recovery caused by pending mode */
     bool ArchiveRecoveryByPending = false; /* archive recovery caused by pending mode */
     bool AbnormalShutdown = true;
+    bool SSOndemandRecoveryExitNormal = true; /* status of last ondemand recovery */
     struct stat st;
     errno_t rcm = 0;
     TransactionId latestCompletedXid;
@@ -8805,15 +8806,15 @@ void StartupXLOG(void)
     if (ENABLE_DMS && ENABLE_DSS) {
         int src_id = INVALID_INSTANCEID;
         SSReadControlFile(REFORM_CTRL_PAGE);
-        if ((SS_CLUSTER_ONDEMAND_BUILD || SS_CLUSTER_ONDEMAND_RECOVERY) && SS_PRIMARY_MODE) {
+        if (SS_CLUSTER_ONDEMAND_NOT_NORAML && SS_PRIMARY_MODE) {
             if (SS_STANDBY_PROMOTING) {
                 ereport(FATAL, (errmsg("Do not allow switchover if on-demand recovery is not finish")));
             }
-
             Assert(g_instance.dms_cxt.SSReformerControl.recoveryInstId != INVALID_INSTANCEID);
             src_id = g_instance.dms_cxt.SSReformerControl.recoveryInstId;
             ereport(LOG, (errmsg("[on-demand]: On-demand recovery do not finish in last reform, "
                                  "reading control file of original primary:%d", src_id)));
+            SSOndemandRecoveryExitNormal = false;
         } else {
             if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
                 src_id = SSGetPrimaryInstId();
@@ -9479,19 +9480,20 @@ void StartupXLOG(void)
         t_thrd.xlog_cxt.InRecovery = false;
     }
 
-    if (SS_PRIMARY_MODE) {
-        if (ENABLE_ONDEMAND_RECOVERY && (SS_STANDBY_FAILOVER || SS_PRIMARY_NORMAL_REFORM) &&
-            t_thrd.xlog_cxt.InRecovery == true) {
+    if (SS_PRIMARY_MODE && ENABLE_ONDEMAND_RECOVERY && (SS_STANDBY_FAILOVER || SS_PRIMARY_NORMAL_REFORM) &&
+        t_thrd.xlog_cxt.InRecovery == true) {
+        if (SSOndemandRecoveryExitNormal) {
             g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = true;
             /* for other nodes in cluster and ondeamnd recovery failed */
             g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_BUILD;
             g_instance.dms_cxt.SSReformerControl.recoveryInstId = g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id;
+            SSSaveReformerCtrl();
             SetOndemandExtremeRtoMode();
             ereport(LOG, (errmsg("[On-demand] replayed in extreme rto ondemand recovery mode")));
         } else {
-            g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
+            ereport(LOG, (errmsg("[On-demand] do not allow replay in ondemand recovery if last ondemand recovery "
+                "crash, replayed in extreme rto recovery mode")));
         }
-        SSSaveReformerCtrl();
     }
 
     ReadRemainSegsFile();
@@ -10543,10 +10545,13 @@ void StartupXLOG(void)
             state->start = state->end;
             (void)LWLockRelease(state->recovery_queue_lock);
         }
+        g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
+    }
+
+    if (SS_PRIMARY_MODE) {
         /* for other nodes in cluster */
         g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
         SSSaveReformerCtrl();
-        g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
     }
 
     ereport(LOG, (errmsg("redo done, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT ", recentLocalXmin: " XID_FMT

@@ -439,7 +439,6 @@ void StartRecoveryWorkers(XLogReaderState *xlogreader, uint32 privateLen)
             ALLOCSET_DEFAULT_MAXSIZE,
             SHARED_CONTEXT);
         g_instance.comm_cxt.predo_cxt.redoItemHash = PRRedoItemHashInitialize(g_instance.comm_cxt.redoItemCtx);
-        g_dispatcher->maxItemNum = ((get_batch_redo_num() + 4) * PAGE_WORK_QUEUE_SIZE) * ITEM_QUQUE_SIZE_RATIO;
         uint32 maxParseBufNum = (uint32)((uint64)g_instance.attr.attr_storage.dms_attr.ondemand_recovery_mem_size *
             1024 / (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc) + sizeof(RedoMemSlot)));
         g_dispatcher->maxItemNum = 4 * PAGE_WORK_QUEUE_SIZE * ITEM_QUQUE_SIZE_RATIO + maxParseBufNum;
