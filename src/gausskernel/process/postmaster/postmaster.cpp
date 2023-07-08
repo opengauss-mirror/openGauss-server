@@ -3034,10 +3034,9 @@ int PostmasterMain(int argc, char* argv[])
             ereport(LOG, (errmsg("[SS reform] Success: node:%d wait for PRIMARY:%d to finish 1st reform",
                 g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
 
-            while (SS_OFFICIAL_RECOVERY_NODE && SS_CLUSTER_NOT_NORAML) {
-                pg_usleep(SLEEP_ONE_SEC);
-                SSReadControlFile(REFORM_CTRL_PAGE);
-                ereport(WARNING, (errmsg("[on-demand] node%d is last primary node, waiting for on-demand recovery done",
+            if (SS_OFFICIAL_RECOVERY_NODE && SS_CLUSTER_ONDEMAND_NOT_NORAML) {
+                ereport(FATAL, (errmsg(
+                    "[on-demand] node%d is last primary node, do not allow join cluster until on-demand recovery done",
                     g_instance.attr.attr_storage.dms_attr.instance_id)));
             }
         }

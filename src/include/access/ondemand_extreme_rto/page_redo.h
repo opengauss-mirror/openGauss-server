@@ -242,7 +242,11 @@ void WaitAllRedoWorkerQueueEmpty();
 void WaitAllReplayWorkerIdle();
 void DispatchClosefdMarkToAllRedoWorker();
 void DispatchCleanInvalidPageMarkToAllRedoWorker(RepairFileKey key);
-
+void ClearRecoveryThreadHashTbl(const RelFileNode &node, ForkNumber forknum, BlockNumber minblkno,
+    bool segment_shrink);
+void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
+void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
+    XLogRecPtr old_lsn, XLogPhyBlock pblk);
 const char *RedoWokerRole2Str(RedoRole role);
 
 }  // namespace ondemand_extreme_rto

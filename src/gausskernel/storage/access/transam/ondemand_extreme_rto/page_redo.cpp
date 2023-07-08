@@ -634,6 +634,7 @@ void RedoPageManagerDistributeToAllOneBlock(XLogRecParseState *ddlParseState)
 
     for (uint32 i = 0; i < WorkerNumPerMng; ++i) {
         XLogRecParseState *newState = XLogParseBufferCopy(ddlParseState);
+        newState->distributeStatus = XLOG_HEAD_DISTRIBUTE;
         AddPageRedoItem(myRedoLine->redoThd[i], newState);
     }
 }
@@ -940,6 +941,7 @@ void PageManagerDistributeBcmBlock(XLogRecParseState *preState)
     PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
     const uint32 WorkerNumPerMng = myRedoLine->redoThdNum;
     uint32 workId = GetWorkerId((uint32)preState->blockparse.blockhead.forknum, WorkerNumPerMng);
+    preState->distributeStatus = XLOG_HEAD_DISTRIBUTE;
     AddPageRedoItem(myRedoLine->redoThd[workId], preState);
 }
 
@@ -2929,6 +2931,36 @@ bool XactHasSegpageRelFiles(XLogReaderState *record)
     }
 
     return false;
+}
+
+/* RecordBadBlockAndPushToRemote
+ *               If the bad page has been stored, record the xlog. If the bad page
+ * has not been stored, need push to page repair thread hash table and record to
+ * recovery thread hash table.
+ */
+void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
+    XLogRecPtr old_lsn, XLogPhyBlock pblk)
+{
+    return;
+}
+
+/* ClearPageRepairHashTbl
+ *         drop table, or truncate table, need clear the page repair hashTbl, if the
+ * repair page Filenode match  need remove.
+ */
+void ClearRecoveryThreadHashTbl(const RelFileNode &node, ForkNumber forknum, BlockNumber minblkno,
+    bool segment_shrink)
+{
+    return;
+}
+
+/* BatchClearPageRepairHashTbl
+ *           drop database, or drop segmentspace, need clear the page repair hashTbl,
+ * if the repair page key dbNode match and spcNode match, need remove.
+ */
+void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode)
+{
+    return;
 }
 
 }  // namespace ondemand_extreme_rto
