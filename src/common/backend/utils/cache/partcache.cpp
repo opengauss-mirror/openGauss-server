@@ -916,8 +916,6 @@ void PartitionCacheInvalidate(void)
         if (PartitionHasReferenceCountZero(partition)) {
             /* Delete this entry immediately */
             PartitionClearPartition(partition, false);
-            hash_seq_term(&status);
-            hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
         } else {
             rebuildList = lappend(rebuildList, partition);
         }
@@ -1036,8 +1034,6 @@ void AtEOXact_PartitionCache(bool isCommit)
                 partition->pd_createSubid = InvalidSubTransactionId;
             } else {
                 PartitionClearPartition(partition, false);
-                hash_seq_term(&status);
-                hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
                 continue;
             }
         }
@@ -1091,8 +1087,6 @@ void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTran
                 partition->pd_createSubid = parentSubid;
             else {
                 PartitionClearPartition(partition, false);
-                hash_seq_term(&status);
-                hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
                 continue;
             }
         }
@@ -1138,19 +1132,11 @@ static void AtEOXact_PartRelCache()
                     Assert(idhentry->reldesc->rd_refcnt == 1);
                     /* destroy part first to release rd_refcnt */
                     PartitionCacheInvalidateEntry(idhentry->pd_id);
-                    hash_seq_term(&status);
-                    hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
-                    PartRelCacheEntry *old_idhentry = idhentry;
-                    while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
-                        if (old_idhentry == idhentry) {
-                            break;
-                        }
-                    }
                     Assert(idhentry->reldesc->rd_refcnt == 0);
                 }
                 RelationDestroyRelation(idhentry->reldesc, false);
+                idhentry->reldesc = NULL;
             }
-            pfree(idhentry);
         }
     }
 }
@@ -1173,8 +1159,8 @@ static void DeletePartRelCacheEntry(PartRelCacheEntry *idhentry, HTAB *PartRelCa
     if (idhentry->reldesc != NULL) {
         Assert(idhentry->reldesc->rd_refcnt == 0);
         RelationDestroyRelation(idhentry->reldesc, false);
+        idhentry->reldesc = NULL;
     }
-    pfree(idhentry);
 }
 
 static void PartRelCachePdIdCallback(Datum arg, Oid partid)
@@ -1200,44 +1186,6 @@ static void PartRelCachePdIdCallback(Datum arg, Oid partid)
     while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
         DeletePartRelCacheEntry(idhentry, u_sess->cache_cxt.PartRelCache,
             &u_sess->cache_cxt.PartRelCacheNeedEOXActWork);
-        if (hash_search(u_sess->cache_cxt.PartRelCache, (void *)&partid, HASH_FIND, NULL) != NULL) {
-            hash_seq_term(&status);
-            hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
-            PartRelCacheEntry *old_idhentry = idhentry;
-            while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
-                if (old_idhentry == idhentry) {
-                    break;
-                }
-            }
-        }
-    }
-}
-
-static void PartRelCacheRdIdCallback(Datum arg, Oid relid)
-{
-    if (u_sess->cache_cxt.PartRelCache == NULL) {
-        return;
-    }
-
-    HASH_SEQ_STATUS status;
-    hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
-    PartRelCacheEntry *idhentry;
-    while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
-        if (relid == InvalidOid || idhentry->reldesc == NULL || idhentry->reldesc->parentId == relid ||
-            idhentry->reldesc->grandparentId == relid) {
-            DeletePartRelCacheEntry(idhentry, u_sess->cache_cxt.PartRelCache,
-                &u_sess->cache_cxt.PartRelCacheNeedEOXActWork);
-            if (hash_search(u_sess->cache_cxt.PartRelCache, (void *)&idhentry->pd_id, HASH_FIND, NULL) != NULL) {
-                hash_seq_term(&status);
-                hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
-                PartRelCacheEntry *old_idhentry = idhentry;
-                while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
-                    if (old_idhentry == idhentry) {
-                        break;
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -1257,7 +1205,6 @@ static void PartRelCacheInitialize(void)
         u_sess->cache_cxt.PartRelCache =
             hash_create("PartRelcache by OID", INITPARTRELCACHESIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
         CacheRegisterSessionPartcacheCallback(PartRelCachePdIdCallback, (Datum)0);
-        CacheRegisterSessionRelcacheCallback(PartRelCacheRdIdCallback, (Datum)0);
     }
 }
 
@@ -1314,6 +1261,7 @@ void partitionInitPartRel(Relation rel, Partition part)
     idhentry->reldesc->come_from_partrel = true;
     part->partrel = idhentry->reldesc;
     part->partrel->rd_refcnt++;
+    part->partrel->rd_att->tdrefcount++;
     return;
 }
 
