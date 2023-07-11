@@ -186,7 +186,7 @@ test: interval tinterval macaddr tstypes comments
 # is concurrent safe.(duplicate)
 # ----------
 test: copyselect copy_error_log copy_support_transform copy_from_support_parallel
-test: copy_new_gram
+test: copy_new_gram copy_gbk_test copy_gb18030_test
 #test: copy_eol
 
 # ----------
