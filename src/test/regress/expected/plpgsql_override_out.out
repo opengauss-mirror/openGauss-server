@@ -1005,6 +1005,13 @@ end;
 ERROR:  Named argument "b" can not be a const
 CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
 set plsql_compile_check_options='';
+drop package body if exists pck1;
+drop package body pck1;
+ERROR:  package body pck1 does not exist
+drop package body pck1;
+ERROR:  package body pck1 does not exist
+drop package body if exists pck1;
+NOTICE:  package pck1() does not exist, skipping
 drop package if exists pck1;
 NOTICE:  drop cascades to 2 other objects
 --?.*

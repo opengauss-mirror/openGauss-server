@@ -835,7 +835,7 @@ ObjectAddress get_object_address(
                 break;
             case OBJECT_PACKAGE_BODY:
                 address.classId = PackageRelationId;
-                address.objectId = PackageNameListGetOid(objname, missing_ok);
+                address.objectId = PackageNameListGetOid(objname, missing_ok, true);
                 address.objectSubId = (int32)address.objectId; /* same as objectId for package body */
                 break;
             case OBJECT_OPERATOR:

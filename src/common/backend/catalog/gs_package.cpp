@@ -176,7 +176,7 @@ bool IsExistPackageName(const char* pkgname)
     return false;
 }
 
-Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok) 
+Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok, bool isPkgBody) 
 {
     Oid pkgOid = InvalidOid;
     char* schemaname = NULL;
@@ -195,6 +195,28 @@ Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok)
         pkgOid = PackageNameGetOid(pkgname, namespaceId);
     } else {
         pkgOid = PackageNameGetOid(pkgname);
+    }
+    if (isPkgBody && OidIsValid(pkgOid)) {
+        HeapTuple tuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
+        if (!HeapTupleIsValid(tuple)) {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("cache lookup failed for package %u", pkgOid),
+                    errdetail("cache lookup failed"),
+                    errcause("System error"),
+                    erraction("rebuild package")));
+        }
+        bool isNull = false;
+        (void)SysCacheGetAttr(PACKAGEOID, tuple, Anum_gs_package_pkgbodydeclsrc, &isNull);
+        if (isNull && !missing_ok) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_PACKAGE),
+                    errmsg("package body %s does not exist", NameListToString(pkgnameList))));
+        } else if (isNull && missing_ok) {
+            ReleaseSysCache(tuple);
+            return InvalidOid;
+        }
+        ReleaseSysCache(tuple);
     }
     if (!OidIsValid(pkgOid) && !missing_ok) {
         ereport(ERROR,
