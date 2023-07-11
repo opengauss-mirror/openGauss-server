@@ -145,7 +145,8 @@
 #define SS_PRIMARY_STANDBY_CLUSTER_NORMAL_STANDBY                                    \
     (SS_NORMAL_STANDBY && (g_instance.attr.attr_storage.xlog_file_path != 0))
 
-#define SS_CLUSTER_NOT_NORAML (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus != CLUSTER_NORMAL))
+#define SS_CLUSTER_ONDEMAND_NOT_NORAML \
+    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus != CLUSTER_NORMAL))
 #define SS_CLUSTER_ONDEMAND_BUILD \
     (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_IN_ONDEMAND_BUILD))
 #define SS_CLUSTER_ONDEMAND_RECOVERY \
