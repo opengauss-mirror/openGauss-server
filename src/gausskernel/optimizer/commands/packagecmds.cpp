@@ -237,7 +237,7 @@ ObjectAddress AlterPackageOwner(List* name, Oid newOwnerId)
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("package not supported in distributed database")));
 #endif
-    Oid pkgOid = PackageNameListGetOid(name, false);
+    Oid pkgOid = PackageNameListGetOid(name, false, false);
     Relation rel;
     HeapTuple tup;
     ObjectAddress address;

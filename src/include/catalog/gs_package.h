@@ -48,7 +48,7 @@ extern Oid SysynonymPkgNameGetOid(const char* pkgname, Oid namespaceId);
 extern Oid saveCallFromPkgOid(Oid pkgOid);
 extern void restoreCallFromPkgOid(Oid pkgOid);
 extern NameData* GetPackageName(Oid packageOid);
-extern Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok=false);
+extern Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok=false, bool isPkgBody = false);
 extern Oid GetPackageNamespace(Oid packageOid);
 extern bool IsExistPackageName(const char* pkgname);
 extern void BuildSessionPackageRuntimeForAutoSession(uint64 sessionId, uint64 parentSessionId,

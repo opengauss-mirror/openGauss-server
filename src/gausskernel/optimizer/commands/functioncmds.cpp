@@ -1673,6 +1673,7 @@ void RemovePackageById(Oid pkgOid, bool isBody)
         HeapTuple newtup = heap_modify_tuple(pkgtup, RelationGetDescr(relation), values, nulls, replaces);
         DropErrorByOid(PLPGSQL_PACKAGE_BODY, pkgOid); 
         simple_heap_update(relation, &newtup->t_self, newtup);
+        CatalogUpdateIndexes(relation, newtup);
     }
     ReleaseSysCache(pkgtup);
 
