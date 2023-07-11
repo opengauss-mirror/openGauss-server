@@ -5007,8 +5007,6 @@ static int IsReplConnInfoChanged(const char* replConnInfo, const char* newval)
     int repl_length = 0;
     replconninfo* newReplInfo = NULL;
     replconninfo* ReplInfo_1 = t_thrd.postmaster_cxt.ReplConnArray[1];
-    newval = TrimStr(newval);
-    replConnInfo = TrimStr(replConnInfo);
     if (replConnInfo == NULL || newval == NULL) {
         return NO_CHANGE;
     }
@@ -5028,9 +5026,9 @@ static int IsReplConnInfoChanged(const char* replConnInfo, const char* newval)
                 return ADD_REPL_CONN_INFO_WITH_NEW_LOCAL_IP_PORT;
             }
 
-            if (strcmp(ReplInfo_1->localhost, newReplInfo->localhost) != 0 ||
+            if (newReplInfo != NULL && (strcmp(ReplInfo_1->localhost, newReplInfo->localhost) != 0 ||
                 ReplInfo_1->localport != newReplInfo->localport ||
-                ReplInfo_1->localheartbeatport != newReplInfo->localheartbeatport) {
+                ReplInfo_1->localheartbeatport != newReplInfo->localheartbeatport)) {
                 pfree_ext(newReplInfo);
                 pfree_ext(oldReplStr);
                 pfree_ext(newReplStr);
