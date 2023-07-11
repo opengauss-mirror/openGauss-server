@@ -257,7 +257,9 @@ static bool libpqsw_receive(bool transfer = true)
         if (u_sess->attr.attr_common.enable_full_encryption && *(conn->inBuffer) == 'Z') {
             get_redirect_manager()->state.client_enable_ce = true;
         } else {
-            transfer_func(conn->inBuffer, conn->inEnd);
+            if (get_sw_cxt()->streamConn->xactStatus != PQTRANS_INERROR) {
+                transfer_func(conn->inBuffer, conn->inEnd);
+            }
         }
     }
 
@@ -1054,6 +1056,12 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
                 libpqsw_inner_excute_pbe(true, true);
             }
         }
+
+        if (get_sw_cxt()->streamConn->xactStatus == PQTRANS_INERROR) {
+            libpqsw_disconnect();
+            ereport(ERROR, (errmsg("The primary node report error when last request was transferred to it!")));
+        }
+
         // because we are not skip Q message process, so send_ready_for_query will be true after transfer.
         // but after transter, master will send Z message for front, so we not need to this flag.
         if (get_redirect_manager()->state.client_enable_ce || libpqsw_end_command(commandTag) ||
@@ -1114,7 +1122,7 @@ bool libpqsw_fetch_command(const char* commandTag)
 // is special commandTag need forbid redirect
 bool libpqsw_special_command(const char* commandTag)
 {
-    return commandTag != NULL && strcmp(commandTag, "LOCK TABLE") == 0;
+    return commandTag != NULL && (strcmp(commandTag, "LOCK TABLE") == 0 || strcmp(commandTag, "TRUNCATE TABLE") == 0);
 }
 
 // is special commandTag need forbid redirect
@@ -1403,4 +1411,12 @@ bool libpqsw_send_pbe(const char* buffer, size_t buffer_size)
     /* OK, it's launched! */
     conn->asyncStatus = PGASYNC_BUSY;
     return result;
+}
+
+void libpqsw_check_ddl_on_primary(const char* commandTag)
+{
+    if (commandTag != NULL && t_thrd.role == SW_SENDER && IsTransactionInProgressState() &&
+        (set_command_type_by_commandTag(commandTag) == CMD_DDL || libpqsw_special_command(commandTag))) {
+        ereport(ERROR, (errmsg("The multi-write feature doesn't support DDL within transaction or function!")));
+    }
 }

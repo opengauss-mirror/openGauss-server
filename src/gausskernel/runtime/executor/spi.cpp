@@ -47,6 +47,7 @@
 #include "utils/elog.h"
 #include "commands/sqladvisor.h"
 #include "distributelayer/streamMain.h"
+#include "replication/libpqsw.h"
 
 #ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
@@ -2492,6 +2493,13 @@ void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_fun
     foreach (list_item, raw_parsetree_list) {
         Node *parsetree = (Node *)lfirst(list_item);
         CachedPlanSource *plansource = NULL;
+
+#ifndef ENABLE_MULTIPLE_NODES
+        if (g_instance.attr.attr_sql.enableRemoteExcute) {
+            libpqsw_check_ddl_on_primary(CreateCommandTag(parsetree));
+        }
+#endif
+
 #ifdef ENABLE_MULTIPLE_NODES
         if (IS_PGXC_COORDINATOR && PointerIsValid(query_string_locationlist) &&
             list_length(query_string_locationlist) > 1) {
