@@ -4040,8 +4040,8 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
             plength = pq_getmsgint(input_message, 4);
             isNull = (plength == -1);
             /* add null value process for date type */
-            if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
-                    TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
+            if (((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
+                    TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
                 0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
                 isNull = true;
 
@@ -4838,8 +4838,8 @@ static void exec_bind_message(StringInfo input_message)
             plength = pq_getmsgint(input_message, 4);
             isNull = (plength == -1);
             /* add null value process for date type */
-            if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
-                    TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
+            if (((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
+                    TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
                 0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
                 isNull = true;
 
@@ -11542,8 +11542,9 @@ static void exec_batch_bind_execute(StringInfo input_message)
                 plength = pq_getmsgint(input_message, 4);
                 isNull = (plength == -1);
                 /* add null value process for date type */
-                if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
-                        TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
+                if (((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype ||
+                        TIMESTAMPTZOID == ptype || TIMEOID == ptype || TIMETZOID == ptype ||
+                        INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
                     0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
                     isNull = true;
 
