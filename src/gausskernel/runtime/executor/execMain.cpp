@@ -3768,14 +3768,3 @@ void EvalPlanQualEnd(EPQState *epqstate)
     epqstate->planstate = NULL;
     epqstate->origslot = NULL;
 }
-
-TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos)
-{
-    int result_rel_index = subPlanState->state->result_rel_index;
-
-    if (result_rel_index > 0) {
-        return ExecProject(projInfos[result_rel_index], NULL);
-    } else {
-        return ExecProcNode(subPlanState);
-    }
-}
