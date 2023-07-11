@@ -1336,9 +1336,8 @@ show warnings;
 ---------+-------+---------------------------
  Error   | 42P01 | table "t1" does not exist
  Warning | 64    | column is not defined2222
- Warning | 64    | column is not defined2222
  Warning | 64    | column is not defined
-(4 rows)
+(3 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping

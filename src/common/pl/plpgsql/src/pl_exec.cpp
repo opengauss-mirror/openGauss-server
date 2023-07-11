@@ -2927,11 +2927,13 @@ static int exec_exception_handler(PLpgSQL_execstate* estate, PLpgSQL_stmt_block*
 
         if (exception_matches_conditions(edata, exception->conditions)) {
 
-            u_sess->dolphin_errdata_ctx.handler_active = true;
-            estate->handler_level = estate->block_level + 1;
-            resetErrorDataArea(true, u_sess->dolphin_errdata_ctx.handler_active);
-            pushErrorData(edata);
-            copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
+            if (DB_IS_CMPT(B_FORMAT)) {
+                u_sess->dolphin_errdata_ctx.handler_active = true;
+                estate->handler_level = estate->block_level + 1;
+                resetErrorDataArea(true, u_sess->dolphin_errdata_ctx.handler_active);
+                pushErrorData(edata);
+                copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
+            }
             /*
              * Initialize the magic SQLSTATE and SQLERRM variables for
              * the exception block. We needn't do this until we have
@@ -4387,7 +4389,7 @@ static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* 
 
     if (stmt->has_cond) {
         if (condition_number < 1 || condition_number > condCount) {
-            ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+            ErrorData* edata = (ErrorData *)palloc0(sizeof(ErrorData));
             edata->elevel = ERROR;
             edata->sqlerrcode = ERRCODE_INVALID_CONDITION_NUMBER;
             edata->message = "Invalid condition number";
@@ -4395,6 +4397,7 @@ static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* 
             edata->cons_name = edata->catalog_name = edata->schema_name = edata->table_name = edata->column_name = edata->cursor_name = NULL;
             copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
             pushErrorData(edata);
+            pfree_ext(edata);
             FreeStringInfo(&buf);
             return PLPGSQL_RC_OK;
         }
