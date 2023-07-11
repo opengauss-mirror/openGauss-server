@@ -9148,7 +9148,13 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                 (void)set_config_option("character_set_connection", NULL, context, PGC_S_SESSION, action, true, 0);
                 (void)set_config_option("collation_connection", NULL, context, PGC_S_SESSION, action, true, 0);
                 break;
+            } else if (strcmp(stmt->name, "collation_connection") == 0) {
+                GucContext context = (superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
+                    PGC_SUSET : PGC_USERSET;
+                (void)set_config_option("character_set_connection", NULL, context, PGC_S_SESSION, action, true, 0);
+                (void)set_config_option("collation_connection", NULL, context, PGC_S_SESSION, action, true, 0);
             }
+
             (void)set_config_option(stmt->name, NULL,
                 ((superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
                     PGC_SUSET : PGC_USERSET), PGC_S_SESSION, action, true, 0);
@@ -11612,7 +11618,9 @@ static void process_set_names_collate(VariableSetStmt* setstmt, GucAction action
     if ((stmtarg = lnext(stmtarg)) != NULL) {
         item = (A_Const*)lfirst(stmtarg);
         collation = strVal(&item->val);
-        (void)check_collation_by_charset(collation, encoding);
+        if (!(strcmp(collation, "default") == 0)) {
+            (void)check_collation_by_charset(collation, encoding);
+        }
     } else {
         Oid collid = get_default_collation_by_charset(encoding);
         collation = get_collation_name(collid);

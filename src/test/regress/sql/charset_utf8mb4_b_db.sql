@@ -1502,5 +1502,4 @@ SELECT /*+ indexscan(t_diff_charset_columns idx_prefixkey_fgb18030_bin) */ fgb18
 reset enable_seqscan;
 
 DROP TABLE t_diff_charset_columns;
-
 \c regression
