@@ -167,6 +167,7 @@ test: single_node_sequence
 # run and check forbidden functions are still forbidden to use in single node
 test: single_node_forbidden
 test: single_node_mergeinto merge_subquery merge_subquery3
+test: merge_concurrent_update_delete_1 merge_concurrent_update_delete_2 merge_concurrent_update_delete_3
 
 # Trigger tests
 test: single_node_triggers
