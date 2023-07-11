@@ -23,6 +23,7 @@
  * ---------------------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "miscadmin.h"
 #include "mb/pg_wchar.h"
 #include "utils/builtins.h"
 #include "knl/knl_session.h"
@@ -71,7 +72,7 @@ Datum nlssort(PG_FUNCTION_ARGS)
             PG_RETURN_NULL();
         }
         if (VARSIZE_ANY_EXHDR(PG_GETARG_TEXT_P(0)) == 0) {
-            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
                 PG_RETURN_NULL();
             } else {
                 PG_RETURN_TEXT_P(cstring_to_text("\0"));

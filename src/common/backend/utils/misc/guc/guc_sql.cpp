@@ -381,7 +381,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"pgformat_substr", OPT_PGFORMAT_SUBSTR},
     {"truncate_numeric_tail_zero", OPT_TRUNC_NUMERIC_TAIL_ZERO},
     {"allow_orderby_undistinct_column", OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN},
-    {"select_into_return_null", OPT_SELECT_INTO_RETURN_NULL}
+    {"select_into_return_null", OPT_SELECT_INTO_RETURN_NULL},
+    {"accept_empty_str", OPT_ACCEPT_EMPTY_STR}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy

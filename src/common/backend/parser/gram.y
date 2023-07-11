@@ -29238,7 +29238,7 @@ makeStringConst(char *str, int location)
 
 	if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
 	{
-		if (NULL == str || 0 == strlen(str))
+		if (NULL == str || (0 == strlen(str) && !ACCEPT_EMPTY_STR))
 		{
 			n->val.type = T_Null;
 			n->val.val.str = str;

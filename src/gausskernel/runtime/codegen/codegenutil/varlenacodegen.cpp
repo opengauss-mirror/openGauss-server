@@ -450,7 +450,7 @@ llvm::Function* substr_codegen()
      * in case of A db compatible format we have to prepare a flag to indicate whether
      * result string is NULL, so we add one more parameter.
      */
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
         fn_prototype.addArgument(GsCodeGen::NamedVariable("isNull", int8PtrType));
 
     llvm::Function* jitted_substr = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
@@ -459,7 +459,7 @@ llvm::Function* substr_codegen()
     start = llvmargs[1];
     len = llvmargs[2];
 
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
         isNull = llvmargs[3];
 
     /*
@@ -497,7 +497,7 @@ llvm::Function* substr_codegen()
      *in case of ORC, we should set isNull to True if res_len == 0;
      *otherwise, just return the result.
      */
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         DEFINE_BLOCK(be_null, jitted_substr);
         DEFINE_BLOCK(bnot_null, jitted_substr);
         DEFINE_BLOCK(ret_bb, jitted_substr);
@@ -568,13 +568,13 @@ llvm::Function* rtrim1_codegen()
      * in case of A db compatible format we have to prepare a flag to indicate whether
      * result string is NULL, so we add one more parameter.
      */
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
         fn_prototype.addArgument(GsCodeGen::NamedVariable("isNull", int8PtrType));
 
     llvm::Function* jitted_rtrim1 = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
 
     argval = llvmargs[0];
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
         isNull = llvmargs[1];
 
     /* load rtrim1 ir function from module */
@@ -599,7 +599,7 @@ llvm::Function* rtrim1_codegen()
      *in case of ORC, we should set isNull to True if res_len == 0;
      *otherwise, just return the result.
      */
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         DEFINE_BLOCK(be_null, jitted_rtrim1);
         DEFINE_BLOCK(bnot_null, jitted_rtrim1);
         DEFINE_BLOCK(ret_bb, jitted_rtrim1);
@@ -671,12 +671,12 @@ llvm::Function* btrim1_codegen()
      * in case of A db compatible format we have to prepare a flag to indicate whether
      * result string is NULL, so we add one more parameter.
      */
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
         fn_prototype.addArgument(GsCodeGen::NamedVariable("isNull", int8PtrType));
     llvm::Function* jitted_btrim1 = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
 
     argval = llvmargs[0];
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
         isNull = llvmargs[1];
 
     /* load rtrim1 ir function from IR file*/
@@ -701,7 +701,7 @@ llvm::Function* btrim1_codegen()
      *in case of ORC, we should set isNull to True if res_len == 0;
      *otherwise, just return the result.
      */
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         DEFINE_BLOCK(be_null, jitted_btrim1);
         DEFINE_BLOCK(bnot_null, jitted_btrim1);
         DEFINE_BLOCK(ret_bb, jitted_btrim1);

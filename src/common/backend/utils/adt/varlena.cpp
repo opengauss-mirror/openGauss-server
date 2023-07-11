@@ -141,6 +141,8 @@ static void text_format_append_string(StringInfo buf, const char* str, int flags
 // adapt A db's substrb
 static text* get_substring_really(Datum str, int32 start, int32 length, bool length_not_specified);
 
+static text* get_result_of_concat(text* result, FunctionCallInfo fcinfo);
+
 /*****************************************************************************
  *	 CONVERSION ROUTINES EXPORTED FOR USE BY C CODE							 *
  *****************************************************************************/
@@ -3278,7 +3280,7 @@ Datum bytea_substr_orclcompat(PG_FUNCTION_ARGS)
 
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT ||
+        if ((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT&& !ACCEPT_EMPTY_STR) ||
             u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
             PG_RETURN_NULL();
         else {
@@ -3292,10 +3294,12 @@ Datum bytea_substr_orclcompat(PG_FUNCTION_ARGS)
      */
     result = bytea_substring_orclcompat(str, start, length, false);
 
-    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (NULL == result || (0 == VARSIZE_ANY_EXHDR(result) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)) {
         PG_RETURN_NULL();
-    else
-        PG_RETURN_BYTEA_P(result);
+    }
+
+    PG_RETURN_BYTEA_P(result);
 }
 
 // adapt A db's substr(bytea x,integer y)
@@ -3310,7 +3314,7 @@ Datum bytea_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
 
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
             PG_RETURN_NULL();
         else {
             result = PG_STR_GET_BYTEA("");
@@ -3323,10 +3327,12 @@ Datum bytea_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
      */
     result = bytea_substring_orclcompat(str, start, -1, true);
 
-    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (NULL == result || (0 == VARSIZE_ANY_EXHDR(result) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)) {
         PG_RETURN_NULL();
-    else
-        PG_RETURN_BYTEA_P(result);
+    }
+
+    PG_RETURN_BYTEA_P(result);
 }
 
 // Does the real work for bytea_substr_orclcompat() and bytea_substr_no_len_orclcompat().
@@ -4391,10 +4397,12 @@ Datum replace_text(PG_FUNCTION_ARGS)
     ret_text = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if (VARHDRSZ == VARSIZE(ret_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (VARHDRSZ == VARSIZE(ret_text) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
-    else
-        PG_RETURN_TEXT_P(ret_text);
+    }
+
+    PG_RETURN_TEXT_P(ret_text);
 }
 
 /*
@@ -4682,7 +4690,7 @@ Datum split_text(PG_FUNCTION_ARGS)
     if (inputstring_len < 1) {
         text_position_cleanup(&state);
 
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR && !RETURN_NS) {
             PG_RETURN_NULL();
         }
 
@@ -4697,7 +4705,7 @@ Datum split_text(PG_FUNCTION_ARGS)
             PG_RETURN_TEXT_P(inputstring);
         }
 
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR && !RETURN_NS) {
             PG_RETURN_NULL();
         }
 
@@ -4716,7 +4724,7 @@ Datum split_text(PG_FUNCTION_ARGS)
             PG_RETURN_TEXT_P(inputstring);
         }
 
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
             PG_RETURN_NULL();
         }
 
@@ -4743,7 +4751,7 @@ Datum split_text(PG_FUNCTION_ARGS)
         result_text = text_substring(PointerGetDatum(inputstring), start_posn, end_posn - start_posn, false);
     }
 
-    if (TEXTISORANULL(result_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (TEXTISORANULL(result_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     }
 
@@ -4935,7 +4943,7 @@ Datum array_to_text(PG_FUNCTION_ARGS)
     result = array_to_text_internal(fcinfo, v, fldsep, NULL);
 
     /* To A db, empty string need return NULL.*/
-    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -4972,7 +4980,7 @@ Datum array_to_text_null(PG_FUNCTION_ARGS)
     result = array_to_text_internal(fcinfo, v, fldsep, null_string);
 
     /* To A db, empty string need return NULL.*/
-    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -6302,11 +6310,25 @@ static text* concat_internal(const char* sepstr, int seplen, int argidx, Functio
     result = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if ((result == NULL || (0 == VARSIZE_ANY_EXHDR(result) && !DB_IS_CMPT(B_FORMAT | PG_FORMAT))) &&
-        (CONCAT_VARIADIC || DB_IS_CMPT(A_FORMAT)))
+    return get_result_of_concat(result, fcinfo);
+}
+
+static text* get_result_of_concat(text* result, FunctionCallInfo fcinfo)
+{
+    if (result == NULL) {
         PG_RETURN_NULL();
-    else
+    }
+
+    if (VARSIZE_ANY_EXHDR(result) > 0 ||
+        DB_IS_CMPT(B_FORMAT | PG_FORMAT) ||
+        (DB_IS_CMPT(A_FORMAT) && ACCEPT_EMPTY_STR)) {
         return result;
+    }
+
+    if (DB_IS_CMPT(A_FORMAT) || CONCAT_VARIADIC) {
+        PG_RETURN_NULL();
+    }
+    return result;
 }
 
 /*
@@ -6425,7 +6447,7 @@ Datum text_left(PG_FUNCTION_ARGS)
     }
 
     rlen = pg_mbcharcliplen(p, len, part_off);
-    if (0 == rlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (0 == rlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     }
 
@@ -6462,7 +6484,7 @@ Datum text_right(PG_FUNCTION_ARGS)
         }
     }
     off = pg_mbcharcliplen(p, len, part_off);
-    if (0 == (len - off) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (0 == (len - off) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     }
 
@@ -6761,7 +6783,8 @@ Datum text_format(PG_FUNCTION_ARGS)
     result = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (result == NULL ||
+        (VARSIZE_ANY_EXHDR(result) == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR))
         PG_RETURN_NULL();
     else
         PG_RETURN_TEXT_P(result);
@@ -7127,7 +7150,7 @@ Datum substrb_with_lenth(PG_FUNCTION_ARGS)
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (total == 0) || (start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
             PG_RETURN_NULL();
         else {
             result = cstring_to_text("");
@@ -7136,8 +7159,10 @@ Datum substrb_with_lenth(PG_FUNCTION_ARGS)
     }
 
     result = get_substring_really(str, start, length, false);
-    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
+    }
     PG_RETURN_TEXT_P(result);
 }
 
@@ -7152,7 +7177,7 @@ Datum substrb_without_lenth(PG_FUNCTION_ARGS)
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((total == 0) || (start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
             PG_RETURN_NULL();
         else {
             result = cstring_to_text("");
@@ -7161,8 +7186,10 @@ Datum substrb_without_lenth(PG_FUNCTION_ARGS)
     }
 
     result = get_substring_really(str, start, -1, true);
-    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
+    }
     PG_RETURN_TEXT_P(result);
 }
 
