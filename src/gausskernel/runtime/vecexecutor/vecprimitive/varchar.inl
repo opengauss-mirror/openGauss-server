@@ -309,7 +309,7 @@ inline static Datum
 null_return(bool *is_null)
 {
 	text *result	= NULL;
-	if(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+	if(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
 	{
 		*is_null = true;
 		return (Datum)0;

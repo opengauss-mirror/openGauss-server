@@ -134,7 +134,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_CHAR_COERCE_COMPAT 4194304
 #define OPT_TRUNC_NUMERIC_TAIL_ZERO 8388608
 #define OPT_ARRAY_COUNT_COMPAT 16777216
-#define OPT_MAX 25
+#define OPT_ACCEPT_EMPTY_STR 33554432
+#define OPT_MAX 26
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -155,6 +156,7 @@ extern bool contain_backend_version(uint32 version_number);
 #define RETURN_NS (u_sess->utils_cxt.behavior_compat_flags & OPT_RETURN_NS_OR_NULL)
 #define CORRECT_TO_NUMBER (u_sess->utils_cxt.behavior_compat_flags & OPT_CORRECT_TO_NUMBER)
 #define SUPPORT_BIND_SEARCHPATH (u_sess->utils_cxt.behavior_compat_flags & OPT_BIND_SEARCHPATH)
+#define ACCEPT_EMPTY_STR (u_sess->utils_cxt.behavior_compat_flags & OPT_ACCEPT_EMPTY_STR)
 /*CONCAT_VARIADIC controls 1.the variadic type process, and 2. td mode null return process in concat. By default, the
  * option is blank and the behavior is new and compatible with current A and C mode, if the option is set, the
  * behavior is old and the same as previous GAUSSDB kernel. */

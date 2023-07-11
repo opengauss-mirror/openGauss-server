@@ -1520,7 +1520,7 @@ static void vlpad_internal(ScalarVector* parg1, ScalarVector* parg2, ScalarVecto
 
     SET_VARSIZE(ret, ptr_ret - (char*)ret);
 
-    if (0 == VARSIZE_ANY_EXHDR(ret) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+    if (0 == VARSIZE_ANY_EXHDR(ret) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR && !RETURN_NS) {
         SET_NULL(pflagsRes[idx]);
     } else {
         VecRet->m_vals[idx] = PointerGetDatum(ret);
