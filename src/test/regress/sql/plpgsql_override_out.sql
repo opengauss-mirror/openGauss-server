@@ -697,5 +697,9 @@ end;
 /
 
 set plsql_compile_check_options='';
+drop package body if exists pck1;
+drop package body pck1;
+drop package body pck1;
+drop package body if exists pck1;
 drop package if exists pck1;
 drop schema if exists plpgsql_override_out cascade;
