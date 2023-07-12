@@ -147,8 +147,8 @@ INSTANCE_ID=${2}
 GSDB_HOME=${3}
 CMD_PARAM=${4}
 
-dms_log=${GSDB_HOME}/DMSexec.log
-heck_log_file ${GSDB_HOME} $dms_log DMSexec
+dms_log=${GSDB_HOME}/dms_control.log
+heck_log_file ${GSDB_HOME} $dms_log dms_control
 
 if [ X${DSS_HOME} == X"" ]
 then
