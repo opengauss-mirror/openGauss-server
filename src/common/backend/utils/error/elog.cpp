@@ -5806,34 +5806,21 @@ void cleanErrorDataArea(ErrorDataArea *errorDataArea)
     ListCell *lc = NULL;
     foreach (lc, errorDataArea->sqlErrorDataList) {
         DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
-        if (eData->errorcode)
-            pfree_ext(eData->errorcode);
-        if (eData->sqlstatestr)
-            pfree_ext(eData->sqlstatestr);
-        if (eData->class_origin)
-            pfree_ext(eData->class_origin);
-        if (eData->subclass_origin)
-            pfree_ext(eData->subclass_origin);
-        if (eData->constraint_catalog)
-            pfree_ext(eData->constraint_catalog);
-        if (eData->constraint_schema)
-            pfree_ext(eData->constraint_schema);
-        if (eData->constraint_name)
-            pfree_ext(eData->constraint_name);
-        if (eData->catalog_name)
-            pfree_ext(eData->catalog_name);
-        if (eData->schema_name)
-            pfree_ext(eData->schema_name);
-        if (eData->table_name)
-            pfree_ext(eData->table_name);
-        if (eData->column_name)
-            pfree_ext(eData->column_name);
-        if (eData->cursor_name)
-            pfree_ext(eData->cursor_name);
-        if (eData->message_text)
-            pfree_ext(eData->message_text);
+        pfree_ext(eData->errorcode);
+        pfree_ext(eData->sqlstatestr);
+        pfree_ext(eData->class_origin);
+        pfree_ext(eData->subclass_origin);
+        pfree_ext(eData->constraint_catalog);
+        pfree_ext(eData->constraint_schema);
+        pfree_ext(eData->constraint_name);
+        pfree_ext(eData->catalog_name);
+        pfree_ext(eData->schema_name);
+        pfree_ext(eData->table_name);
+        pfree_ext(eData->column_name);
+        pfree_ext(eData->cursor_name);
+        pfree_ext(eData->message_text);
     }
-    list_free_ext(errorDataArea->sqlErrorDataList);
+    list_free_deep(errorDataArea->sqlErrorDataList);
     errorDataArea->sqlErrorDataList = NIL;
     errorDataArea->current_edata_count = 0;
     for (int i = 0; i <= enum_dolphin_error_level::B_END; i++) {
@@ -5969,7 +5956,9 @@ void resetErrorDataArea(bool stacked, bool handler_active)
             copyErrorDataArea(errorDataArea, lastErrorDataArea);
         }
     } else {
-        cleanErrorDataArea(lastErrorDataArea);
+        if (!handler_active) {
+            cleanErrorDataArea(lastErrorDataArea);
+        }
     }
     cleanErrorDataArea(errorDataArea);
     MemoryContextSwitchTo(oldcontext);
@@ -6274,7 +6263,7 @@ void getDiagnosticsInfo(List* condInfo, bool hasCondNum, List* condNum)
         int conditionNum = getConditionNum(condNum);
 
         if (conditionNum < 1 || conditionNum > condCount) {
-            ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+            ErrorData* edata = (ErrorData *)palloc0(sizeof(ErrorData));
             edata->elevel = ERROR;
             edata->sqlerrcode = ERRCODE_INVALID_CONDITION_NUMBER;
             edata->message = "Invalid condition number";
@@ -6282,6 +6271,7 @@ void getDiagnosticsInfo(List* condInfo, bool hasCondNum, List* condNum)
             edata->cons_name = edata->catalog_name = edata->schema_name = edata->table_name = edata->column_name = edata->cursor_name = NULL;
             copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
             pushErrorData(edata);
+            pfree_ext(edata);
             FreeStringInfo(&buf);
             return;
         }
