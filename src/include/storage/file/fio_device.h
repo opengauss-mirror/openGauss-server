@@ -349,6 +349,16 @@ static inline int fseek_dev(FILE *stream, long offset, int whence)
     }
 }
 
+static inline int fseeko_dev(FILE *stream, long offset, int whence)
+{
+    DSS_STREAM *dss_stream = (DSS_STREAM *)stream;
+    if (unlikely(dss_stream->magic_head == DSS_MAGIC_NUMBER)) {
+        return dss_fseek_file(stream, offset, whence);
+    } else {
+        return fseeko(stream, offset, whence);
+    }
+}
+
 static inline long ftell_dev(FILE *stream)
 {
     DSS_STREAM *dss_stream = (DSS_STREAM *)stream;
@@ -522,6 +532,7 @@ static inline int closedir_dev(DIR *dirp)
 #define fread(ptr, size, nmemb, stream) fread_dev((ptr), (size), (nmemb), (stream))
 #define fwrite(ptr, size, nmemb, stream) fwrite_dev((ptr), (size), (nmemb), (stream))
 #define fseek(stream, offset, whence) fseek_dev((stream), (offset), (whence))
+#define fseeko(stream, offset, whence) fseeko_dev((stream), (offset), (whence))
 #define ftell(stream) ftell_dev((stream))
 #define fflush(stream) fflush_dev((stream))
 #define feof(stream) feof_dev((stream))
