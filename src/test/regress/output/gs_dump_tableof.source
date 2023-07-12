@@ -23,6 +23,13 @@ NOTICE:  database "restore_type_db" does not exist, skipping
 create database restore_type_db;
 \! @abs_bindir@/gs_restore -d restore_type_db -p @portstring@ @abs_bindir@/dump_type.tar >/dev/null 2>&1; echo $?
 0
+\c restore_type_db
+select proname, obj_description(oid, 'pg_proc') AS comment from pg_proc where proname = 'comment_test_procedure';
+        proname         |     comment     
+------------------------+-----------------
+ comment_test_procedure | test_comment_on
+(1 row)
+
 \c regression
 drop database if exists restore_type_db;
 drop database if exists dump_type_db;
