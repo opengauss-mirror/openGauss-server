@@ -188,7 +188,7 @@ function Stop()
 {
     log "stop ${GSDB_BIN}..."
     ${BIN_PATH}/gs_ctl stop -D ${GSDB_HOME}
-    sleep 5
+    sleep 60
 
     pid=`program_pid ${GSDB_BIN} ${GSDB_HOME}`
     if [[ -z ${pid} ]]
