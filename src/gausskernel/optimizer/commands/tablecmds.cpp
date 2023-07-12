@@ -59,6 +59,7 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_hashbucket.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
