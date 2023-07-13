@@ -19064,6 +19064,15 @@ TransactionStmt:
 				}
 			| START TRANSACTION WITH CONSISTENT SNAPSHOT
 				{
+					if (!DB_IS_CMPT(B_FORMAT)) {
+						const char* message = "WITH CONSISTENT SNAPSHOT is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("WITH CONSISTENT SNAPSHOT is supported only in B-format database."),
+								parser_errposition(@3)));
+					}
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_START;
 					n->options = NIL;

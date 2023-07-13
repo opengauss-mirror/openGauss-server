@@ -1,3 +1,8 @@
+\c regression
+start transaction with consistent snapshot;
+ERROR:  WITH CONSISTENT SNAPSHOT is supported only in B-format database.
+LINE 1: start transaction with consistent snapshot;
+                          ^
 create database with_snapshot_test dbcompatibility 'b';
 \c with_snapshot_test;
 set global transaction isolation level repeatable read;
