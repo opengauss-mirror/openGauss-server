@@ -528,7 +528,7 @@ static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTab
         slot = ExecMergeProjQual(mtstate, mergeMatchedActionStates, econtext, slot, slot, estate);
 
         if (slot != NULL) {
-
+            TM_Result out_result;
             /* Encoding check if need */
             EncodingCheck(estate, slot);
 
@@ -541,7 +541,12 @@ static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTab
                              epqstate,
                              mtstate,
                              mtstate->canSetTag,
-                             partKeyUpdated);
+                             partKeyUpdated,
+                             &out_result);
+            /* the matched row has been delted or after updated, the row does not matched, change to insert. */
+            if (out_result == TM_Deleted || out_result == TM_Updated) {
+                return false;
+            }
         }
         if (action->commandType == CMD_UPDATE /* && tuple_updated*/)
             InstrCountFiltered2(&mtstate->ps, 1);
