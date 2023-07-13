@@ -6,6 +6,7 @@ curr_path=`dirname $(readlink -f $0)`
 curr_filename=`basename $(readlink -f $0)`
 os_user=`whoami`
 file_user=`ls -l ${curr_path}"/${curr_filename}" | awk '{print $3}'`
+dms_log=/dev/null
 
 if [ ${file_user} != ${os_user} ]; then
     echo "Can't run ${curr_filename}, because it does not belong to the current user!"
@@ -46,6 +47,7 @@ log()
 {
     time=`date "+%Y-%m-%d %H:%M:%S"`
     echo "$time $1"
+    echo "$time $1" >> $dms_log
 }
 
 assert_empty()
@@ -108,6 +110,15 @@ function clear_script_log
     fi
 }
 
+touch_logfile()
+{
+    log_file=$1
+    if [ ! -f $log_file ]
+    then
+        touch $log_file
+    fi
+}
+
 check_log_file()
 {
     log_path=$1
@@ -116,22 +127,15 @@ check_log_file()
     # max log file size 16 * 1024 * 1024
     MAX_LOG_SIZE=16777216
     MAX_LOG_BACKUP=10
-    log_file_size=$(ls -l ${log_file} |awk '{print $5}')
     if [ -f ${log_file} ];then
+        log_file_size=$(ls -l ${log_file} | awk '{print $5}')
         if [ ${log_file_size} -ge ${MAX_LOG_SIZE} ];then
             mv -f ${log_file} "${log_path}/${operation}-`date +%Y-%m-%d_%H%M%S`.log" 2>/dev/null
             clear_script_log "${log_path}" "${operation}-" $MAX_LOG_BACKUP
         fi
     fi
-}
-
-touch_logfile()
-{
-    log_file=$1
-    if [ ! -f $log_file ]
-    then
-        touch $log_file
-    fi
+    touch_logfile $log_file
+    chmod 600 $log_file
 }
 
 assert_nonempty 1 ${1}
@@ -142,6 +146,9 @@ CMD=${1}
 INSTANCE_ID=${2}
 GSDB_HOME=${3}
 CMD_PARAM=${4}
+
+dms_log=${GSDB_HOME}/dms_control.log
+check_log_file ${GSDB_HOME} $dms_log dms_control
 
 if [ X${DSS_HOME} == X"" ]
 then
@@ -155,14 +162,6 @@ function Start()
 {
     db_start_log=${GSDB_HOME}/DBstart.log
     check_log_file ${GSDB_HOME} $db_start_log DBstart
-
-    if [[ -z "${GSDB_HOME}" ]]
-    then
-        db_start_log=/dev/null
-    else
-        touch_logfile $db_start_log
-        chmod 600 $db_start_log
-    fi
 
     dss_flag_file=instance_manual_start_$(expr $INSTANCE_ID + 20001 - 6001)
     if [[ -f $GAUSSHOME/bin/$dss_flag_file ]];

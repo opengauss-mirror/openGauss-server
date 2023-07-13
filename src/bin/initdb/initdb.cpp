@@ -4663,7 +4663,7 @@ int main(int argc, char* argv[])
 
     // dss device init
     if (dss_device_init(socketpath, enable_dss) != DSS_SUCCESS) {
-        write_stderr(_("failed to init dss device.\n"));
+        write_stderr(_("failed to init dss device, check logs under $DSS_HOME for more information.\n"));
         exit_nicely();
     }
 
