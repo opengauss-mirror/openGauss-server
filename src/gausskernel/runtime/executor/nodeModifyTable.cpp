@@ -715,9 +715,10 @@ checktest:
     ExecProject(resultRelInfo->ri_updateProj, NULL);
     /* Evaluate where qual if exists, add to count if filtered */
     if (ExecQual(upsertState->us_updateWhere, econtext, false)) {
+        TM_Result out_result;
         *returning = ExecUpdate(conflictTid, oldPartitionOid, bucketid, NULL,
             upsertState->us_updateproj, planSlot, &mtstate->mt_epqstate,
-            mtstate, canSetTag, ((ModifyTable*)mtstate->ps.plan)->partKeyUpdated, partExprKeyStr);
+            mtstate, canSetTag, ((ModifyTable*)mtstate->ps.plan)->partKeyUpdated, &out_result, partExprKeyStr);
     } else {
         InstrCountFiltered1(&mtstate->ps, 1);
     }
@@ -2004,6 +2005,33 @@ end:;
     return NULL;
 }
 
+/*
+ * check whether the tuple still match the merge condition after the tuple has been updated by other transaction.
+ * [in] node, executor node
+ * [in] epq_slot, the tuple slot after recheck on the updated tuple
+ * [in] mergeMatchedActionStates, update action state
+ * [in] fake_relation, heap table relation
+ * [in/out] slot, in: origin tuple slot, out: slot after merge projection
+ * [out] tuple, if the updated tuple still match the merge condition, return the new projected tuple
+ * [return value] true for match, false for not match.
+ */
+static bool MatchMergeCondition(ModifyTableState* node, TupleTableSlot* epq_slot, List* mergeMatchedActionStates,
+    Relation fake_relation, AttrNumber junkAttno, TupleTableSlot** slot, Tuple *tuple)
+{
+    /* resultRelInfo->ri_mergeState is always not null */
+    *slot = ExecMergeProjQual(node, mergeMatchedActionStates, node->ps.ps_ExprContext, epq_slot, *slot, node->ps.state);
+    if (*slot != NULL) {
+        bool is_null = false;
+        /* Check after epq, whether the ctid is null. null means the updated row does not match */
+        (void)ExecGetJunkAttribute(epq_slot, junkAttno, &is_null);
+        if (!is_null) {
+            *tuple = tableam_tslot_get_tuple_from_slot(fake_relation, *slot);
+            return true;
+        }
+    }
+    return false;
+}
+
 /* ----------------------------------------------------------------
  *		ExecUpdate
  *
@@ -2027,7 +2055,7 @@ end:;
 TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     Oid oldPartitionOid, /* when update a partitioned table , give a partitionOid to find the tuple */
     int2 bucketid, HeapTupleHeader oldtuple, TupleTableSlot* slot, TupleTableSlot* planSlot, EPQState* epqstate,
-    ModifyTableState* node, bool canSetTag, bool partKeyUpdate, char* partExprKeyStr)
+    ModifyTableState* node, bool canSetTag, bool partKeyUpdate, TM_Result* out_result, char* partExprKeyStr)
 {
     EState* estate = node->ps.state;
     Tuple tuple = NULL;
@@ -2058,7 +2086,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     bool allow_update_self = (node->mt_upsert != NULL &&
         node->mt_upsert->us_action != UPSERT_NONE) ? true : false;
 
-
+    *out_result = TM_Ok;
     /*
      * get information on the (current) result relation
      */
@@ -2300,6 +2328,7 @@ lreplace:
                         estate->es_crosscheck_snapshot, estate->es_snapshot, true, // wait for commit
                         &oldslot, &tmfd, &update_indexes, &modifiedIdxAttrs, allow_update_self,
                         allowInplaceUpdate, &lockmode);
+                    *out_result = result;
                     switch (result) {
                         case TM_SelfUpdated:
                         case TM_SelfModified:
@@ -2339,7 +2368,6 @@ lreplace:
                                         tupleid, node->delete_delta_rel);
                                 }
                             }
-
                             break;
 
                         case TM_Updated: {
@@ -2382,14 +2410,8 @@ lreplace:
                                  * from plan slot.
                                  */
                                 if (node->operation == CMD_MERGE) {
-                                    List* mergeMatchedActionStates = NIL;
-
-                                    /* resultRelInfo->ri_mergeState is always not null */
-                                    mergeMatchedActionStates = result_rel_info->ri_mergeState->matchedActionStates;
-                                    slot = ExecMergeProjQual(
-                                        node, mergeMatchedActionStates, node->ps.ps_ExprContext, epq_slot, slot, estate);
-                                    if (slot != NULL) {
-                                        tuple = tableam_tslot_get_tuple_from_slot(fake_relation, slot);
+                                    if (MatchMergeCondition(node, epq_slot, result_rel_info->ri_mergeState->matchedActionStates,
+                                        fake_relation, result_rel_info->ri_junkFilter->jf_junkAttNo, &slot, &tuple)) {
                                         goto lreplace;
                                     }
                                 } else {
@@ -2622,6 +2644,7 @@ lreplace:
                             allow_update_self,
                             allowInplaceUpdate,
                             &lockmode);
+                        *out_result = result;
                         switch (result) {
                             case TM_SelfUpdated:
                             case TM_SelfModified:
@@ -2692,14 +2715,8 @@ lreplace:
                                      * projected from plan slot.
                                      */
                                     if (node->operation == CMD_MERGE) {
-                                        List *mergeMatchedActionStates = NIL;
-
-                                        /* resultRelInfo->ri_mergeState is always not null */
-                                        mergeMatchedActionStates = result_rel_info->ri_mergeState->matchedActionStates;
-                                        slot = ExecMergeProjQual(node, mergeMatchedActionStates,
-                                            node->ps.ps_ExprContext, epq_slot, slot, estate);
-                                        if (slot != NULL) {
-                                            tuple = tableam_tslot_get_tuple_from_slot(fake_relation, slot);
+                                        if (MatchMergeCondition(node, epq_slot, result_rel_info->ri_mergeState->matchedActionStates,
+                                            fake_relation, result_rel_info->ri_junkFilter->jf_junkAttNo, &slot, &tuple)) {
                                             goto lreplace;
                                         }
                                     } else {
@@ -2835,7 +2852,7 @@ ldelete:
                                 &oldslot,
                                 &tmfd,
                                 allow_update_self);
-
+                            *out_result = result;
                             switch (result) {
                                 case TM_SelfUpdated:
                                 case TM_SelfModified:
@@ -2934,15 +2951,8 @@ ldelete:
                                          * needs slot to be projected from plan slot.
                                          */
                                         if (node->operation == CMD_MERGE) {
-                                            List* mergeMatchedActionStates = NIL;
-
-                                            /* resultRelInfo->ri_mergeState is always not null */
-                                            mergeMatchedActionStates =
-                                                result_rel_info->ri_mergeState->matchedActionStates;
-                                            slot = ExecMergeProjQual(node, mergeMatchedActionStates,
-                                                node->ps.ps_ExprContext, epq_slot, slot, estate);
-                                            if (slot != NULL) {
-                                                tuple = tableam_tslot_get_tuple_from_slot(old_fake_relation, slot);
+                                            if (MatchMergeCondition(node, epq_slot, result_rel_info->ri_mergeState->matchedActionStates,
+                                                old_fake_relation, result_rel_info->ri_junkFilter->jf_junkAttNo, &slot, &tuple)) {
                                                 goto ldelete;
                                             }
                                         } else {
@@ -3705,7 +3715,8 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
                     slot = ExecReplace(estate, node, slot, plan_slot, bucketid, hi_options, partition_list, partExprKeyStr);
                 }
                 break;
-            case CMD_UPDATE:
+            case CMD_UPDATE: {
+                TM_Result out_result;
                 slot = ExecUpdate(tuple_id,
                     old_partition_oid,
                     bucketid,
@@ -3716,8 +3727,9 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
                     node,
                     node->canSetTag,
                     part_key_updated,
+                    &out_result,
                     partExprKeyStr);
-                break;
+                } break;
             case CMD_DELETE:
                 slot = ExecDelete(
                     tuple_id, old_partition_oid, bucketid, old_tuple, plan_slot, &node->mt_epqstate, node, node->canSetTag);
