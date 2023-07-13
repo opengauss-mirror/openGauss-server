@@ -654,7 +654,6 @@ void plpgsql_yyerror(const char* message, bool isError)
 {
     char* yytext = u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf + plpgsql_yylloc;
     int errstate = 0;
-    u_sess->plsql_cxt.have_error = true;
 #ifndef ENABLE_MULTIPLE_NODES
         if (u_sess->attr.attr_common.plsql_show_all_error && !isError) {
             errstate = NOTICE;
