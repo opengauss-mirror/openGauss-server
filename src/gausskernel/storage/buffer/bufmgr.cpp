@@ -4666,7 +4666,9 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
     Block bufBlock;
     char *bufToWrite = NULL;
     uint32 buf_state;
-    RedoBufferInfo bufferinfo = {0};
+    RedoBufferInfo bufferinfo;
+    errno_t rc = memset_s(&bufferinfo, sizeof(RedoBufferInfo), 0, sizeof(RedoBufferInfo));
+    securec_check(rc, "\0", "\0");
 
     t_thrd.dms_cxt.buf_in_aio = false;
 
