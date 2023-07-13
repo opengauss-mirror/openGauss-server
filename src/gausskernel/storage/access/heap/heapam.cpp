@@ -9729,7 +9729,7 @@ Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, 
     if (relation->rd_id != parentid)
         ereport(ERROR,
                 (errcode(ERRCODE_PARTITION_ERROR),
-                 errmsg("partition %u does not exist on relation \"%s\"", partitionOid,
+                 errmsg("partition %u does not exist on relation \"%s\"", parentid,
                          RelationGetRelationName(relation))));
 
     /*

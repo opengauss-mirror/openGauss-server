@@ -28,7 +28,10 @@ select array_varchar_last(array['1','2']);
 ERROR:  array_varchar_last must be call in procedure
 CONTEXT:  referenced column: array_varchar_last
 select array_varchar_deleteidx(array['1','2'], '3');
-ERROR:  array_varchar_deleteidx must be call in procedure
+ERROR:  function array_varchar_deleteidx(text[], unknown) does not exist
+LINE 1: select array_varchar_deleteidx(array['1','2'], '3');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 CONTEXT:  referenced column: array_varchar_deleteidx
 select array_integer_exists(array[1, 2], 3);
 ERROR:  array_integer_exists must be call in procedure
@@ -46,7 +49,10 @@ select array_integer_last(array[1, 2]);
 ERROR:  array_integer_last must be call in procedure
 CONTEXT:  referenced column: array_integer_last
 select array_integer_deleteidx(array[1, 2], 3);
-ERROR:  array_integer_deleteidx must be call in procedure
+ERROR:  function array_integer_deleteidx(integer[], integer) does not exist
+LINE 1: select array_integer_deleteidx(array[1, 2], 3);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 CONTEXT:  referenced column: array_integer_deleteidx
 -- test array interface count --
 create or replace procedure array_interface_p1()

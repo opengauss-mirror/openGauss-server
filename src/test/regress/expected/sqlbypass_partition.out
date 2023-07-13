@@ -1296,13 +1296,15 @@ reset enable_indexonlyscan;
 --bypass though index only scan
 set enable_indexscan = off;
 explain select col1,col2 from test_bypass_sql_partition where col1=10 and col2=10;
-                                                         QUERY PLAN                                                          
------------------------------------------------------------------------------------------------------------------------------
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
  [Bypass]
- Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=8)
-   Index Cond: ((col1 = 10) AND (col2 = 10))
-   Selected Partitions:  2
-(4 rows)
+ Partition Iterator  (cost=0.00..8.27 rows=1 width=8)
+   Iterations: 1
+   ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=8)
+         Index Cond: ((col1 = 10) AND (col2 = 10))
+         Selected Partitions:  2
+(6 rows)
 
 select col1,col2 from test_bypass_sql_partition where col1=10 and col2=10;
  col1 | col2 
@@ -1311,14 +1313,16 @@ select col1,col2 from test_bypass_sql_partition where col1=10 and col2=10;
 (1 row)
 
 explain select col1,col2 from test_bypass_sql_partition where col1=10 and col2=10 order by col1 limit 1;
-                                                            QUERY PLAN                                                             
------------------------------------------------------------------------------------------------------------------------------------
+                                                               QUERY PLAN                                                                
+-----------------------------------------------------------------------------------------------------------------------------------------
  [Bypass]
  Limit  (cost=0.00..8.27 rows=1 width=8)
-   ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=8)
-         Index Cond: ((col1 = 10) AND (col2 = 10))
-         Selected Partitions:  2
-(5 rows)
+   ->  Partition Iterator  (cost=0.00..8.27 rows=1 width=8)
+         Iterations: 1
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=8)
+               Index Cond: ((col1 = 10) AND (col2 = 10))
+               Selected Partitions:  2
+(7 rows)
 
 select col1,col2 from test_bypass_sql_partition where col1=10 and col2=10 order by col1 limit 1;
  col1 | col2 
@@ -1327,14 +1331,16 @@ select col1,col2 from test_bypass_sql_partition where col1=10 and col2=10 order 
 (1 row)
 
 explain select col1,col2 from test_bypass_sql_partition where col1=10 and col2=10 order by col1 limit 0;
-                                                            QUERY PLAN                                                             
------------------------------------------------------------------------------------------------------------------------------------
+                                                               QUERY PLAN                                                                
+-----------------------------------------------------------------------------------------------------------------------------------------
  [Bypass]
  Limit  (cost=0.00..8.27 rows=1 width=8)
-   ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=8)
-         Index Cond: ((col1 = 10) AND (col2 = 10))
-         Selected Partitions:  2
-(5 rows)
+   ->  Partition Iterator  (cost=0.00..8.27 rows=1 width=8)
+         Iterations: 1
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=8)
+               Index Cond: ((col1 = 10) AND (col2 = 10))
+               Selected Partitions:  2
+(7 rows)
 
 select col1,col2 from test_bypass_sql_partition where col1=10 and col2=10 order by col1 limit 0;
  col1 | col2 
@@ -1885,13 +1891,15 @@ insert into test_bypass_sql_partition select generate_series(0,79,1), generate_s
 --bypass though index only scan
 set enable_indexscan = off;
 explain select col1,col2 from  test_bypass_sql_partition where col1=0 order by col2;
-                                                          QUERY PLAN                                                          
-------------------------------------------------------------------------------------------------------------------------------
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
  [Bypass]
- Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=8)
-   Index Cond: (col1 = 0)
-   Selected Partitions:  1
-(4 rows)
+ Partition Iterator  (cost=0.00..24.36 rows=6 width=8)
+   Iterations: 1
+   ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=8)
+         Index Cond: (col1 = 0)
+         Selected Partitions:  1
+(6 rows)
 
 select col1,col2 from  test_bypass_sql_partition where col1=0 order by col2;
  col1 | col2 
@@ -1910,14 +1918,16 @@ select col1,col2 from  test_bypass_sql_partition where col1=0 order by col2;
 (11 rows)
 
 explain select col1,col2 from test_bypass_sql_partition where col1>0 and col1<10 order by col1 limit 10;
-                                                             QUERY PLAN                                                             
-------------------------------------------------------------------------------------------------------------------------------------
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
  [Bypass]
  Limit  (cost=0.00..24.37 rows=6 width=8)
-   ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.37 rows=6 width=8)
-         Index Cond: ((col1 > 0) AND (col1 < 10))
-         Selected Partitions:  1
-(5 rows)
+   ->  Partition Iterator  (cost=0.00..24.37 rows=6 width=8)
+         Iterations: 1
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.37 rows=6 width=8)
+               Index Cond: ((col1 > 0) AND (col1 < 10))
+               Selected Partitions:  1
+(7 rows)
 
 select col1,col2 from test_bypass_sql_partition where col1>0 and col1<10 order by col1 limit 10;
  col1 | col2 
@@ -1935,14 +1945,16 @@ select col1,col2 from test_bypass_sql_partition where col1>0 and col1<10 order b
 (10 rows)
 
 explain select col2,col1 from test_bypass_sql_partition where col1>0 and col1<10 order by col1 limit 3;
-                                                             QUERY PLAN                                                             
-------------------------------------------------------------------------------------------------------------------------------------
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
  [Bypass]
  Limit  (cost=0.00..12.19 rows=3 width=8)
-   ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.37 rows=6 width=8)
-         Index Cond: ((col1 > 0) AND (col1 < 10))
-         Selected Partitions:  1
-(5 rows)
+   ->  Partition Iterator  (cost=0.00..24.37 rows=6 width=8)
+         Iterations: 1
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.37 rows=6 width=8)
+               Index Cond: ((col1 > 0) AND (col1 < 10))
+               Selected Partitions:  1
+(7 rows)
 
 select col2,col1 from test_bypass_sql_partition where col1>0 and col1<10 order by col1 limit 3;
  col2 | col1 
@@ -1953,14 +1965,16 @@ select col2,col1 from test_bypass_sql_partition where col1>0 and col1<10 order b
 (3 rows)
 
 explain select col1,col2 from test_bypass_sql_partition where col1>=0 and col1<10 and col2>0 order by col1 limit 3;
-                                                             QUERY PLAN                                                             
-------------------------------------------------------------------------------------------------------------------------------------
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
  [Bypass]
  Limit  (cost=0.00..12.35 rows=2 width=8)
-   ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..12.35 rows=2 width=8)
-         Index Cond: ((col1 >= 0) AND (col1 < 10) AND (col2 > 0))
-         Selected Partitions:  1
-(5 rows)
+   ->  Partition Iterator  (cost=0.00..12.35 rows=2 width=8)
+         Iterations: 1
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..12.35 rows=2 width=8)
+               Index Cond: ((col1 >= 0) AND (col1 < 10) AND (col2 > 0))
+               Selected Partitions:  1
+(7 rows)
 
 select col1,col2 from test_bypass_sql_partition where col1>=0 and col1<10 and col2>0 order by col1 limit 3;
  col1 | col2 
@@ -1971,14 +1985,16 @@ select col1,col2 from test_bypass_sql_partition where col1>=0 and col1<10 and co
 (3 rows)
 
 explain select col1,col2 from test_bypass_sql_partition where col1>=0 and col1<10 and col2>0 order by col1 limit null;
-                                                             QUERY PLAN                                                             
-------------------------------------------------------------------------------------------------------------------------------------
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
  [Bypass]
  Limit  (cost=0.00..12.35 rows=2 width=8)
-   ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..12.35 rows=2 width=8)
-         Index Cond: ((col1 >= 0) AND (col1 < 10) AND (col2 > 0))
-         Selected Partitions:  1
-(5 rows)
+   ->  Partition Iterator  (cost=0.00..12.35 rows=2 width=8)
+         Iterations: 1
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..12.35 rows=2 width=8)
+               Index Cond: ((col1 >= 0) AND (col1 < 10) AND (col2 > 0))
+               Selected Partitions:  1
+(7 rows)
 
 select col1,col2 from test_bypass_sql_partition where col1>=0 and col1<10 and col2>0 order by col1 limit null;
  col1 | col2 
