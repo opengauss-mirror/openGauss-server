@@ -18350,12 +18350,19 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 newStrategy);
             for (i = 1; i <= partkeynum; i++) {
-                if (i == partkeynum)
-                    appendPQExpBuffer(
-                        partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
-                else
-                    appendPQExpBuffer(
-                        partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                if (partkeyexprIsNull) {
+                    if (i == partkeynum)
+                        appendPQExpBuffer(
+                            partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                    else
+                        appendPQExpBuffer(
+                            partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                } else {
+                    if (i == partkeynum)
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC", i);
+                    else
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d], ", i);
+                }
             }
         } else {
             appendPQExpBuffer(partitionq,
