@@ -602,6 +602,8 @@ void StreamNodeGroup::cancelStreamThread()
  */
 void StreamNodeGroup::quitSyncPoint()
 {
+    int timeout = 30;
+
     if (StreamThreadAmI() == true) {
         StreamPair* pair = NULL;
         AutoMutexLock streamLock(&m_mutex);
@@ -630,8 +632,13 @@ void StreamNodeGroup::quitSyncPoint()
         if (m_quitWaitCond <= 0)
             pthread_cond_broadcast(&m_cond);
         else {
-            while (m_quitWaitCond > 0)
-                pthread_cond_wait(&m_cond, &m_mutex);
+            struct timespec ts;
+            while (m_quitWaitCond > 0) {
+                clock_gettime(CLOCK_REALTIME, &ts);
+                ts.tv_sec += timeout;
+                ts.tv_nsec = 0;
+                pthread_cond_timedwait(&m_cond, &m_mutex, &ts);
+            }
         }
         streamLock.unLock();
     } else if (StreamTopConsumerAmI() == true) {
@@ -680,8 +687,13 @@ void StreamNodeGroup::quitSyncPoint()
                  */
                 CHECK_FOR_INTERRUPTS();
 
-                while (m_quitWaitCond > 0)
-                    pthread_cond_wait(&m_cond, &m_mutex);
+                struct timespec ts;
+                while (m_quitWaitCond > 0) {
+                    clock_gettime(CLOCK_REALTIME, &ts);
+                    ts.tv_sec += timeout;
+                    ts.tv_nsec = 0;
+                    pthread_cond_timedwait(&m_cond, &m_mutex, &ts);
+                }
 
                 t_thrd.int_cxt.ImmediateInterruptOK = false;
                 u_sess->stream_cxt.in_waiting_quit = false;
