@@ -412,7 +412,7 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
         libpqsw_check_savepoint(query_list, &(redirect_manager->state.have_savepoint));
         libpqsw_set_transaction(true);
         need_redirect = true;
-    } else if (libpqsw_redirect() || libpqsw_end_command(commandTag)) {
+    } else if (libpqsw_redirect()) {
         need_redirect = true;
     } else {
         if (strcmp(commandTag, "SET") == 0) {
@@ -931,7 +931,7 @@ bool libpqsw_only_localrun()
 */
 bool libpqsw_process_message(int qtype, StringInfo msg)
 {
-    if (IsAbortedTransactionBlockState()) {
+    if (IsAbortedTransactionBlockState() || u_sess->proc_cxt.clientIsCMAgent) {
         return false;
     }
 
