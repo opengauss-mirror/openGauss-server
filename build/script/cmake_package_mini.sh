@@ -53,7 +53,7 @@ else
 fi
 
 show_package=false
-gcc_version="7.3.0"
+gcc_version="10.3.1"
 
 ##add platform architecture information
 cpus_num=$(grep -w processor /proc/cpuinfo|wc -l)
@@ -269,9 +269,9 @@ done
 
 read_mpp_version
 
-if [ "$gcc_version" = "7.3.0" ]; then
+if [ "$gcc_version" == "7.3.0" ]; then
     gcc_version=${gcc_version:0:3}
-elif [ "$gcc_version" = "10.3.0" ] || [ "$gcc_version" = "10.3.1" ]; then
+elif [ "$gcc_version" == "10.3.0" ] || [ "$gcc_version" == "10.3.1" ]; then
     gcc_version=${gcc_version:0:4}
 else
     echo "Unknown gcc version $gcc_version"

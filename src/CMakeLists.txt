@@ -242,7 +242,7 @@ endif()
 if("${ENABLE_MOT}" STREQUAL "ON")
 install(DIRECTORY ${MASSTREE_LIB_PATH} DESTINATION .)
 install(CODE "execute_process(
-     COMMAND cp ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libatomic.so.1.2.0 ${prefix_home}/lib/libatomic.so.1.2.0
+     COMMAND cp ${GCC_LIB_PATH}/lib64/libatomic.so.1.2.0 ${prefix_home}/lib/libatomic.so.1.2.0
      COMMAND ln -fs libatomic.so.1.2.0 libatomic.so
      COMMAND ln -fs libatomic.so.1.2.0 libatomic.so.1
      WORKING_DIRECTORY ${prefix_home}/lib)"
@@ -252,10 +252,10 @@ install(CODE "message(\"-- Created symlink: libatomic.so.1 -> libatomic.so.1.2.0
 endif()
 
 install(FILES ${SECUREDYNAMICLIB_HOME}/libsecurec.so DESTINATION lib)
-install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgcc_s.so.1 DESTINATION lib)
-install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgomp.so DESTINATION lib)
-install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgomp.so.1 DESTINATION lib)
-install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgomp.so.1.0.0 DESTINATION lib)
+install(FILES ${GCC_LIB_PATH}/lib64/libgcc_s.so.1 DESTINATION lib)
+install(FILES ${GCC_LIB_PATH}/lib64/libgomp.so DESTINATION lib)
+install(FILES ${GCC_LIB_PATH}/lib64/libgomp.so.1 DESTINATION lib)
+install(FILES ${GCC_LIB_PATH}/lib64/libgomp.so.1.0.0 DESTINATION lib)
 install(FILES ${XGBOOST_LIB_PATH}/libxgboost.so DESTINATION lib)
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     install(FILES ${PLJAVA_HOME}/lib/libpljava.so DESTINATION lib)
@@ -279,7 +279,7 @@ install(DIRECTORY ${GCC_LIB_PATH}/lib64/ DESTINATION lib
     FILES_MATCHING PATTERN "libgomp.so*")
 
 install(CODE "execute_process(
-     COMMAND cp ${GCC_LIB_PATH}/lib64/libstdc++.so.6.0.24 ${prefix_home}/lib/libstdc++.so.6
+     COMMAND cp ${GCC_LIB_PATH}/lib64/libstdc++.so.6.0.${LIBSTD_SUB_VERSION} ${prefix_home}/lib/libstdc++.so.6
      WORKING_DIRECTORY ${prefix_home}/lib)"
 )
 
