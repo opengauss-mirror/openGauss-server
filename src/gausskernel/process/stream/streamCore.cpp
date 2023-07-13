@@ -621,10 +621,16 @@ void StreamNodeGroup::quitSyncPoint()
         Assert(m_quitWaitCond >= 0);
         Assert(pair->expectThreadNum >= pair->createThreadNum);
 
-        if (m_quitWaitCond == 0)
+        if (m_quitWaitCond < 0) {
+            ereport(WARNING, (errmsg("Stream sub thread m_quitWaitCond invalid: %d. "
+                    "To get backtrace detail, set backtrace_min_messages=warning.", m_quitWaitCond)));
+            ereport(LOG, (errmsg("Stream info, smp id: %u, m_streamEnter: %d, ThreadId: %u, m_createThreadNum: %d, m_size: %d", 
+                u_sess->stream_cxt.smp_id, m_streamEnter, (u_sess->stream_cxt.producer_obj)->getThreadId(), m_createThreadNum, m_size)));
+        }
+        if (m_quitWaitCond <= 0)
             pthread_cond_broadcast(&m_cond);
         else {
-            while (m_quitWaitCond != 0)
+            while (m_quitWaitCond > 0)
                 pthread_cond_wait(&m_cond, &m_mutex);
         }
         streamLock.unLock();
@@ -640,7 +646,13 @@ void StreamNodeGroup::quitSyncPoint()
             Assert(m_quitWaitCond >= 0);
             Assert(m_size >= m_createThreadNum);
 
-            if (m_quitWaitCond == 0)
+            if (m_quitWaitCond < 0) {
+                ereport(WARNING, (errmsg("Stream top consumer thread m_quitWaitCond invalid: %d. "
+                    "To get backtrace detail, set backtrace_min_messages=warning.", m_quitWaitCond)));
+                ereport(LOG, (errmsg("Stream info, m_streamEnter: %d, m_createThreadNum: %d, m_size: %d", 
+                    m_streamEnter, m_createThreadNum, m_size)));
+            }
+            if (m_quitWaitCond <= 0)
                 pthread_cond_broadcast(&m_cond);
             else {
                 /*
@@ -668,7 +680,7 @@ void StreamNodeGroup::quitSyncPoint()
                  */
                 CHECK_FOR_INTERRUPTS();
 
-                while (m_quitWaitCond != 0)
+                while (m_quitWaitCond > 0)
                     pthread_cond_wait(&m_cond, &m_mutex);
 
                 t_thrd.int_cxt.ImmediateInterruptOK = false;
