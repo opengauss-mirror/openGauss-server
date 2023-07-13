@@ -471,6 +471,9 @@ private:
     /* A flag to indicate stream enter the quit point. */
     volatile int m_streamEnter;
 
+    /* A counter to indicate stream enter the quit point. */
+    volatile int m_streamEnterCount;
+
     /* Mutex and condition waiting for all thread in the node group is complete. */
     pthread_mutex_t m_mutex;
 
