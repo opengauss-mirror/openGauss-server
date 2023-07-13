@@ -2716,7 +2716,7 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
 
                     if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
                         ClearTxnInfoForSSLibpqsw();
-                        if (libpqsw_get_transaction()) {
+                        if (libpqsw_get_transaction() && !libpqsw_is_end()) {
                             libpqsw_set_transaction(false);
                         }
                     }
@@ -2829,7 +2829,7 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
 
                     if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
                         ClearTxnInfoForSSLibpqsw();
-                        if (libpqsw_get_transaction()) {
+                        if (libpqsw_get_transaction() && !libpqsw_is_end()) {
                             libpqsw_set_transaction(false);
                         }
                     }
