@@ -280,6 +280,7 @@ int main(int argc, char* argv[])
     int display_id;
     int ss_nodeid = MIN_INSTANCEID;
     off_t ControlFileSize;
+    char* endstr = nullptr;
 
     static struct option long_options[] = {{"enable-dss", no_argument, NULL, 1},
         {"socketpath", required_argument, NULL, 2},
@@ -308,12 +309,14 @@ int main(int argc, char* argv[])
         switch (option_value) {
 #ifndef ENABLE_LITE_MODE
             case 'I':
-                if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > REFORMER_CTL_INSTANCEID) {
-                    fprintf(stderr, _("%s: unexpected node id specified, valid range is %d - %d\n"),
-                            progname, MIN_INSTANCEID, REFORMER_CTL_INSTANCEID);
+                ss_nodeid = strtol(optarg, &endstr, 10);
+                if ((endstr != nullptr && endstr[0] != '\0') || ss_nodeid < MIN_INSTANCEID ||
+                     ss_nodeid > REFORMER_CTL_INSTANCEID) {
+                    fprintf(stderr, _("%s: unexpected node id specified, "
+                        "the instance-id should be an integer in the range of %d - %d\n"),
+                        progname, MIN_INSTANCEID, REFORMER_CTL_INSTANCEID);
                     exit_safely(1);
                 }
-                ss_nodeid = atoi(optarg);
                 display_all = false;
                 break;
             case 1:
