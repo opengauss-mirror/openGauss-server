@@ -8406,6 +8406,7 @@ char* scan_dir(DIR* dir, const char* dirpath, const char* pattern, long* filesiz
 bool StrToInt32(const char* s, int *val)
 {
     /* set val to zero */
+    int64 _val = 0;
     *val = 0;
     int base = 10;
     const char* ptr = s;
@@ -8414,11 +8415,12 @@ bool StrToInt32(const char* s, int *val)
         if (isdigit((unsigned char)*ptr) == 0)
             return false;
         int8 digit = (*ptr++ - '0');
-        *val = *val * base + digit;
-        if (*val > PG_INT32_MAX || *val < PG_INT32_MIN) {
+        _val = _val * base + digit;
+        if (_val > PG_INT32_MAX || _val < PG_INT32_MIN) {
             return false;
         }
     }
+    *val = (int)_val;
     return true;
 }
 

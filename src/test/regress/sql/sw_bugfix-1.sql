@@ -485,6 +485,39 @@ select * from (select 'test111' col from sys_dummy) connect by rownum < length(t
 --test find siblings target name bug
 select test1.a, cast (min(1) OVER (PARTITION BY test1.a ORDER BY test1.b) as integer) from test1 where test1.b is NULL connect by exists(select test2.id from test2 where false limit 40) order siblings by test1.ctid;
 
+--test swcb func with aggregate
+create table test3(id text, name text, parentid text);
+insert into test3 values('001', 'root', '0');
+insert into test3 values('001001', 'a', '001');
+insert into test3 values('001002', 'b', '001');
+insert into test3 values('001003', 'c', '001');
+insert into test3 values('001001001', 'a1', '001001');
+insert into test3 values('001001002', 'a2', '001001');
+insert into test3 values('001001003', 'a3', '001001');
+insert into test3 values('001001003001', 'a31', '001001003');
+insert into test3 values('001002001', 'b1', '001002');
+insert into test3 values('001002002', 'b2', '001002');
+insert into test3 values('001003001', 'c1', '001003');
+
+explain(verbose on, costs off) select sys_connect_by_path(min(name || 'hahaha'), '/') from test3 connect by parentid = prior id;
+select sys_connect_by_path(min(name || 'hahaha'), '/') from test3 connect by parentid = prior id;
+
+explain(verbose on, costs off) select max(sys_connect_by_path(name, '/')) from test3 connect by parentid = prior id;
+select max(sys_connect_by_path(name, '/')) from test3 connect by parentid = prior id;
+
+explain(verbose on, costs off) select sys_connect_by_path(name, '/') from test3 connect by parentid = prior id group by 1;
+select sys_connect_by_path(name, '/') from test3 connect by parentid = prior id group by 1;
+
+explain select max(name) from test3 where sys_connect_by_path(name,'/') > 'dasdsa' connect by parentid = prior id;
+select max(name) from test3 where sys_connect_by_path(name,'/') > 'dasdsa' connect by parentid = prior id;
+
+explain select max(name) from test3 connect by parentid = prior id order by sys_connect_by_path(name,'/');
+select max(name) from test3 connect by parentid = prior id order by sys_connect_by_path(name,'/');
+
+explain select max(name) from test3 connect by parentid = prior id group by sys_connect_by_path(name,'/');
+select max(name) from test3 connect by parentid = prior id group by sys_connect_by_path(name,'/');
+
+drop table test3;
 drop table test2;
 drop table test1;
 

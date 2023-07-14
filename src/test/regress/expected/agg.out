@@ -5,21 +5,23 @@ insert into t1 values(1,2);
 set enable_hashagg = off;
 --force hash agg, if used sort agg will report error.
 select a , count(distinct  generate_series(1,2)) from t1 group by a;
-ERROR:  set-valued function called in context when calculate targetlist that cannot accept a set
+ERROR:  aggregate function calls cannot contain set-returning function calls
+LINE 1: select a , count(distinct  generate_series(1,2)) from t1 gro...
+                                   ^
+CONTEXT:  referenced column: count
 explain (verbose, costs off)
 select a , count(distinct  generate_series(1,2)) from t1 group by a;
-                     QUERY PLAN                     
-----------------------------------------------------
- GroupAggregate
-   Output: a, count(DISTINCT generate_series(1, 2))
-   Group By Key: t1.a
-   ->  Sort
-         Output: a
-         Sort Key: t1.a
-         ->  Seq Scan on aggregate.t1
-               Output: a
-(8 rows)
-
+ERROR:  aggregate function calls cannot contain set-returning function calls
+LINE 2: select a , count(distinct  generate_series(1,2)) from t1 gro...
+                                   ^
+CONTEXT:  referenced column: count
+set query_dop = 2;
+select a , count(distinct  generate_series(1,2)) from t1 group by a;
+ERROR:  aggregate function calls cannot contain set-returning function calls
+LINE 1: select a , count(distinct  generate_series(1,2)) from t1 gro...
+                                   ^
+CONTEXT:  referenced column: count
+reset query_dop;
 --test const-false agg
 CREATE TABLE bmsql_item (
 i_id int4 NoT NULL,i_name varchar(24),i_price numeric(5,2),i_data varchar( 50),i_im_id int4,

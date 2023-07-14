@@ -4598,6 +4598,7 @@ static void ObsArchSighupHandler()
     }
 }
 
+#define SIGHUP_TRY_COUNT (3)
 /*
  * SIGHUP -- reread config files, and tell children to do same
  */
@@ -4622,12 +4623,29 @@ static void SIGHUP_handler(SIGNAL_ARGS)
          * Get two locks for config file before making changes, please refer to 
          * AlterSystemSetConfigFile() in guc.cpp for detailed explanations.
          */
-        if (get_file_lock(gucconf_lock_file, &filelock) != CODE_OK || 
-            !LWLockConditionalAcquire(ConfigFileLock, LW_EXCLUSIVE)) {
+        if (get_file_lock(gucconf_lock_file, &filelock) != CODE_OK) {
             ereport(WARNING, (errmsg("the last sigup signal is processing,get file lock failed.")));
             (void)PG_SETMASK(&t_thrd.libpq_cxt.UnBlockSig);
             errno = save_errno;
             return;
+        }
+        bool get_locked = false;
+        int j = 0;
+        for (; j < SIGHUP_TRY_COUNT; j ++) {
+            if(LWLockConditionalAcquire(ConfigFileLock, LW_EXCLUSIVE)) {
+                get_locked = true;
+                break;
+            }
+            usleep(1000); //wait 1ms per time
+        }
+        if (!get_locked) {
+            ereport(WARNING, (errmsg("the last sigup signal is processing,get file thread lock failed.")));
+            (void)PG_SETMASK(&t_thrd.libpq_cxt.UnBlockSig);
+            errno = save_errno;
+            return;
+        }
+        if (j != 0) {
+            ereport(LOG, (errmsg("we try get lock times:%d", j)));
         }
 
         ProcessConfigFile(PGC_SIGHUP);
@@ -13354,4 +13372,3 @@ void ShutdownForDRSwitchover(void)
     }
     ereport(LOG, (errmsg("Close All Sessions and shutdown AutoVacuum for DR switchover.")));
 }
-

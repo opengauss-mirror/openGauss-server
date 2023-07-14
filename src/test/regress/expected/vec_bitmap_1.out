@@ -16,16 +16,15 @@ analyze vector_bitmap_table_02;
 ----
 explain (verbose on, costs off)
 select count(1) from vector_bitmap_table_01; 
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
  Row Adapter
    Output: (count(1))
    ->  Vector Aggregate
          Output: count(1)
-         ->  CStore Index Heap Scan on vector_bitmap_engine.vector_bitmap_table_01
+--?         ->  CStore Index Only Scan using bitmap_01_.* on vector_bitmap_engine.vector_bitmap_table_01
                Output: 'Dummy'
---?               ->  CStore Index Ctid Scan on bitmap_01_.*
-(7 rows)
+(6 rows)
 
 select count(1) from vector_bitmap_table_01; 
  count 

@@ -512,6 +512,7 @@ bool hist_table_record_internal(Oid hist_oid, const uint64 *hash_ins, const uint
 
     HeapTuple tuple = heap_form_tuple(hist_desc, values, nulls);
     simple_heap_insert(hist_rel, tuple);
+    CatalogUpdateIndexes(hist_rel,tuple);
     heap_freetuple(tuple);
     heap_close(hist_rel, RowExclusiveLock);
 

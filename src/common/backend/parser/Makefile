@@ -49,9 +49,11 @@ gram.cpp: gram.y
 ifdef BISON
 	$(BISON) -d $(BISONFLAGS) -o $@ $<
 	sed -i 's/YY_NULL nullptr/YY_NULL 0/g' gram.cpp
+	sed -i 's/\# define YYINITDEPTH .*/\# define YYINITDEPTH 1000/g' gram.cpp
 else
 	@$(missing) bison $< $@
 	sed -i 's/YY_NULL nullptr/YY_NULL 0/g' gram.cpp
+	sed -i 's/\# define YYINITDEPTH .*/\# define YYINITDEPTH 1000/g' gram.cpp
 endif
 
 scan.inc: scan.l

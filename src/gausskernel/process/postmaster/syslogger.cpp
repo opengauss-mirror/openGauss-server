@@ -135,7 +135,7 @@ static FILE* logfile_open(const char* filename, const char* mode, bool allow_err
 #ifdef WIN32
 static unsigned int __stdcall pipeThread(void* arg);
 #endif
-static void logfile_rotate(bool time_based_rotation, int size_rotation_for);
+static void logfile_rotate(bool time_based_rotation, int size_rotation_for, bool time_span_variation);
 static char* logfile_getname(pg_time_t timestamp, const char* suffix, const char* logdir, const char* filename);
 static void set_next_rotation_time(void);
 static void sigHupHandler(SIGNAL_ARGS);
@@ -311,6 +311,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
     /* main worker loop */
     for (;;) {
         bool time_based_rotation = false;
+        bool time_span_variation = false;
         int size_rotation_for = 0;
         long cur_timeout;
         int cur_flags;
@@ -386,6 +387,18 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
             now = (pg_time_t)time(NULL);
             if (now >= t_thrd.logger.next_rotation_time) {
                 t_thrd.logger.rotation_requested = time_based_rotation = true;
+                if (now - t_thrd.logger.next_rotation_time >= 
+                    u_sess->attr.attr_common.Log_RotationAge * SECS_PER_MINUTE) {
+                    time_span_variation = true;
+                }
+                foreach_logctl(logctl) {
+                    /* share the same rotation age */
+                    logctl->rotation_requested = true;
+                }
+            } else if (t_thrd.logger.next_rotation_time - now >= 
+                u_sess->attr.attr_common.Log_RotationAge * SECS_PER_MINUTE) {
+                t_thrd.logger.rotation_requested = time_based_rotation = true;
+                time_span_variation = true;
                 foreach_logctl(logctl) {
                     /* share the same rotation age */
                     logctl->rotation_requested = true;
@@ -438,7 +451,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
             slow_query_logfile_rotate(time_based_rotation, size_rotation_for);
             
             /* only last one can recalculate next_rotation_time */
-            logfile_rotate(time_based_rotation, size_rotation_for);
+            logfile_rotate(time_based_rotation, size_rotation_for, time_span_variation);
         }
 
         /*
@@ -1161,12 +1174,13 @@ static FILE* logfile_open(const char* filename, const char* mode, bool allow_err
 /*
  * perform logfile rotation
  */
-static void logfile_rotate(bool time_based_rotation, int size_rotation_for)
+static void logfile_rotate(bool time_based_rotation, int size_rotation_for, bool time_span_variation)
 {
     char* filename = NULL;
     char* csvfilename = NULL;
     pg_time_t fntime;
     FILE* fh = NULL;
+    bool is_ow_oldlog = false;
 
     t_thrd.logger.rotation_requested = false;
 
@@ -1175,7 +1189,7 @@ static void logfile_rotate(bool time_based_rotation, int size_rotation_for)
      * the planned rotation time, not current time, to avoid "slippage" in the
      * file name when we don't do the rotation immediately.
      */
-    if (time_based_rotation)
+    if (time_based_rotation && !time_span_variation)
         fntime = t_thrd.logger.next_rotation_time;
     else
         fntime = time(NULL);
@@ -1195,11 +1209,17 @@ static void logfile_rotate(bool time_based_rotation, int size_rotation_for)
      */
     if (time_based_rotation || (size_rotation_for & LOG_DESTINATION_STDERR)) {
         if (u_sess->attr.attr_common.Log_truncate_on_rotation && time_based_rotation &&
-            t_thrd.logger.last_file_name != NULL && strcmp(filename, t_thrd.logger.last_file_name) != 0)
-            fh = logfile_open(filename, "w", true);
-        else
+            t_thrd.logger.last_file_name != NULL) {
+            if (strcmp(filename, t_thrd.logger.last_file_name) != 0) {
+                fh = logfile_open(filename, "w", true);
+            } else {
+                fclose(t_thrd.logger.syslogFile);
+                fh = logfile_open(filename, "w", true);
+                is_ow_oldlog = true;
+            }
+        } else
             fh = logfile_open(filename, "a", true);
-
+ 
         if (fh == NULL) {
             /*
              * ENFILE/EMFILE are not too surprising on a busy system; just
@@ -1219,7 +1239,8 @@ static void logfile_rotate(bool time_based_rotation, int size_rotation_for)
             return;
         }
 
-        fclose(t_thrd.logger.syslogFile);
+        if (!is_ow_oldlog)
+            fclose(t_thrd.logger.syslogFile);
         t_thrd.logger.syslogFile = fh;
 
         /* instead of pfree'ing filename, remember it for next time */
@@ -1230,12 +1251,19 @@ static void logfile_rotate(bool time_based_rotation, int size_rotation_for)
     }
 
     /* Same as above, but for csv file. */
+    is_ow_oldlog = false;
     if (t_thrd.logger.csvlogFile != NULL && (time_based_rotation || (size_rotation_for & LOG_DESTINATION_CSVLOG)) &&
         ((unsigned int)t_thrd.log_cxt.Log_destination & LOG_DESTINATION_CSVLOG)) {
         if (u_sess->attr.attr_common.Log_truncate_on_rotation && time_based_rotation &&
-            t_thrd.logger.last_csv_file_name != NULL && strcmp(csvfilename, t_thrd.logger.last_csv_file_name) != 0)
-            fh = logfile_open(csvfilename, "w", true);
-        else
+            t_thrd.logger.last_csv_file_name != NULL) {
+            if (strcmp(csvfilename, t_thrd.logger.last_csv_file_name) != 0) {
+                fh = logfile_open(csvfilename, "w", true);
+            } else {
+                fclose(t_thrd.logger.csvlogFile);
+                fh = logfile_open(csvfilename, "w", true);
+                is_ow_oldlog = true;
+            }
+        } else
             fh = logfile_open(csvfilename, "a", true);
 
         if (fh == NULL) {
@@ -1257,7 +1285,8 @@ static void logfile_rotate(bool time_based_rotation, int size_rotation_for)
             return;
         }
 
-        fclose(t_thrd.logger.csvlogFile);
+        if (!is_ow_oldlog)
+            fclose(t_thrd.logger.csvlogFile);
         t_thrd.logger.csvlogFile = fh;
 
         /* instead of pfree'ing filename, remember it for next time */

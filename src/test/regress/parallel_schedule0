@@ -8,13 +8,16 @@
 
 # This test case is used to monitor GUC parameter information.
 # If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
-test: recovery_2pc_tools 
-test: sqlbypass_partition
+test: recovery_2pc_tools
 
 test: auto_explain auto_explain_threshold opt_relopt_tuples
 
 test: sqlpatch_base
 test: sqlpatch_func
+
+#wlm
+test: workload_manager
+
 test: smp
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
@@ -32,7 +35,7 @@ test: out_param_func out_param_func1
 # test AI4DB
 #test: plpgsql_override_out
 test: plpgsql_sql_with_proc_keyword
-test: plsql_show_all_error
+test: plsql_show_all_error b_pg_plsql_show_all_error
 test: pldeveloper_gs_source
 test: index_advisor
 test: pl_debugger_server pl_debugger_client
@@ -52,8 +55,8 @@ test: hw_pwd_encryption_sm3
 test: sync_standy_names
 
 # test subpartition
-test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size
-test: hw_subpartition_vacuum_partition
+test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size hw_partition_size hw_cstore_partition_size
+test: hw_subpartition_vacuum_partition hw_subpartition_tablespace_global
 test: gs_dump_subpartition
 test: partition_dml_operations partition_minmax partition_pruning
 test: partition_param_path
@@ -236,6 +239,7 @@ test: single_node_triggers
 
 # Synonym tests
 #test: single_node_synonym
+test: synonym_conflict_test
 
 # unsupported view tests
 test: single_node_unsupported_view
@@ -248,6 +252,7 @@ test: single_node_produce_commit_rollback
 test: single_node_function_commit_rollback
 
 test: instr_unique_sql
+test: plan_table_for_anonymous_block
 test: shutdown
 
 # List/Hash table exchange
@@ -635,7 +640,7 @@ test: bypass_preparedexecute_support
 test: sqlbypass_partition
 #test: sqlbypass_partition_prepare
 
-test: string_digit_to_numeric
+test: string_digit_to_numeric tablesample_3
 # Another group of parallel tests
 # ----------
 #test: collate tablesample tablesample_1 tablesample_2 matview
@@ -883,7 +888,6 @@ test: rule_test
 #delete limit
 test: delete_limit
 
-
 # --------------------------
 # DB4AI
 # --------------------------
@@ -940,6 +944,8 @@ test: row_compression/twophase
 test: component_view_enhancements 
 test: single_node_user_mapping
 
+test: pldebugger_shutdown
+
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
 test: publication
 test: subscription
@@ -959,3 +965,6 @@ test: builtin_func_13
 # test for slow_sql
 test: slow_sql
 test: alter_ctable_compress
+
+# test: fulljoin_rewrite
+test: prevent_table_in_sys_schema

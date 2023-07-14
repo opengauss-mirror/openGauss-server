@@ -734,10 +734,12 @@ static void ScanExpireJobs()
             continue;
         }
 
+#ifdef ENABLE_MULTIPLE_NODES
         /* handle cases - ALL_NODE/ALL_CN/ALL_DN/CCN specific node */
         if (!IsExecuteOnCurrentNode(pg_job->node_name.data)) {
             continue;
         }
+#endif
 
         if (false == DatumGetBool(DirectFunctionCall2(timestamp_gt, curtime, values[Anum_pg_job_next_run_date - 1]))) {
             /* skip since it doesnot reach book time */

@@ -384,7 +384,7 @@ void OpFusion::auditRecord()
     }
 }
 
-bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted)
+bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted, long max_rows)
 {
 #ifdef ENABLE_MOT
     if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_cacheplan &&
@@ -436,6 +436,11 @@ bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted)
         if (isQueryCompleted)
             *isQueryCompleted = false;
         u_sess->xact_cxt.pbe_execute_complete = false;
+        /* when only set maxrows, we don't need to set pbe_execute_complete flag. */
+        if ((portal_name == NULL || portal_name[0] == '\0') &&
+            max_rows != FETCH_ALL && IsConnFromApp()) {
+            u_sess->xact_cxt.pbe_execute_complete = true;
+        }
         if (ENABLE_GPC)
             Assert(locateFusion(m_local.m_portalName) != NULL);
     }
@@ -504,7 +509,7 @@ void OpFusion::fusionExecute(StringInfo msg, char *completionTag, bool isTopLeve
 #endif
         u_sess->exec_cxt.need_track_resource = old_status;
         gstrace_exit(GS_TRC_ID_BypassExecutor);
-        completed = u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name, isQueryCompleted);
+        completed = u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name, isQueryCompleted, max_rows);
         if (completed && u_sess->exec_cxt.CurrentOpFusionObj->IsGlobal()) {
             Assert(ENABLE_GPC);
             tearDown(u_sess->exec_cxt.CurrentOpFusionObj);

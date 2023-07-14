@@ -18,3 +18,7 @@ alter role test_myrole002 rename to temp_myrole;
 reset role;
 drop role test_myrole001;
 drop role test_myrole002;
+
+alter user u1 identified by aswd3456 replace dfg1637484kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkklll;
+alter user u1 ACCOUNT LOCK PASSWORD EXPIRE NEVER                         PASSWORD EXPIRE NEVER ACCOUNT UNLOCK                       ACCOUNT UNLOCK ACCOUNT UNLOCK ACCOUNT UNLOCK;
+alter user u1 lock password expir never lock password expire never lock password expire never lock;

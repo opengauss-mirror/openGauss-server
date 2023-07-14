@@ -1905,15 +1905,10 @@ static inline Datum populate_record_worker(FunctionCallInfo fcinfo, bool have_re
      * calls, assuming the record type doesn't change underneath us.
      */
     my_extra = (RecordIOData *) fcinfo->flinfo->fn_extra;
-    if (my_extra == NULL ||
-        my_extra->ncolumns != ncolumns) {
-        fcinfo->flinfo->fn_extra =
-            MemoryContextAlloc(fcinfo->flinfo->fn_mcxt,
-                               sizeof(RecordIOData) - sizeof(ColumnIOData)
-                               + ncolumns * sizeof(ColumnIOData));
+    if (my_extra == NULL || my_extra->ncolumns != ncolumns) {
+        fcinfo->flinfo->fn_extra = MemoryContextAllocZero(
+            fcinfo->flinfo->fn_mcxt, sizeof(RecordIOData) - sizeof(ColumnIOData) + ncolumns * sizeof(ColumnIOData));
         my_extra = (RecordIOData *) fcinfo->flinfo->fn_extra;
-        my_extra->record_type = InvalidOid;
-        my_extra->record_typmod = 0;
     }
 
     if (have_record_arg && (my_extra->record_type != tupType ||

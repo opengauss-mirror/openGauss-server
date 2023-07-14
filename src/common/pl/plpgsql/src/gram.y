@@ -1594,7 +1594,7 @@ record_attr		: attr_name decl_datatype decl_notnull decl_rec_defval
                     }
 			| attr_name T_REFCURSOR decl_notnull decl_rec_defval
                   {
-                        ereport(errstate,
+                        ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmodule(MOD_PLSQL),
                                 errmsg("ref cursor type nested by record is not supported yet."),
@@ -6829,6 +6829,9 @@ static inline void init_array_parse_context(ArrayParseContext *context)
  */
 static inline void push_array_parse_stack(ArrayParseContext *context, int parenlevel, int state)
 {
+    if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+        return;
+    }
     if (likely(parenlevel >= 0)) {
         context->list_left_bracket = lcons_int(parenlevel, context->list_left_bracket);
         context->list_right_bracket = lcons_int(parenlevel, context->list_right_bracket);
@@ -8645,7 +8648,7 @@ make_execsql_stmt(int firsttoken, int location)
                     continue;
                 }
 
-                yyerror("unsupported insert into table from non record type.");
+                yyerror("unsupported insert into table from non record type.", true);
             } else if (tok == T_VARRAY_VAR || tok == T_TABLE_VAR) {
                 if (yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_VAR) {
                     array_data = (PLpgSQL_var *) yylval.wdatum.datum;

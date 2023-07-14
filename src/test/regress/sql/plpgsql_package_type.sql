@@ -1115,11 +1115,17 @@ end pck1;
 
 -- test pck1.va.col%type ref table of
 
-
+create or replace package pak1 as
+type tp_varray is varray(1) of char%type;
+varray1 tp_varray;
+procedure p1;
+end pak1 ;
+/
 
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------
+drop package pak1;
 drop package p_test2;
 drop package plpgsql_packagetype1.p_test2;
 drop package plpgsql_packagetype1.p_test1;

@@ -251,7 +251,7 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
      * Check some cases in which we want to promote an error into a more
      * severe error.  None of this logic applies for non-error messages.
      */
-    if (elevel >= ERROR) {
+    if (elevel >= ERROR && u_sess != NULL) {
         /*
          * If we are inside a critical section, all errors become PANIC
          * errors.	See miscadmin.h.
@@ -317,7 +317,15 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
             elevel = ERROR;
         }
     }
-
+    if (u_sess == NULL && (g_instance.role == VUNKNOWN || t_thrd.role == MASTER_THREAD)) {
+        // there out of memory in startup, we exit directly.
+        /* Ooops, hard crash time; very little we can do safely here */
+        write_stderr("error occurred at %s:%d before error message processing is available\n"
+                     " u_sess is NULL! gaussdb is exit now.\n",
+            filename ? filename : "(unknown file)",
+            lineno);
+        _exit(-1);
+    }
     /*
      * Now decide whether we need to process this report at all; if it's
      * warning or less and not enabled for logging, just return FALSE without
@@ -4503,6 +4511,8 @@ static char* mask_Password_internal(const char* query_string)
                             if (query_string[position[i] + length[i] - 1] == ';') {
                                 length[i]--;
                             }
+                            curStmtType = 0;
+                            isPassword = false;
                         }
 
                         /*
@@ -4532,7 +4542,7 @@ static char* mask_Password_internal(const char* query_string)
 
                         char* maskBegin = mask_string + (position[i] - truncateLen);
                         int copySize = strlen(mask_string) - (position[i] - truncateLen) - length[i] + 1;
-                        if (copySize > 0) {
+                        if ((position[i] - truncateLen) >= 0 && copySize > 0) {
                             rc = memmove_s(maskBegin + maskLen, copySize, maskBegin + length[i], copySize);
                             securec_check(rc, "", "");
                             rc = memset_s(maskBegin, maskLen, '*', maskLen);

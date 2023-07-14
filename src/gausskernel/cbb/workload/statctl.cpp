@@ -1882,8 +1882,12 @@ void WLMReadjustUserSpaceByQuery(const char* username, List* database_name_list)
             isFirstDb ? "true" : "false");
         securec_check_ss(rc, "\0", "\0");
         isFirstDb = false;
-
+        bool old = t_thrd.int_cxt.ImmediateInterruptOK;
+        /*Allow cancel/die interrupts because the connection might be stucked forever*/
+        t_thrd.int_cxt.ImmediateInterruptOK = true;
+        CHECK_FOR_INTERRUPTS();
         pgConn = PQconnectdb(conninfo);
+        t_thrd.int_cxt.ImmediateInterruptOK = old;
         if (PQstatus(pgConn) != CONNECTION_OK) {
             ereport(WARNING,
                 (errcode(ERRCODE_CONNECTION_TIMED_OUT),

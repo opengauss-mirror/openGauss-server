@@ -8,6 +8,10 @@ drop schema if exists plpgsql_array_interface_indexby;
 create schema plpgsql_array_interface_indexby;
 set current_schema = plpgsql_array_interface_indexby;
 
+-- must be call in procedure --
+select array_indexby_delete(array[1, 2]);
+
+
 -- test array interface count --
 create or replace procedure array_interface_p1() as
 declare

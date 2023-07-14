@@ -494,12 +494,12 @@ static int DoWALWrite(const char* wal_buf, int len, XLogRecPtr& block_pos, const
             suspendHeartBeatTimer();
             return DO_WAL_DATA_WRITE_ERROR;
         }
-
         /* Write was successful, advance our position */
         bytes_written += bytes_to_write;
         bytes_left -= bytes_to_write;
         XLByteAdvance(block_pos, bytes_to_write);
         xlogoff += bytes_to_write;
+        lastFlushPosition = block_pos;
 
         /* Did we reach the end of a WAL segment? */
         if (block_pos % XLOG_SEG_SIZE == 0) {
@@ -586,14 +586,12 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
          * so that the master can remove WAL.
          */
 
-        reportFlushPosition = true;
         ss_c = snprintf_s(slotcmd, MAXPGPATH, MAXPGPATH - 1, "SLOT \"%s\" ", replication_slot);
         securec_check_ss_c(ss_c, "", "");
     } else {
-        reportFlushPosition = false;
         slotcmd[0] = 0;
     }
-
+    reportFlushPosition = true;
     if (sysidentifier != NULL) {
         /* Validate system identifier and timeline hasn't changed */
         res = PQexec(conn, "IDENTIFY_SYSTEM");

@@ -1347,9 +1347,9 @@ static void GenerateStartWithInternalEntries(PlannerInfo *root, CteScan *cteplan
      * First, match cte targetEntry in funcs like connect_by_root(xxx) and
      * SYS_CONNECT_BY_PATH(xxx, '/')
      */
-    foreach(lc, root->origin_tlist) {
-        TargetEntry *origin = (TargetEntry *)lfirst(lc);
-        List *vars = PullUpConnectByFuncVars(root, cteplan, (Node *)origin);
+    foreach(lc, root->parse->targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        List *vars = PullUpConnectByFuncVars(root, cteplan, (Node *)tle);
         tmp_list = list_concat(tmp_list, vars);
     }
 

@@ -405,6 +405,7 @@ null;
 end;
 /
 create synonym proc1 for proc1;
+ERROR:  synonym name is already used by an existing object
 call proc1();
  proc1 
 -------
@@ -1462,9 +1463,17 @@ end pck1;
 /
 -- test pck1.record.col%type ref table of
 -- test pck1.va.col%type ref table of
+create or replace package pak1 as
+type tp_varray is varray(1) of char%type;
+varray1 tp_varray;
+procedure p1;
+end pak1 ;
+/
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------
+drop package pak1;
+NOTICE:  drop cascades to function plpgsql_packagetype1.p1()
 drop package p_test2;
 ERROR:  package p_test2 does not exist
 drop package plpgsql_packagetype1.p_test2;
@@ -1473,7 +1482,6 @@ drop package plpgsql_packagetype1.p_test1;
 ERROR:  package plpgsql_packagetype1.p_test1 does not exist
 -- clean up --
 drop schema if exists plpgsql_packagetype2 cascade;
-NOTICE:  drop cascades to synonym plpgsql_packagetype2.proc1
 drop schema if exists plpgsql_packagetype1 cascade;
 NOTICE:  drop cascades to 2 other objects
 --?.*

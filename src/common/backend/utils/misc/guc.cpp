@@ -1823,7 +1823,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL,
-            NULL
+            false
         },
         {{"enable_gtt_concurrent_truncate",
             PGC_SIGHUP,
@@ -8611,10 +8611,10 @@ void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
                  errmsg("could not rename file \"%s\" to \"%s\"", ConfTmpFileName, ConfFileName)));
     }
 
-    FinishAlterSystemSet(record->context);
-    release_file_lock(&filelock);
     /* release thread lock for config file */
     LWLockRelease(ConfigFileLock);
+    FinishAlterSystemSet(record->context);
+    release_file_lock(&filelock);
 }
 #endif
 

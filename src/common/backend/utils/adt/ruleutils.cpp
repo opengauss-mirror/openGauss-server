@@ -4867,14 +4867,12 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
          * mark upsert clause under PlanState.
          */
         dpns->inner_tlist = ((ModifyTableState*)ps)->mt_upsert->us_excludedtlist;
+    } else if ((IsA(ps, ModifyTableState) || IsA(ps, VecModifyTableState) || IsA(ps, DistInsertSelectState)) &&
+                ((ModifyTableState *)ps)->operation == CMD_MERGE) {
+        /* For merge into statements, source relation is always the inner one. */
+        dpns->inner_tlist = ((ModifyTable*)(ps->plan))->mergeSourceTargetList;
     } else if (dpns->inner_planstate != NULL) {
-        if ((IsA(ps, ModifyTableState) || IsA(ps, VecModifyTableState) || IsA(ps, DistInsertSelectState)) &&
-            ((ModifyTableState *)ps)->operation == CMD_MERGE) {
-            /* For merge into statements, source relation is always the inner one. */
-            dpns->inner_tlist = ((ModifyTable*)(ps->plan))->mergeSourceTargetList;
-        } else {
-            dpns->inner_tlist = dpns->inner_planstate->plan->targetlist;
-        }
+        dpns->inner_tlist = dpns->inner_planstate->plan->targetlist;
     } else {
         dpns->inner_tlist = NIL;
     }
@@ -8029,7 +8027,10 @@ static char* get_variable(
                     errmsg("bogus varattno for INNER_VAR var: %d", var->varattno)));
 
         Assert(netlevelsup == 0);
-        push_child_plan(dpns, dpns->inner_planstate, &save_dpns);
+        bool push = dpns->inner_planstate != NULL;
+        if (push) {
+            push_child_plan(dpns, dpns->inner_planstate, &save_dpns);
+        }
 
         /*
          * Force parentheses because our caller probably assumed a Var is a
@@ -8041,7 +8042,9 @@ static char* get_variable(
         if (!IsA(tle->expr, Var))
             appendStringInfoChar(buf, ')');
 
-        pop_child_plan(dpns, &save_dpns);
+        if (push) {
+            pop_child_plan(dpns, &save_dpns);
+        }
         return NULL;
     } else if (var->varno == INDEX_VAR && dpns->index_tlist) {
         TargetEntry* tle = NULL;

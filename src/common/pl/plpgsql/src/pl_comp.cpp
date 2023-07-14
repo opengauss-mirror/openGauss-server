@@ -2998,8 +2998,12 @@ PLpgSQL_type* plpgsql_parse_wordtype(char* ident)
             return NULL;
         }
 
-        dtype = build_datatype(type_tup, -1, 
-            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_input_collation);
+        if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile == NULL) {
+            dtype = build_datatype(type_tup, -1, 0);
+        } else {
+            dtype = build_datatype(type_tup, -1,
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_input_collation);
+        }
 
         ReleaseSysCache(type_tup);
         return dtype;
@@ -3429,7 +3433,7 @@ void plpgsql_set_variable(const char* varname, int value)
  * array, and optionally to the current namespace.
  */
 PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace,
-    bool isImplicit, const char* varname, knl_pl_body_type plType)
+    bool isImplicit, const char* varname, knl_pl_body_type plType, bool notNull)
 {
     PLpgSQL_variable* result = NULL;
     int varno;
@@ -3449,6 +3453,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             var->refname = pstrdup(refname);
             var->lineno = lineno;
             var->datatype = dtype;
+            var->notnull = (int)notNull;
             var->pkg = NULL;
             /* other fields might be filled by caller */
 
@@ -3927,7 +3932,7 @@ PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLpgSQL_re
 
         rc = snprintf_s(buf, len, len - 1, "%s.%s", row->refname, type->attrnames[i]);
         securec_check_ss(rc, "", "");
-        var = plpgsql_build_variable(buf, lineno, type->types[i], false);
+        var = plpgsql_build_variable(buf, lineno, type->types[i], false, false, NULL, PL_BODY_FUNCTION, type->notnulls[i]);
 
         if (type->defaultvalues[i] != NULL)
             ((PLpgSQL_var*)var)->default_val = type->defaultvalues[i];

@@ -4495,7 +4495,7 @@ static void WalSndKill(int code, Datum arg)
     if (BBOX_BLACKLIST_XLOG_MESSAGE_SEND) {
         bbox_blacklist_remove(XLOG_MESSAGE_SEND, t_thrd.walsender_cxt.output_xlog_message);
     }
-    if (XlogCopyStartPtr != InvalidXLogRecPtr && walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY) {
+    if (XlogCopyStartPtr != InvalidXLogRecPtr) {
         LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
         XlogCopyStartPtr = InvalidXLogRecPtr;
         LWLockRelease(FullBuildXlogCopyStartPtrLock);

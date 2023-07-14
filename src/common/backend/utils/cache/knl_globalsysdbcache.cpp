@@ -121,7 +121,7 @@ void GlobalSysDBCache::FreeDeadDBs()
         GlobalSysDBCacheEntry *dbEntry = (GlobalSysDBCacheEntry *)DLE_VAL(elt);
         Assert(dbEntry->m_dbOid != InvalidOid);
         /* refcount means ref may leak */
-        if (dbEntry->m_refcount != 0 && m_dbstat_manager.IsDBUsedByProc(dbEntry)) {
+        if (dbEntry->m_refcount != 0) {
             GSC_CACHE1_elog("GlobalSysDBCacheEntry used can not be freed");
             /* clear memory, this proc may exit, and forget to call releasedb */
             dbEntry->ResetDBCache<false>();

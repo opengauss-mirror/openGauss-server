@@ -59,6 +59,7 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_hashbucket.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
@@ -1491,12 +1492,19 @@ static void validateDfsTableDef(CreateStmt* stmt, bool isDfsTbl)
     }
 }
 
+static void check_sub_part_tbl_space(Oid ownerId, char* tablespacename, List* subPartitionDefState)
+{
+    ListCell* subspccell = NULL;
+    foreach(subspccell, subPartitionDefState) {
+        RangePartitionDefState* subpartitiondef = (RangePartitionDefState*)lfirst(subspccell);
+        char* subtablespacename = subpartitiondef->tablespacename;
+        CheckPartitionTablespace(subtablespacename, ownerId);
+    }
+}
+
 /* Check tablespace's permissions for partition */
 static void check_part_tbl_space(CreateStmt* stmt, Oid ownerId, bool dfsTablespace)
 {
-    Oid partitionTablespaceId;
-    bool isPartitionTablespaceDfs = false;
-    RangePartitionDefState* partitiondef = NULL;
     ListCell* spccell = NULL;
     /* check value partition table is created at DFS table space */
     if (stmt->partTableState->partitionStrategy == PART_STRATEGY_VALUE && !dfsTablespace)
@@ -1505,21 +1513,31 @@ static void check_part_tbl_space(CreateStmt* stmt, Oid ownerId, bool dfsTablespa
                 errmsg("Value partitioned table can only be created on DFS tablespace.")));
 
     foreach (spccell, stmt->partTableState->partitionList) {
-        partitiondef = (RangePartitionDefState*)lfirst(spccell);
-
-        if (partitiondef->tablespacename) {
-            partitionTablespaceId = get_tablespace_oid(partitiondef->tablespacename, false);
-            isPartitionTablespaceDfs = IsSpecifiedTblspc(partitionTablespaceId, FILESYSTEM_HDFS);
-            if (isPartitionTablespaceDfs) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Partition can not be created on DFS tablespace.Only table-level tablespace can be "
-                               "DFS.DFS table only support partition strategy '%s' feature.",
-                            GetPartitionStrategyNameByType(PART_STRATEGY_VALUE))));
-            }
+        if (nodeTag(lfirst(spccell)) == T_RangePartitionDefState) {
+            RangePartitionDefState* partitiondef = (RangePartitionDefState*)lfirst(spccell);
+            char* tablespacename = partitiondef->tablespacename;
+            List* subPartitionDefState = partitiondef->subPartitionDefState;
+            CheckPartitionTablespace(tablespacename, ownerId);
+            check_sub_part_tbl_space(ownerId, tablespacename, subPartitionDefState);
+        } else if (nodeTag(lfirst(spccell)) == T_HashPartitionDefState) {
+            HashPartitionDefState* partitiondef = (HashPartitionDefState*)lfirst(spccell);
+            char* tablespacename = partitiondef->tablespacename;
+            List* subPartitionDefState = partitiondef->subPartitionDefState;
+            CheckPartitionTablespace(tablespacename, ownerId);
+            check_sub_part_tbl_space(ownerId, tablespacename, subPartitionDefState);
+        } else if (nodeTag(lfirst(spccell)) == T_ListPartitionDefState) {
+            ListPartitionDefState* partitiondef = (ListPartitionDefState*)lfirst(spccell);
+            char* tablespacename = partitiondef->tablespacename;
+            List* subPartitionDefState = partitiondef->subPartitionDefState;
+            CheckPartitionTablespace(tablespacename, ownerId);
+            check_sub_part_tbl_space(ownerId, tablespacename, subPartitionDefState);
+        } else {
+            ereport(ERROR, (errmodule(MOD_COMMAND), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Unknown PartitionDefState"),
+                errdetail("N/A"), errcause("The partition type is incorrect."),
+                erraction("Use the correct partition type.")));
+            break;
         }
-
-        CheckPartitionTablespace(partitiondef->tablespacename, ownerId);
     }
 }
 
@@ -3760,6 +3778,47 @@ static void DropRelationPermissionCheck(char relkind, Oid relOid, Oid nspOid, co
         aclcheck_error(aclresult, ACL_KIND_CLASS, relname);
     }
 }
+
+static bool IsPartitionDeltaCudesc(Oid relOid)
+{
+#define PARTITION_DELTA_NAME "pg_delta_part_"
+#define PARTITION_CUDESC_NAME "pg_cudesc_part_"
+
+    int attnum;
+    bool found = false;
+    ScanKeyData scanKey[1];
+    TableScanDesc scan;
+    Relation pgpartition = NULL;
+    Relation rel = NULL;
+
+    rel = try_relation_open(relOid, AccessShareLock);
+    if (!RelationIsValid(rel)) {
+        return false;
+    }
+
+    const char *relname = RelationGetRelationName(rel);
+    if (strncmp(relname, PARTITION_DELTA_NAME, strlen(PARTITION_DELTA_NAME)) == 0) {
+        attnum = Anum_pg_partition_reltoastrelid;
+    } else if (strncmp(relname, PARTITION_CUDESC_NAME, strlen(PARTITION_CUDESC_NAME)) == 0) {
+        attnum = Anum_pg_partition_relcudescrelid;
+    } else {
+        heap_close(rel, AccessShareLock);
+        return false;
+    }
+
+    ScanKeyInit(&scanKey[0], attnum, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rel->rd_id));
+    pgpartition = heap_open(PartitionRelationId, AccessShareLock);
+    scan = tableam_scan_begin(pgpartition, SnapshotNow, 1, scanKey);
+    if (tableam_scan_getnexttuple(scan, ForwardScanDirection)) {
+        found = true;
+    }
+    tableam_scan_end(scan);
+    heap_close(pgpartition, AccessShareLock);
+    heap_close(rel, AccessShareLock);
+
+    return found;
+}
+
 /*
  * Before acquiring a table lock, check whether we have sufficient rights.
  * In the case of DROP INDEX, also try to lock the table before the index.
@@ -3808,6 +3867,12 @@ static void RangeVarCallbackForDropRelation(
                 relkind == RELKIND_RELATION && expected_relkind == RELKIND_TOASTVALUE);
     if (flag) {
         DropErrorMsgWrongType(rel->relname, classform->relkind, relkind);
+    }
+
+    if (IsPartitionDeltaCudesc(relOid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot drop relation \"%s\", it is a partition delta/cudesc table", rel->relname)));
     }
 
     /* Permission Check */
@@ -5899,6 +5964,15 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
     }
 
     relform = (Form_pg_class)GETSTRUCT(reltup);
+
+    /* 
+     * Check relation name to ensure that it doesn't conflict with existing synonym.
+     */
+    if (!IsInitdb && GetSynonymOid(newrelname, namespaceId, true) != InvalidOid) {
+        ereport(ERROR,
+                (errmsg("relation name is already used by an existing synonym in schema \"%s\"",
+                    get_namespace_name(namespaceId))));
+    }
 
     if (get_relname_relid(newrelname, namespaceId) != InvalidOid)
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_TABLE), errmsg("relation \"%s\" already exists", newrelname)));
@@ -17817,6 +17891,14 @@ void AlterRelationNamespaceInternal(
      * Do nothing when there's nothing to do.
      */
     if (!object_address_present(&thisobj, objsMoved)) {
+        /* 
+         * Check relation name to ensure that it doesn't conflict with existing synonym.
+         */
+        if (!IsInitdb && GetSynonymOid(NameStr(classForm->relname), newNspOid, true) != InvalidOid) {
+            ereport(ERROR,
+                    (errmsg("relation name is already used by an existing synonym in schema \"%s\"",
+                        get_namespace_name(newNspOid))));
+        }
         /* check for duplicate name (more friendly than unique-index failure) */
         if (get_relname_relid(NameStr(classForm->relname), newNspOid) != InvalidOid)
             ereport(ERROR,

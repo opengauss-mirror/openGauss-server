@@ -1,0 +1,118 @@
+create database test_b dbcompatibility = 'B';
+\c test_b
+set plsql_show_all_error to on;
+create or replace function f(v int[]) return int
+as
+n int;
+begin
+n := v();
+return n;
+end;
+/
+create or replace function f(v int[]) return int
+as
+n int;
+begin
+n := v[];
+return n;
+end;
+/
+NOTICE:  syntax error at or near "]"
+LINE 4: n := v[];
+               ^
+QUERY:   DECLARE 
+n int;
+begin
+n := v[];
+return n;
+end
+ERROR:  Debug mod,create procedure has error.
+DETAIL:  N/A
+CONTEXT:  compilation of PL/pgSQL function "f" near line 3
+set plsql_show_all_error to off;
+create or replace function f(v int[]) return int
+as
+n int;
+begin
+n := v();
+return n;
+end;
+/
+create or replace function f(v int[]) return int
+as
+n int;
+begin
+n := v[];
+return n;
+end;
+/
+ERROR:  syntax error at or near "]"
+LINE 4: n := v[];
+               ^
+QUERY:   DECLARE 
+n int;
+begin
+n := v[];
+return n;
+end
+\c regression
+drop database test_b;
+create database test_pg dbcompatibility = 'PG';
+\c test_pg
+set plsql_show_all_error to on;
+create or replace function f(v int[]) return int
+as
+n int;
+begin
+n := v();
+return n;
+end;
+/
+create or replace function f(v int[]) return int
+as
+n int;
+begin
+n := v[];
+return n;
+end;
+/
+NOTICE:  syntax error at or near "]"
+LINE 4: n := v[];
+               ^
+QUERY:   DECLARE 
+n int;
+begin
+n := v[];
+return n;
+end
+ERROR:  Debug mod,create procedure has error.
+DETAIL:  N/A
+CONTEXT:  compilation of PL/pgSQL function "f" near line 3
+set plsql_show_all_error to off;
+create or replace function f(v int[]) return int
+as
+n int;
+begin
+n := v();
+return n;
+end;
+/
+create or replace function f(v int[]) return int
+as
+n int;
+begin
+n := v[];
+return n;
+end;
+/
+ERROR:  syntax error at or near "]"
+LINE 4: n := v[];
+               ^
+QUERY:   DECLARE 
+n int;
+begin
+n := v[];
+return n;
+end
+\c regression
+drop database test_pg;

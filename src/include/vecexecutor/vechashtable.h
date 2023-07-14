@@ -356,7 +356,7 @@ inline int getPower2LessNum(int num)
     return i;
 }
 
-inline int getPower2NextNum(int num)
+inline int getPower2NextNum(int64 num)
 {
     int i = 1;
     int count = 0;

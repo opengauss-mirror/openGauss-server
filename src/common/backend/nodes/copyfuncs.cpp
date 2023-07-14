@@ -6188,9 +6188,11 @@ static AlterTSConfigurationStmt* _copyAlterTSConfigurationStmt(const AlterTSConf
     COPY_NODE_FIELD(cfgname);
     COPY_NODE_FIELD(tokentype);
     COPY_NODE_FIELD(dicts);
+    COPY_NODE_FIELD(cfoptions);
     COPY_SCALAR_FIELD(override);
     COPY_SCALAR_FIELD(replace);
     COPY_SCALAR_FIELD(missing_ok);
+    COPY_SCALAR_FIELD(is_reset);
 
     return newnode;
 }

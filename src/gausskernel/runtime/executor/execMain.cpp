@@ -785,7 +785,8 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
     UnregisterSnapshot(estate->es_crosscheck_snapshot);
 
 #ifdef ENABLE_LLVM_COMPILE
-    if (!t_thrd.codegen_cxt.g_runningInFmgr) {
+   /* Do not release codegen in Fmgr and Procedure */
+    if (!t_thrd.codegen_cxt.g_runningInFmgr && u_sess->SPI_cxt._connected == -1) {
         CodeGenThreadTearDown();
     }
 #endif

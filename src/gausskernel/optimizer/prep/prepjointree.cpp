@@ -3438,6 +3438,13 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
             IncrementVarSublevelsUp(j1->quals, 2, 1);
             IncrementVarSublevelsUp(j2->quals, 2, 1);
 
+            /*
+            * Upper-level vars in subquery are now two level far to their parent
+            * than before.
+            */
+            IncrementVarSublevelsUp((Node*)setop1, 2, 1);
+            IncrementVarSublevelsUp((Node*)setop2, 2, 1);
+
             /* No quals in FromExpr. Search 'QUALS SHOULD BE HERE.' in this
              * source code file.
              */
@@ -3555,6 +3562,7 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
                     } break;
                     default:
                         oldvar = (Node*)copyObject(node);
+                        oldvar = eval_const_expressions(root, oldvar);
                         break;
                 }
 
@@ -3574,6 +3582,7 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
 
             /* Generate subquery rte and add it to the range tables */
             RangeTblEntry* rte = addRangeTableEntryForSubquery(NULL, partial_query, makeAlias("subquery", NIL), false, true);
+            rte->pulled_from_subquery = true;
             root->parse->rtable = lappend(root->parse->rtable, rte);
 
             root->parse->targetList = (List*)replace_node_clause(

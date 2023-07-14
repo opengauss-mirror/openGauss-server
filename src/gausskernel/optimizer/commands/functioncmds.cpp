@@ -51,6 +51,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_proc_fn.h"
+#include "catalog/pg_synonym.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
 #include "catalog/gs_db_privilege.h"
@@ -1563,6 +1564,14 @@ void RenameFunction(List* name, List* argtypes, const char* newname)
                     get_namespace_name(namespaceOid))));
     }
 #else
+    /* 
+     * Check function name to ensure that it doesn't conflict with existing synonym.
+     */
+    if (!IsInitdb && GetSynonymOid(newname, namespaceOid, true) != InvalidOid) {
+        ereport(ERROR,
+                (errmsg("function name is already used by an existing synonym in schema \"%s\"",
+                    get_namespace_name(namespaceOid))));
+    }
     if (t_thrd.proc->workingVersionNum < 92470) {
         if (SearchSysCacheExists3(PROCNAMEARGSNSP,
                 CStringGetDatum(newname),
@@ -2599,6 +2608,14 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
                     get_namespace_name(nspOid))));
     }    
 #else
+    /* 
+     * Check function name to ensure that it doesn't conflict with existing synonym.
+     */
+    if (!IsInitdb && GetSynonymOid(NameStr(proc->proname), nspOid, true) != InvalidOid) {
+        ereport(ERROR,
+                (errmsg("function name is already used by an existing synonym in schema \"%s\"",
+                    get_namespace_name(nspOid))));
+    }
     if (t_thrd.proc->workingVersionNum < 92470) { 
         if (SearchSysCacheExists3(PROCNAMEARGSNSP,
                 CStringGetDatum(NameStr(proc->proname)),

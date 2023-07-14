@@ -315,7 +315,7 @@ Datum bpchar(PG_FUNCTION_ARGS)
          *
          * Now, only explicit cast char type data should pad blank space.
          */
-        if (!isExplicit)
+        if (!isExplicit || DB_IS_CMPT(PG_FORMAT | B_FORMAT))
             maxlen = len;
     }
 

@@ -786,6 +786,12 @@ select bit_length(a),bit_length(b) from char_test;
           8 |          8
 (8 rows)
 
+select 'ni啊shaeskeeee'::char(3);
+ bpchar 
+--------
+ ni啊
+(1 row)
+
 create index a on char_test(a);
 create index b on char_test(b);
 set enable_seqscan to off;

@@ -875,7 +875,7 @@ Datum local_debug_server_info(PG_FUNCTION_ARGS)
         DebuggerServerInfo* entry = (DebuggerServerInfo*)funcctx->user_fctx + funcctx->call_cntr;
         values[i++] = CStringGetTextDatum(entry->nodename);
         values[i++] = Int8GetDatum(entry->port);
-        values[i++] = Int16GetDatum(entry->funcoid);
+        values[i++] = ObjectIdGetDatum(entry->funcoid);
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }

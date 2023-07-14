@@ -30,6 +30,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/pg_proc_fn.h"
+#include "catalog/pg_synonym.h"
 #include "catalog/pg_type.h"
 #include "client_logic/client_logic_proc.h"
 #include "commands/defrem.h"
@@ -1073,6 +1074,15 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
 	
     /* sanity checks */
     Assert(PointerIsValid(prosrc));
+
+    /* 
+     * Check function name to ensure that it doesn't conflict with existing synonym.
+     */
+    if (!IsInitdb && GetSynonymOid(procedureName, procNamespace, true) != InvalidOid) {
+        ereport(ERROR,
+                (errmsg("function name is already used by an existing synonym in schema \"%s\"",
+                    get_namespace_name(procNamespace))));
+    }
 
     parameterCount = parameterTypes->dim1;
     if (parameterCount < 0 || parameterCount > FUNC_MAX_ARGS)

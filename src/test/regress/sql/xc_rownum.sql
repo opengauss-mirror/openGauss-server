@@ -527,6 +527,52 @@ select rownum, sc1.stuname, sc2.id from  student_cstore2 as sc1, student_cstore2
 -- test rownum for agg
 select * from (select rownum, max(id) as max_id from student_cstore1 group by rownum) as t order by max_id;
 
+-- test rownum with base result plan
+create table tab_1110306_1 (a1 int, b1 int, c1 int, d1 int,e1 text,f1 date) with (orientation=column) ;
+
+insert into tab_1110306_1 values
+(1, 1, 1, 1,'A10Z','2000-03-01')
+,(1, 1, 1, 2,'A1Z' ,'2000-03-02')
+,(1, 1, 2, 1,'A11Z','2000-03-05')
+,(1, 1, 2, 2,'A2Z' ,'2000-03-04')
+,(1, 2, 1, 1,'A13Z','2000-03-05')
+,(1, 2, 1, 2,'A3Z' ,'2000-03-19')
+,(1, 2, 2, 1,'A15Z','2000-03-05')
+,(1, 2, 2, 2,'A4Z' ,'2000-03-19')
+,(1, 3, 3, 3,'A10Z','2000-03-05')
+,(2, 5, 5, 5,'A5Z' ,'2000-03-10')
+,(2, NULL, 6, 6,null,'2000-04-01')
+,(2, 6, NULL, 6,'A15Z','2000-05-01')
+,(null, 6, 6, NULL,'A6Z','2000-03-11')
+,(2, NULL, NULL, 7,'A5Z','2000-03-02')
+,(2, NULL, 7, NULL,'A7Z','2000-03-03')
+,(2, 7, NULL, NULL,'A10Z','2000-03-10')
+,(3, NULL, NULL, NULL,'A9Z','2000-03-05')
+;
+
+explain (verbose, costs off)select 1
+from (select transaction_timestamp() as aa
+from tab_1110306_1
+where f1 <=to_date('2010-01-02')
+and c1 > 12
+or statement_timestamp() >=current_timestamp
+and rownum < 6
+group by c1) t1
+group by t1.aa
+having t1.aa <=transaction_timestamp();
+
+select 1
+from (select transaction_timestamp() as aa
+from tab_1110306_1
+where f1 <=to_date('2010-01-02')
+and c1 > 12
+or statement_timestamp() >=current_timestamp
+and rownum < 6
+group by c1) t1
+group by t1.aa
+having t1.aa <=transaction_timestamp();
+
+drop table tab_1110306_1;
 drop table student_cstore1;
 drop table student_cstore2;
 drop table student;

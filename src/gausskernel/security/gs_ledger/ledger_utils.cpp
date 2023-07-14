@@ -160,8 +160,7 @@ uint64 get_next_recnum(Oid histoid)
     uint64 res;
     RecNumItem *item = (RecNumItem *)hash_search(g_recnum_cache, &histoid, HASH_FIND, &found);
     if (found) {
-        res = item->rec_num;
-        pg_atomic_add_fetch_u64(&item->rec_num, 1);
+        res = pg_atomic_fetch_add_u64(&item->rec_num, 1);
     } else {
         LWLockRelease(BlockchainVersionLock);
         LWLockAcquire(BlockchainVersionLock, LW_EXCLUSIVE);

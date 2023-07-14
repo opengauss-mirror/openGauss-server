@@ -942,6 +942,7 @@ DROP PACKAGE PCKG_EXCHANGE_RATE;
 
 
 drop table if exists tb_test;
+drop synonym if exists tb_test;
 create table tb_test(col1 int,col2 int,col3 int);
 create or replace package pckg_test1 as
 procedure pr_test(i_col1 in varchar2,o_ret inout varchar2,o_ret1 out varchar2);

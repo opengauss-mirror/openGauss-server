@@ -3297,6 +3297,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
 #endif
     ExecNodes* single_exec_node = NULL;
     bool is_read_only = false;
+    bool is_ctas = false;
 
     gstrace_entry(GS_TRC_ID_exec_parse_message);
     /*
@@ -3595,6 +3596,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         */
         if (query->utilityStmt != NULL && IsA(query->utilityStmt, CreateTableAsStmt)) {
             querytree_list = list_make1(query);
+            is_ctas = true;
         } else {
             querytree_list = pg_rewrite_query(query);
         }
@@ -3685,7 +3687,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         is_read_only); /* fixed result */
 
      /* For ctas query, rewrite is not called in PARSE, so we must set invalidation to revalidate the cached plan. */
-    if (raw_parse_tree != NULL && IsA(raw_parse_tree, CreateTableAsStmt)) {
+    if (is_ctas) {
         psrc->is_valid = false;
     }
 
@@ -5141,6 +5143,11 @@ static void exec_execute_message(const char* portal_name, long max_rows)
             pq_putemptymessage('s');
 
         u_sess->xact_cxt.pbe_execute_complete = false;
+        /* when only set maxrows, we don't need to set pbe_execute_complete flag. */
+        if ((portal_name == NULL || portal_name[0] == '\0') &&
+            max_rows != FETCH_ALL && IsConnFromApp()) {
+            u_sess->xact_cxt.pbe_execute_complete = true;
+        }
 #ifndef ENABLE_MULTIPLE_NODES
         /* reset stream info for session */
         if (u_sess->stream_cxt.global_obj != NULL) {

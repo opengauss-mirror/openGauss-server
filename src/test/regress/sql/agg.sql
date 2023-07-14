@@ -8,6 +8,9 @@ set enable_hashagg = off;
 select a , count(distinct  generate_series(1,2)) from t1 group by a;
 explain (verbose, costs off)
 select a , count(distinct  generate_series(1,2)) from t1 group by a;
+set query_dop = 2;
+select a , count(distinct  generate_series(1,2)) from t1 group by a;
+reset query_dop;
 
 --test const-false agg
 CREATE TABLE bmsql_item (

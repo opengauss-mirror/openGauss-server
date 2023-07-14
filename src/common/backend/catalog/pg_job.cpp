@@ -1929,8 +1929,12 @@ void update_run_job_to_fail()
     while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
         Form_pg_job pg_job = (Form_pg_job)GETSTRUCT(tuple);
         /* Every coordinator should update all tuples which job_status is 'r'. */
+#ifdef ENABLE_MULTIPLE_NODES
         if (pg_job->job_status == PGJOB_RUN_STATUS &&
             0 == strcmp(pg_job->node_name.data, g_instance.attr.attr_common.PGXCNodeName)) {
+#else
+        if (pg_job->job_status == PGJOB_RUN_STATUS) {
+#endif
             get_job_values(pg_job->job_id, tuple, pg_job_tbl, old_value, visnull);
             values[Anum_pg_job_failure_count - 1] = Int16GetDatum(pg_job->failure_count + 1);
 
@@ -1989,7 +1993,7 @@ void update_run_job_to_fail()
  */
 static int get_random_job_id(int64 job_max_number = JOBID_MAX_NUMBER) 
 {
-    if (job_max_number < InvalidJobId) {
+    if (job_max_number <= InvalidJobId) {
         ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("Cannot generate job id."), errdetail("N/A"), errcause("Invalid job id range set."),
                         erraction("Please recheck job status.")));

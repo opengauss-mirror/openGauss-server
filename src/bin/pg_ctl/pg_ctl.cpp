@@ -1528,6 +1528,53 @@ static void do_init(void)
     }
 }
 
+/*
+ * get data directory in configfile. return value of the option.
+ */
+static void get_data_directory(const char* filename, char* data_directory_str)
+{
+    char** optlines;
+    errno_t rc = EOK;
+
+    if (filename == NULL) {
+        pg_log(PG_WARNING, _("the parameter filename is NULL in function get_data_directory()"));
+        exit(1);
+    }
+
+    if ((optlines = readfile(filename)) != NULL) {
+        int optvalue_off = 0;
+        int optvalue_len = 0;
+        int lines_index = 0;
+
+        lines_index = find_gucoption((const char**)optlines, "data_directory", NULL, NULL, &optvalue_off, &optvalue_len);
+        if (lines_index != INVALID_LINES_IDX) {
+            /* remove heading and tailing "'" */
+            if (optlines[lines_index][optvalue_off] == '\'' &&
+                optlines[lines_index][optvalue_off + optvalue_len - 1] == '\'') {
+                optvalue_off++;
+                optvalue_len -= 2;
+            }
+            rc = strncpy_s(data_directory_str,
+                           MAX_PARAM_LEN,
+                           optlines[lines_index] + optvalue_off,
+                           (size_t)Min(optvalue_len, MAX_PARAM_LEN - 1));
+            securec_check_c(rc, "", "");
+        }
+
+        int opt_index = 0;
+        while (optlines[opt_index] != NULL) {
+            free(optlines[opt_index]);
+            optlines[opt_index] = NULL;
+            opt_index++;
+        }
+        free(optlines);
+        optlines = NULL;
+    } else {
+        pg_log(PG_WARNING, _("%s cannot be opened.\n"), filename);
+        exit(1);
+    }
+}
+
 static int get_instance_port(const char* filename)
 {
     char** optlines;
@@ -2136,6 +2183,11 @@ static void do_failover(uint32 term)
         pg_log(PG_WARNING,
             _(" cannot failover server; "
               "server is not in standby or cascade standby mode\n"));
+        exit(1);
+    }
+
+    if (g_dcfEnabled) {
+        pg_log(PG_WARNING, _("Failover is not supported in dcf mode.\n"));
         exit(1);
     }
 
@@ -3920,6 +3972,19 @@ static void adjust_data_dir(void)
     if ((fd = fopen(filename, "r")) != NULL) {
         fclose(fd);
         fd = NULL;
+
+        /* find the data directory in config file. if the option is specified, set pg_config to the value of data_directory */
+        nRet = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/postgresql.conf", pg_config);
+        securec_check_ss_c(nRet, "\0", "\0");
+        char data_directory_str[MAX_PARAM_LEN] = {0};
+        get_data_directory(filename, data_directory_str);
+        if (data_directory_str[0] != '\0') {
+            free(pg_data);
+            pg_data = NULL;
+            pg_data = xstrdup(data_directory_str);
+            canonicalize_path(pg_data);
+            pg_log(PG_WARNING, _("data directory is set to %s according to data_directory in config file.\n"), pg_data);
+        }
         return;
     }
 

@@ -80,6 +80,24 @@ end p_test2;
 
 select p_test2.f1((1,2,3,4,5,6));
 
+--test not null
+CREATE OR REPLACE FUNCTION regress_record1(p_w VARCHAR2)
+RETURNS
+VARCHAR2 AS $$
+DECLARE
+type rec_type is record (name varchar2(100) not null default 'a', epno int);
+employer rec_type;
+BEGIN
+employer.name := null;
+employer.epno = 18;
+raise info 'employer name: % , epno:%', employer.name, employer.epno;
+return employer.name;
+END;
+$$
+LANGUAGE plpgsql;
+CALL regress_record1('aaa');
+DROP FUNCTION regress_record1;
+
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------
