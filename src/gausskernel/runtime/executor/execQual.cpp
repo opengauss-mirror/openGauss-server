@@ -2982,7 +2982,12 @@ extern bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo)
    } else if (return_refcursor) {
        fcinfo->refcursor_data.return_number = out_count;
    }
-
+    /* func_has_out_param means whether a func with out param and with GUC proc_outparam_override. */
+    bool func_has_out_param = is_function_with_plpgsql_language_and_outparam((fcinfo->flinfo)->fn_oid);
+    if (func_has_out_param && (return_refcursor || procStruct->prorettype == REFCURSOROID)) {
+        fcinfo->refcursor_data.return_number = out_count + 1;
+    }
+    
    ReleaseSysCache(proctup);
    return use_cursor;
 }

@@ -4367,7 +4367,6 @@ static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* 
     StringInfoData buf;
     int condCount = 0;
     int condition_number = 0;
-    int currIdx = 0;
     int ret = 0;
 
     /*

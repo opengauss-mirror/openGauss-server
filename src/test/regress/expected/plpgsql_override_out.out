@@ -1004,6 +1004,24 @@ end;
 /
 ERROR:  Named argument "b" can not be a const
 CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
+create table test_table2 (coll int,col2 text);
+insert into test_table2 values (1, 'test');
+create or replace function test_function2(out rl refcursor, out r2 refcursor)
+returns refcursor as 
+$$
+begin
+open rl for select coll from test_table2;
+open r2 for select col2 from test_table2;
+return r2;
+end;
+$$
+LANGUAGE 'plpgsql';
+call test_function2('','');
+   test_function2   |         rl         |         r2         
+--------------------+--------------------+--------------------
+ <unnamed portal 2> | <unnamed portal 1> | <unnamed portal 2>
+(1 row)
+
 set plsql_compile_check_options='';
 drop package body if exists pck1;
 drop package body pck1;
@@ -1017,7 +1035,7 @@ NOTICE:  drop cascades to 2 other objects
 --?.*
 --?.*
 drop schema if exists plpgsql_override_out cascade;
-NOTICE:  drop cascades to 15 other objects
+NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to function iob_proc(integer,integer)
 drop cascades to function bio_proc(integer,integer)
 drop cascades to function obi_proc(integer,integer)
@@ -1033,3 +1051,5 @@ drop cascades to function plpgsql_override_out.p11()
 drop cascades to function p11()
 drop cascades to function plpgsql_override_out.p11()
 drop cascades to function p11(integer)
+drop cascades to table test_table2
+drop cascades to function test_function2()
