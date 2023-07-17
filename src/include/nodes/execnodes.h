@@ -1684,6 +1684,7 @@ typedef struct StartWithOpState
 
     MemoryContext       sw_context;
     List*               sw_cycle_rowmarks;
+    List*               sw_leaf_rowmarks;
 } StartWithOpState;
 
 /* ----------------

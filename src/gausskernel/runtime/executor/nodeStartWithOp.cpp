@@ -516,11 +516,16 @@ static bool depth_first_connect(int currentLevel, StartWithOpState *node, List* 
         /* Go into the depth NOW: sibling tuples won't get processed
          *  until all children are done */
         node->sw_rownum = rowCountBefore;
+        List* children = peekNextLevel(leader, outerNode, currentLevel);
         bool expectCycle = depth_first_connect(currentLevel + 1, node,
-                                               peekNextLevel(leader, outerNode, currentLevel),
+                                               children,
                                                dfsRowCount);
         if (expectCycle) {
             node->sw_cycle_rowmarks = lappend_int(node->sw_cycle_rowmarks, rowCountBefore);
+        }
+
+        if (!children) {
+            node->sw_leaf_rowmarks = lappend_int(node->sw_leaf_rowmarks, rowCountBefore);
         }
     }
     return isCycle;
@@ -1382,6 +1387,20 @@ static void CheckIsCycleByRowmarks(StartWithOpState *state, bool* connect_by_isc
     }
 }
 
+static void CheckIsLeafByRowmarks(StartWithOpState *state, bool* connect_by_isleaf, int row)
+{
+    if (state->sw_leaf_rowmarks == NULL) {
+        return;
+    }
+    ListCell* mark = NULL;
+    foreach (mark, state->sw_leaf_rowmarks) {
+        int markIndex = lfirst_int(mark);
+        if (row == markIndex) {
+            *connect_by_isleaf = true;
+        }
+    }
+}
+
 /*
  * - brief: process the recursive-union returned tuples with isleaf/iscycle
  *          pseudo value filled
@@ -1429,7 +1448,6 @@ static void ProcessPseudoReturnColumns(StartWithOpState *state)
 
             /* Calculate connect_by_iscycle */
             CheckIsCycle(state, &connect_by_iscycle);
-            CheckIsCycleByRowmarks(state, &connect_by_iscycle, rowCount);
             /* Calculate connect_by_isleaf */
             CheckIsLeaf(state, &connect_by_isleaf);
             /* Free per-tuple keyArrayStr */
@@ -1444,6 +1462,9 @@ static void ProcessPseudoReturnColumns(StartWithOpState *state)
             connect_by_isleaf = false;
             connect_by_iscycle = false;
         }
+
+        CheckIsCycleByRowmarks(state, &connect_by_iscycle, rowCount);
+        CheckIsLeafByRowmarks(state, &connect_by_isleaf, rowCount);
 
         /* update result, fill the result tuple */
         UpdatePseudoReturnColumn(state, dstSlot, connect_by_isleaf, connect_by_iscycle);
