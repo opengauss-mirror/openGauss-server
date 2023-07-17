@@ -1553,6 +1553,17 @@ static void transformTableLikeClause(
      * table can have different column numbers.
      */
     attmap = (AttrNumber*)palloc0(sizeof(AttrNumber) * tupleDesc->natts);
+    int colCount = list_length(cxt->columns);
+    for (parent_attno = 1; parent_attno <= tupleDesc->natts; parent_attno++) {
+        Form_pg_attribute attribute = tupleDesc->attrs[parent_attno - 1];
+        if (attribute->attisdropped && (!u_sess->attr.attr_sql.enable_cluster_resize || RelationIsTsStore(relation)))
+            continue;
+        if (attribute->attkvtype == ATT_KV_HIDE && table_like_clause->options != CREATE_TABLE_LIKE_ALL) {
+            continue;
+        }
+        colCount++;
+        attmap[parent_attno - 1] = colCount;
+    }
 
     /*
      * Insert the copied attributes into the cxt for the new table definition.
@@ -1654,8 +1665,6 @@ static void transformTableLikeClause(
          * Add to column list
          */
         cxt->columns = lappend(cxt->columns, def);
-
-        attmap[parent_attno - 1] = list_length(cxt->columns);
 
         /*
          * Copy default, if present and the default has been requested

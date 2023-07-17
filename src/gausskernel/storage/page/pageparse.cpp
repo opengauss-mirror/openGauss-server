@@ -355,6 +355,15 @@ static void ParseTupleHeader(const PageHeader page, uint lineno, char *strOutput
 static void ParseHeapPage(const PageHeader page, BlockNumber blockNum, char *strOutput, BlockNumber block_endpoint)
 {
     errno_t rc = EOK;
+    if (PageIsNew(page)) {
+        rc = snprintf_s(strOutput + (int)strlen(strOutput), MAXOUTPUTLEN, MAXOUTPUTLEN - 1,
+                        "Page information of block %u/%u : new page\n", blockNum, block_endpoint);
+        securec_check_ss(rc, "\0", "\0");
+        ParseHeapHeader(page, strOutput, blockNum, block_endpoint);
+        rc = snprintf_s(strOutput + (int)strlen(strOutput), MAXOUTPUTLEN, MAXOUTPUTLEN - 1, "\n");
+        securec_check_ss(rc, "\0", "\0");
+        return;
+    }
     if (page->pd_lower < GetPageHeaderSize(page) || page->pd_lower > page->pd_upper ||
         page->pd_upper > page->pd_special || page->pd_special > BLCKSZ ||
         page->pd_special != MAXALIGN(page->pd_special)) {
@@ -531,7 +540,8 @@ static void ParseOnePage(const PageHeader page, BlockNumber blockNum, char *strO
 {
     errno_t rc = EOK;
     if (strcmp(relation_type, "heap") == 0) {
-        if (PG_HEAP_PAGE_LAYOUT_VERSION != (uint16)PageGetPageLayoutVersion(page) || PageGetSpecialSize(page) != 0) {
+        if ((PG_HEAP_PAGE_LAYOUT_VERSION != (uint16)PageGetPageLayoutVersion(page) && 
+                   (uint16)PageGetPageLayoutVersion(page) != 0) || PageGetSpecialSize(page) != 0) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 (errmsg("The target page is not heap, the given page version is: %u",
                 (uint16)PageGetPageLayoutVersion(page)))));
@@ -554,14 +564,16 @@ static void ParseOnePage(const PageHeader page, BlockNumber blockNum, char *strO
         }
         ParseUHeapPage((void *)page, blockNum, block_endpoint, strOutput, dumpUndo);
     } else if (strcmp(relation_type, "btree") == 0) {
-        if (PG_COMM_PAGE_LAYOUT_VERSION != (uint16)PageGetPageLayoutVersion(page) || PageGetSpecialSize(page) == 0) {
+        if ((PG_COMM_PAGE_LAYOUT_VERSION != (uint16)PageGetPageLayoutVersion(page) &&
+            (uint16)PageGetPageLayoutVersion(page) != 0) || PageGetSpecialSize(page) == 0) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 (errmsg("The target page is not btree, the given page version is: %u",
                 (uint16)PageGetPageLayoutVersion(page)))));
         }
         ParseIndexPage((void *)page, BTREE_INDEX, blockNum, block_endpoint, strOutput);
     } else if (strcmp(relation_type, "ubtree") == 0) {
-        if (PG_COMM_PAGE_LAYOUT_VERSION != (uint16)PageGetPageLayoutVersion(page) || PageGetSpecialSize(page) == 0) {
+        if ((PG_COMM_PAGE_LAYOUT_VERSION != (uint16)PageGetPageLayoutVersion(page) &&
+            (uint16)PageGetPageLayoutVersion(page) != 0) || PageGetSpecialSize(page) == 0) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 (errmsg("The target page is not ubtree, the given page version is: %u",
                 (uint16)PageGetPageLayoutVersion(page)))));
