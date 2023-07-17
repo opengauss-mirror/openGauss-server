@@ -1310,6 +1310,7 @@ select '15'::bpchar(2)::INTERVAL YEAR;
  @ 15 years
 (1 row)
 
+<<<<<<< HEAD
 -- test abourt interval typmod in procedure
 drop table if exists all_datatype_tbl;
 NOTICE:  table "all_datatype_tbl" does not exist, skipping
