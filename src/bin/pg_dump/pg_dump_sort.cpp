@@ -948,7 +948,7 @@ static void repairDependencyLoop(DumpableObject** loop, int nLoop)
      * dependency data, so we can't see that here.)
      */
     if (nLoop == 1) {
-        if (loop[0]->objType == DO_TABLE) {
+        if (loop[0]->objType == DO_TABLE || loop[0]->objType == DO_FUNC) {
             removeObjectDependency(loop[0], loop[0]->dumpId);
             return;
         }
