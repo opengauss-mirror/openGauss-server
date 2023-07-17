@@ -108,8 +108,8 @@ static void secure_initialize(void);
 static int open_server_SSL(Port*);
 static void close_SSL(Port*);
 static const char* SSLerrmessage(void);
-static void init_server_ssl_passwd(SSL_CTX* pstContext);
-static void check_permission_cipher_file(const char* parent_dir);
+static void init_server_ssl_passwd(SSL_CTX* pstContext, bool enc);
+static void check_permission_cipher_file(const char* parent_dir, bool enc);
 extern bool StreamThreadAmI();
 
 static BIO_METHOD* my_BIO_s_socket(void);
@@ -131,12 +131,22 @@ static const char* ssl_ciphers_map[] = {
     /* The following are compatible with earlier versions of the client. */
     TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,       /* TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, */
     TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,       /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
+#ifdef USE_TASSL
+    /* GM */
+    TLS1_TXT_ECDHE_WITH_SM4_SM3,                     /* TLS1_TXT_ECDHE_WITH_SM4_SM3 */
+    TLS1_TXT_ECDHE_WITH_SM4_GCM_SM3,                 /* TLS1_TXT_ECDHE_WITH_SM4_GCM_SM3 */
+    TLS1_TXT_ECC_WITH_SM4_SM3,                       /* TLS1_TXT_ECC_WITH_SM4_SM3 */
+    TLS1_TXT_ECC_WITH_SM4_GCM_SM3,                   /* TLS1_TXT_ECC_WITH_SM4_GCM_SM3 */
+#endif
     NULL};
 #endif
 
 const char* ssl_cipher_file = "server.key.cipher";
 const char* ssl_rand_file = "server.key.rand";
-
+#ifdef USE_TASSL
+const char *ssl_enc_cipher_file = "server_enc.key.cipher";
+const char *ssl_enc_rand_file = "server_enc.key.rand";
+#endif
 /* ------------------------------------------------------------ */
 /*                       Hardcoded values                       */
 /* ------------------------------------------------------------ */
@@ -1002,7 +1012,7 @@ static void initialize_SSL(void)
         SSL_CTX_set_mode(u_sess->libpq_cxt.SSL_server_context, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
         /* set the default password for certificate/private key loading */
-        init_server_ssl_passwd(u_sess->libpq_cxt.SSL_server_context);
+        init_server_ssl_passwd(u_sess->libpq_cxt.SSL_server_context, false);
         
         /* Load and verify server's certificate and private key*/
         if (SSL_CTX_use_certificate_chain_file(
@@ -1066,6 +1076,75 @@ static void initialize_SSL(void)
                     g_instance.attr.attr_security.ssl_key_file,
                     SSLerrmessage())));
         }
+#ifdef USE_TASSL
+        if(g_instance.attr.attr_security.ssl_use_tlcp)
+        {
+            /* set the default password for certificate/private key loading */
+            init_server_ssl_passwd(u_sess->libpq_cxt.SSL_server_context, true);
+            
+            if (SSL_CTX_use_certificate_chain_file(
+                u_sess->libpq_cxt.SSL_server_context, g_instance.attr.attr_security.ssl_enc_cert_file) != 1) {
+                ereport(FATAL,
+                    (errcode(ERRCODE_CONFIG_FILE_ERROR),
+                        errmsg("could not load server encryption certificate file \"%s\": %s",
+                            g_instance.attr.attr_security.ssl_enc_cert_file,
+                            SSLerrmessage())));
+            }
+            /* check certificate file permission */
+    #if !defined(WIN32) && !defined(__CYGWIN__)
+            if (stat(g_instance.attr.attr_security.ssl_enc_cert_file, &buf) == 0) {
+                if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
+                    ereport(FATAL,
+                        (errcode(ERRCODE_CONFIG_FILE_ERROR),
+                            errmsg("certificate file \"%s\" has group or world access",
+                                g_instance.attr.attr_security.ssl_enc_cert_file),
+                            errdetail("Permissions should be u=rw (0600) or less.")));
+                }
+            }
+    #endif
+
+            if (stat(g_instance.attr.attr_security.ssl_enc_key_file, &buf) != 0) {
+                ereport(FATAL,
+                    (errcode_for_file_access(),
+                        errmsg("could not access encryption private key file \"%s\": %m", 
+                            g_instance.attr.attr_security.ssl_enc_key_file)));
+            }
+
+            /*
+            * Require no public access to key file.
+            *
+            * XXX temporarily suppress check when on Windows, because there may
+            * not be proper support for Unix-y file permissions.  Need to think
+            * of a reasonable check to apply on Windows.  (See also the data
+            * directory permission check in postmaster.c)
+            */
+    #if !defined(WIN32) && !defined(__CYGWIN__)
+            if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
+                ereport(FATAL,
+                    (errcode(ERRCODE_CONFIG_FILE_ERROR),
+                        errmsg("encryption private key file \"%s\" has group or world access",
+                            g_instance.attr.attr_security.ssl_enc_key_file),
+                        errdetail("Permissions should be u=rw (0600) or less.")));
+            }
+    #endif
+
+            if (SSL_CTX_use_PrivateKey_file(u_sess->libpq_cxt.SSL_server_context,
+                g_instance.attr.attr_security.ssl_enc_key_file,
+                SSL_FILETYPE_PEM) != 1) {
+                ereport(FATAL,
+                    (errmsg("could not load encryption private key file \"%s\": %s",
+                        g_instance.attr.attr_security.ssl_enc_key_file,
+                        SSLerrmessage())));
+            }
+
+            if (SSL_CTX_check_private_key(u_sess->libpq_cxt.SSL_server_context) != 1) {
+                ereport(FATAL,
+                    (errmsg("check of encryption private key \"%s\"failed: %s",
+                        g_instance.attr.attr_security.ssl_enc_key_file,
+                        SSLerrmessage())));
+            }
+        }
+#endif
     }
     /* check ca certificate file permission */
 #if !defined(WIN32) && !defined(__CYGWIN__)
@@ -1314,36 +1393,63 @@ static const char* SSLerrmessage(void)
 }
 
 /* set the default password for certificate/private key loading */
-static void init_server_ssl_passwd(SSL_CTX* pstContext)
+static void init_server_ssl_passwd(SSL_CTX* pstContext, bool enc)
 {
     char* parentdir = NULL;
+#ifdef USE_TASSL
+    KeyMode keymode = enc ? SERVER_ENC_MODE : SERVER_MODE;
+#else
     KeyMode keymode = SERVER_MODE;
-    if (is_absolute_path(g_instance.attr.attr_security.ssl_key_file)) {
-        parentdir = pstrdup(g_instance.attr.attr_security.ssl_key_file);
-        get_parent_directory(parentdir);
-        decode_cipher_files(keymode, NULL, parentdir, u_sess->libpq_cxt.server_key);
+#endif
+    char *keyfile;
+    errno_t rc = 0;
+    rc = memset_s(u_sess->libpq_cxt.server_key, CIPHER_H + 1, 0, CIPHER_H + 1);
+    securec_check(rc, "\0", "\0");
+
+#ifdef USE_TASSL
+    if(enc) {
+        keyfile = g_instance.attr.attr_security.ssl_enc_key_file;
+    }
+    else {
+        keyfile = g_instance.attr.attr_security.ssl_key_file;  
+    }
+#else
+    keyfile = g_instance.attr.attr_security.ssl_key_file;  
+#endif
+  
+    if (is_absolute_path(keyfile)) {
+        parentdir = pstrdup(keyfile);
+        get_parent_directory(parentdir); 
     } else {
-        decode_cipher_files(keymode, NULL, t_thrd.proc_cxt.DataDir, u_sess->libpq_cxt.server_key);
         parentdir = pstrdup(t_thrd.proc_cxt.DataDir);
     }
-
-    check_permission_cipher_file(parentdir);
+    check_permission_cipher_file(parentdir, enc);
+    decode_cipher_files(keymode, NULL, parentdir, u_sess->libpq_cxt.server_key);
     pfree_ext(parentdir);
 
     SSL_CTX_set_default_passwd_cb_userdata(pstContext, (char*)u_sess->libpq_cxt.server_key);
 }
 
 /* Check permissions of cipher file and rand file in server */
-static void check_permission_cipher_file(const char* parent_dir)
+static void check_permission_cipher_file(const char* parent_dir, bool enc)
 {
     char cipher_file[MAXPGPATH] = {0};
     char rand_file[MAXPGPATH] = {0};
     struct stat cipherbuf;
     struct stat randbuf;
+#ifdef USE_TASSL
+    int rcs = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s%s", parent_dir, enc ? "_enc" : "" ,CIPHER_KEY_FILE);
+#else
     int rcs = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s", parent_dir, CIPHER_KEY_FILE);
+#endif
     securec_check_ss(rcs, "\0", "\0");
+#ifdef USE_TASSL
+    rcs = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s%s", parent_dir, enc ? "_enc" : "", RAN_KEY_FILE);
+#else
     rcs = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/server%s", parent_dir, RAN_KEY_FILE);
+#endif
     securec_check_ss(rcs, "\0", "\0");
+
     if (lstat(cipher_file, &cipherbuf) != 0 || lstat(rand_file, &randbuf) != 0)
         return;
 #if !defined(WIN32) && !defined(__CYGWIN__)

@@ -831,6 +831,9 @@
 /* Define to build with (Open)SSL support. (--with-openssl) */
 #define USE_SSL 1
 
+/* Define to build with TASSL support. (--with-tassl) */
+/* #undef USE_TASSL 1 */
+
 /* Define to select SysV-style semaphores. */
 #define USE_SYSV_SEMAPHORES 1
 

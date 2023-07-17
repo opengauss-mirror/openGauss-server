@@ -2756,6 +2756,10 @@ static bool CheckCopyFileInBlackList(const char* path)
         FindFileName(g_instance.attr.attr_common.external_pid_file),
         FindFileName(g_instance.attr.attr_security.ssl_cert_file),
         FindFileName(g_instance.attr.attr_security.ssl_key_file),
+ #ifdef USE_TASSL
+        FindFileName(g_instance.attr.attr_security.ssl_enc_cert_file),
+        FindFileName(g_instance.attr.attr_security.ssl_enc_key_file),
+#endif
         FindFileName(g_instance.attr.attr_security.ssl_ca_file),
         FindFileName(g_instance.attr.attr_security.ssl_crl_file),
         FindFileName(u_sess->attr.attr_security.pg_krb_server_keyfile),

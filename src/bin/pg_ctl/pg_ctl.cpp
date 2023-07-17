@@ -273,6 +273,12 @@ char ssl_ca_file[MAXPGPATH];
 char ssl_crl_file[MAXPGPATH];
 char* ssl_cipher_file = "server.key.cipher";
 char* ssl_rand_file = "server.key.rand";
+#ifdef USE_TASSL
+char ssl_enc_cert_file[MAXPGPATH];
+char ssl_enc_key_file[MAXPGPATH];
+char *ssl_enc_cipher_file = "server_enc.key.cipher";
+char *ssl_enc_rand_file = "server_enc.key.rand";
+#endif
 
 char pgxc_node_name[MAXPGPATH];
 
@@ -4999,6 +5005,10 @@ static void read_ssl_confval(void)
 
     (void)find_guc_optval((const char**)optlines, "ssl_cert_file", ssl_cert_file);
     (void)find_guc_optval((const char**)optlines, "ssl_key_file", ssl_key_file);
+#ifdef USE_TASSL
+    (void)find_guc_optval((const char**)optlines, "ssl_enc_cert_file", ssl_enc_cert_file);
+    (void)find_guc_optval((const char**)optlines, "ssl_enc_key_file", ssl_enc_key_file);
+#endif
     (void)find_guc_optval((const char**)optlines, "ssl_ca_file", ssl_ca_file);
     (void)find_guc_optval((const char**)optlines, "ssl_crl_file", ssl_crl_file);
 

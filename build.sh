@@ -26,6 +26,7 @@ function print_help()
     -wrap|--wrap_binaries             wrop up the project binaries. By default, only compile the project
     -nopt|--not_optimized             on kunpeng platform, like 1616 version, without LSE optimized
     -f|--config_file                  set postgresql.conf.sample from config_file when packing
+    -T|--tassl                        build with tassl
     "
 }
 
@@ -68,6 +69,10 @@ while [ $# -gt 0 ]; do
             config_file=$(realpath "$2")
             shift 2
             ;;
+        -T|--tassl)
+            build_with_tassl='-T'
+            shift 1
+            ;;
          *)
             echo "Internal Error: option processing error: $1" 1>&2
             echo "please input right paramtenter, the following command may help you"
@@ -81,7 +86,7 @@ ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 echo "ROOT_DIR : $ROOT_DIR"
 cd build/script
 chmod a+x build_opengauss.sh
-./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server
+./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server ${build_with_tassl}
 if [ "${wrap_binaries}"X = "YES"X ]
 then
     chmod a+x package_opengauss.sh

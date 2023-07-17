@@ -665,7 +665,12 @@ LIBCURL_LIB_PATH = $(LIBCURL_HOME)/lib
 #############################################################################
 # openssl component
 #############################################################################
-LIBOPENSSL_HOME = $(top_builddir)/../$(BINARYPATH)/openssl/comm
+
+ifeq ($(with_tassl), yes)
+    LIBOPENSSL_HOME =$(top_builddir)/../$(BINARYPATH)/tassl/comm
+else
+    LIBOPENSSL_HOME =$(top_builddir)/../$(BINARYPATH)/openssl/comm
+endif
 LIBOPENSSL_BIN_PATH = $(LIBOPENSSL_HOME)/bin
 LIBOPENSSL_LIB_PATH = $(LIBOPENSSL_HOME)/lib
 LIBOPENSSL_SSL_PATH = $(LIBOPENSSL_HOME)/ssl

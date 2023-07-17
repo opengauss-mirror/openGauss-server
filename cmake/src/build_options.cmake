@@ -65,6 +65,7 @@ option(ENABLE_ORACLE_FDW "enable export or import data with oracle,the old is --
 option(BUILD_BY_CMAKE "the BUILD_BY_CMAKE is new,used in distribute pg_regress.cpp" ON)
 option(DEBUG_UHEAP "collect USTORE statistics" OFF)
 option(MAX_ALLOC_SEGNUM "max alloc xlog seg num in extreme_rto" 4)
+option(USE_TASSL "build with tassl, the old is --with-tassl" OFF)#ON
 
 #No matter what to set, the old mppdb aways use ENABLE_THREAD_SAFETY=yes by default defined.
 option(ENABLE_THREAD_SAFETY "enable thread safety, the old is --enable-thread-safety" ON)
@@ -100,6 +101,12 @@ option(ENABLE_OPENEULER_MAJOR "support openEuler 22.03 LTS, this set to default"
 set(DB_COMMON_DEFINE "")
 set(PROJECT_LDFLAGS "")
 set(GAUSSDB_CONFIGURE "")
+
+if(($ENV{WITH_TASSL}) STREQUAL "YES")
+    set(USE_TASSL ON)
+else()
+    set(USE_TASSL OFF)
+endif()
 
 message(STATUS "status ENV{DEBUG_TYPE}" $ENV{DEBUG_TYPE})
 if($ENV{DEBUG_TYPE} STREQUAL "debug" OR ${ENABLE_LLT} OR ${ENABLE_UT})
@@ -244,7 +251,9 @@ if(${USE_SSL})
     set(LIBS "${LIBS} -lssl -lcrypto")
     set(GAUSSDB_CONFIGURE "${GAUSSDB_CONFIGURE} -DUSE_SSL")
 endif()
-
+if(${USE_TASSL})
+    set(GAUSSDB_CONFIGURE "${GAUSSDB_CONFIGURE} -DUSE_TASSL")
+endif()
 #after 8.1: we build without etcd 3rd, the DEFAULT is -DUSE_ETCD=no
 if(${USE_ETCD})
     set(LIBS "${LIBS} -letcd -lyajl")

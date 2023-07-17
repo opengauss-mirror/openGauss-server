@@ -70,6 +70,10 @@
 #ifndef WIN32
 #define USER_CERT_FILE ".postgresql/postgresql.crt"
 #define USER_KEY_FILE ".postgresql/postgresql.key"
+#ifdef USE_TASSL
+#define USER_ENC_CERT_FILE ".postgresql/postgresql_enc.crt"
+#define USER_ENC_KEY_FILE ".postgresql/postgresql_enc.key"
+#endif
 #define ROOT_CERT_FILE ".postgresql/root.crt"
 #define ROOT_CRL_FILE ".postgresql/root.crl"
 #else
@@ -77,6 +81,10 @@
 
 #define USER_CERT_FILE "postgresql.crt"
 #define USER_KEY_FILE "postgresql.key"
+#ifdef USE_TASSL
+#define USER_ENC_CERT_FILE "postgresql_enc.crt"
+#define USER_ENC_KEY_FILE "postgresql_enc.key"
+#endif
 #define ROOT_CERT_FILE "root.crt"
 #define ROOT_CRL_FILE "root.crl"
 #endif
@@ -90,18 +98,18 @@ static void destroySSL(PGconn* conn);
 static void close_SSL(PGconn*);
 #ifndef ENABLE_UT
 static char* SSLerrmessage(void);
-static int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const char* username);
+static int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const char* username, bool enc);
 static PostgresPollingStatusType open_client_SSL(PGconn*);
 static int verify_cb(int ok, X509_STORE_CTX* ctx);
 static int initialize_SSL(PGconn* conn);
-static int init_client_ssl_passwd(SSL* pstContext, const char* path, const char* username, PGconn* conn);
+static int init_client_ssl_passwd(SSL* pstContext, const char* path, const char* username, PGconn* conn, bool enc);
 #else
 char* SSLerrmessage(void);
-int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const char* username);
+int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const char* username, bool enc);
 PostgresPollingStatusType open_client_SSL(PGconn*);
 int verify_cb(int ok, X509_STORE_CTX* ctx);
 int initialize_SSL(PGconn* conn);
-int init_client_ssl_passwd(SSL* pstContext, const char* path, const char* username, PGconn* conn);
+int init_client_ssl_passwd(SSL* pstContext, const char* path, const char* username, PGconn* conn, bool enc);
 #endif
 
 static void SSLerrfree(char* buf);
@@ -153,6 +161,13 @@ static const char* ssl_ciphers_map[] = {
     /* The following are compatible with earlier versions of the server. */
     TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,       /* TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, */
     TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,       /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
+#ifdef USE_TASSL
+    /* GM */
+    TLS1_TXT_ECDHE_WITH_SM4_SM3,                     /* TLS1_TXT_ECDHE_WITH_SM4_SM3 */
+    TLS1_TXT_ECDHE_WITH_SM4_GCM_SM3,                 /* TLS1_TXT_ECDHE_WITH_SM4_GCM_SM3 */
+    TLS1_TXT_ECC_WITH_SM4_SM3,                       /* TLS1_TXT_ECC_WITH_SM4_SM3 */
+    TLS1_TXT_ECC_WITH_SM4_GCM_SM3,                   /* TLS1_TXT_ECC_WITH_SM4_GCM_SM3 */
+#endif
     NULL};
 
 #endif /* SSL */
@@ -1220,7 +1235,15 @@ static int init_ssl_system(PGconn* conn)
         }
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#ifdef USE_TASSL
+        if (conn->ssltlcp) {
+            SSL_context = SSL_CTX_new(CNTLS_client_method());
+        } else {
+            SSL_context = SSL_CTX_new(TLSv1_2_method());
+        }   
+#else
         SSL_context = SSL_CTX_new(TLSv1_2_method());
+#endif 
         if (SSL_context == NULL) {
             char* err = SSLerrmessage();
 
@@ -1286,21 +1309,31 @@ static
 #endif
 
 /* Read the client certificate file */
-int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool *have_cert)
+int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool *have_cert, bool enc)
 {
     struct stat buf;
     char fnbuf[MAXPGPATH] = {0};
     char sebuf[256];
     errno_t rc = 0;
     int nRet = 0;
-    
-    if ((conn->sslcert != NULL) && strlen(conn->sslcert) > 0) {
-        rc = strncpy_s(fnbuf, MAXPGPATH, conn->sslcert, strlen(conn->sslcert));
+    char *cert;
+    const char *certfile;
+#ifdef USE_TASSL
+    cert = enc ? conn->sslenccert : conn->sslcert;
+    certfile = enc ? USER_ENC_CERT_FILE : USER_CERT_FILE;
+#else
+    cert = conn->sslcert;
+    certfile = USER_CERT_FILE;
+#endif
+
+    if ((cert != NULL) && strlen(cert) > 0) {
+        rc = strncpy_s(fnbuf, MAXPGPATH, cert, strlen(cert));
         securec_check_c(rc, "\0", "\0");
         fnbuf[MAXPGPATH - 1] = '\0';
     } else if (have_homedir) {
-        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, USER_CERT_FILE);
+        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, certfile);
         securec_check_ss_c(nRet, "\0", "\0");
+
     } else
         fnbuf[0] = '\0';
     if (fnbuf[0] == '\0') {
@@ -1345,7 +1378,7 @@ int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bo
         }
 #endif
         /* set the default password for certificate/private key loading */
-        if (init_client_ssl_passwd(conn->ssl, fnbuf, conn->pguser, conn) != 0) {
+        if (init_client_ssl_passwd(conn->ssl, fnbuf, conn->pguser, conn, enc) != 0) {
 #ifdef ENABLE_THREAD_SAFETY
             (void)pthread_mutex_unlock(&ssl_config_mutex);
 #endif
@@ -1394,7 +1427,7 @@ int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bo
     return 0;
 }
 
-int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool have_cert)
+int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool have_cert, bool enc)
 {
     struct stat buf;
     char fnbuf[MAXPGPATH] = {0};
@@ -1406,13 +1439,23 @@ int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, boo
      * colon in the name. The exception is if the second character is a colon,
      * in which case it can be a Windows filename with drive specification.
      */
-    if (have_cert && (conn->sslkey != NULL) && strlen(conn->sslkey) > 0) {
-        rc = strncpy_s(fnbuf, MAXPGPATH, conn->sslkey, strlen(conn->sslkey));
+    char *key;
+    const char *keyfile;
+#ifdef USE_TASSL
+    key = enc ? conn->sslenckey : conn->sslkey;
+    keyfile = enc ? USER_ENC_KEY_FILE : USER_KEY_FILE;
+#else
+    key = conn->sslkey;
+    keyfile = USER_KEY_FILE;
+#endif
+
+    if (have_cert && key != NULL && strlen(key) > 0) {
+        rc = strncpy_s(fnbuf, MAXPGPATH, key, strlen(key));
         securec_check_c(rc, "\0", "\0");
         fnbuf[MAXPGPATH - 1] = '\0';
     } else if (have_homedir) {
         /* No PGSSLKEY specified, load default file */
-        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, USER_KEY_FILE);
+        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, keyfile);
         securec_check_ss_c(nRet, "\0", "\0");
     } else
         fnbuf[0] = '\0';
@@ -1460,6 +1503,7 @@ int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, boo
     }
     return 0;
 }
+
 
 void LoadSslCrlFile(PGconn* conn, bool have_homedir, const PathData *homedir)
 {
@@ -1591,21 +1635,38 @@ int initialize_SSL(PGconn* conn)
      */
     if (!((conn->sslcert != NULL) && strlen(conn->sslcert) > 0) ||
         !((conn->sslkey != NULL) && strlen(conn->sslkey) > 0) ||
+#ifdef USE_TASSL
+        !((conn->sslenccert != NULL) && strlen(conn->sslenccert) > 0) ||
+        !((conn->sslenckey != NULL) && strlen(conn->sslenckey) > 0) ||
+#endif
         !((conn->sslrootcert != NULL) && strlen(conn->sslrootcert) > 0) ||
         !((conn->sslcrl != NULL) && strlen(conn->sslcrl) > 0))
         have_homedir = pqGetHomeDirectory(homedir.data, MAXPGPATH);
     else /* won't need it */
         have_homedir = false;
     
-    retval = LoadSslCertFile(conn, have_homedir, &homedir, &have_cert);
+    retval = LoadSslCertFile(conn, have_homedir, &homedir, &have_cert, false);
     if (retval == -1) {
         return retval;
     }
     g_crl_invalid = false;
-    retval = LoadSslKeyFile(conn, have_homedir, &homedir, have_cert);
+    retval = LoadSslKeyFile(conn, have_homedir, &homedir, have_cert, false);
     if (retval == -1) {
         return retval;
     }
+#ifdef USE_TASSL
+    if (conn->ssltlcp) {
+        retval = LoadSslCertFile(conn, have_homedir, &homedir, &have_cert, true);
+        if (retval == -1) {
+            return retval;
+        }
+        g_crl_invalid = false;
+        retval = LoadSslKeyFile(conn, have_homedir, &homedir, have_cert, true);
+        if (retval == -1) {
+            return retval;
+        }
+    }
+#endif
     retval = LoadRootCertFile(conn, have_homedir, &homedir);
     if (retval == -1) {
         return retval;
@@ -1911,7 +1972,7 @@ void pq_reset_sigpipe(sigset_t* osigset, bool sigpipe_pending, bool got_epipe)
 static
 #endif
     int
-    init_client_ssl_passwd(SSL* pstContext, const char* path, const char* username, PGconn* conn)
+    init_client_ssl_passwd(SSL* pstContext, const char* path, const char* username, PGconn* conn, bool enc)
 {
     char* CertFilesDir = NULL;
     char CertFilesPath[MAXPGPATH] = {0};
@@ -1919,8 +1980,14 @@ static
 
     struct stat st;
     int retval = 0;
+#ifdef USE_TASSL
+    KeyMode mode = enc ? CLIENT_ENC_MODE : CLIENT_MODE;
+#else
     KeyMode mode = CLIENT_MODE;
+#endif
     int nRet = 0;
+
+    char *uname = NULL;
 
     if (NULL == path || '\0' == path[0]) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("invalid cert file path\n"));
@@ -1933,30 +2000,35 @@ static
     CertFilesDir = CertFilesPath;
     get_parent_directory(CertFilesDir);
 
+    nRet = memset_s(conn->cipher_passwd, CIPHER_LEN + 1, 0, CIPHER_LEN + 1);
+    securec_check_ss_c(nRet, "\0", "\0");
+    
     /*check whether the cipher and rand files begins with username exist.
     if exist, decrypt it.
     if not,decrypt the default cipher and rand files begins with client%.
     Because,for every client user mayown certification and private key*/
-    if (NULL == username) {
-        retval = check_permission_cipher_file(CertFilesDir, conn, NULL);
-        if (retval != 1)
-            return retval;
-        decode_cipher_files(mode, NULL, CertFilesDir, conn->cipher_passwd);
-    } else {
+
+    if(NULL != username) {
+#ifdef USE_TASSL
+        nRet = snprintf_s(CipherFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s%s", CertFilesDir, username, enc ? "_enc" : "", CIPHER_KEY_FILE);
+#else
         nRet = snprintf_s(CipherFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s", CertFilesDir, username, CIPHER_KEY_FILE);
+#endif
         securec_check_ss_c(nRet, "\0", "\0");
+
         if (lstat(CipherFileName, &st) < 0) {
-            retval = check_permission_cipher_file(CertFilesDir, conn, NULL);
-            if (retval != 1)
-                return retval;
-            decode_cipher_files(mode, NULL, CertFilesDir, conn->cipher_passwd);
-        } else {
-            retval = check_permission_cipher_file(CertFilesDir, conn, username);
-            if (retval != 1)
-                return retval;
-            decode_cipher_files(mode, username, CertFilesDir, conn->cipher_passwd);
+            uname = NULL;
+        }else {
+            uname = (char*)username;
         }
     }
+
+    retval = check_permission_cipher_file(CertFilesDir, conn, uname, enc);
+    if (retval != 1) {
+        return retval;
+    }
+        
+    decode_cipher_files(mode, uname, CertFilesDir, conn->cipher_passwd);
 
     SSL_set_default_passwd_cb_userdata(pstContext, (char*)conn->cipher_passwd);
     return 0;
@@ -1975,13 +2047,26 @@ static
 static
 #endif  // ENABLE_UT
 /* Check permissions of cipher file and rand file in client */
-int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const char* username)
+int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const char* username ,bool enc)
 {
     char cipher_file[MAXPGPATH] = {0};
     char rand_file[MAXPGPATH] = {0};
     struct stat cipherbuf;
     struct stat randbuf;
     int nRet = 0;
+#ifdef USE_TASSL
+    if (NULL == username) {
+        nRet = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/client%s%s", parent_dir, enc ? "_enc" : "", CIPHER_KEY_FILE);
+        securec_check_ss_c(nRet, "\0", "\0");
+        nRet = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/client%s%s", parent_dir, enc ? "_enc" : "", RAN_KEY_FILE);
+        securec_check_ss_c(nRet, "\0", "\0");
+    } else {
+        nRet = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s%s", parent_dir, username, enc ? "_enc" : "", CIPHER_KEY_FILE);
+        securec_check_ss_c(nRet, "\0", "\0");
+        nRet = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s%s", parent_dir, username, enc ? "_enc" : "", RAN_KEY_FILE);
+        securec_check_ss_c(nRet, "\0", "\0");
+    }
+#else
     if (NULL == username) {
         nRet = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/client%s", parent_dir, CIPHER_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
@@ -1993,6 +2078,7 @@ int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const cha
         nRet = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s", parent_dir, username, RAN_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
     }
+#endif
     /*cipher file or rand file do not exist,skip check the permission.
     For key and certications without password,it is also ok*/
     if (lstat(cipher_file, &cipherbuf) != 0 || lstat(rand_file, &randbuf) != 0)

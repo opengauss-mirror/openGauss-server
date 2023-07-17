@@ -260,7 +260,7 @@ endif
 # Saved arguments form configure
 with_3rd = @with_3rdpartydir@
 with_jdk = @with_jdk@
-
+with_tassl = @with_tassl@
 ifeq ($(with_3rd), NONE)
   BINARYPATH = binarylibs/kernel/dependency
   PLATFORMPATH = binarylibs/kernel/platform
@@ -283,7 +283,11 @@ ifeq ($(with_3rd), NONE)
   CJSON_HOME = $(top_builddir)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(top_builddir)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
   BOOST_HOME = $(top_builddir)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
-  LIBOPENSSL_HOME = $(top_builddir)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  ifeq ($(with_tassl), yes)
+    LIBOPENSSL_HOME = $(top_builddir)/$(BINARYPATH)/tassl/$(LIB_NOT_SUPPORT_LLT)
+  else
+    LIBOPENSSL_HOME = $(top_builddir)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  endif
   SECURE_HOME = $(top_builddir)/$(PLATFORMPATH)/Huawei_Secure_C/$(LIB_NOT_SUPPORT_LLT)
   SECUREDYNAMICLIB_HOME = $(top_builddir)/$(PLATFORMPATH)/Huawei_Secure_C/Dynamic_Lib
   LICENSE_HOME = $(top_builddir)/$(PLATFORMPATH)/AdaptiveLM_C_V100R005C01SPC002/$(LIB_SUPPORT_LLT)
@@ -322,7 +326,12 @@ else
   CJSON_HOME = $(with_3rd)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(with_3rd)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
   BOOST_HOME = $(with_3rd)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
-  LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  ifeq ($(with_tassl), yes)
+    LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/tassl/$(LIB_NOT_SUPPORT_LLT)
+  else
+    LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  endif
+
 ifneq ($(enable_lite_mode), yes)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 LIBKMC_HOME = $(with_3rd)/$(PLATFORMPATH)/kmc/comm

@@ -227,6 +227,11 @@ static const PQconninfoOption PQconninfoOptions[] = {
     {"sslcompression", "PGSSLCOMPRESSION", "1", NULL, "SSL-Compression", "", 1, 0},
     {"sslcert", "PGSSLCERT", NULL, NULL, "SSL-Client-Cert", "", 64, 0},
     {"sslkey", "PGSSLKEY", NULL, NULL, "SSL-Client-Key", "", 64, 0},
+#ifdef USE_TASSL
+    {"sslenccert", "PGSSLENCCERT", NULL, NULL, "SSL-Client-Enc-Cert", "", 64, 0},
+    {"sslenckey", "PGSSLENCKEY", NULL, NULL, "SSL-Client-Enc-Key", "", 64, 0},
+    {"ssltlcp", "PGSSLTLCP", NULL, NULL, "SSL-TLCP", "", 1, 0},
+#endif
     {"sslrootcert", "PGSSLROOTCERT", NULL, NULL, "SSL-Root-Certificate", "", 64, 0},
     {"sslcrl", "PGSSLCRL", NULL, NULL, "SSL-Revocation-List", "", 64, 0},
     {"requirepeer", "PGREQUIREPEER", NULL, NULL, "Require-Peer", "", 10, 0},
@@ -928,6 +933,17 @@ static void fillPGconn(PGconn* conn, PQconninfoOption* connOptions)
     conn->sslkey = (tmp != NULL) ? strdup(tmp) : NULL;
     tmp = conninfo_getval(connOptions, "sslcert");
     conn->sslcert = (tmp != NULL) ? strdup(tmp) : NULL;
+#ifdef USE_TASSL
+    tmp = conninfo_getval(connOptions, "sslenckey");
+    conn->sslenckey = (tmp != NULL) ? strdup(tmp) : NULL;
+    tmp = conninfo_getval(connOptions, "sslenccert");
+    conn->sslenccert = (tmp != NULL) ? strdup(tmp) : NULL;
+    tmp = conninfo_getval(connOptions, "ssltlcp");
+    conn->ssltlcp = false;
+    if (tmp != NULL && strcmp("1", tmp) == 0) {
+        conn->ssltlcp = true;
+    }
+#endif
     tmp = conninfo_getval(connOptions, "sslrootcert");
     conn->sslrootcert = (tmp != NULL) ? strdup(tmp) : NULL;
     tmp = conninfo_getval(connOptions, "sslcrl");
@@ -3457,6 +3473,10 @@ void freePGconn(PGconn* conn)
     libpq_free(conn->sslmode);
     libpq_free(conn->sslcert);
     libpq_free(conn->sslkey);
+#ifdef USE_TASSL
+    libpq_free(conn->sslenccert);
+    libpq_free(conn->sslenckey);
+#endif
     libpq_free(conn->sslrootcert);
     libpq_free(conn->sslcrl);
     libpq_free(conn->sslcompression);

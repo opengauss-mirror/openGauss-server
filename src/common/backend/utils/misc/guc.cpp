@@ -8632,6 +8632,9 @@ static void CheckAlterSystemSetPrivilege(const char* name)
         "asp_log_directory", "config_file", "data_directory", "enable_access_server_directory",
         "enable_copy_server_files", "external_pid_file", "hba_file", "ident_file", "log_directory", "perf_directory",
         "query_log_directory", "ssl_ca_file", "ssl_cert_file", "ssl_crl_file", "ssl_key_file", "stats_temp_directory",
+#ifdef USE_TASSL
+        "ssl_enc_cert_file", "ssl_enc_key_file",
+#endif
         "unix_socket_directory", "unix_socket_group", "unix_socket_permissions",
         "krb_caseins_users", "krb_server_keyfile", "krb_srvname", "allow_system_table_mods", "enableSeparationOfDuty",
         "modify_initial_password", "password_encryption_type", "password_policy", "audit_xid_info",

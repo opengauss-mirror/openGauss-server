@@ -83,6 +83,10 @@ extern void pq_revert_recvbuffer(const char* data, int len);
  */
 extern const char* ssl_cipher_file;
 extern const char* ssl_rand_file;
+#ifdef USE_TASSL
+extern const char *ssl_enc_cipher_file;
+extern const char *ssl_enc_rand_file;
+#endif
 
 extern bool secure_loaded_verify_locations(void);
 extern void secure_destroy(void);

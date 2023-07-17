@@ -372,6 +372,11 @@ struct pg_conn {
     char* sslcompression;      /* SSL compression (0 or 1) */
     char* sslkey;              /* client key filename */
     char* sslcert;             /* client certificate filename */
+#ifdef USE_TASSL
+    char *sslenckey;
+    char *sslenccert;
+    bool ssltlcp;
+#endif
     char* sslrootcert;         /* root certificate filename */
     char* sslcrl;              /* certificate revocation list filename */
     char* requirepeer;         /* required peer credentials for local sockets */
