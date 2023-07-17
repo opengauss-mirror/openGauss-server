@@ -1904,9 +1904,9 @@ void SS_process_ctes(PlannerInfo* root)
         Query* subquery = NULL;
 
         /*
-         * Ignore SELECT CTEs that are not actually referenced anywhere or already inlined.
+         * Ignore SELECT CTEs that are not actually referenced anywhere.
          */
-        if ((cte->cterefcount == 0 && cmdType == CMD_SELECT) || cte->cterefcount == -1) {
+        if (cte->cterefcount == 0 && cmdType == CMD_SELECT) {
             /* Make a dummy entry in cte_plan_ids */
             root->cte_plan_ids = lappend_int(root->cte_plan_ids, -1);
             continue;

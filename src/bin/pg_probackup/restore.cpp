@@ -18,6 +18,7 @@
 
 #include "thread.h"
 #include "common/fe_memutils.h"
+#include "catalog/catalog.h"
 
 #define RESTORE_ARRAY_LEN 100
 
@@ -72,7 +73,8 @@ static void get_pgdata_files(const char *pgdata_path,
                              parray *external_dirs);
 static void remove_redundant_files(const char *pgdata_path,
                                    parray *pgdata_files,
-                                   pgBackup *dest_backup);
+                                   pgBackup *dest_backup,
+                                   parray *external_dirs);
 static void threads_handle(pthread_t *threads,
                            restore_files_arg *threads_args,
                            pgBackup *dest_backup,
@@ -802,7 +804,7 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
     {
         pgdata_files = parray_new();
         get_pgdata_files(pgdata_path, pgdata_files, external_dirs);
-        remove_redundant_files(pgdata_path, pgdata_files, dest_backup);
+        remove_redundant_files(pgdata_path, pgdata_files, dest_backup, external_dirs);
     }
 
     /*
@@ -933,25 +935,56 @@ static void get_pgdata_files(const char *pgdata_path,
          pretty_time);
 }
 
+static bool skip_some_tblspc_files(pgFile *file)
+{
+    Oid     tblspcOid;
+    int     sscanf_res;
+    char    tmp_rel_path[MAXPGPATH];
+    bool    equ_tbs_version_dir = false;
+    bool    prefix_equ_tbs_version_dir = false;
+
+    sscanf_res = sscanf_s(file->rel_path, PG_TBLSPC_DIR "/%u/%[^/]/",
+                          &tblspcOid, tmp_rel_path, sizeof(tmp_rel_path));
+    equ_tbs_version_dir = (strcmp(tmp_rel_path, TABLESPACE_VERSION_DIRECTORY) == 0);
+    prefix_equ_tbs_version_dir = (strncmp(tmp_rel_path, TABLESPACE_VERSION_DIRECTORY, 
+                                  strlen(TABLESPACE_VERSION_DIRECTORY)) == 0);
+
+    if (sscanf_res == 2 && !equ_tbs_version_dir && prefix_equ_tbs_version_dir)
+        return true;
+    return false;
+}
+
 static void remove_redundant_files(const char *pgdata_path,
                                    parray *pgdata_files,
-                                   pgBackup *dest_backup)
+                                   pgBackup *dest_backup,
+                                   parray *external_dirs)
 {
     char   pretty_time[20];
     time_t start_time, end_time;
 
     elog(INFO, "Removing redundant files in destination directory");
     time(&start_time);
-    for (int i = 0; (size_t)i < parray_num(pgdata_files); i++)
-    {
+    for (int i = 0; (size_t)i < parray_num(pgdata_files); i++) {
         pgFile	   *file = (pgFile *)parray_get(pgdata_files, i);
+        bool    in_tablespace = false;
+
+        /* For incremental backups, we need to skip some files */
+        in_tablespace = path_is_prefix_of_path(PG_TBLSPC_DIR, file->rel_path);
+        if (in_tablespace && skip_some_tblspc_files(file))
+            continue;
 
         /* if file does not exists in destination list, then we can safely unlink it */
-        if (parray_bsearch(dest_backup->files, file, pgFileCompareRelPathWithExternal) == NULL)
-        {
+        if (parray_bsearch(dest_backup->files, file, 
+            pgFileCompareRelPathWithExternal) == NULL) {
             char    fullpath[MAXPGPATH];
 
-            join_path_components(fullpath, pgdata_path, file->rel_path);
+            if (file->external_dir_num) {
+                char *external_path = (char *)parray_get(external_dirs,
+                                                         file->external_dir_num - 1);
+                join_path_components(fullpath, external_path, file->rel_path);                
+            } else {
+                join_path_components(fullpath, pgdata_path, file->rel_path);
+            }            
 
             fio_delete(file->mode, fullpath, FIO_DB_HOST);
             elog(VERBOSE, "Deleted file \"%s\"", fullpath);
