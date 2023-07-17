@@ -12758,6 +12758,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     PQExpBuffer delqry;
     PQExpBuffer labelq;
     PQExpBuffer asPart;
+    PQExpBuffer headWithDefault;
+    PQExpBuffer headWithoutDefault;
     PGresult* res = NULL;
     char* funcsig = NULL;     /* identity signature */
     char* funcfullsig = NULL; /* full signature */
@@ -12781,6 +12783,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     char* procost = NULL;
     char* prorows = NULL;
     char* lanname = NULL;
+    char* selfloop = NULL;
     char* fencedmode = NULL; /*Fenced UDF add*/
     char* proKind = NULL;
     char* proshippable = NULL;
@@ -12801,6 +12804,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     bool isProcedure = false;
     bool hasProargsrc = false;
     bool isNullProargsrc = false;
+    bool isNullSelfloop = false;
     const char *funcKind;
     ArchiveHandle* AH = (ArchiveHandle*)fout;
 
@@ -12816,6 +12820,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     delqry = createPQExpBuffer();
     labelq = createPQExpBuffer();
     asPart = createPQExpBuffer();
+    headWithDefault = createPQExpBuffer();
+    headWithoutDefault = createPQExpBuffer();
 
     /* Set proper schema search path so type references list correctly */
     selectSourceSchema(fout, finfo->dobj.nmspace->dobj.name);
@@ -12841,7 +12847,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         "%s, "
         "%s, "
         "(SELECT lanname FROM pg_catalog.pg_language WHERE oid = prolang) AS lanname, "
-        "%s "
+        "%s, "
+        "(SELECT 1 FROM pg_depend WHERE objid = oid AND objid = refobjid AND refclassid = 1255 LIMIT 1) AS selfloop "
         "FROM pg_catalog.pg_proc "
         "WHERE oid = '%u'::pg_catalog.oid",
         isHasFencedmode ? "fencedmode" : "NULL AS fencedmode",
@@ -12869,6 +12876,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     procost = PQgetvalue(res, 0, PQfnumber(res, "procost"));
     prorows = PQgetvalue(res, 0, PQfnumber(res, "prorows"));
     lanname = PQgetvalue(res, 0, PQfnumber(res, "lanname"));
+    selfloop = PQgetvalue(res, 0, PQfnumber(res, "selfloop"));
     fencedmode = PQgetvalue(res, 0, PQfnumber(res, "fencedmode"));
     proshippable = PQgetvalue(res, 0, PQfnumber(res, "proshippable"));
     propackage = PQgetvalue(res, 0, PQfnumber(res, "propackage"));
@@ -12882,6 +12890,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
             destroyPQExpBuffer(delqry);
             destroyPQExpBuffer(labelq);
             destroyPQExpBuffer(asPart);
+            destroyPQExpBuffer(headWithDefault);
+            destroyPQExpBuffer(headWithoutDefault);
             return;
         }
     }
@@ -12998,7 +13008,16 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     appendPQExpBuffer(delqry, "DROP %s IF EXISTS %s.%s%s;\n", funcKind,
                       fmtId(finfo->dobj.nmspace->dobj.name), funcsig, if_cascade);
 
-    appendPQExpBuffer(q, "CREATE %s %s ", funcKind, funcfullsig);
+    isNullSelfloop = (selfloop == NULL || selfloop[0] == '\0');
+
+    if (!isNullSelfloop) {
+        appendPQExpBuffer(headWithoutDefault, "CREATE %s %s ", funcKind, funcsig);
+    }
+
+    if (isNullSelfloop)
+    	appendPQExpBuffer(headWithDefault, "CREATE %s %s ", funcKind, funcfullsig);
+    else
+        appendPQExpBuffer(headWithDefault, "CREATE OR REPLACE %s %s ", funcKind, funcfullsig);
     
     if (isProcedure) {
         /* For procedure, no return type, do nothing */
@@ -13118,6 +13137,12 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     if (binary_upgrade)
         binary_upgrade_extension_member(q, &finfo->dobj, labelq->data);
 
+    if (isNullSelfloop) {
+        appendPQExpBuffer(headWithDefault, "%s", q->data);
+    } else {
+        appendPQExpBuffer(headWithoutDefault, "%s\n%s%s", q->data, headWithDefault->data, q->data);
+    }
+
     ArchiveEntry(fout,
         finfo->dobj.catId,
         finfo->dobj.dumpId,
@@ -13128,7 +13153,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         false,
         funcKind,
         SECTION_PRE_DATA,
-        q->data,
+        isNullSelfloop ? headWithDefault->data : headWithoutDefault->data,
         delqry->data,
         NULL,
         NULL,
@@ -13160,6 +13185,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     destroyPQExpBuffer(delqry);
     destroyPQExpBuffer(labelq);
     destroyPQExpBuffer(asPart);
+    destroyPQExpBuffer(headWithDefault);
+    destroyPQExpBuffer(headWithoutDefault);
 
     GS_FREE(funcsig);
     GS_FREE(funcfullsig);
