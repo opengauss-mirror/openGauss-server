@@ -4470,6 +4470,7 @@ bool equal(const void* a, const void* b)
             break;
         case T_ShowEventStmt:
             retval = node_equal_show_event_info((const ShowEventStmt *)a, (const ShowEventStmt *)b);
+            break;
         case T_IndexHintDefinition:
             retval = _equalIndexHintDefinition((IndexHintDefinition *)a, (IndexHintDefinition *)b);
             break;
