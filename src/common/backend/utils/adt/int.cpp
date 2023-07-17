@@ -1523,6 +1523,33 @@ Datum int4_interval(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(DirectFunctionCall1(numeric_interval, DirectFunctionCall1(int4_numeric, PG_GETARG_DATUM(0))));
 }
 
+/* Cast int1 -> interval by typmod */
+Datum int1_to_interval(PG_FUNCTION_ARGS)
+{
+    int32 typmod = PG_GETARG_INT32(1);
+    PG_RETURN_DATUM(DirectFunctionCall2(numeric_to_interval,
+                                        DirectFunctionCall1(int1_numeric, PG_GETARG_DATUM(0)),
+                                        Int32GetDatum(typmod)));
+}
+
+/* Cast int2 -> interval by typmod */
+Datum int2_to_interval(PG_FUNCTION_ARGS)
+{
+    int32 typmod = PG_GETARG_INT32(1);
+    PG_RETURN_DATUM(DirectFunctionCall2(numeric_to_interval,
+                                        DirectFunctionCall1(int2_numeric, PG_GETARG_DATUM(0)),
+                                        Int32GetDatum(typmod)));
+}
+
+/* Cast int4 -> interval by typmod */
+Datum int4_to_interval(PG_FUNCTION_ARGS)
+{
+    int32 typmod = PG_GETARG_INT32(1);
+    PG_RETURN_DATUM(DirectFunctionCall2(numeric_to_interval,
+                                        DirectFunctionCall1(int4_numeric, PG_GETARG_DATUM(0)),
+                                        Int32GetDatum(typmod)));
+}
+
 /* OPERATE INT1 */
 Datum int1um(PG_FUNCTION_ARGS)
 {
