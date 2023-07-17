@@ -343,6 +343,53 @@ Datum pg_terminate_session(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(r == 0);
 }
 
+Datum pg_terminate_active_session_socket(PG_FUNCTION_ARGS)
+{
+    ThreadId tid = PG_GETARG_INT64(0);
+    uint64 sid = PG_GETARG_INT64(1);
+
+    if (tid <= 0 || sid <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Invalid params, tid or sessionid must have real number")));
+    }
+
+    if (!initialuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("must be initial user can use this function")));
+    }
+
+    ereport(LOG, (errmsg("pg_terminate_active_session_socket: tid %lu and sessionid %lu", tid, sid)));
+
+    if (ENABLE_THREAD_POOL && tid != sid) {
+        int count = g_threadPoolControler->GetSessionCtrl()->terminate_session_socket(tid, sid);
+        if (count == 0) {
+            ereport(WARNING, (errmsg("tid %lu and sessionid %lu do not match with valid active session", tid, sid)));
+            PG_RETURN_BOOL(false);
+        }
+    }
+
+    ProcArrayStruct *array_ptr = g_instance.proc_array_idx;
+    LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+    for (int index = 0; index < array_ptr->numProcs; index++) {
+        int pg_proc_no = array_ptr->pgprocnos[index];
+        volatile PGPROC *proc = g_instance.proc_base_all_procs[pg_proc_no];
+        VirtualTransactionId vxid;
+        GET_VXID_FROM_PGPROC(vxid, *proc);
+
+        if (proc->pid != tid) {
+            continue;
+        }
+
+        (void)SendProcSignal(tid, PROCSIG_COMM_CLOSE_ACTIVE_SESSION_SOCKET, vxid.backendId);
+        ereport(LOG,
+            (errmsg("pg_terminate_active_session_socket: send signal to tid %lu and sessionid %lu", tid, sid)));
+        break;
+    }
+    LWLockRelease(ProcArrayLock);
+
+    PG_RETURN_BOOL(true);
+}
+
 /*
  * function name: pg_wlm_jump_queue
  * description  : wlm jump the queue with thread id.

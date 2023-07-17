@@ -716,7 +716,7 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
         }
 
         /* Close Session. */
-        m_group->GetListener()->DelSessionFromEpoll(m_currentSession);
+        m_group->GetListener()->DelSessionFromEpoll(m_currentSession, true);
 
         if (m_currentSession->proc_cxt.PassConnLimit) {
             SpinLockAcquire(&g_instance.conn_cxt.ConnCountLock);

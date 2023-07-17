@@ -118,11 +118,11 @@ bool IsGotPoolReload()
 }
 void ResetGotPoolReload(bool value)
 {
+    if (!t_thrd.int_cxt.ignoreSessionBackendSignal) {
+        u_sess->sig_cxt.got_pool_reload = value;
+    }
     if (EnableLocalSysCache()) {
-        u_sess->sig_cxt.got_pool_reload = value;
         t_thrd.lsc_cxt.lsc->got_pool_reload = value;
-    } else {
-        u_sess->sig_cxt.got_pool_reload = value;
     }
 }
 
