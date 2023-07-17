@@ -1736,8 +1736,10 @@ void free_session_context(knl_session_context* session)
     MemoryContextDeleteChildren(session->top_mem_cxt, NULL);
     MemoryContextDelete(session->top_mem_cxt);
     (void)syscalllockFree(&session->utils_cxt.deleMemContextMutex);
+    t_thrd.int_cxt.ignoreSessionBackendSignal = true;
     pfree_ext(session);
     use_fake_session();
+    t_thrd.int_cxt.ignoreSessionBackendSignal = false;
 }
 
 bool stp_set_commit_rollback_err_msg(stp_xact_err_type type)

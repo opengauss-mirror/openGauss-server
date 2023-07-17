@@ -479,6 +479,33 @@ void ThreadPoolSessControl::HandlePoolerReload()
     alock.unLock();
 }
 
+int ThreadPoolSessControl::terminate_session_socket(ThreadId tid, uint64 session_id)
+{
+    int count = 0;
+    AutoMutexLock alock(&m_sessCtrlock);
+    alock.lock();
+
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = DLGetHead(&m_activelist);
+    while (elem != NULL) {
+        ctrl= (knl_sess_control*)DLE_VAL(elem);
+        knl_session_context* sess = ctrl->sess;
+        /* Only active session can be closed socket */
+        if (sess == NULL || sess->attachPid != tid || sess->session_id != session_id ||
+            sess->status != KNL_SESS_ATTACH) {
+            elem = DLGetSucc(elem);
+            continue;
+        }
+
+        ctrl->sess->sig_cxt.got_terminate_sess_socket = true;
+        count++;
+        elem = DLGetSucc(elem);
+        break;
+    }
+    alock.unLock();
+    return count;
+}
+
 void ThreadPoolSessControl::calculateSessMemCxtStats(
     knl_session_context* sess, const MemoryContext context, Tuplestorestate* tupStore, TupleDesc tupDesc)
 {

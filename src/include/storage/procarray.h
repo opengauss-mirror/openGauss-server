@@ -116,7 +116,8 @@ extern VirtualTransactionId* GetCurrentVirtualXIDs(
 extern VirtualTransactionId *GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbOid, XLogRecPtr lsn = 0,
                                                        CommitSeqNo limitXminCSN = InvalidCommitSeqNo,
                                                        TransactionId* xminArray = NULL);
-extern ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalReason sigmode);
+extern ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalReason sigmode,
+    int retry_count);
 extern bool proc_array_cancel_conflicting_proc(
     TransactionId latest_removed_xid, XLogRecPtr truncate_redo_lsn, bool reach_max_check_times);
 
@@ -124,7 +125,7 @@ extern bool MinimumActiveBackends(int min);
 extern int CountDBBackends(Oid database_oid);
 extern int CountDBActiveBackends(Oid database_oid);
 extern int CountSingleNodeActiveBackends(Oid databaseOid, Oid userOid);
-extern void CancelDBBackends(Oid databaseid, ProcSignalReason sigmode, bool conflictPending);
+extern void CancelDBBackends(Oid databaseid, ProcSignalReason sigmode, bool conflictPending, int retry_count);
 extern void CancelSingleNodeBackends(Oid databaseOid, Oid userOid, ProcSignalReason sigmode, bool conflictPending);
 extern int CountUserBackends(Oid roleid);
 extern bool CountOtherDBBackends(Oid databaseId, int* nbackends, int* nprepared);

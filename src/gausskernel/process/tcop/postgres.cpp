@@ -6357,7 +6357,10 @@ void HandlePoolerReload(void)
         return;
 
     ResetGotPoolReload(true);
-    u_sess->sig_cxt.cp_PoolReload = true;
+
+    if (!t_thrd.int_cxt.ignoreSessionBackendSignal) {
+        u_sess->sig_cxt.cp_PoolReload = true;
+    }
 }
 
 // HandleMemoryContextDump
@@ -6375,6 +6378,39 @@ void HandleExecutorFlag(void)
     if (IS_PGXC_DATANODE)
         u_sess->exec_cxt.executorStopFlag = true;
 }
+
+void handle_terminate_active_sess_socket()
+{
+    /* If doing free_session_context, u_sess will be invalid pointer, just return */
+    if (t_thrd.int_cxt.ignoreSessionBackendSignal) {
+        return;
+    }
+
+    if (t_thrd.role == THREADPOOL_WORKER) {
+        if (u_sess->sig_cxt.got_terminate_sess_socket) {
+            t_thrd.threadpool_cxt.worker->GetGroup()->GetListener()->DelSessionFromEpoll(u_sess, false);
+
+            int sock = u_sess->proc_cxt.MyProcPort->sock;
+            if (unlikely(u_sess->status == KNL_SESS_UNINIT)) {
+                u_sess->status = KNL_SESS_CLOSERAW;
+            } else {
+                u_sess->status = KNL_SESS_CLOSE;
+            }
+            u_sess->proc_cxt.MyProcPort->sock = PGINVALID_SOCKET;
+            closesocket(sock);
+            u_sess->sig_cxt.got_terminate_sess_socket = false;
+        }
+    } else if (t_thrd.role == THREADPOOL_STREAM) {
+        if (u_sess->proc_cxt.MyProcPort->is_logic_conn) {
+            gs_close_gsocket(&(u_sess->proc_cxt.MyProcPort->gs_sock));
+        }
+    } else {
+        int sock = u_sess->proc_cxt.MyProcPort->sock;
+        u_sess->proc_cxt.MyProcPort->sock = -1;
+        closesocket(sock);
+    }
+}
+
 /*
  * RecoveryConflictInterrupt: out-of-line portion of recovery conflict
  * handling following receipt of SIGUSR1. Designed to be similar to die()
@@ -12515,6 +12551,7 @@ bool checkCompArgs(const char *compFormat)
 void ResetInterruptCxt()
 {
     t_thrd.int_cxt.ignoreBackendSignal = false;
+    t_thrd.int_cxt.ignoreSessionBackendSignal = false;
 
     t_thrd.int_cxt.InterruptHoldoffCount = 0;
     t_thrd.int_cxt.QueryCancelHoldoffCount = 0;

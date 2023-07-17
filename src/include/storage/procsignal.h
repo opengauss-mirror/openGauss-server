@@ -56,6 +56,9 @@ typedef enum {
     PROCSIG_RECOVERY_CONFLICT_STARTUP_DEADLOCK,
     PROCSIG_EXECUTOR_FLAG,
 
+    /* close active session socket */
+    PROCSIG_COMM_CLOSE_ACTIVE_SESSION_SOCKET,
+
     NUM_PROCSIGNALS /* Must be last! */
 } ProcSignalReason;
 
