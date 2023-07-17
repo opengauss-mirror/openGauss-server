@@ -1,14 +1,14 @@
-select id from t_gtt_trunc_dml_result order by mtime;
+select id from t_gtt_trunc_dml_result order by id;
            id            
 -------------------------
- gtt_trunc_parallel_dml2
  gtt_trunc_parallel_dml1
+ gtt_trunc_parallel_dml2
 (2 rows)
 
 drop table t_gtt_trunc_dml;
 drop table t_gtt_trunc_dml_f;
 drop table t_gtt_trunc_dml_result;
-select id from t_gtt_trunc_ddl_result order by mtime;
+select id from t_gtt_trunc_ddl_result order by id;
            id            
 -------------------------
  gtt_trunc_parallel_ddl1
