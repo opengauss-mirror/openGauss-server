@@ -791,7 +791,7 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
                     ereport(DEBUG2, (errmodule(MOD_PARSER), errcode(ERRCODE_LOG),
                         errmsg("default column \"%s\" is effectively NULL, and hence omitted.",
                             NameStr(att_tup->attname))));
-                } else {
+                } else if (target_relation->rd_rel->relkind != RELKIND_VIEW) {
                     new_expr = (Node*)makeConst(att_tup->atttypid,
                         -1,
                         att_tup->attcollation,
@@ -936,7 +936,7 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
                 new_tle = NULL;
             } else if (applyDefault) {
                 Node* new_expr = build_column_default(target_relation, attrno, true);
-                if (new_expr == NULL) {
+                if (new_expr == NULL && target_relation->rd_rel->relkind != RELKIND_VIEW) {
                     new_expr = (Node*)makeConst(att_tup->atttypid,
                         -1,
                         att_tup->attcollation,
@@ -948,7 +948,9 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
                     new_expr = coerce_to_domain(
                         new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST, -1, false, false);
                 }
-                new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
+                if (new_expr != NULL) {
+                    new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
+                }
                 new_tle->rtindex = result_relation;
             }
 
