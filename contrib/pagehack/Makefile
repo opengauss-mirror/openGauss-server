@@ -6,6 +6,9 @@ OBJS		= pagehack.o
 PROGRAM = pagehack
 all: submake-pagecompression
 
+exclude_option = -fPIC
+override CPPFLAGS := $(filter-out $(exclude_option),$(CPPFLAGS))
+
 ifdef USE_PGXS
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
