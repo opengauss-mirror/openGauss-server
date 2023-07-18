@@ -26,6 +26,7 @@
 #include "catalog/catalog.h"
 #include "PageCompression.h"
 #include "catalog/pg_type.h"
+#include "storage/file/fio_device.h"
 
 PGconn* conn = NULL;
 char source_slot_name[NAMEDATALEN] = {0};

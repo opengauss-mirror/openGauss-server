@@ -222,7 +222,7 @@ static char* new_role = "passive";
 static char start_minority_file[MAXPGPATH];
 static int get_instance_id(void);
 static int ss_get_primary_id(void);
-static bool ss_read_dorado_config(void);
+bool ss_read_config(void);
 static unsigned int vote_num = 0;
 static unsigned int xmode = 2;
 static char postport_lock_file[MAXPGPATH];
@@ -367,6 +367,7 @@ static void do_overwrite(void);
 static void do_full_restore(void);
 static void kill_proton_force(void);
 static void SigAlarmHandler(int arg);
+static bool DoBuildCheck(uint32 term);
 int ExecuteCmd(const char* command, struct timeval timeout);
 
 static int find_guc_optval(const char** optlines, const char* optname, char* optval);
@@ -4353,6 +4354,10 @@ static void do_build(uint32 term)
     else if (build_mode == COPY_SECURE_FILES_BUILD) {
         buildSuccess = DoCopySecureFileBuild(term);
     }
+    /* check need we build and can we do inc build */
+    else if (build_mode == BUILD_CHECK) {
+        buildSuccess = DoBuildCheck(term);
+    }
 
     if (!buildSuccess) {
         exit(1);
@@ -4785,6 +4790,116 @@ static bool GetRemoteNodeName()
 
     return true;
 }
+
+/*
+ * @@GaussDB@@
+ * Brief            : the check need to build
+ * Description        :
+ * Notes            :
+ */
+bool build_check_main(uint32 term)
+{
+    BuildErrorCode status = BUILD_SUCCESS;
+    PGresult* res = NULL;
+    errno_t errorno = EOK;
+    char* sysidentifier = NULL;
+    uint32 timeline;
+    char connstrSource[MAXPGPATH] = {0};
+    g_inc_fail_reason = DEFAULT_REASON;
+
+    CheckBuildParameter();
+    check_nested_pgconf();
+
+    /* 
+     * Save connection info from command line or openGauss file.
+     */
+    get_conninfo(pg_conf_file);
+
+    /* Find a available connection. */
+    streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
+    if (streamConn == NULL) {
+        pg_log(PG_WARNING, _("could not connect to server.\n"));
+        g_inc_fail_reason = CONN_PRIMARY_FAIL;
+        return false;
+    }
+
+    /* Concate connection str to primary host for performing rewind. */
+    errorno = sprintf_s(connstrSource,
+        sizeof(connstrSource),
+        "host=%s port=%s dbname=postgres application_name=gs_rewind connect_timeout=5 rw_timeout=600",
+        (streamConn->pghost != NULL) ? streamConn->pghost : streamConn->pghostaddr,
+        streamConn->pgport);
+    securec_check_ss_c(errorno, "\0", "\0");
+
+    /*
+     * Run IDENTIFY_SYSTEM so we can get sys identifier and timeline.
+     */
+    res = PQexec(streamConn, "IDENTIFY_SYSTEM");
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        pg_log(PG_WARNING, _("could not identify system: %s"), PQerrorMessage(streamConn));
+        PQfinish(streamConn);
+        streamConn = NULL;
+        PQclear(res);
+        return false;
+    }
+    if (PQntuples(res) != 1 || PQnfields(res) != 4) {
+        pg_log(PG_WARNING, _("could not identify system, got %d rows and %d fields\n"), PQntuples(res), PQnfields(res));
+        PQfinish(streamConn);
+        streamConn = NULL;
+        PQclear(res);
+        return false;
+    }
+    sysidentifier = pg_strdup(PQgetvalue(res, 0, 0));
+    timeline = atoi(PQgetvalue(res, 0, 1));
+    PQclear(res);
+
+    if (streamConn != NULL) {
+        PQfinish(streamConn);
+        streamConn = NULL;
+    }
+
+    /* Pretend to be gs_rewind and perform rewind. */
+    progname = "gs_rewind";
+    status = do_build_check(pg_data, connstrSource, sysidentifier, timeline, term);
+
+    libpqDisconnect();
+
+    if (sysidentifier != NULL) {
+        pg_free(sysidentifier);
+        sysidentifier = NULL;
+    }
+
+    return (status == BUILD_SUCCESS); 
+}
+
+/*
+ * build_mode:
+ *		check: check we are or not need to build
+ */
+static bool DoBuildCheck(uint32 term)
+{
+    bool buildSuccess = false;
+    char cwd[MAXPGPATH];
+
+    if (getcwd(cwd, MAXPGPATH) == NULL) {
+        pg_fatal(_("could not identify current directory: %s"), gs_strerror(errno));
+        exit(1);
+    }
+    pg_log(PG_WARNING, _("current workdir is (%s).\n"), cwd);
+
+    check_nested_pgconf();
+    
+    replconn_num = get_replconn_number(pg_conf_file);
+
+    buildSuccess = build_check_main(term);
+    if (!buildSuccess) {
+        pg_log(PG_WARNING, _("%s failed(%s), need to do full build\n"), BuildModeToString(build_mode), pg_data);
+    } else {
+        pg_log(PG_WARNING, _("%s completed(%s).\n"), BuildModeToString(build_mode), pg_data);
+    }
+    return buildSuccess;
+}
+
 /*
  * build_mode:
  *		AUTO_BUILD: do gs_rewind first, after failed 3 times, do full
@@ -4942,18 +5057,18 @@ static int find_guc_optval(const char** optlines, const char* optname, char* opt
     int ret;
     errno_t rc = EOK;
 
-    lineno = find_gucoption(optlines, (const char*)optname, NULL, NULL, &offset, &len);
+    lineno = find_gucoption(optlines, (const char*)optname, NULL, NULL, &offset, &len, '\'');
     if (lineno != INVALID_LINES_IDX) {
-        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset + 1, (size_t)(Min(len - 1, MAX_VALUE_LEN) - 1));
+        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset, (size_t)(Min(len, MAX_VALUE_LEN)));
         securec_check_c(rc, "", "");
         return lineno;
     }
 
-    ret = snprintf_s(def_optname, sizeof(def_optname), sizeof(def_optname) - 1, "#%s", optname);
+    ret = snprintf_s(def_optname, sizeof(def_optname), sizeof(def_optname) - 1, "#%s", optname, '\'');
     securec_check_ss_c(ret, "\0", "\0");
     lineno = find_gucoption(optlines, (const char*)def_optname, NULL, NULL, &offset, &len);
     if (lineno != INVALID_LINES_IDX) {
-        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset + 1, (size_t)(Min(len - 1, MAX_VALUE_LEN) - 1));
+        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset, (size_t)(Min(len, MAX_VALUE_LEN)));
         securec_check_c(rc, "", "");
         return lineno;
     }
@@ -5054,6 +5169,8 @@ const char *BuildModeToString(BuildMode mode)
             break;
         case COPY_SECURE_FILES_BUILD:
             return "copy secure files build";
+        case BUILD_CHECK:
+            return "build check";
         default:
             return "unkwon";
             break;
@@ -6336,6 +6453,8 @@ int main(int argc, char** argv)
                     } else if (strcmp(optarg, "copy_upgrade_file") == 0) {
                         build_mode = COPY_SECURE_FILES_BUILD;
                         need_copy_upgrade_file = true;
+                    } else if (strcmp(optarg, "check") == 0) {
+                        build_mode = BUILD_CHECK;
                     }
                     break;
                 }
@@ -6670,7 +6789,7 @@ int main(int argc, char** argv)
                                MIN_INSTANCEID, MAX_INSTANCEID );
                         goto Error;
                     }
-                    instance_config.dss.instance_id = atoi(optarg);
+                    ss_instance_config.dss.instance_id = atoi(optarg);
                     break;
                 case 1:
                     clear_backup_dir = true;
@@ -6702,9 +6821,9 @@ int main(int argc, char** argv)
                     FREE_AND_RESET(vgdata);
                     FREE_AND_RESET(vgdata);
                     parse_vgname_args(optarg);
-                    instance_config.dss.vgname = xstrdup(vgname);
-                    instance_config.dss.vgdata = xstrdup(vgdata);
-                    instance_config.dss.vglog = xstrdup(vglog);
+                    ss_instance_config.dss.vgname = xstrdup(vgname);
+                    ss_instance_config.dss.vgdata = xstrdup(vgdata);
+                    ss_instance_config.dss.vglog = xstrdup(vglog);
                     break;
                 }
                 case 6:{
@@ -6714,11 +6833,11 @@ int main(int argc, char** argv)
                         goto Error;
                     }
                     socketpath = xstrdup(optarg);
-                    instance_config.dss.socketpath = xstrdup(optarg);
+                    ss_instance_config.dss.socketpath = xstrdup(optarg);
                     break;
                 }
                 case 7:
-                    instance_config.dss.enable_dss = true;
+                    ss_instance_config.dss.enable_dss = true;
                     break;
                 case 8:{
                     check_input_for_security(optarg);
@@ -6894,21 +7013,25 @@ int main(int argc, char** argv)
         do_wait = false;
     }
 
-    if (instance_config.dss.enable_dss) {
+    enable_dss = ss_read_config();
+    if (ss_instance_config.dss.enable_dss) {
         // dss device init
-        if (dss_device_init(instance_config.dss.socketpath,
-            instance_config.dss.enable_dss) != DSS_SUCCESS) {
+        if (dss_device_init(ss_instance_config.dss.socketpath,
+            ss_instance_config.dss.enable_dss) != DSS_SUCCESS) {
             pg_log(PG_WARNING, _("failed to init dss device\n"));
             goto Error;
         }
 
         /* Prepare some g_datadir parameters */
-        g_datadir.instance_id = instance_config.dss.instance_id;
+        g_datadir.instance_id = ss_instance_config.dss.instance_id;
 
-        errno_t rc = strcpy_s(g_datadir.dss_data, strlen(instance_config.dss.vgdata) + 1, instance_config.dss.vgdata);
+        errno_t rc = strcpy_s(g_datadir.dss_data, strlen(ss_instance_config.dss.vgname) + 1, ss_instance_config.dss.vgname);
         securec_check_c(rc, "\0", "\0");
 
-        rc = strcpy_s(g_datadir.dss_log, strlen(instance_config.dss.vglog) + 1, instance_config.dss.vglog);
+        if (ss_instance_config.dss.vglog == NULL) {
+            ss_instance_config.dss.vglog = ss_instance_config.dss.vgname;
+        }
+        rc = strcpy_s(g_datadir.dss_log, strlen(ss_instance_config.dss.vglog) + 1, ss_instance_config.dss.vglog);
         securec_check_c(rc, "\0", "\0");
         
         /* The default of XLogSegmentSize was set 16M during configure, we reassign 1G to XLogSegmentSize
@@ -6916,7 +7039,7 @@ int main(int argc, char** argv)
         XLogSegmentSize = DSS_XLOG_SEG_SIZE;
     }
 
-    initDataPathStruct(instance_config.dss.enable_dss);
+    initDataPathStruct(ss_instance_config.dss.enable_dss);
     
     SetConfigFilePath();
 
@@ -7033,6 +7156,11 @@ int main(int argc, char** argv)
                         _("gs_ctl copy secure files from remote build ,datadir is %s,conn_str is \'%s\'\n"),
                         pg_data,
                         conn_str);
+                } else if (build_mode == BUILD_CHECK) {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl build check ,datadir is %s,conn_str is \'%s\'\n"),
+                        pg_data,
+                        conn_str);
                 } else {
                     pg_log(PG_PROGRESS,
                         _("gs_ctl incremental build ,datadir is %s,conn_str is \'%s\'\n"),
@@ -7051,6 +7179,10 @@ int main(int argc, char** argv)
                 } else if (g_is_obsmode) {
                     pg_log(PG_PROGRESS,
                         _("gs_ctl full backup to obs ,datadir is %s\n"),
+                        pg_data);
+                } else if (build_mode == BUILD_CHECK) {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl build check ,datadir is %s\n"),
                         pg_data);
                 } else {
                     pg_log(PG_PROGRESS,
@@ -7226,11 +7358,11 @@ static int get_instance_id(void)
 
 static int ss_get_primary_id(void)
 {
-    if (instance_config.dss.socketpath == NULL) {
+    if (ss_instance_config.dss.socketpath == NULL) {
         return -1;
     }
 
-    if (instance_config.dss.vgname == NULL) {
+    if (ss_instance_config.dss.vgname == NULL) {
         return -1;
     }
 
@@ -7242,10 +7374,10 @@ static int ss_get_primary_id(void)
 
     err = memset_s(control_file_path, MAXPGPATH, 0, MAXPGPATH);
     securec_check_c(err, "\0", "\0");
-    err = snprintf_s(control_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", instance_config.dss.vgname);
+    err = snprintf_s(control_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", ss_instance_config.dss.vgname);
     securec_check_ss_c(err, "\0", "\0");
 
-    if (dss_device_init(instance_config.dss.socketpath, true) != DSS_SUCCESS) {
+    if (dss_device_init(ss_instance_config.dss.socketpath, true) != DSS_SUCCESS) {
         pg_log(PG_WARNING, _("failed to init dss device\n"));
         exit(1);
     }
@@ -7283,12 +7415,13 @@ static int ss_get_primary_id(void)
 }
 
 /*
-* read dorado config, if it is dorado standby cluster,
-* we will get ss_dss_conn_path and ss_dss_vg_name.
+* read ss config, return enable_dss 
+* we will get ss_enable_dss, ss_dss_conn_path and ss_dss_vg_name.
 */
-static bool ss_read_dorado_config(void)
+bool ss_read_config(void)
 {
     char config_file[MAXPGPATH] = {0};
+    char enable_dss[MAXPGPATH] = {0};
     char** optlines = NULL;
     int ret = EOK;
 
@@ -7296,19 +7429,19 @@ static bool ss_read_dorado_config(void)
     securec_check_ss_c(ret, "\0", "\0");
     config_file[MAXPGPATH - 1] = '\0';
     optlines = readfile(config_file);
-    char cluster_run_mode[MAXPGPATH] = {0};
 
-    (void)find_guc_optval((const char**)optlines, "cluster_run_mode", cluster_run_mode);
+    (void)find_guc_optval((const char**)optlines, "ss_enable_dss", enable_dss);
 
-    /* this is not dorado cluster_standby, wo do not need to do anythiny else */
-    if(strncmp(cluster_run_mode, "cluster_standby", sizeof("cluster_standby")) != 0) {
+    /* this is not enable_dss, wo do not need to do anythiny else */
+    if(strncmp(enable_dss, "on", sizeof("on")) != 0) {
         return false;
     }
 
-    instance_config.dss.socketpath = (char*)malloc(sizeof(char) * MAXPGPATH);
-    instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
-    (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", instance_config.dss.socketpath);
-    (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", (char*)instance_config.dss.vgname);
+    ss_instance_config.dss.enable_dss = true;
+    ss_instance_config.dss.socketpath = (char*)malloc(sizeof(char) * MAXPGPATH);
+    ss_instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
+    (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", ss_instance_config.dss.socketpath);
+    (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", ss_instance_config.dss.vgname);
     freefile(optlines);
     optlines = NULL;
     return true;

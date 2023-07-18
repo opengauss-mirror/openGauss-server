@@ -25,6 +25,18 @@
 #include "securec_check.h"
 #include "tool_common.h"
 
+SSInstanceConfig ss_instance_config = {
+    .dss = {
+        .enable_dss = false,
+        .instance_id = -1,
+        .primaryInstId = -1,
+        .vgname = NULL,
+        .vglog = NULL,
+        .vgdata = NULL,
+        .socketpath = NULL,
+    },
+};
+
 datadir_t g_datadir;  /* need init when used in first time */
 
 static void initFileDataPathStruct(datadir_t *dataDir);
