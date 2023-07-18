@@ -1403,7 +1403,7 @@ HoldPinnedPortals(bool is_rollback)
     }
 }
 
-/*解除游标与row type类型的依赖关系*/
+/* Release the dependency between CURSOR and ROW type */
 static void CursorRecordTypeUnbind(const char* portal_name)
 {
     ListCell* cell = NULL;

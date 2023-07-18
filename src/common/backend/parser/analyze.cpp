@@ -4429,9 +4429,9 @@ static Query* transformDeclareCursorStmt(ParseState* pstate, DeclareCursorStmt* 
             ERROR, (errcode(ERRCODE_INVALID_CURSOR_DEFINITION), errmsg("cannot specify both SCROLL and NO SCROLL")));
     }
 
-    /*除WITH HOLD游标外，根据DeclareCursorName对使用的row type形成依赖*/
     PG_TRY();
     {
+        /* according to DeclareCursorName to form a dependency on the used ROW type */
         if (!(stmt->options & CURSOR_OPT_HOLD)) {
             u_sess->analyze_cxt.DeclareCursorName = stmt->portalname;
         }
