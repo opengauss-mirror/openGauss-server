@@ -1822,6 +1822,11 @@ Datum pg_free_remain_segment(PG_FUNCTION_ARGS)
     int32 dbId = PG_GETARG_INT32(1);
     int32 segmentId = PG_GETARG_INT32(2);
 
+    if (spaceId < 0 || dbId < 0 || segmentId < 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Input segment [%d, %d, %d] is not valid segment!", spaceId, dbId, segmentId)));
+    }
+
     RemainSegsCtx* remainSegsCtx = (RemainSegsCtx *)palloc(sizeof(RemainSegsCtx));
     remainSegsCtx->remainSegsBuf = NULL;
     remainSegsCtx->remainSegsNum = 0;
