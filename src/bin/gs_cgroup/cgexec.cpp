@@ -1054,9 +1054,11 @@ static int cgexec_create_remain_cgroup(gscgroup_grp_t* grp)
     cpushares = MAX_CLASS_CPUSHARES * cgutil_vaddr[i]->ginfo.cls.rempct / GROUP_ALL_PERCENT;
     ioweight = IO_WEIGHT_CALC(MAX_IO_WEIGHT, cgutil_vaddr[i]->ginfo.cls.rempct);
 
-    sret =
-        snprintf_s(cgutil_vaddr[i]->cpuset, CPUSET_LEN, CPUSET_LEN - 1, "%s", cgutil_vaddr[grp->ginfo.wd.cgid]->cpuset);
-    securec_check_intval(sret, free(relpath), -1);
+    if (i != grp->ginfo.wd.cgid) {
+        sret = snprintf_s(cgutil_vaddr[i]->cpuset, CPUSET_LEN, CPUSET_LEN - 1, 
+                          "%s", cgutil_vaddr[grp->ginfo.wd.cgid]->cpuset);
+        securec_check_intval(sret, free(relpath), -1);
+    }
 
     (void)cgexec_create_default_cgroup(relpath, cpushares, ioweight, cgutil_vaddr[i]->cpuset);
 
