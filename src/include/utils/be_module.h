@@ -132,6 +132,7 @@ enum ModuleId {
     MOD_SEC_SDD,       /* Security sub-module: sensitive data discovery */
     MOD_SEC_TDE,       /* Security sub-module: transparent data encryption */
 
+    MOD_COMM_FRAMEWORK,    /* for basic communication framework */
     MOD_COMM_PROXY,    /* for cbb comm_proxy */
     MOD_COMM_POOLER,   /* for pooler communication */
     MOD_VACUUM,     /* lazy vacuum */

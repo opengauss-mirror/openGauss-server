@@ -404,7 +404,8 @@ static void CreateHaListenSocket(void);
 static void RemoteHostInitilize(Port* port);
 static int StartupPacketInitialize(Port* port);
 static void PsDisplayInitialize(Port* port);
-static void SetListenSocket(ReplConnInfo **replConnArray, bool *listen_addr_saved);
+static void SetListenSocket(ReplConnInfo **replConnArray, bool *listen_addr_saved, char** first_saved_listen_addr,
+    bool only_refresh_file);
 static void UpdateArchiveSlotStatus();
 
 static ServerMode get_cur_mode(void);
@@ -1043,7 +1044,39 @@ static void print_port_info()
     return;
 }
 
-static void SetListenSocket(ReplConnInfo **replConnArray, bool *listen_addr_saved)
+/*
+ * If host is internal IP, then write it into postmaster.pid
+ */
+static void refresh_datadir_lock_file(char* host, bool* listen_addr_saved, char** first_saved_listen_addr)
+{
+    errno_t rc;
+    struct sockaddr_in cur_host_addr;
+    rc = memset_s(&cur_host_addr, sizeof(cur_host_addr), 0, sizeof(cur_host_addr));
+    securec_check(rc, "\0", "\0");
+    cur_host_addr.sin_family = AF_INET;
+    cur_host_addr.sin_addr.s_addr = inet_addr(host);
+    if (is_cluster_internal_IP(*(struct sockaddr*)&cur_host_addr)) {
+        AddToDataDirLockFile(LOCK_FILE_LINE_LISTEN_ADDR, host);
+        *listen_addr_saved = true;
+        ereport(DEBUG5, (errmodule(MOD_COMM_FRAMEWORK),
+            errmsg("[reload listen IP]refresh_datadir_lock_file write %s into postmaster.pid", host)));
+    }
+    if (*first_saved_listen_addr == NULL) {
+        *first_saved_listen_addr = pstrdup(host);
+    }
+}
+
+bool is_not_wildcard(void* val1, void* val2)
+{
+    ListCell* cell = (ListCell*)val1;
+    char* nodename = (char*)val2;
+
+    char* curhost = (char*)lfirst(cell);
+    return (strcmp(curhost, nodename) == 0) ? false : true;
+}
+
+static void SetListenSocket(ReplConnInfo **replConnArray, bool *listen_addr_saved, char** first_saved_listen_addr,
+    bool only_refresh_file = false)
 {
     int i = 0;
     int success = 0;
@@ -1052,9 +1085,12 @@ static void SetListenSocket(ReplConnInfo **replConnArray, bool *listen_addr_save
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
         if (replConnArray[i] != NULL) {
             if (!(*listen_addr_saved) &&
-                !IsInplicitIp(replConnArray[i]->localhost)) {
-                AddToDataDirLockFile(LOCK_FILE_LINE_LISTEN_ADDR, replConnArray[i]->localhost);
-                *listen_addr_saved = true;
+                !IsInplicitIp(replConnArray[i]->localhost) &&
+                replConnArray[i]->localport == g_instance.attr.attr_network.PoolerPort) {
+                refresh_datadir_lock_file(replConnArray[i]->localhost, listen_addr_saved, first_saved_listen_addr);
+            }
+            if (only_refresh_file) {
+                continue;
             }
             if (IsAlreadyListen(replConnArray[i]->localhost,
                 replConnArray[i]->localport)) {
@@ -1070,7 +1106,8 @@ static void SetListenSocket(ReplConnInfo **replConnArray, bool *listen_addr_save
                 MAXLISTEN,
                 false,
                 false,
-                false);
+                false,
+                REPL_LISTEN_CHANEL);
             if (status == STATUS_OK) {
                 success++;
             } else {
@@ -1084,19 +1121,109 @@ static void SetListenSocket(ReplConnInfo **replConnArray, bool *listen_addr_save
         }
     }
 
-    if (success == 0) {
+    if (!only_refresh_file && success == 0) {
         ReportAlarmAbnormalDataHAInstListeningSocket();
         ereport(WARNING, (errmsg("could not create any HA TCP/IP sockets")));
     }
 }
 
-bool isNotWildcard(void* val1, void* val2)
+/*
+ * 1. Listen Repl IP if necessary.
+ * 2. Record the first successful host addr which does not mean 'localhost' in lockfile.
+ * Inner maintanence tools, such as cm_agent and gs_ctl, will use that host for connecting dn.
+ * Only accept internal IP which method is trust/gss
+ */
+static void ha_listen_and_refresh_conf(bool only_refresh_file)
 {
-    ListCell* cell = (ListCell*)val1;
-    char* nodename = (char*)val2;
+    bool listen_addr_saved = false;
+    int use_pooler_port = -1;
+    char *first_saved_listen_addr = NULL;
+    char *first_inplicit_addr = NULL;
+    List* elemlist = NULL;
+    ListCell* l = NULL;
 
-    char* curhost = (char*)lfirst(cell);
-    return (strcmp(curhost, nodename) == 0) ? false : true;
+#ifdef ENABLE_MULTIPLE_NODES
+    char *rawstring = pstrdup(g_instance.attr.attr_network.ListenAddresses);
+#else
+    char *rawstring = pstrdup(u_sess->attr.attr_network.ListenAddresses);
+#endif
+    /* Parse string into list of identifiers */
+    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
+        /* syntax error in list */
+        ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("ha_listen_and_refresh_conf invalid list syntax for \"listen_addresses\": %s", rawstring)));
+        list_free_ext(elemlist);
+    }
+
+    bool haswildcard = false;
+    foreach(l, elemlist) {
+        char* curhost = (char*)lfirst(l);
+        if (strcmp(curhost, "*") == 0) {
+            haswildcard = true;
+            break;
+        }
+    }
+
+    if (haswildcard == true) {
+        char *wildcard = "*";
+        elemlist = list_cell_clear(elemlist, (void *)wildcard, is_not_wildcard);
+    }
+    foreach(l, elemlist) {
+        char* curhost = (char*)lfirst(l);
+        /*
+         * If IP has been listen successfully, then can write it to postmaster.pid
+         * Inner maintanence tools will connect to PoolerPort, so we can only compare this port
+         */
+        if (!IsAlreadyListen(curhost, g_instance.attr.attr_network.PoolerPort)) {
+            continue;
+        }
+        use_pooler_port = NeedPoolerPort(curhost);
+        if (t_thrd.xlog_cxt.server_mode == NORMAL_MODE || use_pooler_port == -1) {
+            if (!listen_addr_saved && !IsInplicitIp(curhost)) {
+                refresh_datadir_lock_file(curhost, &listen_addr_saved, &first_saved_listen_addr);
+            }
+        }
+        if (first_inplicit_addr == NULL && IsInplicitIp(curhost)) {
+            first_inplicit_addr = pstrdup(curhost);
+        }
+    }
+    list_free_ext(elemlist);
+    pfree(rawstring);
+
+    /*
+     * Then we use ReplConnArray. Because this list not changes frequently and usually has trust/gss method
+     */
+    if (t_thrd.xlog_cxt.server_mode != NORMAL_MODE) {
+        SetListenSocket(t_thrd.postmaster_cxt.ReplConnArray, &listen_addr_saved, &first_saved_listen_addr,
+            only_refresh_file);
+        ReportResumeAbnormalDataHAInstListeningSocket();
+    }
+    SetListenSocket(t_thrd.postmaster_cxt.CrossClusterReplConnArray, &listen_addr_saved,
+        &first_saved_listen_addr, only_refresh_file);
+    ReportResumeAbnormalDataHAInstListeningSocket();
+
+    /*
+     * If no valid TCP ports, write an empty line for listen address,
+     * indicating the Unix socket must be used.  Note that this line is not
+     * added to the lock file until there is a socket backing it.
+     */
+    if (!listen_addr_saved) {
+        if (first_inplicit_addr != NULL) {
+            AddToDataDirLockFile(LOCK_FILE_LINE_LISTEN_ADDR, first_inplicit_addr);
+            ereport(DEBUG5, (errmodule(MOD_COMM_FRAMEWORK),
+                errmsg("[reload listen IP]refresh inplicit_addr %s into postmaster.pid", first_inplicit_addr)));
+        } else if (first_saved_listen_addr == NULL) {
+            AddToDataDirLockFile(LOCK_FILE_LINE_LISTEN_ADDR, "");
+            ereport(WARNING, (
+                errmsg("No explicit IP is configured for listen_addresses GUC.")));
+        } else {
+            AddToDataDirLockFile(LOCK_FILE_LINE_LISTEN_ADDR, first_saved_listen_addr);
+            ereport(DEBUG5, (errmodule(MOD_COMM_FRAMEWORK),
+                errmsg("[reload listen IP]refresh saved_addr %s into postmaster.pid", first_saved_listen_addr)));
+        }
+    }
+    pfree_ext(first_inplicit_addr);
+    pfree_ext(first_saved_listen_addr);
 }
 
 void initKnlRTOContext(void)
@@ -1108,6 +1235,495 @@ void initKnlRTOContext(void)
     }
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+bool get_addr_from_socket(int sock, struct sockaddr *saddr)
+{
+    if (sock == PGINVALID_SOCKET) {
+        return false;
+    }
+
+    socklen_t slen;
+    errno_t rc = memset_s(saddr, sizeof(sockaddr), 0, sizeof(sockaddr));
+    securec_check(rc, "\0", "\0");
+    slen = sizeof(sockaddr);
+    if (comm_getsockname(sock, saddr, (socklen_t*)&slen) < 0) {
+        return false;
+    }
+    return true;
+}
+
+int get_ip_port_from_addr(char* sock_ip, int* port, struct sockaddr saddr)
+{
+    if (sock_ip == NULL) {
+        return -1;
+    }
+
+    char* result = NULL;
+    if (AF_INET6 == ((struct sockaddr *) &saddr)->sa_family) {
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in6 *) &saddr)->sin6_addr, 128, sock_ip, IP_LEN);
+        if (NULL == result) {
+            ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
+        }
+        *port = ntohs(((struct sockaddr_in6 *) &saddr)->sin6_port);
+        return AF_INET6;
+    } else if (AF_INET == ((struct sockaddr *) &saddr)->sa_family) {
+        result = inet_net_ntop(AF_INET, &((struct sockaddr_in *) &saddr)->sin_addr, 32, sock_ip, IP_LEN);
+        if (NULL == result) {
+            ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
+        }
+        *port = ntohs(((struct sockaddr_in *) &saddr)->sin_port);
+        return AF_INET;
+    } else if (AF_UNIX == ((struct sockaddr *) &saddr)->sa_family) {
+        return AF_UNIX;
+    }
+    return -1;
+}
+
+static bool cmp_ip_with_replication(char* sock_ip, int port, ReplConnInfo** replConnArray, int family)
+{
+    if (sock_ip == NULL || replConnArray == NULL) {
+        return false;
+    }
+    for (int i = 0; i < MAX_REPLNODE_NUM; i++) {
+        if (replConnArray[i] == NULL || replConnArray[i]->localhost == NULL) {
+            continue;
+        }
+        switch (family) {
+            case AF_INET6: {
+                char* ip_no_zone = NULL;
+                char ip_no_zone_data[IP_LEN] = {0};
+                /* remove any '%zone' part from an IPv6 address string */
+                ip_no_zone = remove_ipv6_zone((char *)replConnArray[i]->localhost, ip_no_zone_data, IP_LEN);
+                if (strcmp(sock_ip, ip_no_zone) == 0 && port == replConnArray[i]->localport) {
+                    return true;
+                }
+                if (strncmp(ip_no_zone, LOCAL_HOST, MAX_IP_STR_LEN) == 0 &&
+                    (strncmp(sock_ip, LOOP_IPV6_IP, MAX_IP_STR_LEN) == 0 ||
+                    strncmp(sock_ip, ip_no_zone, MAX_IP_STR_LEN) == 0) &&
+                    port == replConnArray[i]->localport) {
+                    return true;
+                }
+                break;
+            } case AF_INET: {
+                if (strcmp(sock_ip, replConnArray[i]->localhost) == 0 && port == replConnArray[i]->localport) {
+                    return true;
+                }
+                if (strncmp(replConnArray[i]->localhost, LOCAL_HOST, MAX_IP_STR_LEN) == 0 &&
+                    (strncmp(sock_ip, LOOP_IP_STRING, MAX_IP_STR_LEN) == 0 ||
+                    strncmp(sock_ip, replConnArray[i]->localhost, MAX_IP_STR_LEN) ==0) &&
+                    port == replConnArray[i]->localport) {
+                    return true;
+                }
+                break;
+            } default: {
+                break;
+            }
+        }
+    }
+    return false;
+}
+
+static void swap_pointer_context(void* p1, int p1_length, void* p2, int p2_length)
+{
+    if (p1_length != p2_length) {
+        ereport(ERROR, (
+            errmsg("swap_pointer_context error, p1_length %d, p2_length %d", p1_length, p2_length)));
+    }
+
+    errno_t rc = EOK;
+    void *tmp = palloc0(p1_length);
+    rc = memcpy_s(tmp, p1_length, p1, p1_length);
+    securec_check(rc, "", "");
+    rc = memcpy_s(p1, p1_length, p2, p1_length);
+    securec_check(rc, "", "");
+    rc = memcpy_s(p2, p1_length, tmp, p1_length);
+    securec_check(rc, "", "");
+    pfree(tmp);
+}
+
+/*
+ * Print listen_addresses info, include socket/IP/port/could close. Just for debug
+ */
+static void reload_listen_addresses_err_info()
+{
+    for (int i = 0; i < MAXLISTEN; i++) {
+        if (t_thrd.postmaster_cxt.ListenSocket[i] == PGINVALID_SOCKET) {
+            continue;
+        }
+        ereport(DEBUG5, (errmodule(MOD_COMM_FRAMEWORK),
+            errmsg("[reload listen IP]print_debuginfo num %d, sock %d, ip %s, port %d, has_listened %s, "
+            "channel type %d",
+            i, t_thrd.postmaster_cxt.ListenSocket[i],
+            t_thrd.postmaster_cxt.all_listen_addr_list[i],
+            t_thrd.postmaster_cxt.all_listen_port_list[i],
+            t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] ? "true" : "false",
+            t_thrd.postmaster_cxt.listen_chanel_type[i])));
+    }
+}
+
+#define rebuild_post_port_listen \
+    (new_listened_list_type[i] == BOTH_PORT_SOCKETS || new_listened_list_type[i] == POST_PORT_SOCKET)
+#define rebuild_pooler_port_listen \
+    (new_listened_list_type[i] == BOTH_PORT_SOCKETS || new_listened_list_type[i] == POOLER_PORT_SOCKET)
+#define is_ext_listen_addresses (t_thrd.postmaster_cxt.listen_chanel_type[i] == EXT_LISTEN_CHANEL)
+#define is_dolphin_listen_addresses (t_thrd.postmaster_cxt.listen_chanel_type[i] == DOLPHIN_LISTEN_CHANEL)
+static void rebuild_listen_address_socket()
+{
+    if (u_sess->attr.attr_network.ListenAddresses == NULL || dummyStandbyMode) {
+        return;
+    }
+
+    char* rawstring = NULL;
+    List* elemlist = NULL;
+    ListCell* l = NULL;
+    ListCell* elem = NULL;
+    errno_t rc = EOK;
+    int i = 0, j = 0, k = 0;
+    /* Need a modifiable copy of u_sess->attr.attr_network.ListenAddresses */
+    rawstring = pstrdup(u_sess->attr.attr_network.ListenAddresses);
+    /* Parse string into list of identifiers */
+    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
+        /* syntax error in list */
+        ereport(WARNING, (errmodule(MOD_COMM_FRAMEWORK),
+            errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("[reload listen IP]rebuild_listen_address_socket invalid list syntax for \"listen_addresses\" %s",
+            u_sess->attr.attr_network.ListenAddresses)));
+        list_free_ext(elemlist);
+        pfree(rawstring);
+        return;
+    }
+
+    bool haswildcard = false;
+    foreach(l, elemlist) {
+        char* curhost = (char*)lfirst(l);
+        if (strcmp(curhost, "*") == 0) {
+            haswildcard = true;
+            break;
+        }
+    }
+
+    if (haswildcard == true) {
+        char *wildcard = "*";
+        elemlist = list_cell_clear(elemlist, (void *)wildcard, is_not_wildcard);
+    }
+
+    for (i = 0; i < MAXLISTEN; i++) {
+        t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] = true;
+        t_thrd.postmaster_cxt.local_listen_addr_can_stop[i] = true;
+    }
+
+    int checked_num = 0;
+    int status = STATUS_OK;
+    bool has_checked = false;
+    int new_listened_num = 0;
+    char new_listened_list[MAXLISTEN][IP_LEN] = {'\0'};
+    int new_listened_list_type[MAXLISTEN] = {BOTH_PORT_SOCKETS};
+
+    /* loop new listen_addresses IP */
+    foreach(l, elemlist) {
+        char* curhost = (char*)lfirst(l);
+
+        /* Deduplicatd listen IP */
+        int check = 0;
+        foreach(elem, elemlist) {
+            if (check >= checked_num) {
+                break;
+            }
+            if (strcmp(curhost, (char*)lfirst(elem)) == 0) {
+                has_checked = true;
+                break;
+            }
+            check++;
+        }
+        checked_num++;
+        if (has_checked) {
+            has_checked = false;
+            continue;
+        }
+
+        bool samed_ip_post_port = false;  /* normal port */
+        bool samed_ip_pooler_port = false;  /* port + 1 */
+        for (i = 0; i < MAXLISTEN; i++) {
+            int sock = t_thrd.postmaster_cxt.ListenSocket[i];
+            if (sock == PGINVALID_SOCKET) {
+                continue;
+            }
+            struct sockaddr saddr;
+            if (!get_addr_from_socket(sock, &saddr)) {
+                continue;
+            }
+
+            char sock_ip[IP_LEN] = {0};
+            int port = 0;
+
+            int family = get_ip_port_from_addr(sock_ip, &port, saddr);
+            if (family == -1) {
+                ereport(WARNING, (errmodule(MOD_COMM_FRAMEWORK),
+                    errmsg("[reload listen IP]inet_net_ntop get invalid socket family, sock %d", sock)));
+                list_free_ext(elemlist);
+                pfree(rawstring);
+                return;
+            } else if (family == AF_UNIX) {
+                t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] = false;
+                continue;
+            }
+
+            if (CheckSockAddr(&saddr, curhost, g_instance.attr.attr_network.PostPortNumber)) {
+                t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] = false;
+                ereport(WARNING, (errmodule(MOD_COMM_FRAMEWORK),
+                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("[reload listen IP]\"listen_addresses\" already listen IP %s, port %d",
+                    curhost, g_instance.attr.attr_network.PostPortNumber)));
+                samed_ip_post_port = true;
+            }
+
+            if (CheckSockAddr(&saddr, curhost, g_instance.attr.attr_network.PoolerPort)) {
+                t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] = false;
+                ereport(WARNING, (errmodule(MOD_COMM_FRAMEWORK),
+                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("[reload listen IP]\"listen_addresses\" already listen IP %s, port %d",
+                    curhost, g_instance.attr.attr_network.PoolerPort)));
+                samed_ip_pooler_port = true;
+            }
+        }
+        if (samed_ip_post_port && samed_ip_pooler_port) {
+            continue;
+        }
+
+        /* add new ip to listen */
+        rc = strcpy_s(new_listened_list[new_listened_num], IP_LEN, curhost);
+        securec_check(rc, "", "");
+        if (!samed_ip_post_port && !samed_ip_pooler_port) {
+            new_listened_list_type[new_listened_num] = BOTH_PORT_SOCKETS;
+        } else {
+            if (!samed_ip_post_port) {
+                new_listened_list_type[new_listened_num] = POST_PORT_SOCKET;  // normal port
+            } else if (!samed_ip_pooler_port) {
+                new_listened_list_type[new_listened_num] = POOLER_PORT_SOCKET;  // port + 1
+            }
+        }
+        new_listened_num++;
+    }
+    list_free_ext(elemlist);
+    pfree(rawstring);
+
+    /* Then we check socket according to rules and mark it to 'false', which means it should not be closed */
+    for (i = 0; i < MAXLISTEN; i++) {
+        int sock = t_thrd.postmaster_cxt.ListenSocket[i];
+        if (sock == PGINVALID_SOCKET) {
+            continue;
+        }
+
+        if (!t_thrd.postmaster_cxt.all_listen_addr_can_stop[i]) {
+            continue;
+        }
+        /* If socket is ext_listen_addresses, should not close it */
+        if (is_ext_listen_addresses) {
+            t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] = false;
+            continue;
+        }
+        /*
+         * But if socket is dolphin listen address, we will close it. Dolphin socket is listened with
+         * <listen_addresses, dolphin_server_port>, so we will close this socket if listen_addresses changed.
+         */
+        if (is_dolphin_listen_addresses) {
+            t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] = true;
+            continue;
+        }
+        struct sockaddr saddr;
+        if (!get_addr_from_socket(sock, &saddr)) {
+            continue;
+        }
+        char sock_ip[IP_LEN] = {0};
+        int port = 0;
+
+        int family = get_ip_port_from_addr(sock_ip, &port, saddr);
+        if (family == -1) {
+            ereport(ERROR, (errmodule(MOD_COMM_FRAMEWORK),
+                errmsg("[reload listen IP]inet_net_ntop get invalid socket family, sock %d", sock)));
+        } else if (family == AF_UNIX) {
+            continue;
+        }
+        /* listen_addresses only listen port and port + 1. Other port number should not be closed */
+        if (port != g_instance.attr.attr_network.PostPortNumber && port != g_instance.attr.attr_network.PoolerPort) {
+            t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] = false;
+            continue;
+        }
+        /* If listen_addresses includes '*', we will close repl socket and rebuild */
+        if (!haswildcard && (cmp_ip_with_replication(sock_ip, port, t_thrd.postmaster_cxt.ReplConnArray, family) ||
+            cmp_ip_with_replication(sock_ip, port, t_thrd.postmaster_cxt.CrossClusterReplConnArray, family))) {
+            t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] = false;
+        }
+    }
+
+    /* finally, we should refresh LocalAddrList */
+    for (i = 0; i < t_thrd.postmaster_cxt.LocalIpNum; i++) {
+        for (j = 0; j < MAXLISTEN; j++) {
+            int sock = t_thrd.postmaster_cxt.ListenSocket[j];
+            if (sock == PGINVALID_SOCKET || t_thrd.postmaster_cxt.all_listen_addr_can_stop[j]) {
+                continue;
+            }
+            struct sockaddr saddr;
+            if (!get_addr_from_socket(sock, &saddr)) {
+                continue;
+            }
+            char sock_ip[IP_LEN] = {0};
+            int port = 0;
+
+            int family = get_ip_port_from_addr(sock_ip, &port, saddr);
+            if (family == -1) {
+                ereport(ERROR, (errmodule(MOD_COMM_FRAMEWORK),
+                    errmsg("[reload listen IP]inet_net_ntop get invalid socket family, sock %d", sock)));
+            } else if (family == AF_UNIX) {
+                continue;
+            }
+            if (strcmp(sock_ip, t_thrd.postmaster_cxt.LocalAddrList[i]) == 0) {
+                t_thrd.postmaster_cxt.local_listen_addr_can_stop[i] = false;
+            }
+        }
+    }
+    reload_listen_addresses_err_info();
+    /* resort global and local listen_addr_list */
+    for (i = 0, j = 0, k = 0; i < MAXLISTEN; i++) {
+        if (t_thrd.postmaster_cxt.ListenSocket[i] == PGINVALID_SOCKET) {
+            continue;
+        }
+        /*
+         * [j] indicates the first position of all socket list which can be closed.
+         * If listen addr could not stop, we should reserve it and swap it with [j], and move j backward.
+         */
+        if (!t_thrd.postmaster_cxt.all_listen_addr_can_stop[i]) {
+            if (i > j) {
+                swap_pointer_context(t_thrd.postmaster_cxt.all_listen_addr_list[i], IP_LEN,
+                    t_thrd.postmaster_cxt.all_listen_addr_list[j], IP_LEN);
+                swap_pointer_context(&t_thrd.postmaster_cxt.all_listen_port_list[i], sizeof(int),
+                    &t_thrd.postmaster_cxt.all_listen_port_list[j], sizeof(int));
+                swap_pointer_context(&t_thrd.postmaster_cxt.ListenSocket[i], sizeof(int),
+                    &t_thrd.postmaster_cxt.ListenSocket[j], sizeof(int));
+                swap_pointer_context(&t_thrd.postmaster_cxt.listen_sock_type[i], sizeof(int),
+                    &t_thrd.postmaster_cxt.listen_sock_type[j], sizeof(int));
+                swap_pointer_context(&t_thrd.postmaster_cxt.all_listen_addr_can_stop[i], sizeof(bool),
+                    &t_thrd.postmaster_cxt.all_listen_addr_can_stop[j], sizeof(bool));
+                swap_pointer_context(&t_thrd.postmaster_cxt.listen_chanel_type[i], sizeof(int),
+                    &t_thrd.postmaster_cxt.listen_chanel_type[j], sizeof(int));
+            }
+            j++;
+        }
+        /*
+         * [k] indicates the first position of local addr list which can be removed.
+         * If listen addr could not stop, we should reserve it and swap it with [k], and move k backward.
+         */
+        if (!t_thrd.postmaster_cxt.local_listen_addr_can_stop[i]) {
+            if (i > k) {
+                swap_pointer_context(t_thrd.postmaster_cxt.LocalAddrList[i], IP_LEN,
+                    t_thrd.postmaster_cxt.LocalAddrList[k], IP_LEN);
+                swap_pointer_context(&t_thrd.postmaster_cxt.local_listen_addr_can_stop[i], sizeof(bool),
+                    &t_thrd.postmaster_cxt.local_listen_addr_can_stop[k], sizeof(bool));
+            }
+            k++;
+        }
+    }
+
+    t_thrd.postmaster_cxt.LocalIpNum = k;
+    for (i = k; i < MAXLISTEN; i++) {
+        if (t_thrd.postmaster_cxt.ListenSocket[i] == PGINVALID_SOCKET) {
+            continue;
+        }
+        rc = memset_s(t_thrd.postmaster_cxt.LocalAddrList[i], IP_LEN, '\0', IP_LEN);
+        securec_check(rc, "", "");
+    }
+
+    /* shutdown socket which is not in listen_addresses */
+    for (i = j; i < MAXLISTEN; i++) {
+        if (t_thrd.postmaster_cxt.ListenSocket[i] == PGINVALID_SOCKET) {
+            continue;
+        }
+        rc = memset_s(t_thrd.postmaster_cxt.all_listen_addr_list[i], IP_LEN, '\0', IP_LEN);
+        securec_check(rc, "", "");
+        StreamClose(t_thrd.postmaster_cxt.ListenSocket[i]);
+        t_thrd.postmaster_cxt.ListenSocket[i] = PGINVALID_SOCKET;
+        t_thrd.postmaster_cxt.listen_sock_type[i] = UNUSED_LISTEN_SOCKET;
+        t_thrd.postmaster_cxt.all_listen_port_list[i] = -1;
+    }
+
+    /* listen socket for new IP */
+    for (i = 0; i < new_listened_num; i++) {
+        char* curhost = new_listened_list[i];
+        ereport(DEBUG5, (errmodule(MOD_COMM_FRAMEWORK),
+                    errmsg("[reload listen IP]rebuild listen IP: %s, listen type %d",
+                        curhost,
+                        new_listened_list_type[i])));
+        if (rebuild_post_port_listen) {
+            if (strcmp(curhost, "*") == 0)
+                status = StreamServerPort(AF_UNSPEC,
+                    NULL,
+                    (unsigned short)g_instance.attr.attr_network.PostPortNumber,
+                    g_instance.attr.attr_network.UnixSocketDir,
+                    t_thrd.postmaster_cxt.ListenSocket,
+                    MAXLISTEN,
+                    true,
+                    true,
+                    false,
+                    NORMAL_LISTEN_CHANEL);
+            else
+                status = StreamServerPort(AF_UNSPEC,
+                    curhost,
+                    (unsigned short)g_instance.attr.attr_network.PostPortNumber,
+                    g_instance.attr.attr_network.UnixSocketDir,
+                    t_thrd.postmaster_cxt.ListenSocket,
+                    MAXLISTEN,
+                    true,
+                    true,
+                    false,
+                    NORMAL_LISTEN_CHANEL);
+            if (status != STATUS_OK) {
+                print_port_info();
+                ereport(WARNING, (errmodule(MOD_COMM_FRAMEWORK),
+                    errmsg("[reload listen IP]could not create listen socket for \"%s:%d\"",
+                        curhost,
+                        g_instance.attr.attr_network.PostPortNumber)));
+            }
+        }
+
+        if (rebuild_pooler_port_listen) {
+            if (strcmp(curhost, "*") == 0) {
+                status = StreamServerPort(AF_UNSPEC,
+                    NULL,
+                    (unsigned short)g_instance.attr.attr_network.PoolerPort,
+                    g_instance.attr.attr_network.UnixSocketDir,
+                    t_thrd.postmaster_cxt.ListenSocket,
+                    MAXLISTEN,
+                    false,
+                    false,
+                    false,
+                    NORMAL_LISTEN_CHANEL);
+            } else {
+                status = StreamServerPort(AF_UNSPEC,
+                    curhost,
+                    (unsigned short)g_instance.attr.attr_network.PoolerPort,
+                    g_instance.attr.attr_network.UnixSocketDir,
+                    t_thrd.postmaster_cxt.ListenSocket,
+                    MAXLISTEN,
+                    false,
+                    false,
+                    false,
+                    NORMAL_LISTEN_CHANEL);
+            }
+
+            if (status != STATUS_OK)
+                ereport(WARNING, (errmodule(MOD_COMM_FRAMEWORK),
+                    errmsg("[reload listen IP]could not create ha listen socket for \"%s:%d\"",
+                        curhost,
+                        g_instance.attr.attr_network.PoolerPort)));
+        }
+    }
+    reload_listen_addresses_err_info();
+
+    /* Add ip to postmaster.pid */
+    ha_listen_and_refresh_conf(true);
+}
+#endif
+
 /*
  * Postmaster main entry point
  */
@@ -1117,7 +1733,6 @@ int PostmasterMain(int argc, char* argv[])
     int status = STATUS_OK;
     char* output_config_variable = NULL;
     char* userDoption = NULL;
-    bool listen_addr_saved = false;
     int use_pooler_port = -1;
     int i;
     OptParseContext optCtxt;
@@ -1694,26 +2309,54 @@ int PostmasterMain(int argc, char* argv[])
     process_shared_preload_libraries();
 
     /*
-        * Establish input sockets.
-        */
-    for (i = 0; i < MAXLISTEN; i++)
-        t_thrd.postmaster_cxt.ListenSocket[i] = PGINVALID_SOCKET;
+    * Load configuration files for client authentication.
+     * Load pg_hba.conf before communication thread.
+     * We will check whether listen_addresses IP is internal of not. If it is, then write this IP to postmaster.pid.
+     * So load_hba() should be before than AddToDataDirLockFile().
+     */
+    int loadhbaCount = 0;
+    while (!load_hba()) {
+        check_old_hba(true);
+        loadhbaCount++;
+        if (loadhbaCount >= 3) {
+            /*
+             * It makes no sense to continue if we fail to load the HBA file,
+             * since there is no way to connect to the database in this case.
+             */
+            ereport(FATAL, (errmsg("could not load pg_hba.conf")));
+        }
+        pg_usleep(200000L);  /* sleep 200ms for reload next time */
+    }
 
-    if (g_instance.attr.attr_network.ListenAddresses && !dummyStandbyMode) {
+    /*
+     * Establish input sockets.
+     */
+    for (i = 0; i < MAXLISTEN; i++) {
+        t_thrd.postmaster_cxt.ListenSocket[i] = PGINVALID_SOCKET;
+        t_thrd.postmaster_cxt.all_listen_addr_can_stop[i] = false;
+    }
+
+    char *listen_addresses =
+#ifdef ENABLE_MULTIPLE_NODES
+        g_instance.attr.attr_network.ListenAddresses;
+#else
+        u_sess->attr.attr_network.ListenAddresses;
+#endif
+    if (listen_addresses && !dummyStandbyMode) {
         char* rawstring = NULL;
         List* elemlist = NULL;
         ListCell* l = NULL;
         int success = 0;
 
         /*
-            * start commproxy if needed
-            */
+         * start commproxy if needed
+         */
         if (CommProxyNeedSetup()) {
             CommProxyStartUp();
         }
 
-        /* Need a modifiable copy of g_instance.attr.attr_network.ListenAddresses */
-        rawstring = pstrdup(g_instance.attr.attr_network.ListenAddresses);
+        /* Need a modifiable copy of listen_addresses */
+        rawstring = pstrdup(listen_addresses);
 
         /* Parse string into list of identifiers */
         if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
@@ -1733,7 +2376,7 @@ int PostmasterMain(int argc, char* argv[])
 
         if (haswildcard == true) {
             char *wildcard = "*";
-            elemlist = list_cell_clear(elemlist, (void *)wildcard, isNotWildcard);
+            elemlist = list_cell_clear(elemlist, (void *)wildcard, is_not_wildcard);
         }
 
         foreach (l, elemlist) {
@@ -1748,7 +2391,8 @@ int PostmasterMain(int argc, char* argv[])
                     MAXLISTEN,
                     true,
                     true,
-                    false);
+                    false,
+                    NORMAL_LISTEN_CHANEL);
             else
                 status = StreamServerPort(AF_UNSPEC,
                     curhost,
@@ -1758,7 +2402,8 @@ int PostmasterMain(int argc, char* argv[])
                     MAXLISTEN,
                     true,
                     true,
-                    false);
+                    false,
+                    NORMAL_LISTEN_CHANEL);
 
             if (status == STATUS_OK)
                 success++;
@@ -1787,7 +2432,8 @@ int PostmasterMain(int argc, char* argv[])
                         MAXLISTEN,
                         false,
                         false,
-                        false);
+                        false,
+                        NORMAL_LISTEN_CHANEL);
                 } else {
                     status = StreamServerPort(AF_UNSPEC,
                         curhost,
@@ -1797,7 +2443,8 @@ int PostmasterMain(int argc, char* argv[])
                         MAXLISTEN,
                         false,
                         false,
-                        false);
+                        false,
+                        NORMAL_LISTEN_CHANEL);
                 }
 
                 if (status != STATUS_OK)
@@ -1805,15 +2452,6 @@ int PostmasterMain(int argc, char* argv[])
                         (errmsg("could not create ha listen socket for \"%s:%d\"",
                             curhost,
                             g_instance.attr.attr_network.PoolerPort)));
-
-                /*
-                    * Record the first successful host addr which does not mean 'localhost' in lockfile.
-                    * Inner maintanence tools, such as cm_agent and gs_ctl, will use that host for connecting cn.
-                    */
-                if (!listen_addr_saved && !IsInplicitIp(curhost)) {
-                    AddToDataDirLockFile(LOCK_FILE_LINE_LISTEN_ADDR, curhost);
-                    listen_addr_saved = true;
-                }
             }
         }
 
@@ -1824,12 +2462,8 @@ int PostmasterMain(int argc, char* argv[])
         pfree(rawstring);
     }
 
-    if (t_thrd.xlog_cxt.server_mode != NORMAL_MODE) {
-        SetListenSocket(t_thrd.postmaster_cxt.ReplConnArray, &listen_addr_saved);
-        ReportResumeAbnormalDataHAInstListeningSocket();
-    }
-    SetListenSocket(t_thrd.postmaster_cxt.CrossClusterReplConnArray, &listen_addr_saved);
-    ReportResumeAbnormalDataHAInstListeningSocket();
+    /* Listen ha IP and refresh postmaster.pid */
+    ha_listen_and_refresh_conf(false);
 #ifdef USE_BONJOUR
 
     /* Register for Bonjour only if we opened TCP socket(s) */
@@ -1880,7 +2514,8 @@ int PostmasterMain(int argc, char* argv[])
             MAXLISTEN,
             false,
             true,
-            false);
+            false,
+            NORMAL_LISTEN_CHANEL);
 
         if (status != STATUS_OK)
             ereport(FATAL,
@@ -1897,7 +2532,8 @@ int PostmasterMain(int argc, char* argv[])
             MAXLISTEN,
             false,
             false,
-            false);
+            false,
+            NORMAL_LISTEN_CHANEL);
 
         if (status != STATUS_OK)
             ereport(FATAL,
@@ -1921,7 +2557,8 @@ int PostmasterMain(int argc, char* argv[])
                 MAXLISTEN,
                 false,
                 true,
-                true);
+                true,
+                NORMAL_LISTEN_CHANEL);
 
             if (status != STATUS_OK)
                 ereport(WARNING, (errmsg("could not create Unix-domain for comm  socket")));
@@ -1943,16 +2580,6 @@ int PostmasterMain(int argc, char* argv[])
         * that will remove the Unix socket file.
         */
     on_proc_exit(CloseServerPorts, 0);
-
-    /*
-        * If no valid TCP ports, write an empty line for listen address,
-        * indicating the Unix socket must be used.  Note that this line is not
-        * added to the lock file until there is a socket backing it.
-        */
-    if (!listen_addr_saved) {
-        AddToDataDirLockFile(LOCK_FILE_LINE_LISTEN_ADDR, "");
-        ereport(WARNING, (errmsg("No explicit IP is configured for listen_addresses GUC.")));
-    }
 
     if (g_instance.attr.attr_common.enable_thread_pool) {
         /* No need to start thread pool for dummy standby node. */
@@ -2208,24 +2835,6 @@ int PostmasterMain(int argc, char* argv[])
 
     /* init the usedDnSpace hash table */
     InitDnHashTable();
-
-    /*
-     * Load configuration files for client authentication.
-     * Load pg_hba.conf before communication thread.
-     */
-    int loadhbaCount = 0;
-    while (!load_hba()) {
-        check_old_hba(true);
-        loadhbaCount++;
-        if (loadhbaCount >= 3) {
-            /*
-             * It makes no sense to continue if we fail to load the HBA file,
-             * since there is no way to connect to the database in this case.
-             */
-            ereport(FATAL, (errmsg("could not load pg_hba.conf")));
-        }
-        pg_usleep(200000L);  /* sleep 200ms for reload next time */
-    }
 
     if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
         InitCommLogicResource();
@@ -2806,6 +3415,8 @@ static int ServerLoop(void)
     }
     ereport(LOG, (errmsg("create thread end!")));
 
+    /* Only after postmaster_main thread starting completed, can reload listen_addresses */
+    t_thrd.postmaster_cxt.can_listen_addresses_reload = true;
     for (;;) {
         fd_set rmask;
         int selres;
@@ -2819,6 +3430,20 @@ static int ServerLoop(void)
             nSockets = initMasks(&readmask);
 #endif
         }
+
+#ifndef ENABLE_MULTIPLE_NODES
+        if (t_thrd.postmaster_cxt.is_listen_addresses_reload) {
+                t_thrd.postmaster_cxt.is_listen_addresses_reload = false;
+                rebuild_listen_address_socket();
+
+                /* rebuild poll fd with new ListenSocket list */
+#ifdef HAVE_POLL
+                nSockets = initPollfd(ufds);
+#else
+                nSockets = initMasks(&readmask);
+#endif
+        }
+#endif
 
         /*
          * Wait for a connection request to arrive.
@@ -10481,10 +11106,15 @@ bool IsLocalAddr(Port* port)
     if (NULL == result && laddr->sa_family != AF_UNSPEC) {
         ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
     }
+    for (i = 0; i != t_thrd.postmaster_cxt.LocalIpNum; ++i) {
+        ereport(DEBUG1, (errmodule(MOD_COMM_FRAMEWORK),
+            errmsg("LocalAddrIP %s, local_ip %s", t_thrd.postmaster_cxt.LocalAddrList[i], local_ip)));
+    }
     return false;
 #else
     for (i = 0; i != t_thrd.postmaster_cxt.LocalIpNum; ++i) {
-        ereport(DEBUG1, (errmsg("LocalAddrIP %s\n", t_thrd.postmaster_cxt.LocalAddrList[i])));
+        ereport(DEBUG1, (errmodule(MOD_COMM_FRAMEWORK),
+            errmsg("LocalAddrIP %s, local_ip %s", t_thrd.postmaster_cxt.LocalAddrList[i], local_ip)));
     }
     return true;
 #endif
@@ -10667,6 +11297,7 @@ static bool IsLocalPort(Port* port)
     if (sockport == g_instance.attr.attr_network.PostPortNumber) {
         return true;
     }
+    ereport(LOG, (errmsg("LocalAddrPort %d", sockport)));
     return false;
 }
 
@@ -10767,11 +11398,21 @@ static bool IsAlreadyListen(const char* ip, int port)
                     return true;
                 }
 
+                if (strcmp(ip, LOCAL_HOST) == 0 &&
+                    (strcmp(sock_ip, LOOP_IPV6_IP) == 0 || strcmp(ip, sock_ip) == 0)) {
+                    return true;
+                }
+
                 if ((strcmp(sock_ip, "::") == 0) && (port == ntohs(((struct sockaddr_in6 *) &saddr)->sin6_port))) {
                     return true;
                 }
             } else if (((struct sockaddr *) &saddr)->sa_family == AF_INET) {
                 if ((0 == strcmp(ip, sock_ip)) && (port == ntohs(((struct sockaddr_in *) &saddr)->sin_port))) {
+                    return true;
+                }
+
+                if (strcmp(ip, LOCAL_HOST) == 0 &&
+                    (strcmp(sock_ip, LOOP_IP_STRING) == 0 || strcmp(ip, sock_ip) == 0)) {
                     return true;
                 }
 
@@ -10869,7 +11510,8 @@ bool CheckSockAddr(struct sockaddr* sock_addr, const char* szIP, int port)
  * According to createmode, create the listen socket
  */
 void CreateServerSocket(
-    char* ipaddr, int portNumber, int enCreatemode, int* success, bool add_localaddr_flag, bool is_create_psql_sock)
+    char* ipaddr, int portNumber, int enCreatemode, int* success, bool add_localaddr_flag, bool is_create_psql_sock,
+    ListenChanelType channel_type)
 {
     int status = 0;
     int successCount = 0;
@@ -10893,7 +11535,8 @@ void CreateServerSocket(
                 MAXLISTEN,
                 add_localaddr_flag,
                 is_create_psql_sock,
-                false);
+                false,
+                channel_type);
         } else {
             status = StreamServerPort(AF_UNSPEC,
                 ipaddr,
@@ -10903,7 +11546,8 @@ void CreateServerSocket(
                 MAXLISTEN,
                 add_localaddr_flag,
                 is_create_psql_sock,
-                false);
+                false,
+                channel_type);
         }
         if (status == STATUS_OK) {
             successCount++;
@@ -11030,7 +11674,8 @@ static void CreateHaListenSocket(void)
             (int)newListenAddrs.lsnArray[i].createmodel,
             &success,
             false,
-            false);
+            false,
+            REPL_LISTEN_CHANEL);
     }
 
     if (0 == success) {

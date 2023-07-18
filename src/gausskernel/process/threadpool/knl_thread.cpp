@@ -1533,6 +1533,8 @@ static void knl_t_postmaster_init(knl_t_postmaster_context* postmaster_cxt)
     securec_check(rc, "\0", "\0");
 
     postmaster_cxt->HaShmData = NULL;
+    postmaster_cxt->can_listen_addresses_reload = false;
+    postmaster_cxt->is_listen_addresses_reload = false;
     postmaster_cxt->LocalIpNum = 0;
     postmaster_cxt->IsRPCWorkerThread = false;
     postmaster_cxt->audit_primary_start = true;

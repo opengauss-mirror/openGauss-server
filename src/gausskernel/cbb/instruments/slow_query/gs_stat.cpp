@@ -391,3 +391,30 @@ PgBackendStatus* gs_stat_fetch_stat_beentry(int32 beid)
 
     return NULL;
 }
+
+void gs_stat_free_stat_node(PgBackendStatusNode* node)
+{
+    PgBackendStatusNode* tmpNode = node;
+    PgBackendStatusNode* freeNode = NULL;
+    PgBackendStatus* beentry = NULL;
+ 
+    while (tmpNode != NULL) {
+        beentry = tmpNode->data;
+        gs_stat_free_stat_beentry(beentry);
+        freeNode = tmpNode;
+        tmpNode = tmpNode->next;
+        pfree_ext(freeNode);
+    }
+}
+
+void gs_stat_free_stat_beentry(PgBackendStatus* beentry)
+{
+    if (beentry == NULL) {
+        return;
+    }
+    pfree_ext(beentry->st_appname);
+    pfree_ext(beentry->st_clienthostname);
+    pfree_ext(beentry->st_conninfo);
+    pfree_ext(beentry->st_activity);
+    pfree_ext(beentry);
+}

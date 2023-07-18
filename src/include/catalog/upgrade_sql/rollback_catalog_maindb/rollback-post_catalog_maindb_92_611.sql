@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.gs_validate_ext_listen_ip() cascade;

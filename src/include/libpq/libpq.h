@@ -44,7 +44,7 @@ typedef struct {
  */
 extern int StreamServerPort(int family, char* hostName, unsigned short portNumber, const char* unixSocketName,
     pgsocket ListenSocket[], int MaxListen, bool add_localaddr_flag,
-    bool is_create_psql_sock, bool is_create_libcomm_sock);
+    bool is_create_psql_sock, bool is_create_libcomm_sock, ListenChanelType listen_channel);
 extern int StreamConnection(pgsocket server_fd, Port* port);
 extern void StreamClose(pgsocket sock);
 extern void TouchSocketFile(void);

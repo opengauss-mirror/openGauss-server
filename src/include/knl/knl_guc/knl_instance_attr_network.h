@@ -41,6 +41,9 @@
 #include "knl/knl_guc/knl_guc_common.h"
 #include "libcomm/libcomm.h"
 
+#define MAXLISTEN 64
+#define IP_LEN 64
+
 typedef struct knl_instance_attr_network {
     bool PoolerStatelessReuse;
     bool comm_tcp_mode;
@@ -63,7 +66,9 @@ typedef struct knl_instance_attr_network {
     int cn_send_buffer_size;
     char* Unix_socket_group;
     char* UnixSocketDir;
+#ifdef ENABLE_MULTIPLE_NODES
     char* ListenAddresses;
+#endif
     char* tcp_link_addr;
     bool comm_enable_SSL;
     LibCommConn ** comm_ctrl_channel_conn;

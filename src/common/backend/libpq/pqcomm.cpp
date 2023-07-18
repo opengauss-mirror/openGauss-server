@@ -561,7 +561,7 @@ static void StreamDoUnlink(int code, Datum arg)
  */
 int StreamServerPort(int family, char* hostName, unsigned short portNumber, const char* unixSocketName,
     pgsocket ListenSocket[], int MaxListen, bool add_localaddr_flag,
-    bool is_create_psql_sock, bool is_create_libcomm_sock)
+    bool is_create_psql_sock, bool is_create_libcomm_sock, ListenChanelType listen_channel)
 {
 #define RETRY_SLEEP_TIME 1000000L
     pgsocket fd = PGINVALID_SOCKET;
@@ -824,6 +824,10 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
             if (result == NULL) {
                 ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
             } else {
+                ereport(DEBUG5, (errmodule(MOD_COMM_FRAMEWORK),
+                    errmsg("[reload listen IP]set LocalIpNum[%d] %s",
+                    t_thrd.postmaster_cxt.LocalIpNum,
+                    t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum])));
                 t_thrd.postmaster_cxt.LocalIpNum++;
             }
         }
@@ -832,6 +836,20 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
         } else {
             t_thrd.postmaster_cxt.listen_sock_type[listen_index] = HA_LISTEN_SOCKET;
         }
+
+        /*
+         * note:
+         * NORMAL_LISTEN_CHANEL include : listen_address or libcomm_bind_addr.
+         * REPL_LISTEN_CHANEL include : replication_info
+         * EXT_LISTEN_CHANEL include : listen_address_ext
+         */
+        t_thrd.postmaster_cxt.listen_chanel_type[listen_index] = listen_channel;
+
+        /* for debug info */
+        rc = strcpy_s(t_thrd.postmaster_cxt.all_listen_addr_list[listen_index], IP_LEN,
+            (hostName == NULL) ? ((addr->ai_family == AF_UNIX) ? "unix domain" : "*") : hostName);
+        securec_check(rc, "", "");
+        t_thrd.postmaster_cxt.all_listen_port_list[listen_index] = portNumber;
 
         continue;
 

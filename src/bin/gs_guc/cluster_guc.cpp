@@ -1092,6 +1092,63 @@ int validate_node_instance_name(char* nodename, int type, char* instance_name)
 
     return 0;
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ ******************************************************************************
+ Function    : gsguc_precheck_forbid_parameters
+ Description : Forbid reload/set/check GUC parameters in list for ALL node type
+ Input       : nodename(indicates node name)
+ Output      : none
+ Return      : bool
+ ******************************************************************************
+ */
+
+/* Forbid parameters for method "reload" with "all" nodes */
+char *gsguc_forbid_list_reload[] = {
+    "listen_addresses",
+    NULL
+};
+
+bool gsguc_precheck_forbid_parameters(char *nodename)
+{
+    /* If set pg_hba, just pass */
+    if (is_hba_conf) {
+        return true;
+    }
+
+    switch (ctl_command) {
+        case SET_CONF_COMMAND:
+            /* process checking parameters for SET mode */
+            break;
+        case RELOAD_CONF_COMMAND:
+            /* process checking parameters for RELOAD mode */
+            if (strncmp(nodename, "all", strlen("all")) != 0) {
+                break;
+            }
+            /* parameters not support '-N all' */
+            for (int i = 0; i < config_param_number && config_param[i] != NULL; i++) {
+                for (int j = 0; gsguc_forbid_list_reload[j] != NULL; j++) {
+                    if (strcmp(config_param[i], gsguc_forbid_list_reload[j]) == 0) {
+                        write_stderr(_("ERROR: \"%s\" can not \"%s\" with \"%s\" method.\n"),
+                            gsguc_forbid_list_reload[j],
+                            get_ctl_command_type(),
+                            nodename);
+                        return false;
+                    }
+                }
+            }
+            break;
+        case CHECK_CONF_COMMAND:
+            /* process checking parameters for CHECK mode */
+            break;
+        default:
+            break;
+    }
+    return true;
+}
+#endif
+
 /*
  ******************************************************************************
  Function    : validate_cluster_guc_options
@@ -1370,10 +1427,16 @@ void process_cluster_guc_option(char* nodename, int type, char* instance_name, c
     }
     else
     {
-        if (0 == strncmp(nodename, "all", sizeof("all")))
+        if (0 == strncmp(nodename, "all", strlen("all"))) {
+#ifndef ENABLE_MULTIPLE_NODES
+            if (!gsguc_precheck_forbid_parameters(nodename)) {
+                exit(1);
+            }
+#endif
             do_all_nodes_instance(instance_name, indatadir);
-        else
+        } else {
             do_remote_instance(nodename, instance_name, indatadir);
+        }
     }
 }
 

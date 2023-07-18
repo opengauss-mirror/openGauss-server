@@ -216,6 +216,8 @@ extern void set_disable_conn_mode(void);
     ((port)->cmdline_options != NULL && strstr((port)->cmdline_options, "remotetype=coordinator") != NULL)
 #else
 #define IsConnPortFromCoord(port) false
+extern bool get_addr_from_socket(int sock, struct sockaddr *saddr);
+extern int get_ip_port_from_addr(char* sock_ip, int* port, struct sockaddr saddr);
 #endif
 
 bool IsFromLocalAddr(Port* port);
