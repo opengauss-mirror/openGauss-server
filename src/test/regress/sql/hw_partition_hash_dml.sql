@@ -169,5 +169,18 @@ set enable_seqscan = off;
 set enable_bitmapscan = off;
 explain (costs off, verbose on) select * from test_index_ht order by 1;
 select * from test_index_ht order by 1;
+
+create table tab_hash(c1 number, c2 number,c3 varchar2(20)) partition by hash(c2)(
+partition p1,
+partition p2,
+partition p3,
+partition p4,
+partition p5
+);
+insert into tab_hash select t,t,t from generate_series(1,10) t;
+analyse tab_hash;
+select relname, pg_stat_get_live_tuples(oid) live_tuples from pg_partition
+where parentid='tab_hash'::regclass and parttype='p' order by relname;
+
 drop table test_index_ht;
 drop schema fvt_other_cmd cascade;
