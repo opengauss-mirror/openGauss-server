@@ -138,10 +138,12 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
 #ifdef HAVE_INT64_TIMESTAMP
     #define TIME_COUNT 60000000
 #else
-    #define TIME_COUNT 60
+    #define TIME_COUNT 300
 #endif
     XLogRecPtr max_lsn;
     char returnmsg[MAX_ERR_MSG_LENTH] = {0};
+    char dssdirdata[MAXPGPATH] = {0};
+    char* dssdir = dssdirdata;
     pg_crc32 maxLsnCrc = 0;
     XLogRecord* record = NULL;
     XLogRecPtr searchptr;
@@ -154,10 +156,17 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
     TimestampTz start_time;
     TimestampTz current_time;
 
+    if (ss_instance_config.dss.enable_dss) {
+        ret = snprintf_s(dssdirdata, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", ss_instance_config.dss.vgname, XLOGDIR, ss_instance_config.dss.instance_id);
+        securec_check_ss_c(ret, "", "");
+    } else {
+        dssdir = NULL;
+    }
+
     /*
      * local max lsn must be exists, or change to full build.
      */
-    max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
+    max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, NULL, NULL, dssdir);
     if (XLogRecPtrIsInvalid(max_lsn)) {
         pg_fatal("find max lsn fail, errmsg:%s\n", returnmsg);
         return BUILD_FATAL;
@@ -177,20 +186,21 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
     securec_check_ss_c(ret, "\0", "\0");
     get_conninfo(pg_conf_file);
 
+
     searchptr = max_lsn;
     start_time = localGetCurrentTimestamp();
     current_time = start_time;
     while (!XLogRecPtrIsInvalid(searchptr)) {
         if (current_time - start_time >= TIME_COUNT) {
             pg_log(PG_FATAL,
-                "try 60s, could not find any common checkpoint, change to full build\n");
+                "try 300s, could not find any common checkpoint, need to do full build\n");
             XLogReaderFree(xlogreader);
             CloseXlogFile();
             return BUILD_FATAL;
         }
         uint8 info;
 
-        record = XLogReadRecord(xlogreader, searchptr, &errormsg);
+        record = XLogReadRecord(xlogreader, searchptr, &errormsg, true, dssdir);
         if (record == NULL) {
             if (errormsg != NULL) {
                 pg_fatal("could not find previous WAL record at %X/%X: %s\n",
@@ -245,7 +255,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
     PG_CHECKBUILD_AND_RETURN();
     /* no common checkpoint between target and source, need full build */
     if (XLogRecPtrIsInvalid(searchptr)) {
-        pg_log(PG_FATAL, "could not find any common checkpoint, change to full build\n");
+        pg_log(PG_FATAL, "could not find any common checkpoint, must to do full build\n");
         return BUILD_FATAL;
     }
     return BUILD_SUCCESS;

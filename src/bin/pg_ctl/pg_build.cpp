@@ -72,7 +72,6 @@ char g_repl_uuid[MAX_VALUE_LEN] = {0};
 int g_replconn_idx = -1;
 int g_replication_type = -1;
 bool is_cross_region_build = false;
-SSInstanceConfig instance_config;
 #define RT_WITH_DUMMY_STANDBY 0
 #define RT_WITH_MULTI_STANDBY 1
 
@@ -610,7 +609,7 @@ void get_conninfo(const char* filename)
     }
 
     if (build_mode == CROSS_CLUSTER_FULL_BUILD || build_mode == CROSS_CLUSTER_INC_BUILD ||
-        build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD) {
+        build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD || build_mode == BUILD_CHECK) {
         /* For shared storage cluster */
         conninfo_para = config_para_cross_cluster_build;
     } else {
@@ -1238,7 +1237,7 @@ int IsBeginWith(const char *str1, char *str2)
 
 bool SsIsSkipPath(const char* dirname, bool needskipall)
 {   
-    if (!instance_config.dss.enable_dss) {
+    if (!ss_instance_config.dss.enable_dss) {
         return false;    
     }
 
@@ -1271,7 +1270,7 @@ bool SsIsSkipPath(const char* dirname, bool needskipall)
             char instanceId[MAX_INSTANCEID_LEN] = {0};
             errno_t rc = EOK;
             rc = snprintf_s(instanceId, sizeof(instanceId), sizeof(instanceId) - 1, "%d",
-                                instance_config.dss.instance_id);
+                                ss_instance_config.dss.instance_id);
             securec_check_ss_c(rc, "\0", "\0");
             /* not skip pg_xlog directory in file systerm */
             if (strlen(dirname) > dirNameLen && strcmp(dirname + dirNameLen, instanceId) != 0)
@@ -1579,7 +1578,7 @@ void delete_datadir(const char* dirname)
      */
     if (strncmp(dirname, "+", 1) == 0 ) {
         nRet = snprintf_s(xlogpath, MAXPGPATH, sizeof(xlogpath) - 1, "%s/pg_xlog%d", dirname,
-        instance_config.dss.instance_id);
+        ss_instance_config.dss.instance_id);
     } else {
         nRet = snprintf_s(xlogpath, MAXPGPATH, sizeof(xlogpath) - 1, "%s/pg_xlog", dirname);
     }
@@ -1792,7 +1791,7 @@ void fsync_pgdata(const char *pg_data)
 
     if (is_dss_file(pg_data)) {
         errorno = snprintf_s(pg_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", pg_data,
-                             instance_config.dss.instance_id);
+                             ss_instance_config.dss.instance_id);
     } else {
         errorno = snprintf_s(pg_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", pg_data);
     }
