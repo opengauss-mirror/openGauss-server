@@ -33,6 +33,7 @@
 #include "utils/memutils.h"
 #include "utils/elog.h"
 #include "ddes/dms/ss_dms_recovery.h"
+#include "storage/file/fio_device.h"
 
 typedef struct XLogPageReadPrivate {
     const char *datadir;
@@ -1268,7 +1269,11 @@ tryAgain:
         securec_check_ss_c(ss_c, "", "");
 #endif
 
-        ss_c = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/" XLOGDIR "/%s", readprivate->datadir, xlogfname);
+        if (xlog_path != NULL) {
+            ss_c = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", xlog_path, xlogfname);
+        } else {
+            ss_c = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/" XLOGDIR "/%s", readprivate->datadir, xlogfname);
+        }
 #ifndef FRONTEND
         securec_check_ss(ss_c, "", "");
 #else
@@ -1313,8 +1318,8 @@ tryAgain:
     return XLOG_BLCKSZ;
 }
 
-XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *maxLsnCrc, uint32 *maxLsnLen, 
-    TimeLineID *returnTli)
+XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *maxLsnCrc,
+    uint32 *maxLsnLen, TimeLineID *returnTli, char* xlog_path)
 {
     DIR *xlogDir = NULL;
     struct dirent *dirEnt = NULL;
@@ -1336,7 +1341,12 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
     uint32 xlogReadLogSeg = -1;
     errno_t rc = EOK;
 
-    rc = snprintf_s(xlogDirStr, MAXPGPATH, MAXPGPATH - 1, "%s/%s", workingPath, XLOGDIR);
+    if (xlog_path != NULL) {
+        rc = snprintf_s(xlogDirStr, MAXPGPATH, MAXPGPATH - 1, "%s", xlog_path);
+    } else {
+        rc = snprintf_s(xlogDirStr, MAXPGPATH, MAXPGPATH - 1, "%s/%s", workingPath, XLOGDIR);
+    }
+
 #ifndef FRONTEND
     securec_check_ss(rc, "", "");
 #else
@@ -1410,7 +1420,7 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
     startLsn = (xlogReadLogSeg * XLogSegSize) + ((XLogRecPtr)xlogReadLogid * XLogSegmentsPerXLogId * XLogSegSize);
     while (!XLogRecPtrIsInvalid(startLsn)) {
         /* find the first valid record from the bigger xlogrecord. then break */
-        curLsn = XLogFindNextRecord(xlogReader, startLsn);
+        curLsn = XLogFindNextRecord(xlogReader, startLsn, NULL, xlogDirStr);
         if (XLogRecPtrIsInvalid(curLsn)) {
             if (xlogreadfd > 0) {
                 close(xlogreadfd);
@@ -1446,7 +1456,7 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
 
     /* find the max lsn. */
     do {
-        record = XLogReadRecord(xlogReader, curLsn, &errorMsg);
+        record = XLogReadRecord(xlogReader, curLsn, &errorMsg, true, xlogDirStr);
         if (record == NULL) {
             break;
         }

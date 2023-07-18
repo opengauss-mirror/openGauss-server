@@ -1014,9 +1014,9 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             }
             
             /* pg_control will be written into a specified postion of main stanby corresponding to */
-            if (instance_config.dss.enable_dss && strcmp(filename, "+data/pg_control") == 0) {
+            if (ss_instance_config.dss.enable_dss && strcmp(filename, "+data/pg_control") == 0) {
                 pg_log(PG_WARNING, _("file size %d. \n"), r);
-                int main_standby_id = instance_config.dss.instance_id;
+                int main_standby_id = ss_instance_config.dss.instance_id;
                 off_t seekpos = (off_t)BLCKSZ * main_standby_id;
                 fseek(file, seekpos, SEEK_SET);
             }
@@ -1180,7 +1180,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     errno_t rc = EOK;
     int nRet = 0;
     struct stat st;
-    char *dssdir = instance_config.dss.vgdata; 
+    char *dssdir = ss_instance_config.dss.vgname; 
 
     pqsignal(SIGCHLD, BuildReaper); /* handle child termination */
     /* concat file and path */
@@ -1227,7 +1227,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
         delete_datadir(dirname);
 
         /* delete data/ and pg_tblspc/ in dss, but keep .config */
-        if (instance_config.dss.enable_dss) {
+        if (ss_instance_config.dss.enable_dss) {
             delete_datadir(dssdir);
         }
         show_full_build_process("clear old target dir success");
@@ -1533,7 +1533,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     * in order to avoid sharing the same dssserver session,
     * we will not start logstreaming here
     */
-    if (!instance_config.dss.enable_dss) {
+    if (!ss_instance_config.dss.enable_dss) {
         BeginGetXlogbyStream(xlogstart, timeline, sysidentifier, xlog_location, term, res);
     }
 
@@ -1657,7 +1657,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     }
 #endif
 
-    if (instance_config.dss.enable_dss) {
+    if (ss_instance_config.dss.enable_dss) {
         BeginGetXlogbyStream(xlogstart, timeline, sysidentifier, xlog_location, term, res);
     }
 
@@ -1749,7 +1749,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     /* fsync all data come from source */
     if (!no_need_fsync) {
         show_full_build_process("starting fsync all files come from source.");
-        if (instance_config.dss.enable_dss) {
+        if (ss_instance_config.dss.enable_dss) {
             (void) fsync_pgdata(dssdir);
         } else {
             (void) fsync_pgdata(basedir);
@@ -1762,7 +1762,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     if (g_is_obsmode) {
         backupDWFileSuccess = backup_dw_file(basedir);
     } else {
-        if (instance_config.dss.enable_dss) {
+        if (ss_instance_config.dss.enable_dss) {
             backupDWFileSuccess = ss_backup_dw_file(dssdir);
         } else {
             backupDWFileSuccess = backup_dw_file(dirname);
@@ -1789,7 +1789,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
         return false;
     }
     
-    if (instance_config.dss.enable_dss) {
+    if (ss_instance_config.dss.enable_dss) {
         nRet = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH, "%s/pg_tblspc", dssdir);
     } else {
         nRet = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH, "%s/pg_tblspc", dirname);
@@ -2370,7 +2370,7 @@ static bool ss_backup_dw_file(const char* target_dir)
 
     /* Delete the dw file, if it exists. */
     rc = snprintf_s(dw_path, PATH_MAX, PATH_MAX - 1, "%s/pg_doublewrite%d", target_dir,
-                    instance_config.dss.instance_id);
+                    ss_instance_config.dss.instance_id);
     securec_check_ss_c(rc, "\0", "\0");
 
     /* check whether directory is exits or not, if not exit then mkdir it */
@@ -2506,10 +2506,10 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH])
     struct stat stbuf;
     int nRet = 0;
 
-    if (instance_config.dss.enable_dss) {
-        char *dssdir = instance_config.dss.vgdata;
+    if (ss_instance_config.dss.enable_dss) {
+        char *dssdir = ss_instance_config.dss.vgname;
         nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", dssdir,
-            instance_config.dss.instance_id);
+            ss_instance_config.dss.instance_id);
     } else {
         nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", basedir);
     }
@@ -2725,8 +2725,8 @@ bool RenameTblspcDir(char *dataDir)
         return true;
     }
     
-    if (instance_config.dss.enable_dss) {
-        char *dssdir = instance_config.dss.vgdata;
+    if (ss_instance_config.dss.enable_dss) {
+        char *dssdir = ss_instance_config.dss.vgname;
         rc = snprintf_s(tblspcParentPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dssdir, "pg_tblspc");
     } else {
         rc = snprintf_s(tblspcParentPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dataDir, "pg_tblspc");
