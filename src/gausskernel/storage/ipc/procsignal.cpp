@@ -312,6 +312,10 @@ void procsignal_sigusr1_handler(SIGNAL_ARGS)
     if (CheckProcSignal(PROCSIG_RECOVERY_CONFLICT_BUFFERPIN))
         RecoveryConflictInterrupt(PROCSIG_RECOVERY_CONFLICT_BUFFERPIN);
 
+    if (CheckProcSignal(PROCSIG_COMM_CLOSE_ACTIVE_SESSION_SOCKET)) {
+        handle_terminate_active_sess_socket();
+    }
+
     latch_sigusr1_handler();
 
     errno = save_errno;

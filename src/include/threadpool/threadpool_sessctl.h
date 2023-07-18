@@ -59,6 +59,7 @@ public:
     bool ValidDBoidAndUseroid(Oid dbOid, Oid userOid, knl_sess_control* ctrl);
     void SigHupHandler();
     void HandlePoolerReload();
+    int terminate_session_socket(ThreadId tid, uint64 session_id);
     void CheckSessionTimeout();
 #ifndef ENABLE_MULTIPLE_NODES
     void CheckIdleInTransactionSessionTimeout();
