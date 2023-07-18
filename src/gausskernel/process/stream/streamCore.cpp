@@ -744,7 +744,7 @@ const List* StreamNodeGroup::getStreamPairList()
 void StreamNodeGroup::initStreamThread(StreamProducer* producer, uint8 smpIdentifier, StreamPair* pair)
 {
     ThreadId producerThreadId = ApplyStreamThread(producer);
-    if (producerThreadId != 0) {
+    if (producerThreadId != 0 && producerThreadId != InvalidTid) {
 #ifdef __aarch64__
         pg_memory_barrier();
 #endif
