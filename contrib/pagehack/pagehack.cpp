@@ -193,7 +193,11 @@ static int PgHeapRelTupleParserCursor = -1;
 static int PgIndexRelTupleParserCursor = -1;
 
 /* For Assert(...) macros. */
+#ifdef USE_ASSERT_CHECKING
 THR_LOCAL bool assert_enabled = true;
+#else
+THR_LOCAL bool assert_enabled = false;
+#endif
 
 /* Options */
 bool only_vm = false;

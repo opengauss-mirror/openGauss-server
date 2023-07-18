@@ -39,6 +39,8 @@
 ./bin/server.key.cipher
 ./bin/server.key.rand
 ./bin/gs_plan_simulator.sh
+./bin/pg_xlogdump
+./bin/pagehack
 ./etc/kerberos/kadm5.acl  
 ./etc/kerberos/kdc.conf  
 ./etc/kerberos/krb5.conf  
