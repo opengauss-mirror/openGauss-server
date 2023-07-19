@@ -1940,7 +1940,7 @@ static void do_stop(bool force)
                 break;
         }
 
-        if (pid != 0) { /* pid file still exists */
+        if ((pid = get_pgpid()) != 0) { /* pid file still exists */
             if (force || (shutdown_mode == IMMEDIATE_MODE)) {
                 kill_proton_force();
 
