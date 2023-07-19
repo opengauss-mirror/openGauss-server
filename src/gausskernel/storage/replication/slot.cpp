@@ -879,6 +879,24 @@ void ReplicationSlotPersist(void)
     ReplicationSlotSave();
 }
 
+static bool IfIgnoreStandbyXmin(TransactionId xmin, TimestampTz last_xmin_change_time)
+{
+    if (u_sess->attr.attr_storage.ignore_feedback_xmin_window <= 0) {
+        return false;
+    }
+
+    TimestampTz nowTime = GetCurrentTimestamp();
+    if (timestamptz_cmp_internal(nowTime, TimestampTzPlusMilliseconds(last_xmin_change_time,
+        u_sess->attr.attr_storage.ignore_feedback_xmin_window)) >= 0) {
+        /* If the xmin is older than recentGlobalXmin, ignore it */
+        TransactionId recentGlobalXmin = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
+        if (xmin < recentGlobalXmin) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /*
  * Compute the oldest xmin across all slots and store it in the ProcArray.
  *
@@ -898,6 +916,7 @@ void ReplicationSlotsComputeRequiredXmin(bool already_locked)
         ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
         TransactionId effective_xmin;
         TransactionId effective_catalog_xmin;
+        TimestampTz last_xmin_change_time;
 
         if (!s->in_use)
             continue;
@@ -908,11 +927,12 @@ void ReplicationSlotsComputeRequiredXmin(bool already_locked)
             SpinLockAcquire(&s->mutex);
             effective_xmin = vslot->effective_xmin;
             effective_catalog_xmin = vslot->effective_catalog_xmin;
+            last_xmin_change_time = vslot->last_xmin_change_time;
             SpinLockRelease(&s->mutex);
         }
 
         /* check the data xmin */
-        if (TransactionIdIsValid(effective_xmin) &&
+        if (TransactionIdIsValid(effective_xmin) && !IfIgnoreStandbyXmin(effective_xmin, last_xmin_change_time) &&
             (!TransactionIdIsValid(agg_xmin) || TransactionIdPrecedes(effective_xmin, agg_xmin)))
             agg_xmin = effective_xmin;
 
@@ -1766,6 +1786,7 @@ loop:
         slot->active = false;
         slot->extra_content = extra_content;
         slot->archive_config = archive_cfg;
+        slot->last_xmin_change_time = GetCurrentTimestamp();
         restored = true;
         if (extra_content != NULL) {
             MarkArchiveSlotOperate();

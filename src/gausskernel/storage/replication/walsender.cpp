@@ -2740,6 +2740,8 @@ static void ProcessStandbyReplyMessage(void)
     }
     /* use volatile pointer to prevent code rearrangement */
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    TimestampTz now = GetCurrentTimestamp();
+    XLogRecPtr localFlush = GetFlushRecPtr();
 
     /*
      * Update shared state for this WalSender process based on reply data from
@@ -2747,6 +2749,18 @@ static void ProcessStandbyReplyMessage(void)
      */
     {
         SpinLockAcquire(&walsnd->mutex);
+        /*
+         * If reply position is bigger than last one, or equal to local flush,
+         * update change time.
+         */
+        walsnd->lastReceiveChangeTime = XLByteLT(walsnd->receive, reply.receive) ||
+            XLByteEQ(walsnd->receive, localFlush) ? now : walsnd->lastReceiveChangeTime;
+        walsnd->lastWriteChangeTime = XLByteLT(walsnd->write, reply.write) ||
+            XLByteEQ(walsnd->write, localFlush) ? now : walsnd->lastWriteChangeTime;
+        walsnd->lastFlushChangeTime = XLByteLT(walsnd->flush, reply.flush) ||
+            XLByteEQ(walsnd->flush, localFlush) ? now : walsnd->lastFlushChangeTime;
+        walsnd->lastApplyChangeTime = XLByteLT(walsnd->apply, reply.apply) ||
+            XLByteEQ(walsnd->apply, localFlush) ? now : walsnd->lastApplyChangeTime;
         walsnd->receive = reply.receive;
         walsnd->write = reply.write;
         walsnd->flush = reply.flush;
@@ -2803,6 +2817,7 @@ static void PhysicalReplicationSlotNewXmin(TransactionId feedbackXmin)
         slot->data.xmin = feedbackXmin;
         slot->effective_xmin = feedbackXmin;
     }
+    slot->last_xmin_change_time = GetCurrentTimestamp();
     SpinLockRelease(&slot->mutex);
 
     if (changed) {
@@ -2912,7 +2927,7 @@ static void ProcessStandbySwitchRequestMessage(void)
         t_thrd.walsender_cxt.Demotion != t_thrd.walsender_cxt.WalSndCtl->demotion) {
         SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
         ereport(NOTICE, (errmsg("master is doing switchover,\
-						 probably another standby already requested switchover.")));
+                                probably another standby already requested switchover.")));
         return;
     } else if (message.demoteMode <= t_thrd.walsender_cxt.Demotion) {
         SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
@@ -4386,6 +4401,10 @@ static void InitWalSnd(void)
             walsnd->lastCalWrite = InvalidXLogRecPtr;
             walsnd->catchupRate = 0;
             walsnd->slot_idx = -1;
+            walsnd->lastReceiveChangeTime = 0;
+            walsnd->lastWriteChangeTime = 0;
+            walsnd->lastFlushChangeTime = 0;
+            walsnd->lastApplyChangeTime = 0;
             SpinLockRelease(&walsnd->mutex);
             /* don't need the lock anymore */
             OwnLatch((Latch *)&walsnd->latch);
@@ -5991,8 +6010,8 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
     int *sync_priority = NULL;
     int i = 0;
     volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
-    List *sync_standbys = NIL;
-    ListCell *lc = NULL;
+    SyncRepStandbyData *sync_standbys;
+    int num_standbys;
 
     Tuplestorestate *tupstore = BuildTupleResult(fcinfo, &tupdesc);
 
@@ -6019,11 +6038,10 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
     }
 
     /*
-     * Get the currently active synchronous standbys.
+     * Get the currently active synchronous standbys.This could be out of
+     * date before we're done, but we'll use the data anyway.
      */
-    LWLockAcquire(SyncRepLock, LW_SHARED);
-    sync_standbys = SyncRepGetSyncStandbys(NULL);
-    LWLockRelease(SyncRepLock);
+    num_standbys = SyncRepGetSyncStandbys(&sync_standbys);
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
@@ -6049,10 +6067,13 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
         Datum values[PG_STAT_GET_WAL_SENDERS_COLS];
         bool nulls[PG_STAT_GET_WAL_SENDERS_COLS];
         int j = 0;
+        int k = 0;
         errno_t rc = 0;
         int ret = 0;
         int group = 0;
         int priority = 0;
+
+        bool is_sync_standby = false;
 
         SpinLockAcquire(&hashmdata->mutex);
         local_role = hashmdata->current_mode;
@@ -6099,6 +6120,18 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
             sndFlush = ctlInfo->insertHead;
             sndReplay = ctlInfo->insertHead;
             AlignFreeShareStorageCtl(ctlInfo);
+        }
+
+        /*
+         * if the walsener's pid has changed,we consider is is not a sync standby
+         */
+        for(k = 0; k < num_standbys; k++) {
+            if(sync_standbys[k].walsnd_index == i  
+                && sync_standbys[k].pid == walsnd->pid 
+                && sync_standbys[k].lwpId == walsnd->lwpId) {
+                is_sync_standby = true;
+                break;
+            }
         }
 
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
@@ -6246,7 +6279,7 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                  */
                 if (priority == 0) {
                     values[j++] = CStringGetTextDatum("Async");
-                } else if (list_member_int((List*)list_nth(sync_standbys, group), i)) {
+                } else if (is_sync_standby) {
                     values[j++] = GetWalsndSyncRepConfig(walsnd)->syncrep_method == SYNC_REP_PRIORITY
                                         ? CStringGetTextDatum("Sync")
                                         : CStringGetTextDatum("Quorum");
@@ -6275,10 +6308,11 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
         tuplestore_putvalues(tupstore, tupdesc, values, nulls);
     }
 
-    foreach(lc, sync_standbys) {
-        list_free((List*)lfirst(lc));
+    if (sync_standbys != NULL) {
+        pfree(sync_standbys);
+        sync_standbys = NULL;
     }
-    list_free(sync_standbys);
+    
     if (sync_priority != NULL) {
         pfree(sync_priority);
         sync_priority = NULL;

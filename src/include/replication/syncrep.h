@@ -49,6 +49,39 @@ extern volatile bool most_available_sync;
 #define GetWalsndSyncRepConfig(walsnder)  \
     (t_thrd.syncrep_cxt.SyncRepConfig[(walsnder)->sync_standby_group])
 
+#define IfIgnoreStandbyLsn(nowTime, lastTime) \
+    (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && \
+    u_sess->attr.attr_storage.ignore_standby_lsn_window > 0 && \
+    timestamptz_cmp_internal(nowTime, TimestampTzPlusMilliseconds(lastTime, \
+    u_sess->attr.attr_storage.ignore_standby_lsn_window)) >= 0)
+
+/*
+ * SyncRepGetCandidateStandbys returns an array of these structs,
+ * one per candidate synchronous walsender.
+ */
+typedef struct SyncRepStandbyData
+{
+    /* Copies of relevant fields from WalSnd shared-memory struct */
+    ThreadId    pid;
+    int         lwpId;
+    XLogRecPtr  receive;
+    XLogRecPtr  write;
+    XLogRecPtr  flush;
+    XLogRecPtr  apply;
+    uint8       sync_standby_group;
+    int         sync_standby_priority;
+    /* Index of this walsender in the WalSnd shared-memory array */
+    int         walsnd_index;
+    /* This flag indicates whether this struct is about our own process */
+    bool        is_me;
+    bool        is_cross_cluster;
+    bool        receive_too_old;
+    bool        write_too_old;
+    bool        flush_too_old;
+    bool        apply_too_old;
+} SyncRepStandbyData;
+
+
 /*
  * Struct for the configuration of synchronous replication.
  *
@@ -95,7 +128,7 @@ extern void SyncRepUpdateSyncStandbysDefined(void);
 extern void SyncRepCheckSyncStandbyAlive(void);
 
 /* called by wal sender and user backend */
-extern List* SyncRepGetSyncStandbys(bool* am_sync, List** catchup_standbys = NULL);
+extern int SyncRepGetSyncStandbys(SyncRepStandbyData** sync_standbys, List** catchup_standbys = NULL);
 
 extern bool check_synchronous_standby_names(char** newval, void** extra, GucSource source);
 extern void assign_synchronous_standby_names(const char* newval, void* extra);
