@@ -770,11 +770,11 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
           "  pg_read_binary_file(path, begin, len, true) AS chunk, len, algorithm, chunksize,rebuild \n"
           "FROM fetchchunks where algorithm =0 \n"
           "union all \n"
-          "select (json->>'path')::text as path, (json->>'blocknum')::int4 as begin, (json->>'data')::bytea as chunk,\n"
+          "(select (json->>'path')::text as path, (json->>'blocknum')::int4 as begin, (json->>'data')::bytea as chunk,\n"
           "(json->>'len')::int4 as len, algorithm, chunksize,rebuild \n"
           "from (select row_to_json(pg_read_binary_file_blocks(path,begin,len)) json, algorithm, chunksize,rebuild \n"
           "from fetchchunks where algorithm !=0) \n"
-          "order by path, begin;";
+          "order by path, begin);";
 
     fprintf(file, "fetch and write file based on temporary table fetchchunks.\n");
     return receiveFileChunks(sql, file);
