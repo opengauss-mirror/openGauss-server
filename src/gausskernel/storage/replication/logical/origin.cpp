@@ -438,7 +438,7 @@ Size ReplicationOriginShmemSize(void)
      * we keep the replay state of *remote* transactions. But for now it seems
      * sufficient to reuse it, lest we introduce a separate guc.
      */
-    if (g_instance.attr.attr_storage.max_replication_slots == 0)
+    if (g_instance.attr.attr_storage.max_replication_slots == 0 || ENABLE_DMS)
         return size;
 
     size = add_size(size, offsetof(ReplicationStateShmStruct, states));
@@ -520,7 +520,7 @@ void CheckPointReplicationOrigin(void)
     pg_crc32c crc;
     struct stat st;
 
-    if (g_instance.attr.attr_storage.max_replication_slots == 0) {
+    if (g_instance.attr.attr_storage.max_replication_slots == 0 || ENABLE_DMS) {
         return;
     }
 
@@ -645,7 +645,7 @@ void StartupReplicationOrigin(void)
     pg_crc32c file_crc;
     pg_crc32c crc;
 
-    if (g_instance.attr.attr_storage.max_replication_slots == 0)
+    if (g_instance.attr.attr_storage.max_replication_slots == 0 || ENABLE_DMS)
         return;
 
     INIT_CRC32C(crc);
