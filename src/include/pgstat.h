@@ -3042,6 +3042,8 @@ typedef struct IoWaitStatGlobalInfo {
 } IoWaitStatGlobalInfo;
 
 void pgstat_release_session_memory_entry();
+extern void gs_stat_free_stat_node(PgBackendStatusNode* node);
+extern void gs_stat_free_stat_beentry(PgBackendStatus* beentry);
 
 #define MAX_PATH 256
 

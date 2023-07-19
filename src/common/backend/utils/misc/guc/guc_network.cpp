@@ -21,6 +21,7 @@
 #include <float.h>
 #include <math.h>
 #include <limits.h>
+#include <arpa/inet.h>
 #include "utils/elog.h"
 
 #ifdef HAVE_SYSLOG
@@ -50,6 +51,7 @@
 #include "job/job_scheduler.h"
 #include "libpq/auth.h"
 #include "libpq/be-fsstubs.h"
+#include "libpq/ip.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "miscadmin.h"
@@ -155,6 +157,11 @@ static void assign_comm_no_delay(bool newval, void* extra);
 static void assign_comm_ackchk_time(int newval, void* extra);
 static bool CheckMaxInnerToolConnections(int* newval, void** extra, GucSource source);
 static bool check_ssl(bool* newval, void** extra, GucSource source);
+
+#ifndef ENABLE_MULTIPLE_NODES
+static bool check_listen_addresses(char **newval, void **extra, GucSource source);
+static void assign_listen_addresses(const char *newval, void *extra);
+#endif
 
 #ifdef LIBCOMM_SPEED_TEST_ENABLE
 static void assign_comm_test_thread_num(int newval, void* extra);
@@ -963,6 +970,7 @@ static void InitNetworkConfigureNamesString()
             NULL,
             NULL},
 
+#ifdef ENABLE_MULTIPLE_NODES
         {{"listen_addresses",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -975,6 +983,20 @@ static void InitNetworkConfigureNamesString()
             NULL,
             NULL,
             NULL},
+#else
+        {{"listen_addresses",
+            PGC_SIGHUP,
+            NODE_ALL,
+            CONN_AUTH_SETTINGS,
+            gettext_noop("Sets the host name or IP address(es) to listen to."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_network.ListenAddresses,
+            "localhost",
+            check_listen_addresses,
+            assign_listen_addresses,
+            NULL},
+#endif
 
         {{"local_bind_address",
             PGC_POSTMASTER,
@@ -1142,6 +1164,172 @@ static void assign_comm_ackchk_time(int newval, void* extra)
 {
     gs_set_ackchk_time(newval);
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+static bool check_listen_addresses(char **newval, void **extra, GucSource source)
+{
+    if (*newval == NULL || strlen(*newval) == 0) {
+        GUC_check_errmsg("listen_addresses can not set to empty");
+        return false;
+    }
+
+    char* rawstring = NULL;
+    List* elemlist = NULL;
+    rawstring = pstrdup(*newval);
+    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
+        /* syntax error in list */
+        GUC_check_errmsg("invalid list syntax for \"listen_addresses\": %s", *newval);
+        list_free_ext(elemlist);
+        pfree(rawstring);
+        return false;
+    }
+    list_free_ext(elemlist);
+    pfree(rawstring);
+    return true;
+}
+
+static void transform_ip_to_addr(char* host_name, unsigned short port_number)
+{
+    char* service = NULL;
+    struct addrinfo* addrs = NULL;
+    struct addrinfo* addr = NULL;
+    struct addrinfo hint;
+    char portNumberStr[32];
+    int family = AF_UNSPEC;
+    errno_t rc = snprintf_s(portNumberStr, sizeof(portNumberStr), sizeof(portNumberStr) - 1, "%hu", port_number);
+    securec_check_ss(rc, "\0", "\0");
+    service = portNumberStr;
+    /* Initialize hint structure */
+    rc = memset_s(&hint, sizeof(hint), 0, sizeof(hint));
+    securec_check(rc, "\0", "\0");
+    hint.ai_family = family;
+    hint.ai_flags = AI_PASSIVE;
+    hint.ai_socktype = SOCK_STREAM;
+
+    int ret = pg_getaddrinfo_all(host_name, service, &hint, &addrs);
+    if (ret || addrs == NULL) {
+        if (host_name != NULL) {
+            ereport(LOG,
+                (errmsg("could not translate host name \"%s\", service \"%s\" to address: %s",
+                    host_name,
+                    service,
+                    gai_strerror(ret))));
+        } else {
+            ereport(LOG,
+                (errmsg("could not translate service \"%s\" to address: %s", service, gai_strerror(ret))));
+        }
+        if (addrs != NULL) {
+            pg_freeaddrinfo_all(hint.ai_family, addrs);
+        }
+        return;
+    }
+
+    for (addr = addrs; addr; addr = addr->ai_next) {
+        if (!IS_AF_UNIX(family) && IS_AF_UNIX(addr->ai_family)) {
+            /*
+             * Only set up a unix domain socket when they really asked for it.
+             * The service/port is different in that case.
+             */
+            continue;
+        }
+        struct sockaddr* sinp = NULL;
+        char* result = NULL;
+
+        sinp = (struct sockaddr*)(addr->ai_addr);
+        if (addr->ai_family == AF_INET6) {
+            result = inet_net_ntop(AF_INET6,
+                &((struct sockaddr_in6*)sinp)->sin6_addr,
+                128,
+                t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum],
+                IP_LEN);
+        } else if (addr->ai_family == AF_INET) {
+            result = inet_net_ntop(AF_INET,
+                &((struct sockaddr_in*)sinp)->sin_addr,
+                32,
+                t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum],
+                IP_LEN);
+        }
+        if (result == NULL) {
+            ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
+        } else {
+            ereport(DEBUG5, (errmodule(MOD_COMM_FRAMEWORK),
+                errmsg("[reload listen IP]set LocalIpNum[%d] %s",
+                t_thrd.postmaster_cxt.LocalIpNum,
+                t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum])));
+            t_thrd.postmaster_cxt.LocalIpNum++;
+        }
+    }
+
+    /* finally free malloc memory */
+    if (addrs != NULL) {
+        pg_freeaddrinfo_all(hint.ai_family, addrs);
+    }
+}
+
+static void assign_listen_addresses(const char *newval, void *extra)
+{
+    if (t_thrd.postmaster_cxt.can_listen_addresses_reload && !IsUnderPostmaster) {
+        if (newval != NULL && strlen(newval) != 0 && u_sess->attr.attr_network.ListenAddresses != NULL &&
+            strcmp((const char *)newval, u_sess->attr.attr_network.ListenAddresses) != 0) {
+            ereport(WARNING,
+                (errmsg("Postmaster received signal to reload listen_addresses, update \"%s\" to \"%s\".",
+                u_sess->attr.attr_network.ListenAddresses, newval)));
+            t_thrd.postmaster_cxt.is_listen_addresses_reload = true;
+        }
+    }
+
+    if (IsUnderPostmaster) {
+        int i = 0;
+        errno_t rc = EOK;
+        char* rawstring = NULL;
+        List* elemlist = NULL;
+        rawstring = pstrdup(newval);
+        if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
+            list_free_ext(elemlist);
+            pfree(rawstring);
+            return;
+        }
+        t_thrd.postmaster_cxt.LocalIpNum = 0;
+        for (i = 0; i < MAXLISTEN; i++) {
+            rc = memset_s(t_thrd.postmaster_cxt.LocalAddrList[i], IP_LEN, '\0', IP_LEN);
+            securec_check(rc, "", "");
+        }
+        ListCell* l = NULL;
+        ListCell* elem = NULL;
+        int checked_num = 0;
+        foreach(l, elemlist) {
+            char* curhost = (char*)lfirst(l);
+
+            /* Deduplicatd listen IP */
+            int check = 0;
+            bool has_checked = false;
+            foreach(elem, elemlist) {
+                if (check >= checked_num) {
+                    break;
+                }
+                if (strcmp(curhost, (char*)lfirst(elem)) == 0) {
+                    has_checked = true;
+                    break;
+                }
+                check++;
+            }
+            checked_num++;
+            if (has_checked) {
+                has_checked = false;
+                continue;
+            }
+
+            if (strcmp(curhost, "*") == 0) {
+                transform_ip_to_addr(NULL, (unsigned short)g_instance.attr.attr_network.PostPortNumber);
+            } else {
+                transform_ip_to_addr(curhost, (unsigned short)g_instance.attr.attr_network.PostPortNumber);
+            }
+        }
+        list_free_ext(elemlist);
+        pfree(rawstring);
+    }
+}
+#endif
 
 #ifdef LIBCOMM_SPEED_TEST_ENABLE
 static void assign_comm_test_thread_num(int newval, void* extra)

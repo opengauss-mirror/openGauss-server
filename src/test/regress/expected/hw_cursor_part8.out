@@ -538,4 +538,10 @@ drop cascades to function pro_base13_03(character varying,character varying,char
 drop cascades to function pro_base13_04(character varying,character varying,character varying)
 drop cascades to function pro_base12_01()
 \c regression;
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
 drop database IF EXISTS pl_test_cursor_part8;

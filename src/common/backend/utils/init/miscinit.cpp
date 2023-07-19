@@ -1676,6 +1676,9 @@ void AddToDataDirLockFile(int target_line, const char* str)
     int lineno;
     char* ptr = NULL;
     char buffer[BLCKSZ];
+    char temp[BLCKSZ] = {0};
+    char new_file[MAXPGPATH];
+    bool has_split = false;
 
     fd = open(DIRECTORY_LOCK_FILE, O_RDWR | PG_BINARY, 0);
 
@@ -1715,12 +1718,59 @@ void AddToDataDirLockFile(int target_line, const char* str)
         ptr++;
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /* If there are extra info, we should copy the string to right place in buffer */
+    if (target_line == LOCK_FILE_LINE_LISTEN_ADDR && ptr != NULL && strlen(ptr) != 0) {
+        char *end = ptr;
+        end = strchr(end, '\n');
+
+        if (end != NULL) {
+            end++;
+            /* set last character to '\0' */
+            char *invalid = strchr(end, '\n');
+            if (invalid != NULL) {
+                *(invalid + 1) = '\0';
+            }
+            int rcs = strcpy_s(temp, BLCKSZ - 1, end);
+            securec_check(rcs, "\0", "\0");
+            has_split = true;
+        }
+    }
+#endif
+
     /*
      * Write or rewrite the target line.
      */
     int rcs = snprintf_s(ptr, buffer + sizeof(buffer) - ptr, buffer + sizeof(buffer) - ptr - 1, "%s\n", str);
     securec_check_ss(rcs, "\0", "\0");
 
+    if (has_split) {
+        /* reload listen_addresses, we will write IP to postmaster.pid.new and then rename it to postmaster.pid */
+        size_t str_len = strlen(str);
+        rcs = snprintf_s(ptr + str_len + 1, buffer + sizeof(buffer) - ptr - str_len - 1,
+            buffer + sizeof(buffer) - ptr - str_len - 1 - 1, "%s", temp);
+        securec_check_ss(rcs, "\0", "\0");
+
+        rcs = snprintf_s(new_file, MAXPGPATH, MAXPGPATH - 1, "%s.new", DIRECTORY_LOCK_FILE);
+        securec_check_ss(rcs, "\0", "\0");
+        close(fd);
+        fd = open(new_file, O_RDWR | O_CREAT, 0600);
+
+        if (fd < 0) {
+            ereport(LOG, (errcode_for_file_access(),
+                errmsg("could not open new temp file \"%s\": %m", new_file)));
+            return;
+        }
+        pgstat_report_waitevent(WAIT_EVENT_LOCK_FILE_ADDTODATADIR_WRITE);
+        if (ftruncate(fd, (off_t)0) != 0) {
+            pgstat_report_waitevent(WAIT_EVENT_END);
+            ereport(LOG, (errcode_for_file_access(),
+                errmsg("could not clear file \"%s\": %m", DIRECTORY_LOCK_FILE)));
+            close(fd);
+            return;
+        }
+        pgstat_report_waitevent(WAIT_EVENT_END);
+    }
     /*
      * And rewrite the data.  Since we write in a single kernel call, this
      * update should appear atomic to onlookers.
@@ -1749,6 +1799,13 @@ void AddToDataDirLockFile(int target_line, const char* str)
 
     if (close(fd) != 0) {
         ereport(LOG, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", DIRECTORY_LOCK_FILE)));
+    }
+
+    if (has_split) {
+        if (rename(new_file, DIRECTORY_LOCK_FILE)) {
+            ereport(LOG, (errcode_for_file_access(),
+                errmsg("failed to rename file \"%s\": %m", new_file)));
+        }
     }
 }
 

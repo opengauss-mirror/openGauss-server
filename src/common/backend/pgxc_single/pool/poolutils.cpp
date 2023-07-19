@@ -40,6 +40,8 @@
 #include "utils/memutils.h"
 #include "utils/resowner.h"
 #include "utils/elog.h"
+#include "pgstat.h"
+#include "utils/mem_snapshot.h"
 
 /*
  * pgxc_pool_check
@@ -612,3 +614,241 @@ void HandlePoolerReload(void)
 }
 
 #endif
+
+#define IS_COMM_NULL_STR(str) ((str) == NULL || (str)[0] == '\0')
+
+int gs_comm_check_valid_ip(char* input_ip)
+{
+    if (!input_ip) {
+        return 0;
+    }
+
+    char* ip_address = pstrdup(input_ip);
+    const int max_cidr_str_len = 3;
+    const int default_inet4_cidr = 32;
+    const int default_inet6_cidr = 128;
+
+    /* get the cidr/netmask if available */
+    char* tmp_cidr_str;
+    int cidr = -1;
+    tmp_cidr_str = strchr(ip_address, '/');
+    if (tmp_cidr_str) {
+        *tmp_cidr_str = '\0';
+        tmp_cidr_str++;
+        /* cidr */
+        if (strlen(tmp_cidr_str) <= max_cidr_str_len) {
+            cidr = atoi(tmp_cidr_str);
+        } else {
+            pfree_ext(ip_address);
+            return 0;
+        }
+    }
+
+    /* check ip */
+    struct addrinfo* addrs = NULL;
+    struct addrinfo hint;
+    errno_t rc = 0;
+    rc = memset_s(&hint, sizeof(hint), 0, sizeof(hint));
+    securec_check(rc, "", "");
+    hint.ai_flags = AI_NUMERICHOST;
+    if (getaddrinfo(ip_address, NULL, &hint, &addrs) != 0) {
+        pfree_ext(ip_address);
+        return 0;
+    }
+    if (addrs->ai_family == AF_INET) {
+        if (cidr < 0) {
+            cidr = default_inet4_cidr;
+        } else if (cidr > default_inet4_cidr) {
+            pfree_ext(ip_address);
+            return 0;
+        }
+    } else if (addrs->ai_family == AF_INET6) {
+        if (cidr < 0) {
+            cidr = default_inet6_cidr;
+        } else if (cidr > default_inet6_cidr) {
+            pfree_ext(ip_address);
+            return 0;
+        }
+    } else {
+        pfree_ext(ip_address);
+        return 0;
+    }
+
+    freeaddrinfo(addrs);
+    pfree_ext(ip_address);
+
+    /* abnormal: retun 0; normal: reutrn 1; unknown: return -1. */
+    return((cidr >= 0) ? 1 : -1);
+}
+
+static void validate_listen_ip(char *validate_ip, ReturnSetInfo *rsinfo)
+{
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(2, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "pid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "node_name", TEXTOID, -1, 0);
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    /* check ip validation */
+    if (IS_COMM_NULL_STR(validate_ip) || gs_comm_check_valid_ip(validate_ip) == 0) {
+        ereport(ERROR, (errmodule(MOD_COMM_FRAMEWORK),
+            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("funcs para not support invalid validate_ip.")));
+    }
+
+    /* If BackendStatusArray is NULL, we will get it from other thread */
+    if (t_thrd.shemem_ptr_cxt.BackendStatusArray == NULL) {
+        if (PgBackendStatusArray != NULL) {
+            t_thrd.shemem_ptr_cxt.BackendStatusArray = PgBackendStatusArray;
+        } else {
+            return;
+        }
+    }
+
+    ThreadId *validate_pids = (ThreadId*)palloc0(sizeof(ThreadId) * BackendStatusArray_size);
+    bool *is_threadpool_worker = (bool*)palloc0(sizeof(bool) * BackendStatusArray_size);
+
+    /* Get all status entries, which procpid or sessionid is valid */
+    uint32 numBackends = 0;
+    PgBackendStatusNode* node = gs_stat_read_current_status(&numBackends);
+    /* If all entries procpid or sessionid are invalid, get numBackends is 0 and should return directly */
+    if (numBackends == 0) {
+        gs_stat_free_stat_node(node);
+        pfree_ext(validate_pids);
+        pfree_ext(is_threadpool_worker);
+        return;
+    }
+
+    PgBackendStatusNode* temp = node;
+    int num = 0;
+    while (temp != NULL) {
+        PgBackendStatus* beentry = temp->data;
+        temp = temp->next;
+
+        /* If the backend thread is valid and application name of beentry equals to appName, record this thread pid */
+        if (beentry == NULL) {
+            continue;
+        }
+
+        int sock = beentry->remote_info.socket;
+        if (sock <= 0) {
+            continue;
+        }
+
+        struct sockaddr saddr;
+        if (!get_addr_from_socket(sock, &saddr)) {
+            continue;
+        }
+        char sock_ip[IP_LEN] = {0};
+        int port = 0;
+
+        int family = get_ip_port_from_addr(sock_ip, &port, saddr);
+        if (family == -1 || family == AF_UNIX) {
+            continue;
+        }
+
+        if (strcmp(sock_ip, validate_ip) == 0) {
+            ThreadId tid = beentry->st_procpid;
+            uint64 sid = beentry->st_sessionid;
+            if (tid == sid) {
+                if (tid <= 0) {
+                    continue;
+                }
+
+                validate_pids[num] = tid;
+                is_threadpool_worker[num] = false;
+                num++;
+            } else if (ENABLE_THREAD_POOL) {
+                if (sid <= 0) {
+                    continue;
+                }
+
+                validate_pids[num] = sid;
+                is_threadpool_worker[num] = true;
+                num++;
+            }
+        }
+    }
+    gs_stat_free_stat_node(node);
+
+    for (int i = 0; i < num; i++) {
+        if (is_threadpool_worker[i]) {
+            ThreadPoolSessControl *sess_ctrl = g_threadPoolControler->GetSessionCtrl();
+            int ctrl_idx = sess_ctrl->FindCtrlIdxBySessId(validate_pids[i]);
+            (void)sess_ctrl->SendSignal((int)ctrl_idx, SIGTERM);
+            ereport(LOG, (errmodule(MOD_COMM_FRAMEWORK),
+                errmsg("Success to send SIGTERM to session:%lu", validate_pids[i])));
+        } else {
+            (void)kill_backend(validate_pids[i], false);
+            ereport(LOG, (errmodule(MOD_COMM_FRAMEWORK),
+                errmsg("Success to send SIGTERM to thread:%lu", validate_pids[i])));
+        }
+    }
+
+    pfree_ext(validate_pids);
+    pfree_ext(is_threadpool_worker);
+    MemoryContextSwitchTo(oldcontext);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+
+    return;
+}
+
+Datum gs_validate_ext_listen_ip(PG_FUNCTION_ARGS)
+{
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("must be system admin or operator admin to execute gs_validate_ext_listen_ip"))));
+    }
+
+    if (IsTransactionBlock()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+                errmsg("gs_validate_ext_listen_ip cannot run inside a transaction block")));
+    }
+
+    char* clear = PG_GETARG_CSTRING(0);
+    char* cur_node_name = PG_GETARG_CSTRING(1);
+    char* validate_ip = PG_GETARG_CSTRING(2);
+    bool is_clear = false;
+    bool is_clear_listen_addresses = false;
+
+    /* check clear validation */
+    if (IS_COMM_NULL_STR(cur_node_name)) {
+        ereport(ERROR, (errmodule(MOD_COMM_FRAMEWORK),
+            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("funcs para not support invalid clear option")));
+    } else if (strcmp(clear, "on") == 0) {
+        is_clear = true;
+    } else if (strcmp(clear, "off") == 0) {
+        is_clear = false;
+    } else if (strcmp(clear, "normal") == 0) {
+        is_clear_listen_addresses = true;
+    } else {
+        ereport(ERROR, (errmodule(MOD_COMM_FRAMEWORK),
+            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("funcs para not support invalid clear option")));
+    }
+
+    /* check node_name validation */
+    if (IS_COMM_NULL_STR(cur_node_name) || strcmp(cur_node_name, g_instance.attr.attr_common.PGXCNodeName) != 0) {
+        ereport(ERROR, (errmodule(MOD_COMM_FRAMEWORK),
+            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("funcs para not support invalid node name.")));
+    }
+
+    if (!is_clear_listen_addresses) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("not support to execute gs_validate_ext_listen_ip"))));
+    } else {
+        ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+        validate_listen_ip(validate_ip, rsinfo);
+        return (Datum)0;
+    }
+
+    return (Datum)0;
+}

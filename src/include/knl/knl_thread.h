@@ -2858,9 +2858,16 @@ typedef struct knl_t_postmaster_context {
     char LocalAddrList[MAXLISTEN][IP_LEN];
     int LocalIpNum;
     int listen_sock_type[MAXLISTEN]; /* ori type: enum ListenSocketType */
+    int listen_chanel_type[MAXLISTEN];  /* ori type: enum ListenChanelType */
     gs_thread_t CurExitThread;
 
     bool IsRPCWorkerThread;
+    char all_listen_addr_list[MAXLISTEN][IP_LEN];
+    int all_listen_port_list[MAXLISTEN];
+    bool can_listen_addresses_reload;
+    bool is_listen_addresses_reload;
+    bool all_listen_addr_can_stop[MAXLISTEN];
+    bool local_listen_addr_can_stop[MAXLISTEN];
 
     /* private variables for reaper backend thread */
     Latch ReaperBackendLatch;

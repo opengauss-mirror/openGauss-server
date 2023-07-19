@@ -45,6 +45,21 @@ typedef enum {
 } ListenSocketType;
 
 typedef enum {
+    POST_PORT_SOCKET = 0,
+    POOLER_PORT_SOCKET,
+    BOTH_PORT_SOCKETS
+} RecreateListenSocketType;
+
+typedef enum {
+    UNUSED_LISTEN_CHANEL = 0,
+    NORMAL_LISTEN_CHANEL,  /* type of listen_addresses */
+    REPL_LISTEN_CHANEL,  /* type of ReplConnArray or CrossClusterReplConnArray */
+    EXT_LISTEN_CHANEL,
+    DOLPHIN_LISTEN_CHANEL,
+    UNKNOWN_LISTEN_CHANEL
+} ListenChanelType;
+
+typedef enum {
     UNKNOWN_MODE = 0,
     NORMAL_MODE,
     PRIMARY_MODE,

@@ -434,4 +434,5 @@ end$$;
 select pro_base12_01() from test_cursor_table;
 drop schema hw_cursor_part8 CASCADE;
 \c regression;
+select pg_sleep(1);
 drop database IF EXISTS pl_test_cursor_part8;
