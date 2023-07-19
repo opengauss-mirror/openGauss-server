@@ -2318,6 +2318,37 @@ static List* fireRules(Query* parsetree, int rt_index, CmdType event, List* lock
     return results;
 }
 
+/*
+ * get_view_query - get the Query from a view's _RETURN rule.
+ *
+ * Caller should have verified that the relation is a view, and therefore
+ * we should find an ON SELECT action.
+ *
+ * Note that the pointer returned is into the relcache and therefore must
+ * be treated as read-only to the caller and not modified or scribbled on.
+ */
+Query* get_view_query(Relation view)
+{
+    int i;
+
+    Assert(view->rd_rel->relkind == RELKIND_VIEW);
+
+    for (i = 0; i < view->rd_rules->numLocks; i++) {
+        RewriteRule *rule = view->rd_rules->rules[i];
+
+        if (rule->event == CMD_SELECT) {
+            /* A _RETURN rule should have only one action */
+            if (list_length(rule->actions) != 1)
+                ereport(ERROR, (errmsg("invalid _RETURN rule action specification")));
+
+            return (Query*)linitial(rule->actions);
+        }
+    }
+
+    ereport(ERROR, (errmsg("failed to find _RETURN rule for view")));
+    return NULL; /* keep compiler quiet */
+}
+
 void ereport_for_each_cmdtype(CmdType event, Relation rt_entry_relation)
 {
     switch (event) {
