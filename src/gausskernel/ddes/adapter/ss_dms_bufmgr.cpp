@@ -504,7 +504,7 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
 bool SSOndemandRequestPrimaryRedo(BufferTag tag)
 {
     dms_context_t dms_ctx;
-    int32 redo_status = ONDEMAND_REDO_INVALID;
+    int32 redo_status = ONDEMAND_REDO_TIMEOUT;
 
     if (!SS_STANDBY_ONDEMAND_RECOVERY) {
         return true;
@@ -522,7 +522,7 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
         ereport(LOG,
             (errmodule(MOD_DMS),
                 errmsg("[on-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
-                    "redo statu %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
+                    "redo status %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
                     (int)tag.rnode.opt, tag.forkNum, tag.blockNum, redo_status)));
         return false;
     }

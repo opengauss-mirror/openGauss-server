@@ -109,6 +109,7 @@ RedoItem g_GlobalLsnForwarder;
 RedoItem g_cleanupMark;
 RedoItem g_closefdMark;
 RedoItem g_cleanInvalidPageMark;
+RedoItem g_forceDistributeMark;
 
 static const int PAGE_REDO_WORKER_ARG = 3;
 static const int REDO_SLEEP_50US = 50;
@@ -553,6 +554,22 @@ void WaitAllRedoWorkerQueueEmpty()
     }
 }
 
+bool OndemandXLogParseMemApproachLimit()
+{
+    float4 ratio = (float4)g_dispatcher->parseManager.memctl.usedblknum / g_dispatcher->parseManager.memctl.totalblknum;
+    if (ratio > ONDEMAND_DISTRIBUTE_RATIO) {
+        return true;
+    }
+    return false;
+}
+
+void BatchRedoSendDistributeMarkToPageRedoManager(RedoItem *distributeMark)
+{
+    PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
+    AddPageRedoItem(myRedoLine->managerThd, distributeMark);
+    pg_usleep(1000000);     // 1 sec
+}
+
 bool BatchRedoDistributeItems(void **eleArry, uint32 eleNum)
 {
     bool parsecomplete = false;
@@ -568,6 +585,9 @@ bool BatchRedoDistributeItems(void **eleArry, uint32 eleNum)
         } else if (eleArry[i] == (void *)&g_cleanInvalidPageMark) {
             forget_range_invalid_pages((void *)eleArry[i]);
         } else {
+            if (OndemandXLogParseMemApproachLimit()) {
+                BatchRedoSendDistributeMarkToPageRedoManager(&g_forceDistributeMark);
+            }
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
             RedoItem *item = (RedoItem *)eleArry[i];
             UpdateRecordGlobals(item, g_redoWorker->standbyState);
@@ -723,7 +743,6 @@ void RedoPageManagerDistributeToRedoThd(PageRedoPipeline *myRedoLine,
 
 void RedoPageManagerDistributeBlockRecord(HTAB *redoItemHash, XLogRecParseState *parsestate)
 {
-    static uint32 total_count = 0;
     PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
     const uint32 WorkerNumPerMng = myRedoLine->redoThdNum;
     HASH_SEQ_STATUS status;
@@ -731,7 +750,6 @@ void RedoPageManagerDistributeBlockRecord(HTAB *redoItemHash, XLogRecParseState 
     HTAB *curMap = redoItemHash;
     hash_seq_init(&status, curMap);
 
-    total_count++;
     while ((redoItemEntry = (RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
         uint32 workId = GetWorkerId(&redoItemEntry->redoItemTag, WorkerNumPerMng);
         ReleaseRecParseState(myRedoLine, curMap, redoItemEntry, workId);
@@ -1053,19 +1071,14 @@ static void WaitNextBarrier(XLogRecParseState *parseState)
 
 static void OnDemandPageManagerRedoSegParseState(XLogRecParseState *preState)
 {
-    static uint32 seg_total_count = 0;
-    static uint32 seg_full_count = 0;
-
     Assert(g_redoWorker->slotId == 0);
     switch (preState->blockparse.blockhead.block_valid) {
         case BLOCK_DATA_SEG_EXTEND:
-            seg_total_count++;
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
             OnDemandPageManagerProcSegPipeLineSyncState(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
             break;
         case BLOCK_DATA_SEG_FULL_SYNC_TYPE:
-            seg_full_count++;
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
             OnDemandPageManagerProcSegFullSyncState(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
@@ -1082,6 +1095,7 @@ static void OnDemandPageManagerRedoSegParseState(XLogRecParseState *preState)
 void PageManagerRedoParseState(XLogRecParseState *preState)
 {
     HTAB *hashMap = g_instance.comm_cxt.predo_cxt.redoItemHash[g_redoWorker->slotId];
+    RedoItem *item = GetRedoItemPtr((XLogReaderState *)preState->refrecord);
 
     switch (preState->blockparse.blockhead.block_valid) {
         case BLOCK_DATA_MAIN_DATA_TYPE:
@@ -1092,6 +1106,11 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
             PRTrackAddBlock(preState, hashMap);
             SetCompletedReadEndPtr(g_redoWorker, preState->blockparse.blockhead.start_ptr,
                 preState->blockparse.blockhead.end_ptr);
+#ifdef USE_ASSERT_CHECKING
+            DoRecordCheck(preState, InvalidXLogRecPtr, false);
+#endif
+            DereferenceRedoItem(item);   // for less ondmeand recovery memory consume
+            preState->refrecord = NULL;
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
             break;
         case BLOCK_DATA_DDL_TYPE:
@@ -1176,6 +1195,16 @@ bool PageManagerRedoDistributeItems(void **eleArry, uint32 eleNum)
         } else if (eleArry[i] == (void *)&g_cleanInvalidPageMark) {
             forget_range_invalid_pages((void *)eleArry[i]);
             continue;
+        } else if (eleArry[i] == (void *)&g_forceDistributeMark) {
+            // double check
+            if (OndemandXLogParseMemApproachLimit()) {
+                RedoPageManagerDistributeBlockRecord(hashMap, NULL);
+                ereport(WARNING, (errcode(ERRCODE_LOG),
+                    errmsg("[On-demand] Parse buffer num approach critical value, distribute block record by force,"
+                        " slotid %d, usedblknum %d, totalblknum %d", g_redoWorker->slotId,
+                        g_dispatcher->parseManager.memctl.usedblknum, g_dispatcher->parseManager.memctl.totalblknum)));
+            }
+            continue;
         }
         XLogRecParseState *recordblockstate = (XLogRecParseState *)eleArry[i];
         XLogRecParseState *nextState = recordblockstate;
@@ -1194,19 +1223,6 @@ bool PageManagerRedoDistributeItems(void **eleArry, uint32 eleNum)
                 __FUNCTION__, preState);
 #endif
         } while (nextState != NULL);
-    }
-
-    float4 ratio = g_dispatcher->parseManager.memctl.usedblknum / g_dispatcher->parseManager.memctl.totalblknum;
-    while (ratio > ONDEMAND_DISTRIBUTE_RATIO) {
-        ereport(WARNING, (errcode(ERRCODE_LOG),
-            errmsg("[On-demand] Parse buffer num approach critical value, distribute block record by force,"
-                   " slotid %d, usedblknum %d, totalblknum %d", g_redoWorker->slotId,
-                   g_dispatcher->parseManager.memctl.usedblknum, g_dispatcher->parseManager.memctl.totalblknum)));
-        GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_9]);
-        RedoPageManagerDistributeBlockRecord(hashMap, NULL);
-        CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_9]);
-        pg_usleep(1000000); /* 1 sec */
-        ratio = g_dispatcher->parseManager.memctl.usedblknum / g_dispatcher->parseManager.memctl.totalblknum;
     }
 
     return false;
@@ -1608,12 +1624,12 @@ void RedoPageWorkerMain()
         bool needRelease = true;
 
         XLogRecParseState *procState = redoblockstateHead;
+        XLogRecParseState *reloadBlockState = NULL;
         Assert(procState->distributeStatus != XLOG_NO_DISTRIBUTE);
 
         MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
         while (procState != NULL) {
             XLogRecParseState *redoblockstate = procState;
-            g_redoWorker->curRedoBlockState = (XLogBlockDataParse*)(&redoblockstate->blockparse.extra_rec);
             // nextrecord will be redo in backwards position
             procState = (procState->distributeStatus == XLOG_TAIL_DISTRIBUTE) ?
                 NULL : (XLogRecParseState *)procState->nextrecord;
@@ -1624,8 +1640,11 @@ void RedoPageWorkerMain()
                 case BLOCK_DATA_FSM_TYPE:
                     needRelease = false;
                     GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
-                    notfound = XLogBlockRedoForExtremeRTO(redoblockstate, &bufferinfo, notfound, 
+                    // reload from disk, because RedoPageManager already release refrecord in on-demand build stage
+                    reloadBlockState = OndemandRedoReloadXLogRecord(redoblockstate);
+                    notfound = XLogBlockRedoForExtremeRTO(reloadBlockState, &bufferinfo, notfound, 
                         g_redoWorker->timeCostList[TIME_COST_STEP_4], g_redoWorker->timeCostList[TIME_COST_STEP_5]);
+                    OndemandRedoReleaseXLogRecord(reloadBlockState);
                     DereferenceRecParseState(redoblockstate);
                     SetCompletedReadEndPtr(g_redoWorker, redoblockstate->blockparse.blockhead.start_ptr,
                                                    redoblockstate->blockparse.blockhead.end_ptr);
@@ -1754,10 +1773,6 @@ static inline bool ReadPageWorkerStop()
 
 void PushToWorkerLsn()
 {
-    static uint32 cur_recor_count = 0;
-
-    cur_recor_count++;
-
     if (!IsExtremeRtoRunning()) {
         return;
     }
@@ -1767,7 +1782,6 @@ void PushToWorkerLsn()
         refCount = pg_atomic_read_u32(&g_GlobalLsnForwarder.record.refcount);
         RedoInterruptCallBack();
     } while (refCount != 0 && !ReadPageWorkerStop());
-    cur_recor_count = 0;
     SendLsnFowarder();
 }
 
