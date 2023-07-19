@@ -614,7 +614,7 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
         result->rightRefState = nullptr;
     }
 
-    PreventCommandDuringSSOndemandRecovery(parseTree);
+    PreventCommandDuringSSOndemandRedo(parseTree);
     return result;
 }
 

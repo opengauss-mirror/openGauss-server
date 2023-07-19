@@ -28,12 +28,15 @@
 
 Size OndemandRecoveryShmemSize(void);
 void OndemandRecoveryShmemInit(void);
+void OndemandXlogFileIdCacheInit(void);
 void OndemandXLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, RefOperate *refOperate,
     InterruptFunc interruptOperte);
 void OndemandXLogParseBufferDestory(RedoParseManager *parsemanager);
 XLogRecParseState *OndemandXLogParseBufferAllocList(RedoParseManager *parsemanager, XLogRecParseState *blkstatehead,
     void *record);
 void OndemandXLogParseBufferRelease(XLogRecParseState *recordstate);
+XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *redoblockstate);
+void OndemandRedoReleaseXLogRecord(XLogRecParseState *reloadBlockState);
 void OnDemandSendRecoveryEndMarkToWorkersAndWaitForReach(int code);
 void OnDemandWaitRedoFinish();
 

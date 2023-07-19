@@ -26,7 +26,16 @@
 #include "access/ondemand_extreme_rto/page_redo.h"
 #include "access/ondemand_extreme_rto/dispatcher.h"
 #include "access/ondemand_extreme_rto/redo_utils.h"
+#include "access/ondemand_extreme_rto/xlog_read.h"
 #include "storage/lock/lwlock.h"
+
+/*
+ * Add xlog reader private structure for page read.
+ */
+typedef struct XLogPageReadPrivate {
+    const char* datadir;
+    TimeLineID tli;
+} XLogPageReadPrivate;
 
 Size OndemandRecoveryShmemSize(void)
 {
@@ -47,6 +56,22 @@ void OndemandRecoveryShmemInit(void)
         /* The memory of the memset sometimes exceeds 2 GB. so, memset_s cannot be used. */
         MemSet(t_thrd.storage_cxt.ondemandXLogMem, 0, OndemandRecoveryShmemSize());
     }
+}
+
+void OndemandXlogFileIdCacheInit(void)
+{
+    HASHCTL ctl;
+
+    /* hash accessed by database file id */
+    errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "", "");
+    ctl.keysize = sizeof(XLogFileId);
+    ctl.entrysize = sizeof(XLogFileIdCacheEntry);
+    ctl.hash = tag_hash;
+    t_thrd.storage_cxt.ondemandXLogFileIdCache = hash_create("Ondemand extreme rto xlogfile handle cache", 8, &ctl,
+        HASH_ELEM | HASH_FUNCTION | HASH_SHRCTX);
+    if (!t_thrd.storage_cxt.ondemandXLogFileIdCache)
+        ereport(FATAL, (errmsg("could not initialize ondemand xlogfile handle hash table")));
 }
 
 /* add for batch redo mem manager */
@@ -74,7 +99,7 @@ RedoMemSlot *OndemandXLogMemAlloc(RedoMemManager *memctl)
 {
     RedoMemSlot *nextfreeslot = NULL;
     do {
-        LWLockAcquire(OndemandXlogMemAllocLock, LW_EXCLUSIVE);
+        LWLockAcquire(OndemandXLogMemAllocLock, LW_EXCLUSIVE);
         if (memctl->firstfreeslot == InvalidBuffer) {
             memctl->firstfreeslot = AtomicExchangeBuffer(&memctl->firstreleaseslot, InvalidBuffer);
             pg_read_barrier();
@@ -86,7 +111,7 @@ RedoMemSlot *OndemandXLogMemAlloc(RedoMemManager *memctl)
             memctl->usedblknum++;
             nextfreeslot->freeNext = InvalidBuffer;
         }
-        LWLockRelease(OndemandXlogMemAllocLock);
+        LWLockRelease(OndemandXLogMemAllocLock);
 
         if (memctl->doInterrupt != NULL) {
             memctl->doInterrupt();
@@ -107,14 +132,14 @@ void OndemandXLogMemRelease(RedoMemManager *memctl, Buffer bufferid)
     }
     bufferslot = &(memctl->memslot[bufferid - 1]);
     Assert(bufferslot->freeNext == InvalidBuffer);
-    LWLockAcquire(OndemandXlogMemAllocLock, LW_EXCLUSIVE);
+    LWLockAcquire(OndemandXLogMemAllocLock, LW_EXCLUSIVE);
     Buffer oldFirst = AtomicReadBuffer(&memctl->firstreleaseslot);
     pg_memory_barrier();
     do {
         AtomicWriteBuffer(&bufferslot->freeNext, oldFirst);
     } while (!AtomicCompareExchangeBuffer(&memctl->firstreleaseslot, &oldFirst, bufferid));
     memctl->usedblknum--;
-    LWLockRelease(OndemandXlogMemAllocLock);
+    LWLockRelease(OndemandXLogMemAllocLock);
 }
 
 
@@ -143,46 +168,63 @@ void OndemandXLogParseBufferDestory(RedoParseManager *parsemanager)
 XLogRecParseState *OndemandXLogParseBufferAllocList(RedoParseManager *parsemanager, XLogRecParseState *blkstatehead,
     void *record)
 {
-    RedoMemManager *memctl = &(parsemanager->memctl);
-    RedoMemSlot *allocslot = NULL;
-    ParseBufferDesc *descstate = NULL;
     XLogRecParseState *recordstate = NULL;
 
-    allocslot = OndemandXLogMemAlloc(memctl);
-    if (allocslot == NULL) {
-        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                          errmsg("XLogParseBufferAlloc Allocated buffer failed!, taoalblknum:%u, usedblknum:%u",
-                                 memctl->totalblknum, memctl->usedblknum)));
-        return NULL;
+    if (parsemanager == NULL) {
+        recordstate = (XLogRecParseState*)palloc(sizeof(XLogRecParseState));
+        errno_t rc = memset_s((void*)recordstate, sizeof(XLogRecParseState), 0, sizeof(XLogRecParseState));
+        securec_check(rc, "\0", "\0");
+        recordstate->manager = &(ondemand_extreme_rto::g_dispatcher->parseManager);
+        recordstate->distributeStatus = XLOG_SKIP_DISTRIBUTE;
+    } else {
+        RedoMemManager *memctl = &(parsemanager->memctl);
+        RedoMemSlot *allocslot = NULL;
+        ParseBufferDesc *descstate = NULL;
+
+        allocslot = OndemandXLogMemAlloc(memctl);
+        if (allocslot == NULL) {
+            ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                            errmsg("XLogParseBufferAlloc Allocated buffer failed!, taoalblknum:%u, usedblknum:%u",
+                                    memctl->totalblknum, memctl->usedblknum)));
+            return NULL;
+        }
+
+        pg_read_barrier();
+        Assert(allocslot->buf_id != InvalidBuffer);
+        Assert(memctl->itemsize == (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc)));
+        descstate = (ParseBufferDesc *)((char *)parsemanager->parsebuffers + memctl->itemsize * (allocslot->buf_id - 1));
+        descstate->buff_id = allocslot->buf_id;
+        Assert(descstate->state == 0);
+        descstate->state = 1;
+        descstate->refcount = 0;
+        recordstate = (XLogRecParseState *)((char *)descstate + sizeof(ParseBufferDesc));
+        recordstate->manager = parsemanager;
+        recordstate->distributeStatus = XLOG_NO_DISTRIBUTE;
+
+        if (parsemanager->refOperate != NULL) {
+            parsemanager->refOperate->refCount(record);
+        }
     }
 
-    pg_read_barrier();
-    Assert(allocslot->buf_id != InvalidBuffer);
-    Assert(memctl->itemsize == (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc)));
-    descstate = (ParseBufferDesc *)((char *)parsemanager->parsebuffers + memctl->itemsize * (allocslot->buf_id - 1));
-    descstate->buff_id = allocslot->buf_id;
-    Assert(descstate->state == 0);
-    descstate->state = 1;
-    descstate->refcount = 0;
-    recordstate = (XLogRecParseState *)((char *)descstate + sizeof(ParseBufferDesc));
     recordstate->nextrecord = NULL;
-    recordstate->manager = parsemanager;
     recordstate->refrecord = record;
     recordstate->isFullSync = false;
-    recordstate->distributeStatus = XLOG_NO_DISTRIBUTE;
     if (blkstatehead != NULL) {
         recordstate->nextrecord = blkstatehead->nextrecord;
         blkstatehead->nextrecord = (void *)recordstate;
     }
-
-    if (parsemanager->refOperate != NULL)
-        parsemanager->refOperate->refCount(record);
 
     return recordstate;
 }
 
 void OndemandXLogParseBufferRelease(XLogRecParseState *recordstate)
 {
+    if (recordstate->distributeStatus == XLOG_SKIP_DISTRIBUTE) {
+        // alloc in pageRedoWorker or backends
+        pfree(recordstate);
+        return;
+    }
+
     RedoMemManager *memctl = &(recordstate->manager->memctl);
     ParseBufferDesc *descstate = NULL;
 
@@ -208,6 +250,7 @@ BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersisten
     ondemand_extreme_rto::RedoItemHashEntry *redoItemEntry = NULL;
     ondemand_extreme_rto::RedoItemTag redoItemTag;
     XLogRecParseState *procState = NULL;
+    XLogRecParseState *reloadBlockState = NULL;
     XLogBlockHead *procBlockHead = NULL;
     XLogBlockHead *blockHead = NULL;
     RedoBufferInfo bufferInfo;
@@ -263,7 +306,10 @@ BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersisten
             case BLOCK_DATA_VM_TYPE:
             case BLOCK_DATA_FSM_TYPE:
                 needMarkDirty = true;
-                XlogBlockRedoForOndemandExtremeRTOQuery(redoBlockState, &bufferInfo);
+                // reload from disk, because RedoPageManager already release refrecord in on-demand build stage
+                reloadBlockState = OndemandRedoReloadXLogRecord(redoBlockState);
+                XlogBlockRedoForOndemandExtremeRTOQuery(reloadBlockState, &bufferInfo);
+                OndemandRedoReleaseXLogRecord(reloadBlockState);
                 break;
             case BLOCK_DATA_XLOG_COMMON_TYPE:
             case BLOCK_DATA_DDL_TYPE:
@@ -288,6 +334,71 @@ BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersisten
     LWLockRelease(xlog_partition_lock);
 
     return bufHdr;
+}
+
+bool IsTargetBlockState(XLogRecParseState *targetblockstate, XLogRecParseState* curblockstate)
+{
+    if (memcmp(&targetblockstate->blockparse.blockhead, &curblockstate->blockparse.blockhead, sizeof(XLogBlockHead)) != 0) {
+        return false;
+    }
+    return true;
+}
+
+// only used in ondemand redo stage
+XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *redoblockstate)
+{
+    uint32 blockNum = 0;
+    char *errormsg = NULL;
+    XLogRecParseState *recordBlockState = NULL;
+    XLogPageReadPrivate readPrivate = {
+        .datadir = NULL,
+        .tli = GetRecoveryTargetTLI()
+    };
+
+    XLogReaderState *xlogreader = XLogReaderAllocate(&SimpleXLogPageReadInFdCache, &readPrivate);  // do not use pre-read
+
+    // step1: read record
+    XLogRecord *record = XLogReadRecord(xlogreader, redoblockstate->blockparse.blockhead.start_ptr, &errormsg,
+        true, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir);
+    if (record == NULL) {
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                        errmsg("[On-demand] reload xlog record failed at %X/%X, errormsg: %s",
+                        (uint32)(redoblockstate->blockparse.blockhead.start_ptr >> 32),
+                        (uint32)redoblockstate->blockparse.blockhead.start_ptr, errormsg)));
+    }
+
+    // step2: parse to block
+    do {
+        recordBlockState = XLogParseToBlockForExtermeRTO(xlogreader, &blockNum);
+        if (recordBlockState != NULL) {
+            break;
+        }
+        Assert(blockNum != 0);   // out of memory
+    } while (true);
+
+    // step3: find target parse state
+    XLogRecParseState *nextState = recordBlockState;
+    XLogRecParseState *targetState = NULL;
+    do {
+        XLogRecParseState *preState = nextState;
+        nextState = (XLogRecParseState *)nextState->nextrecord;
+        preState->nextrecord = NULL;
+
+        if (IsTargetBlockState(preState, redoblockstate)) {
+            targetState = preState;
+        } else {
+            OndemandXLogParseBufferRelease(preState);
+        }
+    } while (nextState != NULL);
+
+    return targetState;
+}
+
+// only used in ondemand redo stage
+void OndemandRedoReleaseXLogRecord(XLogRecParseState *reloadBlockState)
+{
+    XLogReaderFree((XLogReaderState*)reloadBlockState->refrecord);
+    OndemandXLogParseBufferRelease(reloadBlockState);
 }
 
 void OnDemandSendRecoveryEndMarkToWorkersAndWaitForReach(int code)

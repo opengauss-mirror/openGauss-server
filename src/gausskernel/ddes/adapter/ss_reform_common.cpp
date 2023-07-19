@@ -37,15 +37,6 @@
 #include "storage/smgr/segment_internal.h"
 #include "replication/walreceiver.h"
 
-/*
- * Add xlog reader private structure for page read.
- */
-typedef struct XLogPageReadPrivate {
-    int emode;
-    bool fetching_ckpt; /* are we fetching a checkpoint record? */
-    bool randAccess;
-} XLogPageReadPrivate;
-
 int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path)
 {
     char path[MAXPGPATH];
@@ -87,7 +78,7 @@ int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
     }
 
     /* Couldn't find it.  For simplicity, complain about front timeline */
-    errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", SS_XLOGDIR,
+    errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", xlog_path,
                          t_thrd.xlog_cxt.recoveryTargetTLI, (uint32)((segno) / XLogSegmentsPerXLogId),
                          (uint32)((segno) % XLogSegmentsPerXLogId));
     securec_check_ss(errorno, "", "");

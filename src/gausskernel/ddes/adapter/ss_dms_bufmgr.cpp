@@ -503,7 +503,7 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
 bool SSOndemandRequestPrimaryRedo(BufferTag tag)
 {
     dms_context_t dms_ctx;
-    int32 redo_status = ONDEMAND_REDO_INVALID;
+    int32 redo_status = ONDEMAND_REDO_TIMEOUT;
 
     if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
         return false;

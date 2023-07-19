@@ -43,7 +43,7 @@ namespace ondemand_extreme_rto {
 
 #define ONDEMAND_DISTRIBUTE_RATIO 0.9
 
-static const uint32 PAGE_WORK_QUEUE_SIZE = 2097152;
+static const uint32 PAGE_WORK_QUEUE_SIZE = 65536;
 
 static const uint32 ONDEMAND_EXTREME_RTO_ALIGN_LEN = 16; /* need 128-bit aligned */
 static const uint32 MAX_REMOTE_READ_INFO_NUM = 100;
@@ -186,7 +186,6 @@ struct PageRedoWorker {
     RedoBufferManager bufferManager;
     RedoTimeCost timeCostList[TIME_COST_NUM];
     char page[BLCKSZ];
-    XLogBlockDataParse *curRedoBlockState;
 };
 
 

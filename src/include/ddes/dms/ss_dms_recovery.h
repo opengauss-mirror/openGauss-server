@@ -35,11 +35,11 @@
 #define SS_IN_ONDEMAND_RECOVERY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery == true)
 #define SS_ONDEMAND_BUILD_DONE (ENABLE_DMS && SS_IN_ONDEMAND_RECOVERY \
                                 && t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone == true)
-#define SS_ONDEMAND_RECOVERY_DONE (ENABLE_DMS && SS_IN_ONDEMAND_RECOVERY \
-                                   && t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone == true)
+#define SS_ONDEMAND_REDO_DONE (SS_IN_ONDEMAND_RECOVERY \
+                               && t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone == true)
 #define SS_REPLAYED_BY_ONDEMAND (ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY && \
                                  t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone == true && \
-                                 t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone == true)
+                                 t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone == true)
 
 #define REFORM_CTRL_VERSION 1
 

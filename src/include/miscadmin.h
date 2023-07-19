@@ -404,7 +404,7 @@ extern bool stack_is_too_deep(void);
 /* in tcop/utility.c */
 extern void PreventCommandIfReadOnly(const char* cmdname);
 extern void PreventCommandDuringRecovery(const char* cmdname);
-extern void PreventCommandDuringSSOndemandRecovery(Node* parseTree);
+extern void PreventCommandDuringSSOndemandRedo(Node* parseTree);
 
 extern int trace_recovery(int trace_level);
 

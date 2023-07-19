@@ -451,6 +451,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 
     if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {
         OndemandRecoveryShmemInit();
+        OndemandXlogFileIdCacheInit();
     }
 
     if (g_instance.ckpt_cxt_ctl->prune_queue_lock == NULL) {
