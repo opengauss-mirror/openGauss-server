@@ -69,10 +69,12 @@
 ./share/postgresql/extension/ndpplugin.control
 ./share/postgresql/extension/ndpplugin--1.0.sql
 ./share/postgresql/extension/dolphin.control
+./share/postgresql/extension/dolphin--2.0.sql
 ./share/postgresql/extension/dolphin--1.0.sql
-./share/postgresql/extension/dolphin--1.1.sql
-./share/postgresql/extension/dolphin--1.0--1.1.sql
-./share/postgresql/extension/dolphin--1.1--1.0.sql
+./share/postgresql/extension/dolphin--1.0--2.0.sql
+./share/postgresql/extension/dolphin--2.0--1.0.sql
+./share/postgresql/extension/dolphin--1.1--2.0.sql
+./share/postgresql/extension/dolphin--2.0--1.1.sql
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/file_fdw--1.0.sql
 ./share/postgresql/extension/plpgsql.control
