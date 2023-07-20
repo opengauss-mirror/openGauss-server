@@ -793,7 +793,7 @@ SELECT nchunks, chunknos FROM pg_catalog.compress_address_details('alter_compres
        1 | {1}
 (1 row)
 
-SELECT count(*) FROM compress_statistic_info(compress_func_findpath('alter_compress_params_schema.all_options_table_compresstype_1_cpc_1'), 1);
+SELECT count(*) FROM compress_ratio_info(compress_func_findpath('alter_compress_params_schema.all_options_table_compresstype_1_cpc_1'));
  count 
 -------
      1
