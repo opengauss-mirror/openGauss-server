@@ -859,7 +859,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             /*
              * All files are padded up to 512 bytes
              */
-            if (current_len_left < 0 || current_len_left > INT_MAX - 511) {
+            if (current_len_left > INT_MAX - 511) {
                 pg_log(PG_WARNING, _("current_len_left is invalid\n"));
                 DisconnectConnection();
                 FREE_AND_RESET(copybuf);
