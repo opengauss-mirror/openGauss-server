@@ -24,7 +24,7 @@
 bool isSlashEnd(const char* strLine)
 {
     if (strLine == NULL) {
-        return NULL;
+        return false;
     }
     const char* pStr = strLine;
     while ('\0' != *pStr) {

@@ -10591,7 +10591,7 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
         aggform = (Form_pg_aggregate)GETSTRUCT(aggTuple);
 
         if (OidIsValid(aggform->aggfinalfn)) {
-            appendStringInfo(buf, "%s(", generate_function_name(aggform->aggfinalfn, 0, NULL, NULL, NULL, NULL));
+            appendStringInfo(buf, "%s(", generate_function_name(aggform->aggfinalfn, 0, NULL, NULL, false, NULL));
             added_finalfn = true;
         }
         ReleaseSysCache(aggTuple);
