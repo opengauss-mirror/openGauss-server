@@ -988,7 +988,7 @@ NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop package pckg_test2;
 NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop schema plpgsql_cursor_rowtype cascade;
-NOTICE:  drop cascades to 13 other objects
+NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table emp
 drop cascades to function pro_cursor_no_args_1()
 drop cascades to function pro_cursor_no_args_2()
@@ -1002,5 +1002,6 @@ drop cascades to function test_forloop_001()
 drop cascades to function pro_close_cursor1()
 drop cascades to function pro_close_cursor2()
 drop cascades to function check_compile_1()
+drop cascades to type foo
 drop schema schema1 cascade;
 NOTICE:  drop cascades to table schema1.t11
