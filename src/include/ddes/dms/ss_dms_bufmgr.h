@@ -87,4 +87,5 @@ void SSUnPinBuffer(BufferDesc* buf_desc);
 bool SSOndemandRequestPrimaryRedo(BufferTag tag);
 bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode);
 bool SSWaitIOTimeout(BufferDesc *buf);
+void buftag_get_buf_info(BufferTag tag, stat_buf_info_t *buf_info);
 #endif

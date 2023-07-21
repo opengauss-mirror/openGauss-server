@@ -47,6 +47,7 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/file/fio_device.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/buf/buf_internals.h"
 
 /*
  * Wake up startup process to replay WAL, or to notice that
@@ -2045,6 +2046,14 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
     return GS_SUCCESS;;
 }
 
+void CBGetBufInfo(char* resid, stat_buf_info_t *buf_info)
+{
+    BufferTag tag;
+    errno_t err = memcpy_s(&tag, DMS_RESID_SIZE, resid, DMS_RESID_SIZE);
+    securec_check(err, "\0", "\0");
+    buftag_get_buf_info(tag, buf_info);
+}
+
 void DmsInitCallback(dms_callback_t *callback)
 {
     // used in reform
@@ -2109,4 +2118,6 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->cache_msg = CBCacheMsg;
     callback->need_flush = CBMarkNeedFlush;
     callback->update_node_oldest_xmin = CBUpdateNodeOldestXmin;
+
+    callback->get_buf_info = CBGetBufInfo;
 }

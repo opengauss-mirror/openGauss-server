@@ -882,7 +882,6 @@ typedef struct st_dms_callback {
     //for shared storage backup
     dms_set_inst_behavior set_inst_behavior;
     dms_db_prepare db_prepare;
-
     dms_get_buf_info get_buf_info;
 } dms_callback_t;
 

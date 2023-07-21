@@ -32,6 +32,7 @@ extern "C" {
 #endif
 
 #define SS_LIBDMS_NAME "libdms.so"
+#define CM_INVALID_ID8 0xff
 
 typedef struct st_ss_dms_func {
     bool inited;
@@ -85,6 +86,7 @@ typedef struct st_ss_dms_func {
         int *redo_status);
     unsigned int (*dms_get_mes_max_watting_rooms)(void);
     int (*dms_send_opengauss_oldest_xmin)(dms_context_t *dms_ctx, unsigned long long oldest_xmin, unsigned char dest_id);
+    int (*dms_get_drc_info)(int* is_found, stat_drc_info_t* drc_info);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -133,6 +135,8 @@ int dms_reform_req_opengauss_ondemand_redo_buffer(dms_context_t *dms_ctx, void *
                                                   int *redo_status);
 unsigned int dms_get_mes_max_watting_rooms(void);
 int dms_send_opengauss_oldest_xmin(dms_context_t *dms_ctx, unsigned long long oldest_xmin, unsigned char dest_id);
+
+int get_drc_info(int* is_found, stat_drc_info_t* drc_info);
 
 #ifdef __cplusplus
 }
