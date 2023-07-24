@@ -1942,6 +1942,12 @@ typedef struct ExceptionContext {
     PLpgSQL_declare_handler handler_type;
 } ExceptionContext;
 
+/*Save the type recorded during the cursor definition*/
+typedef struct CursorRecordType {
+    char* cursor_name;
+    Oid type_oid;
+} CursorRecordType;
+
 /* Quick access array state */
 #define IS_ARRAY_STATE(state_list, state) ((state_list && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) ? \
                                           (linitial_int(state_list) == state) : false)

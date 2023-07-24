@@ -121,6 +121,7 @@ static void cache_record_field_properties(TypeCacheEntry* typentry);
 static void load_enum_cache_data(TypeCacheEntry* tcache);
 static EnumItem* find_enumitem(TypeCacheEnumData* enum_data, Oid arg);
 static int enum_oid_cmp(const void* left, const void* right);
+static void record_cursor_rowtype(const char* CursorName, TypeCacheEntry* typentry);
 
 void init_type_cache()
 {
@@ -393,8 +394,13 @@ TypeCacheEntry* lookup_type_cache(Oid type_id, int flags)
     /*
      * If it's a composite type (row type), get tupdesc if requested
      */
-    if ((flags & TYPECACHE_TUPDESC) && typentry->tupDesc == NULL && typentry->typtype == TYPTYPE_COMPOSITE) {
-        load_typcache_tupdesc(typentry);
+    if ((flags & TYPECACHE_TUPDESC) && typentry->typtype == TYPTYPE_COMPOSITE) {
+        if (typentry->tupDesc == NULL) {
+            load_typcache_tupdesc(typentry);
+        }
+        if (u_sess->analyze_cxt.DeclareCursorName) {
+            record_cursor_rowtype(u_sess->analyze_cxt.DeclareCursorName, typentry);
+        }
     }
 
     /*
@@ -1155,4 +1161,17 @@ static int enum_oid_cmp(const void* left, const void* right)
     } else {
         return 0;
     }
+}
+
+static void record_cursor_rowtype(const char* CursorName, TypeCacheEntry* typentry)
+{
+    MemoryContext old = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    Relation rel = relation_open(typentry->typrelid,AccessShareLock);
+    RelationIncrementReferenceCount(rel);
+    relation_close(rel,AccessShareLock);
+    CursorRecordType* var = (CursorRecordType*)palloc(sizeof(CursorRecordType));
+    var->cursor_name = pstrdup(CursorName);
+    var->type_oid = typentry->typrelid;
+    u_sess->plsql_cxt.CursorRecordTypeList = lappend(u_sess->plsql_cxt.CursorRecordTypeList,var);
+    (void)MemoryContextSwitchTo(old);
 }

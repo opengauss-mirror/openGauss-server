@@ -89,6 +89,7 @@ static void knl_u_analyze_init(knl_u_analyze_context* anl_cxt)
     anl_cxt->autoanalyze_process = NULL;
     anl_cxt->autoanalyze_timeinfo = NULL;
     anl_cxt->vac_strategy = (BufferAccessStrategyData*)palloc0(sizeof(BufferAccessStrategyData));
+    anl_cxt->DeclareCursorName = NULL;
 }
 
 static void knl_u_attr_init(knl_session_attr* attr)
@@ -869,6 +870,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->cur_exception_cxt = NULL;
     plsql_cxt->pragma_autonomous = false;
     plsql_cxt->is_insert_gs_source = false;
+    plsql_cxt->CursorRecordTypeList = NIL;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)

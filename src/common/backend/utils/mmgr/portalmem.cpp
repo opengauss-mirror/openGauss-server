@@ -44,6 +44,7 @@
 
 
 extern void ReleaseSharedCachedPlan(CachedPlan* plan, bool useResOwner);
+static void CursorRecordTypeUnbind(const char* portal_name);
 /*
  * Estimate of the maximum number of open portals a user would have,
  * used in initially sizing the PortalHashTable in EnablePortalManager().
@@ -567,6 +568,11 @@ void PortalDrop(Portal portal, bool isTopCommit)
 
     /* drop cached plan reference, if any */
     PortalReleaseCachedPlan(portal);
+
+    /*if cursor record row type*/
+    if (portal->name[0] != '\0' && u_sess->plsql_cxt.CursorRecordTypeList && IsTransactionBlock()) {
+        CursorRecordTypeUnbind(portal->name);
+    }
 
     /*
      * Release any resources still attached to the portal.	There are several
@@ -1395,4 +1401,41 @@ HoldPinnedPortals(bool is_rollback)
             portal->autoHeld = true;
         }
     }
+}
+
+/* Release the dependency between CURSOR and ROW type */
+static void CursorRecordTypeUnbind(const char* portal_name)
+{
+    ListCell* cell = NULL;
+    ListCell* pnext = NULL;
+    MemoryContext old = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner;
+    PG_TRY();
+    {
+        t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
+        for (cell = list_head(u_sess->plsql_cxt.CursorRecordTypeList); cell != NULL; cell = pnext) {
+            pnext = lnext(cell);
+            CursorRecordType* var = (CursorRecordType*)lfirst(cell);
+            if (strcmp(portal_name,var->cursor_name) == 0) {
+                Relation rel = relation_open(var->type_oid,AccessShareLock);
+                if (rel->rd_refcnt > 1) {
+                    RelationDecrementReferenceCount(rel);
+                }
+                relation_close(rel,AccessShareLock);
+                u_sess->plsql_cxt.CursorRecordTypeList = list_delete_ptr(u_sess->plsql_cxt.CursorRecordTypeList,var);
+                pfree(var->cursor_name);
+                pfree(var);
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        t_thrd.utils_cxt.CurrentResourceOwner = save;
+        (void)MemoryContextSwitchTo(old);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    t_thrd.utils_cxt.CurrentResourceOwner = save;
+    (void)MemoryContextSwitchTo(old);
 }
