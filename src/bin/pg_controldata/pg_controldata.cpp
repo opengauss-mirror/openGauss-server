@@ -88,8 +88,8 @@ static const char* SSClusterState(SSGlobalClusterState state) {
     switch (state) {
         case CLUSTER_IN_ONDEMAND_BUILD:
             return _("in on-demand build");
-        case CLUSTER_IN_ONDEMAND_RECOVERY:
-            return _("in on-demand recovery");
+        case CLUSTER_IN_ONDEMAND_REDO:
+            return _("in on-demand redo");
         case CLUSTER_NORMAL:
             return _("normal");
         default:

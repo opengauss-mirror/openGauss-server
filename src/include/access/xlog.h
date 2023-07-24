@@ -541,7 +541,7 @@ typedef struct XLogCtlData {
 
     bool IsRecoveryDone;
     bool IsOnDemandBuildDone;
-    bool IsOnDemandRecoveryDone;
+    bool IsOnDemandRedoDone;
 
     /*
      * SharedHotStandbyActive indicates if we're still in crash or archive

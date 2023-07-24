@@ -179,6 +179,7 @@ typedef struct {
 extern LogDispatcher *g_dispatcher;
 extern RedoItem g_GlobalLsnForwarder;
 extern RedoItem g_cleanupMark;
+extern RedoItem g_forceDistributeMark;
 extern THR_LOCAL RecordBufferState *g_recordbuffer;
 
 const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;

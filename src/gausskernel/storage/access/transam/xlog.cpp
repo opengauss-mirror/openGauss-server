@@ -6377,7 +6377,7 @@ void XLOGShmemInit(void)
     t_thrd.shemem_ptr_cxt.XLogCtl->SharedRecoveryInProgress = true;
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone = false;
-    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone = false;
+    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->SharedHotStandbyActive = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->WalWriterSleeping = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->xlogFlushPtrForPerRead = InvalidXLogRecPtr;
@@ -8501,7 +8501,7 @@ static void XLogMakeUpRemainSegsContent(char *contentBuffer)
 
 void XLogCheckRemainSegs()
 {
-    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_RECOVERY_DONE) {
+    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_REDO_DONE) {
         return;
     }
 
@@ -9302,7 +9302,7 @@ void StartupXLOG(void)
     t_thrd.shemem_ptr_cxt.XLogCtl->ckptXid = checkPoint.oldestXid;
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone = false;
-    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone = false;
+    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone = false;
 
     latestCompletedXid = checkPoint.nextXid;
     TransactionIdRetreat(latestCompletedXid);
