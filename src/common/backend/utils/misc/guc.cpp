@@ -498,9 +498,11 @@ static void pg_timezone_abbrev_initialize(void);
 static void assign_tcp_keepalives_idle(int newval, void *extra);
 static void assign_tcp_keepalives_interval(int newval, void *extra);
 static void assign_tcp_keepalives_count(int newval, void *extra);
+static void assign_tcp_user_timeout(int newval, void *extra);
 static const char* show_tcp_keepalives_idle(void);
 static const char* show_tcp_keepalives_interval(void);
 static const char* show_tcp_keepalives_count(void);
+static const char* show_tcp_user_timeout(void);
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source);
 static void assign_effective_io_concurrency(int newval, void* extra);
 static void assign_pgstat_temp_directory(const char* newval, void* extra);
@@ -2542,8 +2544,8 @@ static void InitConfigureNamesInt()
             0,
             3600000,
             NULL,
-            assign_tcp_keepalives_count,
-            show_tcp_keepalives_count},
+            assign_tcp_user_timeout,
+            show_tcp_user_timeout},
         {{"gin_fuzzy_search_limit",
             PGC_USERSET,
             NODE_ALL,
@@ -11954,6 +11956,21 @@ static const char* show_tcp_keepalives_count(void)
     static char nbuf[maxBufLen];
 
     errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d", pq_getkeepalivescount(u_sess->proc_cxt.MyProcPort));
+    securec_check_ss(rc, "\0", "\0");
+    return nbuf;
+}
+
+static void assign_tcp_user_timeout(int newval, void *extra)
+{
+    (void) pq_settcpusertimeout(newval, u_sess->proc_cxt.MyProcPort);
+}
+
+static const char* show_tcp_user_timeout(void)
+{
+    const int maxBufLen = 16;
+    static char nbuf[maxBufLen];
+
+    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d", pq_gettcpusertimeout(u_sess->proc_cxt.MyProcPort));
     securec_check_ss(rc, "\0", "\0");
     return nbuf;
 }
