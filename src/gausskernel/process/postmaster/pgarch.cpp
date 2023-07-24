@@ -611,6 +611,7 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
     int fdDest = -1;
     char srcPath[PATH_MAX + 1] = {0};
     char destPath[PATH_MAX + 1] = {0};
+    char archPath[PATH_MAX + 1] = {0};
     char activitymsg[MAXFNAMELEN + 16];
     long int fileBytes = 0;
     int rc = 0;
@@ -631,17 +632,17 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
     if (retVal == NULL) {
         ereport(FATAL, (errmsg_internal("realpath dest %s failed:%m\n", u_sess->attr.attr_storage.XLogArchiveDest)));
     }
-    rc = snprintf_s(destPath, PATH_MAX, PATH_MAX - 1, "%s/%s", destPath, xlog);
+    rc = snprintf_s(archPath, PATH_MAX, PATH_MAX - 1, "%s/%s", destPath, xlog);
     securec_check_ss(rc, "\0", "\0");
 
     if ((fdSrc = open(srcPath, O_RDONLY)) >= 0) {                
-        if ((fdDest = open(destPath, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR)) >= 0) {
+        if ((fdDest = open(archPath, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR)) >= 0) {
             char pbuff[ARCHIVE_BUF_SIZE] = {0};
 
             while ((fileBytes = read(fdSrc, pbuff, sizeof(pbuff))) > 0) {
                 if (write(fdDest, pbuff, fileBytes) != fileBytes) {
                     close(fdSrc);
-                    ereport(FATAL, (errmsg_internal("could not write file\"%s\":%m\n", destPath)));
+                    ereport(FATAL, (errmsg_internal("could not write file\"%s\":%m\n", archPath)));
                 }
                 (void)memset_s(pbuff, sizeof(pbuff), 0, sizeof(pbuff));
             }
@@ -663,7 +664,7 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
             return true;
         } else {
             close(fdSrc);
-            ereport(FATAL, (errmsg_internal("could not open archive dest file \"%s\":%m\n", destPath)));
+            ereport(FATAL, (errmsg_internal("could not open archive dest file \"%s\":%m\n", archPath)));
         }
     } else {
         ereport(FATAL, (errmsg_internal("could not open archive src file \"%s\":%m\n", srcPath)));
