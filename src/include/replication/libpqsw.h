@@ -84,7 +84,7 @@ bool libpqsw_is_end();
 bool libpqsw_only_localrun();
 void libpqsw_create_conn();
 void libpqsw_trace_q_msg(const char* commandTag, const char* queryString);
-void libpqsw_disconnect(void);
+void libpqsw_disconnect(bool clear_queue);
 void libpqsw_check_ddl_on_primary(const char* commandTag);
 
 #ifdef _cplusplus

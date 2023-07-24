@@ -55,7 +55,7 @@ int internal_putbytes(const char* s, size_t len);
 int pq_flush(void);
 PGresult* libpqsw_get_result(PGconn* conn, libpqsw_transfer_standby_func transfer_func);
 bool libpqsw_connect(char* conninfo, const char *dbName, const char* userName);
-void libpqsw_disconnect(void);
+void libpqsw_disconnect(bool clear_queue);
 bool libpqsw_send_pbe(const char* buffer, size_t buffer_size);
 bool libpqsw_begin_command(const char* commandTag);
 bool libpqsw_end_command(const char* commandTag);
@@ -276,7 +276,7 @@ void libpqsw_create_conn()
 {
     uint32 ss_standby_state = get_redirect_manager()->ss_standby_state;
     RedirectState temp_state = get_redirect_manager()->state;
-    libpqsw_disconnect();
+    libpqsw_disconnect(false);
     get_redirect_manager()->ss_standby_state = ss_standby_state;
     get_redirect_manager()->state = temp_state;
     if (SS_STANDBY_MODE) {
@@ -301,7 +301,7 @@ static bool libpqsw_remote_excute_sql(int retry, const char *sql, uint32 size, c
     if (get_sw_cxt()->streamConn == NULL) {
         libpqsw_create_conn();
     } else if(PQstatus(get_sw_cxt()->streamConn) != CONNECTION_OK) {
-        libpqsw_disconnect();
+        libpqsw_disconnect(true);
         ereport(ERROR,
             (errcode(ERRCODE_CONNECTION_RESET_BY_PEER),
                 errmsg("connection already bad!%s",
@@ -318,7 +318,7 @@ static bool libpqsw_remote_excute_sql(int retry, const char *sql, uint32 size, c
     } else {
         // send failed, so we need retry!
         uint32 ss_standby_state = get_redirect_manager()->ss_standby_state;
-        libpqsw_disconnect();
+        libpqsw_disconnect(false);
         get_redirect_manager()->ss_standby_state = ss_standby_state;
         if (retry > 0) {
             return libpqsw_remote_excute_sql(retry - 1, sql, size, commandTag, waitResult, transfer);
@@ -361,14 +361,14 @@ bool libpqsw_can_seek_next_session()
 
 void libpqsw_cleanup(int code, Datum arg)
 {
-    if (u_sess == NULL) {
+    if (u_sess == NULL || !g_instance.attr.attr_sql.enableRemoteExcute) {
         return;
     }
     ereport(LIBPQSW_DEFAULT_LOG_LEVEL,
         (errmsg("libpqsw(%ld): cleanup called!",
             get_sw_cxt()->redirect_manager == NULL ? -1 : ((int64)(get_sw_cxt()->redirect_manager)))));
     if (get_sw_cxt()->streamConn != NULL) {
-        libpqsw_disconnect();
+        libpqsw_disconnect(true);
     }
     if (get_sw_cxt()->redirect_manager != NULL) {
         DELETE_EX_TYPE(get_sw_cxt()->redirect_manager, RedirectManager);
@@ -396,6 +396,15 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
     }
     bool need_redirect = false;
     redirect_manager->state.have_savepoint= false;
+    if (libpqsw_remote_in_transaction() || libpqsw_get_transaction()) {
+        if (!SS_STANDBY_MODE && set_command_type_by_commandTag(commandTag) == CMD_DDL &&
+            !libpqsw_fetch_command(commandTag)) {
+            libpqsw_disconnect(true);
+            ereport(ERROR, (errmsg("The multi-write feature doesn't support DDL within transaction!")));
+        }
+        libpqsw_check_savepoint(query_list, &(redirect_manager->state.have_savepoint));
+    }
+
     if (!libpqsw_enable_autocommit()) {
         if (strcmp(commandTag, "SET") == 0) {
             libpqsw_set_set_command(true);
@@ -404,12 +413,6 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
         libpqsw_set_transaction(true);
         need_redirect = true;
     } else if (libpqsw_begin_command(commandTag) || libpqsw_remote_in_transaction()) {
-        if (!SS_STANDBY_MODE && set_command_type_by_commandTag(commandTag) == CMD_DDL &&
-            !libpqsw_fetch_command(commandTag)) {
-            libpqsw_disconnect();
-            ereport(ERROR, (errmsg("The multi-write feature doesn't support DDL within transaction!")));
-        }
-        libpqsw_check_savepoint(query_list, &(redirect_manager->state.have_savepoint));
         libpqsw_set_transaction(true);
         need_redirect = true;
     } else if (libpqsw_redirect()) {
@@ -856,7 +859,7 @@ static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *
                 get_redirect_manager()->ss_standby_state |= SS_STANDBY_REQ_WRITE_REDIRECT;
                 return ret;
             } else {
-                libpqsw_disconnect();
+                libpqsw_disconnect(true);
                 ereport(ERROR, (errmsg("The multi-write feature doesn't support DDL within transaction!")));
             }
         }
@@ -967,7 +970,7 @@ bool libpqsw_process_message(int qtype, StringInfo msg)
 	// exit msg
     if (qtype == 'X' || qtype == -1) {
         libpqsw_receive(true);
-        libpqsw_disconnect();
+        libpqsw_disconnect(true);
         return false;
     }
 	// process U B E msg
@@ -1058,7 +1061,7 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
         }
 
         if (get_sw_cxt()->streamConn->xactStatus == PQTRANS_INERROR) {
-            libpqsw_disconnect();
+            libpqsw_disconnect(true);
             ereport(ERROR, (errmsg("The primary node report error when last request was transferred to it!")));
         }
 
@@ -1229,12 +1232,18 @@ bool libpqsw_connect(char* conninfo, const char *dbName, const char* userName)
 /*
  * Disconnect connection to primary, if any.
  */
-void libpqsw_disconnect(void)
+void libpqsw_disconnect(bool clear_queue)
 {
+    RedirectManager* redirect_manager = (RedirectManager*)get_sw_cxt()->redirect_manager;
     ereport(LIBPQSW_DEFAULT_LOG_LEVEL,
         (errmsg("libpqsw(%ld): libpqsw_disconnect called, conn is null:%s",
-            get_sw_cxt()->redirect_manager == NULL ? -1 : ((int64)(get_sw_cxt()->redirect_manager)),
+            redirect_manager == NULL ? -1 : ((int64)(redirect_manager)),
             get_sw_cxt()->streamConn == NULL ? "true" : "false")));
+    RedirectMessageManager* message_manager = &(redirect_manager->messages_manager);
+    if (clear_queue && !(message_manager->message_empty())) {
+        message_manager->reset();
+    }
+
     if (get_sw_cxt()->streamConn != NULL) {
         if (get_sw_cxt()->conn_trace_file != NULL) {
             PQuntrace(get_sw_cxt()->streamConn);
@@ -1245,8 +1254,8 @@ void libpqsw_disconnect(void)
         get_sw_cxt()->streamConn = NULL;
     }
     
-    if (get_sw_cxt()->redirect_manager != NULL) {
-        get_redirect_manager()->init();
+    if (redirect_manager != NULL) {
+        redirect_manager->init();
     }
 }
 
@@ -1379,7 +1388,7 @@ bool libpqsw_send_pbe(const char* buffer, size_t buffer_size)
     struct pg_conn* conn =  get_sw_cxt()->streamConn;
     bool result = true;
     if (!libpqsw_before_send(conn)) {
-        libpqsw_disconnect();
+        libpqsw_disconnect(true);
         result = false;
         ereport(ERROR,
             (errcode(ERRCODE_CONNECTION_FAILURE),
@@ -1387,7 +1396,7 @@ bool libpqsw_send_pbe(const char* buffer, size_t buffer_size)
     }
     conn->outMsgEnd = conn->outMsgStart = conn->outCount;
     if (pqPutnchar(buffer, buffer_size, conn) < 0) {
-        libpqsw_disconnect();
+        libpqsw_disconnect(true);
         result = false;
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_STATUS),
