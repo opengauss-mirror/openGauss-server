@@ -125,8 +125,12 @@ extern void CancelSingleNodeBackends(Oid databaseOid, Oid userOid, ProcSignalRea
 extern int CountUserBackends(Oid roleid);
 extern bool CountOtherDBBackends(Oid databaseId, int* nbackends, int* nprepared);
 
-extern void XidCacheRemoveRunningXids(TransactionId xid, int nxids, const TransactionId* xids, TransactionId latestXid);
+extern void XidCacheRemoveRunningXids(PGPROC* proc, PGXACT* pgxact);
 extern void SetPgXactXidInvalid(void);
+
+extern void ProcArrayGroupClearXid(bool isSubTransaction, PGPROC* proc, TransactionId latestXid,
+                                   TransactionId subTranactionXid, int nSubTransactionXids,
+                                   TransactionId* subTransactionXids, TransactionId subTransactionLatestXid);
 
 extern void ProcArraySetReplicationSlotXmin(TransactionId xmin, TransactionId catalog_xmin, bool already_locked);
 
