@@ -2336,6 +2336,9 @@ void assign_synchronous_standby_names(const char *newval, void *extra)
         i++;
     }
 
+     list_free_deep(tcxt->SyncRepConfig);
+     tcxt->SyncRepConfig = NIL;
+
     (void)MemoryContextSwitchTo(old_context);
 }
 
