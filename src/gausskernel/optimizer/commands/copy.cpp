@@ -6449,8 +6449,8 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
                  * 1. A db SQL compatibility requires; or
                  * 2. This column donesn't accept any empty string.
                  */
-                if ((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT || !accept_empty_str[m]) &&
-                    (string != NULL && string[0] == '\0')) {
+                if (((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) ||
+                    !accept_empty_str[m]) && (string != NULL && string[0] == '\0')) {
                     /* for any type, '' = null */
                     string = NULL;
                 }
