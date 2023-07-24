@@ -925,3 +925,388 @@ SELECT '烦%￥' || CAST(NULL AS INTERVAL);
  烦%￥
 (1 row)
 
+-- test about cast
+select 15::int1::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select 15::int2::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select 15::int4::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select 15::float8::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select 15::numeric::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select 15::text::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select 15::varchar::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select 15::bpchar(2)::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select '15'::int1::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select '15'::int2::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select '15'::int4::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select '15'::float8::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select '15'::numeric::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select '15'::text::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select '15'::varchar::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select '15'::bpchar(2)::INTERVAL MINUTE;
+ interval  
+-----------
+ @ 15 mins
+(1 row)
+
+select 15::int1::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select 15::int2::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select 15::int4::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select 15::float8::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select 15::numeric::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select 15::text::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select 15::varchar::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select 15::bpchar(2)::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select '15'::int1::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select '15'::int2::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select '15'::int4::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select '15'::float8::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select '15'::numeric::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select '15'::text::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select '15'::varchar::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select '15'::bpchar(2)::INTERVAL HOUR;
+  interval  
+------------
+ @ 15 hours
+(1 row)
+
+select 15::int1::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select 15::int2::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select 15::int4::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select 15::float8::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select 15::numeric::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select 15::text::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select 15::varchar::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select 15::bpchar(2)::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select '15'::int1::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select '15'::int2::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select '15'::int4::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select '15'::float8::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select '15'::numeric::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select '15'::text::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select '15'::varchar::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select '15'::bpchar(2)::INTERVAL ;
+ interval  
+-----------
+ @ 15 days
+(1 row)
+
+select 15::int1::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select 15::int2::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select 15::int4::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select 15::float8::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select 15::numeric::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select 15::text::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select 15::varchar::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select 15::bpchar(2)::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select '15'::int1::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select '15'::int2::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select '15'::int4::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select '15'::float8::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select '15'::numeric::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select '15'::text::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select '15'::varchar::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+
+select '15'::bpchar(2)::INTERVAL YEAR;
+  interval  
+------------
+ @ 15 years
+(1 row)
+

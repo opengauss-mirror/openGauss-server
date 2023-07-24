@@ -7357,3 +7357,11 @@ Datum btvarstrequalimage(PG_FUNCTION_ARGS)
     else
         PG_RETURN_BOOL(false);
 }
+
+Datum text_interval(PG_FUNCTION_ARGS)
+{
+    char* input = TextDatumGetCString(PG_GETARG_TEXT_P(0));
+    int32 typmod = PG_GETARG_INT32(1);
+    return DirectFunctionCall3(interval_in, CStringGetDatum(input), ObjectIdGetDatum(InvalidOid),
+                                Int32GetDatum(typmod));
+}

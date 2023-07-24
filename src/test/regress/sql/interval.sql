@@ -299,3 +299,72 @@ select interval_hash('30 days'::interval) = interval_hash('1 month'::interval) a
 
 SELECT 'ABC' || CAST(NULL AS INTERVAL); 
 SELECT '烦%￥' || CAST(NULL AS INTERVAL); 
+
+-- test about cast
+select 15::int1::INTERVAL MINUTE;
+select 15::int2::INTERVAL MINUTE;
+select 15::int4::INTERVAL MINUTE;
+select 15::float8::INTERVAL MINUTE;
+select 15::numeric::INTERVAL MINUTE;
+select 15::text::INTERVAL MINUTE;
+select 15::varchar::INTERVAL MINUTE;
+select 15::bpchar(2)::INTERVAL MINUTE;
+select '15'::int1::INTERVAL MINUTE;
+select '15'::int2::INTERVAL MINUTE;
+select '15'::int4::INTERVAL MINUTE;
+select '15'::float8::INTERVAL MINUTE;
+select '15'::numeric::INTERVAL MINUTE;
+select '15'::text::INTERVAL MINUTE;
+select '15'::varchar::INTERVAL MINUTE;
+select '15'::bpchar(2)::INTERVAL MINUTE;
+
+select 15::int1::INTERVAL HOUR;
+select 15::int2::INTERVAL HOUR;
+select 15::int4::INTERVAL HOUR;
+select 15::float8::INTERVAL HOUR;
+select 15::numeric::INTERVAL HOUR;
+select 15::text::INTERVAL HOUR;
+select 15::varchar::INTERVAL HOUR;
+select 15::bpchar(2)::INTERVAL HOUR;
+select '15'::int1::INTERVAL HOUR;
+select '15'::int2::INTERVAL HOUR;
+select '15'::int4::INTERVAL HOUR;
+select '15'::float8::INTERVAL HOUR;
+select '15'::numeric::INTERVAL HOUR;
+select '15'::text::INTERVAL HOUR;
+select '15'::varchar::INTERVAL HOUR;
+select '15'::bpchar(2)::INTERVAL HOUR;
+
+select 15::int1::INTERVAL ;
+select 15::int2::INTERVAL ;
+select 15::int4::INTERVAL ;
+select 15::float8::INTERVAL ;
+select 15::numeric::INTERVAL ;
+select 15::text::INTERVAL ;
+select 15::varchar::INTERVAL ;
+select 15::bpchar(2)::INTERVAL ;
+select '15'::int1::INTERVAL ;
+select '15'::int2::INTERVAL ;
+select '15'::int4::INTERVAL ;
+select '15'::float8::INTERVAL ;
+select '15'::numeric::INTERVAL ;
+select '15'::text::INTERVAL ;
+select '15'::varchar::INTERVAL ;
+select '15'::bpchar(2)::INTERVAL ;
+
+select 15::int1::INTERVAL YEAR;
+select 15::int2::INTERVAL YEAR;
+select 15::int4::INTERVAL YEAR;
+select 15::float8::INTERVAL YEAR;
+select 15::numeric::INTERVAL YEAR;
+select 15::text::INTERVAL YEAR;
+select 15::varchar::INTERVAL YEAR;
+select 15::bpchar(2)::INTERVAL YEAR;
+select '15'::int1::INTERVAL YEAR;
+select '15'::int2::INTERVAL YEAR;
+select '15'::int4::INTERVAL YEAR;
+select '15'::float8::INTERVAL YEAR;
+select '15'::numeric::INTERVAL YEAR;
+select '15'::text::INTERVAL YEAR;
+select '15'::varchar::INTERVAL YEAR;
+select '15'::bpchar(2)::INTERVAL YEAR;

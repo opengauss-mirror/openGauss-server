@@ -289,7 +289,7 @@ select  job_name, nspname from pg_job where dbname='event_b';
 
 drop event if exists ee11;
 create event IF NOT EXISTS ee11 on schedule at now() + interval 666666666666666666666666666667 year + interval '00:00' minute to second disable do insert into t values(0);
-ERROR:  interval field value out of range: "666666666666666666666666666667 day"
+ERROR:  interval field value out of range: "666666666666666666666666666667"
 select pg_sleep(0.2);
  pg_sleep 
 ----------
