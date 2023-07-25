@@ -37,8 +37,7 @@
 #include "libpq-int.h"
 #include "pqexpbuffer.h"
 #include "catalog/pg_type.h"
-#include "cmk_entity_manager_hooks/reg_cmkem_manager_main.h"
-#include "cmk_entity_manager_hooks/reg_hook_frame.h"
+#include "keymgr/security_key_adpt.h"
 
 bool is_cmk_algo_sm(CmkAlgorithm cmk_algo)
 {
@@ -131,8 +130,8 @@ int EncryptionColumnHookExecutor::process_data_impl(const ICachedColumn *cached_
     } else if (data_type == BYTEAWITHOUTORDERCOLOID) {
         encryption_type = EncryptionType::RANDOMIZED_TYPE;
     }
-    int encryptedSize = encrypt_data(data, data_size, aesCbcEncryptionKey, encryption_type, processed_data,
-        column_encryption_algorithm);
+    int encryptedSize = encrypt_data((unsigned char *)data, data_size, aesCbcEncryptionKey, encryption_type,
+        processed_data, column_encryption_algorithm);
     return encryptedSize;
 }
 
@@ -203,7 +202,7 @@ DecryptDataRes EncryptionColumnHookExecutor::deprocess_data_impl(const unsigned 
     }
     res = memset_s(*data, data_proceeed_size, 0, data_proceeed_size);
     securec_check_c(res, "\0", "\0");
-    int plainTextSize = decrypt_data(data_processed, data_proceeed_size, aesCbcEncryptionKey, *data,
+    int plainTextSize = decrypt_data((unsigned char *)data_processed, data_proceeed_size, aesCbcEncryptionKey, *data,
         column_encryption_algorithm);
     if (plainTextSize <= 0) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): failed to decrypt data.\n"));
@@ -230,36 +229,29 @@ bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(
     const char *key_store_str = NULL;
     const char *key_path_str = NULL;
     const char *key_algo_str = NULL;
-    CmkemErrCode ret = CMKEM_SUCCEED;
-    CmkemUStr cek_cipher = {(unsigned char *)encrypted_key_value, *encrypted_key_value_size};
-    CmkemUStr *cek_plain = NULL;
 
     encryption_global_hook_executor->get_argument("key_store", &key_store_str, unused);
     encryption_global_hook_executor->get_argument("key_path", &key_path_str, unused);
     encryption_global_hook_executor->get_argument("algorithm", &key_algo_str, unused);
 
-    CmkIdentity cmk_identify = {key_store_str, key_path_str, key_algo_str, 0, PgClientLogic.client_cache_id};
-
-    ret = reg_all_cmk_entity_manager();
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
-        return false;
-    }
-
-    ret = decrypt_cek_cipher(&cek_cipher, &cmk_identify, &cek_plain);
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+    KeyAdpt *adpt = CL_GET_KEY_ADPT(PgClientLogic);
+    KeyInfo info = {key_store_str, key_path_str, key_algo_str};
+    KmUnStr cipher = {(unsigned char *)encrypted_key_value, *encrypted_key_value_size};
+    KmUnStr plain = {0};
+    plain = key_adpt_mk_decrypt(adpt, info, cipher);
+    if (key_adpt_catch_err(adpt)) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
         conn->client_logic->is_external_err = true;
         return false;
     }
 
     size_t i = 0;
-    for (; i < cek_plain->ustr_len && i < MAX_CEK_LENGTH - 1; i++) {
-        decrypted_key[i] = cek_plain->ustr_val[i];
+    for (; i < plain.len && i < MAX_CEK_LENGTH - 1; i++) {
+        decrypted_key[i] = plain.val[i];
     }
-    decrypted_key[i] = '\0';
     *decrypted_key_size = i;
-    free_cmkem_ustr_with_erase(cek_plain);
+
+    free(plain.val);
 
     return true;
 }
@@ -339,13 +331,10 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     const char *cmk_store_str = NULL;
     const char *cmk_path_str = NULL;
     const char *cmk_algo_str = NULL;
-    CmkemErrCode ret = CMKEM_SUCCEED;
 
     encryption_global_hook_executor->get_argument("key_store", &cmk_store_str, unused);
     encryption_global_hook_executor->get_argument("key_path", &cmk_path_str, unused);
     encryption_global_hook_executor->get_argument("algorithm", &cmk_algo_str, unused);
-
-    CmkIdentity cmk_identify = {cmk_store_str, cmk_path_str, cmk_algo_str, 0, column_encryption.client_cache_id};
 
     ColumnEncryptionAlgorithm column_encryption_algorithm(ColumnEncryptionAlgorithm::INVALID_ALGORITHM);
     char *expected_value = NULL;
@@ -390,29 +379,24 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     }
     /* encrypt CEK */
 
-    CmkemUStr cek_plain = {(unsigned char *)expected_value, expected_value_size};
-    CmkemUStr *cek_cipher = NULL;
-
-    ret = reg_all_cmk_entity_manager();
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
-        free_after_check(!has_user_set_cek, (unsigned char *)expected_value, expected_value_size);
-        return false;
-    }
-    
-    ret = encrypt_cek_plain(&cek_plain, &cmk_identify, &cek_cipher);
+    /* encrypt CEK */
+    KeyAdpt *adpt = CL_GET_KEY_ADPT(column_encryption);
+    KeyInfo info = {cmk_store_str, cmk_path_str, cmk_algo_str};
+    KmUnStr plain = {(unsigned char *)expected_value, expected_value_size};
+    KmUnStr cipher = {0};
+    cipher = key_adpt_mk_encrypt(adpt, info, plain);
     free_after_check(!has_user_set_cek, (unsigned char *)expected_value, expected_value_size);
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+    if (key_adpt_catch_err(adpt)) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
         conn->client_logic->is_external_err = true;
         return false;
     }
 
     /* escape encrypted CEK for BYTEA insertion */
     size_t encoded_encrypted_value_size;
-    char *encoded_encrypted_value = (char *)PQescapeByteaConn(conn, cek_cipher->ustr_val,
-        cek_cipher->ustr_len, &encoded_encrypted_value_size);
-    free_cmkem_ustr(cek_cipher);
+    char *encoded_encrypted_value = (char *)PQescapeByteaConn(conn, cipher.val, cipher.len,
+        &encoded_encrypted_value_size);
+    free(cipher.val);
     if (encoded_encrypted_value == NULL) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): failed to encode encrypted values.\n"));
         return false;

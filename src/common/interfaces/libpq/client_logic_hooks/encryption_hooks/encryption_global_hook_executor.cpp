@@ -35,9 +35,7 @@
 #include "libpq-fe.h"
 #include "libpq-int.h"
 #include "cl_state.h"
-#include "cmk_entity_manager_hooks/reg_cmkem_manager_main.h"
-#include "cmk_entity_manager_hooks/reg_hook_frame.h"
-
+#include "keymgr/security_key_adpt.h"
 /* 
  * while using SQL :
  *      CREATE CLIENT MASTER KEY xxx WITH(
@@ -59,30 +57,25 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
     const char *key_store_str = args.find("key_store");
     const char *key_path_str = args.find("key_path");
     const char *key_algo_str = args.find("algorithm");
-    CmkIdentity cmk_identify = {key_store_str, key_path_str, key_algo_str, 0, m_clientLogic.client_cache_id};
-    CmkemErrCode ret = CMKEM_SUCCEED;
 
-    /* 
-     * You can register your own cmk entity management tools/components/services in reg_all_cmk_entity_manager()
-     * now, we have registered 3:
-     *      (1) cmk entity management tool : gs_ktool. (not supported in openGauss)
-     *      (2) cmk entity management component : localkms
-     *      (3) cmk entity management service : HuaWei KMS (provided by HuaWei Cloud, not supported in openGauss)
-     * 
-     *      (*4) finally, we have a grammar check ：if cmk entity is not processed, we think it's out of control 
-     *           and it is a syntax error
-     */
-    ret = reg_all_cmk_entity_manager();
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+    KeyAdpt *adpt = CL_GET_KEY_ADPT(m_clientLogic);
+    KeyInfo info = {key_store_str, key_path_str, key_algo_str};
+    char *keystate = key_adpt_mk_select(adpt, info);
+    if (key_adpt_catch_err(adpt)) {
+        libpq_free(keystate);
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
+        conn->client_logic->is_external_err = true;
         return false;
     }
 
-    ret = create_cmk_obj(&cmk_identify);
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+    if (keystate != NULL && strcmp(keystate, "active") != 0) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): the key state of '%s' is not 'active' but '%s'\n",
+            key_path_str, keystate);
+        conn->client_logic->is_external_err = true;
+        libpq_free(keystate);
         return false;
     }
+    libpq_free(keystate);
 
     /* check same attributes are not used by existing global settings */
     for (size_t i = 0; i < existing_global_hook_executors_size; ++i) {
@@ -116,18 +109,13 @@ bool EncryptionGlobalHookExecutor::post_create(const StringArgs& args)
     const char *key_store_str = args.find("key_store");
     const char *key_path_str = args.find("key_path");
     const char *key_algo_str = args.find("algorithm");
-    CmkIdentity cmk_identify = {key_store_str, key_path_str, key_algo_str, 0, m_clientLogic.client_cache_id};
-    CmkemErrCode ret = CMKEM_SUCCEED;
 
-    ret = reg_all_cmk_entity_manager();
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
-        return false;
-    }
-
-    ret = post_create_cmk_obj(&cmk_identify);
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+    /* encrypt CEK */
+    KeyAdpt *adpt = CL_GET_KEY_ADPT(m_clientLogic);
+    KeyInfo info = {key_store_str, key_path_str, key_algo_str};
+    key_adpt_mk_create(adpt, info);
+    if (key_adpt_catch_err(adpt)) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
         return false;
     }
 
@@ -146,22 +134,16 @@ bool EncryptionGlobalHookExecutor::set_deletion_expected()
     size_t unused = 0;
     const char *key_store_str = NULL;
     const char *key_path_str = NULL;
-    CmkemErrCode ret = CMKEM_SUCCEED;
 
     get_argument("key_store", &key_store_str, unused);
     get_argument("key_path", &key_path_str, unused);
 
-    CmkIdentity cmk_identify = {key_store_str, key_path_str, NULL, 0, m_clientLogic.client_cache_id};
-
-    ret = reg_all_cmk_entity_manager();
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
-        return false;
-    }
-
-    ret = drop_cmk_obj(&cmk_identify);
-    if (ret != CMKEM_SUCCEED) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+    /* encrypt CEK */
+    KeyAdpt *adpt = CL_GET_KEY_ADPT(m_clientLogic);
+    KeyInfo info = {key_store_str, key_path_str, NULL};
+    key_adpt_mk_delete(adpt, info);
+    if (key_adpt_catch_err(adpt)) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
         return false;
     }
 
@@ -233,25 +215,20 @@ bool EncryptionGlobalHookExecutor::deprocess_column_setting(const unsigned char 
     size_t processed_data_size, const char *key_store, const char *key_path, const char *key_algo, unsigned char **data,
     size_t *data_size)
 {
-    CmkIdentity cmk_identify = {key_store, key_path, key_algo, 0, 1};
-    CmkemUStr cek_cipher = {(unsigned char *)processed_data, (size_t)processed_data_size};
-    CmkemUStr *cek_plain = NULL;
-    CmkemErrCode ret = CMKEM_SUCCEED;
-
-    ret = reg_all_cmk_entity_manager();
-    if (ret != CMKEM_SUCCEED) {
-        /* this function is only called by gs_dump, so we can print errmsg on the terminal */
-        printf("ERROR: %s", get_cmkem_errmsg(ret));
+    KeyAdpt *adpt = key_adpt_new();
+    KeyInfo info = {key_store, key_path, key_algo};
+    KmUnStr cipher = {(unsigned char *)processed_data, (size_t)processed_data_size};
+    KmUnStr plain = {0};
+    plain = key_adpt_mk_decrypt(adpt, info, cipher);
+    if (key_adpt_catch_err(adpt)) {
+        printf("ERROR: %s\n", key_adpt_get_err(adpt));
+        key_adpt_free(adpt);
         return false;
     }
 
-    if (decrypt_cek_cipher(&cek_cipher, &cmk_identify, &cek_plain) != CMKEM_SUCCEED) {
-        return false;
-    }
+    *data = plain.val;
+    *data_size = plain.len;
+    key_adpt_free(adpt);
 
-    *data = cek_plain->ustr_val;
-    *data_size = cek_plain->ustr_len;
-
-    cmkem_free(cek_plain);
     return true;
 }

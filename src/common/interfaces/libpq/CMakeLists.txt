@@ -165,9 +165,9 @@ SET(TGT_pq_ce_INC
     ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_cache
     ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_processor
     ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_fmt
-    ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks
     ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/encryption_hooks
     ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_data_fetcher
+    ${PROJECT_SRC_DIR}/gausskernel/security/keymgr/include
     ${JAVA_HOME}/include
     ${JAVA_HOME}/include/linux
 )
@@ -208,23 +208,6 @@ list(REMOVE_ITEM libpq_ce_DEF_OPTIONS -D_REENTRANT -D_THREAD_SAFE -D_POSIX_PTHRE
 set(libpq_ce_COMPILE_OPTIONS ${pq_ce_COMPILE_OPTIONS})
 list(REMOVE_ITEM libpq_ce_COMPILE_OPTIONS -fstack-protector -pthread)
 add_static_objtarget(libpq_ce TGT_libpq_ce_SRC TGT_pq_ce_INC "${libpq_ce_DEF_OPTIONS}" "${libpq_ce_COMPILE_OPTIONS}" "")
-
-AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks TGT_cmk_entity_manager_hooks_SRC)
-if(NOT "${ENABLE_UT}" STREQUAL "ON")
-    if(NOT "${ENABLE_MULTIPLE_NODES}_${ENABLE_PRIVATEGAUSS}" STREQUAL "OFF_OFF")
-        if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
-            list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_local_kms.cpp)
-        else()
-            list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.cpp)
-            list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_gs_ktool.cpp)
-        endif()
-    else()
-        list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.cpp)
-        list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_gs_ktool.cpp)
-    endif()
-endif()
-set(cmk_entity_manager_hooks_DEF_OPTIONS ${MACRO_OPTIONS} -DFRONTEND -DFRONTEND_PARSER -DUNSAFE_STAT_OK -DHAVE_CE -DWORDS_BIGENDIAN -DSO_MAJOR_VERSION=5)
-add_static_objtarget(cmk_entity_manager_hooks TGT_cmk_entity_manager_hooks_SRC TGT_pq_ce_INC "${cmk_entity_manager_hooks_DEF_OPTIONS}" "${pq_ce_COMPILE_OPTIONS}" "")
 
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/encryption_hooks TGT_encryption_hooks_SRC)
 set(encryption_hooks_DEF_OPTIONS ${MACRO_OPTIONS} -DFRONTEND -DFRONTEND_PARSER -DHAVE_CE)
@@ -289,18 +272,18 @@ add_static_objtarget(frontend_parser TGT_frontend_parser_SRC TGT_pq_ce_INC "${fr
 
 set(pq_ce_LINK_OPTIONS ${LIB_LINK_OPTIONS})
 add_shared_libtarget(pq_ce TGT_pq_ce_SRC TGT_pq_ce_INC "${pq_ce_DEF_OPTIONS}" "${pq_ce_COMPILE_OPTIONS}" "${pq_ce_LINK_OPTIONS}")
-set(pq_ce_LINK_LIBS libpq_ce cmk_entity_manager_hooks encryption_hooks client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher frontend_parser)
+set(pq_ce_LINK_LIBS libpq_ce encryption_hooks client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher frontend_parser)
 if(NOT "${ENABLE_MULTIPLE_NODES}_${ENABLE_PRIVATEGAUSS}" STREQUAL "OFF_OFF")
     if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
         set(pq_ce_LINK_LIBS ${pq_ce_LINK_LIBS} -lgs_ktool -lkmc)
     endif()
 endif()
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
-    target_link_libraries(pq_ce PRIVATE ${pq_ce_LINK_LIBS} -lcurl -lcjson -lssl -lcrypto -l${SECURE_C_CHECK} -lpthread -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss)
+    target_link_libraries(pq_ce PRIVATE ${pq_ce_LINK_LIBS} libkeymgr.a -lcurl -lcjson -lssl -lcrypto -l${SECURE_C_CHECK} -lpthread -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss)
 else()
-    target_link_libraries(pq_ce PRIVATE ${pq_ce_LINK_LIBS} -lcurl -lcjson -lssl -lcrypto -l${SECURE_C_CHECK} -lpthread)
+    target_link_libraries(pq_ce PRIVATE ${pq_ce_LINK_LIBS} libkeymgr.a -lcurl -lcjson -lssl -lcrypto -l${SECURE_C_CHECK} -lpthread)
 endif()
-add_dependencies(pq_ce libpq_ce cmk_entity_manager_hooks encryption_hooks client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher frontend_parser)
+add_dependencies(pq_ce libpq_ce encryption_hooks client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher frontend_parser)
 target_link_directories(pq_ce PUBLIC 
     ${SECURE_LIB_PATH}
     ${KMC_LIB_PATH}
@@ -313,6 +296,7 @@ target_link_directories(pq_ce PUBLIC
 if(NOT "${ENABLE_MULTIPLE_NODES}_${ENABLE_PRIVATEGAUSS}" STREQUAL "OFF_OFF")
     if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
         add_dependencies(pq_ce gs_ktool)
+        add_dependencies(pq_ce keymgr)
     endif()
 endif()
 SET_TARGET_PROPERTIES(pq_ce PROPERTIES VERSION 5.5)

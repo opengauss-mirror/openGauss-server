@@ -27,7 +27,7 @@ SUBDIRS = bootstrap catalog commands client_logic datatype executor foreign gs_p
 	storage vecexecutor access streaming access/obs \
 	hotpatch \
 	gstrace \
-	knl knl/knl_guc threadpool workload lite
+	knl knl/knl_guc threadpool workload lite keymgr
 	
 ifneq ($(enable_multiple_nodes), yes)
     SUBDIRS += storage/smgr storage/lock storage/buf storage/item storage/cstore storage/mot fmgr

@@ -7655,7 +7655,7 @@ master_key_elem:
             // len is not filled on purpose ??
             $$ = (Node*) n;
         }
-        | KEY_PATH '=' ColId
+        | KEY_PATH '=' ColId_or_Sconst
         {
             ClientLogicGlobalParam *n = makeNode (ClientLogicGlobalParam);
             n->key = ClientLogicGlobalProperty::CMK_KEY_PATH;

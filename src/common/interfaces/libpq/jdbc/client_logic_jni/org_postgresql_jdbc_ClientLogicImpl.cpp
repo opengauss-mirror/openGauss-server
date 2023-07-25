@@ -209,7 +209,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_setKmsIn
     if (client_logic_jni->set_kms_info(key.c_str, value.c_str)) {
         result.set_no_error_retrun();
     } else {
-        status.set_error(INVALID_INPUT_PARAMETER, get_cmkem_errmsg(CMKEM_CHECK_INPUT_AUTH_ERR));
+        status.set_error(INVALID_INPUT_PARAMETER, "set kms info error");
         result.set_error_return(&status);
     }
 
