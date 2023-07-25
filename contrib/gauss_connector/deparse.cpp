@@ -2798,7 +2798,7 @@ Plan* deparse_agg_node(Plan* agg, PlannerInfo* root)
 
     ForeignScan* fscan = (ForeignScan*)agg->lefttree;
 
-    if (fscan->scan.scanrelid <= 0 || (int)fscan->scan.scanrelid >= root->simple_rel_array_size)
+    if (fscan->scan.scanrelid == 0 || (int)fscan->scan.scanrelid >= root->simple_rel_array_size)
         return agg;
 
     RelOptInfo* scanrel = root->simple_rel_array[fscan->scan.scanrelid];
