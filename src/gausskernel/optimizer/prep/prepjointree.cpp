@@ -3858,9 +3858,13 @@ static bool is_safe_pull_up_sublink_having(PlannerInfo* root)
         subQuery = castNode(Query, sublink->subselect);
         level_up_varnos = pull_varnos((Node*)subQuery->jointree, 1, true);
         if (!bms_is_empty(level_up_varnos)) {
+            bms_free(level_up_varnos);
+            list_free_ext(sublinkList);
             return false;
         }
     }
- 
+
+    bms_free(level_up_varnos);
+    list_free_ext(sublinkList);
     return true;
 }
