@@ -61,7 +61,7 @@ static const int SEGMENT_MAX_FORKNUM = VISIBILITYMAP_FORKNUM;
  * Logic segment file
  *
  * A logic segment file is divided into several sequential physical files, to avoid the size of
- * a single file exceeding the file system's limit, or concurrent visist to the same physical file.
+ * a single file exceeding the file system's limit, or concurrent visit to the same physical file.
  * This design is similar to file segment (_MdfdVec) in md.c. We use the term "file slice" here
  * to distinguish with the term "segment".
  */
