@@ -4039,7 +4039,7 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
 #endif
 
     if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE && !libpqsw_is_end()) {
-        libpqsw_disconnect();
+        libpqsw_disconnect(true);
     }
 
     s->savepointList = NULL;
