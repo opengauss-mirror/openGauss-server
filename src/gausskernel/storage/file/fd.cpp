@@ -2756,7 +2756,7 @@ int AllocateSocket(const char* ipaddr, int port)
     errno_t rc = EOK;
     int retrynum = 0;
 
-    DO_DB(ereport(LOG, (errmsg("AllocateFile: Allocated %d (%s)", u_sess->storage_cxt.numAllocatedDescs, name))));
+    DO_DB(ereport(LOG, (errmsg("AllocateFile: Allocated %d", u_sess->storage_cxt.numAllocatedDescs))));
 
     Assert(ipaddr != NULL);
 restart:
