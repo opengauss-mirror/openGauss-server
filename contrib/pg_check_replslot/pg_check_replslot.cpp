@@ -199,7 +199,7 @@ static void show_slot(char* buffer, size_t size)
     char lsn[64] = {0};
 
     if (size != sizeof(ReplicationSlotOnDisk)) {
-        fprintf(stderr, _("unexpected slot file size %d, expected %d\n"), (int)size, sizeof(ReplicationSlotOnDisk));
+        fprintf(stderr, _("unexpected slot file size %d, expected %lu\n"), (int)size, sizeof(ReplicationSlotOnDisk));
         exit(1);
     }
 
@@ -237,7 +237,7 @@ static void show_slot(char* buffer, size_t size)
     snprintf(lsn, 63, "%X/%X", (uint32)(slot.slotdata.restart_lsn >> 32), (uint32)slot.slotdata.restart_lsn);
 
     fprintf(stderr,
-        _("%-24s| %-12s| %-8u| %-8u| %-12s| %-12s\n"),
+        _("%-24s| %-12s| %-8u| %-8lu| %-12s| %-12s\n"),
         NameStr(slot.slotdata.name),
         (slot.slotdata.database == InvalidOid) ? "physical" : "logical",
         slot.slotdata.database,

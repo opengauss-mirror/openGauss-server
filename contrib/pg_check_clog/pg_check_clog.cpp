@@ -103,7 +103,7 @@ static void parse_clog_file(const int segnum)
             for (bit_index = 0; bit_index < 4; bit_index++) {
                 bshift = TransactionIdToBIndex(xid) * CLOG_BITS_PER_XACT;
                 status = (*byteptr >> bshift) & CLOG_XACT_BITMASK;
-                fprintf(stdout, "xid %u, status: %s\n", xid, xid_status_name[status]);
+                fprintf(stdout, "xid %lu, status: %s\n", xid, xid_status_name[status]);
                 xid++;
             }
 
@@ -159,7 +159,7 @@ static void parse_single_xid(const TransactionId xid)
 
     byteptr = buffer + byteno;
     status = (*byteptr >> bshift) & CLOG_XACT_BITMASK;
-    fprintf(stdout, "xid %u, status: %s\n", xid, xid_status_name[status]);
+    fprintf(stdout, "xid %lu, status: %s\n", xid, xid_status_name[status]);
 
     if (close(fd)) {
         fprintf(stderr, "file close error !\n");
