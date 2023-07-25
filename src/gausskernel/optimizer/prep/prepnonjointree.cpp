@@ -2178,9 +2178,12 @@ static void reduce_orderby_recurse(Query* query, Node* jtnode, bool reduce)
         }
     } else if (IsA(jtnode, SetOperationStmt)) {
         SetOperationStmt* op = (SetOperationStmt*)jtnode;
-
-        reduce_orderby_recurse(query, op->larg, true);
-        reduce_orderby_recurse(query, op->rarg, true);
+        bool need_reduce = true;
+        if (op->op == SETOP_UNION && op->all && u_sess->attr.attr_sql.enable_union_all_subquery_orderby) {
+            need_reduce = reduce;
+        }
+        reduce_orderby_recurse(query, op->larg, need_reduce);
+        reduce_orderby_recurse(query, op->rarg, need_reduce);
     }
 
     return;
@@ -2243,8 +2246,13 @@ void reduce_orderby(Query* query, bool reduce)
 
     /* If there has setop, it should optimize orderby clause. */
     if (query->setOperations) {
-        reduce_orderby_recurse(query, ((SetOperationStmt*)query->setOperations)->larg, true);
-        reduce_orderby_recurse(query, ((SetOperationStmt*)query->setOperations)->rarg, true);
+        bool need_reduce = true;
+        SetOperationStmt *setop_stmt = (SetOperationStmt *)query->setOperations;
+        if (setop_stmt->op == SETOP_UNION && setop_stmt->all && u_sess->attr.attr_sql.enable_union_all_subquery_orderby) {
+            need_reduce = reduce;
+        }
+        reduce_orderby_recurse(query, ((SetOperationStmt*)query->setOperations)->larg, need_reduce);
+        reduce_orderby_recurse(query, ((SetOperationStmt*)query->setOperations)->rarg, need_reduce);
     }
 }
 
