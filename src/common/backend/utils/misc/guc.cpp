@@ -1880,7 +1880,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL,
-            NULL
+            false
         },
         {{"enable_iud_fusion",
             PGC_USERSET,
@@ -1893,7 +1893,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL,
-            NULL
+            false
         },
 #endif
         {{"enable_expr_fusion",
@@ -1907,7 +1907,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL,
-            NULL
+            false
         },
         {{"ts_adaptive_threads",
             PGC_SIGHUP, 

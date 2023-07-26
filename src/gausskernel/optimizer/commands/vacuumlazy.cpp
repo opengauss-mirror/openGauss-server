@@ -2115,7 +2115,7 @@ count_nondeletable_pages(Relation onerel, LVRelStats *vacrelstats)
     while (blkno > vacrelstats->nonempty_pages) {
         Buffer          buf;
         Page            page;
-        bool            hastup = NULL;
+        bool            hastup = false;
 
         /*
          * Check if another process requests a lock on our relation. We are
