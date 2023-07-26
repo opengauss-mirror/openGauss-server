@@ -7289,6 +7289,7 @@ static void DropAllRecoverySlotForPitr()
     List *all_archive_slots = NIL;
     all_archive_slots = GetAllRecoverySlotsName();
     if (all_archive_slots == NIL || all_archive_slots->length == 0) {
+        list_free_deep(all_archive_slots);
         return;
     }
 
