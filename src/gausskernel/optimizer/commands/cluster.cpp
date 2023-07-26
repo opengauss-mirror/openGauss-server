@@ -3219,7 +3219,7 @@ static void swapPartitionfiles(
         /* set the relOptions of old rel to the ones after compressed options */
         UpdatePartitionRelOptionsSystemCache(tab->newOptions, &reltup1, relRelation1, (void**)&relform1);
         /* set the relOptions of new rel to the ones before alter compressed options */
-        UpdatePartitionRelOptionsSystemCache(tab->oldOptions, &reltup2, relRelation2, (void**)&relform2);
+        UpdatePgClassRelOptionsSystemCache(tab->oldOptions, &reltup2, relRelation2, (void**)&relform2);
     }
 
     /* swap size statistics too, since new rel has freshly-updated stats */
