@@ -163,8 +163,8 @@ static ForeignScan *gcGetForeignPlan(PlannerInfo *root,
 					   Oid foreigntableid,
 					   ForeignPath *best_path,
 					   List *tlist,
-					   List *scan_clauses/*,
-					   Plan *outer_plan*/);
+					   List *scan_clauses,
+					   Plan *outer_plan);
 static void gcBeginForeignScan(ForeignScanState* node, int eflags);
 static TupleTableSlot* gcIterateForeignScan(ForeignScanState* node);
 static VectorBatch* gcIterateVecForeignScan(VecForeignScanState* node);
