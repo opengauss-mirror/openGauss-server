@@ -6685,9 +6685,11 @@ static bool safe_pullup_uncorrelated_sublink_where(Node* inout_quals, Query* sub
  
     level_up_varnos = pull_varnos((Node*)subQuery->jointree, 1, true);
     if (!bms_is_empty(level_up_varnos) && bms_is_subset(level_up_varnos, *available_rels)) {
+        bms_free(level_up_varnos);
         return false;
     }
-    
+
+    bms_free(level_up_varnos);
     if (!IsA(inout_quals, OpExpr)) {
         return false;
     }
@@ -6721,9 +6723,11 @@ bool safe_pullup_op_expr_sublink(OpExpr* expr)
     // sublink should be only one
     sublinkList = pull_sublink((Node*)expr, 0, false, false);
     if (sublinkList == NULL || list_length(sublinkList) != 1) {
+        list_free_ext(sublinkList);
         return false;
     }
- 
+
+    list_free_ext(sublinkList);
     return true;
 }
 
