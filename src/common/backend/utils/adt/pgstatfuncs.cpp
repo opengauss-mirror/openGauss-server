@@ -9264,6 +9264,66 @@ void insert_pv_session_memory(Tuplestorestate* tupStore, TupleDesc tupDesc, cons
 }
 
 
+static inline double calcCacheHitRate() {
+    uint64 cache = g_instance.dms_cxt.SSDFxStats.txnstatus_varcache_gets +
+        g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets;
+    uint64 total = cache + g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets;
+    double hitrate = total == 0 ? 0 : ((cache * 1.0) / total);
+    return hitrate;
+}
+
+/* txnstatus_cache_stat view pg_tde_info */
+Datum ss_txnstatus_cache_stat(PG_FUNCTION_ARGS)
+{
+    int i = 0;
+    errno_t rc = 0;
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(8, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "vcache_gets", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hcache_gets", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "nio_gets", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "avg_hcache_gettime_us", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "avg_nio_gettime_us", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cache_hit_rate", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hcache_eviction", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "avg_eviction_refcnt", FLOAT8OID, -1, 0);
+    BlessTupleDesc(tupdesc);
+
+    Datum values[8];
+    bool nulls[8] = {false};
+    HeapTuple tuple = NULL;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    i = 0;
+    double avgnio = g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets == 0 ? 0 :
+        (g_instance.dms_cxt.SSDFxStats.txnstatus_total_niogets_time * 1.0 /
+        g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets);
+    double avghash = g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets == 0 ? 0 :
+        (g_instance.dms_cxt.SSDFxStats.txnstatus_total_hcgets_time * 1.0 /
+        g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets);
+    double avgref = g_instance.dms_cxt.SSDFxStats.txnstatus_total_evictions == 0 ? 0 :
+        (g_instance.dms_cxt.SSDFxStats.txnstatus_total_eviction_refcnt * 1.0 /
+        g_instance.dms_cxt.SSDFxStats.txnstatus_total_evictions);
+
+    values[i++] = Int64GetDatum(g_instance.dms_cxt.SSDFxStats.txnstatus_varcache_gets);
+    values[i++] = Int64GetDatum(g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets);
+    values[i++] = Int64GetDatum(g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets);
+    values[i++] = Float8GetDatum(avghash);
+    values[i++] = Float8GetDatum(avgnio);
+    values[i++] = Float8GetDatum(calcCacheHitRate());
+    values[i++] = Int64GetDatum(g_instance.dms_cxt.SSDFxStats.txnstatus_total_evictions);
+    values[i] = Float8GetDatum(avgref);
+    
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+
 Datum pg_stat_get_file_stat(PG_FUNCTION_ARGS)
 {
     FuncCallContext* funcctx = NULL;

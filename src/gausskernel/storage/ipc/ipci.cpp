@@ -82,6 +82,7 @@
 #include "replication/dcf_replication.h"
 #include "commands/verify.h"
 #include "storage/cfs/cfs_buffers.h"
+#include "ddes/dms/ss_txnstatus.h"
 
 /* we use semaphore not LWLOCK, because when thread InitGucConfig, it does not get a t_thrd.proc */
 pthread_mutex_t gLocaleMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -319,6 +320,8 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
          * Set up predicate lock manager
          */
         InitPredicateLocks();
+
+        SSInitTxnStatusCache();
     }
 
     /*

@@ -32,6 +32,21 @@
 #include "storage/sinvaladt.h"
 #include "replication/libpqsw.h"
 
+static inline void txnstatusNetworkStats(uint64 timeDiff);
+static inline void txnstatusHashStats(uint64 timeDiff);
+
+#define TxnStatusCalcStats(startTime, endTime, timeDiff, isHash) \
+ do {                                                            \
+    (void)INSTR_TIME_SET_CURRENT(endTime);                       \
+    INSTR_TIME_SUBTRACT(endTime, startTime);                     \
+    timeDiff = INSTR_TIME_GET_MICROSEC(endTime);                 \
+    if (isHash) {                                                \
+        txnstatusHashStats((uint64)timeDiff);                    \
+    } else {                                                     \
+        txnstatusNetworkStats((uint64)timeDiff);                 \
+    }                                                            \
+ } while (0)
+
 void SSStandbyGlobalInvalidSharedInvalidMessages(const SharedInvalidationMessage* msg, Oid tsid);
 
 Snapshot SSGetSnapshotData(Snapshot snapshot)
@@ -82,6 +97,53 @@ static int SSTransactionIdGetCSN(dms_opengauss_xid_csn_t *dms_txn_info, dms_open
     return dms_request_opengauss_xid_csn(&dms_ctx, dms_txn_info, xid_csn_result);
 }
 
+static inline void txnstatusNetworkStats(uint64 timeDiff)
+{
+    ereport(DEBUG1, (errmodule(MOD_SS_TXNSTATUS),
+            errmsg("SSTxnStatusCache niotimediff=%luus", timeDiff)));
+    g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets++;
+    g_instance.dms_cxt.SSDFxStats.txnstatus_total_niogets_time += timeDiff;
+}
+
+static inline void txnstatusHashStats(uint64 timeDiff)
+{
+    ereport(DEBUG1, (errmodule(MOD_SS_TXNSTATUS),
+            errmsg("SSTxnStatusCache hashtimediff=%luus", timeDiff)));
+    g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets++;
+    g_instance.dms_cxt.SSDFxStats.txnstatus_total_hcgets_time += timeDiff;
+}
+
+/*
+ * Use TxnStatusCache regardless of the snapshot might result in erroneous visibility check.
+ * trustFrozen: whether frozen CSN can be used to determine visibility. if xid > snapshotxid,
+ * then still fetch from remote clogstatus cache. is clogstatus the most accurate?
+ */
+static inline bool SnapshotSatisfiesTSC(TransactionId transactionId, Snapshot snapshot,
+    bool isMvcc, bool *trustFrozen)
+{
+    if (snapshot == NULL || !isMvcc) {
+        return true;
+    } else {
+        if (IsVersionMVCCSnapshot(snapshot) || (snapshot->satisfies == SNAPSHOT_DECODE_MVCC)) {
+            return false;
+        }
+        if (IsMVCCSnapshot(snapshot) && !TransactionIdPrecedes(transactionId, snapshot->xmin)) {
+            *trustFrozen = false;
+        }
+    }
+    return true;
+}
+
+static inline bool IsCommitSeqNoDefinitive(CommitSeqNo csn)
+{
+    return (COMMITSEQNO_IS_ABORTED(csn) || COMMITSEQNO_IS_COMMITTED(csn));
+}
+
+static inline bool IsClogStatusDefinitive(CLogXidStatus status)
+{
+    return (status != CLOG_XID_STATUS_IN_PROGRESS && status != CLOG_XID_STATUS_SUB_COMMITTED);
+}
+
 /*
  * xid -> csnlog status
  * is_committed: if true, then no need to fetch xid status from clog
@@ -89,19 +151,43 @@ static int SSTransactionIdGetCSN(dms_opengauss_xid_csn_t *dms_txn_info, dms_open
 CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest,
     Snapshot snapshot, bool* sync)
 {
+    instr_time startTime;
+    instr_time endTime;
+    PgStat_Counter timeDiff = 0;
+    (void)INSTR_TIME_SET_CURRENT(startTime);
+
     if ((snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) &&
         TransactionIdEquals(transactionId, t_thrd.xact_cxt.cachedFetchCSNXid)) {
+        g_instance.dms_cxt.SSDFxStats.txnstatus_varcache_gets++;
         t_thrd.xact_cxt.latestFetchCSNXid = t_thrd.xact_cxt.cachedFetchCSNXid;
         t_thrd.xact_cxt.latestFetchCSN = t_thrd.xact_cxt.cachedFetchCSN;
         return t_thrd.xact_cxt.cachedFetchCSN;
     }
     if (!TransactionIdIsNormal(transactionId)) {
+        g_instance.dms_cxt.SSDFxStats.txnstatus_varcache_gets++;
         t_thrd.xact_cxt.latestFetchCSNXid = InvalidTransactionId;
         if (TransactionIdEquals(transactionId, BootstrapTransactionId) ||
             TransactionIdEquals(transactionId, FrozenTransactionId)) {
             return COMMITSEQNO_FROZEN;
         }
         return COMMITSEQNO_ABORTED;
+    }
+
+    CommitSeqNo cachedCSN = InvalidCommitSeqNo;
+    bool trustFrozen = false;
+    if (ENABLE_SS_TXNSTATUS_CACHE && SnapshotSatisfiesTSC(transactionId, snapshot, isMvcc, &trustFrozen)) {
+        bool cached = false;
+        uint32 hashcode = XidHashCode(&transactionId);
+        cached = TxnStatusCacheLookup(&transactionId, hashcode, &cachedCSN);
+        if (cached) {
+            Assert(IsCommitSeqNoDefinitive(cachedCSN));
+            if (!COMMITSEQNO_IS_FROZEN(cachedCSN) || trustFrozen) {
+                TxnStatusCalcStats(startTime, endTime, timeDiff, true);
+#ifndef USE_ASSERT_CHECKING
+                return cachedCSN;
+#endif
+            }
+        }
     }
 
     CommitSeqNo csn = 0; // COMMITSEQNO_INPROGRESS by default
@@ -151,17 +237,39 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
         }
     } while (true);
 
-    if (COMMITSEQNO_IS_COMMITTED(csn) || COMMITSEQNO_IS_ABORTED(csn)) {
+#ifdef USE_ASSERT_CHECKING
+    /* DEBUG mode validates cache-networkIO consistency before returning cache */
+    if (cachedCSN != InvalidCommitSeqNo && (!COMMITSEQNO_IS_FROZEN(cachedCSN) || trustFrozen)) {
+        Assert(((COMMITSEQNO_IS_COMMITTED(csn) && COMMITSEQNO_IS_COMMITTED(cachedCSN))) ||
+            (COMMITSEQNO_IS_ABORTED(csn) && COMMITSEQNO_IS_ABORTED(cachedCSN)));
+        return cachedCSN;
+    }
+#endif
+
+    if (IsCommitSeqNoDefinitive(csn)) {
         t_thrd.xact_cxt.cachedFetchCSNXid = transactionId;
         t_thrd.xact_cxt.cachedFetchCSN = csn;
+
+        if (ENABLE_SS_TXNSTATUS_CACHE && IsClogStatusDefinitive(clogstatus)) {
+            /* clogstat might be in-progress, therefore we want to be discreet */
+            uint32 hashcode = XidHashCode(&transactionId);
+            LWLock *partitionLock = TxnStatusCachePartitionLock(hashcode);
+            LWLockAcquire(partitionLock, LW_EXCLUSIVE);
+            int ret = TxnStatusCacheInsert(&transactionId, hashcode, csn, clogstatus);
+            if (ret != GS_SUCCESS) {
+                ereport(PANIC, (errmsg("SSTxnStatusCache insert failed, xid=%lu.", transactionId)));
+            }
+            LWLockRelease(partitionLock);
+        }
     }
 
-    if (clogstatus != CLOG_XID_STATUS_IN_PROGRESS && clogstatus != CLOG_XID_STATUS_SUB_COMMITTED) {
+    if (IsClogStatusDefinitive(clogstatus)) {
         t_thrd.xact_cxt.cachedFetchXid = transactionId;
         t_thrd.xact_cxt.cachedFetchXidStatus = clogstatus;
         t_thrd.xact_cxt.cachedCommitLSN = lsn;
     }
 
+    TxnStatusCalcStats(startTime, endTime, timeDiff, false);
     return csn;
 }
 

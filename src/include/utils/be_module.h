@@ -149,6 +149,7 @@ enum ModuleId {
     MOD_GPI, /* debug info for global partition index */
     MOD_PARTITION,
     MOD_SRF, /* debug info for SRF */
+    MOD_SS_TXNSTATUS, /* debug info for SS TXNSTATUS */
 
     /*
      * Add your module id above.

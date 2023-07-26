@@ -387,6 +387,16 @@ static void setDMSProfile(dms_profile_t* profile)
     DmsInitCallback(&profile->callback);
 }
 
+static inline void DMSDfxStatReset(){
+    g_instance.dms_cxt.SSDFxStats.txnstatus_varcache_gets = 0;
+    g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets = 0;
+    g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets = 0;
+    g_instance.dms_cxt.SSDFxStats.txnstatus_total_hcgets_time = 0;
+    g_instance.dms_cxt.SSDFxStats.txnstatus_total_niogets_time = 0;
+    g_instance.dms_cxt.SSDFxStats.txnstatus_total_evictions = 0;
+    g_instance.dms_cxt.SSDFxStats.txnstatus_total_eviction_refcnt = 0;
+}
+
 void DMSInit()
 {
     if (ss_dms_func_init() != DMS_SUCCESS) {
@@ -409,6 +419,7 @@ void DMSInit()
     setDMSProfile(&profile);
 
     DMSInitLogger();
+    DMSDfxStatReset();
 
     g_instance.dms_cxt.log_timezone = u_sess->attr.attr_common.log_timezone;
 
