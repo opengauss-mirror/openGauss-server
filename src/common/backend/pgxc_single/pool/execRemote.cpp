@@ -9017,7 +9017,7 @@ bool CheckPrepared(RemoteQuery* rq, Oid nodeoid)
 {
     Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return NULL;
+    return false;
 }
 
 void FindExecNodesInPBE(RemoteQueryState* planstate, ExecNodes* exec_nodes, RemoteQueryExecType exec_type)
