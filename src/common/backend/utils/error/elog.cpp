@@ -5036,7 +5036,7 @@ static char* mask_Password_internal(const char* query_string)
                         int lengthOfQuote = 0;
                         int yyvalLen = (yylval.str != NULL) ? (int)strlen(yylval.str) : 0;
                         for (int len = 0; len < length[i]; len++) {
-                            if ((yylval.str != NULL) && len < (int)strlen(yylval.str) && (yylval.str[len] == '\'')) {
+                            if ((yylval.str != NULL) && len < yyvalLen && (yylval.str[len] == '\'')) {
                                 lengthOfQuote++;
                             }
                         }
