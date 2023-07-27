@@ -2821,7 +2821,6 @@ static void parse_pgxc_clean_options(int argc, char* argv[])
             case 'W':
                 try_password_opt = TRI_YES;
                 if (optarg != NULL) {
-                    check_env_name_c(optarg);
                     password = pg_strdup(optarg);
                     rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
                     securec_check_c(rc, "\0", "\0");
