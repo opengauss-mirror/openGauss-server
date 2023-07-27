@@ -31270,12 +31270,6 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     }
 
     rel = heap_open(GsGlobalConfigRelationId, RowExclusiveLock);
-    if (!OidIsValid(rel)) {
-        ereport(ERROR, 
-            (errcode(ERRCODE_SYSTEM_ERROR),
-                errmsg("could not open gs_global_config")));
-        return;
-    }
 
     foreach (pwd_obj, stmt->weak_password_string_list) {
         Datum values[Natts_gs_global_config] = {0};
