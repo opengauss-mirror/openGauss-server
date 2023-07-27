@@ -233,7 +233,7 @@ static inline RbWorkerInfo *RbInitWorkerInfo(uint64 id, char *dbName)
 
     workerInfo->id = id;
     rc = strcpy_s(NameStr(workerInfo->dbName), NAMEDATALEN, dbName);
-    securec_check_c(rc, "\0", "\0");
+    securec_check(rc, "\0", "\0");
 
     InitLatch(&workerInfo->latch);
 
@@ -274,7 +274,7 @@ static inline void RbMsgGetRes(uint64 id, PurgeMsgRes *localRes, bool reset = fa
     } else {
         errno_t rc = 0;
         rc = memcpy_s(localRes, sizeof(PurgeMsgRes), &rbMsg->res, sizeof(PurgeMsgRes));
-        securec_check_c(rc, "\0", "\0");
+        securec_check(rc, "\0", "\0");
     }
     if (reset && RbMsgIsDone(rbMsg->res.status)) {
         rbMsg->id = RB_INVALID_MSGID;
@@ -315,7 +315,7 @@ static inline void RbMsgSetStatistics(uint64 id, PurgeMsgRes *localRes)
     rbMsg->res.undefinedNum += localRes->undefinedNum;
     if (localRes->errMsg[0] != '\0') {
         rc = strncpy_s(rbMsg->res.errMsg, RB_MAX_ERRMSG_SIZE, localRes->errMsg, RB_MAX_ERRMSG_SIZE - 1);
-        securec_check_c(rc, "\0", "\0");
+        securec_check(rc, "\0", "\0");
     }
     SpinLockRelease(&rbMsg->mutex);
 }
@@ -329,8 +329,9 @@ static inline void RbMsgSetStatusErr(uint32 id, PurgeMsgStatus status,
     SpinLockAcquire(&rbMsg->mutex);
     rbMsg->res.status = status;
     rbMsg->res.errCode = errCode;
-    rc = strcpy_s(rbMsg->res.errMsg, RB_MAX_ERRMSG_SIZE, errMsg);
-    securec_check_c(rc, "\0", "\0");
+    rc = strncpy_s(rbMsg->res.errMsg, RB_MAX_ERRMSG_SIZE, errMsg, RB_MAX_ERRMSG_SIZE - 1);
+    securec_check(rc, "\0", "\0");
+
     if (setLatch) {
         SetLatch(&rbMsg->latch);
     }
@@ -344,8 +345,9 @@ static inline void RbMsgSetStatusErrLocal(PurgeMsgRes *localRes, PurgeMsgStatus 
 
     localRes->status = status;
     localRes->errCode = errCode;
-    rc = strcpy_s(localRes->errMsg, RB_MAX_ERRMSG_SIZE, errMsg);
-    securec_check_c(rc, "\0", "\0");
+    rc = strncpy_s(localRes->errMsg, RB_MAX_ERRMSG_SIZE, errMsg, RB_MAX_ERRMSG_SIZE - 1);
+    securec_check(rc, "\0", "\0");
+
 }
 
 extern void RbCltPurgeSchema(Oid nspId);
