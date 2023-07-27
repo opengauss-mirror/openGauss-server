@@ -1556,6 +1556,7 @@ void DropDatanodeStatement(const char* stmt_name)
         (void*)hash_search(u_sess->pcache_cxt.datanode_queries, entry->stmt_name, HASH_REMOVE, NULL);
         if (!ENABLE_CN_GPC)
             ExecCloseRemoteStatement(stmt_name, nodelist);
+        list_free_ext(nodelist);
     }
 }
 
