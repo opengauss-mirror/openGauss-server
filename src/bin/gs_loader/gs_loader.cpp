@@ -127,7 +127,7 @@ int main(int argc, char **argv)
     // get the exe path for get shell script
     char abs_path[PATH_SIZE] = {'\0'};
     int cnt = readlink("/proc/self/exe", abs_path, PATH_SIZE);
-    if (cnt <= -1 || cnt >= PATH_SIZE) {
+    if (cnt == -1 || cnt >= PATH_SIZE) {
         std::cout << "ERROR: can not find gs_loader path" << std::endl;
         return 0;
     }
