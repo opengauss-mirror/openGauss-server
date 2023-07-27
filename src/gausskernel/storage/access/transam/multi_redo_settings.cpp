@@ -148,6 +148,7 @@ void ParseBindCpuInfo(RedoCpuBindControl *control)
     int bindNum = 0;
     if (strncmp("nobind", ptoken, strlen("nobind")) == 0) {
         control->bindType = REDO_NO_CPU_BIND;
+        pfree_ext(ptoken);
         return;
     } else if (strncmp("cpubind", ptoken, strlen("cpubind")) == 0) {
         control->bindType = REDO_CPU_BIND;
@@ -169,6 +170,7 @@ void ParseBindCpuInfo(RedoCpuBindControl *control)
                       "2. The process has been bind to other CPUs and there is no intersection,"
                       "use taskset -pc to check process CPU bind info.\n")));
     }
+    pfree_ext(ptoken);
 }
 
 bool CpuCanConfiged(RedoCpuBindControl *contrl, int cpuid, int numaid)
@@ -193,6 +195,7 @@ void ConfigBindCpuInfo(RedoCpuBindControl *contrl)
     ThreadPoolControler::GetActiveCpu(sysNumaCpuIdList, &sysNumaCpuIdNum);
 
     if (sysNumaCpuIdNum == 0) {
+        pfree_ext(sysNumaCpuIdList);
         return;
     }
 
