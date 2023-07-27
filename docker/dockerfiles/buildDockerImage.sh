@@ -67,16 +67,16 @@ check_docker_version() {
   echo "Checking Docker version."
   DOCKER_VERSION=$(docker version --format '{{.Server.Version | printf "%.5s" }}'|| exit 0)
   # Remove dot in Docker version
-  DOCKER_VERSION=${DOCKER_VERSION//./}
+  docker_version_major=$(echo $DOCKER_VERSION | awk -F . '{print $1}')
 
   if [ -z "$DOCKER_VERSION" ]; then
     # docker could be aliased to podman and errored out (https://github.com/containers/libpod/pull/4608)
-    checkPodmanVersion
-  elif [ "$DOCKER_VERSION" -lt "${MIN_DOCKER_VERSION//./}" ]; then
-    echo "Docker version is below the minimum required version $MIN_DOCKER_VERSION"
+    echo "Please check if docker is installed." && exit 1
+  elif [ "$docker_version_major" -lt "${MIN_DOCKER_VERSION_MAJOR}" ]; then
+    echo "Docker version is below the minimum required version $MIN_DOCKER_VERSION_MAJOR.$MIN_DOCKER_VERSION_MINOR"
     echo "Please upgrade your Docker installation to proceed."
     exit 1;
-  fi;
+  fi
 }
 
 ##############
@@ -87,7 +87,8 @@ check_docker_version() {
 VERSION="5.0.0"
 SKIPCHECKSUM=0
 DOCKEROPS=""
-MIN_DOCKER_VERSION="17.09"
+MIN_DOCKER_VERSION_MAJOR="17"
+MIN_DOCKER_VERSION_MINOR="09"
 arch=$(case $(uname -m) in i386)   echo "386" ;; i686)   echo "386" ;; x86_64) echo "amd64";; aarch64)echo "arm64";; esac)
 if [ "${arch}" = "amd64" ]; then
     DOCKERFILE="dockerfile_amd"
@@ -128,12 +129,6 @@ done
 
 check_docker_version
 
-
-
-# Which Dockerfile should be used?
-if [ "$VERSION" == "12.1.0.2" ] || [ "$VERSION" == "11.2.0.2" ] || [ "$VERSION" == "18.4.0" ]; then
-  DOCKERFILE="$DOCKERFILE"
-fi;
 
 # openGauss Database Image Name
 IMAGE_NAME="opengauss:$VERSION"
