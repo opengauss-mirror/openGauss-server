@@ -123,26 +123,10 @@ SHLIB_EXPORTS = exports.txt
 ifeq "$(ENABLE_CE)" "1"
 SUBDIRS = frontend_parser client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher
 encryption_hooks_files := $(shell find client_logic_hooks/encryption_hooks -name '*.cpp' | sort)
-cmk_entity_manager_hooks_files := $(shell find client_logic_hooks/cmk_entity_manager_hooks -maxdepth 1 -name '*.cpp' | sort)
-
+key_files := $(shell find $(top_builddir)/src/gausskernel/security/keymgr -name '*.cpp' | sort)
 OBJS += $(encryption_hooks_files:.cpp=.o)
-OBJS += $(cmk_entity_manager_hooks_files:.cpp=.o)
+OBJS += $(key_files:.cpp=.o)
 endif
-
-ifneq ($(enable_ut), yes)
-ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-ifneq ($(enable_lite_mode), yes)
-  OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_local_kms.o, $(OBJS))
-else
-  OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.o, $(OBJS))
-  OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_gs_ktool.o, $(OBJS))
-endif
-else
-OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.o, $(OBJS))
-OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_gs_ktool.o, $(OBJS))
-endif
-endif
-
 
 files:= $(foreach DIR,$(SUBDIRS),  $(wildcard $(DIR)/*.cpp) )
 ifneq "$(ENABLE_CE)" "1"
@@ -176,7 +160,6 @@ libpq_ce:
 	@- if ! test -e libpq_ce; then mkdir libpq_ce; fi
 
 endif
-
 
 frontend_parser/gram.hpp:
 	$(MAKE) -C frontend_parser gram.hpp

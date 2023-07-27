@@ -32,8 +32,8 @@
 #include "column_hook_executor.h"
 #include "abstract_encryption_hook.h"
 #include "encryption_global_hook_executor.h"
-#include "encrypt_decrypt.h"
-#include "aead_aes_hamc_enc_key.h"
+#include "keymgr/encrypt/security_encrypt_decrypt.h"
+#include "keymgr/encrypt/security_aead_aes_hamc_enc_key.h"
 #include "postgres_ext.h"
 #include "client_logic_processor/values_processor.h"
 
