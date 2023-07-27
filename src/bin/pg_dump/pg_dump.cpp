@@ -3758,6 +3758,7 @@ static void dumpClientGlobalKeys(Archive *fout, const Oid nspoid, const char *ns
                 rc = memcpy_s(algorithm, MAX_CLIENT_KEYS_PARAM_SIZE, unescaped_data, unescapedDataSize);
                 securec_check_c(rc, "", "");
             }
+            PQfreemem(unescaped_data);
         } 
         appendPQExpBuffer(createClientGlobalKeysQry,
             "CREATE CLIENT MASTER KEY %s.%s ", nspname, fmtId(global_key_name));
@@ -3897,6 +3898,7 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
                 rc = memcpy_s(key_algorithm_str, MAX_CLIENT_KEYS_PARAM_SIZE, unescaped_data, unescapedDataSize);
             }
             securec_check_c(rc, "", "");
+            PQfreemem(unescaped_data);
         } 
 
         unsigned char *deprocessed_cek = NULL;
@@ -3939,6 +3941,7 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
                 rc = memcpy_s(algorithm, MAX_CLIENT_KEYS_PARAM_SIZE, unescaped_data, unescapedDataSize);
                 securec_check_c(rc, "", "");
             }
+            PQfreemem(unescaped_data);
         }
         appendPQExpBuffer(createColumnEncryptionKeysQry,
             "CREATE COLUMN ENCRYPTION KEY %s.%s ", nspname, column_key_name);
