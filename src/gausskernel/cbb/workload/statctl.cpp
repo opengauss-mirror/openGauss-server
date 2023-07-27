@@ -1866,7 +1866,7 @@ void WLMReadjustUserSpaceByQuery(const char* username, List* database_name_list)
         errno_t rc = snprintf_s(conninfo,
             sizeof(conninfo),
             sizeof(conninfo) - 1,
-            "dbname=%s port=%d application_name='statctl'",
+            "dbname=%s port=%d application_name='statctl' connect_timeout=5",
             lfirst(cell),
             g_instance.attr.attr_network.PostPortNumber);
         securec_check_ss(rc, "\0", "\0");
