@@ -12937,7 +12937,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
 
         XLByteToSeg(keep, slotSegNo);
 
-        if (slotSegNo <= 0) {
+        if (slotSegNo == 0) {
             /* segno = 1 show all file should be keep */
             segno = 1;
             ereport(LOG, (errmsg("keep all the xlog segments, because the minimal replication slot segno "
@@ -12955,7 +12955,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
         XLogSegNo slotSegNo;
         XLByteToSeg(xlogcopystartptr, slotSegNo);
 
-        if (slotSegNo <= 0) {
+        if (slotSegNo == 0) {
             /* segno = 1 show all file should be keep */
             segno = 1;
             ereport(LOG, (errmsg("keep all the xlog segments, because there is a full-build task in the backend, "

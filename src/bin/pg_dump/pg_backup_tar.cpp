@@ -555,7 +555,7 @@ static size_t tarRead(void* buf, size_t len, TAR_MEMBER* th)
     if (len > (size_t)(th->fileLen - th->pos))
         len = th->fileLen - th->pos;
 
-    if (len <= 0)
+    if (len == 0)
         return 0;
 
     res = _tarReadRaw(th->AH, buf, len, th, NULL);

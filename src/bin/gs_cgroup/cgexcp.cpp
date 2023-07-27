@@ -54,7 +54,7 @@
  */
 static int cgexcp_skewpercent_is_invalid(const except_data_t* except)
 {
-    if ((except->skewpercent > 0 && except->qualitime > 0) || (except->skewpercent <= 0 && except->qualitime <= 0))
+    if ((except->skewpercent > 0 && except->qualitime > 0) || (except->skewpercent == 0 && except->qualitime == 0))
         return 0;
 
     return 1;

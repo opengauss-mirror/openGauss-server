@@ -1699,7 +1699,7 @@ static int stmt_compare_wait_events(const void *a, const void *b)
 void decode_stmt_wait_events(StringInfo resultBuf, const char *details,
     uint32 total_len, bool *is_valid_record, bool pretty)
 {
-    if (total_len <= 0) {
+    if (total_len == 0) {
         *is_valid_record = false;
         return;
     }
@@ -1771,7 +1771,7 @@ void decode_stmt_wait_events(StringInfo resultBuf, const char *details,
 void decode_statement_detail(StringInfo resultBuf, const char *details,
     uint32 total_len, bool *is_valid_record, bool pretty)
 {
-    if (total_len <= 0) {
+    if (total_len == 0) {
         *is_valid_record = false;
         return;
     }

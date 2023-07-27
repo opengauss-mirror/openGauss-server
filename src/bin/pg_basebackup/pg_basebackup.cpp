@@ -950,7 +950,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
             /*
              * All files are padded up to 512 bytes
              */
-            if (current_len_left < 0 || current_len_left > INT_MAX - 511) {
+            if (current_len_left > INT_MAX - 511) {
                 pg_log(stderr, _("%s: the file '%s' is too big or file size is invalid\n"), progname, copybuf);
                 disconnect_and_exit(1);
             }

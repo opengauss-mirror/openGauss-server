@@ -327,7 +327,7 @@ static void gcGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid fore
 
     gcfdw_fetch_remote_table_info(pgxc_handle, fpinfo->table, remote_info, PGFDW_GET_TABLE_INFO);
     Assert(remote_info->snapsize > 0);
-    if (remote_info->snapsize <= 0) {
+    if (remote_info->snapsize == 0) {
         ereport(ERROR,
             (errcode(ERRCODE_NO_DATA_FOUND),
                 errmsg("cooperation analysis: not receive the snapshot from remote cluster")));

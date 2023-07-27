@@ -805,7 +805,7 @@ static Node* create_udf_function(ParseState *pstate, Var* var, Oid funcid, maski
     Oid rescollid = 100; /* OID of collation, or InvalidOid if none */
     PG_TRY();
     {
-        if (funcid <= 0) {
+        if (funcid == 0) {
             return NULL;
         }
         Oid rettype = var->vartype;
@@ -1393,7 +1393,7 @@ bool handle_masking(List *targetList, ParseState *pstate, const policy_set *poli
         /* Shuffle masking columns can only select directly with out other operations */
         parser_target_entry(pstate, old_tle, policy_ids, &masking_result, rtable, true);
     }
-    if (masking_result.size() <= 0) {
+    if (masking_result.size() == 0) {
         return false;
     }
     if (strlen(t_thrd.security_policy_cxt.prepare_stmt_name) > 0) {

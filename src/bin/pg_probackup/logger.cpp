@@ -540,7 +540,7 @@ logfile_getname(const char *format, time_t timestamp)
 #ifdef WIN32
     if (pg_strftime(filename + len, MAXPGPATH - len, format, tm) <= 0)
 #else
-    if (strftime(filename + len, MAXPGPATH - len, format, tm) <= 0)
+    if (strftime(filename + len, MAXPGPATH - len, format, tm) == 0)
 #endif
         elog_stderr(ERROR, "strftime(%s) failed: %s", format, strerror(errno));
 

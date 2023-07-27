@@ -303,7 +303,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     if (enable_pbe_gpc) {
         plansource->gpc.status.ShareInit();
     } else if (ENABLE_CN_GPC && enable_spi_gpc) {
-        Assert(u_sess->SPI_cxt._current->plan_id >= 0 && u_sess->SPI_cxt._current->visit_id >= 0);
+        Assert(u_sess->SPI_cxt._current->plan_id >= 0);
         plansource->gpc.status.ShareInit();
         plansource->spi_signature.spi_key = u_sess->SPI_cxt._current->spi_hash_key;
         plansource->spi_signature.func_oid = u_sess->SPI_cxt._current->func_oid;

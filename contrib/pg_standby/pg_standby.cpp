@@ -326,7 +326,7 @@ static bool SetWALFileNameForCleanup(void)
 
     if (keepfiles > 0) {
         sscanf(nextWALFileName, "%08X%08X%08X", &tli, &log, &seg);
-        if (tli > 0 && log >= 0 && seg > 0) {
+        if (tli > 0 && seg > 0) {
             log_diff = keepfiles / MaxSegmentsPerLogFile;
             seg_diff = keepfiles % MaxSegmentsPerLogFile;
             if (seg_diff > seg) {

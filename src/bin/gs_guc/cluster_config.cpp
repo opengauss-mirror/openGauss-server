@@ -684,7 +684,7 @@ int init_gauss_cluster_config(void)
         return 1;
     }
 
-    if (g_nodeHeader.node <= 0) {
+    if (g_nodeHeader.node == 0) {
         write_stderr("ERROR: Invalid cluster_staic_config file,"
                      " curerent node id is:%d .\n",
             (int32)g_nodeHeader.node);
