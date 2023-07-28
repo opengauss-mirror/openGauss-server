@@ -331,6 +331,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_tde                                       | bool    |      |           | 
  enable_thread_pool                               | bool    |      |           | 
  enable_tidscan                                   | bool    |      |           | 
+ enable_union_all_subquery_orderby                | bool    |      |           | 
  enable_upgrade_merge_lock_mode                   | bool    |      |           | 
  enable_user_metric_persistent                    | bool    |      |           | 
  enable_ustore                                    | bool    |      |           | 
