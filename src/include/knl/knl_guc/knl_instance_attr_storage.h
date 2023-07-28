@@ -211,6 +211,10 @@ typedef struct knl_instance_attr_storage {
 #endif
     bool enable_huge_pages;
     int huge_page_size;
+    bool parallel_recovery_cost_record;
+    bool enable_batch_dispatch;
+    int parallel_recovery_timeout;
+    int parallel_recovery_batch;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

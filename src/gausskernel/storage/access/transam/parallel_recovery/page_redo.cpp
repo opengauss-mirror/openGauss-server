@@ -556,12 +556,58 @@ static void ApplyRecordWithoutSyncUndoLog(RedoItem *item)
     }
 }
 
+/*
+ * If woker do a page vacuum redo, it should wait if it's operator
+ * may cause snapshot invalid.
+ */
+static void wait_valid_snapshot(XLogReaderState *record)
+{
+    RmgrId rm_id = XLogRecGetRmid(record);
+    uint8 info = (XLogRecGetInfo(record) & ~XLR_INFO_MASK) & XLOG_HEAP_OPMASK;
+    xl_heap_clean* xlrec = NULL;
+    uint64 blockcnt = 0;
+
+    if(rm_id != RM_HEAP2_ID || info != XLOG_HEAP2_CLEAN)
+        return;
+
+    xlrec = (xl_heap_clean*)XLogRecGetData(record);
+
+    /*
+     * If xlrec->latestRemovedXid <= t_thrd.xact_cxt.ShmemVariableCache->standbyXmin then
+     * it will not incluence current snapshot, so it can exec redo.
+     */
+    while(t_thrd.xact_cxt.ShmemVariableCache->standbyXmin < xlrec->latestRemovedXid &&
+                                                            !in_full_sync_dispatch()) {
+        /*
+         * Normaly, it need wait for startup thread handle xact wal records, but there be a case
+         * that if a very old xid commit and no new xact comes then xlrec->latestRemovedXid >
+         * t_thrd.xact_cxt.ShmemVariableCache->standbyXmin all the time.
+         * 
+         * So if we do not have new xact work in startup thread, it avoid wait.
+         */
+        if (getTransedTxnLsn(g_dispatcher->txnWorker) < record->EndRecPtr)
+            return;
+        pg_usleep(10);
+        blockcnt++;
+        if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
+            XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
+            ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                              errmsg("[REDO_LOG_TRACE]wait_valid_snapshot:recordEndLsn:%lu, blockcnt:%lu, "
+                                     "Workerid:%u, LatestReplayedRecPtr:%lu",
+                                     record->EndRecPtr, blockcnt, g_redoWorker->id, LatestReplayedRecPtr)));
+        }
+        RedoInterruptCallBack();
+    }
+}
+
 /* Run from the worker thread. */
 static void ApplySinglePageRecord(RedoItem *item, bool replayUndo)
 {
     XLogReaderState *record = &item->record;
     long readbufcountbefore = u_sess->instr_cxt.pg_buffer_usage->local_blks_read;
     MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
+
+    wait_valid_snapshot(record);
     ApplyRedoRecord(record);
     (void)MemoryContextSwitchTo(oldCtx);
     record->readblocks = u_sess->instr_cxt.pg_buffer_usage->local_blks_read - readbufcountbefore;
