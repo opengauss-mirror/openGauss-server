@@ -1040,6 +1040,9 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
 
             break;
         }
+        case AUTH_REQ_PASSWORD:
+            pwd_to_send = password;
+            break;
         /*
          * Notice: Authentication of send password directly are not currently supported.
          * need to: We remove the branch of AUTH_REQ_PASSWORD here for both implication and
@@ -1208,6 +1211,7 @@ int pg_fe_sendauth(AuthRequest areq, PGconn* conn)
 
         case AUTH_REQ_MD5:
         case AUTH_REQ_MD5_SHA256:
+        case AUTH_REQ_PASSWORD:
         case AUTH_REQ_SHA256:
 #ifdef ENABLE_LITE_MODE
         case AUTH_REQ_SHA256_RFC:
