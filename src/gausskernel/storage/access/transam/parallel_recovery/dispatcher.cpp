@@ -96,7 +96,6 @@ LogDispatcher *g_dispatcher = NULL;
 static const int XLOG_INFO_SHIFT_SIZE = 4; /* xlog info flag shift size */
 
 static const int32 MAX_PENDING = 1;
-static const int32 MAX_PENDING_STANDBY = 1;
 static const int32 ITEM_QUQUE_SIZE_RATIO = 5;
 
 static const uint32 EXIT_WAIT_DELAY = 100; /* 100 us */
@@ -167,6 +166,7 @@ static bool DispatchUndoActionRecord(XLogReaderState *record, List *expectedTLIs
 static bool DispatchRollbackFinishRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static uint32 GetUndoSpaceWorkerId(int zid);
 static void HandleStartupProcInterruptsForParallelRedo(void);
+static bool timeoutForDispatch(void);
 
 RedoWaitInfo redo_get_io_event(int32 event_id);
 
@@ -384,16 +384,14 @@ static LogDispatcher *CreateDispatcher()
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
     g_instance.comm_cxt.predo_cxt.state = REDO_STARTING_BEGIN;
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
-    if (OnHotStandBy())
-        newDispatcher->pendingMax = MAX_PENDING_STANDBY;
-    else
-        newDispatcher->pendingMax = MAX_PENDING; /* one batch, one recorder */
+
     newDispatcher->totalCostTime = 0;
     newDispatcher->txnCostTime = 0;
     newDispatcher->pprCostTime = 0;
     newDispatcher->dispatchReadRecPtr = 0;
     newDispatcher->dispatchEndRecPtr = 0;
     newDispatcher->startupTimeCost = t_thrd.xlog_cxt.timeCost;
+    newDispatcher->full_sync_dispatch = !g_instance.attr.attr_storage.enable_batch_dispatch;
     return newDispatcher;
 }
 
@@ -560,6 +558,22 @@ static bool RmgrGistRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint
     return false;
 }
 
+static bool timeoutForDispatch(void)
+{
+    int         parallel_recovery_timeout = 0;
+    TimestampTz current_time = 0;
+    TimestampTz dispatch_limit_time = 0;
+
+    current_time = GetCurrentTimestamp();
+    
+    parallel_recovery_timeout = g_instance.attr.attr_storage.parallel_recovery_timeout;
+    dispatch_limit_time = TimestampTzPlusMilliseconds(g_dispatcher->lastDispatchTime,
+                                                            parallel_recovery_timeout);
+    if(current_time >= dispatch_limit_time)
+        return true;
+    return false;
+}
+
 void CheckDispatchCount(XLogRecPtr lastCheckLsn)
 {
     uint64 maxCount = 0;
@@ -592,6 +606,8 @@ void CheckDispatchCount(XLogRecPtr lastCheckLsn)
     }
 }
 
+
+
 /* Run from the dispatcher thread. */
 void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
@@ -600,6 +616,8 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
     uint32 indexid = (uint32)-1;
     uint32 rmid = XLogRecGetRmid(record);
     uint32 term = XLogRecGetTerm(record);
+    int dispatch_batch = 0;
+
     if (term > g_instance.comm_cxt.localinfo_cxt.term_from_xlog) {
         g_instance.comm_cxt.localinfo_cxt.term_from_xlog = term;
     }
@@ -629,9 +647,11 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
         g_dispatcher->dispatchReadRecPtr = record->ReadRecPtr;
         g_dispatcher->dispatchEndRecPtr = record->EndRecPtr;
 
+        dispatch_batch = g_instance.attr.attr_storage.enable_batch_dispatch ?
+                                            g_instance.attr.attr_storage.parallel_recovery_batch : 1;
         if (isNeedFullSync)
             ProcessPendingRecords(true);
-        else if (++g_dispatcher->pendingCount >= g_dispatcher->pendingMax)
+        else if (++g_dispatcher->pendingCount >= dispatch_batch || timeoutForDispatch())
             ProcessPendingRecords();
 
         if (fatalerror == true) {
@@ -1491,6 +1511,9 @@ static bool StandbyWillChangeStandbyState(XLogReaderState *record)
 /*        : false not wait for other workers  */
 void ProcessPendingRecords(bool fullSync)
 {
+    if(fullSync)
+        g_dispatcher->full_sync_dispatch = true;
+    g_dispatcher->lastDispatchTime = GetCurrentTimestamp();
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
             uint64 blockcnt = 0;
@@ -1516,6 +1539,8 @@ void ProcessPendingRecords(bool fullSync)
         ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, fullSync);
         g_dispatcher->pendingCount = 0;
     }
+    if(fullSync)
+        g_dispatcher->full_sync_dispatch = false;
 }
 
 /* Run from the dispatcher thread. */
@@ -1524,7 +1549,10 @@ void ProcessPendingRecords(bool fullSync)
 void ProcessTrxnRecords(bool fullSync)
 {
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
-        ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, fullSync);
+        if (g_instance.attr.attr_storage.enable_batch_dispatch)
+            ProcessPendingRecords(fullSync);
+        else
+            ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, fullSync);
 
         if (fullSync && (IsTxnWorkerIdle(g_dispatcher->txnWorker))) {
             /* notify pageworker sleep long time */
@@ -1980,7 +2008,7 @@ void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, 
     knl_parallel_redo_state state = g_instance.comm_cxt.predo_cxt.state;
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
 
-    if (state != REDO_IN_PROGRESS) {
+    if (state != REDO_IN_PROGRESS || !g_instance.attr.attr_storage.parallel_recovery_cost_record) {
         *realNum = 0;
         return;
     }
@@ -2501,4 +2529,12 @@ static void HandleStartupProcInterruptsForParallelRedo(void)
     if (IsUnderPostmaster && !PostmasterIsAlive())
         gs_thread_exit(1);
 }
+
+bool in_full_sync_dispatch(void)
+{
+    if (!g_dispatcher || !g_instance.attr.attr_storage.enable_batch_dispatch)
+        return true;
+    return g_dispatcher->full_sync_dispatch;
+}
+
 }

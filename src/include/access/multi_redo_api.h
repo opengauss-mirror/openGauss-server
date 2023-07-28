@@ -127,18 +127,27 @@ void ResetXLogStatics();
 
 static inline void GetRedoStartTime(RedoTimeCost &cost)
 {
+    if(!g_instance.attr.attr_storage.parallel_recovery_cost_record)
+        return;
     cost.startTime = GetCurrentTimestamp();
 }
 
 static inline void CountRedoTime(RedoTimeCost &cost)
 {
+    if(!g_instance.attr.attr_storage.parallel_recovery_cost_record)
+        return;
     cost.totalDuration += GetCurrentTimestamp() - cost.startTime;
     cost.counter += 1;
 }
 
 static inline void CountAndGetRedoTime(RedoTimeCost &curCost, RedoTimeCost &nextCost)
 {
-    uint64 curTime = GetCurrentTimestamp();
+    uint64 curTime = 0;
+
+    if(!g_instance.attr.attr_storage.parallel_recovery_cost_record)
+        return;
+
+    curTime = GetCurrentTimestamp();
     curCost.totalDuration += curTime - curCost.startTime;
     curCost.counter += 1;
     nextCost.startTime = curTime;

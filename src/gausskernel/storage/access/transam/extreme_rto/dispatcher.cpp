@@ -96,7 +96,6 @@ LogDispatcher *g_dispatcher = NULL;
 static const int XLOG_INFO_SHIFT_SIZE = 4; /* xlog info flag shift size */
 
 static const int32 MAX_PENDING = 1;
-static const int32 MAX_PENDING_STANDBY = 1;
 static const int32 ITEM_QUQUE_SIZE_RATIO = 5;
 
 static const uint32 EXIT_WAIT_DELAY = 100; /* 100 us */
@@ -2139,7 +2138,7 @@ void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, 
     knl_parallel_redo_state state = g_instance.comm_cxt.predo_cxt.state;
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
 
-    if (state != REDO_IN_PROGRESS) {
+    if (state != REDO_IN_PROGRESS || !g_instance.attr.attr_storage.parallel_recovery_cost_record) {
         *realNum = 0;
         return;
     }
