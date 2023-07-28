@@ -238,7 +238,7 @@ static relopt_int intRelOpts[] = {
         0, 1, 32
     },
     {{ "compress_level", "Level of page compression.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, -31, 31},
-    {{ "compresstype", "compress type (none, pglz or zstd or pgzstd).", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, 0, 3},
+    {{ "compresstype", "compress type (none, pglz or zstd. pgzstd isn't available now).", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, 0, 2},
     {{ "compress_chunk_size", "Size of chunk to store compressed page.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
      BLCKSZ / 2,
      BLCKSZ / 16,
