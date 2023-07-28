@@ -3940,6 +3940,8 @@ void PushOverrideSearchPath(OverrideSearchPath* newpath, bool inProcedure)
                 break;
             }
         }
+        pfree_ext(rawname);
+        list_free_ext(namelist);
     }
 
     /*
