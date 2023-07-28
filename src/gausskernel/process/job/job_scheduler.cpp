@@ -520,7 +520,7 @@ static void jobschd_sighup_handler(SIGNAL_ARGS)
 static void jobschd_sigusr2_handler(SIGNAL_ARGS)
 {
     int save_errno = errno;
-    elog(LOG, "Job scheduler received sigusr2 when job worker startup failed.");
+    write_stderr("Job scheduler received sigusr2 when job worker startup failed.");
 
     t_thrd.job_cxt.got_SIGUSR2 = true;
     if (t_thrd.proc) {
