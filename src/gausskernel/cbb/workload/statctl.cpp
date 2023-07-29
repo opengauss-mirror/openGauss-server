@@ -1182,6 +1182,8 @@ void WLMCleanUpNodeInternal(const Qid* qid)
 
         /* No threads already, remove the info from the hash table. */
         if (info->threadCount <= 0) {
+            pfree_ext(info->qband);
+            pfree_ext(info->statement);
             hash_search(g_instance.wlm_cxt->stat_manager.collect_info_hashtbl, qid, HASH_REMOVE, NULL);
         }
     }
@@ -4190,8 +4192,10 @@ bool WLMInsertCollectInfoIntoHashTable(void)
 
         USE_MEMORY_CONTEXT(g_instance.wlm_cxt->query_resource_track_mcxt);
         if (u_sess->attr.attr_resource.query_band) {
+            pfree_ext(pDNodeInfo->qband);
             pDNodeInfo->qband = pstrdup(u_sess->attr.attr_resource.query_band);
         }
+        pfree_ext(pDNodeInfo->statement);
 
         pDNodeInfo->statement = pstrdup(t_thrd.wlm_cxt.collect_info->sdetail.statement);
 
