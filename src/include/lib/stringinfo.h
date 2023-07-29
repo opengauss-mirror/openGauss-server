@@ -87,7 +87,12 @@ extern void FreeStringInfo(StringInfo str);
  * Clears the current content of the StringInfo, if any. The
  * StringInfo remains valid.
  */
-extern void resetStringInfo(StringInfo str);
+inline void resetStringInfo(StringInfo str)
+{
+    str->data[0] = '\0';
+    str->len = 0;
+    str->cursor = 0;
+}
 
 /* ------------------------
  * appendStringInfo
@@ -166,9 +171,19 @@ void enlargeBufferSize(int needed, int len, size_t* maxlen, char** data);
 
 /* ------------------------
  * enlargeStringInfo
- * Make sure a StringInfo's buffer can hold at least 'needed' more bytes.
+ *
+ * Make sure there is enough space for StringInfo
+ *
+ * External callers usually need not concern themselves with this, since
+ * all stringinfo.c routines do it automatically.  However, if a caller
+ * knows that a StringInfo will eventually become X bytes large, it
+ * can save some palloc overhead by enlarging the buffer before starting
+ * to store data in it.
  */
-extern void enlargeStringInfo(StringInfo str, int needed);
+inline void enlargeStringInfo(StringInfo str, int needed)
+{
+    enlargeBuffer(needed, str->len, &str->maxlen, &str->data);
+}
 
 /*
  * The following function is used to request the use of more than 1GB of memory
