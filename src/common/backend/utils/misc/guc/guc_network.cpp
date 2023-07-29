@@ -1183,7 +1183,7 @@ static bool check_ssl(bool* newval, void** extra, GucSource source)
 static bool check_pooler_maximum_idle_time(int* newval, void** extra, GucSource source)
 {
     if (*newval < 0) {
-        ereport(ERROR, (errmsg("GaussDB can't support idle time less than 0 or more than %d seconds.", INT_MAX)));
+        GUC_check_errmsg("GaussDB can't support idle time less than 0 or more than %d seconds.", INT_MAX);
         return false;
     }
 
