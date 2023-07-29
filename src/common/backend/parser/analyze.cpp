@@ -2630,7 +2630,7 @@ static bool shouldTransformStartWithStmt(ParseState* pstate, SelectStmt* stmt, Q
      * Back up the current select statement to be restored after query re-writing
      * for cases of START WITH CONNNECT BY under CREATE TABLE AS.
      */
-    selectQuery->sql_statement = fetchSelectStmtFromCTAS((char*)pstate->p_sourcetext);
+    selectQuery->sql_statement = fetchSelectStmtFromCTAS((char*)pstrdup(pstate->p_sourcetext));
 
     return true;
 }
