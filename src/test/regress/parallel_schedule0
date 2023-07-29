@@ -1056,8 +1056,8 @@ test: describe_index_with_tablespace
 test: sytcomp_del_upt4orderby
 test: aioptimizer
 test: aioptimizer_small
-test: pgfincore
-test: rename_table
+test: pgfincore 
+test: rename_table test_plsql_core
 
 # debug instrument
 test: test_debug5
