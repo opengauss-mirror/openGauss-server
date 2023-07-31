@@ -123,6 +123,8 @@ BuildErrorCode libpqGetParameters(void)
     }
     str2 = run_simple_query("SHOW enable_incremental_checkpoint");
     if (str2 == NULL) {
+        pg_free(str);
+        str = NULL;
         return BUILD_FATAL;
     }
     if (strcmp(str, "on") != 0 && strcmp(str2, "on") != 0) {
