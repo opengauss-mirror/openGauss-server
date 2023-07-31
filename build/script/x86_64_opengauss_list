@@ -47,6 +47,7 @@
 ./bin/gs_plan_simulator.sh
 ./bin/pg_xlogdump
 ./bin/pagehack
+./bin/assessment_database
 ./etc/kerberos/kadm5.acl  
 ./etc/kerberos/kdc.conf  
 ./etc/kerberos/krb5.conf  
@@ -76,6 +77,8 @@
 ./share/postgresql/extension/dolphin--2.0--1.2.sql
 ./share/postgresql/extension/dolphin--1.2--2.0.sql
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
+./share/postgresql/extension/assessment--1.0.sql
+./share/postgresql/extension/assessment.control
 ./share/postgresql/extension/file_fdw--1.0.sql
 ./share/postgresql/extension/plpgsql.control
 ./share/postgresql/extension/dist_fdw.control
@@ -770,6 +773,7 @@
 ./lib/postgresql/postgres_fdw.so
 ./lib/postgresql/dblink.so
 ./lib/postgresql/pgoutput.so
+./lib/postgresql/assessment.so
 ./lib/libpljava.so
 ./lib/libpq.a
 ./lib/libpq.so
