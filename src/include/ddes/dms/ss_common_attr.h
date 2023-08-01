@@ -186,6 +186,8 @@
 #define SS_ACQUIRE_LOCK_DO_NOT_WAIT 0
 #define SS_ACQUIRE_LOCK_RETRY_INTERVAL (50)   // 50ms
 
+#define DMS_MSG_MAX_WAIT_TIME (10 * 1000) // 10s
+
 typedef enum SSBroadcastOp {
     BCAST_GET_XMIN = 0,
     BCAST_CANCEL_TRX_FOR_SWITCHOVER,
