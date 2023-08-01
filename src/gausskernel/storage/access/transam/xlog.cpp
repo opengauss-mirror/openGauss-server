@@ -8807,11 +8807,11 @@ void StartupXLOG(void)
         SSReadControlFile(REFORM_CTRL_PAGE);
         if (SS_CLUSTER_ONDEMAND_NOT_NORAML && SS_PRIMARY_MODE) {
             if (SS_STANDBY_PROMOTING) {
-                ereport(FATAL, (errmsg("Do not allow switchover if on-demand recovery is not finish")));
+                ereport(FATAL, (errmsg("[On-demand] Do not allow switchover if ondemand recovery is not finish")));
             }
             Assert(g_instance.dms_cxt.SSReformerControl.recoveryInstId != INVALID_INSTANCEID);
             src_id = g_instance.dms_cxt.SSReformerControl.recoveryInstId;
-            ereport(LOG, (errmsg("[on-demand]: On-demand recovery do not finish in last reform, "
+            ereport(LOG, (errmsg("[On-demand]: Ondemand recovery do not finish in last reform, "
                                  "reading control file of original primary:%d", src_id)));
             SSOndemandRecoveryExitNormal = false;
         } else {
@@ -9492,6 +9492,8 @@ void StartupXLOG(void)
             SetOndemandExtremeRtoMode();
             ereport(LOG, (errmsg("[On-demand] replayed in extreme rto ondemand recovery mode")));
         } else {
+            g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
+            SetExtremeRtoMode();
             ereport(LOG, (errmsg("[On-demand] do not allow replay in ondemand recovery if last ondemand recovery "
                 "crash, replayed in extreme rto recovery mode")));
         }
@@ -10516,7 +10518,7 @@ void StartupXLOG(void)
 
     if (SS_IN_ONDEMAND_RECOVERY) {
         /* We wait at here */
-        ereport(LOG, (errmsg("[SS] On-demand redo, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT
+        ereport(LOG, (errmsg("[On-demand] ondemand redo, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT
                              ", recentLocalXmin: " XID_FMT ", recentGlobalXmin: %lu, PendingPreparedXacts: %d"
                              ", NextCommitSeqNo: %lu, cutoff_csn_min: %lu.",
                              NextXidAfterReovery, t_thrd.xact_cxt.ShmemVariableCache->startupMaxXid,
@@ -10537,7 +10539,7 @@ void StartupXLOG(void)
         LWLockRelease(ControlFileLock);
         SSRecheckBufferPool();
         ereport(LOG, (errmodule(MOD_DMS),
-            errmsg("[SS][on demand recovery] finished full checkpoint and update control file")));
+            errmsg("[On-demand] finished full checkpoint and update control file")));
 
         NotifyGscRecoveryFinished();
         if (ENABLE_INCRE_CKPT) {
@@ -11566,6 +11568,9 @@ void CreateCheckPoint(int flags)
         return;
     } else if (g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status == NOT_ALLOW_CKPT) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do not do CreateCheckpoint during failover")));
+        return;
+    } else if (SS_IN_ONDEMAND_RECOVERY && !SS_ONDEMAND_REDO_DONE) {
+        /* do not allow ckpt in ondemand recovery if xlog do not redo done, for valid ckpt loc in control file */
         return;
     }
 
