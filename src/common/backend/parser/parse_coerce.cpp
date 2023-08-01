@@ -3137,7 +3137,7 @@ Const* setValueToConstExpr(SetVariableExpr* set)
         case PGC_BOOL:
             {
                 bool variable_bool = false;
-                if (strcmp(variable_str,"true") || strcmp(variable_str,"on")) {
+                if (strcmp(variable_str, "true") == 0 || strcmp(variable_str,"on") == 0) {
                     variable_bool = true;
                 }
                 val = BoolGetDatum(variable_bool);
