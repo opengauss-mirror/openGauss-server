@@ -521,7 +521,7 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
         (unsigned int)sizeof(BufferTag), &redo_status) != DMS_SUCCESS) {
         ereport(LOG,
             (errmodule(MOD_DMS),
-                errmsg("[on-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
+                errmsg("[On-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
                     "redo status %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
                     (int)tag.rnode.opt, tag.forkNum, tag.blockNum, redo_status)));
         return false;

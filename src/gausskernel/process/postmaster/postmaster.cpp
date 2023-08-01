@@ -3030,7 +3030,7 @@ int PostmasterMain(int argc, char* argv[])
 
             if (SS_OFFICIAL_RECOVERY_NODE && SS_CLUSTER_ONDEMAND_NOT_NORAML) {
                 ereport(FATAL, (errmsg(
-                    "[on-demand] node%d is last primary node, do not allow join cluster until on-demand recovery done",
+                    "[On-demand] node%d is last primary node, do not allow join cluster until on-demand recovery done",
                     g_instance.attr.attr_storage.dms_attr.instance_id)));
             }
         }
