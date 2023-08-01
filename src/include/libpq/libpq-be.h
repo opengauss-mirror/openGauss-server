@@ -104,6 +104,7 @@ typedef struct ProtocolExtensionConfig {
     void    (*fn_comm_reset)(void);
     void    (*fn_send_ready_for_query)(CommandDest dest);
     int	    (*fn_read_command)(StringInfo inBuf);
+    void    (*fn_end_command)(const char *completionTag);
     DestReceiver*   (*fn_printtup_create_DR)(CommandDest dest);
     void    (*fn_set_DR_params)(DestReceiver* self, List* target_list);
     int     (*fn_process_command)(StringInfo inBuf);

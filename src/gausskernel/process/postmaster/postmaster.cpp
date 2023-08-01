@@ -565,6 +565,7 @@ ProtocolExtensionConfig default_protocol_config = {
     pq_comm_reset,
     ReadyForQuery,
     SocketBackend,
+    NULL,
     printtup_create_DR, /* use libpq defaults for printtup*() */
     NULL,
     NULL,
