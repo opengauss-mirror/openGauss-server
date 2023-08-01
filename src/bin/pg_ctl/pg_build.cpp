@@ -1931,7 +1931,7 @@ int fsync_fname(const char *fname, bool isdir)
      */
     fd = open(fname, flags, 0);
     if (fd < 0) {
-        if (errno == EACCES || (isdir && errno == EISDIR))
+        if (errno == EACCES || (isdir && (errno == EISDIR || errno == ERR_DSS_FILE_TYPE_MISMATCH)))
             return 0;
         pg_log(PG_WARNING, _("could not open file \"%s\": %s\n"), fname, strerror(errno));
         return -1;
