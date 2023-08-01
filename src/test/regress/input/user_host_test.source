@@ -54,6 +54,7 @@ grant select on test2 to 'test_user_host'@'127.0.%';
 grant insert on test2 to 'test_user_host'@'127.0.%';
 revoke insert on test2 from 'test_user_host'@'127.0.%';
 \! echo 'b_compatibility_user_host_auth = on' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! /usr/bin/cp @abs_srcdir@/tmp_check/datanode1/pg_hba.conf @abs_srcdir@/tmp_check/datanode1/pg_hba_bk.conf
 \! sed -i 's#host.*all.*all.*127.0.0.1/32.*#host  all  all  all  sha256#g' @abs_srcdir@/tmp_check/datanode1/pg_hba.conf
 \! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
 \! sleep 2
@@ -65,3 +66,6 @@ revoke insert on test2 from 'test_user_host'@'127.0.%';
 \! @abs_bindir@/gsql -p @portstring@ -h 127.0.0.1 -d user_host_db -r -U test_user_host -W 'test123@' -c "select current_user";
 \! @abs_bindir@/gsql -p @portstring@ -h 127.0.0.1 -d user_host_db -r -U test_user_host -W 'test123@' -c "select * from test2";
 \! @abs_bindir@/gsql -p @portstring@ -h 127.0.0.1 -d user_host_db -r -U test_user_host2 -W 'test123@' -c "select current_user";
+\! /usr/bin/mv -f @abs_srcdir@/tmp_check/datanode1/pg_hba_bk.conf @abs_srcdir@/tmp_check/datanode1/pg_hba.conf
+\! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
