@@ -10335,7 +10335,7 @@ void StartupXLOG(void)
     t_thrd.xlog_cxt.InRecovery = false;
     g_instance.roach_cxt.isRoachRestore = false;
 
-    if (!SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING && !SS_IN_ONDEMAND_RECOVERY) {
+    if (!SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING && !SS_IN_ONDEMAND_RECOVERY && SSOndemandRecoveryExitNormal) {
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_PRODUCTION;
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
@@ -10463,14 +10463,14 @@ void StartupXLOG(void)
         }
     }
 
-    if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
+    if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING || !SSOndemandRecoveryExitNormal) {
         if (SS_STANDBY_FAILOVER) {
             g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = ALLOW_CKPT;
             pg_memory_barrier();
         }
         if (!SS_IN_ONDEMAND_RECOVERY) {
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS switchover/SS failover] standby promoting: start full checkpoint.")));
+                errmsg("[SS switchover/SS failover/SS normal reform] start full checkpoint.")));
             RequestCheckpoint(CHECKPOINT_FORCE | CHECKPOINT_IMMEDIATE | CHECKPOINT_WAIT);
             LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
             t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_PRODUCTION;
@@ -10479,7 +10479,7 @@ void StartupXLOG(void)
             LWLockRelease(ControlFileLock);
             SSRecheckBufferPool();
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS switchover/SS failover] standby promoting: finished full checkpoint"
+                errmsg("[SS switchover/SS failover/SS normal reform] finished full checkpoint"
                     "and update control file")));
         }
     }
