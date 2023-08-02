@@ -1074,14 +1074,10 @@ static void OnDemandPageManagerRedoSegParseState(XLogRecParseState *preState)
     Assert(g_redoWorker->slotId == 0);
     switch (preState->blockparse.blockhead.block_valid) {
         case BLOCK_DATA_SEG_EXTEND:
-            GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
             OnDemandPageManagerProcSegPipeLineSyncState(preState);
-            CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
             break;
         case BLOCK_DATA_SEG_FULL_SYNC_TYPE:
-            GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
             OnDemandPageManagerProcSegFullSyncState(preState);
-            CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
             break;
         case BLOCK_DATA_SEG_FILE_EXTEND_TYPE:
         default:
@@ -1133,14 +1129,19 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
             XLogBlockParseStateRelease(preState);
             break;
         case BLOCK_DATA_CREATE_DATABASE_TYPE:
-        case BLOCK_DATA_SEG_FILE_EXTEND_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_6]);
-            OnDemandPageManagerRedoSegParseState(preState);
+            RedoPageManagerDistributeBlockRecord(hashMap, NULL);
+            /* wait until queue empty */
+            WaitCurrentPipeLineRedoWorkersQueueEmpty();
+            /* do atcual action */
+            RedoPageManagerSyncDdlAction(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_6]);
             break;
+        case BLOCK_DATA_SEG_FILE_EXTEND_TYPE:
         case BLOCK_DATA_SEG_FULL_SYNC_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
             OnDemandPageManagerRedoSegParseState(preState);
+            CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
             break;
         case BLOCK_DATA_CREATE_TBLSPC_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_7]);
