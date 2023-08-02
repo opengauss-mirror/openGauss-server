@@ -159,20 +159,22 @@ Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid ta
         (cformat != COERCE_IMPLICIT_CAST),
         (result != expr && !IsA(result, Const)));
 
+    if (expr != origexpr && (
 #ifdef PGXC
-    /* Do not need to do that on local Coordinator */
-    if (IsConnFromCoord())
+        /* Do not need to do that on local Coordinator */
+        IsConnFromCoord() ||
 #endif
-        if (expr != origexpr) {
-            /* Reinstall top CollateExpr */
-            CollateExpr* coll = (CollateExpr*)origexpr;
-            CollateExpr* newcoll = makeNode(CollateExpr);
+        type_is_collatable(targettype))) {
 
-            newcoll->arg = (Expr*)result;
-            newcoll->collOid = coll->collOid;
-            newcoll->location = coll->location;
-            result = (Node*)newcoll;
-        }
+        /* Reinstall top CollateExpr */
+        CollateExpr* coll = (CollateExpr*)origexpr;
+        CollateExpr* newcoll = makeNode(CollateExpr);
+
+        newcoll->arg = (Expr*)result;
+        newcoll->collOid = coll->collOid;
+        newcoll->location = coll->location;
+        result = (Node*)newcoll;
+    }
 
     return result;
 }
