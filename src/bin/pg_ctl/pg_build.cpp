@@ -1417,9 +1417,12 @@ static void DeleteSubDataDir(const char* dirname)
                                 de_slot->d_name);
                             securec_check_ss_c(nRet, "", "");
                             if (!rmtree(fullpath, true)) {
-                                pg_log(PG_WARNING, _("failed to remove dir %s,errno=%d.\n"), fullpath, errno);
-                                (void)closedir(dir);
-                                exit(1);
+                                /* enable dss, something in pg_replslot may be a link */
+                                if (unlink(fullpath) != 0) {
+                                    pg_log(PG_WARNING, _("failed to remove dir %s,errno=%d.\n"), fullpath, errno);
+                                    (void)closedir(dir);
+                                    exit(1);
+                                }
                             }
                         }
                         (void)closedir(dir_slot);
