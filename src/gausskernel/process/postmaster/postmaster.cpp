@@ -551,6 +551,7 @@ extern int ClientConnInitilize(Port* port);
 extern void send_message_to_frontend(ErrorData* edata);
 extern int SocketBackend(StringInfo inBuf);
 extern DestReceiver* printtup_create_DR(CommandDest dest);
+extern void InitDolpinProtoIfNeeded();
 
 ProtocolExtensionConfig* ListenConfig[MAXLISTEN];
 
@@ -564,6 +565,7 @@ ProtocolExtensionConfig default_protocol_config = {
     pq_comm_reset,
     ReadyForQuery,
     SocketBackend,
+    NULL,
     printtup_create_DR, /* use libpq defaults for printtup*() */
     NULL,
     NULL,
@@ -2662,6 +2664,8 @@ int PostmasterMain(int argc, char* argv[])
         ereport(FATAL, (errmsg("no socket created for listening")));
     }
 
+    InitDolpinProtoIfNeeded();
+    
     /*
         * Set up an on_proc_exit function that's charged with closing the sockets
         * again at postmaster shutdown.  You might think we should have done this
