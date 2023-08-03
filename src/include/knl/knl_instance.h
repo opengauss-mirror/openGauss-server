@@ -73,6 +73,7 @@
 #include "postmaster/barrier_creator.h"
 #include "pgxc/barrier.h"
 #include "ddes/dms/ss_dms_recovery.h"
+#include "ddes/dms/ss_xmin.h"
 
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
@@ -217,6 +218,7 @@ typedef struct knl_g_pid_context {
     ThreadId ApplyLauncerPID;
     ThreadId StackPerfPID;
     ThreadId CfsShrinkerPID;
+    ThreadId DmsAuxiliaryPID;
 } knl_g_pid_context;
 
 typedef struct {
@@ -1198,7 +1200,6 @@ typedef struct knl_g_datadir_context {
 
 typedef struct knl_g_dms_context {
     uint32 dmsProcSid;
-    uint64 xminAck;
     dms_status_t dms_status;
     ClusterNodeState SSClusterState;
     ss_reformer_ctrl_t SSReformerControl;  // saved in disk; saved by primary
@@ -1215,6 +1216,7 @@ typedef struct knl_g_dms_context {
     char dmsInstAddr[MAX_REPLNODE_NUM][DMS_MAX_IP_LEN];
     char conninfo[MAXPGPATH];
     ss_dfx_stats_t SSDFxStats;
+    ss_xmin_info_t SSXminInfo;
 } knl_g_dms_context;
 
 typedef struct knl_instance_context {

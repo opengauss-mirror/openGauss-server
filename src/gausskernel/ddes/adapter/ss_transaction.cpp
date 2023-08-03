@@ -384,47 +384,6 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
     return update_xid;
 }
 
-int SSGetOldestXmin(char *data, uint32 len, char *output_msg, uint32 *output_msg_len)
-{
-    if (unlikely(len != sizeof(SSBroadcastXmin))) {
-        ereport(DEBUG1, (errmsg("invalid broadcast xmin message")));
-        return DMS_ERROR;
-    }
-
-    SSBroadcastXminAck* getXminReq = (SSBroadcastXminAck *)output_msg;
-    getXminReq->type = BCAST_GET_XMIN_ACK;
-    GetOldestGlobalProcXmin(&(getXminReq->xmin));
-    *output_msg_len = sizeof(SSBroadcastXminAck);
-    return DMS_SUCCESS;
-}
-
-/* Calbulate the oldest xmin during broadcast xmin ack */
-int SSGetOldestXminAck(SSBroadcastXminAck *ack_data)
-{
-    TransactionId xmin_ack = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
-    if (TransactionIdIsValid(ack_data->xmin) && TransactionIdIsNormal(ack_data->xmin) &&
-        TransactionIdPrecedes(ack_data->xmin, xmin_ack)) {
-        pg_atomic_write_u64(&g_instance.dms_cxt.xminAck, ack_data->xmin);
-    }
-    return DMS_SUCCESS;
-}
-
-bool SSGetOldestXminFromAllStandby()
-{
-    dms_context_t dms_ctx;
-    InitDmsContext(&dms_ctx);
-    SSBroadcastXmin xmin_data;
-    xmin_data.type = BCAST_GET_XMIN;
-    xmin_data.xmin = InvalidTransactionId;
-    pg_atomic_write_u64(&g_instance.dms_cxt.xminAck, MaxTransactionId);
-    int ret = dms_broadcast_msg(&dms_ctx, (char *)&xmin_data, sizeof(SSBroadcastXmin),
-        (unsigned char)true, SS_BROADCAST_WAIT_FIVE_SECONDS);
-    if (ret != DMS_SUCCESS) {
-        return false;
-    }
-    return true;
-}
-
 void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *pageMap, int *bitCount)
 {
     dms_context_t dms_ctx;

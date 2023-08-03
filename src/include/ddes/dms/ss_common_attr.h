@@ -187,10 +187,10 @@
 #define SS_ACQUIRE_LOCK_RETRY_INTERVAL (50)   // 50ms
 
 #define DMS_MSG_MAX_WAIT_TIME (10 * 1000) // 10s
+#define SS_REFORM_WAIT_TIME (5000) // 5ms
 
 typedef enum SSBroadcastOp {
-    BCAST_GET_XMIN = 0,
-    BCAST_CANCEL_TRX_FOR_SWITCHOVER,
+    BCAST_CANCEL_TRX_FOR_SWITCHOVER = 0,
     BCAST_SI,
     BCAST_SEGDROPTL,
     BCAST_DROP_REL_ALL_BUFFER,
@@ -206,8 +206,7 @@ typedef enum SSBroadcastOp {
 } SSBroadcastOp;
 
 typedef enum SSBroadcastOpAck {
-    BCAST_GET_XMIN_ACK = 0,
-    BCAST_CANCEL_TRX_ACK,
+    BCAST_CANCEL_TRX_ACK = 0,
     BCAST_CHECK_DB_BACKENDS_ACK,
     BCAST_ACK_END
 } SSBroadcastOpAck;
