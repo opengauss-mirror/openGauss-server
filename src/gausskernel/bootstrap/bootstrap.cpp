@@ -308,6 +308,7 @@ void BootStrapProcessMain(int argc, char* argv[])
                     pfree(value);
                 break;
             }
+
             default:
                 write_stderr("Try \"%s --help\" for more information.\n", progName);
                 proc_exit(1);

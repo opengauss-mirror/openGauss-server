@@ -30,6 +30,7 @@
 #include "knl/knl_variable.h"
 
 const uint32 MEMORY_ALIGNED_SIZE = 8192;
+const uint32 DORADO_CTL_WRITE_SIZE = 512;
 
 void InitDoradoStorage(char *filePath, uint64 fileSize);
 

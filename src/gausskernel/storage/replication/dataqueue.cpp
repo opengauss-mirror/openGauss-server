@@ -37,6 +37,7 @@
 #include "replication/syncrep.h"
 #include "replication/walsender.h"
 #include "replication/walreceiver.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/lock/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
@@ -300,7 +301,7 @@ DataQueuePtr PushToSenderQueue(const RelFileNode &rnode, BlockNumber blockNum, S
         LWLockRelease(DataSyncRepLock);
 
         if (g_instance.attr.attr_storage.max_wal_senders > 0) {
-            if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE) {
+            if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !(IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION)) {
                 ereport(
                     LOG,
                     (errmsg("failed to push rnode %u/%u/%u blockno %u into data-queue becuase sync_master_standalone "

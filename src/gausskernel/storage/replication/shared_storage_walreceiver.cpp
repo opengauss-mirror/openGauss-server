@@ -30,6 +30,7 @@
 #include "miscadmin.h"
 #include "replication/walreceiver.h"
 #include "replication/shared_storage_walreceiver.h"
+#include "replication/ss_cluster_replication.h"
 #include "replication/slot.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
@@ -367,28 +368,36 @@ bool shared_storage_connect(char *conninfo, XLogRecPtr *startpoint, char *slotna
     walrcv->peer_role = PRIMARY_MODE;
     walrcv->peer_state = NORMAL_STATE;
     walrcv->isFirstTimeAccessStorage = true;
-    uint32 totalLen = sizeof(WalDataMessageHeader) + ShareStorageBufSize +
-                      g_instance.xlog_cxt.shareStorageopCtl.blkSize;
-    t_thrd.libwalreceiver_cxt.shared_storage_buf = (char *)palloc0(totalLen);
-    t_thrd.libwalreceiver_cxt.shared_storage_read_buf =
-        (char *)TYPEALIGN(g_instance.xlog_cxt.shareStorageopCtl.blkSize,
-                          t_thrd.libwalreceiver_cxt.shared_storage_buf + sizeof(WalDataMessageHeader));
-    t_thrd.libwalreceiver_cxt.connect_param.conninfo = conninfo;
-    t_thrd.libwalreceiver_cxt.connect_param.startpoint = *startpoint;
-    t_thrd.libwalreceiver_cxt.connect_param.slotname = slotname;
-    t_thrd.libwalreceiver_cxt.connect_param.channel_identifier = channel_identifier;
-    XLogReaderState *xlogreader = XLogReaderAllocate(SharedStorageXLogPageRead, 0,
-                                                     g_instance.xlog_cxt.shareStorageopCtl.blkSize);
-    if (xlogreader == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory"),
-                        errdetail("Failed while allocating an XLog reading processor")));
+
+    if (SS_CLUSTER_DORADO_REPLICATION) {
+        libpgConnected = libpqrcv_connect(conninfo, startpoint, slotname, channel_identifier);
+        return libpgConnected; 
     }
-    xlogreader->system_identifier = GetSystemIdentifier();
-    t_thrd.libwalreceiver_cxt.xlogreader = xlogreader;
 
-    shared_storage_xlog_check_consistency();
+    if (IS_SHARED_STORAGE_MODE) {
+        uint32 totalLen = sizeof(WalDataMessageHeader) + ShareStorageBufSize +
+                        g_instance.xlog_cxt.shareStorageopCtl.blkSize;
+        t_thrd.libwalreceiver_cxt.shared_storage_buf = (char *)palloc0(totalLen);
+        t_thrd.libwalreceiver_cxt.shared_storage_read_buf =
+            (char *)TYPEALIGN(g_instance.xlog_cxt.shareStorageopCtl.blkSize,
+                            t_thrd.libwalreceiver_cxt.shared_storage_buf + sizeof(WalDataMessageHeader));
+        t_thrd.libwalreceiver_cxt.connect_param.conninfo = conninfo;
+        t_thrd.libwalreceiver_cxt.connect_param.startpoint = *startpoint;
+        t_thrd.libwalreceiver_cxt.connect_param.slotname = slotname;
+        t_thrd.libwalreceiver_cxt.connect_param.channel_identifier = channel_identifier;
+        XLogReaderState *xlogreader = XLogReaderAllocate(SharedStorageXLogPageRead, 0,
+                                                        g_instance.xlog_cxt.shareStorageopCtl.blkSize);
+        if (xlogreader == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory"),
+                            errdetail("Failed while allocating an XLog reading processor")));
+        }
+        xlogreader->system_identifier = GetSystemIdentifier();
+        t_thrd.libwalreceiver_cxt.xlogreader = xlogreader;
 
-    libpgConnected = try_connect_libpq(&t_thrd.libwalreceiver_cxt.connect_param, true);
+        shared_storage_xlog_check_consistency();
+
+        libpgConnected = try_connect_libpq(&t_thrd.libwalreceiver_cxt.connect_param, true);
+    }
 
     return libpgConnected;
 }
@@ -425,12 +434,20 @@ bool shared_storage_receive(int timeout, unsigned char *type, char **buffer, int
         }
     }
 
+    /* 
+     * When ss cluster replication enabled, no xlog will receive, so return false directly.
+     * Xlog will replicated by Dorado synchronous replication.
+     */
+    if (SS_CLUSTER_DORADO_REPLICATION) {
+        return false;
+    }
+
     return shared_storage_xlog_read(timeout / timeRatio, type, buffer, len, isStopping);
 }
 
 void shared_storage_send(const char *buffer, int nbytes)
 {
-    if (IS_SHARED_STORAGE_STANBY_MODE) {
+    if (IS_SHARED_STORAGE_STANBY_MODE || SS_CLUSTER_DORADO_REPLICATION) {
         if (t_thrd.libwalreceiver_cxt.streamConn)
             libpqrcv_send(buffer, nbytes);
     }

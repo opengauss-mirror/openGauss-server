@@ -102,6 +102,7 @@ typedef struct st_datadir_t {
     char multixactDir[MAXPGPATH];
     char controlPath[MAXPGPATH];
     char controlBakPath[MAXPGPATH];
+    char controlInfoPath[MAXPGPATH];
     dw_subdatadir_t dwDir;
 } datadir_t;
 

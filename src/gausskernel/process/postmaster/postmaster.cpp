@@ -149,6 +149,7 @@
 #include "replication/dcf_replication.h"
 #include "replication/logicallauncher.h"
 #include "replication/logicalworker.h"
+#include "replication/ss_cluster_replication.h"
 #include "postmaster/bgwriter.h"
 #include "postmaster/cbmwriter.h"
 #include "postmaster/startup.h"
@@ -3690,6 +3691,32 @@ void ArchObsThreadManage()
     SpinLockRelease(&g_instance.archive_obs_cxt.mutex);
 }
 
+static bool IsNeedStartXlogCopyer()
+{
+    /* Only in normal cluster replication and ss cluster replication, we need start xlogcopyer thread. */
+    if (SS_CLUSTER_DORADO_REPLICATION || !IS_SHARED_STORAGE_MODE) {
+        return false;
+    }
+
+    if (g_instance.pid_cxt.sharedStorageXlogCopyThreadPID != 0 || dummyStandbyMode) {
+        return false;
+    }
+
+    /* Non SS mode */
+    if (!ENABLE_DMS && (pmState == PM_RUN || t_thrd.xlog_cxt.is_hadr_main_standby)) {
+        return true;
+    }
+
+    /* SS mode, Primary cluster primary node need start xlogcopyer thread. */
+    if (ENABLE_DMS && pmState == PM_RUN && 
+        t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE &&
+        !SS_PERFORMING_SWITCHOVER) {
+        return true;
+    }
+
+    return false;
+}
+
 /*
  * Main idle loop of postmaster
  */
@@ -3740,7 +3767,7 @@ static int ServerLoop(void)
         fd_set rmask;
         int selres;
 
-        if (t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE || IS_SHARED_STORAGE_MODE) {
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE || IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION) {
             check_and_reset_ha_listen_port();
 
 #ifdef HAVE_POLL
@@ -4008,11 +4035,7 @@ static int ServerLoop(void)
         if (g_instance.pid_cxt.ReaperBackendPID == 0)
             g_instance.pid_cxt.ReaperBackendPID = initialize_util_thread(REAPER);
 
-        if (((!ENABLE_DMS && (pmState == PM_RUN || t_thrd.xlog_cxt.is_hadr_main_standby)) || 
-            (ENABLE_DMS && pmState == PM_RUN && t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE &&
-             !SS_PERFORMING_SWITCHOVER)) &&
-            g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == 0 && !dummyStandbyMode &&
-            g_instance.attr.attr_storage.xlog_file_path != NULL) {
+        if (IsNeedStartXlogCopyer()) {
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
         }
 
@@ -6605,7 +6628,7 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.StatementPID, SIGTERM);
                     }
 
-                    if (g_instance.pid_cxt.StartupPID != 0 && DORADO_STANDBY_CLUSTER) {
+                    if (g_instance.pid_cxt.StartupPID != 0 && (DORADO_STANDBY_CLUSTER || SS_REPLICATION_STANDBY_CLUSTER)) {
                         signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
                     }
                     
@@ -6614,7 +6637,7 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
                     StopAliveBuildSender();
 
-                    if (g_instance.pid_cxt.WalReceiverPID != 0 && DORADO_STANDBY_CLUSTER) {
+                    if (g_instance.pid_cxt.WalReceiverPID != 0 && SS_REPLICATION_STANDBY_CLUSTER) {
                         signal_child(g_instance.pid_cxt.WalReceiverPID, SIGTERM);
                     }
 
@@ -10050,12 +10073,17 @@ static void sigusr1_handler(SIGNAL_ARGS)
         StartPgjobWorker();
     }
     
-    /* if xlog_file_path is not equel to zero and dms is enabled, main standby need to initialize walreceiver
-     * and walrecwrite. Other modes don't need when dms is enabled. */
+    /* 
+     * 1. if xlog_file_path is not equel to zero and dms is enabled, main standby need to initialize walreceiver
+     *    and walrecwrite. Other modes don't need when dms is enabled. 
+     * 2. if ss dorado replication enabled, don't need walrecwriter thread
+     */
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER) && g_instance.pid_cxt.WalReceiverPID == 0 &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
-        g_instance.status == NoShutdown && (!ENABLE_DMS || SS_STANDBY_CLUSTER_MAIN_STANDBY)) {
-        if (g_instance.pid_cxt.WalRcvWriterPID == 0) {
+        g_instance.status == NoShutdown &&
+        (!ENABLE_DMS || SS_STANDBY_CLUSTER_MAIN_STANDBY || SS_CLUSTER_DORADO_REPLICATION)) {
+        /* when SS_CLUSTER_DORADO_REPLICATION enabled, don't start walrecwrite */
+        if (g_instance.pid_cxt.WalRcvWriterPID == 0 && !SS_CLUSTER_DORADO_REPLICATION) {
             g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
             SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
         }
@@ -10065,7 +10093,8 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (CheckPostmasterSignal(PMSIGNAL_START_DATARECEIVER) && g_instance.pid_cxt.DataReceiverPID == 0 &&
-        (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
+        (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY ||
+            pmState == PM_WAIT_READONLY) &&
         g_instance.status == NoShutdown) {
         if (g_instance.pid_cxt.DataRcvWriterPID == 0) {
             g_instance.pid_cxt.DataRcvWriterPID = initialize_util_thread(DATARECWRITER);
@@ -10098,7 +10127,8 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if ((mode = CheckSwitchoverSignal()) != 0 && WalRcvIsOnline() && DataRcvIsOnline() &&
-        (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY)) {
+        (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY ||
+            pmState == PM_WAIT_READONLY)) {
         if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
             ereport(LOG, (errmsg("to do switchover")));
             /* Label the standby to do switchover */
@@ -10139,17 +10169,16 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->CloseAllSessions();
             /*
-            * before pmState set to wait backends,
-            * threadpool cannot launch new thread by scheduler during demote.
-            */
+                * before pmState set to wait backends,
+                * threadpool cannot launch new thread by scheduler during demote.
+                */
             g_threadPoolControler->ShutDownScheduler(true, true);
             g_threadPoolControler->ShutDownThreads(true);
         }
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
-        if (g_instance.pid_cxt.PgStatPID != 0 && 
-            g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) {
+        if (g_instance.pid_cxt.PgStatPID != 0 && g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) {
             signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
         }
 
@@ -10185,23 +10214,23 @@ static void sigusr1_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
         }
 
-        if (g_instance.pid_cxt.UndoLauncherPID != 0 && DORADO_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.UndoLauncherPID != 0 && (DORADO_STANDBY_CLUSTER ||SS_REPLICATION_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
         }
 #ifndef ENABLE_MULTIPLE_NODES
-        if (g_instance.pid_cxt.ApplyLauncerPID != 0 && DORADO_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.ApplyLauncerPID != 0 && (DORADO_STANDBY_CLUSTER ||SS_REPLICATION_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
         }
 #endif
-        if (g_instance.pid_cxt.GlobalStatsPID != 0 && DORADO_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.GlobalStatsPID != 0 && (DORADO_STANDBY_CLUSTER ||SS_REPLICATION_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
         }
 
-        if (g_instance.pid_cxt.UndoRecyclerPID != 0 && DORADO_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.UndoRecyclerPID != 0 && (DORADO_STANDBY_CLUSTER ||SS_REPLICATION_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
         }
 
-        if (g_instance.pid_cxt.FaultMonitorPID != 0 && DORADO_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.FaultMonitorPID != 0 && (DORADO_STANDBY_CLUSTER ||SS_REPLICATION_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.FaultMonitorPID, SIGTERM);
         }
 
@@ -12639,7 +12668,7 @@ const char* wal_get_db_state_string(DbState db_state)
 static ServerMode get_cur_mode(void)
 {
     if (ENABLE_DMS) {
-        if (DORADO_STANDBY_CLUSTER) {
+        if (DORADO_STANDBY_CLUSTER || SS_REPLICATION_STANDBY_CLUSTER) {
             return STANDBY_MODE;
         }
         /* except for main standby in standby cluster, current mode of instance is determined by SS_OFFICIAL_PRIMARY*/
@@ -14911,7 +14940,7 @@ void InitShmemForDmsCallBack()
 
 const char *GetSSServerMode(ServerMode mode)
 {
-    if (g_instance.attr.attr_storage.xlog_file_path != 0) {
+    if (IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION) {
         if (SS_OFFICIAL_PRIMARY && (mode == PRIMARY_MODE || mode == NORMAL_MODE)) { 
             return "Primary";
         }

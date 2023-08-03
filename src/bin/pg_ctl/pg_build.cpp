@@ -1250,6 +1250,10 @@ bool SsIsSkipPath(const char* dirname, bool needskipall)
         return true;
     }
 
+    if (IsBeginWith(dirname, "pg_replication") > 0) {
+        return true;
+    }
+
     /* skip pg_control file when dss enable, only copy pg_control of main standby,
      * we need to retain pg_control of other nodes, so pg_contol not be deleted directly.
      */
