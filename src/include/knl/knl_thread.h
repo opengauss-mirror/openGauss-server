@@ -3350,6 +3350,9 @@ typedef struct knl_t_dms_context {
     bool buf_in_aio;
     bool is_reform_proc;
     bool CloseAllSessionsFailed;
+    uint64 latest_snapshot_xmin;
+    uint64 latest_snapshot_xmax;
+    uint64 latest_snapshot_csn;
     char *origin_buf; /* origin buffer for unaligned read/write */
     char *aligned_buf;
     int size; /* aligned buffer size */

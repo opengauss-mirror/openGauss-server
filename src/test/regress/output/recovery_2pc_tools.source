@@ -620,6 +620,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_dss_conn_path                                 | string  |      |           | 
  ss_dss_vg_name                                   | string  |      |           | 
  ss_enable_aio                                    | bool    |      |           | 
+ ss_enable_bcast_snapshot                         | bool    |      |           | 
  ss_enable_catalog_centralized                    | bool    |      |           | 
  ss_enable_dms                                    | bool    |      |           | 
  ss_enable_dss                                    | bool    |      |           | 

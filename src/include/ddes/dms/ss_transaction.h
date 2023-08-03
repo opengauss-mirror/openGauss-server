@@ -42,6 +42,13 @@ typedef struct SSBroadcastXminAck {
     TransactionId xmin;
 } SSBroadcastXminAck;
 
+typedef struct SSBroadcastSnapshot {
+    SSBroadcastOp type; // must be first
+    TransactionId xmin;
+    TransactionId xmax;
+    CommitSeqNo csn;
+} SSBroadcastSnapshot;
+
 typedef struct SSBroadcastSI {
     SSBroadcastOp type; // must be first
     Oid tablespaceid;
@@ -113,5 +120,7 @@ int SSCheckDbBackends(char *data, uint32 len, char *output_msg, uint32 *output_m
 int SSCheckDbBackendsAck(char *data, unsigned int len);
 bool SSCheckDbBackendsFromAllStandby(Oid dbid);
 void SSStandbyUpdateRedirectInfo();
+void SSSendLatestSnapshotToStandby(TransactionId xmin, TransactionId xmax, CommitSeqNo csn);
+int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len);
 
 #endif

@@ -202,7 +202,6 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->resetSyscache = false;
     dms_cxt->finishedRecoverOldPrimaryDWFile = false;
     dms_cxt->dw_init = false;
-
     {
         ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
         for (int i = 0; i < DMS_MAX_INSTANCES; i++) {
@@ -220,6 +219,10 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
         SpinLockInit(&xmin_info->bitmap_active_nodes_lock);
         xmin_info->bitmap_active_nodes = 0;
     }
+    dms_cxt->latest_snapshot_xmin = 0;
+    dms_cxt->latest_snapshot_xmax = 0;
+    dms_cxt->latest_snapshot_csn = 0;
+    SpinLockInit(&dms_cxt->set_snapshot_mutex);
 }
 
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)
