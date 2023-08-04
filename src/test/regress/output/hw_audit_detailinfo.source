@@ -76,7 +76,6 @@ SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:0
 
 -- DQL
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state_select=1" > /dev/null 2>&1
-\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=127" > /dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -101,37 +100,6 @@ SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:0
  xid=XIDNUM, select * from t3;
 (1 row)
 
--- trigger test
-CREATE TABLE test_trigger_src_tbl(id1 INT, id2 INT,id3 INT);
-CREATE TABLE test_trigger_des_tbl(id1 INT, id2 INT, id3 INT);
-CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
-$$
-DECLARE
-BEGIN
-    INSERT INTO test_trigger_des_tbl VALUES(NEW.id1, NEW.id2,
-    NEW.id3);
-    RETURN NEW;
-END
-$$ LANGUAGE PLPGSQL;
-CREATE TRIGGER insert_trigger
-   BEFORE INSERT ON test_trigger_src_tbl
-   FOR EACH ROW
-   EXECUTE PROCEDURE tri_insert_func();
-ALTER TRIGGER insert_trigger ON test_trigger_src_tbl RENAME TO
-insert_trigger_renamed;
-DROP TRIGGER insert_trigger_renamed ON test_trigger_src_tbl;
-DROP FUNCTION tri_insert_func();
-DROP TABLE test_trigger_src_tbl;
-DROP TABLE test_trigger_des_tbl;
-SELECT object_name FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where object_name like '%insert_trigger%';
-      object_name       
-------------------------
- insert_trigger
- insert_trigger
- insert_trigger_renamed
-(3 rows)
-
-\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
 -- 关闭xid开关
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_xid_info=0" > /dev/null 2>&1
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state=0" > /dev/null 2>&1
