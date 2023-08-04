@@ -501,6 +501,7 @@ static void get_role_password();
 static void get_encrypt_key();
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo);
 static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxInfo* indxinfo, bool isBcompatibility);
+static bool IsPlainFormat();
 static bool findDBCompatibility(Archive* fout, const char* databasename);
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
 static bool needIgnoreSequence(TableInfo* tbinfo);
@@ -23565,4 +23566,9 @@ static bool hasSpecificExtension(Archive* fout, const char* extensionName)
     PQclear(res);
     destroyPQExpBuffer(query);
     return ntups != 0;
+}
+
+static bool IsPlainFormat()
+{
+	return pg_strcasecmp(format, "plain") == 0 || pg_strcasecmp(format, "p") == 0;
 }
