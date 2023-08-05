@@ -9579,6 +9579,11 @@ void StartupXLOG(void)
         }
     }
 
+    if (SS_PRIMARY_MODE || SS_STANDBY_CLUSTER_MAIN_STANDBY) {
+        g_instance.dms_cxt.SSReformerControl.clusterRunMode = (ClusterRunMode)g_instance.attr.attr_common.cluster_run_mode;
+        SSSaveReformerCtrl();
+    }
+
     ReadRemainSegsFile();
     /* Determine whether it is currently in the switchover of streaming disaster recovery */
     checkHadrInSwitchover();
@@ -19359,6 +19364,30 @@ retry:
                     t_thrd.xlog_cxt.RedoDone = IsRedoDonePromoting();
                     pg_memory_barrier();
 
+                    if (DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE && WalRcvIsDone() && CheckForFailoverTrigger()) {
+                        t_thrd.xlog_cxt.receivedUpto = GetWalRcvWriteRecPtr(NULL);
+                        if (XLByteLT(RecPtr, t_thrd.xlog_cxt.receivedUpto)) {
+                            /* wait xlog redo done */
+                            continue;
+                        }
+
+                        ProcTxnWorkLoad(true);
+                        /* use volatile pointer to prevent code rearrangement */
+                        volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+                        SpinLockAcquire(&walrcv->mutex);
+                        walrcv->dummyStandbyConnectFailed = false;
+                        SpinLockRelease(&walrcv->mutex);
+
+                        ereport(LOG, (errmsg("RecPtr(%X/%X),receivedUpto(%X/%X)", (uint32)(RecPtr >> 32),
+                                             (uint32)RecPtr, (uint32)(t_thrd.xlog_cxt.receivedUpto >> 32),
+                                             (uint32)t_thrd.xlog_cxt.receivedUpto)));
+
+                        ShutdownWalRcv();
+                        ShutdownDataRcv();
+
+                        goto triggered;
+                    }
+
                     if (IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION) {
                         uint32 disableConnectionNode =
                             pg_atomic_read_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node);
@@ -19486,7 +19515,9 @@ retry:
                          */
                         load_server_mode();
 
-                        if (DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE || IS_SS_REPLICATION_MAIN_STANBY_NODE) {
+                        if (DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE && CheckForFailoverTrigger()) {
+                            goto triggered;
+                        } else if (DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE || IS_SS_REPLICATION_MAIN_STANBY_NODE) {
                             ProcTxnWorkLoad(false);
                             /* use volatile pointer to prevent code rearrangement */
                             volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
@@ -19523,6 +19554,32 @@ retry:
                      * Nope, not found in archive and/or pg_xlog.
                      */
                     t_thrd.xlog_cxt.failedSources |= sources;
+
+                    if (DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE && CheckForFailoverTrigger()) {
+                        XLogRecPtr receivedUpto = GetWalRcvWriteRecPtr(NULL);
+                        XLogRecPtr EndRecPtrTemp = t_thrd.xlog_cxt.EndRecPtr;
+                        XLByteAdvance(EndRecPtrTemp, SizeOfXLogRecord);
+                        if (XLByteLT(EndRecPtrTemp, receivedUpto) && !FORCE_FINISH_ENABLED &&
+                            t_thrd.xlog_cxt.currentRetryTimes++ < g_retryTimes) {
+                            ereport(WARNING, (errmsg("there are some received xlog have not been redo "
+                                "the tail of last redo lsn:%X/%X, received lsn:%X/%X, retry %d times",
+                                (uint32)(EndRecPtrTemp >> 32), (uint32)EndRecPtrTemp,
+                                (uint32)(receivedUpto >> 32), (uint32)receivedUpto,
+                                t_thrd.xlog_cxt.currentRetryTimes)));
+                            return -1;
+                        }
+                        ereport(LOG,
+                                (errmsg("read record failed when promoting, current lsn (%X/%X), received lsn(%X/%X),"
+                                        "sources[%u], failedSources[%u], readSource[%u], readFile[%d], readId[%u],"
+                                        "readSeg[%u], readOff[%u], readLen[%u]",
+                                        (uint32)(RecPtr >> 32), (uint32)RecPtr,
+                                        (uint32)(t_thrd.xlog_cxt.receivedUpto >> 32),
+                                        (uint32)t_thrd.xlog_cxt.receivedUpto, sources, t_thrd.xlog_cxt.failedSources,
+                                        t_thrd.xlog_cxt.readSource, t_thrd.xlog_cxt.readFile,
+                                        (uint32)(t_thrd.xlog_cxt.readSegNo >> 32), (uint32)t_thrd.xlog_cxt.readSegNo,
+                                        t_thrd.xlog_cxt.readOff, t_thrd.xlog_cxt.readLen)));
+                        goto triggered;
+                    }
 
                 }
 
@@ -19645,6 +19702,16 @@ next_record_is_invalid:
     t_thrd.xlog_cxt.readFile = -1;
     t_thrd.xlog_cxt.readLen = 0;
     t_thrd.xlog_cxt.readSource = 0;
+
+    return -1;
+triggered:
+    if (t_thrd.xlog_cxt.readFile >= 0) {
+        close(t_thrd.xlog_cxt.readFile);
+    }
+    t_thrd.xlog_cxt.readFile = -1;
+    t_thrd.xlog_cxt.readLen = 0;
+    t_thrd.xlog_cxt.readSource = 0;
+    t_thrd.xlog_cxt.recoveryTriggered = true;
 
     return -1;
 }

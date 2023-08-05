@@ -58,8 +58,9 @@ function check_dn_startup()
 function start_dn()
 {
     data_dir=$1
-    echo "start $data_dir"
-    nohup $BIN_PATH/gaussdb -D $data_dir & 2>&1 &
+    run_mode=$2
+    echo "start $data_dir, exec gaussdb -D $data_dir $run_mode"
+    nohup $BIN_PATH/gaussdb -D $data_dir $run_mode & 2>&1 &
     sleep 10
 }
 
@@ -67,43 +68,45 @@ function start_primary_cluster() {
   primary_dn=$1
   standby_dn=$2
   ss_data=$3
+  run_mode="-z cluster_primary"
   for node in $@
   do
     if [ ${node} == ${ss_data} ]; then
         continue
     fi
-    gs_guc set -Z datanode -D $node -c "cluster_run_mode=cluster_primary"
+    run_mode="-z cluster_primary"
   done
   export DSS_HOME=${ss_data}/dss_home0
-  start_dn $primary_dn
+  start_dn $primary_dn "$run_mode"
   export DSS_HOME=${ss_data}/dss_home1
-  start_dn $standby_dn
+  start_dn $standby_dn "$run_mode"
 }
 
 function start_standby_cluster() {
   main_standby_dn=$1
   standby_dn=$2
   ss_data=$3
+  run_mode="-z cluster_standby"
   for node in $@
   do
     if [ ${node} == ${ss_data} ]; then
         continue
     fi
-    gs_guc set -Z datanode -D $node -c "cluster_run_mode=cluster_standby"
+    run_mode="-z cluster_standby"
   done
-  start_dn $main_standby_dn
-  start_dn $standby_dn
+  start_dn $main_standby_dn "$run_mode"
+  start_dn $standby_dn "$run_mode"
 }
 
 function assign_dorado_master_parameter()
 {
     for id in $@
     do
+        gs_guc set -Z datanode -D ${SS_DATA_STANDBY}/dn${id} -c "xlog_file_path = '${SS_DATA}/dorado_shared_disk'"
         gs_guc set -Z datanode -D ${SS_DATA}/dn${id} -c "xlog_lock_file_path = '${SS_DATA}/shared_lock_primary'"
         gs_guc set -Z datanode -D ${SS_DATA}/dn${id} -c "application_name = 'master_${id}'"
         gs_guc set -Z datanode -D ${SS_DATA}/dn${id} -c "cross_cluster_replconninfo1='localhost=127.0.0.1 localport=${PGPORT[id]} remotehost=127.0.0.1 remoteport=${STANDBY_PGPORT[0]}'"
         gs_guc set -Z datanode -D ${SS_DATA}/dn${id} -c "cross_cluster_replconninfo2='localhost=127.0.0.1 localport=${PGPORT[id]} remotehost=127.0.0.1 remoteport=${STANDBY_PGPORT[1]}'"
-        gs_guc set -Z datanode -D ${SS_DATA}/dn${id} -c "cluster_run_mode = 'cluster_primary'"
         gs_guc set -Z datanode -D ${SS_DATA}/dn${id} -c "ha_module_debug = off"
         gs_guc set -Z datanode -D ${SS_DATA}/dn${id} -c "ss_log_level = 255"
         gs_guc set -Z datanode -D ${SS_DATA}/dn${id} -c "ss_log_backup_file_count = 100"
@@ -120,7 +123,6 @@ function assign_dorado_standby_parameter()
         gs_guc set -Z datanode -D ${SS_DATA_STANDBY}/dn${id} -c "application_name = 'standby_${id}'"
         gs_guc set -Z datanode -D ${SS_DATA_STANDBY}/dn${id} -c "cross_cluster_replconninfo1='localhost=127.0.0.1 localport=${STANDBY_PGPORT[id]} remotehost=127.0.0.1 remoteport=${PGPORT[0]}'"
         gs_guc set -Z datanode -D ${SS_DATA_STANDBY}/dn${id} -c "cross_cluster_replconninfo2='localhost=127.0.0.1 localport=${STANDBY_PGPORT[id]} remotehost=127.0.0.1 remoteport=${PGPORT[1]}'"
-        gs_guc set -Z datanode -D ${SS_DATA_STANDBY}/dn${id} -c "cluster_run_mode = 'cluster_standby'"
         gs_guc set -Z datanode -D ${SS_DATA_STANDBY}/dn${id} -c "ha_module_debug = off"
         gs_guc set -Z datanode -D ${SS_DATA_STANDBY}/dn${id} -c "ss_log_level = 255"
         gs_guc set -Z datanode -D ${SS_DATA_STANDBY}/dn${id} -c "ss_log_backup_file_count = 100"

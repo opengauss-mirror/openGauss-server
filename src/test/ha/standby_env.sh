@@ -488,8 +488,12 @@ function check_multi_standby_startup()
 }
 function start_standby()
 {
+cluster_mode_param=""
+if [-n "$1" ]; then
+  cluster_mode_param=$1
+fi
 echo "start standby $standby_data_dir"
-$bin_dir/gaussdb --single_node  -M standby -p $dn1_standby_port -D $standby_data_dir > ./results/gaussdb.log 2>&1 &
+$bin_dir/gaussdb --single_node  -M standby -p $dn1_standby_port -D $standby_data_dir $cluster_mode_param > ./results/gaussdb.log 2>&1 &
 check_standby_startup
 }
 
@@ -502,15 +506,23 @@ sleep 10
 
 function start_standby2()
 {
+  cluster_mode_param=""
+  if [-n "$1" ]; then
+    cluster_mode_param=$1
+  fi
   echo "start standby2 $standby2_data_dir"
-  $bin_dir/gaussdb --single_node -M standby -p $standby2_port -D $standby2_data_dir > ./results/gaussdb.log 2>&1 &
+  $bin_dir/gaussdb --single_node -M standby -p $standby2_port -D $standby2_data_dir $cluster_mode_param > ./results/gaussdb.log 2>&1 &
   sleep 10
 }
 
 function start_standby3()
 {
+  cluster_mode_param=""
+  if [-n "$1" ]; then
+    cluster_mode_param=$1
+  fi
   echo "start standby3 $standby3_data_dir"
-  $bin_dir/gaussdb --single_node -M standby -p $standby3_port -D $standby3_data_dir > ./results/gaussdb.log 2>&1 &
+  $bin_dir/gaussdb --single_node -M standby -p $standby3_port -D $standby3_data_dir $cluster_mode_param > ./results/gaussdb.log 2>&1 &
   sleep 10
 }
 
@@ -523,15 +535,23 @@ function start_standby4()
 
 function start_primary_as_primary()
 {
+cluster_mode_param=""
+if [-n "$1" ]; then
+  cluster_mode_param=$1
+fi
 echo "start primary $primary_data_dir as primary"
-$bin_dir/gaussdb --single_node  -M primary -p $dn1_primary_port -D $primary_data_dir > ./results/gaussdb.log 2>&1 &
+$bin_dir/gaussdb --single_node  -M primary -p $dn1_primary_port -D $primary_data_dir $cluster_mode_param > ./results/gaussdb.log 2>&1 &
 check_primary_startup
 }
 
 function start_primary_as_standby()
 {
+cluster_mode_param=""
+if [-n "$1" ]; then
+  cluster_mode_param=$1
+fi
 echo "start primary $primary_data_dir as standby"
-$bin_dir/gaussdb --single_node  -M standby -p $dn1_primary_port -D $primary_data_dir > ./results/gaussdb.log 2>&1 &
+$bin_dir/gaussdb --single_node  -M standby -p $dn1_primary_port -D $primary_data_dir $cluster_mode_param > ./results/gaussdb.log 2>&1 &
 check_primary_startup
 }
 
@@ -544,8 +564,12 @@ check_standby_startup
 
 function start_standby2_as_primary()
 {
+cluster_mode_param=""
+if [-n "$1" ]; then
+  cluster_mode_param=$1
+fi
 echo "start standby $standby2_data_dir as primary"
-$bin_dir/gaussdb --single_node  -M primary -p $standby2_port -D $standby2_data_dir > ./results/gaussdb.log 2>&1 &
+$bin_dir/gaussdb --single_node  -M primary -p $standby2_port -D $standby2_data_dir $cluster_mode_param > ./results/gaussdb.log 2>&1 &
 check_standby2_startup
 }
 

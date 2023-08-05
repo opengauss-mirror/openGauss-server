@@ -2203,7 +2203,7 @@ static void do_failover(uint32 term)
         exit(1);
     }
     /* failover executed only in standby server */
-    else if (run_mode != STANDBY_MODE && run_mode != CASCADE_STANDBY_MODE) {
+    else if (run_mode != STANDBY_MODE && run_mode != CASCADE_STANDBY_MODE && run_mode != MAIN_STANDBY_MODE) {
         pg_log(PG_WARNING,
             _(" cannot failover server; "
               "server is not in standby or cascade standby mode\n"));
