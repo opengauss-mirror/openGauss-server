@@ -639,21 +639,9 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                 } else {
                     /*
                     * previous attempts to read the buffer must have failed,
-                    * but DRC has been created, so load page directly again;
-                    * but if previous read attempt has failed but concurrently
-                    * getting released, a contradiction happens and we panic.
+                    * but DRC has been created, so load page directly again
                     */
                     Assert(pg_atomic_read_u32(&bufHdr->state) & BM_IO_ERROR);
-
-                    if (buf_ctrl->state & BUF_BEING_RELEASED) {
-                        ereport(WARNING, (errmodule(MOD_DMS), errmsg(
-                            "[%d/%d/%d/%d/%d %d-%d] buffer:%d is in the process of release owner",
-                            rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                            bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufHdr->buf_id)));
-                        pg_usleep(5000L);
-                        continue;
-                    }
-
                     buf_ctrl->state |= BUF_NEED_LOAD;
                 }
 
@@ -808,7 +796,6 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
             return FoundBufferInHashTable(buf_id, new_partition_lock, foundPtr);
         }
 
-retry_victim:
         buf_state = LockBufHdr(buf);
         old_flags = buf_state & BUF_FLAG_MASK;
 
@@ -819,32 +806,13 @@ retry_victim:
                 * release owner procedure is in buf header lock, it's not reasonable,
                 * need to improve.
                 */
-                unsigned char released = 0;
-                RelFileNode rnode = buf->tag.rnode;
-                bool returned = DmsReleaseOwner(old_tag, buf->buf_id, &released);
-                int retry_times = 0;
-
-                if (returned && released) {
+                if (DmsReleaseOwner(old_tag, buf->buf_id)) {
                     ClearReadHint(buf->buf_id, true);
                     break;
-                } else if (!returned) {
-                    MarkDmsBufBeingReleased(buf, true);
-                    UnlockBufHdr(buf, buf_state);
-                    pg_usleep(1000L);
-                    ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d retry release owner",
-                        rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                        buf->tag.forkNum, buf->tag.blockNum, buf->buf_id, ++retry_times)));
-                    goto retry_victim;
-                } else { /* if returned and !released, we will have to try another victim */
-                    MarkDmsBufBeingReleased(buf, false);
                 }
             } else {
                 break;
             }
-        }
-
-        if (ENABLE_DMS) { /* between two tries of releasing owner, buffer might be dirtied and got skipped */
-            MarkDmsBufBeingReleased(buf, false);
         }
         UnlockBufHdr(buf, buf_state);
         BufTableDelete(&new_tag, new_hash);
