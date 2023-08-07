@@ -231,6 +231,14 @@ void HandleStartupProcInterrupts(void)
      * Check if we were requested to exit without finishing recovery.
      */
     if (t_thrd.startup_cxt.shutdown_requested && SmartShutdown != g_instance.status) {
+        if (t_thrd.xlog_cxt.StandbyModeRequested && IS_SHARED_STORAGE_STANDBY_CLUSTER && ENABLE_DMS) {
+            ereport(LOG, (errmsg("dorado standby cluster switchover shutdown startup\n")));
+            if (!IsExtremeRedo()) {
+                DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
+            }
+            DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->dataRecoveryLatch);
+        }
+
         /* release compression ctx */
         crps_destory_ctxs();
 
