@@ -4031,8 +4031,6 @@ static double convert_numeric_to_scalar(Datum value, Oid typid)
     switch (typid) {
         case BOOLOID:
             return (double)DatumGetBool(value);
-        case INT1OID:
-            return (double)DatumGetInt8(value);
         case INT2OID:
             return (double)DatumGetInt16(value);
         case INT4OID:

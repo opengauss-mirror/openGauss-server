@@ -1132,16 +1132,6 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                         outputstr = output_numeric_out(DatumGetNumeric(attr));
                         need_free = !check_need_free_numeric_output(outputstr);
                         break;
-                    case F_DATE_OUT:
-                        /* support dolphin customizing dateout */
-                        if (u_sess->attr.attr_sql.dolphin) {
-                            outputstr = OutputFunctionCall(&thisState->finfo, attr);
-                            need_free = true;
-                        } else {
-                            outputstr = output_date_out(DatumGetDateADT(attr));
-                            need_free = !check_need_free_date_output(outputstr);
-                        }
-                        break;
                     default:
                         outputstr = OutputFunctionCall(&thisState->finfo, attr);
                         need_free = true;
