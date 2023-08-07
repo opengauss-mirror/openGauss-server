@@ -2046,6 +2046,23 @@ Datum gs_streaming_dr_in_switchover(PG_FUNCTION_ARGS)
 Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+    int dr_sender_num = 0;
+
+    for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
+        ReplConnInfo *replConnInfo = NULL;
+        replConnInfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+
+        /* Number of DR replconninfo */
+        if (replConnInfo != NULL && replConnInfo->isCrossRegion) {
+            dr_sender_num++;
+        }
+    }
+    if (IS_PGXC_COORDINATOR) {
+        g_instance.streaming_dr_cxt.hadrWalSndNum = dr_sender_num;
+    } else {
+        g_instance.streaming_dr_cxt.hadrWalSndNum = dr_sender_num > 0 ? 1 : 0;
+    }
+
     for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
@@ -2057,7 +2074,6 @@ Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
             SpinLockAcquire(&walsnd->mutex);
             if (walsnd->interactiveState == SDRS_DEFAULT) {
                 walsnd->interactiveState = SDRS_INTERACTION_BEGIN;
-                g_instance.streaming_dr_cxt.hadrWalSndNum++;
             }
             SpinLockRelease(&walsnd->mutex);
         }
