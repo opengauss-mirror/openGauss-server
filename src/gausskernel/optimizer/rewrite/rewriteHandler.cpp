@@ -35,6 +35,7 @@
 #include "parser/parsetree.h"
 #include "parser/parse_merge.h"
 #include "parser/parse_hint.h"
+#include "parser/parse_type.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteManip.h"
@@ -4505,6 +4506,21 @@ static bool findAttrByName(const char* attributeName, List* tableElts, int maxle
     }
     return false;
 }
+/*
+ * for create table as in B foramt, add type's oid and typemod in tableElts
+ */
+static void addInitAttrType(List* tableElts)
+{
+    ListCell* lc = NULL;
+
+    foreach (lc, tableElts) {
+        Node* node = (Node*)lfirst(lc);
+        if (IsA(node, ColumnDef)) {
+            ColumnDef* def = (ColumnDef*)node;
+            typenameTypeIdAndMod(NULL, def->typname, &def->typname->typeOid, &def->typname->typemod);
+        }
+    }
+}
 
 char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
 {
@@ -4515,8 +4531,10 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
     IntoClause* into = stmt->into;
     List* tableElts = NIL;
 
-    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
         tableElts = stmt->into->tableElts;
+        addInitAttrType(tableElts);
+    }
     int initlen = list_length(tableElts);
 
     /* Obtain the target list of new table */
@@ -4672,8 +4690,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
 
     StringInfo cquery = makeStringInfo();
 
-    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || initlen <= 0)
-        deparse_query(parsetree, cquery, NIL, false, false);
+    deparse_query(parsetree, cquery, NIL, false, false);
 
     return cquery->data;
 }
