@@ -107,5 +107,12 @@ insert into tb_unique values(1,1) ON DUPLICATE KEY UPDATE a = 1, b = 1;
 select * from tb_primary;
 select * from tb_unique;
 
+--fixbug
+drop table if exists t_base;
+create table t_base(col1 int, col2 int, col3 int);
+insert into t_base values(1,2,3),(11,22,33);
+create table ttt3(col int) as select * from t_base;
+select * from ttt3;
+
 \c postgres
 drop database b_createas;
