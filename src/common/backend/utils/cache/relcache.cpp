@@ -5020,7 +5020,7 @@ RelFileNodeBackend CreateNewRelfilenodePart(Relation parent, Partition part)
         part->newcbi = true;
     }
 
-    partition_create_new_storage(parent, part, newrnode);
+    partition_create_new_storage(parent, part, newrnode, true);
 
     return newrnode;
 }

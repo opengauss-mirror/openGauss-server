@@ -180,6 +180,20 @@ select * from t1 where c1 = call_test.proc1;
 select * from t1 where c1 = call_test.proc2;
 select * from t1 where c1 = call_test.proc3;
 
+create or replace function syn_fun_077(c bigint:=1) return int
+as
+  b int := c;
+begin
+ for i in 1..c loop
+   b := b + 1;
+ end loop;
+ return b;
+end;
+/
+
+select syn_fun_077;
+drop  function syn_fun_077;
+
 declare
 var int;
 begin

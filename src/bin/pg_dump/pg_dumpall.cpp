@@ -431,6 +431,20 @@ int main(int argc, char* argv[])
     if (instport == NULL) {
         instport = gs_strdup(PQport(conn));
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * During gs_dumpall, PQfnumber() is matched according to the lowercase column name.
+     * However, when uppercase_attribute_name is on, the column names in the result set
+     * will be converted to uppercase. So we need to turn off it temporarily. We don't
+     * need to turn it on cause this connection is for gs_dumpall only, will not affect others.
+     */
+    if (!SetUppercaseAttributeNameToOff(conn)) {
+        write_stderr(_("%s: set uppercase_attribute_name to off failed.\n"), progname);
+        exit_nicely(1);
+    }
+#endif
+
     /*
      * Get the active encoding and the standard_conforming_strings setting, so
      * we know how to escape strings.
@@ -1671,6 +1685,9 @@ static void dumpRoles(PGconn* conn)
 
         auth_oid = atooid(PQgetvalue(res, i, i_oid));
         rolename = PQgetvalue(res, i, i_rolname);
+        if (strncmp("gs_role_", rolename, strlen("gs_role_")) == 0) {
+            continue;
+        }
 
         resetPQExpBuffer(buf);
 

@@ -488,7 +488,11 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     uint32 updated_colnum_resno;
     Bitmapset* updatedCols = GetUpdatedColumns(resultRelInfo, estate);
 
+    /* use pertuple memory for trigger tuple */
+    oldContext = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
     HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
+    MemoryContextSwitchTo(oldContext);
+
     RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
 
     /*
@@ -2224,14 +2228,6 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         bool update_indexes = false;
         LockTupleMode lockmode;
 
-        /* acquire Form_pg_attrdef ad_on_update */
-        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
-            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, tupleid, oldPartitionOid, bucketid);
-            if (!update_fix_result) {
-                tuple = slot->tts_tuple;
-            }
-        }
-
         /*
          * Check the constraints of the tuple
          *
@@ -2243,6 +2239,14 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
          */
         Assert(RELATION_HAS_BUCKET(result_relation_desc) == (bucketid != InvalidBktId));
 lreplace:
+
+        /* acquire Form_pg_attrdef ad_on_update */
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
+            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, tupleid, oldPartitionOid, bucketid);
+            if (!update_fix_result) {
+                tuple = slot->tts_tuple;
+            }
+        }
 
         /*
          * Compute stored generated columns

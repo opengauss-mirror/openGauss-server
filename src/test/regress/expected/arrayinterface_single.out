@@ -11,6 +11,43 @@ drop schema if exists plpgsql_array_interface;
 NOTICE:  schema "plpgsql_array_interface" does not exist, skipping
 create schema plpgsql_array_interface;
 set current_schema = plpgsql_array_interface;
+-- must be call in procedure --
+select array_varchar_exists(array['1', '2'], '3');
+ERROR:  array_varchar_exists must be call in procedure
+CONTEXT:  referenced column: array_varchar_exists
+select array_varchar_next(array['1','2'], '3');
+ERROR:  array_varchar_next must be call in procedure
+CONTEXT:  referenced column: array_varchar_next
+select array_varchar_prior(array['1','2'], '3');
+ERROR:  array_varchar_prior must be call in procedure
+CONTEXT:  referenced column: array_varchar_prior
+select array_varchar_first(array['1','2']);
+ERROR:  array_varchar_first must be call in procedure
+CONTEXT:  referenced column: array_varchar_first
+select array_varchar_last(array['1','2']);
+ERROR:  array_varchar_last must be call in procedure
+CONTEXT:  referenced column: array_varchar_last
+select array_varchar_deleteidx(array['1','2'], '3');
+ERROR:  array_varchar_deleteidx must be call in procedure
+CONTEXT:  referenced column: array_varchar_deleteidx
+select array_integer_exists(array[1, 2], 3);
+ERROR:  array_integer_exists must be call in procedure
+CONTEXT:  referenced column: array_integer_exists
+select array_integer_next(array[1, 2], 3);
+ERROR:  array_integer_next must be call in procedure
+CONTEXT:  referenced column: array_integer_next
+select array_integer_prior(array[1, 2], 3);
+ERROR:  array_integer_prior must be call in procedure
+CONTEXT:  referenced column: array_integer_prior
+select array_integer_first(array[1, 2]);
+ERROR:  array_integer_first must be call in procedure
+CONTEXT:  referenced column: array_integer_first
+select array_integer_last(array[1, 2]);
+ERROR:  array_integer_last must be call in procedure
+CONTEXT:  referenced column: array_integer_last
+select array_integer_deleteidx(array[1, 2], 3);
+ERROR:  array_integer_deleteidx must be call in procedure
+CONTEXT:  referenced column: array_integer_deleteidx
 -- test array interface count --
 create or replace procedure array_interface_p1()
 as
@@ -685,7 +722,7 @@ begin
 end;
 /
 ERROR:  schema "colors" does not exist
-CONTEXT:  compilation of PL/pgSQL function "array_interface_p8" near line 7
+CONTEXT:  compilation of PL/pgSQL function "array_interface_p8" near line 6
 --call array_interface_p8();
 -- test array exists interface A.B input parameter
 create or replace procedure array_interface_p9()

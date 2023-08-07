@@ -263,10 +263,9 @@ end;
 end test_cur2;
 /
 ERROR:  "cur1.a.a" is not a known variable
-LINE 3: cur1.a.a:=2;
+LINE 2: cur1.a.a:=2;
         ^
-QUERY:   DECLARE 
-BEGIN
+QUERY:   DECLARE BEGIN
 cur1.a.a:=2;
 end
 create or replace package test_cur3
@@ -290,10 +289,9 @@ end;
 end test_cur3;
 /
 ERROR:  "cur1.a.a" is not a known variable
-LINE 3: cur1.a.a:=2;
+LINE 2: cur1.a.a:=2;
         ^
-QUERY:   DECLARE 
-BEGIN
+QUERY:   DECLARE BEGIN
 cur1.a.a:=2;
 end
 create or replace package test_cur4
@@ -318,10 +316,9 @@ end;
 end test_cur4;
 /
 ERROR:  "cur1.a.a" is not a known variable
-LINE 3: cur1.a.a:=2;
+LINE 2: cur1.a.a:=2;
         ^
-QUERY:   DECLARE 
-BEGIN
+QUERY:   DECLARE BEGIN
 cur1.a.a:=2;
 cur.a.a:=2;
 end
@@ -449,7 +446,7 @@ end;
 /
 ERROR:  array type nested by array is not supported yet.
 DETAIL:  Define array type "t2" of array is not supported yet.
-CONTEXT:  compilation of PL/pgSQL function "func1" near line 3
+CONTEXT:  compilation of PL/pgSQL function "func1" near line 2
 -- 2. table nest array
 create or replace package pck1 as
 type t1 is varray(10) of int;
@@ -468,7 +465,7 @@ end;
 /
 ERROR:  array type nested by table type is not supported yet.
 DETAIL:  Define table type "t2" of array is not supported yet.
-CONTEXT:  compilation of PL/pgSQL function "func1" near line 3
+CONTEXT:  compilation of PL/pgSQL function "func1" near line 2
 -- 3. array nest table
 create or replace package pck1 as
 type t1 is table of int;
@@ -487,7 +484,7 @@ end;
 /
 ERROR:  table type nested by array is not supported yet.
 DETAIL:  Define array type "t2" of table type is not supported yet.
-CONTEXT:  compilation of PL/pgSQL function "func1" near line 3
+CONTEXT:  compilation of PL/pgSQL function "func1" near line 2
 -- 4. table nest table, will be supported soon
 -- create or replace package pck1 as
 -- type t1 is table of int;
@@ -521,7 +518,7 @@ end;
 /
 ERROR:  ref cursor type nested by record is not supported yet.
 DETAIL:  Define a record type of ref cursor type is not supported yet.
-CONTEXT:  compilation of PL/pgSQL function "func1" near line 3
+CONTEXT:  compilation of PL/pgSQL function "func1" near line 2
 -- 6. table nest ref cursor
 create or replace package pck1 as
 type t1 is ref cursor;
@@ -540,7 +537,7 @@ end;
 /
 ERROR:  ref cursor type nested by table type is not supported yet.
 DETAIL:  Define table type "t2" of ref cursor is not supported yet.
-CONTEXT:  compilation of PL/pgSQL function "func1" near line 3
+CONTEXT:  compilation of PL/pgSQL function "func1" near line 2
 -- 7. varray nest ref cursor
 create or replace package pck1 as
 type t1 is ref cursor;
@@ -559,7 +556,7 @@ end;
 /
 ERROR:  ref cursor type nested by array is not supported yet.
 DETAIL:  Define array type "t2" of ref cursor type is not supported yet.
-CONTEXT:  compilation of PL/pgSQL function "func1" near line 3
+CONTEXT:  compilation of PL/pgSQL function "func1" near line 2
 DROP package pck1;
 ERROR:  package pck1 does not exist
 DROP function func1();
@@ -721,10 +718,10 @@ end pck1;
 call pck1.p1();
 INFO:  (1,2)
 CONTEXT:  SQL statement "CALL p2(va)"
-PL/pgSQL function p1() line 5 at PERFORM
+PL/pgSQL function p1() line 4 at PERFORM
 INFO:  (4,5)
 CONTEXT:  SQL statement "CALL p2(va)"
-PL/pgSQL function p1() line 7 at PERFORM
+PL/pgSQL function p1() line 6 at PERFORM
  p1 
 ----
  
@@ -833,9 +830,9 @@ call pck1.p1();
 INFO:  (1,2)
 INFO:  (,)
 CONTEXT:  SQL statement "CALL p2(vb)"
-PL/pgSQL function p1() line 9 at SQL statement
+PL/pgSQL function p1() line 8 at SQL statement
 ERROR:  mismatch between assignment and variable filed.
-CONTEXT:  PL/pgSQL function p1() line 9 at SQL statement
+CONTEXT:  PL/pgSQL function p1() line 8 at SQL statement
 DROP PACKAGE pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function plpgsql_packagetype2.p1()
@@ -870,9 +867,9 @@ call pck1.p1();
 INFO:  (1,2)
 INFO:  (,)
 CONTEXT:  SQL statement "CALL p2(vb)"
-PL/pgSQL function p1() line 9 at SQL statement
+PL/pgSQL function p1() line 8 at SQL statement
 ERROR:  mismatch between assignment and variable filed.
-CONTEXT:  PL/pgSQL function p1() line 9 at SQL statement
+CONTEXT:  PL/pgSQL function p1() line 8 at SQL statement
 DROP PACKAGE pck1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function plpgsql_packagetype2.p1()
@@ -907,7 +904,7 @@ call pck1.p1();
 INFO:  (1,2)
 --?.*
 CONTEXT:  SQL statement "CALL p2(vb)"
-PL/pgSQL function p1() line 9 at SQL statement
+PL/pgSQL function p1() line 8 at SQL statement
 INFO:  (1,2)
  p1 
 ----
@@ -1022,7 +1019,7 @@ call p1();
 ERROR:  type "pck1.r1" is not supported as column type
 DETAIL:  "pck1.r1" is a package or procedure type
 CONTEXT:  SQL statement "create table t1(a pck1.r1)"
-PL/pgSQL function p1() line 3 at SQL statement
+PL/pgSQL function p1() line 2 at SQL statement
 create or replace procedure p1 as
 begin
 create table t1(a pck1.r2);
@@ -1032,7 +1029,7 @@ call p1();
 ERROR:  type "pck1.r2" is not supported as column type
 DETAIL:  "pck1.r2" is a package or procedure type
 CONTEXT:  SQL statement "create table t1(a pck1.r2)"
-PL/pgSQL function p1() line 3 at SQL statement
+PL/pgSQL function p1() line 2 at SQL statement
 create or replace procedure p1 as
 begin
 create table t1(a pck1.r3);
@@ -1042,7 +1039,7 @@ call p1();
 ERROR:  type "pck1.r3" is not supported as column type
 DETAIL:  "pck1.r3" is a package or procedure type
 CONTEXT:  SQL statement "create table t1(a pck1.r3)"
-PL/pgSQL function p1() line 3 at SQL statement
+PL/pgSQL function p1() line 2 at SQL statement
 create or replace procedure p1 as
 begin
 create type o1 as (a pck1.r1);
@@ -1052,7 +1049,7 @@ call p1();
 ERROR:  type "pck1.r1" is not supported as column type
 DETAIL:  "pck1.r1" is a package or procedure type
 CONTEXT:  SQL statement "create type o1 as (a pck1.r1)"
-PL/pgSQL function p1() line 3 at SQL statement
+PL/pgSQL function p1() line 2 at SQL statement
 create or replace procedure p1 as
 begin
 create type o1 as (a pck1.r2);
@@ -1062,7 +1059,7 @@ call p1();
 ERROR:  type "pck1.r2" is not supported as column type
 DETAIL:  "pck1.r2" is a package or procedure type
 CONTEXT:  SQL statement "create type o1 as (a pck1.r2)"
-PL/pgSQL function p1() line 3 at SQL statement
+PL/pgSQL function p1() line 2 at SQL statement
 create or replace procedure p1 as
 begin
 create type o1 as (a pck1.r3);
@@ -1072,7 +1069,7 @@ call p1();
 ERROR:  type "pck1.r3" is not supported as column type
 DETAIL:  "pck1.r3" is a package or procedure type
 CONTEXT:  SQL statement "create type o1 as (a pck1.r3)"
-PL/pgSQL function p1() line 3 at SQL statement
+PL/pgSQL function p1() line 2 at SQL statement
 DROP procedure p1;
 DROP package pck1;
 -- test package-depended type clean
@@ -1343,11 +1340,10 @@ end;
 end pck1;
 /
 ERROR:  record type with table of attribute is not suppoted to be referenced by another package.
-LINE 2: vb pck1.r1;
-                  ^
+LINE 1:  DECLARE vb pck1.r1;
+                           ^
 DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be referenced by another package.
-QUERY:   DECLARE 
-vb pck1.r1;
+QUERY:   DECLARE vb pck1.r1;
 begin
 null;
 end
@@ -1366,11 +1362,10 @@ null;
 end;
 /
 ERROR:  record type with table of attribute is not suppoted to be referenced by another package.
-LINE 2: va pck1.r1;
-                  ^
+LINE 1:  DECLARE va pck1.r1;
+                           ^
 DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be referenced by another package.
-QUERY:   DECLARE 
-va pck1.r1;
+QUERY:   DECLARE va pck1.r1;
 begin
 null;
 end

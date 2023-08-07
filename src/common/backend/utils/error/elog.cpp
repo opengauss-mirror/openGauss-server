@@ -137,6 +137,7 @@ static void write_eventlog(int level, const char* line, int len);
 
 static const int CREATE_ALTER_SUBSCRIPTION = 16;
 static const int CREATE_ALTER_USERMAPPING = 18;
+static const int GRANT_USAGE = 19;
 
 /* Macro for checking t_thrd.log_cxt.errordata_stack_depth is reasonable */
 #define CHECK_STACK_DEPTH()                                               \
@@ -160,7 +161,6 @@ static void setup_formatted_log_time(void);
 static void setup_formatted_start_time(void);
 extern void send_only_message_to_frontend(const char* message, bool is_putline);
 static char* mask_Password_internal(const char* query_string);
-static char* mask_error_password(const char* query_string, int str_len);
 static void truncate_identified_by(char* query_string, int query_len);
 static char* mask_execute_direct_cmd(const char* query_string);
 static bool is_execute_cmd(const char* query_string);
@@ -3020,7 +3020,11 @@ static void send_message_to_server_log(ErrorData* edata)
         char* randomPlanInfo = NULL;
         char* mask_string = NULL;
         mask_string = maskPassword(t_thrd.postgres_cxt.debug_query_string);
-        if (edata->sqlerrcode == ERRCODE_SYNTAX_ERROR) {
+        /*
+         * For B-compatible database with dolphin, there're some scenarios that
+         * maskPassword couldn't cover.
+         */
+        if (edata->sqlerrcode == ERRCODE_SYNTAX_ERROR || u_sess->attr.attr_sql.dolphin) {
             if (mask_string != NULL) {
                 truncate_identified_by(mask_string, strlen(mask_string));
             } else {
@@ -4015,6 +4019,8 @@ static char* mask_word(char* query_string, int query_len, const char* word, int 
     char* lower_string = (char*)palloc0(query_len + 1);
     rc = memcpy_s(lower_string, query_len, query_string, query_len);
     securec_check(rc, "\0", "\0");
+    bool truncate = false;
+    int set_password_len = 0;
 
     tolower_func(lower_string);
 
@@ -4036,16 +4042,30 @@ static char* mask_word(char* query_string, int query_len, const char* word, int 
         }
         token_len++;
     }
+
+    /* set password for user=password */
+    if (strncmp(token_ptr, "for", token_len) == 0) {
+        token_ptr += token_len;
+        set_password_len = token_len + 1;
+        for (int i = 0; i < query_len - head_len - token_len; i++) {
+            if (token_ptr[i] == '=') {
+                truncate = true;
+                break;
+            }
+            set_password_len++;
+        }
+    }
     tail_ptr = token_ptr + token_len;
     tail_len = query_len - head_len - token_len;
 
-    rc = memcpy_s(mask_string, query_len + mask_len + 1, query_string, head_len);
+    rc = memcpy_s(mask_string, query_len + mask_len + 1, query_string, head_len + set_password_len);
     securec_check(rc, "\0", "\0");
-    rc = memset_s(mask_string + head_len, query_len + mask_len + 1 - head_len, '*', mask_len);
+    rc = memset_s(mask_string + head_len + set_password_len, query_len + mask_len + 1 - head_len - set_password_len,
+                  '*', mask_len);
     securec_check(rc, "\0", "\0");
-    bool is_identified_by = ((strstr(word, " identified by ") == NULL) ? false : true);
-    if (is_identified_by) {
-        mask_string[head_len + mask_len] = '\0';
+    truncate = truncate || ((strstr(word, " identified by ") == NULL) ? false : true);
+    if (truncate) {
+        mask_string[head_len + mask_len + set_password_len] = '\0';
     } else {
         rc = memcpy_s(mask_string + head_len + mask_len, query_len + 1 - head_len, tail_ptr, tail_len);
         securec_check(rc, "\0", "\0");
@@ -4090,7 +4110,7 @@ static void truncate_identified_by(char* query_string, int query_len)
     pfree_ext(lower_string);
 }
 
-static char* mask_error_password(const char* query_string, int str_len)
+char* mask_error_password(const char* query_string, int str_len)
 {
     char* mask_string = NULL;
     errno_t rc = EOK;
@@ -4368,6 +4388,7 @@ static char* mask_Password_internal(const char* query_string)
      * 16 - create/alter subscription(CREATE_ALTER_SUBSCRIPTION)
      * 17 - set password (b compatibility)
      * 18 - create/alter user mapping
+     * 19 - grant usage on *.*(b compatibility, same as create/alter user)
      */
     int curStmtType = 0;
     int prevToken[5] = {0};
@@ -4662,7 +4683,7 @@ static char* mask_Password_internal(const char* query_string)
                         idx = 0;
                     break;
                 case REPLACE:
-                    isPassword = (curStmtType == 3 || curStmtType == 4 || curStmtType == 17);
+                    isPassword = (curStmtType == 3 || curStmtType == 4);
                     if (isPassword)
                         idx = 0;
                     break;
@@ -4964,6 +4985,9 @@ static char* mask_Password_internal(const char* query_string)
                             curStmtType = 0;
                         }
                         idx = 0;
+                    } else if (DB_IS_CMPT(B_FORMAT) && prevToken[1] == GRANT &&
+                        pg_strcasecmp(yylval.str, "usage") == 0) {
+                        curStmtType = GRANT_USAGE;
                     }
                     break;
                 case SCONST:
@@ -5077,6 +5101,11 @@ static char* mask_Password_internal(const char* query_string)
                 case MAPPING:
                     if (prevToken[0] == USER) {
                         prevToken[1] = MAPPING;
+                    }
+                    break;
+                case GRANT:
+                    if (DB_IS_CMPT(B_FORMAT) && prevToken[0] == ';') {
+                        prevToken[1] = GRANT;
                     }
                     break;
                 default:

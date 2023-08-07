@@ -1177,4 +1177,33 @@ return 1;
 end;
 $$ language plpgsql;
 
+truncate dbe_pldeveloper.gs_errors;
+create table tab_1139605(id int,a1 int);
+create function fun_1139605()return int
+as
+b int;
+begin
+select a1 into b,c from tab_1139605 where id=1;
+return b;
+end;
+/
+select count(*) from dbe_pldeveloper.gs_errors;
+
 set plsql_show_all_error to off;
+
+delete from DBE_PLDEVELOPER.gs_source;
+create package pac_1139606 is
+procedure pro_1139606();
+function fun_1139606();
+end pac_1139606;
+/
+select name, status, src from DBE_PLDEVELOPER.gs_source;
+delete from DBE_PLDEVELOPER.gs_source;
+
+create package pac_1139606 is
+procedure pro_1139606();
+end pac_1139606;
+/
+select name, status, src from DBE_PLDEVELOPER.gs_source;
+delete from DBE_PLDEVELOPER.gs_source;
+drop package pac_1139606;

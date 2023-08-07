@@ -2589,8 +2589,8 @@ typedef struct knl_t_storage_context {
      * are still pinned at the end of transactions and when exiting.
      *
      *
-     * To avoid - as we used to - requiring an array with g_instance.attr.attr_storage.NBuffers entries to keep
-     * track of local buffers we use a small sequentially searched array
+     * To avoid - as we used to - requiring an array with NBuffers entries to keep
+     * track of local buffers, we use a small sequentially searched array
      * (PrivateRefCountArray) and a overflow hash table (PrivateRefCountHash) to
      * keep track of backend local pins.
      *
@@ -2601,11 +2601,19 @@ typedef struct knl_t_storage_context {
      *
      * Note that in most scenarios the number of pinned buffers will not exceed
      * REFCOUNT_ARRAY_ENTRIES.
+     *
+     *
+     * To enter a buffer into the refcount tracking mechanism first reserve a free
+     * entry using ReservePrivateRefCountEntry() and then later, if necessary,
+     * fill it with NewPrivateRefCountEntry(). That split lets us avoid doing
+     * memory allocations in NewPrivateRefCountEntry() which can be important
+     * because in some scenarios it's called with a spinlock held...
      */
     struct PrivateRefCountEntry* PrivateRefCountArray;
     struct HTAB* PrivateRefCountHash;
     int32 PrivateRefCountOverflowed;
     uint32 PrivateRefCountClock;
+    PrivateRefCountEntry* ReservedRefCountEntry;
     /*
      * Information saved between calls so we can determine the strategy
      * point's advance rate and avoid scanning already-cleaned buffers.
@@ -3331,6 +3339,7 @@ typedef struct knl_t_publication_context {
     /* Map used to remember which relation schemas we sent. */
     HTAB* RelationSyncCache;
     bool updateConninfoNeeded;
+    bool firstTimeSendConninfo;
 } knl_t_publication_context;
 
 typedef struct knl_t_dms_context {

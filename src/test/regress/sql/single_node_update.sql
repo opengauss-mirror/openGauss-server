@@ -261,5 +261,37 @@ update t_dmpportal_common_intent set intent_name='2' where id=2;
 select count(upt_time) from t_dmpportal_common_intent group by upt_time order by upt_time;
 select * from t_dmpportal_common_intent;
 
+
+show sql_beta_feature;
+show enable_partition_opfusion;
+show enable_opfusion;
+set sql_beta_feature = 'a_style_coerce, partition_opfusion';
+set enable_partition_opfusion = on;
+set enable_opfusion = on;
+
+create table bypass_pt_update (
+    a serial primary key,
+    b int default 1
+) partition by range(a) (
+    partition p1 values less than (5),
+    partition p2 values less than (maxvalue)
+);
+
+insert into bypass_pt_update(b) select generate_series(1,8);
+select * from bypass_pt_update order by a;
+
+explain (verbose on, costs off) update bypass_pt_update set b = 2 where a = 1;
+update bypass_pt_update set b = 2 where a = 1;
+
+explain (verbose on, costs off) update bypass_pt_update set a = 9 where a = 2;
+update bypass_pt_update set a = 9 where a = 2;
+
+select * from bypass_pt_update order by a;
+
+drop table bypass_pt_update;
+set sql_beta_feature='a_style_coerce';
+set enable_partition_opfusion = off;
+set enable_opfusion = off;
+
 \c regression
 DROP database mysql;

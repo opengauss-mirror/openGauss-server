@@ -923,10 +923,7 @@ compress_init(void)
 #ifndef HAVE_LIBZ
         if (instance_config.compress_alg == ZLIB_COMPRESS)
             elog(ERROR, "This build does not support zlib compression");
-        else
 #endif
-        if (instance_config.compress_alg == PGLZ_COMPRESS && num_threads > 1)
-            elog(ERROR, "Multithread backup does not support pglz compression");
     }
 }
 
@@ -934,7 +931,8 @@ static void dss_init(void)
 {
     if (IsDssMode()) {
         /* skip in some special backup modes */
-        if (backup_subcmd == DELETE_CMD || backup_subcmd == DELETE_INSTANCE_CMD) {
+        if (backup_subcmd == DELETE_CMD || backup_subcmd == DELETE_INSTANCE_CMD || 
+            backup_subcmd == SHOW_CMD || backup_subcmd == MERGE_CMD) {
             return;
         }
 

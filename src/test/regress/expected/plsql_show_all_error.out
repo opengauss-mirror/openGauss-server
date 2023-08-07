@@ -73,7 +73,7 @@ BEGIN
 END;
 /
 ERROR:  unrecognized exception condition "division_by_zeros"
-CONTEXT:  compilation of PL/pgSQL function "exce_pro2" near line 5
+CONTEXT:  compilation of PL/pgSQL function "exce_pro2" near line 4
 create or replace procedure pro1
 as
 begin
@@ -88,10 +88,9 @@ creat table (c1 int,c2 int) t1; --顺序错误
 end;
 /
 NOTICE:  syntax error at or near "t1"
-LINE 3: drop t1; --缺失table关键字
+LINE 2: drop t1; --缺失table关键字
              ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 drop t1; --缺失table关键字
 drop tables t1; --错写
 crop table t1; --错写
@@ -102,10 +101,9 @@ creat table t1(c1 int,c2 int); --未标行号
 creat table (c1 int,c2 int) t1; --顺序错误
 end
 NOTICE:  syntax error at or near "tables"
-LINE 4: drop tables t1; --错写
+LINE 3: drop tables t1; --错写
              ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 drop t1; --缺失table关键字
 drop tables t1; --错写
 crop table t1; --错写
@@ -116,10 +114,9 @@ creat table t1(c1 int,c2 int); --未标行号
 creat table (c1 int,c2 int) t1; --顺序错误
 end
 NOTICE:  syntax error at or near "crop"
-LINE 5: crop table t1; --错写
+LINE 4: crop table t1; --错写
         ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 drop t1; --缺失table关键字
 drop tables t1; --错写
 crop table t1; --错写
@@ -130,10 +127,9 @@ creat table t1(c1 int,c2 int); --未标行号
 creat table (c1 int,c2 int) t1; --顺序错误
 end
 NOTICE:  syntax error at or near "t2"
-LINE 6: create table t1 t2(c1 int,c2 int);--表名不正确
+LINE 5: create table t1 t2(c1 int,c2 int);--表名不正确
                         ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 drop t1; --缺失table关键字
 drop tables t1; --错写
 crop table t1; --错写
@@ -144,10 +140,9 @@ creat table t1(c1 int,c2 int); --未标行号
 creat table (c1 int,c2 int) t1; --顺序错误
 end
 NOTICE:  syntax error at or near "int"
-LINE 7: create table t1(c1 ,c2 int);--漏写数据类型
+LINE 6: create table t1(c1 ,c2 int);--漏写数据类型
                                ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 drop t1; --缺失table关键字
 drop tables t1; --错写
 crop table t1; --错写
@@ -158,10 +153,9 @@ creat table t1(c1 int,c2 int); --未标行号
 creat table (c1 int,c2 int) t1; --顺序错误
 end
 NOTICE:  syntax error at or near "tables"
-LINE 8: create tables t1(c1 int,c2 int); --行号不对
+LINE 7: create tables t1(c1 int,c2 int); --行号不对
                ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 drop t1; --缺失table关键字
 drop tables t1; --错写
 crop table t1; --错写
@@ -172,10 +166,9 @@ creat table t1(c1 int,c2 int); --未标行号
 creat table (c1 int,c2 int) t1; --顺序错误
 end
 NOTICE:  syntax error at or near "creat"
-LINE 9: creat table t1(c1 int,c2 int); --未标行号
+LINE 8: creat table t1(c1 int,c2 int); --未标行号
         ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 drop t1; --缺失table关键字
 drop tables t1; --错写
 crop table t1; --错写
@@ -186,10 +179,9 @@ creat table t1(c1 int,c2 int); --未标行号
 creat table (c1 int,c2 int) t1; --顺序错误
 end
 NOTICE:  syntax error at or near "creat"
-LINE 10: creat table (c1 int,c2 int) t1; --顺序错误
-         ^
-QUERY:   DECLARE 
-begin
+LINE 9: creat table (c1 int,c2 int) t1; --顺序错误
+        ^
+QUERY:   DECLARE begin
 drop t1; --缺失table关键字
 drop tables t1; --错写
 crop table t1; --错写
@@ -201,7 +193,7 @@ creat table (c1 int,c2 int) t1; --顺序错误
 end
 ERROR:  Debug mod,create procedure has error.
 DETAIL:  N/A
-CONTEXT:  compilation of PL/pgSQL function "pro1" near line 2
+CONTEXT:  compilation of PL/pgSQL function "pro1" near line 1
 select line,src from dbe_pldeveloper.gs_errors where name='pro1';
  line |     src      
 ------+--------------
@@ -1455,7 +1447,7 @@ ERROR:  relation "dd_bb_cc_rel" does not exist
 LINE 3:      SELECT count(*) INTO temp FROM DD_BB_CC_REL WHERE BB_ID...
              ^
 DETAIL:  
-QUERY:   DECLARE  temp INTEGER;
+QUERY:   DECLARE temp INTEGER;
   BEGIN
      SELECT count(*) INTO temp FROM DD_BB_CC_REL WHERE BB_ID=BBId;
      RETURN temp;
@@ -1473,19 +1465,17 @@ open v_cur for select c1,c2 from tab1;
 end;
 /
 NOTICE:  "v_cur" is not a known variable
-LINE 5: open v_cur for select c1,c2 from tab1;
+LINE 4: open v_cur for select c1,c2 from tab1;
              ^
-QUERY:   DECLARE 
-type tpc1 is ref cursor;
+QUERY:   DECLARE type tpc1 is ref cursor;
 --v_cur tpc1;
 begin
 open v_cur for select c1,c2 from tab1;
 end
 ERROR:  open cursor error
-LINE 5: open v_cur for select c1,c2 from tab1;
+LINE 4: open v_cur for select c1,c2 from tab1;
              ^
-QUERY:   DECLARE 
-type tpc1 is ref cursor;
+QUERY:   DECLARE type tpc1 is ref cursor;
 --v_cur tpc1;
 begin
 open v_cur for select c1,c2 from tab1;
@@ -1501,10 +1491,9 @@ forall i in 1 .. v1.count save exceptions
 end;
 /
 ERROR:  invalid type's rel tuple for insert. at or near ";"
-LINE 6:     insert into tb values v1(i);
+LINE 5:     insert into tb values v1(i);
                                        ^
-QUERY:   DECLARE 
-type t1 is table of tb.eno%type;
+QUERY:   DECLARE type t1 is table of tb.eno%type;
 v1 t1;
 begin
 forall i in 1 .. v1.count save exceptions
@@ -1533,19 +1522,17 @@ end;
 end pack2;
 /
 NOTICE:  syntax error at or near "table" when compile function pro1()
-LINE 3: update table t1 set c1=1 and c2=1;
+LINE 2: update table t1 set c1=1 and c2=1;
         ^
 DETAIL:  syntax error
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 update table t1 set c1=1 and c2=1;
 end
 NOTICE:  syntax error at or near "table" when compile function pro2()
-LINE 3: update table t1 set c1=1 and c2=1;
+LINE 2: update table t1 set c1=1 and c2=1;
         ^
 DETAIL:  syntax error
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
 update table t1 set c1=1 and c2=1;
 end
 ERROR:  Debug mod,create procedure has error.
@@ -1564,17 +1551,16 @@ return n;
 end;
 /
 NOTICE:  empty index at or near ")"
-LINE 4: n := v();
+LINE 3: n := v();
                ^
-QUERY:   DECLARE 
-n int;
+QUERY:   DECLARE n int;
 begin
 n := v();
 return n;
 end
 ERROR:  Debug mod,create procedure has error.
 DETAIL:  N/A
-CONTEXT:  compilation of PL/pgSQL function "f" near line 3
+CONTEXT:  compilation of PL/pgSQL function "f" near line 2
 create or replace PACKAGE z_pk2
 AS
  PROCEDURE pro(p1 int);
@@ -1668,7 +1654,7 @@ end;
 /
 ERROR:  array element type is not composite in assignment
 DETAIL:  array variable "tblof001" must be composite when assign value to attibute
-CONTEXT:  compilation of PL/pgSQL function "pro_tblof_pro_013_1" near line 8
+CONTEXT:  compilation of PL/pgSQL function "pro_tblof_pro_013_1" near line 7
 drop procedure pro_tblof_pro_013_1();
 ERROR:  function pro_tblof_pro_013_1 does not exist
 drop type pro_tblof_013;
@@ -1685,10 +1671,9 @@ begin
 end;
 /
 NOTICE:  syntax error at or near ";"
-LINE 4:  select c1 from t1 into ;             
+LINE 3:  select c1 from t1 into ;             
                                 ^
-QUERY:   DECLARE 
-a int;
+QUERY:   DECLARE a int;
 begin
  select c1 from t1 into ;             
  select c1 from t1  limit  1  a;       
@@ -1696,11 +1681,10 @@ begin
  select c1 from t1 into b;                          
 end
 ERROR:  relation "t1" does not exist
-LINE 4:  select c1 from t1 into ;             
+LINE 3:  select c1 from t1 into ;             
          ^
 DETAIL:  
-QUERY:   DECLARE 
-a int;
+QUERY:   DECLARE a int;
 begin
  select c1 from t1 into ;             
  select c1 from t1  limit  1  a;       
@@ -1716,26 +1700,24 @@ begin
 end;
 /
 NOTICE:  syntax error at or near "from"
-LINE 4:  select  into a from t1.c1;
+LINE 3:  select  into a from t1.c1;
                         ^
-QUERY:   DECLARE 
-a int;
+QUERY:   DECLARE a int;
 begin
  select  into a from t1.c1;
  select 1  into ab;
 end
 NOTICE:  syntax error at or near "from"
-LINE 2: a int;
-             ^
-QUERY:   DECLARE 
-a int;
+LINE 1:  DECLARE a int;
+                       ^
+QUERY:   DECLARE a int;
 begin
  select  into a from t1.c1;
  select 1  into ab;
 end
 ERROR:  compile failed when parse the query: select         from t1.c1
 DETAIL:  unexpected null parsetree list
-CONTEXT:  compilation of PL/pgSQL function "pro20" near line 4
+CONTEXT:  compilation of PL/pgSQL function "pro20" near line 3
 create or replace procedure pro21
 as
 a int;
@@ -1746,21 +1728,19 @@ begin
 end;
 /
 NOTICE:  "ab" is not a known variable
-LINE 4:  select 1  into ab;
+LINE 3:  select 1  into ab;
                         ^
-QUERY:   DECLARE 
-a int;
+QUERY:   DECLARE a int;
 begin
  select 1  into ab;
  select 1  intoo a;
  dbe_output.print_line('a  is:'||a);
 end
 ERROR:  Invalid use of identifiers.
-LINE 5:  select 1  intoo a;
+LINE 4:  select 1  intoo a;
                    ^
 DETAIL:  Syntax error found near token "intoo"
-QUERY:   DECLARE 
-a int;
+QUERY:   DECLARE a int;
 begin
  select 1  into ab;
  select 1  intoo a;
@@ -1777,7 +1757,7 @@ begin
 end;
 /
 ERROR:  schema "dbe_output" does not exist
-CONTEXT:  compilation of PL/pgSQL function "pro22" near line 6
+CONTEXT:  compilation of PL/pgSQL function "pro22" near line 5
 set behavior_compat_options = '';
 drop package if exists package_020;
 NOTICE:  drop cascades to 2 other objects
@@ -1826,4 +1806,66 @@ $$ language plpgsql;
 ERROR:  unsupported insert into table from non record type. at or near "i"
 LINE 6: insert into insert_table values i;
                                         ^
+truncate dbe_pldeveloper.gs_errors;
+create table tab_1139605(id int,a1 int);
+create function fun_1139605()return int
+as
+b int;
+begin
+select a1 into b,c from tab_1139605 where id=1;
+return b;
+end;
+/
+NOTICE:  syntax error at or near "from"
+LINE 3: select a1 into b,c from tab_1139605 where id=1;
+                           ^
+QUERY:   DECLARE b int;
+begin
+select a1 into b,c from tab_1139605 where id=1;
+return b;
+end
+ERROR:  Debug mod,create procedure has error.
+DETAIL:  N/A
+CONTEXT:  compilation of PL/pgSQL function "fun_1139605" near line 2
+select count(*) from dbe_pldeveloper.gs_errors;
+ count 
+-------
+     1
+(1 row)
+
 set plsql_show_all_error to off;
+delete from DBE_PLDEVELOPER.gs_source;
+create package pac_1139606 is
+procedure pro_1139606();
+function fun_1139606();
+end pac_1139606;
+/
+ERROR:  syntax error at or near "BEGIN"
+LINE 4: end pac_1139606;
+          ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+select name, status, src from DBE_PLDEVELOPER.gs_source;
+    name     | status |              src              
+-------------+--------+-------------------------------
+ pac_1139606 | f      | create package pac_1139606 is+
+             |        | procedure pro_1139606();     +
+             |        | function fun_1139606();      +
+             |        | end pac_1139606;
+(1 row)
+
+delete from DBE_PLDEVELOPER.gs_source;
+create package pac_1139606 is
+procedure pro_1139606();
+end pac_1139606;
+/
+select name, status, src from DBE_PLDEVELOPER.gs_source;
+    name     | status |              src              
+-------------+--------+-------------------------------
+ pac_1139606 | t      | create package pac_1139606 is+
+             |        | procedure pro_1139606();     +
+             |        | end pac_1139606;
+(1 row)
+
+delete from DBE_PLDEVELOPER.gs_source;
+drop package pac_1139606;
+NOTICE:  drop cascades to function public.pro_1139606()

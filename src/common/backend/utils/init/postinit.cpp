@@ -2187,8 +2187,19 @@ void PostgresInitializer::InitSession()
     Assert(dummyStandbyMode || CurrentMemoryContext == t_thrd.mem_cxt.cur_transaction_mem_cxt);
 
     if (IsUnderPostmaster) {
-        CheckAuthentication();
-        InitUser();
+        u_sess->proc_cxt.check_auth = true;
+        PG_TRY();
+        {
+            CheckAuthentication();
+            InitUser();
+            u_sess->proc_cxt.check_auth = false;
+        }
+        PG_CATCH();
+        {
+            u_sess->proc_cxt.check_auth = false;
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
     } else {
         CheckAtLeastOneRoles();
         SetSuperUserStandalone();

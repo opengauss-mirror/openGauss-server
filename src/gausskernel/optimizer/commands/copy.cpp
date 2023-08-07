@@ -4834,7 +4834,7 @@ uint64 CopyFrom(CopyState cstate)
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
                             targetOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
                         } else {
-                            targetOid = heapTupleGetPartitionId(resultRelationDesc, tuple, NULL);
+                            targetOid = getPartitionIdFromTuple(resultRelationDesc, tuple, estate, slot, NULL);
                         }
                     } else {
                         targetOid = RelationGetRelid(resultRelationDesc);
@@ -4887,7 +4887,7 @@ uint64 CopyFrom(CopyState cstate)
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
                             targetPartOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
                         } else {
-                            targetPartOid = heapTupleGetPartitionId(resultRelationDesc, tuple, NULL);
+                            targetPartOid = getPartitionIdFromTuple(resultRelationDesc, tuple, estate, slot, NULL);
                         }
                         partitionList = list_append_unique_oid(partitionList, targetPartOid);
                     }
@@ -4900,7 +4900,7 @@ uint64 CopyFrom(CopyState cstate)
                     if (isPartitionRel) {
                         /* get partititon oid to insert the record */
                         int partitionno = INVALID_PARTITION_NO;
-                        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple, &partitionno);
+                        partitionid = getPartitionIdFromTuple(resultRelationDesc, tuple, estate, slot, &partitionno);
                         searchFakeReationForPartitionOid(estate->esfRelations,
                             estate->es_query_cxt,
                             resultRelationDesc,
@@ -4912,7 +4912,7 @@ uint64 CopyFrom(CopyState cstate)
 
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
                             int subpartitionno = INVALID_PARTITION_NO;
-                            partitionid = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno);
+                            partitionid = getPartitionIdFromTuple(heaprel, tuple, estate, slot, &subpartitionno);
                             searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, heaprel,
                                 partitionid, subpartitionno, subPartRel, subPart, RowExclusiveLock);
                             heaprel = subPartRel;
@@ -6891,6 +6891,7 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
     for (;;) {
         int prev_raw_ptr;
         char c;
+        char sec = '\0';
 
         /*
          * Load more data if needed.  Ideally we would just force four bytes
@@ -6928,6 +6929,9 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
         /* OK to fetch a character */
         prev_raw_ptr = raw_buf_ptr;
         c = copy_raw_buf[raw_buf_ptr++];
+        if (raw_buf_ptr < copy_buf_len) {
+            sec = copy_raw_buf[raw_buf_ptr];
+        }
 
         if (csv_mode) {
             /*
@@ -7219,10 +7223,12 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
          * high-bit set, so as an optimization we can avoid this block
          * entirely if it is not set.
          */
-        if (cstate->encoding_embeds_ascii && IS_HIGHBIT_SET(c)) {
+        if ((cstate->encoding_embeds_ascii || cstate->file_encoding == PG_GBK || cstate->file_encoding == PG_GB18030)
+            && IS_HIGHBIT_SET(c)) {
             int mblen;
 
             mblen_str[0] = c;
+            mblen_str[1] = sec;
             /* All our encodings only read the first byte to get the length */
             mblen = pg_encoding_mblen(cstate->file_encoding, mblen_str);
             IF_NEED_REFILL_AND_NOT_EOF_CONTINUE(mblen - 1);

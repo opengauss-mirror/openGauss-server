@@ -9,7 +9,7 @@ end;
 call test_without_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_without_commit() line 3 at SQL statement
+PL/pgSQL function test_without_commit() line 2 at SQL statement
  test_without_commit 
 ---------------------
  
@@ -57,7 +57,7 @@ end;
 call test_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit() line 3 at SQL statement
+PL/pgSQL function test_commit() line 2 at SQL statement
  test_commit 
 -------------
  
@@ -83,7 +83,7 @@ end;
 call test_commit_insert_option();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_option() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_option() line 2 at SQL statement
  test_commit_insert_option 
 ---------------------------
  
@@ -110,7 +110,7 @@ end;
 call test_commit_insert_delete();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_delete() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_delete() line 2 at SQL statement
  test_commit_insert_delete 
 ---------------------------
  
@@ -136,7 +136,7 @@ end;
 call test_commit_insert_update();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_update() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_update() line 2 at SQL statement
  test_commit_insert_update 
 ---------------------------
  
@@ -163,7 +163,7 @@ end;
 call test_commit_insert_update_delete();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_update_delete() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_update_delete() line 2 at SQL statement
  test_commit_insert_update_delete 
 ----------------------------------
  
@@ -190,7 +190,7 @@ end;
 call test_commit_insert_delete_update();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_delete_update() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_delete_update() line 2 at SQL statement
  test_commit_insert_delete_update 
 ----------------------------------
  
@@ -217,7 +217,7 @@ end;
 call test_commit_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_commit() line 3 at SQL statement
+PL/pgSQL function test_commit_commit() line 2 at SQL statement
  test_commit_commit 
 --------------------
  
@@ -247,7 +247,7 @@ end;
 call test_commit_commit1();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_commit1() line 3 at SQL statement
+PL/pgSQL function test_commit_commit1() line 2 at SQL statement
  test_commit_commit1 
 ---------------------
  
@@ -274,7 +274,7 @@ end;
 call test_commit_rollback();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_rollback() line 3 at SQL statement
+PL/pgSQL function test_commit_rollback() line 2 at SQL statement
  test_commit_rollback 
 ----------------------
  
@@ -303,7 +303,7 @@ end;
 call test_commit_rollback1();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_rollback1() line 3 at SQL statement
+PL/pgSQL function test_commit_rollback1() line 2 at SQL statement
  test_commit_rollback1 
 -----------------------
  
@@ -338,10 +338,10 @@ end;
 call test_rollback_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_rollback_commit() line 3 at SQL statement
+PL/pgSQL function test_rollback_commit() line 2 at SQL statement
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_rollback_commit() line 8 at SQL statement
+PL/pgSQL function test_rollback_commit() line 7 at SQL statement
  test_rollback_commit 
 ----------------------
  
@@ -372,7 +372,7 @@ end;
 call test_commit_insert_exception_rollback();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_exception_rollback() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_exception_rollback() line 2 at SQL statement
  test_commit_insert_exception_rollback 
 ---------------------------------------
  
@@ -403,7 +403,7 @@ end;
 call test_commit_insert_exception_commit_rollback();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_exception_commit_rollback() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_exception_commit_rollback() line 2 at SQL statement
  test_commit_insert_exception_commit_rollback 
 ----------------------------------------------
  
@@ -430,7 +430,7 @@ end;
 call test_commit_insert_raise_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_raise_commit() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_raise_commit() line 2 at SQL statement
 ERROR:  After commit
 select * from test_commit;
  a | b 
@@ -454,7 +454,7 @@ end;
 call test_commit_insert_delete_raise_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_delete_raise_commit() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_delete_raise_commit() line 2 at SQL statement
 ERROR:  After commit
 select * from test_commit;
  a | b 
@@ -477,7 +477,7 @@ end;
 call test_commit_insert_update_raise_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_update_raise_commit() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_update_raise_commit() line 2 at SQL statement
 ERROR:  After commit
 select * from test_commit;
  a | b 
@@ -501,7 +501,7 @@ end;
 call test_commit_insert_update_delete_raise_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_update_delete_raise_commit() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_update_delete_raise_commit() line 2 at SQL statement
 ERROR:  After commit
 select * from test_commit;
  a | b 
@@ -525,7 +525,7 @@ end;
 call test_commit_insert_delete_update_raise_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_delete_update_raise_commit() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_delete_update_raise_commit() line 2 at SQL statement
 ERROR:  After commit
 select * from test_commit;
  a | b 
@@ -569,7 +569,7 @@ end;
 call test_commit_insert_delete_commit_raise();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_delete_commit_raise() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_delete_commit_raise() line 2 at SQL statement
 ERROR:  Before commit
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
@@ -591,7 +591,7 @@ end;
 call test_commit_insert_update_commit_raise();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_update_commit_raise() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_update_commit_raise() line 2 at SQL statement
 ERROR:  Before commit
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
@@ -614,7 +614,7 @@ end;
 call test_commit_insert_update_delete_commit_raise();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_update_delete_commit_raise() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_update_delete_commit_raise() line 2 at SQL statement
 ERROR:  Before commit
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
@@ -638,7 +638,7 @@ end;
 call test_commit_insert_delete_update_commit_raise();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_insert_delete_update_commit_raise() line 3 at SQL statement
+PL/pgSQL function test_commit_insert_delete_update_commit_raise() line 2 at SQL statement
 ERROR:  Before commit
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
@@ -664,7 +664,7 @@ end;
 call test_exception_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_exception_commit() line 3 at SQL statement
+PL/pgSQL function test_exception_commit() line 2 at SQL statement
  test_exception_commit 
 -----------------------
  
@@ -696,7 +696,7 @@ end;
 call test_exception_commit_commit_raise();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_exception_commit_commit_raise() line 3 at SQL statement
+PL/pgSQL function test_exception_commit_commit_raise() line 2 at SQL statement
 ERROR:  (After commit)
 select * from test_commit;
  a | b 
@@ -724,7 +724,7 @@ end;
 call test_exception_commit_raise_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_exception_commit_raise_commit() line 3 at SQL statement
+PL/pgSQL function test_exception_commit_raise_commit() line 2 at SQL statement
 ERROR:  (After commit)
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
@@ -754,7 +754,7 @@ end;
 call test_gg_1();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_gg_1() line 3 at SQL statement
+PL/pgSQL function test_gg_1() line 2 at SQL statement
  test_gg_1 
 -----------
  
@@ -788,7 +788,7 @@ end;
 call test_commit_exception();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_exception() line 3 at SQL statement
+PL/pgSQL function test_commit_exception() line 2 at SQL statement
  test_commit_exception 
 -----------------------
  
@@ -824,7 +824,7 @@ end;
 call test_commit2();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit2() line 3 at SQL statement
+PL/pgSQL function test_commit2() line 2 at SQL statement
  test_commit2 
 --------------
  
@@ -859,7 +859,7 @@ end;
 call test_commit3();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit3() line 3 at SQL statement
+PL/pgSQL function test_commit3() line 2 at SQL statement
  test_commit3 
 --------------
  
@@ -891,7 +891,7 @@ end;
 call test_rollback_with_exception();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_rollback_with_exception() line 3 at SQL statement
+PL/pgSQL function test_rollback_with_exception() line 2 at SQL statement
  test_rollback_with_exception 
 ------------------------------
  
@@ -919,7 +919,7 @@ end;
 call test_nest_procedure_without_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_nest_procedure_without_commit() line 3 at SQL statement
+PL/pgSQL function test_nest_procedure_without_commit() line 2 at SQL statement
  test_nest_procedure_without_commit 
 ------------------------------------
  
@@ -948,7 +948,7 @@ end;
 call test_nest_procedure();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_nest_procedure() line 3 at SQL statement
+PL/pgSQL function test_nest_procedure() line 2 at SQL statement
  test_nest_procedure 
 ---------------------
  
@@ -973,9 +973,9 @@ end;
 call test_nest_procedure1();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit() line 3 at SQL statement
+PL/pgSQL function test_commit() line 2 at SQL statement
 SQL statement "CALL test_commit()"
-PL/pgSQL function test_nest_procedure1() line 3 at PERFORM
+PL/pgSQL function test_nest_procedure1() line 2 at PERFORM
  test_nest_procedure1 
 ----------------------
  
@@ -997,9 +997,9 @@ end;
 call test_nest_procedure2();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit() line 3 at SQL statement
+PL/pgSQL function test_commit() line 2 at SQL statement
 SQL statement "CALL test_commit()"
-PL/pgSQL function test_nest_procedure2() line 3 at PERFORM
+PL/pgSQL function test_nest_procedure2() line 2 at PERFORM
  test_nest_procedure2 
 ----------------------
  
@@ -1022,9 +1022,9 @@ end;
 call test_nest_procedure_rollback();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_without_commit() line 3 at SQL statement
+PL/pgSQL function test_without_commit() line 2 at SQL statement
 SQL statement "CALL test_without_commit()"
-PL/pgSQL function test_nest_procedure_rollback() line 3 at PERFORM
+PL/pgSQL function test_nest_procedure_rollback() line 2 at PERFORM
  test_nest_procedure_rollback 
 ------------------------------
  
@@ -1052,7 +1052,7 @@ ERROR:  relation "tx" does not exist on datanode1
 LINE 1: insert into tx select 3
                     ^
 QUERY:  insert into tx select 3
-CONTEXT:  PL/pgSQL function test_nest_procedure_select() line 3 at SQL statement
+CONTEXT:  PL/pgSQL function test_nest_procedure_select() line 2 at SQL statement
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: select * from test_commit;
@@ -1075,7 +1075,7 @@ ERROR:  relation "tx" does not exist on datanode1
 LINE 1: insert into tx select 3
                     ^
 QUERY:  insert into tx select 3
-CONTEXT:  PL/pgSQL function test_nest_procedure_calll() line 3 at SQL statement
+CONTEXT:  PL/pgSQL function test_nest_procedure_calll() line 2 at SQL statement
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: select * from test_commit;
@@ -1099,12 +1099,12 @@ end;
 call test_commit_exception_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_exception_commit() line 3 at SQL statement
+PL/pgSQL function test_commit_exception_commit() line 2 at SQL statement
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: insert into test_commit select 3
                     ^
 QUERY:  insert into test_commit select 3
-CONTEXT:  PL/pgSQL function test_commit_exception_commit() line 10 at SQL statement
+CONTEXT:  PL/pgSQL function test_commit_exception_commit() line 9 at SQL statement
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: select * from test_commit;
@@ -1129,12 +1129,12 @@ end;
 call test_commit_exception_commit_commit();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_exception_commit_commit() line 3 at SQL statement
+PL/pgSQL function test_commit_exception_commit_commit() line 2 at SQL statement
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: insert into test_commit select 3
                     ^
 QUERY:  insert into test_commit select 3
-CONTEXT:  PL/pgSQL function test_commit_exception_commit_commit() line 10 at SQL statement
+CONTEXT:  PL/pgSQL function test_commit_exception_commit_commit() line 9 at SQL statement
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: select * from test_commit;
@@ -1159,12 +1159,12 @@ end;
 call test_commit_exception_commit_rollback();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_commit_exception_commit_rollback() line 3 at SQL statement
+PL/pgSQL function test_commit_exception_commit_rollback() line 2 at SQL statement
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: insert into test_commit select 3
                     ^
 QUERY:  insert into test_commit select 3
-CONTEXT:  PL/pgSQL function test_commit_exception_commit_rollback() line 10 at SQL statement
+CONTEXT:  PL/pgSQL function test_commit_exception_commit_rollback() line 9 at SQL statement
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: select * from test_commit;
@@ -1184,12 +1184,12 @@ end;
 call test_rollback();
 NOTICE:  table "test_commit" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists test_commit"
-PL/pgSQL function test_rollback() line 3 at SQL statement
+PL/pgSQL function test_rollback() line 2 at SQL statement
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: insert into test_commit select 2
                     ^
 QUERY:  insert into test_commit select 2
-CONTEXT:  PL/pgSQL function test_rollback() line 7 at SQL statement
+CONTEXT:  PL/pgSQL function test_rollback() line 6 at SQL statement
 select * from test_commit;
 ERROR:  relation "test_commit" does not exist on datanode1
 LINE 1: select * from test_commit;

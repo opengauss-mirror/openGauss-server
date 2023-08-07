@@ -376,6 +376,8 @@ CREATE TABLE resource(a int);
 CREATE TABLE store(a int);
 CREATE TABLE than(a int);
 CREATE TABLE workload(a int);
+CREATE TABLE ignore(ignore int);
+CREATE TABLE charset(charset int);
 
 DROP TABLE app;
 DROP TABLE movement;
@@ -385,6 +387,8 @@ DROP TABLE resource;
 DROP TABLE store;
 DROP TABLE than;
 DROP TABLE workload;
+DROP TABLE ignore;
+DROP TABLE charset;
 
 -- test orientation
 CREATE TABLE orientation_test_1 (c1 int) WITH (orientation = column);

@@ -4552,6 +4552,15 @@ static IndexHintDefinition* _copyIndexHintDefinition(const IndexHintDefinition* 
     return newnode;
 }
 
+static FunctionSources* _copyFunctionSources(const FunctionSources* from)
+{
+    FunctionSources* newnode = makeNode(FunctionSources);
+    COPY_STRING_FIELD(headerSrc);
+    COPY_STRING_FIELD(bodySrc);
+
+    return newnode;
+}
+
 static SkewRelInfo* _copySkewRelInfo(const SkewRelInfo* from)
 {
     SkewRelInfo* newnode = makeNode(SkewRelInfo);
@@ -6259,7 +6268,6 @@ static CreateTrigStmt* _copyCreateTrigStmt(const CreateTrigStmt* from)
     COPY_SCALAR_FIELD(if_not_exists);
     COPY_STRING_FIELD(trgordername);
     COPY_SCALAR_FIELD(is_follows);
-
     return newnode;
 }
 
@@ -6356,6 +6364,7 @@ static LockStmt* _copyLockStmt(const LockStmt* from)
     COPY_SCALAR_FIELD(mode);
     COPY_SCALAR_FIELD(nowait);
     COPY_SCALAR_FIELD(cancelable);
+    COPY_SCALAR_FIELD(isLockTables);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(waitSec);
     }
@@ -8684,6 +8693,9 @@ void* copyObject(const void* from)
             break;
         case T_IndexHintDefinition:
             retval = _copyIndexHintDefinition((IndexHintDefinition *)from);
+            break;
+        case T_FunctionSources:
+            retval = _copyFunctionSources((FunctionSources *)from);
             break;
         default:
             ereport(ERROR,

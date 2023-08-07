@@ -105,7 +105,7 @@ static const int MILLISECONDS_PER_SECONDS = 1000;
 static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt);
 static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt);
 static void checkUpsertTargetlist(Relation targetTable, List* updateTlist);
-static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upsertClause);
+static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upsertClause, List* resultRelations);
 static int count_rowexpr_columns(ParseState* pstate, Node* expr);
 static void transformVariableSetStmt(ParseState* pstate, VariableSetStmt* stmt);
 static Query* transformVariableMutiSetStmt(ParseState* pstate, VariableMultiSetStmt* muti_stmt);
@@ -116,7 +116,7 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt);
 static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, bool isTopLevel, List** targetlist);
 static void determineRecursiveColTypes(ParseState* pstate, Node* larg, List* nrtargetlist);
 static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt);
-static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List* origTlist);
+static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List* origTlist, List* resultRelations);
 static List* transformReturningList(ParseState* pstate, List* returningList);
 static Query* transformDeclareCursorStmt(ParseState* pstate, DeclareCursorStmt* stmt);
 static Query* transformExplainStmt(ParseState* pstate, ExplainStmt* stmt);
@@ -1614,17 +1614,23 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
         return;
     }
     RightRefState* rstate = pstate->rightRefState;
-    int len = list_length(targetList);
+    const int len = list_length(targetList);
     rstate->usExplicitAttrLen = len;
     rstate->usExplicitAttrNos = (int*)palloc0(sizeof(int) * len);
 
     Relation relation = (Relation)linitial(pstate->p_target_relation);
     FormData_pg_attribute* attr = relation->rd_att->attrs;
-    int colNum = RelationGetNumberOfAttributes(relation);
+    const int colNum = RelationGetNumberOfAttributes(relation);
     ListCell* target = list_head(targetList);
     for (int ni = 0; ni < len; ++ni) {
         ResTarget* res = (ResTarget*)lfirst(target);
-        const char* name = res->name;
+        char* name = nullptr;
+        if (list_length(res->indirection) > 0) {
+            name = ((Value*)llast(res->indirection))->val.str;
+        } else {
+            name = res->name;
+        }
+
         for (int ci = 0; ci < colNum; ++ci) {
             if (attr[ci].attisdropped) {
                 continue;
@@ -1634,7 +1640,12 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
                 break;
             }
         }
-        
+
+        if (rstate->usExplicitAttrNos[ni] == InvalidOid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_COLUMN),
+                 errmsg("Column \"%s\" not found in upsert attrno state initialization", name)));
+        }
         target = lnext(target);
     }
 }
@@ -2199,10 +2210,10 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
             pstate->p_varnamespace = NIL;
             rightRefState->isUpsert = true;
             SetUpsertAttrnoState(pstate, stmt->upsertClause->targetList);
-            qry->upsertClause = transformUpsertClause(pstate, stmt->upsertClause);
+            qry->upsertClause = transformUpsertClause(pstate, stmt->upsertClause, qry->resultRelations);
             rightRefState->isUpsert = false;
         } else {
-            qry->upsertClause = transformUpsertClause(pstate, stmt->upsertClause);
+            qry->upsertClause = transformUpsertClause(pstate, stmt->upsertClause, qry->resultRelations);
         }
     }
     /*
@@ -2384,7 +2395,7 @@ static bool ContainSubLink(Node* clause)
 }
 #endif /* ENABLE_MULTIPLE_NODES */
 
-static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upsertClause)
+static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upsertClause, List* resultRelations)
 {
     UpsertExpr* result = NULL;
     List* updateTlist = NIL;
@@ -2445,7 +2456,7 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
 
         updateTlist = transformTargetList(pstate, upsertClause->targetList, EXPR_KIND_UPDATE_TARGET);
         /* Done with select-like processing, move on transforming to match update set target column */
-        updateTlist = transformUpdateTargetList(pstate, updateTlist, upsertClause->targetList);
+        updateTlist = transformUpdateTargetList(pstate, updateTlist, upsertClause->targetList, resultRelations);
         updateWhere = transformWhereClause(pstate, upsertClause->whereClause, EXPR_KIND_WHERE, "WHERE");
 #ifdef ENABLE_MULTIPLE_NODES
         /* Do not support sublinks in update where clause for now */
@@ -4055,7 +4066,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
      * Now we are done with SELECT-like processing, and can get on with
      * transforming the target list to match the UPDATE target columns.
      */
-    qry->targetList = transformUpdateTargetList(pstate, qry->targetList, stmt->targetList);
+    qry->targetList = transformUpdateTargetList(pstate, qry->targetList, stmt->targetList, qry->resultRelations);
     transformLimitSortClause(pstate, stmt, qry, false);
 
     qry->resultRelations = remove_update_redundant_relation(qry->resultRelations, pstate->p_target_rangetblentry);
@@ -4140,22 +4151,25 @@ char* checkUpdateResTargetName(Relation rd, RangeVar* rel, ResTarget* res, bool*
 }
 
 /* Find the attrno corresponding to ResTarget from target tables. */
-static int fixUpdateResTargetName(ParseState* pstate, ResTarget* res, int* rti, Relation* rd, RangeTblEntry** rte)
+static int fixUpdateResTargetName(ParseState* pstate, List* resultRelations, ResTarget* res, int* rti,
+    Relation* rd, RangeTblEntry** rte)
 {
     ListCell* l1;
     ListCell* l2;
     ListCell* l3;
+    ListCell* l4;
     bool removeRelname = false, matchRelname = false;
     char* resname = NULL;
     char* resultResName = NULL;
     int attrno, resultAttrno = InvalidAttrNumber;
     bool isMatched = false;
 
-    int rtindex = 1;
-    forthree (l1, pstate->p_target_rangetblentry, l2, pstate->p_target_relation, l3, pstate->p_updateRangeVars) {
+    forfour (l1, pstate->p_target_rangetblentry, l2, pstate->p_target_relation, l3, pstate->p_updateRangeVars,
+        l4, resultRelations) {
         RangeTblEntry* target_rte = (RangeTblEntry*)lfirst(l1);
         Relation targetrel = (Relation)lfirst(l2);
         RangeVar* rangeVar = (RangeVar*)lfirst(l3);
+        int rtindex = lfirst_int(l4);
         
         resname = checkUpdateResTargetName(targetrel, rangeVar, res, &matchRelname);
         attrno = attnameAttNum(targetrel, resname, true);
@@ -4184,7 +4198,6 @@ static int fixUpdateResTargetName(ParseState* pstate, ResTarget* res, int* rti, 
         if (matchRelname == true) {
             removeRelname = true;
         }
-        rtindex++;
     }
 
     if (!isMatched) {
@@ -4259,7 +4272,7 @@ static inline void checkSRFInMultiUpdate(Expr* expr, int targetRelationNum)
  * transformUpdateTargetList -
  * handle SET clause in UPDATE/INSERT ... DUPLICATE KEY UPDATE
  */
-static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List* origTlist)
+static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List* origTlist, List* resultRelations)
 {
     List* tlist = NIL;
     RangeTblEntry* target_rte = NULL;
@@ -4268,8 +4281,9 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
     Relation targetrel = NULL;
     int rtindex = 0;
     int targetRelationNum = list_length(pstate->p_target_relation);
+    int rangeTableNum = list_length(pstate->p_rtable);
 
-    List** new_tle = (List**)palloc0(targetRelationNum * sizeof(List*));
+    List** new_tle = (List**)palloc0(rangeTableNum * sizeof(List*));
 
     /* Prepare to assign non-conflicting resnos to resjunk attributes */
     pstate->p_next_resno = 1;
@@ -4296,7 +4310,7 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
             continue;
         }
 
-        attrno = fixUpdateResTargetName(pstate, origTarget, &rtindex, &targetrel, &target_rte);
+        attrno = fixUpdateResTargetName(pstate, resultRelations, origTarget, &rtindex, &targetrel, &target_rte);
         if (attrno == InvalidAttrNumber) {
             UndefinedColumnError(pstate, origTarget, targetRelationNum);
         }
@@ -4312,9 +4326,14 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
      */
     transformMultiTargetList(pstate->p_target_rangetblentry, new_tle);
 
-    for (int i = 0; i < targetRelationNum; i++) {
-        if (new_tle[i]) {
-            tlist = list_concat(tlist, new_tle[i]);
+    if (targetRelationNum == 1) {
+        int i = linitial_int(resultRelations);
+        tlist = new_tle[i - 1];
+    } else {
+        for (int i = 0; i < rangeTableNum; i++) {
+            if (new_tle[i]) {
+                tlist = list_concat(tlist, new_tle[i]);
+            }
         }
     }
     pfree(new_tle);
@@ -4851,7 +4870,7 @@ static void init_execdirect_utility_stmt(RemoteQuery* step, const char* statemen
 }
 
 /*
- * find agg functions which need add finalize funcion on sql statement in deparse_query
+ * find agg functions which need add finalize function on sql statement in deparse_query
  */
 static bool check_agg_in_execute_direct_query(Node* node, void* context)
 {
@@ -5104,6 +5123,29 @@ void CheckSelectLocking(Query* qry)
     }
 }
 
+static bool CheckViewBasedOnCstore(Relation targetrel)
+{
+    Assert(RelationIsView(targetrel));
+
+    Query* viewquery = get_view_query(targetrel);
+    ListCell* l = NULL;
+
+    foreach (l, viewquery->jointree->fromlist) {
+        RangeTblRef* rtr = (RangeTblRef*)lfirst(l);
+        RangeTblEntry* base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
+        Relation base_rel = try_relation_open(base_rte->relid, AccessShareLock);
+
+        if (RelationIsColStore(base_rel) || (RelationIsView(base_rel) && CheckViewBasedOnCstore(base_rel))) {
+            heap_close(base_rel, AccessShareLock);
+            return true;
+        }
+
+        heap_close(base_rel, AccessShareLock);
+    }
+
+    return false;
+}
+
 /*
  * Transform a FOR [KEY] UPDATE/SHARE clause
  *
@@ -5166,6 +5208,12 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
                                        "column table \"%s\"", rte->eref->aliasname)));
+                    } else if (RelationIsView(rel) && CheckViewBasedOnCstore(rel)) {
+                        heap_close(rel, AccessShareLock);
+                        ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
+                                       "view \"%s\" based on column table", rte->eref->aliasname)));
                     } else {
                         if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
                             ereport(ERROR,
@@ -5232,7 +5280,14 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                                         errmsg("SELECT FOR UPDATE/SHARE%s cannot be used with column table \"%s\"",
                                                NOKEYUPDATE_KEYSHARE_ERRMSG, rte->eref->aliasname),
                                         parser_errposition(pstate, thisrel->location)));
-                            }else {
+                            } else if (RelationIsView(rel) && CheckViewBasedOnCstore(rel)) {
+                                heap_close(rel, AccessShareLock);
+                                ereport(ERROR,
+                                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                        errmsg("SELECT FOR UPDATE/SHARE%s cannot be used with view \"%s\" based on"
+                                               " column table", NOKEYUPDATE_KEYSHARE_ERRMSG, rte->eref->aliasname),
+                                        parser_errposition(pstate, thisrel->location)));
+                            } else {
                                 if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
                                     ereport(ERROR,
                                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

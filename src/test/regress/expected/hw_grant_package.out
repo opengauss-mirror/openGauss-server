@@ -67,13 +67,13 @@ SET SESSION AUTHORIZATION test_grant2 password 'Gauss123';
 call test_grant1.pck3.p1();
 INFO:  va:(1,zhangsan,shanghai)
 CONTEXT:  SQL statement "CALL p2(b,va,1,vb)"
-PL/pgSQL function p1() line 9 at PERFORM
+PL/pgSQL function p1() line 8 at PERFORM
 INFO:  vb(233):(10087,aa,bb)
 CONTEXT:  SQL statement "CALL p2(b,va,1,vb)"
-PL/pgSQL function p1() line 9 at PERFORM
+PL/pgSQL function p1() line 8 at PERFORM
 INFO:  vb:{"(10086,aa,bb)","(10087,aa,bb)"}
 CONTEXT:  SQL statement "CALL p2(b,va,1,vb)"
-PL/pgSQL function p1() line 9 at PERFORM
+PL/pgSQL function p1() line 8 at PERFORM
  p1 
 ----
  

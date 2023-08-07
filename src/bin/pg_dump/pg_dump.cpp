@@ -54,6 +54,7 @@
 #include "catalog/pg_cast.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_database.h"
+#include "catalog/pg_extension.h"
 #include "catalog/pg_default_acl.h"
 #include "catalog/pg_event_trigger.h"
 #include "catalog/pg_largeobject.h"
@@ -500,6 +501,7 @@ static void get_role_password();
 static void get_encrypt_key();
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo);
 static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxInfo* indxinfo, bool isBcompatibility);
+static bool IsPlainFormat();
 static bool findDBCompatibility(Archive* fout, const char* databasename);
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
 static bool needIgnoreSequence(TableInfo* tbinfo);
@@ -507,6 +509,7 @@ inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
 #ifdef DUMPSYSLOG
 static void ReceiveSyslog(PGconn* conn, const char* current_path);
 #endif
+static bool hasSpecificExtension(Archive* fout, const char* databasename);
 
 #ifdef GSDUMP_LLT
 bool lltRunning = true;
@@ -823,6 +826,20 @@ int main(int argc, char** argv)
         exit_horribly(NULL, "connection to database \"%s\" failed: %s ",
             ((dbname != NULL) ? dbname : ""), errorMessages);
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * During gs_dump, PQfnumber() is matched according to the lowercase column name.
+     * However, when uppercase_attribute_name is on, the column names in the result set
+     * will be converted to uppercase. So we need to turn off it temporarily. We don't
+     * need to turn it on cause this connection is for gs_dump only, will not affect others.
+     */
+    if (!SetUppercaseAttributeNameToOff(((ArchiveHandle*)fout)->connection)) {
+        (void)remove(filename);
+        GS_FREE(filename);
+        exit_horribly(NULL, "set uppercase_attribute_name to off failed.\n", progname);
+    }
+#endif
 
     if (CheckIfStandby(fout)) {
         (void)remove(filename);
@@ -9287,7 +9304,9 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 "a.attstattarget, a.attstorage, t.typstorage, "
                 "a.attnotnull, a.atthasdef, a.attisdropped, "
                 "a.attlen, a.attalign, a.attislocal, a.attkvtype, t.oid AS typid, "
-                "CASE WHEN t.typtype <> 's' THEN pg_catalog.format_type(t.oid,a.atttypmod) ELSE 'set(' || (select pg_catalog.string_agg(''''||setlabel||'''', ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid) || ')' END AS atttypname, "
+                "CASE WHEN t.typtype = 's' THEN 'set(' || (select pg_catalog.string_agg(''''||setlabel||'''', ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid) || ')' "
+                "WHEN t.typtype = 'e' THEN 'enum(' || (select pg_catalog.string_agg(''''||enumlabel||'''', ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid) || ')' ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
+                "AS atttypname, "
                 "pg_catalog.array_to_string(a.attoptions, ', ') AS attoptions, "
                 "CASE WHEN a.attcollation <> t.typcollation "
                 "THEN a.attcollation ELSE 0::Oid END AS attcollation, "
@@ -11361,8 +11380,12 @@ static void dumpType(Archive* fout, TypeInfo* tyinfo)
         dumpDomain(fout, tyinfo);
     else if (tyinfo->typtype == TYPTYPE_COMPOSITE)
         dumpCompositeType(fout, tyinfo);
-    else if (tyinfo->typtype == TYPTYPE_ENUM)
+    else if (tyinfo->typtype == TYPTYPE_ENUM) {
+        if (findDBCompatibility(fout, PQdb(GetConnection(fout))) && hasSpecificExtension(fout, "dolphin")) {
+            return;
+        }
         dumpEnumType(fout, tyinfo);
+    }
     else if (tyinfo->typtype == TYPTYPE_RANGE)
         dumpRangeType(fout, tyinfo);
     else if (tyinfo->typtype == TYPTYPE_TABLEOF)
@@ -13047,6 +13070,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     PQExpBuffer delqry;
     PQExpBuffer labelq;
     PQExpBuffer asPart;
+    PQExpBuffer headWithDefault;
+    PQExpBuffer headWithoutDefault;
     PGresult* res = NULL;
     PGresult* defres = NULL;
     char* funcsig = NULL;     /* identity signature */
@@ -13071,6 +13096,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     char* procost = NULL;
     char* prorows = NULL;
     char* lanname = NULL;
+    char* selfloop = NULL;
     char* fencedmode = NULL; /*Fenced UDF add*/
     char* proKind = NULL;
     char* proshippable = NULL;
@@ -13093,6 +13119,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     bool hasProargsrc = false;
     bool isNullProargsrc = false;
     bool addDelimiter = false;
+    bool isNullSelfloop = false;
     const char *funcKind;
     ArchiveHandle* AH = (ArchiveHandle*)fout;
 
@@ -13109,6 +13136,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     labelq = createPQExpBuffer();
     asPart = createPQExpBuffer();
     definerquery = createPQExpBuffer();
+    headWithDefault = createPQExpBuffer();
+    headWithoutDefault = createPQExpBuffer();
 
     /* Set proper schema search path so type references list correctly */
     selectSourceSchema(fout, finfo->dobj.nmspace->dobj.name);
@@ -13134,7 +13163,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         "%s, "
         "%s, "
         "(SELECT lanname FROM pg_catalog.pg_language WHERE oid = prolang) AS lanname, "
-        "%s "
+        "%s, "
+        "(SELECT 1 FROM pg_depend WHERE objid = oid AND objid = refobjid AND refclassid = 1255 LIMIT 1) AS selfloop "
         "FROM pg_catalog.pg_proc "
         "WHERE oid = '%u'::pg_catalog.oid",
         isHasFencedmode ? "fencedmode" : "NULL AS fencedmode",
@@ -13161,6 +13191,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     proconfig = PQgetvalue(res, 0, PQfnumber(res, "proconfig"));
     procost = PQgetvalue(res, 0, PQfnumber(res, "procost"));
     prorows = PQgetvalue(res, 0, PQfnumber(res, "prorows"));
+    selfloop = PQgetvalue(res, 0, PQfnumber(res, "selfloop"));
     lanname = PQgetvalue(res, 0, PQfnumber(res, "lanname"));
     fencedmode = PQgetvalue(res, 0, PQfnumber(res, "fencedmode"));
     proshippable = PQgetvalue(res, 0, PQfnumber(res, "proshippable"));
@@ -13190,6 +13221,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
             destroyPQExpBuffer(labelq);
             destroyPQExpBuffer(asPart);
             destroyPQExpBuffer(definerquery);
+            destroyPQExpBuffer(headWithDefault);
+            destroyPQExpBuffer(headWithoutDefault);
             return;
         }
     }
@@ -13314,22 +13347,42 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     appendPQExpBuffer(delqry, "DROP %s IF EXISTS %s.%s%s;\n", funcKind,
                       fmtId(finfo->dobj.nmspace->dobj.name), funcsig, if_cascade);
 
-    if (addDelimiter) {
-        appendPQExpBuffer(q, "delimiter //\n");
+    isNullSelfloop = (selfloop == NULL || selfloop[0] == '\0');
+
+    if (!isNullSelfloop) {
+        if (addDelimiter && IsPlainFormat()) {
+            appendPQExpBuffer(headWithoutDefault, "delimiter //\n");
+        }
+
+        if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
+            appendPQExpBuffer(headWithoutDefault, "CREATE DEFINER = \"%s\" %s %s ", definer, funcKind, funcsig);
+        } else {
+            appendPQExpBuffer(headWithoutDefault, "CREATE %s %s ", funcKind, funcsig);
+        }
+    }
+
+    if (addDelimiter && IsPlainFormat()) {
+        appendPQExpBuffer(headWithDefault, "delimiter //\n");
     }
 
     if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
-        appendPQExpBuffer(q, "CREATE DEFINER = \"%s\" %s %s ", definer, funcKind, funcfullsig);
+        if (isNullSelfloop)
+            appendPQExpBuffer(headWithDefault, "CREATE DEFINER = \"%s\" %s %s ", definer, funcKind, funcfullsig);
+        else
+            appendPQExpBuffer(headWithDefault, "CREATE OR REPLACE %s %s ", funcKind, funcfullsig);
         PQclear(defres);
     } else {
-         appendPQExpBuffer(q, "CREATE %s %s ", funcKind, funcfullsig);
+        if (isNullSelfloop)
+            appendPQExpBuffer(headWithDefault, "CREATE %s %s ", funcKind, funcfullsig);
+        else
+            appendPQExpBuffer(headWithDefault, "CREATE OR REPLACE %s %s ", funcKind, funcfullsig);
     }
     
     
     if (isProcedure) {
         /* For procedure, no return type, do nothing */
     } else if (funcresult != NULL) {
-        if (!isNullProargsrc) {
+        if (!isNullProargsrc && !addDelimiter) {
             appendPQExpBuffer(q, "RETURN %s", funcresult);
         } else {
             appendPQExpBuffer(q, "RETURNS %s", funcresult);
@@ -13453,6 +13506,12 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         appendPQExpBuffer(q, "delimiter ;\n");
     }
 
+    if (isNullSelfloop) {
+        appendPQExpBuffer(headWithDefault, "%s", q->data);
+    } else {
+        appendPQExpBuffer(headWithoutDefault, "%s\n%s%s", q->data, headWithDefault->data, q->data);
+    }
+
     ArchiveEntry(fout,
         finfo->dobj.catId,
         finfo->dobj.dumpId,
@@ -13463,7 +13522,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         false,
         funcKind,
         SECTION_PRE_DATA,
-        q->data,
+        isNullSelfloop ? headWithDefault->data : headWithoutDefault->data,
         delqry->data,
         NULL,
         NULL,
@@ -13496,6 +13555,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     destroyPQExpBuffer(labelq);
     destroyPQExpBuffer(asPart);
     destroyPQExpBuffer(definerquery);
+    destroyPQExpBuffer(headWithDefault);
+    destroyPQExpBuffer(headWithoutDefault);
 
     GS_FREE(funcsig);
     GS_FREE(funcfullsig);
@@ -23477,4 +23538,37 @@ static bool needIgnoreSequence(TableInfo* tbinfo)
         }
     }
     return false;
+}
+
+/*
+ * check if current database has specific extension whose name is provided by parameter
+ */
+static bool hasSpecificExtension(Archive* fout, const char* extensionName)
+{
+    PGresult *res = NULL;
+    int ntups = 0;
+    bool hasExtnameColumn = true;
+    ArchiveHandle *AH = (ArchiveHandle *)fout;
+
+    hasExtnameColumn = is_column_exists(AH->connection, ExtensionRelationId, "extname");
+    if (!hasExtnameColumn) {
+        return false;
+    }
+
+    PQExpBuffer query = createPQExpBuffer();
+
+    resetPQExpBuffer(query);
+    appendPQExpBuffer(query, "SELECT extname from pg_catalog.pg_extension where extname = ");
+    appendStringLiteralAH(query, extensionName, fout);
+
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    ntups = PQntuples(res);
+    PQclear(res);
+    destroyPQExpBuffer(query);
+    return ntups != 0;
+}
+
+static bool IsPlainFormat()
+{
+	return pg_strcasecmp(format, "plain") == 0 || pg_strcasecmp(format, "p") == 0;
 }

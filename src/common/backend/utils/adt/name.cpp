@@ -211,6 +211,17 @@ int namestrcmp(Name name, const char* str)
     return strncmp(NameStr(*name), str, NAMEDATALEN);
 }
 
+int namestrcasecmp(Name name, const char* str)
+{
+    if (name == NULL && str == NULL)
+        return 0;
+    if (name == NULL)
+        return -1; /* NULL < anything */
+    if (str == NULL)
+        return 1; /* NULL < anything */
+    return strncasecmp(NameStr(*name), str, NAMEDATALEN);
+}
+
 /*
  * SQL-functions CURRENT_USER, SESSION_USER
  */

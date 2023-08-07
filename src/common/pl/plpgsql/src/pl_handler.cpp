@@ -137,7 +137,7 @@ void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bo
     bool notInsert = u_sess->attr.attr_common.upgrade_mode != 0 || IsSystemNamespace(nspid) || 
         IsToastNamespace(nspid) || IsCStoreNamespace(nspid) || 
         IsPackageSchemaOid(nspid) || SKIP_GS_SOURCE;
-    if (notInsert) {
+    if (notInsert || t_thrd.log_cxt.errordata_stack_depth > ERRORDATA_STACK_SIZE - 2) {
         return;
     }
     if (g_instance.attr.attr_storage.max_concurrent_autonomous_transactions <= 0) {
@@ -1446,10 +1446,7 @@ PLpgSQL_package* plpgsql_package_validator(Oid packageOid, bool isSpec, bool isC
     PG_CATCH();
     {
 #ifndef ENABLE_MULTIPLE_NODES
-        bool insertError = (u_sess->attr.attr_common.plsql_show_all_error ||
-                                !u_sess->attr.attr_sql.check_function_bodies) &&
-                                isCreate;
-        if (insertError) {
+        if (isCreate) {
             SPI_STACK_LOG("finish", NULL, NULL);
             SPI_finish();
             if (!IsInitdb) {

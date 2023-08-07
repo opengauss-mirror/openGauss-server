@@ -644,10 +644,9 @@ begin
 end;
 /
 ERROR:  syntax error at or near "["
-LINE 7:  insert into customers values (customer_table[1].id, custome...
+LINE 6:  insert into customers values (customer_table[1].id, custome...
                                                      ^
-QUERY:  
-declare
+QUERY:  declare
 	type c_list is TABLE of customers%rowtype; 
     customer_table c_list:=c_list();
 begin 
@@ -716,7 +715,7 @@ end;
 ERROR:  mismatched brackets at or near ";"
 LINE 6:         RAISE INFO 'Student: %', names(i];
                                                  ^
-QUERY:  DECLARE  type students is table of varchar2(10);
+QUERY:  DECLARE type students is table of varchar2(10);
     names students;
 begin
     names := students(1, 'Zera ', 'Alice', 'Jim  ', 'Kevin'); -- should be able read all values correctly --
@@ -826,9 +825,9 @@ begin
 end;
 /
 ERROR:  syntax error at or near "("
-LINE 1: DECLARE  type arrayfirst is table(10) of int[];
-                                         ^
-QUERY:  DECLARE  type arrayfirst is table(10) of int[];
+LINE 1: DECLARE type arrayfirst is table(10) of int[];
+                                        ^
+QUERY:  DECLARE type arrayfirst is table(10) of int[];
     arr arrayfirst := arrayfirst();
 begin
     

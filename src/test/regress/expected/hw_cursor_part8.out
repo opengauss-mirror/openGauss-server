@@ -424,7 +424,7 @@ NOTICE:  test cursor
 close  pro_cursor_c0019_1;
 select * from pro_cursor_c0019();
 ERROR:  cannot open FETCH query as cursor
-CONTEXT:  PL/pgSQL function pro_cursor_c0019() line 5 at OPEN
+CONTEXT:  PL/pgSQL function pro_cursor_c0019() line 4 at OPEN
 create table test_cursor_table(c1 int,c2 varchar);
 insert into test_cursor_table values(1,'Jack'),(2,'Rose');
 create or replace procedure test_cursor_8() as

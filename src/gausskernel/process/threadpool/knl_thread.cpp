@@ -1084,6 +1084,7 @@ static void KnlTPublicationInit(knl_t_publication_context* publicationCxt)
     publicationCxt->publications_valid = false;
     publicationCxt->RelationSyncCache = NULL;
     publicationCxt->updateConninfoNeeded = false;
+    publicationCxt->firstTimeSendConninfo = false;
 }
 
 static void KnlTUndolauncherInit(knl_t_undolauncher_context* undolauncherCxt)
@@ -1326,6 +1327,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->PrivateRefCountHash = NULL;
     storage_cxt->PrivateRefCountOverflowed = 0;
     storage_cxt->PrivateRefCountClock = 0;
+    storage_cxt->ReservedRefCountEntry = NULL;
     storage_cxt->saved_info_valid = false;
     storage_cxt->prev_strategy_buf_id = 0;
     storage_cxt->prev_strategy_passes = 0;

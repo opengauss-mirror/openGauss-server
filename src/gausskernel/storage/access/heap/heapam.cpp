@@ -6077,6 +6077,15 @@ void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
                 errmsg("All built-in functions are hard coded, and they should not be updated.")));
     }
 
+    /* All attribute of system table columns are hard coded, and thus they should not be updated */
+    if (u_sess->attr.attr_common.IsInplaceUpgrade == false && IsAttributeRelation(relation)) {
+        Oid attrelid = ((Form_pg_attribute)GETSTRUCT(tup))->attrelid;
+        if (IsSystemObjOid(attrelid)) {
+            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("All attribute of system table columns are hard coded, and they should not be updated.")));
+        }
+    }
+
     result = heap_update(relation,
         NULL,
         otid,
@@ -9772,12 +9781,19 @@ Partition partitionOpen(Relation relation, Oid partitionOid, LOCKMODE lockmode, 
                         errdetail("this partition may have already been dropped")));
     }
 
+    Assert(RelationIsPartitioned(relation));
+    /* subpartition table open subpartition, which is judged by partitionOpen() */
     if (RelationIsSubPartitioned(relation) && relation->rd_id != parentOid) {
         /* partitionOid is subpartition oid */
         p = SubPartitionOidGetPartition(relation, partitionOid, lockmode);
         Assert(relation->rd_id == partid_get_parentid(p->pd_part->parentid));
         return p;
     }
+    if (relation->rd_id != parentOid)
+        ereport(ERROR,
+                (errcode(ERRCODE_PARTITION_ERROR),
+                 errmsg("partition %u does not exist on relation \"%s\"", partitionOid,
+                         RelationGetRelationName(relation))));
 
     /*
      * If we are executing select for update/share operation,
@@ -9915,6 +9931,8 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
         return NULL;
     }
 
+    Assert(RelationIsPartitioned(relation));
+    /* subpartition table open subpartition, which is judged by tryPartitionOpen() */
     if (RelationIsSubPartitioned(relation) && relation->rd_id != parentid) {
         if (!SearchSysCacheExists1(PARTRELID, ObjectIdGetDatum(partition_id))) {
             return NULL;
@@ -9924,6 +9942,8 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
         Assert(relation->rd_id == partid_get_parentid(p->pd_part->parentid));
         return p;
     }
+    if (relation->rd_id != parentid)
+        return NULL;
 
     /*
      * If we are executing select for update/share operation,

@@ -264,8 +264,8 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
     if (RELATION_IS_PARTITIONED(rel)) {
         m_c_local.m_estate->esfRelations = NULL;
         int partitionno = INVALID_PARTITION_NO;
-        partOid =
-            heapTupleGetPartitionId(rel, tuple, &partitionno, false, m_c_local.m_estate->es_plannedstmt->hasIgnore);
+        m_local.m_reslot->tts_tuple = tuple;
+        partOid = getPartitionIdFromTuple(rel, tuple, m_c_local.m_estate, m_local.m_reslot, &partitionno, false, m_c_local.m_estate->es_plannedstmt->hasIgnore);
         if (m_c_local.m_estate->es_plannedstmt->hasIgnore && partOid == InvalidOid) {
             ExecReleaseResource(tuple, m_local.m_reslot, result_rel_info, m_c_local.m_estate, bucket_rel, rel, part,
                                 partRel);
@@ -406,9 +406,10 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     refreshParameterIfNecessary();
 
     ModifyTable* node = (ModifyTable*)(m_global->m_planstmt->planTree);
+    PlanState* ps = NULL;
     if (node->withCheckOptionLists != NIL) {
         Plan* plan = (Plan*)linitial(node->plans);
-        PlanState* ps = ExecInitNode(plan, m_c_local.m_estate, 0);
+        ps = ExecInitNode(plan, m_c_local.m_estate, 0);
         List* wcoList = (List*)linitial(node->withCheckOptionLists);
         List* wcoExprs = NIL;
         ListCell* ll = NULL;
@@ -433,6 +434,9 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     /****************
      * step 3: done *
      ****************/
+    if (ps != NULL) {
+        ExecEndNode(ps);
+    }
     success = true;
     m_local.m_isCompleted = true;
     if (m_local.m_ledger_hash_exist && !IsConnFromApp()) {

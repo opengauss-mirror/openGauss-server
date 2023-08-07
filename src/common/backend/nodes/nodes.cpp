@@ -604,7 +604,8 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_SetVariableExpr, "SetVariableExpr"},
     {T_VariableMultiSetStmt, "VariableMultiSetStmt"},
     {T_IndexHintDefinition, "IndexHintDefinition"},
-    {T_IndexHintRelationData, "IndexHintRelationData"}
+    {T_IndexHintRelationData, "IndexHintRelationData"},
+    {T_FunctionSources, "FunctionSources"}
 };
 
 char* nodeTagToString(NodeTag tag)

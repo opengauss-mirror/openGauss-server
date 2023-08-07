@@ -1380,6 +1380,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
         /* For gs_backup, we should not skip these files */
             if (strcmp(pathbuf, "./pg_ctl.lock") == 0 || strcmp(pathbuf, "./postgresql.conf.lock") == 0 ||
                 strcmp(pathbuf, "./postgresql.conf.bak") == 0 || strcmp(pathbuf, "./postgresql.conf") == 0 ||
+                strcmp(de->d_name, "postgresql.conf.guc.bak") == 0 ||
                 strcmp(pathbuf, "./postgresql.conf.bak.old") == 0) {
                 continue;
             }

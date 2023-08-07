@@ -1163,6 +1163,7 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
         PLpgSQL_execstate* estate_tmp = (PLpgSQL_execstate*)(plcallstack.prev->elem);
         exec_set_cursor_att_var(estate_tmp, &estate);
     }
+    list_free_deep(autonmsList);
 #endif
     /* Clean up any leftover temporary memory */
     plpgsql_destroy_econtext(&estate);
@@ -7528,6 +7529,10 @@ static int exec_stmt_fetch(PLpgSQL_execstate* estate, PLpgSQL_stmt_fetch* stmt)
     exec_set_found(estate, n != 0);
     exec_set_cursor_found(estate, (n != 0) ? PLPGSQL_TRUE : PLPGSQL_FALSE, stmt->curvar + CURSOR_FOUND);
     exec_set_notfound(estate, (n == 0) ? PLPGSQL_TRUE : PLPGSQL_FALSE, stmt->curvar + CURSOR_NOTFOUND);
+    
+    if (B_FETCH && n == 0) {
+        return PLPGSQL_RC_EXIT;
+    }
     exec_set_rowcount(estate, n, false, stmt->curvar + CURSOR_ROWCOUNT);
 
     return PLPGSQL_RC_OK;

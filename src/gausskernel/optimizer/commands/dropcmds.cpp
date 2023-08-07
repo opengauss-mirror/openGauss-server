@@ -115,6 +115,11 @@ static void DropExtensionInListIsSupported(List* objname)
         }
     }
 
+    if (pg_strcasecmp(name, "file_fdw") == 0 && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("EXTENSION file_fdw does not allow to drop.")));
+    }
+
     /* Enable DROP operation of the above objects during inplace upgrade or support_extended_features is true */
     if (!u_sess->attr.attr_common.IsInplaceUpgrade && !g_instance.attr.attr_common.support_extended_features) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXTENSION is not yet supported.")));

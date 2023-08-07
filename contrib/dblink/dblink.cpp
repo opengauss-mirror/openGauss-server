@@ -822,6 +822,12 @@ Datum dblink_connect(PG_FUNCTION_ARGS)
     char* conname = NULL;
     remoteConn* rconn = NULL;
     
+    if (ENABLE_THREAD_POOL) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("dblink not support in thread pool")));
+    }
+
     DBLINK_INIT;
 
     if (get_session_context()->needFree) {
@@ -1486,12 +1492,13 @@ static void storeRow(storeInfo* sinfo, PGresult* res, bool first)
      */
     oldcontext = MemoryContextSwitchTo(sinfo->tmpcontext);
 
-     /* Should have a single-row result if we get here */
-    Assert(PQntuples(res) == 1);
-
     /* Done if empty resultset */
     if (PQntuples(res) == 0)
-            return;
+        return;
+
+     /* Should have a single-row result if we get here */
+    Assert(PQntuples(res) == 1);
+    
     /*
      * Fill cstrs with null-terminated strings of column values.
      */

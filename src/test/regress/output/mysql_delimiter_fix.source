@@ -19,10 +19,9 @@ h_data varchar(24));
 end;
 /
 ERROR:  syntax error at or near ";"
-LINE 15: ;
+LINE 14: ;
          ^
-QUERY:  
-declare
+QUERY:  declare
 count_num int;
 f_count_num int;
 begin
@@ -88,10 +87,10 @@ end;
 call pro_exp_001_2();
 NOTICE:  table "f_pro_exp_001_1" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists f_pro_exp_001_1"
-PL/pgSQL function pro_exp_001_2() line 6 at SQL statement
+PL/pgSQL function pro_exp_001_2() line 5 at SQL statement
 NOTICE:  table "fto_pro_exp_001_1" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists fto_pro_exp_001_1"
-PL/pgSQL function pro_exp_001_2() line 32 at SQL statement
+PL/pgSQL function pro_exp_001_2() line 31 at SQL statement
  pro_exp_001_2 
 ---------------
  
@@ -156,10 +155,10 @@ end;
 call pro_exp_001_1();
 NOTICE:  table "f_pro_exp_001_1" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists f_pro_exp_001_1"
-PL/pgSQL function pro_exp_001_1() line 6 at SQL statement
+PL/pgSQL function pro_exp_001_1() line 5 at SQL statement
 NOTICE:  table "fto_pro_exp_001_1" does not exist, skipping
 CONTEXT:  SQL statement "drop table if exists fto_pro_exp_001_1"
-PL/pgSQL function pro_exp_001_1() line 32 at SQL statement
+PL/pgSQL function pro_exp_001_1() line 31 at SQL statement
  pro_exp_001_1 
 ---------------
  

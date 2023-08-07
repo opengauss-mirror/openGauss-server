@@ -286,10 +286,9 @@ select 1,'a','b' into va,vb vc;
 end;
 /
 ERROR:  syntax error, expected ","
-LINE 6: select 1,'a','b' into va,vb vc;
+LINE 5: select 1,'a','b' into va,vb vc;
                                     ^
-QUERY:  DECLARE 
-va int;
+QUERY:  DECLARE va int;
 vb varchar2;
 vc varchar2;
 begin

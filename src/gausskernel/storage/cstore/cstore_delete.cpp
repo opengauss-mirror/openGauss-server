@@ -819,6 +819,7 @@ Retry:
         newTup =
             CStore::FormVCCUDescTup(cudesc_tupdesc, (char*)delMask, cuid, rowCount, GetCurrentTransactionIdIfAny());
         oldTupCtid = oldTup->t_self;
+        pfree(delMask);
     };
 
     systable_endscan_ordered(cudesc_scan);

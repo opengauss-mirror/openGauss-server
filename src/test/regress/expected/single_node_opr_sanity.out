@@ -1607,6 +1607,16 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9999 | pg_test_err_contain_err
 --?.*
 
+-- pg_catalog.function() should be visible.
+SELECT oid, proname
+FROM pg_proc
+where pronamespace = 11 AND
+      pg_function_is_visible(oid) = false
+order by 1,2;
+ oid | proname 
+-----+---------
+(0 rows)
+
 -- **************** pg_cast ****************
 -- Catch bogus values in pg_cast columns (other than cases detected by
 -- oidjoins test).

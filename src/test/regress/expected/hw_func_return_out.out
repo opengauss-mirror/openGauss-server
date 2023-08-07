@@ -137,7 +137,7 @@ begin
 end;
 /
 ERROR:  invalid input syntax for integer: "abc"
-CONTEXT:  PL/pgSQL function inline_code_block line 5 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at SQL statement
 declare
 a int := 1;
 b int;
@@ -156,7 +156,7 @@ AS
 ERROR:  RETURN cannot have a parameter in function returning void
 LINE 2:   RETURN i;
                  ^
-QUERY:   DECLARE 	BEGIN
+QUERY:   DECLARE BEGIN
 		RETURN i;
     END
 --ora err
@@ -287,7 +287,7 @@ AS
 ERROR:  RETURN must specify a record or row variable in function returning row
 LINE 3:         RETURN result;
                        ^
-QUERY:   DECLARE  result int;
+QUERY:   DECLARE result int;
     BEGIN
         RETURN result;
     END
@@ -310,7 +310,7 @@ AS
 ERROR:  RETURN must specify a record or row variable in function returning row
 LINE 3:         RETURN 1;
                        ^
-QUERY:   DECLARE  result int;
+QUERY:   DECLARE result int;
     BEGIN
         RETURN 1;
     END
@@ -511,7 +511,7 @@ LINE 1: SELECT 2 * test_return(a, b)
                    ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 QUERY:  SELECT 2 * test_return(a, b)
-CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
 declare
 a int := 1;
 b int := 1;
@@ -533,7 +533,7 @@ LINE 1: SELECT test_return(a)+ test_return(a, b)
                                ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 QUERY:  SELECT test_return(a)+ test_return(a, b)
-CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
 DROP FUNCTION test_return;
 declare 
 temp varchar2(20);
@@ -734,7 +734,7 @@ begin
 end;
 /
 ERROR:  invalid input syntax for integer: "abc"
-CONTEXT:  PL/pgSQL function inline_code_block line 5 at SQL statement
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at SQL statement
 declare
 a int := 1;
 b int;
@@ -753,7 +753,7 @@ AS
 ERROR:  RETURN cannot have a parameter in function returning void
 LINE 2:   RETURN i;
                  ^
-QUERY:   DECLARE 	BEGIN
+QUERY:   DECLARE BEGIN
 		RETURN i;
     END
 --ora err
@@ -884,7 +884,7 @@ AS
 ERROR:  RETURN must specify a record or row variable in function returning row
 LINE 3:         RETURN result;
                        ^
-QUERY:   DECLARE  result int;
+QUERY:   DECLARE result int;
     BEGIN
         RETURN result;
     END
@@ -907,7 +907,7 @@ AS
 ERROR:  RETURN must specify a record or row variable in function returning row
 LINE 3:         RETURN 1;
                        ^
-QUERY:   DECLARE  result int;
+QUERY:   DECLARE result int;
     BEGIN
         RETURN 1;
     END
@@ -1107,7 +1107,7 @@ LINE 1: SELECT 2 * test_return(a, b)
                    ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 QUERY:  SELECT 2 * test_return(a, b)
-CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
 declare
 a int := 1;
 b int := 1;
@@ -1129,7 +1129,7 @@ LINE 1: SELECT test_return(a)+ test_return(a, b)
                                ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 QUERY:  SELECT test_return(a)+ test_return(a, b)
-CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
 DROP FUNCTION test_return;
 declare 
 temp varchar2(20);

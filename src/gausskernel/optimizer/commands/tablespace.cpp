@@ -100,6 +100,8 @@ static void createtbspc_abort_callback(bool isCommit, const void* arg);
 
 Datum CanonicalizeTablespaceOptions(Datum datum);
 
+#define CHECK_PATH_RETRY_COUNT 100
+
 #define CANONICALIZE_PATH(path)         \
     do {                                \
         if (NULL != (path)) {           \
@@ -2478,12 +2480,57 @@ char* get_tablespace_name(Oid spc_oid)
     return result;
 }
 
+bool IsPathContainsSymlink(char* path)
+{
+    struct stat statbuf;
+    errno_t rc;
+    char* ptr = path;
+
+    if (*ptr == '/') {
+        ++ptr;
+    }
+
+    for (bool isLast = false; !isLast; ++ptr) {
+        if (*ptr == '\0') {
+            isLast = true;
+        } else if (*ptr != '/') {
+            continue;
+        }
+
+        if (!isLast && ptr[1] == '\0') {
+            isLast = true;
+        }
+
+        *ptr = '\0';
+        rc = memset_s(&statbuf, sizeof(statbuf), 0, sizeof(statbuf));
+        securec_check(rc, "\0", "\0");
+
+        if (lstat(path, &statbuf) == 0 && S_ISLNK(statbuf.st_mode)) {
+            if (!isLast) {
+                *ptr = '/';
+            }
+            return true;
+        }
+
+        if (!isLast) {
+            *ptr = '/';
+        }
+    }
+    
+    return false;
+}
+
 /* check if the dir(location) is exist, if not create it */
 void check_create_dir(char* location)
 {
     int ret;
+    int retryCount = 0;
+    bool hasLink = IsPathContainsSymlink(location);
 
 recheck:
+    if (hasLink) {
+        ++retryCount;
+    }
     /* We believe that the location we got from the record is credible. */
     switch (ret = pg_check_dir(location)) {
         case 0: {
@@ -2492,6 +2539,14 @@ recheck:
             if (pg_mkdir_p_used_by_gaussdb(tmplocation, S_IRWXU) == -1) {
                 if (errno == EEXIST) {
                     pfree_ext(tmplocation);
+
+                    if (hasLink && retryCount > CHECK_PATH_RETRY_COUNT) {
+                        ereport(ERROR, (errmodule(MOD_TBLSPC),
+                            errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                            errmsg("recheck location \"%s\" exeed max times.", location),
+                            errdetail("the location contains symbolic link, the linked path likely has been deleted.")));
+                    }
+
                     goto recheck;
                 } else
                     ereport(ERROR,

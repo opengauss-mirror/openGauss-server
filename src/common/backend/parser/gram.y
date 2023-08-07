@@ -1692,6 +1692,9 @@ UserId:
 							ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("syntax error at or near \"%s\"", $1), parser_errposition(@1)));
 						if (strchr($1,'@'))
 							ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("@ can't be allowed in username")));
+						if (strlen($1) >= NAMEDATALEN) {
+							ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("String %s is too long for user name (should be no longer than 64)", $1)));
+						}
 						$$ = $1;
 					}
 			| RoleId SET_USER_IDENT
@@ -11649,11 +11652,15 @@ CreateTrigStmt:
 				{
 					if ($2 != false)
 					{
-						parser_yyerror("syntax error found");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+							 	errmsg("syntax error.")));
 					}
 					if ($3 != NULL)
 					{
-						parser_yyerror("only support definer in B compatibility database and B syntax");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("only support definer in B compatibility database and B syntax")));
 					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->definer = $3;
@@ -11713,15 +11720,20 @@ CreateTrigStmt:
 				u_sess->parser_cxt.isCreateFuncOrProc = true;
 			} subprogram_body
 				{
-					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || $2 != false)
-					{
-						parser_yyerror("only support definer, trigger_order, subprogram_body in B compatibility database");
-					}
-					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)
 					{
-						parser_yyerror("syntax error found");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("syntax error.")));
 					}
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Current syntax is supported only in B compatibility database")));
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					
 					n->definer = $3;
 					n->if_not_exists = false;
 					n->trigname = $5;
@@ -11751,15 +11763,20 @@ CreateTrigStmt:
 				u_sess->parser_cxt.isCreateFuncOrProc = true;
 			} subprogram_body
 				{
-					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
-					{
-						parser_yyerror("only support definer, if not exists, trigger_order, subprogram_body in B compatibility database");
-					}
-					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)
 					{
-						parser_yyerror("syntax error");
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("syntax error.")));
 					}
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Current syntax is supported only in B compatibility database")));
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					
 					n->definer = $3;
 					n->if_not_exists = true;
 					n->trigname = $8;
@@ -15424,9 +15441,9 @@ preserve_opt:   ON COMPLETION PRESERVE
                                 | /*EMPTY*/                     { $$ = NULL; }
                         ;
 
-rename_opt:		RENAME TO qualified_name
+rename_opt:		RENAME TO name
 				{
-					$$ = makeDefElem("rename", (Node *)$3);
+					$$ = makeDefElem("rename", (Node *)makeString($3));
 				}
 				| /*EMPTY*/			{ $$ = NULL; }
 			;
@@ -16665,16 +16682,19 @@ subprogram_body: 	{
 				if (add_declare)
 				{
 					proc_body_str = (char *)palloc0(proc_body_len + DECLARE_LEN + 1);
-					strncpy(proc_body_str, DECLARE_STR, DECLARE_LEN + 1);
-					strncpy(proc_body_str + DECLARE_LEN,
-							yyextra->core_yy_extra.scanbuf + proc_b - 1, proc_body_len);
+					rc = strcpy_s(proc_body_str, proc_body_len + DECLARE_LEN + 1, DECLARE_STR);
+					securec_check(rc, "", "");
+					rc = strncpy_s(proc_body_str + DECLARE_LEN, proc_body_len + 1,
+							yyextra->core_yy_extra.scanbuf + proc_b, proc_body_len - 1);
+					securec_check(rc, "", "");
 					proc_body_len = DECLARE_LEN + proc_body_len;
 				}
 				else
 				{
 					proc_body_str = (char *)palloc0(proc_body_len + 1);
-					strncpy(proc_body_str,
-						yyextra->core_yy_extra.scanbuf + proc_b - 1, proc_body_len);
+					rc = strncpy_s(proc_body_str, proc_body_len + 1,
+						yyextra->core_yy_extra.scanbuf + proc_b, proc_body_len - 1);
+					securec_check(rc, "", "");
 				}
 
 				proc_body_str[proc_body_len] = '\0';
@@ -16690,7 +16710,7 @@ subprogram_body: 	{
 				yyextra->core_yy_extra.query_string_locationlist = 
 					lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);
 
-				funSrc = (FunctionSources*)palloc0(sizeof(FunctionSources));
+				funSrc = makeNode(FunctionSources);
 				funSrc->bodySrc   = proc_body_str;
 				funSrc->headerSrc = proc_header_str;
 
@@ -22973,7 +22993,7 @@ select_no_parens:
 										(Node*)list_nth($5, 0), (Node*)list_nth($5, 1),
 										$1,
 										yyscanner);
-					$$ = processIntoClauseInSelectStmt((SelectStmt *) $1, (IntoClause *) $6);
+					$$ = processIntoClauseInSelectStmt((SelectStmt *) $2, (IntoClause *) $6);
 				}
 			| with_clause select_clause opt_sort_clause select_limit for_locking_clause into_clause
 				{
@@ -22982,7 +23002,7 @@ select_no_parens:
 										(Node*)list_nth($4, 0), (Node*)list_nth($4, 1),
 										$1,
 										yyscanner);
-					$$ = processIntoClauseInSelectStmt((SelectStmt *) $1, (IntoClause *) $6);
+					$$ = processIntoClauseInSelectStmt((SelectStmt *) $2, (IntoClause *) $6);
 				}
 			| with_clause select_clause opt_sort_clause opt_select_limit into_clause opt_for_locking_clause
 				{
@@ -22991,7 +23011,7 @@ select_no_parens:
 										(Node*)list_nth($4, 0), (Node*)list_nth($4, 1),
 										$1,
 										yyscanner);
-					$$ = processIntoClauseInSelectStmt((SelectStmt *) $1, (IntoClause *) $5);
+					$$ = processIntoClauseInSelectStmt((SelectStmt *) $2, (IntoClause *) $5);
 				}
 			| with_clause select_clause opt_sort_clause select_limit opt_for_locking_clause
 				{
@@ -23824,7 +23844,7 @@ table_ref:	relation_expr		%prec UMINUS
         					int rc = sprintf_s(message, MAXFNAMELEN, "relation \"%s\" does not exist", r->relname);
         					securec_check_ss(rc, "", "");
 							ReleaseSysCacheList(catlist);
-        					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
+        					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
             				ereport(ERROR,
                 				(errcode(ERRCODE_UNDEFINED_TABLE),
                     				errmsg("relation \"%s\" does not exist", r->relname),
@@ -28395,6 +28415,7 @@ unreserved_keyword:
 			| CHANGE
 			| CHARACTERISTICS
 			| CHARACTERSET
+			| CHARSET
 			| CHECKPOINT
 			| CLASS
 			| CLEAN
@@ -28527,6 +28548,7 @@ unreserved_keyword:
 			| IDENTIFIED
 			| IDENTITY_P
 			| IF_P
+			| IGNORE
 			| IGNORE_EXTRA_DATA
 			| IMMEDIATE
 			| IMMUTABLE
@@ -30395,6 +30417,20 @@ check_outarg_info(const bool *have_assigend, const char *argmodes,const int proa
 	}
 }
 
+static bool HasVariadic(int nargs, const char* argmodes)
+{
+	if (!argmodes) {
+		return false;
+	}
+
+	for (int i = nargs - 1; i >= 0; --i) {
+		if (argmodes[i] == FUNC_PARAM_VARIADIC) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // Added CALL for procedure and function
 static Node *
 makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
@@ -30469,15 +30505,16 @@ makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
 		return NULL;
 	}
 
+	/* get the all args informations, only "in" parameters if p_argmodes is null */
+	narg = get_func_arg_info(proctup, &p_argtypes, &p_argnames, &p_argmodes);
+	bool hasVariadic = HasVariadic(narg, p_argmodes);
+
 #ifndef ENABLE_MULTIPLE_NODES
-	if (!has_overload_func && !enable_out_param_override())
+	if (!hasVariadic && !has_overload_func && !enable_out_param_override())
 #else
-        if (!has_overload_func)
+        if (!hasVariadic && !has_overload_func)
 #endif
 	{
-		/* get the all args informations, only "in" parameters if p_argmodes is null */
-		narg = get_func_arg_info(proctup,&p_argtypes,&p_argnames,&p_argmodes);
-
 		/* get the all "in" parameters, except "out" or "table_colums" parameters */
 		ntable_colums = get_table_modes(narg, p_argmodes);
 		narg -= ntable_colums;
@@ -31301,6 +31338,8 @@ static CharsetCollateOptions* MakeCharsetCollateOptions(CharsetCollateOptions *o
 static char* GetValidUserHostId(char* userName, char* hostId)
 {
 	CheckUserHostIsValid();
+	if (strchr(userName,'@'))
+		ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("@ can't be allowed in username")));
 	char* userHostId = NULL;
 	if (*hostId == '\'') {
 		userHostId = hostId + 1;
@@ -31315,6 +31354,9 @@ static char* GetValidUserHostId(char* userName, char* hostId)
 	appendStringInfoString(&buf, userName);
 	appendStringInfoString(&buf, "@");
 	appendStringInfoString(&buf, userHostId);
+	if (strlen(buf.data) >= NAMEDATALEN) {
+		ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("String %s is too long for user name (should be no longer than 64)", buf.data)));
+	}
 	return buf.data;
 }
 

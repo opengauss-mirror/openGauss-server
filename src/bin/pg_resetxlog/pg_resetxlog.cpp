@@ -97,6 +97,15 @@ typedef struct DssOptions
 /* DSS connect parameters */
 static DssOptions dss;
 
+static inline bool is_negative_num(char *str)
+{
+    char *s = str;
+    while (*s != '\0' && isspace(*s)) {
+        s++;
+    }
+    return *s == '-' ? true : false;
+}
+
 int main(int argc, char* argv[])
 {
     int c;
@@ -161,6 +170,10 @@ int main(int argc, char* argv[])
                     fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                     exit(1);
                 }
+                if (is_negative_num(optarg)) {
+                    fprintf(stderr, _("%s: transaction ID epoch (-e) can't be negative.\n"), progname);
+                    exit(1);
+                }
                 break;
 
             case 'x':
@@ -170,8 +183,14 @@ int main(int argc, char* argv[])
                     fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                     exit(1);
                 }
-                if (set_xid == 0) {
-                    fprintf(stderr, _("%s: transaction ID (-x) must not be 0\n"), progname);
+                if (is_negative_num(optarg)) {
+                    fprintf(stderr, _("%s: transaction ID (-x) can't be negative.\n"), progname);
+                    exit(1);
+                }
+
+                if (!TransactionIdIsNormal(set_xid)) {
+                    fprintf(stderr, _("%s: transaction ID (-x) must be greater than or equal to %lu.\n"),
+                        progname, FirstNormalTransactionId);
                     exit(1);
                 }
                 break;
@@ -181,6 +200,10 @@ int main(int argc, char* argv[])
                 if (endptr == optarg || *endptr != '\0' || tmpValue > PG_UINT32_MAX) {
                     fprintf(stderr, _("%s: invalid argument for option -o\n"), progname);
                     fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+                    exit(1);
+                }
+                if (is_negative_num(optarg)) {
+                    fprintf(stderr, _("%s: OID (-o) can't be negative.\n"), progname);
                     exit(1);
                 }
                 set_oid = (Oid)tmpValue;
@@ -197,6 +220,10 @@ int main(int argc, char* argv[])
                     fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                     exit(1);
                 }
+                if (is_negative_num(optarg)) {
+                    fprintf(stderr, _("%s: multitransaction ID (-m) can't be negative.\n"), progname);
+                    exit(1);
+                }
                 if (set_mxid == 0) {
                     fprintf(stderr, _("%s: multitransaction ID (-m) must not be 0\n"), progname);
                     exit(1);
@@ -211,7 +238,7 @@ int main(int argc, char* argv[])
                     exit(1);
                 }
                 if ((int32)set_mxoff == -1) {
-                    fprintf(stderr, _("%s: multitransaction offset (-O) must not be -1\n"), progname);
+                    fprintf(stderr, _("%s: the low 32bit of multitransaction offset (-O) must not be ffffffff\n"), progname);
                     exit(1);
                 }
                 break;

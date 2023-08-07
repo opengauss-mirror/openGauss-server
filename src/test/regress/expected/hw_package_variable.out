@@ -453,10 +453,9 @@ pck1.va := vb;
 end;
 /
 ERROR:  "va" is declared CONSTANT
-LINE 5: pck1.va := vb;
+LINE 4: pck1.va := vb;
         ^
-QUERY:  DECLARE 
-vb int;
+QUERY:  DECLARE vb int;
 begin
 vb := 2;
 pck1.va := vb;
@@ -475,10 +474,9 @@ pck1.vb := vb;
 end;
 /
 ERROR:  "pck1.vb" is not a known variable
-LINE 5: pck1.vb := vb;
+LINE 4: pck1.vb := vb;
         ^
-QUERY:  DECLARE 
-vb int;
+QUERY:  DECLARE vb int;
 begin
 vb := 2;
 pck1.vb := vb;
@@ -491,10 +489,9 @@ pck2.vb := vb;
 end;
 /
 ERROR:  "pck2.vb" is not a known variable
-LINE 5: pck2.vb := vb;
+LINE 4: pck2.vb := vb;
         ^
-QUERY:  DECLARE 
-vb int;
+QUERY:  DECLARE vb int;
 begin
 vb := 2;
 pck2.vb := vb;
@@ -1031,7 +1028,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "va"
 LINE 10:  va int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1064,7 +1061,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "vb"
 LINE 10:  vb int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1097,7 +1094,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "r1"
 LINE 10:  r1 int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1130,7 +1127,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "r2"
 LINE 10:  r2 int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1163,7 +1160,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "r4"
 LINE 10:  r4 int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1199,7 +1196,7 @@ end;
 ERROR:  duplicate declaration at or near "va"
 LINE 10:  va int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1230,7 +1227,7 @@ end;
 ERROR:  duplicate declaration at or near "vb"
 LINE 10:  vb int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1262,7 +1259,7 @@ end;
 ERROR:  duplicate declaration at or near "vd"
 LINE 11:  vd int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1294,7 +1291,7 @@ end;
 ERROR:  duplicate declaration at or near "ve"
 LINE 10:  ve int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1325,7 +1322,7 @@ end;
 ERROR:  duplicate declaration at or near "r1"
 LINE 10:  r1 int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1356,7 +1353,7 @@ end;
 ERROR:  duplicate declaration at or near "r2"
 LINE 10:  r2 int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1387,7 +1384,7 @@ end;
 ERROR:  duplicate declaration at or near "r3"
 LINE 10:  r3 int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1418,7 +1415,7 @@ end;
 ERROR:  duplicate declaration at or near "r4"
 LINE 10:  r4 int;
           ^
-QUERY:   DECLARE 	type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 	type r2 is varray(10) of int;
 	type r3 is table of int;
 	type r4 is ref cursor;
@@ -1463,7 +1460,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "r1"
 LINE 2:  r1 int;
          ^
-QUERY:   DECLARE  va r1;
+QUERY:   DECLARE va r1;
 	r1 int;
 	begin
     NULL;
@@ -1480,7 +1477,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "r1"
 LINE 2:  type r1 is record (a int, b int);
               ^
-QUERY:   DECLARE  va r1;
+QUERY:   DECLARE va r1;
 	type r1 is record (a int, b int);
 	begin
     NULL;
@@ -1497,7 +1494,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "r2"
 LINE 2:  r2 int;
          ^
-QUERY:   DECLARE  va r2;
+QUERY:   DECLARE va r2;
 	r2 int;
 	begin
     NULL;
@@ -1514,7 +1511,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "r3"
 LINE 2:  r3 int;
          ^
-QUERY:   DECLARE  va r3;
+QUERY:   DECLARE va r3;
 	r3 int;
 	begin
     NULL;
@@ -1531,7 +1528,7 @@ end pck1;
 ERROR:  duplicate declaration at or near "r4"
 LINE 2:  r4 int;
          ^
-QUERY:   DECLARE  va r4;
+QUERY:   DECLARE va r4;
 	r4 int;
 	begin
     NULL;
@@ -1558,10 +1555,9 @@ end;
 end pck1;
 /
 ERROR:  duplicate declaration at or near "va"
-LINE 3: va int;
+LINE 2: va int;
         ^
-QUERY:   DECLARE 
-vd int := va;
+QUERY:   DECLARE vd int := va;
 va int;
 begin
 end
@@ -1574,10 +1570,9 @@ end;
 end pck1;
 /
 ERROR:  duplicate declaration at or near "vb"
-LINE 3: vb int;
+LINE 2: vb int;
         ^
-QUERY:   DECLARE 
-vd r2 := vb;
+QUERY:   DECLARE vd r2 := vb;
 vb int;
 begin
 end
@@ -1590,10 +1585,9 @@ end;
 end pck1;
 /
 ERROR:  duplicate declaration at or near "vc"
-LINE 3: vc int;
+LINE 2: vc int;
         ^
-QUERY:   DECLARE 
-vd int := vc;
+QUERY:   DECLARE vd int := vc;
 vc int;
 begin
 end
@@ -1656,10 +1650,9 @@ null;
 end;
 /
 ERROR:  duplicate declaration at or near "r1"
-LINE 3: r1 r1;
+LINE 2: r1 r1;
         ^
-QUERY:   DECLARE 
-type r1 is record (a int, b int);
+QUERY:   DECLARE type r1 is record (a int, b int);
 r1 r1;
 begin
 null;
@@ -1672,10 +1665,9 @@ null;
 end;
 /
 ERROR:  duplicate declaration at or near "r1"
-LINE 3: r1 r1;
+LINE 2: r1 r1;
         ^
-QUERY:   DECLARE 
-type r1 is varray(10) of int;
+QUERY:   DECLARE type r1 is varray(10) of int;
 r1 r1;
 begin
 null;
@@ -1688,10 +1680,9 @@ null;
 end;
 /
 ERROR:  duplicate declaration at or near "r1"
-LINE 3: r1 r1;
+LINE 2: r1 r1;
         ^
-QUERY:   DECLARE 
-type r1 is table of int;
+QUERY:   DECLARE type r1 is table of int;
 r1 r1;
 begin
 null;
@@ -1755,7 +1746,7 @@ end pck2;
 call pck2.p1();
 INFO:  11
 CONTEXT:  SQL statement "CALL p2(11)"
-PL/pgSQL function p1() line 3 at PERFORM
+PL/pgSQL function p1() line 2 at PERFORM
  p1 
 ----
  
@@ -1917,7 +1908,7 @@ end pck1;
 /
 ERROR:  compile failed when parse the query: (select a,b into v1 from tab1)
 DETAIL:  select into clause is not supported in cursor or for..in loop condition yet.
-CONTEXT:  compilation of PL/pgSQL package near line 4
+CONTEXT:  compilation of PL/pgSQL package near line 3
 create or replace package pck1 as
 func int;
 function func() return int;
@@ -2465,7 +2456,7 @@ end;
 end pck2;
 /
 ERROR:  pck1.c1 isn't a cursor
-CONTEXT:  compilation of PL/pgSQL package near line 6
+CONTEXT:  compilation of PL/pgSQL package near line 5
 create or replace package body pck2 is
 procedure p1 as
 type r1 is record (a int, b int);
@@ -2479,7 +2470,7 @@ end;
 end pck2;
 /
 ERROR:  undefined cursor: pck1.c2
-CONTEXT:  compilation of PL/pgSQL package near line 6
+CONTEXT:  compilation of PL/pgSQL package near line 5
 DROP PACKAGE pck2;
 NOTICE:  drop cascades to function pkg_val_2.p1()
 DROP PACKAGE pck1;
@@ -2664,10 +2655,9 @@ end;
 end pck1;
 /
 ERROR:  cursor referenced by "pkg_val_2.pck1.c1" is not supported yet
-LINE 4: open pkg_val_2.pck1.c1;
+LINE 3: open pkg_val_2.pck1.c1;
              ^
-QUERY:   DECLARE 
-va t1;
+QUERY:   DECLARE va t1;
 begin
 open pkg_val_2.pck1.c1;
 close pkg_val_2.pck1.c1;
@@ -2697,10 +2687,9 @@ end;
 end pck1;
 /
 ERROR:  cursor referenced by "pck2.c1" in autonomous procedure is not supported yet
-LINE 5: open pck2.c1;
+LINE 4: open pck2.c1;
              ^
-QUERY:   DECLARE 
-PRAGMA AUTONOMOUS_TRANSACTION;
+QUERY:   DECLARE PRAGMA AUTONOMOUS_TRANSACTION;
 va t1;
 begin
 open pck2.c1;
@@ -2718,10 +2707,9 @@ end;
 end pck1;
 /
 ERROR:  cursor referenced by "c1" in autonomous procedure is not supported yet
-LINE 5: open c1;
+LINE 4: open c1;
              ^
-QUERY:   DECLARE 
-PRAGMA AUTONOMOUS_TRANSACTION;
+QUERY:   DECLARE PRAGMA AUTONOMOUS_TRANSACTION;
 va t1;
 begin
 open c1;
@@ -2800,9 +2788,9 @@ end pck1;
 call pck1.p1();
 ERROR:  ERROR:  package cursor referenced in autonomous procedure is not supported yet
 DETAIL:  cursor "c1" in package "pck2" referenced in autonomous procedure is not supported yet
-CONTEXT:  PL/pgSQL function p2() line 4 at OPEN
+CONTEXT:  PL/pgSQL function p2() line 3 at OPEN
 SQL statement "CALL p2()"
-PL/pgSQL function p1() line 4 at PERFORM
+PL/pgSQL function p1() line 3 at PERFORM
 referenced column: p1
 
 DROP PACKAGE pck1;
@@ -2837,7 +2825,7 @@ end;
 /
 ERROR:  compile failed when parse the query: select c3 from check_tab1 order by c3 limit 6
 DETAIL:  relation "check_tab1" does not exist on datanode1
-CONTEXT:  compilation of PL/pgSQL function "check_f04" near line 11
+CONTEXT:  compilation of PL/pgSQL function "check_f04" near line 10
 create table check_tab1(a int);
 create or replace function check_f04 return int as
 declare
@@ -2864,7 +2852,7 @@ end;
 /
 ERROR:  compile failed when parse the query: select c3 from check_tab1 order by c3 limit 6
 DETAIL:  column "c3" does not exist
-CONTEXT:  compilation of PL/pgSQL function "check_f04" near line 11
+CONTEXT:  compilation of PL/pgSQL function "check_f04" near line 10
 drop table check_tab1;
 reset behavior_compat_options;
 -- ref package cursor attr at first
@@ -2974,13 +2962,13 @@ INFO:  isopend: t
 INFO:  rowcount: 1
 INFO:  va:(3,4)
 CONTEXT:  SQL statement "CALL pp1()"
-PL/pgSQL function p1() line 12 at PERFORM
+PL/pgSQL function p1() line 11 at PERFORM
 INFO:  isopend: t
 CONTEXT:  SQL statement "CALL pp1()"
-PL/pgSQL function p1() line 12 at PERFORM
+PL/pgSQL function p1() line 11 at PERFORM
 INFO:  rowcount: 2
 CONTEXT:  SQL statement "CALL pp1()"
-PL/pgSQL function p1() line 12 at PERFORM
+PL/pgSQL function p1() line 11 at PERFORM
  p1 
 ----
  
@@ -2994,11 +2982,10 @@ fetch pck1.c1 into va;
 end;
 /
 ERROR:  package cursor with arguments is only supported to be opened in the same package.
-LINE 4: open pck1.c1(4);
+LINE 3: open pck1.c1(4);
                     ^
 DETAIL:  cursor "pck1.c1" is only supported to be opened in the package "pck1"
-QUERY:  DECLARE 
-va t1;
+QUERY:  DECLARE va t1;
 begin
 open pck1.c1(4);
 fetch pck1.c1 into va;
@@ -3057,10 +3044,10 @@ end;
 /
 INFO:  before auto: hahahah,(1,cccc)
 CONTEXT:  SQL statement "CALL p1(150,pck1.va,pck1.vc)"
-PL/pgSQL function inline_code_block line 4 at PERFORM
+PL/pgSQL function inline_code_block line 3 at PERFORM
 INFO:  after auto: hahahah,(1,cccc)
 CONTEXT:  SQL statement "CALL p1(150,pck1.va,pck1.vc)"
-PL/pgSQL function inline_code_block line 4 at PERFORM
+PL/pgSQL function inline_code_block line 3 at PERFORM
 INFO:  after p1: bbbbbbb,(123,ayayayayay)
  
 drop procedure p1;

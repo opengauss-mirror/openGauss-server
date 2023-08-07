@@ -60,8 +60,7 @@ CREATE DEFINER = testusr1 FUNCTION public.func_definer1(integer, integer)
 AS $function$select $1 + $2;$function$;
 \sf  proc_definer1
 CREATE DEFINER = testusr1 PROCEDURE public.proc_definer1()
-AS  DECLARE 
-BEGIN
+AS  DECLARE BEGIN
    raise info 'create definer procedure.';
 END;
 /
@@ -123,8 +122,7 @@ CREATE DATABASE mysqltestbak DBCOMPATIBILITY  'B';
 \c mysqltestbak
 \sf proc_definer1
 CREATE DEFINER = testusr1 PROCEDURE public.proc_definer1()
-AS  DECLARE 
-BEGIN
+AS DECLARE BEGIN
    raise info 'create definer procedure.';
 END;
 /

@@ -2155,6 +2155,13 @@ static bool _equalIndexHintRelationData (const IndexHintRelationData* a, const I
     return true;
 }
 
+static bool _equalFunctionSources(const FunctionSources* a, const FunctionSources* b)
+{
+    COMPARE_STRING_FIELD(headerSrc);
+    COMPARE_STRING_FIELD(bodySrc);
+    return true;
+}
+
 static bool _equalCreatePolicyLabelStmt(const CreatePolicyLabelStmt* a, const CreatePolicyLabelStmt* b)
 {
     COMPARE_SCALAR_FIELD(if_not_exists);
@@ -2350,6 +2357,8 @@ static bool _equalLockStmt(const LockStmt* a, const LockStmt* b)
     COMPARE_NODE_FIELD(relations);
     COMPARE_SCALAR_FIELD(mode);
     COMPARE_SCALAR_FIELD(nowait);
+    COMPARE_SCALAR_FIELD(cancelable);
+    COMPARE_SCALAR_FIELD(isLockTables);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COMPARE_SCALAR_FIELD(waitSec);
     }
@@ -4434,7 +4443,9 @@ bool equal(const void* a, const void* b)
         case T_IndexHintRelationData:
             retval = _equalIndexHintRelationData((IndexHintRelationData *)a, (IndexHintRelationData *)b);
             break;
-
+        case T_FunctionSources:
+            retval = _equalFunctionSources((const FunctionSources *)a, (const FunctionSources *)b);
+            break;
 
         default:
             ereport(ERROR,

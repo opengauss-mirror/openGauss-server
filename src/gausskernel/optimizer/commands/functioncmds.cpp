@@ -1650,6 +1650,14 @@ void RemovePackageById(Oid pkgOid, bool isBody)
         DropErrorByOid(PLPGSQL_PACKAGE, pkgOid); 
         simple_heap_delete(relation, &pkgtup->t_self);
     } else {
+        bool isNull = false;
+        SysCacheGetAttr(PACKAGEOID, pkgtup, Anum_gs_package_pkgbodydeclsrc, &isNull);
+        if (isNull) {
+            DropErrorByOid(PLPGSQL_PACKAGE_BODY, pkgOid);
+            ReleaseSysCache(pkgtup);
+            heap_close(relation, RowExclusiveLock);
+            return;
+        }
         bool nulls[Natts_gs_package];
         Datum values[Natts_gs_package];
         bool replaces[Natts_gs_package];
@@ -1665,6 +1673,7 @@ void RemovePackageById(Oid pkgOid, bool isBody)
         HeapTuple newtup = heap_modify_tuple(pkgtup, RelationGetDescr(relation), values, nulls, replaces);
         DropErrorByOid(PLPGSQL_PACKAGE_BODY, pkgOid); 
         simple_heap_update(relation, &newtup->t_self, newtup);
+        CatalogUpdateIndexes(relation, newtup);
     }
     ReleaseSysCache(pkgtup);
 

@@ -447,6 +447,7 @@ extern Datum namegt(PG_FUNCTION_ARGS);
 extern Datum namege(PG_FUNCTION_ARGS);
 extern int namestrcpy(Name name, const char* str);
 extern int namestrcmp(Name name, const char* str);
+extern int namestrcasecmp(Name name, const char* str);
 extern Datum current_user(PG_FUNCTION_ARGS);
 extern Datum session_user(PG_FUNCTION_ARGS);
 extern Datum current_schema(PG_FUNCTION_ARGS);
@@ -1841,5 +1842,8 @@ extern Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS);
 #endif
 extern char *pg_ultostr(char *str, uint32 value);
 extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
+
+/* float.cpp */
+extern int float8_cmp_internal(float8 a, float8 b);
 
 #endif /* BUILTINS_H */

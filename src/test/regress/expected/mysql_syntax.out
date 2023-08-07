@@ -3,6 +3,28 @@
 drop database if exists db_mysql;
 NOTICE:  database "db_mysql" does not exist, skipping
 create database db_mysql dbcompatibility 'B';
+drop database if exists db_td;
+NOTICE:  database "db_td" does not exist, skipping
+create database db_td dbcompatibility='C';
+\c db_td
+create table animals (id int, name char(30));
+create table food (id int, foodtype varchar(32), remark varchar(32), time_flag timestamp);
+create trigger animal_trigger1
+after insert on animals
+for each row
+begin
+    insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
+end;
+/
+ERROR:  Current syntax is supported only in B compatibility database
+create or replace trigger animal_trigger1
+after insert on animals
+for each row
+begin
+    insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
+end;
+/
+ERROR:  syntax error.
 \c db_mysql
 create table t (id int);
 create table t1 (id int);
@@ -49,6 +71,14 @@ begin
     insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
 end;
 /
+create or replace trigger animal_trigger1
+after insert on animals
+for each row
+begin
+    insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
+end;
+/
+ERROR:  syntax error.
 --different type trigger follows|precedes
 create trigger animal_trigger2
 before insert on animals
@@ -275,7 +305,7 @@ end;
 ERROR:  duplicate declaration at or near "c1_all"
 LINE 8:     declare c1_all cursor is --cursor without args 
                     ^
-QUERY:   DECLARE  company_name    varchar(100);
+QUERY:   DECLARE company_name    varchar(100);
     company_loc varchar(100);
     company_no  integer;
 
@@ -296,6 +326,51 @@ begin
         close c1_all;
     end if;
 end
+-- mysql fetch 自动退出
+show b_format_behavior_compat_options;
+ b_format_behavior_compat_options 
+----------------------------------
+ 
+(1 row)
+
+set b_format_behavior_compat_options = 'fetch';
+create or replace procedure test_cursor_1 
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+begin 
+    declare c1_all cursor is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+    if not c1_all%isopen then
+        open c1_all;
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        close c1_all;
+    end if;
+end;
+/
+call test_cursor_1();
+NOTICE:  backberry : canada : 3
+NOTICE:  macrosoft : usa : 1
+NOTICE:  oracle : usa : 2
+ test_cursor_1 
+---------------
+ 
+(1 row)
+
+set b_format_behavior_compat_options = '';
+show b_format_behavior_compat_options;
+ b_format_behavior_compat_options 
+----------------------------------
+ 
+(1 row)
+
 -- test declare condition
 create or replace procedure test_condition_1 as
 declare
@@ -355,10 +430,9 @@ exception
 END;
 /
 ERROR:  duplicate declaration at or near "DIVISION_ZERO"
-LINE 6:     declare DIVISION_ZERO condition for SQLSTATE '22005';
+LINE 5:     declare DIVISION_ZERO condition for SQLSTATE '22005';
                     ^
-QUERY:  
-declare
+QUERY:  declare
     a int;
 BEGIN
     declare DIVISION_ZERO condition for SQLSTATE '22012';
@@ -392,7 +466,7 @@ BEGIN
 END;
 /
 ERROR:  Incorrect CONDITION value: '0'
-CONTEXT:  compilation of PL/pgSQL function "test_condition_5" near line 3
+CONTEXT:  compilation of PL/pgSQL function "test_condition_5" near line 2
 -- declare condition sqlstate begin with '00'
 create or replace procedure test_condition_6 as
 BEGIN
@@ -401,7 +475,7 @@ BEGIN
 END;
 /
 ERROR:  bad SQLSTATE '00000'
-CONTEXT:  compilation of PL/pgSQL function "test_condition_6" near line 3
+CONTEXT:  compilation of PL/pgSQL function "test_condition_6" near line 2
 create or replace procedure test_condition_1 as
 declare
     a int;
@@ -448,6 +522,7 @@ ERROR:  drop trigger without table name only support in B-format database
 drop trigger if exists animal_trigger1;
 ERROR:  drop trigger without table name only support in B-format database
 drop database db_mysql;
+drop database db_td;
 -- test declare condition in other compatibility
 create or replace procedure test_condition_1 as
 declare
@@ -463,10 +538,9 @@ exception
 END;
 /
 ERROR:  syntax error at or near "SQLSTATE"
-LINE 5:     declare DIVISION_ZERO condition for SQLSTATE '22012';
+LINE 4:     declare DIVISION_ZERO condition for SQLSTATE '22012';
                                   ^
-QUERY:  
-declare
+QUERY:  declare
     a int;
 BEGIN
     declare DIVISION_ZERO condition for SQLSTATE '22012';

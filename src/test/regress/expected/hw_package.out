@@ -323,8 +323,7 @@ drop cascades to function public.autonomous_f_150_1_private(integer)
 CREATE OR REPLACE FUNCTION public.feature_cross_test.func3(a int --函数入参注释 end
    )
  RETURN numeric NOT FENCED NOT SHIPPABLE PACKAGE
-AS  DECLARE 
---函数头部注释
+AS  DECLARE --函数头部注释
    begin
       data1 := 1;
       data2 := 2;
@@ -387,10 +386,9 @@ END;
 END autonomous_pkg_150;
 /
 ERROR:  mismatched parentheses at or near ")"
-LINE 7:   select count(*)) into re_int from test_package1; 
+LINE 6:   select count(*)) into re_int from test_package1; 
                          ^
-QUERY:   DECLARE 
-PRAGMA AUTONOMOUS_TRANSACTION;
+QUERY:   DECLARE PRAGMA AUTONOMOUS_TRANSACTION;
 re_int INT;
 BEGIN
   re_int:=autonomous_1;
@@ -520,7 +518,7 @@ ERROR:  package instantiation can not have autonomous function
 DETAIL:  this package have autonmous function
 CONTEXT:  referenced column: autonomous_f_150_1
 SQL statement "SELECT autonomous_f_150_1(autonomous_f_150_1_private(1))"
-PL/pgSQL function inline_code_block line 3 at PERFORM
+PL/pgSQL function inline_code_block line 2 at PERFORM
 compilation of PL/pgSQL package near line 0
 create or replace package pack_log
 is
@@ -649,7 +647,7 @@ select multi_sql.func16();
 ERROR:  alter function in package is not allowed
 DETAIL:  please rebuild package
 CONTEXT:  SQL statement "alter function func5() rename to func25"
-PL/pgSQL function func16() line 3 at SQL statement
+PL/pgSQL function func16() line 2 at SQL statement
 referenced column: func16
 create or replace package aa
 is
@@ -748,7 +746,7 @@ call multi_sql.func16();
 ERROR:  alter function in package is not allowed
 DETAIL:  please rebuild package
 CONTEXT:  SQL statement "alter function func5() rename to func25"
-PL/pgSQL function func16() line 3 at SQL statement
+PL/pgSQL function func16() line 2 at SQL statement
 create or replace package pkgschema1.aa
 is
 a int:=1;
@@ -841,10 +839,9 @@ end;
 end test1;
 /
 ERROR:  "test1.a" is not a known variable
-LINE 5:             test1.a:=case when 1>2 then 1 else 1 end;
+LINE 4:             test1.a:=case when 1>2 then 1 else 1 end;
                     ^
-QUERY:   DECLARE 
-begin
+QUERY:   DECLARE begin
     for rec in (select 1) loop
         begin
             test1.a:=case when 1>2 then 1 else 1 end;
@@ -1058,10 +1055,9 @@ end;
 end pckg_test;
 /
 ERROR:  type "tb_test" does not exist
-LINE 2: v_t tb_test;
-            ^
-QUERY:   DECLARE 
-v_t tb_test;
+LINE 1:  DECLARE v_t tb_test;
+                     ^
+QUERY:   DECLARE v_t tb_test;
 o_list sys_refcursor;
 begin
 for rec in (select col1,col2 from tb_test where col1<i_col1) loop
@@ -1124,13 +1120,13 @@ end pck1;
 call pck1.pp2();
 NOTICE:  a:no value
 CONTEXT:  SQL statement "CALL pck1.pp1()"
-PL/pgSQL function pp2() line 3 at PERFORM
+PL/pgSQL function pp2() line 2 at PERFORM
 NOTICE:  a:no value
 CONTEXT:  SQL statement "CALL pck1.pp1()"
-PL/pgSQL function pp2() line 4 at PERFORM
+PL/pgSQL function pp2() line 3 at PERFORM
 NOTICE:  a:assign value
 CONTEXT:  SQL statement "CALL pck1.pp1('assign value')"
-PL/pgSQL function pp2() line 5 at PERFORM
+PL/pgSQL function pp2() line 4 at PERFORM
  pp2 
 -----
  
@@ -1182,7 +1178,7 @@ end pck20;
 call pck20.read_proc1(1);
 INFO:  aa
 CONTEXT:  SQL statement "CALL read_proc1()"
-PL/pgSQL function read_proc1(integer) line 3 at PERFORM
+PL/pgSQL function read_proc1(integer) line 2 at PERFORM
 INFO:  bb
  read_proc1 
 ------------
@@ -1220,10 +1216,9 @@ dbe_output.print_line('hello'||my_var);
 end;
 /
 ERROR:  syntax error at or near "transaction"
-LINE 3: begin transaction;
+LINE 2: begin transaction;
               ^
-QUERY:  DECLARE 
-my_var VARCHAR2(30);
+QUERY:  DECLARE my_var VARCHAR2(30);
 begin transaction;
 begin
 my_var :='world';
@@ -1465,8 +1460,7 @@ end a3;
 \sf a3.func_1
 CREATE OR REPLACE PROCEDURE t2.a3.func_1()
  AUTHID CURRENT_USER PACKAGE
-AS  DECLARE 
-begin
+AS  DECLARE begin
 insert into test1 values(1);
 end;
 /
@@ -1565,25 +1559,25 @@ select proacl,prosecdef from pg_proc where proname='test5';
 call t5.test5();
 NOTICE:  t2
 CONTEXT:  SQL statement "CALL t2.test2()"
-PL/pgSQL function t3.test3() line 6 at PERFORM
+PL/pgSQL function t3.test3() line 5 at PERFORM
 SQL statement "CALL t3.test3()"
-PL/pgSQL function t4.test4() line 6 at PERFORM
+PL/pgSQL function t4.test4() line 5 at PERFORM
 SQL statement "CALL t4.test4()"
-PL/pgSQL function test5() line 6 at PERFORM
+PL/pgSQL function test5() line 5 at PERFORM
 NOTICE:  t2
 CONTEXT:  SQL statement "CALL t2.test2()"
-PL/pgSQL function t3.test3() line 6 at PERFORM
+PL/pgSQL function t3.test3() line 5 at PERFORM
 SQL statement "CALL t3.test3()"
-PL/pgSQL function t4.test4() line 6 at PERFORM
+PL/pgSQL function t4.test4() line 5 at PERFORM
 SQL statement "CALL t4.test4()"
-PL/pgSQL function test5() line 6 at PERFORM
+PL/pgSQL function test5() line 5 at PERFORM
 ERROR:  division by zero
 CONTEXT:  SQL statement "SELECT 2/0"
-PL/pgSQL function t3.test3() line 4 at assignment
+PL/pgSQL function t3.test3() line 3 at assignment
 SQL statement "CALL t3.test3()"
-PL/pgSQL function t4.test4() line 6 at PERFORM
+PL/pgSQL function t4.test4() line 5 at PERFORM
 SQL statement "CALL t4.test4()"
-PL/pgSQL function test5() line 6 at PERFORM
+PL/pgSQL function test5() line 5 at PERFORM
 reset session AUTHORIZATION;
 drop user t2 cascade;
 drop user t3 cascade;
@@ -1856,7 +1850,7 @@ NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function p1()
 drop cascades to function p2()
 CONTEXT:  SQL statement "drop package pck1"
-PL/pgSQL function p2() line 3 at SQL statement
+PL/pgSQL function p2() line 2 at SQL statement
  p2 
 ----
  
@@ -1977,42 +1971,42 @@ INFO:  de1 is {"(1,1,varchar1,clob1clob1,0ABCDEF1)","(2,2,varchar10,clob2clob2,0
 INFO:  de2 is {"(201,201,varchar1200,clob1clob1200,00ABCDEF1200)","(202,202,varchar10200,clob2clob2200,00ABCDEF2200)"}
 INFO:  pkg059.col1 {}
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  pkg059.col2 {}
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  col3 is {"(1,1,varchar1,clob1clob1,0ABCDEF1)","(2,2,varchar10,clob2clob2,0ABCDEF2)"}
 CONTEXT:  SQL statement "CALL proc059_1(pkg059.col1,pkg059.col2)"
-PL/pgSQL function func059_2(integer) line 7 at PERFORM
+PL/pgSQL function func059_2(integer) line 6 at PERFORM
 SQL statement "CALL pkg059.func059_2(cf3)"
 --?.*
 SQL statement "CALL func059_1_2(cf1=>pkg059.col1,cf2=>pkg059.col2)"
 --?.*
 SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  col4 is {"(2,2,varchar10,clob2clob2,0ABCDEF2)","(1,1,varchar1,clob1clob1,0ABCDEF1)"}
 CONTEXT:  SQL statement "CALL proc059_1(pkg059.col1,pkg059.col2)"
-PL/pgSQL function func059_2(integer) line 7 at PERFORM
+PL/pgSQL function func059_2(integer) line 6 at PERFORM
 SQL statement "CALL pkg059.func059_2(cf3)"
 --?.*
 SQL statement "CALL func059_1_2(cf1=>pkg059.col1,cf2=>pkg059.col2)"
 --?.*
 SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  cf2(1).c1 is <NULL>
 CONTEXT:  SQL statement "CALL func059_1_2(cf1=>pkg059.col1,cf2=>pkg059.col2)"
 --?.*
 SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  cp1 is {"(1,1,varchar1,clob1clob1,0ABCDEF1)","(2,2,varchar10,clob2clob2,0ABCDEF2)"}
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  cp2 is <NULL>
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  cp3 is <NULL>
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  de2 out is <NULL>
 create or replace package body pkg059
 is
@@ -2054,42 +2048,42 @@ INFO:  de1 is {"(1,1,varchar1,clob1clob1,0ABCDEF1)","(2,2,varchar10,clob2clob2,0
 INFO:  de2 is {"(201,201,varchar1200,clob1clob1200,00ABCDEF1200)","(202,202,varchar10200,clob2clob2200,00ABCDEF2200)"}
 INFO:  pkg059.col1 {}
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  pkg059.col2 {}
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  col3 is {"(1,1,varchar1,clob1clob1,0ABCDEF1)","(2,2,varchar10,clob2clob2,0ABCDEF2)"}
 CONTEXT:  SQL statement "CALL proc059_1(pkg059.col1,pkg059.col2)"
-PL/pgSQL function func059_2(integer) line 7 at PERFORM
+PL/pgSQL function func059_2(integer) line 6 at PERFORM
 SQL statement "CALL pkg059.func059_2(cf3)"
 --?.*
 SQL statement "CALL func059_1_2(cf1=>pkg059.col1,cf2=>pkg059.col2)"
 --?.*
 SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  col4 is {"(2,2,varchar10,clob2clob2,0ABCDEF2)","(1,1,varchar1,clob1clob1,0ABCDEF1)"}
 CONTEXT:  SQL statement "CALL proc059_1(pkg059.col1,pkg059.col2)"
-PL/pgSQL function func059_2(integer) line 7 at PERFORM
+PL/pgSQL function func059_2(integer) line 6 at PERFORM
 SQL statement "CALL pkg059.func059_2(cf3)"
 --?.*
 SQL statement "CALL func059_1_2(cf1=>pkg059.col1,cf2=>pkg059.col2)"
 --?.*
 SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  cf2(1).c1 is <NULL>
 CONTEXT:  SQL statement "CALL func059_1_2(cf1=>pkg059.col1,cf2=>pkg059.col2)"
 --?.*
 SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  cp1 is {"(1,1,varchar1,clob1clob1,0ABCDEF1)","(2,2,varchar10,clob2clob2,0ABCDEF2)"}
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  cp2 is <NULL>
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  cp3 is <NULL>
 CONTEXT:  SQL statement "CALL pkg059_1.proc059_1_1(de1,de2)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 12 at SQL statement
 INFO:  de2 out is <NULL>
 --test alter package owner
 create user alt_package PASSWORD 'gauss@123';
@@ -2373,24 +2367,21 @@ call pck1.func2();
 \sf p1
 CREATE OR REPLACE PROCEDURE pkgsch059.p1()
  AUTHID CURRENT_USER
-AS  DECLARE 
-begin
+AS  DECLARE begin
 null;
 end;
 /
 \sf p2
 CREATE OR REPLACE PROCEDURE pkgsch059.p2()
  AUTHID DEFINER
-AS  DECLARE 
-begin
+AS  DECLARE begin
 null;
 end;
 /
 \sf p3
 CREATE OR REPLACE PROCEDURE pkgsch059.p3()
  AUTHID DEFINER
-AS  DECLARE 
-begin
+AS  DECLARE begin
 null;
 end;
 /
