@@ -19300,8 +19300,7 @@ retry:
                         xlogctl->IsRecoveryDone = true;
                         SpinLockRelease(&xlogctl->info_lck);
                         static uint64 printFrequency = 0;
-                        if (!(IS_SHARED_STORAGE_MODE) ||
-                            pg_atomic_read_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage)) {
+                        if (pg_atomic_read_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage)) {
                             knl_g_set_redo_finish_status(REDO_FINISH_STATUS_LOCAL | REDO_FINISH_STATUS_CM);
                             if ((printFrequency & 0xFF) == 0) {
                                 ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
@@ -19317,21 +19316,8 @@ retry:
                              * If it hasn't been long since last attempt, sleep 1s to
                              * avoid busy-waiting.
                              */
-                            if (IS_SHARED_STORAGE_MODE) {
-                                uint32 connMode =
-                                    pg_atomic_read_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node);
-                                if (connMode) {
-                                    pg_atomic_write_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node,
-                                                        false);
-                                }
-                                pg_usleep(2000000L);
-                            } else {
-#ifdef ENABLE_LITE_MODE
-                                pg_usleep(1000000L);
-#else
-                                pg_usleep(50000L);
-#endif
-                            }
+                            pg_atomic_write_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node, false);
+                            pg_usleep(2000000L);
                         }
                         /*
                          * If primary_conninfo is set, launch walreceiver to
@@ -19347,7 +19333,7 @@ retry:
                          */
                         load_server_mode();
 
-                        if (IS_SHARED_STORAGE_STANBY_MODE && !IS_SHARED_STORAGE_MAIN_STANDBY_MODE) {
+                        if (DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE) {
                             ProcTxnWorkLoad(false);
                             /* use volatile pointer to prevent code rearrangement */
                             volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
