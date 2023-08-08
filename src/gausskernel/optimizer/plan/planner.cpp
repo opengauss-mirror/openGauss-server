@@ -12119,6 +12119,9 @@ bool findConstraintByVar(Var* var, Oid relid, constraintType conType)
         ArrayType* arr = NULL;
 
         adatum = SysCacheGetAttr(CONSTROID, htup, Anum_pg_constraint_conkey, &isNull);
+        if (adatum == 0) {
+            continue;
+        }
 
         arr = DatumGetArrayTypeP(adatum);
         attnums = (int16*)ARR_DATA_PTR(arr);
