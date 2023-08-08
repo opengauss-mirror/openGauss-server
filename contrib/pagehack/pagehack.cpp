@@ -3230,6 +3230,7 @@ static int parse_uncompressed_page_file(const char *filename, SegmentType type, 
     /* parse */
     number = CalculateMaxBlockNumber(blknum, start, number);
     if (number == InvalidBlockNumber) {
+        fclose(fd);
         return false;
     } else if ((start + number) > blknum) {
         fprintf(stderr,
@@ -4492,6 +4493,8 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
         if (start_page >= dw_batch_page_num) {
             fprintf(stdout, "start_page %u exceeds the double write file upper limit offset %u\n",
                 start_page, dw_batch_page_num - 1);
+            free(dw_buf);
+            fclose(fd);
             return false;
         }
         file_head.start = (uint16)start_page;
