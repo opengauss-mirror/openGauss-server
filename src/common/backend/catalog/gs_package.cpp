@@ -1387,6 +1387,8 @@ static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntim
 
         if (fromVar->tableOfIndex != NULL) {
             MemoryContext temp = MemoryContextSwitchTo(targetVar->pkg->pkg_cxt);
+            hash_destroy(targetVar->tableOfIndex);
+            targetVar->tableOfIndex = NULL;
             targetVar->tableOfIndex = copyTableOfIndex(fromVar->tableOfIndex);
             MemoryContextSwitchTo(temp);
         } else if (fromVar->isnull) {
