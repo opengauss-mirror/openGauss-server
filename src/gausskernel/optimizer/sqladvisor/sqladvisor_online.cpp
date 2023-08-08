@@ -320,7 +320,7 @@ static bool equalPLpgsqlFunc(PLpgSQL_function* funcA, PLpgSQL_function* funcB)
         /* equalPLpgEstate(funcA->cur_estate, funcB->cur_estate) */
         for (int i = 0; i < funcA->fn_nargs; i++) {
             if (funcA->fn_argvarnos[i] != funcB->fn_argvarnos[i]) {
-                break;
+                return false;
             }
         }
         return true;
