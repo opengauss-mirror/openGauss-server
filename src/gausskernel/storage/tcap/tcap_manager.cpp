@@ -1696,7 +1696,7 @@ static bool TrObjInRecyclebin(const ObjectAddress *obj)
     sd = systable_beginscan(rbRel, RecyclebinDbidRelidIndexId, true, NULL, 2, skey);
     while ((tup = systable_getnext(sd)) != NULL) {
         Form_pg_recyclebin rbForm = (Form_pg_recyclebin)GETSTRUCT(tup);
-        if ((TrObjType)rbForm->rcyoperation == 'd') {
+        if (rbForm->rcyoperation == 'd') {
             found = true;
             break;
         }

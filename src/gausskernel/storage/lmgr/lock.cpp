@@ -1260,7 +1260,7 @@ static void RemoveLocalLock(LOCALLOCK *locallock)
     }
 }
 
-bool inline IsInSameLockGroup(const PROCLOCK *proclock1, const PROCLOCK *proclock2)
+inline  bool IsInSameLockGroup(const PROCLOCK *proclock1, const PROCLOCK *proclock2)
 {
     Assert(proclock1->groupLeader != t_thrd.proc || t_thrd.proc->lockGroupLeader != NULL);
     return proclock1 != proclock2 && proclock1->groupLeader == proclock2->groupLeader;
