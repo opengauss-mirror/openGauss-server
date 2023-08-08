@@ -161,7 +161,7 @@ extern void PushErrorV(int errorCode, int severity, const char* file, int line, 
         va_list args2;
         va_copy(args2, args);
         errno_t erc = vsnprintf_truncated_s(errorFrame->m_errorMessage, MOT_MAX_ERROR_MESSAGE, format, args2);
-        securec_check_ss(erc, "\0", "\0");
+        securec_check_ss_c(erc, "\0", "\0");
         errorFrame->m_errorMessage[MOT_MAX_ERROR_MESSAGE - 1] = 0;
         ++errorFrameCount;
     }
