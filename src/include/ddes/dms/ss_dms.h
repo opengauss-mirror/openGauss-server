@@ -84,6 +84,7 @@ typedef struct st_ss_dms_func {
     int (*dms_reform_req_opengauss_ondemand_redo_buffer)(dms_context_t *dms_ctx, void *block_key, unsigned int key_len,
         int *redo_status);
     unsigned int (*dms_get_mes_max_watting_rooms)(void);
+    int (*dms_send_opengauss_oldest_xmin)(dms_context_t *dms_ctx, unsigned long long oldest_xmin, unsigned char dest_id);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -131,6 +132,8 @@ void dms_validate_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned lon
 int dms_reform_req_opengauss_ondemand_redo_buffer(dms_context_t *dms_ctx, void *block_key, unsigned int key_len,
                                                   int *redo_status);
 unsigned int dms_get_mes_max_watting_rooms(void);
+int dms_send_opengauss_oldest_xmin(dms_context_t *dms_ctx, unsigned long long oldest_xmin, unsigned char dest_id);
+
 #ifdef __cplusplus
 }
 #endif

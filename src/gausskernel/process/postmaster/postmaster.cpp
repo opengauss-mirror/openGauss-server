@@ -260,6 +260,7 @@
 #include "storage/dss/dss_log.h"
 #include "ddes/dms/ss_switchover.h"
 #include "ddes/dms/ss_reform_common.h"
+#include "ddes/dms/ss_dms_auxiliary.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -3070,6 +3071,7 @@ int PostmasterMain(int argc, char* argv[])
         if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
             /* need to initialize before STARTUP */
             DMSInit();
+            g_instance.pid_cxt.DmsAuxiliaryPID = initialize_util_thread(DMS_AUXILIARY_THREAD);
         }
     }
 
@@ -13252,6 +13254,9 @@ static void SetAuxType()
             t_thrd.bootstrap_cxt.MyAuxProcType = TsCompactionAuxiliaryProcess;
             break;
 #endif   /* ENABLE_MULTIPLE_NODES */
+        case DMS_AUXILIARY_THREAD:
+            t_thrd.bootstrap_cxt.MyAuxProcType = DmsAuxiliaryProcess;
+            break;
         default:
             ereport(ERROR, (errmsg("unrecorgnized proc type %d", thread_role)));
     }
@@ -13546,6 +13551,10 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             proc_exit(1);
             break;
 #endif   /* ENABLE_MULTIPLE_NODES */
+        case DMS_AUXILIARY_THREAD:
+            DmsAuxiliaryMain();
+            proc_exit(1);
+            break;
         default:
             ereport(PANIC, (errmsg("unrecognized process type: %d", (int)t_thrd.bootstrap_cxt.MyAuxProcType)));
             proc_exit(1);
@@ -13789,6 +13798,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 #endif   /* ENABLE_MULTIPLE_NODES */
         case THREADPOOL_LISTENER:
         case THREADPOOL_SCHEDULER:
+        case DMS_AUXILIARY_THREAD:
         case UNDO_RECYCLER: {
             SetAuxType<thread_role>();
             /* Restore basic shared memory pointers */
@@ -14332,6 +14342,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<APPLY_LAUNCHER>, APPLY_LAUNCHER, "applylauncher", "apply launcher" },
     { GaussDbThreadMain<APPLY_WORKER>, APPLY_WORKER, "applyworker", "apply worker" },
     { GaussDbThreadMain<STACK_PERF_WORKER>, STACK_PERF_WORKER, "stack_perf", "stack perf worker" },
+    { GaussDbThreadMain<DMS_AUXILIARY_THREAD>, DMS_AUXILIARY_THREAD, "dms_auxiliary", "maintenance xmin in dms" },
 
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES

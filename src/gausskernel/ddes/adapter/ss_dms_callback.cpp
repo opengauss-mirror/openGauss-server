@@ -197,7 +197,7 @@ static int CBGetTxnCSN(void *db_handle, dms_opengauss_xid_csn_t *csn_req, dms_op
     return ret;
 }
 
-static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot)
+static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot, uint8 inst_id)
 {   
     /* SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY always is in recovery progress, but it can acquire snapshot*/
     if (RecoveryInProgress() && !SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
@@ -216,7 +216,11 @@ static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_
             txn_snapshot->xmax = snapshot.xmax;
             txn_snapshot->snapshotcsn = snapshot.snapshotcsn;
             txn_snapshot->localxmin = u_sess->utils_cxt.RecentGlobalXmin;
-            retCode = DMS_SUCCESS;
+            if (RecordSnapshotBeforeSend(inst_id, txn_snapshot->xmin)) {
+                retCode = DMS_SUCCESS;
+            } else {
+                retCode = DMS_ERROR;
+            }
         }
     }
     PG_CATCH();
@@ -460,6 +464,8 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
     g_instance.dms_cxt.SSReformerControl.list_stable = list_stable;
     int ret = DMS_ERROR;
     SSLockReleaseAll();
+    SSSyncOldestXminWhenReform(reformer_id);
+
     if ((int)primary_id == SS_MY_INST_ID) {
         if (g_instance.dms_cxt.SSClusterState > NODESTATE_NORMAL) {
             Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED ||
@@ -1022,9 +1028,6 @@ static int32 CBProcessBroadcast(void *db_handle, char *data, unsigned int len, c
     PG_TRY();
     {
         switch (bcast_op) {
-            case BCAST_GET_XMIN:
-                ret = SSGetOldestXmin(data, len, output_msg, output_msg_len);
-                break;
             case BCAST_SI:
                 ret = SSProcessSharedInvalMsg(data, len);
                 break;
@@ -1079,9 +1082,6 @@ static int32 CBProcessBroadcastAck(void *db_handle, char *data, unsigned int len
     SSBroadcastOpAck bcast_op = *(SSBroadcastOpAck *)data;
 
     switch (bcast_op) {
-        case BCAST_GET_XMIN_ACK:
-            ret = SSGetOldestXminAck((SSBroadcastXminAck *)data);
-            break;
         case BCAST_CHECK_DB_BACKENDS_ACK:
             ret = SSCheckDbBackendsAck(data, len);
             break;
@@ -1678,7 +1678,21 @@ static void ReformTypeToString(SSReformType reform_type, char* ret_str)
     return;
 }
 
-static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type)
+static void SSXminInfoPrepare()
+{
+    ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
+    if (g_instance.dms_cxt.SSReformInfo.dms_role == DMS_ROLE_REFORMER) {
+        xmin_info->global_oldest_xmin_active = false;
+        for (int i = 0; i < DMS_MAX_INSTANCES; i++) {
+            xmin_info->node_table[i].active = false;
+            xmin_info->node_table[i].notify_oldest_xmin = MaxTransactionId;
+        }
+    }
+    xmin_info->bitmap_active_nodes = 0;
+}
+
+static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type,
+    unsigned long long bitmap_nodes)
 {
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     reform_info->reform_type = (SSReformType)reform_type;
@@ -1707,8 +1721,11 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] failover trigger.")));
         }
     }
+
+    reform_info->bitmap_nodes = bitmap_nodes;
     reform_info->dms_role = role;
     reform_info->in_reform = true;
+    SSXminInfoPrepare();
 
     char reform_type_str[reform_type_str_len] = {0};
     ReformTypeToString(reform_info->reform_type, reform_type_str);
@@ -1824,6 +1841,12 @@ static int CBMarkNeedFlush(void *db_handle, char *pageid)
         tag->forkNum, tag->blockNum)));
     SSUnPinBuffer(buf_desc);
     return DMS_SUCCESS;
+}
+
+static int CBUpdateNodeOldestXmin(void *db_handle, uint8 inst_id, unsigned long long oldest_xmin)
+{
+    SSUpdateNodeOldestXmin(inst_id, oldest_xmin);
+    return GS_SUCCESS;
 }
 
 void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
@@ -1997,4 +2020,5 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->db_check_lock = CBDBCheckLock;
     callback->cache_msg = CBCacheMsg;
     callback->need_flush = CBMarkNeedFlush;
+    callback->update_node_oldest_xmin = CBUpdateNodeOldestXmin;
 }
