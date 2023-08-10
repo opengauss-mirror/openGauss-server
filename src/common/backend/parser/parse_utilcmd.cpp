@@ -3706,7 +3706,7 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
                 } else if (attnum == 0) {
                     // expresional index
                     Node *indexkey = NULL;
-                    attform = 0;
+                    attform = NULL;
 
                     if (indexpr_item == NULL) {
                         ereport(ERROR,

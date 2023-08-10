@@ -4916,6 +4916,7 @@ Datum generate_series_timestamptz(PG_FUNCTION_ARGS)
         Interval* step = PG_GETARG_INTERVAL_P(2);
         MemoryContext oldcontext;
         Interval interval_zero;
+        errno_t rc;
 
         /* create a function context for cross-call persistence */
         funcctx = SRF_FIRSTCALL_INIT();
@@ -4937,7 +4938,8 @@ Datum generate_series_timestamptz(PG_FUNCTION_ARGS)
         fctx->step = *step;
 
         /* Determine sign of the interval */
-        MemSet(&interval_zero, 0, sizeof(Interval));
+        rc = memset_s(&interval_zero, sizeof(Interval), 0, sizeof(Interval));
+        securec_check(rc, "\0", "\0");
         fctx->step_sign = interval_cmp_internal(&fctx->step, &interval_zero);
 
         if (fctx->step_sign == 0)
