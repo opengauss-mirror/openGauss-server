@@ -1023,14 +1023,12 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
                      List* (*parser_hook)(const char*, List**))
 {
     List* raw_parsetree_list = NULL;
-    PGSTAT_INIT_TIME_RECORD();
+    OgRecordOperator _local_opt(PARSE_TIME);
 
     TRACE_POSTGRESQL_QUERY_PARSE_START(query_string);
 
     if (u_sess->attr.attr_common.log_parser_stats)
         ResetUsage();
-
-    PGSTAT_START_TIME_RECORD();
 
     if (parser_hook == NULL) {
         parser_hook = raw_parser;
@@ -1047,7 +1045,6 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
     if (u_sess->parser_cxt.hasPartitionComment) {
         ereport(WARNING, (errmsg("comment is not allowed in partition/subpartition.")));
     }
-    PGSTAT_END_TIME_RECORD(PARSE_TIME);
 
     if (u_sess->attr.attr_common.log_parser_stats)
         ShowUsage("PARSER STATISTICS");
@@ -1082,6 +1079,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
  */
 List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* paramTypes, int numParams)
 {
+    OgRecordOperator _local_opt(SRT3_ANALYZE_REWRITE);
     Query* query = NULL;
     List* querytree_list = NULL;
 
@@ -1362,7 +1360,7 @@ static void check_query_acl(Query* query)
 PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo boundParams, bool underExplain)
 {
     PlannedStmt* plan = NULL;
-    PGSTAT_INIT_TIME_RECORD();
+    OgRecordOperator _local_opt(PLAN_TIME);
     bool multi_node_hint = false;
 
     /* Utility commands have no plans. */
@@ -1385,8 +1383,6 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
     /* Update hard parse counter for Unique SQL */
     UniqueSQLStatCountHardParse(1);
 
-    PGSTAT_START_TIME_RECORD();
-
     /* check perssion for expect_computing_nodegroup */
     if (!OidIsValid(lc_replan_nodegroup))
         check_query_acl(querytree);
@@ -1397,8 +1393,6 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
         /* call the optimizer */
         plan = planner(querytree, cursorOptions, boundParams);
     }
-
-    PGSTAT_END_TIME_RECORD(PLAN_TIME);
 
     if (u_sess->attr.attr_common.log_planner_stats)
         ShowUsage("PLANNER STATISTICS");
@@ -1492,6 +1486,7 @@ __attribute__((unused)) static bool is_insert_multiple_values_query_in_gtmfree(Q
  */
 List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundParams)
 {
+    OgRecordOperator _local_opt(SRT4_PLAN_QUERY);
     List* stmt_list = NIL;
     ListCell* query_list = NULL;
 
@@ -2377,6 +2372,7 @@ bool IsRightRefState(List* plantreeList)
  */
 static void exec_simple_query(const char* query_string, MessageType messageType, StringInfo msg = NULL)
 {
+    OgRecordOperator _local_opt(SRT2_SIMPLE_QUERY);
     CommandDest dest = (CommandDest)t_thrd.postgres_cxt.whereToSendOutput;
     MemoryContext oldcontext;
     MemoryContext OptimizerContext;
@@ -8404,6 +8400,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         if (AlignMemoryContext != NULL)
             MemoryContextReset(AlignMemoryContext);
+
+        // reinit record time class and related memory.
+        og_record_time_reinit();
+
         /*
          * Now return to normal top-level context and clear ErrorContext for
          * next time.
@@ -8482,10 +8482,15 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     }
 
     bool template0_locked = false;
+    OgRecordOperator _local_tmp_opt(false, SRT13_BEFORE_QUERY);
+    OgRecordOperator _local_tmp_opt1(false, SRT14_AFTER_QUERY);
     /*
      * Non-error queries loop here.
      */
     for (;;) {
+        if (og_time_record_is_started()) {
+            _local_tmp_opt.enter();
+        }
         /*
          * Since max_query_rerty_times is a USERSET GUC, so must check Statement retry
          * in each query loop here.
@@ -8626,6 +8631,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             }
 #endif
             /* update our elapsed time statistics. */
+            if (og_time_record_is_started()) {
+                _local_tmp_opt.exit();
+            }
             timeInfoRecordEnd();
 
             /* reset unique_sql_id & stat
@@ -8642,6 +8650,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             send_ready_for_query = false;
         } else {
             /* update our elapsed time statistics. */
+            if (og_time_record_is_started()) {
+                _local_tmp_opt.exit();
+            }
             timeInfoRecordEnd();
         }
         /*
@@ -8742,6 +8753,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         firstchar = ReadCommand(&input_message);
         /* update our elapsed time statistics. */
         timeInfoRecordStart();
+        _local_tmp_opt1.enter();
 
         /* stmt retry routine phase : pack input_message */
         if (IsStmtRetryEnabled()) {
@@ -8786,6 +8798,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             u_sess->proc_cxt.MyProcPort->protocol_config->fn_process_command) {
             firstchar = u_sess->proc_cxt.MyProcPort->protocol_config->fn_process_command(&input_message);
             send_ready_for_query = true;
+            _local_tmp_opt1.exit();
             continue;
         }
 
@@ -8793,8 +8806,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          * (7) process the command.  But ignore it if we're skipping till
          * Sync.
          */
-        if (u_sess->postgres_cxt.ignore_till_sync && firstchar != EOF)
+        if (u_sess->postgres_cxt.ignore_till_sync && firstchar != EOF) {
+            _local_tmp_opt1.exit();
             continue;
+        }
 #ifdef ENABLE_MULTIPLE_NODES
         // reset some flag related to stream
         ResetSessionEnv();
@@ -8837,8 +8852,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 firstchar);
 
         if (libpqsw_process_message(firstchar, &input_message)) {
+            _local_tmp_opt1.exit();
             continue;
         }
+        _local_tmp_opt1.exit();
 
         switch (firstchar) {
 #ifdef ENABLE_MULTIPLE_NODES
@@ -8992,6 +9009,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             case 'Q': /* simple query */
             {
                 const char* query_string = NULL;
+                OgRecordOperator _local_opt(SRT1_Q);
 
                 pgstat_report_trace_id(&u_sess->trace_cxt, true);
                 query_string = pq_getmsgstring(&input_message);
@@ -9361,6 +9379,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #endif
             case 'P': /* parse */
             {
+                OgRecordOperator _local_opt(SRT6_P);
                 const char* stmt_name = NULL;
                 const char* query_string = NULL;
                 int numParams;
@@ -9467,6 +9486,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             } break;
 
             case 'B': /* bind */
+            {
+                OgRecordOperator _local_opt(SRT7_B);
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled())
                     u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
@@ -9479,10 +9500,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  */
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_bind_message(&input_message);
-                break;
+            }  break;
 
             case 'E': /* execute */
             {
+                OgRecordOperator _local_opt(SRT8_E);
                 const char* portal_name = NULL;
                 int max_rows;
 
@@ -9627,6 +9649,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'C': /* close */
             {
+                OgRecordOperator _local_opt(SRT11_C);
                 int close_type;
                 const char* closeTarget = NULL;
 
@@ -9689,6 +9712,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'D': /* describe */
             {
+                OgRecordOperator _local_opt(SRT9_D);
                 int describe_type;
                 const char* describe_target = NULL;
                 if ((unsigned int)input_message.len > SECUREC_MEM_MAX_LEN) {
@@ -9741,6 +9765,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 break;
 
             case 'S': /* sync */
+            {
+                OgRecordOperator _local_opt(SRT10_S);
                 pq_getmsgend(&input_message);
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled()) {
@@ -9759,8 +9785,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 if (IsStmtRetryEnabled()) {
                     t_thrd.log_cxt.flush_message_immediately = false;
                 }
-
-                break;
+            } break;
 
                 /*
                  * 'X' means that the frontend is closing down the socket. EOF
@@ -10222,6 +10247,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'U': /* msg type for batch Bind-Execute for PBE */
             {
+                OgRecordOperator _local_opt(SRT12_U);
                 if (!u_sess->attr.attr_common.support_batch_bind)
                     ereport(ERROR,
                         (errcode(ERRCODE_SYSTEM_ERROR),

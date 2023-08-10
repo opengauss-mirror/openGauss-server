@@ -72,6 +72,7 @@
 #include "replication/worker_internal.h"
 #include "replication/origin.h"
 #include "replication/libpqsw.h"
+#include "og_record_time.h"
 #include "catalog/pg_subscription.h"
 #include "port/pg_crc32c.h"
 #include "ddes/dms/ss_common_attr.h"

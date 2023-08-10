@@ -572,7 +572,7 @@ ssize_t old_secure_write(Port* port, void* ptr, size_t len)
         /* CommProxy Interface Support */
         n = comm_send(port->sock, ptr, len, 0);
         PGSTAT_END_TIME_RECORD(NET_SEND_TIME);
-        END_NET_SEND_INFO(n);
+        END_NET_SEND_INFO_DUPLICATE(n);
         
         /* for log printing, send message */
         IPC_PERFORMANCE_LOG_COLLECT(port->msgLog, ptr, n, port->remote_hostname, NULL, SECURE_WRITE);

@@ -32,6 +32,7 @@
 #include "instruments/instr_event.h"
 #include "instruments/unique_sql_basic.h"
 #include "knl/knl_instance.h"
+#include "og_record_time.h"
 
 
 /* Values for track_functions GUC variable --- order is significant! */
@@ -2474,26 +2475,6 @@ extern void DumpMemoryContext(DUMP_TYPE type);
 extern void getThreadMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, uint32* procIdx);
 extern void getSharedMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc);
 
-typedef enum TimeInfoType {
-    DB_TIME = 0, /*total elapsed time while dealing user command.*/
-    CPU_TIME,    /*total cpu time used while dealing user command.*/
-
-    /*statistics of specific execution stage.*/
-    EXECUTION_TIME, /*total elapsed time of execution stage.*/
-    PARSE_TIME,     /*total elapsed time of parse stage.*/
-    PLAN_TIME,      /*total elapsed time of plan stage.*/
-    REWRITE_TIME,   /*total elapsed time of rewrite stage.*/
-
-    /*statistics for plpgsql especially*/
-    PL_EXECUTION_TIME,   /*total elapsed time of plpgsql exection.*/
-    PL_COMPILATION_TIME, /*total elapsed time of plpgsql compilation.*/
-
-    NET_SEND_TIME,
-    DATA_IO_TIME,
-
-    TOTAL_TIME_INFO_TYPES
-} TimeInfoType;
-
 typedef struct SessionTimeEntry {
     /*
      *protect the rest part of the entry.
@@ -2527,38 +2508,36 @@ typedef struct SessionTimeEntry {
 
 #define SessionTimeArraySize (BackendStatusArray_size)
 
-#define PGSTAT_INIT_TIME_RECORD() int64 startTime = 0;
+#define PGSTAT_INIT_TIME_RECORD() OgRecordOperator og_record_opt(false);
 
 #define PGSTAT_START_TIME_RECORD()                    \
     do {                                              \
         if (t_thrd.shemem_ptr_cxt.mySessionTimeEntry) \
-            startTime = GetCurrentTimestamp();        \
+            og_record_opt.enter();                    \
     } while (0)
 
 #define PGSTAT_END_TIME_RECORD(stage)                                                        \
     do {                                                                                     \
         if (t_thrd.shemem_ptr_cxt.mySessionTimeEntry)                                        \
-            u_sess->stat_cxt.localTimeInfoArray[stage] += GetCurrentTimestamp() - startTime; \
+            og_record_opt.exit(stage);                                                       \
     } while (0)
 
 #define PGSTAT_START_PLSQL_TIME_RECORD()                                                    \
     do {                                                                                    \
         if (u_sess->stat_cxt.isTopLevelPlSql && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) { \
-            startTime = GetCurrentTimestamp();                                              \
             u_sess->stat_cxt.isTopLevelPlSql = false;                                       \
             needRecord = true;                                                              \
+            og_record_opt.enter();                    \
         }                                                                                   \
     } while (0)
 
 #define PGSTAT_END_PLSQL_TIME_RECORD(stage)                                                  \
     do {                                                                                     \
         if (needRecord == true && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                \
-            u_sess->stat_cxt.localTimeInfoArray[stage] += GetCurrentTimestamp() - startTime; \
             u_sess->stat_cxt.isTopLevelPlSql = true;                                         \
+            og_record_opt.exit(stage);                    \
         }                                                                                    \
     } while (0)
-
-extern const char* TimeInfoTypeName[TOTAL_TIME_INFO_TYPES];
 
 extern Size sessionTimeShmemSize(void);
 extern void sessionTimeShmemInit(void);
@@ -2970,6 +2949,8 @@ extern void pgstat_clean_memcxt(void);
 extern PgBackendStatus* gs_stat_fetch_stat_beentry(int32 beid);
 extern void pgstat_send(void* msg, int len);
 extern char* GetGlobalSessionStr(GlobalSessionId globalSessionId);
+void ResetMemory(void* dest, size_t size);
+
 
 typedef struct PgStat_NgMemSize {
     int* ngmemsize;
@@ -2979,60 +2960,39 @@ typedef struct PgStat_NgMemSize {
     uint32 allcnt;
 } PgStat_NgMemSize;
 
-typedef enum NetInfoType {
-    NET_SEND_TIMES,
-    NET_SEND_N_CALLS,
-    NET_SEND_SIZE,
+#define END_NET_SEND_INFO(str_len)                        \
+    do {                                                  \
+        if (t_thrd.shemem_ptr_cxt.mySessionTimeEntry)  {  \
+            og_record_opt.exit(NET_SEND_TIMES, str_len);  \
+        } \
+    } while (0)
+#define END_NET_SEND_INFO_DUPLICATE(str_len)                                      \
+                do {                                                              \
+                    if (t_thrd.shemem_ptr_cxt.mySessionTimeEntry)  {              \
+                        og_record_opt.report_duplicate(NET_SEND_TIMES, str_len);  \
+                    } \
+                } while (0)
 
-    NET_RECV_TIMES,
-    NET_RECV_N_CALLS,
-    NET_RECV_SIZE,
 
-    NET_STREAM_SEND_TIMES,
-    NET_STREAM_SEND_N_CALLS,
-    NET_STREAM_SEND_SIZE,
-
-    NET_STREAM_RECV_TIMES,
-    NET_STREAM_RECV_N_CALLS,
-    NET_STREAM_RECV_SIZE,
-
-    TOTAL_NET_INFO_TYPES
-} NetInfoType;
-
-#define END_NET_SEND_INFO(str_len)                                                              \
-    do {                                                                                        \
-        if (str_len > 0 && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                          \
-            u_sess->stat_cxt.localNetInfo[NET_SEND_TIMES] += GetCurrentTimestamp() - startTime; \
-            u_sess->stat_cxt.localNetInfo[NET_SEND_N_CALLS]++;                                  \
-            u_sess->stat_cxt.localNetInfo[NET_SEND_SIZE] += str_len;                            \
-        }                                                                                       \
+#define END_NET_STREAM_SEND_INFO(str_len)                                         \
+    do {                                                                          \
+        if (t_thrd.shemem_ptr_cxt.mySessionTimeEntry)  {                          \
+            og_record_opt.exit(NET_STREAM_SEND_TIMES, str_len);                   \
+        }             \
     } while (0)
 
-#define END_NET_STREAM_SEND_INFO(str_len)                                                              \
-    do {                                                                                               \
-        if (str_len > 0 && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                                 \
-            u_sess->stat_cxt.localNetInfo[NET_STREAM_SEND_TIMES] += GetCurrentTimestamp() - startTime; \
-            u_sess->stat_cxt.localNetInfo[NET_STREAM_SEND_N_CALLS]++;                                  \
-            u_sess->stat_cxt.localNetInfo[NET_STREAM_SEND_SIZE] += str_len;                            \
-        }                                                                                              \
+#define END_NET_RECV_INFO(str_len)                                                \
+    do {                                                                          \
+        if (t_thrd.shemem_ptr_cxt.mySessionTimeEntry)  {                          \
+            og_record_opt.exit(NET_RECV_TIMES, str_len);                          \
+        }       \
     } while (0)
 
-#define END_NET_RECV_INFO(str_len)                                                              \
-    do {                                                                                        \
-        if (str_len > 0 && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                          \
-            u_sess->stat_cxt.localNetInfo[NET_RECV_TIMES] += GetCurrentTimestamp() - startTime; \
-            u_sess->stat_cxt.localNetInfo[NET_RECV_N_CALLS]++;                                  \
-            u_sess->stat_cxt.localNetInfo[NET_RECV_SIZE] += str_len;                            \
-        }                                                                                       \
-    } while (0)
-
-#define END_NET_STREAM_RECV_INFO(str_len)                                                              \
-    do {                                                                                               \
-        if (str_len > 0 && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                                 \
-            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_TIMES] += GetCurrentTimestamp() - startTime; \
-            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_N_CALLS]++;                                 \
-            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_SIZE] += str_len;                           \
-        }                                                                                             \
+#define END_NET_STREAM_RECV_INFO(str_len)                                         \
+    do {                                                                          \
+        if (t_thrd.shemem_ptr_cxt.mySessionTimeEntry)  {                          \
+            og_record_opt.exit(NET_STREAM_RECV_TIMES, str_len);                   \
+        } \
     } while(0)
 
 bool GetTableGstats(Oid dbid, Oid relid, Oid parentid, PgStat_StatTabEntry *tabentry);

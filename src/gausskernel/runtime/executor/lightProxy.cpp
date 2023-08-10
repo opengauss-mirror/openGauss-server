@@ -1336,6 +1336,7 @@ bool IsLightProxyOn(void)
 bool exec_query_through_light_proxy(List* querytree_list, Node* parsetree, bool snapshot_set, StringInfo msg, 
                                     MemoryContext OptimizerContext)
 {
+    OgRecordOperator _local_opt(SRT5_LIGHT_QUERY);
     if ((list_length(querytree_list) == 1) && !IsA(parsetree, CreateTableAsStmt) &&
         !IsA(parsetree, RefreshMatViewStmt)) {
         ExecNodes* single_exec_node = NULL;

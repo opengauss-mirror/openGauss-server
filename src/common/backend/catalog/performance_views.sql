@@ -3994,7 +3994,24 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
    OUT details bytea,
    OUT is_slow_sql bool,
    OUT trace_id text,
-   OUT advise text)
+   OUT advise text,
+   OUT net_send_time bigint,
+   OUT srt1_q bigint,
+   OUT srt2_simple_query bigint,
+   OUT srt3_analyze_rewrite bigint,
+   OUT srt4_plan_query bigint,
+   OUT srt5_light_query bigint,
+   OUT srt6_p bigint,
+   OUT srt7_b bigint,
+   OUT srt8_e bigint,
+   OUT srt9_d bigint,
+   OUT srt10_s bigint,
+   OUT srt11_c bigint,
+   OUT srt12_u bigint,
+   OUT srt13_before_query bigint,
+   OUT srt14_after_query bigint,
+   OUT rtt_unknown bigint
+   )
  RETURNS setof record
  AS $$
  DECLARE
@@ -4063,6 +4080,22 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
           is_slow_sql := row_data.is_slow_sql;
           trace_id := row_data.trace_id;
           advise := row_data.advise;
+          net_send_time =row_data.net_send_time;
+          srt1_q := row_data.srt1_q;
+          srt2_simple_query := row_data.srt2_simple_query;
+          srt3_analyze_rewrite := row_data.srt3_analyze_rewrite;
+          srt4_plan_query := row_data.srt4_plan_query;
+          srt5_light_query := row_data.srt5_light_query;
+          srt6_p := row_data.srt6_p;
+          srt7_b := row_data.srt7_b;
+          srt8_e := row_data.srt8_e;
+          srt9_d := row_data.srt9_d;
+          srt10_s := row_data.srt10_s;
+          srt11_c := row_data.srt11_c;
+          srt12_u := row_data.srt12_u;
+          srt13_before_query := row_data.srt13_before_query;
+          srt14_after_query := row_data.srt14_after_query;
+          rtt_unknown := row_data.rtt_unknown;
           return next;
        END LOOP;
     END LOOP;
@@ -4126,7 +4159,23 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
    OUT details bytea,
    OUT is_slow_sql bool,
    OUT trace_id text,
-   OUT advise text)
+   OUT advise text,
+   OUT net_send_time bigint,
+   OUT srt1_q bigint,
+   OUT srt2_simple_query bigint,
+   OUT srt3_analyze_rewrite bigint,
+   OUT srt4_plan_query bigint,
+   OUT srt5_light_query bigint,
+   OUT srt6_p bigint,
+   OUT srt7_b bigint,
+   OUT srt8_e bigint,
+   OUT srt9_d bigint,
+   OUT srt10_s bigint,
+   OUT srt11_c bigint,
+   OUT srt12_u bigint,
+   OUT srt13_before_query bigint,
+   OUT srt14_after_query bigint,
+   OUT rtt_unknown bigint)
  RETURNS setof record
  AS $$
  DECLARE
@@ -4195,6 +4244,22 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
           is_slow_sql := row_data.is_slow_sql;
           trace_id := row_data.trace_id;
           advise := row_data.advise;
+          net_send_time =row_data.net_send_time;
+          srt1_q := row_data.srt1_q;
+          srt2_simple_query := row_data.srt2_simple_query;
+          srt3_analyze_rewrite := row_data.srt3_analyze_rewrite;
+          srt4_plan_query := row_data.srt4_plan_query;
+          srt5_light_query := row_data.srt5_light_query;
+          srt6_p := row_data.srt6_p;
+          srt7_b := row_data.srt7_b;
+          srt8_e := row_data.srt8_e;
+          srt9_d := row_data.srt9_d;
+          srt10_s := row_data.srt10_s;
+          srt11_c := row_data.srt11_c;
+          srt12_u := row_data.srt12_u;
+          srt13_before_query := row_data.srt13_before_query;
+          srt14_after_query := row_data.srt14_after_query;
+          rtt_unknown := row_data.rtt_unknown;
           return next;
        END LOOP;
     END LOOP;
@@ -4553,7 +4618,22 @@ SELECT
 		S.pl_execution_time,
 		S.pl_compilation_time,
 		S.net_send_time,
-		S.data_io_time
+		S.data_io_time,
+		S.srt1_q,
+		S.srt2_simple_query,
+		S.srt3_analyze_rewrite,
+		S.srt4_plan_query,
+		S.srt5_light_query,
+		S.srt6_p,
+		S.srt7_b,
+		S.srt8_e,
+		S.srt9_d,
+		S.srt10_s,
+		S.srt11_c,
+		S.srt12_u,
+		S.srt13_before_query,
+		S.srt14_after_query,
+		S.rtt_unknown
 FROM gs_wlm_session_query_info_all S where S.is_slow_query = 1;
 
 CREATE VIEW dbe_perf.gs_slow_query_history AS
@@ -4585,7 +4665,22 @@ SELECT
 		S.pl_execution_time,
 		S.pl_compilation_time,
 		S.net_send_time,
-		S.data_io_time
+		S.data_io_time,
+		S.srt1_q,
+		S.srt2_simple_query,
+		S.srt3_analyze_rewrite,
+		S.srt4_plan_query,
+		S.srt5_light_query,
+		S.srt6_p,
+		S.srt7_b,
+		S.srt8_e,
+		S.srt9_d,
+		S.srt10_s,
+		S.srt11_c,
+		S.srt12_u,
+		S.srt13_before_query,
+		S.srt14_after_query,
+		S.rtt_unknown
 FROM pg_catalog.pg_stat_get_wlm_session_info(0) S where S.is_slow_query = 1;
 
 CREATE OR REPLACE FUNCTION dbe_perf.global_slow_query_history

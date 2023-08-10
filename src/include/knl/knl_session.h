@@ -68,6 +68,7 @@
 #include "storage/lock/lock.h"
 #include "utils/elog.h"
 #include "tcop/dest.h"
+#include "og_record_time.h"
 
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 
@@ -1755,6 +1756,8 @@ typedef struct knl_u_stat_context {
     bool isTopLevelPlSql;
     int64* localTimeInfoArray;
     uint64* localNetInfo;
+    // use to record all use time in multi thread.
+    void* og_record_stat;
 
     MemoryContext pgStatLocalContext;
     MemoryContext pgStatCollectThdStatusContext;

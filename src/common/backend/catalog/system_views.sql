@@ -1386,7 +1386,22 @@ create table gs_wlm_session_query_info_all
     pl_compilation_time  bigint,
     net_send_time        bigint,
     data_io_time         bigint,
-    is_slow_query        bigint
+    is_slow_query        bigint,
+    srt1_q               bigint,
+    srt2_simple_query    bigint,
+    srt3_analyze_rewrite bigint,
+    srt4_plan_query      bigint,
+    srt5_light_query     bigint,
+    srt6_p               bigint,
+    srt7_b               bigint,
+    srt8_e               bigint,
+    srt9_d               bigint,
+    srt10_s              bigint,
+    srt11_c              bigint,
+    srt12_u              bigint,
+    srt13_before_query   bigint,
+    srt14_after_query    bigint,
+    rtt_unknown          bigint
 );
 
 CREATE VIEW gs_wlm_session_info_all AS
@@ -3487,7 +3502,23 @@ CREATE unlogged table statement_history(
     details bytea,
     is_slow_sql bool,
     trace_id text,
-    advise text
+    advise text,
+    net_send_time bigint,
+    srt1_q bigint,
+    srt2_simple_query bigint,
+    srt3_analyze_rewrite bigint,
+    srt4_plan_query bigint,
+    srt5_light_query bigint,
+    srt6_p bigint,
+    srt7_b bigint,
+    srt8_e bigint,
+    srt9_d bigint,
+    srt10_s bigint,
+    srt11_c bigint,
+    srt12_u bigint,
+    srt13_before_query bigint,
+    srt14_after_query bigint,
+    rtt_unknown bigint
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
