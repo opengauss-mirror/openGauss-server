@@ -3108,7 +3108,7 @@ static void ResetSlotLSNEndRecovery(StringInfo slotname)
     ReplicationSlotsComputeRequiredLSN(NULL);
 }
 
-void inline XlogUpMinRecovPointSwitchChk(XLogRecPtr lsn)
+inline void XlogUpMinRecovPointSwitchChk(XLogRecPtr lsn)
 {
     if (g_instance.comm_cxt.predo_cxt.pre_enable_switch !=
         g_instance.attr.attr_storage.enable_update_max_page_flush_lsn) {
@@ -12896,7 +12896,7 @@ static XLogSegNo CalcRecycleSegNoForHadrMainStandby(XLogRecPtr curFlush, XLogSeg
 
         XLByteToSeg(minRequired, slotSegNo);
 
-        if (slotSegNo <= 0) {
+        if (slotSegNo == 0) {
             /* segno = 1 show all file should be keep */
             SegNoCanRecycled = 1;
             ereport(LOG, (errmsg("main standby keep all the xlog segments, because the minimal replication slot segno "
