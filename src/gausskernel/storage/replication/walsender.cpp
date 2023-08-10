@@ -87,6 +87,7 @@
 #include "replication/parallel_decode.h"
 #include "replication/parallel_decode_worker.h"
 #include "replication/parallel_reorderbuffer.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
@@ -135,8 +136,8 @@ static int g_appname_extra_len = 3; /* [+]+\0 */
 #define AmWalSenderToStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_STANDBY)
 
 #define USE_PHYSICAL_XLOG_SEND \
-    (AM_WAL_HADR_SENDER || !IS_SHARED_STORAGE_MODE || (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY))
-#define USE_SYNC_REP_FLUSH_PTR (AM_WAL_HADR_SENDER && !IS_SHARED_STORAGE_MODE)
+    (AM_WAL_HADR_SENDER || !SS_CLUSTER_DORADO_REPLICATION || !IS_SHARED_STORAGE_MODE || (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY))
+#define USE_SYNC_REP_FLUSH_PTR (AM_WAL_HADR_SENDER && (!IS_SHARED_STORAGE_MODE && !SS_CLUSTER_DORADO_REPLICATION))
 
 /* Statistics for log control */
 static const int MICROSECONDS_PER_SECONDS = 1000000;
@@ -2920,8 +2921,15 @@ static void ProcessStandbyReplyMessage(void)
 
     /*
      * Advance our local xmin horizon when the client confirmed a flush.
+     * 1. When starting ss dorado replication, we need to know replayPtr that standby has already replayed,
+     * because primary xlog will cover standby xlog by Dorado synchronous replication.
+     * 2. Otherwise, we only need to confirm that standby xlog has been flushed successfully.
      */
-    AdvanceReplicationSlot(reply.flush);
+    if (SS_CLUSTER_DORADO_REPLICATION) {
+        AdvanceReplicationSlot(reply.apply);
+    } else {
+        AdvanceReplicationSlot(reply.flush);
+    }
 
     if (AM_WAL_STANDBY_SENDER) {
         sndFlush = GetFlushRecPtr();
@@ -6264,6 +6272,15 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
             sndFlush = ctlInfo->insertHead;
             sndReplay = ctlInfo->insertHead;
             AlignFreeShareStorageCtl(ctlInfo);
+        }
+
+        if (SS_CLUSTER_DORADO_REPLICATION && !AM_WAL_HADR_SENDER) {
+            ReadSSDoradoCtlInfoFile();
+            ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
+            sentRecPtr = ctlInfo->insertHead;
+            sndWrite = ctlInfo->insertHead;
+            sndFlush = ctlInfo->insertHead;
+            sndReplay = ctlInfo->insertHead;
         }
 
         /*

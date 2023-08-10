@@ -212,6 +212,7 @@ typedef struct knl_instance_attr_storage {
 #endif
     bool enable_huge_pages;
     int huge_page_size;
+    bool enable_ss_dorado;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

@@ -26,6 +26,7 @@
 #include "storage/proc.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment.h"
+#include "replication/ss_cluster_replication.h"
 #include "utils/resowner.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_reform_common.h"
@@ -741,7 +742,7 @@ dms_session_e DMSGetProcType4RequestPage()
          * DMS_SESSION_RECOVER_HOT_STANDBY will be returned, it indicates that normal threads can access
          * page in recovery state.
          */
-        if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
+        if ((SS_STANDBY_CLUSTER_MAIN_STANDBY || IS_SS_REPLICATION_MAIN_STANBY_NODE) && pmState == PM_HOT_STANDBY) {
             return DMS_SESSION_RECOVER_HOT_STANDBY; 
         } else {
             return DMS_SESSION_RECOVER;   

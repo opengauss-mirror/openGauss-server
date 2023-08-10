@@ -28,6 +28,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender_private.h"
 #include "replication/libpqwalreceiver.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "utils/guc.h"
@@ -233,6 +234,21 @@ static bool CheckRemoteServerSharedStorage(ServerMode remoteMode, PGresult* res)
             return false;
         }
     }
+    return true;
+}
+
+static bool CheckSSRemoteServerMode(ServerMode remoteMode, PGresult* res)
+{
+    if (IS_SS_REPLICATION_MAIN_STANBY_NODE) {
+        if (remoteMode != PRIMARY_MODE) {
+            PQclear(res);
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("when ss replication, main standby of standby cluster of the remote server must be primary, current is %s",
+                            wal_get_role_string(remoteMode, true))));
+            return false;
+        }
+    } 
+
     return true;
 }
 
@@ -477,7 +493,7 @@ ServerMode IdentifyRemoteMode()
         !t_thrd.walreceiver_cxt.AmWalReceiverForFailover &&
         (!IS_PRIMARY_NORMAL(remoteMode)) &&
         /* remoteMode of cascade standby is a standby */
-        !t_thrd.xlog_cxt.is_cascade_standby && !IS_SHARED_STORAGE_MODE) {
+        !t_thrd.xlog_cxt.is_cascade_standby && !(IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION)) {
         PQclear(res);
 
         if (dummyStandbyMode) {
@@ -490,7 +506,7 @@ ServerMode IdentifyRemoteMode()
     }
 
     if (t_thrd.postmaster_cxt.HaShmData->is_cascade_standby && remoteMode != STANDBY_MODE &&
-        !IS_SHARED_STORAGE_MODE) {
+        !(IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION)) {
         PQclear(res);
 
         SpinLockAcquire(&walrcv->mutex);
@@ -506,6 +522,10 @@ ServerMode IdentifyRemoteMode()
         if (!CheckRemoteServerSharedStorage(remoteMode, res)) {
             return UNKNOWN_MODE;
         }
+    }
+
+    if (SS_CLUSTER_DORADO_REPLICATION && CheckSSRemoteServerMode(remoteMode, res)) {
+        return UNKNOWN_MODE;
     }
 
     PQclear(res);
@@ -1395,7 +1415,8 @@ bool libpqrcv_receive(int timeout, unsigned char *type, char **buffer, int *len)
         return true;
     }
     *type = *((unsigned char *)t_thrd.libwalreceiver_cxt.recvBuf);
-    if (IS_SHARED_STORAGE_MODE && !AM_HADR_WAL_RECEIVER && *type == 'w') {
+
+    if ((IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION) && !AM_HADR_WAL_RECEIVER && *type == 'w') {
         *len = 0;
         return false;
     }

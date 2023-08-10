@@ -900,6 +900,7 @@ typedef struct knl_g_xlog_context {
     void *shareStorageXLogCtlOrigin;
     ShareStorageOperateCtl shareStorageopCtl;
     int shareStorageLockFd;
+    ShareStorageXLogCtl *ssReplicationXLogCtl;
 } knl_g_xlog_context;
 
 typedef struct knl_g_undo_context {
@@ -1195,6 +1196,7 @@ typedef struct knl_g_datadir_context {
     char xlogDir[MAXPGPATH];
     char controlPath[MAXPGPATH];
     char controlBakPath[MAXPGPATH];
+    char controlInfoPath[MAXPGPATH];
     knl_g_dwsubdatadir_context dw_subdir_cxt;
 } knl_g_datadir_context;
 

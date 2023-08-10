@@ -149,6 +149,9 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
     rc = snprintf_s(dataDir->controlBakPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control.backup", dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
+    rc = snprintf_s(dataDir->controlInfoPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_replication/pg_ss_ctl_info", dataDir->dss_data);
+    securec_check_ss_c(rc, "", "");
+
     // DSS file directory (instance owner)
     rc = snprintf_s(dataDir->clogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_clog%d", dataDir->dss_data,
         dataDir->instance_id);

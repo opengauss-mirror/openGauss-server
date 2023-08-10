@@ -29,6 +29,7 @@
 #include "postmaster/startup.h"
 #include "postmaster/postmaster.h"
 #include "replication/shared_storage_walreceiver.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -284,7 +285,7 @@ static void StartupReleaseAllLocks(int code, Datum arg)
 
 void DeleteDisConnFileInClusterStandby()
 {
-    if (!IS_SHARED_STORAGE_MODE) {
+    if (!(IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION)) {
         return;
     }
 

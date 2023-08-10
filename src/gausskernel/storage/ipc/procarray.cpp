@@ -122,6 +122,7 @@
 #include "gstrace/storage_gstrace.h"
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_transaction.h"
+#include "replication/ss_cluster_replication.h"
 
 #ifdef ENABLE_UT
     #define static
@@ -2362,12 +2363,12 @@ GROUP_GET_SNAPSHOT:
     }
 
     /* Check whether there's a standby requiring an older xmin when dms is enabled. */
-    if (ENABLE_DMS && SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
+    if (ENABLE_DMS && (SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY || (SS_NORMAL_PRIMARY && IS_SS_REPLICATION_MAIN_STANBY_NODE))) {
         ss_xmin_info_t* xmin_info = &g_instance.dms_cxt.SSXminInfo;
         uint64 global_xmin = SSGetGlobalOldestXmin(u_sess->utils_cxt.RecentGlobalXmin);
         u_sess->utils_cxt.RecentGlobalXmin = global_xmin;
     }
-    
+
     /* Non-catalog tables can be vacuumed if older than this xid */
     u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
 

@@ -469,6 +469,7 @@ static void knl_g_xlog_init(knl_g_xlog_context *xlog_cxt)
     securec_check(rc, "\0", "\0");
     pthread_mutex_init(&xlog_cxt->remain_segs_lock, NULL);
     xlog_cxt->shareStorageLockFd = -1;
+    xlog_cxt->ssReplicationXLogCtl = NULL;
 }
 
 static void KnlGUndoInit(knl_g_undo_context *undoCxt)
@@ -847,6 +848,9 @@ static void knl_g_datadir_init(knl_g_datadir_context* datadir_init)
     securec_check_c(errorno, "\0", "\0");
 
     errorno = strcpy_s(datadir_init->controlBakPath, MAXPGPATH, "global/pg_control.backup");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->controlInfoPath, MAXPGPATH, "pg_replication/pg_ss_ctl_info");
     securec_check_c(errorno, "\0", "\0");
 
     knl_g_dwsubdir_init(&datadir_init->dw_subdir_cxt);

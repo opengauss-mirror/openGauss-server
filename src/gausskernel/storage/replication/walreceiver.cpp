@@ -59,6 +59,7 @@
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
 #include "replication/dcf_replication.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/copydir.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
@@ -468,9 +469,9 @@ void WalReceiverMain(void)
     int nRet = 0;
     errno_t rc = 0;
 
-    if (ENABLE_DSS && t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE &&
+    if ((ENABLE_DSS && t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE &&
         g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY &&
-        g_instance.attr.attr_storage.xlog_file_path != 0) {
+        g_instance.attr.attr_storage.xlog_file_path != 0) || IS_SS_REPLICATION_MAIN_STANBY_NODE) {
         ereport(LOG, (errmsg("walreceiver thread started for main standby")));
     } else {
         Assert(ENABLE_DSS == false);    
@@ -847,6 +848,10 @@ bool HasBuildReason()
 
 static void rcvAllXlog()
 {
+    if (SS_CLUSTER_DORADO_REPLICATION) {
+        return;
+    }
+
     if (HasBuildReason() || t_thrd.walreceiver_cxt.checkConsistencyOK == false) {
         ereport(LOG, (errmsg("rcvAllXlog no need copy xlog buildreason:%d, check flag:%d",
             (int)t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl],
@@ -884,7 +889,7 @@ static void WalRcvDie(int code, Datum arg)
 {
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    if (IS_SHARED_STORAGE_MODE && !t_thrd.walreceiver_cxt.termChanged) {
+    if ((IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION) && !t_thrd.walreceiver_cxt.termChanged) {
         SpinLockAcquire(&walrcv->mutex);
         walrcv->walRcvState = WALRCV_STOPPING;
         SpinLockRelease(&walrcv->mutex);
@@ -1558,6 +1563,11 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
         ReadShareStorageCtlInfo(ctlInfo);
         receivePtr = ctlInfo->insertHead;
         AlignFreeShareStorageCtl(ctlInfo);
+    } else if (SS_CLUSTER_DORADO_REPLICATION) {
+        ReadSSDoradoCtlInfoFile();
+        receivePtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
+        writePtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
+        flushPtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
     }
     /* Get current timestamp. */
     now = GetCurrentTimestamp();
@@ -2278,6 +2288,19 @@ Datum pg_stat_get_wal_receiver(PG_FUNCTION_ARGS)
             sendLocFix = ctlInfo->insertHead;
         }
         AlignFreeShareStorageCtl(ctlInfo);
+        sndSent = sendLocFix;
+        sndWrite = sendLocFix;
+        sndFlush = sendLocFix;
+        sndReplay = sendLocFix;
+    }
+
+    if (SS_CLUSTER_DORADO_REPLICATION) {
+        ReadSSDoradoCtlInfoFile();
+        XLogRecPtr sendLocFix = rcvReceived;
+        ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
+        if (XLByteLT(sendLocFix, ctlInfo->insertHead)) {
+            sendLocFix = ctlInfo->insertHead;
+        }
         sndSent = sendLocFix;
         sndWrite = sendLocFix;
         sndFlush = sendLocFix;

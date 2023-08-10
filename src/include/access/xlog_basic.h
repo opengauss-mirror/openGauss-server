@@ -110,6 +110,8 @@
 #define REDO_STATS_FILE             "redo.state"
 #define REDO_STATS_FILE_TMP         "redo.state.tmp"
 
+#define SS_DORADO_CTRL_FILE (g_instance.datadir_cxt.controlInfoPath)
+
 
 #define InvalidRepOriginId 0
 #define InvalidXlogPreReadStartPtr 0xFFFFFFFFFFFFFFFF
