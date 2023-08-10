@@ -7149,13 +7149,15 @@ void add_archive_task_to_list(int archive_task_status_idx, WalSnd *walsnd)
 ArchiveXlogMessage* get_archive_task_from_list() 
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    SpinLockAcquire(&walsnd->mutex_archive_task_list);
     volatile unsigned int *archive_task_count = &walsnd->archive_task_count;
     if (*archive_task_count == 0) {
+        SpinLockRelease(&walsnd->mutex_archive_task_list);
         return NULL;
     }
     ArchiveXlogMessage *result = NULL;
     int idx = -1;
-    SpinLockAcquire(&walsnd->mutex_archive_task_list);
+
     idx = lfirst_int(list_head(walsnd->archive_task_list));
     result = &g_instance.archive_obs_cxt.archive_status[idx].archive_task;
     walsnd->archive_task_list = list_delete_first(walsnd->archive_task_list);

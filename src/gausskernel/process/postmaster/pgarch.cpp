@@ -1012,6 +1012,14 @@ static void pgarch_archiveDone(const char* xlog)
 static void archKill(int code, Datum arg)
 {
     setObsArchLatch(NULL);
+    volatile WalSnd *walsnd = NULL;
+    for (int i = 0; i< g_instance.attr.attr_storage.max_wal_senders; i++) {
+        /* use volitile pointer to prevent code rearrangement */
+        walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        SpinLockAcquire(&walsnd->mutex_archive_task_list);
+        walsnd->archive_task_count=0;
+        SpinLockRelease(&walsnd->mutex_archive_task_list);
+    }
     ereport(LOG, (errmsg("arch thread shut down, slotName: %s", t_thrd.arch.slot_name)));
     pfree_ext(t_thrd.arch.slot_name);
     if (t_thrd.arch.archive_config != NULL && t_thrd.arch.archive_config->archive_config.conn_config != NULL) {
