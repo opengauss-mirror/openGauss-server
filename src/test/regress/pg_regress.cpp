@@ -1991,7 +1991,7 @@ static void initdb_node_info(bool standby)
         char buf[MAXPGPATH * 4];
 
         char* data_folder = get_node_info_name(i, DATANODE, false);
-        char* node_name   = get_node_info_name(i, DATANODE, true;
+        char* node_name   = get_node_info_name(i, DATANODE, true);
         (void)snprintf(buf,
             sizeof(buf),
             SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s_standby\" -L \"%s\" "
