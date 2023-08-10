@@ -2598,9 +2598,13 @@ typedef struct knl_t_storage_context {
      * Note that in most scenarios the number of pinned buffers will not exceed
      * REFCOUNT_ARRAY_ENTRIES.
      */
+    unsigned char PrivateRefCacheCount;
+    int32 PrivateRefCountOverflowed;
+
+    Buffer PrivateRefRigsterBuffer;
+    int32 PrivateRefRigsterRefcount;
     struct PrivateRefCountEntry* PrivateRefCountArray;
     struct HTAB* PrivateRefCountHash;
-    int32 PrivateRefCountOverflowed;
     uint32 PrivateRefCountClock;
     /*
      * Information saved between calls so we can determine the strategy
