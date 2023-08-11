@@ -4422,8 +4422,9 @@ double* GetGlobalIndexTuplesForSubPartition(Relation heapRelation, Relation inde
         partition = partitionOpen(heapRelation, partitionId, ShareLock);
         heapPartRel = partitionGetRelation(heapRelation, partition);
         subPartitionIdList = relationGetPartitionOidList(heapPartRel);
-        int subPartNum = subPartitionIdList->length;
         Assert(subPartitionIdList != NULL);
+        int subPartNum = subPartitionIdList->length;
+        
         if (globalIndexTuples != NULL) {
             globalIndexTuples = (double*)repalloc(globalIndexTuples, (subPartitionIdx + subPartNum) * sizeof(double));
         } else {
