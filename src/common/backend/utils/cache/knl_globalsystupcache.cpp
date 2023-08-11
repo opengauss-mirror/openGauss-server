@@ -794,7 +794,7 @@ GlobalCatCTup *GlobalSysTupCache::SearchTupleMiss(InsertCatTupInfo *tup_info)
             if (!tup_info->has_concurrent_lock) {
                 tup_info->canInsertGSC = false;
             } else {
-                tup_info->canInsertGSC = CanTupleInertGSC(ntp);
+                tup_info->canInsertGSC = CanTupleInsertGSC(ntp);
                 if (!tup_info->canInsertGSC) {
                     /* unlock concurrent immediately, any one can invalid cache now */
                     ReleaseGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
@@ -811,7 +811,7 @@ GlobalCatCTup *GlobalSysTupCache::SearchTupleMiss(InsertCatTupInfo *tup_info)
             if (!tup_info->has_concurrent_lock) {
                 tup_info->canInsertGSC = false;
             } else {
-                tup_info->canInsertGSC = CanTupleInertGSC(ntp);
+                tup_info->canInsertGSC = CanTupleInsertGSC(ntp);
                 if (!tup_info->canInsertGSC) {
                     /* unlock concurrent immediately, any one can invalid cache now */
                     ReleaseGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
@@ -1080,7 +1080,7 @@ GlobalCatCList *GlobalSysTupCache::SearchListMiss(InsertCatListInfo *list_info)
             * See if there's an entry for this tuple already.
             */
         InitInsertCatTupInfo(&tup_info, ntp, list_info->arguments);
-        tup_info.canInsertGSC = list_info->has_concurrent_lock && CanTupleInertGSC(ntp);
+        tup_info.canInsertGSC = list_info->has_concurrent_lock && CanTupleInsertGSC(ntp);
         GlobalCatCTup *ct = InsertHeapTupleIntoCatCacheInList(&tup_info);
         list_info->canInsertGSC = list_info->canInsertGSC && ct->canInsertGSC;
         /*
@@ -1849,7 +1849,7 @@ GlobalCatCTup *GlobalSysTupCache::SearchTupleMissWithArgModes(InsertCatTupInfo *
         if (!tup_info->has_concurrent_lock) {
             tup_info->canInsertGSC = false;
         } else {
-            tup_info->canInsertGSC = CanTupleInertGSC(ntp);
+            tup_info->canInsertGSC = CanTupleInsertGSC(ntp);
             if (!tup_info->canInsertGSC) {
                 /* unlock concurrent immediately, any one can invalid cache now */
                 ReleaseGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
