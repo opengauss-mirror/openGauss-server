@@ -21,14 +21,8 @@
 #include "replication/output_plugin.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
-
-#include "access/extreme_rto/redo_item.h"
 #include "nodes/pg_list.h"
 #include "storage/proc.h"
-
-
-#include "access/extreme_rto/posix_semaphore.h"
-#include "access/extreme_rto/spsc_blocking_queue.h"
 #include "access/parallel_recovery/redo_item.h"
 
 #include "nodes/parsenodes_common.h"
@@ -83,7 +77,7 @@ typedef struct LogicalDecodingContext {
      * User-Provided callback for writing/streaming out data.
      */
     LogicalOutputPluginWriterPrepareWrite prepare_write;
-    LogicalOutputPluginWriterWrite write;
+    LogicalOutputPluginWriterWrite do_write;
 
     /*
      * Output buffer.

@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "replication/replicainternal.h"
+#include "tool_common.h"
 
 #define CONFIGRURE_FILE "postgresql.conf"
 #define CONFIGRURE_FILE_BAK "postgresql.conf.bak"

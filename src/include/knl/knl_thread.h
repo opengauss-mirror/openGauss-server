@@ -2805,6 +2805,7 @@ typedef struct knl_t_storage_context {
     int timeoutRemoteOpera;
     char* PcaBufferBlocks;
     dms_buf_ctrl_t* dmsBufCtl;
+    char* ondemandXLogMem;
 } knl_t_storage_context;
 
 typedef struct knl_t_port_context {
@@ -3353,7 +3354,14 @@ typedef struct knl_t_dms_context {
     int offset; /* current read/write position in aligned_buf */
     int file_size; /* initialized as pg_internal.init file size, will decrease after read */
     char msg_backup[24]; // 24 is sizeof mes_message_head_t
+    bool flush_copy_get_page_failed; //used in flush copy
 } knl_t_dms_context;
+
+typedef struct knl_t_ondemand_xlog_copy_context {
+    int openLogFile;
+    XLogSegNo openLogSegNo;
+    uint32 openLogOff;
+} knl_t_ondemand_xlog_copy_context;
 
 /* thread context. */
 typedef struct knl_thrd_context {
@@ -3503,6 +3511,7 @@ typedef struct knl_thrd_context {
     knl_t_cfs_shrinker_context cfs_shrinker_cxt;
     knl_t_sql_patch_context sql_patch_cxt;
     knl_t_dms_context dms_cxt;
+    knl_t_ondemand_xlog_copy_context ondemand_xlog_copy_cxt;
     knl_t_rc_context rc_cxt;
 } knl_thrd_context;
 

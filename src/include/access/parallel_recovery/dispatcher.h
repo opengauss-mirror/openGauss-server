@@ -126,7 +126,7 @@ void GetReplayedRecPtrFromUndoWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 List* CheckImcompleteAction(List* imcompleteActionList);
 void SetPageWorkStateByThreadId(uint32 threadState);
 RedoWaitInfo redo_get_io_event(int32 event_id);
-void redo_get_wroker_statistic(uint32* realNum, RedoWorkerStatsData* worker, uint32 workerLen);
+void redo_get_worker_statistic(uint32* realNum, RedoWorkerStatsData* worker, uint32 workerLen);
 extern void redo_dump_all_stats();
 void WaitRedoWorkerIdle();
 void SendClearMarkToAllWorkers();
@@ -139,7 +139,7 @@ extern void InitReaderStateByOld(XLogReaderState *newState, XLogReaderState *old
 extern void CopyDataFromOldReader(XLogReaderState *newReaderState, XLogReaderState *oldReaderState);
 
 bool TxnQueueIsEmpty(TxnRedoWorker* worker);
-void redo_get_wroker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum);
+void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum);
 
 }
 

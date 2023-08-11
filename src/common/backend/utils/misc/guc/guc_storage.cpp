@@ -1,3 +1,4 @@
+
 /* --------------------------------------------------------------------
  * guc_storage.cpp
  *
@@ -212,6 +213,7 @@ static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource sou
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source);
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
+static bool check_ss_enable_ondemand_recovery(bool* newval, void** extra, GucSource source);
 static void assign_ss_enable_aio(bool newval, void *extra);
 #ifdef USE_ASSERT_CHECKING
 static void assign_ss_enable_verify_page(bool newval, void *extra);
@@ -1029,6 +1031,19 @@ static void InitStorageConfigureNamesBool()
             &g_instance.attr.attr_storage.dms_attr.enable_dss_aio,
             true,
             NULL,
+            NULL,
+            NULL},
+
+        {{"ss_enable_ondemand_recovery",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether use on-demand recovery"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery,
+            false,
+            check_ss_enable_ondemand_recovery,
             NULL,
             NULL},
 
@@ -3566,7 +3581,35 @@ static void InitStorageConfigureNamesInt()
             4 * 1024 *1024,
             NULL,
             assign_ss_log_max_file_size,
-            NULL},  
+            NULL},
+        {{"ss_parallel_thread_count",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss reform parallel thread count"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.parallel_thread_num,
+            16,
+            0,
+            64,
+            NULL,
+            NULL,
+            NULL},
+        {{"ss_ondemand_recovery_mem_size",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the number of on-demand recovery memory buffers."),
+            NULL,
+            GUC_SUPERUSER_ONLY | GUC_UNIT_KB},
+            &g_instance.attr.attr_storage.dms_attr.ondemand_recovery_mem_size,
+            4194304,
+            1048576,
+            104857600,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -5770,48 +5813,33 @@ static bool check_ss_interconnect_type(char **newval, void **extra, GucSource so
     return (strcmp("TCP", *newval) == 0 || strcmp("RDMA", *newval) == 0);
 }
 
-static inline bool check_digit_text(char *str, uint32* len)
+static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source)
 {
-    uint32 idx = 0;
-    if (str == NULL) {
-        *len = 0;
+    if(**newval == '\0') {
         return true;
     }
+    
+    char* str = *newval;
+    bool parsing = false;
+    int cnt = 0;
+    const int len = strlen(str);
 
-    while (*str != '\0' && *str == ' ') {
-        idx++;
-        ++str;
-    }
-
-    while (*str != '\0') {
-        if (*str == ' ') {
-            break;
-        }
-
-        if (*str >= '0' && *str <= '9') {
-            ++str;
-            ++idx;
+    for (int i = 0; i < len; i++) {
+        if (isdigit(str[i])) {
+            if (!parsing) {
+                cnt++;
+                parsing = true;
+            }
+        } else if (isspace(str[i])) {
+            parsing = false;
         } else {
-            *len = 0;
             return false;
         }
     }
-
-    *len = idx;
-    return true;
-}
-
-static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source)
-{
-    uint32 idx1 = 0;
-    uint32 idx2 = 0;
-    if (!check_digit_text(*newval, &idx1)) {
-        return false;
+    if (cnt == 2) {
+        return true;
     }
-    if (!check_digit_text(*newval + idx1, &idx2)) {
-        return false;
-    }
-    return true;
+    return false;
 }
 
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source)
@@ -5874,6 +5902,17 @@ static bool check_ss_enable_ssl(bool *newval, void **extra, GucSource source)
 {
     if (!*newval) {
         ereport(WARNING, (errmsg("The SSL connection will be disabled during build, which brings security risks.")));
+    }
+    return true;
+}
+
+static bool check_ss_enable_ondemand_recovery(bool* newval, void** extra, GucSource source)
+{
+    if (*newval) {
+        if (pg_atomic_read_u32(&WorkingGrandVersionNum) < ONDEMAND_REDO_VERSION_NUM) {
+            ereport(ERROR, (errmsg("Do not allow enable ondemand_recovery if openGauss run in old version.")));
+            return false;
+        }
     }
     return true;
 }

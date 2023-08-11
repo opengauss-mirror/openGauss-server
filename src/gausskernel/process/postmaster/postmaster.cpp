@@ -2279,6 +2279,9 @@ int PostmasterMain(int argc, char* argv[])
         return 0;
     }
     
+    /* Check for invalid combinations of GUC settings */
+    CheckGUCConflicts();
+
     /* Check DSS config */
     initDSSConf();
 
@@ -2287,11 +2290,7 @@ int PostmasterMain(int argc, char* argv[])
 
     /* And switch working directory into it */
     ChangeToDataDir();
-    /*
-        * Check for invalid combinations of GUC settings.
-        */
-    CheckGUCConflicts();
-
+    
     /* Set parallel recovery config */
     ConfigRecoveryParallelism();
     ProcessRedoCpuBindInfo();
@@ -3034,6 +3033,12 @@ int PostmasterMain(int argc, char* argv[])
             }
             ereport(LOG, (errmsg("[SS reform] Success: node:%d wait for PRIMARY:%d to finish 1st reform",
                 g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
+
+            if (SS_OFFICIAL_RECOVERY_NODE && SS_CLUSTER_ONDEMAND_NOT_NORAML) {
+                ereport(FATAL, (errmsg(
+                    "[on-demand] node%d is last primary node, do not allow join cluster until on-demand recovery done",
+                    g_instance.attr.attr_storage.dms_attr.instance_id)));
+            }
         }
     }
 
@@ -3069,8 +3074,6 @@ int PostmasterMain(int argc, char* argv[])
             DMSInit();
         }
     }
-
-    
 
     /*
      * We're ready to rock and roll...
@@ -3351,6 +3354,22 @@ static void CheckExtremeRtoGUCConflicts(void)
                     TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM, MAX_RECOVERY_THREAD_NUM)));
     }
 #endif
+
+    if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {
+        if (!g_instance.attr.attr_storage.dms_attr.enable_dms) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("ondemand extreme rto only support in shared storage mode."),
+                    errhint("Either turn on ss_enable_dms, or turn off ss_enable_ondemand_recovery.")));
+        }
+
+        if (g_instance.attr.attr_storage.recovery_parse_workers <= 1) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("extreme rto param should be set in ondemand extreme rto mode."),
+                    errhint("Either turn off ss_enable_ondemand_recovery, or set extreme rto param.")));
+        }
+    }
 }
 static void CheckRecoveryParaConflict()
 {
@@ -3403,6 +3422,13 @@ static void CheckShareStorageConfigConflicts(void)
                     errmsg("shared storage mode could not support specifics tablespace(s)."),
                     errhint("Either set temp_tablespaces to NULL, or turn off ss_enable_dss.")));
         }
+    }
+
+    if (g_instance.attr.attr_storage.dss_attr.ss_enable_dss != 
+            g_instance.attr.attr_storage.dms_attr.enable_dms) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SYSTEM_ERROR),
+                errmsg("ss_enable_dms and ss_enable_dss must be turned on or off simultaneously.")));
     }
 }
 
@@ -3906,7 +3932,9 @@ static int ServerLoop(void)
         if (g_instance.pid_cxt.ReaperBackendPID == 0)
             g_instance.pid_cxt.ReaperBackendPID = initialize_util_thread(REAPER);
 
-        if ((pmState == PM_RUN || t_thrd.xlog_cxt.is_hadr_main_standby) &&
+        if (((!ENABLE_DMS && (pmState == PM_RUN || t_thrd.xlog_cxt.is_hadr_main_standby)) || 
+            (ENABLE_DMS && pmState == PM_RUN && t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE &&
+             !SS_PERFORMING_SWITCHOVER)) &&
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == 0 && !dummyStandbyMode &&
             g_instance.attr.attr_storage.xlog_file_path != NULL) {
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
@@ -3991,7 +4019,8 @@ static int ServerLoop(void)
             (AutoVacuumingActive() || t_thrd.postmaster_cxt.start_autovac_launcher) && pmState == PM_RUN &&
             !dummyStandbyMode && u_sess->attr.attr_common.upgrade_mode != 1 &&
             !g_instance.streaming_dr_cxt.isInSwitchover &&
-            !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM) {
+            !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM &&
+            !SS_IN_ONDEMAND_RECOVERY) {
             g_instance.pid_cxt.AutoVacPID = initialize_util_thread(AUTOVACUUM_LAUNCHER);
 
             if (g_instance.pid_cxt.AutoVacPID != 0)
@@ -4022,7 +4051,7 @@ static int ServerLoop(void)
         if ((u_sess->attr.attr_common.upgrade_mode == 0 ||
             pg_atomic_read_u32(&WorkingGrandVersionNum) >= PUBLICATION_VERSION_NUM) &&
             g_instance.pid_cxt.ApplyLauncerPID == 0 &&
-            pmState == PM_RUN && !dummyStandbyMode && !SS_IN_REFORM) {
+            pmState == PM_RUN && !dummyStandbyMode && !ENABLE_DMS) {
             g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
         }
 #endif
@@ -6500,10 +6529,18 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.StatementPID, SIGTERM);
                     }
 
+                    if (g_instance.pid_cxt.StartupPID != 0 && DORADO_STANDBY_CLUSTER) {
+                        signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+                    }
+                    
                     /* and the walwriter too, to avoid checkpoint hang after ss switchover */
                     if (g_instance.pid_cxt.WalWriterPID != 0)
                         signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
                     StopAliveBuildSender();
+
+                    if (g_instance.pid_cxt.WalReceiverPID != 0 && DORADO_STANDBY_CLUSTER) {
+                        signal_child(g_instance.pid_cxt.WalReceiverPID, SIGTERM);
+                    }
 
                     if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
                         signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
@@ -6604,29 +6641,6 @@ dms_demote:
 }
 
 /*
- * Reaper -- get current time.
- */
-static void GetTimeNowForReaperLog(char* nowTime, int timeLen)
-{
-    time_t formatTime;
-    struct timeval current = {0};
-    const int tmpBufSize = 32;
-    char tmpBuf[tmpBufSize] = {0};
-
-    if (nowTime == NULL || timeLen == 0) {
-        return;
-    }
-
-    (void)gettimeofday(&current, NULL);
-    formatTime = current.tv_sec;
-    struct tm* pTime = localtime(&formatTime);
-    strftime(tmpBuf, sizeof(tmpBuf), "%Y-%m-%d %H:%M:%S", pTime);
-
-    errno_t rc = sprintf_s(nowTime, timeLen - 1, "%s.%ld ", tmpBuf, current.tv_usec / 1000);
-    securec_check_ss(rc, "\0", "\0");
-}
-
-/*
  * Reaper -- encap reaper prefix log.
  */
 static char* GetReaperLogPrefix(char* buf, int bufLen)
@@ -6635,7 +6649,7 @@ static char* GetReaperLogPrefix(char* buf, int bufLen)
     char timeBuf[bufSize] = {0};
     errno_t rc;
 
-    GetTimeNowForReaperLog(timeBuf, bufSize);
+    get_time_now(timeBuf, bufSize);
 
     rc = memset_s(buf, bufLen, 0, bufLen);
     securec_check(rc, "\0", "\0");
@@ -6841,7 +6855,8 @@ static void reaper(SIGNAL_ARGS)
             if (!u_sess->proc_cxt.IsBinaryUpgrade && AutoVacuumingActive() && g_instance.pid_cxt.AutoVacPID == 0 &&
                 !dummyStandbyMode && u_sess->attr.attr_common.upgrade_mode != 1 &&
                 !g_instance.streaming_dr_cxt.isInSwitchover &&
-                !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
+                !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM &&
+                !SS_IN_ONDEMAND_RECOVERY)
                 g_instance.pid_cxt.AutoVacPID = initialize_util_thread(AUTOVACUUM_LAUNCHER);
 
             if (SS_REFORM_PARTNER) {
@@ -6861,7 +6876,8 @@ static void reaper(SIGNAL_ARGS)
             }
 
             if (g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == 0 && !dummyStandbyMode &&
-                g_instance.attr.attr_storage.xlog_file_path != NULL) {
+                g_instance.attr.attr_storage.xlog_file_path != NULL && (!SS_PRIMARY_STANDBY_CLUSTER_STANDBY
+                && !SS_PRIMARY_DEMOTING)) {
                 g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
             }
 
@@ -6874,7 +6890,7 @@ static void reaper(SIGNAL_ARGS)
 #ifndef ENABLE_MULTIPLE_NODES
             if ((u_sess->attr.attr_common.upgrade_mode == 0 ||
                 pg_atomic_read_u32(&WorkingGrandVersionNum) >= PUBLICATION_VERSION_NUM) &&
-                g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode && !SS_IN_REFORM) {
+                g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode && !ENABLE_DMS) {
                 g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
             }
 #endif
@@ -6994,8 +7010,10 @@ static void reaper(SIGNAL_ARGS)
                 GetReaperLogPrefix(logBuf, ReaperLogBufSize), wal_get_role_string(get_cur_mode()));
 
             /* at this point we are really open for business */
-            write_stderr("%s LOG: database system is ready to accept connections\n",
-                GetReaperLogPrefix(logBuf, ReaperLogBufSize));
+            if (!SS_REPLAYED_BY_ONDEMAND) {
+                write_stderr("%s LOG: database system is ready to accept connections\n",
+                    GetReaperLogPrefix(logBuf, ReaperLogBufSize));
+            }
 
             continue;
         }
@@ -7186,7 +7204,11 @@ static void reaper(SIGNAL_ARGS)
                  * Any unexpected exit of the checkpointer (including FATAL
                  * exit) is treated as a crash.
                  */
-                HandleChildCrash(pid, exitstatus, _("checkpointer process"));
+                if (pid == g_instance.pid_cxt.sharedStorageXlogCopyThreadPID) {
+                    HandleChildCrash(pid, exitstatus, _("sharedStorageXlogCopy process"));
+                } else {
+                    HandleChildCrash(pid, exitstatus, _("checkpointer process"));
+                }
             }
 
             continue;
@@ -9951,10 +9973,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* the parent process, return 0 if the fork failed, return the PID if fork succeed. */
         StartPgjobWorker();
     }
-
+    
+    /* if xlog_file_path is not equel to zero and dms is enabled, main standby need to initialize walreceiver
+     * and walrecwrite. Other modes don't need when dms is enabled. */
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER) && g_instance.pid_cxt.WalReceiverPID == 0 &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
-        g_instance.status == NoShutdown && !ENABLE_DMS) {
+        g_instance.status == NoShutdown && (!ENABLE_DMS || SS_STANDBY_CLUSTER_MAIN_STANDBY)) {
         if (g_instance.pid_cxt.WalRcvWriterPID == 0) {
             g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
             SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
@@ -9989,12 +10013,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
-        if (SS_NORMAL_STANDBY && pmState == PM_RUN) {
+        SSReadControlFile(REFORM_CTRL_PAGE);
+        if (SS_NORMAL_STANDBY && pmState == PM_RUN && !SS_STANDBY_ONDEMAND_RECOVERY) {
             SSDoSwitchover();
         } else {
             ereport(LOG, (errmsg("Current mode is not NORMAL STANDBY, SS switchover command ignored.")));
         }
-        
     }
 
     if ((mode = CheckSwitchoverSignal()) != 0 && WalRcvIsOnline() && DataRcvIsOnline() &&
@@ -10036,6 +10060,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
+        if (g_instance.pid_cxt.PgStatPID != 0 && 
+            g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) {
+            signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
+        }
+
         /* and the autovac launcher too */
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
@@ -10066,6 +10095,26 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.WLMCollectPID != 0) {
             Assert(!dummyStandbyMode);
             signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.UndoLauncherPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
+        }
+#ifndef ENABLE_MULTIPLE_NODES
+        if (g_instance.pid_cxt.ApplyLauncerPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
+        }
+#endif
+        if (g_instance.pid_cxt.GlobalStatsPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.UndoRecyclerPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.FaultMonitorPID != 0 && DORADO_STANDBY_CLUSTER) {
+            signal_child(g_instance.pid_cxt.FaultMonitorPID, SIGTERM);
         }
 
         pmState = PM_WAIT_BACKENDS;
@@ -10144,7 +10193,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
     }
 
-    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER)) {
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS)) {
         PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
         t_thrd.dms_cxt.CloseAllSessionsFailed = false;
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] kill backends begin.")));
@@ -10165,13 +10214,22 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
+        //active check once
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
+            g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
+        }
+
         /* and the autovac launcher too */
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
 
+        if (g_instance.pid_cxt.PgStatPID != 0 && 
+            g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) {
+            signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
+        }
+
         if (g_instance.pid_cxt.PgJobSchdPID != 0)
             signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
-
         /*
          * before init startup threads, need close WalWriter and WalWriterAuxiliary
          * because during StartupXLOG remove_xlogtemp_files() occurs process file concurrently
@@ -10181,7 +10239,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
-
         pmState = PM_WAIT_BACKENDS;
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
@@ -10197,6 +10254,18 @@ static void sigusr1_handler(SIGNAL_ARGS)
         ereport(LOG,
             (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
                 wal_get_role_string(get_cur_mode()))));
+
+        /* Clear replication slot info of SS standby */
+        if (SS_NORMAL_STANDBY) {
+            ResetReplicationSlotsShmem();
+        }
+    }
+
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP)) {
+        if (g_instance.pid_cxt.StartupPID != 0) {
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] send to startup term signal")));
+            signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+        }
     }
 
     if (CheckPromoteSignal()) {
@@ -12477,6 +12546,14 @@ const char* wal_get_db_state_string(DbState db_state)
 static ServerMode get_cur_mode(void)
 {
     if (ENABLE_DMS) {
+        if (DORADO_STANDBY_CLUSTER) {
+            return STANDBY_MODE;
+        }
+        /* except for main standby in standby cluster, current mode of instance is determined by SS_OFFICIAL_PRIMARY*/
+        if (g_instance.attr.attr_storage.xlog_file_path !=0 && SS_OFFICIAL_PRIMARY &&
+            t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) {
+            return STANDBY_MODE;
+        }
         return !SS_OFFICIAL_PRIMARY ? STANDBY_MODE : PRIMARY_MODE;
     }
     return t_thrd.postmaster_cxt.HaShmData->current_mode;
@@ -14728,14 +14805,29 @@ void InitShmemForDmsCallBack()
     InitProcessAndShareMemory();
 }
 
-const char *GetSSServerMode()
+const char *GetSSServerMode(ServerMode mode)
 {
-    if (!SS_OFFICIAL_PRIMARY) {
-        return "Standby";
-    }
- 
-    if (SS_OFFICIAL_PRIMARY) {
-        return "Primary";
+    if (g_instance.attr.attr_storage.xlog_file_path != 0) {
+        if (SS_OFFICIAL_PRIMARY && (mode == PRIMARY_MODE || mode == NORMAL_MODE)) { 
+            return "Primary";
+        }
+        
+        /* main standby in standby cluster */
+        if (SS_OFFICIAL_PRIMARY && mode == STANDBY_MODE) { 
+            return "Main Standby";
+        }
+        
+        if (!SS_OFFICIAL_PRIMARY) {
+            return "Standby";
+        }
+    } else {
+        if (!SS_OFFICIAL_PRIMARY) {
+            return "Standby";
+        }
+    
+        if (SS_OFFICIAL_PRIMARY) {
+            return "Primary";
+        }
     }
  
     return "Unknown";

@@ -15,8 +15,11 @@ declare -a DB_STATUS
 declare -a DB_HOME
 
 PGPORT=(6600 6700)
+STANDBY_PGPORT=(9600 9700)
 SS_DATA=${HOME}/ss_hatest
+SS_DATA_STANDBY=${HOME}/ss_hatest1
 nodedata_cfg="0:127.0.0.1:6611,1:127.0.0.1:6711"
+standby_nodedata_cfg="0:127.0.0.1:9611,1:127.0.0.1:9711"
 export CM_CONFIG_PATH=${CURPATH}/cm_config.ini
 export TPCC_PATH=~/benchmarksql/run
 TPCC_P=("0-primary.gs" "1-primary.gs" "2-primary.gs")
@@ -295,6 +298,49 @@ function deploy_two_inst
     start_gaussdb ${SS_DATA}/dn1
 }
 
+function deploy_dual_cluster
+{   
+    echo "deploy master cluster"
+    source ${CURPATH}/build_ss_database_common.sh
+    kill_gaussdb
+    clean_database_env ${SS_DATA}
+    DORADO_SHARED_DISK=${HOME}/ss_hatest/dorado_shared_disk
+
+    sh ${CURPATH}/conf_start_dss_inst.sh 2 ${SS_DATA} ${SS_DATA}/dss_disk 
+    init_gaussdb 0 ${SS_DATA}/dss_home0 $SS_DATA $nodedata_cfg $DORADO_SHARED_DISK
+    init_gaussdb 1 ${SS_DATA}/dss_home1 $SS_DATA $nodedata_cfg
+
+    set_gaussdb_port ${SS_DATA}/dn0 ${PGPORT[0]}
+    set_gaussdb_port ${SS_DATA}/dn1 ${PGPORT[1]} 
+
+    assign_hatest_parameter ${SS_DATA}/dn0 ${SS_DATA}/dn1
+    assign_dorado_parameter ${SS_DATA} ${SS_DATA}/dn0
+
+    export DSS_HOME=${SS_DATA}/dss_home0
+    start_gaussdb ${SS_DATA}/dn0
+    export DSS_HOME=${SS_DATA}/dss_home1
+    start_gaussdb ${SS_DATA}/dn1
+
+    echo "deploy standby cluster"
+    clean_database_env ${SS_DATA_STANDBY}
+    sh ${CURPATH}/conf_start_dss_inst.sh 2 ${SS_DATA_STANDBY} ${SS_DATA_STANDBY}/dss_disk standby_cluster
+    init_gaussdb 0 ${SS_DATA_STANDBY}/dss_home0 $SS_DATA_STANDBY $standby_nodedata_cfg
+    init_gaussdb 1 ${SS_DATA_STANDBY}/dss_home1 $SS_DATA_STANDBY $standby_nodedata_cfg
+
+    set_gaussdb_port ${SS_DATA_STANDBY}/dn0 ${STANDBY_PGPORT[0]}
+    set_gaussdb_port ${SS_DATA_STANDBY}/dn1 ${STANDBY_PGPORT[1]} 
+    
+    assign_hatest_parameter ${SS_DATA_STANDBY}/dn0 ${SS_DATA_STANDBY}/dn1
+
+    cp ${CURPATH}/cm_config.ini ${CURPATH}/cm_config_standby.ini
+    export CM_CONFIG_PATH=${CURPATH}/cm_config_standby.ini
+    export DSS_HOME=${SS_DATA_STANDBY}/dss_home0
+    start_gaussdb ${SS_DATA_STANDBY}/dn0
+    export DSS_HOME=${SS_DATA_STANDBY}/dss_home1
+    start_gaussdb ${SS_DATA_STANDBY}/dn1
+
+}
+
 function testcase()
 {
     restart_primary
@@ -514,7 +560,13 @@ function muti_execute()
 }
 
 check_user
-deploy_two_inst
+if [ "$1" == "dual_cluster" ]; then
+    echo "starting dual cluster"
+    deploy_dual_cluster
+else
+    echo "starting single cluster"
+    deploy_two_inst
+fi
 ha_test_init
 testcase
 ## if you want use tpcc

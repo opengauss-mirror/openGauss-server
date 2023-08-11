@@ -58,9 +58,29 @@ bool IsPostmasterEnvironment = false;
 bool open_join_children = true;
 bool will_shutdown = false;
 
-/* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92850;
+/********************************************
+ * 1.HARD-WIRED BINARY VERSION NUMBER
+ *
+ *    version num range detail for openGauss:
+ *      version | start at | release at | reserve to
+ *      --------+----------+------------+------------
+ *       1.0.X  |  00000   |   92072    |   92086   
+ *       1.1.X  |  92087   |   92298    |   92298   
+ *       2.0.X  |  92298   |   92298    |   92303   
+ *       2.1.X  |  92304   |   92421    |   92423   
+ *       3.0.X  |  92424   |   92605    |   92655   
+ *       3.1.X  |    -     |     -      |     -     
+ *       5.0.X  |  92656   |   92848    |   92898   
+ *       NEXT   |  92899   |     ?      |     ?     
+ *
+ ********************************************/
+const uint32 GRAND_VERSION_NUM = 92851;
 
+/********************************************
+ * 2.VERSION NUM FOR EACH FEATURE
+ *   Please write indescending order.
+ ********************************************/
+const uint32 ONDEMAND_REDO_VERSION_NUM = 92851;
 const uint32 SRF_FUSION_VERSION_NUM = 92847;
 const uint32 INNER_UNIQUE_VERSION_NUM = 92845;
 const uint32 PARTITION_ENHANCE_VERSION_NUM = 92844;

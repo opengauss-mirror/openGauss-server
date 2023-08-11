@@ -100,7 +100,6 @@ static const int32 MAX_PENDING_STANDBY = 1;
 static const int32 ITEM_QUQUE_SIZE_RATIO = 5;
 
 static const uint32 EXIT_WAIT_DELAY = 100; /* 100 us */
-uint32 g_startupTriggerState = TRIGGER_NORMAL;
 uint32 g_readManagerTriggerFlag = TRIGGER_NORMAL;
 static const int invalid_worker_id = -1;
 
@@ -398,7 +397,7 @@ void HandleStartupInterruptsForExtremeRto()
     Assert(AmStartupProcess());
 
     uint32 newtriggered = (uint32)CheckForSatartupStatus();
-    if (newtriggered != extreme_rto::TRIGGER_NORMAL) {
+    if (newtriggered != TRIGGER_NORMAL) {
         uint32 triggeredstate = pg_atomic_read_u32(&(g_startupTriggerState));
         if (triggeredstate != newtriggered) {
             ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
@@ -2096,7 +2095,7 @@ RedoWaitInfo redo_get_io_event(int32 event_id)
     return resultInfo;
 }
 
-void redo_get_wroker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
+void redo_get_worker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
 {
     PageRedoWorker *redoWorker = NULL;
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
@@ -2134,7 +2133,7 @@ void make_worker_static_info(RedoWorkerTimeCountsInfo *workerCountInfo, PageRedo
     workerCountInfo->time_cost = redoWorker->timeCostList;
 }
 
-void redo_get_wroker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum)
+void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum)
 {
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
     knl_parallel_redo_state state = g_instance.comm_cxt.predo_cxt.state;

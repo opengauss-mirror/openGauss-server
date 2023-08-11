@@ -100,6 +100,8 @@ typedef struct knl_instance_attr_dms {
     bool enable_catalog_centralized;
     bool enable_dss_aio;
     bool enable_verify_page;
+    bool enable_ondemand_recovery;
+    int ondemand_recovery_mem_size;
     int instance_id;
     int recv_msg_pool_size;
     char* interconnect_url;
@@ -121,6 +123,7 @@ typedef struct knl_instance_attr_dms {
     int32 sslog_level;
     int32 sslog_backup_file_count;
     int32 sslog_max_file_size; //Unit:KB
+    int parallel_thread_num;
 } knl_instance_attr_dms;
 
 typedef struct knl_instance_attr_storage {

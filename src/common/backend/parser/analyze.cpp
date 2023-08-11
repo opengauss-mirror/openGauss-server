@@ -613,7 +613,8 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
     if (nodeTag(parseTree) != T_InsertStmt) {
         result->rightRefState = nullptr;
     }
-    
+
+    PreventCommandDuringSSOndemandRecovery(parseTree);
     return result;
 }
 

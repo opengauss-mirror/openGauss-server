@@ -48,6 +48,7 @@
 #include "replication/syncrep.h"
 #include "storage/copydir.h"
 #include "storage/smgr/fd.h"
+#include "storage/file/fio_device.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "postmaster/postmaster.h"
@@ -66,6 +67,8 @@ static char *trim_str(char *str, int str_len, char sep);
 static char *get_application_name(void);
 static void ReleaseArchiveSlotInfo(ReplicationSlot *slot);
 static int cmp_slot_lsn(const void *a, const void *b);
+static int RenameReplslotPath(char *path1, char *path2);
+static bool CheckExistReplslotPath(char *path);
 
 /*
  * Report shared-memory space needed by ReplicationSlotShmemInit.
@@ -745,6 +748,9 @@ static void ReplicationSlotDropAcquired(void)
     /* slot isn't acquired anymore */
     t_thrd.slot_cxt.MyReplicationSlot = NULL;
 
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+
     /*
      * If some other backend ran this code concurrently with us, we might try
      * to delete a slot with a certain name while someone else was trying to
@@ -753,10 +759,10 @@ static void ReplicationSlotDropAcquired(void)
     LWLockAcquire(ReplicationSlotAllocationLock, LW_EXCLUSIVE);
 
     /* Generate pathnames. */
-    int nRet = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s", NameStr(slot->data.name));
+    int nRet = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s", replslot_path, NameStr(slot->data.name));
     securec_check_ss(nRet, "\0", "\0");
 
-    nRet = snprintf_s(tmppath, sizeof(tmppath), MAXPGPATH - 1, "pg_replslot/%s.tmp", NameStr(slot->data.name));
+    nRet = snprintf_s(tmppath, sizeof(tmppath), MAXPGPATH - 1, "%s/%s.tmp", replslot_path, NameStr(slot->data.name));
     securec_check_ss(nRet, "\0", "\0");
 
     /*
@@ -767,7 +773,7 @@ static void ReplicationSlotDropAcquired(void)
 * survive and this might get called during error handling.
 
  */
-    if (rename(path, tmppath) == 0) {
+    if (RenameReplslotPath(path, tmppath) == 0) {
         /*
          * We need to fsync() the directory we just renamed and its parent to
          * make sure that our changes are on disk in a crash-safe fashion.  If
@@ -778,7 +784,7 @@ static void ReplicationSlotDropAcquired(void)
          */
         START_CRIT_SECTION();
         fsync_fname(tmppath, true);
-        fsync_fname("pg_replslot", true);
+        fsync_fname(replslot_path, true);
         END_CRIT_SECTION();
     } else {
         volatile ReplicationSlot *vslot = slot;
@@ -853,8 +859,10 @@ void ReplicationSlotSave(void)
 
     Assert(t_thrd.slot_cxt.MyReplicationSlot != NULL);
 
-    nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "pg_replslot/%s",
-                      NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+    nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", replslot_path,
+        NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
     securec_check_ss(nRet, "\0", "\0");
     if (unlikely(CheckFileExists(path) == FILE_NOT_EXIST)) {
         CreateSlotOnDisk(t_thrd.slot_cxt.MyReplicationSlot);
@@ -1281,6 +1289,9 @@ void CheckPointReplicationSlots(void)
 
     ereport(DEBUG1, (errmsg("performing replication slot checkpoint")));
 
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+
     /*
      * Prevent any slot from being created/dropped while we're active. As we
      * explicitly do *not* want to block iterating over replication_slots or
@@ -1298,7 +1309,7 @@ void CheckPointReplicationSlots(void)
             continue;
 
         /* save the slot to disk, locking is handled in SaveSlotToPath() */
-        nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "pg_replslot/%s", NameStr(s->data.name));
+        nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", replslot_path, NameStr(s->data.name));
         securec_check_ss(nRet, "\0", "\0");
 
         if (unlikely(CheckFileExists(path) == FILE_NOT_EXIST)) {
@@ -1321,12 +1332,15 @@ void StartupReplicationSlots()
 
     ereport(DEBUG1, (errmsg("starting up replication slots")));
 
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+
     /* restore all slots by iterating over all on-disk entries */
-    replication_dir = AllocateDir("pg_replslot");
+    replication_dir = AllocateDir(replslot_path);
     if (replication_dir == NULL) {
         char tmppath[MAXPGPATH];
 
-        nRet = snprintf_s(tmppath, sizeof(tmppath), MAXPGPATH - 1, "%s", "pg_replslot");
+        nRet = snprintf_s(tmppath, sizeof(tmppath), MAXPGPATH - 1, "%s", replslot_path);
         securec_check_ss(nRet, "\0", "\0");
 
         if (mkdir(tmppath, S_IRWXU) < 0)
@@ -1334,14 +1348,14 @@ void StartupReplicationSlots()
         fsync_fname(tmppath, true);
         return;
     }
-    while ((replication_de = ReadDir(replication_dir, "pg_replslot")) != NULL) {
+    while ((replication_de = ReadDir(replication_dir, replslot_path)) != NULL) {
         struct stat statbuf;
         char path[MAXPGPATH];
 
         if (strcmp(replication_de->d_name, ".") == 0 || strcmp(replication_de->d_name, "..") == 0)
             continue;
 
-        nRet = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s", replication_de->d_name);
+        nRet = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s", replslot_path, replication_de->d_name);
         securec_check_ss(nRet, "\0", "\0");
 
         /* we're only creating directories here, skip if it's not our's */
@@ -1350,11 +1364,22 @@ void StartupReplicationSlots()
 
         /* we crashed while a slot was being setup or deleted, clean up */
         if (string_endswith(replication_de->d_name, ".tmp")) {
+            if (ENABLE_DSS && CheckExistReplslotPath(path)) {
+                RestoreSlotFromDisk(replication_de->d_name);
+                continue;
+            }
             if (!rmtree(path, true)) {
                 ereport(WARNING, (errcode_for_file_access(), errmsg("could not remove directory \"%s\"", path)));
                 continue;
             }
-            fsync_fname("pg_replslot", true);
+            fsync_fname(replslot_path, true);
+            continue;
+        }
+
+        if (ENABLE_DSS && !CheckExistReplslotPath(path)) {
+            if (!unlink(path)) {
+                ereport(WARNING, (errcode_for_file_access(), errmsg("could not remove directory \"%s\"", path)));
+            }
             continue;
         }
 
@@ -1387,15 +1412,18 @@ void CreateSlotOnDisk(ReplicationSlot *slot)
     struct stat st;
     int nRet = 0;
 
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+
     /*
      * No need to take out the io_in_progress_lock, nobody else can see this
      * slot yet, so nobody else will write. We're reusing SaveSlotToPath which
      * takes out the lock, if we'd take the lock here, we'd deadlock.
      */
-    nRet = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s", NameStr(slot->data.name));
+    nRet = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s", replslot_path, NameStr(slot->data.name));
     securec_check_ss(nRet, "\0", "\0");
 
-    nRet = snprintf_s(tmppath, sizeof(tmppath), MAXPGPATH - 1, "pg_replslot/%s.tmp", NameStr(slot->data.name));
+    nRet = snprintf_s(tmppath, sizeof(tmppath), MAXPGPATH - 1, "%s/%s.tmp", replslot_path, NameStr(slot->data.name));
     securec_check_ss(nRet, "\0", "\0");
 
     /*
@@ -1421,7 +1449,7 @@ void CreateSlotOnDisk(ReplicationSlot *slot)
     SaveSlotToPath(slot, tmppath, ERROR);
 
     /* Rename the directory into place. */
-    if (rename(tmppath, path) != 0)
+    if (RenameReplslotPath(tmppath, path) != 0)
         ereport(ERROR,
                 (errcode_for_file_access(), errmsg("could not rename file \"%s\" to \"%s\": %m", tmppath, path)));
 
@@ -1433,7 +1461,7 @@ void CreateSlotOnDisk(ReplicationSlot *slot)
     START_CRIT_SECTION();
 
     fsync_fname(path, true);
-    fsync_fname("pg_replslot", true);
+    fsync_fname(replslot_path, true);
 
     END_CRIT_SECTION();
 
@@ -1588,7 +1616,9 @@ static void SaveSlotToPath(ReplicationSlot *slot, const char *dir, int elevel)
 
     fsync_fname(path, false);
     fsync_fname(dir, true);
-    fsync_fname("pg_replslot", true);
+    if (!ENABLE_DSS) {
+        fsync_fname("pg_replslot", true);
+    }
 
     END_CRIT_SECTION();
 
@@ -1626,11 +1656,15 @@ static void RestoreSlotFromDisk(const char *name)
     bool retry = false;
     char *extra_content = NULL;
     ArchiveConfig *archive_cfg = NULL;
+
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+
     /* no need to lock here, no concurrent access allowed yet
      *
      * delete temp file if it exists
      */
-    rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s/state.tmp", name);
+    rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s/state.tmp", replslot_path, name);
     securec_check_ss(rc, "\0", "\0");
 
     ret = unlink(path);
@@ -1639,14 +1673,14 @@ static void RestoreSlotFromDisk(const char *name)
 
     /* unlink backup file if rename failed */
     if (ret == 0) {
-        rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s/state.backup", name);
+        rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s/state.backup", replslot_path, name);
         securec_check_ss(rc, "\0", "\0");
         if (unlink(path) < 0 && errno != ENOENT)
             ereport(PANIC, (errcode_for_file_access(), errmsg("could not unlink file \"%s\": %m", path)));
         ignore_bak = true;
     }
 
-    rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s/state", name);
+    rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s/state", replslot_path, name);
     securec_check_ss(rc, "\0", "\0");
 
     elog(DEBUG1, "restoring replication slot from \"%s\"", path);
@@ -1727,7 +1761,7 @@ loop:
             ereport(WARNING,
                     (errmsg("replication slot file %s: checksum mismatch, is %u, should be %u, try backup file", path,
                             checksum, cp.checksum)));
-            rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s/state.backup", name);
+            rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s/state.backup", replslot_path, name);
             securec_check_ss(rc, "\0", "\0");
             ignore_bak = true;
             retry = true;
@@ -1743,7 +1777,7 @@ loop:
             ereport(WARNING, (errcode_for_file_access(),
                               errmsg("replication slot file \"%s\" has wrong magic %u instead of %d, try backup file",
                                      path, cp.magic, SLOT_MAGIC)));
-            rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s/state.backup", name);
+            rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s/state.backup", replslot_path, name);
             securec_check_ss(rc, "\0", "\0");
             ignore_bak = true;
             retry = true;
@@ -1760,7 +1794,7 @@ loop:
             ereport(WARNING,
                     (errcode_for_file_access(),
                      errmsg("replication slot file \"%s\" has corrupted length %u, try backup file", path, cp.length)));
-            rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s/state.backup", name);
+            rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s/state.backup", replslot_path, name);
             securec_check_ss(rc, "\0", "\0");
             ignore_bak = true;
             retry = true;
@@ -1775,12 +1809,12 @@ loop:
      * If we crashed with an ephemeral slot active, don't restore but delete it.
      */
     if (GET_SLOT_PERSISTENCY(cp.slotdata) != RS_PERSISTENT && GET_SLOT_PERSISTENCY(cp.slotdata) != RS_BACKUP) {
-        rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "pg_replslot/%s", name);
+        rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", replslot_path, name);
         securec_check_ss(rc, "\0", "\0");
         if (!rmtree(path, true)) {
             ereport(WARNING, (errcode_for_file_access(), errmsg("could not remove directory \"%s\"", path)));
         }
-        fsync_fname("pg_replslot", true);
+        fsync_fname(replslot_path, true);
         return;
     }
 
@@ -1849,7 +1883,10 @@ static void RecoverReplSlotFile(const ReplicationSlotOnDisk &cp, const char *nam
     char path[MAXPGPATH];
     errno_t rc = EOK;
 
-    rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "pg_replslot/%s/state", name);
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+
+    rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s/state", replslot_path, name);
     securec_check_ss(rc, "\0", "\0");
 
     ereport(WARNING, (errmsg("recover the replication slot file %s", name)));
@@ -2535,3 +2572,81 @@ void get_hadr_cn_info(char* keyCn, bool* isExitKey, char* deleteCn, bool* isExit
     }
 }
 #endif
+
+void GetReplslotPath(char *path)
+{
+    if (ENABLE_DSS) {
+        errno_t rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_replslot",
+            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        errno_t rc = strcpy_s(path, MAXPGPATH, "pg_replslot");
+        securec_check_ss(rc, "\0", "\0");
+    }
+}
+
+static int RenameReplslotPath(char *path1, char *path2)
+{
+    int rc = 0;
+    const char* suffix = ".tmp";
+    if (ENABLE_DSS) {
+        int lenth_of_path1 = strlen(path1);
+        if (strstr(path1, suffix) == path1 + lenth_of_path1 - strlen(suffix)) {
+            rc = symlink(path1, path2);
+        } else {
+            rc = unlink(path1);
+        }
+    } else {
+        rc = rename(path1, path2);
+    }
+    return rc;
+}
+
+static bool CheckExistReplslotPath(char *path)
+{
+    char path_for_check[MAXPGPATH];
+    const char* suffix = ".tmp";
+    if (strstr(path, suffix) != NULL) {
+        int count = strlen(path) - strlen(suffix);
+        errno_t rc = strncpy_s(path_for_check, MAXPGPATH, path, count);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        errno_t rc = strcat_s(path_for_check, MAXPGPATH, suffix);
+        securec_check_ss(rc, "\0", "\0");
+    }
+    if (dss_exist_dir(path_for_check)) {
+        return true;
+    }
+
+    return false;
+}
+
+void ResetReplicationSlotsShmem()
+{
+    if (g_instance.attr.attr_storage.max_replication_slots == 0)
+        return;
+
+    if (t_thrd.slot_cxt.ReplicationSlotCtl != NULL) {
+        errno_t rc = 0;
+
+        for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+            ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+            if (slot != NULL && strlen(slot->data.name.data) != 0) {
+                slot->in_use = false;
+                slot->active = false;
+                slot->just_dirtied = false;
+                slot->dirty = false;
+                slot->effective_xmin = 0;
+                slot->effective_catalog_xmin = 0;
+                rc = memset_s(&slot->data, sizeof(ReplicationSlotPersistentData), 0,
+                    sizeof(ReplicationSlotPersistentData));
+                securec_check(rc, "\0", "\0");
+                slot->candidate_catalog_xmin = 0;
+                slot->candidate_xmin_lsn = 0;
+                slot->candidate_restart_valid = 0;
+                slot->candidate_restart_lsn = 0;
+                slot->is_recovery = false;
+            }
+        }
+    }
+}

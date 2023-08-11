@@ -41,6 +41,7 @@
 
 #define FIXED_NUM_OF_INST_IP_PORT 3
 #define BYTES_PER_KB 1024
+#define NON_PROC_NUM 4
 
 
 const int MAX_CPU_STR_LEN = 5;
@@ -371,6 +372,7 @@ static void setDMSProfile(dms_profile_t* profile)
     profile->inst_map = 0;
     profile->enable_reform = (unsigned char)dms_attr->enable_reform;
     profile->load_balance_mode = 1; /* primary-standby */
+    profile->parallel_thread_num = dms_attr->parallel_thread_num;
 
     if (dms_attr->enable_ssl && g_instance.attr.attr_security.EnableSSL) {
         InitDmsSSL();
@@ -388,6 +390,13 @@ void DMSInit()
     }
     if (dms_register_thread_init(DmsCallbackThreadShmemInit)) {
         ereport(FATAL, (errmsg("failed to register dms memcxt callback!")));
+    }
+
+    uint32 TotalProcs = (uint32)(GLOBAL_ALL_PROCS);
+    uint32 MesMaxRooms = dms_get_mes_max_watting_rooms();
+    if (TotalProcs + NON_PROC_NUM >= MesMaxRooms) {
+        ereport(FATAL, (errmsg("The thread ID range is too large when dms enable. Please set the related GUC "
+                               "parameters to a smaller value.")));
     }
 
     dms_profile_t profile;
@@ -470,6 +479,7 @@ void DMSUninit()
     dms_uninit();
 }
 
+// order: DMS reform finish -> CBReformDoneNotify finish -> startup exit (if has)
 int32 DMSWaitReform()
 {
     uint32 has_offline; /* currently not used in openGauss */
@@ -511,4 +521,15 @@ bool DMSWaitInitStartup()
     }
 
     return true;
+}
+
+void StartupWaitReform()
+{
+    while (g_instance.dms_cxt.SSReformInfo.in_reform) {
+        if (dms_reform_failed() || dms_reform_last_failed()) {
+            ereport(LOG, (errmsg("[SS reform] reform failed, startup no need wait.")));
+            break;
+        }
+        pg_usleep(5000L);
+    }
 }

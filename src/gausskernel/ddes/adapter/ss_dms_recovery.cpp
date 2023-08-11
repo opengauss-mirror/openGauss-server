@@ -54,14 +54,52 @@ void SSSavePrimaryInstId(int id)
     SSSaveReformerCtrl();
 }
 
+void SSWaitStartupExit()
+{
+    if (g_instance.pid_cxt.StartupPID == 0) {
+        return;
+    }
+
+    if (SS_STANDBY_FAILOVER && !g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag) {
+        g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = true;
+    }
+    SendPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP);
+    int err_level = g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally ? LOG : WARNING;
+    ereport(err_level, (errmodule(MOD_DMS), errmsg("[SS reform] reform failed, startup thread need exit")));
+
+    while (true) {
+        if (g_instance.pid_cxt.StartupPID == 0) {
+            break;
+        }
+
+        if (g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request) {
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform] pageredo or startup thread are trapped "
+                "in page request during recovery phase, need exit")));
+            _exit(0);
+        }
+        pg_usleep(5000L);
+    }
+}
+
+/**
+ * find reform failed in recovery phase, maybe other node restart
+ * pageredo or startup thread may trapped in LockBuffer for page request
+ * to solve this: reform_proc thread need exit process
+ * 
+ * reform failed during recovery phase has three situation
+ * 1) primary restart 2) restart failover 3) alive failover
+ *  
+ * 1) primary restart 2) restart failover:
+ *      gaussdb will restart
+ * 3) alive failover:
+ *      try to exit startup thread, 
+ *      if success, gaussdb still alive and prepare next reform
+ *      if not, gaussdb need exit cause pageredo or startup may trapped in LockBuffer
+*/
 bool SSRecoveryNodes()
 {
     bool result = false;
     while (true) {
-        if (dms_reform_failed()) {
-            result = false;
-            break;
-        }
         /** why use lock:
          * time1 startup thread: update IsRecoveryDone, not finish UpdateControlFile
          * time2 reform_proc: finish reform, think ControlFile is ok
@@ -76,6 +114,27 @@ bool SSRecoveryNodes()
             break;
         }
         LWLockRelease(ControlFileLock);
+
+        /* do not wait when on-demand HashMap build done */
+        if (SS_ONDEMAND_BUILD_DONE) {
+            result = true;
+            break;
+        }
+
+        /* If main standby is set hot standby to on, when it reach consistency or recovery all xlogs in disk,
+         * recovery phase could be regarded successful in hot_standby thus set pmState = PM_HOT_STANDBY, which
+         * indicate database systerm is ready to accept read only connections.
+         */
+        if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
+            result = true;
+            break;
+        }
+
+        if (dms_reform_failed()) {
+            SSWaitStartupExit();
+            result = false;
+            break;
+        }
         pg_usleep(REFORM_WAIT_TIME);
     }
     return result;
@@ -85,6 +144,10 @@ bool SSRecoveryApplyDelay()
 {
     if (!ENABLE_REFORM) {
         return false;
+    }
+    
+    if (DORADO_STANDBY_CLUSTER) {
+        return true;
     }
 
     while (g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag) {
@@ -97,98 +160,8 @@ bool SSRecoveryApplyDelay()
     return true;
 }
 
-void SSReadControlFile(int id, bool updateDmsCtx)
-{
-    pg_crc32c crc;
-    errno_t rc = EOK;
-    int fd = -1;
-    char *fname = NULL;
-    bool retry = false;
-    int read_size = 0;
-    int len = 0;
-    fname = XLOG_CONTROL_FILE;
-
-loop:
-    fd = BasicOpenFile(fname, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
-    if (fd < 0) {
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname)));
-    }
-
-    off_t seekpos = (off_t)BLCKSZ * id;
-
-    if (id == REFORM_CTRL_PAGE) {
-        len = sizeof(ss_reformer_ctrl_t);
-    } else {
-        len = sizeof(ControlFileData);
-    }
-
-    read_size = (int)BUFFERALIGN(len);
-    char buffer[read_size] __attribute__((__aligned__(ALIGNOF_BUFFER)));
-    if (pread(fd, buffer, read_size, seekpos) != read_size) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %m")));
-    }
-
-    if (id == REFORM_CTRL_PAGE) {
-        rc = memcpy_s(&g_instance.dms_cxt.SSReformerControl, len, buffer, len);
-        securec_check(rc, "", "");
-        if (close(fd) < 0) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
-        }
-
-        /* Now check the CRC. */
-        INIT_CRC32C(crc);
-        COMP_CRC32C(crc, (char *)&g_instance.dms_cxt.SSReformerControl, offsetof(ss_reformer_ctrl_t, crc));
-        FIN_CRC32C(crc);
-
-        if (!EQ_CRC32C(crc, g_instance.dms_cxt.SSReformerControl.crc)) {
-            if (retry == false) {
-                ereport(WARNING, (errmsg("control file \"%s\" contains incorrect checksum, try backup file", fname)));
-                fname = XLOG_CONTROL_FILE_BAK;
-                retry = true;
-                goto loop;
-            } else {
-                ereport(FATAL, (errmsg("incorrect checksum in control file")));
-            }
-        }
-    } else {
-        ControlFileData* controlFile = NULL;
-        ControlFileData tempControlFile;
-        if (updateDmsCtx) {
-            controlFile = &tempControlFile;
-        } else {
-            controlFile = t_thrd.shemem_ptr_cxt.ControlFile;
-        }
-
-        rc = memcpy_s(controlFile, (size_t)len, buffer, (size_t)len);
-        securec_check(rc, "", "");
-        if (close(fd) < 0) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
-        }
-
-        /* Now check the CRC. */
-        INIT_CRC32C(crc);
-        COMP_CRC32C(crc, (char *)controlFile, offsetof(ControlFileData, crc));
-        FIN_CRC32C(crc);
-
-        if (!EQ_CRC32C(crc, controlFile->crc)) {
-            if (retry == false) {
-                ereport(WARNING, (errmsg("control file \"%s\" contains incorrect checksum, try backup file", fname)));
-                fname = XLOG_CONTROL_FILE_BAK;
-                retry = true;
-                goto loop;
-            } else {
-                ereport(FATAL, (errmsg("incorrect checksum in control file")));
-            }
-        }
-
-        if (XLByteLE(g_instance.dms_cxt.ckptRedo, controlFile->checkPointCopy.redo)) {
-            g_instance.dms_cxt.ckptRedo = controlFile->checkPointCopy.redo;
-        }
-    }
-}
-
 /* initialize reformer ctrl parameter when initdb */
-void SSWriteReformerControlPages(void)
+void SSInitReformerControlPages(void)
 {
     /*
      * If already exists control file, reformer page must have been initialized
@@ -198,7 +171,7 @@ void SSWriteReformerControlPages(void)
         if (g_instance.dms_cxt.SSReformerControl.list_stable != 0 ||
             g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
             (void)printf("[SS] ERROR: files from last install must be cleared.\n");
-            ereport(PANIC, (errmsg("Files from last initdb not cleared")));
+            ereport(ERROR, (errmsg("Files from last initdb not cleared")));
         }
         (void)printf("[SS] Current node:%d acknowledges cluster PRIMARY node:%d.\n",
             SS_MY_INST_ID, g_instance.dms_cxt.SSReformerControl.primaryInstId);
@@ -216,6 +189,9 @@ void SSWriteReformerControlPages(void)
     Assert(!dss_exist_file(XLOG_CONTROL_FILE));
     g_instance.dms_cxt.SSReformerControl.list_stable = 0;
     g_instance.dms_cxt.SSReformerControl.primaryInstId = SS_MY_INST_ID;
+    g_instance.dms_cxt.SSReformerControl.recoveryInstId = INVALID_INSTANCEID;
+    g_instance.dms_cxt.SSReformerControl.version = REFORM_CTRL_VERSION;
+    g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
     (void)printf("[SS] Current node:%d initdb first, will become PRIMARY for first-time SS cluster startup.\n",
         SS_MY_INST_ID);
 
@@ -244,17 +220,6 @@ void SSWriteReformerControlPages(void)
     SSWriteInstanceControlFile(fd, buffer, REFORM_CTRL_PAGE, PG_CONTROL_SIZE);
     if (close(fd)) {
         ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
-    }
-}
-
-void SSTriggerFailover()
-{
-    if (g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
-        g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = true;
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB restart.")));
-    } else {
-        SendPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER);
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do failover when DB alive")));
     }
 }
 

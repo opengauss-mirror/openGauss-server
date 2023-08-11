@@ -42,7 +42,7 @@ extern bool ss_issharedstorage;
 extern bool ss_need_mkclusterdir;
 
 /* check dms url when gs_initdb */
-extern bool ss_check_nodedatainfo();
+extern bool ss_check_nodedatainfo(bool enable_dss);
 extern bool ss_check_existclusterdir(const char* path);
 extern bool ss_check_shareddir(char* path);
 extern void ss_createdir(const char** ss_dirs, int32 num, int32 node_id, const char* pg_data, const char* vgdata_dir, const char* vglog_dir);

@@ -67,9 +67,10 @@
 
 #define SS_IN_FLUSHCOPY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == true)
 
-#define SS_STANDBY_FAILOVER ((g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING) \
-    && (g_instance.dms_cxt.SSReformerControl.primaryInstId != SS_MY_INST_ID) \
-    && SS_REFORM_REFORMER)
+#define SS_STANDBY_FAILOVER (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING)
+
+#define SS_PRIMARY_NORMAL_REFORM \
+    (SS_REFORM_REFORMER && (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS))
 
 #define SS_PERFORMING_SWITCHOVER \
     (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState > NODESTATE_NORMAL && \
@@ -89,6 +90,71 @@
     (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_WAITING || \
     g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_REDIRECT))
 
+/* Mode in dorado hyperreplication and dms enabled as follow */
+
+/* main standby in standby cluster */
+#define SS_STANDBY_CLUSTER_MAIN_STANDBY                                    \
+    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* standby mode in primary or standby cluster */
+#define SS_PRIMARY_STANDBY_CLUSTER_STANDBY                                    \
+    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == NORMAL_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  NORMAL_MODE) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* standby mode in primary cluster */
+#define SS_PRIMARY_CLUSTER_STANDBY                                    \
+    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == NORMAL_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  NORMAL_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* arbitrary mode when dorado hyperreplication and dms enabled */
+#define SS_PRIMARY_STANDBY_CLUSTER_NORMAL                                   \
+    (ENABLE_DMS && ((g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) || \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY)) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* primary mode in primary cluster, after reform done and primary id has been determined */
+#define SS_PRIMARY_CLUSTER_NORMAL_PRIMARY                                    \
+    (SS_NORMAL_PRIMARY && (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  PRIMARY_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* main standby in standby cluster, after reform done and primary id has been determined */
+#define SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY                                    \
+    (SS_NORMAL_PRIMARY && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* standby mode in standby cluster, after reform done and primary id has been determined */
+#define SS_STANDBY_CLUSTER_NORMAL_STANDBY                                    \
+    (SS_NORMAL_STANDBY && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
+    t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
+    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
+    (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+/* standby mode in primary or standby, after reform done and primary id has been determined */
+#define SS_PRIMARY_STANDBY_CLUSTER_NORMAL_STANDBY                                    \
+    (SS_NORMAL_STANDBY && (g_instance.attr.attr_storage.xlog_file_path != 0))
+
+#define SS_CLUSTER_ONDEMAND_NOT_NORAML \
+    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus != CLUSTER_NORMAL))
+#define SS_CLUSTER_ONDEMAND_BUILD \
+    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_IN_ONDEMAND_BUILD))
+#define SS_CLUSTER_ONDEMAND_RECOVERY \
+    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_IN_ONDEMAND_RECOVERY))
+#define SS_CLUSTER_ONDEMAND_NORMAL \
+    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_NORMAL))
+#define SS_STANDBY_ONDEMAND_BUILD (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_BUILD)
+#define SS_STANDBY_ONDEMAND_RECOVERY (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_RECOVERY)
+#define SS_STANDBY_ONDEMAND_NORMAL (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_NORMAL)
+
 /* DMS_BUF_NEED_LOAD */
 #define BUF_NEED_LOAD           0x1
 /* DMS_BUF_IS_LOADED */
@@ -106,8 +172,6 @@
 #define BUF_READ_MODE_ZERO_LOCK    0x80
 #define BUF_DIRTY_NEED_FLUSH    0x100
 #define BUF_ERTO_NEED_MARK_DIRTY    0x200
-/* mark buffer whether is being released in DMS DRC */
-#define BUF_BEING_RELEASED      0x400
 
 #define SS_BROADCAST_FAILED_RETRYCOUNTS 4
 #define SS_BROADCAST_WAIT_INFINITE (0xFFFFFFFF)
@@ -157,6 +221,19 @@ typedef enum SSReformType {
     DMS_REFORM_TYPE_FOR_FULL_CLEAN,
     DMS_REFORM_TYPE_FOR_MAINTAIN
 } SSReformType;
+
+typedef enum SSGlobalClusterState {
+    CLUSTER_IN_ONDEMAND_BUILD = 0,
+    CLUSTER_IN_ONDEMAND_RECOVERY,
+    CLUSTER_NORMAL
+} SSGlobalClusterState;
+
+typedef enum SSOndemandRequestRedoStatus {
+    ONDEMAND_REDO_DONE = 0,
+    ONDEMAND_REDO_SKIP,
+    ONDEMAND_REDO_FAIL,
+    ONDEMAND_REDO_INVALID
+} SSOndemandRequestRedoStatus;
 
 
 #endif

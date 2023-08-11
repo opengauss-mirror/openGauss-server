@@ -5,6 +5,7 @@ list(APPEND TGT_transam_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/clog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/csnlog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/double_write.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/extreme_rto_redo_api.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/single_double_write.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/multi_redo_api.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/multi_redo_settings.cpp
@@ -51,10 +52,12 @@ add_static_objtarget(gausskernel_storage_access_transam TGT_transam_SRC TGT_tran
 set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel_recovery
     ${CMAKE_CURRENT_SOURCE_DIR}/extreme_rto
+    ${CMAKE_CURRENT_SOURCE_DIR}/ondemand_extreme_rto
 )
 
 add_subdirectory(parallel_recovery)
 add_subdirectory(extreme_rto)
+add_subdirectory(ondemand_extreme_rto)
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/recovery.conf.sample
     DESTINATION share/postgresql/

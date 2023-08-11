@@ -23,8 +23,8 @@
  * ---------------------------------------------------------------------------------------
  */
 
-#ifndef BATCH_REDO_H
-#define BATCH_REDO_H
+#ifndef EXTREME_RTO_BATCH_REDO_H
+#define EXTREME_RTO_BATCH_REDO_H
 
 #include "c.h"
 #include "storage/buf/block.h"
@@ -69,4 +69,4 @@ extern  void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoIt
 extern void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
 
 }  // namespace extreme_rto
-#endif /* BATCH_REDO_H */
+#endif /* EXTREME_RTO_BATCH_REDO_H */

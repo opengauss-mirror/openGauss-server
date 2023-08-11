@@ -57,9 +57,10 @@ typedef struct st_ss_dms_func {
     void (*dms_get_event)(dms_wait_event_t event_type, unsigned long long *event_cnt, unsigned long long *event_time);
     int (*dms_buf_res_rebuild_drc)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
                                    unsigned char is_dirty);
+    int (*dms_buf_res_rebuild_drc_parallel)(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index,
+                                            unsigned char for_rebuild, unsigned char can_release, unsigned char *release);
     int (*dms_is_recovery_session)(unsigned int sid);
     int (*drc_get_page_master_id)(char pageid[DMS_PAGEID_SIZE], unsigned char *master_id);
-    int (*dms_release_page_batch)(dms_context_t *dms_ctx, dcs_batch_buf_t *owner_map, unsigned int *owner_count);
     int (*dms_register_ssl_decrypt_pwd)(dms_decrypt_pwd_t cb_func);
     int (*dms_set_ssl_param)(const char *param_name, const char *param_value);
     int (*dms_get_ssl_param)(const char *param_name, char *param_value, unsigned int size);
@@ -79,6 +80,9 @@ typedef struct st_ss_dms_func {
     void (*dms_refresh_logger)(char *log_field, unsigned long long *value);
     void (*dms_validate_drc)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
         unsigned char is_dirty);
+    int (*dms_reform_req_opengauss_ondemand_redo_buffer)(dms_context_t *dms_ctx, void *block_key, unsigned int key_len,
+        int *redo_status);
+    unsigned int (*dms_get_mes_max_watting_rooms)(void);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -103,9 +107,10 @@ int dms_wait_reform(unsigned int *has_offline);
 void dms_get_event(dms_wait_event_t event_type, unsigned long long *event_cnt, unsigned long long *event_time);
 int dms_buf_res_rebuild_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
                             unsigned char is_dirty);
+int dms_buf_res_rebuild_drc_parallel(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index,
+                                    unsigned char for_rebuild, unsigned char can_release, unsigned char *release);
 int dms_is_recovery_session(unsigned int sid);
 int drc_get_page_master_id(char pageid[DMS_PAGEID_SIZE], unsigned char *master_id);
-int dms_release_page_batch(dms_context_t *dms_ctx, dcs_batch_buf_t *owner_map, unsigned int *owner_count);
 int dms_register_ssl_decrypt_pwd(dms_decrypt_pwd_t cb_func);
 int dms_set_ssl_param(const char *param_name, const char *param_value);
 int dms_get_ssl_param(const char *param_name, char *param_value, unsigned int size);
@@ -121,6 +126,9 @@ bool dms_latch_timed_s(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned i
 void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
 void dms_pre_uninit(void);
 void dms_validate_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn, unsigned char is_dirty);
+int dms_reform_req_opengauss_ondemand_redo_buffer(dms_context_t *dms_ctx, void *block_key, unsigned int key_len,
+                                                  int *redo_status);
+unsigned int dms_get_mes_max_watting_rooms(void);
 #ifdef __cplusplus
 }
 #endif

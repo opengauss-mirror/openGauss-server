@@ -30,7 +30,6 @@
 #include "access/xlogproc.h"
 #include "access/multi_redo_api.h"
 #include "access/parallel_recovery/dispatcher.h"
-#include "access/extreme_rto/page_redo.h"
 #include "catalog/catalog.h"
 #include "catalog/storage_xlog.h"
 #include "miscadmin.h"
@@ -514,6 +513,10 @@ static void CollectInvalidPagesStates(uint32 *nstates_ptr, InvalidPagesState ***
 /* Complain about any remaining invalid-page entries */
 void XLogCheckInvalidPages(void)
 {
+    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_RECOVERY_DONE) {
+        return;
+    }
+
     bool foundone = false;
     if (t_thrd.xlog_cxt.forceFinishHappened) {
         ereport(WARNING,
@@ -672,7 +675,7 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
         if (pageisvalid) {
             if (readmethod != WITH_LOCAL_CACHE) {
                 if (mode != RBM_ZERO_AND_LOCK && mode != RBM_ZERO_AND_CLEANUP_LOCK) {
-                    if (ENABLE_DMS)
+                    if (ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY)
                         LockBuffer(buf, BUFFER_LOCK_SHARE);
                     else if (get_cleanup_lock)
                         LockBufferForCleanup(buf);
@@ -699,7 +702,7 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
             return BLK_DONE;
         } else {
             if (readmethod != WITH_LOCAL_CACHE && mode != RBM_ZERO_AND_LOCK && mode != RBM_ZERO_AND_CLEANUP_LOCK &&
-                ENABLE_DMS) {
+                ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY) {
                 Assert(!CheckPageNeedSkipInRecovery(buf));
                 LockBuffer(buf, BUFFER_LOCK_UNLOCK);
                 if (get_cleanup_lock) {
@@ -1438,7 +1441,7 @@ void XLogDropRelation(const RelFileNode &rnode, ForkNumber forknum)
 
     /* clear relfilenode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
-        extreme_rto::ClearRecoveryThreadHashTbl(rnode, forknum, 0, false);
+        ExtremeClearRecoveryThreadHashTbl(rnode, forknum, 0, false);
     } else {
         parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forknum, 0, false);
     }
@@ -1513,7 +1516,7 @@ void XLogDropDatabase(Oid dbid)
 
     /* clear dbNode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
-        extreme_rto::BatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
+        ExtremeBatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
     } else {
         parallel_recovery::BatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
     }
@@ -1532,7 +1535,7 @@ void XLogDropSegmentSpace(Oid spcNode, Oid dbNode)
 
     /* clear spcNode and dbNode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
-        extreme_rto::BatchClearRecoveryThreadHashTbl(spcNode, dbNode);
+        ExtremeBatchClearRecoveryThreadHashTbl(spcNode, dbNode);
     } else {
         parallel_recovery::BatchClearRecoveryThreadHashTbl(spcNode, dbNode);
     }
@@ -1554,7 +1557,7 @@ void XLogTruncateRelation(RelFileNode rnode, ForkNumber forkNum, BlockNumber nbl
     /* clear relfilenode match entry of recovery thread hashtbl */
     if (g_instance.pid_cxt.PageRepairPID != 0) {
         if (IsExtremeRedo()) {
-            extreme_rto::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
+            ExtremeClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
         } else {
             parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
         }
@@ -1570,7 +1573,7 @@ void XLogTruncateSegmentSpace(RelFileNode rnode, ForkNumber forkNum, BlockNumber
     /* clear relfilenode match entry of recovery thread hashtbl */
     if (g_instance.pid_cxt.PageRepairPID != 0) {
         if (IsExtremeRedo()) {
-            extreme_rto::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
+            ExtremeClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
         } else {
             parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
         }

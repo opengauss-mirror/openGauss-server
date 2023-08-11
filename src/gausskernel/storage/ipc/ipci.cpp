@@ -30,6 +30,7 @@
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/ustore/knl_undoworker.h"
 #include "access/ustore/knl_undorequest.h"
+#include "access/ondemand_extreme_rto/redo_utils.h"
 #include "commands/tablespace.h"
 #include "commands/async.h"
 #include "commands/matview.h"
@@ -195,6 +196,10 @@ Size ComputeTotalSizeOfShmem()
 
         /* csf shrinker backend shared memory */
         size = add_size(size, CfsShrinkerShmemSize());
+
+        if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {
+            size = add_size(size, OndemandRecoveryShmemSize());
+        }
         return size;
 }
 
@@ -443,6 +448,10 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     PageRepairHashTblInit();
     FileRepairHashTblInit();
     initRepairBadBlockStat();
+
+    if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {
+        OndemandRecoveryShmemInit();
+    }
 
     if (g_instance.ckpt_cxt_ctl->prune_queue_lock == NULL) {
         g_instance.ckpt_cxt_ctl->prune_queue_lock = LWLockAssign(LWTRANCHE_PRUNE_DIRTY_QUEUE);

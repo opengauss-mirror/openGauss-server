@@ -128,6 +128,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* Number of partions of the segment head buffer */
 #define NUM_SEGMENT_HEAD_PARTITIONS 128
 
+/* Number of partitions of the redo xlog track mapping hashtable */
+#define NUM_XLOG_TRACK_PARTITIONS 4096
+
 /* Number of partions the session roleid hashtable */
 #define NUM_SESSION_ROLEID_PARTITIONS 128
 
@@ -190,8 +193,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define FirstGPRCMappingLock (FirstSessRoleIdLock + NUM_SESSION_ROLEID_PARTITIONS)
 /* standby statement history */
 #define FirstStandbyStmtHistLock (FirstGPRCMappingLock + NUM_GPRC_PARTITIONS)
+#define FirstXlogTrackLock (FirstStandbyStmtHistLock + NUM_STANDBY_STMTHIST_PARTITIONS)
 /* must be last: */
-#define NumFixedLWLocks (FirstStandbyStmtHistLock + NUM_STANDBY_STMTHIST_PARTITIONS)
+#define NumFixedLWLocks (FirstXlogTrackLock + NUM_XLOG_TRACK_PARTITIONS)
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
  *
@@ -270,6 +274,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_REPLICATION_ORIGIN,
     LWTRANCHE_AUDIT_INDEX_WAIT,
     LWTRANCHE_PCA_BUFFER_CONTENT,
+    LWTRANCHE_XLOG_TRACK_PARTITION,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

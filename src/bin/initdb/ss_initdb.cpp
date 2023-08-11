@@ -48,7 +48,8 @@ static const char* ss_clusterdirs[] = {"+global",
                                        "+pg_multixact/members",
                                        "+pg_multixact/offsets",
                                        "+pg_twophase",
-                                       "+pg_serial"};
+                                       "+pg_serial",
+                                       "+pg_replslot"};
 
 static const char* ss_instancedirs[] = {"+pg_xlog",
                                         "+pg_doublewrite"
@@ -60,7 +61,6 @@ static const char* ss_instanceowndirs[] = {"base",
                                            "pg_xlog",
                                            "pg_xlog/archive_status",
                                            "undo",
-                                           "pg_replslot",
                                            "pg_stat_tmp",
                                            "pg_errorinfo",
                                            "pg_logical",
@@ -146,14 +146,20 @@ void pg_ltoa(int32 value, char *a)
 }
 
 /* check dms url when gs_initdb */
-bool ss_check_nodedatainfo()
-{
+bool ss_check_nodedatainfo(bool enable_dss)
+{   
     bool issharedstorage = false;
 
-    if ((ss_nodeid == INVALID_INSTANCEID && ss_nodedatainfo != NULL) ||
-        (ss_nodeid != INVALID_INSTANCEID && ss_nodedatainfo == NULL)) {
-        issharedstorage = false;
-        fprintf(stderr, _("ss_nodeid is invalid or nodedatainfo file not exist or nodedatainfo file is empty.\n"));
+    if (!enable_dss) {
+        if (ss_nodeid != INVALID_INSTANCEID || ss_nodedatainfo != NULL) {
+            fprintf(stderr, _("ss_nodeid is valid or nodedatainfo exist without enable-dss.\n"));
+            exit(1);
+        }
+        return issharedstorage;   
+    }
+
+    if ((ss_nodeid == INVALID_INSTANCEID || ss_nodedatainfo == NULL)) {
+        fprintf(stderr, _("ss_nodeid is invalid or nodedatainfo not exist or nodedatainfo is empty with enable-dss.\n"));
         exit(1);
     }
 

@@ -28,6 +28,7 @@
 #include "storage/smgr/segment.h"
 #include "utils/resowner.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
+#include "ddes/dms/ss_reform_common.h"
 #include "securec_check.h"
 #include "miscadmin.h"
 #include "access/double_write.h"
@@ -153,41 +154,10 @@ void MarkReadHint(int buf_id, char persistence, bool extend, const XLogPhyBlock 
 void ClearReadHint(int buf_id, bool buf_deleted)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
-
-    if (buf_ctrl->state & BUF_BEING_RELEASED) {
-        BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
-        RelFileNode rnode = buf_desc->tag.rnode;
-        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d marked as NOT being" 
-            " released during release owner, old_val:%u", rnode.spcNode, rnode.dbNode, rnode.relNode,
-            rnode.bucketNode, rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-            buf_desc->buf_id, BUF_BEING_RELEASED)));
-    }
-
     buf_ctrl->state &=
-        ~(BUF_NEED_LOAD | BUF_IS_LOADED | BUF_LOAD_FAILED | BUF_NEED_TRANSFER | BUF_IS_EXTEND |
-        BUF_DIRTY_NEED_FLUSH | BUF_BEING_RELEASED);
+        ~(BUF_NEED_LOAD | BUF_IS_LOADED | BUF_LOAD_FAILED | BUF_NEED_TRANSFER | BUF_IS_EXTEND | BUF_DIRTY_NEED_FLUSH);
     if (buf_deleted) {
         buf_ctrl->state = 0;
-    }
-}
-
-/* this function should be called inside header lock */
-void MarkDmsBufBeingReleased(BufferDesc *buf_desc, bool set)
-{
-    RelFileNode rnode = buf_desc->tag.rnode;
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    unsigned int old_val = buf_ctrl->state & BUF_BEING_RELEASED;
-    if (set) {
-        buf_ctrl->state |= BUF_BEING_RELEASED;
-        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d marked as being released during"
-            " release owner, old_val:%u", rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode,
-            rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum, buf_desc->buf_id, old_val)));
-    } else if (!set && old_val) {
-        buf_ctrl->state &= ~BUF_BEING_RELEASED;
-        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d marked as NOT being"
-            " released during release owner, old_val:%u", rnode.spcNode, rnode.dbNode, rnode.relNode,
-            rnode.bucketNode, rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-            buf_desc->buf_id, old_val)));
     }
 }
 
@@ -200,14 +170,6 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     dms_lock_mode_t req_mode = (mode == LW_SHARED) ? DMS_LOCK_SHARE : DMS_LOCK_EXCLUSIVE;
-    RelFileNode rnode = buf_desc->tag.rnode;
-
-    if (buf_ctrl->state & BUF_BEING_RELEASED) {
-        ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] buffer is being released in dms_release_owner",
-                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
-        return false;
-    }
 
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
@@ -283,7 +245,7 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
         if ((lsn_on_mem != InvalidXLogRecPtr) && (lsn_on_disk > lsn_on_mem)) {
             RelFileNode rnode = buf_desc->tag.rnode;
             int elevel = WARNING;
-            if (!RecoveryInProgress()) {
+            if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY) {
                 elevel = PANIC;
             }
             ereport(elevel, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
@@ -311,6 +273,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
             ereport(PANIC, (errmsg("extend page should not be tranferred from DMS, "
                 "and needs to be loaded from disk!")));
         }
+        if (buf_ctrl->been_loaded == false) {
+            ereport(PANIC, (errmsg("ctrl not marked loaded before transferring from remote")));
+        }
 #endif
 
         Block bufBlock = BufHdrGetBlock(buf_desc);
@@ -327,6 +292,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
             CalcSegDmsPhysicalLoc(buf_desc, buffer, !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy);
         }
     }
+    if (BufferIsValid(buffer)) {
+        buf_ctrl->been_loaded = true;
+    }
 
     if ((read_mode == RBM_ZERO_AND_LOCK || read_mode == RBM_ZERO_AND_CLEANUP_LOCK) &&
         !LWLockHeldByMe(buf_desc->content_lock)) {
@@ -335,6 +303,15 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
     ClearReadHint(buf_desc->buf_id);
     TerminateBufferIO(buf_desc, false, BM_VALID);
+
+    /*
+     * we need redo items to get lastest page in ondemand recovery
+     */
+    if (t_thrd.role != PAGEREDO && SS_ONDEMAND_BUILD_DONE && SS_PRIMARY_MODE &&
+        !LWLockHeldByMe(buf_desc->content_lock)) {
+        buf_desc = RedoForOndemandExtremeRTOQuery(buf_desc, RELPERSISTENCE_PERMANENT, buf_desc->tag.forkNum,
+            buf_desc->tag.blockNum, read_mode);
+    }
     return buffer;
 }
 
@@ -433,6 +410,9 @@ Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
         SegTerminateBufferIO(buf_desc, false, BM_VALID);
         buffer = BufferDescriptorGetBuffer(buf_desc);
     }
+    if (!BufferIsInvalid(buffer)) {
+        buf_ctrl->been_loaded = true;
+    }
 
     if ((read_mode == RBM_ZERO_AND_LOCK || read_mode == RBM_ZERO_AND_CLEANUP_LOCK) &&
         !LWLockHeldByMe(buf_desc->content_lock)) {
@@ -502,21 +482,73 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
         return buffer;
     }
 
+    // standby node must notify primary node for prepare lastest page in ondemand recovery
+    if (SS_STANDBY_ONDEMAND_RECOVERY) {
+        while (!SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
+            SSReadControlFile(REFORM_CTRL_PAGE);
+            if (SS_STANDBY_ONDEMAND_NORMAL) {
+                break; // ondemand recovery finish, skip
+            } else if (SS_STANDBY_ONDEMAND_BUILD) {
+                return 0; // in new reform
+            }
+            // still need requset page
+        }
+    }
+
     if (!StartReadPage(buf_desc, mode)) {
         return 0;
     }
     return TerminateReadPage(buf_desc, read_mode, OidIsValid(buf_ctrl->pblk_relno) ? &pblk : NULL);
 }
 
-bool DmsReleaseOwner(BufferTag buf_tag, int buf_id, unsigned char* released)
+bool SSOndemandRequestPrimaryRedo(BufferTag tag)
+{
+    dms_context_t dms_ctx;
+    int32 redo_status = ONDEMAND_REDO_INVALID;
+
+    if (!SS_STANDBY_ONDEMAND_RECOVERY) {
+        return true;
+    }
+
+    ereport(DEBUG1,
+        (errmodule(MOD_DMS),
+            errmsg("[On-demand] start request primary node redo page, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
+                tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum,
+                tag.blockNum)));
+    InitDmsContext(&dms_ctx);
+    dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
+    if (dms_reform_req_opengauss_ondemand_redo_buffer(&dms_ctx, &tag,
+        (unsigned int)sizeof(BufferTag), &redo_status) != DMS_SUCCESS) {
+        ereport(LOG,
+            (errmodule(MOD_DMS),
+                errmsg("[on-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
+                    "redo statu %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
+                    (int)tag.rnode.opt, tag.forkNum, tag.blockNum, redo_status)));
+        return false;
+    }
+    ereport(DEBUG1,
+        (errmodule(MOD_DMS),
+            errmsg("[On-demand] end request primary node redo page, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, "
+                "redo status %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, tag.rnode.bucketNode,
+                tag.forkNum, tag.blockNum, redo_status)));
+
+    if (redo_status != ONDEMAND_REDO_DONE) {
+        SSReadControlFile(REFORM_CTRL_PAGE);
+    }
+    return true;
+}
+
+bool DmsReleaseOwner(BufferTag buf_tag, int buf_id)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
     if (buf_ctrl->state & BUF_IS_RELPERSISTENT_TEMP) {
         return true;
     }
+    unsigned char released = 0;
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_tag);
-    return (dms_release_owner(&dms_ctx, buf_ctrl, released) == DMS_SUCCESS);
+
+    return ((dms_release_owner(&dms_ctx, buf_ctrl, &released) == DMS_SUCCESS) && (released != 0));
 }
 
 void BufValidateDrc(BufferDesc *buf_desc)
@@ -531,33 +563,6 @@ void BufValidateDrc(BufferDesc *buf_desc)
     unsigned long long lsn = (unsigned long long)BufferGetLSN(buf_desc);
     bool is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;
     dms_validate_drc(&dms_ctx, buf_ctrl, lsn, (unsigned char)is_dirty);
-}
-
-int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
-{
-#ifdef USE_ASSERT_CHECKING
-    if (IsSegmentPhysicalRelNode(buf_desc->tag.rnode)) {
-        SegNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
-    } else {
-        SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
-    }
-#endif
-
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    Assert(buf_ctrl != NULL);
-    Assert(buf_ctrl->is_edp != 1);
-    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
-    dms_context_t dms_ctx;
-    InitDmsBufContext(&dms_ctx, buf_desc->tag);
-    bool is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;
-    int ret = dms_buf_res_rebuild_drc(&dms_ctx, buf_ctrl, (unsigned long long)BufferGetLSN(buf_desc), is_dirty);
-    if (ret != DMS_SUCCESS) {
-        ereport(LOG, (errmsg("Failed to rebuild page, rel:%u/%u/%u/%d, forknum:%d, blocknum:%u.",
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-            buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
-        return ret;
-    }
-    return DMS_SUCCESS;
 }
 
 int SSLockAcquire(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock, bool dontWait,
@@ -729,8 +734,18 @@ bool CheckPageNeedSkipInRecovery(Buffer buf)
 dms_session_e DMSGetProcType4RequestPage()
 {
     // proc type used in DMS request page
-    if (AmDmsReformProcProcess() || AmPageRedoProcess() || AmStartupProcess()) {
-        return DMS_SESSION_RECOVER;
+    if (AmDmsReformProcProcess() || (AmPageRedoProcess() && !SS_ONDEMAND_BUILD_DONE) ||
+        (AmStartupProcess() && !SS_ONDEMAND_BUILD_DONE)) {
+        /* When xlog_file_path is not null and enable_dms is set on, main standby always is in recovery.
+         * When pmState is PM_HOT_STANDBY, this case indicates main standby support to read only. So here
+         * DMS_SESSION_RECOVER_HOT_STANDBY will be returned, it indicates that normal threads can access
+         * page in recovery state.
+         */
+        if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
+            return DMS_SESSION_RECOVER_HOT_STANDBY; 
+        } else {
+            return DMS_SESSION_RECOVER;   
+        }
     } else {
         return DMS_SESSION_NORMAL;
     }

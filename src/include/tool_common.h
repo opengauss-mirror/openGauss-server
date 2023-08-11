@@ -105,8 +105,24 @@ typedef struct st_datadir_t {
     dw_subdatadir_t dwDir;
 } datadir_t;
 
-void initDataPathStruct(bool enable_dss);
+/* DSS conntct parameters */
+typedef struct DssOptions {
+    bool enable_dss;
+    int instance_id;
+    int primaryInstId;
+    char *vgname;
+    char *vglog;
+    char *vgdata;
+    char *socketpath;
+} DssOptions;
 
+typedef struct SSInstanceConfig {
+    DssOptions dss;
+} SSInstanceConfig;
+
+extern SSInstanceConfig ss_instance_config;
 extern datadir_t g_datadir;
+
+void initDataPathStruct(bool enable_dss);
 
 #endif

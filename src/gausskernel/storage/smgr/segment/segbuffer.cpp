@@ -344,7 +344,7 @@ void SegMarkBufferDirty(Buffer buf)
 #ifdef USE_ASSERT_CHECKING
 void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, BlockNumber blocknum, char *buf)
 {
-    if (!RecoveryInProgress() && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION) {
+    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION) {
         char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
         char *temp_buf = (char *)BUFFERALIGN(origin_buf);
         seg_physical_read(spc, rNode, forknum, blocknum, temp_buf);
@@ -483,11 +483,8 @@ void ReportInvalidPage(RepairBlockKey key)
 void ReadSegBufferForCheck(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *spc, Block bufBlock)
 {
     if (spc == NULL) {
-        bool found;
-        SegSpcTag tag = {.spcNode = bufHdr->tag.rnode.spcNode, .dbNode = bufHdr->tag.rnode.dbNode};
-        SegmentCheck(t_thrd.storage_cxt.SegSpcCache != NULL);
-        spc = (SegSpace *)hash_search(t_thrd.storage_cxt.SegSpcCache, (void *)&tag, HASH_FIND, &found);
-        SegmentCheck(found);
+        spc = spc_open(bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode, false, false);
+        SegmentCheck(spc != NULL);
     }
 
     seg_physical_read(spc, bufHdr->tag.rnode, bufHdr->tag.forkNum, bufHdr->tag.blockNum, (char *)bufBlock);
@@ -529,8 +526,9 @@ Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
 #endif
     } else {
 #ifdef USE_ASSERT_CHECKING
-        bool need_verify = (!RecoveryInProgress() && ((pg_atomic_read_u32(&bufHdr->state) & BM_VALID) != 0) &&
-            ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION);
+        bool need_verify = (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY &&
+            ((pg_atomic_read_u32(&bufHdr->state) & BM_VALID) != 0) && ENABLE_DSS &&
+            ENABLE_VERIFY_PAGE_VERSION);
         char *past_image = NULL;
         if (need_verify) {
             past_image = (char *)palloc(BLCKSZ);
@@ -624,6 +622,12 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                         SegTerminateBufferIO((BufferDesc *)bufHdr, false, 0);
                         // when reform fail, should return InvalidBuffer to reform proc thread
                         if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                            SSUnPinBuffer(bufHdr);
+                            return InvalidBuffer;
+                        }
+
+                        if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
+                            SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
 
@@ -633,21 +637,9 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                 } else {
                     /*
                     * previous attempts to read the buffer must have failed,
-                    * but DRC has been created, so load page directly again;
-                    * but if previous read attempt has failed but concurrently
-                    * getting released, a contradiction happens and we panic.
+                    * but DRC has been created, so load page directly again
                     */
                     Assert(pg_atomic_read_u32(&bufHdr->state) & BM_IO_ERROR);
-
-                    if (buf_ctrl->state & BUF_BEING_RELEASED) {
-                        ereport(WARNING, (errmodule(MOD_DMS), errmsg(
-                            "[%d/%d/%d/%d/%d %d-%d] buffer:%d is in the process of release owner",
-                            rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                            bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufHdr->buf_id)));
-                        pg_usleep(5000L);
-                        continue;
-                    }
-
                     buf_ctrl->state |= BUF_NEED_LOAD;
                 }
 
@@ -802,7 +794,6 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
             return FoundBufferInHashTable(buf_id, new_partition_lock, foundPtr);
         }
 
-retry_victim:
         buf_state = LockBufHdr(buf);
         old_flags = buf_state & BUF_FLAG_MASK;
 
@@ -813,32 +804,13 @@ retry_victim:
                 * release owner procedure is in buf header lock, it's not reasonable,
                 * need to improve.
                 */
-                unsigned char released = 0;
-                RelFileNode rnode = buf->tag.rnode;
-                bool returned = DmsReleaseOwner(old_tag, buf->buf_id, &released);
-                int retry_times = 0;
-
-                if (returned && released) {
+                if (DmsReleaseOwner(old_tag, buf->buf_id)) {
                     ClearReadHint(buf->buf_id, true);
                     break;
-                } else if (!returned) {
-                    MarkDmsBufBeingReleased(buf, true);
-                    UnlockBufHdr(buf, buf_state);
-                    pg_usleep(1000L);
-                    ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d retry release owner",
-                        rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                        buf->tag.forkNum, buf->tag.blockNum, buf->buf_id, ++retry_times)));
-                    goto retry_victim;
-                } else { /* if returned and !released, we will have to try another victim */
-                    MarkDmsBufBeingReleased(buf, false);
                 }
             } else {
                 break;
             }
-        }
-
-        if (ENABLE_DMS) { /* between two tries of releasing owner, buffer might be dirtied and got skipped */
-            MarkDmsBufBeingReleased(buf, false);
         }
         UnlockBufHdr(buf, buf_state);
         BufTableDelete(&new_tag, new_hash);
@@ -857,6 +829,7 @@ retry_victim:
 
     if (ENABLE_DMS) {
         GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
+        GetDmsBufCtrl(buf->buf_id)->been_loaded = false;
     }
 
     if (old_flag_valid) {

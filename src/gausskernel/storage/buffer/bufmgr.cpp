@@ -84,6 +84,7 @@
 #include "tde_key_management/tde_key_storage.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_common_attr.h"
+#include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_transaction.h"
 
 const int ONE_MILLISECOND = 1;
@@ -703,26 +704,15 @@ static volatile BufferDesc *PageListBufferAlloc(SMgrRelation smgr, char relpersi
          *
          * Need to lock the buffer header to change its tag.
          */
-retry_victim:
         buf_state = LockBufHdr(buf);
 
         /* Everything is fine, the buffer is ours, so break */
         old_flags = buf_state & BUF_FLAG_MASK;
         if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY) && !(old_flags & BM_IS_META)) {
             if (ENABLE_DMS && (old_flags & BM_TAG_VALID)) {
-                unsigned char released = 0;
-                bool returned = DmsReleaseOwner(old_tag, buf->buf_id, &released);
-
-                if (returned && released) {
+                if (DmsReleaseOwner(buf->tag, buf->buf_id)) {
                     ClearReadHint(buf->buf_id, true);
                     break;
-                } else if (!returned) {
-                    MarkDmsBufBeingReleased(buf, true);
-                    UnlockBufHdr(buf, buf_state);
-                    pg_usleep(1000L);
-                    goto retry_victim;
-                } else { /* if returned and !released, we will have to try another victim */
-                    MarkDmsBufBeingReleased(buf, false);
                 }
             } else {
                 break;
@@ -737,9 +727,6 @@ retry_victim:
          * we must undo everything we've done and start
          * over with a new victim buffer.
          */
-        if (ENABLE_DMS) { /* between two tries of releasing owner, buffer might be dirtied and got skipped */
-            MarkDmsBufBeingReleased(buf, false);
-        }
         UnlockBufHdr(buf, buf_state);
         BufTableDelete(&new_tag, new_hash);
         if ((old_flags & BM_TAG_VALID) && old_partition_lock != new_partition_lock) {
@@ -2169,7 +2156,8 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
     Block bufBlock = BufHdrGetBlock(buf_desc);
 
 #ifdef USE_ASSERT_CHECKING
-    bool need_verify = (!RecoveryInProgress() && ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0) && ENABLE_VERIFY_PAGE_VERSION);
+    bool need_verify = (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY &&
+        ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0) && ENABLE_VERIFY_PAGE_VERSION);
     char *past_image = NULL;
     if (need_verify) {
         past_image = (char *)palloc(BLCKSZ);
@@ -2360,8 +2348,11 @@ found_branch:
                     }
                     LockBufferForCleanup(BufferDescriptorGetBuffer(bufHdr));
                 }
+
+                if (t_thrd.role != PAGEREDO && SS_ONDEMAND_BUILD_DONE && SS_PRIMARY_MODE) {
+                    bufHdr = RedoForOndemandExtremeRTOQuery(bufHdr, relpersistence, forkNum, blockNum, mode);
+                }
             }
-            
             return BufferDescriptorGetBuffer(bufHdr);
         }
 
@@ -2423,11 +2414,31 @@ found_branch:
 
     /* DMS: Try get page remote */
     if (ENABLE_DMS) {
+        // standby node must notify primary node for prepare lastest page in ondemand recovery
+        if (SS_STANDBY_ONDEMAND_RECOVERY) {
+            while (!SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
+                SSReadControlFile(REFORM_CTRL_PAGE);
+                if (SS_STANDBY_ONDEMAND_NORMAL) {
+                    break; // ondemand recovery finish, skip
+                } else if (SS_STANDBY_ONDEMAND_BUILD) {
+                    return 0; // in new reform
+                }
+                // still need requset page
+            }
+        }
         MarkReadHint(bufHdr->buf_id, relpersistence, isExtend, pblk);
         if (mode != RBM_FOR_REMOTE && relpersistence != RELPERSISTENCE_TEMP && !isLocalBuf) {
             Assert(!(pg_atomic_read_u32(&bufHdr->state) & BM_VALID));
 
             do {
+                if (!DmsCheckBufAccessible()) {
+                    if(LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
+                        TerminateBufferIO(bufHdr, false, 0);
+                    }
+                    pg_usleep(5000L);
+                    continue;
+                }
+
                 bool startio;
                 if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                     startio = true;
@@ -2448,6 +2459,12 @@ found_branch:
                         TerminateBufferIO(bufHdr, false, 0);
                         // when reform fail, should return InvalidBuffer to reform proc thread
                         if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                            SSUnPinBuffer(bufHdr);
+                            return InvalidBuffer;
+                        }
+
+                        if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
+                            SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
 
@@ -2459,23 +2476,11 @@ found_branch:
                     * 1. previous attempts to read the buffer must have failed,
                     * but DRC has been created, so load page directly again
                     * 2. maybe we have failed previous, and try again in this loop
-                    * 3. if previous read attempt has failed but concurrently getting
-                    * released, a contradiction happens and we panic
                     */
-                    if (buf_ctrl->state & BUF_BEING_RELEASED) {
-                        RelFileNode rnode = bufHdr->tag.rnode;
-                        ereport(WARNING, (errmodule(MOD_DMS), errmsg("[%d/%d/%d/%d/%d %d-%d] previous read"
-                            " attempt has failed but concurrently trying to release owner, contradiction",
-                            rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                            bufHdr->tag.forkNum, bufHdr->tag.blockNum)));
-                        pg_usleep(5000L);
-                        continue;
-                    } else {
-                        buf_ctrl->state |= BUF_NEED_LOAD;
-                    }
+                    buf_ctrl->state |= BUF_NEED_LOAD;
                 }
                 break;
-            } while (true);
+            }while (true);
 
             return TerminateReadPage(bufHdr, mode, pblk);
         }
@@ -2955,7 +2960,6 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
         /*
          * Need to lock the buffer header too in order to change its tag.
          */
-retry_victim:
         buf_state = LockBufHdr(buf);
         /*
          * Somebody could have pinned or re-dirtied the buffer while we were
@@ -2973,34 +2977,15 @@ retry_victim:
                 * release owner procedure is in buf header lock, it's not reasonable,
                 * need to improve.
                 */
-                unsigned char released = 0;
-                RelFileNode rnode = buf->tag.rnode;
-                bool returned = DmsReleaseOwner(old_tag, buf->buf_id, &released);
-                int retry_times = 0;
-
-                if (returned && released) {
+                if (DmsReleaseOwner(old_tag, buf->buf_id)) {
                     ClearReadHint(buf->buf_id, true);
                     break;
-                } else if (!returned) {
-                    MarkDmsBufBeingReleased(buf, true);
-                    UnlockBufHdr(buf, buf_state);
-                    pg_usleep(1000L);
-                    ereport(DEBUG1, (errmodule(MOD_DMS),
-                        errmsg("[%d/%d/%d/%d/%d %d-%d] buf:%d retry release owner",
-                        rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-                        buf->tag.forkNum, buf->tag.blockNum, buf->buf_id, ++retry_times)));
-                    goto retry_victim;
-                } else { /* if returned and !released, we will have to try another victim */
-                    MarkDmsBufBeingReleased(buf, false);
                 }
             } else {
                 break;
             }
         }
 
-        if (ENABLE_DMS) { /* between two tries of releasing owner, buffer might be dirtied and got skipped */
-            MarkDmsBufBeingReleased(buf, false);
-        }
         UnlockBufHdr(buf, buf_state);
         BufTableDelete(&new_tag, new_hash);
         if ((old_flags & BM_TAG_VALID) && old_partition_lock != new_partition_lock) {
@@ -3041,6 +3026,7 @@ retry_victim:
 
     if (ENABLE_DMS) {
         GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
+        GetDmsBufCtrl(buf->buf_id)->been_loaded = false;
     }
 
     if (old_flags & BM_TAG_VALID) {
@@ -3157,9 +3143,7 @@ retry:
     }
 
     if (ENABLE_DMS && (buf_state & BM_TAG_VALID)) {
-        unsigned char released = 0;
-        bool returned = DmsReleaseOwner(old_tag, buf->buf_id, &released);
-        if (!(returned && released)) {
+        if (!DmsReleaseOwner(buf->tag, buf->buf_id)) {
             UnlockBufHdr(buf, buf_state);
             LWLockRelease(old_partition_lock);
             pg_usleep(5000);
@@ -5946,6 +5930,15 @@ retry:
             
             LWLockRelease(buf->content_lock);
 
+            if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                t_thrd.dms_cxt.flush_copy_get_page_failed = true;
+                return;
+            }
+
+            if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
+                g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request = true;
+            }
+
             dms_retry_times++;
             pg_usleep(SSGetBufSleepTime(dms_retry_times));
             goto retry;
@@ -6050,6 +6043,10 @@ retry:
                 }
             }
             LWLockRelease(buf->content_lock);
+
+            if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
+                g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request = true;
+            }
 
             dms_retry_times++;
             pg_usleep(SSGetBufSleepTime(dms_retry_times));

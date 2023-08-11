@@ -180,8 +180,9 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSReformInfo.in_reform = false;
     dms_cxt->SSReformInfo.dms_role = DMS_ROLE_UNKNOW;
     dms_cxt->SSClusterState = NODESTATE_NORMAL;
+    dms_cxt->SSRecoveryInfo.recovery_inst_id = INVALID_INSTANCEID;
     dms_cxt->SSRecoveryInfo.recovery_pause_flag = true;
-    dms_cxt->SSRecoveryInfo.failover_triggered = false;
+    dms_cxt->SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
     dms_cxt->SSRecoveryInfo.new_primary_reset_walbuf_flag = false;
     dms_cxt->SSRecoveryInfo.ready_to_startup = false;
     dms_cxt->SSRecoveryInfo.startup_reform = true;
@@ -190,6 +191,10 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.in_failover = false;
     dms_cxt->SSRecoveryInfo.in_flushcopy = false;
     dms_cxt->SSRecoveryInfo.no_backend_left = false;
+    dms_cxt->SSRecoveryInfo.in_ondemand_recovery = false;
+    dms_cxt->SSRecoveryInfo.startup_need_exit_normally = false;
+    dms_cxt->SSRecoveryInfo.recovery_trapped_in_page_request = false;
+    dms_cxt->SSRecoveryInfo.dorado_sharestorage_inited = false;
     dms_cxt->log_timezone = NULL;
     pg_atomic_init_u32(&dms_cxt->inDmsThreShmemInitCnt, 0);
     pg_atomic_init_u32(&dms_cxt->inProcExitCnt, 0);
@@ -299,6 +304,8 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
 
     rc = memset_s(&predo_cxt->redoCpuBindcontrl, sizeof(RedoCpuBindControl), 0, sizeof(RedoCpuBindControl));
     securec_check(rc, "", "");
+
+    predo_cxt->redoItemHash = NULL;
 }
 
 static void knl_g_parallel_decode_init(knl_g_parallel_decode_context* pdecode_cxt)
