@@ -310,7 +310,7 @@ struct PGPROC;
 
 typedef struct LWLock {
     uint16      tranche;            /* tranche ID */
-    pg_atomic_uint32 state; /* state of exlusive/nonexclusive lockers */
+    pg_atomic_uint64 state; /* state of exlusive/nonexclusive lockers */
     dlist_head waiters;     /* list of waiting PGPROCs */
 #ifdef LOCK_DEBUG
     pg_atomic_uint32 nwaiters; /* number of waiters */
