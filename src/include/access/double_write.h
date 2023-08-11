@@ -147,12 +147,12 @@ const uint16 DW_FIRST_DATA_PAGE_NUM = (32768 - DW_SECOND_DATA_PAGE_NUM - DW_SECO
 const uint16 DW_SECOND_BUFTAG_START_IDX = 1 + DW_FIRST_DATA_PAGE_NUM + 1; /* two head */
 const uint16 DW_SECOND_DATA_START_IDX = DW_SECOND_BUFTAG_START_IDX + DW_SECOND_BUFTAG_PAGE_NUM;
 
-inline bool dw_buf_valid_dirty(uint32 buf_state)
+inline bool dw_buf_valid_dirty(uint64 buf_state)
 {
     return ((buf_state & (BM_VALID | BM_DIRTY)) == (BM_VALID | BM_DIRTY));
 }
 
-inline bool dw_buf_ckpt_needed(uint32 buf_state)
+inline bool dw_buf_ckpt_needed(uint64 buf_state)
 {
     return ((buf_state & (BM_VALID | BM_DIRTY | BM_CHECKPOINT_NEEDED)) == (BM_VALID | BM_DIRTY | BM_CHECKPOINT_NEEDED));
 }

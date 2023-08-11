@@ -321,9 +321,9 @@ extern bool HoldingBufferPinThatDelaysRecovery(void);
 extern void AsyncUnpinBuffer(volatile void* bufHdr, bool forgetBuffer);
 extern void AsyncCompltrPinBuffer(volatile void* bufHdr);
 extern void AsyncCompltrUnpinBuffer(volatile void* bufHdr);
-extern void TerminateBufferIO(volatile BufferDesc* buf, bool clear_dirty, uint32 set_flag_bits);
+extern void TerminateBufferIO(volatile BufferDesc* buf, bool clear_dirty, uint64 set_flag_bits);
 
-extern void AsyncTerminateBufferIO(void* bufHdr, bool clear_dirty, uint32 set_flag_bits);
+extern void AsyncTerminateBufferIO(void* bufHdr, bool clear_dirty, uint64 set_flag_bits);
 extern void AsyncAbortBufferIO(void* buf, bool isForInput);
 extern void AsyncTerminateBufferIOByVacuum(void* buffer);
 extern void AsyncAbortBufferIOByVacuum(void* buffer);

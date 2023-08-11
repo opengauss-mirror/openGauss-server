@@ -71,7 +71,7 @@ const int MAX_RETRY_TIMES = 1000;
 const float NEED_DELAY_RETRY_GET_BUF = 0.8;
 
 /* Prototypes for internal functions */
-static BufferDesc* GetBufferFromRing(BufferAccessStrategy strategy, uint32* buf_state);
+static BufferDesc* GetBufferFromRing(BufferAccessStrategy strategy, uint64* buf_state);
 static void AddBufferToRing(BufferAccessStrategy strategy, volatile BufferDesc* buf);
 void PageListBackWrite(uint32* bufList, int32 n,
     /* buffer list, bufs to scan, */
@@ -79,7 +79,7 @@ void PageListBackWrite(uint32* bufList, int32 n,
     SMgrRelation use_smgrReln = NULL, /* opt relation */
     int32* bufs_written = NULL,       /* opt written count returned */
     int32* bufs_reusable = NULL);     /* opt reusable count returned */
-static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, uint32* buf_state);
+static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, uint64* buf_state);
 
 static void perform_delay(StrategyDelayStatus *status)
 {
@@ -177,12 +177,12 @@ static inline uint32 ClockSweepTick(int max_nbuffer_can_use)
  *  If the fraction is too small, we will increase dynamiclly to avoid elog(ERROR)
  *  in `Startup' process because of ERROR will promote to FATAL.
  */
-BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint32* buf_state)
+BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint64* buf_state)
 {
     BufferDesc *buf = NULL;
     int bgwproc_no;
     int try_counter;
-    uint32 local_buf_state = 0; /* to avoid repeated (de-)referencing */
+    uint64 local_buf_state = 0; /* to avoid repeated (de-)referencing */
     int max_buffer_can_use;
     bool am_standby = RecoveryInProgress();
     StrategyDelayStatus retry_lock_status = { 0, 0 };
@@ -306,8 +306,8 @@ retry:
                     Min(u_sess->attr.attr_storage.shared_buffers_fraction + 0.1, 1.0);
                 goto retry;
             } else if (dw_page_writer_running()) {
-                ereport(LOG, (errmsg("double writer is on, no buffer available, this buffer dirty is %u, "
-                                     "this buffer refcount is %u, now dirty page num is %ld",
+                ereport(LOG, (errmsg("double writer is on, no buffer available, this buffer dirty is %lu, "
+                                     "this buffer refcount is %lu, now dirty page num is %ld",
                                      (local_buf_state & BM_DIRTY), BUF_STATE_GET_REFCOUNT(local_buf_state),
                                      get_dirty_page_num())));
                 perform_delay(&retry_buf_status);
@@ -541,11 +541,11 @@ const float MAX_RETRY_RING_PCT = 0.1;
  *
  * The bufhdr spin lock is held on the returned buffer.
  */
-static BufferDesc *GetBufferFromRing(BufferAccessStrategy strategy, uint32 *buf_state)
+static BufferDesc *GetBufferFromRing(BufferAccessStrategy strategy, uint64 *buf_state)
 {
     BufferDesc *buf = NULL;
     Buffer buf_num;
-    uint32 local_buf_state; /* to avoid repeated (de-)referencing */
+    uint64 local_buf_state; /* to avoid repeated (de-)referencing */
     uint16 retry_times = 0;
 
 RETRY:
@@ -605,7 +605,7 @@ RETRY:
      * shouldn't re-use it.
      */
     buf = GetBufferDescriptor(buf_num - 1);
-    if (pg_atomic_read_u32(&buf->state) & (BM_DIRTY | BM_IS_META)) {
+    if (pg_atomic_read_u64(&buf->state) & (BM_DIRTY | BM_IS_META)) {
         if (retry_times < Min(MAX_RETRY_RING_TIMES, strategy->ring_size * MAX_RETRY_RING_PCT)) {
             goto RETRY;
         } else if (get_curr_candidate_nums(false) >= (uint32)g_instance.attr.attr_storage.NBuffers *
@@ -705,10 +705,10 @@ void wakeup_pagewriter_thread()
 
 const int CANDIDATE_DIRTY_LIST_LEN = 100;
 const float HIGH_WATER = 0.75;
-static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, uint32* buf_state)
+static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, uint64* buf_state)
 {
     BufferDesc* buf = NULL;
-    uint32 local_buf_state;
+    uint64 local_buf_state;
     int buf_id = 0;
     int list_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
     int list_id = 0;

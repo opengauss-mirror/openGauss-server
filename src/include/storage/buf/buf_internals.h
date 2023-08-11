@@ -38,16 +38,19 @@
  *
  * The definition of buffer state components is below.
  */
-#define BUF_REFCOUNT_ONE 1
-#define BUF_REFCOUNT_MASK ((1U << 17) - 1)
-#define BUF_USAGECOUNT_MASK 0x003C0000U
-#define BUF_USAGECOUNT_ONE (1U << 18)
-#define BUF_USAGECOUNT_SHIFT 18
-#define BUF_FLAG_MASK 0xFFC00000U
+
+#define BUF_REFCOUNT_ONE 1LU
+#define BUF_REFCOUNT_ONE_16 (1LU << 16)
+#define BUF_REFCOUNT_ONE_32 (1LU << 32)
+#define BUF_REFCOUNT_MASK ((1LU << 17) - 1)
+#define BUF_USAGECOUNT_MASK 0x003C000000000000LU
+#define BUF_USAGECOUNT_ONE (1LU << 18 << 32)
+#define BUF_USAGECOUNT_SHIFT (18 + 32)
+#define BUF_FLAG_MASK 0xFFC0000000000000LU
 
 /* Get refcount and usagecount from buffer state */
-#define BUF_STATE_GET_REFCOUNT(state) ((state)&BUF_REFCOUNT_MASK)
 #define BUF_STATE_GET_USAGECOUNT(state) (((state)&BUF_USAGECOUNT_MASK) >> BUF_USAGECOUNT_SHIFT)
+#define BUF_STATE_GET_REFCOUNT(state) (((state)&0xFFFFFFFF))
 
 /*
  * Flags for buffer descriptors
@@ -55,18 +58,18 @@
  * Note: TAG_VALID essentially means that there is a buffer hashtable
  * entry associated with the buffer's tag.
  */
-#define BM_IS_META (1U << 17)
-#define BM_LOCKED (1U << 22)            /* buffer header is locked */
-#define BM_DIRTY (1U << 23)             /* data needs writing */
-#define BM_VALID (1U << 24)             /* data is valid */
-#define BM_TAG_VALID (1U << 25)         /* tag is assigned */
-#define BM_IO_IN_PROGRESS (1U << 26)    /* read or write in progress */
-#define BM_IO_ERROR (1U << 27)          /* previous I/O failed */
-#define BM_JUST_DIRTIED (1U << 28)      /* dirtied since write started */
-#define BM_PIN_COUNT_WAITER (1U << 29)  /* have waiter for sole pin */
-#define BM_CHECKPOINT_NEEDED (1U << 30) /* must write for checkpoint */
+#define BM_IS_META (1LU << 17 << 32)
+#define BM_LOCKED (1LU << 22 << 32)            /* buffer header is locked */
+#define BM_DIRTY (1LU << 23 << 32)             /* data needs writing */
+#define BM_VALID (1LU << 24 << 32)             /* data is valid */
+#define BM_TAG_VALID (1LU << 25 << 32)         /* tag is assigned */
+#define BM_IO_IN_PROGRESS (1LU << 26 << 32)    /* read or write in progress */
+#define BM_IO_ERROR (1LU << 27 << 32)          /* previous I/O failed */
+#define BM_JUST_DIRTIED (1LU << 28 << 32)      /* dirtied since write started */
+#define BM_PIN_COUNT_WAITER (1LU << 29 << 32)  /* have waiter for sole pin */
+#define BM_CHECKPOINT_NEEDED (1LU << 30 << 32) /* must write for checkpoint */
 #define BM_PERMANENT                      \
-    (1U << 31) /* permanent relation (not \
+    (1LU << 31 << 32) /* permanent relation (not \
                 * unlogged, or init fork) ) */
 /*
  * The maximum allowed value of usage_count represents a tradeoff between
@@ -181,9 +184,14 @@ typedef struct buftagnohbkt {
  * are not used and not all of the flag bits are useful either.
  */
 typedef struct BufferDesc {
+    char align1[128];
+    pg_atomic_uint64 state;
+    char align2[120];
+
     BufferTag tag; /* ID of page contained in buffer */
     /* state of the tag, containing flags, refcount and usagecount */
-    pg_atomic_uint32 state;
+
+    bool encrypt; /* enable table's level data encryption */
 
     /* Cached physical location for segment-page storage, used for xlog */
     uint8 seg_fileno;
@@ -199,7 +207,6 @@ typedef struct BufferDesc {
     /* below fields are used for incremental checkpoint */
     pg_atomic_uint64 rec_lsn;        /* recovery LSN */
     volatile uint64 dirty_queue_loc; /* actual loc of dirty page queue */
-    bool encrypt; /* enable table's level data encryption */
     
     volatile uint64 lsn_on_disk;
 #ifdef USE_ASSERT_CHECKING
@@ -248,7 +255,7 @@ typedef union BufferDescPadded {
  * Functions for acquiring/releasing a shared buffer header's spinlock.  Do
  * not apply these to local buffers!
  */
-extern uint32 LockBufHdr(BufferDesc* desc);
+extern uint64 LockBufHdr(BufferDesc* desc);
 
 #ifdef ENABLE_THREAD_CHECK
 extern "C" {
@@ -264,10 +271,10 @@ extern "C" {
         /* ENABLE_THREAD_CHECK only, release semantic */         \
         TsAnnotateHappensBefore(&desc->state);                   \
         pg_write_barrier();                                      \
-        pg_atomic_write_u32(&(desc)->state, (s) & (~BM_LOCKED)); \
+        pg_atomic_write_u32((((volatile uint32 *)&(desc)->state) + 1), ( ( (s) & (~BM_LOCKED) ) >> 32) ); \
     } while (0)
 
-extern bool retryLockBufHdr(BufferDesc* desc, uint32* buf_state);
+extern bool retryLockBufHdr(BufferDesc* desc, uint64* buf_state);
 /*
  * The PendingWriteback & WritebackContext structure are used to keep
  * information about pending flush requests to be issued to the OS.
@@ -315,7 +322,7 @@ extern void IssuePendingWritebacks(WritebackContext* context);
 extern void ScheduleBufferTagForWriteback(WritebackContext* context, BufferTag* tag);
 
 /* freelist.c */
-extern BufferDesc *StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state);
+extern BufferDesc *StrategyGetBuffer(BufferAccessStrategy strategy, uint64 *buf_state);
 
 extern void StrategyFreeBuffer(volatile BufferDesc* buf);
 extern bool StrategyRejectBuffer(BufferAccessStrategy strategy, BufferDesc* buf);

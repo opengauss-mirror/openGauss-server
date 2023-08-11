@@ -8515,7 +8515,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
          */
         for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
 
-            uint32 buf_state;
+            uint64 buf_state;
             bufHdr = GetBufferDescriptor(i);
 
             /* Lock each buffer header before inspecting. */
