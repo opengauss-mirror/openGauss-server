@@ -3204,6 +3204,8 @@ static void exec_plan_with_params(StringInfo input_message)
     /* Get the parameter value */
     if (numParams > 0) {
         int paramno;
+        Oid param_collation = GetCollationConnection();
+        int param_charset = GetCharsetConnection();
 
         params = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + numParams * sizeof(ParamExternData));
 
@@ -3276,6 +3278,8 @@ static void exec_plan_with_params(StringInfo input_message)
                  */
                 if (isNull) {
                     pstring = NULL;
+                } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
+                    pstring = pg_client_to_any(pbuf.data, plength, param_charset);
                 } else {
                     pstring = pg_client_to_server(pbuf.data, plength);
                 }
@@ -3998,6 +4002,8 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
      */
     if (numParams > 0) {
         int paramno;
+        Oid param_collation = GetCollationConnection();
+        int param_charset = GetCharsetConnection();
 
         params = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + numParams * sizeof(ParamExternData));
 
@@ -4077,10 +4083,13 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
                  * We have to do encoding conversion before calling the
                  * typinput routine.
                  */
-                if (isNull)
+                if (isNull) {
                     pstring = NULL;
-                else
+                } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
+                    pstring = pg_client_to_any(pbuf.data, plength, param_charset);
+                } else {
                     pstring = pg_client_to_server(pbuf.data, plength);
+                }
 
                 pval = OidInputFunctionCall(typinput, pstring, typioparam, -1);
 
@@ -4305,6 +4314,8 @@ void exec_get_ddl_params(StringInfo input_message)
 
     if (numParams > 0) {
         int paramno;
+        Oid param_collation = GetCollationConnection();
+        int param_charset = GetCharsetConnection();
         params = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + numParams * sizeof(ParamExternData));
         params->paramFetch = NULL;
         params->paramFetchArg = NULL;
@@ -4358,7 +4369,14 @@ void exec_get_ddl_params(StringInfo input_message)
 
                 getTypeInputInfo(ptype, &typinput, &typioparam);
 
-                pstring = isNull ? NULL : pg_client_to_server(pbuf.data, plength);
+                if (isNull) {
+                    pstring = NULL;
+                } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
+                    pstring = pg_client_to_any(pbuf.data, plength, param_charset);
+                } else {
+                    pstring = pg_client_to_server(pbuf.data, plength);
+                }
+
                 pval = OidInputFunctionCall(typinput, pstring, typioparam, -1);
 
                 /* Free result of encoding conversion, if any */
@@ -4789,6 +4807,8 @@ static void exec_bind_message(StringInfo input_message)
      */
     if (numParams > 0) {
         int paramno;
+        Oid param_collation = GetCollationConnection();
+        int param_charset = GetCharsetConnection();
 
         params = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + numParams * sizeof(ParamExternData));
         /* we have static list of params, so no hooks needed */
@@ -4876,10 +4896,13 @@ static void exec_bind_message(StringInfo input_message)
                  * We have to do encoding conversion before calling the
                  * typinput routine.
                  */
-                if (isNull)
+                if (isNull) {
                     pstring = NULL;
-                else
+                } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
+                    pstring = pg_client_to_any(pbuf.data, plength, param_charset);
+                } else {
                     pstring = pg_client_to_server(pbuf.data, plength);
+                }
 
 #ifndef ENABLE_MULTIPLE_NODES
                 if (pmode == NULL || *pmode != PROARGMODE_OUT || !enable_out_param_override()) {
@@ -11312,6 +11335,9 @@ static void exec_batch_bind_execute(StringInfo input_message)
     bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
     bool snapshot_set = false;
     char msec_str[PRINTF_DST_MAX];
+    Oid param_collation = GetCollationConnection();
+    int param_charset = GetCharsetConnection();
+    FmgrInfo convert_finfo;
 
     int msg_type;
     /* D message */
@@ -11558,6 +11584,17 @@ static void exec_batch_bind_execute(StringInfo input_message)
         params_set_end[0] = input_message->cursor;
     }
 
+    /*
+     * There is a fast path for transcoding from the client to the server.
+     * If the characterset_connection is different from the server_encoding,
+     * Fmgrinfo should be constructed here to avoid poor construction performance during each conversion.
+     */
+    if (OidIsValid(param_collation) && param_charset != GetDatabaseEncoding()) {
+        construct_conversion_fmgr_info(pg_get_client_encoding(), param_charset, (void*)&convert_finfo);
+    } else {
+        convert_finfo.fn_oid = InvalidOid;
+    }
+
     /* Second, process each set of params */
     params_set = (ParamListInfo*)palloc0(batch_count * sizeof(ParamListInfo));
     if (numParams > 0) {
@@ -11643,10 +11680,13 @@ static void exec_batch_bind_execute(StringInfo input_message)
                      * We have to do encoding conversion before calling the
                      * typinput routine.
                      */
-                    if (isNull)
+                    if (isNull) {
                         pstring = NULL;
-                    else
+                    } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
+                        pstring = pg_client_to_any(pbuf.data, plength, param_charset, (void*)&convert_finfo);
+                    } else {
                         pstring = pg_client_to_server(pbuf.data, plength);
+                    }
 
                     pval = OidInputFunctionCall(typinput, pstring, typioparam, -1);
 

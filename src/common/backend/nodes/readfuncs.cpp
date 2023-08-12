@@ -2132,6 +2132,10 @@ static Param* _readParam(void)
     {
         READ_NODE_FIELD(tableOfIndexTypeList);
     }
+    IF_EXIST(is_bind_param)
+    {
+        READ_BOOL_FIELD(is_bind_param);
+    }
     READ_DONE();
 }
 

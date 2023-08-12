@@ -37,6 +37,7 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 PARAM_MARK_VERSION_NUM;
 extern const uint32 MULTI_CHARSET_VERSION_NUM;
 extern const uint32 SRF_FUSION_VERSION_NUM;
 extern const uint32 INNER_UNIQUE_VERSION_NUM;

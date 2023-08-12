@@ -737,6 +737,8 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
     }
     (void)MemoryContextSwitchTo(m_local.m_tmpContext);
     if (num_params > 0) {
+        Oid param_collation = GetCollationConnection();
+        int param_charset = GetCharsetConnection();
         for (paramno = 0; paramno < num_params; paramno++) {
             Oid ptype = m_global->m_psrc->param_types[paramno];
             int32 plength;
@@ -807,6 +809,8 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
                  */
                 if (isNull) {
                     pstring = NULL;
+                } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
+                    pstring = pg_client_to_any(pbuf.data, plength, param_charset);
                 } else {
                     pstring = pg_client_to_server(pbuf.data, plength);
                 }
