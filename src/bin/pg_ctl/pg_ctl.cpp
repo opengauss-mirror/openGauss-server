@@ -6810,6 +6810,7 @@ int main(int argc, char** argv)
                     }
                     break;
                 }
+#ifndef ENABLE_LITE_MODE                
                 case 5:{
                     check_input_for_security(optarg);
                     if (strlen(optarg) > MAX_PATH_LEN) {
@@ -6851,6 +6852,7 @@ int main(int argc, char** argv)
                     ss_nodedatainfo = xstrdup(optarg);
                     break;
                 }
+#endif                
                 default:
                     /* getopt_long already issued a suitable error message */
                     do_advice();
