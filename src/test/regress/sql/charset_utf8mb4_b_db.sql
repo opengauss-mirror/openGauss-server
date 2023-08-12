@@ -569,30 +569,57 @@ SELECT CONCAT(futf8_bin, @var_binary) result, collation for(result) FROM t_diff_
 SELECT CONCAT(@var_binary, fgbk_bin) result, collation for(result) FROM t_diff_charset_columns;
 
 -- -- concat column and bind parameter
+-- -- bind parameter collation is fixed as collation_connection, collation level is same as a const
 -- -- -- -- PBE with implicit collation
 PREPARE test_merge_collation(text) AS
 SELECT CONCAT(futf8_uni, $1) result, collation for(result) FROM t_diff_charset_columns;
-EXECUTE test_merge_collation(_utf8mb4'高斯DB'); -- $1 use collation_connection, conflict
-EXECUTE test_merge_collation(_utf8mb4'高斯DB' collate utf8mb4_unicode_ci); -- explicit noneffective, conflict
-EXECUTE test_merge_collation(_gbk'高斯DB'); -- _gbk noneffective, conflict
-DEALLOCATE test_merge_collation;
--- -- -- -- PBE with implicit collation
-PREPARE test_merge_collation(text) AS
-SELECT CONCAT($1, fgbk_bin) result, collation for(result) FROM t_diff_charset_columns;
-EXECUTE test_merge_collation(_utf8mb4'高斯DB'); -- $1 use collation_connection, utf8_gen
-EXECUTE test_merge_collation(_gbk'高斯DB'); -- _gbk noneffective, utf8_gen
-EXECUTE test_merge_collation(_utf8mb4'高斯DB' collate gbk_chinese_ci); -- implicit type cast, keep explicit collation and check it, ERROR
+-- -- -- -- -- _utf8mb4
+SET @pbe_param1 = _utf8mb4'高斯DB';
+EXECUTE test_merge_collation(@pbe_param1); -- futf8_uni collation has priority
+EXECUTE test_merge_collation(_utf8mb4'高斯DB'); -- same as above
+SELECT CONCAT(futf8_uni, _utf8mb4'高斯DB') result, collation for(result) FROM t_diff_charset_columns; -- same as above
+-- -- -- -- -- _gbk
+SET @pbe_param1 = _gbk'高斯DB';
+EXECUTE test_merge_collation(@pbe_param1); -- _gbk noneffective, futf8_uni collation has priority,  _gbk'高斯DB' will not convert to utf8mb4
+EXECUTE test_merge_collation(_gbk'高斯DB'); -- same as above
+SELECT CONCAT(futf8_uni, _gbk'高斯DB') result, collation for(result) FROM t_diff_charset_columns; -- same as above
+-- -- -- -- -- _utf8mb4 utf8mb4_unicode_ci
+SET @pbe_param1 = _utf8mb4'高斯DB' collate utf8mb4_bin;
+EXECUTE test_merge_collation(@pbe_param1); -- explicit noneffective, futf8_uni collation has priority
+EXECUTE test_merge_collation(_utf8mb4'高斯DB' collate utf8mb4_unicode_ci); -- explicit noneffective, futf8_uni collation has priority
 DEALLOCATE test_merge_collation;
 -- -- -- -- PBE with explicit collation,
 PREPARE test_merge_collation(text) AS
 SELECT CONCAT($1 collate utf8mb4_unicode_ci, futf8_bin) result, collation for(result) FROM t_diff_charset_columns;
+-- -- -- -- -- _utf8mb4
+SET @pbe_param1 = _utf8mb4'高斯DB';
+EXECUTE test_merge_collation(@pbe_param1);
 EXECUTE test_merge_collation(_utf8mb4'高斯DB'); -- utf8mb4_unicode_ci
+-- -- -- -- -- _gbk
+SET @pbe_param1 = _gbk'高斯DB';
+EXECUTE test_merge_collation(@pbe_param1);
 EXECUTE test_merge_collation(_gbk'高斯DB'); -- utf8mb4_unicode_ci
 DEALLOCATE test_merge_collation;
 -- -- -- -- PBE with explicit collation,
 PREPARE test_merge_collation(text) AS
 SELECT CONCAT($1 collate gbk_chinese_ci, futf8_bin) result, collation for(result) FROM t_diff_charset_columns; -- $1 use collation_connection, ERROR
-DEALLOCATE test_merge_collation;
+-- -- -- -- test revalidate
+SELECT fgbk_chi result FROM t_diff_charset_columns WHERE fgbk_chi=_utf8mb4'高斯db'; -- 1 rows
+PREPARE test_revalidate(text) AS
+SELECT fgbk_chi result FROM t_diff_charset_columns WHERE fgbk_chi=$1;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+ALTER INDEX idx_prefixkey_futf8_bin UNUSABLE;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+SET NAMES utf8mb4 COLLATE utf8mb4_bin;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+ALTER INDEX idx_prefixkey_futf8_bin REBUILD;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+SET NAMES gbk COLLATE gbk_bin;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+ALTER INDEX idx_prefixkey_futf8_bin REBUILD;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+DEALLOCATE test_revalidate;
+SET NAMES utf8mb4;
 
 -- -- concat column and PROCEDURE parameter with CURSOR
 -- -- -- implicit collation && string

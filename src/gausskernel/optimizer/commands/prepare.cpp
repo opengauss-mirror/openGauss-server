@@ -494,6 +494,8 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
     ParamListInfo paramLI;
     List* exprstates = NIL;
     ListCell* l = NULL;
+    Oid param_collation;
+    int param_charset;
     int i;
 
     if (nparams != num_params)
@@ -515,6 +517,8 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
     pstate = make_parsestate(NULL);
     pstate->p_sourcetext = queryString;
 
+    param_collation = GetCollationConnection();
+    param_charset = GetCharsetConnection();
     i = 0;
     foreach (l, params) {
         Node* expr = (Node*)lfirst(l);
@@ -550,6 +554,12 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
 
         /* Take care of collations in the finished expression. */
         assign_expr_collations(pstate, expr);
+
+        /* Try convert expression to target parameter charset. */
+        if (OidIsValid(param_collation) && IsSupportCharsetType(expected_type_id)) {
+            /* convert charset only, expression will be evaluated below */
+            expr = coerce_to_target_charset(expr, param_charset, expected_type_id, -1, param_collation, false);
+        }
 
         lfirst(l) = expr;
         i++;
@@ -1860,6 +1870,7 @@ static Node* substitute_const_with_parameters_mutator(Node* node, substitute_con
         param->paramtypmod = con->consttypmod;
         param->paramcollid = con->constcollid;
         param->location = con->location;
+        param->is_bind_param = true;
         if (*context->args) {
             *context->args = (Oid*)repalloc(*context->args, param->paramid * sizeof(Oid));
         } else {

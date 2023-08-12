@@ -2563,6 +2563,7 @@ static Param* _copyParam(const Param* from)
     COPY_SCALAR_FIELD(tableOfIndexType);
     COPY_SCALAR_FIELD(recordVarTypOid);
     COPY_NODE_FIELD(tableOfIndexTypeList);
+    COPY_SCALAR_FIELD(is_bind_param);
 
     return newnode;
 }

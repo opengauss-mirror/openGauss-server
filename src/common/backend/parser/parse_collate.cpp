@@ -626,6 +626,12 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
             }
             if (IsA(node, Const)) {
                 derivation = ((Const*)node)->constisnull ? DERIVATION_IGNORABLE : DERIVATION_COERCIBLE;
+            } else if (IsA(node, Param)) {
+                /*
+                 * We set bind param DERIVATION_COERCIBLE to make "column = $1" and  "column = 'string'"
+                 * use the same collation to compare.
+                 */
+                derivation = (((Param*)node)->is_bind_param) ? DERIVATION_COERCIBLE : DERIVATION_IMPLICIT;
             } else {
                 derivation = DERIVATION_IMPLICIT;
             }
