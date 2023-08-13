@@ -93,15 +93,6 @@ void dss_set_errno(int *errcode)
     }
 }
 
-bool dss_exist_file(const char *file_name)
-{
-    bool result = false;
-    if (g_dss_device_op.dss_exist(file_name, &result) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return false;
-    }
-    return result;
-}
 
 int dss_access_file(const char *file_name, int mode)
 {
@@ -116,16 +107,6 @@ int dss_create_dir(const char *name, mode_t mode)
         return GS_ERROR;
     }
     return GS_SUCCESS;
-}
-
-bool dss_exist_dir(const char *name)
-{
-    bool result = false;
-    if (g_dss_device_op.dss_exist_dir(name, &result) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return false;
-    }
-    return result;
 }
 
 int dss_open_dir(const char *name, DIR **dir_handle)
@@ -216,9 +197,10 @@ int dss_remove_file(const char *name)
 
 int dss_open_file(const char *name, int flags, mode_t mode, int *handle)
 {
-    if ((flags & O_CREAT) != 0 && !dss_exist_file(name)) {
+    struct stat st;
+    if ((flags & O_CREAT) != 0 && dss_stat_file(name, &st) != GS_SUCCESS) {
         // file not exists, create it first.
-        if (g_dss_device_op.dss_create(name, flags) != DSS_SUCCESS) {
+        if (errno == ERR_DSS_FILE_NOT_EXIST && g_dss_device_op.dss_create(name, flags) != DSS_SUCCESS) {
             dss_set_errno(NULL);
             return GS_ERROR;
         }
@@ -508,16 +490,6 @@ int dss_unlink_target(const char *name)
     return GS_SUCCESS;
 }
 
-bool dss_exist_link(const char *name)
-{
-    bool result = false;
-    if (g_dss_device_op.dss_exist_link(name, &result) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return false;
-    }
-    return result;
-}
-
 ssize_t dss_read_link(const char *path, char *buf, size_t buf_size)
 {
     ssize_t result = (ssize_t)g_dss_device_op.dss_read_link(path, buf, buf_size);
@@ -696,9 +668,11 @@ int dss_set_server_status_wrapper()
 
 int dss_remove_dev(const char *name)
 {
-    if (dss_exist_file(name)) {
+    struct stat st;
+    int ret = lstat(name, &st);
+    if (ret == 0 && S_ISREG(st.st_mode)) {
         return dss_remove_file(name);
-    } else if (dss_exist_link(name)) {
+    } else if (ret == 0 && S_ISLNK(st.st_mode)) {
         return dss_unlink_target(name);
     } else {
         return GS_SUCCESS;

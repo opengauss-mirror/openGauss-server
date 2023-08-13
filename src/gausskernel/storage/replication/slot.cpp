@@ -2635,7 +2635,8 @@ static bool CheckExistReplslotPath(char *path)
         errno_t rc = strcat_s(path_for_check, MAXPGPATH, suffix);
         securec_check_ss(rc, "\0", "\0");
     }
-    if (dss_exist_dir(path_for_check)) {
+    struct stat st;
+    if (stat(path_for_check, &st) == 0 && S_ISDIR(st.st_mode)) {
         return true;
     }
 

@@ -2156,7 +2156,8 @@ void initDSSConf(void)
     }
 
     // check whether dss connect is successful.
-    if (!dss_exist_dir(g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name)) {
+    struct stat st;
+    if (stat(g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, &st) != 0 || !S_ISDIR(st.st_mode)) {
         ereport(FATAL, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
             errmsg("Could not connect dssserver, vgname: \"%s\", socketpath: \"%s\"",
             g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,

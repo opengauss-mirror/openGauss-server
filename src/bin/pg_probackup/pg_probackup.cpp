@@ -953,12 +953,13 @@ static void dss_init(void)
         parse_vgname_args(instance_config.dss.vgname);
 
         /* Check dss connect */
-        if (!dss_exist_dir(instance_config.dss.vgdata)) {
+        struct stat st;
+        if (stat(instance_config.dss.vgdata, &st) != 0 || !S_ISDIR(st.st_mode)) {
             elog(ERROR, "Could not connect dssserver, vgdata: \"%s\", socketpath: \"%s\", check and retry later.",
                  instance_config.dss.vgdata, instance_config.dss.socketpath);
         }
 
-        if (strlen(instance_config.dss.vglog) && !dss_exist_dir(instance_config.dss.vglog)) {
+        if (strlen(instance_config.dss.vglog) && (stat(instance_config.dss.vglog, &st) != 0 || !S_ISDIR(st.st_mode))) {
             elog(ERROR, "Could not connect dssserver, vglog: \"%s\", socketpath: \"%s\", check and retry later.",
                  instance_config.dss.vglog, instance_config.dss.socketpath);
         }

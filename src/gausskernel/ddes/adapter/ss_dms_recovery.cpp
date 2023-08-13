@@ -166,7 +166,8 @@ void SSInitReformerControlPages(void)
     /*
      * If already exists control file, reformer page must have been initialized
      */
-    if (dss_exist_file(XLOG_CONTROL_FILE)) {
+    struct stat st;
+    if (stat(XLOG_CONTROL_FILE, &st) == 0 && S_ISREG(st.st_mode)) {
         SSReadControlFile(REFORM_CTRL_PAGE);
         if (g_instance.dms_cxt.SSReformerControl.list_stable != 0 ||
             g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
@@ -186,7 +187,7 @@ void SSInitReformerControlPages(void)
      * Initialize list_stable and primaryInstId
      * First node to initdb is chosen as primary for now, and for first-time cluster startup.
      */
-    Assert(!dss_exist_file(XLOG_CONTROL_FILE));
+    Assert(stat(XLOG_CONTROL_FILE, &st) != 0 || !S_ISREG(st.st_mode));
     g_instance.dms_cxt.SSReformerControl.list_stable = 0;
     g_instance.dms_cxt.SSReformerControl.primaryInstId = SS_MY_INST_ID;
     g_instance.dms_cxt.SSReformerControl.recoveryInstId = INVALID_INSTANCEID;
