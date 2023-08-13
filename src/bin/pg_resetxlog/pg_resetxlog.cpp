@@ -490,7 +490,8 @@ static void SetGlobalDssParam(void)
     securec_check_c(rc, "\0", "\0");
     XLogSegmentSize = DSS_XLOG_SEG_SIZE;
     /* Check dss connect */
-    if (!dss_exist_dir(g_datadir.dss_data)) {
+    struct stat st;
+    if (stat(g_datadir.dss_data, &st) != 0 || !S_ISDIR(st.st_mode)) {
         fprintf(stderr, _("Could not connect dssserver, vgname: \"%s\", socketpath: \"%s\", \n"
             "please check that whether the dssserver is manually started and retry later.\n"),
             dss.vgname, dss.socketpath);

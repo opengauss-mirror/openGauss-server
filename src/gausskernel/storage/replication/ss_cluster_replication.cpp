@@ -30,7 +30,8 @@
 
 void WriteSSDoradoCtlInfoFile()
 {
-    Assert(dss_exist_file(SS_DORADO_CTRL_FILE));
+    struct stat st;
+    Assert(stat(SS_DORADO_CTRL_FILE, &st) == 0 && S_ISREG(st.st_mode));
     Assert(g_instance.xlog_cxt.ssReplicationXLogCtl != NULL);
     ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
     errno_t errorno = EOK;
@@ -65,7 +66,8 @@ void WriteSSDoradoCtlInfoFile()
 
 void ReadSSDoradoCtlInfoFile()
 {
-    Assert(dss_exist_file(SS_DORADO_CTRL_FILE));
+    struct stat st;
+    Assert(stat(SS_DORADO_CTRL_FILE, &st) == 0 && S_ISREG(st.st_mode));
     Assert(g_instance.xlog_cxt.ssReplicationXLogCtl != NULL);
     ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
     errno_t errorno = EOK;
@@ -105,7 +107,8 @@ void ReadSSDoradoCtlInfoFile()
 
 void InitSSDoradoCtlInfoFile()
 {
-    if (dss_exist_file(SS_DORADO_CTRL_FILE)) {
+    struct stat st;
+    if (stat(SS_DORADO_CTRL_FILE, &st) == 0 && S_ISREG(st.st_mode)) {
         ReadSSDoradoCtlInfoFile();
         ereport(LOG, (errcode_for_file_access(), errmsg("[InitSSDoradoCtlInfoFile] Dorado ctl info file already exists.")));
         return;
@@ -117,7 +120,7 @@ void InitSSDoradoCtlInfoFile()
     int fd = -1;
     char buffer[SS_DORADO_CTL_INFO_SIZE] __attribute__((__aligned__(ALIGNOF_BUFFER))); /* need to be aligned */
     errno_t errorno = EOK;
-    Assert(!dss_exist_file(SS_DORADO_CTRL_FILE));
+    Assert(stat(SS_DORADO_CTRL_FILE, &st) !=0 || !S_ISREG(st.st_mode));
 
     /* create SS_DORADO_CTRL_FILE first time */
     fd = BasicOpenFile(SS_DORADO_CTRL_FILE, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, S_IRUSR | S_IWUSR);
