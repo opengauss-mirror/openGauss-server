@@ -1199,6 +1199,17 @@ static void InitStorageConfigureNamesBool()
             NULL},
 #endif
 
+        {{"ss_enable_bcast_snapshot",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Enable broadcast snapshot by primay."),
+            NULL},
+            &g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot,
+            false,
+            NULL,
+            NULL,
+            NULL},
         {{"enable_huge_pages",
             PGC_POSTMASTER,
             NODE_SINGLENODE,

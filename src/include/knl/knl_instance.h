@@ -1215,6 +1215,10 @@ typedef struct knl_g_dms_context {
     bool resetSyscache;
     bool finishedRecoverOldPrimaryDWFile;
     bool dw_init;
+    uint64 latest_snapshot_xmin;
+    uint64 latest_snapshot_xmax;
+    uint64 latest_snapshot_csn;
+    slock_t set_snapshot_mutex;
     char dmsInstAddr[MAX_REPLNODE_NUM][DMS_MAX_IP_LEN];
     char conninfo[MAXPGPATH];
     ss_dfx_stats_t SSDFxStats;

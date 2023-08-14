@@ -5031,6 +5031,9 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
         if (ENABLE_DMS && SS_PRIMARY_MODE) {
             SSUpdateNodeOldestXmin(SS_MY_INST_ID, globalxmin);
             globalxmin = SSGetGlobalOldestXmin(globalxmin);
+            if (ENABLE_SS_BCAST_SNAPSHOT) {
+                SSSendLatestSnapshotToStandby(xmin, xmax, t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+            }
         }
 
         t_thrd.xact_cxt.ShmemVariableCache->xmin = xmin;
@@ -5038,6 +5041,9 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
         if (GTM_FREE_MODE) {
             t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin = globalxmin;
         }
+    } else if (ENABLE_SS_BCAST_SNAPSHOT && SS_PRIMARY_MODE) {
+        SSSendLatestSnapshotToStandby(t_thrd.xact_cxt.ShmemVariableCache->xmin, xmax,
+            t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
     }
 
     if (GTM_LITE_MODE) {

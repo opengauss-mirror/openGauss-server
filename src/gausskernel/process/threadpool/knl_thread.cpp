@@ -1711,6 +1711,9 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     dms_cxt->flush_copy_get_page_failed = false;
     dms_cxt->SSTxnStatusHash = NULL;
     dms_cxt->SSTxnStatusLRU = NULL;
+    dms_cxt->latest_snapshot_xmin = 0;
+    dms_cxt->latest_snapshot_xmax = 0;
+    dms_cxt->latest_snapshot_csn = 0;
 }
 
 static void knl_t_ondemand_xlog_copy_context_init(knl_t_ondemand_xlog_copy_context *ondemand_xlog_copy_cxt)

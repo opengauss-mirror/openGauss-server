@@ -1060,6 +1060,9 @@ static int32 CBProcessBroadcast(void *db_handle, char *data, unsigned int len, c
             case BCAST_CHECK_DB_BACKENDS:
                 ret = SSCheckDbBackends(data, len, output_msg, output_msg_len);
                 break;
+            case BCAST_SEND_SNAPSHOT:
+                ret = SSUpdateLatestSnapshotOfStandby(data, len);
+                break;
             default:
                 ereport(WARNING, (errmodule(MOD_DMS), errmsg("invalid broadcast operate type")));
                 ret = DMS_ERROR;
