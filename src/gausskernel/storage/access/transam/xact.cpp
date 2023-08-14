@@ -3900,6 +3900,8 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
     /* reset flag is_delete_function */
     u_sess->plsql_cxt.is_delete_function = false;
 
+    list_free_ext(u_sess->plsql_cxt.CursorRecordTypeList);
+
     /*
      * do abort processing
      */
