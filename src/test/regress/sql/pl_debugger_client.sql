@@ -464,3 +464,31 @@ SELECT * FROM DBE_PLDEBUGGER.info_locals();
 SELECT * FROM DBE_PLDEBUGGER.backtrace();
 
 SELECT * FROM DBE_PLDEBUGGER.continue();
+
+--test anonymous
+select pg_sleep(1);
+delete from tmp_holder;
+
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+
+select dbe_pldebugger.info_code(0);
+
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 0); -- negative
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 6); -- headerline
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 6); -- already
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 8); -- ok
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 13); -- negative
+insert into tmp_holder select * from dbe_pldebugger.disable_breakpoint(1); -- ok
+insert into tmp_holder select * from dbe_pldebugger.enable_breakpoint(1); -- ok
+insert into tmp_holder select * from dbe_pldebugger.delete_breakpoint(0);  -- ok
+select funcname, lineno, query from dbe_pldebugger.next();
+select funcname, lineno, query from dbe_pldebugger.continue();
+select funcname, lineno, query from dbe_pldebugger.step();
+select funcname, lineno, query from dbe_pldebugger.next();
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
+select * from dbe_pldebugger.info_locals();
+select funcname, lineno, query from dbe_pldebugger.finish();
+select * from dbe_pldebugger.print_var('k');
+select * from dbe_pldebugger.abort();
+
+select * from tmp_holder;

@@ -818,6 +818,7 @@ typedef enum NodeTag {
     T_PLDebug_variable,
     T_PLDebug_breakPoint,
     T_PLDebug_frame,
+    T_PLDebug_codeline,
 
     T_TdigestData,
 

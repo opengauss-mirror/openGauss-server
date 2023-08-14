@@ -66,10 +66,11 @@ static CodeLine* debug_show_code_worker(Oid funcid, uint32* num, int* headerline
 static void* debug_client_split_breakpoints_msg(uint32* num);
 static void* debug_client_split_localvariables_msg(uint32 *num);
 static void* debug_client_split_backtrace_msg(uint32* num);
+static void* debug_client_split_infocode_msg(uint32* num);
+static void debug_client_match_infocode_msg(Datum values[], bool nulls[], FuncCallContext *funcctx);
 static List* collect_breakable_line_oid(Oid funcOid);
 static void init_pldebug_htcl();
 static bool CheckPlpgsqlFunc(Oid funcoid, bool report_error = true);
-static List* collect_breakable_line(PLpgSQL_function* func);
 
 static Datum get_tuple_lineno_and_query(DebugClientInfo* client)
 {
@@ -361,7 +362,21 @@ Datum debug_client_info_code(PG_FUNCTION_ARGS)
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
         int headerlines = 0;
         /* total number of tuples to be returned */
-        funcctx->user_fctx = debug_show_code_worker(funcid, &(funcctx->max_calls), &headerlines);
+        if (OidIsValid(funcid)) {
+            funcctx->user_fctx = debug_show_code_worker(funcid, &(funcctx->max_calls), &headerlines);
+        } else {
+            DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
+            if (client == NULL) {
+                ereport(ERROR, (errmodule(MOD_PLDEBUGGER), errmsg("There is no anonymous block in debugging")));
+            }
+            StringInfoData str;
+            initStringInfo(&str);
+            appendStringInfo(&str, "0");
+            debug_client_send_msg(client, DEBUG_INFOCODE_HEADER, str.data, str.len);
+            debug_client_rec_msg(client);
+            funcctx->user_fctx = debug_client_split_infocode_msg(&(funcctx->max_calls));
+            pfree(str.data);
+        }
         (void)MemoryContextSwitchTo(oldcontext);
     }
 
@@ -467,38 +482,55 @@ Datum debug_client_add_breakpoint(PG_FUNCTION_ARGS)
 
     Oid funcOid = PG_GETARG_OID(0);
     int32 lineno = PG_GETARG_INT32(1);
-    (void)CheckPlpgsqlFunc(funcOid);
     uint32 nLine = 0;
     int headerlines = 0;
-    CodeLine* lines = debug_show_code_worker(funcOid, &nLine, &headerlines);
+    CodeLine* lines = NULL;
+    CodeLine cl;
+    cl.code = NULL;
 
-    if (lineno < 1 || (uint32)lineno > nLine - headerlines) {
-        ereport(WARNING, (errcode(ERRCODE_WARNING),
-            errmsg("lineno must be within the range of [1, MaxLineNumber]"
-            " Please use dbe_pldebugger.info_code for valid breakpoint candidates")));
-        PG_RETURN_INT32(-1);
-    }
+    if (OidIsValid(funcOid)) {
+        (void)CheckPlpgsqlFunc(funcOid);
+        lines = debug_show_code_worker(funcOid, &nLine, &headerlines);
+        if (lineno < 1 || (uint32)lineno > nLine - headerlines) {
+            ereport(WARNING, (errcode(ERRCODE_WARNING),
+                errmsg("lineno must be within the range of [1, MaxLineNumber]"
+                " Please use dbe_pldebugger.info_code for valid breakpoint candidates")));
+            PG_RETURN_INT32(-1);
+        }
 
-    CodeLine cl = lines[(uint32)headerlines + lineno - 1];
-    if (!cl.canBreak) {
-        ereport(WARNING, (errcode(ERRCODE_WARNING),
-            errmsg("the given line number does not name a valid breakpoint."
-            " Please use dbe_pldebugger.info_code for valid breakpoint candidates")));
-        PG_RETURN_INT32(-1);
+        cl = lines[(uint32)headerlines + lineno - 1];
+        if (!cl.canBreak) {
+            ereport(WARNING, (errcode(ERRCODE_WARNING),
+                errmsg("the given line number does not name a valid breakpoint."
+                " Please use dbe_pldebugger.info_code for valid breakpoint candidates")));
+            PG_RETURN_INT32(-1);
+        }
     }
 
     DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
     StringInfoData str;
     initStringInfo(&str);
-    appendStringInfo(&str, "%u:%d:%s", funcOid, lineno, cl.code);
+    appendStringInfo(&str, "%u:%d:%s", funcOid, lineno, cl.code == NULL ? "NULL" : cl.code);
     debug_client_send_msg(client, DEBUG_ADDBREAKPOINT_HEADER, str.data, str.len);
     debug_client_rec_msg(client);
     int32 ans = pg_strtoint32(client->rec_buffer);
-    pfree(lines);
-    if (ans == -1) {
+    pfree_ext(lines);
+
+    if (ans == ADD_BP_ERR_ALREADY_EXISTS) {
         ereport(WARNING, (errcode(ERRCODE_WARNING),
             errmsg("the given line number already contains a valid breakpoint."
             " Please se dbe_pldebugger.info_breakpoints for detail.")));
+        PG_RETURN_INT32(-1);
+    } else if (ans == ADD_BP_ERR_OUT_OF_RANGE) {
+        ereport(WARNING, (errcode(ERRCODE_WARNING),
+                errmsg("lineno must be within the range of [1, MaxLineNumber]"
+                " Please use dbe_pldebugger.info_code for valid breakpoint candidates")));
+        PG_RETURN_INT32(-1);
+    } else if (ans == ADD_BP_ERR_INVALID_BP_POS) {
+        ereport(WARNING, (errcode(ERRCODE_WARNING),
+                errmsg("the given line number does not name a valid breakpoint."
+                " Please use dbe_pldebugger.info_code for valid breakpoint candidates")));
+        PG_RETURN_INT32(-1);
     }
     PG_RETURN_INT32(ans);
 }
@@ -1038,8 +1070,9 @@ static PlDebugEntry* add_debug_func(Oid key)
         init_pldebug_htcl();
     }
 
-    (void)CheckPlpgsqlFunc(key);
-
+    if (OidIsValid(key)) {
+        (void)CheckPlpgsqlFunc(key);
+    }
     bool found = false;
     int commIdx = GetValidDebugCommIdx();
     if (commIdx == -1) {
@@ -1233,6 +1266,44 @@ static List* collect_breakable_line_oid(Oid funcOid)
     PG_END_TRY();
     
     return collect_breakable_line(func);
+}
+
+static void* debug_client_split_infocode_msg(uint32* num)
+{
+    char* msg = u_sess->plsql_cxt.debug_client->rec_buffer;
+    Node* ret = (Node*)stringToNode(msg);
+    if (ret == NULL || !(IsA(ret, List))) {
+        *num = 0;
+        return NULL;
+    }
+
+    List* list = (List*)ret;
+    ListCell* lc = NULL;
+    Size length = list_length(list);
+    Size array_size = mul_size(sizeof(CodeLine), length);
+    CodeLine* codes = (CodeLine*)palloc0(array_size);
+    CodeLine* code = NULL;
+    int index = 0;
+
+    foreach(lc, list) {
+        Node* n = (Node*)lfirst(lc);
+        if (!IsA(n, PLDebug_codeline)) {
+            goto error;
+        }
+        code = codes + index;
+        PLDebug_codeline* c = (PLDebug_codeline*)n;
+        code->lineno = c->lineno;
+        code->code = pstrdup(c->code);
+        code->canBreak = c->canBreak;
+        index++;
+    }
+    *num = length;
+    return codes;
+
+error:
+    ereport(DEBUG1, (errmodule(MOD_PLDEBUGGER), errmsg("False output for codeline type:\n%s", msg)));
+    ereport(ERROR, (errmodule(MOD_PLDEBUGGER), errmsg("Get unexpected output for codeline type.")));
+    return NULL;
 }
 
 CodeLine* debug_show_code_worker(Oid funcid, uint32* num, int* headerlines)
@@ -1469,7 +1540,7 @@ static void collect_breakable_line_walker(const List* stmts, List** lines)
     }
 }
 
-static List* collect_breakable_line(PLpgSQL_function* func)
+List* collect_breakable_line(PLpgSQL_function* func)
 {
     if (func == NULL) {
         return NIL;
