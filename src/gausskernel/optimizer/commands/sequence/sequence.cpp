@@ -1339,7 +1339,15 @@ bool shouldReturnNumeric()
             break;
     }
 
-    return get_nextval_rettype() == NUMERICOID;
+    HeapTuple ftup = SearchSysCache1(PROCOID, ObjectIdGetDatum(NEXTVALFUNCOID));
+    if (!HeapTupleIsValid(ftup)) {
+        ereport(ERROR, (errmsg("cache lookup failed for function %u", NEXTVALFUNCOID)));
+    }
+    Form_pg_proc pform = (Form_pg_proc)GETSTRUCT(ftup);
+    bool ret = pform->prorettype == NUMERICOID;
+    ReleaseSysCache(ftup);
+
+    return ret;
 }
 
 Datum nextval_oid(PG_FUNCTION_ARGS)
