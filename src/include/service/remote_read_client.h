@@ -43,6 +43,7 @@ extern int RemoteGetPage(char* remote_address, RepairBlockKey *key, uint32 block
 extern int RemoteGetFile(char* remoteAddress, RemoteReadFileKey *key, uint64 lsn, uint32 size, char* pageData,
     XLogRecPtr *remote_lsn, uint32 *remote_size, int timeout);
 extern int RemoteGetFileSize(char* remoteAddress, RemoteReadFileKey *key, uint64 lsn, int64 *size, int timeout);
+extern uint64 RemoteGetXlogReplayPtr(char* remoteAddress);
 
 
 #endif /* REMOTE_READ_CLIENT_H */
