@@ -140,18 +140,17 @@ const char *g_reserve_param[] = {
     "xlog_file_path",
     "xlog_lock_file_path",
     "auto_csn_barrier",
+    "enable_huge_pages",
+    "huge_page_size",
 #ifndef ENABLE_MULTIPLE_NODES
     "recovery_min_apply_delay",
     "sync_config_strategy",
-#else
-    NULL,
-    NULL,
-#endif
-#ifndef ENABLE_MULTIPLE_NODES
     "dcf_node_id",
     "dcf_data_path",
     "dcf_log_path"
 #else
+    NULL,
+    NULL,
     NULL,
     NULL,
     NULL
