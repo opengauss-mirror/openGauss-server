@@ -375,7 +375,6 @@ void ss_createdir(const char **ss_dirs, int32 num, int32 node_id, const char *pg
         char *link_path = NULL;
 
         if (vglog_dir[0] != '\0' && (pg_strcasecmp(ss_dirs[i], "+pg_xlog") == 0 ||
-            pg_strcasecmp(ss_dirs[i], "+pg_doublewrite") == 0 ||
             pg_strcasecmp(ss_dirs[i], "+pg_notify") == 0 ||
             pg_strcasecmp(ss_dirs[i], "+pg_snapshots") == 0 ||
             pg_strcasecmp(ss_dirs[i], "+pg_replication") == 0)) {

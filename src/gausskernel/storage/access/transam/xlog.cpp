@@ -4200,8 +4200,14 @@ static int XLogFileOpenInternal(XLogSegNo segno, const char *xlog_dir)
                          (uint32)((segno) / XLogSegmentsPerXLogId), (uint32)((segno) % XLogSegmentsPerXLogId));
     securec_check_ss(errorno, "", "");
 
-    fd = BasicOpenFile(path, O_RDWR | PG_BINARY | (unsigned int)get_sync_bit(u_sess->attr.attr_storage.sync_method),
+    if (SS_CLUSTER_DORADO_REPLICATION) {
+        fd = SSErgodicOpenXlogFile(segno, O_RDWR | PG_BINARY | (unsigned int)get_sync_bit(u_sess->attr.attr_storage.sync_method),
                        S_IRUSR | S_IWUSR);
+    } else {
+        fd = BasicOpenFile(path, O_RDWR | PG_BINARY | (unsigned int)get_sync_bit(u_sess->attr.attr_storage.sync_method),
+                       S_IRUSR | S_IWUSR);
+    }
+
     if (fd < 0) {
         ereport(PANIC, (errcode_for_file_access(), errmsg("could not open xlog file \"%s\" (log segment %s): %m", path,
                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
@@ -18861,10 +18867,6 @@ void SSReadDoradoCtlInfoFile()
 
 void NormalClusterDoradoStorageInit()
 {
-    if (g_instance.attr.attr_storage.xlog_file_path == NULL || g_instance.attr.attr_storage.xlog_file_size <= 0) {
-        return;
-    }
-
     bool found = false;
     void *tmpBuf = ShmemInitStruct("share storage Ctl", CalShareStorageCtlSize(), &found);
     g_instance.xlog_cxt.shareStorageXLogCtl = (ShareStorageXLogCtl *)TYPEALIGN(MEMORY_ALIGNED_SIZE, tmpBuf);
@@ -18903,8 +18905,11 @@ void NormalClusterDoradoStorageInit()
 
 void ShareStorageInit()
 {
-    NormalClusterDoradoStorageInit();
-    SSClusterDoradoStorageInit();
+    if (SS_CLUSTER_DORADO_REPLICATION) {
+        SSClusterDoradoStorageInit();
+    } else if (IS_SHARED_STORAGE_MODE) {
+        NormalClusterDoradoStorageInit();
+    }
 }
 
 void ShareStorageSetBuildErrorAndExit(HaRebuildReason reason, bool setRcvDone)
@@ -19185,7 +19190,7 @@ static void SSOndemandXlogCopy(XLogSegNo copySegNo, uint32 startOffset, char *co
 }
 
 static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
-                      XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path)
+                        XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path)                      
 {
     /* Load reader private data */
     XLogPageReadPrivate *readprivate = (XLogPageReadPrivate *)xlogreader->private_data;
@@ -19233,13 +19238,6 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
 
     XLByteToSeg(targetPagePtr, t_thrd.xlog_cxt.readSegNo);
     XLByteAdvance(RecPtr, reqLen);
-
-    /* get insertHead of ctl_info file */
-    if (SS_CLUSTER_DORADO_REPLICATION) {
-        ReadSSDoradoCtlInfoFile();
-        ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
-        t_thrd.xlog_cxt.receivedUpto = ctlInfo->insertHead;
-    }
     
 retry:
     /* See if we need to retrieve more data */
@@ -19562,7 +19560,7 @@ retry:
      * know the requested record is in it.
      */
     Assert(t_thrd.xlog_cxt.readFile != -1);
-    
+
     if (t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM) {
         if ((targetPagePtr / XLOG_BLCKSZ) != (t_thrd.xlog_cxt.receivedUpto / XLOG_BLCKSZ)) {
             t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
@@ -19631,7 +19629,6 @@ try_again:
     Assert(targetSegNo == t_thrd.xlog_cxt.readSegNo);
     Assert(targetPageOff == t_thrd.xlog_cxt.readOff);
     Assert((uint32)reqLen <= t_thrd.xlog_cxt.readLen);
-
     *readTLI = t_thrd.xlog_cxt.curFileTLI;
 
     return t_thrd.xlog_cxt.readLen;

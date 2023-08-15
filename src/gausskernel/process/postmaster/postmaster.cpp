@@ -3076,10 +3076,12 @@ int PostmasterMain(int argc, char* argv[])
         }
     }
 
+    /* init sharestorge(dorado) */
+    ShareStorageInit();
+
     /*
      * We're ready to rock and roll...
      */
-    ShareStorageInit();
     if (ENABLE_DMS && ENABLE_REFORM) {
         if (!DMSWaitInitStartup()) {
             if (g_instance.pid_cxt.StartupPID == 0) {
