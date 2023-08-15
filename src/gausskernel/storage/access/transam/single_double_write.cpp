@@ -613,7 +613,7 @@ uint16 first_version_dw_single_flush(BufferDesc *buf_desc)
     (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 
-    uint32 buf_state = LockBufHdr(buf_desc);
+    uint64 buf_state = LockBufHdr(buf_desc);
     Block block = BufHdrGetBlock(buf_desc);
     XLogRecPtr page_lsn = BufferGetLSN(buf_desc);
     UnlockBufHdr(buf_desc, buf_state);

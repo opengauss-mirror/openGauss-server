@@ -46,11 +46,11 @@ thread_local static bool isForInput = false;
 static const int TEN_MICROSECOND = 10;
 
 #define BufHdrLocked(bufHdr) ((bufHdr)->state & BM_LOCKED)
-#define SegBufferIsPinned(bufHdr) ((bufHdr)->state & BUF_REFCOUNT_MASK)
+#define SegBufferIsPinned(bufHdr) BUF_STATE_GET_REFCOUNT((bufHdr)->state)
 
-static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state);
+static BufferDesc *SegStrategyGetBuffer(uint64 *buf_state);
 static bool SegStartBufferIO(BufferDesc *buf, bool forInput);
-static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bits);
+static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint64 set_flag_bits);
 
 extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool create, bool do_move);
 extern void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref);
@@ -66,7 +66,7 @@ void AbortSegBufferIO(void)
 static void WaitIO(BufferDesc *buf)
 {
     while (true) {
-        uint32 buf_state;
+        uint64 buf_state;
 
         buf_state = LockBufHdr(buf);
         UnlockBufHdr(buf, buf_state);
@@ -82,7 +82,7 @@ static void WaitIO(BufferDesc *buf)
 
 static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
 {
-    uint32 buf_state;
+    uint64 buf_state;
 
     SegmentCheck(!InProgressBuf);
 
@@ -117,11 +117,11 @@ static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
     return true;
 }
 
-static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bits)
+static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint64 set_flag_bits)
 {
     SegmentCheck(buf == InProgressBuf);
 
-    uint32 buf_state = LockBufHdr(buf);
+    uint64 buf_state = LockBufHdr(buf);
 
     SegmentCheck(buf_state & BM_IO_IN_PROGRESS);
 
@@ -157,20 +157,20 @@ static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_f
     LWLockRelease(buf->io_in_progress_lock);
 }
 
-static uint32 SegWaitBufHdrUnlocked(BufferDesc *buf)
+static uint64 SegWaitBufHdrUnlocked(BufferDesc *buf)
 {
 #ifndef ENABLE_THREAD_CHECK
     SpinDelayStatus delayStatus = init_spin_delay(buf);
 #endif
-    uint32 buf_state;
+    uint64 buf_state;
 
-    buf_state = pg_atomic_read_u32(&buf->state);
+    buf_state = pg_atomic_read_u64(&buf->state);
 
     while (buf_state & BM_LOCKED) {
 #ifndef ENABLE_THREAD_CHECK
         perform_spin_delay(&delayStatus);
 #endif
-        buf_state = pg_atomic_read_u32(&buf->state);
+        buf_state = pg_atomic_read_u64(&buf->state);
     }
 
 #ifndef ENABLE_THREAD_CHECK
@@ -193,8 +193,8 @@ bool SegPinBuffer(BufferDesc *buf)
     SegmentCheck(ref != NULL);
 
     if (ref->refcount == 0) {
-        uint32 buf_state;
-        uint32 old_buf_state = pg_atomic_read_u32(&buf->state);
+        uint64 buf_state;
+        uint64 old_buf_state = pg_atomic_read_u64(&buf->state);
 
         for (;;) {
             if (old_buf_state & BM_LOCKED) {
@@ -203,7 +203,7 @@ bool SegPinBuffer(BufferDesc *buf)
             buf_state = old_buf_state;
 
             buf_state += BUF_REFCOUNT_ONE;
-            if (pg_atomic_compare_exchange_u32(&buf->state, &old_buf_state, buf_state)) {
+            if (pg_atomic_compare_exchange_u64(&buf->state, &old_buf_state, buf_state)) {
                 result = old_buf_state & BM_VALID;
                 break;
             }
@@ -229,11 +229,12 @@ static bool SegPinBufferLocked(BufferDesc *buf, const BufferTag *tag)
     PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true, true);
     SegmentCheck(ref != NULL);
 
-    uint32 buf_state = pg_atomic_read_u32(&buf->state);
+    uint64 buf_state = pg_atomic_read_u64(&buf->state);
 
     if (ref->refcount == 0) {
-        buf_state += BUF_REFCOUNT_ONE;
+        buf_state = __sync_add_and_fetch(&buf->state, 1);
     }
+
     UnlockBufHdr(buf, buf_state);
 
     ref->refcount++;
@@ -257,10 +258,10 @@ void SegUnpinBuffer(BufferDesc *buf)
     ref->refcount--;
 
     if (ref->refcount == 0) {
-        uint32 buf_state;
-        uint32 old_buf_state;
+        uint64 buf_state;
+        uint64 old_buf_state;
 
-        old_buf_state = pg_atomic_read_u32(&buf->state);
+        old_buf_state = pg_atomic_read_u64(&buf->state);
         for (;;) {
             if (old_buf_state & BM_LOCKED) {
                 old_buf_state = SegWaitBufHdrUnlocked(buf);
@@ -269,7 +270,7 @@ void SegUnpinBuffer(BufferDesc *buf)
             buf_state = old_buf_state;
             SegmentCheck(BUF_STATE_GET_REFCOUNT(buf_state) > 0);
             buf_state -= BUF_REFCOUNT_ONE;
-            if (pg_atomic_compare_exchange_u32(&buf->state, &old_buf_state, buf_state)) {
+            if (pg_atomic_compare_exchange_u64(&buf->state, &old_buf_state, buf_state)) {
                 break;
             }
         }
@@ -295,7 +296,7 @@ void SegUnlockReleaseBuffer(Buffer buffer)
 
 void SegMarkBufferDirty(Buffer buf)
 {
-    uint32 old_buf_state, buf_state;
+    uint64 old_buf_state, buf_state;
     BufferDesc *bufHdr;
 
     bufHdr = GetBufferDescriptor(buf - 1);
@@ -363,7 +364,7 @@ void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
     }
     SegmentCheck(spc != NULL);
 
-    uint32 buf_state = LockBufHdr(buf);
+    uint64 buf_state = LockBufHdr(buf);
     buf_state &= ~BM_JUST_DIRTIED;
 
     UnlockBufHdr(buf, buf_state);
@@ -422,7 +423,7 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
     BufferDesc *bufHdr = SegBufferAlloc(spc, rnode, forkNum, blockNum, &found);
 
     if (!found) {
-        SegmentCheck(!(pg_atomic_read_u32(&bufHdr->state) & BM_VALID));
+        SegmentCheck(!(pg_atomic_read_u64(&bufHdr->state) & BM_VALID));
 
         char *bufBlock = (char *)BufHdrGetBlock(bufHdr);
         if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK) {
@@ -494,8 +495,8 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
 {
     BufferDesc *buf;
     BufferTag new_tag, old_tag;
-    uint32 buf_state;
-    uint32 old_flags;
+    uint64 buf_state;
+    uint64 old_flags;
     uint32 new_hash, old_hash;
     LWLock *new_partition_lock;
     LWLock *old_partition_lock;
@@ -611,10 +612,10 @@ static inline uint32 ClockSweepTick(void)
     return victim;
 }
 
-static BufferDesc* get_segbuf_from_candidate_list(uint32* buf_state)
+static BufferDesc* get_segbuf_from_candidate_list(uint64* buf_state)
 {
     BufferDesc* buf = NULL;
-    uint32 local_buf_state;
+    uint64 local_buf_state;
     int buf_id = 0;
 
     if (ENABLE_INCRE_CKPT && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
@@ -651,7 +652,7 @@ static BufferDesc* get_segbuf_from_candidate_list(uint32* buf_state)
 
 /* lock the buffer descriptor before return */
 const int RETRY_COUNT = 3;
-static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state) 
+static BufferDesc *SegStrategyGetBuffer(uint64 *buf_state)
 {
     // todo: add free list
     BufferDesc *buf = get_segbuf_from_candidate_list(buf_state);
@@ -666,7 +667,7 @@ static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state)
         int buf_id = BufferIdOfSegmentBuffer(ClockSweepTick());
         buf = GetBufferDescriptor(buf_id);
 
-        uint32 state = LockBufHdr(buf);
+        uint64 state = LockBufHdr(buf);
 
         if (BUF_STATE_GET_REFCOUNT(state) == 0) {
             *buf_state = state;
@@ -679,7 +680,7 @@ static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state)
         UnlockBufHdr(buf, state);
         ereport(DEBUG5,
                 (errmodule(MOD_SEGMENT_PAGE),
-                 (errmsg("SegStrategyGetBuffer get a pinned buffer, %d, buffer tag <%u, %u, %u, %u>.%d.%u, state %u",
+                 (errmsg("SegStrategyGetBuffer get a pinned buffer, %d, buffer tag <%u, %u, %u, %u>.%d.%u, state %lu",
                          buf_id, buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode,
                          buf->tag.rnode.bucketNode, buf->tag.forkNum, buf->tag.blockNum, state))));
     }
@@ -693,7 +694,7 @@ void SegDropSpaceMetaBuffers(Oid spcNode, Oid dbNode)
     smgrcloseall();
     for (i = SegmentBufferStartID; i < TOTAL_BUFFER_NUM; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
-        uint32 buf_state;
+        uint64 buf_state;
         /*
          * As in DropRelFileNodeBuffers, an unlocked precheck should be safe
          * and saves some cycles.

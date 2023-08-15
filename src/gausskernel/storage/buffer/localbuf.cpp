@@ -103,16 +103,16 @@ void LocalBufferFlushAllBuffer()
 
     for (i = 0; i < u_sess->storage_cxt.NLocBuffer; i++) {
         BufferDesc *bufHdr = &u_sess->storage_cxt.LocalBufferDescriptors[i];
-        uint32 buf_state;
+        uint64 buf_state;
 
-        buf_state = pg_atomic_read_u32(&bufHdr->state);
+        buf_state = pg_atomic_read_u64(&bufHdr->state);
         Assert(u_sess->storage_cxt.LocalRefCount[i] == 0);
 
         if ((buf_state & BM_VALID) && (buf_state & BM_DIRTY)) {
             LocalBufferFlushForExtremRTO(bufHdr);
 
             buf_state &= ~BM_DIRTY;
-            pg_atomic_write_u32(&bufHdr->state, buf_state);
+            pg_atomic_write_u32(((volatile uint32 *)&bufHdr->state) + 1, buf_state >> 32);
 
             u_sess->instr_cxt.pg_buffer_usage->local_blks_written++;
         }
@@ -144,7 +144,7 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
     int b;
     int try_counter;
     bool found = false;
-    uint32 buf_state;
+    uint64 buf_state;
 
     INIT_BUFFERTAG(new_tag, smgr->smgr_rnode.node, forkNum, blockNum);
 
@@ -161,13 +161,13 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
 #ifdef LBDEBUG
         fprintf(stderr, "LB ALLOC (%u,%d,%d) %d\n", smgr->smgr_rnode.node.relNode, forkNum, blockNum, -b - 1);
 #endif
-        buf_state = pg_atomic_read_u32(&buf_desc->state);
+        buf_state = pg_atomic_read_u64(&buf_desc->state);
 
         /* this part is equivalent to PinBuffer for a shared buffer */
         if (u_sess->storage_cxt.LocalRefCount[b] == 0) {
             if (BUF_STATE_GET_USAGECOUNT(buf_state) < BM_MAX_USAGE_COUNT) {
                 buf_state += BUF_USAGECOUNT_ONE;
-                pg_atomic_write_u32(&buf_desc->state, buf_state);
+                pg_atomic_write_u32(((volatile uint32 *)&buf_desc->state) + 1, buf_state >> 32);
             }
         }
         u_sess->storage_cxt.LocalRefCount[b]++;
@@ -202,11 +202,11 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
         buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[b];
 
         if (u_sess->storage_cxt.LocalRefCount[b] == 0) {
-            buf_state = pg_atomic_read_u32(&buf_desc->state);
+            buf_state = pg_atomic_read_u64(&buf_desc->state);
 
             if (BUF_STATE_GET_USAGECOUNT(buf_state) > 0) {
                 buf_state -= BUF_USAGECOUNT_ONE;
-                pg_atomic_write_u32(&buf_desc->state, buf_state);
+                pg_atomic_write_u32(((volatile uint32 *)&buf_desc->state) + 1, buf_state >> 32);
                 try_counter = u_sess->storage_cxt.NLocBuffer;
             } else {
                 /* Found a usable buffer */
@@ -231,7 +231,7 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
 
         /* Mark not-dirty now in case we error out below */
         buf_state &= ~BM_DIRTY;
-        pg_atomic_write_u32(&buf_desc->state, buf_state);
+        pg_atomic_write_u32(((volatile uint32 *)&buf_desc->state) + 1, buf_state >> 32);
 
         u_sess->instr_cxt.pg_buffer_usage->local_blks_written++;
     }
@@ -255,7 +255,7 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
         /* mark buffer invalid just in case hash insert fails */
         CLEAR_BUFFERTAG(buf_desc->tag);
         buf_state &= ~(BM_VALID | BM_TAG_VALID);
-        pg_atomic_write_u32(&buf_desc->state, buf_state);
+        pg_atomic_write_u32(((volatile uint32 *)&buf_desc->state) + 1, buf_state >> 32);
     }
 
     hresult = (LocalBufferLookupEnt *)hash_search(u_sess->storage_cxt.LocalBufHash, (void *)&new_tag, HASH_ENTER,
@@ -273,7 +273,7 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
     buf_state |= BM_TAG_VALID;
     buf_state &= ~BUF_USAGECOUNT_MASK;
     buf_state += BUF_USAGECOUNT_ONE;
-    pg_atomic_write_u32(&buf_desc->state, buf_state);
+    pg_atomic_write_u32(((volatile uint32 *)&buf_desc->state) + 1, buf_state >> 32);
 
     buf_desc->seg_fileno = EXTENT_INVALID;
 
@@ -289,7 +289,7 @@ void MarkLocalBufferDirty(Buffer buffer)
 {
     int buf_id;
     BufferDesc *buf_desc = NULL;
-    uint32 buf_state;
+    uint64 buf_state;
 
     Assert(BufferIsLocal(buffer));
 
@@ -303,7 +303,7 @@ void MarkLocalBufferDirty(Buffer buffer)
 
     buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[buf_id];
 
-    buf_state = pg_atomic_fetch_or_u32(&buf_desc->state, BM_DIRTY);
+    buf_state = pg_atomic_fetch_or_u64(&buf_desc->state, BM_DIRTY);
     if (!(buf_state & BM_DIRTY)) {
         u_sess->instr_cxt.pg_buffer_usage->local_blks_dirtied++;
         pgstatCountLocalBlocksDirtied4SessionLevel();
@@ -328,9 +328,9 @@ void DropRelFileNodeLocalBuffers(const RelFileNode &rnode, ForkNumber forkNum, B
     for (i = 0; i < u_sess->storage_cxt.NLocBuffer; i++) {
         BufferDesc* buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[i];
         LocalBufferLookupEnt* hresult = NULL;
-        uint32 buf_state;
+        uint64 buf_state;
 
-        buf_state = pg_atomic_read_u32(&buf_desc->state);
+        buf_state = pg_atomic_read_u64(&buf_desc->state);
 
         if ((buf_state & BM_TAG_VALID) && RelFileNodeEquals(rnode, buf_desc->tag.rnode) &&
             buf_desc->tag.forkNum == forkNum && buf_desc->tag.blockNum >= firstDelBlock) {
@@ -351,7 +351,7 @@ void DropRelFileNodeLocalBuffers(const RelFileNode &rnode, ForkNumber forkNum, B
             CLEAR_BUFFERTAG(buf_desc->tag);
             buf_state &= ~BUF_FLAG_MASK;
             buf_state &= ~BUF_USAGECOUNT_MASK;
-            pg_atomic_write_u32(&buf_desc->state, buf_state);
+            pg_atomic_write_u32(((volatile uint32 *)&buf_desc->state) + 1, buf_state >> 32);
         }
     }
 }
@@ -370,9 +370,9 @@ void DropRelFileNodeAllLocalBuffers(const RelFileNode &rnode)
     for (i = 0; i < u_sess->storage_cxt.NLocBuffer; i++) {
         BufferDesc* buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[i];
         LocalBufferLookupEnt* hresult = NULL;
-        uint32 buf_state;
+        uint64 buf_state;
 
-        buf_state = pg_atomic_read_u32(&buf_desc->state);
+        buf_state = pg_atomic_read_u64(&buf_desc->state);
 
         if ((buf_state & BM_TAG_VALID) && RelFileNodeEquals(rnode, buf_desc->tag.rnode)) {
             if (u_sess->storage_cxt.LocalRefCount[i] != 0) {
@@ -396,7 +396,7 @@ void DropRelFileNodeAllLocalBuffers(const RelFileNode &rnode)
             CLEAR_BUFFERTAG(buf_desc->tag);
             buf_state &= ~BUF_FLAG_MASK;
             buf_state &= ~BUF_USAGECOUNT_MASK;
-            pg_atomic_write_u32(&buf_desc->state, buf_state);
+            pg_atomic_write_u32(((volatile uint32 *)&buf_desc->state) + 1, buf_state >> 32);
         }
     }
 }
@@ -565,7 +565,7 @@ void ForgetLocalBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockN
     BufferTag   tag;            /* identity of target block */
     LocalBufferLookupEnt *hresult;
     BufferDesc *bufHdr;
-    uint32      bufState;
+    uint64      bufState;
 
     /*
      * If somehow this is the first request in the session, there's nothing to
@@ -590,6 +590,6 @@ void ForgetLocalBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockN
     /* mark buffer invalid */
     bufHdr = GetLocalBufferDescriptor(hresult->id);
     CLEAR_BUFFERTAG(bufHdr->tag);
-    bufState = pg_atomic_read_u32(&bufHdr->state);
+    bufState = pg_atomic_read_u64(&bufHdr->state);
     bufState &= ~(BM_VALID | BM_TAG_VALID | BM_DIRTY);
 }
