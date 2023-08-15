@@ -76,7 +76,6 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
         ItemId itemid;
         IndexTuple itup;
         BlockNumber blkno;
-        BlockNumber par_blkno;
         BTStack new_stack = NULL;
 
         /*
@@ -106,7 +105,6 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
         itemid = PageGetItemId(page, offnum);
         itup = (IndexTuple)PageGetItem(page, itemid);
         blkno = BTreeInnerTupleGetDownLink(itup);
-        par_blkno = BufferGetBlockNumber(*bufP);
 
         /*
          * We need to save the location of the index entry we chose in the
@@ -120,7 +118,7 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
          */
         if (needStack) {
             new_stack = (BTStack)palloc(sizeof(BTStackData));
-            new_stack->bts_blkno = par_blkno;
+            new_stack->bts_blkno = BufferGetBlockNumber(*bufP);
             new_stack->bts_offset = offnum;
             new_stack->bts_btentry = blkno;
             new_stack->bts_parent = stack_in;
