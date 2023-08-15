@@ -72,11 +72,21 @@ ParallelReorderBufferTXN *ParallelReorderBufferGetOldestTXN(ParallelReorderBuffe
     return txn;
 }
 
-void tuple_to_stringinfo(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool isOld)
+void tuple_to_stringinfo(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool isOld,
+    bool printOid)
 {
     if ((tuple->tupTableType == HEAP_TUPLE) && (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) ||
         (int)HeapTupleHeaderGetNatts(tuple->t_data, tupdesc) > tupdesc->natts)) {
         return;
+    }
+
+    if (printOid) {
+        Oid oid;
+
+        /* print oid of tuple, it's not included in the TupleDesc */
+        if ((oid = HeapTupleHeaderGetOid(tuple->t_data)) != InvalidOid) {
+            appendStringInfo(s, " oid[oid]:%u", oid);
+        }
     }
 
     /* print all columns individually */
@@ -90,6 +100,12 @@ void tuple_to_stringinfo(Relation relation, StringInfo s, TupleDesc tupdesc, Hea
 
         attr = &tupdesc->attrs[natt];
 
+        /*
+         * Don't print dropped columns, we can't be sure everything is
+         * available for them.
+         * Don't print system columns, oid will already have been printed if
+         * present.
+         */
         if (attr->attisdropped || attr->attnum < 0 || (isOld && !IsRelationReplidentKey(relation, attr->attnum)))
             continue;
 
