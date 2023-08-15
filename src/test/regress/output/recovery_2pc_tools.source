@@ -479,7 +479,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_pred_locks_per_transaction                   | integer |      | 10        | 2147483647
  max_prepared_transactions                        | integer |      | 0         | 262143
  max_process_memory                               | integer | kB   | 2097152   | 2147483647
- max_query_retry_times                            | integer |      | 0         | 20
  max_recursive_times                              | integer |      | 0         | 2147483647
  max_redo_log_size                                | integer | kB   | 163840    | 2147483647
  max_replication_slots                            | integer |      | 0         | 1024
