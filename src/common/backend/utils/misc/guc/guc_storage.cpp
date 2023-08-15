@@ -293,6 +293,13 @@ static const struct config_enum_entry repl_auth_mode_options[] = {
     {NULL, 0, false}
 };
 
+static const struct config_enum_entry ConflictResolvers[] = {
+    {"error", RESOLVE_ERROR, false},
+    {"apply_remote", RESOLVE_APPLY_REMOTE, false},
+    {"keep_local", RESOLVE_KEEP_LOCAL, false},
+    {NULL, 0, false}
+};
+
 /*
  * Although only "on", "off", "remote_write", and "local" are documented, we
  * accept all the likely variants of "on" and "off".
@@ -4720,6 +4727,18 @@ static void InitStorageConfigureNamesEnum()
             &u_sess->attr.attr_storage.repl_auth_mode,
             REPL_AUTH_DEFAULT,
             repl_auth_mode_options,
+            NULL,
+            NULL,
+            NULL},
+        {{"subscription_conflict_resolution",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION,
+            gettext_noop("Sets method used for conflict resolution for resolvable conflicts."),
+            NULL},
+            &u_sess->attr.attr_storage.subscription_conflict_resolution,
+            RESOLVE_ERROR,
+            ConflictResolvers,
             NULL,
             NULL,
             NULL},

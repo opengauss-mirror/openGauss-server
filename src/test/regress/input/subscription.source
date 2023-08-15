@@ -70,6 +70,14 @@ ALTER SUBSCRIPTION testsub owner to regress_subscription_user2;
 -- alter subbinary to true
 ALTER SUBSCRIPTION testsub SET (binary=true);
 select subname, subbinary from pg_subscription where subname='testsub';
+-- set subskiplsn
+ALTER SUBSCRIPTION testsub SET (skiplsn = '0/ABCDEF');
+select subname, subskiplsn from pg_subscription where subname='testsub';
+ALTER SUBSCRIPTION testsub SET (skiplsn = '0/ABCDEFGH');
+ALTER SUBSCRIPTION testsub SET (skiplsn = 'none');
+select subname, subskiplsn from pg_subscription where subname='testsub';
+-- disable test
+ALTER SUBSCRIPTION testsub DISABLE;
 --rename
 ALTER SUBSCRIPTION testsub rename to testsub_rename;
 --- inside a transaction block

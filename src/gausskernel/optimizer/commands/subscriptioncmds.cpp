@@ -45,9 +45,45 @@
 #include "utils/syscache.h"
 #include "utils/array.h"
 #include "utils/acl.h"
+#include "utils/pg_lsn.h"
 #include "access/tableam.h"
 #include "libpq/libpq-fe.h"
 #include "replication/slot.h"
+
+/*
+ * Options that can be specified by the user in CREATE/ALTER SUBSCRIPTION
+ * command.
+ */
+#define SUBOPT_CONNINFO             0x00000001
+#define SUBOPT_PUBLICATION          0x00000002
+#define SUBOPT_ENABLED              0x00000004
+#define SUBOPT_SLOT_NAME            0x00000008
+#define SUBOPT_SYNCHRONOUS_COMMIT   0x00000010
+#define SUBOPT_BINARY               0x00000020
+#define SUBOPT_COPY_DATA            0x00000040
+#define SUBOPT_CONNECT              0x00000080
+#define SUBOPT_SKIPLSN              0x00000100
+
+/* check if the 'val' has 'bits' set */
+#define IsSet(val, bits)  (((val) & (bits)) == (bits))
+
+/*
+ * Structure to hold a bitmap representing the user-provided CREATE/ALTER
+ * SUBSCRIPTION command options and the parsed/default values of each of them.
+ */
+typedef struct SubOpts
+{
+    bits32 specified_opts;
+    char *conninfo;
+    List *publications;
+    bool enabled;
+    char *slot_name;
+    char *synchronous_commit;
+    bool binary;
+    bool copy_data;
+    bool connect;
+    XLogRecPtr skiplsn;
+} SubOpts;
 
 static bool ConnectPublisher(char* conninfo, char* slotname);
 static void CreateSlotInPublisherAndInsertSubRel(char *slotname, Oid subid, List *publications,
@@ -61,120 +97,127 @@ static bool CheckPublicationsExistOnPublisher(List *publications);
  * Common option parsing function for CREATE and ALTER SUBSCRIPTION commands.
  *
  * Since not all options can be specified in both commands, this function
- * will report an error on options if the target output pointer is NULL to
- * accommodate that.
+ * will report an error mutually exclusive options are specified.
+ *
+ * Caller is expected to have cleared 'opts'.
  */
-static void parse_subscription_options(const List *options, char **conninfo, List **publications, bool *enabled_given,
-    bool *enabled, bool *slot_name_given, char **slot_name, char **synchronous_commit, bool *binary_given, bool *binary,
-    bool *copy_data_given, bool *copy_data, bool *connect_given, bool *connect)
+static void parse_subscription_options(const List *stmt_options, bits32 supported_opts, SubOpts *opts)
 {
     ListCell *lc;
 
-    if (conninfo) {
-        *conninfo = NULL;
-    }
-    if (publications) {
-        *publications = NIL;
-    }
-    if (enabled) {
-        *enabled_given = false;
-    }
-    if (slot_name) {
-        *slot_name_given = false;
-        *slot_name = NULL;
-    }
-    if (synchronous_commit) {
-        *synchronous_commit = NULL;
-    }
-    if (binary) {
-        *binary_given = false;
-        *binary = false;
-    }
+    /* caller must expect some option */
+    Assert(supported_opts != 0);
 
-    if (copy_data) {
-        *copy_data_given = false;
-        *copy_data = true;
+    /* Set default values for the boolean supported options. */
+    if (IsSet(supported_opts, SUBOPT_BINARY)) {
+        opts->binary = false;
     }
-
-    if (connect) {
-        *connect_given = false;
-        *connect = true;
+    if (IsSet(supported_opts, SUBOPT_COPY_DATA)) {
+        opts->copy_data = true;
+    }
+    if (IsSet(supported_opts, SUBOPT_CONNECT)) {
+        opts->connect = true;
     }
 
     /* Parse options */
-    foreach (lc, options) {
+    foreach (lc, stmt_options) {
         DefElem *defel = (DefElem *)lfirst(lc);
 
-        if (strcmp(defel->defname, "conninfo") == 0 && conninfo) {
-            if (*conninfo) {
+        if (IsSet(supported_opts, SUBOPT_CONNINFO) && strcmp(defel->defname, "conninfo") == 0) {
+            if (IsSet(opts->specified_opts, SUBOPT_CONNINFO)) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             }
 
-            *conninfo = defGetString(defel);
-        } else if (strcmp(defel->defname, "publication") == 0 && publications) {
-            if (*publications) {
+            opts->specified_opts |= SUBOPT_CONNINFO;
+            opts->conninfo = defGetString(defel);
+        } else if (IsSet(supported_opts, SUBOPT_PUBLICATION) && strcmp(defel->defname, "publication") == 0) {
+            if (IsSet(opts->specified_opts, SUBOPT_PUBLICATION)) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             }
 
-            *publications = defGetStringList(defel);
-        } else if (strcmp(defel->defname, "enabled") == 0 && enabled) {
-            if (*enabled_given) {
+            opts->specified_opts |= SUBOPT_PUBLICATION;
+            opts->publications = defGetStringList(defel);
+        } else if (IsSet(supported_opts, SUBOPT_ENABLED) && strcmp(defel->defname, "enabled") == 0) {
+            if (IsSet(opts->specified_opts, SUBOPT_ENABLED)) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             }
 
-            *enabled_given = true;
-            *enabled = defGetBoolean(defel);
-        } else if (strcmp(defel->defname, "slot_name") == 0 && slot_name) {
-            if (*slot_name_given) {
+            opts->specified_opts |= SUBOPT_ENABLED;
+            opts->enabled = defGetBoolean(defel);
+        } else if (IsSet(supported_opts, SUBOPT_SLOT_NAME) && strcmp(defel->defname, "slot_name") == 0) {
+            if (IsSet(opts->specified_opts, SUBOPT_SLOT_NAME)) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             }
 
-            *slot_name_given = true;
-            *slot_name = defGetString(defel);
+            opts->specified_opts |= SUBOPT_SLOT_NAME;
+            opts->slot_name = defGetString(defel);
 
             /* Setting slot_name = NONE is treated as no slot name. */
-            if (strcmp(*slot_name, "none") == 0) {
-                *slot_name = NULL;
+            if (strcmp(opts->slot_name, "none") == 0) {
+                opts->slot_name = NULL;
             } else {
-                ReplicationSlotValidateName(*slot_name, ERROR);
+                ReplicationSlotValidateName(opts->slot_name, ERROR);
             }
-        } else if (strcmp(defel->defname, "synchronous_commit") == 0 && synchronous_commit) {
-            if (*synchronous_commit) {
+        } else if (IsSet(supported_opts, SUBOPT_SYNCHRONOUS_COMMIT) &&
+                   strcmp(defel->defname, "synchronous_commit") == 0) {
+            if (IsSet(opts->specified_opts, SUBOPT_SYNCHRONOUS_COMMIT)) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             }
 
-            *synchronous_commit = defGetString(defel);
+            opts->specified_opts |= SUBOPT_SYNCHRONOUS_COMMIT;
+            opts->synchronous_commit = defGetString(defel);
 
             /* Test if the given value is valid for synchronous_commit GUC. */
-            (void)set_config_option("synchronous_commit", *synchronous_commit, PGC_BACKEND, PGC_S_TEST, GUC_ACTION_SET,
-                false, 0, false);
-        } else if (strcmp(defel->defname, "binary") == 0 && binary) {
-            if (*binary_given) {
+            (void)set_config_option("synchronous_commit", opts->synchronous_commit, PGC_BACKEND, PGC_S_TEST,
+                GUC_ACTION_SET, false, 0, false);
+        } else if (IsSet(supported_opts, SUBOPT_BINARY) && strcmp(defel->defname, "binary") == 0) {
+            if (IsSet(opts->specified_opts, SUBOPT_BINARY)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_SYNTAX_ERROR),
                          errmsg("conflicting or redundant options")));
             }
 
-            *binary_given = true;
-            *binary = defGetBoolean(defel);
-        } else if (strcmp(defel->defname, "copy_data") == 0 && copy_data) {
-            if (*copy_data_given) {
+            opts->specified_opts |= SUBOPT_BINARY;
+            opts->binary = defGetBoolean(defel);
+        } else if (IsSet(supported_opts, SUBOPT_COPY_DATA) && strcmp(defel->defname, "copy_data") == 0) {
+            if (IsSet(opts->specified_opts, SUBOPT_COPY_DATA)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_SYNTAX_ERROR),
                          errmsg("conflicting or redundant options")));
             }
 
-            *copy_data_given = true;
-            *copy_data = defGetBoolean(defel);
-        } else if (strcmp(defel->defname, "connect") == 0 && connect) {
-            if (*connect_given) {
+            opts->specified_opts |= SUBOPT_COPY_DATA;
+            opts->copy_data = defGetBoolean(defel);
+        } else if (IsSet(supported_opts, SUBOPT_CONNECT) && strcmp(defel->defname, "connect") == 0) {
+            if (IsSet(opts->specified_opts, SUBOPT_CONNECT)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_SYNTAX_ERROR),
                          errmsg("conflicting or redundant options")));
             }
 
-            *connect_given = true;
-            *connect = defGetBoolean(defel);
+            opts->specified_opts = SUBOPT_CONNECT;
+            opts->connect = defGetBoolean(defel);
+        } else if (IsSet(supported_opts, SUBOPT_SKIPLSN) && strcmp(defel->defname, "skiplsn") == 0) {
+            if (IsSet(opts->specified_opts, SUBOPT_SKIPLSN)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                         errmsg("conflicting or redundant options")));
+            }
+
+            char *lsn_str = defGetString(defel);
+            opts->specified_opts = SUBOPT_SKIPLSN;
+            /* Setting lsn = 'NONE' is treated as resetting LSN */
+            if (strcmp(lsn_str, "none") == 0) {
+                opts->skiplsn = InvalidXLogRecPtr;
+            } else {
+                /* Parse the argument as LSN */
+                opts->skiplsn = DatumGetLSN(DirectFunctionCall1(pg_lsn_in, CStringGetDatum(lsn_str)));
+
+                if (XLogRecPtrIsInvalid(opts->skiplsn))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("invalid WAL location (LSN): %s", lsn_str)));
+            }
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized subscription parameter: %s", defel->defname)));
@@ -185,38 +228,39 @@ static void parse_subscription_options(const List *options, char **conninfo, Lis
      * We've been explicitly asked to not connect, that requires some
      * additional processing.
      */
-    if (connect && !*connect) {
+    if (IsSet(supported_opts, SUBOPT_CONNECT) && !opts->connect) {
         /* Check for incompatible options from the user. */
-        if (*enabled_given && *enabled)
+        if (IsSet(opts->specified_opts, SUBOPT_ENABLED) && opts->enabled)
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("%s and %s are mutually exclusive options",
                 "connect = false", "enabled = true")));
 
-        if (*copy_data_given && *copy_data)
+        if (IsSet(opts->specified_opts, SUBOPT_COPY_DATA) && opts->copy_data)
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("%s and %s are mutually exclusive options",
                 "connect = false", "copy_data = true")));
 
         /* Change the defaults of other options. */
-        *enabled = false;
-        *copy_data = false;
+        opts->enabled = false;
+        opts->copy_data = false;
     }
 
     /*
      * Do additional checking for disallowed combination when
      * slot_name = NONE was used.
      */
-    if (slot_name && *slot_name_given && !*slot_name) {
-        if (enabled && *enabled_given && *enabled) {
+    if (!opts->slot_name && IsSet(supported_opts, SUBOPT_SLOT_NAME) && IsSet(opts->specified_opts, SUBOPT_SLOT_NAME)) {
+        if (opts->enabled && IsSet(supported_opts, SUBOPT_ENABLED) && IsSet(opts->specified_opts, SUBOPT_ENABLED)) {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                 errmsg("slot_name = NONE and enabled = true are mutually exclusive options")));
         }
 
-        if (enabled && !*enabled_given && *enabled) {
+        if (opts->enabled && IsSet(supported_opts, SUBOPT_ENABLED) && !IsSet(opts->specified_opts, SUBOPT_ENABLED)) {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                 errmsg("subscription with slot_name = NONE must also set enabled = false")));
         }
     }
 
-    if (copy_data && *copy_data && u_sess->attr.attr_storage.max_sync_workers_per_subscription == 0) {
+    if (IsSet(supported_opts, SUBOPT_COPY_DATA) && IsSet(opts->specified_opts, SUBOPT_COPY_DATA) &&
+        u_sess->attr.attr_storage.max_sync_workers_per_subscription == 0) {
         ereport(WARNING, (errmsg("you need to set max_sync_workers_per_subscription because it is zero but "
                                  "copy_data is true")));
     }
@@ -451,27 +495,20 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     Datum values[Natts_pg_subscription];
     Oid owner = GetUserId();
     HeapTuple tup;
-    bool enabled_given = false;
-    bool enabled = true;
-    char *synchronous_commit;
-    char *slotname;
-    bool slotname_given;
-    bool binary;
-    bool binary_given;
-    bool copy_data;
-    bool copy_data_given;
-    bool connect;
-    bool connect_given;
     char originname[NAMEDATALEN];
     List *publications;
+    bits32 supported_opts;
+    SubOpts opts = {0};
+    opts.enabled = true;
     int rc;
 
     /*
      * Parse and check options.
      * Connection and publication should not be specified here.
      */
-    parse_subscription_options(stmt->options, NULL, NULL, &enabled_given, &enabled, &slotname_given, &slotname,
-        &synchronous_commit, &binary_given, &binary, &copy_data_given, &copy_data, &connect_given, &connect);
+    supported_opts = (SUBOPT_ENABLED | SUBOPT_SLOT_NAME | SUBOPT_SYNCHRONOUS_COMMIT | SUBOPT_BINARY |
+                      SUBOPT_COPY_DATA | SUBOPT_CONNECT);
+    parse_subscription_options(stmt->options, supported_opts, &opts);
 
     /*
      * Since creating a replication slot is not transactional, rolling back
@@ -479,7 +516,7 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
      * CREATE SUBSCRIPTION inside a transaction block if creating a
      * replication slot.
      */
-    if (enabled)
+    if (opts.enabled)
         PreventTransactionChain(isTopLevel, "CREATE SUBSCRIPTION ... WITH (enabled = true)");
 
     if (!superuser())
@@ -495,8 +532,8 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     }
 
     /* The default for synchronous_commit of subscriptions is off. */
-    if (synchronous_commit == NULL) {
-        synchronous_commit = "off";
+    if (opts.synchronous_commit == NULL) {
+        opts.synchronous_commit = "off";
     }
 
     publications = stmt->publication;
@@ -513,28 +550,29 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     values[Anum_pg_subscription_subdbid - 1] = ObjectIdGetDatum(u_sess->proc_cxt.MyDatabaseId);
     values[Anum_pg_subscription_subname - 1] = DirectFunctionCall1(namein, CStringGetDatum(stmt->subname));
     values[Anum_pg_subscription_subowner - 1] = ObjectIdGetDatum(owner);
-    values[Anum_pg_subscription_subenabled - 1] = BoolGetDatum(enabled);
-    values[Anum_pg_subscription_subbinary - 1] = BoolGetDatum(binary);
+    values[Anum_pg_subscription_subenabled - 1] = BoolGetDatum(opts.enabled);
+    values[Anum_pg_subscription_subbinary - 1] = BoolGetDatum(opts.binary);
 
     /* encrypt conninfo */
     char *encryptConninfo = EncryptOrDecryptConninfo(stmt->conninfo, 'E');
     values[Anum_pg_subscription_subconninfo - 1] = CStringGetTextDatum(encryptConninfo);
 
-    if (enabled) {
-        if (!slotname_given) {
-            slotname = stmt->subname;
+    if (opts.enabled) {
+        if (!IsSet(opts.specified_opts, SUBOPT_SLOT_NAME)) {
+            opts.slot_name = stmt->subname;
         }
-        values[Anum_pg_subscription_subslotname - 1] = DirectFunctionCall1(namein, CStringGetDatum(slotname));
+        values[Anum_pg_subscription_subslotname - 1] = DirectFunctionCall1(namein, CStringGetDatum(opts.slot_name));
     } else {
-        if (slotname_given && slotname) {
+        if (IsSet(opts.specified_opts, SUBOPT_SLOT_NAME) && opts.slot_name) {
             ereport(WARNING, (errmsg("When enabled=false, it is dangerous to set slot_name. "
                 "This will cause wal log accumulation on the publisher, "
                 "so slot_name will be forcibly set to NULL.")));
         }
         nulls[Anum_pg_subscription_subslotname - 1] = true;
     }
-    values[Anum_pg_subscription_subsynccommit - 1] = CStringGetTextDatum(synchronous_commit);
+    values[Anum_pg_subscription_subsynccommit - 1] = CStringGetTextDatum(opts.synchronous_commit);
     values[Anum_pg_subscription_subpublications - 1] = publicationListToArray(publications);
+    values[Anum_pg_subscription_subskiplsn - 1] = LsnGetTextDatum(InvalidXLogRecPtr);
 
     tup = heap_form_tuple(RelationGetDescr(rel), values, nulls);
 
@@ -553,8 +591,8 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
      * Connect to remote side to execute requested commands and fetch table
      * info.
      */
-    if (connect) {
-        if (!AttemptConnectPublisher(encryptConninfo, slotname, true)) {
+    if (opts.connect) {
+        if (!AttemptConnectPublisher(encryptConninfo, opts.slot_name, true)) {
             ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Failed to connect to publisher.")));
         }
 
@@ -567,8 +605,8 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
          * If requested, create the replication slot on remote side for our
          * newly created subscription.
          */
-        Assert(!enabled || slotname);
-        CreateSlotInPublisherAndInsertSubRel(slotname, subid, publications, &copy_data, enabled);
+        Assert(!opts.enabled || opts.slot_name);
+        CreateSlotInPublisherAndInsertSubRel(opts.slot_name, subid, publications, &opts.copy_data, opts.enabled);
 
         (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
     } else {
@@ -582,7 +620,7 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     securec_check(rc, "", "");
 
     /* Don't wake up logical replication launcher unnecessarily */
-    if (enabled) {
+    if (opts.enabled) {
         ApplyLauncherWakeupAtCommit();
     }
 
@@ -793,17 +831,6 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     Datum values[Natts_pg_subscription];
     HeapTuple tup;
     Oid subid;
-    bool enabled_given = false;
-    bool enabled = false;
-    bool binary_given = false;
-    bool binary = false;
-    char *synchronous_commit = NULL;
-    char *conninfo = NULL;
-    char *slot_name = NULL;
-    bool slotname_given = false;
-    bool copy_data = false;
-    bool copy_data_given = false;
-    List *publications = NIL;
     Subscription *sub = NULL;
     int rc;
     bool checkConn = false;
@@ -812,6 +839,8 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     bool needFreeConninfo = false;
     char *finalSlotName = NULL;
     char *encryptConninfo = NULL;
+    bits32 supported_opts;
+    SubOpts opts = {0};
 
     rel = heap_open(SubscriptionRelationId, RowExclusiveLock);
 
@@ -831,17 +860,18 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     /* Lock the subscription so nobody else can do anything with it. */
     LockSharedObject(SubscriptionRelationId, subid, 0, AccessExclusiveLock);
 
-    enabled = sub->enabled;
+    opts.enabled = sub->enabled;
     finalSlotName = sub->name;
     encryptConninfo = sub->conninfo;
 
     /* Parse options. */
     if (!stmt->refresh) {
-        parse_subscription_options(stmt->options, &conninfo, &publications, &enabled_given, &enabled, &slotname_given,
-            &slot_name, &synchronous_commit, &binary_given, &binary, NULL, NULL, NULL, NULL);
+        supported_opts = (SUBOPT_CONNINFO | SUBOPT_PUBLICATION | SUBOPT_ENABLED | SUBOPT_SLOT_NAME |
+                          SUBOPT_SYNCHRONOUS_COMMIT | SUBOPT_BINARY | SUBOPT_SKIPLSN);
+        parse_subscription_options(stmt->options, supported_opts, &opts);
     } else {
-        parse_subscription_options(stmt->options, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-            &copy_data_given, &copy_data, NULL, NULL);
+        supported_opts = SUBOPT_COPY_DATA;
+        parse_subscription_options(stmt->options, supported_opts, &opts);
 
         PreventTransactionChain(isTopLevel, "ALTER SUBSCRIPTION ... REFRESH");
     }
@@ -854,38 +884,39 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
     securec_check(rc, "", "");
 
-    if (enabled_given && enabled != sub->enabled) {
-        values[Anum_pg_subscription_subenabled - 1] = BoolGetDatum(enabled);
+    if (IsSet(opts.specified_opts, SUBOPT_ENABLED) && opts.enabled != sub->enabled) {
+        values[Anum_pg_subscription_subenabled - 1] = BoolGetDatum(opts.enabled);
         replaces[Anum_pg_subscription_subenabled - 1] = true;
     }
-    if (conninfo) {
+    if (opts.conninfo) {
         /* Check the connection info string. */
-        libpqrcv_check_conninfo(conninfo);
-        encryptConninfo = EncryptOrDecryptConninfo(conninfo, 'E');
-        rc = memset_s(conninfo, strlen(conninfo), 0, strlen(conninfo));
+        libpqrcv_check_conninfo(opts.conninfo);
+        encryptConninfo = EncryptOrDecryptConninfo(opts.conninfo, 'E');
+        rc = memset_s(opts.conninfo, strlen(opts.conninfo), 0, strlen(opts.conninfo));
         securec_check(rc, "\0", "\0");
         values[Anum_pg_subscription_subconninfo - 1] = CStringGetTextDatum(encryptConninfo);
         replaces[Anum_pg_subscription_subconninfo - 1] = true;
         needFreeConninfo = true;
 
         /* need to check whether new conninfo can be used to connect to new publisher */
-        if (sub->enabled || (enabled_given && enabled)) {
+        if (sub->enabled || (IsSet(opts.specified_opts, SUBOPT_ENABLED) && opts.enabled)) {
             checkConn = true;
         }
     }
-    if (slotname_given) {
-        if (sub->enabled && !slot_name) {
+    if (IsSet(opts.specified_opts, SUBOPT_SLOT_NAME)) {
+        if (sub->enabled && !opts.slot_name) {
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR), errmsg("cannot set slot_name = NONE for enabled subscription")));
         }
 
         /* change to non-null value */
-        if (slot_name) {
-            if (sub->enabled || (enabled_given && enabled)) {
-                values[Anum_pg_subscription_subslotname - 1] = DirectFunctionCall1(namein, CStringGetDatum(slot_name));
+        if (opts.slot_name) {
+            if (sub->enabled || (IsSet(opts.specified_opts, SUBOPT_ENABLED) && opts.enabled)) {
+                values[Anum_pg_subscription_subslotname - 1] = DirectFunctionCall1(namein,
+                    CStringGetDatum(opts.slot_name));
                 /* if old slotname is null or same as new slot name, then we need to validate the new slot name */
-                validateSlot = sub->slotname == NULL || strcmp(slot_name, sub->slotname) != 0;
-                finalSlotName = slot_name;
+                validateSlot = sub->slotname == NULL || strcmp(opts.slot_name, sub->slotname) != 0;
+                finalSlotName = opts.slot_name;
             } else {
                 ereport(ERROR, (errmsg("Currently enabled=false, cannot change slot_name to a non-null value.")));
             }
@@ -896,30 +927,34 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
              * when enable this subscription but slot_name is not specified,
              * it will be set to default value subname.
              */
-            if (!sub->enabled && enabled_given && enabled) {
+            if (!sub->enabled && IsSet(opts.specified_opts, SUBOPT_ENABLED) && opts.enabled) {
                 values[Anum_pg_subscription_subslotname - 1] = DirectFunctionCall1(namein, CStringGetDatum(sub->name));
             } else {
                 nulls[Anum_pg_subscription_subslotname - 1] = true;
             }
         }
         replaces[Anum_pg_subscription_subslotname - 1] = true;
-    } else if (!sub->enabled && enabled_given && enabled) {
+    } else if (!sub->enabled && IsSet(opts.specified_opts, SUBOPT_ENABLED) && opts.enabled) {
         values[Anum_pg_subscription_subslotname - 1] = DirectFunctionCall1(namein, CStringGetDatum(sub->name));
         replaces[Anum_pg_subscription_subslotname - 1] = true;
     }
-    if (synchronous_commit) {
-        values[Anum_pg_subscription_subsynccommit - 1] = CStringGetTextDatum(synchronous_commit);
+    if (opts.synchronous_commit) {
+        values[Anum_pg_subscription_subsynccommit - 1] = CStringGetTextDatum(opts.synchronous_commit);
         replaces[Anum_pg_subscription_subsynccommit - 1] = true;
     }
-    if (binary_given) {
-        values[Anum_pg_subscription_subbinary - 1] = BoolGetDatum(binary);
+    if (IsSet(opts.specified_opts, SUBOPT_BINARY)) {
+        values[Anum_pg_subscription_subbinary - 1] = BoolGetDatum(opts.binary);
         replaces[Anum_pg_subscription_subbinary - 1] = true;
     }
-    if (publications != NIL) {
-        values[Anum_pg_subscription_subpublications - 1] = publicationListToArray(publications);
+    if (opts.publications != NIL) {
+        values[Anum_pg_subscription_subpublications - 1] = publicationListToArray(opts.publications);
         replaces[Anum_pg_subscription_subpublications - 1] = true;
     } else {
-        publications = sub->publications;
+        opts.publications = sub->publications;
+    }
+    if (IsSet(opts.specified_opts, SUBOPT_SKIPLSN)) {
+        values[Anum_pg_subscription_subskiplsn - 1] = LsnGetTextDatum(opts.skiplsn);
+        replaces[Anum_pg_subscription_subskiplsn - 1] = true;
     }
 
     tup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);
@@ -938,8 +973,9 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
 
     /* case 0: keep the subscription enabled, it's over here */
     /* case 1: deactivating subscription */
-    if (sub->enabled && !enabled) {
-        ereport(ERROR, (errmsg("If you want to deactivate this subscription, use DROP SUBSCRIPTION.")));
+    if (sub->enabled && !opts.enabled) {
+        ereport(WARNING, (errmsg("The subscription will be disabled, take care of the xlog would be accumulate "
+            "because the slot of subscription wouldn't be advanced")));
     }
 
     /* case 2: keep the subscription active */
@@ -947,7 +983,7 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
         if (!AttemptConnectPublisher(encryptConninfo, finalSlotName, true)) {
             ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg( "Failed to connect to publisher.")));
         }
-        if (!CheckPublicationsExistOnPublisher(publications)) {
+        if (!CheckPublicationsExistOnPublisher(opts.publications)) {
             (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
             ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
         }
@@ -958,7 +994,7 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
      * enabling subscription, but slot hasn't been created,
      * then mark createSlot to true.
      */
-    if (!sub->enabled && enabled && (!sub->slotname || !*(sub->slotname))) {
+    if (!sub->enabled && opts.enabled && (!sub->slotname || !*(sub->slotname))) {
             createSlot = true;
     }
 
@@ -968,13 +1004,13 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
                 checkConn ? "The new conninfo cannot connect to new publisher." : "Failed to connect to publisher.")));
         }
 
-        if (!CheckPublicationsExistOnPublisher(publications)) {
+        if (!CheckPublicationsExistOnPublisher(opts.publications)) {
             (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
             ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
         }
 
         if (createSlot) {
-            CreateSlotInPublisherAndInsertSubRel(finalSlotName, subid, publications, NULL, true);
+            CreateSlotInPublisherAndInsertSubRel(finalSlotName, subid, opts.publications, NULL, true);
         }
 
         /* no need to validate replication slot if the slot is created just by ourself */
@@ -984,6 +1020,8 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
 
         (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
         ApplyLauncherWakeupAtCommit();
+    } else if (!sub->enabled && opts.enabled) {
+        ApplyLauncherWakeupAtCommit();
     }
 
     if (stmt->refresh) {
@@ -991,7 +1029,7 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                     errmsg("ALTER SUBSCRIPTION ... REFRESH is not allowed for disabled subscriptions")));
         }
-        AlterSubscription_refresh(sub, copy_data);
+        AlterSubscription_refresh(sub, opts.copy_data);
     }
 
     if (needFreeConninfo) {
