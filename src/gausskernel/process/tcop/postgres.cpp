@@ -7563,8 +7563,8 @@ void LoadSqlPlugin()
         if (!u_sess->attr.attr_sql.dolphin && !u_sess->attr.attr_common.IsInplaceUpgrade) {
             Oid userId = GetUserId();
             if (userId != INITIAL_USER_ID) {
-                ereport(WARNING, (errmsg("Use the original role to load extension dolphin")));
-                return;
+                ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("Please use the original role to connect B-compatibility database first, to load extension dolphin")));
             }
             /* recheck and load dolphin within lock */
             pthread_mutex_lock(&g_instance.loadPluginLock[DB_CMPT_B]);
