@@ -493,7 +493,8 @@ void RelationMapFinishBootstrap(void)
             g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, RELMAPPER_FILENAME);
         securec_check_ss_c(rc, "\0", "\0");
 
-        if (dss_exist_file(map_file_name)) {
+        struct stat st;
+        if (stat(map_file_name, &st) == 0 && S_ISREG(st.st_mode)) {
             return;
         }
     }
