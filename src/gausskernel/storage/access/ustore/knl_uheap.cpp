@@ -4734,7 +4734,7 @@ void UHeapResetPreparedUndo()
                     LWLock *lock = BufferDescriptorGetContentLock(bufdesc);
                     ereport(PANIC, (
                         errmodule(MOD_USTORE),
-                        errmsg(USTOREFORMAT("xid %lu, oid %u, blockno %u. buffer %d is not unlocked, lock state %u."),
+                        errmsg(USTOREFORMAT("xid %lu, oid %u, blockno %u. buffer %d is not unlocked, lock state %lu."),
                         GetTopTransactionId(), bufdesc->tag.rnode.relNode,
                         BufferGetBlockNumber(t_thrd.ustore_cxt.undo_buffers[i].buf),
                         t_thrd.ustore_cxt.undo_buffers[i].buf, lock->state)));
