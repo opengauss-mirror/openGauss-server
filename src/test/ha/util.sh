@@ -194,42 +194,27 @@ function kill_standby_cluster() {
 
 function start_primary_cluster() {
   cluster_dns=($primary_data_dir $standby_data_dir)
-  for element in ${cluster_dns[@]}
-  do
-    gs_guc set -Z datanode -D $element -c "cluster_run_mode=cluster_primary"
-  done
-  start_primary_as_primary
-  start_standby
+  start_primary_as_primary "-z cluster_primary"
+  start_standby "-z cluster_primary"
 }
 
 function start_standby_cluster() {
   cluster_dns=($standby2_data_dir $standby3_data_dir)
-  for element in ${cluster_dns[@]}
-  do
-    gs_guc set -Z datanode -D $element -c "cluster_run_mode=cluster_standby"
-  done
-  start_standby2
-  start_standby3
+
+  start_standby2 "-z cluster_standby"
+  start_standby3 "-z cluster_standby"
 }
 
 function start_primary_cluster_as_standby() {
   cluster_dns=($primary_data_dir $standby_data_dir)
-  for element in ${cluster_dns[@]}
-  do
-    gs_guc set -Z datanode -D $element -c "cluster_run_mode=cluster_standby"
-  done
-  start_primary_as_standby
-  start_standby
+  start_primary_as_standby "-z cluster_standby"
+  start_standby "-z cluster_standby"
 }
 
 function start_standby_cluster_as_primary() {
   cluster_dns=($standby2_data_dir $standby3_data_dir)
-  for element in ${cluster_dns[@]}
-  do
-    gs_guc set -Z datanode -D $element -c "cluster_run_mode=cluster_primary"
-  done
-  start_standby2_as_primary
-  start_standby3
+  start_standby2_as_primary  "-z cluster_primary"
+  start_standby3  "-z cluster_primary"
 }
 
 function stop_primary_cluster() {

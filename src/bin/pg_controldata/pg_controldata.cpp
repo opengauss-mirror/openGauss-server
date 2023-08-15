@@ -98,6 +98,18 @@ static const char* SSClusterState(SSGlobalClusterState state) {
     return _("unrecognized status code");
 }
 
+static const char* SSClusterRunMode(ClusterRunMode run_mode) {
+    switch (run_mode) {
+        case RUN_MODE_PRIMARY:
+            return _("primary cluster");
+        case RUN_MODE_STANDBY:
+            return _("standby cluster");
+        default:
+            break;
+    }
+    return _("unrecognized cluster run mode");
+}
+
 static const char* wal_level_str(WalLevel wal_level)
 {
     switch (wal_level) {
@@ -263,6 +275,7 @@ static void display_last_page(ss_reformer_ctrl_t reformerCtrl, int last_page_id)
     printf(_("Primary instance ID:                  %d\n"), reformerCtrl.primaryInstId);
     printf(_("Recovery instance ID:                 %d\n"), reformerCtrl.recoveryInstId);
     printf(_("Cluster status:                       %s\n"), SSClusterState(reformerCtrl.clusterStatus));
+    printf(_("Cluster run mode:                     %s\n"), SSClusterRunMode(reformerCtrl.clusterRunMode));
 }
 
 int main(int argc, char* argv[])

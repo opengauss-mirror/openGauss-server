@@ -1896,7 +1896,7 @@ int PostmasterMain(int argc, char* argv[])
 
     optCtxt.opterr = 1;
 
-    check_short_optOfVoid("A:B:bc:C:D:d:EeFf:h:ijk:lM:N:nOo:Pp:Rr:S:sTt:u:W:g:X:-:", argc, argv);
+    check_short_optOfVoid("A:B:bc:C:D:d:EeFf:h:ijk:lM:N:nOo:Pp:Rr:S:sTt:u:W:g:X:z:-:", argc, argv);
 
     /*
      * Parse command-line options.	CAUTION: keep this in sync with
@@ -1904,7 +1904,7 @@ int PostmasterMain(int argc, char* argv[])
      * common help() function in main/main.c.
      */
     initOptParseContext(&optCtxt);
-    while ((opt = getopt_r(argc, argv, "A:B:bc:C:D:d:EeFf:h:ijk:lM:N:nOo:Pp:Rr:S:sTt:u:W:g:X:-:", &optCtxt)) != -1) {
+    while ((opt = getopt_r(argc, argv, "A:B:bc:C:D:d:EeFf:h:ijk:lM:N:nOo:Pp:Rr:S:sTt:u:W:g:X:z:-:", &optCtxt)) != -1) {
         switch (opt) {
             case 'A':
                 SetConfigOption("debug_assertions", optCtxt.optarg, PGC_POSTMASTER, PGC_S_ARGV);
@@ -2100,6 +2100,18 @@ int PostmasterMain(int argc, char* argv[])
                     securec_check(rc, "\0", "\0");
                     ereport(LOG, (errmsg("Set stop barrierID %s", g_instance.csn_barrier_cxt.stopBarrierId)));
                 }
+                break;
+            case 'z':
+                if (0 == strncmp(optCtxt.optarg, "cluster_primary", strlen("cluster_primary")) &&
+                    '\0' == optCtxt.optarg[strlen("cluster_primary")]) {
+                    g_instance.attr.attr_common.cluster_run_mode = RUN_MODE_PRIMARY;
+                } else if (0 == strncmp(optCtxt.optarg, "cluster_standby", strlen("cluster_standby")) &&
+                           '\0' == optCtxt.optarg[strlen("cluster_standby")]) {
+                    g_instance.attr.attr_common.cluster_run_mode = RUN_MODE_STANDBY;
+                } else {
+                    ereport(FATAL, (errmsg("the options of -z is not recognized")));
+                }
+                g_instance.dms_cxt.SSReformerControl.clusterRunMode = (ClusterRunMode)g_instance.attr.attr_common.cluster_run_mode;
                 break;
             case 'c':
             case '-': {
@@ -9963,6 +9975,23 @@ static void sigusr1_handler(SIGNAL_ARGS)
             (errmsg("set gaussdb state file: db state(PROMOTING_STATE), server mode(%s)",
                 wal_get_role_string(get_cur_mode()))));
 
+        /*
+         * update cluster_run_mode from pg_control file,
+         * in case failover has been performed between two dorado cluster.
+         */
+        if (ENABLE_DMS && g_instance.attr.attr_storage.xlog_file_path != 0) {
+            g_instance.attr.attr_common.cluster_run_mode = g_instance.dms_cxt.SSReformerControl.clusterRunMode;
+        }
+        if (ENABLE_DMS && DORADO_STANDBY_CLUSTER_MAINSTANDBY_NODE) {
+            ereport(LOG,
+                (errmsg("Failover between two dorado cluster start, change current run mode to primary_cluster")));
+            g_instance.attr.attr_common.cluster_run_mode = RUN_MODE_PRIMARY;
+            g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
+            SSSaveReformerCtrl();
+            t_thrd.xlog_cxt.server_mode = PRIMARY_MODE;
+            SetHaShmemData();
+        }
+
         /* promote cascade standby */
         if (IsCascadeStandby()) {
             t_thrd.xlog_cxt.is_cascade_standby = false;
@@ -10122,6 +10151,8 @@ static void sigusr1_handler(SIGNAL_ARGS)
     if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
         SSReadControlFile(REFORM_CTRL_PAGE);
         if (SS_NORMAL_STANDBY && pmState == PM_RUN && !SS_STANDBY_ONDEMAND_RECOVERY) {
+            /* update cluster_run_mode in case failover has been performed between two dorado cluster. */
+            g_instance.attr.attr_common.cluster_run_mode = g_instance.dms_cxt.SSReformerControl.clusterRunMode;
             SSDoSwitchover();
         } else {
             ereport(LOG, (errmsg("Current mode is not NORMAL STANDBY, SS switchover command ignored.")));

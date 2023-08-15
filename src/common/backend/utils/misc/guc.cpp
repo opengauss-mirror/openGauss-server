@@ -852,7 +852,7 @@ static const struct config_enum_entry sync_config_strategy_options[] = {
 #endif
 
 static const struct config_enum_entry cluster_run_mode_options[] = {
-    {"cluster_primary", RUN_MODE_PRIMARY, false}, 
+    {"cluster_primary", RUN_MODE_PRIMARY, false},
     {"cluster_standby", RUN_MODE_STANDBY, false},
     {NULL, 0, false}};
 
@@ -4406,18 +4406,6 @@ static void InitConfigureNamesEnum()
             &u_sess->attr.attr_common.unique_sql_track_type,
             UNIQUE_SQL_TRACK_TOP,
             unique_sql_track_option,
-            NULL,
-            NULL,
-            NULL},
-        {{"cluster_run_mode",
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            PRESET_OPTIONS,
-            gettext_noop("Sets the type of shared storage cluster."),
-            NULL},
-            &g_instance.attr.attr_common.cluster_run_mode,
-            RUN_MODE_PRIMARY,
-            cluster_run_mode_options,
             NULL,
             NULL,
             NULL},

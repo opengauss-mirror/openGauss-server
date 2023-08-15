@@ -110,7 +110,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  checkpoint_warning                               | integer | s    | 0         | 2147483647
  client_encoding                                  | string  |      |           | 
  client_min_messages                              | enum    |      |           | 
- cluster_run_mode                                 | enum    |      |           | 
  cn_send_buffer_size                              | integer | kB   | 8         | 128
  codegen_cost_threshold                           | integer |      | 0         | 2147483647
  codegen_strategy                                 | enum    |      |           | 
