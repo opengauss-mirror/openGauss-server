@@ -144,11 +144,16 @@ static PrivateRefCountEntry* GetPrivateRefCountEntryFast(Buffer buffer, PrivateR
     Assert(BufferIsValid(buffer));
     Assert(!BufferIsLocal(buffer));
 
+    /* use one register */
+    if (t_thrd.storage_cxt.PrivateRefRigsterBuffer == buffer) {
+        return (PrivateRefCountEntry*)&t_thrd.storage_cxt.PrivateRefRigsterBuffer;
+    }
     /*
      * First search for references in the array, that'll be sufficient in the
      * majority of cases.
      */
-    for (i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
+    int cacheCount = 0;
+    for (i = 0; i < REFCOUNT_ARRAY_ENTRIES && cacheCount <= t_thrd.storage_cxt.PrivateRefCacheCount; i++) {
         res = &t_thrd.storage_cxt.PrivateRefCountArray[i];
 
         if (res->buffer == buffer) {
@@ -156,8 +161,12 @@ static PrivateRefCountEntry* GetPrivateRefCountEntryFast(Buffer buffer, PrivateR
         }
 
         /* Remember where to put a new refcount, should it become necessary. */
-        if (free_entry == NULL && res->buffer == InvalidBuffer) {
-            free_entry = res;
+        if (res->buffer == InvalidBuffer) {
+            if (free_entry == NULL) {
+                free_entry = res;
+            }
+        } else {
+            cacheCount++;
         }
     }
     return NULL;
@@ -208,10 +217,19 @@ static PrivateRefCountEntry* GetPrivateRefCountEntrySlow(Buffer buffer,
         if (!create) {
             /* Neither array nor hash have an entry and no new entry is needed */
             return NULL;
-        } else if (free_entry != NULL) {
+        }
+
+        if (t_thrd.storage_cxt.PrivateRefRigsterBuffer == InvalidBuffer) {
+            t_thrd.storage_cxt.PrivateRefRigsterBuffer = buffer;
+            t_thrd.storage_cxt.PrivateRefRigsterRefcount = 0;
+            return (PrivateRefCountEntry*)&t_thrd.storage_cxt.PrivateRefRigsterBuffer;
+        }
+
+        if (free_entry != NULL) {
             /* add entry into the free array slot */
             free_entry->buffer = buffer;
             free_entry->refcount = 0;
+            t_thrd.storage_cxt.PrivateRefCacheCount++;
 
             return free_entry;
         } else {
@@ -244,21 +262,28 @@ static PrivateRefCountEntry* GetPrivateRefCountEntrySlow(Buffer buffer,
     } else {
         if (!do_move) {
             return res;
-        } else if (found && free_entry != NULL) {
+        }
+
+        if (free_entry != NULL) {
             /* move buffer from hashtable into the free array slot
              *
              * fill array slot
              */
-            free_entry->buffer = buffer;
-            free_entry->refcount = res->refcount;
+            if (t_thrd.storage_cxt.PrivateRefRigsterBuffer != InvalidBuffer) {
+                free_entry->buffer = t_thrd.storage_cxt.PrivateRefRigsterBuffer;
+                free_entry->refcount = t_thrd.storage_cxt.PrivateRefRigsterRefcount;
+                t_thrd.storage_cxt.PrivateRefCacheCount++;
+            }
 
+            t_thrd.storage_cxt.PrivateRefRigsterBuffer = buffer;
+            t_thrd.storage_cxt.PrivateRefRigsterRefcount = res->refcount;
             /* delete from hashtable */
             (void)hash_search(t_thrd.storage_cxt.PrivateRefCountHash, (void *)&buffer, HASH_REMOVE, &found);
             Assert(found);
             Assert(t_thrd.storage_cxt.PrivateRefCountOverflowed > 0);
             t_thrd.storage_cxt.PrivateRefCountOverflowed--;
 
-            return free_entry;
+            return (PrivateRefCountEntry*)&t_thrd.storage_cxt.PrivateRefRigsterBuffer;
         } else {
             /*
              * Swap the entry in the hash table with the one in the array at the
@@ -267,16 +292,24 @@ static PrivateRefCountEntry* GetPrivateRefCountEntrySlow(Buffer buffer,
             PrivateRefCountEntry *array_ent = NULL;
             PrivateRefCountEntry *hash_ent = NULL;
 
-            /* select victim slot */
-            array_ent = &t_thrd.storage_cxt
-                             .PrivateRefCountArray[t_thrd.storage_cxt.PrivateRefCountClock++ % REFCOUNT_ARRAY_ENTRIES];
-            Assert(array_ent->buffer != InvalidBuffer);
+            if (t_thrd.storage_cxt.PrivateRefRigsterBuffer == InvalidBuffer) {
+                array_ent = (PrivateRefCountEntry*)&t_thrd.storage_cxt.PrivateRefRigsterBuffer;
+                t_thrd.storage_cxt.PrivateRefCountOverflowed--;
+            } else {
+                /* select victim slot */
+                array_ent = &t_thrd.storage_cxt
+                                 .PrivateRefCountArray[t_thrd.storage_cxt.PrivateRefCountClock++ % REFCOUNT_ARRAY_ENTRIES];
+                Assert(array_ent->buffer != InvalidBuffer);
 
-            /* enter victim entry into the hashtable */
-            hash_ent = (PrivateRefCountEntry *)hash_search(t_thrd.storage_cxt.PrivateRefCountHash,
+                /* enter victim entry into the hashtable */
+                hash_ent = (PrivateRefCountEntry *)hash_search(t_thrd.storage_cxt.PrivateRefCountHash,
                                                            (void *)&array_ent->buffer, HASH_ENTER, &found);
-            Assert(!found);
-            hash_ent->refcount = array_ent->refcount;
+                Assert(!found);
+                hash_ent->refcount = array_ent->refcount;
+                array_ent->buffer = t_thrd.storage_cxt.PrivateRefRigsterBuffer;
+                array_ent->refcount = t_thrd.storage_cxt.PrivateRefRigsterRefcount;
+                array_ent = (PrivateRefCountEntry*)&t_thrd.storage_cxt.PrivateRefRigsterBuffer;
+            }
 
             /* fill now free array entry with previously searched entry */
             array_ent->buffer = res->buffer;
@@ -338,10 +371,12 @@ static int32 GetPrivateRefCount(Buffer buffer)
 void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref)
 {
     Assert(ref->refcount == 0);
-
-    if (ref >= &t_thrd.storage_cxt.PrivateRefCountArray[0] &&
+    if (ref->buffer == t_thrd.storage_cxt.PrivateRefRigsterBuffer) {
+        t_thrd.storage_cxt.PrivateRefRigsterBuffer = InvalidBuffer;
+    } else if (ref >= &t_thrd.storage_cxt.PrivateRefCountArray[0] &&
         ref < &t_thrd.storage_cxt.PrivateRefCountArray[REFCOUNT_ARRAY_ENTRIES]) {
         ref->buffer = InvalidBuffer;
+        t_thrd.storage_cxt.PrivateRefCacheCount--;
     } else {
         bool found = false;
         Buffer buffer = ref->buffer;
@@ -4005,6 +4040,10 @@ void InitBufferPoolAccess(void)
                   REFCOUNT_ARRAY_ENTRIES * sizeof(PrivateRefCountEntry));
     securec_check(rc, "\0", "\0");
 
+    t_thrd.storage_cxt.PrivateRefRigsterRefcount = 0;
+    t_thrd.storage_cxt.PrivateRefRigsterBuffer = InvalidBuffer;
+    t_thrd.storage_cxt.PrivateRefCacheCount = 0;
+
     rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
     securec_check(rc, "\0", "\0");
     hash_ctl.keysize = sizeof(int32);
@@ -4049,6 +4088,10 @@ int GetThreadBufferLeakNum(void)
     int refCountErrors = 0;
     PrivateRefCountEntry *res = NULL;
 
+    if (t_thrd.storage_cxt.PrivateRefRigsterBuffer != InvalidBuffer) {
+        PrintBufferLeakWarning(t_thrd.storage_cxt.PrivateRefRigsterBuffer);
+        refCountErrors++;
+    }
     /* check the array */
     for (int i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
         res = &t_thrd.storage_cxt.PrivateRefCountArray[i];
