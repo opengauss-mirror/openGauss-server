@@ -2460,10 +2460,9 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
 
     /* determine its hash code and partition lock ID */
     new_hash = BufTableHashCode(&new_tag);
-    new_partition_lock = BufMappingPartitionLock(new_hash);
 
+retry:
     /* see if the block is in the buffer pool already */
-    (void)LWLockAcquire(new_partition_lock, LW_SHARED);
     pgstat_report_waitevent(WAIT_EVENT_BUF_HASH_SEARCH);
     buf_id = BufTableLookup(&new_tag, new_hash);
     pgstat_report_waitevent(WAIT_EVENT_END);
@@ -2477,8 +2476,10 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
 
         valid = PinBuffer(buf, strategy);
 
-        /* Can release the mapping lock as soon as we've pinned it */
-        LWLockRelease(new_partition_lock);
+        if (!BUFFERTAGS_PTR_EQUAL(&buf->tag, &new_tag)) {
+            UnpinBuffer(buf, true);
+            goto retry;
+        }
 
         *found = TRUE;
 
@@ -2502,11 +2503,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
         return buf;
     }
 
-    /*
-     * Didn't find it in the buffer pool.  We'll have to initialize a new
-     * buffer.	Remember to unlock the mapping lock while doing the work.
-     */
-    LWLockRelease(new_partition_lock);
+    new_partition_lock = BufMappingPartitionLock(new_hash);
     /* Loop here in case we have to try another victim buffer */
     for (;;) {
         bool needGetLock = false;
@@ -2628,6 +2625,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
          * To change the association of a valid buffer, we'll need to have
          * exclusive lock on both the old and new mapping partitions.
          */
+        old_flags = buf_state & BUF_FLAG_MASK;
         if (old_flags & BM_TAG_VALID) {
             /*
              * Need to compute the old tag's hashcode and partition lock ID.
@@ -2659,6 +2657,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
             old_partition_lock = NULL;
         }
 
+        buf_state = LockBufHdr(buf);
         /*
          * Try to make a hashtable entry for the buffer under its new tag.
          * This could fail because while we were writing someone else
@@ -2674,6 +2673,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
              * pool in the first place.  First, give up the buffer we were
              * planning to use.
              */
+            UnlockBufHdr(buf, buf_state);
             UnpinBuffer(buf, true);
 
             /* Can give up that buffer's mapping partition lock now */
@@ -2711,11 +2711,6 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
         }
 
         /*
-         * Need to lock the buffer header too in order to change its tag.
-         */
-        buf_state = LockBufHdr(buf);
-
-        /*
          * Somebody could have pinned or re-dirtied the buffer while we were
          * doing the I/O and making the new hashtable entry.  If so, we can't
          * recycle this buffer; we must undo everything we've done and start
@@ -2727,11 +2722,12 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
             break;
         }
 
-        UnlockBufHdr(buf, buf_state);
         BufTableDelete(&new_tag, new_hash);
         if ((old_flags & BM_TAG_VALID) && old_partition_lock != new_partition_lock) {
             LWLockRelease(old_partition_lock);
         }
+
+        UnlockBufHdr(buf, buf_state);
         LWLockRelease(new_partition_lock);
         UnpinBuffer(buf, true);
     }
@@ -2763,8 +2759,6 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
         buf_state |= BM_TAG_VALID | BUF_USAGECOUNT_ONE;
     }
 
-    UnlockBufHdr(buf, buf_state);
-
     if (old_flags & BM_TAG_VALID) {
         BufTableDelete(&old_tag, old_hash);
         if (old_partition_lock != new_partition_lock) {
@@ -2782,7 +2776,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
         buf->seg_blockno = InvalidBlockNumber;
     }
     LWLockRelease(new_partition_lock);
-
+    UnlockBufHdr(buf, buf_state);
     /*
      * Buffer contents are currently invalid.  Try to get the io_in_progress
      * lock.  If StartBufferIO returns false, then someone else managed to
