@@ -524,7 +524,7 @@ ServerMode IdentifyRemoteMode()
         }
     }
 
-    if (SS_CLUSTER_DORADO_REPLICATION && CheckSSRemoteServerMode(remoteMode, res)) {
+    if (SS_CLUSTER_DORADO_REPLICATION && !CheckSSRemoteServerMode(remoteMode, res)) {
         return UNKNOWN_MODE;
     }
 
@@ -577,7 +577,7 @@ static int32 IdentifyRemoteVersion()
                 (errcode(ERRCODE_INVALID_STATUS),
                  errmsg("could not get the local protocal version, make sure the PG_PROTOCOL_VERSION is defined")));
     }
-    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
+    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !IS_SS_REPLICATION_MAIN_STANBY_NODE) {
         if (walrcv->conn_target != REPCONNTARGET_DUMMYSTANDBY && (localTerm == 0 || localTerm > remoteTerm) &&
             !AM_HADR_WAL_RECEIVER) {
             PQclear(res);
@@ -699,7 +699,8 @@ bool libpqrcv_connect(char *conninfo, XLogRecPtr *startpoint, char *slotname, in
                           u_sess->attr.attr_storage.wal_receiver_connect_timeout, username, passwd);
         rc = memset_s(passwd, MAXPGPATH, 0, MAXPGPATH);
         securec_check(rc, "\0", "\0");
-    } else if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
+    } else if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || 
+                IS_SS_REPLICATION_MAIN_STANBY_NODE) {
         nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
                           "%s dbname=postgres replication=standby_cluster "
                           "fallback_application_name=%s_hass "

@@ -3558,7 +3558,11 @@ static void LogCtrlCalculateCurrentRPO(StandbyReplyMessage *reply)
     if (AM_WAL_HADR_CN_SENDER) {
         flushPtr = GetFlushRecPtr();
     } else if (AM_WAL_SHARE_STORE_SENDER) {
-        flushPtr = g_instance.xlog_cxt.shareStorageXLogCtl->insertHead;
+        if (SS_CLUSTER_DORADO_REPLICATION) {
+            flushPtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
+        } else {
+            flushPtr = g_instance.xlog_cxt.shareStorageXLogCtl->insertHead;
+        } 
     } else {
         got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
         if (got_recptr != true) {

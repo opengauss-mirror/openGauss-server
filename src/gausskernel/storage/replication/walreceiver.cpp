@@ -387,7 +387,8 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         }
     }
 
-    if (!WalRcvWriterInProgress())
+    /* walrec in dorado replication mode not need walrecwrite */
+    if (!IS_SS_REPLICATION_MAIN_STANBY_NODE && !WalRcvWriterInProgress())
         ereport(FATAL, (errmsg("terminating walreceiver process due to the death of walrcvwriter")));
 #ifndef ENABLE_MULTIPLE_NODES
     /* For Paxos, receive wal should be done by send log callback function */
@@ -578,7 +579,7 @@ void WalReceiverMain(void)
             int walreplindex = hashmdata->current_repl;
             SpinLockRelease(&hashmdata->mutex);
 
-            if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
+            if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !IS_SS_REPLICATION_MAIN_STANBY_NODE) {
                 replConnInfo = t_thrd.postmaster_cxt.ReplConnArray[walreplindex];
             } else if (walreplindex >= MAX_REPLNODE_NUM) {
                 replConnInfo = t_thrd.postmaster_cxt.CrossClusterReplConnArray[walreplindex - MAX_REPLNODE_NUM];
@@ -1132,9 +1133,11 @@ static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len)
         case 'm': /* config file */
         {
 #ifndef ENABLE_MULTIPLE_NODES
-            if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || AM_HADR_WAL_RECEIVER) {
+            if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || AM_HADR_WAL_RECEIVER
+                || SS_CLUSTER_DORADO_REPLICATION) {
 #else
-            if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || AM_HADR_WAL_RECEIVER || AM_HADR_CN_WAL_RECEIVER) {
+            if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || AM_HADR_WAL_RECEIVER 
+                || SS_CLUSTER_DORADO_REPLICATION || AM_HADR_CN_WAL_RECEIVER) {
 #endif
                 break;
             }
@@ -1613,7 +1616,7 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
     t_thrd.walreceiver_cxt.reply_message->replyRequested = requestReply;
 
     SpinLockAcquire(&hashmdata->mutex);
-    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE)
+    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !IS_SS_REPLICATION_MAIN_STANBY_NODE)
         t_thrd.walreceiver_cxt.reply_message->peer_role = hashmdata->current_mode;
     else
         t_thrd.walreceiver_cxt.reply_message->peer_role = STANDBY_CLUSTER_MODE;

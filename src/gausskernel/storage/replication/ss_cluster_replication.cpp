@@ -154,17 +154,10 @@ void InitSSDoradoCtlInfoFile()
 
 void SSClusterDoradoStorageInit()
 {
-    if (!SS_CLUSTER_DORADO_REPLICATION) {
-        return;
-    }
-
     bool found = false;
     g_instance.xlog_cxt.ssReplicationXLogCtl = (ShareStorageXLogCtl*)ShmemInitStruct("SS Replication Xlog Ctl", sizeof(ShareStorageXLogCtl), &found);
     InitSSDoradoCtlInfoFile();
-
-    if (!IsInitdb && ENABLE_DMS) {
-        g_instance.dms_cxt.SSRecoveryInfo.dorado_sharestorage_inited = true;
-    }
+    g_instance.dms_cxt.SSRecoveryInfo.dorado_sharestorage_inited = true;
 }
 
 void UpdateSSDoradoCtlInfoAndSync()
