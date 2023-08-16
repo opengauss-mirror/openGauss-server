@@ -64,7 +64,7 @@ std::vector<int> SSGetAllStableNodeId()
     return posList;
 }
 
-int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path)
+int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path)
 {
     char path[MAXPGPATH];
     ListCell *cell = NULL;
@@ -83,7 +83,7 @@ int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
         t_thrd.xlog_cxt.restoredFromArchive = false;
 
         fd = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
-retry:
+
         if (fd >= 0) {
             /* Success! */
             t_thrd.xlog_cxt.curFileTLI = tli;
@@ -103,38 +103,9 @@ retry:
         /* 
         * When SS_CLUSTER_DORADO_REPLICATION enabled, current xlog dictionary may be not the correct dictionary,
         * because all xlog dictionaries are in the same LUN, we need loop over other dictionaries.
-        * Do we need source == XLOG_FROM_STREAM?
         */
-        if (SS_CLUSTER_DORADO_REPLICATION) {
-            std::vector<int> nodeList = SSGetAllStableNodeId(); // stable node list,
-            Assert(!nodeList.empty());
-            char xlogPath[MAXPGPATH];
-            char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
-            for (auto elem : nodeList) {
-                if (elem == g_instance.dms_cxt.SSReformerControl.recoveryInstId) {
-                    continue;
-                }
-
-                errorno = memset_s(xlogPath, sizeof(xlogPath), 0, sizeof(xlogPath));
-                securec_check_ss(errorno, "", "");
-                /* try to read from other xlog dictionary */
-                errorno = snprintf_s(xlogPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", dssdir, elem);
-                securec_check_ss(errorno, "", "");
-
-                errorno = memset_s(path, sizeof(path), 0, sizeof(path));
-                securec_check_ss(errorno, "", "");
-
-                errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", xlogPath, tli,
-                                    (uint32)((segno) / XLogSegmentsPerXLogId), (uint32)((segno) % XLogSegmentsPerXLogId));
-                securec_check_ss(errorno, "", "");
-
-                fd = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
-                if (fd < 0) {
-                    continue;
-                }
-                ereport(LOG, (errmsg("find xlog file in path : \"%s\"", path)));
-                goto retry;
-            }
+        if (fd < 0 && SS_CLUSTER_DORADO_REPLICATION) {
+            return -1;
         }
 
         if (!FILE_POSSIBLY_DELETED(errno)) { 
