@@ -360,7 +360,6 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "enable_codegen_print",
     "codegen_cost_threshold",
     "codegen_strategy",
-    "max_query_retry_times",
     "convert_string_to_digit",
 #ifdef ENABLE_MULTIPLE_NODES
     "agg_redistribute_enhancement",
@@ -853,7 +852,7 @@ static const struct config_enum_entry sync_config_strategy_options[] = {
 #endif
 
 static const struct config_enum_entry cluster_run_mode_options[] = {
-    {"cluster_primary", RUN_MODE_PRIMARY, false}, 
+    {"cluster_primary", RUN_MODE_PRIMARY, false},
     {"cluster_standby", RUN_MODE_STANDBY, false},
     {NULL, 0, false}};
 
@@ -2184,7 +2183,7 @@ static void InitConfigureNamesInt()
             NULL},
         {{"max_query_retry_times",
             PGC_USERSET,
-            NODE_ALL,
+            NODE_DISTRIBUTE,
             CLIENT_CONN_STATEMENT,
             gettext_noop("Sets the maximum sql retry times."),
             gettext_noop("A value of 0 turns off the retry."),
@@ -4410,18 +4409,6 @@ static void InitConfigureNamesEnum()
             NULL,
             NULL,
             NULL},
-        {{"cluster_run_mode",
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            PRESET_OPTIONS,
-            gettext_noop("Sets the type of shared storage cluster."),
-            NULL},
-            &g_instance.attr.attr_common.cluster_run_mode,
-            RUN_MODE_PRIMARY,
-            cluster_run_mode_options,
-            NULL,
-            NULL,
-            NULL},
         {{"stream_cluster_run_mode",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -4787,6 +4774,7 @@ static void InitSingleNodeUnsupportGuc()
     u_sess->attr.attr_common.transaction_sync_timeout = 600;
     u_sess->attr.attr_storage.default_index_kind = DEFAULT_INDEX_KIND_GLOBAL;
     u_sess->attr.attr_sql.application_type = NOT_PERFECT_SHARDING_TYPE;
+    u_sess->attr.attr_common.max_query_retry_times = 0;
     /* for Double Guc Variables */
     u_sess->attr.attr_sql.stream_multiple = DEFAULT_STREAM_MULTIPLE;
     u_sess->attr.attr_sql.max_cn_temp_file_size = 5 * 1024 * 1024;

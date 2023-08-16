@@ -110,7 +110,7 @@ inline void spi_stack_record_log(const char* action, const char* filename, int l
         ereport(DEBUG3, (errmodule(MOD_SPI), errcode(ERRCODE_LOG),
             errmsg("SPISTACK(Action:%s, Location %s,%d, Funcname:%s): cur spiconnected:%d, cur spi:%d, query string:%s",
                     action, filename, lineno, funcname, u_sess->SPI_cxt._connected, u_sess->SPI_cxt._curid,
-                    query != NULL ? maskPassword(query) : NULL)));
+                    query != NULL ? maskPassword(query) : "null")));
     }
 }
 

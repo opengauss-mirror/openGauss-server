@@ -1526,8 +1526,10 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
          * WAL archive anyway. But include it as an empty directory anyway, so
          * we get permissions right.
          */
+
+        /* when ss dorado replication enabled, "+data/pg_replication/" also need to copy when backup */
         int pathNameLen = strlen("+data/pg_xlog");
-        if (strcmp(pathbuf, "./pg_xlog") == 0 || strncmp(pathbuf, "+data/pg_xlog", pathNameLen) == 0) {
+        if (strcmp(pathbuf, "./pg_xlog") == 0 || strncmp(pathbuf, "+data/pg_xlog", pathNameLen) == 0 || strcmp(pathbuf, "+data/pg_replication") == 0) {
             if (!sizeonly) {
                 /* If pg_xlog is a symlink, write it as a directory anyway */
 #ifndef WIN32

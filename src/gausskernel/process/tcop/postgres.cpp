@@ -991,6 +991,19 @@ void LoadDolphinIfNeeded()
         ExecuteFunctionIfExisted(DOLPHIN, LOAD_DOLPHIN);
     }
 }
+
+#define INIT_DOLPHIN_PROTO "init_dolphin_proto"
+typedef void (*init_dolphin_proto_fn)(char *database_name);
+
+void InitDolpinProtoIfNeeded()
+{
+    if (IsFileExisted(DOLPHIN) && g_instance.attr.attr_network.enable_dolphin_proto) {
+        CFunInfo func = load_external_function(DOLPHIN, INIT_DOLPHIN_PROTO, false, false);
+        if (func.user_fn != NULL) {
+            ((init_dolphin_proto_fn)func.user_fn)("");
+        }
+    }
+}
 #endif
 
 /*

@@ -36,11 +36,13 @@
 #define ENABLE_REFORM false
 #define ENABLE_VERIFY_PAGE_VERSION false
 #define ENABLE_SS_TXNSTATUS_CACHE false
+#define ENABLE_SS_BCAST_SNAPSHOT false
 #else
 #define ENABLE_DMS (g_instance.attr.attr_storage.dms_attr.enable_dms && !IsInitdb)
 #define ENABLE_REFORM (g_instance.attr.attr_storage.dms_attr.enable_reform)
 #define ENABLE_VERIFY_PAGE_VERSION (g_instance.attr.attr_storage.dms_attr.enable_verify_page)
 #define ENABLE_SS_TXNSTATUS_CACHE (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.txnstatus_cache_size > 0)
+#define ENABLE_SS_BCAST_SNAPSHOT (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot)
 #endif
 
 #define SS_REFORM_REFORMER                                                  \
@@ -101,51 +103,51 @@
     (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
     t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
+    (g_instance.attr.attr_storage.xlog_file_path != NULL))
 
 /* standby mode in primary or standby cluster */
 #define SS_PRIMARY_STANDBY_CLUSTER_STANDBY                                    \
     (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == NORMAL_MODE || \
     t_thrd.postmaster_cxt.HaShmData->current_mode ==  NORMAL_MODE) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
+    (g_instance.attr.attr_storage.xlog_file_path != NULL))
 
 /* standby mode in primary cluster */
 #define SS_PRIMARY_CLUSTER_STANDBY                                    \
     (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == NORMAL_MODE || \
     t_thrd.postmaster_cxt.HaShmData->current_mode ==  NORMAL_MODE) && \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
+    (g_instance.attr.attr_storage.xlog_file_path != NULL))
 
 /* arbitrary mode when dorado hyperreplication and dms enabled */
 #define SS_PRIMARY_STANDBY_CLUSTER_NORMAL                                   \
     (ENABLE_DMS && ((g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) || \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY)) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
+    (g_instance.attr.attr_storage.xlog_file_path != NULL))
 
 /* primary mode in primary cluster, after reform done and primary id has been determined */
 #define SS_PRIMARY_CLUSTER_NORMAL_PRIMARY                                    \
     (SS_NORMAL_PRIMARY && (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE || \
     t_thrd.postmaster_cxt.HaShmData->current_mode ==  PRIMARY_MODE) && \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
+    (g_instance.attr.attr_storage.xlog_file_path != NULL))
 
 /* main standby in standby cluster, after reform done and primary id has been determined */
 #define SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY                                    \
     (SS_NORMAL_PRIMARY && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
     t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
+    (g_instance.attr.attr_storage.xlog_file_path != NULL))
 
 /* standby mode in standby cluster, after reform done and primary id has been determined */
 #define SS_STANDBY_CLUSTER_NORMAL_STANDBY                                    \
     (SS_NORMAL_STANDBY && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
     t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
+    (g_instance.attr.attr_storage.xlog_file_path != NULL))
 
 /* standby mode in primary or standby, after reform done and primary id has been determined */
 #define SS_PRIMARY_STANDBY_CLUSTER_NORMAL_STANDBY                                    \
-    (SS_NORMAL_STANDBY && (g_instance.attr.attr_storage.xlog_file_path != 0))
+    (SS_NORMAL_STANDBY && (g_instance.attr.attr_storage.xlog_file_path != NULL))
 
 #define SS_CLUSTER_ONDEMAND_NOT_NORAML \
     (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus != CLUSTER_NORMAL))
@@ -186,9 +188,11 @@
 #define SS_ACQUIRE_LOCK_DO_NOT_WAIT 0
 #define SS_ACQUIRE_LOCK_RETRY_INTERVAL (50)   // 50ms
 
+#define DMS_MSG_MAX_WAIT_TIME (10 * 1000) // 10s
+#define SS_REFORM_WAIT_TIME (5000) // 5ms
+
 typedef enum SSBroadcastOp {
-    BCAST_GET_XMIN = 0,
-    BCAST_CANCEL_TRX_FOR_SWITCHOVER,
+    BCAST_CANCEL_TRX_FOR_SWITCHOVER = 0,
     BCAST_SI,
     BCAST_SEGDROPTL,
     BCAST_DROP_REL_ALL_BUFFER,
@@ -200,12 +204,12 @@ typedef enum SSBroadcastOp {
     BCAST_DDLLOCKRELEASE,
     BCAST_DDLLOCKRELEASE_ALL,
     BCAST_CHECK_DB_BACKENDS,
+    BCAST_SEND_SNAPSHOT,
     BCAST_END
 } SSBroadcastOp;
 
 typedef enum SSBroadcastOpAck {
-    BCAST_GET_XMIN_ACK = 0,
-    BCAST_CANCEL_TRX_ACK,
+    BCAST_CANCEL_TRX_ACK = 0,
     BCAST_CHECK_DB_BACKENDS_ACK,
     BCAST_ACK_END
 } SSBroadcastOpAck;

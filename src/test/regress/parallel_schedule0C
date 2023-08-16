@@ -130,7 +130,7 @@ test: mysql_function_clearup cost_model
 test: base_update
 test: seqscan_fusion
 
-test: union_null_01 fulljoin_rewrite
+test: union_null_01 fulljoin_rewrite test_union_all_orderby
 
 # var selectivity
 test: var_eq_const_selectivity

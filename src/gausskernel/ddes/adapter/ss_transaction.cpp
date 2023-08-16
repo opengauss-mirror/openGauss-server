@@ -49,15 +49,11 @@ static inline void txnstatusHashStats(uint64 timeDiff);
 
 void SSStandbyGlobalInvalidSharedInvalidMessages(const SharedInvalidationMessage* msg, Oid tsid);
 
-Snapshot SSGetSnapshotData(Snapshot snapshot)
+static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
 {
     dms_opengauss_txn_snapshot_t dms_snapshot;
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
-    if (SS_IN_REFORM) {
-        ereport(DEBUG1, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
-        return NULL;
-    }
 
     do {
         dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
@@ -76,6 +72,14 @@ Snapshot SSGetSnapshotData(Snapshot snapshot)
     snapshot->xmin = dms_snapshot.xmin;
     snapshot->xmax = dms_snapshot.xmax;
     snapshot->snapshotcsn = dms_snapshot.snapshotcsn;
+    if (ENABLE_SS_BCAST_SNAPSHOT) {
+        t_thrd.dms_cxt.latest_snapshot_xmin = dms_snapshot.xmin;
+        t_thrd.dms_cxt.latest_snapshot_csn = dms_snapshot.snapshotcsn;
+        t_thrd.dms_cxt.latest_snapshot_xmax = dms_snapshot.xmax;
+        ereport(DEBUG1,
+            (errmsg("Get Local snapshot from master, xmin/xmax/csn:%lu/%lu/%lu", t_thrd.dms_cxt.latest_snapshot_xmin,
+            t_thrd.dms_cxt.latest_snapshot_xmax, t_thrd.dms_cxt.latest_snapshot_csn)));
+    }
     if (!TransactionIdIsValid(t_thrd.pgxact->xmin)) {
         t_thrd.pgxact->xmin = u_sess->utils_cxt.TransactionXmin = snapshot->xmin;
     }
@@ -86,6 +90,72 @@ Snapshot SSGetSnapshotData(Snapshot snapshot)
     u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
     u_sess->utils_cxt.RecentXmin = snapshot->xmin;
     return snapshot;
+}
+
+Snapshot SSGetSnapshotData(Snapshot snapshot)
+{
+    if (SS_IN_REFORM) {
+        ereport(DEBUG1, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
+        return NULL;
+    }
+
+    if (!ENABLE_SS_BCAST_SNAPSHOT ||
+        (g_instance.dms_cxt.latest_snapshot_xmax == InvalidTransactionId &&
+        t_thrd.dms_cxt.latest_snapshot_xmax == InvalidTransactionId)) {
+        return SSGetSnapshotDataFromMaster(snapshot);
+    } else if (TransactionIdPrecedes(t_thrd.dms_cxt.latest_snapshot_xmax, g_instance.dms_cxt.latest_snapshot_xmax)) {
+        SpinLockAcquire(&g_instance.dms_cxt.set_snapshot_mutex);
+        t_thrd.dms_cxt.latest_snapshot_xmin = g_instance.dms_cxt.latest_snapshot_xmin;
+        t_thrd.dms_cxt.latest_snapshot_csn = g_instance.dms_cxt.latest_snapshot_csn;
+        t_thrd.dms_cxt.latest_snapshot_xmax = g_instance.dms_cxt.latest_snapshot_xmax;
+        SpinLockRelease(&g_instance.dms_cxt.set_snapshot_mutex);
+        ereport(DEBUG1,
+            (errmsg("Update Local snapshot from global, xmin/xmax/csn:%lu/%lu/%lu", t_thrd.dms_cxt.latest_snapshot_xmin,
+            t_thrd.dms_cxt.latest_snapshot_xmax, t_thrd.dms_cxt.latest_snapshot_csn)));
+    }
+
+    Assert(t_thrd.dms_cxt.latest_snapshot_xmax != InvalidTransactionId);
+    if (g_instance.dms_cxt.latest_snapshot_xmax == InvalidTransactionId) {
+        return SSGetSnapshotDataFromMaster(snapshot);
+    }
+    snapshot->xmin = t_thrd.dms_cxt.latest_snapshot_xmin;
+    snapshot->xmax = t_thrd.dms_cxt.latest_snapshot_xmax;
+    snapshot->snapshotcsn = t_thrd.dms_cxt.latest_snapshot_csn;
+    ereport(DEBUG1, (errmsg("Current Use snapshot, xmin/xmax/csn:%lu/%lu/%lu", snapshot->xmin,
+        snapshot->xmax, snapshot->snapshotcsn)));
+    if (!TransactionIdIsValid(t_thrd.pgxact->xmin)) {
+        t_thrd.pgxact->xmin = u_sess->utils_cxt.TransactionXmin = snapshot->xmin;
+    }
+
+    if (!TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin)) {
+        u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
+    }
+    u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
+    u_sess->utils_cxt.RecentXmin = snapshot->xmin;
+    return snapshot;
+}
+
+int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len)
+{
+    if (unlikely(len != sizeof(SSBroadcastSnapshot))) {
+        ereport(DEBUG1, (errmsg("invalid broadcast set snapshot message")));
+        return DMS_ERROR;
+    }
+
+    SSBroadcastSnapshot *received_data = (SSBroadcastSnapshot *)data;
+    if (TransactionIdPrecedes(received_data->xmax, g_instance.dms_cxt.latest_snapshot_xmax)) {
+        ereport(WARNING, (errmsg("Receive oldest one, can't update:%lu/%lu", received_data->xmin,
+            g_instance.dms_cxt.latest_snapshot_xmax)));
+        return DMS_SUCCESS;
+    }
+    SpinLockAcquire(&g_instance.dms_cxt.set_snapshot_mutex);
+    g_instance.dms_cxt.latest_snapshot_xmin = received_data->xmin;
+    g_instance.dms_cxt.latest_snapshot_csn = received_data->csn;
+    g_instance.dms_cxt.latest_snapshot_xmax = received_data->xmax;
+    SpinLockRelease(&g_instance.dms_cxt.set_snapshot_mutex);
+    ereport(DEBUG1, (errmsg("Receive and set global snapshot xmin/xmax/csn:%lu/%lu/%lu", received_data->xmin,
+        received_data->xmax, received_data->csn)));
+    return DMS_SUCCESS;
 }
 
 static int SSTransactionIdGetCSN(dms_opengauss_xid_csn_t *dms_txn_info, dms_opengauss_csn_result_t *xid_csn_result)
@@ -384,45 +454,26 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
     return update_xid;
 }
 
-int SSGetOldestXmin(char *data, uint32 len, char *output_msg, uint32 *output_msg_len)
-{
-    if (unlikely(len != sizeof(SSBroadcastXmin))) {
-        ereport(DEBUG1, (errmsg("invalid broadcast xmin message")));
-        return DMS_ERROR;
-    }
-
-    SSBroadcastXminAck* getXminReq = (SSBroadcastXminAck *)output_msg;
-    getXminReq->type = BCAST_GET_XMIN_ACK;
-    GetOldestGlobalProcXmin(&(getXminReq->xmin));
-    *output_msg_len = sizeof(SSBroadcastXminAck);
-    return DMS_SUCCESS;
-}
-
-/* Calbulate the oldest xmin during broadcast xmin ack */
-int SSGetOldestXminAck(SSBroadcastXminAck *ack_data)
-{
-    TransactionId xmin_ack = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
-    if (TransactionIdIsValid(ack_data->xmin) && TransactionIdIsNormal(ack_data->xmin) &&
-        TransactionIdPrecedes(ack_data->xmin, xmin_ack)) {
-        pg_atomic_write_u64(&g_instance.dms_cxt.xminAck, ack_data->xmin);
-    }
-    return DMS_SUCCESS;
-}
-
-bool SSGetOldestXminFromAllStandby()
+void SSSendLatestSnapshotToStandby(TransactionId xmin, TransactionId xmax, CommitSeqNo csn)
 {
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
-    SSBroadcastXmin xmin_data;
-    xmin_data.type = BCAST_GET_XMIN;
-    xmin_data.xmin = InvalidTransactionId;
-    pg_atomic_write_u64(&g_instance.dms_cxt.xminAck, MaxTransactionId);
-    int ret = dms_broadcast_msg(&dms_ctx, (char *)&xmin_data, sizeof(SSBroadcastXmin),
-        (unsigned char)true, SS_BROADCAST_WAIT_FIVE_SECONDS);
-    if (ret != DMS_SUCCESS) {
-        return false;
-    }
-    return true;
+    int ret;
+    SSBroadcastSnapshot latest_snapshot;
+    latest_snapshot.xmin = xmin;
+    latest_snapshot.xmax = xmax;
+    latest_snapshot.csn = csn;
+    latest_snapshot.type = BCAST_SEND_SNAPSHOT;
+    do {
+        ret = dms_broadcast_msg(&dms_ctx, (char *)&latest_snapshot, sizeof(SSBroadcastSnapshot),
+            (unsigned char)false, SS_BROADCAST_WAIT_ONE_SECOND);
+
+        if (ret == DMS_SUCCESS) {
+            return;
+        }
+
+        pg_usleep(5000L);
+    } while (ret != DMS_SUCCESS);
 }
 
 void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *pageMap, int *bitCount)

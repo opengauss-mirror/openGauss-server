@@ -4422,7 +4422,9 @@ double* GetGlobalIndexTuplesForSubPartition(Relation heapRelation, Relation inde
         partition = partitionOpen(heapRelation, partitionId, ShareLock);
         heapPartRel = partitionGetRelation(heapRelation, partition);
         subPartitionIdList = relationGetPartitionOidList(heapPartRel);
+        Assert(subPartitionIdList != NULL);
         int subPartNum = subPartitionIdList->length;
+        
         if (globalIndexTuples != NULL) {
             globalIndexTuples = (double*)repalloc(globalIndexTuples, (subPartitionIdx + subPartNum) * sizeof(double));
         } else {
@@ -6590,10 +6592,8 @@ void ScanPartitionInsertIndex(Relation partTableRel, Relation partRel, const Lis
     ListCell* cell = NULL;
     ListCell* cell1 = NULL;
     EState* estate = NULL;
-    TupleDesc tupleDesc = NULL;
     TupleTableSlot* slot = NULL;
 
-    tupleDesc = partRel->rd_att;
 
     if (PointerIsValid(indexRelList)) {
         estate = CreateExecutorState();
@@ -6614,8 +6614,9 @@ void ScanPartitionInsertIndex(Relation partTableRel, Relation partRel, const Lis
             Relation indexRel = (Relation)lfirst(cell);
             IndexInfo* indexInfo = static_cast<IndexInfo*>(lfirst(cell1));
 
-            Datum values[tupleDesc->natts];
-            bool isNull[tupleDesc->natts];
+            Datum values[INDEX_MAX_KEYS];
+            bool isNull[INDEX_MAX_KEYS];
+
             bool estateIsNotNull = false;
             ItemPointer t_ctid = tableam_tops_get_t_self(partTableRel, tuple);
 

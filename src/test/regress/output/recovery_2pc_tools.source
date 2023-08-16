@@ -110,7 +110,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  checkpoint_warning                               | integer | s    | 0         | 2147483647
  client_encoding                                  | string  |      |           | 
  client_min_messages                              | enum    |      |           | 
- cluster_run_mode                                 | enum    |      |           | 
  cn_send_buffer_size                              | integer | kB   | 8         | 128
  codegen_cost_threshold                           | integer |      | 0         | 2147483647
  codegen_strategy                                 | enum    |      |           | 
@@ -326,12 +325,14 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_sonic_optspill                            | bool    |      |           | 
  enable_sort                                      | bool    |      |           | 
  enable_sortgroup_agg                             | bool    |      |           | 
+ enable_ss_dorado                                 | bool    |      |           | 
  enable_startwith_debug                           | bool    |      |           | 
  enable_stmt_track                                | bool    |      |           | 
  enable_stream_replication                        | bool    |      |           | 
  enable_tde                                       | bool    |      |           | 
  enable_thread_pool                               | bool    |      |           | 
  enable_tidscan                                   | bool    |      |           | 
+ enable_union_all_subquery_orderby                | bool    |      |           | 
  enable_upgrade_merge_lock_mode                   | bool    |      |           | 
  enable_user_metric_persistent                    | bool    |      |           | 
  enable_ustore                                    | bool    |      |           | 
@@ -478,7 +479,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_pred_locks_per_transaction                   | integer |      | 10        | 2147483647
  max_prepared_transactions                        | integer |      | 0         | 262143
  max_process_memory                               | integer | kB   | 2097152   | 2147483647
- max_query_retry_times                            | integer |      | 0         | 20
  max_recursive_times                              | integer |      | 0         | 2147483647
  max_redo_log_size                                | integer | kB   | 163840    | 2147483647
  max_replication_slots                            | integer |      | 0         | 1024
@@ -623,6 +623,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_dss_conn_path                                 | string  |      |           | 
  ss_dss_vg_name                                   | string  |      |           | 
  ss_enable_aio                                    | bool    |      |           | 
+ ss_enable_bcast_snapshot                         | bool    |      |           | 
  ss_enable_catalog_centralized                    | bool    |      |           | 
  ss_enable_dms                                    | bool    |      |           | 
  ss_enable_dss                                    | bool    |      |           | 

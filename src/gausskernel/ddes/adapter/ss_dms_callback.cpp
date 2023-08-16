@@ -41,6 +41,7 @@
 #include "storage/sinvaladt.h"
 #include "replication/walsender_private.h"
 #include "replication/walreceiver.h"
+#include "replication/ss_cluster_replication.h"
 #include "ddes/dms/ss_switchover.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
@@ -57,7 +58,7 @@ void SSWakeupRecovery(void)
     /* need make sure pagewriter started first */
     bool need_recovery = true;
 
-    if (DORADO_STANDBY_CLUSTER) {
+    if (DORADO_STANDBY_CLUSTER || SS_REPLICATION_STANDBY_CLUSTER) {
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
         return;
     }
@@ -197,10 +198,11 @@ static int CBGetTxnCSN(void *db_handle, dms_opengauss_xid_csn_t *csn_req, dms_op
     return ret;
 }
 
-static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot)
+static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot, uint8 inst_id)
 {   
     /* SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY always is in recovery progress, but it can acquire snapshot*/
-    if (RecoveryInProgress() && !SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
+    if (RecoveryInProgress() &&
+        !(SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY || (SS_NORMAL_PRIMARY && IS_SS_REPLICATION_MAIN_STANBY_NODE))) {
         return DMS_ERROR;
     }
 
@@ -216,7 +218,11 @@ static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_
             txn_snapshot->xmax = snapshot.xmax;
             txn_snapshot->snapshotcsn = snapshot.snapshotcsn;
             txn_snapshot->localxmin = u_sess->utils_cxt.RecentGlobalXmin;
-            retCode = DMS_SUCCESS;
+            if (RecordSnapshotBeforeSend(inst_id, txn_snapshot->xmin)) {
+                retCode = DMS_SUCCESS;
+            } else {
+                retCode = DMS_ERROR;
+            }
         }
     }
     PG_CATCH();
@@ -415,7 +421,7 @@ static void CBSwitchoverResult(void *db_handle, int result)
     } else {
         /* abort and restore state */
         g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
-        if (DORADO_STANDBY_CLUSTER) {
+        if (DORADO_STANDBY_CLUSTER || SS_REPLICATION_STANDBY_CLUSTER) {
             g_instance.dms_cxt.SSReformInfo.in_reform = false;
         }
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS switchover] Switchover failed, errno: %d.", result)));
@@ -460,6 +466,8 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
     g_instance.dms_cxt.SSReformerControl.list_stable = list_stable;
     int ret = DMS_ERROR;
     SSLockReleaseAll();
+    SSSyncOldestXminWhenReform(reformer_id);
+
     if ((int)primary_id == SS_MY_INST_ID) {
         if (g_instance.dms_cxt.SSClusterState > NODESTATE_NORMAL) {
             Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED ||
@@ -1022,9 +1030,6 @@ static int32 CBProcessBroadcast(void *db_handle, char *data, unsigned int len, c
     PG_TRY();
     {
         switch (bcast_op) {
-            case BCAST_GET_XMIN:
-                ret = SSGetOldestXmin(data, len, output_msg, output_msg_len);
-                break;
             case BCAST_SI:
                 ret = SSProcessSharedInvalMsg(data, len);
                 break;
@@ -1055,6 +1060,9 @@ static int32 CBProcessBroadcast(void *db_handle, char *data, unsigned int len, c
             case BCAST_CHECK_DB_BACKENDS:
                 ret = SSCheckDbBackends(data, len, output_msg, output_msg_len);
                 break;
+            case BCAST_SEND_SNAPSHOT:
+                ret = SSUpdateLatestSnapshotOfStandby(data, len);
+                break;
             default:
                 ereport(WARNING, (errmodule(MOD_DMS), errmsg("invalid broadcast operate type")));
                 ret = DMS_ERROR;
@@ -1079,9 +1087,6 @@ static int32 CBProcessBroadcastAck(void *db_handle, char *data, unsigned int len
     SSBroadcastOpAck bcast_op = *(SSBroadcastOpAck *)data;
 
     switch (bcast_op) {
-        case BCAST_GET_XMIN_ACK:
-            ret = SSGetOldestXminAck((SSBroadcastXminAck *)data);
-            break;
         case BCAST_CHECK_DB_BACKENDS_ACK:
             ret = SSCheckDbBackendsAck(data, len);
             break;
@@ -1577,7 +1582,7 @@ static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
     if (new_dms_role == DMS_ROLE_REFORMER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover]begin to set currrent DSS as primary")));
         /* standby of standby cluster need to set mode to STANDBY_MODE in dual cluster*/
-        if (DORADO_STANDBY_CLUSTER) {
+        if (DORADO_STANDBY_CLUSTER || SS_REPLICATION_STANDBY_CLUSTER) {
             t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
         }
         while (dss_set_server_status_wrapper() != GS_SUCCESS) {
@@ -1678,7 +1683,21 @@ static void ReformTypeToString(SSReformType reform_type, char* ret_str)
     return;
 }
 
-static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type)
+static void SSXminInfoPrepare()
+{
+    ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
+    if (g_instance.dms_cxt.SSReformInfo.dms_role == DMS_ROLE_REFORMER) {
+        xmin_info->global_oldest_xmin_active = false;
+        for (int i = 0; i < DMS_MAX_INSTANCES; i++) {
+            xmin_info->node_table[i].active = false;
+            xmin_info->node_table[i].notify_oldest_xmin = MaxTransactionId;
+        }
+    }
+    xmin_info->bitmap_active_nodes = 0;
+}
+
+static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type,
+    unsigned long long bitmap_nodes)
 {
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     reform_info->reform_type = (SSReformType)reform_type;
@@ -1707,8 +1726,11 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] failover trigger.")));
         }
     }
+
+    reform_info->bitmap_nodes = bitmap_nodes;
     reform_info->dms_role = role;
     reform_info->in_reform = true;
+    SSXminInfoPrepare();
 
     char reform_type_str[reform_type_str_len] = {0};
     ReformTypeToString(reform_info->reform_type, reform_type_str);
@@ -1736,7 +1758,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
 
     /* After reform done, standby of standby cluster need to set mode to STANDBY_MODE in dual cluster. */
     if (SS_REFORM_REFORMER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) &&
-       (g_instance.attr.attr_storage.xlog_file_path != 0)) {
+       (g_instance.attr.attr_storage.xlog_file_path != NULL || SS_CLUSTER_DORADO_REPLICATION)) {
         t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
     }
 }
@@ -1753,7 +1775,7 @@ static int CBReformDoneNotify(void *db_handle)
     
     /* After reform done, primary of master cluster need to set mode to PRIMARY_MODE in dual cluster. */
     if (SS_REFORM_REFORMER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) &&
-       (g_instance.attr.attr_storage.xlog_file_path != 0)) {
+       (g_instance.attr.attr_storage.xlog_file_path != NULL || SS_CLUSTER_DORADO_REPLICATION)) {
         t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;    
     }
    
@@ -1826,11 +1848,17 @@ static int CBMarkNeedFlush(void *db_handle, char *pageid)
     return DMS_SUCCESS;
 }
 
+static int CBUpdateNodeOldestXmin(void *db_handle, uint8 inst_id, unsigned long long oldest_xmin)
+{
+    SSUpdateNodeOldestXmin(inst_id, oldest_xmin);
+    return GS_SUCCESS;
+}
+
 void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
 {
     /* in dorado mode, we need to wait sharestorageinit finished */
     while (!g_instance.dms_cxt.SSRecoveryInfo.dorado_sharestorage_inited &&
-            g_instance.attr.attr_storage.xlog_file_path != 0) {
+           (g_instance.attr.attr_storage.xlog_file_path != NULL || SS_CLUSTER_DORADO_REPLICATION)) {
         pg_usleep(REFORM_WAIT_TIME);
     }
     IsUnderPostmaster = true;
@@ -1997,4 +2025,5 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->db_check_lock = CBDBCheckLock;
     callback->cache_msg = CBCacheMsg;
     callback->need_flush = CBMarkNeedFlush;
+    callback->update_node_oldest_xmin = CBUpdateNodeOldestXmin;
 }

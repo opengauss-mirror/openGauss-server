@@ -758,6 +758,42 @@ alter type foo alter attribute b type text;--success
 fetch c3;
 close c3;
 
+---- 不在 TRANSACTION Block里的游标声明导致 core的问题
+--游标依赖row type，后续alter type
+drop type if exists type_cursor_bugfix_0001;
+create type type_cursor_bugfix_0001 as (a int, b int);
+
+--游标依赖type，alter type报错
+begin;
+declare c5 cursor for select (i,2^30)::type_cursor_bugfix_0001 from generate_series(1,10) i;
+fetch c5;
+fetch c5;
+alter type type_cursor_bugfix_0001 alter attribute b type text;--error
+end;
+/
+
+--close后，可以成功alter
+begin;
+declare c7 cursor for select (i,2^30)::type_cursor_bugfix_0001 from generate_series(1,10) i;
+fetch c7;
+fetch c7;
+close c7;
+alter type type_cursor_bugfix_0001 alter attribute b type text;--success
+declare c8 cursor for select (i,2^30)::type_cursor_bugfix_0001 from generate_series(1,10) i;
+fetch c8;
+fetch c8;
+rollback;
+/
+
+begin;
+cursor c9 for select (i,2^30)::type_cursor_bugfix_0001 from generate_series(1,10) i;
+close c9;
+alter type type_cursor_bugfix_0001 alter attribute b type text;--success
+end;
+
+drop type if exists type_cursor_bugfix_0001;
+
+
 ----  clean  ----
 drop package pck1;
 drop package pck2;

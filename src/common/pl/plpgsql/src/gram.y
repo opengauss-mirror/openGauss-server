@@ -10064,6 +10064,7 @@ make_execsql_stmt(int firsttoken, int location)
                 PLpgSQL_nsitem* ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, yylval.word.ident, NULL, NULL, NULL);
                 if (ns == NULL) {
                     yyerror("insert an nonexistent variable.");
+                    continue;
                 }
 
                 PLpgSQL_datum* datum = u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno];

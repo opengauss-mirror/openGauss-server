@@ -29,6 +29,7 @@
 #include "postmaster/startup.h"
 #include "postmaster/postmaster.h"
 #include "replication/shared_storage_walreceiver.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -231,6 +232,14 @@ void HandleStartupProcInterrupts(void)
      * Check if we were requested to exit without finishing recovery.
      */
     if (t_thrd.startup_cxt.shutdown_requested && SmartShutdown != g_instance.status) {
+        if (t_thrd.xlog_cxt.StandbyModeRequested && IS_SHARED_STORAGE_STANDBY_CLUSTER && ENABLE_DMS) {
+            ereport(LOG, (errmsg("dorado standby cluster switchover shutdown startup\n")));
+            if (!IsExtremeRedo()) {
+                DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
+            }
+            DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->dataRecoveryLatch);
+        }
+
         /* release compression ctx */
         crps_destory_ctxs();
 
@@ -276,7 +285,7 @@ static void StartupReleaseAllLocks(int code, Datum arg)
 
 void DeleteDisConnFileInClusterStandby()
 {
-    if (!IS_SHARED_STORAGE_MODE) {
+    if (!(IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION)) {
         return;
     }
 

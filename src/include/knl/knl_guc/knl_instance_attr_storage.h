@@ -125,6 +125,7 @@ typedef struct knl_instance_attr_dms {
     int32 sslog_max_file_size; //Unit:KB
     int parallel_thread_num;
     int32 txnstatus_cache_size;
+    bool enable_bcast_snapshot;
 } knl_instance_attr_dms;
 
 typedef struct knl_instance_attr_storage {
@@ -216,6 +217,7 @@ typedef struct knl_instance_attr_storage {
     bool enable_batch_dispatch;
     int parallel_recovery_timeout;
     int parallel_recovery_batch;
+    bool enable_ss_dorado;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

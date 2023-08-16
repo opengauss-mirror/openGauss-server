@@ -384,20 +384,55 @@ typedef uint16 uint2;
 typedef uint32 uint4;
 
 /*
- * Define signed 128 bit int type.
- * Define unsigned 128 bit int type.
+ * 128-bit signed and unsigned integers
+ *		There currently is only limited support for such types.
+ *		E.g. 128bit literals and snprintf are not supported; but math is.
+ *		Also, because we exclude such types when choosing MAXIMUM_ALIGNOF,
+ *		it must be possible to coerce the compiler to allocate them on no
+ *		more than MAXALIGN boundaries.
  */
+
+#if defined(__GNUC__) || defined(__SUNPRO_C) || defined(__IBMC__)
+#define pg_attribute_aligned(a) __attribute__((aligned(a)))
+#endif
+
 #ifndef ENABLE_DEFAULT_GCC
 #if !defined(WIN32)
-typedef __int128 int128;
-typedef unsigned __int128 uint128;
+    #if defined(pg_attribute_aligned) || ALIGNOF_PG_INT128_TYPE <= MAXIMUM_ALIGNOF
+        typedef __int128 int128  
+        #if defined(pg_attribute_aligned)
+                    pg_attribute_aligned(MAXIMUM_ALIGNOF)
+        #endif
+                    ;
+
+        typedef unsigned __int128 uint128  
+        #if defined(pg_attribute_aligned)
+                    pg_attribute_aligned(MAXIMUM_ALIGNOF)
+        #endif
+                    ;
+    #else
+        ereport(ERROR, (errmsg("the compiler can't support int128 or uint128 aligned on a 8-byte boundary.")));
+    #endif
 #endif
 #else
 #ifdef __linux__
-#if __GNUC__ >= 7
-typedef __int128 int128;
-typedef unsigned __int128 uint128;
-#endif
+    #if __GNUC__ >= 7
+        #if defined(pg_attribute_aligned) || ALIGNOF_PG_INT128_TYPE <= MAXIMUM_ALIGNOF
+            typedef __int128 int128
+            #if defined(pg_attribute_aligned)
+                        pg_attribute_aligned(MAXIMUM_ALIGNOF)
+            #endif
+                        ;
+            
+            typedef unsigned __int128 uint128
+            #if defined(pg_attribute_aligned)
+                        pg_attribute_aligned(MAXIMUM_ALIGNOF)
+            #endif
+                        ;
+        #else
+            ereport(ERROR, (errmsg("the compiler can't support int128 or uint128 aligned on a 8-byte boundary.")));
+        #endif
+    #endif
 #endif
 #endif
 

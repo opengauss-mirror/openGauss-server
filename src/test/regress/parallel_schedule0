@@ -905,7 +905,7 @@ test: vec_sonic_hashjoin_number_nospill
 test: timeout
 test: dml
 test: hashfilter hashfilter_1
-test: reduce_orderby
+test: reduce_orderby test_union_all_orderby
 #test: backtrace_log
 #test: bulkload_start
 test: bulkload_parallel_test_2 bulkload_parallel_test_3
@@ -1056,8 +1056,8 @@ test: describe_index_with_tablespace
 test: sytcomp_del_upt4orderby
 test: aioptimizer
 test: aioptimizer_small
-test: pgfincore
-test: rename_table
+test: pgfincore 
+test: rename_table test_plsql_core
 
 # debug instrument
 test: test_debug5
@@ -1098,3 +1098,4 @@ test: user_host_test
 test: enable_expr_fusion_flatten
 # test for on update timestamp and generated column
 test: on_update_session1 on_update_session2
+

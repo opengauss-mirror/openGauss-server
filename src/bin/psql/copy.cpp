@@ -768,6 +768,8 @@ bool handleCopyIn(PGconn* conn, FILE* copystream, bool isbinary)
                         if (strncmp((const char*)pset.decryptInfo.decryptBuff, "\\.\n", strlen("\\.\n")) == 0 ||
                             strncmp((const char*)pset.decryptInfo.decryptBuff, "\\.\r\n", strlen("\\.\n")) == 0) {
                             copydone = true;
+                            free(pset.decryptInfo.decryptBuff);
+                            pset.decryptInfo.decryptBuff = NULL;
                             break;
                         }
 
@@ -777,6 +779,8 @@ bool handleCopyIn(PGconn* conn, FILE* copystream, bool isbinary)
                     if (PQputCopyData(conn, (const char*)pset.decryptInfo.decryptBuff, linelen) <= 0) {
                         OK = false;
                         copydone = true;
+                        free(pset.decryptInfo.decryptBuff);
+                        pset.decryptInfo.decryptBuff = NULL;
                         break;
                     }
 

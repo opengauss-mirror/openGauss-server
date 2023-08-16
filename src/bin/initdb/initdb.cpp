@@ -173,6 +173,7 @@ static char* xlog_dir = "";
 static bool security = false;
 static char* dbcompatibility = "";
 static char* new_xlog_file_path = "";
+static bool enable_ss_dorado = false;
 
 #ifdef PGXC
 /* Name of the PGXC node initialized */
@@ -1593,6 +1594,12 @@ static void setup_config(void)
         conflines = replace_token(conflines, "#ss_enable_dss = off", repltok);
 
         conflines = ss_addnodeparmater(conflines);
+    }
+
+    if (enable_ss_dorado) {
+        nRet = strcpy_s(repltok, sizeof(repltok), "enable_ss_dorado = on");
+        securec_check_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#enable_ss_dorado = off", repltok);
     }
 
     nRet = sprintf_s(path, sizeof(path), "%s/postgresql.conf", pg_data);
@@ -3976,6 +3983,7 @@ int main(int argc, char* argv[])
         {"socketpath", required_argument, NULL, 16},
         {"enable-dss", no_argument, NULL, 17},
         {"dms_url", required_argument, NULL, 18},
+        {"enable-ss-dorado", no_argument, NULL, 19},
         {NULL, 0, NULL, 0}};
 
     int c, i, ret;
@@ -4290,6 +4298,10 @@ int main(int argc, char* argv[])
                 FREE_NOT_STATIC_ZERO_STRING(ss_nodedatainfo);
                 check_input_spec_char(optarg);
                 ss_nodedatainfo = xstrdup(optarg);
+                break;
+            case 19:
+                enable_ss_dorado = true;
+                printf(_("Enable ss dorado replication.\n"));
                 break;
 #endif
             default:
@@ -4915,7 +4927,8 @@ int main(int argc, char* argv[])
     }
     
     if (enable_dss && ss_issharedstorage) {
-        ss_mkdirdir(ss_nodeid, pg_data, vgdata, vglog, ss_need_mkclusterdir);
+        ss_need_mkspecialdir = (enable_ss_dorado && !ss_check_specialdir(vgdata));
+        ss_mkdirdir(ss_nodeid, pg_data, vgdata, vglog, ss_need_mkclusterdir, ss_need_mkspecialdir);
     } else {
         /* Create required subdirectories */
         printf(_("creating subdirectories ... in ordinary occasion"));

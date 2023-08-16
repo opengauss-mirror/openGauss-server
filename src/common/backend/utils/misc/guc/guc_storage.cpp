@@ -216,6 +216,8 @@ static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source);
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
 static bool check_ss_enable_ondemand_recovery(bool* newval, void** extra, GucSource source);
+static bool check_normal_cluster_replication_config_para(char** newval, void** extra, GucSource source);
+static bool check_ss_cluster_replication_control_para(bool* newval, void** extra, GucSource source);
 
 #ifdef USE_ASSERT_CHECKING
 static void assign_ss_enable_verify_page(bool newval, void *extra);
@@ -1129,6 +1131,18 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_ss_dorado",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            WAL,
+            gettext_noop("Use to enabel dorado replication in share storage mode."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.enable_ss_dorado,
+            false,
+            check_ss_cluster_replication_control_para,
+            NULL,
+            NULL},
 
 #ifdef USE_ASSERT_CHECKING
         {{"enable_hashbucket",
@@ -1185,6 +1199,17 @@ static void InitStorageConfigureNamesBool()
             NULL},
 #endif
 
+        {{"ss_enable_bcast_snapshot",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Enable broadcast snapshot by primay."),
+            NULL},
+            &g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot,
+            false,
+            NULL,
+            NULL,
+            NULL},
         {{"enable_huge_pages",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -4480,7 +4505,7 @@ static void InitStorageConfigureNamesString()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.xlog_file_path,
             NULL,
-            NULL,
+            check_normal_cluster_replication_config_para,
             NULL,
             NULL},
         {{"hadr_super_user_record_path",
@@ -5968,6 +5993,38 @@ static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource sou
         return true;
     }
     return false;
+}
+
+static bool check_normal_cluster_replication_config_para(char** newval, void** extra, GucSource source)
+{
+    if (newval == NULL || *newval == NULL || **newval == '\0') {
+        return true;
+    }
+
+    if (g_instance.attr.attr_storage.enable_ss_dorado) {
+        ereport(ERROR, (errmsg("Do not allow both enable normal cluster replication "
+            "and ss cluster repliction with \"enable_ss_dorado\" = %d", \
+            g_instance.attr.attr_storage.enable_ss_dorado)));
+        return false; 
+    }
+
+    return true;
+}
+
+static bool check_ss_cluster_replication_control_para(bool* newval, void** extra, GucSource source)
+{
+    if (!(*newval)) {
+        return true;
+    }
+
+    if (g_instance.attr.attr_storage.xlog_file_path != NULL) {
+        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
+            "and normal cluster repliction with \"xlog_file_path\" = %s", \
+            g_instance.attr.attr_storage.xlog_file_path)));
+        return false;
+    }
+
+    return true;
 }
 
 extern bool check_special_character(char c);

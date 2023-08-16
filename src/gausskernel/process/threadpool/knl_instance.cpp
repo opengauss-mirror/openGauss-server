@@ -174,7 +174,6 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
 {
     Assert(dms_cxt != NULL);
     dms_cxt->dmsProcSid = 0;
-    dms_cxt->xminAck = 0;
     dms_cxt->SSReformerControl.list_stable = 0;
     dms_cxt->SSReformerControl.primaryInstId = -1;
     dms_cxt->SSReformInfo.in_reform = false;
@@ -203,6 +202,27 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->resetSyscache = false;
     dms_cxt->finishedRecoverOldPrimaryDWFile = false;
     dms_cxt->dw_init = false;
+    {
+        ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
+        for (int i = 0; i < DMS_MAX_INSTANCES; i++) {
+            ss_node_xmin_item_t *item = &xmin_info->node_table[i];
+            item->active = false;
+            SpinLockInit(&item->item_lock);
+            item->notify_oldest_xmin = MaxTransactionId;
+        }
+        xmin_info->snap_cache = NULL;
+        xmin_info->snap_oldest_xmin = MaxTransactionId;
+        xmin_info->recent_snap_send_time = 0;
+        SpinLockInit(&xmin_info->global_oldest_xmin_lock);
+        xmin_info->global_oldest_xmin = MaxTransactionId;
+        xmin_info->global_oldest_xmin_active = false;
+        SpinLockInit(&xmin_info->bitmap_active_nodes_lock);
+        xmin_info->bitmap_active_nodes = 0;
+    }
+    dms_cxt->latest_snapshot_xmin = 0;
+    dms_cxt->latest_snapshot_xmax = 0;
+    dms_cxt->latest_snapshot_csn = 0;
+    SpinLockInit(&dms_cxt->set_snapshot_mutex);
 }
 
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)
@@ -452,6 +472,7 @@ static void knl_g_xlog_init(knl_g_xlog_context *xlog_cxt)
     securec_check(rc, "\0", "\0");
     pthread_mutex_init(&xlog_cxt->remain_segs_lock, NULL);
     xlog_cxt->shareStorageLockFd = -1;
+    xlog_cxt->ssReplicationXLogCtl = NULL;
 }
 
 static void KnlGUndoInit(knl_g_undo_context *undoCxt)
@@ -830,6 +851,9 @@ static void knl_g_datadir_init(knl_g_datadir_context* datadir_init)
     securec_check_c(errorno, "\0", "\0");
 
     errorno = strcpy_s(datadir_init->controlBakPath, MAXPGPATH, "global/pg_control.backup");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->controlInfoPath, MAXPGPATH, "pg_replication/pg_ss_ctl_info");
     securec_check_c(errorno, "\0", "\0");
 
     knl_g_dwsubdir_init(&datadir_init->dw_subdir_cxt);

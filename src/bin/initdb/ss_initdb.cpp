@@ -77,16 +77,21 @@ static const char* ss_instanceowndirs[] = {"base",
 
 static const char* ss_xlogsubdirs[] = {"archive_status"};
 
+/* for ss dorado replication */
+static const char* ss_specialdirs[] = {"+pg_replication"};
+
 /* num of every directory type */
 #define SS_CLUSTERDIRS_NUM       ARRAY_NUM(ss_clusterdirs)
 #define SS_INSTANCEDIRS_NUM      ARRAY_NUM(ss_instancedirs)
 #define SS_INSTANCEOENDIRS_NUM   ARRAY_NUM(ss_instanceowndirs)
 #define SS_XLOGSUBIRS_NUM        ARRAY_NUM(ss_xlogsubdirs)
+#define SS_SPECIALDIRS_NUM       ARRAY_NUM(ss_specialdirs)
 
 char *ss_nodedatainfo = NULL;
 int32 ss_nodeid = INVALID_INSTANCEID;
 bool ss_issharedstorage = false;
 bool ss_need_mkclusterdir = true;
+bool ss_need_mkspecialdir = false;
 static const char *ss_progname = "ss_initdb";
 
 /*
@@ -224,6 +229,40 @@ int ss_check_existdir(const char *path, int node_id, const char **subdir)
     return 2; // subdir exists and complete
 }
 
+bool ss_check_exist_specialdir(char *path)
+{
+    for (uint32_t i = 0; i < SS_SPECIALDIRS_NUM; ++i) {
+        if (strcmp(ss_specialdirs[i] + 1, path) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ss_check_specialdir(char *path)
+{
+    char *datadir = path;
+    DIR *pgdatadir = NULL;
+    struct dirent *file = NULL;
+    
+    if ((pgdatadir = opendir(datadir)) != NULL) {
+        while ((file = readdir(pgdatadir)) != NULL) {
+            if (strcmp(".", file->d_name) == 0 || strcmp("..", file->d_name) == 0) {
+                /* skip this and parent directory */
+                continue;
+            }
+
+            if (ss_check_exist_specialdir(file->d_name)) {
+                (void)closedir(pgdatadir);
+                return true;
+            }
+        }
+        (void)closedir(pgdatadir);
+    }
+
+    return false;
+}
+
 int ss_check_shareddir(char *path, int node_id, bool *need_mkclusterdir)
 {
     int ret = 0;
@@ -270,7 +309,7 @@ int ss_check_shareddir(char *path, int node_id, bool *need_mkclusterdir)
 }
 
 void ss_mkdirdir(int32 node_id, const char *pg_data, const char *vgdata_dir, const char *vglog_dir,
-    bool need_mkclusterdir)
+    bool need_mkclusterdir, bool need_specialdir)
 {
     /* Create required subdirectories */
     printf(_("creating subdirectories ... in shared storage mode ... "));
@@ -285,6 +324,10 @@ void ss_mkdirdir(int32 node_id, const char *pg_data, const char *vgdata_dir, con
     /* shared and cluster one copy */
     if (need_mkclusterdir) {
         ss_createdir(ss_clusterdirs, SS_CLUSTERDIRS_NUM, INVALID_INSTANCEID, pg_data, vgdata_dir, vglog_dir);
+    }
+
+    if (need_specialdir) {
+        ss_createdir(ss_specialdirs, SS_SPECIALDIRS_NUM, INVALID_INSTANCEID, pg_data, vgdata_dir, vglog_dir);
     }
 }
 
@@ -332,9 +375,9 @@ void ss_createdir(const char **ss_dirs, int32 num, int32 node_id, const char *pg
         char *link_path = NULL;
 
         if (vglog_dir[0] != '\0' && (pg_strcasecmp(ss_dirs[i], "+pg_xlog") == 0 ||
-            pg_strcasecmp(ss_dirs[i], "+pg_doublewrite") == 0 ||
             pg_strcasecmp(ss_dirs[i], "+pg_notify") == 0 ||
-            pg_strcasecmp(ss_dirs[i], "+pg_snapshots") == 0)) {
+            pg_strcasecmp(ss_dirs[i], "+pg_snapshots") == 0 ||
+            pg_strcasecmp(ss_dirs[i], "+pg_replication") == 0)) {
             is_xlog = true;
         }
 

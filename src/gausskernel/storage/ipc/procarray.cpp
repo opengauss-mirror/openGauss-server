@@ -122,6 +122,7 @@
 #include "gstrace/storage_gstrace.h"
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_transaction.h"
+#include "replication/ss_cluster_replication.h"
 
 #ifdef ENABLE_UT
     #define static
@@ -2363,14 +2364,12 @@ GROUP_GET_SNAPSHOT:
     }
 
     /* Check whether there's a standby requiring an older xmin when dms is enabled. */
-    if (ENABLE_DMS && SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY && SSGetOldestXminFromAllStandby()) {
-        TransactionId ss_oldest_xmin = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
-        if (TransactionIdIsValid(ss_oldest_xmin) && TransactionIdIsNormal(ss_oldest_xmin) &&
-            TransactionIdPrecedes(ss_oldest_xmin, u_sess->utils_cxt.RecentGlobalXmin)) {
-            u_sess->utils_cxt.RecentGlobalXmin = ss_oldest_xmin;
-        }
+    if (ENABLE_DMS && (SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY || (SS_NORMAL_PRIMARY && IS_SS_REPLICATION_MAIN_STANBY_NODE))) {
+        ss_xmin_info_t* xmin_info = &g_instance.dms_cxt.SSXminInfo;
+        uint64 global_xmin = SSGetGlobalOldestXmin(u_sess->utils_cxt.RecentGlobalXmin);
+        u_sess->utils_cxt.RecentGlobalXmin = global_xmin;
     }
-    
+
     /* Non-catalog tables can be vacuumed if older than this xid */
     u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
 
@@ -5030,11 +5029,11 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
         if (TransactionIdPrecedes(xmin, globalxmin))
             globalxmin = xmin;
 
-        if (ENABLE_DMS && SS_PRIMARY_MODE && SSGetOldestXminFromAllStandby()) {
-            TransactionId ss_oldest_xmin = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
-            if (TransactionIdIsValid(ss_oldest_xmin) && TransactionIdIsNormal(ss_oldest_xmin) &&
-                TransactionIdPrecedes(ss_oldest_xmin, globalxmin)) {
-                globalxmin = ss_oldest_xmin;
+        if (ENABLE_DMS && SS_PRIMARY_MODE) {
+            SSUpdateNodeOldestXmin(SS_MY_INST_ID, globalxmin);
+            globalxmin = SSGetGlobalOldestXmin(globalxmin);
+            if (ENABLE_SS_BCAST_SNAPSHOT) {
+                SSSendLatestSnapshotToStandby(xmin, xmax, t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
             }
         }
 
@@ -5043,6 +5042,9 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
         if (GTM_FREE_MODE) {
             t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin = globalxmin;
         }
+    } else if (ENABLE_SS_BCAST_SNAPSHOT && SS_PRIMARY_MODE) {
+        SSSendLatestSnapshotToStandby(t_thrd.xact_cxt.ShmemVariableCache->xmin, xmax,
+            t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
     }
 
     if (GTM_LITE_MODE) {
@@ -5402,7 +5404,6 @@ void UpdateXLogMaxCSN(CommitSeqNo xlogCSN)
 void GetOldestGlobalProcXmin(TransactionId *globalProcXmin)
 {
     TransactionId globalxmin = MaxTransactionId;
-    *globalProcXmin = InvalidTransactionId;
     ProcArrayStruct *arrayP = g_instance.proc_array_idx;
     int *pgprocnos = arrayP->pgprocnos;
     int numProcs = arrayP->numProcs;

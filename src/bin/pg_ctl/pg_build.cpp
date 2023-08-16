@@ -1250,6 +1250,10 @@ bool SsIsSkipPath(const char* dirname, bool needskipall)
         return true;
     }
 
+    if (IsBeginWith(dirname, "pg_replication") > 0) {
+        return true;
+    }
+
     /* skip pg_control file when dss enable, only copy pg_control of main standby,
      * we need to retain pg_control of other nodes, so pg_contol not be deleted directly.
      */
@@ -1417,9 +1421,12 @@ static void DeleteSubDataDir(const char* dirname)
                                 de_slot->d_name);
                             securec_check_ss_c(nRet, "", "");
                             if (!rmtree(fullpath, true)) {
-                                pg_log(PG_WARNING, _("failed to remove dir %s,errno=%d.\n"), fullpath, errno);
-                                (void)closedir(dir);
-                                exit(1);
+                                /* enable dss, something in pg_replslot may be a link */
+                                if (unlink(fullpath) != 0) {
+                                    pg_log(PG_WARNING, _("failed to remove dir %s,errno=%d.\n"), fullpath, errno);
+                                    (void)closedir(dir);
+                                    exit(1);
+                                }
                             }
                         }
                         (void)closedir(dir_slot);
@@ -1931,7 +1938,7 @@ int fsync_fname(const char *fname, bool isdir)
      */
     fd = open(fname, flags, 0);
     if (fd < 0) {
-        if (errno == EACCES || (isdir && errno == EISDIR))
+        if (errno == EACCES || (isdir && (errno == EISDIR || errno == ERR_DSS_FILE_TYPE_MISMATCH)))
             return 0;
         pg_log(PG_WARNING, _("could not open file \"%s\": %s\n"), fname, strerror(errno));
         return -1;

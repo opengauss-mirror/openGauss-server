@@ -5299,11 +5299,11 @@ void do_query_for_first_tuple(RemoteQueryState* node, bool vectorized, int regul
                 pfree_ext(node->cursor_connections);
 
             if (!node->need_error_check) {
-                int error_code;
+                int error_code = 0;
                 char* error_msg = getSocketError(&error_code);
 
                 ereport(ERROR,
-                    (errcode(error_code), errmsg("Failed to read response from Datanodes Detail: %s\n", error_msg)));
+                    (errcode(error_code), errmsg("Failed to read response from Datanodes Detail: %s\n", error_msg == NULL ? "null" : error_msg)));
             } else {
                 node->need_error_check = false;
                 pgxc_node_report_error(node);

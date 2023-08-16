@@ -377,6 +377,7 @@ static void setDMSProfile(dms_profile_t* profile)
     profile->enable_reform = (unsigned char)dms_attr->enable_reform;
     profile->load_balance_mode = 1; /* primary-standby */
     profile->parallel_thread_num = dms_attr->parallel_thread_num;
+    profile->max_wait_time = DMS_MSG_MAX_WAIT_TIME;
 
     if (dms_attr->enable_ssl && g_instance.attr.attr_security.EnableSSL) {
         InitDmsSSL();
@@ -501,6 +502,9 @@ void DMSUninit()
     if (!ENABLE_DMS || !g_instance.dms_cxt.dmsInited) {
         return;
     }
+
+    ereport(LOG, (errmsg("dms xmin maintainer thread exit")));
+    signal_child(g_instance.pid_cxt.DmsAuxiliaryPID, SIGTERM, -1);
 
     g_instance.dms_cxt.dmsInited = false;
     ereport(LOG, (errmsg("DMS uninit worker threads, DRC, errdesc and DL")));

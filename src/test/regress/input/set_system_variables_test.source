@@ -110,6 +110,7 @@ set @@session.enable_broadcast = on;
 set @@session.enable_broadcast = default;
 set @@enable_broadcast = (1 = 1);
 set @@enable_broadcast = (true = true);
+select @@enable_broadcast;
 set @@enable_broadcast = (true = false);
 
 select @@enable_broadcast;

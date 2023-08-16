@@ -3350,6 +3350,9 @@ typedef struct knl_t_dms_context {
     bool buf_in_aio;
     bool is_reform_proc;
     bool CloseAllSessionsFailed;
+    uint64 latest_snapshot_xmin;
+    uint64 latest_snapshot_xmax;
+    uint64 latest_snapshot_csn;
     char *origin_buf; /* origin buffer for unaligned read/write */
     char *aligned_buf;
     int size; /* aligned buffer size */
@@ -3366,6 +3369,10 @@ typedef struct knl_t_ondemand_xlog_copy_context {
     XLogSegNo openLogSegNo;
     uint32 openLogOff;
 } knl_t_ondemand_xlog_copy_context;
+
+typedef struct knl_t_dms_auxiliary_context {
+    volatile sig_atomic_t shutdown_requested;
+} knl_t_dms_auxiliary_context;
 
 /* thread context. */
 typedef struct knl_thrd_context {
@@ -3517,6 +3524,7 @@ typedef struct knl_thrd_context {
     knl_t_dms_context dms_cxt;
     knl_t_ondemand_xlog_copy_context ondemand_xlog_copy_cxt;
     knl_t_rc_context rc_cxt;
+    knl_t_dms_auxiliary_context dms_aux_cxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT

@@ -237,23 +237,29 @@ set @@session.enable_broadcast = on;
 set @@session.enable_broadcast = default;
 set @@enable_broadcast = (1 = 1);
 set @@enable_broadcast = (true = true);
-set @@enable_broadcast = (true = false);
 select @@enable_broadcast;
  ?column? 
 ----------
  t
 (1 row)
 
+set @@enable_broadcast = (true = false);
+select @@enable_broadcast;
+ ?column? 
+----------
+ f
+(1 row)
+
 select @@session.enable_broadcast;
  ?column? 
 ----------
- t
+ f
 (1 row)
 
 select @@session.enable_broadcast = 'true';
  ?column? 
 ----------
- t
+ f
 (1 row)
 
 set global most_available_sync = t;

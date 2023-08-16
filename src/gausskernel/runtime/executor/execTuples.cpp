@@ -483,31 +483,6 @@ void ExecClearMutilTuple(List* slots)
         (void)ExecClearTuple(slot);
     }
 }
-/* --------------------------------
- *		ExecStoreVirtualTuple
- *			Mark a slot as containing a virtual tuple.
- *
- * The protocol for loading a slot with virtual tuple data is:
- *		* Call ExecClearTuple to mark the slot empty.
- *		* Store data into the Datum/isnull arrays.
- *		* Call ExecStoreVirtualTuple to mark the slot valid.
- * This is a bit unclean but it avoids one round of data copying.
- * --------------------------------
- */
-TupleTableSlot* ExecStoreVirtualTuple(TupleTableSlot* slot)
-{
-    /*
-     * sanity checks
-     */
-    Assert(slot != NULL);
-    Assert(slot->tts_tupleDescriptor != NULL);
-    Assert(TTS_EMPTY(slot));
-
-    slot->tts_flags &= ~TTS_FLAG_EMPTY;
-    slot->tts_nvalid = slot->tts_tupleDescriptor->natts;
-
-    return slot;
-}
 
 /* --------------------------------
  *		ExecStoreAllNullTuple

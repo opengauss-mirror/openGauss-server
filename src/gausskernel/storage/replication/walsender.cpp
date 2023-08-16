@@ -87,6 +87,7 @@
 #include "replication/parallel_decode.h"
 #include "replication/parallel_decode_worker.h"
 #include "replication/parallel_reorderbuffer.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
@@ -135,8 +136,8 @@ static int g_appname_extra_len = 3; /* [+]+\0 */
 #define AmWalSenderToStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_STANDBY)
 
 #define USE_PHYSICAL_XLOG_SEND \
-    (AM_WAL_HADR_SENDER || !IS_SHARED_STORAGE_MODE || (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY))
-#define USE_SYNC_REP_FLUSH_PTR (AM_WAL_HADR_SENDER && !IS_SHARED_STORAGE_MODE)
+    (AM_WAL_HADR_SENDER || !SS_CLUSTER_DORADO_REPLICATION || !IS_SHARED_STORAGE_MODE || (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY))
+#define USE_SYNC_REP_FLUSH_PTR (AM_WAL_HADR_SENDER && (!IS_SHARED_STORAGE_MODE && !SS_CLUSTER_DORADO_REPLICATION))
 
 /* Statistics for log control */
 static const int MICROSECONDS_PER_SECONDS = 1000000;
@@ -2920,8 +2921,15 @@ static void ProcessStandbyReplyMessage(void)
 
     /*
      * Advance our local xmin horizon when the client confirmed a flush.
+     * 1. When starting ss dorado replication, we need to know replayPtr that standby has already replayed,
+     * because primary xlog will cover standby xlog by Dorado synchronous replication.
+     * 2. Otherwise, we only need to confirm that standby xlog has been flushed successfully.
      */
-    AdvanceReplicationSlot(reply.flush);
+    if (SS_CLUSTER_DORADO_REPLICATION) {
+        AdvanceReplicationSlot(reply.apply);
+    } else {
+        AdvanceReplicationSlot(reply.flush);
+    }
 
     if (AM_WAL_STANDBY_SENDER) {
         sndFlush = GetFlushRecPtr();
@@ -3550,7 +3558,11 @@ static void LogCtrlCalculateCurrentRPO(StandbyReplyMessage *reply)
     if (AM_WAL_HADR_CN_SENDER) {
         flushPtr = GetFlushRecPtr();
     } else if (AM_WAL_SHARE_STORE_SENDER) {
-        flushPtr = g_instance.xlog_cxt.shareStorageXLogCtl->insertHead;
+        if (SS_CLUSTER_DORADO_REPLICATION) {
+            flushPtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
+        } else {
+            flushPtr = g_instance.xlog_cxt.shareStorageXLogCtl->insertHead;
+        } 
     } else {
         got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
         if (got_recptr != true) {
@@ -6266,6 +6278,15 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
             AlignFreeShareStorageCtl(ctlInfo);
         }
 
+        if (SS_CLUSTER_DORADO_REPLICATION && !AM_WAL_HADR_SENDER) {
+            ReadSSDoradoCtlInfoFile();
+            ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
+            sentRecPtr = ctlInfo->insertHead;
+            sndWrite = ctlInfo->insertHead;
+            sndFlush = ctlInfo->insertHead;
+            sndReplay = ctlInfo->insertHead;
+        }
+
         /*
          * if the walsener's pid has changed,we consider is is not a sync standby
          */
@@ -7149,13 +7170,15 @@ void add_archive_task_to_list(int archive_task_status_idx, WalSnd *walsnd)
 ArchiveXlogMessage* get_archive_task_from_list() 
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    SpinLockAcquire(&walsnd->mutex_archive_task_list);
     volatile unsigned int *archive_task_count = &walsnd->archive_task_count;
     if (*archive_task_count == 0) {
+        SpinLockRelease(&walsnd->mutex_archive_task_list);
         return NULL;
     }
     ArchiveXlogMessage *result = NULL;
     int idx = -1;
-    SpinLockAcquire(&walsnd->mutex_archive_task_list);
+
     idx = lfirst_int(list_head(walsnd->archive_task_list));
     result = &g_instance.archive_obs_cxt.archive_status[idx].archive_task;
     walsnd->archive_task_list = list_delete_first(walsnd->archive_task_list);

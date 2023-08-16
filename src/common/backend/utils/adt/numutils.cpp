@@ -545,9 +545,9 @@ int pg_ultoa_n(uint32 value, char *a)
 
         value /= 10000;
 
-        errno_t rc = memcpy_s(pos - 2, 2, DIGIT_TABLE + c0, 2);
+        errno_t rc = memcpy_sp(pos - 2, 2, DIGIT_TABLE + c0, 2);
         securec_check(rc, "\0", "\0");
-        rc = memcpy_s(pos - 4, 2, DIGIT_TABLE + c1, 2);
+        rc = memcpy_sp(pos - 4, 2, DIGIT_TABLE + c1, 2);
         securec_check(rc, "\0", "\0");
         i += 4;
     }
@@ -558,7 +558,7 @@ int pg_ultoa_n(uint32 value, char *a)
 
         value /= 100;
 
-        errno_t rc = memcpy_s(pos - 2, 2, DIGIT_TABLE + c, 2);
+        errno_t rc = memcpy_sp(pos - 2, 2, DIGIT_TABLE + c, 2);
         securec_check(rc, "\0", "\0");
         i += 2;
     }
@@ -567,7 +567,7 @@ int pg_ultoa_n(uint32 value, char *a)
 
         char *pos = a + olength - i;
 
-        errno_t rc = memcpy_s(pos - 2, 2, DIGIT_TABLE + c, 2);
+        errno_t rc = memcpy_sp(pos - 2, 2, DIGIT_TABLE + c, 2);
         securec_check(rc, "\0", "\0");
     } else {
         *a = (char)('0' + value);
@@ -633,7 +633,7 @@ char* pg_ultostr_zeropad(char* str, uint32 value, int32 minwidth)
 
     if (value < 100 && minwidth == 2)	/* Short cut for common case */
     {
-        rc = memcpy_s(str, 2, DIGIT_TABLE + value * 2, 2);
+        rc = memcpy_sp(str, 2, DIGIT_TABLE + value * 2, 2);
         securec_check(rc, "\0", "\0");
         return str + 2;
     }

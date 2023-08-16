@@ -611,6 +611,7 @@ static int regrGetServPid(char* pcBuff, unsigned int uiBuffLen,
 #else
     if (!getcwd(cwd, MAXPGPATH)) {
         fprintf(stderr, _("\n Get current dir fail.\n"));
+        free((char*)data_folder);
         return -1;
     }
     if (strlen(cwd) + strlen("/tmp_check/") + strlen(data_folder) + strlen("/postmaster.pid") >= uiBuffLen) {
@@ -620,6 +621,7 @@ static int regrGetServPid(char* pcBuff, unsigned int uiBuffLen,
               "length needed: %lu.\n"),
             uiBuffLen,
             (strlen(cwd) + strlen("/") + strlen("tmp_check/") + strlen(data_folder) + strlen("/postmaster.pid") + 1));
+            free((char*)data_folder);
             return REGR_ERRCODE_BUFF_NOT_ENOUGH;
     }
 
@@ -1333,6 +1335,7 @@ static void start_gtm(void)
 
     /* Save static PID number */
     myinfo.gtm_pid = node_pid;
+    free((char*)data_folder);
 }
 
 /* Start single datanode for test */
@@ -1740,6 +1743,7 @@ static void* thread_initdb(void* arg)
 static void start_thread(thread_desc* thread, bool is_cn, bool is_standby, int i)
 {
     char* data_folder = get_node_info_name(i, is_cn ? COORD : DATANODE, false);
+    char* node_name = get_node_info_name(i, is_cn ? COORD : DATANODE, true);
     char** args = thread->args;
     int thi = thread->thi;
     pthread_t* thd = &(thread->thd[thi]);
@@ -1750,7 +1754,7 @@ static void start_thread(thread_desc* thread, bool is_cn, bool is_standby, int i
         SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s%s\" -L \"%s\" --noclean%s%s > "
                     "\"%s/log/initdb%d.log\" 2>&1" SYSTEMQUOTE,
         bindir,
-        (char*)get_node_info_name(i, is_cn ? COORD : DATANODE, true),
+        node_name,
         init_database ? "-U upcheck" : "",
         temp_install,
         data_folder,
@@ -1773,6 +1777,7 @@ static void start_thread(thread_desc* thread, bool is_cn, bool is_standby, int i
     thread->thi++;
 
     free(data_folder);
+    free(node_name);
 }
 
 /*
@@ -1986,12 +1991,13 @@ static void initdb_node_info(bool standby)
         char buf[MAXPGPATH * 4];
 
         char* data_folder = get_node_info_name(i, DATANODE, false);
+        char* node_name   = get_node_info_name(i, DATANODE, true);
         (void)snprintf(buf,
             sizeof(buf),
             SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s_standby\" -L \"%s\" "
                         "--noclean%s%s > \"%s/log/initdb.log\" 2>&1" SYSTEMQUOTE,
             bindir,
-            (char*)get_node_info_name(i, DATANODE, true),
+            node_name,
             init_database ? "-U upcheck" : "",
             temp_install,
             data_folder,
@@ -2008,6 +2014,7 @@ static void initdb_node_info(bool standby)
             exit_nicely(2);
         }
         free(data_folder);
+        free(node_name);
     }
 }
 
@@ -3191,10 +3198,18 @@ static void convertSourcefilesIn(char* pcSourceSubdir, char* pcDestDir, char* pc
                 replace_string(line, "@libdir@", dlpath);
                 replace_string(line, "@DLSUFFIX@", DLSUFFIX);
                 replace_string(line, "@gsqldir@", psqldir);
-                replace_string(line, "@datanode1@", get_node_info_name(0, DATANODE, true));
-                replace_string(line, "@datanode2@", get_node_info_name(1, DATANODE, true));
-                replace_string(line, "@coordinator1@", get_node_info_name(0, COORD, true));
-                replace_string(line, "@coordinator2@", get_node_info_name(1, COORD, true));
+                char* node_name = get_node_info_name(0, DATANODE, true);
+                replace_string(line, "@datanode1@", node_name);
+                free(node_name);
+                node_name = get_node_info_name(1, DATANODE, true); 
+                replace_string(line, "@datanode2@", node_name);
+                free(node_name);
+                node_name=get_node_info_name(0, COORD, true);
+                replace_string(line, "@coordinator1@", node_name);
+                free(node_name);
+                node_name = get_node_info_name(1, COORD, true);
+                replace_string(line, "@coordinator2@", node_name);
+                free(node_name);
                 replace_string(line, "@pgbench_dir@", pgbenchdir);
                 replace_string(line, "@client_logic_hook@", client_logic_hook);
                 char* ptr = GetStartNodeCmdString(0, DATANODE);

@@ -55,6 +55,7 @@ typedef struct st_reformer_ctrl {
     int primaryInstId;
     int recoveryInstId;
     SSGlobalClusterState clusterStatus;
+    ClusterRunMode clusterRunMode;
     pg_crc32c crc;
 } ss_reformer_ctrl_t;
 
@@ -62,6 +63,7 @@ typedef struct st_reform_info {
     bool in_reform;
     dms_role_t dms_role;
     SSReformType reform_type;
+    unsigned long long bitmap_nodes;
 } ss_reform_info_t;
 
 typedef enum st_failover_ckpt_status {
