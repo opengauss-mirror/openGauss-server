@@ -371,9 +371,20 @@ void addr_to_name_reuse(void* pc, StringInfoData* call_stack)
          */
         uint sym_off;
         if (dlinfo.dli_saddr && dlinfo.dli_sname) {
-            sym_off = (uint)((uintptr_t)pc - (uintptr_t)dlinfo.dli_saddr);
-            ereport(LOG, (errmsg("dlinfo.dli_sname %s.", dlinfo.dli_sname)));
+            if (ENABLE_DMS && (strcmp(dlinfo.dli_sname, "dms_request_page") == 0)) {
+                Buffer bufferid = ResourceOwnerGetBuffer(t_thrd.utils_cxt.CurrentResourceOwner);
+                if (bufferid > 0) {
+                    BufferDesc *buf_desc = GetBufferDescriptor(bufferid - 1);
+                    ereport(LOG, (errmsg("dlinfo.dli_sname %s. Current hold buffer: %u/%u/%u/%d %d-%u",
+                        dlinfo.dli_sname, buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
+                        buf_desc->tag.rnode.relNode, buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum,
+                        buf_desc->tag.blockNum)));
+                }
+            } else {
+                ereport(LOG, (errmsg("dlinfo.dli_sname %s.", dlinfo.dli_sname)));
+            }
             demangle_one_symbol(dlinfo.dli_sname, tmp_buf, sizeof(tmp_buf));
+            sym_off = (uint)((uintptr_t)pc - (uintptr_t)dlinfo.dli_saddr);
             appendStringInfo(call_stack, "%s + 0x%x\n", tmp_buf, sym_off);
         } else {
             addr_to_name_bin(pc, dlinfo, call_stack);

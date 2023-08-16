@@ -2549,3 +2549,12 @@ void ReleaseResownerOutOfTransaction()
     ResourceOwnerRelease(root, RESOURCE_RELEASE_LOCKS, false, true);
     ResourceOwnerRelease(root, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
 }
+
+FORCE_INLINE
+Buffer ResourceOwnerGetBuffer(ResourceOwner owner)
+{
+    if (owner != NULL && owner->nbuffers > 0) {
+        return owner->buffers[owner->nbuffers - 1];
+    }
+    return 0;
+}
