@@ -2732,7 +2732,8 @@ static Datum ExecMakeFunctionResultNoSets(
    }
 
    if (econtext) {
-        fcinfo->can_ignore = econtext->can_ignore;
+        fcinfo->can_ignore = econtext->can_ignore || (econtext->ecxt_estate && econtext->ecxt_estate->es_plannedstmt &&
+                 econtext->ecxt_estate->es_plannedstmt->hasIgnore);
     }
 
     /*
