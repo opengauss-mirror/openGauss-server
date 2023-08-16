@@ -79,6 +79,7 @@
 #include "nodes/makefuncs.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/file/fio_device.h"
+#include "ddes/dms/ss_dms_recovery.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -14900,3 +14901,165 @@ Datum gs_get_index_status(PG_FUNCTION_ARGS)
 }
 
 #endif
+
+TupleDesc create_query_node_reform_info_tupdesc()
+{
+    int column = 10;
+    TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "reform_node_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "reform_type", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "reform_start_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "reform_end_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "is_reform_success", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "redo_start_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "rode_end_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "xlog_total_bytes", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "hashmap_construct_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)10, "action", TEXTOID, -1, 0);
+    BlessTupleDesc(tupdesc);
+    return tupdesc;
+}
+
+/*
+* @Description : Convert timeval to string
+* @in          : time
+* @out         : buffer
+*/
+void timeval_to_string(timeval time, char* buffer, int buf_size)
+{
+    if (buffer == NULL || buf_size == 0 || time.tv_sec == 0) {
+        return;
+    }
+    time_t format_time = time.tv_sec;
+    struct tm *p_time = localtime(&format_time);
+    
+    char tmp_buf[32] = {0};
+    strftime(tmp_buf, sizeof(tmp_buf), "%Y-%m-%d %H:%M:%S", p_time);
+    errno_t rc = sprintf_s(buffer, buf_size - 1, "%s.%ld ", tmp_buf, time.tv_usec / 1000);
+    securec_check_ss(rc, "\0", "\0");
+}
+
+
+typedef struct {
+    uint64 changed_inst_list;
+    uint64 stable_inst_list;
+    uint8 iterate_idx;
+    ss_reform_info_t reform_info;
+} reform_iterate_t;
+/*
+ * @Description : Get reform information about special node
+ * @in         	: None
+ * @out         : None
+ * @return      : record
+ */
+Datum query_node_reform_info(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info without shared storage deployment!")));
+    }
+
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info at Standby node while DMS enabled!")));
+    }
+
+    FuncCallContext *funcctx = NULL;
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        reform_iterate_t *iterate = (reform_iterate_t *)palloc0(sizeof(reform_iterate_t));
+        ss_reform_info_t reform_info = g_instance.dms_cxt.SSReformInfo;
+        iterate->reform_info = reform_info;
+        iterate->changed_inst_list = reform_info.old_bitmap ^ reform_info.new_bitmap;
+        iterate->stable_inst_list = reform_info.old_bitmap & reform_info.new_bitmap;
+        iterate->iterate_idx = 0;
+
+        funcctx->user_fctx = (void *)iterate;
+        funcctx->tuple_desc = create_query_node_reform_info_tupdesc();
+        MemoryContextSwitchTo(oldcontext);
+    }
+    
+    funcctx = SRF_PERCALL_SETUP();
+    reform_iterate_t *iterate = (reform_iterate_t *)funcctx->user_fctx;
+    ss_reform_info_t reform_info = iterate->reform_info;
+    for (uint64 i = iterate->iterate_idx; i < DMS_MAX_INSTANCE; i++) {
+        if (!((reform_info.old_bitmap | reform_info.new_bitmap) & (1 << i))) {
+            continue;
+        }
+
+#define MAX_BUF_SIZE 256
+        char tmp_buf[MAX_BUF_SIZE] = {0};
+        Datum values[10];
+        values[0] = UInt16GetDatum(i);
+        if (i == (uint64)SS_MY_INST_ID) {
+            switch (reform_info.reform_type) {
+                case DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS:
+                    values[1] = CStringGetTextDatum("Normal reform");
+                    break;
+                case DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS:
+                    values[1] = CStringGetTextDatum("Failover");
+                    break;
+                case DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS:
+                    values[1] = CStringGetTextDatum("Switchover");
+                    break;
+                default:
+                    values[1] = CStringGetTextDatum("NULL");
+            }
+
+            timeval_to_string(reform_info.reform_start_time, tmp_buf, MAX_BUF_SIZE);
+            values[2] = CStringGetTextDatum(tmp_buf);
+
+            timeval_to_string(reform_info.reform_end_time, tmp_buf, MAX_BUF_SIZE);
+            values[3] = CStringGetTextDatum(tmp_buf);
+            values[4] = BoolGetDatum(reform_info.reform_success);
+
+            if (reform_info.reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
+                timeval_to_string(reform_info.redo_start_time, tmp_buf, MAX_BUF_SIZE);
+                values[5] = CStringGetTextDatum(tmp_buf);
+
+                timeval_to_string(reform_info.redo_end_time, tmp_buf, MAX_BUF_SIZE);
+                values[6] = CStringGetTextDatum(tmp_buf);
+
+                values[7] = UInt64GetDatum(reform_info.redo_total_bytes);
+
+                timeval_to_string(reform_info.construct_hashmap, tmp_buf, MAX_BUF_SIZE);
+                values[8] = CStringGetTextDatum(tmp_buf);
+            } else {
+                sprintf_s(tmp_buf, MAX_BUF_SIZE, "-");
+                values[5] = CStringGetTextDatum(tmp_buf);
+                values[6] = CStringGetTextDatum(tmp_buf);
+                values[7] = UInt64GetDatum(-1);
+                values[8] = CStringGetTextDatum(tmp_buf);
+            }
+        } else {
+            values[1] = CStringGetTextDatum("-");
+            sprintf_s(tmp_buf, MAX_BUF_SIZE, "-");
+            values[2] = CStringGetTextDatum(tmp_buf);
+            values[3] = CStringGetTextDatum(tmp_buf);
+            values[4] = BoolGetDatum(reform_info.reform_success);
+            values[5] = CStringGetTextDatum(tmp_buf);
+            values[6] = CStringGetTextDatum(tmp_buf);
+            values[7] = UInt64GetDatum(-1);
+            values[8] = CStringGetTextDatum(tmp_buf);
+        }
+
+        if (iterate->changed_inst_list & (1 << i)) {
+            if (reform_info.old_bitmap & (1 << i)) {
+                sprintf_s(tmp_buf, MAX_BUF_SIZE, "kick off");
+            } else {
+                sprintf_s(tmp_buf, MAX_BUF_SIZE, "join in");
+            }
+        } else if (iterate->stable_inst_list & (1 << i)) {
+            sprintf_s(tmp_buf, MAX_BUF_SIZE, "stable");
+        }
+        
+        values[9] = CStringGetTextDatum(tmp_buf);
+        bool nulls[10] = {false};
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        if (tuple != NULL) {
+            iterate->iterate_idx++;
+            SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+        }
+    }
+    SRF_RETURN_DONE(funcctx);
+}

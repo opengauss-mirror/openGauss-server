@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.query_node_reform_info() CASCADE;

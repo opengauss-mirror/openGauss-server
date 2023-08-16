@@ -178,6 +178,9 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSReformerControl.primaryInstId = -1;
     dms_cxt->SSReformInfo.in_reform = false;
     dms_cxt->SSReformInfo.dms_role = DMS_ROLE_UNKNOW;
+    dms_cxt->SSReformInfo.old_bitmap = 0;
+    dms_cxt->SSReformInfo.new_bitmap = 0;
+    dms_cxt->SSReformInfo.redo_total_bytes = 0;
     dms_cxt->SSClusterState = NODESTATE_NORMAL;
     dms_cxt->SSRecoveryInfo.recovery_inst_id = INVALID_INSTANCEID;
     dms_cxt->SSRecoveryInfo.recovery_pause_flag = true;

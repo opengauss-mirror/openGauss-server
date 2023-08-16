@@ -155,7 +155,10 @@ void PRRegisterBlockChangeExtended(XLogRecParseState *recordBlockState, const Re
                                "forknum %d blkno %u",
                                rNode.spcNode, rNode.dbNode, rNode.relNode, forkNum, blkNo)));
     }
-
+    if (!g_instance.dms_cxt.SSReformInfo.is_hashmap_constructed) {
+        g_instance.dms_cxt.SSReformInfo.is_hashmap_constructed = true;
+        INSTR_TIME_SET_CURRENT(g_instance.dms_cxt.SSReformInfo.construct_hashmap);
+    }
     if (!found) {
         PRInitRedoItemEntry(redoItemHashEntry);
     }

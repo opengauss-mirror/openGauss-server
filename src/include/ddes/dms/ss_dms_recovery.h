@@ -64,6 +64,17 @@ typedef struct st_reform_info {
     dms_role_t dms_role;
     SSReformType reform_type;
     unsigned long long bitmap_nodes;
+    timeval reform_start_time;
+    timeval reform_end_time;
+    uint64 old_bitmap;      // Save the cluster nodes bitmap before REFORM
+    uint64 new_bitmap;      // Save the cluster nodes bitmap after REFORM
+    
+    timeval redo_start_time;
+    timeval redo_end_time;
+    timeval construct_hashmap;
+    uint64 redo_total_bytes;
+    bool reform_success;
+    bool is_hashmap_constructed;
 } ss_reform_info_t;
 
 typedef enum st_failover_ckpt_status {
