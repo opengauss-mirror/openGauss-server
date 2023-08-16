@@ -672,7 +672,7 @@ makeStringValue(char *str)
 
 	if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
 	{
-		if (NULL == str || 0 == strlen(str))
+		if (NULL == str || (0 == strlen(str) && !ACCEPT_EMPTY_STR))
 		{
 			val->type = T_Null;
 			val->val.str = str;

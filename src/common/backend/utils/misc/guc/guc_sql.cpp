@@ -356,7 +356,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"compat_cursor", OPT_COMPAT_CURSOR},
     {"char_coerce_compat", OPT_CHAR_COERCE_COMPAT},
     {"truncate_numeric_tail_zero", OPT_TRUNC_NUMERIC_TAIL_ZERO},
-    {"array_count_compat", OPT_ARRAY_COUNT_COMPAT}
+    {"array_count_compat", OPT_ARRAY_COUNT_COMPAT},
+    {"accept_empty_str", OPT_ACCEPT_EMPTY_STR}
 };
 
 static const struct behavior_compat_entry plsql_compile_check_options[PLPSQL_OPT_MAX] = {
