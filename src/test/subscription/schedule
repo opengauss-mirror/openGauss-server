@@ -13,3 +13,4 @@ matviews
 change_wal_level
 skiplsn
 disable
+pub_subconflict
