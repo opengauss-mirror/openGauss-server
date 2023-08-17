@@ -7286,6 +7286,7 @@ static void RemoveNonParentXlogFiles(XLogRecPtr switchpoint, TimeLineID newTLI)
 void CheckBeforeTruncateXLog(XLogRecPtr endRecPtr)
 {
     const uint32 shiftSize = 32;
+    ProcTxnWorkLoad(true);
 
     if (XLogRecPtrIsInvalid(t_thrd.xlog_cxt.minRecoveryPoint) ||
         XLByteLT(endRecPtr, t_thrd.xlog_cxt.minRecoveryPoint) ||
