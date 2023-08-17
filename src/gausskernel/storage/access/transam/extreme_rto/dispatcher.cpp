@@ -2138,7 +2138,7 @@ void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, 
     knl_parallel_redo_state state = g_instance.comm_cxt.predo_cxt.state;
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
 
-    if (state != REDO_IN_PROGRESS || !g_instance.attr.attr_storage.parallel_recovery_cost_record) {
+    if (state != REDO_IN_PROGRESS || !g_instance.attr.attr_storage.enable_time_report) {
         *realNum = 0;
         return;
     }
