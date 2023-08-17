@@ -238,6 +238,53 @@ int GetRemoteConnInfo(char* remoteAddress, char* remoteReadConnInfo, int len)
     return errCode;
 }
 
+/**
+ * get connection
+ * @param remoteAddress ip@port 
+ * @return connection if success or else nullptr
+ */
+static PGconn* RemoteGetConnection(char* remoteAddress)
+{
+    char remoteReadConnInfo[MAXPGPATH];
+    int errCode = GetRemoteConnInfo(remoteAddress, remoteReadConnInfo, MAXPGPATH);
+    if (errCode != REMOTE_READ_OK) {
+        return nullptr;
+    }
+    PGconn* conGet = RemoteReadGetConn(remoteReadConnInfo);
+    if (conGet == nullptr) {
+        errCode = REMOTE_READ_RPC_ERROR;
+        return nullptr;
+    }
+    /* need to close by caller */
+    return conGet;
+}
+
+uint64 RemoteGetXlogReplayPtr(char* remoteAddress)
+{
+    PGconn* conGet = RemoteGetConnection(remoteAddress);
+    if (conGet == nullptr) {
+        return InvalidXLogRecPtr;
+    }
+    PGresult* res = PQexec(conGet, "SELECT lsn::varchar from pg_last_xlog_replay_location()");
+    if (PQresultStatus(res) != PGRES_TUPLES_OK || PQgetisnull(res, 0, 0)) {
+        PQclear(res);
+        res = nullptr;
+        PQfinish(conGet);
+        conGet = nullptr;
+        return InvalidXLogRecPtr;
+    }
+    uint32 hi = 0;
+    uint32 lo = 0;
+    /* get remote lsn location */
+    if (sscanf_s(PQgetvalue(res, 0, 0), "%X/%X", &hi, &lo) != 2) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("could not parse log location \"%s\"", PQgetvalue(res, 0, 0))));
+    }
+    PQclear(res);
+    PQfinish(conGet);
+    return (((uint64)hi) << 32) | lo;
+}
+
 
 /*
  * @Description: remote read page
