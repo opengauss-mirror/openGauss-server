@@ -566,6 +566,7 @@ static void wait_valid_snapshot(XLogReaderState *record)
     uint8 info = (XLogRecGetInfo(record) & ~XLR_INFO_MASK) & XLOG_HEAP_OPMASK;
     xl_heap_clean* xlrec = NULL;
     uint64 blockcnt = 0;
+    XLogRecPtr cur_transed_lsn = InvalidXLogRecPtr;
 
     if(rm_id != RM_HEAP2_ID || info != XLOG_HEAP2_CLEAN)
         return;
@@ -578,14 +579,16 @@ static void wait_valid_snapshot(XLogReaderState *record)
      */
     while(t_thrd.xact_cxt.ShmemVariableCache->standbyXmin < xlrec->latestRemovedXid &&
                                                             !in_full_sync_dispatch()) {
+        if(cur_transed_lsn == InvalidXLogRecPtr)
+            cur_transed_lsn = getTransedTxnLsn(g_dispatcher->txnWorker);
         /*
          * Normaly, it need wait for startup thread handle xact wal records, but there be a case
          * that if a very old xid commit and no new xact comes then xlrec->latestRemovedXid >
          * t_thrd.xact_cxt.ShmemVariableCache->standbyXmin all the time.
          * 
-         * So if we do not have new xact work in startup thread, it avoid wait.
+         * So if all xact record before current vacuum record finished, then avoid wait.
          */
-        if (getTransedTxnLsn(g_dispatcher->txnWorker) < record->EndRecPtr)
+        if (cur_transed_lsn <= GetXLogReplayRecPtr(NULL))
             return;
         pg_usleep(10);
         blockcnt++;
