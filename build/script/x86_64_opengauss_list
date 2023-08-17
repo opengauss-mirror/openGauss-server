@@ -47,7 +47,7 @@
 ./bin/gs_plan_simulator.sh
 ./bin/pg_xlogdump
 ./bin/pagehack
-./bin/assessment_database
+./bin/gs_assessment
 ./etc/kerberos/kadm5.acl  
 ./etc/kerberos/kdc.conf  
 ./etc/kerberos/krb5.conf  
