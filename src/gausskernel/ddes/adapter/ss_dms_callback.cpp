@@ -1017,9 +1017,12 @@ static int32 CBProcessReleaseAllLock(uint32 len)
     return res;
 }
 
-static int32 CBProcessBroadcast(void *db_handle, char *data, unsigned int len, char *output_msg,
-    uint32 *output_msg_len)
+static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_ctx)
 {
+    char *data = broad_ctx->data;
+    unsigned int len = broad_ctx->len;
+    char *output_msg = broad_ctx->output_msg;
+    unsigned int *output_msg_len = broad_ctx->output_msg_len;
     int32 ret = DMS_SUCCESS;
     SSBroadcastOp bcast_op = *(SSBroadcastOp *)data;
 
@@ -1080,8 +1083,10 @@ static int32 CBProcessBroadcast(void *db_handle, char *data, unsigned int len, c
     return ret;
 }
 
-static int32 CBProcessBroadcastAck(void *db_handle, char *data, unsigned int len)
+static int32 CBProcessBroadcastAck(void *db_handle, dms_broadcast_context_t *broad_ctx)
 {
+    char *data = broad_ctx->data;
+    unsigned int len = broad_ctx->len;
     int32 ret = DMS_SUCCESS;
     SSBroadcastOpAck bcast_op = *(SSBroadcastOpAck *)data;
 
