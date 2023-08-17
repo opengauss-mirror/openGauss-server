@@ -493,7 +493,7 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
             XLogRecord *record = NULL;
             char *errm = NULL;
 
-            record = XLogReadRecord(ctx->reader, startptr, &errm);
+            record = XLogReadRecord(ctx->reader, startptr, &errm, true, SS_XLOGDIR);
             if (errm != NULL)
                 ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
                                 errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
