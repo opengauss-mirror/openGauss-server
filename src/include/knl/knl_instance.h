@@ -1341,6 +1341,9 @@ typedef struct knl_instance_context {
     void *raw_parser_hook[DB_CMPT_MAX];
     char *llvmIrFilePath[DB_CMPT_MAX];
     pthread_mutex_t loadPluginLock[DB_CMPT_MAX];
+
+    List* needCheckConflictSubIds;
+    pthread_mutex_t subIdsLock;
 #endif
     pg_atomic_uint32 extensionNum;
     knl_g_audit_context audit_cxt;

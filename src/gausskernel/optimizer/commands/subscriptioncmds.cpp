@@ -195,7 +195,7 @@ static void parse_subscription_options(const List *stmt_options, bits32 supporte
                          errmsg("conflicting or redundant options")));
             }
 
-            opts->specified_opts = SUBOPT_CONNECT;
+            opts->specified_opts |= SUBOPT_CONNECT;
             opts->connect = defGetBoolean(defel);
         } else if (IsSet(supported_opts, SUBOPT_SKIPLSN) && strcmp(defel->defname, "skiplsn") == 0) {
             if (IsSet(opts->specified_opts, SUBOPT_SKIPLSN)) {
@@ -205,7 +205,7 @@ static void parse_subscription_options(const List *stmt_options, bits32 supporte
             }
 
             char *lsn_str = defGetString(defel);
-            opts->specified_opts = SUBOPT_SKIPLSN;
+            opts->specified_opts |= SUBOPT_SKIPLSN;
             /* Setting lsn = 'NONE' is treated as resetting LSN */
             if (strcmp(lsn_str, "none") == 0) {
                 opts->skiplsn = InvalidXLogRecPtr;

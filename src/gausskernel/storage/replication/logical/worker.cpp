@@ -516,6 +516,17 @@ static void apply_handle_commit(StringInfo s)
     /* Process any tables that are being synchronized in parallel. */
     process_syncing_tables(commit_data.end_lsn);
 
+    
+    if (t_thrd.applyworker_cxt.curWorker->needCheckConflict) {
+        t_thrd.applyworker_cxt.curWorker->needCheckConflict = false;
+        MemoryContext oldctx = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+        pthread_mutex_lock(&g_instance.subIdsLock);
+        g_instance.needCheckConflictSubIds = list_delete_oid(g_instance.needCheckConflictSubIds,
+            t_thrd.applyworker_cxt.curWorker->subid);
+        pthread_mutex_unlock(&g_instance.subIdsLock);
+        MemoryContextSwitchTo(oldctx);
+    }
+
     if (t_thrd.applyworker_cxt.isSkipTransaction) {
         StopSkippingChanges();
     }
@@ -596,16 +607,19 @@ Oid find_conflict_tuple(EState *estate, TupleTableSlot *remoteslot, TupleTableSl
 
     /* Check the replica identity index first */
     replidxoid = RelationGetReplicaIndex(relinfo->ri_RelationDesc);
-    found = RelationFindReplTuple(estate, relinfo->ri_RelationDesc, replidxoid, LockTupleExclusive, remoteslot,
-        localslot, fakeRelInfo);
-    if (found) {
-        if (originslot != NULL && ItemPointerCompare(tableam_tops_get_t_self(relinfo->ri_RelationDesc,
-            localslot->tts_tuple), tableam_tops_get_t_self(relinfo->ri_RelationDesc,
-            originslot->tts_tuple)) == 0) {
-            /* If conflict with the tuple to be updated, ignore it. */
-            found = false;
-        } else {
-            return replidxoid;
+    if (OidIsValid(replidxoid)) {
+        found = RelationFindReplTuple(estate, relinfo->ri_RelationDesc, replidxoid, LockTupleExclusive, remoteslot,
+            localslot, fakeRelInfo);
+
+        if (found) {
+            if (originslot != NULL && ItemPointerCompare(tableam_tops_get_t_self(relinfo->ri_RelationDesc,
+                localslot->tts_tuple), tableam_tops_get_t_self(relinfo->ri_RelationDesc,
+                originslot->tts_tuple)) == 0) {
+                /* If conflict with the tuple to be updated, ignore it. */
+                found = false;
+            } else {
+                return replidxoid;
+            }
         }
     }
 
@@ -693,7 +707,8 @@ static void apply_handle_insert(StringInfo s)
 
     ExecOpenIndices(estate->es_result_relation_info, false);
 
-    if ((conflictIndexOid = find_conflict_tuple(estate, remoteslot, localslot, &fakeRelInfo)) != InvalidOid) {
+    if (t_thrd.applyworker_cxt.curWorker->needCheckConflict &&
+        (conflictIndexOid = find_conflict_tuple(estate, remoteslot, localslot, &fakeRelInfo)) != InvalidOid) {
         StringInfoData localtup, remotetup;
         initStringInfo(&localtup);
         tuple_to_stringinfo(rel->localrel, &localtup, RelationGetDescr(rel->localrel),
@@ -743,11 +758,31 @@ static void apply_handle_insert(StringInfo s)
         FreeStringInfo(&localtup);
         FreeStringInfo(&remotetup);
     } else {
-        /* Get fake relation and partition for patitioned table */
-        GetFakeRelAndPart(estate, rel->localrel, remoteslot, &fakeRelInfo);
+        PG_TRY();
+        {
+            /* Get fake relation and partition for patitioned table */
+            GetFakeRelAndPart(estate, rel->localrel, remoteslot, &fakeRelInfo);
 
-        /* Do the insert. */
-        ExecSimpleRelationInsert(estate, remoteslot, &fakeRelInfo);
+            /* Do the insert. */
+            ExecSimpleRelationInsert(estate, remoteslot, &fakeRelInfo);
+        }
+        PG_CATCH();
+        {
+            ErrorData* errdata = NULL;
+
+            (void*)MemoryContextSwitchTo(oldctx);
+            errdata = CopyErrorData();
+            if (errdata->sqlerrcode == ERRCODE_UNIQUE_VIOLATION) {
+                (void*)MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+                pthread_mutex_lock(&g_instance.subIdsLock);
+                g_instance.needCheckConflictSubIds = lappend_oid(g_instance.needCheckConflictSubIds,
+                    t_thrd.applyworker_cxt.curWorker->subid);
+                pthread_mutex_unlock(&g_instance.subIdsLock);
+                (void*)MemoryContextSwitchTo(oldctx);
+            }
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
     }
 
     /* Cleanup. */
@@ -924,7 +959,8 @@ static void apply_handle_update(StringInfo s)
         slot_modify_data(remoteslot, localslot, rel, &newtup);
         MemoryContextSwitchTo(oldctx);
 
-        if ((conflictIndexOid = find_conflict_tuple(estate, remoteslot, conflictLocalSlot, &fakeRelInfo, localslot))
+        if (t_thrd.applyworker_cxt.curWorker->needCheckConflict &&
+            (conflictIndexOid = find_conflict_tuple(estate, remoteslot, conflictLocalSlot, &fakeRelInfo, localslot))
             != InvalidOid) {
             StringInfoData localtup, remotetup;
             initStringInfo(&localtup);
@@ -977,10 +1013,30 @@ static void apply_handle_update(StringInfo s)
             FreeStringInfo(&localtup);
             FreeStringInfo(&remotetup);
         } else {
-            EvalPlanQualSetSlot(&epqstate, remoteslot);
+            PG_TRY();
+            {
+                EvalPlanQualSetSlot(&epqstate, remoteslot);
 
-            /* Do the actual update. */
-            ExecSimpleRelationUpdate(estate, &epqstate, localslot, remoteslot, &fakeRelInfo);
+                /* Do the actual update. */
+                ExecSimpleRelationUpdate(estate, &epqstate, localslot, remoteslot, &fakeRelInfo);
+            }
+            PG_CATCH();
+            {
+                ErrorData* errdata = NULL;
+
+                (void*)MemoryContextSwitchTo(oldctx);
+                errdata = CopyErrorData();
+                if (errdata->sqlerrcode == ERRCODE_UNIQUE_VIOLATION) {
+                    (void*)MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+                    pthread_mutex_lock(&g_instance.subIdsLock);
+                    g_instance.needCheckConflictSubIds = lappend_oid(g_instance.needCheckConflictSubIds,
+                        t_thrd.applyworker_cxt.curWorker->subid);
+                    pthread_mutex_unlock(&g_instance.subIdsLock);
+                    (void*)MemoryContextSwitchTo(oldctx);
+                }
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
         }
     } else {
         /*
