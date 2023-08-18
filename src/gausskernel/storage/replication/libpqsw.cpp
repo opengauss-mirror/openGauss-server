@@ -1034,8 +1034,7 @@ bool libpqsw_process_parse_message(const char* commandTag, List* query_list)
 }
 
 /* process Q type msg, true if need in redirect mode*/
-bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string,
-    size_t query_string_len)
+bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string)
 {
     if (IsAbortedTransactionBlockState()) {
         return false;

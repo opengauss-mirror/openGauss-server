@@ -46,8 +46,7 @@ bool libpqsw_process_message(int qtype, const StringInfo msg);
 /* process P type msg, true if need redirect*/
 bool libpqsw_process_parse_message(const char* commandTag, List* query_list);
 /* process Q type msg, true if need in redirect mode*/
-bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string,
-    size_t query_string_len = 0);
+bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string);
 /* is need send ready_for_query messge to front, if in redirect then false*/
 bool libpqsw_need_end();
 /* udpate if need ready_for_query messge flag */

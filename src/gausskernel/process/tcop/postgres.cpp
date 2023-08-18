@@ -2395,6 +2395,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
     bool is_compl_sql = true;
     bool savedisAllowCommitRollback = false;
     bool needResetErrMsg = false;
+    const char* querystringForLibpqsw = NULL;
     /*
      * @hdfs
      * When messageType is 1, we get hybridmessage. This message
@@ -2681,6 +2682,11 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
 
         set_ps_display(commandTag, false);
         if (libpqsw_skip_check_readonly()) {
+            if (is_multistmt) {
+                querystringForLibpqsw = query_string_single[stmt_num - 1];
+            } else {
+                querystringForLibpqsw = query_string;
+            }
             // create table as / select into / insert into
             if (nodeTag(parsetree) == T_CreateTableAsStmt
                 || ((nodeTag(parsetree) == T_SelectStmt) && ((SelectStmt*)parsetree)->intoClause != NULL)
@@ -2691,13 +2697,13 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         }
 
         if (libpqsw_get_redirect()) {
-            if (libpqsw_process_query_message(commandTag, NULL, query_string)) {
-                libpqsw_trace_q_msg(commandTag, query_string);
+            if (libpqsw_process_query_message(commandTag, NULL, querystringForLibpqsw)) {
+                libpqsw_trace_q_msg(commandTag, querystringForLibpqsw);
                 if (snapshot_set) {
                     PopActiveSnapshot();
                 }
                 finish_xact_command();
-                return;
+                continue;
             }
         }
 
@@ -2812,8 +2818,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             break;
         }
 
-        if (libpqsw_process_query_message(commandTag, querytree_list, query_string, query_string_len)) {
-            libpqsw_trace_q_msg(commandTag, query_string);
+        if (libpqsw_process_query_message(commandTag, querytree_list, querystringForLibpqsw)) {
+            libpqsw_trace_q_msg(commandTag, querystringForLibpqsw);
             if (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag)) {
                 libpqsw_trace("libpq send sql at my side as well:%s", commandTag);
             } else {
@@ -2823,7 +2829,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
                 CommandCounterIncrement();
                 finish_xact_command();
                 MemoryContextReset(OptimizerContext);
-                return;
+                continue;
             }
         }
 
