@@ -286,6 +286,10 @@ void logicalrep_worker_launch(Oid dbid, Oid subid, const char *subname, Oid user
     TIMESTAMP_NOBEGIN(worker->reply_time);
     worker->workerLaunchTime = GetCurrentTimestamp();
 
+    pthread_mutex_lock(&g_instance.subIdsLock);
+    worker->needCheckConflict = list_member_oid(g_instance.needCheckConflictSubIds, subid);
+    pthread_mutex_unlock(&g_instance.subIdsLock);
+
     t_thrd.applylauncher_cxt.applyLauncherShm->startingWorker = worker;
     LWLockRelease(LogicalRepWorkerLock);
 
