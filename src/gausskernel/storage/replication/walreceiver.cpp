@@ -150,12 +150,14 @@ const char *g_reserve_param[] = {
 #ifndef ENABLE_MULTIPLE_NODES
     "dcf_node_id",
     "dcf_data_path",
-    "dcf_log_path"
+    "dcf_log_path",
 #else
     NULL,
     NULL,
-    NULL
+    NULL,
 #endif
+    "enable_huge_pages",
+    "huge_page_size"
 };
 
 const int g_reserve_param_num = lengthof(g_reserve_param);
