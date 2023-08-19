@@ -2874,7 +2874,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                  * then we have to set 'isNull' flag to True,
                  * and then jump to the be_null block.
                  */
-                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
                     res1 = inner_builder.CreateCall(func_substr, {inargs[0], inargs[1], inargs[2], isNull});
                     llvm::Value* res_flag = inner_builder.CreateLoad(int8Type, isNull, "resflag");
                     llvm::Value* cmp = inner_builder.CreateICmpEQ(res_flag, null_true, "check");
@@ -2897,7 +2897,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                  * then we have to set 'isNull' flag to True,
                  * and then jump to the be_null block.
                  */
-                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
                     res1 = inner_builder.CreateCall(func_rtrim1, {inargs[0], isNull});
                     llvm::Value* res_flag = inner_builder.CreateLoad(int8Type, isNull, "resflag");
                     llvm::Value* cmp = inner_builder.CreateICmpEQ(res_flag, null_true, "check");
@@ -2919,7 +2919,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                  * then we have to set 'isNull' flag to True,
                  * and then jump to the be_null block.
                  */
-                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
                     res1 = inner_builder.CreateCall(func_btrim1, {inargs[0], isNull});
                     llvm::Value* res_flag = inner_builder.CreateLoad(int8Type, isNull, "resflag");
                     llvm::Value* cmp = inner_builder.CreateICmpEQ(res_flag, null_true, "check");
