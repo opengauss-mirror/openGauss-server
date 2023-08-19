@@ -1337,6 +1337,7 @@ extern Datum int1_numeric(PG_FUNCTION_ARGS);
 extern Datum numeric_int1(PG_FUNCTION_ARGS);
 extern Datum float8_numeric(PG_FUNCTION_ARGS);
 extern Datum float8_interval(PG_FUNCTION_ARGS);
+extern Datum float8_to_interval(PG_FUNCTION_ARGS);
 extern Datum numeric_float8(PG_FUNCTION_ARGS);
 extern Datum numeric_float8_no_overflow(PG_FUNCTION_ARGS);
 extern Datum float4_numeric(PG_FUNCTION_ARGS);
@@ -1388,9 +1389,13 @@ extern Datum width_bucket_numeric(PG_FUNCTION_ARGS);
 extern Datum hash_numeric(PG_FUNCTION_ARGS);
 extern Datum numtodsinterval(PG_FUNCTION_ARGS);
 extern Datum numeric_interval(PG_FUNCTION_ARGS);
+extern Datum numeric_to_interval(PG_FUNCTION_ARGS);
 extern Datum int1_interval(PG_FUNCTION_ARGS);
 extern Datum int2_interval(PG_FUNCTION_ARGS);
 extern Datum int4_interval(PG_FUNCTION_ARGS);
+extern Datum int1_to_interval(PG_FUNCTION_ARGS);
+extern Datum int2_to_interval(PG_FUNCTION_ARGS);
+extern Datum int4_to_interval(PG_FUNCTION_ARGS);
 
 /* ri_triggers.c */
 extern Datum RI_FKey_check_ins(PG_FUNCTION_ARGS);
@@ -1815,6 +1820,9 @@ extern Datum pg_replication_origin_session_setup(PG_FUNCTION_ARGS);
 extern Datum pg_replication_origin_xact_reset(PG_FUNCTION_ARGS);
 extern Datum pg_replication_origin_xact_setup(PG_FUNCTION_ARGS);
 extern Datum pg_show_replication_origin_status(PG_FUNCTION_ARGS);
+
+
+extern Datum text_interval(PG_FUNCTION_ARGS);
 
 /* pg_publication.cpp */
 extern Datum pg_get_publication_tables(PG_FUNCTION_ARGS);
