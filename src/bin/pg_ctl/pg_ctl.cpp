@@ -223,6 +223,7 @@ static char* new_role = "passive";
 static char start_minority_file[MAXPGPATH];
 static int get_instance_id(void);
 static int ss_get_primary_id(void);
+static int ss_get_inter_node_nums(const char* interconn_url);
 bool ss_read_config(void);
 static unsigned int vote_num = 0;
 static unsigned int xmode = 2;
@@ -6852,7 +6853,7 @@ int main(int argc, char** argv)
                     
                     FREE_AND_RESET(vgname);
                     FREE_AND_RESET(vgdata);
-                    FREE_AND_RESET(vgdata);
+                    FREE_AND_RESET(vglog);
                     parse_vgname_args(optarg);
                     ss_instance_config.dss.vgname = xstrdup(vgname);
                     ss_instance_config.dss.vgdata = xstrdup(vgdata);
@@ -7450,6 +7451,32 @@ static int ss_get_primary_id(void)
     return reformerCtrl->primaryInstId;
 }
 
+static int ss_get_inter_node_nums(const char* interconn_url)
+{
+    errno_t rc;
+    int nodeNum = 0;
+    char* next_token = NULL;
+    char* token = NULL;
+    const char* delim = ",";
+    if (interconn_url == NULL || interconn_url[0] == '\0') {
+        pg_log(PG_WARNING, _("can not contain interconnect nodes.\n"));
+        return nodeNum;
+    }
+
+    char* strs = (char*)palloc(strlen(interconn_url) + 1);
+    rc = strncpy_s(strs, strlen(interconn_url) + 1, interconn_url, strlen(interconn_url));
+    securec_check_c(rc, "\0", "\0");
+
+    token = strtok_s(strs, delim, &next_token);
+    do {
+        nodeNum++;
+        token = strtok_s(NULL, delim, &next_token);
+    } while (token != NULL);
+    pfree(strs);
+    return nodeNum;
+}
+
+
 /*
 * read ss config, return enable_dss 
 * we will get ss_enable_dss, ss_dss_conn_path and ss_dss_vg_name.
@@ -7458,6 +7485,7 @@ bool ss_read_config(void)
 {
     char config_file[MAXPGPATH] = {0};
     char enable_dss[MAXPGPATH] = {0};
+    char interconnect_url[MAXPGPATH] = {0};
     char** optlines = NULL;
     int ret = EOK;
 
@@ -7480,6 +7508,9 @@ bool ss_read_config(void)
     ss_instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
     (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", ss_instance_config.dss.socketpath);
     (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", ss_instance_config.dss.vgname);
+    (void)find_guc_optval((const char**)optlines, "ss_interconnect_url", interconnect_url);
+    ss_instance_config.dss.interNodeNum = ss_get_inter_node_nums(interconnect_url);
+
     freefile(optlines);
     optlines = NULL;
     return true;

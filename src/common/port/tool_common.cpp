@@ -34,6 +34,7 @@ SSInstanceConfig ss_instance_config = {
         .vglog = NULL,
         .vgdata = NULL,
         .socketpath = NULL,
+        .interNodeNum = 0,
     },
 };
 

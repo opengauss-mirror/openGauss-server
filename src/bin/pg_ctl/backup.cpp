@@ -775,6 +775,8 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
     struct stat st;
     int nRet = 0;
     bool forbid_write = false;
+    char pg_control_file[MAXPGPATH] = {0};
+    errno_t errorno = EOK;
 
     if (!GetCurrentPath(current_path, res, rownum)) {
         return false;
@@ -791,6 +793,12 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
         return false;
     }
     PQclear(res);
+
+    if (ss_instance_config.dss.enable_dss) {
+        errorno = snprintf_s(pg_control_file, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control",
+                             ss_instance_config.dss.vgname);
+        securec_check_ss_c(errorno, "\0", "\0");
+    }
 
     while (1) {
         int r;
@@ -1013,22 +1021,29 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 continue;
             }
             
-            /* pg_control will be written into a specified postion of main stanby corresponding to */
-            if (ss_instance_config.dss.enable_dss && strcmp(filename, "+data/pg_control") == 0) {
+            /* pg_control will be written into pages of each interconnect nodes in stanby cluster corresponding to */
+            if (ss_instance_config.dss.enable_dss && strcmp(filename, pg_control_file) == 0) {
                 pg_log(PG_WARNING, _("file size %d. \n"), r);
-                int main_standby_id = ss_instance_config.dss.instance_id;
-                off_t seekpos = (off_t)BLCKSZ * main_standby_id;
-                fseek(file, seekpos, SEEK_SET);
-            }
-
-            if (forbid_write == false) {
-                if (fwrite(copybuf, r, 1, file) != 1) {
+                int node;
+                for (node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
+                    off_t seekpos = (off_t)BLCKSZ * node;
+                    fseek(file, seekpos, SEEK_SET);
+                    if (fwrite(copybuf, r, 1, file) != 1) {
+                        pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                        DisconnectConnection();
+                        FREE_AND_RESET(copybuf);
+                        return false;
+                    }
+                }
+            } else {
+                if (!forbid_write && fwrite(copybuf, r, 1, file) != 1) {
                     pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
                     DisconnectConnection();
                     FREE_AND_RESET(copybuf);
                     return false;
                 }
             }
+
             totaldone += r;
             if (showprogress && build_mode != COPY_SECURE_FILES_BUILD) {
                 progress_report(rownum, filename, false);
