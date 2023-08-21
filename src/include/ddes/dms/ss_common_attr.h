@@ -191,6 +191,16 @@
 #define DMS_MSG_MAX_WAIT_TIME (10 * 1000) // 10s
 #define SS_REFORM_WAIT_TIME (5000) // 5ms
 
+/* length of segment filename like '/1' */
+#define SEG_MAINFORK_FILENAME_LEN   2
+/* length of segment vm filename like '1_vm' */
+#define SEG_VMFORK_FILENAME_LEN     4
+/* length of segment fsm filename like '1_fsm' */
+#define SEG_FSMFORK_FILENAME_LEN    5
+
+/* max length of max int range as char */
+#define MAX_LEN_OF_MAXINTRANGE      12
+
 typedef enum SSBroadcastOp {
     BCAST_CANCEL_TRX_FOR_SWITCHOVER = 0,
     BCAST_SI,
