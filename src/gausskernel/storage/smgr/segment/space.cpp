@@ -43,6 +43,8 @@
 #include "storage/file/fio_device.h"
 #include "libaio.h"
 
+static void SSInitSegLogicFile(SegSpace *spc);
+
 void spc_lock(SegSpace *spc)
 {
     PthreadMutexLock(t_thrd.utils_cxt.CurrentResourceOwner, &spc->lock, true);
@@ -240,6 +242,10 @@ void InitSpaceNode(SegSpace *spc, Oid spcNode, Oid dbNode, bool is_redo)
         for (int forknum = 0; forknum <= SEGMENT_MAX_FORKNUM; forknum++) {
             eg_ctrl_init(spc, &spc->extent_group[egid][forknum], EXTENT_GROUPID_TO_SIZE(egid), forknum);
         }
+    }
+
+    if (SS_STANDBY_MODE) {
+        SSInitSegLogicFile(spc);
     }
 }
 
@@ -1353,3 +1359,153 @@ void InitSegSpcCache(void)
     }
 }
 
+static bool SSCheckIfSegLogicFileNormal(SegExtentGroup *seg)
+{
+    SegLogicFile *sf = seg->segfile;
+    if (sf->total_blocks < DF_FILE_MIN_BLOCKS) {
+        return false;
+    }
+
+    int fd = BasicOpenFile(sf->filename, O_RDWR | PG_BINARY, S_IWUSR | S_IRUSR);
+    if (fd < 0) {
+        ereport(ERROR, (errmsg("open_file failed filename: %s, fd is %d, %d", sf->filename, fd, errno)));
+    }
+    sf->segfiles[0].fd = fd;
+    char* buffer = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
+    char* aligned_buffer = (char *)BUFFERALIGN(buffer);
+    int nbytes = pread(fd, aligned_buffer, BLCKSZ, DF_MAP_HEAD_PAGE * BLCKSZ);
+    if (nbytes != BLCKSZ) {
+        ereport(ERROR, (errmsg("could not read segment meta block in file %s, %d", sf->filename, errno)));
+    }
+
+    if (!PageIsVerified((Page)aligned_buffer, DF_MAP_HEAD_PAGE)) {
+        pfree(buffer);
+        return false;
+    }
+
+    df_map_head_t *map_head = (df_map_head_t *)PageGetContents((Page)aligned_buffer);
+    if (map_head->bit_unit != seg->extent_size) {
+        pfree(buffer);
+        return false;
+    }
+
+    pfree(buffer);
+    return true;
+}
+
+static void SSUpdateSegLogicFileSize(SegSpace *spc)
+{
+    bool is_normal = true;
+    bool is_meta_normal = false;
+
+    for (int egid = 0; egid < EXTENT_GROUPS; egid++) {
+        for (int forknum = 0; forknum <= SEGMENT_MAX_FORKNUM; forknum++) {
+            SegLogicFile *sf = spc->extent_group[egid][forknum].segfile;
+            if (sf->file_num == 0) {
+                continue;
+            }
+
+            struct stat statbuf;
+            if (sf->file_num == 1) {
+                if (stat(sf->filename, &statbuf) == 0) {
+                    sf->total_blocks = statbuf.st_size / BLCKSZ;
+                } else {
+                    ereport(ERROR, (errmsg("failed stat file %s during init segment file.", sf->filename)));
+                }
+            } else {
+                char fullpath[MAXPGPATH];
+                errno_t rc = sprintf_s(fullpath, MAXPGPATH, "%s.%d", sf->filename, sf->file_num - 1);
+                securec_check_ss(rc, "\0", "\0");
+                if (stat(fullpath, &statbuf) == 0) {
+                    sf->total_blocks = statbuf.st_size / BLCKSZ + (sf->file_num - 1) * EXT_SIZE_1024_TOTAL_PAGES;
+                } else {
+                    ereport(ERROR, (errmsg("failed stat file %s during init segment file.", fullpath)));
+                }
+            }
+
+            if (!is_normal) {
+                continue;
+            }
+
+            /* we can set spc status to open here, only need to open sf->filename and read one block to verify */
+            if (is_normal && SSCheckIfSegLogicFileNormal(&(spc->extent_group[egid][forknum]))) {
+                if (egid == 0 && forknum == 0) {
+                    is_meta_normal = true;
+                }
+            } else {
+                is_normal = false;
+            }
+        }
+    }
+
+    if (is_meta_normal && is_normal) {
+        spc->status = OPENED;
+    }
+}
+
+static void SSUpdateSegLogicFileNum(SegLogicFile* sf, char* dirpath, char* filename)
+{
+    int sliceno = sf->file_num + 1;
+    if (sliceno > sf->vector_capacity) {
+        df_extend_file_vector(sf);
+    }
+    sf->segfiles[sf->file_num].sliceno = sf->file_num;
+    sf->file_num++;
+}
+
+static void SSInitSegLogicFile(SegSpace *spc)
+{
+    if (spc->extent_group[0][0].segfile == NULL) {
+        return;
+    }
+    SegmentCheck(spc->extent_group[0][0].segfile->filename[0] != '\0');
+    /* Get path of dir from seg filename */
+    char dirpath[MAXPGPATH];
+    int count = strlen(spc->extent_group[0][0].segfile->filename) - SEG_MAINFORK_FILENAME_LEN;
+    int rc = EOK;
+    rc = strncpy_s(dirpath, MAXPGPATH, spc->extent_group[0][0].segfile->filename, count);
+    securec_check_c(rc, "\0", "\0");
+
+    /*
+     * Read dir and fill seg logic file except fd.
+     * For filenum and total block, we only need to check the filename and size under the dir.
+     * For fd, we can construct the filename and open it when we really need use the file.
+     */
+    DIR *data_dir = NULL;
+    struct dirent *data_de = NULL;
+    data_dir = opendir(dirpath);
+    if (data_dir == NULL) {
+        ereport(ERROR,
+            (errcode_for_file_access(), errmsg("could not open data dir %s during init segment file.", dirpath)));
+    }
+
+    while ((data_de = readdir(data_dir)) != NULL) {
+        if (!isdigit(data_de->d_name[0])) {
+            continue;
+        }
+
+        char tmp_path[MAXPGPATH];
+        int suffix = 0;
+        rc = sscanf_s(data_de->d_name, "%[^.].%d", tmp_path, MAXPGPATH, &suffix);
+        if (rc <= 0) {
+            ereport(LOG, (errmsg("skip %s as it is not segment file.", data_de->d_name)));
+            continue;
+        }
+        int extent_size = tmp_path[0] - '0';
+        int tmp_length = strlen(tmp_path);
+        if (strstr(tmp_path, "_vm") != NULL && tmp_length == SEG_VMFORK_FILENAME_LEN && extent_size >= EXTENT_1 &&
+            extent_size <= EXTENT_8192) {
+            SSUpdateSegLogicFileNum(spc->extent_group[extent_size - 1][VISIBILITYMAP_FORKNUM].segfile, dirpath,
+                data_de->d_name);
+        } else if (strstr(tmp_path, "_fsm") != NULL && tmp_length == SEG_FSMFORK_FILENAME_LEN &&
+            extent_size >= EXTENT_1 && extent_size <= EXTENT_8192) {
+            SSUpdateSegLogicFileNum(spc->extent_group[extent_size - 1][FSM_FORKNUM].segfile, dirpath, data_de->d_name);
+        } else if (tmp_length == 1 && extent_size >= EXTENT_1 && extent_size <= EXTENT_8192) {
+            SSUpdateSegLogicFileNum(spc->extent_group[extent_size - 1][MAIN_FORKNUM].segfile, dirpath, data_de->d_name);
+        } else {
+            ereport(LOG, (errmsg("skip %s as it is not segment file.", data_de->d_name)));
+        }
+    }
+    SSUpdateSegLogicFileSize(spc);
+    closedir(data_dir);
+}

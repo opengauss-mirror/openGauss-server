@@ -2085,6 +2085,10 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
                     ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
                         errmsg("could not obtain lock on row in relation,waitSec = %d", waitSec)));
                 } else {
+                    StringInfoData callStack;
+                    initStringInfo(&callStack);
+                    get_stack_according_to_tid(t_thrd.storage_cxt.conflicting_lock_thread_id, &callStack);
+                    FreeStringInfo(&callStack);
                     ereport(ERROR, (errcode(ERRCODE_LOCK_WAIT_TIMEOUT),
                                 (errmsg("Lock wait timeout: thread %lu on node %s waiting for %s on %s after %ld.%03d ms",
                                         t_thrd.proc_cxt.MyProcPid, g_instance.attr.attr_common.PGXCNodeName, modename, buf.data, msecs,
