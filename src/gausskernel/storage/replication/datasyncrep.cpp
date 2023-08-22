@@ -186,7 +186,7 @@ void WaitForDataSync(void)
         /*
          * if we  modify the syncmode dynamically, we'll stop wait
          */
-        if ((t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !(IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION)) ||
+        if ((t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !(IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER)) ||
             u_sess->attr.attr_storage.guc_synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
             ereport(WARNING,
                     (errmsg("canceling wait for synchronous replication due to syncmaster standalone."),

@@ -136,8 +136,8 @@ static int g_appname_extra_len = 3; /* [+]+\0 */
 #define AmWalSenderToStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_STANDBY)
 
 #define USE_PHYSICAL_XLOG_SEND \
-    (AM_WAL_HADR_SENDER || !SS_CLUSTER_DORADO_REPLICATION || !IS_SHARED_STORAGE_MODE || (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY))
-#define USE_SYNC_REP_FLUSH_PTR (AM_WAL_HADR_SENDER && (!IS_SHARED_STORAGE_MODE && !SS_CLUSTER_DORADO_REPLICATION))
+    (AM_WAL_HADR_SENDER || !SS_REPLICATION_DORADO_CLUSTER || !IS_SHARED_STORAGE_MODE || (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY))
+#define USE_SYNC_REP_FLUSH_PTR (AM_WAL_HADR_SENDER && (!IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER))
 
 /* Statistics for log control */
 static const int MICROSECONDS_PER_SECONDS = 1000000;
@@ -2645,7 +2645,7 @@ static void LogCtrlDoActualSleep(volatile WalSnd *walsnd, bool forceUpdate)
                 u_sess->attr.attr_storage.hadr_recovery_point_target > 0) {
                 LogCtrlExecuteSleeping(walsnd, forceUpdate, logical_slot_sleep_flag);
             } else {
-                if (logical_slot_sleep_flag && !IS_SHARED_STORAGE_MODE) {
+                if (logical_slot_sleep_flag && !IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER) {
                     pg_usleep(g_logical_slot_sleep_time);
                 }
             }
@@ -2653,7 +2653,7 @@ static void LogCtrlDoActualSleep(volatile WalSnd *walsnd, bool forceUpdate)
             if (u_sess->attr.attr_storage.target_rto > 0) {
                 LogCtrlExecuteSleeping(walsnd, forceUpdate, logical_slot_sleep_flag);
             } else {
-                if (logical_slot_sleep_flag && !IS_SHARED_STORAGE_MODE) {
+                if (logical_slot_sleep_flag && !IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER) {
                     pg_usleep(g_logical_slot_sleep_time);
                 }
             }
@@ -2684,7 +2684,7 @@ static void LogCtrlExecuteSleeping(volatile WalSnd *walsnd, bool forceUpdate, bo
     }
     LogCtrlSleep();
     if (logicalSlotSleepFlag && g_logical_slot_sleep_time > t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time &&
-        !IS_SHARED_STORAGE_MODE) {
+        !IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER) {
         pg_usleep(g_logical_slot_sleep_time - t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time);
     }
 }
@@ -2925,7 +2925,7 @@ static void ProcessStandbyReplyMessage(void)
      * because primary xlog will cover standby xlog by Dorado synchronous replication.
      * 2. Otherwise, we only need to confirm that standby xlog has been flushed successfully.
      */
-    if (SS_CLUSTER_DORADO_REPLICATION) {
+    if (SS_REPLICATION_DORADO_CLUSTER) {
         AdvanceReplicationSlot(reply.apply);
     } else {
         AdvanceReplicationSlot(reply.flush);
@@ -3167,7 +3167,7 @@ static void LogCtrlCountSleepLimit(void)
 static void LogCtrlSleep(void)
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    if (IS_SHARED_STORAGE_MODE) {
+    if (IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) {
         if (walsnd->log_ctrl.sleep_time > MICROSECONDS_PER_SECONDS) {
             walsnd->log_ctrl.sleep_time = MICROSECONDS_PER_SECONDS;
         }
@@ -3558,7 +3558,7 @@ static void LogCtrlCalculateCurrentRPO(StandbyReplyMessage *reply)
     if (AM_WAL_HADR_CN_SENDER) {
         flushPtr = GetFlushRecPtr();
     } else if (AM_WAL_SHARE_STORE_SENDER) {
-        if (SS_CLUSTER_DORADO_REPLICATION) {
+        if (SS_REPLICATION_DORADO_CLUSTER) {
             flushPtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
         } else {
             flushPtr = g_instance.xlog_cxt.shareStorageXLogCtl->insertHead;
@@ -4200,7 +4200,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
                         XLByteEQ(t_thrd.walsender_cxt.sentPtr, t_thrd.walsender_cxt.MyWalSnd->flush))
                         t_thrd.walsender_cxt.walsender_shutdown_requested = true;
                 }
-                if (IS_SHARED_STORAGE_MODE) {
+                if (IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) {
                     t_thrd.walsender_cxt.walsender_shutdown_requested = true;
                 }
             }
@@ -6278,7 +6278,7 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
             AlignFreeShareStorageCtl(ctlInfo);
         }
 
-        if (SS_CLUSTER_DORADO_REPLICATION && !AM_WAL_HADR_SENDER) {
+        if (SS_REPLICATION_DORADO_CLUSTER && !AM_WAL_HADR_SENDER) {
             ReadSSDoradoCtlInfoFile();
             ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
             sentRecPtr = ctlInfo->insertHead;

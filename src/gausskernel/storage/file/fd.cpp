@@ -871,7 +871,7 @@ tryAgain:
 
 
 /* 
-* When SS_CLUSTER_DORADO_REPLICATION enabled, current xlog dictionary may be not the correct dictionary,
+* When SS_REPLICATION_DORADO_CLUSTER enabled, current xlog dictionary may be not the correct dictionary,
 * because all xlog dictionaries are in the same LUN, we need loop over other dictionaries.
 */
 int SSErgodicOpenXlogFile(XLogSegNo segno, int fileFlags, int fileMode)

@@ -2364,7 +2364,7 @@ GROUP_GET_SNAPSHOT:
     }
 
     /* Check whether there's a standby requiring an older xmin when dms is enabled. */
-    if (ENABLE_DMS && (SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY || (SS_NORMAL_PRIMARY && IS_SS_REPLICATION_MAIN_STANBY_NODE))) {
+    if (SS_NORMAL_PRIMARY && SS_REPLICATION_MAIN_STANBY_NODE) {
         ss_xmin_info_t* xmin_info = &g_instance.dms_cxt.SSXminInfo;
         uint64 global_xmin = SSGetGlobalOldestXmin(u_sess->utils_cxt.RecentGlobalXmin);
         u_sess->utils_cxt.RecentGlobalXmin = global_xmin;

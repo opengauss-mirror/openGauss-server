@@ -58,7 +58,7 @@ void SSWakeupRecovery(void)
     /* need make sure pagewriter started first */
     bool need_recovery = true;
 
-    if (DORADO_STANDBY_CLUSTER || SS_REPLICATION_STANDBY_CLUSTER) {
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
         return;
     }
@@ -200,9 +200,8 @@ static int CBGetTxnCSN(void *db_handle, dms_opengauss_xid_csn_t *csn_req, dms_op
 
 static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot, uint8 inst_id)
 {   
-    /* SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY always is in recovery progress, but it can acquire snapshot*/
-    if (RecoveryInProgress() &&
-        !(SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY || (SS_NORMAL_PRIMARY && IS_SS_REPLICATION_MAIN_STANBY_NODE))) {
+    /* SS_REPLICATION_MAIN_STANBY_NODE always is in recovery progress, but it can acquire snapshot*/
+    if (RecoveryInProgress() && !(SS_NORMAL_PRIMARY && SS_REPLICATION_MAIN_STANBY_NODE)) {
         return DMS_ERROR;
     }
 
@@ -421,7 +420,7 @@ static void CBSwitchoverResult(void *db_handle, int result)
     } else {
         /* abort and restore state */
         g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
-        if (DORADO_STANDBY_CLUSTER || SS_REPLICATION_STANDBY_CLUSTER) {
+        if (SS_REPLICATION_STANDBY_CLUSTER) {
             g_instance.dms_cxt.SSReformInfo.in_reform = false;
         }
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS switchover] Switchover failed, errno: %d.", result)));
@@ -1582,7 +1581,7 @@ static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
     if (new_dms_role == DMS_ROLE_REFORMER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover]begin to set currrent DSS as primary")));
         /* standby of standby cluster need to set mode to STANDBY_MODE in dual cluster*/
-        if (DORADO_STANDBY_CLUSTER || SS_REPLICATION_STANDBY_CLUSTER) {
+        if (SS_REPLICATION_STANDBY_CLUSTER) {
             t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
         }
         while (dss_set_server_status_wrapper() != GS_SUCCESS) {
@@ -1757,8 +1756,8 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     }
 
     /* After reform done, standby of standby cluster need to set mode to STANDBY_MODE in dual cluster. */
-    if (SS_REFORM_REFORMER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) &&
-       (g_instance.attr.attr_storage.xlog_file_path != NULL || SS_CLUSTER_DORADO_REPLICATION)) {
+    if (SS_REFORM_REFORMER && SS_REPLICATION_DORADO_CLUSTER &&
+            g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) {
         t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
     }
 }
@@ -1774,8 +1773,7 @@ static int CBReformDoneNotify(void *db_handle)
     }
     
     /* After reform done, primary of master cluster need to set mode to PRIMARY_MODE in dual cluster. */
-    if (SS_REFORM_REFORMER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) &&
-       (g_instance.attr.attr_storage.xlog_file_path != NULL || SS_CLUSTER_DORADO_REPLICATION)) {
+    if (SS_REFORM_REFORMER && SS_REPLICATION_PRIMARY_CLUSTER) {
         t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;    
     }
    
@@ -1857,8 +1855,7 @@ static int CBUpdateNodeOldestXmin(void *db_handle, uint8 inst_id, unsigned long 
 void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
 {
     /* in dorado mode, we need to wait sharestorageinit finished */
-    while (!g_instance.dms_cxt.SSRecoveryInfo.dorado_sharestorage_inited &&
-           (g_instance.attr.attr_storage.xlog_file_path != NULL || SS_CLUSTER_DORADO_REPLICATION)) {
+    while (!g_instance.dms_cxt.SSRecoveryInfo.dorado_sharestorage_inited && SS_REPLICATION_DORADO_CLUSTER) {
         pg_usleep(REFORM_WAIT_TIME);
     }
     IsUnderPostmaster = true;

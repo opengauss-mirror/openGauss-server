@@ -56,6 +56,7 @@
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
 #include "replication/shared_storage_walreceiver.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
@@ -247,8 +248,8 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         RESUME_INTERRUPTS();
         return REPSYNCED;
     }
-    if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE &&
-        !DelayIntoMostAvaSync(false)) {
+    if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !DelayIntoMostAvaSync(false) &&
+        !IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER) {
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
         return STAND_ALONE;

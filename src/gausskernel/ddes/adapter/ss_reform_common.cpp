@@ -101,10 +101,10 @@ int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
         }
 
         /* 
-        * When SS_CLUSTER_DORADO_REPLICATION enabled, current xlog dictionary may be not the correct dictionary,
+        * When SS_REPLICATION_DORADO_CLUSTER enabled, current xlog dictionary may be not the correct dictionary,
         * because all xlog dictionaries are in the same LUN, we need loop over other dictionaries.
         */
-        if (fd < 0 && SS_CLUSTER_DORADO_REPLICATION) {
+        if (fd < 0 && SS_REPLICATION_DORADO_CLUSTER) {
             return -1;
         }
 
@@ -144,7 +144,7 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
          * record just writing into pg_xlog file when source is XLOG_FROM_STREAM and dms and dss are enabled. So we
          * need to reread xlog from dss to preReadBuf.
          */
-        if (SS_STANDBY_CLUSTER_MAIN_STANDBY) {
+        if (SS_REPLICATION_MAIN_STANBY_NODE) {
             volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
             if (XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr) && 
                ((targetRecPtr < xlogFlushPtrForPerRead && t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM) || 
@@ -154,13 +154,13 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
         }
 
         if ((XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr) &&
-             !SS_STANDBY_CLUSTER_MAIN_STANDBY) || (!isReadFile)) {
+             !SS_REPLICATION_MAIN_STANBY_NODE) || (!isReadFile)) {
             preReadOff = targetPagePtr % XLogPreReadSize;
             int err = memcpy_s(buf, readLen, xlogreader->preReadBuf + preReadOff, readLen);
             securec_check(err, "\0", "\0");
             break;
         } else {
-            if (SS_STANDBY_CLUSTER_MAIN_STANDBY) {
+            if (SS_REPLICATION_MAIN_STANBY_NODE) {
                 xlogreader->xlogFlushPtrForPerRead = GetWalRcvWriteRecPtr(NULL);
                 xlogFlushPtrForPerRead = xlogreader->xlogFlushPtrForPerRead;
             }
@@ -218,6 +218,35 @@ void SSGetRecoveryXlogPath()
     rc = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d",
         dssdir, g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id);
     securec_check_ss(rc, "", "");
+}
+
+void SSDoradoGetInstidList()
+{
+    for (int i = 0; i < DMS_MAX_INSTANCE; i++) {
+        g_instance.dms_cxt.SSRecoveryInfo.instid_list[i] = -1;
+    }
+    struct dirent *entry;
+    errno_t rc = EOK;
+    DIR* dssdir = opendir(g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+    if (dssdir == NULL) {
+        ereport(PANIC, (errcode_for_file_access(), errmsg("Error opening dssdir %s", 
+                        g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name)));                                                  
+    }
+
+    int len = strlen("pg_xlog");
+    int index = 0;
+    while ((entry = readdir(dssdir)) != NULL) {
+        if (strncmp(entry->d_name, "pg_xlog", len) == 0) {
+            if (strlen(entry->d_name) > len) {
+                rc = memmove_s(entry->d_name, MAX_PATH, entry->d_name + len, strlen(entry->d_name) - len + 1);
+                securec_check_c(rc, "\0", "\0");
+                g_instance.dms_cxt.SSRecoveryInfo.instid_list[index++] = atoi(entry->d_name);
+            }
+        } else {
+            continue;
+        }
+    }
+    closedir(dssdir);
 }
 
 static void SSSaveOldReformerCtrl()

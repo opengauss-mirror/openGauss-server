@@ -126,7 +126,7 @@ bool SSRecoveryNodes()
          * recovery phase could be regarded successful in hot_standby thus set pmState = PM_HOT_STANDBY, which
          * indicate database systerm is ready to accept read only connections.
          */
-        if ((SS_STANDBY_CLUSTER_MAIN_STANDBY || IS_SS_REPLICATION_MAIN_STANBY_NODE) && pmState == PM_HOT_STANDBY) {
+        if (SS_REPLICATION_MAIN_STANBY_NODE && pmState == PM_HOT_STANDBY) {
             result = true;
             break;
         }
@@ -147,7 +147,7 @@ bool SSRecoveryApplyDelay()
         return false;
     }
     
-    if (DORADO_STANDBY_CLUSTER || SS_REPLICATION_STANDBY_CLUSTER) {
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
         return true;
     }
 

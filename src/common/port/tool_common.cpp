@@ -28,13 +28,13 @@
 SSInstanceConfig ss_instance_config = {
     .dss = {
         .enable_dss = false,
-        .instance_id = -1,
+        .instance_id = 0,
         .primaryInstId = -1,
+        .interNodeNum = 0,
         .vgname = NULL,
         .vglog = NULL,
         .vgdata = NULL,
         .socketpath = NULL,
-        .interNodeNum = 0,
     },
 };
 

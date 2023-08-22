@@ -111,11 +111,11 @@ typedef struct DssOptions {
     bool enable_dss;
     int instance_id;
     int primaryInstId;
+    int interNodeNum;
     char *vgname;
     char *vglog;
     char *vgdata;
     char *socketpath;
-    int interNodeNum;
 } DssOptions;
 
 typedef struct SSInstanceConfig {

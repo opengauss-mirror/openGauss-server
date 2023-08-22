@@ -139,16 +139,7 @@ void LocalXLogRead(char *buf, XLogRecPtr startptr, Size count)
             }
 
             XLByteToSeg(recptr, t_thrd.sharestoragexlogcopyer_cxt.readSegNo);
-            if (SS_STANDBY_FAILOVER && SS_PRIMARY_CLUSTER_STANDBY) {
-                int nRet;                                          
-                nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", 
-                    g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir, t_thrd.xlog_cxt.ThisTimeLineID,
-                    (uint32)((t_thrd.sharestoragexlogcopyer_cxt.readSegNo) / XLogSegmentsPerXLogId),
-                    (uint32)((t_thrd.sharestoragexlogcopyer_cxt.readSegNo) % XLogSegmentsPerXLogId));
-                securec_check_ss(nRet, "\0", "\0"); 
-            } else {
-                XLogFilePath(path, MAXPGPATH, t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.sharestoragexlogcopyer_cxt.readSegNo);
-            }
+            XLogFilePath(path, MAXPGPATH, t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.sharestoragexlogcopyer_cxt.readSegNo);
 
             t_thrd.sharestoragexlogcopyer_cxt.readFile = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
             if (t_thrd.sharestoragexlogcopyer_cxt.readFile < 0) {
