@@ -1731,6 +1731,16 @@ static PLDebug_frame* _readPLDebug_frame(void)
     READ_DONE();
 }
 
+static PLDebug_codeline* _readPLDebug_codeline(void)
+{
+    READ_LOCALS(PLDebug_codeline);
+    READ_INT_FIELD(lineno);
+    READ_STRING_FIELD(code);
+    READ_BOOL_FIELD(canBreak);
+
+    READ_DONE();
+}
+
 /*
  * _readWithCheckOption
  */
@@ -6653,6 +6663,8 @@ Node* parseNodeString(void)
         return_value = _readPLDebug_breakPoint(); 
     } else if (MATCH("PLDEBUG_FRAME", 13)) {
         return_value = _readPLDebug_frame();
+    } else if (MATCH("PLDEBUG_CODELINE", 16)) {
+        return_value = _readPLDebug_codeline();
     } else if (MATCH("TdigestData", 11)) {
         return_value = _readTdigestData();
     } else if (MATCH("AUTO_INCREMENT", 14)) {

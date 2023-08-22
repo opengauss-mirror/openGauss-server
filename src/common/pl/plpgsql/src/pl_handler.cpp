@@ -1128,6 +1128,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     save_compile_context = u_sess->plsql_cxt.curr_compile_context;
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
     int save_compile_status = u_sess->plsql_cxt.compile_status;
+    DebugInfo* save_debug_info = func->debug;
     FormatCallStack* saveplcallstack = t_thrd.log_cxt.call_stack;
     PG_TRY();
     {
@@ -1149,6 +1150,16 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
         DecreasePackageUseCount(func);
 
 #ifndef ENABLE_MULTIPLE_NODES
+        /* debug finished, close debug resource */
+        if (func->debug) {
+            /* if debuger is waiting for end msg, send end */
+            server_send_end_msg(func->debug);
+            /* pass opt to upper debug function */
+            server_pass_upper_debug_opt(func->debug);
+            clean_up_debug_server(func->debug, false, true);
+            delete_debug_func(InvalidOid);
+        }
+        func->debug = save_debug_info;
         /* for restore parent session and automn session package var values */
         (void)processAutonmSessionPkgsInException(func);
 
@@ -1169,6 +1180,18 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
         PG_RE_THROW();
     }
     PG_END_TRY();
+#ifndef ENABLE_MULTIPLE_NODES
+    /* debug finished, close debug resource */
+    if (func->debug) {
+        /* if debuger is waiting for end msg, send end */
+        server_send_end_msg(func->debug);
+        /* pass opt to upper debug function */
+        server_pass_upper_debug_opt(func->debug);
+        clean_up_debug_server(func->debug, false, true);
+        delete_debug_func(InvalidOid);
+    }
+    func->debug = save_debug_info;
+#endif
     if (u_sess->SPI_cxt._connected == 0) {
         t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
     }

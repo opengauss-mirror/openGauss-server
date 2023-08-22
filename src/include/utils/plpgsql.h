@@ -1497,6 +1497,19 @@ typedef struct PlDebugEntry {
     PLpgSQL_function* func;
 } PlDebugEntry;
 
+typedef enum AddBreakPointError {
+    ADD_BP_ERR_ALREADY_EXISTS = -1,
+    ADD_BP_ERR_OUT_OF_RANGE = -2,
+    ADD_BP_ERR_INVALID_BP_POS = -3
+} AddBreakPointError;
+
+typedef struct PLDebug_codeline {
+    NodeTag type;
+    int lineno;
+    char* code;
+    bool canBreak;
+} PLDebug_codeline;
+
 typedef List* (*RawParserHook)(const char*, List**);
 
 const int MAXINT8LEN = 25;
@@ -1527,6 +1540,7 @@ const char DEBUG_STEP_INTO_HEADER = 's';
 const char DEBUG_STEP_INTO_HEADER_AFTER = 'S';
 const char DEBUG_BACKTRACE_HEADER = 't';
 const char DEBUG_SET_VARIABLE_HEADER = 'h';
+const char DEBUG_INFOCODE_HEADER = 'i';
 
 /* server return message */
 const int DEBUG_SERVER_SUCCESS = 0;
@@ -1632,6 +1646,7 @@ extern void RecvUnixMsg(const char* buf, int bufLen, char* destBuf, int destLen)
 extern char* ResizeDebugBufferIfNecessary(char* buffer, int* oldSize, int needSize);
 extern void ReleaseDebugCommIdx(int idx);
 extern void SendUnixMsg(int socket, const char* val, int len, bool is_client);
+extern List* collect_breakable_line(PLpgSQL_function* func);
 
 /**********************************************************************
  * Function declarations

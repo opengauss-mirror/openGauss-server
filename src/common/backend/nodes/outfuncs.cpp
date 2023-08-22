@@ -4275,6 +4275,14 @@ static void _outPLDebug_frame(StringInfo str, PLDebug_frame* node)
     WRITE_INT_FIELD(funcoid);
 }
 
+static void _outPLDebug_codeline(StringInfo str, PLDebug_codeline* node)
+{
+    WRITE_NODE_TYPE("PLDEBUG_CODELINE");
+    WRITE_INT_FIELD(lineno);
+    WRITE_STRING_FIELD(code);
+    WRITE_BOOL_FIELD(canBreak);
+}
+
 /*
  * @Description: Write hint node to string.
  * @out str: String buf.
@@ -6966,6 +6974,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_PLDebug_frame:
                 _outPLDebug_frame(str, (PLDebug_frame*) obj);
+                break;
+            case T_PLDebug_codeline:
+                _outPLDebug_codeline(str, (PLDebug_codeline*) obj);
                 break;
             case T_CharsetCollateOptions:
                 _outCharsetcollateOptions(str, (CharsetCollateOptions*)obj);
