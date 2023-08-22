@@ -115,6 +115,7 @@ typedef struct DssOptions {
     char *vglog;
     char *vgdata;
     char *socketpath;
+    int interNodeNum;
 } DssOptions;
 
 typedef struct SSInstanceConfig {
