@@ -943,18 +943,13 @@ BuildErrorCode do_build_check(const char* pgdata, const char* connstr, char* sys
     XLogRecPtr startrec;
     errno_t errorno = EOK;
     BuildErrorCode rv = BUILD_SUCCESS;
+    char controlFile[MAXPGPATH];
 
-    datadir_target = pg_strdup(pgdata);
     if (connstr_source == NULL) {
         connstr_source = pg_strdup(connstr);
     }
 
-    if (connstr_source == NULL) {
-        pg_log(PG_WARNING, "%s: no source specified (--source-server)\n", progname);
-        pg_log(PG_WARNING, "Try \"%s --help\" for more information.\n", progname);
-        return BUILD_ERROR;
-    }
-
+    datadir_target = pg_strdup(pgdata);
     if (datadir_target == NULL) {
         pg_log(PG_WARNING, "%s: no target data directory specified (--target-pgdata)\n", progname);
         pg_log(PG_WARNING, "Try \"%s --help\" for more information.\n", progname);
@@ -999,9 +994,14 @@ BuildErrorCode do_build_check(const char* pgdata, const char* connstr, char* sys
      * Ok, we have all the options and we're ready to start. Read in all the
      * information we need from both clusters.
      */
-    buffer = slurpFile(ss_instance_config.dss.vgname, "pg_control", &size);
+    if (ss_instance_config.dss.enable_dss) {
+        buffer = slurpFile(ss_instance_config.dss.vgname, "pg_control", &size);
+    } else {
+        buffer = slurpFile(pgdata, "global/pg_control", &size);
+    }
     PG_CHECKBUILD_AND_RETURN();
-    digestControlFile(&ControlFile_target, (const char*)buffer);
+    /* in share storage mode, all nodes's pg_control is in one file, we need offset BLCKSZ * id */
+    digestControlFile(&ControlFile_target, (const char*)(buffer + BLCKSZ * ss_instance_config.dss.instance_id));
     pg_free(buffer);
     buffer = NULL;
     PG_CHECKBUILD_AND_RETURN();
@@ -1013,7 +1013,13 @@ BuildErrorCode do_build_check(const char* pgdata, const char* connstr, char* sys
         (uint32)(ControlFile_target.checkPointCopy.redo >> 32),
         (uint32)(ControlFile_target.checkPointCopy.redo));
 
-    buffer = fetchFile("+data/pg_control", &size);
+    if (ss_instance_config.dss.enable_dss) {
+        errorno = snprintf_s(controlFile, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", ss_instance_config.dss.vgname);
+        securec_check_ss_c(errorno, "\0", "\0");
+        buffer = fetchFile(controlFile, &size);
+    } else {
+        buffer = fetchFile("global/pg_control", &size);
+    }
     PG_CHECKBUILD_AND_RETURN();
     digestControlFile(&ControlFile_source, buffer);
     pg_free(buffer);

@@ -370,8 +370,8 @@ SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_
     BlockNumber blocknum;
 
     /* Recovery thread should use physical location to read data directly. */
-    if (SS_STANDBY_CLUSTER_MAIN_STANDBY || IS_SS_REPLICATION_MAIN_STANBY_NODE) {
-        ereport(DEBUG1, (errmsg("can segment address translation when role is IS_SS_REPLICATION_MAIN_STANBY_NODE")));
+    if (SS_REPLICATION_MAIN_STANBY_NODE) {
+        ereport(DEBUG1, (errmsg("can segment address translation when role is SS_REPLICATION_MAIN_STANBY_NODE")));
     } else {
         if (RecoveryInProgress() && !CurrentThreadIsWorker() && !SS_IN_FLUSHCOPY) {
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),

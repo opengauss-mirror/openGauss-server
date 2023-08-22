@@ -162,7 +162,7 @@ void SSClusterDoradoStorageInit()
 
 void UpdateSSDoradoCtlInfoAndSync()
 {
-    if (!SS_CLUSTER_DORADO_REPLICATION) {
+    if (!SS_REPLICATION_DORADO_CLUSTER) {
         return;
     }
 
@@ -174,7 +174,7 @@ void UpdateSSDoradoCtlInfoAndSync()
 
 bool CheckSSCtlInfoConsistency(XLogRecPtr localEnd)
 {
-    if (!SS_CLUSTER_DORADO_REPLICATION) {
+    if (!SS_REPLICATION_DORADO_CLUSTER) {
         return true;
     }
 
@@ -208,7 +208,7 @@ void InitSSDoradoCtlInfo(ShareStorageXLogCtl *ctlInfo, uint64 sysidentifier)
 
 void CheckSSDoradoCtlInfo(XLogRecPtr localEnd)
 {
-    if (!SS_CLUSTER_DORADO_REPLICATION) {
+    if (!SS_REPLICATION_DORADO_CLUSTER) {
         return;
     }
 

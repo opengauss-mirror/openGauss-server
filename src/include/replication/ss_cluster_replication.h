@@ -32,36 +32,36 @@
 
 const uint32 SS_DORADO_CTL_INFO_SIZE = 512;
 
-#define SS_CLUSTER_DORADO_REPLICATION \
+#define SS_REPLICATION_DORADO_CLUSTER \
         (ENABLE_DSS && g_instance.attr.attr_storage.enable_ss_dorado)
 
 /* Primary Cluster in SS replication */
-#define SS_REPLICATION_MAIN_CLUSTER \
-        (SS_CLUSTER_DORADO_REPLICATION && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY))
+#define SS_REPLICATION_PRIMARY_CLUSTER \
+        (SS_REPLICATION_DORADO_CLUSTER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY))
 
 /* Standby Cluster in SS replication */
 #define SS_REPLICATION_STANDBY_CLUSTER \
-        (SS_CLUSTER_DORADO_REPLICATION && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY))
+        (SS_REPLICATION_DORADO_CLUSTER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY))
 
 /* Primary node in SS replication, means primary node in main cluster. */
-#define IS_SS_REPLICATION_PRIMARY_NODE \
-    (SS_REPLICATION_MAIN_CLUSTER && (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE))
+#define SS_REPLICATION_PRIMARY_NODE \
+    (SS_REPLICATION_PRIMARY_CLUSTER && (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE))
 
 /* Standby node in SS replication, means standby node in main cluster. */
-#define IS_SS_REPLICATION_PRIMARY_CLUSTER_STANDBY_NODE \
-    (SS_REPLICATION_MAIN_CLUSTER && (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
+#define SS_REPLICATION_PRIMARY_CLUSTER_STANDBY_NODE \
+    (SS_REPLICATION_PRIMARY_CLUSTER && (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
 
 /* Main standby node in SS replication, means primary node in standby cluster. */
-#define IS_SS_REPLICATION_MAIN_STANBY_NODE \
+#define SS_REPLICATION_MAIN_STANBY_NODE \
     (SS_REPLICATION_STANDBY_CLUSTER && (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE))
 
 /* Standby node in SS replication, means standby node in standby cluster. */
-#define IS_SS_REPLICATION_STANDBY_CLUSTER_STANDBY_NODE \
+#define SS_REPLICATION_STANDBY_CLUSTER_STANDBY_NODE \
     (SS_REPLICATION_STANDBY_CLUSTER && (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
 
 /* All Standby in SS replication, means nodes other than primary node in primary cluster and standby cluster */
-#define IS_SS_REPLICATION_STANBY_NODE \
-    (SS_CLUSTER_DORADO_REPLICATION && (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
+#define SS_REPLICATION_STANBY_NODE \
+    (SS_REPLICATION_DORADO_CLUSTER && (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
 
 
 void SSClusterDoradoStorageInit();

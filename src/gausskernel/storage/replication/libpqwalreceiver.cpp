@@ -239,7 +239,7 @@ static bool CheckRemoteServerSharedStorage(ServerMode remoteMode, PGresult* res)
 
 static bool CheckSSRemoteServerMode(ServerMode remoteMode, PGresult* res)
 {
-    if (IS_SS_REPLICATION_MAIN_STANBY_NODE) {
+    if (SS_REPLICATION_MAIN_STANBY_NODE) {
         if (remoteMode != PRIMARY_MODE) {
             PQclear(res);
             ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
@@ -493,7 +493,7 @@ ServerMode IdentifyRemoteMode()
         !t_thrd.walreceiver_cxt.AmWalReceiverForFailover &&
         (!IS_PRIMARY_NORMAL(remoteMode)) &&
         /* remoteMode of cascade standby is a standby */
-        !t_thrd.xlog_cxt.is_cascade_standby && !(IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION)) {
+        !t_thrd.xlog_cxt.is_cascade_standby && !(IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER)) {
         PQclear(res);
 
         if (dummyStandbyMode) {
@@ -506,7 +506,7 @@ ServerMode IdentifyRemoteMode()
     }
 
     if (t_thrd.postmaster_cxt.HaShmData->is_cascade_standby && remoteMode != STANDBY_MODE &&
-        !(IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION)) {
+        !(IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER)) {
         PQclear(res);
 
         SpinLockAcquire(&walrcv->mutex);
@@ -524,7 +524,7 @@ ServerMode IdentifyRemoteMode()
         }
     }
 
-    if (SS_CLUSTER_DORADO_REPLICATION && !CheckSSRemoteServerMode(remoteMode, res)) {
+    if (SS_REPLICATION_DORADO_CLUSTER && !CheckSSRemoteServerMode(remoteMode, res)) {
         return UNKNOWN_MODE;
     }
 
@@ -577,7 +577,7 @@ static int32 IdentifyRemoteVersion()
                 (errcode(ERRCODE_INVALID_STATUS),
                  errmsg("could not get the local protocal version, make sure the PG_PROTOCOL_VERSION is defined")));
     }
-    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !IS_SS_REPLICATION_MAIN_STANBY_NODE) {
+    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_REPLICATION_MAIN_STANBY_NODE) {
         if (walrcv->conn_target != REPCONNTARGET_DUMMYSTANDBY && (localTerm == 0 || localTerm > remoteTerm) &&
             !AM_HADR_WAL_RECEIVER) {
             PQclear(res);
@@ -700,7 +700,7 @@ bool libpqrcv_connect(char *conninfo, XLogRecPtr *startpoint, char *slotname, in
         rc = memset_s(passwd, MAXPGPATH, 0, MAXPGPATH);
         securec_check(rc, "\0", "\0");
     } else if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || 
-                IS_SS_REPLICATION_MAIN_STANBY_NODE) {
+                SS_REPLICATION_MAIN_STANBY_NODE) {
         nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
                           "%s dbname=postgres replication=standby_cluster "
                           "fallback_application_name=%s_hass "
@@ -1417,7 +1417,7 @@ bool libpqrcv_receive(int timeout, unsigned char *type, char **buffer, int *len)
     }
     *type = *((unsigned char *)t_thrd.libwalreceiver_cxt.recvBuf);
 
-    if ((IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION) && !AM_HADR_WAL_RECEIVER && *type == 'w') {
+    if ((IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) && !AM_HADR_WAL_RECEIVER && *type == 'w') {
         *len = 0;
         return false;
     }

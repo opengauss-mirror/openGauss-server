@@ -6815,15 +6815,6 @@ int main(int argc, char** argv)
                     }
                     break;
                 }
-                case 'g':
-                    check_input_for_security(optarg);
-                    if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > MAX_INSTANCEID) {
-                        pg_log(PG_WARNING, _("unexpected node id specified, valid range is %d - %d.\n"),
-                               MIN_INSTANCEID, MAX_INSTANCEID );
-                        goto Error;
-                    }
-                    ss_instance_config.dss.instance_id = atoi(optarg);
-                    break;
                 case 1:
                     clear_backup_dir = true;
                     break;
@@ -7485,6 +7476,7 @@ bool ss_read_config(void)
 {
     char config_file[MAXPGPATH] = {0};
     char enable_dss[MAXPGPATH] = {0};
+    char inst_id[MAXPGPATH] = {0};
     char interconnect_url[MAXPGPATH] = {0};
     char** optlines = NULL;
     int ret = EOK;
@@ -7508,6 +7500,9 @@ bool ss_read_config(void)
     ss_instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
     (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", ss_instance_config.dss.socketpath);
     (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", ss_instance_config.dss.vgname);
+    (void)find_guc_optval((const char**)optlines, "ss_instance_id", inst_id);
+    ss_instance_config.dss.instance_id = atoi(inst_id);
+
     (void)find_guc_optval((const char**)optlines, "ss_interconnect_url", interconnect_url);
     ss_instance_config.dss.interNodeNum = ss_get_inter_node_nums(interconnect_url);
 

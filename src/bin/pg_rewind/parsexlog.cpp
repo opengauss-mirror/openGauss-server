@@ -142,8 +142,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
 #endif
     XLogRecPtr max_lsn;
     char returnmsg[MAX_ERR_MSG_LENTH] = {0};
-    char dssdirdata[MAXPGPATH] = {0};
-    char* dssdir = dssdirdata;
+    char dssxlogdir[MAXPGPATH] = {0};
     pg_crc32 maxLsnCrc = 0;
     XLogRecord* record = NULL;
     XLogRecPtr searchptr;
@@ -156,17 +155,17 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
     TimestampTz start_time;
     TimestampTz current_time;
 
-    if (ss_instance_config.dss.enable_dss) {
-        ret = snprintf_s(dssdirdata, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", ss_instance_config.dss.vgname, XLOGDIR, ss_instance_config.dss.instance_id);
-        securec_check_ss_c(ret, "", "");
-    } else {
-        dssdir = NULL;
-    }
-
     /*
      * local max lsn must be exists, or change to full build.
      */
-    max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, NULL, NULL, dssdir);
+    if (ss_instance_config.dss.enable_dss) {
+        ret = snprintf_s(dssxlogdir, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", 
+                        ss_instance_config.dss.vgname, XLOGDIR, ss_instance_config.dss.instance_id);
+        securec_check_ss_c(ret, "", "");
+        max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, NULL, NULL, dssxlogdir);
+    } else {
+        max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
+    }
     if (XLogRecPtrIsInvalid(max_lsn)) {
         pg_fatal("find max lsn fail, errmsg:%s\n", returnmsg);
         return BUILD_FATAL;
@@ -200,7 +199,25 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
         }
         uint8 info;
 
-        record = XLogReadRecord(xlogreader, searchptr, &errormsg, true, dssdir);
+        if (ss_instance_config.dss.enable_dss) {
+            struct dirent *entry;
+            DIR* dssdir = opendir(ss_instance_config.dss.vgname);
+            while (dssdir != NULL && (entry = readdir(dssdir)) != NULL) {
+                if (strncmp(entry->d_name, "pg_xlog", strlen("pg_xlog")) == 0) {
+                    ret = snprintf_s(dssxlogdir, MAXPGPATH, MAXPGPATH - 1, "%s/%s", ss_instance_config.dss.vgname, entry->d_name);
+                    securec_check_ss_c(ret, "", "");
+                    record = XLogReadRecord(xlogreader, searchptr, &errormsg, true, dssxlogdir);
+                    if (record != NULL) {
+                        break;
+                    }
+                } else {
+                    continue;
+                }
+            }
+            closedir(dssdir);
+        } else {
+            record = XLogReadRecord(xlogreader, searchptr, &errormsg);
+        }
         if (record == NULL) {
             if (errormsg != NULL) {
                 pg_fatal("could not find previous WAL record at %X/%X: %s\n",

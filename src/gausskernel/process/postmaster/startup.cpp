@@ -232,7 +232,7 @@ void HandleStartupProcInterrupts(void)
      * Check if we were requested to exit without finishing recovery.
      */
     if (t_thrd.startup_cxt.shutdown_requested && SmartShutdown != g_instance.status) {
-        if (t_thrd.xlog_cxt.StandbyModeRequested && IS_SHARED_STORAGE_STANDBY_CLUSTER && ENABLE_DMS) {
+        if (t_thrd.xlog_cxt.StandbyModeRequested && SS_REPLICATION_MAIN_STANBY_NODE) {
             ereport(LOG, (errmsg("dorado standby cluster switchover shutdown startup\n")));
             if (!IsExtremeRedo()) {
                 DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
@@ -285,7 +285,7 @@ static void StartupReleaseAllLocks(int code, Datum arg)
 
 void DeleteDisConnFileInClusterStandby()
 {
-    if (!(IS_SHARED_STORAGE_MODE || SS_CLUSTER_DORADO_REPLICATION)) {
+    if (!(IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER)) {
         return;
     }
 
