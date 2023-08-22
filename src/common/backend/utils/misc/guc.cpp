@@ -8568,6 +8568,10 @@ static void replace_config_value(char** optlines, char* name, char* value, confi
             rc = snprintf_s(newline, MAX_PARAM_LEN, MAX_PARAM_LEN - 1, "%s = %s\n", name, value);
             break;
         case PGC_STRING:
+            if (strlen(name) + strlen(value) + 6 >= MAX_PARAM_LEN) {
+                pfree(newline);
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("the length of GUC string type value exceed 1024.")));
+            }
             rc = snprintf_s(newline, MAX_PARAM_LEN, MAX_PARAM_LEN - 1, "%s = '%s'\n", name, value);
             break;
     }
