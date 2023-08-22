@@ -213,6 +213,10 @@ typedef struct knl_instance_attr_storage {
 #endif
     bool enable_huge_pages;
     int huge_page_size;
+    bool enable_time_report;
+    bool enable_batch_dispatch;
+    int parallel_recovery_timeout;
+    int parallel_recovery_batch;
     bool enable_ss_dorado;
 } knl_instance_attr_storage;
 
