@@ -969,39 +969,46 @@ static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nbl
     if (lastblock < firstblock || lastblock == InvalidBlockNumber)
         return false;
 
-    if (IsSegmentFileNode(rel->rd_node)) {
-        Buffer buf = ReadBuffer(rel, P_NEW);
-#ifdef USE_ASSERT_CHECKING
-        BufferDesc *buf_desc = GetBufferDescriptor(buf - 1);
-        Assert(buf_desc->tag.blockNum == lastblock);
-#endif
-        ReleaseBuffer(buf);
-    } else {
-        page = (Page)zerobuf;
+    /* change segment table insert hash table */
+    page = (Page)zerobuf;
+    /*
+    * Initialize the page.  Just zeroing the page won't work; see
+    * _hash_freeovflpage for similar usage.  We take care to make the special
+    * space valid for the benefit of tools such as pageinspect.
+    */
+    _hash_pageinit(page, BLCKSZ);
 
-        /*
-         * Initialize the page.  Just zeroing the page won't work; see
-         * _hash_freeovflpage for similar usage.  We take care to make the special
-         * space valid for the benefit of tools such as pageinspect.
-         */
-        _hash_pageinit(page, BLCKSZ);
+    ovflopaque = (HashPageOpaque) PageGetSpecialPointer(page);
 
-        ovflopaque = (HashPageOpaque) PageGetSpecialPointer(page);
+    ovflopaque->hasho_prevblkno = InvalidBlockNumber;
+    ovflopaque->hasho_nextblkno = InvalidBlockNumber;
+    ovflopaque->hasho_bucket = -1;
+    ovflopaque->hasho_flag = LH_UNUSED_PAGE;
+    ovflopaque->hasho_page_id = HASHO_PAGE_ID;
+    PageSetChecksumInplace(zerobuf, lastblock);
 
-        ovflopaque->hasho_prevblkno = InvalidBlockNumber;
-        ovflopaque->hasho_nextblkno = InvalidBlockNumber;
-        ovflopaque->hasho_bucket = -1;
-        ovflopaque->hasho_flag = LH_UNUSED_PAGE;
-        ovflopaque->hasho_page_id = HASHO_PAGE_ID;
-
-        if (RelationNeedsWAL(rel))
+    if (RelationNeedsWAL(rel))
             log_newpage(&rel->rd_node,
                         MAIN_FORKNUM,
                         lastblock,
                         zerobuf,
                         true);
+
+    if (IsSegmentFileNode(rel->rd_node)) {
+        Buffer buf;
+        for (int i = firstblock; i <= lastblock; i++) {
+            buf = ReadBuffer(rel, P_NEW);
+            ReleaseBuffer(buf);
+        }
+        buf = ReadBuffer(rel, lastblock);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        errno_t rel = memcpy_s(BufferGetPage(buf), BLCKSZ, page, BLCKSZ);
+        securec_check(rel, "", "");
+        MarkBufferDirty(buf);
+        LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+        ReleaseBuffer(buf);
+    } else {
         RelationOpenSmgr(rel);
-        PageSetChecksumInplace(zerobuf, lastblock);
         smgrextend(rel->rd_smgr, MAIN_FORKNUM, lastblock, zerobuf, false);
     }
 
