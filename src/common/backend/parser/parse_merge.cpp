@@ -128,14 +128,18 @@ static void transformMergeJoinClause(ParseState* pstate, Node* merge)
     foreach (cell1, relnamespace) {
         ParseNamespaceItem* nitem1 = (ParseNamespaceItem*)lfirst(cell1);
         RangeTblEntry* entry1 = nitem1->p_rte;
+        bool unique = true;
 
         foreach (cell2, pstate->p_relnamespace) {
             ParseNamespaceItem* nitem2 = (ParseNamespaceItem*)lfirst(cell2);
             RangeTblEntry* entry2 = nitem2->p_rte;
 
-            if (entry1->relid == entry2->relid) {
-                continue;
+            if (entry1->relid == entry2->relid && strcmp(entry1->eref->aliasname, entry2->eref->aliasname) == 0) {
+                unique = false;
+                break;
             }
+        }
+        if (unique) {
             pstate->p_relnamespace = lappend(pstate->p_relnamespace, lfirst(cell1));
         }
     }
