@@ -6103,7 +6103,7 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
 
     int WLM_SESSION_INFO_ATTRNUM = 0;
     if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION)
-        WLM_SESSION_INFO_ATTRNUM = 87;
+        WLM_SESSION_INFO_ATTRNUM = 77 + TOTAL_TIME_INFO_TYPES;
     else
         WLM_SESSION_INFO_ATTRNUM = 68;
 
@@ -6201,10 +6201,13 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
             TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_tuples_deleted", INT8OID, -1, 0);
             TupleDescInitEntry(tupdesc, (AttrNumber)++i, "t_blocks_fetched", INT8OID, -1, 0);
             TupleDescInitEntry(tupdesc, (AttrNumber)++i, "t_blocks_hit", INT8OID, -1, 0);
-            for (num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
+            for (num = 0; num < TOTAL_TIME_INFO_TYPES_P1; num++) {
                 TupleDescInitEntry(tupdesc, (AttrNumber)++i, TimeInfoTypeName[num], INT8OID, -1, 0);
             }
             TupleDescInitEntry(tupdesc, (AttrNumber)++i, "is_slow_query", INT8OID, -1, 0);
+            for (num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES; num++) {
+                TupleDescInitEntry(tupdesc, (AttrNumber)++i, TimeInfoTypeName[num], INT8OID, -1, 0);
+            }
         }
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
         funcctx->user_fctx = WLMGetSessionInfo(&qid, removed, &num);
@@ -6439,11 +6442,15 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
             values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_tuples_deleted);
             values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_blocks_fetched);
             values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_blocks_hit);
-            /* time Info */
-            for (num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
+            /* time Info p1*/
+            for (num = 0; num < TOTAL_TIME_INFO_TYPES_P1; num++) {
                 values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.localTimeInfoArray[num]);
             }
             values[++i] = Int64GetDatum(0);
+            /* time Info */
+            for (num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES; num++) {
+                values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.localTimeInfoArray[num]);
+            }
         }
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);

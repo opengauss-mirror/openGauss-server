@@ -8162,17 +8162,6 @@ Size sessionTimeShmemSize(void)
     return mul_size(SessionTimeArraySize, sizeof(SessionTimeEntry));
 }
 
-const char* TimeInfoTypeName[TOTAL_TIME_INFO_TYPES] = {"DB_TIME",
-    "CPU_TIME",
-    "EXECUTION_TIME",
-    "PARSE_TIME",
-    "PLAN_TIME",
-    "REWRITE_TIME",
-    "PL_EXECUTION_TIME",
-    "PL_COMPILATION_TIME",
-    "NET_SEND_TIME",
-    "DATA_IO_TIME"};
-
 void sessionTimeShmemInit(void)
 {
     bool found = false;
@@ -8307,68 +8296,60 @@ void AttachMySessionTimeEntry(void)
     Assert((t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount & 1) == 0);
 }
 
+static void addThreadTimeEntry()
+{
+    for (int i = 0; i < TOTAL_TIME_INFO_TYPES; i++) {
+        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[i] +=
+            u_sess->stat_cxt.localTimeInfoArray[i];
+    }
+}
+void ResetMemory(void* dest, size_t size)
+{
+    errno_t rc;
+    rc = memset_s(dest, size, 0, size);
+    securec_check(rc, "\0", "\0");
+}
+
 void timeInfoRecordStart(void)
 {
-    if (u_sess->stat_cxt.localTimeInfoArray[DB_TIME] == 0) {
-        u_sess->stat_cxt.localTimeInfoArray[DB_TIME] = GetCurrentTimestamp();
-        if (u_sess->attr.attr_common.enable_instr_cpu_timer)
-            u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = getCpuTime();
+    if (!og_time_record_start()) {
+        return;
     }
+    if (u_sess->attr.attr_common.enable_instr_cpu_timer)
+        u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = getCpuTime();
 }
 
 void timeInfoRecordEnd(void)
 {
-    errno_t rc;
-    if (u_sess->stat_cxt.localTimeInfoArray[DB_TIME] != 0) {
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
-
-        if (u_sess->attr.attr_common.enable_instr_cpu_timer) {
-            int64 cur = getCpuTime();
-
-            u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = cur - u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];
-        }
-        u_sess->stat_cxt.localTimeInfoArray[DB_TIME] =
-            GetCurrentTimestamp() - u_sess->stat_cxt.localTimeInfoArray[DB_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[CPU_TIME] += u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[DB_TIME] += u_sess->stat_cxt.localTimeInfoArray[DB_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[EXECUTION_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[EXECUTION_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[PARSE_TIME] += u_sess->stat_cxt.localTimeInfoArray[PARSE_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[PLAN_TIME] += u_sess->stat_cxt.localTimeInfoArray[PLAN_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[REWRITE_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[REWRITE_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[PL_EXECUTION_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[PL_EXECUTION_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[PL_COMPILATION_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[PL_COMPILATION_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[NET_SEND_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[NET_SEND_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[DATA_IO_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[DATA_IO_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
-        Assert((t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount & 1) == 0);
-
-        UniqueSQLStat sqlStat;
-        sqlStat.timeInfo = u_sess->stat_cxt.localTimeInfoArray;
-        sqlStat.netInfo = u_sess->stat_cxt.localNetInfo;
-        if (u_sess->unique_sql_cxt.unique_sql_id != 0 && is_unique_sql_enabled())
-            UpdateUniqueSQLStat(NULL, NULL, 0, NULL, &sqlStat);
-        rc = memset_s(u_sess->stat_cxt.localTimeInfoArray,
-            sizeof(int64) * TOTAL_TIME_INFO_TYPES,
-            0,
-            sizeof(int64) * TOTAL_TIME_INFO_TYPES);
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(u_sess->stat_cxt.localNetInfo,
-            sizeof(uint64) * TOTAL_NET_INFO_TYPES,
-            0,
-            sizeof(uint64) * TOTAL_NET_INFO_TYPES);
-        securec_check(rc, "\0", "\0");
+    if (!og_time_record_is_started()) {
+        return;
     }
+    t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
+
+    if (u_sess->attr.attr_common.enable_instr_cpu_timer) {
+        int64 cur = getCpuTime();
+        u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = cur - 
+            u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];
+    }
+    og_time_record_end();
+    og_get_record_stat()->print_self();
+
+    addThreadTimeEntry();
+    t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
+    Assert((t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount & 1) == 0);
+
+    UniqueSQLStat sqlStat;
+    sqlStat.timeInfo = u_sess->stat_cxt.localTimeInfoArray;
+    sqlStat.netInfo = u_sess->stat_cxt.localNetInfo;
+    if (u_sess->unique_sql_cxt.unique_sql_id != 0 && is_unique_sql_enabled()) {
+        UpdateUniqueSQLStat(NULL, NULL, 0, NULL, &sqlStat);
+
+    }
+
+    ResetMemory(u_sess->stat_cxt.localTimeInfoArray,
+        sizeof(int64) * TOTAL_TIME_INFO_TYPES);
+    ResetMemory(u_sess->stat_cxt.localNetInfo,
+        sizeof(uint64) * TOTAL_NET_INFO_TYPES);
 }
 
 /* generate result of pv_session_time view */

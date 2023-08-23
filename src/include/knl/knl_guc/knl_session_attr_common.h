@@ -244,6 +244,7 @@ typedef struct knl_session_attr_common {
     bool enable_indexscan_optimization;
     char* delimiter_name;
     bool b_compatibility_user_host_auth;
+    int time_record_level;
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

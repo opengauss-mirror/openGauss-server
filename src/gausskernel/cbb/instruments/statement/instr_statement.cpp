@@ -75,7 +75,7 @@
 
 #define STATEMENT_DETAILS_HEAD_SIZE (1)     /* [VERSION] */
 #define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
-#define INSTR_STATEMENT_ATTRNUM 53
+#define INSTR_STATEMENT_ATTRNUM (44 + TOTAL_TIME_INFO_TYPES)
 
 /* support different areas in stmt detail column */
 #define STATEMENT_DETAIL_TYPE_LEN (1)
@@ -503,9 +503,10 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     set_stmt_row_activity_cache_io(statementInfo, values, &i);
 
     /* time info */
-    for (int num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
-        if (num == NET_SEND_TIME)
+    for (int num = 0; num < TOTAL_TIME_INFO_TYPES_P1; num++) {
+        if (num == NET_SEND_TIME) {
             continue;
+        }
         values[i++] = Int64GetDatum(statementInfo->timeModel[num]);
     }
 
@@ -550,6 +551,11 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
 
     SET_TEXT_VALUES(statementInfo->trace_id, i++);
     set_stmt_advise(statementInfo, values, nulls, &i);
+    /* time info addition */
+    values[i++] = Int64GetDatum(statementInfo->timeModel[NET_SEND_TIME]);
+    for (int num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES; num++) {
+        values[i++] = Int64GetDatum(statementInfo->timeModel[num]);
+    }
     Assert(INSTR_STATEMENT_ATTRNUM == i);
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }

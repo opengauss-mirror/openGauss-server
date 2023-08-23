@@ -688,6 +688,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  temp_tablespaces                                 | string  |      |           | 
  thread_pool_attr                                 | string  |      |           | 
  thread_pool_stream_attr                          | string  |      |           | 
+ time_record_level                                | integer |      | 0         | 10
  time_to_target_rpo                               | integer |      | 0         | 3600
  TimeZone                                         | string  |      |           | 
  timezone_abbreviations                           | string  |      |           | 

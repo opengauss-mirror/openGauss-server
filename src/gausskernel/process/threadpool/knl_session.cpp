@@ -916,6 +916,8 @@ static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
     size = sizeof(int64) * TOTAL_TIME_INFO_TYPES;
     stat_cxt->localTimeInfoArray = (int64*)palloc0(size);
     stat_cxt->localNetInfo = (uint64*)palloc0(sizeof(uint64) * TOTAL_NET_INFO_TYPES);
+    stat_cxt->og_record_stat = New(CurrentMemoryContext) OgRecordStat(stat_cxt->localTimeInfoArray,
+            stat_cxt->localNetInfo);
 
     stat_cxt->trackedMemChunks = 0;
     stat_cxt->trackedBytes = 0;
