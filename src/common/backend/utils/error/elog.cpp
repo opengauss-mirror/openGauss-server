@@ -6275,7 +6275,6 @@ void getDiagnosticsInfo(List* condInfo, bool hasCondNum, List* condNum)
             FreeStringInfo(&buf);
             return;
         }
-        int currIdx = 0;
         DolphinErrorData* eData = (DolphinErrorData *)list_nth(errorDataArea->sqlErrorDataList, conditionNum - 1);
         foreach(lc, condInfo) {
             CondInfo *cond = (CondInfo*)lfirst(lc);
