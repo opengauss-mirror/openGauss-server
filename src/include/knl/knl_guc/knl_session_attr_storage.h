@@ -266,6 +266,7 @@ typedef struct knl_session_attr_storage {
     int logical_sender_timeout;
     int ignore_standby_lsn_window;
     int ignore_feedback_xmin_window;
+    int subscription_conflict_resolution;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */

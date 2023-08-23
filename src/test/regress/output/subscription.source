@@ -19,6 +19,7 @@ ALTER SUBSCRIPTION name CONNECTION 'conninfo'
 ALTER SUBSCRIPTION name SET PUBLICATION publication_name [, ...]
 ALTER SUBSCRIPTION name REFRESH PUBLICATION [ WITH ( refresh_option [= value] [, ... ] ) ]
 ALTER SUBSCRIPTION name ENABLE
+ALTER SUBSCRIPTION name DISABLE
 ALTER SUBSCRIPTION name SET ( subscription_parameter [= value] [, ... ] )
 ALTER SUBSCRIPTION name OWNER TO new_owner
 ALTER SUBSCRIPTION name RENAME TO new_name
@@ -153,6 +154,25 @@ select subname, subbinary from pg_subscription where subname='testsub';
  testsub | t
 (1 row)
 
+-- set subskiplsn
+ALTER SUBSCRIPTION testsub SET (skiplsn = '0/ABCDEF');
+select subname, subskiplsn from pg_subscription where subname='testsub';
+ subname | subskiplsn 
+---------+------------
+ testsub | 0/ABCDEF
+(1 row)
+
+ALTER SUBSCRIPTION testsub SET (skiplsn = '0/ABCDEFGH');
+ERROR:  invalid input syntax for type pg_lsn: "0/ABCDEFGH"
+ALTER SUBSCRIPTION testsub SET (skiplsn = 'none');
+select subname, subskiplsn from pg_subscription where subname='testsub';
+ subname | subskiplsn 
+---------+------------
+ testsub | 0/0
+(1 row)
+
+-- disable test
+ALTER SUBSCRIPTION testsub DISABLE;
 --rename
 ALTER SUBSCRIPTION testsub rename to testsub_rename;
 --- inside a transaction block
@@ -337,12 +357,15 @@ SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-1
  testsub              | ALTER SUBSCRIPTION testsub SET (synchronous_commit=on);
  testsub              | ALTER SUBSCRIPTION testsub owner to regress_subscription_user2;
  testsub              | ALTER SUBSCRIPTION testsub SET (binary=true);
+ testsub              | ALTER SUBSCRIPTION testsub SET (skiplsn = '0/ABCDEF');
+ testsub              | ALTER SUBSCRIPTION testsub SET (skiplsn = 'none');
+ testsub              | ALTER SUBSCRIPTION testsub DISABLE;
  testsub              | ALTER SUBSCRIPTION testsub rename to testsub_rename;
  sub_len_999          | CREATE SUBSCRIPTION sub_len_999 CONNECTION *********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************PUBLICATION insert_only WITH (connect = false);
  testsub_rename       | DROP SUBSCRIPTION IF EXISTS testsub_rename;
  testsub_maskconninfo | DROP SUBSCRIPTION IF EXISTS testsub_maskconninfo;
  sub_len_999          | DROP SUBSCRIPTION IF EXISTS sub_len_999;
-(17 rows)
+(20 rows)
 
 --clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');

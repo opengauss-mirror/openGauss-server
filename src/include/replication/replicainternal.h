@@ -214,6 +214,13 @@ typedef enum replauthmode{
     REPL_AUTH_UUID /* uuid auth */
 } ReplAuthMode;
 
+typedef enum
+{
+    RESOLVE_ERROR,
+    RESOLVE_APPLY_REMOTE,
+    RESOLVE_KEEP_LOCAL
+} PGLogicalResolveOption;
+
 extern bool data_catchup;
 extern bool wal_catchup;
 extern BuildMode build_mode;

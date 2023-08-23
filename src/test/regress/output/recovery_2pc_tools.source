@@ -665,6 +665,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  stats_temp_directory                             | string  |      |           | 
  stream_cluster_run_mode                          | enum    |      |           | 
  string_hash_compatible                           | bool    |      |           | 
+ subscription_conflict_resolution                 | enum    |      |           | 
  support_batch_bind                               | bool    |      |           | 
  support_extended_features                        | bool    |      |           | 
  sync_config_strategy                             | enum    |      |           | 

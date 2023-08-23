@@ -1016,6 +1016,8 @@ void knl_instance_init()
     for (int i = 0; i < DB_CMPT_MAX; i++) {
         pthread_mutex_init(&g_instance.loadPluginLock[i], NULL);
     }
+    g_instance.needCheckConflictSubIds = NIL;
+    pthread_mutex_init(&g_instance.subIdsLock, NULL);
 #endif
 
     knl_g_datadir_init(&g_instance.datadir_cxt);
