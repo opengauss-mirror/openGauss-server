@@ -1,3 +1,15 @@
+do $$
+DECLARE
+ans boolean;
+BEGIN
+    for ans in select case when count(*)=1 then true else false end as ans  from (select extname from pg_extension where extname='dolphin' and extversion = '2.0')
+    LOOP
+        if ans = true then
+            ALTER EXTENSION dolphin UPDATE TO '2.0.1';
+        end if;
+    exit;
+    END LOOP;
+END$$;
 DROP FUNCTION IF EXISTS pg_catalog.ss_txnstatus_cache_stat() CASCADE;
 
 -- those type of view and producer will recreate.
@@ -955,3 +967,15 @@ GRANT SELECT ON TABLE DBE_PERF.statement_history TO PUBLIC;
 GRANT SELECT ON TABLE DBE_PERF.global_slow_query_history TO PUBLIC;
 GRANT SELECT ON TABLE DBE_PERF.global_slow_query_info TO PUBLIC;
 
+do $$
+DECLARE
+ans boolean;
+BEGIN
+    for ans in select case when count(*)=1 then true else false end as ans  from (select extname from pg_extension where extname='dolphin' and extversion = '2.0.1')
+    LOOP
+        if ans = true then
+            ALTER EXTENSION dolphin UPDATE TO '2.0';
+        end if;
+    exit;
+    END LOOP;
+END$$;
