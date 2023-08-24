@@ -486,7 +486,7 @@ void OgRecordStat::report_start(const OgTimeDataVo& data_record)
         return;
     }
     records_stack.top().depth = increment_depth();
-    record_debug("begin: %s", FORMAT_VO(records_stack.top()));
+    log_vo("begin", records_stack.top());
     if (data_record.record_type.is_root_type()) {
         records_stack.top().begin = GetCurrentTimestamp();
     }
@@ -497,8 +497,8 @@ void OgRecordStat::report_end(const OgTimeDataVo& record)
     // assert not records_stack.is_empty()
     OgTimeDataVo& time_vo = records_stack.top();
     if (record != time_vo) {
-        record_debug("find time record not match!top =%s, curr=%s",
-                FORMAT_VO(time_vo), FORMAT_VO(record));
+        log_vo("unmatch_top:", time_vo);
+        log_vo("unmatch_cur:", record);
         return;
     }
     records_stack.pop();
@@ -510,9 +510,9 @@ void OgRecordStat::report_end(const OgTimeDataVo& record)
     if (time_vo.record_type.is_root_type()) {
         // We don't want debug time calc in root type.
         time_vo.end = GetCurrentTimestamp();
-        record_debug("end  : %s", FORMAT_VO(time_vo));
+        log_vo("  end", time_vo);
     } else {
-        record_debug("end  : %s", FORMAT_VO(time_vo));
+        log_vo("  end", time_vo);
         time_vo.end = GetCurrentTimestamp();
     }
     OgTimeDataVo& parent_time_vo = records_stack.top();
@@ -528,7 +528,7 @@ void OgRecordStat::report_end(const OgTimeDataVo& record)
 void OgRecordStat::report_duplicate(OgTimeDataVo& record)
 {
     Assert(record.record_type.get_record_time_type() == NET_INFO);
-    record_debug("duplicate  : %s, str_len=%d", FORMAT_VO(record), record.record_type.get_str_len());
+    log_vo("duplicate", record);
     if (record.end == 0) {
         record.end = GetCurrentTimestamp();
     }
@@ -555,7 +555,7 @@ void OgRecordStat::print_self() const
 {
     int64 bind_total = 0;
     int64 bind_data = 0;
-    if (!log_enable_debug()) {
+    if (!log_enable(DEBUG1)) {
         return;
     }
     for (int i = 0; i <  TOTAL_RECORD_TYPES; i ++)
@@ -571,10 +571,10 @@ void OgRecordStat::print_self() const
         } else {
             // nothing to do
         }
-        record_debug("name:%d %30s %ld", i, og_record_time_type_str(i), bind_data);
+        logtrace(DEBUG1, "name:%d %30s %ld", i, og_record_time_type_str(i), bind_data);
     }
     int64 child_cost = bind_total - get_record_times(DB_TIME) - get_record_times(CPU_TIME);
-    record_debug("%s,%s,diff(%lld) = total=(%lld) - child_cost(%lld)",
+    logtrace(DEBUG1, "%s,%s,diff(%lld) = total=(%lld) - child_cost(%lld)",
                  get_record_times(RTT_UNKNOWN) < db_time_baseline ? "rd_yes" : "rd_no ",
                  (child_cost == get_db_time()) ? "rd_eq  " : "rd_ne",
                  get_record_times(RTT_UNKNOWN),
@@ -618,7 +618,7 @@ bool OgRecordStat::free_first_record_opt()
         while (records_stack.size() > 2 && (records_stack.top().id != record_id)) {
             records_stack.top().end = GetCurrentTimestamp();
             pre_records_stack.push(records_stack.top());
-            logtrace(DEBUG1, "free_head, %s", OgTimeDataFormatHelper().format(records_stack.top()));
+            log_vo("free_head", records_stack.top());
             report_end(records_stack.top());
         }
         first_record_opt.exit();
@@ -669,15 +669,19 @@ void OgRecordStat::update_record_time(const RecordType& record_type, int64 cost)
 }
 
 // flow database system log config
-bool OgRecordStat::log_enable() const
-{
-    return u_sess != NULL && u_sess->attr.attr_common.log_statement == LOGSTMT_ALL;
+bool OgRecordStat::log_enable(int level) const {
+    return u_sess != NULL && u_sess->attr.attr_common.log_statement == LOGSTMT_ALL
+           && level >= u_sess->attr.attr_common.log_min_messages;
 }
 
-// flow database system log config
-bool OgRecordStat::log_enable_debug() const
+void OgRecordStat::log_vo(const char* tag, const OgTimeDataVo& vo) const
 {
-    return log_enable() && u_sess->attr.attr_common.log_min_messages < LOG;
+    if (!log_enable(DEBUG1)) {
+        return;
+    }
+    ereport(DEBUG1, (errmsg("record(%ld-%ld) %s %s", (uint64)this,
+                           u_sess == NULL ? 0 : u_sess->session_id, tag,
+                           FORMAT_VO(vo))));
 }
 
 void OgRecordStat::logtrace(int level, const char* fmt, ...) const

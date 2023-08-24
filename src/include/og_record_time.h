@@ -182,10 +182,6 @@ const char* og_record_time_type_str(int pos);
 }
 #endif
 
-#define record_debug(fmt, ...) (og_get_record_stat()->logtrace(DEBUG1, fmt, ##__VA_ARGS__))
-#define record_info(fmt, ...) (og_get_record_stat()->logtrace(LOG, fmt, ##__VA_ARGS__))
-#define record_warn(fmt, ...) (og_get_record_stat()->logtrace(WARNING, fmt, ##__VA_ARGS__))
-
 class RecordType {
 public:
     explicit RecordType();
@@ -490,8 +486,8 @@ public:
      */
     void update_time_record_level();
 
-    bool log_enable() const;
-    bool log_enable_debug() const;
+    bool log_enable(int level = LOG) const;
+    void log_vo(const char* tag, const OgTimeDataVo& vo) const;
     void logtrace(int level, const char* fmt, ...) const;
 private:
     void update_record_time(const RecordType& record_type, int64 cost);
