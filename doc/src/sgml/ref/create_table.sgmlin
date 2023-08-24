@@ -41,7 +41,7 @@ NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode a
 where table_constraint can be:
 [ CONSTRAINT [ constraint_name ] ]
 { CHECK ( expression ) |
-  UNIQUE [ index_name ] [ USING method ] ( { { column_name | ( expression ) } [ ASC | DESC ] } [, ... ] ) index_parameters [ VISIBLE | INVISIBLE ] |
+  UNIQUE [ index_name ] [ USING method ] ( { { column_name [ ( length ) ] | ( expression ) } [ ASC | DESC ] } [, ... ] ) index_parameters [ VISIBLE | INVISIBLE ] |
   PRIMARY KEY [ USING method ] ( { column_name [ ASC | DESC ] } [, ... ] ) index_parameters [ VISIBLE | INVISIBLE ] |
   PARTIAL CLUSTER KEY ( column_name [, ... ] ) |
   FOREIGN KEY [ index_name ] ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
@@ -72,6 +72,7 @@ NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mod
 NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
 NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
 NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'column_name ( length )' in 'UNIQUE' clause of table_constraint is only available in CENTRALIZED mode and B-format database!
 NOTICE: '( expression )' in 'UNIQUE' clause of table_constraint is only available in CENTRALIZED mode and B-format database!
 NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
 NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!

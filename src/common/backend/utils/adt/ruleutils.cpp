@@ -4052,7 +4052,11 @@ static char* pg_get_constraintdef_worker(Oid constraintId, bool fullCommand, int
 
                     str = deparse_expression_pretty(indexkey, context, false, false,
                         PRETTYFLAG_PAREN | PRETTYFLAG_INDENT, 0);
-                    appendStringInfo(&buf, "(%s)", str);
+                    if (IsA(indexkey, PrefixKey)) {
+                        appendStringInfo(&buf, "%s", str);
+                    } else {
+                        appendStringInfo(&buf, "(%s)", str);
+                    }
                 }
 
                 if (opt & INDOPTION_DESC) {

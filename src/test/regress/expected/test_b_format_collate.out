@@ -87,6 +87,187 @@ SHOW b_format_behavior_compat_options;
  enable_multi_charset
 (1 row)
 
+-- test index collation
+DROP TABLE if exists t_collate_index;
+NOTICE:  table "t_collate_index" does not exist, skipping
+CREATE TABLE t_collate_index(id int, a text collate "C");
+INSERT INTO t_collate_index VALUES(1, 'ABC');
+INSERT INTO t_collate_index VALUES(1, 'ABC  ');
+CREATE INDEX idx_t_collate_index ON t_collate_index(a);
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a collate "C" like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a collate "C" like 'abc%';
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ HashSetOp Intersect
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Aggregate
+                     ->  Seq Scan on t_collate_index t
+                           Filter: (a ~~ 'abc%'::text)
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Aggregate
+                     ->  Index Only Scan using idx_t_collate_index on t_collate_index t
+                           Index Cond: ((a >= 'abc'::text) AND (a < 'abd'::text))
+                           Filter: (a ~~ 'abc%'::text)
+(11 rows)
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a collate "C" like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a collate "C" like 'abc%';
+ count 
+-------
+     0
+(1 row)
+
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%' COLLATE utf8mb4_general_ci
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%' COLLATE utf8mb4_general_ci;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ HashSetOp Intersect
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Aggregate
+                     ->  Seq Scan on t_collate_index t
+                           Filter: (a ~~ 'abc%'::text COLLATE utf8mb4_general_ci)
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Aggregate
+                     ->  Index Only Scan using idx_t_collate_index on t_collate_index t
+                           Filter: (a ~~ 'abc%'::text COLLATE utf8mb4_general_ci)
+(10 rows)
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%' COLLATE utf8mb4_general_ci
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%' COLLATE utf8mb4_general_ci;
+ count 
+-------
+     2
+(1 row)
+
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a COLLATE utf8mb4_general_ci like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a COLLATE utf8mb4_general_ci like 'abc%';
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ HashSetOp Intersect
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Aggregate
+                     ->  Seq Scan on t_collate_index t
+                           Filter: ((a)::text ~~ 'abc%'::text)
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Aggregate
+                     ->  Index Only Scan using idx_t_collate_index on t_collate_index t
+                           Filter: ((a)::text ~~ 'abc%'::text)
+(10 rows)
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a COLLATE utf8mb4_general_ci like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a COLLATE utf8mb4_general_ci like 'abc%';
+ count 
+-------
+     2
+(1 row)
+
+DROP TABLE if exists t_collate_index;
+CREATE TABLE t_collate_index(id int, a varchar(16) collate utf8mb4_bin);
+INSERT INTO t_collate_index VALUES(1, 'abc');
+INSERT INTO t_collate_index VALUES(1, 'abc ');
+INSERT INTO t_collate_index VALUES(1, 'abc  ');
+INSERT INTO t_collate_index VALUES(1, 'abc   ');
+CREATE INDEX idx_t_collate_index ON t_collate_index(a);
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ HashSetOp Intersect
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Aggregate
+                     ->  Seq Scan on t_collate_index t
+                           Filter: ((a)::text ~~ 'abc%'::text)
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Aggregate
+                     ->  Index Only Scan using idx_t_collate_index on t_collate_index t
+                           Index Cond: ((a >= 'abc'::text) AND (a <= 'abc￿￿￿￿￿￿￿￿￿￿￿￿￿'::text))
+                           Filter: ((a)::text ~~ 'abc%'::text)
+(11 rows)
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
+ count 
+-------
+     4
+(1 row)
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc %'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc %';
+ count 
+-------
+     3
+(1 row)
+
+DROP TABLE if exists t_collate_index;
+CREATE TABLE t_collate_index(id int, a char(16) collate utf8mb4_bin);
+INSERT INTO t_collate_index VALUES(1, 'abc');
+INSERT INTO t_collate_index VALUES(1, 'abc ');
+INSERT INTO t_collate_index VALUES(1, 'abc  ');
+INSERT INTO t_collate_index VALUES(1, 'abc   ');
+SELECT LENGTH(a) FROM t_collate_index ORDER BY 1;
+ length 
+--------
+      3
+      3
+      3
+      3
+(4 rows)
+
+CREATE INDEX idx_t_collate_index ON t_collate_index(a);
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ HashSetOp Intersect
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Aggregate
+                     ->  Seq Scan on t_collate_index t
+                           Filter: (a ~~ 'abc%'::text)
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Aggregate
+                     ->  Index Only Scan using idx_t_collate_index on t_collate_index t
+                           Index Cond: ((a >= 'abc'::bpchar) AND (a <= 'abc￿￿￿￿￿￿￿￿￿￿￿￿￿'::bpchar))
+                           Filter: (a ~~ 'abc%'::text)
+(11 rows)
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
+ count 
+-------
+     4
+(1 row)
+
+-- different with mdb
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc %'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc %';
+ count 
+-------
+     4
+(1 row)
+
+DROP TABLE if exists t_collate_index;
 -- test create table/alter table
 drop table if exists t_collate;
 NOTICE:  table "t_collate" does not exist, skipping

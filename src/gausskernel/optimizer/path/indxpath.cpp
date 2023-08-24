@@ -2429,7 +2429,9 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
          * If we didn't find a member of the index's opfamily, see whether it
          * is a "special" indexable operator.
          */
-        if (plain_op && match_special_index_operator(clause, opfamily, idxcollation, true, index, indexcol)) {
+        if (plain_op && match_special_index_operator(clause, opfamily, idxcollation, true, index, indexcol) &&
+            (IndexCollMatchesExprColl(idxcollation, expr_coll) ||
+                (!COLLATION_IN_B_FORMAT(idxcollation) && !COLLATION_IN_B_FORMAT(expr_coll)))) {
             return true;
         }
         return false;
@@ -2444,7 +2446,9 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
          * If we didn't find a member of the index's opfamily, see whether it
          * is a "special" indexable operator.
          */
-        if (match_special_index_operator(clause, opfamily, idxcollation, false, index, indexcol)) {
+        if (match_special_index_operator(clause, opfamily, idxcollation, false, index, indexcol) &&
+            (IndexCollMatchesExprColl(idxcollation, expr_coll) ||
+                (!COLLATION_IN_B_FORMAT(idxcollation) && !COLLATION_IN_B_FORMAT(expr_coll)))) {
             return true;
         }
         return false;
