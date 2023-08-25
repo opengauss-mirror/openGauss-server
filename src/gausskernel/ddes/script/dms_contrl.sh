@@ -208,8 +208,6 @@ function Check()
         log "check ${GSDB_BIN} in ${GSDB_HOME} fail."
         exit 1
     fi
-
-    log "check gaussdb in ${GSDB_HOME} success."
 }
 
 # 1st step: kill database
