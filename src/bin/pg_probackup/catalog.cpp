@@ -1948,6 +1948,7 @@ write_backup(pgBackup *backup, bool strict)
     }
 
     if (chmod(path_temp, FILE_PERMISSION) == -1) {
+        fclose(fp);
         elog(ERROR, "Cannot change mode of \"%s\": %s", path_temp,
          strerror(errno));
         return;
@@ -1957,13 +1958,17 @@ write_backup(pgBackup *backup, bool strict)
 
     pgBackupWriteControl(fp, backup);
 
-    if (fflush(fp) != 0)
+    if (fflush(fp) != 0){
+        fclose(fp);
         elog(ERROR, "Cannot flush control file \"%s\": %s",
          path_temp, strerror(errno));
+    }
 
-    if (fsync(fileno(fp)) < 0)
+    if (fsync(fileno(fp)) < 0){
+        fclose(fp);
         elog(ERROR, "Cannot sync control file \"%s\": %s",
          path_temp, strerror(errno));
+    }
 
     if (fclose(fp) != 0)
         elog(ERROR, "Cannot close control file \"%s\": %s",
