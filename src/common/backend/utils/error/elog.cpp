@@ -287,7 +287,7 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
                  * during which panic is not expected.
                  */
                 if (AmCheckpointerProcess() || AmBackgroundWriterProcess() || AmWalReceiverWriterProcess() ||
-                    AmDataReceiverWriterProcess())
+                    AmDataReceiverWriterProcess() || AmWLMArbiterProcess())
                     elevel = FATAL;
                 else
                     elevel = PANIC;
