@@ -540,6 +540,36 @@ SET
 WHERE
     alias1.h_c_w_id >= alias1.h_amount
     OR alias3 != 30002;
+
+CREATE TABLE products
+(
+product_id INTEGER,
+product_name VARCHAR2(60),
+category VARCHAR2(60)
+);
+INSERT INTO products VALUES (1501, 'vivitar 35mm', 'electrncs');
+INSERT INTO products VALUES (1502, 'olympus is50', 'electrncs');
+INSERT INTO products VALUES (1600, 'play gym', 'toys');
+INSERT INTO products VALUES (1601, 'lamaze', 'toys');
+INSERT INTO products VALUES (1666, 'harry potter', 'dvd');
+MERGE INTO products vp
+USING products np
+ON (vp.product_id = np.product_id)
+WHEN MATCHED THEN
+UPDATE SET vp.product_name = np.product_name, vp.category = np.category WHERE vp.product_name != 'play gym'
+WHEN NOT MATCHED THEN
+INSERT VALUES (np.product_id, np.product_name, np.category) WHERE np.category = 'books';
+select * from products order by 1;
+MERGE INTO products vp
+USING products np
+ON (vp.product_id = np.product_id)
+WHEN MATCHED THEN
+UPDATE SET vp.product_name = np.category, vp.category = np.product_name WHERE vp.product_name != 'play gym'
+WHEN NOT MATCHED THEN
+INSERT VALUES (np.product_id, np.product_name, np.category) WHERE np.category = 'books';
+select * from products order by 1;
+
+drop table products;
 reset current_schema;
 ------------------------------------------------
 -- clean up
