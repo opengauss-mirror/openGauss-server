@@ -61,13 +61,19 @@ struct TxnRedoWorker {
     RedoItem *pendingTail; /* The tail of the RedoItem list. */
     RedoItem *procHead;
     RedoItem *procTail;
-    XLogRecPtr dispatched_txn_lsn;
-    XLogRecPtr transed_txn_lsn;
+    XLogRecPtr dispatched_txn_lsn; /* Max lsn dispatched to txn worker*/
+    XLogRecPtr transed_txn_lsn; /* Max lsn transfer to txn worker list*/
+    XLogRecPtr txn_trying_lsn; /* EndPtr of trying record on txn worker*/
 };
 
 XLogRecPtr getTransedTxnLsn(TxnRedoWorker *worker)
 {
     return (XLogRecPtr)pg_atomic_read_u64((volatile uint64*)&worker->transed_txn_lsn);
+}
+
+XLogRecPtr getTryingTxnLsn(TxnRedoWorker *worker)
+{
+    return (XLogRecPtr)pg_atomic_read_u64((volatile uint64*)&worker->txn_trying_lsn);
 }
 
 TxnRedoWorker *StartTxnRedoWorker()
@@ -268,6 +274,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
         XLogRecPtr lrEnd;
         XLogRecPtr curRead;
 
+        pg_atomic_write_u64(&worker->txn_trying_lsn, record->EndRecPtr);
         if (forceAll) {
             GetRedoStartTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_6]);
             XLogRecPtr lrRead; /* lastReplayedReadPtr */
