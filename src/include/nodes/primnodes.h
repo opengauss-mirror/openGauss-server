@@ -256,6 +256,7 @@ typedef struct Param {
     Oid tableOfIndexType; /* type Oid of table of (wait to discard) */
     Oid recordVarTypOid; /* package record var's composite type oid */
     List* tableOfIndexTypeList; /* type Oid list of table of, max size 6 */
+    bool is_bind_param;
 } Param;
 
 /*

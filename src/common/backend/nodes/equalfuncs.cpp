@@ -209,6 +209,7 @@ static bool _equalParam(const Param* a, const Param* b)
     COMPARE_LOCATION_FIELD(location);
     COMPARE_SCALAR_FIELD(tableOfIndexType);
     COMPARE_SCALAR_FIELD(recordVarTypOid);
+    COMPARE_SCALAR_FIELD(is_bind_param);
 
     return true;
 }

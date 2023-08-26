@@ -422,6 +422,7 @@ typedef struct CachedPlanSource {
     bool opteval;
     bool hasSubQuery;
     int nextval_default_expr_type;
+    Oid param_collation;
 } CachedPlanSource;
 
 /*
@@ -467,6 +468,7 @@ typedef struct CachedPlan {
     CachedPlanInfo *cpi;
     bool is_candidate;
     double cost;      /* cost of generic plan, or -1 if not known */
+    Oid param_collation;
 } CachedPlan;
 
 typedef struct CachedPlanInfo {

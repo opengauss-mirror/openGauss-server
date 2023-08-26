@@ -2344,6 +2344,9 @@ static void _outParam(StringInfo str, Param* node)
         WRITE_NODE_FIELD(tableOfIndexTypeList);
     }
 
+    if (t_thrd.proc->workingVersionNum >= PARAM_MARK_VERSION_NUM) {
+        WRITE_BOOL_FIELD(is_bind_param);
+    }
 }
 
 static void _outRownum(StringInfo str, const Rownum* node)

@@ -490,6 +490,7 @@ extern char* pg_server_to_client(const char* s, int len);
 extern char* pg_any_to_server(const char* s, int len, int encoding);
 extern char* pg_server_to_any(const char* s, int len, int encoding, void* convert_finfo = NULL);
 extern char* pg_any_to_client(const char* s, int len, int encoding, void* convert_finfo = NULL);
+extern char* pg_client_to_any(const char* s, int len, int dst_encoding, void* convert_finfo = NULL);
 extern bool WillTranscodingBePerformed(int encoding);
 
 extern unsigned short BIG5toCNS(unsigned short big5, unsigned char* lc);

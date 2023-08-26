@@ -38,6 +38,7 @@
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
 extern const uint32 TXNSTATUS_CACHE_DFX_VERSION_NUM;
+extern const uint32 PARAM_MARK_VERSION_NUM;
 extern const uint32 TIMESCALE_DB_VERSION_NUM;
 extern const uint32 NBTREE_INSERT_OPTIMIZATION_VERSION_NUM;
 extern const uint32 NBTREE_DEDUPLICATION_VERSION_NUM;
