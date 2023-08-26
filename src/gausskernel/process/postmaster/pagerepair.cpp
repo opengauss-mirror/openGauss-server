@@ -269,7 +269,7 @@ void CopyPageToRepairHashTbl(RepairBlockEntry *entry, char *page_content)
     XLogRecPtr page_lsn = PageGetLSN(page_content);
     errno_t rc = 0;
 
-    memcpy_s(entry->page_content, BLCKSZ, page_content, BLCKSZ);
+    rc = memcpy_s(entry->page_content, BLCKSZ, page_content, BLCKSZ);
     securec_check(rc, "", "");
 
     if (entry->error_type == CRC_CHECK_FAIL) {
