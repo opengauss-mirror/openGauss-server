@@ -120,6 +120,8 @@ CONVERSIONS = \
 		utf8_to_euc_tw UTF8 EUC_TW utf8_to_euc_tw utf8_and_euc_tw \
 		gb18030_to_utf8 GB18030 UTF8 gb18030_to_utf8 utf8_and_gb18030 \
 		utf8_to_gb18030 UTF8 GB18030 utf8_to_gb18030 utf8_and_gb18030 \
+		gb18030_2022_to_utf8 GB18030_2022 UTF8 gb18030_2022_to_utf8 utf8_and_gb18030 \
+		utf8_to_gb18030_2022 UTF8 GB18030_2022 utf8_to_gb18030_2022 utf8_and_gb18030 \
 		gbk_to_utf8 GBK UTF8 gbk_to_utf8 utf8_and_gbk \
 		utf8_to_gbk UTF8 GBK utf8_to_gbk utf8_and_gbk \
 		utf8_to_iso_8859_2 UTF8 LATIN2 utf8_to_iso8859 utf8_and_iso8859 \

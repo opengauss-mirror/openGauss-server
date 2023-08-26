@@ -267,6 +267,10 @@ Oid createdb(const CreatedbStmt* stmt)
             if (encoding < 0)
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("%s is not a valid encoding name", encoding_name)));
+            if (t_thrd.proc->workingVersionNum < GB18030_2022_VERSION_NUM && encoding == PG_GB18030_2022) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Not support to create database encoding %s in upgrade!", encoding_name)));
+            }
         } else
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -783,7 +787,8 @@ void check_encoding_locale_matches(int encoding, const char* collate, const char
 #ifdef WIN32
             encoding == PG_UTF8 ||
 #endif
-            (encoding == PG_SQL_ASCII && superuser())))
+            (encoding == PG_SQL_ASCII && superuser() ||
+            (encoding == PG_GB18030_2022 && ctype_encoding == PG_GB18030))))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("encoding \"%s\" does not match locale \"%s\"", pg_encoding_to_char(encoding), ctype),
@@ -794,7 +799,8 @@ void check_encoding_locale_matches(int encoding, const char* collate, const char
 #ifdef WIN32
             encoding == PG_UTF8 ||
 #endif
-            (encoding == PG_SQL_ASCII && superuser())))
+            (encoding == PG_SQL_ASCII && superuser() ||
+            (encoding == PG_GB18030_2022 && collate_encoding == PG_GB18030))))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("encoding \"%s\" does not match locale \"%s\"", pg_encoding_to_char(encoding), collate),

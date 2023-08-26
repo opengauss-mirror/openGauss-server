@@ -174,6 +174,7 @@
 #include "utils/guc_resource.h"
 #include "utils/mem_snapshot.h"
 #include "nodes/parsenodes_common.h"
+#include "mb/pg_wchar.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -8306,6 +8307,9 @@ static void set_config_sourcefile(const char* name, char* sourcefile, int source
  */
 void SetConfigOption(const char* name, const char* value, GucContext context, GucSource source)
 {
+    if (strcmp(name, "client_encoding") == 0 && pg_char_to_encoding(value) == PG_GB18030_2022) {
+        value = "gb18030";
+    }
     (void)set_config_option(name, value, context, source, GUC_ACTION_SET, true, 0);
 }
 

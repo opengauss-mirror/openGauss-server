@@ -3594,7 +3594,8 @@ static bool check_locale_encoding(const char* locale_encoding, int user_enc)
 #ifdef WIN32
             user_enc == PG_UTF8 ||
 #endif
-            user_enc == PG_SQL_ASCII)) {
+            user_enc == PG_SQL_ASCII ||
+            (user_enc == PG_GB18030_2022 && locale_enc == PG_GB18030))) {
         write_stderr(_("%s: encoding mismatch\n"), progname);
         write_stderr(_("The encoding you selected (%s) and the encoding that the\n"
                        "selected locale uses (%s) do not match.  This would lead to\n"

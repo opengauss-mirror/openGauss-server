@@ -223,6 +223,7 @@ typedef enum pg_enc {
     PG_WIN1257,       /* windows-1257 */
     PG_KOI8U,         /* KOI8-U */
     PG_GB18030,       /* GB18030 */
+    PG_GB18030_2022,       /* GB18030-2022 */
     /* PG_ENCODING_BE_LAST points to the above entry */
 
     /* followings are for client encoding only */
@@ -235,7 +236,7 @@ typedef enum pg_enc {
 
 } pg_enc;
 
-#define PG_ENCODING_BE_LAST PG_GB18030
+#define PG_ENCODING_BE_LAST PG_GB18030_2022
 
 /*
  * Please use these tests before access to pg_encconv_tbl[]

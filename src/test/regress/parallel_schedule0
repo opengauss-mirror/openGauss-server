@@ -1099,3 +1099,4 @@ test: enable_expr_fusion_flatten
 # test for on update timestamp and generated column
 test: on_update_session1 on_update_session2
 
+test: ts_gb18030_utf8
