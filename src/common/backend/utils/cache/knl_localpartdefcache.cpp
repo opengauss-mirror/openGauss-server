@@ -77,6 +77,9 @@ Partition LocalPartDefCache::SearchPartitionFromGlobalCopy(Oid part_oid)
     if (unlikely(!IsPrimaryRecoveryFinished())) {
         return NULL;
     }
+    if (unlikely(u_sess->attr.attr_common.IsInplaceUpgrade)) {
+        return NULL;
+    }
     uint32 hash_value = oid_hash((void *)&(part_oid), sizeof(Oid));
     ResourceOwnerEnlargeGlobalBaseEntry(LOCAL_SYSDB_RESOWNER);
     GlobalPartitionEntry *global = (GlobalPartitionEntry *)m_global_partdefcache->SearchReadOnly(part_oid, hash_value);

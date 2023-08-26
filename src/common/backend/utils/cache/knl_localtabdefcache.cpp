@@ -119,6 +119,9 @@ Relation LocalTabDefCache::SearchRelationFromGlobalCopy(Oid rel_oid)
     if (unlikely(!IsPrimaryRecoveryFinished())) {
         return NULL;
     }
+    if (unlikely(u_sess->attr.attr_common.IsInplaceUpgrade)) {
+        return NULL;
+    }
     uint32 hash_value = oid_hash((void *)&(rel_oid), sizeof(Oid));
     Index hash_index = HASH_INDEX(hash_value, (uint32)m_nbuckets);
     ResourceOwner owner = LOCAL_SYSDB_RESOWNER;

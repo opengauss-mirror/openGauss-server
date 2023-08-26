@@ -434,7 +434,8 @@ LocalCatCTup *LocalSysTupCache::SearchTupleFromGlobal(Datum *arguments, uint32 h
     bool bypass_gsc = HistoricSnapshotActive() ||
         m_global_systupcache->enable_rls ||
         !g_instance.global_sysdbcache.hot_standby ||
-        unlikely(!IsPrimaryRecoveryFinished());
+        unlikely(!IsPrimaryRecoveryFinished()) ||
+        (unlikely(u_sess->attr.attr_common.IsInplaceUpgrade));
     if (invalid_entries.ExistTuple(hash_value) || bypass_gsc) {
         global_ct = m_global_systupcache->SearchTupleFromFile(hash_value, arguments, true);
     } else {
@@ -586,7 +587,8 @@ LocalCatCList *LocalSysTupCache::SearchListFromGlobal(int nkeys, Datum *argument
     bool bypass_gsc = HistoricSnapshotActive() ||
         m_global_systupcache->enable_rls ||
         !g_instance.global_sysdbcache.hot_standby ||
-        unlikely(!IsPrimaryRecoveryFinished());
+        unlikely(!IsPrimaryRecoveryFinished()) ||
+        unlikely(u_sess->attr.attr_common.IsInplaceUpgrade);
     GlobalCatCList *global_cl;
     if (invalid_entries.ExistList() || bypass_gsc) {
         global_cl = m_global_systupcache->SearchListFromFile(hash_value, nkeys, arguments, true);
@@ -704,7 +706,8 @@ LocalCatCTup *LocalSysTupCache::SearchTupleFromGlobalForProcAllArgs(
     bool bypass_gsc = HistoricSnapshotActive() ||
         m_global_systupcache->enable_rls ||
         !g_instance.global_sysdbcache.hot_standby ||
-        unlikely(!IsPrimaryRecoveryFinished());
+        unlikely(!IsPrimaryRecoveryFinished()) ||
+        unlikely(u_sess->attr.attr_common.IsInplaceUpgrade);
     if (invalid_entries.ExistTuple(hash_value) || bypass_gsc) {
         global_ct = m_global_systupcache->SearchTupleFromFileWithArgModes(hash_value, arguments, argModes, true);
     } else {
