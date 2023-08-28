@@ -1285,7 +1285,8 @@ static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mod
 
     SSGetBufferDesc(pageid, &valid, &buf_desc);
     if (buf_desc == NULL) {
-        return DMS_ERROR;
+        *lock_mode = (uint8)DMS_LOCK_NULL;
+        return GS_SUCCESS;
     }
 
     if (!valid) {
@@ -1322,7 +1323,8 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
     
     SSGetBufferDesc(pageid, &valid, &buf_desc);
     if (buf_desc == NULL) {
-        return DMS_ERROR;
+        *lock_mode = (uint8)DMS_LOCK_NULL;
+        return GS_SUCCESS;
     }
 
     if (!valid) {

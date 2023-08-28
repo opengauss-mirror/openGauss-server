@@ -210,4 +210,5 @@ extern void ResourceOwnerReleaseGlobalDBEntry(ResourceOwner owner, bool isCommit
 extern void ResourceOwnerReleaseGlobalIsExclusive(ResourceOwner owner, bool isCommit);
 extern bool CurrentResourceOwnerIsEmpty(ResourceOwner owner);
 extern void ReleaseResownerOutOfTransaction();
+extern Buffer ResourceOwnerGetBuffer(ResourceOwner owner);
 #endif /* RESOWNER_H */
