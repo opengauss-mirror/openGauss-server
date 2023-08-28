@@ -2057,9 +2057,9 @@ lazy_truncate_heap(Relation onerel, VacuumStmt *vacstmt, LVRelStats *vacrelstats
          */
         if (RelationIsPartition(onerel)) {
             Assert(vacstmt->onepart && vacstmt->onepartrel);
-            PartitionTruncate(vacstmt->onepartrel, vacstmt->onepart, new_rel_pages);
+            PartitionTruncate(vacstmt->onepartrel, vacstmt->onepart, new_rel_pages, vacrelstats->latestRemovedXid);
         } else {
-            RelationTruncate(onerel, new_rel_pages);
+            RelationTruncate(onerel, new_rel_pages, vacrelstats->latestRemovedXid);
         }
 
         /*

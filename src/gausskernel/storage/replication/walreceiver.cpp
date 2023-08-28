@@ -1699,6 +1699,8 @@ static void XLogWalRcvSendHSFeedback(void)
     else
         xmin = InvalidTransactionId;
     t_thrd.pgxact->xmin = InvalidTransactionId;
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
     /*
      * Always send feedback message.
      */

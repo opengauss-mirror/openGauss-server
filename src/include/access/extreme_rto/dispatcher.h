@@ -165,6 +165,7 @@ typedef struct {
     volatile bool recoveryStop;
     volatile XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoTimeCost *startupTimeCost;
+    ExrtoSnapshotData exrto_snapshot;
 } LogDispatcher;
 
 typedef struct {

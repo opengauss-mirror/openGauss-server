@@ -38,6 +38,7 @@
 #include "access/double_write.h"
 #include "access/heapam.h"
 #include "access/multixact.h"
+#include "access/multi_redo_api.h"
 #include "access/rewriteheap.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
@@ -10424,6 +10425,12 @@ void StartupXLOG(void)
     } else {
         Insert->fullPageWrites = t_thrd.xlog_cxt.lastFullPageWrites;
     }
+
+    if (IS_EXRTO_READ) {
+        /* we are going to be master, we need to recycle residual_undo_file again */
+        g_instance.undo_cxt.is_exrto_residual_undo_file_recycled = false;
+    }
+
     LocalSetXLogInsertAllowed();
     UpdateFullPageWrites();
     t_thrd.xlog_cxt.LocalXLogInsertAllowed = -1;
@@ -13182,6 +13189,16 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
             segno = mainStandbySegNo;
         }
     }
+
+    if (IS_EXRTO_READ) {
+        XLogRecPtr recycle_recptr = pg_atomic_read_u64(&g_instance.comm_cxt.predo_cxt.global_recycle_lsn);
+        XLogSegNo recyle_segno;
+        XLByteToSeg(recycle_recptr, recyle_segno);
+        if (recyle_segno < segno && recyle_segno > 0) {
+            segno = recyle_segno;
+        }
+    }
+
     /* don't delete WAL segments newer than the calculated segment */
     if (segno < *logSegNo && segno > 0) {
         *logSegNo = segno;
@@ -16019,8 +16036,8 @@ void SetXLogReplayRecPtr(XLogRecPtr readRecPtr, XLogRecPtr endRecPtr)
     SpinLockRelease(&xlogctl->info_lck);
     if (isUpdated) {
         RedoSpeedDiag(readRecPtr, endRecPtr);
+        update_dirty_page_queue_rec_lsn(readRecPtr);
     }
-    update_dirty_page_queue_rec_lsn(readRecPtr);
 #ifndef ENABLE_MULTIPLE_NODES
     if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
         int ret = dcf_set_election_priority(1, endRecPtr);

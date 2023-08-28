@@ -216,6 +216,7 @@ typedef enum {
 typedef struct {
     uint32 blockddltype;
     int rels;
+    uint32 mainDataLen;
     char *mainData;
     bool compress;
 } XLogBlockDdlParse;
@@ -947,6 +948,10 @@ static inline Buffer AtomicExchangeBuffer(volatile Buffer *ptr, Buffer newval)
     return old;
 }
 
+/* this is an estimated value */
+static const uint32 MAX_BUFFER_NUM_PER_WAL_RECORD = XLR_MAX_BLOCK_ID + 1;
+static const uint32 LSN_MOVE32 = 10;
+
 void HeapXlogCleanOperatorPage(
     RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen, Size* freespace, bool repairFragmentation);
 void HeapXlogFreezeOperatorPage(RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen,
@@ -1117,7 +1122,7 @@ void SegPageRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdat
 extern void xlog_redo_data_block(
     XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void XLogRecSetBlockDdlState(XLogBlockDdlParse* blockddlstate, uint32 blockddltype, char *mainData,
-    int rels = 1, bool compress = false);
+    int rels = 1, bool compress = false, uint32 main_data_len = 0);
 XLogRedoAction XLogCheckBlockDataRedoAction(XLogBlockDataParse* datadecode, RedoBufferInfo* bufferinfo);
 
 void BtreeRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
@@ -1275,5 +1280,6 @@ extern bool IsCheckPoint(const XLogRecParseState *parseState);
 
 void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const char *data);
 void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn);
+void redo_target_page(const BufferTag& buf_tag, StandbyReadLsnInfoArray* lsn_info, Buffer base_page_buf);
 
 #endif

@@ -41,6 +41,9 @@
 #define IS_PAUSE_BY_TARGET_BARRIER 0x00000001
 #define IS_CANCEL_LOG_CTRL 0x00000010
 
+#define IS_DISASTER_RECOVER_MODE \
+    (static_cast<ClusterRunMode>(g_instance.attr.attr_common.stream_cluster_run_mode) == RUN_MODE_STANDBY)
+
 #ifdef ENABLE_MULTIPLE_NODES
 #define AM_HADR_CN_WAL_RECEIVER (t_thrd.postmaster_cxt.HaShmData->is_cross_region && \
             t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && IS_PGXC_COORDINATOR)

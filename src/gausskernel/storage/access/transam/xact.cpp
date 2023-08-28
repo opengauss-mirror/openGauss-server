@@ -46,6 +46,7 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "access/multi_redo_api.h"
+#include "access/extreme_rto/standby_read/block_info_meta.h"
 #include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_authid.h"
@@ -7205,6 +7206,15 @@ static void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels)
             SMgrRelation srel = smgropen(relFileNode, InvalidBackendId);
             smgrdounlink(srel, true);
             smgrclose(srel);
+
+            /*
+             * recycle exrto files when dropping table occurs.
+             */
+            if (IS_EXRTO_READ) {
+                RelFileNode block_meta_file = relFileNode;
+                block_meta_file.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
+                extreme_rto_standby_read::remove_one_block_info_file(block_meta_file);
+            }
 
             UnlockRelFileNode(relFileNode, AccessExclusiveLock);
 

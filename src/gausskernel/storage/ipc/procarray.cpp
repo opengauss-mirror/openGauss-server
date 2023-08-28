@@ -76,6 +76,7 @@
 
 #include "access/clog.h"
 #include "access/csnlog.h"
+#include "access/extreme_rto/page_redo.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
 #include "access/twophase.h"
@@ -541,6 +542,8 @@ void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommi
         pgxact->xmin = InvalidTransactionId;
         proc->snapXmax = InvalidTransactionId;
         proc->snapCSN = InvalidCommitSeqNo;
+        proc->exrto_read_lsn = 0;
+        proc->exrto_gen_snap_time = 0;
         pgxact->csn_min = InvalidCommitSeqNo;
         pgxact->csn_dr = InvalidCommitSeqNo;
         /* must be cleared with xid/xmin: */
@@ -585,6 +588,8 @@ static inline void ProcArrayEndTransactionInternal(PGPROC* proc, PGXACT* pgxact,
     pgxact->xmin = InvalidTransactionId;
     proc->snapXmax = InvalidTransactionId;
     proc->snapCSN = InvalidCommitSeqNo;
+    proc->exrto_read_lsn = 0;
+    proc->exrto_gen_snap_time = 0;
     pgxact->csn_min = InvalidCommitSeqNo;
     pgxact->csn_dr = InvalidCommitSeqNo;
     /* must be cleared with xid/xmin: */
@@ -827,6 +832,8 @@ void ProcArrayClearTransaction(PGPROC* proc)
     /* Clear the subtransaction-XID cache too */
     pgxact->nxids = 0;
 
+    proc->exrto_read_lsn = 0;
+    proc->exrto_gen_snap_time = 0;
     /* Free xid cache memory if needed */
     ResetProcXidCache(proc, true);
 }
@@ -2107,7 +2114,7 @@ RETRY:
     /* reset xmin before acquiring lwlock, in case blocking redo */
     t_thrd.pgxact->xmin = InvalidTransactionId;
 RETRY_GET:
-    if (snapshot->takenDuringRecovery && !StreamThreadAmI() &&
+    if (snapshot->takenDuringRecovery && !StreamThreadAmI() && !IS_EXRTO_READ &&
         !u_sess->proc_cxt.clientIsCMAgent) {
         if (InterruptPending) {
             (void)pgstat_report_waitstatus(oldStatus);
@@ -2427,6 +2434,10 @@ GROUP_GET_SNAPSHOT:
 
     if (snapshot->takenDuringRecovery) {
         (void)pgstat_report_waitstatus(oldStatus);
+    }
+
+    if (IsExtremeRtoRunning() && pmState == PM_HOT_STANDBY) {
+        extreme_rto::exrto_read_snapshot(snapshot);
     }
 
     return snapshot;
@@ -3198,6 +3209,59 @@ ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalRe
     LWLockRelease(ProcArrayLock);
 
     return pid;
+}
+
+bool proc_array_cancel_conflicting_proc(TransactionId latest_removed_xid, bool reach_max_check_times)
+{
+    ProcArrayStruct* proc_array = g_instance.proc_array_idx;
+    bool conflict = false;
+
+    LWLockAcquire(ProcArrayLock, LW_SHARED);
+    for (int index = 0; index < proc_array->numProcs; index++) {
+        int pg_proc_no = proc_array->pgprocnos[index];
+        PGPROC* pg_proc = g_instance.proc_base_all_procs[pg_proc_no];
+        PGXACT* pg_xact = &g_instance.proc_base_all_xacts[pg_proc_no];
+        XLogRecPtr read_lsn = pg_proc->exrto_read_lsn;
+        TransactionId pxmin = pg_xact->xmin;
+
+        if (pg_proc->pid == 0 || !TransactionIdIsValid(pxmin) || XLogRecPtrIsInvalid(read_lsn)) {
+            continue;
+        }
+
+        Assert(!(pg_xact->vacuumFlags & PROC_IN_VACUUM));
+        /*
+         * Backend is doing logical decoding which manages xmin
+         * separately, check below.
+         */
+        if (pg_xact->vacuumFlags & PROC_IN_LOGICAL_DECODING) {
+            continue;
+        }
+
+         /* cancel query when its xmin < latest_removed_xid */
+        if (TransactionIdPrecedesOrEquals(pxmin, latest_removed_xid)) {
+            conflict = true;
+            pg_proc->recoveryConflictPending = true;
+            if (pg_proc->pid != 0) {
+                /*
+                 * Kill the pid if it's still here. If not, that's what we
+                 * wanted so ignore any errors.
+                 */
+                (void)SendProcSignal(pg_proc->pid, PROCSIG_RECOVERY_CONFLICT_SNAPSHOT, pg_proc->backendId);
+                /*
+                 * Wait a little bit for it to die so that we avoid flooding
+                 * an unresponsive backend when system is heavily loaded.
+                 */
+                pg_usleep(5000L);
+            }
+        }
+        if (reach_max_check_times) {
+            ereport(WARNING, (
+                errmsg("can not cancel thread while redo truncate, thread id = %lu", pg_proc->pid)));
+        }
+    }
+    LWLockRelease(ProcArrayLock);
+
+    return conflict;
 }
 
 /*

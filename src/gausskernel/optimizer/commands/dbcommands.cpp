@@ -33,6 +33,8 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "access/multixact.h"
+#include "access/multi_redo_api.h"
+#include "access/extreme_rto/standby_read/block_info_meta.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -2440,7 +2442,10 @@ void do_db_drop(Oid dbId, Oid tbSpcId)
     if (!rmtree(dst_path, true)) {
         ereport(WARNING, (errmsg("some useless files may be left behind in old database directory \"%s\"", dst_path)));
     }
-    
+    if (IS_EXRTO_READ) {
+        /* remove file start with {db_id}_ */
+        extreme_rto_standby_read::remove_block_meta_info_files_of_db(dbId);
+    }
     if (InHotStandby) {
         /*
          * Release locks prior to commit. XXX There is a race condition

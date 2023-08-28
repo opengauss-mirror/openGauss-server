@@ -113,6 +113,8 @@ enum knl_parallel_redo_state {
     REDO_DONE,
 };
 
+typedef struct ExrtoSnapshotData* ExrtoSnapshot;
+
 /* all process level attribute which expose to user */
 typedef struct knl_instance_attr {
 
@@ -216,6 +218,7 @@ typedef struct knl_g_pid_context {
     ThreadId LogicalReadWorkerPID;
     ThreadId LogicalDecoderWorkerPID;
     ThreadId BarrierPreParsePID;
+    ThreadId exrto_recycler_pid;
     ThreadId ApplyLauncerPID;
     ThreadId StackPerfPID;
     ThreadId CfsShrinkerPID;
@@ -746,7 +749,7 @@ typedef struct knl_g_parallel_redo_context {
     char* ali_buf;
     XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoCpuBindControl redoCpuBindcontrl;
-
+    XLogRecPtr global_recycle_lsn; /* extreme-rto standby read */
     HTAB **redoItemHash; /* used in ondemand extreme RTO */
 } knl_g_parallel_redo_context;
 
@@ -918,6 +921,7 @@ typedef struct knl_g_undo_context {
     pg_atomic_uint64         globalFrozenXid;
     /* Oldest transaction id which is having undo. */
     pg_atomic_uint64         globalRecycleXid;
+    bool                     is_exrto_residual_undo_file_recycled;
 } knl_g_undo_context;
 
 typedef struct knl_g_flashback_context {

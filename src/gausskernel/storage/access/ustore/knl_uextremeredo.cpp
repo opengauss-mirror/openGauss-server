@@ -1148,9 +1148,6 @@ void UHeapXlogFreezeTDOperatorPage(RedoBufferInfo *buffer, void *recorddata)
     UHeapPageTDData *tdPtr = (UHeapPageTDData *)PageGetTDPointer(page);
     TD *transinfo = tdPtr->td_info;
 
-    if (InHotStandby && TransactionIdIsValid(xlrec->latestFrozenXid))
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestFrozenXid, buffer->blockinfo.rnode, buffer->lsn);
-
     UHeapFreezeOrInvalidateTuples(buffer->buf, nFrozen, frozenSlots, true);
 
     for (int i = 0; i < nFrozen; i++) {
@@ -1520,12 +1517,6 @@ void UHeapRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
-const static bool SUPPORT_HOT_STANDBY = false; /* don't support consistency view */
-#else
-const static bool SUPPORT_HOT_STANDBY = true;
-#endif
-
 void UHeap2XlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *blkdata, Size datalen)
 {
     XlUHeapFreeze *xlrec = (XlUHeapFreeze *)recorddata;
@@ -1535,14 +1526,6 @@ void UHeap2XlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void
     OffsetNumber *offsets = (OffsetNumber *)recorddata;
     OffsetNumber *offsetsEnd = NULL;
     UHeapTupleData utuple;
-
-    /*
-     * In Hot Standby mode, ensure that there's no queries running which still
-     * consider the frozen xids as running.
-     */
-    if (InHotStandby && SUPPORT_HOT_STANDBY) {
-        ResolveRecoveryConflictWithSnapshot(cutoffXid, buffer->blockinfo.rnode, buffer->lsn);
-    }
 
     if (datalen > 0) {
         offsetsEnd = (OffsetNumber *)((char *)offsets + datalen);
@@ -2019,12 +2002,18 @@ static void RedoUndoDiscardBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *b
     XLogRecPtr lsn = blockdatarec->undoDiscardParse.lsn;
 
     UndoZone *zone = UndoZoneGroup::GetUndoZone(zoneId);
+    ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+        "redo_undo_discard_block zid=%d, isZoneNull:%d, zone_lsn:%lu, lsn:%lu, end_slot:%lu, end_undo_ptr:%lu, "
+        "recycled_xid:%lu."), zoneId, (int)(zone == NULL), zone->GetLSN(), lsn, endSlot, endUndoPtr, recycledXid)));
     if (zone == NULL) {
         return;
     }
     if (zone->GetLSN() < lsn) {
         zone->LockUndoZone();
         Assert(blockdatarec->undoDiscardParse.startSlot == zone->GetRecycleTSlotPtr());
+        if (IS_EXRTO_READ && (!g_instance.undo_cxt.is_exrto_residual_undo_file_recycled)) {
+            zone->set_recycle_tslot_ptr_exrto(endSlot);
+        }
         zone->SetRecycleTSlotPtr(endSlot);
         zone->SetDiscardURecPtr(endUndoPtr);
         zone->SetForceDiscardURecPtr(endUndoPtr);
@@ -2048,12 +2037,19 @@ static void RedoUndoUnlinkBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     XLogRecPtr unlinkLsn = blockdatarec->undoUnlinkParse.unlinkLsn;
     UndoLogOffset newHead = blockdatarec->undoUnlinkParse.headOffset;
     UndoLogOffset head = usp->Head();
+    ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+        "redo_undo_unlink_block, zid=%d, usp_lsn:%lu, unlink_lsn:%lu, head:%lu, new_head:%lu."),
+        zoneId, usp->LSN(), unlinkLsn, head, newHead)));
 
     if (usp->LSN() < unlinkLsn) {
         zone->ForgetUndoBuffer(head, newHead, UNDO_DB_OID);
         usp->LockSpace();
         usp->MarkDirty();
-        usp->UnlinkUndoLog(zoneId, newHead, UNDO_DB_OID);
+        if (IS_EXRTO_STANDBY_READ) {
+            usp->SetHead(newHead);
+        } else {
+            usp->UnlinkUndoLog(zoneId, newHead, UNDO_DB_OID);
+        }
         usp->SetLSN(unlinkLsn);
         usp->UnlockSpace();
     }
@@ -2071,12 +2067,19 @@ static void RedoSlotUnlinkBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     XLogRecPtr unlinkLsn = blockdatarec->undoUnlinkParse.unlinkLsn;
     UndoLogOffset newHead = blockdatarec->undoUnlinkParse.headOffset;
     UndoLogOffset head = usp->Head();
+    ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+        "redo_slot_unlink_block, zid=%d, usp_lsn:%lu, unlink_lsn:%lu, head:%lu, new_head:%lu."),
+        zoneId, usp->LSN(), unlinkLsn, head, newHead)));
 
     if (usp->LSN() < unlinkLsn) {
         zone->ForgetUndoBuffer(head, newHead, UNDO_SLOT_DB_OID);
         usp->LockSpace();
         usp->MarkDirty();
-        usp->UnlinkUndoLog(zoneId, newHead, UNDO_SLOT_DB_OID);
+        if (IS_EXRTO_STANDBY_READ) {
+            usp->SetHead(newHead);
+        } else {
+            usp->UnlinkUndoLog(zoneId, newHead, UNDO_SLOT_DB_OID);
+        }
         usp->SetLSN(unlinkLsn);
         usp->UnlockSpace();
     }

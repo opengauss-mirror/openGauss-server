@@ -50,6 +50,9 @@
 #include "access/ustore/knl_uextremeredo.h"
 
 #include "commands/dbcommands.h"
+#include "access/extreme_rto/standby_read/block_info_meta.h"
+#include "access/extreme_rto/batch_redo.h"
+#include "access/extreme_rto/page_redo.h"
 #include "access/twophase.h"
 #include "access/redo_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
@@ -805,11 +808,12 @@ void XLogUpdateCopyedBlockState(XLogRecParseState *recordblockstate, XLogBlockPa
 }
 
 void XLogRecSetBlockDdlState(XLogBlockDdlParse *blockddlstate, uint32 blockddltype, char *mainData,
-                             int rels, bool compress)
+                             int rels, bool compress, uint32 mainDataLen)
 {
     Assert(blockddlstate != NULL);
     blockddlstate->blockddltype = blockddltype;
     blockddlstate->rels = rels;
+    blockddlstate->mainDataLen = mainDataLen;
     blockddlstate->mainData = mainData;
     blockddlstate->compress = compress;
 }
@@ -1495,9 +1499,14 @@ void XLogBlockDdlDoSmgrAction(XLogBlockHead *blockhead, void *blockrecbody, Redo
         case BLOCK_DDL_CREATE_RELNODE:
             smgr_redo_create(rnode, blockhead->forknum, blockddlrec->mainData);
             break;
-        case BLOCK_DDL_TRUNCATE_RELNODE:
-            xlog_block_smgr_redo_truncate(rnode, blockhead->blkno, blockhead->end_ptr);
+        case BLOCK_DDL_TRUNCATE_RELNODE: {
+            TransactionId latest_removed_xid = InvalidTransactionId;
+            if (blockddlrec->mainDataLen == TRUNCATE_CONTAIN_XID_SIZE) {
+                latest_removed_xid = ((xl_smgr_truncate_compress*)blockddlrec->mainData)->latest_removed_xid;
+            }
+            xlog_block_smgr_redo_truncate(rnode, blockhead->blkno, blockhead->end_ptr, latest_removed_xid);
             break;
+        }
         case BLOCK_DDL_DROP_RELNODE: {
             bool compress = blockddlrec->compress;
             ColFileNodeRel *xnodes = (ColFileNodeRel *)blockddlrec->mainData;
@@ -1748,26 +1757,38 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
     }
 
     bool checkvalid = XLogBlockRefreshRedoBufferInfo(blockhead, bufferinfo);
-    if (!checkvalid) {
+    if (unlikely(!checkvalid)) {
         ereport(PANIC, (errmsg("XLogBlockRedoForExtremeRTO: redobuffer checkfailed")));
     }
-    if (block_valid <= BLOCK_DATA_FSM_TYPE) {
-        if (redoaction != BLK_DONE) {
-            GetRedoStartTime(redoCost);
-            Assert(block_valid == g_xlogExtRtoRedoTable[block_valid].block_valid);
-            g_xlogExtRtoRedoTable[block_valid].xlog_redoextrto(blockhead, blockrecbody, bufferinfo);
-            CountRedoTime(redoCost);
-        }
-#ifdef USE_ASSERT_CHECKING
-        if (block_valid != BLOCK_DATA_UNDO_TYPE && !bufferinfo->pageinfo.ignorecheck) {
-            DoRecordCheck(redoblocktate, PageGetLSN(bufferinfo->pageinfo.page), true);
-        }
-#endif
-        AddReadBlock(redoblocktate, (u_sess->instr_cxt.pg_buffer_usage->shared_blks_read - readcount));
-    } else {
+
+    if (unlikely(block_valid > BLOCK_DATA_FSM_TYPE)) {
         ereport(WARNING, (errmsg("XLogBlockRedoForExtremeRTO: unsuport type %u, lsn %X/%X", (uint32)block_valid,
                                  (uint32)(blockhead->end_ptr >> 32), (uint32)(blockhead->end_ptr))));
+        return false;
     }
+
+    if ((block_valid != BLOCK_DATA_UNDO_TYPE) && g_instance.attr.attr_storage.EnableHotStandby &&
+        XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr)) {
+        BufferTag buf_tag;
+        INIT_BUFFERTAG(buf_tag, bufferinfo->blockinfo.rnode,
+            bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno);
+        extreme_rto_standby_read::insert_lsn_to_block_info(&extreme_rto::g_redoWorker->standby_read_meta_info, buf_tag,
+            bufferinfo->pageinfo.page, blockhead->start_ptr);
+    }
+
+    if (redoaction != BLK_DONE) {
+        GetRedoStartTime(redoCost);
+        Assert(block_valid == g_xlogExtRtoRedoTable[block_valid].block_valid);
+        g_xlogExtRtoRedoTable[block_valid].xlog_redoextrto(blockhead, blockrecbody, bufferinfo);
+        CountRedoTime(redoCost);
+    }
+#ifdef USE_ASSERT_CHECKING
+    if (block_valid != BLOCK_DATA_UNDO_TYPE && !bufferinfo->pageinfo.ignorecheck) {
+        DoRecordCheck(redoblocktate, PageGetLSN(bufferinfo->pageinfo.page), true);
+    }
+#endif
+    AddReadBlock(redoblocktate, (u_sess->instr_cxt.pg_buffer_usage->shared_blks_read - readcount));
+
     return false;
 }
 
@@ -1863,6 +1884,119 @@ void XLogBlockDispatchForExtermeRTO(XLogRecParseState *recordblockstate)
         nextstate = (XLogRecParseState *)nextstate->nextrecord;
         blockhead = &nextstate->blockparse.blockhead;
     } while (nextstate != NULL);
+}
+
+bool find_target_state(XLogRecParseState *state_iter, const RedoBufferTag &target_tag)
+{
+    RelFileNode n;
+    uint32 blk;
+    ForkNumber fork;
+    extreme_rto::PRXLogRecGetBlockTag(state_iter, &n, &blk, &fork);
+    if (RelFileNodeEquals(n, target_tag.rnode) && target_tag.blkno == blk && target_tag.forknum == fork) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+void wal_block_redo_for_extreme_rto_read(XLogRecParseState *state, RedoBufferInfo *buf_info)
+{
+    uint16 block_valid;
+    void *block_rec_body;
+    XLogBlockHead *block_head;
+    const int shift_size = 32;
+
+    /* decode blockdata body */
+    block_head = &state->blockparse.blockhead;
+    block_rec_body = &state->blockparse.extra_rec;
+    block_valid = XLogBlockHeadGetValidInfo(block_head);
+
+    bool check_valid = XLogBlockRefreshRedoBufferInfo(block_head, buf_info);
+    if (!check_valid) {
+        ereport(ERROR, (errmsg("wal_block_redo_for_extreme_rto: redobuffer checkfailed")));
+    }
+    if (block_valid <= BLOCK_DATA_FSM_TYPE) {
+        Assert(block_valid == g_xlogExtRtoRedoTable[block_valid].block_valid);
+        g_xlogExtRtoRedoTable[block_valid].xlog_redoextrto(block_head, block_rec_body, buf_info);
+    } else {
+        ereport(ERROR, (errmsg("wal_block_redo_for_extreme_rto: unsuport type %u, lsn %X/%X", (uint32)block_valid,
+                                (uint32)(block_head->end_ptr >> shift_size), (uint32)(block_head->end_ptr))));
+    }
+}
+
+void init_redo_buffer_info(RedoBufferInfo *rb_info, const BufferTag &buf_tag, Buffer buf)
+{
+    rb_info->lsn = InvalidXLogRecPtr;
+    rb_info->buf = buf;
+    rb_info->blockinfo.rnode = buf_tag.rnode;
+    rb_info->blockinfo.forknum = buf_tag.forkNum;
+    rb_info->blockinfo.blkno = buf_tag.blockNum;
+    rb_info->blockinfo.pblk.block = InvalidBlockNumber;
+    rb_info->blockinfo.pblk.lsn = InvalidXLogRecPtr;
+    rb_info->blockinfo.pblk.relNode = InvalidOid;
+    rb_info->pageinfo.page = BufferGetPage(buf);
+    rb_info->pageinfo.pagesize = BufferGetPageSize(buf);
+#ifdef USE_ASSERT_CHECKING
+    rb_info->pageinfo.ignorecheck = false; /* initial value */
+#endif
+    rb_info->dirtyflag = false; /* initial value, actually, dirtyflag is useless in extreme RTO read */
+}
+
+void redo_target_page(const BufferTag &buf_tag, StandbyReadLsnInfoArray *lsn_info, Buffer base_page_buf)
+{
+    char *error_msg = NULL;
+    RedoParseManager redo_pm;
+
+    XLogReaderState *xlog_reader = XLogReaderAllocate(&read_local_xlog_page, NULL);
+    /* do we need register interrupt func here? like ProcessConfigFile */
+    XLogParseBufferInitFunc(&redo_pm, MAX_BUFFER_NUM_PER_WAL_RECORD, NULL, NULL);
+    if (xlog_reader == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory"),
+                        errdetail("Failed while allocating an XLog reading processor.")));
+    }
+
+    RedoBufferInfo buf_info;
+    init_redo_buffer_info(&buf_info, buf_tag, base_page_buf);
+    for (uint32 i = 0; i < lsn_info->lsn_num; i++) {
+        XLogRecord *record = XLogReadRecord(xlog_reader, lsn_info->lsn_array[i], &error_msg);
+        if (record == NULL) {
+            ereport(ERROR, (errcode_for_file_access(),
+                            errmsg("could not read two-phase state from xlog at %X/%X, errormsg: %s",
+                                   (uint32)(lsn_info->lsn_array[i] >> LSN_MOVE32), (uint32)(lsn_info->lsn_array[i]),
+                                   error_msg ? error_msg : " ")));
+        }
+
+        uint32 num = 0;
+        XLogRecParseState *state = XLogParseToBlockCommonFunc(xlog_reader, &num);
+
+        if (num == 0) {
+            ereport(ERROR, (errmsg("internal error, xlog in lsn %X/%X doesn't contain any block.",
+                                   (uint32)(lsn_info->lsn_array[i] >> LSN_MOVE32), (uint32)(lsn_info->lsn_array[i]))));
+        }
+
+        if (state == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory"),
+                            errdetail("Failed while wal parse to block.")));
+        }
+        XLogRecParseState *state_iter = state;
+        while (state_iter != NULL) {
+            if (find_target_state(state_iter, buf_info.blockinfo)) {
+                break;
+            }
+            state_iter = (XLogRecParseState *)(state_iter->nextrecord);
+        }
+        if (state_iter == NULL) {
+            ereport(ERROR, (errmsg("internal error, xlog in lsn %X/%X doesn't contain target block.",
+                                   (uint32)(lsn_info->lsn_array[i] >> LSN_MOVE32), (uint32)(lsn_info->lsn_array[i]))));
+        }
+        buf_info.lsn = state_iter->blockparse.blockhead.end_ptr;
+        buf_info.blockinfo.pblk = state_iter->blockparse.blockhead.pblk;
+        wal_block_redo_for_extreme_rto_read(state_iter, &buf_info);
+        XLogBlockParseStateRelease(state);
+    }
+
+    XLogReaderFree(xlog_reader);
+    XLogParseBufferDestoryFunc(&redo_pm);
 }
 
 #ifdef EXTREME_RTO_DEBUG_AB

@@ -80,6 +80,7 @@
 #endif
 
 #include "access/cbmparsexlog.h"
+#include "access/extreme_rto/standby_read.h"
 #include "access/obs/obs_am.h"
 #include "access/transam.h"
 #include "access/ustore/undo/knl_uundoapi.h"
@@ -233,6 +234,7 @@
 #include "access/multi_redo_api.h"
 #include "postmaster/postmaster.h"
 #include "access/parallel_recovery/dispatcher.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "utils/distribute_test.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/compaction/compaction_entry.h"
@@ -312,6 +314,8 @@ volatile int Shutdown = NoShutdown;
 extern void gs_set_hs_shm_data(HaShmemData* ha_shm_data);
 extern void ReaperBackendMain();
 extern void AdjustThreadAffinity();
+
+extern void exrto_standby_read_init();
 
 #define EXTERN_SLOTS_NUM 17
 volatile PMState pmState = PM_INIT;
@@ -3090,10 +3094,7 @@ int PostmasterMain(int argc, char* argv[])
 
     /* init sharestorge(dorado) */
     ShareStorageInit();
-
-    /*
-     * We're ready to rock and roll...
-     */
+    exrto_standby_read_init();
     if (ENABLE_DMS && ENABLE_REFORM) {
         if (!DMSWaitInitStartup()) {
             if (g_instance.pid_cxt.StartupPID == 0) {
@@ -3347,10 +3348,10 @@ static void CheckExtremeRtoGUCConflicts(void)
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if ((g_instance.attr.attr_storage.recovery_parse_workers > 1) && g_instance.attr.attr_storage.EnableHotStandby) {
+    if (IS_DISASTER_RECOVER_MODE &&(g_instance.attr.attr_storage.recovery_parse_workers > 1) && g_instance.attr.attr_storage.EnableHotStandby) {
         ereport(ERROR,
             (errcode(ERRCODE_SYSTEM_ERROR),
-                errmsg("extreme rto could not support hot standby."),
+                errmsg("For disaster standby cluster, extreme rto could not support hot standby."),
                 errhint("Either turn off extreme rto, or turn off hot_standby.")));
     }
 #endif
@@ -4313,7 +4314,7 @@ static int ServerLoop(void)
 
         if (g_instance.attr.attr_storage.enable_ustore &&
             g_instance.pid_cxt.GlobalStatsPID == 0 &&
-            pmState == PM_RUN) {
+            (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
             g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
         }
 
@@ -5094,7 +5095,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
         } else {
 #ifdef ENABLE_MULTIPLE_NODES
             if (STANDBY_MODE == hashmdata->current_mode && (!IS_MULTI_DISASTER_RECOVER_MODE || GTM_FREE_MODE ||
-                                                            g_instance.attr.attr_storage.recovery_parse_workers > 1)) {
+                                                            (IS_PGXC_DATANODE && !g_instance.attr.attr_storage.EnableHotStandby))) {
                 ereport(ERROR, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
                         errmsg("can not accept connection in standby mode.")));
             }
@@ -5866,6 +5867,10 @@ static void SIGHUP_handler(SIGNAL_ARGS)
 #endif
         if (g_instance.pid_cxt.UndoRecyclerPID != 0) {
             signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGHUP);
+        }
+
+        if (g_instance.pid_cxt.exrto_recycler_pid != 0) {
+            signal_child(g_instance.pid_cxt.exrto_recycler_pid, SIGHUP);
         }
 
         if (g_instance.pid_cxt.GlobalStatsPID != 0) {
@@ -6959,7 +6964,11 @@ static void reaper(SIGNAL_ARGS)
 
             if (g_instance.pid_cxt.CBMWriterPID == 0 && !dummyStandbyMode &&
                 u_sess->attr.attr_storage.enable_cbm_tracking)
-                g_instance.pid_cxt.CBMWriterPID = initialize_util_thread(CBMWRITER);
+                
+                
+            if (IS_EXRTO_READ && g_instance.pid_cxt.exrto_recycler_pid == 0) {
+                g_instance.pid_cxt.exrto_recycler_pid = initialize_util_thread(EXRTO_RECYCLER);
+            }
 
             /*
              * Likewise, start other special children as needed.  In a restart
@@ -7746,6 +7755,15 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
+        if (pid == g_instance.pid_cxt.exrto_recycler_pid) {
+            g_instance.pid_cxt.exrto_recycler_pid = 0;
+ 
+            if (!EXIT_STATUS_0(exitstatus)) {
+                HandleChildCrash(pid, exitstatus, _("Exrto recycle process"));
+            }
+            continue;
+        }
+
         if (get_real_recovery_parallelism() > 1) {
             PageRedoExitStatus pageredoStatus = CheckExitPageWorkers(pid);
             if (pageredoStatus == PAGE_REDO_THREAD_EXIT_NORMAL) {
@@ -8328,6 +8346,7 @@ static void AsssertAllChildThreadExit()
     Assert(g_instance.pid_cxt.CommPoolerCleanPID == 0);
     Assert(g_instance.pid_cxt.UndoLauncherPID == 0);
     Assert(g_instance.pid_cxt.UndoRecyclerPID == 0);
+    Assert(g_instance.pid_cxt.exrto_recycler_pid == 0);
 #ifndef ENABLE_MULTIPLE_NODES
     Assert(g_instance.pid_cxt.ApplyLauncerPID == 0);
 #endif
@@ -8401,7 +8420,7 @@ static void PostmasterStateMachine(void)
 #endif   /* ENABLE_MULTIPLE_NODES */
 
             g_instance.pid_cxt.UndoLauncherPID == 0 && g_instance.pid_cxt.UndoRecyclerPID == 0 &&
-            g_instance.pid_cxt.GlobalStatsPID == 0 &&
+            g_instance.pid_cxt.exrto_recycler_pid == 0 && g_instance.pid_cxt.GlobalStatsPID == 0 &&
 #ifndef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.ApplyLauncerPID == 0 &&
 #endif
@@ -8619,6 +8638,7 @@ static void PostmasterStateMachine(void)
         hashmdata = t_thrd.postmaster_cxt.HaShmData;
         hashmdata->current_mode = cur_mode;
         NotifyGscHotStandby();
+        exrto_standby_read_init();
         g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
         Assert(g_instance.pid_cxt.StartupPID != 0);
         pmState = PM_STARTUP;
@@ -8662,6 +8682,7 @@ static void PostmasterStateMachine(void)
             PMUpdateDBState(STARTING_STATE, get_cur_mode(), get_cur_repl_num());
         }
 
+        exrto_standby_read_init();
         g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
         Assert(g_instance.pid_cxt.StartupPID != 0);
         pmState = PM_STARTUP;
@@ -13197,6 +13218,21 @@ bool PMstateIsRun(void)
     return PM_RUN == pmState;
 }
 
+bool pm_state_is_startup()
+{
+    return (pmState == PM_STARTUP);
+}
+ 
+bool pm_state_is_recovery()
+{
+    return (pmState == PM_RECOVERY);
+}
+ 
+bool pm_state_is_hot_standby()
+{
+    return (pmState == PM_HOT_STANDBY);
+}
+
 /* malloc api of cJSON at backend side */
 static void* cJSON_internal_malloc(size_t size)
 {
@@ -13295,6 +13331,9 @@ static void SetAuxType()
             break;
         case SHARE_STORAGE_XLOG_COPYER:
             t_thrd.bootstrap_cxt.MyAuxProcType = XlogCopyBackendProcess;
+            break;
+        case EXRTO_RECYCLER:
+            t_thrd.bootstrap_cxt.MyAuxProcType = ExrtoRecyclerProcess;
             break;
 #ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
@@ -13589,6 +13628,10 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             SharedStorageXlogCopyBackendMain();
             proc_exit(1);
             break;
+        case EXRTO_RECYCLER:
+            extreme_rto::exrto_recycle_main();
+            proc_exit(1);
+            break;
 #ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
             BarrierPreParseMain();
@@ -13846,6 +13889,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case PAGEREPAIR_THREAD:
         case HEARTBEAT:
         case SHARE_STORAGE_XLOG_COPYER:
+        case EXRTO_RECYCLER:
 #ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
         case TS_COMPACTION:
@@ -14399,6 +14443,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<APPLY_WORKER>, APPLY_WORKER, "applyworker", "apply worker" },
     { GaussDbThreadMain<STACK_PERF_WORKER>, STACK_PERF_WORKER, "stack_perf", "stack perf worker" },
     { GaussDbThreadMain<DMS_AUXILIARY_THREAD>, DMS_AUXILIARY_THREAD, "dms_auxiliary", "maintenance xmin in dms" },
+    { GaussDbThreadMain<EXRTO_RECYCLER>, EXRTO_RECYCLER, "exrtorecycler", "exrto recycler" },
 
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES

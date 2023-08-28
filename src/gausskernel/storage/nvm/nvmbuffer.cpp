@@ -255,10 +255,10 @@ restart:
     return;
 }
 
-BufferDesc *NvmBufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber fork_num,
+BufferDesc *NvmBufferAlloc(const RelFileNode& rel_file_node, char relpersistence, ForkNumber fork_num,
     BlockNumber block_num, BufferAccessStrategy strategy, bool *found, const XLogPhyBlock *pblk)
 {
-    Assert(!IsSegmentPhysicalRelNode(smgr->smgr_rnode.node));
+    Assert(!IsSegmentPhysicalRelNode(rel_file_node));
 
     BufferTag new_tag;                 /* identity of requested block */
     uint32 new_hash;                   /* hash value for newTag */
@@ -276,7 +276,7 @@ BufferDesc *NvmBufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber fo
     errno_t rc;
 
     /* create a tag so we can lookup the buffer */
-    INIT_BUFFERTAG(new_tag, smgr->smgr_rnode.node, fork_num, block_num);
+    INIT_BUFFERTAG(new_tag, rel_file_node, fork_num, block_num);
 
     /* determine its hash code and partition lock ID */
     new_hash = BufTableHashCode(&new_tag);

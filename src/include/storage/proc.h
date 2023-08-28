@@ -272,6 +272,8 @@ struct PGPROC {
     uint64 snap_refcnt_bitmap;
 #endif
 
+    XLogRecPtr exrto_read_lsn; /* calculate recycle lsn for read on standby in extreme rto */
+    TimestampTz exrto_gen_snap_time;
     LWLock* subxidsLock;
     struct XidCache subxids; /* cache for subtransaction XIDs */
 

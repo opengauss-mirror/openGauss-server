@@ -57,6 +57,7 @@
  */
 #define BM_IN_MIGRATE (1U << 16)        /* buffer is migrating */
 #define BM_IS_META (1U << 17)
+#define BM_IS_TMP_BUF (1U << 21)         /* temp buf, can not write to disk */
 #define BM_LOCKED (1U << 22)            /* buffer header is locked */
 #define BM_DIRTY (1U << 23)             /* data needs writing */
 #define BM_VALID (1U << 24)             /* data is valid */
@@ -283,6 +284,23 @@ extern "C" {
         TsAnnotateHappensBefore(&desc->state);                   \
         pg_write_barrier();                                      \
         pg_atomic_write_u32(&(desc)->state, (s) & (~BM_LOCKED)); \
+    } while (0)
+
+#define FIX_SEG_BUFFER_TAG(node, tag, rel_node, block_num) \
+    do {                                              \
+        if (IsSegmentFileNode(node)) {                \
+            tag.rnode.relnode = rel_node;              \
+            tag.blocknum = block_num;                  \
+            tag.rnode.bucketnode = SegmentBktId;      \
+        }                                             \
+    } while (0)
+
+#define FIX_BUFFER_DESC(buf, pblk)              \
+    do {                                            \
+        Assert(PhyBlockIsValid(*pblk)); \
+        buf->seg_fileno = pblk->rel_node;   \
+        buf->seg_blockno = pblk->block;     \
+        buf->seg_lsn = pblk->lsn;           \
     } while (0)
 
 extern bool retryLockBufHdr(BufferDesc* desc, uint32* buf_state);

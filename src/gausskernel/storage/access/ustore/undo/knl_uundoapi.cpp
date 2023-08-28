@@ -22,6 +22,7 @@
 #include "access/ustore/undo/knl_uundoxlog.h"
 #include "access/ustore/knl_whitebox_test.h"
 #include "access/transam.h"
+#include "access/multi_redo_api.h"
 #include "catalog/pg_class.h"
 #include "knl/knl_session.h"
 #include "knl/knl_thread.h"
@@ -281,9 +282,14 @@ UndoRecordState CheckUndoRecordValid(UndoRecPtr urp, bool checkForceRecycle, Tra
     UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, false);
     if (uzone == NULL) {
         return UNDO_RECORD_INVALID;
-    } else {
-        return uzone->CheckUndoRecordValid(UNDO_PTR_GET_OFFSET(urp), checkForceRecycle, lastXid);
     }
+
+    if (IS_EXRTO_STANDBY_READ) {
+        return uzone->check_record_valid_exrto(UNDO_PTR_GET_OFFSET(urp), checkForceRecycle, lastXid);
+    }
+
+
+    return uzone->CheckUndoRecordValid(UNDO_PTR_GET_OFFSET(urp), checkForceRecycle, lastXid);
 }
 
 /*
@@ -640,6 +646,7 @@ void RecoveryUndoSystemMeta(void)
 
         /* Close fd. */
         close(fd);
+        ereport(LOG, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("recovery_meta: undo recovery finish.")));
 #endif
     }
 }

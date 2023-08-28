@@ -140,3 +140,4 @@ DropArchiveSlotLock 130
 AboCacheLock 131
 OndemandXLogMemAllocLock 132
 OndemandXLogFileHandleLock 133
+ExrtoSnapshotLock 134
