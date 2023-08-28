@@ -67,12 +67,13 @@ void WriteSSDoradoCtlInfoFile()
 void ReadSSDoradoCtlInfoFile()
 {
     struct stat st;
-    Assert(stat(SS_DORADO_CTRL_FILE, &st) == 0 && S_ISREG(st.st_mode));
-    Assert(g_instance.xlog_cxt.ssReplicationXLogCtl != NULL);
-    ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
-    errno_t errorno = EOK;
-    int fd = -1;
-    fd = BasicOpenFile(SS_DORADO_CTRL_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
+    if (!stat(SS_DORADO_CTRL_FILE, &st) == 0 || !S_ISREG(st.st_mode)) {
+        ereport(PANIC,
+                (errcode_for_file_access(), errmsg("[ReadSSDoradoCtlInfo]SS dorado control file is not exist\"%s\".",
+                SS_DORADO_CTRL_FILE)));
+    } 
+
+    int fd = BasicOpenFile(SS_DORADO_CTRL_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         /* TODO: need consider that dorado is briefly unreadable during the synchronization process */
         ereport(PANIC,
@@ -82,26 +83,30 @@ void ReadSSDoradoCtlInfoFile()
 
     char buffer[SS_DORADO_CTL_INFO_SIZE] __attribute__((__aligned__(ALIGNOF_BUFFER)));
     if (read(fd, buffer, SS_DORADO_CTL_INFO_SIZE) != SS_DORADO_CTL_INFO_SIZE) {
+        (void)close(fd);
         ereport(PANIC,
                 (errcode_for_file_access(), errmsg("[ReadSSDoradoCtlInfo]could not read SS dorado control file \"%s\".",
                 SS_DORADO_CTRL_FILE)));
     }
 
-    errorno = memcpy_s(ctlInfo, SS_DORADO_CTL_INFO_SIZE, buffer, SS_DORADO_CTL_INFO_SIZE);
-    securec_check_c(errorno, "\0", "\0");
-    if (close(fd)) {
-        ereport(PANIC,
-                (errcode_for_file_access(), errmsg("[ReadSSDoradoCtlInfo]could not close SS dorado control file \"%s\".",
-                SS_DORADO_CTRL_FILE)));
-    }
-
+    ShareStorageXLogCtl *ctlInfo = (ShareStorageXLogCtl*)buffer;
     if ((ctlInfo->magic != SHARE_STORAGE_CTL_MAGIC) || (ctlInfo->checkNumber != SHARE_STORAGE_CTL_CHCK_NUMBER)) {
+        (void)close(fd);
         ereport(FATAL, (errmsg("[ReadSSDoradoCtlInfo]SS replication ctl_info maybe damaged.")));
     }
 
     pg_crc32c crc = CalShareStorageCtlInfoCrc(ctlInfo);
     if (!EQ_CRC32C(crc, ctlInfo->crc)) {
+        (void)close(fd);
         ereport(FATAL, (errmsg("[ReadSSDoradoCtlInfo]SS replication ctl_info crc check failed.")));
+    }
+
+    errno_t errorno = memcpy_s(g_instance.xlog_cxt.ssReplicationXLogCtl, SS_DORADO_CTL_INFO_SIZE, buffer, SS_DORADO_CTL_INFO_SIZE);
+    securec_check_c(errorno, "\0", "\0");
+    if (close(fd)) {
+        ereport(PANIC,
+                (errcode_for_file_access(), errmsg("[ReadSSDoradoCtlInfo]could not close SS dorado control file \"%s\".",
+                SS_DORADO_CTRL_FILE)));
     }
 }
 
@@ -120,7 +125,7 @@ void InitSSDoradoCtlInfoFile()
     int fd = -1;
     char buffer[SS_DORADO_CTL_INFO_SIZE] __attribute__((__aligned__(ALIGNOF_BUFFER))); /* need to be aligned */
     errno_t errorno = EOK;
-    Assert(stat(SS_DORADO_CTRL_FILE, &st) !=0 || !S_ISREG(st.st_mode));
+    Assert(stat(SS_DORADO_CTRL_FILE, &st) != 0 || !S_ISREG(st.st_mode));
 
     /* create SS_DORADO_CTRL_FILE first time */
     fd = BasicOpenFile(SS_DORADO_CTRL_FILE, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, S_IRUSR | S_IWUSR);
