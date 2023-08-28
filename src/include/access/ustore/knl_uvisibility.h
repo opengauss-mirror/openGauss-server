@@ -16,6 +16,8 @@
 #ifndef KNL_UVISIBILITY_H
 #define KNL_UVISIBILITY_H
 
+#include "postmaster/postmaster.h"
+
 typedef struct UHeapTupleTransInfo {
     int td_slot;
     TransactionId xid;

@@ -63,6 +63,26 @@ typedef struct redoitemhashentry {
     int redoItemNum;
 } RedoItemHashEntry;
 
+inline void PRXLogRecGetBlockTag(XLogRecParseState *recordBlockState, RelFileNode *rnode, BlockNumber *blknum,
+                                        ForkNumber *forknum)
+{
+    XLogBlockParse *blockparse = &(recordBlockState->blockparse);
+
+    if (rnode != NULL) {
+        rnode->dbNode = blockparse->blockhead.dbNode;
+        rnode->relNode = blockparse->blockhead.relNode;
+        rnode->spcNode = blockparse->blockhead.spcNode;
+        rnode->bucketNode = blockparse->blockhead.bucketNode;
+        rnode->opt = blockparse->blockhead.opt;
+    }
+    if (blknum != NULL) {
+        *blknum = blockparse->blockhead.blkno;
+    }
+    if (forknum != NULL) {
+        *forknum = blockparse->blockhead.forknum;
+    }
+}
+
 extern void PRPrintRedoItemHashTab(HTAB *redoItemHash);
 extern HTAB *PRRedoItemHashInitialize(MemoryContext context);
 extern  void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);

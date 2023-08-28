@@ -6488,7 +6488,7 @@ void ProcessInterrupts(void)
                                 " database and repeat your command.")));
             else
                 ereport(ERROR,
-                    (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                    (errcode(ERRCODE_SR_RECOVERY_CONFLICT),
                         errmsg("canceling statement due to conflict with recovery"),
                         errdetail_recovery_conflict()));
         }
@@ -8327,6 +8327,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         t_thrd.log_cxt.msgbuf->cursor = 0;
         t_thrd.log_cxt.msgbuf->len = 0;
         lc_replan_nodegroup = InvalidOid;
+        /* reset xmin before ReadCommand, in case blocking redo */
+        //if (RecoveryInProgress()) {
+            
+        //}
 
         /*
          * (1) If we've reached idle state, tell the frontend we're ready for

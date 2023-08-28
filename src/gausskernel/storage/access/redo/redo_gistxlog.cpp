@@ -202,11 +202,13 @@ static XLogRecParseState *GistXlogPageSplitParseBlock(XLogReaderState *record, u
         BlockNumber blkno;
         XLogRecGetBlockTag(record, i + 1, NULL, NULL, &blkno);
         if (blkno == GIST_ROOT_BLKNO) {
+            XLogRecSetBlockDataState(record, i + 1, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
             XLogRecSetAuxiBlkNumState(&blockstate->blockparse.extra_rec.blockdatarec, InvalidForkNumber,
                                       InvalidForkNumber);
             isrootsplit = true;
         }
         if (blkno != GIST_ROOT_BLKNO) {
+            XLogRecSetBlockDataState(record, i + 1, blockstate);
             uint32 flag;
             if ((i < xldata->npage - 1) && !isrootsplit && xldata->markfollowright)
                 flag = 1;

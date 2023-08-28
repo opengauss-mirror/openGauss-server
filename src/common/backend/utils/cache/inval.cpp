@@ -117,6 +117,7 @@
 #include "utils/syscache.h"
 #include "access/heapam.h"
 #include "catalog/pgxc_class.h"
+#include "access/multi_redo_api.h"
 
 /*
  * To minimize palloc traffic, we keep pending requests in successively-
@@ -911,6 +912,20 @@ void AcceptInvalidationMessages()
     --u_sess->inval_cxt.DeepthInAcceptInvalidationMessage;
 }
 
+void reset_invalidation_cache()
+{
+    if (EnableLocalSysCache()) {
+        if (!IS_THREAD_POOL_WORKER) {
+            InvalidateSystemCaches();
+        } else {
+            InvalidateThreadSystemCaches();
+            InvalidateSessionSystemCaches();
+        }
+        return;
+    }
+    InvalidateSystemCaches();
+}
+
 /*
  * AtStart_Inval
  *		Initialize inval lists at start of a main transaction.
@@ -1059,10 +1074,14 @@ int xactGetCommittedInvalidationMessages(SharedInvalidationMessage** msgs, bool*
  * before and after we send the SI messages. See AtEOXact_Inval()
  */
 void ProcessCommittedInvalidationMessages(
-    SharedInvalidationMessage* msgs, int nmsgs, bool RelcacheInitFileInval, Oid dbid, Oid tsid)
+    SharedInvalidationMessage* msgs, int nmsgs, bool RelcacheInitFileInval, Oid dbid, Oid tsid, XLogRecPtr lsn)
 {
     if (nmsgs <= 0) {
         return;
+    }
+
+    if (!IS_EXRTO_READ) {
+        lsn = 0;
     }
 
     ereport(trace_recovery(DEBUG4),
@@ -1085,7 +1104,7 @@ void ProcessCommittedInvalidationMessages(
         u_sess->proc_cxt.DatabasePath = NULL;
     }
 
-    SendSharedInvalidMessages(msgs, nmsgs);
+    send_shared_invalid_messages(msgs, nmsgs, lsn);
 
     if (RelcacheInitFileInval) {
         RelationCacheInitFilePostInvalidate();
@@ -1567,13 +1586,13 @@ void CacheInvalidateSmgr(RelFileNodeBackend rnode)
  * should happen in low-level relmapper.c routines, which are executed while
  * replaying WAL as well as when creating it.
  */
-void CacheInvalidateRelmap(Oid databaseId)
+void CacheInvalidateRelmap(Oid databaseId, XLogRecPtr lsn)
 {
     SharedInvalidationMessage msg;
 
     msg.rm.id = SHAREDINVALRELMAP_ID;
     msg.rm.dbId = databaseId;
-    SendSharedInvalidMessages(&msg, 1);
+    send_shared_invalid_messages(&msg, 1, lsn);
 }
 
 /*

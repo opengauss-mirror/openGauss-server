@@ -120,14 +120,37 @@ static const f_smgr smgrsw[] = {
         seg_async_write,
         seg_move_buckets
     },
+
+    /* extreme-rto standby read */
+    {
+        exrto_init,
+        NULL,
+        exrto_close,
+        NULL,
+        exrto_exists,
+        exrto_unlink,
+        exrto_extend,
+        NULL,
+        exrto_read,
+        exrto_write,
+        exrto_writeback,
+        exrto_nblocks,
+        exrto_truncate,
+        NULL,
+        NULL,
+        NULL,
+        NULL
+    }
 };
 
 static const int NSmgr = lengthof(smgrsw);
 static void push_unlink_rel_one_fork_to_hashtbl(RelFileNode node, ForkNumber forkNum);
 
-static inline int ChooseSmgrManager(RelFileNode rnode)
+static inline int ChooseSmgrManager(const RelFileNode& rnode)
 {
-    if (rnode.dbNode == UNDO_DB_OID || rnode.dbNode == UNDO_SLOT_DB_OID) {
+    if (IS_EXRTO_RELFILENODE(rnode)) {
+        return EXRTO_MANAGER;
+    } else if (rnode.dbNode == UNDO_DB_OID || rnode.dbNode == UNDO_SLOT_DB_OID) {
         return UNDO_MANAGER;
     } else if (IsSegmentFileNode(rnode)) {
         return SEGMENT_MANAGER;
@@ -311,7 +334,7 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
                 reln->smgr_bcm_nblocks[colnum] = InvalidBlockNumber;
         }
 
-        if (reln->smgr_which == UNDO_MANAGER) {
+        if (reln->smgr_which == UNDO_MANAGER || reln->smgr_which == EXRTO_MANAGER) {
             fdNeeded = 1;
         }
 
@@ -409,8 +432,15 @@ void smgrclose(SMgrRelation reln, BlockNumber blockNum)
     ereport(DEBUG5, (errmsg("smgr close %p", reln)));
     SMgrRelation* owner = NULL;
     int forknum;
+    int max_forknum;
 
-    for (forknum = 0; forknum < (int)(reln->md_fdarray_size); forknum++) {
+    if (reln->smgr_which == EXRTO_MANAGER && reln->smgr_rnode.node.spcNode == EXRTO_BLOCK_INFO_SPACE_OID) {
+        max_forknum = EXRTO_FORK_NUM;
+    } else {
+        max_forknum = reln->md_fdarray_size;
+    }
+
+    for (forknum = 0; forknum < max_forknum; forknum++) {
         (*(smgrsw[reln->smgr_which].smgr_close))(reln, (ForkNumber)forknum, blockNum);
     }
     owner = reln->smgr_owner;
@@ -567,10 +597,20 @@ void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum)
     RelFileNodeBackend rnode = reln->smgr_rnode;
     int which = reln->smgr_which;
     int forknum;
+    int max_forknum;
+    HTAB *unlink_rel_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+    bool found = false;
 
     (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
+
+    if (which == EXRTO_MANAGER && reln->smgr_rnode.node.spcNode == EXRTO_BLOCK_INFO_SPACE_OID) {
+        max_forknum = EXRTO_FORK_NUM;
+    } else {
+        max_forknum = reln->md_fdarray_size;
+    }
+
     /* Close the forks at smgr level */
-    for (forknum = 0; forknum < (int)(reln->md_fdarray_size); forknum++) {
+    for (forknum = 0; forknum < max_forknum; forknum++) {
         (*(smgrsw[which].smgr_close))(reln, (ForkNumber)forknum, blockNum);
     }
     if (which == UNDO_MANAGER) {

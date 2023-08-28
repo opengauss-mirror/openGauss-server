@@ -22,6 +22,7 @@
 #-------------------------------------------------------------------------
 
 subdir = src/gausskernel/storage/access/redo
+SUBDIRS = standby_read
 top_builddir = ../../../../..
 include $(top_builddir)/src/Makefile.global
 

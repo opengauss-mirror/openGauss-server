@@ -19,6 +19,7 @@
 
 #include "access/xlog_internal.h" /* for pg_start/stop_backup */
 #include "access/cbmparsexlog.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_type.h"
 #include "gs_thread.h"
@@ -1202,7 +1203,6 @@ int IsBeginWith(const char *str1, char *str2)
     return 1;
 }
 
-
 bool IsSkipPath(const char * pathName)
 {
     /* Skip pg_control here to back up it last */
@@ -1676,6 +1676,24 @@ static bool check_data_filename(char *filename, int *segNo)
 
     token = strtok_r(filename, "_", &tmptoken);
     if ('\0' == tmptoken[0]) {
+        uint dot_count = 0;
+        int filename_idx = static_cast<int>(strlen(filename) - 1);
+        // check the last word must be num
+        if (isdigit(filename[filename_idx]) == false) {
+            *segNo = 0;
+            return false;
+        }
+        while (filename_idx >= 0) {
+            if (filename[filename_idx] == '.') {
+                dot_count++;
+            }
+            /* if the char is not num/'.' or dot_count > 1, then break */
+            if ((isdigit(filename[filename_idx]) == false && filename[filename_idx] != '.') || dot_count > 1) {
+                *segNo = 0;
+                return false;
+            }
+            filename_idx--;
+        }
         /* MAIN_FORK */
         nmatch = sscanf_s(filename, "%u.%d", &relNode, segNo);
         return (nmatch == 1 || nmatch == 2);

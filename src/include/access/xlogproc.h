@@ -162,6 +162,7 @@ typedef enum {
     BLOCK_DATA_SEG_SPACE_SHRINK,
     BLOCK_DATA_SEG_FULL_SYNC_TYPE,
     BLOCK_DATA_SEG_EXTEND,
+    BLOCK_DATA_CLEANUP_TYPE,
 } XLogBlockParseEnum;
 
 /* ********BLOCK COMMON HEADER  END ***************** */
@@ -218,6 +219,7 @@ typedef enum {
 typedef struct {
     uint32 blockddltype;
     int rels;
+    uint32 mainDataLen;
     char *mainData;
 } XLogBlockDdlParse;
 
@@ -498,7 +500,9 @@ typedef struct {
     Oid dbNode;           /* database */
     int2 bucketNode; /* bucket   */
     uint2 opt;
+    bool is_conflict_type; /* whether wal log type is conflict with standby read if redo */
     XLogPhyBlock pblk;
+    bool hasCSN;
 } XLogBlockHead;
 
 #define XLogBlockHeadEncodeSize (sizeof(XLogBlockHead))
@@ -595,6 +599,10 @@ typedef struct {
 } XLogBlockSegNewPage;
 
 typedef struct {
+    TransactionId removed_xid;
+} WalCleanupInfoParse;
+
+typedef struct {
     XLogBlockHead blockhead;
     XLogBlockRedoHead redohead;
     union {
@@ -624,6 +632,7 @@ typedef struct {
         XLogBlockSegDdlParse blocksegddlrec;
         XLogBlockSegFullSyncParse blocksegfullsyncrec;
         XLogBlockSegNewPage blocksegnewpageinfo;
+        WalCleanupInfoParse clean_up_info;
     } extra_rec;
 } XLogBlockParse;
 
@@ -914,7 +923,9 @@ extern AbnormalProcFunc g_AbFunList[ABNORMAL_NUM];
 #define ADD_ABNORMAL_POSITION(pos)
 #endif
 
-
+/* this is an estimated value */
+static const uint32 MAX_BUFFER_NUM_PER_WAL_RECORD = XLR_MAX_BLOCK_ID + 1;
+static const uint32 LSN_MOVE32 = 32;
 
 void HeapXlogCleanOperatorPage(
     RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen, Size* freespace, bool repairFragmentation);
@@ -1075,7 +1086,7 @@ void XLogRecSetSegNewPageInfo(XLogBlockSegNewPage *state, char *mainData, Size l
 void XLogRecSetAuxiBlkNumState(XLogBlockDataParse* blockdatarec, BlockNumber auxilaryblkn1, BlockNumber auxilaryblkn2);
 void XLogRecSetBlockDataStateContent(XLogReaderState *record, uint32 blockid, XLogBlockDataParse *blockdatarec);
 void XLogRecSetBlockDataState(XLogReaderState* record, uint32 blockid, XLogRecParseState* recordblockstate,
-    XLogBlockParseEnum type = BLOCK_DATA_MAIN_DATA_TYPE);
+    XLogBlockParseEnum type = BLOCK_DATA_MAIN_DATA_TYPE, bool is_conflict_type = false);
 extern char* XLogBlockDataGetBlockData(XLogBlockDataParse* datadecode, Size* len);
 void Heap2RedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void HeapRedoDataBlock(
@@ -1084,8 +1095,9 @@ void SegPageRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdat
 extern void xlog_redo_data_block(
     XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void XLogRecSetBlockDdlState(XLogBlockDdlParse* blockddlstate, uint32 blockddltype, char *mainData,
-    int rels = 1);
+    int rels = 1, uint32 main_data_len = 0);
 XLogRedoAction XLogCheckBlockDataRedoAction(XLogBlockDataParse* datadecode, RedoBufferInfo* bufferinfo);
+extern void wal_rec_set_clean_up_info_state(WalCleanupInfoParse *parse_state, TransactionId removed_xid);
 
 void BtreeRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 void Btree2RedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
@@ -1238,8 +1250,9 @@ extern void XLogBlockSegDdlDoRealAction(XLogBlockHead* blockhead, void* blockrec
 extern void GinRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void GistRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo);
 extern bool IsCheckPoint(const XLogRecParseState *parseState);
-
+bool is_backup_end(const XLogRecParseState *parse_state);
 void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const char *data);
 void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn);
+void redo_target_page(const BufferTag& buf_tag, StandbyReadLsnInfoArray* lsn_info, Buffer base_page_buf);
 
 #endif

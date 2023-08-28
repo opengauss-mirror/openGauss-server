@@ -33,9 +33,7 @@
 #include "nodes/pg_list.h"
 #include "storage/proc.h"
 #include "access/redo_statistic.h"
-
-
-
+#include "postmaster/postmaster.h"
 
 typedef enum {
     NOT_PAGE_REDO_THREAD,
@@ -58,6 +56,18 @@ static const uint32 PAGE_REDO_WORKER_START = 1;
 static const uint32 PAGE_REDO_WORKER_READY = 2;
 static const uint32 PAGE_REDO_WORKER_EXIT = 3;
 static const uint32 BIG_RECORD_LENGTH = XLOG_BLCKSZ * 16;
+
+#define IS_EXRTO_READ (g_instance.attr.attr_storage.EnableHotStandby && IsExtremeRedo())
+#define IS_EXRTO_STANDBY_READ (IS_EXRTO_READ && pm_state_is_hot_standby())
+#define IS_EXRTO_RECOVERY_IN_PROGRESS (RecoveryInProgress() && IsExtremeRedo())
+#define IS_EXRTO_READ_OPT \
+    (g_instance.attr.attr_storage.EnableHotStandby && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)
+
+static inline bool is_exrto_standby_read_worker()
+{
+    return (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == THREADPOOL_STREAM ||
+        t_thrd.role == STREAM_WORKER);
+}
 
 static inline int get_real_recovery_parallelism()
 {

@@ -73,6 +73,7 @@
 #include "replication/origin.h"
 #include "catalog/pg_subscription.h"
 #include "port/pg_crc32c.h"
+
 #define MAX_PATH_LEN 1024
 
 extern const int g_reserve_param_num;
@@ -1556,6 +1557,7 @@ typedef struct knl_t_undorecycler_context {
     /* Flags set by signal handlers */
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
+    bool is_recovery_in_progress;
 } knl_t_undorecycler_context;
 
 typedef struct knl_t_rollback_requests_context {
@@ -1943,12 +1945,38 @@ typedef struct knl_t_conn_context {
     const char* _float_inf;
 } knl_t_conn_context;
 
+typedef struct _DelayInvalidMsg {
+    SharedInvalidationMessage* inval_msgs;
+    int nmsgs;
+    uint32 xinfo;
+    Oid db_id;
+    Oid ts_id;
+    XLogRecPtr lsn;
+    bool relcache_init_file_inval;
+    bool valid;
+} DelayInvalidMsg;
+
 typedef struct {
     volatile sig_atomic_t shutdown_requested;
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t sleep_long;
     volatile sig_atomic_t check_repair;
+    void *redo_worker_ptr;
+    DelayInvalidMsg invalid_msg;
 } knl_t_page_redo_context;
+
+typedef struct _StandbyReadLsnInfoArray {
+    XLogRecPtr *lsn_array;
+    uint32 lsn_num;
+    XLogRecPtr base_page_lsn;
+    uint64 base_page_pos;
+} StandbyReadLsnInfoArray;
+
+typedef struct {
+    volatile sig_atomic_t shutdown_requested;
+    volatile sig_atomic_t got_SIGHUP;
+    StandbyReadLsnInfoArray lsn_info;
+} knl_t_exrto_recycle_context;
 
 typedef struct knl_t_startup_context {
     /*
@@ -2558,8 +2586,10 @@ typedef struct knl_t_storage_context {
     struct HTAB* SharedBufHash;
     struct HTAB* BufFreeListHash;
     struct BufferDesc* InProgressBuf;
+    struct BufferDesc* ParentInProgressBuf;
     /* local state for StartBufferIO and related functions */
     volatile bool IsForInput;
+    volatile bool ParentIsForInput;
     /* local state for LockBufferForCleanup */
     struct BufferDesc* PinCountWaitBuf;
     /* local state for aio clean up resource  */
@@ -3458,6 +3488,7 @@ typedef struct knl_thrd_context {
     knl_t_percentile_context percentile_cxt;
     knl_t_perf_snap_context perf_snap_cxt;
     knl_t_page_redo_context page_redo_cxt;
+    knl_t_exrto_recycle_context exrto_recycle_cxt;
     knl_t_parallel_decode_worker_context parallel_decode_cxt;
     knl_t_logical_read_worker_context logicalreadworker_cxt;
     knl_t_heartbeat_context heartbeat_cxt;

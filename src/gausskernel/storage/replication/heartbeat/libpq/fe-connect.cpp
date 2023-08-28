@@ -34,12 +34,14 @@
 #define SOCK_ERRNO errno
 #define SOCK_ERRNO_SET(e) (errno = (e))
 
+#ifndef FREE_AND_RESET
 #define FREE_AND_RESET(ptr) do { \
     if (NULL != (ptr)) { \
         free(ptr);       \
         (ptr) = NULL;    \
     }                    \
 } while (0)
+#endif
 
 namespace PureLibpq {
 typedef struct PQconninfoOption {

@@ -76,7 +76,7 @@ XLogRecParseState *ClogXlogDdlParseToBlock(XLogReaderState *record, uint32 *bloc
     XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);
 
     XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype,
-                            (char *)XLogRecGetData(record));
+                            (char *)XLogRecGetData(record), 1);
 
     return recordstatehead;
 }

@@ -132,6 +132,7 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_LOGICAL_DECODE, "LOGICAL_DECODE"},
     {MOD_GPRC, "GPRC"},
     {MOD_DISASTER_READ, "DISASTER_READ"},
+    {MOD_STANDBY_READ, "STANDBY_READ"},
     {MODE_REPSYNC, "REPSYNC"},
     {MOD_SQLPATCH, "SQLPATCH"},
     {MOD_GPI, "GPI"},
@@ -274,4 +275,3 @@ module_logging_enable_comm(ModuleId module_id)
 {
     enable_module_logging(module_id);
 }
-

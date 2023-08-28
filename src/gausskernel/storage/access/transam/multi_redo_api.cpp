@@ -33,7 +33,6 @@
 #include "access/multi_redo_api.h"
 #include "access/extreme_rto/dispatcher.h"
 #include "access/parallel_recovery/dispatcher.h"
-#include "access/extreme_rto/page_redo.h"
 #include "access/parallel_recovery/page_redo.h"
 #include "access/xlog_internal.h"
 
@@ -98,9 +97,9 @@ void DispatchRedoRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz
             g_instance.comm_cxt.localinfo_cxt.term_from_xlog = term;
         }
 
-        long readbufcountbefore = u_sess->instr_cxt.pg_buffer_usage->local_blks_read;
+        long readbufcountbefore = u_sess->instr_cxt.pg_buffer_usage->shared_blks_read;
         ApplyRedoRecord(record);
-        record->readblocks = u_sess->instr_cxt.pg_buffer_usage->local_blks_read - readbufcountbefore;
+        record->readblocks = u_sess->instr_cxt.pg_buffer_usage->shared_blks_read - readbufcountbefore;
         CountXLogNumbers(record);
         if (XLogRecGetRmid(record) == RM_XACT_ID)
             SetLatestXTime(recordXTime);
@@ -165,6 +164,12 @@ bool IsAllPageWorkerExit()
             }
         }
         g_instance.comm_cxt.predo_cxt.totalNum = 0;
+    }
+
+    if (g_instance.pid_cxt.exrto_recycler_pid != 0) {
+        ereport(LOG,
+            (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("exrto_recycler_pid no equal to 0")));
+        return false;
     }
     ereport(LOG,
             (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("page workers all exit or not open parallel redo")));

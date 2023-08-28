@@ -44,7 +44,7 @@ void UHeapRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
 void UHeap2RedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo);
 
 void UHeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool isinit, bool istoast, void *blkdata,
-    Size datalen, TransactionId recxid, Size *freespace);
+    Size datalen, TransactionId recxid, Size *freespace, bool isHasCSN);
 
 void RedoUHeapUndoBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *blockdatarec, RedoBufferInfo *bufferinfo);
 void RedoUndoBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *blockdatarec, RedoBufferInfo *bufferinfo);

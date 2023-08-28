@@ -42,6 +42,7 @@
 #include "utils/postinit.h"
 #include "utils/gs_bitmap.h"
 #include "pgstat.h"
+#include "access/ustore/knl_uvisibility.h"
 
 #define TRANS_PARTITION_LINEAR_SPARE_TIME(degree) \
     (degree > 3000 ? 3000 : degree)
@@ -385,7 +386,7 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
         if (undoRecycled) {
             Assert(TransactionIdIsValid(recycleXid) && (zone->GetRecycleXid() < recycleXid));
             zone->LockUndoZone();
-            if (!zone->CheckRecycle(startUndoPtr, endUndoPtr)) {
+            if (!zone->CheckRecycle(startUndoPtr, endUndoPtr, false)) {
                 ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d recycle start %lu >= recycle end %lu."),
                         zone->GetZoneId(), startUndoPtr, endUndoPtr)));
             }

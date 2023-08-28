@@ -40,6 +40,7 @@
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/multixact.h"
+#include "access/multi_redo_api.h"
 #include "catalog/catalog.h"
 #include "catalog/heap.h"
 #include "catalog/catversion.h"
@@ -1358,7 +1359,7 @@ HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic)
      * relfilenode of non mapped system relations during decoding.
      */
     snapshot = SnapshotNow;
-    if (HistoricSnapshotActive() && !force_non_historic) {
+    if (HistoricSnapshotActive() && !force_non_historic || IS_EXRTO_RECOVERY_IN_PROGRESS) {
         snapshot = GetCatalogSnapshot();
     }
 
@@ -1554,7 +1555,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
      */
     Snapshot snapshot = NULL;
     snapshot = SnapshotNow;
-    if (HistoricSnapshotActive()) {
+    if (HistoricSnapshotActive() || IS_EXRTO_RECOVERY_IN_PROGRESS) {
         snapshot =  GetCatalogSnapshot();
     }
 
@@ -8435,4 +8436,3 @@ bool IsRelationReplidentKey(Relation r, int attno)
     RelationClose(idx_rel);
     return false;
 }
-

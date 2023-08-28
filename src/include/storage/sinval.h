@@ -132,10 +132,16 @@ typedef union SharedInvalidationMessage {
     SharedInvalFuncMsg fm;
 } SharedInvalidationMessage;
 
+typedef struct _SharedInvalidationMessageEx {
+    SharedInvalidationMessage msg;
+    XLogRecPtr lsn;
+} SharedInvalidationMessageEx;
+
 /* Counter of messages processed; don't worry about overflow. */
 extern THR_LOCAL volatile sig_atomic_t catchupInterruptPending;
 
 extern void SendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n);
+void send_shared_invalid_messages(const SharedInvalidationMessage* msgs, int n, XLogRecPtr lsn);
 
 extern void ReceiveSharedInvalidMessages(
     void (*invalFunction)(SharedInvalidationMessage* msg), void (*resetFunction)(void), bool worksession);
@@ -152,7 +158,7 @@ extern void ProcessCatchupInterrupt(void);
 
 extern int xactGetCommittedInvalidationMessages(SharedInvalidationMessage** msgs, bool* RelcacheInitFileInval);
 extern void ProcessCommittedInvalidationMessages(
-    SharedInvalidationMessage* msgs, int nmsgs, bool RelcacheInitFileInval, Oid dbid, Oid tsid);
+    SharedInvalidationMessage* msgs, int nmsgs, bool RelcacheInitFileInval, Oid dbid, Oid tsid, XLogRecPtr lsn);
 extern void LocalExecuteThreadAndSessionInvalidationMessage(SharedInvalidationMessage* msg);
 extern void LocalExecuteThreadInvalidationMessage(SharedInvalidationMessage* msg);
 extern void LocalExecuteSessionInvalidationMessage(SharedInvalidationMessage* msg);

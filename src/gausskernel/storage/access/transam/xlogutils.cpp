@@ -1324,6 +1324,13 @@ void XlogDropRowReation(RelFileNode rnode)
     rbnode.node = rnode;
     rbnode.backend = InvalidBackendId;
     smgrclosenode(rbnode);
+    if (IS_EXRTO_READ) {
+        RelFileNodeBackend standbyReadRnode;
+        standbyReadRnode.node = rnode;
+        standbyReadRnode.node.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
+        standbyReadRnode.backend = InvalidBackendId;
+        smgrclosenode(standbyReadRnode);
+    }
 }
 
 void XLogForgetDDLRedo(XLogRecParseState *redoblockstate)
@@ -1378,6 +1385,10 @@ void XLogDropSpaceShrink(XLogRecParseState *redoblockstate)
  */
 void XLogDropRelation(const RelFileNode &rnode, ForkNumber forknum)
 {
+    if (AmErosRecyclerProcess()) {
+        return;
+    }
+
     forget_invalid_pages(rnode, forknum, 0, false);
 
     /* clear relfilenode match entry of recovery thread hashtbl */
@@ -1454,6 +1465,10 @@ void XLogDropDatabase(Oid dbid)
     smgrcloseall();
 
     forget_invalid_pages_batch(InvalidOid, dbid);
+
+    if (AmErosRecyclerProcess()) {
+        return;
+    }
 
     /* clear dbNode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
@@ -1731,8 +1746,9 @@ XLogRecParseState *multixact_xlog_ddl_parse_to_block(XLogReaderState *record, ui
     }
     filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
     XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);
+
     XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype,
-        (char *)XLogRecGetData(record));
+        (char *)XLogRecGetData(record), 1);
     return recordstatehead;
 }
 XLogRecParseState *multixact_xlog_offset_parse_to_block(XLogReaderState *record, uint32 *blocknum)
@@ -1894,4 +1910,3 @@ XLogRecParseState *multixact_redo_parse_to_block(XLogReaderState *record, uint32
     }
     return recordstatehead;
 }
-

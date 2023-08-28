@@ -58,6 +58,7 @@
  * Note: TAG_VALID essentially means that there is a buffer hashtable
  * entry associated with the buffer's tag.
  */
+#define BM_IS_TMP_BUF (1LU << 21 << 32)         /* temp buf, can not write to disk */
 #define BM_IS_META (1LU << 17 << 32)
 #define BM_LOCKED (1LU << 22 << 32)            /* buffer header is locked */
 #define BM_DIRTY (1LU << 23 << 32)             /* data needs writing */
@@ -272,6 +273,23 @@ extern "C" {
         TsAnnotateHappensBefore(&desc->state);                   \
         pg_write_barrier();                                      \
         pg_atomic_write_u32((((volatile uint32 *)&(desc)->state) + 1), ( ( (s) & (~BM_LOCKED) ) >> 32) ); \
+    } while (0)
+
+#define FIX_SEG_BUFFER_TAG(node, tag, rel_node, block_num) \
+    do {                                              \
+        if (IsSegmentFileNode(node)) {                \
+            tag.rnode.relnode = rel_node;              \
+            tag.blocknum = block_num;                  \
+            tag.rnode.bucketnode = SegmentBktId;      \
+        }                                             \
+    } while (0)
+
+#define FIX_BUFFER_DESC(buf, pblk)              \
+    do {                                            \
+        Assert(PhyBlockIsValid(*pblk)); \
+        buf->seg_fileno = pblk->rel_node;   \
+        buf->seg_blockno = pblk->block;     \
+        buf->seg_lsn = pblk->lsn;           \
     } while (0)
 
 extern bool retryLockBufHdr(BufferDesc* desc, uint64* buf_state);

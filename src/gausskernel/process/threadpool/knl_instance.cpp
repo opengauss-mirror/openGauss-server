@@ -42,6 +42,7 @@
 #include "regex/regex.h"
 #include "utils/memutils.h"
 #include "utils/palloc.h"
+#include "utils/snapshot.h"
 #include "workload/workload.h"
 #include "instruments/instr_waitevent.h"
 #include "access/multi_redo_api.h"
@@ -270,6 +271,19 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
 
     rc = memset_s(&predo_cxt->redoCpuBindcontrl, sizeof(RedoCpuBindControl), 0, sizeof(RedoCpuBindControl));
     securec_check(rc, "", "");
+    predo_cxt->global_recycle_lsn = InvalidXLogRecPtr;
+    predo_cxt->exrto_recyle_xmin = 0;
+    predo_cxt->exrto_snapshot = (ExrtoSnapshot)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(ExrtoSnapshotData));
+    predo_cxt->redoItemHash = NULL;
+
+    predo_cxt->standby_read_delay_ddl_stat.delete_stat = 0;
+    predo_cxt->standby_read_delay_ddl_stat.next_index_can_insert = 0;
+    predo_cxt->standby_read_delay_ddl_stat.next_index_need_unlink = 0;
+    predo_cxt->max_clog_pageno = 0;
+    predo_cxt->buffer_pin_wait_buf_ids = NULL;
+    predo_cxt->buffer_pin_wait_buf_len = 0;
+    predo_cxt->exrto_send_lsn_forworder_time = 0;
 }
 
 static void knl_g_parallel_decode_init(knl_g_parallel_decode_context* pdecode_cxt)
@@ -439,6 +453,8 @@ static void KnlGUndoInit(knl_g_undo_context *undoCxt)
     undoCxt->undoChainTotalSize = 0;
     undoCxt->globalFrozenXid = InvalidTransactionId;
     undoCxt->globalRecycleXid = InvalidTransactionId;
+    undoCxt->hotStandbyRecycleXid = InvalidTransactionId;
+    undoCxt->is_exrto_residual_undo_file_recycled = false;
 }
 
 static void knl_g_flashback_init(knl_g_flashback_context *flashbackCxt)
@@ -909,4 +925,3 @@ bool knl_g_get_redo_finish_status()
     uint32 isRedoFinish = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish));
     return (isRedoFinish & REDO_FINISH_STATUS_CM) == REDO_FINISH_STATUS_CM;
 }
-

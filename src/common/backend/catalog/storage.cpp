@@ -24,6 +24,7 @@
 
 #include "access/cstore_am.h"
 #include "access/visibilitymap.h"
+#include "access/multi_redo_api.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
@@ -42,6 +43,7 @@
 #include "pgxc/pgxc.h"
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
+#include "storage/procarray.h"
 #include "storage/smgr/smgr.h"
 #include "storage/smgr/segment.h"
 #include "threadpool/threadpool.h"
@@ -607,7 +609,7 @@ void RelationPreserveStorage(RelFileNode rnode, bool atCommit)
  * This includes getting rid of any buffers for the blocks that are to be
  * dropped.
  */
-void RelationTruncate(Relation rel, BlockNumber nblocks)
+void RelationTruncate(Relation rel, BlockNumber nblocks, TransactionId latest_removed_xid)
 {
     /* Currently, segment-page tables should not be truncated */
     Assert(!RelationIsSegmentTable(rel));
@@ -674,14 +676,13 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
         uint size;
         uint8 info = XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE;
 
+        size = sizeof(xl_smgr_truncate_compress);
         xlrec.xlrec.blkno = nblocks;
+        xlrec.pageCompressOpts = rel->rd_node.opt;
+        xlrec.latest_removed_xid = latest_removed_xid;
 
         if (rel->rd_node.opt != 0) {
-            xlrec.pageCompressOpts = rel->rd_node.opt;
-            size = sizeof(xl_smgr_truncate_compress);
             info |= XLR_REL_COMPRESS;
-        } else {
-            size = sizeof(xl_smgr_truncate);
         }
 
         RelFileNodeRelCopy(xlrec.xlrec.rnode, rel->rd_node);
@@ -711,7 +712,7 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
     BatchClearBadBlock(rel->rd_node, MAIN_FORKNUM, nblocks);
 }
 
-void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
+void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks, TransactionId latest_removed_xid)
 {
     /* Currently, segment-page tables should not be truncated */
     Assert(!RelationIsSegmentTable(parent));
@@ -762,6 +763,10 @@ void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
         uint size;
         uint8 info = XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE;
         
+        int redoSize;
+
+        redoSize = sizeof(xl_smgr_truncate_compress);
+        
         xlrec.xlrec.blkno = nblocks;
         
         if (rel->rd_node.opt != 0) {
@@ -771,7 +776,7 @@ void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
         } else {
             size = sizeof(xl_smgr_truncate);
         }
-        
+
         RelFileNodeRelCopy(xlrec.xlrec.rnode, part->pd_node);
         
         XLogBeginInsert();
@@ -1211,13 +1216,33 @@ void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum, char *data)
     }
 }
 
-void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr lsn)
+void smgr_redo_truncate_cancel_conflicting_proc(TransactionId latest_removed_xid, XLogRecPtr lsn)
 {
+    if (IS_EXRTO_READ) {
+        const int max_check_times = 1000;
+        int check_times = 0;
+        bool conflict = true;
+        bool reach_max_check_times = false;
+        while (conflict && check_times < max_check_times) {
+            RedoInterruptCallBack();
+            check_times++;
+            reach_max_check_times = (check_times == max_check_times);
+            conflict = proc_array_cancel_conflicting_proc(latest_removed_xid, lsn, reach_max_check_times);
+        }
+    }
+}
+
+void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr lsn,
+    TransactionId latest_removed_xid)
+{
+    smgr_redo_truncate_cancel_conflicting_proc(latest_removed_xid, lsn);
     SMgrRelation reln = smgropen(rnode, InvalidBackendId);
     smgrcreate(reln, MAIN_FORKNUM, true);
     UpdateMinRecoveryPoint(lsn, false);
     LockRelFileNode(rnode, AccessExclusiveLock);
+    (void)LWLockAcquire(RedoTruncateLock, LW_EXCLUSIVE);
     smgrtruncate(reln, MAIN_FORKNUM, blkno);
+    LWLockRelease(RedoTruncateLock);
     XLogTruncateRelation(rnode, MAIN_FORKNUM, blkno);
     Relation rel = CreateFakeRelcacheEntry(rnode);
     if (smgrexists(reln, FSM_FORKNUM))
@@ -1233,6 +1258,7 @@ void smgr_redo(XLogReaderState* record)
     XLogRecPtr lsn = record->EndRecPtr;
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     bool compress = XLogRecGetInfo(record) & XLR_REL_COMPRESS;
+    TransactionId latest_removed_xid = InvalidTransactionId;
     /* Backup blocks are not used in smgr records */
     Assert(!XLogRecHasAnyBlockRefs(record));
 
@@ -1249,6 +1275,9 @@ void smgr_redo(XLogReaderState* record)
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
         rnode.opt = compress ? ((xl_smgr_truncate_compress*)XLogRecGetData(record))->pageCompressOpts : 0;
+        if (XLogRecGetDataLen(record) == TRUNCATE_CONTAIN_XID_SIZE) {
+            latest_removed_xid = ((xl_smgr_truncate_compress*)(void *)XLogRecGetData(record))->latest_removed_xid;
+        }
         /*
          * Forcibly create relation if it doesn't exist (which suggests that
          * it was dropped somewhere later in the WAL sequence).  As in
@@ -1274,7 +1303,7 @@ void smgr_redo(XLogReaderState* record)
          */
 
         /* Also tell xlogutils.c about it */
-        xlog_block_smgr_redo_truncate(rnode, xlrec->blkno, lsn);
+        xlog_block_smgr_redo_truncate(rnode, xlrec->blkno, lsn, latest_removed_xid);
     } else
         ereport(PANIC, (errmsg("smgr_redo: unknown op code %u", info)));
 }

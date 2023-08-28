@@ -1811,6 +1811,9 @@ typedef struct knl_u_storage_context {
     /* md.cpp */
     MemoryContext MdCxt; /* context for all md.c allocations */
 
+    /* exrto_file.cpp */
+    MemoryContext exrto_standby_read_file_cxt;
+
     /* sync.cpp */
     MemoryContext pendingOpsCxt;
     struct HTAB *pendingOps;
