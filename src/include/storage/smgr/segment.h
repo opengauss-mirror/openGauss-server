@@ -67,6 +67,7 @@ int seg_sync_filetag(const FileTag *ftag, char *path);
 int seg_unlink_filetag(const FileTag *ftag, char *path);
 void segForgetDatabaseFsyncRequests(Oid dbid);
 bool seg_filetag_matches(const FileTag *ftag, const FileTag *candidate);
+void df_extend_file_vector(SegLogicFile *sf);
 
 /*
  * XLog Atomic Operation APIs

@@ -944,5 +944,5 @@ long SSGetBufSleepTime(int retry_times)
     if (retry_times < ss_buf_retry_threshold) {
         return 5000L * retry_times;
     }
-    return 1000L * 1000 * 60;
+    return 1000L * 1000 * 20;
 }
