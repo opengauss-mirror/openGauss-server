@@ -96,6 +96,7 @@ install:
 	$(MAKE) -C contrib/dblink $@
 	$(MAKE) -C contrib/ndpplugin $@
 	@if test -d contrib/dolphin; then $(MAKE) -C contrib/dolphin $@; fi
+	@if test -d contrib/whale; then $(MAKE) -C contrib/whale $@; fi
 	+@echo "openGauss installation complete."
 endif
 endif

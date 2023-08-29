@@ -157,6 +157,12 @@ static RegExternFunc plpgsql_function_table[] = {
  */
 RegExternFunc b_plpgsql_function_table[3];
 
+/*
+ * Now for whale to rewrite plpgsql_call_handler, plpgsql_inline_handler
+ * and plpgsql_validator.
+ */
+RegExternFunc a_plpgsql_function_table[3];
+
 static HTAB* CFuncHash = NULL;
 
 static void fmgr_info_cxt_security(Oid functionId, FmgrInfo* finfo, MemoryContext mcxt, bool ignore_security);
@@ -401,6 +407,12 @@ static PGFunction load_plpgsql_function(char* funcname)
         search_result = (RegExternFunc*)bsearch(&tmp_key,
         b_plpgsql_function_table,
         sizeof(b_plpgsql_function_table) / sizeof(b_plpgsql_function_table[0]),
+        sizeof(RegExternFunc),
+        ExternFuncComp);
+    } else if (u_sess->attr.attr_sql.whale) {
+        search_result = (RegExternFunc*)bsearch(&tmp_key,
+        a_plpgsql_function_table,
+        sizeof(a_plpgsql_function_table) / sizeof(a_plpgsql_function_table[0]),
         sizeof(RegExternFunc),
         ExternFuncComp);
     }
