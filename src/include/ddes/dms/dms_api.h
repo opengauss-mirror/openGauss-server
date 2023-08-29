@@ -710,6 +710,7 @@ typedef unsigned int (*dms_calc_page_checksum)(void *db_handle, dms_buf_ctrl_t *
 typedef int (*dms_verify_page_checksum)(void *db_handle, dms_buf_ctrl_t *ctrl, unsigned int page_size, int cks);
 typedef int (*dms_update_node_oldest_xmin)(void *db_handle, unsigned char inst_id, unsigned long long oldest_xmin);
 typedef void (*dms_set_inst_behavior)(void *db_handle, dms_inst_behavior_t inst_behavior);
+typedef int (*dms_db_prepare)(void *db_handle);
 
 typedef struct st_dms_callback {
     // used in reform
@@ -854,6 +855,7 @@ typedef struct st_dms_callback {
 
     //for shared storage backup
     dms_set_inst_behavior set_inst_behavior;
+    dms_db_prepare db_prepare;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -937,7 +939,7 @@ typedef enum st_protocol_version {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           88
+#define DMS_LOCAL_VERSION           89
 
 #ifdef __cplusplus
 }
