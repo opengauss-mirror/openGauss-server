@@ -149,6 +149,7 @@ typedef struct knl_g_cost_context {
 
 enum plugin_vecfunc_type {
     DOLPHIN_VEC = 0,
+    WHALE_VEC,
 
     /* 
      * This is the number of vecfunc hash tables.
