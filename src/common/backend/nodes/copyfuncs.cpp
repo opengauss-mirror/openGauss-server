@@ -5901,6 +5901,7 @@ static CreateSeqStmt* _copyCreateSeqStmt(const CreateSeqStmt* from)
     COPY_SCALAR_FIELD(uuid);
     COPY_SCALAR_FIELD(canCreateTempSeq);
     COPY_SCALAR_FIELD(is_large);
+    COPY_SCALAR_FIELD(missing_ok);
 
     return newnode;
 }

@@ -1131,6 +1131,7 @@ typedef struct CreateSeqStmt {
     int64 uuid;            /* UUID of the sequence, mark unique sequence globally */
     bool canCreateTempSeq; /* create sequence when "create table (like )" */
     bool is_large;
+    bool missing_ok; /* skip error if a Sequence is exists */
 } CreateSeqStmt;
 
 typedef struct AlterSeqStmt {
