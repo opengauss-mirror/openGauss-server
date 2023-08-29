@@ -144,6 +144,8 @@ else
     declare CMAKE_BUILD_DIR=${ROOT_DIR}/tmp_build
     if [ "$product_mode"x == "lite"x ]; then
         declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_LITE_MODE=ON ${extra_cmake_opt}"
+    elif [ "$product_mode"x == "finance"x ]; then
+        declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_FINANCE_MODE=ON ${extra_cmake_opt}"
     else
         declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON ${extra_cmake_opt}"
     fi
