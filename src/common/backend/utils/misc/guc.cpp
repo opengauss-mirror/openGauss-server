@@ -1946,6 +1946,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+#ifndef ENABLE_FINANCE_MODE
         {{"enable_ustore",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -1959,6 +1960,21 @@ static void InitConfigureNamesBool()
             NULL,
             false
         },
+#else
+        {{"enable_ustore",
+            PGC_INTERNAL,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enable ustore storage engine"),
+            NULL},
+            &g_instance.attr.attr_storage.enable_ustore,
+            false,
+            NULL,
+            NULL,
+            NULL,
+            false
+        },
+#endif
         {{"enable_gtt_concurrent_truncate",
             PGC_SIGHUP,
             NODE_SINGLENODE,

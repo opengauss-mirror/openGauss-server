@@ -4171,6 +4171,7 @@ static int ServerLoop(void)
         /*
         * Start the Undo launcher thread if we need to.
         */
+#ifndef ENABLE_FINANCE_MODE
         if (g_instance.attr.attr_storage.enable_ustore &&
             g_instance.pid_cxt.UndoLauncherPID == 0 &&
             pmState == PM_RUN && !dummyStandbyMode) {
@@ -4182,6 +4183,7 @@ static int ServerLoop(void)
             pmState == PM_RUN && !dummyStandbyMode) {
             g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
         }
+#endif
 
         /*
          * If we are doing upgrade and old version >= PUBLICATION_VERSION_NUM, we can launch applylauncer.
@@ -4252,9 +4254,11 @@ static int ServerLoop(void)
                 g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
             g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
 
+#ifndef ENABLE_FINANCE_MODE
         /* If we have lost the cfs shrinker, try to start a new one */
         if (g_instance.pid_cxt.CfsShrinkerPID == 0 && pmState <= PM_RUN)
             g_instance.pid_cxt.CfsShrinkerPID = StartCfsShrinkerCapturer();
+#endif
 
         /* If we have lost the rbcleaner, try to start a new one */
         if (ENABLE_TCAP_RECYCLEBIN && (g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
@@ -6396,12 +6400,14 @@ static void ProcessDemoteRequest(void)
 {
     DemoteMode mode;
 
+#ifndef ENABLE_FINANCE_MODE
     /* The temperary solution is to exit Gauss when demoting happened in DCF mode */
     if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
         /* Don't free share memory */
         ereport(LOG, (errmsg("Exit postmaster when demoting.")));
         HandleChildCrash(t_thrd.proc_cxt.MyProcPid, 1, t_thrd.proc_cxt.MyProgName);
     }
+#endif
 
     /* get demote request type */
     mode = t_thrd.walsender_cxt.WalSndCtl->demotion;
@@ -7064,9 +7070,11 @@ static void reaper(SIGNAL_ARGS)
                     g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
                 g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
 
+#ifndef ENABLE_FINANCE_MODE
             /* If we have lost the cfs shrinker, try to start a new one */
             if (g_instance.pid_cxt.CfsShrinkerPID == 0 && pmState <= PM_RUN)
                 g_instance.pid_cxt.CfsShrinkerPID = StartCfsShrinkerCapturer();
+#endif
 
             if (ENABLE_TCAP_RECYCLEBIN && (g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
                 g_instance.pid_cxt.RbCleanrPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
@@ -10517,6 +10525,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_FINANCE_MODE
     uint32 nodeID = 0;
     NewNodeInfo nodeinfo;
     RunModeParam param;
@@ -10539,6 +10548,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         CheckSetRunModeSignal(&param) && t_thrd.dcf_cxt.dcfCtxInfo->isDcfStarted) {
         handle_start_minority_signal(param);
     }
+#endif
 #endif
 
 #ifndef ENABLE_LITE_MODE

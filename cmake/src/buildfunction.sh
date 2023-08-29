@@ -119,6 +119,9 @@ function get_gs_version()
     if [ "${ENABLE_LITE_MODE}" == "ON" ]; then
         product="$product-lite"
     fi
+    if [ "${ENABLE_FINANCE_MODE}" == "ON" ]; then
+        product="$product-finance"
+    fi
     if test "$enable_ccache" = yes; then
         default_gs_version="(${product} ${version} build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
     else

@@ -358,6 +358,7 @@ static void InitSecurityConfigureNamesBool()
             NULL},
         /* Database Security: Support Transparent Data Encryption */
         /* add guc option about TDE */
+#ifndef ENABLE_FINANCE_MODE
         {{"enable_tde",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -369,6 +370,19 @@ static void InitSecurityConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+#else
+            {{"enable_tde",
+            PGC_INTERNAL,
+            NODE_ALL,
+            TRANSPARENT_DATA_ENCRYPTION,
+            gettext_noop("Enable Transparent Data Encryption feature."),
+            NULL},
+            &g_instance.attr.attr_security.enable_tde,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
         {{"modify_initial_password",
             PGC_SIGHUP,
             NODE_ALL,

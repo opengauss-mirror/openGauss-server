@@ -2219,6 +2219,10 @@ static void InitSqlConfigureNamesInt()
             1,
             MIN_QUERY_DOP,
             INT_MAX,
+#elif defined(ENABLE_FINANCE_MODE)
+            1,
+            1,
+            1,
 #else
             1,
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3114,6 +3118,7 @@ static void InitSqlConfigureNamesEnum()
             NULL,
             NULL,
             NULL},
+#ifndef ENABLE_FINANCE_MODE
         {{"try_vector_engine_strategy",
             PGC_USERSET,
             NODE_ALL,
@@ -3126,6 +3131,20 @@ static void InitSqlConfigureNamesEnum()
             NULL,
             strategy_assign_vector_targetlist,
             NULL},
+#else
+        {{"try_vector_engine_strategy",
+            PGC_INTERNAL,
+            NODE_ALL,
+            QUERY_TUNING,
+            gettext_noop("Sets the strategy of using vector engine for row table."),
+            NULL},
+            &u_sess->attr.attr_sql.vectorEngineStrategy,
+            OFF_VECTOR_ENGINE,
+            vector_engine_strategy,
+            NULL,
+            strategy_assign_vector_targetlist,
+            NULL},
+#endif
         {{"multi_stats_type",
             PGC_USERSET,
             NODE_ALL,

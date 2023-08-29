@@ -671,6 +671,7 @@ static void InitStorageConfigureNamesBool()
             NULL},
 
 #ifndef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_FINANCE_MODE
         {{"enable_dcf",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -693,6 +694,30 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+#else
+        {{"enable_dcf",
+            PGC_INTERNAL,
+            NODE_SINGLENODE,
+            REPLICATION_PAXOS,
+            gettext_noop("Enable DCF to replicate redo Log."),
+            NULL},
+            &g_instance.attr.attr_storage.dcf_attr.enable_dcf,
+            false,
+            NULL,
+            NULL,
+            NULL},
+        {{"dcf_ssl",
+            PGC_INTERNAL,
+            NODE_SINGLENODE,
+            REPLICATION_PAXOS,
+            gettext_noop("DCF enable ssl on."),
+            NULL},
+            &g_instance.attr.attr_storage.dcf_attr.dcf_ssl,
+            true,
+            NULL,
+            NULL,
+            NULL},
+#endif
 #endif
         {{"ha_module_debug",
             PGC_USERSET,
