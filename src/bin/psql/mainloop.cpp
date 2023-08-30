@@ -101,7 +101,7 @@ static void SetSessionTimeout(const char* session_timeout)
     PQclear(StRes);
 }
 
-static void JudgeEndStateInBFormat(const char* inputLine, bool &is_b_format, char* delimiter_name, bool is_new_lines)
+static void JudgeEndStateInBFormat(const char* inputLine, bool &is_b_format, char* delimiter_name, bool is_new_lines, bool reset_check_after_reconn = false)
 {
     /* Convert inputLine to lowercase */ 
     char *inputLine_temp = pg_strdup(inputLine);
@@ -114,6 +114,13 @@ static void JudgeEndStateInBFormat(const char* inputLine, bool &is_b_format, cha
     char *tokenPtr = strstr(inputLine_temp, "delimiter");
     char *tokenPtr1 = strstr(inputLine_temp, "\\c" );
     errno_t rc = 0;
+
+    /* reset the variables after reseting the losed connection to the server successfully */
+    if (reset_check_after_reconn) {
+        is_just_one_check = false;
+        is_just_two_check = false;
+        return;
+    }
     
     if (!is_just_one_check) {
         res = PQexec(pset.db, "show sql_compatibility");
@@ -151,6 +158,12 @@ static void JudgeEndStateInBFormat(const char* inputLine, bool &is_b_format, cha
 
     free(inputLine_temp);
     inputLine_temp =NULL;
+}
+
+void resetCheckAfterReconn()
+{
+    bool fake_param = false;
+    JudgeEndStateInBFormat("", fake_param, NULL, false, true);
 }
 
 static bool is_match_delimiter_name(const char* left, const char* right)
