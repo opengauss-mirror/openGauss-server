@@ -692,6 +692,7 @@ void ReplicationSlotRelease(void)
     t_thrd.pgxact->xmin = InvalidTransactionId;
     t_thrd.pgxact->vacuumFlags &= ~PROC_IN_LOGICAL_DECODING;
     t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
     t_thrd.proc->exrto_gen_snap_time = 0;
     LWLockRelease(ProcArrayLock);
 }

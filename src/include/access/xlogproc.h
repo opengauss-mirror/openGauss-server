@@ -950,7 +950,7 @@ static inline Buffer AtomicExchangeBuffer(volatile Buffer *ptr, Buffer newval)
 
 /* this is an estimated value */
 static const uint32 MAX_BUFFER_NUM_PER_WAL_RECORD = XLR_MAX_BLOCK_ID + 1;
-static const uint32 LSN_MOVE32 = 10;
+static const uint32 LSN_MOVE32 = 32;
 
 void HeapXlogCleanOperatorPage(
     RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen, Size* freespace, bool repairFragmentation);
@@ -1277,7 +1277,7 @@ extern void XLogBlockSegDdlDoRealAction(XLogBlockHead* blockhead, void* blockrec
 extern void GinRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void GistRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo);
 extern bool IsCheckPoint(const XLogRecParseState *parseState);
-
+bool is_backup_end(const XLogRecParseState *parse_state);
 void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const char *data);
 void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn);
 void redo_target_page(const BufferTag& buf_tag, StandbyReadLsnInfoArray* lsn_info, Buffer base_page_buf);

@@ -8737,7 +8737,11 @@ static void heap_xlog_cleanup_info(XLogReaderState* record)
     RelFileNode tmp_node;
     RelFileNodeCopy(tmp_node, xlrec->node, XLogRecGetBucketId(record));
 
-    if (InHotStandby && g_supportHotStandby) {
+    if (IsExtremeRedo()) {
+        return;
+    }
+
+    if (InHotStandby && g_supportHotStandby && !IS_EXRTO_READ) {
         XLogRecPtr lsn = record->EndRecPtr;
         ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node, lsn);
     }
@@ -10324,4 +10328,3 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
 
     return NULL;
 }
-

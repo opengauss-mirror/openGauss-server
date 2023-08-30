@@ -80,6 +80,7 @@ XLogRecParseState *smgr_redo_parse_to_block(XLogReaderState *record, uint32 *blo
     *blocknum = 0;
     if ((info == XLOG_SMGR_CREATE) || (info == XLOG_SMGR_TRUNCATE)) {
         recordstatehead = smgr_xlog_relnode_parse_to_block(record, blocknum);
+        recordstatehead->isFullSync = record->isFullSync;
     } else {
         ereport(PANIC, (errmsg("smgr_redo_parse_to_block: unknown op code %u", info)));
     }

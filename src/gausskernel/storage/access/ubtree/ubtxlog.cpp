@@ -970,7 +970,7 @@ static void UBTreeXlogReusePage(XLogReaderState *record)
     RelFileNode tmp_node;
     RelFileNodeCopy(tmp_node, xlrec->node, XLogRecGetBucketId(record));
 
-    if (InHotStandby && g_supportHotStandby) {
+    if (InHotStandby && g_supportHotStandby && !IS_EXRTO_READ) {
         ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node, lsn);
     }
 }
@@ -1000,7 +1000,7 @@ static void UBTreeXlogPrunePage(XLogReaderState* record)
         /* Caller specified a bogus block_id */
         ereport(PANIC, (errmsg("failed to locate backup block with ID %d", 0)));
     }
-    if (InHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid))
+    if (InHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid) && !IS_EXRTO_READ)
         ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, rnode, lsn);
 
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {

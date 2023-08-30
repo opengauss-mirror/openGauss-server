@@ -81,25 +81,28 @@ bool UndoZone::CheckNeedSwitch(UndoRecordSize size)
     return false;
 }
 
-bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp)
+bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp, bool isexrto)
 {
     int startZid = UNDO_PTR_GET_ZONE_ID(starturp);
     int endZid = UNDO_PTR_GET_ZONE_ID(endurp);
     UndoLogOffset start = UNDO_PTR_GET_OFFSET(starturp);
     UndoLogOffset end = UNDO_PTR_GET_OFFSET(endurp);
-    UndoLogOffset force_discard_urec_ptr;
-    if (IS_EXRTO_STANDBY_READ) {
-        force_discard_urec_ptr = force_discard_urec_ptr_exrto;
-    } else {
-        force_discard_urec_ptr = forceDiscardURecPtr_;
-    }
-    Assert(start == force_discard_urec_ptr);
     WHITEBOX_TEST_STUB(UNDO_CHECK_RECYCLE_FAILED, WhiteboxDefaultErrorEmit);
-
-    if ((startZid == endZid) && (force_discard_urec_ptr <= insertURecPtr_) && (end <= insertURecPtr_)
-        && (start < end)) {
-        return true;
+    if (isexrto) {
+        if ((startZid == endZid) && (forceDiscardURecPtr_ <= insertURecPtr_) && (end <= insertURecPtr_) &&
+            (start < end)) {
+            return true;
+        }
+    } else {
+        if ((startZid == endZid) && (forceDiscardURecPtr_ <= insertURecPtr_) && (end <= insertURecPtr_) &&
+            (start < end) && (start == forceDiscardURecPtr_)) {
+            return true;
+        }
     }
+    ereport(WARNING, (errmodule(MOD_UNDO),
+                      errmsg(UNDOFORMAT("check_recycle: zone:%d, startZid:%d, endZid:%d, start:%lu, end:%lu, "
+                                        "forceDiscardURecPtr_:%lu, insertURecPtr_:%lu."),
+                             zid_, startZid, endZid, start, end, forceDiscardURecPtr_, insertURecPtr_)));
     return false;
 }
 
@@ -312,9 +315,14 @@ void UndoZone::ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRe
 /* Release undo space from starturp to endurp and advance discard. */
 uint64 UndoZone::release_residual_record_space()
 {
-    undoSpace_.LockSpace();
     UndoLogOffset unlink_start = undoSpace_.find_oldest_offset(zid_, UNDO_DB_OID);
     UndoLogOffset unlink_end = undoSpace_.Head();
+    uint64 start_segno = unlink_start / UNDO_LOG_SEGMENT_SIZE;
+    uint64 end_segno = unlink_end / UNDO_LOG_SEGMENT_SIZE;
+    ereport(DEBUG1, (errmodule(MOD_STANDBY_READ),
+                     errmsg("release_residual_record_space start_segno:%lu end_segno:%lu.", start_segno, end_segno)));
+    ForgetUndoBuffer(start_segno * UNDO_LOG_SEGMENT_SIZE, end_segno * UNDO_LOG_SEGMENT_SIZE, UNDO_DB_OID);
+    undoSpace_.LockSpace();
     undoSpace_.unlink_residual_log(zid_, unlink_start, unlink_end, UNDO_DB_OID);
     undoSpace_.UnlockSpace();
     if (unlink_start > unlink_end) {
@@ -367,9 +375,12 @@ void UndoZone::ReleaseSlotSpace(UndoRecPtr startSlotPtr, UndoRecPtr endSlotPtr, 
 /* Release slot space from starturp to endurp and advance discard. */
 uint64 UndoZone::release_residual_slot_space()
 {
-    slotSpace_.LockSpace();
     UndoLogOffset unlink_start = slotSpace_.find_oldest_offset(zid_, UNDO_SLOT_DB_OID);
     UndoLogOffset unlink_end = slotSpace_.Head();
+    uint64 start_segno = unlink_start / UNDO_LOG_SEGMENT_SIZE;
+    uint64 end_segno = unlink_end / UNDO_LOG_SEGMENT_SIZE;
+    ForgetUndoBuffer(start_segno * UNDO_LOG_SEGMENT_SIZE, end_segno * UNDO_LOG_SEGMENT_SIZE, UNDO_SLOT_DB_OID);
+    slotSpace_.LockSpace();
     slotSpace_.unlink_residual_log(zid_, unlink_start, unlink_end, UNDO_SLOT_DB_OID);
     slotSpace_.UnlockSpace();
     if (unlink_start > unlink_end) {

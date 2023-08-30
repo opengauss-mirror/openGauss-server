@@ -2380,7 +2380,7 @@ struct varlena* heap_internal_toast_fetch_datum(struct varatt_external toast_poi
      */
     nextidx = 0;
 
-    toastscan = systable_beginscan_ordered(toastrel, toastidx, SnapshotToast, 1, &toastkey);
+    toastscan = systable_beginscan_ordered(toastrel, toastidx, get_toast_snapshot(), 1, &toastkey);
     while ((ttup = systable_getnext_ordered(toastscan, ForwardScanDirection)) != NULL) {
         /*
          * Have a chunk, extract the sequence number and the data
@@ -2559,7 +2559,7 @@ struct varlena* HeapInternalToastFetchDatumSlice(struct varatt_external toastPoi
      * The index is on (valueid, chunkidx) so they will come in order
      */
     nextidx = startchunk;
-    toastscan = systable_beginscan_ordered(toastrel, toastidx, SnapshotToast, nscankeys, toastkey);
+    toastscan = systable_beginscan_ordered(toastrel, toastidx, get_toast_snapshot(), nscankeys, toastkey);
     while ((ttup = systable_getnext_ordered(toastscan, ForwardScanDirection)) != NULL) {
         /*
          * Have a chunk, extract the sequence number and the data
@@ -2775,7 +2775,7 @@ static struct varlena *toast_huge_fetch_datum_slice(struct varlena *attr, int64 
     Relation toastidx = index_open(toastrel->rd_rel->reltoastidxid, AccessShareLock);
     ScanKeyInit(&toastkey, (AttrNumber)1, BTEqualStrategyNumber, F_OIDEQ,
         ObjectIdGetDatum(large_toast_pointer.va_valueid));
-    toastscan = systable_beginscan_ordered(toastrel, toastidx, SnapshotToast, 1, &toastkey);
+    toastscan = systable_beginscan_ordered(toastrel, toastidx, get_toast_snapshot(), 1, &toastkey);
     while ((ttup = systable_getnext_ordered(toastscan, ForwardScanDirection)) != NULL) {
         chunk = DatumGetPointer(fastgetattr(ttup, CHUNK_DATA_ATTR, toast_tup_desc, &isnull));
         struct varatt_external toast_pointer;

@@ -234,6 +234,7 @@
 #include "access/multi_redo_api.h"
 #include "postmaster/postmaster.h"
 #include "access/parallel_recovery/dispatcher.h"
+#include "access/extreme_rto/standby_read/lsn_info_meta.h"
 #include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "utils/distribute_test.h"
 #ifdef ENABLE_MULTIPLE_NODES
@@ -314,8 +315,6 @@ volatile int Shutdown = NoShutdown;
 extern void gs_set_hs_shm_data(HaShmemData* ha_shm_data);
 extern void ReaperBackendMain();
 extern void AdjustThreadAffinity();
-
-extern void exrto_standby_read_init();
 
 #define EXTERN_SLOTS_NUM 17
 volatile PMState pmState = PM_INIT;
@@ -3347,12 +3346,29 @@ static void CheckExtremeRtoGUCConflicts(void)
                 errhint("recommend config \"wal_receiver_buffer_size=64MB\"")));
     }
 
+#ifdef ENABLE_LITE_MODE
+    if ((g_instance.attr.attr_storage.recovery_parse_workers > 1) && g_instance.attr.attr_storage.EnableHotStandby) {
+        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR),
+                        errmsg("when enabling lite mode, extreme rto could not support hot standby."),
+                        errhint("Either turn off extreme rto, or turn off hot_standby.")));
+    }
+#endif
+
 #ifndef ENABLE_MULTIPLE_NODES
-    if (IS_DISASTER_RECOVER_MODE &&(g_instance.attr.attr_storage.recovery_parse_workers > 1) && g_instance.attr.attr_storage.EnableHotStandby) {
-        ereport(ERROR,
-            (errcode(ERRCODE_SYSTEM_ERROR),
-                errmsg("For disaster standby cluster, extreme rto could not support hot standby."),
-                errhint("Either turn off extreme rto, or turn off hot_standby.")));
+    if (IS_DISASTER_RECOVER_MODE && (g_instance.attr.attr_storage.recovery_parse_workers > 1) &&
+        g_instance.attr.attr_storage.EnableHotStandby) {
+        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR),
+                        errmsg("For disaster standby cluster, extreme rto could not support hot standby."),
+                        errhint("Either turn off extreme rto, or turn off hot_standby.")));
+    }
+
+    if (g_instance.attr.attr_storage.EnableHotStandby == true) {
+        int base_page_saved_interval = g_instance.attr.attr_storage.base_page_saved_interval;
+        g_instance.attr.attr_storage.base_page_saved_interval =
+            (g_instance.attr.attr_storage.base_page_saved_interval / (int)extreme_rto_standby_read::LSN_NUM_PER_NODE) *
+            (int)extreme_rto_standby_read::LSN_NUM_PER_NODE;  // Rounded down of 5
+        ereport(LOG, (errmsg("base_page_saved_interval is %d, ori is %d.",
+                             g_instance.attr.attr_storage.base_page_saved_interval, base_page_saved_interval)));
     }
 #endif
 
@@ -4006,7 +4022,7 @@ static int ServerLoop(void)
             }
         }
         ADIO_END();
-
+        
         if (threadPoolActivated && (pmState == PM_RUN || pmState == PM_HOT_STANDBY))
             g_threadPoolControler->AddWorkerIfNecessary();
 
@@ -5094,10 +5110,11 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     errmsg("can not accept connection in pending mode.")));
         } else {
 #ifdef ENABLE_MULTIPLE_NODES
-            if (STANDBY_MODE == hashmdata->current_mode && (!IS_MULTI_DISASTER_RECOVER_MODE || GTM_FREE_MODE ||
-                                                            (IS_PGXC_DATANODE && !g_instance.attr.attr_storage.EnableHotStandby))) {
-                ereport(ERROR, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
-                        errmsg("can not accept connection in standby mode.")));
+            if (STANDBY_MODE == hashmdata->current_mode &&
+                (!IS_MULTI_DISASTER_RECOVER_MODE || GTM_FREE_MODE ||
+                 (IS_PGXC_DATANODE && !g_instance.attr.attr_storage.EnableHotStandby))) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_CANNOT_CONNECT_NOW), errmsg("can not accept connection in standby mode.")));
             }
 #else
             if (hashmdata->current_mode == STANDBY_MODE && !g_instance.attr.attr_storage.EnableHotStandby) {
@@ -6963,9 +6980,10 @@ static void reaper(SIGNAL_ARGS)
                 g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
 
             if (g_instance.pid_cxt.CBMWriterPID == 0 && !dummyStandbyMode &&
-                u_sess->attr.attr_storage.enable_cbm_tracking)
-                
-                
+                u_sess->attr.attr_storage.enable_cbm_tracking) {
+                g_instance.pid_cxt.CBMWriterPID = initialize_util_thread(CBMWRITER);
+            }
+
             if (IS_EXRTO_READ && g_instance.pid_cxt.exrto_recycler_pid == 0) {
                 g_instance.pid_cxt.exrto_recycler_pid = initialize_util_thread(EXRTO_RECYCLER);
             }

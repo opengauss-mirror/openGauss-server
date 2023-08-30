@@ -977,7 +977,7 @@ struct varlena *UHeapInternalToastFetchDatum(struct varatt_external toastPointer
      */
     nextidx = 0;
 
-    toastscan = systable_beginscan_ordered(toastrel, toastidx, SnapshotToast, 1, &toastkey);
+    toastscan = systable_beginscan_ordered(toastrel, toastidx, get_toast_snapshot(), 1, &toastkey);
     while (UHeapSysIndexGetnextSlot(toastscan, ForwardScanDirection, slot)) {
         /*
          * Have a chunk, extract the sequence number and the data
@@ -1163,7 +1163,7 @@ struct varlena *UHeapInternalToastFetchDatumSlice(struct varatt_external toastPo
      * The index is on (valueid, chunkidx) so they will come in order
      */
     nextidx = startchunk;
-    toastscan = systable_beginscan_ordered(toastrel, toastidx, SnapshotToast, nscankeys, toastkey);
+    toastscan = systable_beginscan_ordered(toastrel, toastidx, get_toast_snapshot(), nscankeys, toastkey);
     while (UHeapSysIndexGetnextSlot(toastscan, ForwardScanDirection, slot)) {
         /*
          * Have a chunk, extract the sequence number and the data

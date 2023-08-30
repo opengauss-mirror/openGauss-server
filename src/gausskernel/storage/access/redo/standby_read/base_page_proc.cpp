@@ -65,7 +65,11 @@ void generate_base_page(StandbyReadMetaInfo* meta_info, const Page src_page)
 
     Buffer dest_buf = buffer_read_base_page(meta_info->batch_id, meta_info->redo_id, position, RBM_ZERO_AND_LOCK);
 
+#ifdef ENABLE_UT
+    Page dest_page = get_page_from_buffer(dest_buf);
+#else
     Page dest_page = BufferGetPage(dest_buf);
+#endif
     errno_t rc = memcpy_s(dest_page, BLCKSZ, src_page, BLCKSZ);
     securec_check(rc, "\0", "\0");
     MarkBufferDirty(dest_buf);
@@ -77,17 +81,21 @@ void generate_base_page(StandbyReadMetaInfo* meta_info, const Page src_page)
 void read_base_page(const BufferTag& buf_tag, BasePagePosition position, BufferDesc* dest_buf_desc)
 {
     extreme_rto::RedoItemTag redo_item_tag;
-    const uint32 worker_num_per_mng = extreme_rto::get_page_redo_worker_num_per_manager();
-
-    /* batch id and worker id start from 1 when reading a page */
-    uint32 batch_id = extreme_rto::GetSlotId(buf_tag.rnode, 0, 0, extreme_rto::GetBatchCount()) + 1;
     INIT_REDO_ITEM_TAG(redo_item_tag, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum);
+
+    const uint32 worker_num_per_mng = extreme_rto::get_page_redo_worker_num_per_manager();
+    /* batch id and worker id start from 1 when reading a page */
+    uint32 batch_id = extreme_rto::GetSlotId(buf_tag.rnode, 0, 0, (uint32)extreme_rto::get_batch_redo_num()) + 1;
     uint32 redo_worker_id = extreme_rto::GetWorkerId(&redo_item_tag, worker_num_per_mng) + 1;
 
     Buffer buffer = buffer_read_base_page(batch_id, redo_worker_id, position, RBM_NORMAL);
 
     LockBuffer(buffer, BUFFER_LOCK_SHARE);
+#ifdef ENABLE_UT
+    Page src_page = get_page_from_buffer(buffer);
+#else
     Page src_page = BufferGetPage(buffer);
+#endif
     Size page_size = BufferGetPageSize(buffer);
     Page dest_page = (Page)BufHdrGetBlock(dest_buf_desc);
     errno_t rc = memcpy_s(dest_page, page_size, src_page, page_size);
@@ -102,6 +110,13 @@ void recycle_base_page_file(uint32 batch_id, uint32 redo_id, BasePagePosition re
 
     smgrdounlink(smgr, true, (BlockNumber)(recycle_pos / BLCKSZ));
 }
+
+#ifdef ENABLE_UT
+Page get_page_from_buffer(Buffer buf)
+{
+    return BufferGetPage(buf);
+}
+#endif
 
 }  // namespace extreme_rto_standby_read
 

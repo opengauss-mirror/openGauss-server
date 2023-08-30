@@ -646,6 +646,7 @@ void RecoveryUndoSystemMeta(void)
 
         /* Close fd. */
         close(fd);
+        exrto_recycle_residual_undo_file("recovery_meta");
         ereport(LOG, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("recovery_meta: undo recovery finish.")));
 #endif
     }

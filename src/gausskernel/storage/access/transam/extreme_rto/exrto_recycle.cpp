@@ -26,6 +26,8 @@
 #include "access/extreme_rto/page_redo.h"
 #include "access/extreme_rto/dispatcher.h"
 #include "access/extreme_rto/standby_read/lsn_info_meta.h"
+#include "access/extreme_rto/standby_read.h"
+#include "access/extreme_rto/standby_read/standby_read_delay_ddl.h"
 #include "access/multi_redo_api.h"
 #include "storage/ipc.h"
 #include "storage/smgr/smgr.h"
@@ -103,12 +105,17 @@ bool check_if_need_force_recycle()
     PageRedoWorker** workers = g_dispatcher->allWorkers;
     int64 total_base_page_size = 0;
     int64 total_lsn_info_size = 0;
-    double ratio = g_instance.attr.attr_storage.standby_force_recyle_ratio;
+    double ratio = g_instance.attr.attr_storage.standby_force_recycle_ratio;
+
+    // if standby_force_recyle_ratio is 0, the system does not recyle file.
+    if (ratio == 0) {
+        return false;
+    }
 
     for (uint32 i = 0; i < worker_nums; ++i) {
         PageRedoWorker* page_redo_worker = workers[i];
         StandbyReadMetaInfo meta_info = page_redo_worker->standby_read_meta_info;
-        if (page_redo_worker->role != REDO_PAGE_WORKER) {
+        if (page_redo_worker->role != REDO_PAGE_WORKER || (page_redo_worker->isUndoSpaceWorker)) {
             continue;
         }
         total_base_page_size += (meta_info.base_page_next_position - meta_info.base_page_recyle_position);
@@ -130,7 +137,7 @@ void do_standby_read_recyle(XLogRecPtr recycle_lsn)
     XLogRecPtr min_recycle_lsn = InvalidXLogRecPtr;
     for (uint32 i = 0; i < worker_nums; ++i) {
         PageRedoWorker* page_redo_worker = workers[i];
-        if (page_redo_worker->role != REDO_PAGE_WORKER) {
+        if (page_redo_worker->role != REDO_PAGE_WORKER || (page_redo_worker->isUndoSpaceWorker)) {
             continue;
         }
         extreme_rto_standby_read::standby_read_recyle_per_workers(&page_redo_worker->standby_read_meta_info, recycle_lsn);
@@ -145,6 +152,7 @@ void do_standby_read_recyle(XLogRecPtr recycle_lsn)
                  (errmsg(EXRTOFORMAT("[exrto_recycle] update global recycle lsn: %08X/%08X"),
                           (uint32)(min_recycle_lsn >> UINT64_HALF), (uint32)min_recycle_lsn)));
     }
+    delete_by_lsn(recycle_lsn);
 }
 
 void exrto_recycle_interrupt()
@@ -197,6 +205,7 @@ void exrto_recycle_main()
         ereport(LOG, (errmsg("exrto recycle: standby_read_old dir not exist")));
     }
 
+    do_all_old_delay_ddl();
     if (!IS_EXRTO_READ || !RecoveryInProgress()) {
         ereport(LOG,
             (errmsg("exrto recycle is available only when exrto standby read is supported")));

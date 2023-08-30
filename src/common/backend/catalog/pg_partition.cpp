@@ -25,6 +25,7 @@
  */
 
 #include "access/sysattr.h"
+#include "access/multi_redo_api.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_partition.h"
@@ -1007,7 +1008,7 @@ List* searchPgPartitionByParentId(char parttype, Oid parentId, ScanDirection dir
      */
     Snapshot snapshot = NULL;
     snapshot = SnapshotNow;
-    if (HistoricSnapshotActive()) {
+    if (HistoricSnapshotActive() || IS_EXRTO_RECOVERY_IN_PROGRESS) {
         snapshot = GetCatalogSnapshot();
     }
 

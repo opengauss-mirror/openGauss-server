@@ -66,8 +66,15 @@ static const uint32 PAGE_REDO_WORKER_READY = 2;
 static const uint32 PAGE_REDO_WORKER_EXIT = 3;
 static const uint32 BIG_RECORD_LENGTH = XLOG_BLCKSZ * 16;
 
-#define IS_EXRTO_READ (g_instance.attr.attr_storage.EnableHotStandby && IsExtremeRedo() && IsDefaultExtremeRtoMode())
+#define IS_EXRTO_READ (IsExtremeRedo() && g_instance.attr.attr_storage.EnableHotStandby && IsDefaultExtremeRtoMode())
 #define IS_EXRTO_STANDBY_READ (IS_EXRTO_READ && pm_state_is_hot_standby())
+#define IS_EXRTO_RECOVERY_IN_PROGRESS (RecoveryInProgress() && IsExtremeRedo())
+
+inline bool is_exrto_standby_read_worker()
+{
+    return (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == THREADPOOL_STREAM ||
+        t_thrd.role == STREAM_WORKER);
+}
 
 static inline int get_real_recovery_parallelism()
 {

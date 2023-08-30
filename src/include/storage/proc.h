@@ -244,6 +244,9 @@ struct PGPROC {
     /* commit sequence number send down */
     CommitSeqNo commitCSN;
 
+    XLogRecPtr exrto_read_lsn; /* calculate recycle lsn for read on standby in extreme rto */
+    TimestampTz exrto_gen_snap_time;
+
     /* Support for group transaction status update. */
     bool clogGroupMember;                   /* true, if member of clog group */
     pg_atomic_uint32 clogGroupNext;         /* next clog group member */
@@ -272,8 +275,9 @@ struct PGPROC {
     uint64 snap_refcnt_bitmap;
 #endif
 
-    XLogRecPtr exrto_read_lsn; /* calculate recycle lsn for read on standby in extreme rto */
-    TimestampTz exrto_gen_snap_time;
+    XLogRecPtr exrto_min; /* calculate recycle lsn for read on standby in extreme rto */
+
+    bool exrto_reload_cache;
     LWLock* subxidsLock;
     struct XidCache subxids; /* cache for subtransaction XIDs */
 

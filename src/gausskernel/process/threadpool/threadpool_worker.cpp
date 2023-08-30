@@ -36,6 +36,7 @@
 #include "threadpool/threadpool.h"
 
 #include "access/xact.h"
+#include "access/multi_redo_api.h"
 #include "commands/prepare.h"
 #include "commands/tablespace.h"
 #include "commands/vacuum.h"
@@ -534,6 +535,9 @@ void ThreadPoolWorker::CleanThread()
     thread_proc->workingVersionNum = pg_atomic_read_u32(&WorkingGrandVersionNum);
 
     if (m_currentSession != NULL) {
+        if (IS_EXRTO_STANDBY_READ) {
+            AtEOXact_Snapshot(false);
+        }
         DetachSessionFromThread();
     }
 }

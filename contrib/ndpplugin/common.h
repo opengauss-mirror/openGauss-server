@@ -242,6 +242,8 @@ typedef unsigned int Oid;
 
 #define InvalidOid 0
 #define InvalidBktId (-1)
+#define ExrtoReadStartLSNBktId (-5)
+#define ExrtoReadEndLSNBktId (-6)
 
 typedef Oid regproc;
 typedef regproc RegProcedure;

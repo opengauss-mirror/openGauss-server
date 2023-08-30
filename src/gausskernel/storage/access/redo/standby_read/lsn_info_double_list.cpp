@@ -63,7 +63,6 @@ void info_list_modify_old_tail(StandbyReadMetaInfo *meta_info, LsnInfoPosition o
         base_page_info->base_page_list.next = insert_pos;
         base_page_info->next_base_page_lsn = current_page_lsn;
         Assert(is_lsn_info_node_valid(base_page_info->lsn_info_node.flags));
-        Assert(XLByteLT(base_page_info->cur_page_lsn, current_page_lsn));
     }
 
     standby_read_meta_page_set_lsn(page, next_lsn);

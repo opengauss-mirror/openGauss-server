@@ -1247,17 +1247,6 @@ void UHeapXlogCleanOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *
     uint16 *nfixed = &tmpfixed;
     char *unused = (char *)xlrec + SizeOfUHeapClean;
 
-    /*
-     * We're about to remove tuples. In Hot Standby mode, ensure that there's
-     * no queries running for which the removed tuples are still visible.
-     *
-     * Not all UHEAP_CLEAN records remove tuples with xids, so we only want to
-     * conflict on the records that cause MVCC failures for user queries. If
-     * latestRemovedXid is invalid, skip conflict processing.
-     */
-    if (InHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid))
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, buffer->blockinfo.rnode, buffer->lsn);
-
     /* Update all item pointers per the record, and repair fragmentation */
     if (xlrec->flags & XLZ_CLEAN_CONTAINS_OFFSET) {
         targetOffnum = (OffsetNumber *)((char *)xlrec + SizeOfUHeapClean);
@@ -2011,12 +2000,13 @@ static void RedoUndoDiscardBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *b
     if (zone->GetLSN() < lsn) {
         zone->LockUndoZone();
         Assert(blockdatarec->undoDiscardParse.startSlot == zone->GetRecycleTSlotPtr());
-        if (IS_EXRTO_READ && (!g_instance.undo_cxt.is_exrto_residual_undo_file_recycled)) {
-            zone->set_recycle_tslot_ptr_exrto(endSlot);
-        }
         zone->SetRecycleTSlotPtr(endSlot);
         zone->SetDiscardURecPtr(endUndoPtr);
         zone->SetForceDiscardURecPtr(endUndoPtr);
+        if (!IS_EXRTO_READ) {
+            zone->set_discard_urec_ptr_exrto(endUndoPtr);
+            zone->set_force_discard_urec_ptr_exrto(endUndoPtr);
+        }
         zone->SetRecycleXid(recycledXid);
         zone->MarkDirty();
         zone->SetLSN(lsn);
@@ -2042,10 +2032,16 @@ static void RedoUndoUnlinkBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
         zoneId, usp->LSN(), unlinkLsn, head, newHead)));
 
     if (usp->LSN() < unlinkLsn) {
-        zone->ForgetUndoBuffer(head, newHead, UNDO_DB_OID);
+        /*
+         * before hot_standby mode, we don,t know we will be primary or standby,
+         * so before hot standby we better do unlinklog.
+        */
+        if (!IS_EXRTO_READ) {
+            zone->ForgetUndoBuffer(head, newHead, UNDO_DB_OID);
+        }
         usp->LockSpace();
         usp->MarkDirty();
-        if (IS_EXRTO_STANDBY_READ) {
+        if (IS_EXRTO_READ) {
             usp->SetHead(newHead);
         } else {
             usp->UnlinkUndoLog(zoneId, newHead, UNDO_DB_OID);
@@ -2072,10 +2068,16 @@ static void RedoSlotUnlinkBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
         zoneId, usp->LSN(), unlinkLsn, head, newHead)));
 
     if (usp->LSN() < unlinkLsn) {
-        zone->ForgetUndoBuffer(head, newHead, UNDO_SLOT_DB_OID);
+        /*
+         * before hot_standby mode, we don,t know we will be primary or standby,
+         * so before hot standby we better do unlinklog.
+        */
+        if (!IS_EXRTO_READ) {
+            zone->ForgetUndoBuffer(head, newHead, UNDO_SLOT_DB_OID);
+        }
         usp->LockSpace();
         usp->MarkDirty();
-        if (IS_EXRTO_STANDBY_READ) {
+        if (IS_EXRTO_READ) {
             usp->SetHead(newHead);
         } else {
             usp->UnlinkUndoLog(zoneId, newHead, UNDO_SLOT_DB_OID);

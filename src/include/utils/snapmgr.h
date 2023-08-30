@@ -71,6 +71,7 @@ extern void RecheckXidFinish(TransactionId xid, CommitSeqNo csn);
 extern Snapshot GetTransactionSnapshot(bool force_local_snapshot = false);
 extern Snapshot GetLatestSnapshot(void);
 extern Snapshot GetCatalogSnapshot();
+extern Snapshot get_toast_snapshot();
 extern void SnapshotSetCommandId(CommandId curcid);
 
 extern void PushActiveSnapshot(Snapshot snapshot);
@@ -118,4 +119,6 @@ extern void TeardownHistoricSnapshot(bool is_error);
 extern bool HistoricSnapshotActive(void);
 
 extern void SetTransactionSnapshot(Snapshot sourcesnap, VirtualTransactionId *sourcevxid, ThreadId sourcepid);
+extern Snapshot get_toast_snapshot();
+
 #endif /* SNAPMGR_H */

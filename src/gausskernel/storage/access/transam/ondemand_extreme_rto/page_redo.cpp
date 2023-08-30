@@ -3046,8 +3046,9 @@ bool XactHasSegpageRelFiles(XLogReaderState *record)
     if (XLogRecGetRmid(record) != RM_XACT_ID) {
         return false;
     }
-    bool compress;
-    XactGetRelFiles(record, &xnodes, &nrels, &compress);
+
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
+    XactGetRelFiles(record, &xnodes, &nrels);
 
     for (int32 idx = 0; idx < nrels; idx++) {
         ColFileNode colFileNode;

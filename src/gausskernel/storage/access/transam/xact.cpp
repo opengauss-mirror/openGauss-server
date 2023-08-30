@@ -47,6 +47,7 @@
 #include "access/xlogutils.h"
 #include "access/multi_redo_api.h"
 #include "access/extreme_rto/standby_read/block_info_meta.h"
+#include "access/extreme_rto/standby_read/standby_read_delay_ddl.h"
 #include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_authid.h"
@@ -1539,8 +1540,9 @@ static TransactionId RecordTransactionCommit(void)
         if (useLocalXid || !IsPostmasterEnvironment || GTM_FREE_MODE) {
 #ifndef ENABLE_MULTIPLE_NODES
             /* For hot standby, set csn to commit in progress */
-            CommitSeqNo csn = SetXact2CommitInProgress(xid, 0);
-            XLogInsertStandbyCSNCommitting(xid, csn, children, nchildren);
+            CommitSeqNo latestCsn = t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo;
+            XLogInsertStandbyCSNCommitting(xid, latestCsn, children, nchildren);
+            (void)SetXact2CommitInProgress(xid, 0);
 #else
             /* set commit CSN and update global CSN in gtm free mode. */
             SetXact2CommitInProgress(xid, 0);
@@ -7082,7 +7084,7 @@ static void xact_redo_forget_alloc_segs(TransactionId xid, TransactionId *subXid
     remainSegsLock.unLock();
 }
 
-static void xact_redo_log_drop_segs(_in_ ColFileNode *xnodes, _in_ int nrels, XLogRecPtr lsn)
+void xact_redo_log_drop_segs(_in_ ColFileNode *xnodes, _in_ int nrels, XLogRecPtr lsn)
 {
     bool isNeedLogRemainSegs = IsNeedLogRemainSegs(lsn);
     if (!isNeedLogRemainSegs) {
@@ -7173,7 +7175,7 @@ void push_unlink_rel_to_hashtbl(ColFileNode *xnodes, int nrels)
 /*
  *	XLOG support routines
  */
-static void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels)
+void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels)
 {
     ColMainFileNodesCreate();
 
@@ -7210,7 +7212,7 @@ static void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels)
             /*
              * recycle exrto files when dropping table occurs.
              */
-            if (IS_EXRTO_READ) {
+            if (RecoveryInProgress() && IS_EXRTO_READ) {
                 RelFileNode block_meta_file = relFileNode;
                 block_meta_file.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
                 extreme_rto_standby_read::remove_one_block_info_file(block_meta_file);
@@ -7241,6 +7243,32 @@ static void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels)
         }
     }
     ColMainFileNodesDestroy();
+}
+
+void send_delay_invalid_message()
+{
+    if (t_thrd.page_redo_cxt.invalid_msg.valid) {
+        ProcessCommittedInvalidationMessages(
+            t_thrd.page_redo_cxt.invalid_msg.inval_msgs, t_thrd.page_redo_cxt.invalid_msg.nmsgs,
+            t_thrd.page_redo_cxt.invalid_msg.relcache_init_file_inval, t_thrd.page_redo_cxt.invalid_msg.db_id,
+            t_thrd.page_redo_cxt.invalid_msg.ts_id, t_thrd.page_redo_cxt.invalid_msg.lsn);
+        t_thrd.page_redo_cxt.invalid_msg.valid = false;
+    }
+}
+ 
+void record_delay_invalid_message(
+    SharedInvalidationMessage* msgs, int nmsgs, bool relcache_init_file_inval, Oid dbid, Oid tsid, XLogRecPtr lsn)
+{
+    if (nmsgs <= 0) {
+        return;
+    }
+    t_thrd.page_redo_cxt.invalid_msg.inval_msgs = msgs;
+    t_thrd.page_redo_cxt.invalid_msg.nmsgs = nmsgs;
+    t_thrd.page_redo_cxt.invalid_msg.relcache_init_file_inval = relcache_init_file_inval;
+    t_thrd.page_redo_cxt.invalid_msg.db_id = dbid;
+    t_thrd.page_redo_cxt.invalid_msg.ts_id = tsid;
+    t_thrd.page_redo_cxt.invalid_msg.lsn = lsn;
+    t_thrd.page_redo_cxt.invalid_msg.valid = true;
 }
 
 /*
@@ -7310,7 +7338,7 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
         }
         if (EnableGlobalSysCache()) {
             ProcessCommittedInvalidationMessages(inval_msgs, nmsgs, XactCompletionRelcacheInitFileInval(xinfo),
-                dbId, tsId);
+                dbId, tsId, lsn);
         }
 #endif
     } else {
@@ -7370,8 +7398,13 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
          * maintain the same order of invalidation then release locks as
          * occurs in CommitTransaction().
          */
-        ProcessCommittedInvalidationMessages(inval_msgs, nmsgs, XactCompletionRelcacheInitFileInval(xinfo), dbId, tsId);
-
+        if (IS_EXRTO_READ) {
+            record_delay_invalid_message(inval_msgs, nmsgs, XactCompletionRelcacheInitFileInval(xinfo), dbId,
+                                         tsId, lsn);
+        } else {
+            ProcessCommittedInvalidationMessages(inval_msgs, nmsgs, XactCompletionRelcacheInitFileInval(xinfo), dbId,
+                                                 tsId, lsn);
+        }
         /*
          * Release locks, if any. We do this for both two phase and normal one
          * phase transactions. In effect we are ignoring the prepare phase and
@@ -7417,8 +7450,12 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
                 ColFileNodeCopy(&newColFileNodes[i], &colFileNodeRel[i]);
             }
         }
-        unlink_relfiles(newColFileNodes, nrels);
-        xact_redo_log_drop_segs(newColFileNodes, nrels, lsn);
+        if (IS_EXRTO_READ) {
+            update_delay_ddl_files(newColFileNodes, nrels, lsn);
+        } else {
+            unlink_relfiles(newColFileNodes, nrels);
+            xact_redo_log_drop_segs(newColFileNodes, nrels, lsn);
+        }
         if (unlikely((long)!compress)) {
             pfree(newColFileNodes);
         }
@@ -7619,7 +7656,11 @@ static void xact_redo_abort(xl_xact_abort *xlrec, TransactionId xid, XLogRecPtr 
                 newColFileNodes[i].filenode.opt = 0;
             }
         }
-        unlink_relfiles(newColFileNodes, xlrec->nrels);
+        if (IS_EXRTO_READ) {
+            update_delay_ddl_files(newColFileNodes, xlrec->nrels, lsn);
+        } else {
+            unlink_relfiles(newColFileNodes, xlrec->nrels);
+        }
         xact_redo_log_drop_segs(newColFileNodes, xlrec->nrels, lsn);
         if (unlikely((long)!compress)) {
             pfree(newColFileNodes);
@@ -7727,12 +7768,52 @@ void xact_redo(XLogReaderState *record)
     }
 }
 
-void XactGetRelFiles(XLogReaderState *record, ColFileNode **xnodesPtr, int *nrelsPtr, bool *compress)
+bool xact_has_invalid_msg_or_delete_file(XLogReaderState *record)
+{
+    Assert(XLogRecGetRmid(record) == RM_XACT_ID);
+ 
+    uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
+    xl_xact_commit *commit = NULL;
+    xl_xact_abort *abort = NULL;
+    int msg_files = 0;
+ 
+    switch (info) {
+        case XLOG_XACT_COMMIT_COMPACT:
+        case XLOG_XACT_PREPARE:
+        case XLOG_XACT_ASSIGNMENT:
+            break;
+        case XLOG_XACT_COMMIT:
+            commit = (xl_xact_commit *)XLogRecGetData(record);
+            msg_files = commit->nmsgs + commit->nrels;
+            break;
+        case XLOG_XACT_ABORT_WITH_XID:
+        case XLOG_XACT_ABORT:
+            abort = (xl_xact_abort *)XLogRecGetData(record);
+            msg_files = abort->nrels;
+            break;
+        case XLOG_XACT_COMMIT_PREPARED:
+            commit = &(((xl_xact_commit_prepared *)XLogRecGetData(record))->crec);
+            msg_files = commit->nmsgs + commit->nrels;
+            break;
+        case XLOG_XACT_ABORT_PREPARED:
+            abort = &(((xl_xact_abort_prepared *)XLogRecGetData(record))->arec);
+            msg_files = abort->nrels;
+            break;
+        default:
+            ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                            errmsg("xactWillRemoveRelFiles: unknown op code %u", (uint32)info)));
+    }
+ 
+    return (msg_files > 0);
+}
+ 
+
+void XactGetRelFiles(XLogReaderState *record, ColFileNode **xnodesPtr, int *nrelsPtr)
 {
     Assert(XLogRecGetRmid(record) == RM_XACT_ID);
 
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
-    *compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
+
     xl_xact_commit *commit = NULL;
     xl_xact_abort *abort = NULL;
 
@@ -7781,13 +7862,12 @@ bool XactWillRemoveRelFiles(XLogReaderState *record)
      */
     int nrels = 0;
     ColFileNode *xnodes = NULL;
-    bool compress = false;
 
     if (XLogRecGetRmid(record) != RM_XACT_ID) {
         return false;
     }
 
-    XactGetRelFiles(record, &xnodes, &nrels, &compress);
+    XactGetRelFiles(record, &xnodes, &nrels);
 
     return (nrels > 0);
 }
@@ -7798,8 +7878,7 @@ bool xactWillRemoveRelFiles(XLogReaderState *record)
     ColFileNode *xnodes = NULL;
 
     Assert(XLogRecGetRmid(record) == RM_XACT_ID);
-    bool compress;
-    XactGetRelFiles(record, &xnodes, &nrels, &compress);
+    XactGetRelFiles(record, &xnodes, &nrels);
     return nrels > 0;
 }
 
@@ -7807,8 +7886,9 @@ void xactApplyXLogDropRelation(XLogReaderState *record)
 {
     int nrels = 0;
     ColFileNode *xnodes = NULL;
-    bool compress;
-    XactGetRelFiles(record, &xnodes, &nrels, &compress);
+    
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
+    XactGetRelFiles(record, &xnodes, &nrels);
     for (int i = 0; i < nrels; i++) {
         RelFileNodeBackend rbnode;
         ColFileNode node;

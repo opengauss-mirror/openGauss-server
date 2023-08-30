@@ -1,7 +1,7 @@
 #!/bin/sh
 #some enviroment vars
 
-export g_base_port=8888
+export g_base_port=25632
 export prefix=${GAUSSHOME}
 export g_pooler_base_port=`expr $g_base_port \+ 410`
 export g_base_standby_port=`expr $g_base_port \+ 400`

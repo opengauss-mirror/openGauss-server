@@ -56,7 +56,7 @@ void ConfigRecoveryParallelism()
                              g_instance.attr.attr_storage.recovery_parse_workers,
                              g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker,
                              total_recovery_parallelism)));
-        g_supportHotStandby = false;
+        g_supportHotStandby = g_instance.attr.attr_storage.EnableHotStandby;
         SetConfigOption("recovery_parallelism", buf, PGC_POSTMASTER, PGC_S_OVERRIDE);
     } else if (g_instance.attr.attr_storage.max_recovery_parallelism > 1) {
         g_instance.comm_cxt.predo_cxt.redoType = PARALLEL_REDO;
@@ -144,6 +144,9 @@ void ParseBindCpuInfo(RedoCpuBindControl *control)
 
     ptoken = TrimStr(strtok_r(attr, pdelimiter, &psave));
     ptoken = pg_strtolower(ptoken);
+    if (ptoken == NULL) {
+        return;
+    }
 
     int bindNum = 0;
     if (strncmp("nobind", ptoken, strlen("nobind")) == 0) {

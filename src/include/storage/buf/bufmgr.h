@@ -35,6 +35,9 @@
 #define IsNvmBufferID(id) ((id) >= NvmBufferStartID && (id) < SegmentBufferStartID)
 #define IsNormalBufferID(id) ((id) >= 0 && (id) < NvmBufferStartID)
 
+#define ExrtoReadStartLSNBktId (-5)
+#define ExrtoReadEndLSNBktId (-6)
+
 #define USE_CKPT_THREAD_SYNC (!g_instance.attr.attr_storage.enableIncrementalCheckpoint ||  \
                                IsBootstrapProcessingMode() ||                               \
                                pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) < 1)
@@ -320,7 +323,6 @@ extern void DropRelFileNodeAllBuffersUsingScan(RelFileNode* rnode, int rnode_len
 extern void DropRelFileNodeOneForkAllBuffersUsingHash(HTAB *relfilenode_hashtbl);
 
 extern void DropDatabaseBuffers(Oid dbid);
-extern void buffer_drop_exrto_standby_read_buffers();
 
 extern BlockNumber PartitionGetNumberOfBlocksInFork(Relation relation, Partition partition, ForkNumber forkNum,
     bool estimate = false);

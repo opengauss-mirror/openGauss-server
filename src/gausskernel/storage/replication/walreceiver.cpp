@@ -1700,6 +1700,7 @@ static void XLogWalRcvSendHSFeedback(void)
         xmin = InvalidTransactionId;
     t_thrd.pgxact->xmin = InvalidTransactionId;
     t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
     t_thrd.proc->exrto_gen_snap_time = 0;
     /*
      * Always send feedback message.

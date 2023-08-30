@@ -179,7 +179,7 @@ typedef struct SISeg {
     /*
      * Circular buffer holding shared-inval messages
      */
-    SharedInvalidationMessage buffer[MAXNUMMESSAGES];
+    SharedInvalidationMessageEx buffer[MAXNUMMESSAGES];
 
     /*
      * Per-backend state info.
@@ -546,7 +546,7 @@ PGPROC* BackendIdGetProc(int backendID)
  * SIInsertDataEntries
  *		Add new invalidation message(s) to the buffer.
  */
-void SIInsertDataEntries(const SharedInvalidationMessage* data, int n)
+void SIInsertDataEntries(const SharedInvalidationMessage* data, int n, XLogRecPtr lsn)
 {
     SISeg* segP = t_thrd.shemem_ptr_cxt.shmInvalBuffer;
 
@@ -592,7 +592,9 @@ void SIInsertDataEntries(const SharedInvalidationMessage* data, int n)
         max = segP->maxMsgNum;
 
         while (nthistime-- > 0) {
-            segP->buffer[max % MAXNUMMESSAGES] = *data++;
+            int index = max % MAXNUMMESSAGES;
+            segP->buffer[index].msg = *data++;
+            segP->buffer[index].lsn = lsn;
             max++;
         }
 
@@ -735,9 +737,23 @@ int SIGetDataEntries(SharedInvalidationMessage* data, int datasize, bool workses
      * from the queue.
      */
     n = 0;
+ 
+    XLogRecPtr read_lsn = InvalidXLogRecPtr;
+    if (u_sess->utils_cxt.CurrentSnapshot != NULL &&
+        XLogRecPtrIsValid(u_sess->utils_cxt.CurrentSnapshot->read_lsn)) {
+        read_lsn = u_sess->utils_cxt.CurrentSnapshot->read_lsn;
+    } else if (XLogRecPtrIsValid(t_thrd.proc->exrto_read_lsn)) {
+        read_lsn = t_thrd.proc->exrto_read_lsn;
+    }
 
     while (n < datasize && stateP->nextMsgNum < max) {
-        data[n++] = segP->buffer[stateP->nextMsgNum % MAXNUMMESSAGES];
+        int index = stateP->nextMsgNum % MAXNUMMESSAGES;
+        if (read_lsn != InvalidXLogRecPtr && segP->buffer[index].lsn != InvalidXLogRecPtr) {
+            if (XLByteLT(read_lsn, segP->buffer[index].lsn)) {
+                break;
+            }
+        }
+        data[n++] = segP->buffer[index].msg;
         stateP->nextMsgNum++;
     }
 

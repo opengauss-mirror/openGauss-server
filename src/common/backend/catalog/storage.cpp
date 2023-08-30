@@ -1269,7 +1269,9 @@ void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRec
     smgrcreate(reln, MAIN_FORKNUM, true);
     UpdateMinRecoveryPoint(lsn, false);
     LockRelFileNode(rnode, AccessExclusiveLock);
+    (void)LWLockAcquire(RedoTruncateLock, LW_EXCLUSIVE);
     smgrtruncate(reln, MAIN_FORKNUM, blkno);
+    LWLockRelease(RedoTruncateLock);
     XLogTruncateRelation(rnode, MAIN_FORKNUM, blkno);
     Relation rel = CreateFakeRelcacheEntry(rnode);
     if (smgrexists(reln, FSM_FORKNUM))

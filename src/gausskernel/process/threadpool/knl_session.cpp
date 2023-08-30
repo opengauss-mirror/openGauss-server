@@ -957,6 +957,9 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
     /* var in knl_uundofile.cpp */
     storage_cxt->UndoFileCxt = NULL;
 
+    /* var in storage_exrto_file.cpp */
+    storage_cxt->exrto_standby_read_file_cxt = NULL;
+
     /* var in sync.cpp */
     storage_cxt->pendingUnlinks = NIL;
     storage_cxt->pendingOpsCxt = NULL;

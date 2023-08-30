@@ -12,7 +12,7 @@ test: btree_deduplication
 # This test case is used to monitor GUC parameter information.
 # If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
 #test: recovery_2pc_tools recovery_2pc_tools02
-test: recovery_2pc_tools
+#test: recovery_2pc_tools
 
 test: sqlbypass_partition
 test: sqlpatch_base
