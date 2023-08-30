@@ -51,6 +51,10 @@ public:
     {
         return this->head_;
     }
+    inline UndoLogOffset Head_exrto(void)
+    {
+        return this->head_exrto;
+    }
     inline UndoLogOffset Tail(void)
     {
         return this->tail_;
@@ -65,6 +69,10 @@ public:
     inline void SetHead(UndoRecPtr head)
     {
         this->head_ = head;
+    }
+    inline void set_head_exrto(UndoRecPtr head)
+    {
+        this->head_exrto = head;
     }
     inline void SetTail(UndoRecPtr tail)
     {
@@ -109,10 +117,14 @@ public:
     void CreateNonExistsUndoFile(int zid, uint32 dbId);
     static void CheckPointUndoSpace(int fd, UndoSpaceType type);
     static void RecoveryUndoSpace(int fd, UndoSpaceType type);
+    UndoLogOffset find_oldest_offset(int zid, uint32 db_id) const;
+    void unlink_residual_log(int zid, UndoLogOffset start, UndoLogOffset end, uint32 db_id) const;
 
 private:
     /* next insertion point (head), this backend is the only one that can modify insert. */
     UndoLogOffset head_;
+    /* real next insertion point (head), this backend is the only one that can modify insert. */
+    UndoLogOffset head_exrto;
     /* one past end of highest segment, need lock befor modify end. */
     UndoLogOffset tail_;
 

@@ -60,6 +60,7 @@ bool PageIsVerified(Page page, BlockNumber blkno)
     bool header_sane = false;
     bool all_zeroes = false;
     uint16 checksum = 0;
+    bool is_exrto_page = bool(p->pd_flags & PD_EXRTO_PAGE);
 
     /*
      * Don't verify page data unless the page passes basic non-zero test
@@ -76,8 +77,8 @@ bool PageIsVerified(Page page, BlockNumber blkno)
          * the block can still reveal problems, which is why we offer the
          * checksum option.
          */
-        if ((p->pd_flags & ~PD_VALID_FLAG_BITS) == 0 && p->pd_lower <= p->pd_upper && p->pd_upper <= p->pd_special &&
-            p->pd_special <= BLCKSZ && p->pd_special == MAXALIGN(p->pd_special)) {
+        if (is_exrto_page || ((p->pd_flags & ~PD_VALID_FLAG_BITS) == 0 && p->pd_lower <= p->pd_upper &&
+            p->pd_upper <= p->pd_special && p->pd_special <= BLCKSZ && p->pd_special == MAXALIGN(p->pd_special))) {
             header_sane = true;
         }
 

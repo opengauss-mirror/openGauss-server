@@ -39,6 +39,24 @@ typedef struct ConvProcInfo {
 static char* perform_default_encoding_conversion(const char* src, int len, bool is_client_to_server);
 static int cliplen(const char* str, int len, int limit);
 
+// Determine whether the current case needs to be converted
+bool NoNeedToConvert(int srcEncoding, int destEncoding)
+{
+    if (srcEncoding == destEncoding) {
+        return true;
+    }
+    if (srcEncoding == PG_SQL_ASCII || destEncoding == PG_SQL_ASCII) {
+        return true;
+    }
+    if (srcEncoding == PG_GB18030_2022 && destEncoding == PG_GB18030) {
+        return true;
+    }
+    if (srcEncoding == PG_GB18030 && destEncoding == PG_GB18030_2022) {
+        return true;
+    }
+    return false;
+}
+
 /*
  * Prepare for a future call to SetClientEncoding.	Success should mean
  * that SetClientEncoding is guaranteed to succeed for this encoding request.
@@ -66,7 +84,7 @@ int PrepareClientEncoding(int encoding)
      * Check for cases that require no conversion function.
      */
     current_server_encoding = GetDatabaseEncoding();
-    if (current_server_encoding == encoding || current_server_encoding == PG_SQL_ASCII || encoding == PG_SQL_ASCII) {
+    if (NoNeedToConvert(current_server_encoding, encoding)) {
         return 0;
     }
 
@@ -159,7 +177,7 @@ int SetClientEncoding(int encoding)
      * Check for cases that require no conversion function.
      */
     current_server_encoding = GetDatabaseEncoding();
-    if (current_server_encoding == encoding || current_server_encoding == PG_SQL_ASCII || encoding == PG_SQL_ASCII) {
+    if (NoNeedToConvert(current_server_encoding, encoding)) {
         u_sess->mb_cxt.ClientEncoding = &pg_enc2name_tbl[encoding];
         u_sess->mb_cxt.ToServerConvProc = NULL;
         u_sess->mb_cxt.ToClientConvProc = NULL;
@@ -277,10 +295,7 @@ unsigned char* pg_do_encoding_conversion(unsigned char* src, int len, int src_en
     if (!IsTransactionState()) {
         return src;
     }
-    if (src_encoding == dest_encoding) {
-        return src;
-    }
-    if (src_encoding == PG_SQL_ASCII || dest_encoding == PG_SQL_ASCII) {
+    if (NoNeedToConvert(src_encoding, dest_encoding)) {
         return src;
     }
     if (len <= 0) {
@@ -673,7 +688,8 @@ char* pg_any_to_server(const char* s, int len, int encoding)
         bulkload_illegal_chars_conversion = true;
     }
 
-    if (encoding == u_sess->mb_cxt.DatabaseEncoding->encoding || encoding == PG_SQL_ASCII) {
+    if (encoding == u_sess->mb_cxt.DatabaseEncoding->encoding || encoding == PG_SQL_ASCII ||
+        (encoding == PG_GB18030 && u_sess->mb_cxt.DatabaseEncoding->encoding == PG_GB18030_2022)) {
         /*
          * No conversion is needed, but we must still validate the data.
          */

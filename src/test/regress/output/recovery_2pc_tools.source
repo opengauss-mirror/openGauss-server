@@ -78,6 +78,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  backtrace_min_messages                           | enum    |      |           | 
  backwrite_quantity                               | integer | 8kB  | 128       | 131072
  basebackup_timeout                               | integer | s    | 0         | 2147483647
+ base_page_saved_interval                         | integer |      | 5         | 2000
  bbox_blanklist_items                             | string  |      |           | 
  bbox_dump_count                                  | integer |      | 1         | 20
  bbox_dump_path                                   | string  |      |           | 
@@ -487,6 +488,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_size_for_xlog_prune                          | integer | kB   | 0         | 2147483647
  max_stack_depth                                  | integer | kB   | 100       | 2147483647
  max_standby_archive_delay                        | integer | ms   | -1        | 2147483647
+ max_standby_base_page_size                       | int64   |      | 0         | 576460752303423487
+ max_standby_lsn_info_size                        | int64   |      | 0         | 576460752303423487
  max_standby_streaming_delay                      | integer | ms   | -1        | 2147483647
  max_sync_workers_per_subscription                | integer |      | 0         | 262143
  max_undo_workers                                 | integer |      | 1         | 100
@@ -660,6 +663,9 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_txnstatus_cache_size                          | integer |      | 0         | 524288
  ss_work_thread_count                             | integer |      | 16        | 128
  standard_conforming_strings                      | bool    |      |           | 
+ standby_force_recyle_ratio                       | real    |      | 0         | 1
+ standby_max_query_time                           | integer | s    | 0         | 86400
+ standby_recycle_interval                         | integer | s    | 0         | 86400
  standby_shared_buffers_fraction                  | real    |      | 0.1       | 1
  statement_timeout                                | integer | ms   | 0         | 2147483647
  stats_temp_directory                             | string  |      |           | 

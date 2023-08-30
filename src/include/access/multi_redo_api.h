@@ -34,6 +34,7 @@
 #include "storage/proc.h"
 #include "access/redo_statistic.h"
 #include "access/extreme_rto_redo_api.h"
+#include "postmaster/postmaster.h"
 
 #ifdef ENABLE_LITE_MODE
 #define ENABLE_ONDEMAND_RECOVERY false
@@ -64,6 +65,9 @@ static const uint32 PAGE_REDO_WORKER_START = 1;
 static const uint32 PAGE_REDO_WORKER_READY = 2;
 static const uint32 PAGE_REDO_WORKER_EXIT = 3;
 static const uint32 BIG_RECORD_LENGTH = XLOG_BLCKSZ * 16;
+
+#define IS_EXRTO_READ (g_instance.attr.attr_storage.EnableHotStandby && IsExtremeRedo())
+#define IS_EXRTO_STANDBY_READ (IS_EXRTO_READ && pm_state_is_hot_standby())
 
 static inline int get_real_recovery_parallelism()
 {

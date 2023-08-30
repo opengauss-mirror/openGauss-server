@@ -685,6 +685,9 @@ typedef struct knl_u_utils_context {
 	
     HTAB* set_user_params_htab;
     DestReceiver* spi_printtupDR;
+
+    /* backend read lsn for read on standby in extreme rto */
+    XLogRecPtr exrto_read_lsn;
 } knl_u_utils_context;
 
 typedef struct knl_u_security_context {
@@ -1850,6 +1853,9 @@ typedef struct knl_u_storage_context {
 
     /* md.cpp */
     MemoryContext MdCxt; /* context for all md.c allocations */
+
+    /* exrto_file.cpp */
+    MemoryContext exrto_standby_read_file_cxt;
 
     /* sync.cpp */
     MemoryContext pendingOpsCxt;

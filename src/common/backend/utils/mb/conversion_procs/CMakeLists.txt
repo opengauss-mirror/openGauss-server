@@ -8,6 +8,7 @@ SET(unicode_cmd_src
     "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_SJIS.pl|"
     "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_GB18030.pl|"
     "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_BIG5.pl|"
+    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_GB18030_2022.pl|"
 )
 
 add_cmd_gen_when_configure(perl_target unicode_cmd_src)

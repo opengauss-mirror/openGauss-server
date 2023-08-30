@@ -45,6 +45,7 @@ pg_encname pg_encname_tbl[] = {
     {"euckr", PG_EUC_KR},            /* EUC-KR; Extended Unix Code for Korean, KS X 1001 standard */
     {"euctw", PG_EUC_TW},            /* EUC-TW; Extended Unix Code for traditional Chinese */
     {"gb18030", PG_GB18030},         /* GB18030;GB18030 */
+    {"gb180302022", PG_GB18030_2022},  /* GB18030-2022;version 2022 for GB18030 */
     {"gbk", PG_GBK},                 /* GBK; Chinese Windows CodePage 936 simplified Chinese */
     {"iso88591", PG_LATIN1},         /* ISO-8859-1; RFC1345,KXS2 */
     {"iso885910", PG_LATIN6},        /* ISO-8859-10; RFC1345,KXS2 */
@@ -188,6 +189,7 @@ pg_enc2name pg_enc2name_tbl[] = {DEF_ENC2NAME(SQL_ASCII, 0),
     DEF_ENC2NAME(WIN1257, 1257),
     DEF_ENC2NAME(KOI8U, 21866),
     DEF_ENC2NAME(GB18030, 54936),
+    DEF_ENC2NAME(GB18030_2022, 54936),
     DEF_ENC2NAME(SJIS, 932),
     DEF_ENC2NAME(BIG5, 950),
     DEF_ENC2NAME(UHC, 0),

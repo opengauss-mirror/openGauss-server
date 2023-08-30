@@ -391,7 +391,7 @@ void SSAllocRecordReadBuffer(XLogReaderState *xlogreader, uint32 privateLen)
 #endif
 }
 
-void HandleStartupInterruptsForExtremeRto()
+void StartupInterruptsForExtremeRto()
 {
     Assert(AmStartupProcess());
 
@@ -400,7 +400,7 @@ void HandleStartupInterruptsForExtremeRto()
         uint32 triggeredstate = pg_atomic_read_u32(&(g_startupTriggerState));
         if (triggeredstate != newtriggered) {
             ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                          errmsg("HandleStartupInterruptsForExtremeRto:g_startupTriggerState set from %u to %u",
+                          errmsg("StartupInterruptsForExtremeRto:g_startupTriggerState set from %u to %u",
                                  triggeredstate, newtriggered)));
             pg_atomic_write_u32(&(g_startupTriggerState), newtriggered);
         }
@@ -452,9 +452,15 @@ void StartRecoveryWorkers(XLogReaderState *xlogreader, uint32 privateLen)
         SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
         g_instance.comm_cxt.predo_cxt.state = REDO_IN_PROGRESS;
         SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
+
+        Assert(g_instance.pid_cxt.exrto_recycler_pid == 0);
+        if (g_instance.attr.attr_storage.EnableHotStandby) {
+            g_instance.pid_cxt.exrto_recycler_pid = initialize_util_thread(EXRTO_RECYCLER);
+        }
+
         on_shmem_exit(StopRecoveryWorkers, 0);
 
-        g_dispatcher->oldStartupIntrruptFunc = RegisterRedoInterruptCallBack(HandleStartupInterruptsForExtremeRto);
+        g_dispatcher->oldStartupIntrruptFunc = RegisterRedoInterruptCallBack(StartupInterruptsForExtremeRto);
 
         close_readFile_if_open();
     }
@@ -563,6 +569,9 @@ static void StartPageRedoWorkers(uint32 totalThrdNum)
         for (uint32 j = 0; j < batchWorkerPerMng; j++) {
             RedoRoleInit(&(g_dispatcher->pageLines[i].redoThd[j]), tmpWorkers[workerCnt++], REDO_PAGE_WORKER, j,
                 isUndoSpaceWorker);
+            // start from 1 not 0
+            g_dispatcher->pageLines[i].redoThd[j]->standby_read_meta_info.batch_id = i + 1;
+            g_dispatcher->pageLines[i].redoThd[j]->standby_read_meta_info.redo_id = j + 1;
         }
         g_dispatcher->pageLines[i].redoThdNum = batchWorkerPerMng;
     }
@@ -607,6 +616,10 @@ bool DispathCouldExit()
         }
     }
 
+    if (g_instance.pid_cxt.exrto_recycler_pid != 0) {
+        return false;
+    }
+
     return true;
 }
 
@@ -636,6 +649,17 @@ void SendSingalToPageWorker(int signal)
     }
 }
 
+void send_signal_to_eros_recycle_worker(int signal)
+{
+    if (g_instance.pid_cxt.exrto_recycler_pid != 0) {
+        int err = gs_signal_send(g_instance.pid_cxt.exrto_recycler_pid, signal);
+        if (err != 0) {
+            ereport(WARNING, (errmsg("Dispatch kill(pid %lu, signal %d) failed: \"%s\",",
+                g_instance.pid_cxt.exrto_recycler_pid, signal, gs_strerror(err))));
+        }
+    }
+}
+
 /* Run from the dispatcher thread. */
 static void StopRecoveryWorkers(int code, Datum arg)
 {
@@ -643,6 +667,7 @@ static void StopRecoveryWorkers(int code, Datum arg)
                   errmsg("parallel redo workers are going to stop, code:%d, arg:%lu",
                          code, DatumGetUInt64(arg))));
     SendSingalToPageWorker(SIGTERM);
+    send_signal_to_eros_recycle_worker(SIGTERM);
 
     uint64 count = 0;
     while (!DispathCouldExit()) {
@@ -1125,6 +1150,7 @@ static bool DispatchDataBaseRecord(XLogReaderState *record, List *expectedTLIs, 
 
     if (IsDataBaseDrop(record)) {
         isNeedFullSync = true;
+        record->isFullSync = true;
         RedoItem *item = GetRedoItemPtr(record);
 
         ReferenceRedoItem(item);
@@ -1132,10 +1158,18 @@ static bool DispatchDataBaseRecord(XLogReaderState *record, List *expectedTLIs, 
             ReferenceRedoItem(item);
             AddPageRedoItem(g_dispatcher->pageLines[i].batchThd, item);
         }
-        DereferenceRedoItem(item);
+        AddTxnRedoItem(g_dispatcher->trxnLine.managerThd, item);
     } else {
         /* database dir may impact many rel so need to sync to all pageworks */
-        DispatchRecordWithoutPage(record, expectedTLIs);
+        record->isFullSync = true;
+        RedoItem *item = GetRedoItemPtr(record);
+ 
+        ReferenceRedoItem(item);
+        for (uint32 i = 0; i < g_dispatcher->pageLineNum; i++) {
+            ReferenceRedoItem(item);
+            AddPageRedoItem(g_dispatcher->pageLines[i].batchThd, item);
+        }
+        AddTxnRedoItem(g_dispatcher->trxnLine.managerThd, item);
         g_dispatcher->needFullSyncCheckpoint = true;
     }
 
@@ -1911,6 +1945,7 @@ void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
          errmsg("[REDO_LOG_TRACE]SendRecoveryEndMarkToWorkersAndWaitForFinish, ready to stop redo workers, code: %d",
                 code)));
     if ((get_real_recovery_parallelism() > 1) && (GetBatchCount() > 0)) {
+        send_signal_to_eros_recycle_worker(SIGTERM);
         WaitPageRedoWorkerReachLastMark(g_dispatcher->readLine.readPageThd);
         PageRedoPipeline *pl = g_dispatcher->pageLines;
         /* send end mark */

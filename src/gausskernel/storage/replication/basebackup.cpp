@@ -19,6 +19,7 @@
 
 #include "access/xlog_internal.h" /* for pg_start/stop_backup */
 #include "access/cbmparsexlog.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_type.h"
 #include "gs_thread.h"
@@ -1216,6 +1217,9 @@ bool IsSkipDir(const char * dirName)
     /* Skip temporary files */
     if (strncmp(dirName, PG_TEMP_FILE_PREFIX, strlen(PG_TEMP_FILE_PREFIX)) == 0)
         return true;
+    if (strncmp(dirName, EXRTO_FILE_DIR, strlen(EXRTO_FILE_DIR)) == 0) {
+        return true;
+    }
 
     /*
      * If there's a backup_label file, it belongs to a backup started by

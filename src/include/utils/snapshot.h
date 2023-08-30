@@ -265,6 +265,32 @@ typedef struct SnapshotData {
     GTM_SnapshotType gtm_snapshot_type;
 } SnapshotData;
 
+typedef struct ExrtoSnapshotData* ExrtoSnapshot;
+ 
+typedef struct ExrtoSnapshotData {
+    /*
+     * The remaining fields are used only for MVCC snapshots, and are normally
+     * just zeroes in special snapshots.  (But xmin and xmax are used
+     * specially by HeapTupleSatisfiesDirty.)
+     *
+     * An MVCC snapshot can never see the effects of XIDs >= xmax. It can see
+     * the effects of all older XIDs except those listed in the snapshot. xmin
+     * is stored as an optimization to avoid needing to search the XID arrays
+     * for most tuples.
+     */
+    TransactionId xmin; /* all XID < xmin are visible to me */
+    TransactionId xmax; /* all XID >= xmax are invisible to me */
+ 
+    /*
+     * This snapshot can see the effects of all transactions with CSN <=
+     * snapshotcsn.
+     */
+    CommitSeqNo snapshot_csn;
+ 
+    XLogRecPtr read_lsn; /* xact lsn when generate snapshot */
+    TimestampTz gen_snap_time;
+} ExrtoSnapshotData;
+
 /*
  * Result codes for AM API tuple_{update,delete,lock}, and for visibility.
  */

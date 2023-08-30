@@ -950,6 +950,8 @@ void InitProcess(void)
     t_thrd.proc->snap_refcnt_bitmap = 0;
 #endif
 
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
     /* Check that group locking fields are in a proper initial state. */
     Assert(t_thrd.proc->lockGroupLeader == NULL);
     Assert(dlist_is_empty(&t_thrd.proc->lockGroupMembers));
@@ -1109,6 +1111,8 @@ void InitAuxiliaryProcess(void)
     t_thrd.pgxact->xmin = InvalidTransactionId;
     t_thrd.proc->snapXmax = InvalidTransactionId;
     t_thrd.proc->snapCSN = InvalidCommitSeqNo;
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
     t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     t_thrd.proc->backendId = InvalidBackendId;

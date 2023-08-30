@@ -320,6 +320,7 @@ extern void DropRelFileNodeAllBuffersUsingScan(RelFileNode* rnode, int rnode_len
 extern void DropRelFileNodeOneForkAllBuffersUsingHash(HTAB *relfilenode_hashtbl);
 
 extern void DropDatabaseBuffers(Oid dbid);
+extern void buffer_drop_exrto_standby_read_buffers();
 
 extern BlockNumber PartitionGetNumberOfBlocksInFork(Relation relation, Partition partition, ForkNumber forkNum,
     bool estimate = false);
@@ -423,4 +424,13 @@ extern void ReadBuffer_common_for_check(ReadBufferMode readmode, BufferDesc* buf
     const XLogPhyBlock *pblk, Block bufBlock);
 extern BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersistence,
     ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode);
+extern Buffer standby_read_buf(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
+                        BufferAccessStrategy strategy);
+typedef struct SMgrRelationData *SMgrRelation;
+BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
+                        BufferAccessStrategy strategy, bool *foundPtr, const XLogPhyBlock *pblk);
+Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
+    ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
+void buffer_in_progress_pop();
+void buffer_in_progress_push();
 #endif

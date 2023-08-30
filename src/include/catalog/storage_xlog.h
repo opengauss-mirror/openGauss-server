@@ -51,7 +51,10 @@ typedef struct xl_smgr_truncate {
 typedef struct xl_smgr_truncate_compress {
     xl_smgr_truncate xlrec;
     uint2 pageCompressOpts;
+    TransactionId latest_removed_xid;
 } xl_smgr_truncate_compress;
+
+#define TRUNCATE_CONTAIN_XID_SIZE (offsetof(xl_smgr_truncate_compress, latest_removed_xid) + sizeof(TransactionId))
 
 extern void log_smgrcreate(RelFileNode *rnode, ForkNumber forkNum);
 
@@ -60,7 +63,8 @@ extern void smgr_desc(StringInfo buf, XLogReaderState *record);
 extern const char* smgr_type_name(uint8 subtype);
 
 extern void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum, char *data);
-extern void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr lsn);
+extern void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr lsn,
+    TransactionId latest_removed_xid);
 
 /* An xlog combined by multiply sub-xlog, it will be decoded again */
 #define XLOG_SEG_ATOMIC_OPERATION 0x00

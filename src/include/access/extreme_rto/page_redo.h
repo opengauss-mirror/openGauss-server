@@ -33,8 +33,10 @@
 #include "nodes/pg_list.h"
 #include "storage/proc.h"
 
+#include "access/extreme_rto/batch_redo.h"
 #include "access/extreme_rto/posix_semaphore.h"
 #include "access/extreme_rto/spsc_blocking_queue.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "access/xlogproc.h"
 #include "postmaster/pagerepair.h"
 
@@ -185,6 +187,7 @@ struct PageRedoWorker {
     HTAB *badPageHashTbl;
     char page[BLCKSZ];
     XLogBlockDataParse *curRedoBlockState;
+    StandbyReadMetaInfo standby_read_meta_info;
 };
 
 
@@ -240,6 +243,7 @@ void DispatchClosefdMarkToAllRedoWorker();
 void DispatchCleanInvalidPageMarkToAllRedoWorker(RepairFileKey key);
 
 const char *RedoWokerRole2Str(RedoRole role);
+uint32 GetWorkerId(const RedoItemTag *redo_item_tag, uint32 worker_count);
 
 
 /* block or file repair function */
@@ -253,6 +257,9 @@ void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
 void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
     XLogRecPtr old_lsn, XLogPhyBlock pblk);
 void SeqCheckRemoteReadAndRepairPage();
-
+void exrto_generate_snapshot(XLogRecPtr trxn_lsn);
+void exrto_read_snapshot(Snapshot snapshot);
+XLogRecPtr exrto_calculate_recycle_position(bool force_recyle);
+TransactionId exrto_calculate_recycle_xmin_for_undo();
 }  // namespace extreme_rto
 #endif

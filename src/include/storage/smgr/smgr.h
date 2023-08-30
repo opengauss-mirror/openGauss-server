@@ -125,12 +125,20 @@ enum SMGR_READ_STATUS {
 #define UNDO_DB_OID (9)
 #define UNDO_SLOT_DB_OID (10)
 
+#define EXRTO_BASE_PAGE_SPACE_OID (6)
+#define EXRTO_LSN_INFO_SPACE_OID (7)
+#define EXRTO_BLOCK_INFO_SPACE_OID (8)
+#define EXRTO_FORK_NUM 3
+
 #define MD_MANAGER (0)
 #define UNDO_MANAGER (1)
 #define SEGMENT_MANAGER (2)
+#define EXRTO_MANAGER (3)
 
 #define IS_UNDO_RELFILENODE(rnode) ((rnode).dbNode == UNDO_DB_OID || (rnode).dbNode == UNDO_SLOT_DB_OID)
-
+#define IS_EXRTO_RELFILENODE(rnode) ((rnode).spcNode == EXRTO_BASE_PAGE_SPACE_OID || \
+                                     (rnode).spcNode == EXRTO_LSN_INFO_SPACE_OID || \
+                                     (rnode).spcNode == EXRTO_BLOCK_INFO_SPACE_OID)
 /*
  * On Windows, we have to interpret EACCES as possibly meaning the same as
  * ENOENT, because if a file is unlinked-but-not-yet-gone on that platform,
@@ -249,5 +257,17 @@ extern void partition_create_new_storage(Relation rel, Partition part, const Rel
     bool keep_old_relfilenode = false);
 extern ScalarToDatum GetTransferFuncByTypeOid(Oid attTypeOid);
 extern bool check_unlink_rel_hashtbl(RelFileNode rnode, ForkNumber forknum);
+
+/* storage_exrto_file.cpp */
+void exrto_init(void);
+void exrto_close(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
+bool exrto_exists(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
+void exrto_unlink(const RelFileNodeBackend& rnode, ForkNumber forknum, bool is_redo, BlockNumber blocknum);
+void exrto_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer, bool skip_fsync);
+SMGR_READ_STATUS exrto_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
+void exrto_write(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skip_fsync);
+BlockNumber exrto_nblocks(SMgrRelation reln, ForkNumber forknum);
+void exrto_truncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);
+void exrto_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
 
 #endif /* SMGR_H */

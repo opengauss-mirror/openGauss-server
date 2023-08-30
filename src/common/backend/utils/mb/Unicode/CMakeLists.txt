@@ -154,3 +154,10 @@ add_custom_command(
     DEPENDS UCS_to_BIG5.pl BIG5.TXT CP950.TXT
     COMMENT "Now Generating *.map"
 )
+
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/gb18030_to_utf8_2022.map ${CMAKE_CURRENT_SOURCE_DIR}/utf8_to_gb18030_2022.map
+    COMMAND perl ${CMAKE_CURRENT_SOURCE_DIR}/UCS_to_GB18030_2022.pl
+    DEPENDS UCS_to_GB18030_2022.pl gb-18030-2022.xml
+    COMMENT "Now Generating *.map"
+)

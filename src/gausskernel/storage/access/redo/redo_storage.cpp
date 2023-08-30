@@ -68,7 +68,7 @@ XLogRecParseState *smgr_xlog_relnode_parse_to_block(XLogReaderState *record, uin
     XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);
 
     XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype,
-                            (char *)XLogRecGetData(record), 1, compress);
+                            (char *)XLogRecGetData(record), 1, compress, XLogRecGetDataLen(record));
     return recordstatehead;
 }
 

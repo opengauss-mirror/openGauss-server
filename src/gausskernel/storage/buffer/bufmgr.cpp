@@ -129,8 +129,7 @@ static int ts_ckpt_progress_comparator(Datum a, Datum b, void *arg);
 static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
     BlockNumber blockNum, ReadBufferMode mode, bool isExtend, Block bufBlock, const XLogPhyBlock *pblk,
     bool *need_repair);
-static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
-    ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
+
 static void TerminateBufferIO_common(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bits);
 
 /*
@@ -351,8 +350,6 @@ void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref)
 static void BufferSync(int flags);
 static void TerminateBufferIO_common(BufferDesc* buf, bool clear_dirty, uint32 set_flag_bits);
 void shared_buffer_write_error_callback(void* arg);
-static BufferDesc* BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
-                               BufferAccessStrategy strategy, bool* foundPtr, const XLogPhyBlock *pblk);
 
 static int rnode_comparator(const void* p1, const void* p2);
 
@@ -1676,6 +1673,10 @@ Buffer ReadBuffer(Relation reln, BlockNumber block_num)
 Buffer ReadBufferExtended(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
                           BufferAccessStrategy strategy)
 {
+    if (IsExtremeRtoRunning() && !AmPageRedoWorker()) {
+        return standby_read_buf(reln, fork_num, block_num, mode, strategy);
+    }
+
     bool hit = false;
     Buffer buf;
 
@@ -2227,7 +2228,7 @@ static inline void BufferDescSetPBLK(BufferDesc *buf, const XLogPhyBlock *pblk)
  *
  * *hit is set to true if the request was satisfied from shared buffer cache.
  */
-static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
+Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
                                 ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk)
 {
     BufferDesc *bufHdr = NULL;
@@ -2288,7 +2289,7 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
          * lookup the buffer.  IO_IN_PROGRESS is set if the requested block is
          * not currently in memory.
          */
-        bufHdr = BufferAlloc(smgr, relpersistence, forkNum, blockNum, strategy, &found, pblk);
+        bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, blockNum, strategy, &found, pblk);
         if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
             bufHdr->extra->encrypt = smgr->encrypt ? true : false; /* set tde flag */
         }
@@ -2670,14 +2671,15 @@ void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags)
  *
  * No locks are held either at entry or exit.
  */
-static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber fork_num, BlockNumber block_num,
-                               BufferAccessStrategy strategy, bool *found, const XLogPhyBlock *pblk)
+BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, ForkNumber fork_num,
+                               BlockNumber block_num, BufferAccessStrategy strategy, bool *found,
+                               const XLogPhyBlock *pblk)
 {
     if (g_instance.attr.attr_storage.nvm_attr.enable_nvm) {
-        return NvmBufferAlloc(smgr, relpersistence, fork_num, block_num, strategy, found, pblk);
+        return NvmBufferAlloc(rel_file_node, relpersistence, fork_num, block_num, strategy, found, pblk);
     }
 
-    Assert(!IsSegmentPhysicalRelNode(smgr->smgr_rnode.node));
+    Assert(!IsSegmentPhysicalRelNode(rel_file_node));
 
     BufferTag new_tag;                 /* identity of requested block */
     uint32 new_hash;                   /* hash value for newTag */
@@ -2692,7 +2694,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
     uint32 buf_state;
 
     /* create a tag so we can lookup the buffer */
-    INIT_BUFFERTAG(new_tag, smgr->smgr_rnode.node, fork_num, block_num);
+    INIT_BUFFERTAG(new_tag, rel_file_node, fork_num, block_num);
 
     /* determine its hash code and partition lock ID */
     new_hash = BufTableHashCode(&new_tag);
@@ -2844,8 +2846,8 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
                 }
 
                 /* OK, do the I/O */
-                TRACE_POSTGRESQL_BUFFER_WRITE_DIRTY_START(fork_num, block_num, smgr->smgr_rnode.node.spcNode,
-                                                          smgr->smgr_rnode.node.dbNode, smgr->smgr_rnode.node.relNode);
+                TRACE_POSTGRESQL_BUFFER_WRITE_DIRTY_START(fork_num, block_num, rel_file_node.spcNode,
+                                                          rel_file_node.dbNode, rel_file_node.relNode);
 
                 /* during initdb, not need flush dw file */
                 if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
@@ -2868,8 +2870,8 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
 
                 ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
 
-                TRACE_POSTGRESQL_BUFFER_WRITE_DIRTY_DONE(fork_num, block_num, smgr->smgr_rnode.node.spcNode,
-                                                         smgr->smgr_rnode.node.dbNode, smgr->smgr_rnode.node.relNode);
+                TRACE_POSTGRESQL_BUFFER_WRITE_DIRTY_DONE(fork_num, block_num, rel_file_node.spcNode,
+                                                         rel_file_node.dbNode, rel_file_node.relNode);
             } else {
                 /*
                  * Someone else has locked the buffer, so give it up and loop
@@ -5422,6 +5424,31 @@ void DropDatabaseBuffers(Oid dbid)
     gstrace_exit(GS_TRC_ID_DropDatabaseBuffers);
 }
 
+void buffer_drop_exrto_standby_read_buffers()
+{
+    int i = 0;
+    ereport(LOG, (errmsg("buffer_drop_exrto_standby_read_buffers: start to drop buffers.")));
+    while (i < TOTAL_BUFFER_NUM) {
+        BufferDesc *buf_desc = GetBufferDescriptor(i);
+        uint32 buf_state;
+        /*
+         * Some safe unlocked checks can be done to reduce the number of cycle.
+         */
+        if (!IS_EXRTO_RELFILENODE(buf_desc->tag.rnode)) {
+            i++;
+            continue;
+        }
+
+        buf_state = LockBufHdr(buf_desc);
+        if (IS_EXRTO_RELFILENODE(buf_desc->tag.rnode)) {
+            InvalidateBuffer(buf_desc); /* with buffer head lock released */
+        } else {
+            UnlockBufHdr(buf_desc, buf_state);
+        }
+        i++;
+    }
+}
+
 /* -----------------------------------------------------------------
  *		PrintBufferDescs
  *
@@ -5690,6 +5717,12 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
     buf_desc = GetBufferDescriptor(buffer - 1);
 
     Assert(GetPrivateRefCount(buffer) > 0);
+
+    //  temp buf just for old page version, could not write to disk
+    if (pg_atomic_read_u32(&buf_desc->state) & BM_IS_TMP_BUF) {
+        return;
+    }
+
     /* here, either share or exclusive lock is OK */
     if (!LWLockHeldByMe(buf_desc->content_lock))
         ereport(PANIC, (errcode(ERRCODE_INVALID_BUFFER),
@@ -5723,8 +5756,9 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
          * The incremental checkpoint is protected by the doublewriter, the
          * half-write problem does not occur.
          */
-        if (!ENABLE_INCRE_CKPT && XLogHintBitIsNeeded() &&
-            (pg_atomic_read_u32(&buf_desc->state) & BM_PERMANENT)) {
+        bool need_write_wal =
+            (!ENABLE_INCRE_CKPT && XLogHintBitIsNeeded() && (pg_atomic_read_u32(&buf_desc->state) & BM_PERMANENT));
+        if (need_write_wal) {
             /*
              * If we're in recovery we cannot dirty a page because of a hint.
              * We can set the hint, just not dirty the page as a result so the
@@ -7351,4 +7385,19 @@ bool IsPageHitBufferPool(RelFileNode& node, ForkNumber forkNum, BlockNumber bloc
         return true;
     }
     return false;
+}
+
+void buffer_in_progress_pop()
+{
+    Assert(t_thrd.storage_cxt.ParentInProgressBuf == NULL);
+    t_thrd.storage_cxt.ParentInProgressBuf = t_thrd.storage_cxt.InProgressBuf;
+    t_thrd.storage_cxt.ParentIsForInput = t_thrd.storage_cxt.IsForInput;
+    t_thrd.storage_cxt.InProgressBuf = NULL;
+}
+
+void buffer_in_progress_push()
+{
+    t_thrd.storage_cxt.InProgressBuf = t_thrd.storage_cxt.ParentInProgressBuf;
+    t_thrd.storage_cxt.IsForInput = t_thrd.storage_cxt.ParentIsForInput;
+    t_thrd.storage_cxt.ParentInProgressBuf = NULL;
 }

@@ -115,6 +115,8 @@ extern VirtualTransactionId *GetConflictingVirtualXIDs(TransactionId limitXmin, 
                                                        CommitSeqNo limitXminCSN = InvalidCommitSeqNo,
                                                        TransactionId* xminArray = NULL);
 extern ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalReason sigmode);
+extern bool proc_array_cancel_conflicting_proc(TransactionId latest_removed_xid,
+    bool reach_max_check_times);
 
 extern bool MinimumActiveBackends(int min);
 extern int CountDBBackends(Oid database_oid);

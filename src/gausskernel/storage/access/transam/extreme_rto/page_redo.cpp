@@ -51,6 +51,7 @@
 #include "storage/smgr/relfilenode_hash.h"
 #include "storage/standby.h"
 #include "storage/pmsignal.h"
+#include "storage/procarray.h"
 #include "utils/guc.h"
 #include "utils/palloc.h"
 #include "portability/instr_time.h"
@@ -63,6 +64,7 @@
 #include "commands/tablespace.h"
 #include "access/extreme_rto/page_redo.h"
 #include "access/extreme_rto/dispatcher.h"
+#include "access/extreme_rto/standby_read/lsn_info_meta.h"
 #include "access/extreme_rto/txn_redo.h"
 #include "access/extreme_rto/xlog_read.h"
 #include "pgstat.h"
@@ -183,6 +185,9 @@ void RedoWorkerQueueCallBack()
 
 bool RedoWorkerIsUndoSpaceWorker()
 {
+    if (g_redoWorker == NULL) {
+        return false;
+    }
     return g_redoWorker->isUndoSpaceWorker;
 }
 
@@ -562,8 +567,6 @@ bool BatchRedoDistributeItems(void **eleArry, uint32 eleNum)
             BatchRedoProcLsnForwarder((RedoItem *)eleArry[i]);
         } else if (eleArry[i] == (void *)&g_cleanupMark) {
             BatchRedoProcCleanupMark((RedoItem *)eleArry[i]);
-        } else if (eleArry[i] == (void *)&g_closefdMark) {
-            smgrcloseall();
         } else if (eleArry[i] == (void *)&g_cleanInvalidPageMark) {
             forget_range_invalid_pages((void *)eleArry[i]);
         } else {
@@ -639,26 +642,21 @@ void RedoPageManagerDistributeToAllOneBlock(XLogRecParseState *ddlParseState)
     }
 }
 
-void RedoPageManagerDistributeBlockRecord(HTAB *redoItemHash, XLogRecParseState *parsestate)
+void RedoPageManagerDistributeBlockRecord(XLogRecParseState *record_block_state)
 {
     PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
     const uint32 WorkerNumPerMng = myRedoLine->redoThdNum;
-    HASH_SEQ_STATUS status;
-    RedoItemHashEntry *redoItemEntry = NULL;
-    HTAB *curMap = redoItemHash;
-    hash_seq_init(&status, curMap);
+    uint32 work_id;
+    RelFileNode rel_node;
+    ForkNumber fork_num;
+    BlockNumber blk_no;
+    RedoItemTag redo_item_tag;
 
-    while ((redoItemEntry = (RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
-        uint32 workId = GetWorkerId(&redoItemEntry->redoItemTag, WorkerNumPerMng);
-        AddPageRedoItem(myRedoLine->redoThd[workId], redoItemEntry->head);
-
-        if (hash_search(curMap, (void *)&redoItemEntry->redoItemTag, HASH_REMOVE, NULL) == NULL)
-            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted")));
-    }
-
-    if (parsestate != NULL) {
-        RedoPageManagerDistributeToAllOneBlock(parsestate);
-    }
+    PRXLogRecGetBlockTag(record_block_state, &rel_node, &blk_no, &fork_num);
+    INIT_REDO_ITEM_TAG(redo_item_tag, rel_node, fork_num, blk_no);
+    work_id = GetWorkerId(&redo_item_tag, WorkerNumPerMng);
+    record_block_state->nextrecord = NULL;
+    AddPageRedoItem(myRedoLine->redoThd[work_id], record_block_state);
 }
 
 void WaitCurrentPipeLineRedoWorkersQueueEmpty()
@@ -762,13 +760,24 @@ void RedoPageManagerSyncDdlAction(XLogRecParseState *parsestate)
     XLogBlockParseStateRelease(parsestate);
 }
 
-void RedoPageManagerDoDropAction(XLogRecParseState *parsestate, HTAB *hashMap)
+void RedoPageManagerDoDatabaseAction(XLogRecParseState *parsestate)
 {
-    XLogRecParseState *newState = XLogParseBufferCopy(parsestate);
-    PRTrackClearBlock(newState, hashMap);
-    RedoPageManagerDistributeBlockRecord(hashMap, parsestate);
+    RedoPageManagerDistributeToAllOneBlock(parsestate);
     WaitCurrentPipeLineRedoWorkersQueueEmpty();
-    RedoPageManagerSyncDdlAction(parsestate);
+    RedoPageManagerSmgrClose(parsestate);
+ 
+    bool need_wait = parsestate->isFullSync;
+    if (need_wait) {
+        pg_atomic_write_u32(&g_redoWorker->fullSyncFlag, 1);
+    }
+    parsestate->nextrecord = NULL;
+    XLogBlockParseStateRelease(parsestate);
+ 
+    uint32 val = pg_atomic_read_u32(&g_redoWorker->fullSyncFlag);
+    while (val != 0) {
+        RedoInterruptCallBack();
+        val = pg_atomic_read_u32(&g_redoWorker->fullSyncFlag);
+    }
 }
 
 void RedoPageManagerDoSmgrAction(XLogRecParseState *recordblockstate)
@@ -790,16 +799,14 @@ void RedoPageManagerDoSmgrAction(XLogRecParseState *recordblockstate)
     XLogBlockParseStateRelease(recordblockstate);
 }
 
-void RedoPageManagerDoDataTypeAction(XLogRecParseState *parsestate, HTAB *hashMap)
+void RedoPageManagerDoDataTypeAction(XLogRecParseState *parsestate)
 {
     XLogBlockDdlParse *ddlrecparse = NULL;
     XLogBlockParseGetDdlParse(parsestate, ddlrecparse);
     
     if (ddlrecparse->blockddltype == BLOCK_DDL_DROP_RELNODE ||
         ddlrecparse->blockddltype == BLOCK_DDL_TRUNCATE_RELNODE) {
-        XLogRecParseState *newState = XLogParseBufferCopy(parsestate);
-        PRTrackClearBlock(newState, hashMap);
-        RedoPageManagerDistributeBlockRecord(hashMap, parsestate);
+        RedoPageManagerDistributeToAllOneBlock(parsestate);
         WaitCurrentPipeLineRedoWorkersQueueEmpty();
     }
 
@@ -839,10 +846,10 @@ void PageManagerProcCleanupMark(RedoItem *cleanupMark)
     ereport(LOG, (errcode(ERRCODE_LOG), errmsg("[ForceFinish]PageManagerProcCleanupMark has cleaned InvalidPages")));
 }
 
-void PageManagerProcCheckPoint(HTAB *hashMap, XLogRecParseState *parseState)
+void PageManagerProcCheckPoint(XLogRecParseState *parseState)
 {
     Assert(IsCheckPoint(parseState));
-    RedoPageManagerDistributeBlockRecord(hashMap, parseState);
+    RedoPageManagerDistributeToAllOneBlock(parseState);
     bool needWait = parseState->isFullSync;
     if (needWait) {
         pg_atomic_write_u32(&g_redoWorker->fullSyncFlag, 1);
@@ -865,9 +872,8 @@ void PageManagerProcCheckPoint(HTAB *hashMap, XLogRecParseState *parseState)
     }
 }
 
-void PageManagerProcCreateTableSpace(HTAB *hashMap, XLogRecParseState *parseState)
+void PageManagerProcCreateTableSpace(XLogRecParseState *parseState)
 {
-    RedoPageManagerDistributeBlockRecord(hashMap, NULL);
     bool needWait = parseState->isFullSync;
     if (needWait) {
         pg_atomic_write_u32(&g_redoWorker->fullSyncFlag, 1);
@@ -881,16 +887,14 @@ void PageManagerProcCreateTableSpace(HTAB *hashMap, XLogRecParseState *parseStat
     }
 }
 
-void PageManagerProcSegFullSyncState(HTAB *hashMap, XLogRecParseState *parseState)
+void PageManagerProcSegFullSyncState(XLogRecParseState *parseState)
 {
-    RedoPageManagerDistributeBlockRecord(hashMap, NULL);
     WaitCurrentPipeLineRedoWorkersQueueEmpty();
     RedoPageManagerSyncDdlAction(parseState);
 }
 
-void PageManagerProcSegPipeLineSyncState(HTAB *hashMap, XLogRecParseState *parseState)
+void PageManagerProcSegPipeLineSyncState(XLogRecParseState *parseState)
 {
-    RedoPageManagerDistributeBlockRecord(hashMap, NULL);
     WaitCurrentPipeLineRedoWorkersQueueEmpty();
     MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
 
@@ -917,40 +921,38 @@ static void WaitNextBarrier(XLogRecParseState *parseState)
 
 void PageManagerRedoParseState(XLogRecParseState *preState)
 {
-    HTAB *hashMap = g_dispatcher->pageLines[g_redoWorker->slotId].managerThd->redoItemHash;
-
     switch (preState->blockparse.blockhead.block_valid) {
         case BLOCK_DATA_MAIN_DATA_TYPE:
         case BLOCK_DATA_UNDO_TYPE:
         case BLOCK_DATA_VM_TYPE:
         case BLOCK_DATA_FSM_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
-            PRTrackAddBlock(preState, hashMap);
+            RedoPageManagerDistributeBlockRecord(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
             break;
         case BLOCK_DATA_DDL_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
-            RedoPageManagerDoDataTypeAction(preState, hashMap);
+            RedoPageManagerDoDataTypeAction(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
             break;
         case BLOCK_DATA_SEG_EXTEND:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
-            PageManagerProcSegPipeLineSyncState(hashMap, preState);
+            PageManagerProcSegPipeLineSyncState(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
             break;
+        case BLOCK_DATA_CREATE_DATABASE_TYPE:
         case BLOCK_DATA_DROP_DATABASE_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_5]);
-            RedoPageManagerDoDropAction(preState, hashMap);
+            RedoPageManagerDoDatabaseAction(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_5]);
             break;
         case BLOCK_DATA_DROP_TBLSPC_TYPE:
             /* just make sure any other ddl before drop tblspc is done */
             XLogBlockParseStateRelease(preState);
             break;
-        case BLOCK_DATA_CREATE_DATABASE_TYPE:
         case BLOCK_DATA_SEG_FILE_EXTEND_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_6]);
-            RedoPageManagerDistributeBlockRecord(hashMap, NULL);
+            RedoPageManagerDistributeBlockRecord(NULL);
             /* wait until queue empty */
             WaitCurrentPipeLineRedoWorkersQueueEmpty();
             /* do atcual action */
@@ -959,31 +961,30 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
             break;
         case BLOCK_DATA_SEG_FULL_SYNC_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
-            PageManagerProcSegFullSyncState(hashMap, preState);
+            PageManagerProcSegFullSyncState(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
             break;
         case BLOCK_DATA_CREATE_TBLSPC_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_7]);
-            PageManagerProcCreateTableSpace(hashMap, preState);
+            PageManagerProcCreateTableSpace(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_7]);
             break;
         case BLOCK_DATA_XLOG_COMMON_TYPE:
-            PageManagerProcCheckPoint(hashMap, preState);
+            PageManagerProcCheckPoint(preState);
             break;
         case BLOCK_DATA_NEWCU_TYPE:
-            RedoPageManagerDistributeBlockRecord(hashMap, NULL);
             PageManagerDistributeBcmBlock(preState);
             break;
         case BLOCK_DATA_SEG_SPACE_DROP:
         case BLOCK_DATA_SEG_SPACE_SHRINK:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
-            RedoPageManagerDistributeBlockRecord(hashMap, preState);
+            RedoPageManagerDistributeToAllOneBlock(preState);
             WaitCurrentPipeLineRedoWorkersQueueEmpty();
             RedoPageManagerSyncDdlAction(preState);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
             break;
         case BLOCK_DATA_BARRIER_TYPE:
-            RedoPageManagerDistributeBlockRecord(hashMap, preState);
+            RedoPageManagerDistributeToAllOneBlock(preState);
             WaitNextBarrier(preState);
             break;
         default:
@@ -992,71 +993,60 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
     }
 }
 
-bool PageManagerRedoDistributeItems(void **eleArry, uint32 eleNum)
+bool PageManagerRedoDistributeItems(XLogRecParseState *record_block_state)
 {
-    HTAB *hashMap = g_dispatcher->pageLines[g_redoWorker->slotId].managerThd->redoItemHash;
-
-    for (uint32 i = 0; i < eleNum; i++) {
-        if (eleArry[i] == (void *)&g_redoEndMark) {
-            RedoPageManagerDistributeBlockRecord(hashMap, NULL);
-            return true;
-        } else if (eleArry[i] == (void *)&g_GlobalLsnForwarder) {
-            RedoPageManagerDistributeBlockRecord(hashMap, NULL);
-            PageManagerProcLsnForwarder((RedoItem *)eleArry[i]);
-            continue;
-        } else if (eleArry[i] == (void *)&g_cleanupMark) {
-            PageManagerProcCleanupMark((RedoItem *)eleArry[i]);
-            continue;
-        } else if (eleArry[i] == (void *)&g_closefdMark) {
-            smgrcloseall();
-            continue;
-        } else if (eleArry[i] == (void *)&g_cleanInvalidPageMark) {
-            forget_range_invalid_pages((void *)eleArry[i]);
-            continue;
-        }
-        XLogRecParseState *recordblockstate = (XLogRecParseState *)eleArry[i];
-        XLogRecParseState *nextState = recordblockstate;
-        do {
-            XLogRecParseState *preState = nextState;
-            nextState = (XLogRecParseState *)nextState->nextrecord;
-            preState->nextrecord = NULL;
-#ifdef ENABLE_UT
-            TestXLogRecParseStateEventProbe(UTEST_EVENT_RTO_PAGEMGR_REDO_BEFORE_DISTRIBUTE_ITEMS,
-                __FUNCTION__, preState);
-#endif
-
-            PageManagerRedoParseState(preState);
-#ifdef ENABLE_UT
-            TestXLogRecParseStateEventProbe(UTEST_EVENT_RTO_PAGEMGR_REDO_AFTER_DISTRIBUTE_ITEMS,
-                __FUNCTION__, preState);
-#endif
-        } while (nextState != NULL);
+    if (record_block_state == (void *)&g_redoEndMark) {
+        return true;
+    } else if (record_block_state == (void *)&g_GlobalLsnForwarder) {
+        PageManagerProcLsnForwarder((RedoItem *) record_block_state);
+        return false;
+    } else if (record_block_state == (void *)&g_cleanupMark) {
+        PageManagerProcCleanupMark((RedoItem *) record_block_state);
+        return false;
+    } else if (record_block_state == (void *)&g_cleanInvalidPageMark) {
+        forget_range_invalid_pages((void *)record_block_state);
+        return false;
     }
-    GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_9]);
-    RedoPageManagerDistributeBlockRecord(hashMap, NULL);
-    CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_9]);
+
+    XLogRecParseState *next_state = record_block_state;
+    do {
+        XLogRecParseState *pre_state = next_state;
+        next_state = (XLogRecParseState *)next_state->nextrecord;
+        pre_state->nextrecord = NULL;
+#ifdef ENABLE_UT
+        TestXLogRecParseStateEventProbe(UTEST_EVENT_RTO_PAGEMGR_REDO_BEFORE_DISTRIBUTE_ITEMS,
+            __FUNCTION__, pre_state);
+#endif
+
+        PageManagerRedoParseState(pre_state);
+#ifdef ENABLE_UT
+        TestXLogRecParseStateEventProbe(UTEST_EVENT_RTO_PAGEMGR_REDO_AFTER_DISTRIBUTE_ITEMS,
+            __FUNCTION__, pre_state);
+#endif
+    } while (next_state != NULL);
+
     return false;
 }
 
 void RedoPageManagerMain()
 {
-    void **eleArry;
-    uint32 eleNum;
+    XLogRecParseState *record_block_state;
+    bool is_end;
 
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
-    g_redoWorker->redoItemHash = PRRedoItemHashInitialize(g_redoWorker->oldCtx);
     XLogParseBufferInitFunc(&(g_redoWorker->parseManager), MAX_PARSE_BUFF_NUM, &recordRefOperate,
                             RedoInterruptCallBack);
 
     GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
-    while (SPSCBlockingQueueGetAll(g_redoWorker->queue, &eleArry, &eleNum)) {
-        CountAndGetRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_1], g_redoWorker->timeCostList[TIME_COST_STEP_2]);
-        bool isEnd = PageManagerRedoDistributeItems(eleArry, eleNum);
-        SPSCBlockingQueuePopN(g_redoWorker->queue, eleNum);
-        CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_2]);
-        if (isEnd)
-            break;
-
+    while (true) {
+        if (!SPSCBlockingQueueIsEmpty(g_redoWorker->queue)) {
+            record_block_state = (XLogRecParseState *)SPSCBlockingQueueTake(g_redoWorker->queue);
+            CountAndGetRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_1], g_redoWorker->timeCostList[TIME_COST_STEP_2]);
+            is_end = PageManagerRedoDistributeItems(record_block_state);
+            CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_2]);
+            if (is_end)
+                break;
+        }
         RedoInterruptCallBack();
         ADD_ABNORMAL_POSITION(5);
         GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
@@ -1105,7 +1095,8 @@ bool TrxnManagerDistributeItemsBeforeEnd(RedoItem *item)
     } else {
         GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
         if (IsCheckPoint(&item->record) || IsTableSpaceDrop(&item->record) || IsTableSpaceCreate(&item->record) ||
-            (IsXactXlog(&item->record) && XactWillRemoveRelFiles(&item->record)) || IsBarrierRelated(&item->record)) {
+            (IsXactXlog(&item->record) && XactWillRemoveRelFiles(&item->record)) || IsBarrierRelated(&item->record) ||
+            IsDataBaseDrop(&item->record) || IsDataBaseCreate(&item->record)) {
             uint32 relCount;
             do {
                 RedoInterruptCallBack();
@@ -1200,6 +1191,11 @@ void TrxnManagerMain()
 void TrxnWorkerProcLsnForwarder(RedoItem *lsnForwarder)
 {
     SetCompletedReadEndPtr(g_redoWorker, lsnForwarder->record.ReadRecPtr, lsnForwarder->record.EndRecPtr);
+    uint32 refcout = pg_atomic_read_u32(&lsnForwarder->record.refcount);
+    while (refcout > 1) {
+        refcout = pg_atomic_read_u32(&lsnForwarder->record.refcount);
+        RedoInterruptCallBack();
+    }
     (void)pg_atomic_sub_fetch_u32(&lsnForwarder->record.refcount, 1);
 }
 
@@ -1258,13 +1254,11 @@ void TrxnWorkMain()
         if ((void *)item == (void *)&g_GlobalLsnForwarder) {
             TrxnWorkerProcLsnForwarder((RedoItem *)item);
             SPSCBlockingQueuePop(g_redoWorker->queue);
-        } else if ((void *)item == (void *)&g_cleanupMark) {
+            exrto_generate_snapshot(g_redoWorker->lastReplayedReadRecPtr);
+        } else if (unlikely((void *)item == (void *)&g_cleanupMark)) {
             TrxnWorkrProcCleanupMark((RedoItem *)item);
             SPSCBlockingQueuePop(g_redoWorker->queue);
-        } else if ((void *)item == (void *)&g_closefdMark) {
-            smgrcloseall();
-            SPSCBlockingQueuePop(g_redoWorker->queue);
-        } else if ((void *)item == (void *)&g_cleanInvalidPageMark) {
+        } else if (unlikely((void *)item == (void *)&g_cleanInvalidPageMark)) {
             forget_range_invalid_pages((void *)item);
             SPSCBlockingQueuePop(g_redoWorker->queue);
         } else {
@@ -1281,6 +1275,12 @@ void TrxnWorkMain()
             if (fullSync) {
                 Assert(CheckFullSyncCheckpoint(item));
                 TrxnWorkNotifyRedoWorker();
+            }
+
+            if (IsCheckPoint(&item->record) || (IsXactXlog(&item->record) &&
+                XactWillRemoveRelFiles(&item->record)) || IsBarrierRelated(&item->record) ||
+                IsDataBaseDrop(&item->record)) {
+                exrto_generate_snapshot(g_redoWorker->lastReplayedEndRecPtr);
             }
 
             if (XactHasSegpageRelFiles(&item->record)) {
@@ -1412,12 +1412,6 @@ void RedoPageWorkerMain()
             g_redoWorker->xlogInvalidPages = XLogGetInvalidPages();
             SPSCBlockingQueuePop(g_redoWorker->queue);
             ereport(LOG, (errcode(ERRCODE_LOG), errmsg("[ForceFinish]RedoPageWorkerMain has cleaned InvalidPages")));
-            continue;
-        }
-
-        if ((void *)redoblockstateHead == (void *)&g_closefdMark) {
-            smgrcloseall();
-            SPSCBlockingQueuePop(g_redoWorker->queue);
             continue;
         }
 
@@ -1761,17 +1755,6 @@ void DispatchCleanupMarkToAllRedoWorker()
     }
 }
 
-void DispatchClosefdMarkToAllRedoWorker()
-{
-    for (uint32 i = 0; i < g_dispatcher->allWorkersCnt; i++) {
-        PageRedoWorker *worker = g_dispatcher->allWorkers[i];
-        if (worker->role == REDO_PAGE_WORKER || worker->role == REDO_PAGE_MNG ||
-            worker->role == REDO_TRXN_MNG || worker->role == REDO_TRXN_WORKER) {
-            SPSCBlockingQueuePut(worker->queue, &g_closefdMark);
-        }
-    }
-}
-
 void DispatchCleanInvalidPageMarkToAllRedoWorker(RepairFileKey key)
 {
     for (uint32 i = 0; i < g_dispatcher->allWorkersCnt; i++) {
@@ -1781,6 +1764,17 @@ void DispatchCleanInvalidPageMarkToAllRedoWorker(RepairFileKey key)
                 sizeof(RepairFileKey), (char*)&key, sizeof(RepairFileKey));
             securec_check(rc, "", "");
             SPSCBlockingQueuePut(worker->queue, &g_cleanInvalidPageMark);
+        }
+    }
+}
+
+void DispatchClosefdMarkToAllRedoWorker()
+{
+    for (uint32 i = 0; i < g_dispatcher->allWorkersCnt; i++) {
+        PageRedoWorker *worker = g_dispatcher->allWorkers[i];
+        if (worker->role == REDO_PAGE_WORKER || worker->role == REDO_PAGE_MNG ||
+            worker->role == REDO_TRXN_MNG || worker->role == REDO_TRXN_WORKER) {
+            SPSCBlockingQueuePut(worker->queue, &g_closefdMark);
         }
     }
 }
@@ -2492,6 +2486,7 @@ void ParallelRedoThreadMain()
     ParallelRedoThreadRegister();
     ereport(LOG, (errmsg("Page-redo-worker thread %u started, role:%u, slotId:%u.", g_redoWorker->id,
                          g_redoWorker->role, g_redoWorker->slotId)));
+    t_thrd.page_redo_cxt.redo_worker_ptr = g_redoWorker;
     // regitster default interrupt call back
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
     SetupSignalHandlers();
@@ -3009,6 +3004,330 @@ void SeqCheckRemoteReadAndRepairPage()
     while ((entry = (BadBlockRecEnt *)hash_seq_search(&status)) != NULL) {
         CheckRemoteReadAndRepairPage(entry);
     }
+}
+
+void exrto_generate_snapshot(XLogRecPtr trxn_lsn)
+{
+    if (!g_instance.attr.attr_storage.EnableHotStandby) {
+        return;
+    }
+ 
+    ExrtoSnapshot exrto_snapshot = &g_dispatcher->exrto_snapshot;
+    /*
+     * do not generate the same snapshot repeatedly.
+     */
+    if (XLByteLE(trxn_lsn, exrto_snapshot->read_lsn)) {
+        return;
+    }
+ 
+    if (XLogRecPtrIsInvalid(t_thrd.xlog_cxt.minRecoveryPoint)) {
+        return;
+    }
+    if (XLByteLT(trxn_lsn, exrto_snapshot->read_lsn)) {
+        return;
+    }
+ 
+    SnapshotData snapshot;
+ 
+    (void)GetSnapshotData(&snapshot, false);
+ 
+    Assert(snapshot.takenDuringRecovery);
+    (void)LWLockAcquire(ExrtoSnapshotLock, LW_EXCLUSIVE);
+    exrto_snapshot->snapshot_csn = snapshot.snapshotcsn;
+    exrto_snapshot->xmin = snapshot.xmin;
+    exrto_snapshot->xmax = snapshot.xmax;
+    exrto_snapshot->read_lsn = trxn_lsn;
+    exrto_snapshot->gen_snap_time = GetCurrentTimestamp();
+    LWLockRelease(ExrtoSnapshotLock);
+}
+ 
+void exrto_read_snapshot(Snapshot snapshot)
+{
+    if (t_thrd.role != WORKER && t_thrd.role != THREADPOOL_WORKER) {
+        return;
+    }
+ 
+    if (g_dispatcher == NULL) {
+        ereport(ERROR,
+            (errmsg("g_dispatcher is not init")));;
+    }
+ 
+    ExrtoSnapshot exrto_snapshot = &g_dispatcher->exrto_snapshot;
+    (void)LWLockAcquire(ExrtoSnapshotLock, LW_SHARED);
+    if (XLByteEQ(exrto_snapshot->read_lsn, 0)) {
+        LWLockRelease(ExrtoSnapshotLock);
+        ereport(ERROR,
+            (errmsg("could not get a valid snapshot with extreme rto")));
+    }
+    snapshot->snapshotcsn = exrto_snapshot->snapshot_csn;
+    snapshot->xmin = exrto_snapshot->xmin;
+    snapshot->xmax = exrto_snapshot->xmax;
+ 
+    t_thrd.pgxact->xmin = exrto_snapshot->xmin;
+    t_thrd.proc->exrto_read_lsn = exrto_snapshot->read_lsn;
+    t_thrd.proc->exrto_gen_snap_time = exrto_snapshot->gen_snap_time;
+    u_sess->utils_cxt.TransactionXmin = exrto_snapshot->xmin;
+    u_sess->utils_cxt.exrto_read_lsn = exrto_snapshot->read_lsn;
+ 
+    LWLockRelease(ExrtoSnapshotLock);
+    Assert(XLogRecPtrIsValid(t_thrd.proc->exrto_read_lsn));
+}
+ 
+static inline uint64 get_force_recycle_pos(uint64 recycle_pos, uint64 insert_pos)
+{
+    const double force_recyle_ratio = 0.3; /* to be adjusted */
+    Assert(recycle_pos <= insert_pos);
+    return recycle_pos + (uint64)((insert_pos - recycle_pos) * force_recyle_ratio);
+}
+ 
+XLogRecPtr calculate_force_recycle_lsn_per_worker(StandbyReadMetaInfo* meta_info)
+{
+    uint64 base_page_recycle_pos;
+    uint64 lsn_info_recycle_pos;
+    XLogRecPtr base_page_recycle_lsn = InvalidXLogRecPtr;
+    XLogRecPtr lsn_info_recycle_lsn = InvalidXLogRecPtr;
+    Buffer buffer;
+    Page page;
+ 
+    /* for base page */
+    if (meta_info->base_page_recyle_position < meta_info->base_page_next_position) {
+        base_page_recycle_pos = get_force_recycle_pos(meta_info->base_page_recyle_position,
+            meta_info->base_page_next_position);
+        buffer = extreme_rto_standby_read::buffer_read_base_page(meta_info->batch_id, meta_info->redo_id,
+        base_page_recycle_pos, RBM_NORMAL);
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        base_page_recycle_lsn = PageGetLSN(BufferGetPage(buffer));
+        UnlockReleaseBuffer(buffer);
+    }
+ 
+    /* for lsn info */
+    if (meta_info->lsn_table_recyle_position < meta_info->lsn_table_next_position) {
+        lsn_info_recycle_pos = get_force_recycle_pos(meta_info->lsn_table_recyle_position,
+            meta_info->lsn_table_next_position);
+        page = extreme_rto_standby_read::get_lsn_info_page(meta_info->batch_id, meta_info->redo_id,
+            lsn_info_recycle_pos, RBM_NORMAL, &buffer);
+        if (unlikely(page == NULL || buffer == InvalidBuffer)) {
+            ereport(PANIC,
+                     (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                              meta_info->batch_id, meta_info->redo_id, lsn_info_recycle_pos)));
+        }
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        extreme_rto_standby_read::LsnInfo lsn_info = (extreme_rto_standby_read::LsnInfo)(page +
+            extreme_rto_standby_read::LSN_INFO_HEAD_SIZE);
+        lsn_info_recycle_lsn = lsn_info->lsn[0];
+        UnlockReleaseBuffer(buffer);
+    }
+ 
+    return rtl::max(base_page_recycle_lsn, lsn_info_recycle_lsn);
+}
+ 
+void calculate_force_recycle_lsn(XLogRecPtr &recycle_lsn)
+{
+    XLogRecPtr recycle_lsn_per_worker;
+    uint32 worker_nums = g_dispatcher->allWorkersCnt;
+    PageRedoWorker** workers = g_dispatcher->allWorkers;
+ 
+    for (uint32 i = 0; i < worker_nums; ++i) {
+        PageRedoWorker* page_redo_worker = workers[i];
+        if (page_redo_worker->role != REDO_PAGE_WORKER) {
+            continue;
+        }
+        recycle_lsn_per_worker = calculate_force_recycle_lsn_per_worker(&page_redo_worker->standby_read_meta_info);
+        if (XLByteLT(recycle_lsn, recycle_lsn_per_worker)) {
+            recycle_lsn = recycle_lsn_per_worker;
+        }
+    }
+    ereport(LOG,
+             (errmsg(EXRTOFORMAT("[exrto_recycle] try force recycle, recycle lsn: %08X/%08X"),
+                      (uint32)(recycle_lsn >> UINT64_HALF), (uint32)recycle_lsn)));
+}
+ 
+static inline bool exceed_standby_max_query_time(TimestampTz start_time)
+{
+    return TimestampDifferenceExceeds(start_time, GetCurrentTimestamp(),
+        g_instance.attr.attr_storage.standby_max_query_time * MSECS_PER_SEC);
+}
+ 
+/* 1. resolve recycle conflict with backends
+ * 2. get oldest xmin and oldest readlsn of backends. */
+void proc_array_get_oldeset_readlsn(XLogRecPtr recycle_lsn, XLogRecPtr &oldest_lsn, TransactionId &oldest_xmin,
+                                    bool &conflict)
+{
+    ProcArrayStruct* proc_array = g_instance.proc_array_idx;
+    conflict = false;
+ 
+    LWLockAcquire(ProcArrayLock, LW_SHARED);
+    for (int index = 0; index < proc_array->numProcs; index++) {
+        int pg_proc_no = proc_array->pgprocnos[index];
+        PGPROC* pg_proc = g_instance.proc_base_all_procs[pg_proc_no];
+        PGXACT* pg_xact = &g_instance.proc_base_all_xacts[pg_proc_no];
+        XLogRecPtr read_lsn = pg_proc->exrto_read_lsn;
+        TransactionId pxmin = pg_xact->xmin;
+ 
+        if (pg_proc->pid == 0 || !TransactionIdIsValid(pxmin) || XLogRecPtrIsInvalid(read_lsn)) {
+            continue;
+        }
+ 
+        Assert(!(pg_xact->vacuumFlags & PROC_IN_VACUUM));
+        /*
+         * Backend is doing logical decoding which manages xmin
+         * separately, check below.
+         */
+        if (pg_xact->vacuumFlags & PROC_IN_LOGICAL_DECODING) {
+            continue;
+        }
+ 
+         /* cancel query when its read_lsn < recycle_lsn or its runtime > standby_max_query_time */
+        if (XLByteLT(read_lsn, recycle_lsn) || exceed_standby_max_query_time(pg_proc->exrto_gen_snap_time)) {
+            pg_proc->recoveryConflictPending = true;
+            conflict = true;
+            if (pg_proc->pid != 0) {
+                /*
+                 * Kill the pid if it's still here. If not, that's what we
+                 * wanted so ignore any errors.
+                 */
+                (void)SendProcSignal(pg_proc->pid, PROCSIG_RECOVERY_CONFLICT_SNAPSHOT, pg_proc->backendId);
+                /*
+                 * Wait a little bit for it to die so that we avoid flooding
+                 * an unresponsive backend when system is heavily loaded.
+                 */
+                pg_usleep(5000L);
+            }
+            continue;
+        }
+ 
+        if (XLogRecPtrIsInvalid(oldest_lsn) ||
+            (XLogRecPtrIsValid(read_lsn) && XLByteLT(read_lsn, oldest_lsn))) {
+            oldest_lsn = read_lsn;
+        }
+ 
+        if (!TransactionIdIsValid(oldest_xmin) ||
+            (TransactionIdIsValid(pxmin) && TransactionIdFollows(oldest_xmin, pxmin))) {
+            oldest_xmin = pxmin;
+        }
+    }
+    LWLockRelease(ProcArrayLock);
+}
+ 
+void proc_array_get_oldeset_xmin_for_undo(TransactionId &oldest_xmin)
+{
+    ProcArrayStruct* proc_array = g_instance.proc_array_idx;
+ 
+    LWLockAcquire(ProcArrayLock, LW_SHARED);
+    for (int index = 0; index < proc_array->numProcs; index++) {
+        int pg_proc_no = proc_array->pgprocnos[index];
+        PGPROC* pg_proc = g_instance.proc_base_all_procs[pg_proc_no];
+        PGXACT* pg_xact = &g_instance.proc_base_all_xacts[pg_proc_no];
+        TransactionId pxmin = pg_xact->xmin;
+ 
+        if (pg_proc->pid == 0 || !TransactionIdIsValid(pxmin)) {
+            continue;
+        }
+ 
+        Assert(!(pg_xact->vacuumFlags & PROC_IN_VACUUM));
+        /*
+         * Backend is doing logical decoding which manages xmin
+         * separately, check below.
+         */
+        if (pg_xact->vacuumFlags & PROC_IN_LOGICAL_DECODING) {
+            continue;
+        }
+        if (!TransactionIdIsValid(oldest_xmin) ||
+            (TransactionIdIsValid(pxmin) && TransactionIdFollows(oldest_xmin, pxmin))) {
+            oldest_xmin = pxmin;
+        }
+    }
+    LWLockRelease(ProcArrayLock);
+}
+ 
+XLogRecPtr exrto_calculate_recycle_position(bool force_recyle)
+{
+    Assert(t_thrd.role != PAGEREDO);
+    Assert(IS_EXRTO_READ);
+ 
+    XLogRecPtr recycle_lsn = g_instance.comm_cxt.predo_cxt.global_recycle_lsn;
+    XLogRecPtr oldest_lsn = InvalidXLogRecPtr;
+    TransactionId oldest_xmin = InvalidTransactionId;
+    bool conflict = false;
+    const int max_check_times = 1000;
+    int check_times = 0;
+ 
+    if (force_recyle) {
+        calculate_force_recycle_lsn(recycle_lsn);
+    }
+ 
+    /* Loop checks to avoid conflicting queries that were not successfully canceled. */
+    do {
+        RedoInterruptCallBack();
+        proc_array_get_oldeset_readlsn(recycle_lsn, oldest_lsn, oldest_xmin, conflict);
+        check_times++;
+    } while (conflict && check_times < max_check_times);
+ 
+    /*
+     * If there is no backend read threads, set read oldest lsn to snapshot lsn.
+     */
+    if (XLogRecPtrIsInvalid(oldest_lsn)) {
+        ExrtoSnapshot exrto_snapshot = NULL;
+        exrto_snapshot = &g_dispatcher->exrto_snapshot;
+        (void)LWLockAcquire(ExrtoSnapshotLock, LW_SHARED);
+        if (XLByteEQ(exrto_snapshot->read_lsn, 0)) {
+            ereport(WARNING,
+                (errmsg("could not get a valid snapshot with extreme rto")));
+        } else {
+            oldest_lsn = exrto_snapshot->read_lsn;
+            oldest_xmin = exrto_snapshot->xmin;
+        }
+ 
+        LWLockRelease(ExrtoSnapshotLock);
+    }
+    recycle_lsn = rtl::max(recycle_lsn, oldest_lsn);
+ 
+    ereport(
+        LOG,
+        (errmsg(
+            EXRTOFORMAT(
+                "[exrto_recycle] calculate recycle position, oldestlsn: %08X/%08X, snapshot read_lsn: %08X/%08X, try "
+                "recycle lsn: %08X/%08X"),
+            (uint32)(oldest_lsn >> UINT64_HALF), (uint32)oldest_lsn,
+            (uint32)(g_dispatcher->exrto_snapshot.read_lsn >> UINT64_HALF),
+            (uint32)g_dispatcher->exrto_snapshot.read_lsn, (uint32)(recycle_lsn >> UINT64_HALF), (uint32)recycle_lsn)));
+ 
+    return recycle_lsn;
+}
+
+TransactionId exrto_calculate_recycle_xmin_for_undo()
+{
+    Assert(t_thrd.role != PAGEREDO);
+    Assert(IS_EXRTO_READ);
+    TransactionId oldest_xmin = InvalidTransactionId;
+    TransactionId snapshot_xmin = InvalidTransactionId;
+    proc_array_get_oldeset_xmin_for_undo(oldest_xmin);
+
+    /*
+     * If there is no backend read threads, set read oldest lsn to snapshot lsn.
+     */
+    if (oldest_xmin == InvalidTransactionId) {
+        ExrtoSnapshot exrto_snapshot = NULL;
+        exrto_snapshot = &g_dispatcher->exrto_snapshot;
+        (void)LWLockAcquire(ExrtoSnapshotLock, LW_SHARED);
+        if (XLByteEQ(exrto_snapshot->xmin, InvalidTransactionId)) {
+            ereport(
+                WARNING,
+                (errmsg("exrto_calculate_recycle_xmin_for_undo: could not get a valid snapshot in exrto_snapshot")));
+        } else {
+            snapshot_xmin = exrto_snapshot->xmin;
+        }
+
+        LWLockRelease(ExrtoSnapshotLock);
+    }
+    ereport(DEBUG1, (errmodule(MOD_UNDO),
+                     errmsg(UNDOFORMAT("exrto_calculate_recycle_xmin_for_undo: oldest_xmin: %lu, snapshot_xmin: %lu."),
+                            oldest_xmin, snapshot_xmin)));
+
+    if (oldest_xmin == InvalidTransactionId) {
+        return snapshot_xmin;
+    }
+    return oldest_xmin;
 }
 
 }  // namespace extreme_rto

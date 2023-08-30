@@ -27,6 +27,7 @@
 #include "PageCompression.h"
 #include "catalog/pg_type.h"
 #include "storage/file/fio_device.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 
 PGconn* conn = NULL;
 char source_slot_name[NAMEDATALEN] = {0};
@@ -303,6 +304,9 @@ BuildErrorCode fetchSourceFileList()
             continue;
         if (NULL != strstr(path, "disable_conn_file"))
             continue;
+        if (NULL != strstr(path, EXRTO_FILE_DIR)) {
+            continue;
+        }
 
         if (PQgetisnull(res, 0, 1)) {
             /*

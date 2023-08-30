@@ -1062,6 +1062,9 @@ static void SnapshotResetXmin(void)
         t_thrd.proc->snapCSN = InvalidCommitSeqNo;
         t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
         t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
+
+        t_thrd.proc->exrto_read_lsn = 0;
+        t_thrd.proc->exrto_gen_snap_time = 0;
     }
 }
 

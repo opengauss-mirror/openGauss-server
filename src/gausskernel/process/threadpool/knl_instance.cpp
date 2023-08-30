@@ -324,7 +324,7 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
 
     rc = memset_s(&predo_cxt->redoCpuBindcontrl, sizeof(RedoCpuBindControl), 0, sizeof(RedoCpuBindControl));
     securec_check(rc, "", "");
-
+    predo_cxt->global_recycle_lsn = InvalidXLogRecPtr;
     predo_cxt->redoItemHash = NULL;
 }
 
@@ -501,6 +501,7 @@ static void KnlGUndoInit(knl_g_undo_context *undoCxt)
     undoCxt->undoChainTotalSize = 0;
     undoCxt->globalFrozenXid = InvalidTransactionId;
     undoCxt->globalRecycleXid = InvalidTransactionId;
+    undoCxt->is_exrto_residual_undo_file_recycled = false;
 }
 
 static void knl_g_flashback_init(knl_g_flashback_context *flashbackCxt)

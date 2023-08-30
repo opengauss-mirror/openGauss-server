@@ -135,6 +135,7 @@ extern const uint32 CREATE_INDEX_IF_NOT_EXISTS_VERSION_NUM;
 extern const uint32 SLOW_SQL_VERSION_NUM;
 extern const uint32 INDEX_HINT_VERSION_NUM;
 extern const uint32 CREATE_TABLE_AS_VERSION_NUM;
+extern const uint32 GB18030_2022_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
@@ -565,6 +566,7 @@ typedef enum {
     XlogCopyBackendProcess,
     BarrierPreParseBackendProcess,
     DmsAuxiliaryProcess,
+    ExrtoRecyclerProcess,
     NUM_SINGLE_AUX_PROC, /* Sentry for auxiliary type with single thread. */
 
     /*
@@ -609,6 +611,7 @@ typedef enum {
 #define AmTsCompactionAuxiliaryProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionAuxiliaryProcess)
 #define AmPageRedoWorker() (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess)
 #define AmDmsReformProcProcess() (t_thrd.role == DMS_WORKER && t_thrd.dms_cxt.is_reform_proc)
+#define AmErosRecyclerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == ExrtoRecyclerProcess)
 
 
 
