@@ -99,6 +99,12 @@ Snapshot SSGetSnapshotData(Snapshot snapshot)
         return NULL;
     }
 
+    /* For cm agent, it only query the system status using the parameter in memory. So don't need MVCC */
+    if (u_sess->libpq_cxt.IsConnFromCmAgent) {
+        snapshot = SnapshotNow;
+        return snapshot;
+    }
+
     if (!ENABLE_SS_BCAST_SNAPSHOT ||
         (g_instance.dms_cxt.latest_snapshot_xmax == InvalidTransactionId &&
         t_thrd.dms_cxt.latest_snapshot_xmax == InvalidTransactionId)) {
