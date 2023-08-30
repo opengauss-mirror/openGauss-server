@@ -9701,8 +9701,6 @@ void StartupXLOG(void)
     /* Determine whether it is currently in the switchover of streaming disaster recovery */
     checkHadrInSwitchover();
     
-    ResetUnloggedRelations(UNLOGGED_RELATION_CLEANUP);
-
     /* REDO */
     if (t_thrd.xlog_cxt.InRecovery) {
         /* use volatile pointer to prevent code rearrangement */
@@ -9834,7 +9832,17 @@ void StartupXLOG(void)
 
         /* Check that the GUCs used to generate the WAL allow recovery */
         CheckRequiredParameterValues(DBStateShutdown);
-
+        
+        /*
+         * We're in recovery, so unlogged relations may be trashed and must be
+         * reset.  This should be done BEFORE allowing Hot Standby
+         * connections, so that read-only backends don't try to read whatever
+         * garbage is left over from before.
+         */
+        if (!RecoveryByPending) {
+            ResetUnloggedRelations(UNLOGGED_RELATION_CLEANUP);
+        }
+        
         /*
          * Likewise, delete any saved transaction snapshot files that got left
          * behind by crashed backends.
@@ -10486,8 +10494,9 @@ void StartupXLOG(void)
      * AFTER recovery is complete so that any unlogged relations created
      * during recovery also get picked up.
      */
-    ResetUnloggedRelations(UNLOGGED_RELATION_INIT);
-
+    if (t_thrd.xlog_cxt.InRecovery && !RecoveryByPending) {
+        ResetUnloggedRelations(UNLOGGED_RELATION_INIT);
+    }
     /*
      * Okay, we're officially UP.
      */
