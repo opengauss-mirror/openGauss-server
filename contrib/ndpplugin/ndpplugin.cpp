@@ -1464,6 +1464,11 @@ void _PG_init(void)
 {
     ereport(DEBUG2, (errmsg("init ndpplugin.")));
 
+    if (!ENABLE_DSS) {
+        ereport(DEBUG2, (errmsg("ndpplugin is not support while DMS and DSS disable.")));
+        return;
+    }
+
     pthread_mutex_lock(&g_ndp_instance.mutex);
 
 #ifdef GlobalCache
