@@ -6341,12 +6341,14 @@ static bool check_ss_txnstatus_cache_size(int* newval, void** extra, GucSource s
 
     const int minval = 8192;
     if (*newval < minval) {
-        ereport(FATAL, (errmsg("ss_txnstatus_cache_size set as %d, should be >8192 or 0.", *newval)));
+        ereport(ERROR, (errmsg("ss_txnstatus_cache_size set as %d, should be >8192 or 0.", *newval)));
+        return false;
     }
 
     if (*newval % NUM_TXNSTATUS_CACHE_PARTITIONS != 0) {
-        ereport(FATAL, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("ss_txnstatus_cache_size should be multiple of partition number 256.")));
+        return false;
     }
     return true;
 }
