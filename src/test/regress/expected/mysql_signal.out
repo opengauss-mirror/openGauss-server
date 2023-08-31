@@ -137,9 +137,9 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning | 64   | Unhandled user-defined warning condition
+  level  | code  |                 message                  
+---------+-------+------------------------------------------
+ Warning | 01000 | Unhandled user-defined warning condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -151,9 +151,9 @@ call p1();
 ERROR:  Unhandled user-defined not found condition
 CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 128  | Unhandled user-defined not found condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 02000 | Unhandled user-defined not found condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -165,9 +165,9 @@ call p1();
 ERROR:  Unhandled user-defined exception condition
 CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 192  | Unhandled user-defined exception condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 03000 | Unhandled user-defined exception condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -179,9 +179,9 @@ call p1();
 ERROR:  Unhandled user-defined exception condition
 CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 192  | Unhandled user-defined exception condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 03000 | Unhandled user-defined exception condition
 (1 row)
 
 -- parse error
@@ -219,9 +219,9 @@ call p1();
 ERROR:  Unhandled user-defined exception condition
 CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 192  | Unhandled user-defined exception condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 03000 | Unhandled user-defined exception condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -239,9 +239,9 @@ CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning | 64   | Unhandled user-defined warning condition
+  level  | code  |                 message                  
+---------+-------+------------------------------------------
+ Warning | 01000 | Unhandled user-defined warning condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -254,9 +254,9 @@ call p1();
 ERROR:  Unhandled user-defined not found condition
 CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 128  | Unhandled user-defined not found condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 02000 | Unhandled user-defined not found condition
 (1 row)
 
 -- parse_error
@@ -280,9 +280,9 @@ CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 ERROR:  Unhandled user-defined not found condition
 CONTEXT:  PL/pgSQL function p1() line 3 at SIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 128  | Unhandled user-defined not found condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 02000 | Unhandled user-defined not found condition
 (1 row)
 
 -- 2.signa with SQLSTATE and signal_information_item
@@ -629,9 +629,9 @@ call p1(0);
 ERROR:  Unhandled user-defined exception condition
 CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 192  | Unhandled user-defined exception condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 03000 | Unhandled user-defined exception condition
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -647,9 +647,9 @@ call p1(0);
 ERROR:  Unhandled user-defined exception condition
 CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 192  | Unhandled user-defined exception condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 03000 | Unhandled user-defined exception condition
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -665,9 +665,9 @@ call p1(0);
 ERROR:  the table is not exist
 CONTEXT:  PL/pgSQL function p1() line 2 at SIGNAL
 show warnings;
- level | code |        message         
--------+------+------------------------
- Error | 192  | the table is not exist
+ level | code  |        message         
+-------+-------+------------------------
+ Error | 03000 | the table is not exist
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -709,9 +709,9 @@ call p1(0);
 ERROR:  Unhandled user-defined exception condition
 CONTEXT:  PL/pgSQL function p1() line 5 at SIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 192  | Unhandled user-defined exception condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 03000 | Unhandled user-defined exception condition
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -1214,9 +1214,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |        message        
----------+------+-----------------------
- Warning | 64   | column is not defined
+  level  | code  |        message        
+---------+-------+-----------------------
+ Warning | 01000 | column is not defined
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -1243,9 +1243,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |        message        
----------+------+-----------------------
- Warning | 64   | column is not defined
+  level  | code  |        message        
+---------+-------+-----------------------
+ Warning | 01000 | column is not defined
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -1272,9 +1272,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |        message        
----------+------+-----------------------
- Warning | 64   | column is not defined
+  level  | code  |        message        
+---------+-------+-----------------------
+ Warning | 01000 | column is not defined
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -1389,9 +1389,9 @@ CONTEXT:  PL/pgSQL function p1() line 6 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |        message        
----------+------+-----------------------
- Warning | 64   | column is not defined
+  level  | code  |        message        
+---------+-------+-----------------------
+ Warning | 01000 | column is not defined
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -1452,9 +1452,9 @@ call p2();
 ERROR:  an error occurred
 CONTEXT:  PL/pgSQL function p2() line 4 at SIGNAL
 show warnings;
- level | code |      message      
--------+------+-------------------
- Error | 192  | an error occurred
+ level | code  |      message      
+-------+-------+-------------------
+ Error | 03000 | an error occurred
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p2(pval int) IS
@@ -1481,27 +1481,27 @@ CONTEXT:  PL/pgSQL function p2(integer) line 4 at SIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning | 64   | Unhandled user-defined warning condition
+  level  | code  |                 message                  
+---------+-------+------------------------------------------
+ Warning | 01000 | Unhandled user-defined warning condition
 (1 row)
 
 call p2(1);
 ERROR:  an error occurred for 1
 CONTEXT:  PL/pgSQL function p2(integer) line 6 at SIGNAL
 show warnings;
- level | code |         message         
--------+------+-------------------------
- Error | 192  | an error occurred for 1
+ level | code  |         message         
+-------+-------+-------------------------
+ Error | 03000 | an error occurred for 1
 (1 row)
 
 call p2(2);
 ERROR:  an error occurred for 2
 CONTEXT:  PL/pgSQL function p2(integer) line 8 at SIGNAL
 show warnings;
- level | code |         message         
--------+------+-------------------------
- Error | 192  | an error occurred for 2
+ level | code  |         message         
+-------+-------+-------------------------
+ Error | 03000 | an error occurred for 2
 (1 row)
 
 call p2(3);

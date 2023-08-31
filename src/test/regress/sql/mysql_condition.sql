@@ -1094,6 +1094,19 @@ end;
 $$ language plpgsql;
 
 select stacked_diagnostics_test();
+CREATE OR REPLACE PROCEDURE p_resig1() IS
+begin
+DECLARE EXIT HANDLER FOR SQLSTATE '42P01'
+BEGIN
+RESIGNAL;
+END;
+DROP TABLE t1;
+end;
+/
+call p_resig1();
+get diagnostics condition 1 @p1 = CLASS_ORIGIN,@p2 = SUBCLASS_ORIGIN,@p3 = MESSAGE_TEXT,@p4 = MYSQL_ERRNO,@p5 = CONSTRAINT_CATALOG,@p6 = CONSTRAINT_SCHEMA,
+@p7 = CONSTRAINT_NAME,@p8 = CATALOG_NAME,@p9 = SCHEMA_NAME,@p10 = TABLE_NAME,@p11 = COLUMN_NAME,@p12 = CURSOR_NAME;
+select @p1,@p2,@p3,@p4;
 \c regression
 -- test access to exception data
 create function zero_divide() returns int as $$

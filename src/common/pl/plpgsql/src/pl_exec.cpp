@@ -4118,7 +4118,8 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
                 if ((enum PLpgSQL_stmt_types)stmt->cmd_type == PLPGSQL_STMT_BLOCK) {
                     if (estate->handler_level == estate->block_level) {
                         copyDiffErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea, estate->cur_error);
-                        copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
+                        if (u_sess->dolphin_errdata_ctx.lastErrorDataArea->current_edata_count != 0)
+                            copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
                         u_sess->dolphin_errdata_ctx.handler_active = false;
                     } else if (!u_sess->dolphin_errdata_ctx.handler_active) {
                         copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
@@ -4406,7 +4407,7 @@ static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* 
             edata->sqlerrcode = ERRCODE_INVALID_CONDITION_NUMBER;
             edata->message = "Invalid condition number";
             edata->class_origin = edata->sqlstate = edata->subclass_origin = edata->cons_catalog = edata->cons_schema = NULL;
-            edata->cons_name = edata->catalog_name = edata->schema_name = edata->table_name = edata->column_name = edata->cursor_name = NULL;
+            edata->cons_name = edata->catalog_name = edata->schema_name = edata->table_name = edata->column_name = edata->cursor_name = edata->mysql_errno = NULL;
             copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
             pushErrorData(edata);
             pfree_ext(edata);
@@ -6380,6 +6381,7 @@ static void exec_get_condition_information(PLpgSQL_execstate* estate, PLpgSQL_st
     PLpgSQL_condition_info_item *con_item)
 {
     ListCell *lc = NULL;
+    int code = 0;
 
     foreach (lc, stmt->cond_info_item) {
         PLpgSQL_signal_info_item *item = (PLpgSQL_signal_info_item *)lfirst(lc);
@@ -6408,12 +6410,13 @@ static void exec_get_condition_information(PLpgSQL_execstate* estate, PLpgSQL_st
                 con_item->message_text = pstrdup(extval);
                 break;
             case PLPGSQL_MYSQL_ERRNO:
-                con_item->sqlerrcode = pg_atoi(extval, sizeof(int32), false);
-                if (con_item->sqlerrcode <= 0 || con_item->sqlerrcode > MYSQL_ERRNO_MAX) {
+                code = pg_atoi(extval, sizeof(int32), false);
+                if (code <= 0 || code > MYSQL_ERRNO_MAX) {
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("Variable '%s' can't be set to the value of '%s'", item->con_name, extval)));
                 }
+                con_item->sqlerrcode = pstrdup(extval);
                 break;
             case PLPGSQL_CONSTRAINT_CATALOG:
                 con_item->constraint_catalog = pstrdup(extval);
@@ -6451,10 +6454,10 @@ static void exec_get_condition_information(PLpgSQL_execstate* estate, PLpgSQL_st
     return;
 }
 
-static void StoreSignalError(int elevel, PLpgSQL_condition_info_item *con_item, bool is_warning_throw, int is_signal)
+static void StoreSignalError(int elevel, int code, PLpgSQL_condition_info_item *con_item, bool is_warning_throw, int is_signal)
 {
     ereport(elevel, 
-        (errcode(con_item->sqlerrcode ? con_item->sqlerrcode : 0),
+        (errcode(code),
             errmsg_internal("%s", con_item->message_text),
             (con_item->sqlstate != NULL) ? signal_returnd_sqlstate(con_item->sqlstate) : 0,
             (con_item->class_origin != NULL) ? signal_class_origin(con_item->class_origin) : 0,
@@ -6467,6 +6470,7 @@ static void StoreSignalError(int elevel, PLpgSQL_condition_info_item *con_item, 
             (con_item->table_name != NULL) ? signal_table_name(con_item->table_name) : 0,
             (con_item->column_name != NULL) ? signal_column_name(con_item->column_name) : 0,
             (con_item->cursor_name != NULL) ? signal_cursor_name(con_item->cursor_name) : 0,
+            (con_item->sqlerrcode != NULL) ? signal_mysql_errno(con_item->sqlerrcode) : 0,
             signal_is_warnings_throw(is_warning_throw),
             signal_is_signal(is_signal)));
     
@@ -6486,6 +6490,7 @@ static void exec_free_con_item(PLpgSQL_condition_info_item *con_item)
     FREE_POINTER(con_item->table_name);
     FREE_POINTER(con_item->column_name);
     FREE_POINTER(con_item->cursor_name);
+    FREE_POINTER(con_item->sqlerrcode);
     
     FREE_POINTER(con_item);
 }
@@ -6502,7 +6507,6 @@ static int exec_stmt_signal(PLpgSQL_execstate* estate, PLpgSQL_stmt_signal* stmt
     bool is_warning_throw = false;;
     
     PLpgSQL_condition_info_item *con_item = (PLpgSQL_condition_info_item *)palloc0(sizeof(PLpgSQL_condition_info_item));
-    con_item->sqlerrcode = stmt->sqlerrstate;
 
     /* sqlsate is not null */
     if (sqlstate == NULL) {
@@ -6515,20 +6519,20 @@ static int exec_stmt_signal(PLpgSQL_execstate* estate, PLpgSQL_stmt_signal* stmt
 
     if (sqlstate[0] == '0' && sqlstate[1] == '1') {
         con_item->message_text = pstrdup("Unhandled user-defined warning condition");
-        con_item->sqlerrcode = MAKE_SQLSTATE('0', '1', '0', '0', '0');
+        con_item->sqlerrcode = pstrdup("01000");
         elevel = WARNING;
         is_warning_throw = is_declare_handler;
     } else if (sqlstate[0] == '0' && sqlstate[1] == '2') {
         con_item->message_text = pstrdup("Unhandled user-defined not found condition");
-        con_item->sqlerrcode = MAKE_SQLSTATE('0', '2', '0', '0', '0');
+        con_item->sqlerrcode = pstrdup("02000");
     } else {
         con_item->message_text = pstrdup("Unhandled user-defined exception condition");
-        con_item->sqlerrcode = MAKE_SQLSTATE('0', '3', '0', '0', '0');
+        con_item->sqlerrcode = pstrdup("03000");
     }
 
     exec_get_condition_information(estate, stmt, con_item);
 
-    StoreSignalError(elevel, con_item, is_warning_throw, PLpgSQL_signal_resignal::PLPGSQL_SIGNAL);
+    StoreSignalError(elevel, stmt->sqlerrstate, con_item, is_warning_throw, PLpgSQL_signal_resignal::PLPGSQL_SIGNAL);
 
     exec_free_con_item(con_item);
     return PLPGSQL_RC_OK;
@@ -6550,7 +6554,7 @@ static int exec_stmt_resignal(PLpgSQL_execstate* estate, PLpgSQL_stmt_signal* st
     PLpgSQL_condition_info_item *con_item = (PLpgSQL_condition_info_item *)palloc0(sizeof(PLpgSQL_condition_info_item));
     
     con_item->message_text = pstrdup(cur_errdata->message);
-    con_item->sqlerrcode = cur_errdata->sqlerrcode;
+    con_item->sqlerrcode = pstrdup(cur_errdata->mysql_errno);
     if (sqlstate != NULL) {
         has_sqlstate = true;
         con_item->sqlstate = pstrdup(sqlstate);
@@ -6560,22 +6564,22 @@ static int exec_stmt_resignal(PLpgSQL_execstate* estate, PLpgSQL_stmt_signal* st
 
     if (sqlstate != NULL) {
         if (sqlstate[0] == '0' && sqlstate[1] == '1') {
-            con_item->sqlerrcode = MAKE_SQLSTATE('0', '1', '0', '0', '0');
+            con_item->sqlerrcode = pstrdup("01000");
             elevel = WARNING;
             is_warning_throw = is_declare_handler;
         } else if (sqlstate[0] == '0' && sqlstate[1] == '2') {
-            con_item->sqlerrcode = MAKE_SQLSTATE('0', '2', '0', '0', '0');
+            con_item->sqlerrcode = pstrdup("02000");
         } else {
-            con_item->sqlerrcode = MAKE_SQLSTATE('0', '3', '0', '0', '0');
+            con_item->sqlerrcode = pstrdup("03000");
         }
     }
 
     exec_get_condition_information(estate, stmt, con_item);
 
     if (has_sqlstate) {
-        StoreSignalError(elevel, con_item, is_warning_throw, PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITH_SQLSTATE);
+        StoreSignalError(elevel, cur_errdata->sqlerrcode, con_item, is_warning_throw, PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITH_SQLSTATE);
     } else {
-        StoreSignalError(elevel, con_item, is_warning_throw, PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITHOUT_SQLSTATE);
+        StoreSignalError(elevel, cur_errdata->sqlerrcode, con_item, is_warning_throw, PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITHOUT_SQLSTATE);
     }
 
     exec_free_con_item(con_item);
