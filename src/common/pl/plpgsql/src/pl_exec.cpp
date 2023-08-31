@@ -6859,13 +6859,13 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
      * to enforce strictness.
      */
     if (stmt->into) {
-        if (!stmt->mod_stmt & !stmt->bulk_collect) {
+        if (!stmt->mod_stmt && !stmt->bulk_collect) {
             if (!DB_IS_CMPT(PG_FORMAT | B_FORMAT) || SELECT_INTO_RETURN_NULL == 0) {
                 stmt->strict = true;
             }
         }
 #ifdef ENABLE_MULTIPLE_NODES
-        if (!stmt->mod_stmt & !stmt->bulk_collect) {
+        if (!stmt->mod_stmt && !stmt->bulk_collect) {
             stmt->strict = true;
         }
 #endif
