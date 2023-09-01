@@ -5623,7 +5623,7 @@ static void show_analyze_buffers(ExplainState* es, const PlanState* planstate, S
                         if (shared_blks_read_max > 0)
                             appendStringInfo(infostr, " max read=%ld", shared_blks_read_max);
                         if (shared_blks_read_min > 0 && shared_blks_read_min < LONG_MAX)
-                            appendStringInfo(infostr, " min  read=%ld", shared_blks_read_min);
+                            appendStringInfo(infostr, " min read=%ld", shared_blks_read_min);
                         if (shared_blks_dirtied_max > 0)
                             appendStringInfo(infostr, " max dirtied=%ld", shared_blks_dirtied_max);
                         if (shared_blks_dirtied_min > 0 && shared_blks_dirtied_min < LONG_MAX)
