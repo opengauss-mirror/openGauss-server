@@ -73,7 +73,7 @@ static bool build_replindex_scan_key(ScanKey skey, Relation rel, Relation idxrel
     ListCell* indexpr_item = NULL;
 
     if (idxrel->rd_indexprs != NIL) {
-        expressionsState = ExecPrepareExprList(idxrel->rd_indexprs, estate);
+        expressionsState = (List*)ExecPrepareExpr((Expr*)idxrel->rd_indexprs, estate);
         indexpr_item = list_head(expressionsState);
     }
 

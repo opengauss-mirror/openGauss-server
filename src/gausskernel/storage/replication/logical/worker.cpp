@@ -116,7 +116,7 @@ static void apply_dispatch(StringInfo s);
 static void apply_handle_conninfo(StringInfo s);
 static void UpdateConninfo(char* standbysInfo);
 static Oid find_conflict_tuple(EState *estate, TupleTableSlot *remoteslot, TupleTableSlot *localslot,
-    FakeRelationPartition *fakeRelInfo, TupleTableSlot *originslot = NULL);
+    TupleTableSlot *originslot = NULL);
 static void IsSkippingChanges(XLogRecPtr finish_lsn);
 static void StopSkippingChanges();
 
@@ -599,17 +599,26 @@ static Oid GetRelationIdentityOrPK(Relation rel)
  * to be updated, ignore it.
  */
 Oid find_conflict_tuple(EState *estate, TupleTableSlot *remoteslot, TupleTableSlot *localslot,
-    FakeRelationPartition *fakeRelInfo, TupleTableSlot *originslot)
+    TupleTableSlot *originslot)
 {
     Oid replidxoid = InvalidOid;
     bool found = false;
     ResultRelInfo* relinfo = estate->es_result_relation_info;
+    FakeRelationPartition fakeRelInfo;
 
     /* Check the replica identity index first */
     replidxoid = RelationGetReplicaIndex(relinfo->ri_RelationDesc);
     if (OidIsValid(replidxoid)) {
         found = RelationFindReplTuple(estate, relinfo->ri_RelationDesc, replidxoid, LockTupleExclusive, remoteslot,
-            localslot, fakeRelInfo);
+            localslot, &fakeRelInfo);
+
+        /* Cleanup. */
+        if (fakeRelInfo.needRleaseDummyRel && fakeRelInfo.partRel) {
+            releaseDummyRelation(&fakeRelInfo.partRel);
+        }
+        if (fakeRelInfo.partList) {
+            releasePartitionList(relinfo->ri_RelationDesc, &fakeRelInfo.partList, NoLock);
+        }
 
         if (found) {
             if (originslot != NULL && ItemPointerCompare(tableam_tops_get_t_self(relinfo->ri_RelationDesc,
@@ -640,7 +649,15 @@ Oid find_conflict_tuple(EState *estate, TupleTableSlot *remoteslot, TupleTableSl
         }
 
         found = RelationFindReplTuple(estate, relinfo->ri_RelationDesc, idxoid, LockTupleExclusive, remoteslot,
-            localslot, fakeRelInfo);
+            localslot, &fakeRelInfo);
+
+        /* Cleanup. */
+        if (fakeRelInfo.needRleaseDummyRel && fakeRelInfo.partRel) {
+            releaseDummyRelation(&fakeRelInfo.partRel);
+        }
+        if (fakeRelInfo.partList) {
+            releasePartitionList(relinfo->ri_RelationDesc, &fakeRelInfo.partList, NoLock);
+        }
 
         if (found) {
             if (originslot != NULL && ItemPointerCompare(tableam_tops_get_t_self(relinfo->ri_RelationDesc,
@@ -673,11 +690,11 @@ static void apply_handle_insert(StringInfo s)
     EPQState epqstate;
     Oid conflictIndexOid = InvalidOid;
 
+    ensure_transaction();
+
     if (t_thrd.applyworker_cxt.isSkipTransaction) {
         return;
     }
-
-    ensure_transaction();
 
     relid = logicalrep_read_insert(s, &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
@@ -707,8 +724,11 @@ static void apply_handle_insert(StringInfo s)
 
     ExecOpenIndices(estate->es_result_relation_info, false);
 
+    /* Get fake relation and partition for patitioned table */
+    GetFakeRelAndPart(estate, rel->localrel, remoteslot, &fakeRelInfo);
+
     if (t_thrd.applyworker_cxt.curWorker->needCheckConflict &&
-        (conflictIndexOid = find_conflict_tuple(estate, remoteslot, localslot, &fakeRelInfo)) != InvalidOid) {
+        (conflictIndexOid = find_conflict_tuple(estate, remoteslot, localslot)) != InvalidOid) {
         StringInfoData localtup, remotetup;
         initStringInfo(&localtup);
         tuple_to_stringinfo(rel->localrel, &localtup, RelationGetDescr(rel->localrel),
@@ -760,9 +780,6 @@ static void apply_handle_insert(StringInfo s)
     } else {
         PG_TRY();
         {
-            /* Get fake relation and partition for patitioned table */
-            GetFakeRelAndPart(estate, rel->localrel, remoteslot, &fakeRelInfo);
-
             /* Do the insert. */
             ExecSimpleRelationInsert(estate, remoteslot, &fakeRelInfo);
         }
@@ -876,11 +893,11 @@ static void apply_handle_update(StringInfo s)
     FakeRelationPartition fakeRelInfo;
     Oid conflictIndexOid = InvalidOid;
 
+    ensure_transaction();
+
     if (t_thrd.applyworker_cxt.isSkipTransaction) {
         return;
     }
-
-    ensure_transaction();
 
     relid = logicalrep_read_update(s, &has_oldtup, &oldtup, &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
@@ -960,8 +977,7 @@ static void apply_handle_update(StringInfo s)
         MemoryContextSwitchTo(oldctx);
 
         if (t_thrd.applyworker_cxt.curWorker->needCheckConflict &&
-            (conflictIndexOid = find_conflict_tuple(estate, remoteslot, conflictLocalSlot, &fakeRelInfo, localslot))
-            != InvalidOid) {
+            (conflictIndexOid = find_conflict_tuple(estate, remoteslot, conflictLocalSlot, localslot)) != InvalidOid) {
             StringInfoData localtup, remotetup;
             initStringInfo(&localtup);
             tuple_to_stringinfo(rel->localrel, &localtup, RelationGetDescr(rel->localrel),
@@ -1075,11 +1091,11 @@ static void apply_handle_delete(StringInfo s)
     MemoryContext oldctx;
     FakeRelationPartition fakeRelInfo;
 
+    ensure_transaction();
+
     if (t_thrd.applyworker_cxt.isSkipTransaction) {
         return;
     }
-
-    ensure_transaction();
 
     relid = logicalrep_read_delete(s, &oldtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
