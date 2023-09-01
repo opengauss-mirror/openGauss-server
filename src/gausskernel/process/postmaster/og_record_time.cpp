@@ -373,6 +373,10 @@ void OgRecordOperator::update_record_id()
 
 bool OgRecordOperator::report_enable() const
 {
+    if (u_sess == NULL) {
+        return false;
+    }
+
     OgRecordStat* record_stat = (OgRecordStat*)get_record_cxt()->og_record_stat;
     if (record_stat == NULL) {
         return false;
