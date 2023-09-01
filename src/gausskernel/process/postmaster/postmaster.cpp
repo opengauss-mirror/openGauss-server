@@ -12699,10 +12699,9 @@ const char* wal_get_db_state_string(DbState db_state)
 
 static ServerMode get_cur_mode(void)
 {
-    if (SS_REPLICATION_DORADO_CLUSTER) {
-        if (SS_REPLICATION_MAIN_STANBY_NODE) {
-            return STANDBY_MODE;
-        }
+    if (SS_REPLICATION_MAIN_STANBY_NODE) {
+        return STANDBY_MODE;
+    } else if (ENABLE_DMS) {
         return SS_OFFICIAL_PRIMARY ? PRIMARY_MODE : STANDBY_MODE;
     }
     return t_thrd.postmaster_cxt.HaShmData->current_mode;

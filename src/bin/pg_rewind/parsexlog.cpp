@@ -159,10 +159,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
      * local max lsn must be exists, or change to full build.
      */
     if (ss_instance_config.dss.enable_dss) {
-        ret = snprintf_s(dssxlogdir, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", 
-                        ss_instance_config.dss.vgname, XLOGDIR, ss_instance_config.dss.instance_id);
-        securec_check_ss_c(ret, "", "");
-        max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, NULL, NULL, dssxlogdir);
+        max_lsn = SSFindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, ss_instance_config.dss.vgname);
     } else {
         max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
     }
@@ -200,21 +197,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
         uint8 info;
 
         if (ss_instance_config.dss.enable_dss) {
-            struct dirent *entry;
-            DIR* dssdir = opendir(ss_instance_config.dss.vgname);
-            while (dssdir != NULL && (entry = readdir(dssdir)) != NULL) {
-                if (strncmp(entry->d_name, "pg_xlog", strlen("pg_xlog")) == 0) {
-                    ret = snprintf_s(dssxlogdir, MAXPGPATH, MAXPGPATH - 1, "%s/%s", ss_instance_config.dss.vgname, entry->d_name);
-                    securec_check_ss_c(ret, "", "");
-                    record = XLogReadRecord(xlogreader, searchptr, &errormsg, true, dssxlogdir);
-                    if (record != NULL) {
-                        break;
-                    }
-                } else {
-                    continue;
-                }
-            }
-            closedir(dssdir);
+            record = XLogReadRecordFromAllDir(ss_instance_config.dss.vgname, xlogreader, searchptr, &errormsg);
         } else {
             record = XLogReadRecord(xlogreader, searchptr, &errormsg);
         }

@@ -4920,7 +4920,8 @@ static bool DoBuildCheck(uint32 term)
 
     buildSuccess = build_check_main(term);
     if (!buildSuccess) {
-        pg_log(PG_WARNING, _("%s failed(%s), need to do full build\n"), BuildModeToString(build_mode), pg_data);
+        pg_log(PG_WARNING, _("Build check result : full build\n"), BuildModeToString(build_mode), pg_data);
+        pg_log(PG_WARNING, _("%s failed(%s).\n"), BuildModeToString(build_mode), pg_data);
     } else {
         pg_log(PG_WARNING, _("%s completed(%s).\n"), BuildModeToString(build_mode), pg_data);
     }
