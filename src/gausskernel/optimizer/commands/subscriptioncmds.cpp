@@ -1173,13 +1173,13 @@ void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
      * the apply and tablesync workers and they can't restart because of
      * exclusive lock on the subscription.
      */
-    rstates = GetSubscriptionRelations(subid, true);
+    rstates = GetSubscriptionRelations(subid, false);
     foreach (lc, rstates) {
         SubscriptionRelState *rstate = (SubscriptionRelState *)lfirst(lc);
         Oid relid = rstate->relid;
 
         /* Only cleanup resources of tablesync workers */
-        if (!OidIsValid(relid))
+        if (!OidIsValid(relid) || rstate->state == SUBREL_STATE_READY)
             continue;
 
         /*
@@ -1236,8 +1236,14 @@ void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
             /*
              * Drop the tablesync slots associated with removed tables.
              *
-             * For SYNCDONE/READY states, the tablesync slot is known to have
-             * already been dropped by the tablesync worker.
+             * For SYNCDONE state, the slot may remain. In the normal
+             * process(process_syncing_tables_for_sync), the slot will be
+             * deleted after the SYNCDONE setting, so if the DropSubscription
+             * is executed after the SYNCDONE and before the slot is deleted,
+             * DropSubscription needs to clean up the remaining slot.
+             * 
+             * For READY state, the slot may also remain after system crashed
+             * and reovers.
              *
              * For other states, there is no certainty, maybe the slot does
              * not exist yet. Also, if we fail after removing some of the
@@ -1245,12 +1251,10 @@ void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
              * slots and fail. For these reasons, we allow missing_ok = true
              * for the drop.
              */
-            if (rstate->state != SUBREL_STATE_SYNCDONE) {
-                char  syncslotname[NAMEDATALEN] = {0};
+            char syncslotname[NAMEDATALEN] = {0};
 
-                ReplicationSlotNameForTablesync(subid, relid, syncslotname, sizeof(syncslotname));
-                ReplicationSlotDropAtPubNode(syncslotname, true);
-            }
+            ReplicationSlotNameForTablesync(subid, relid, syncslotname, sizeof(syncslotname));
+            ReplicationSlotDropAtPubNode(syncslotname, true);
         }
 
         list_free(rstates);
@@ -1304,7 +1308,7 @@ void ReplicationSlotDropAtPubNode(char *slotname, bool missing_ok)
             walrcv_clear_result(res);
             FreeStringInfo(&cmd);
 
-            ereport(WARNING, (errmsg("replication slot \"%s\" does not exist on publisher", slotname)));
+            ereport(DEBUG2, (errmsg("replication slot \"%s\" does not exist on publisher", slotname)));
             return;
         }
     }
