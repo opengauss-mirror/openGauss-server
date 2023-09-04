@@ -466,9 +466,7 @@ static void UBTreeRecsplitloc(FindSplitData *state, OffsetNumber firstoldonright
      * data from the first item that winds up on the right page.
      */
     if (!state->is_leaf) {
-        int indexTupleDataSize = state->is_leaf ?
-            MAXALIGN(sizeof(IndexTupleData)) :
-            (MAXALIGN(sizeof(IndexTupleData)) - TXNINFOSIZE);
+        int indexTupleDataSize = (MAXALIGN(sizeof(IndexTupleData)) - TXNINFOSIZE);
         rightfree += (int16)firstrightitemsz - (int16)(indexTupleDataSize + sizeof(ItemIdData));
     }
 
