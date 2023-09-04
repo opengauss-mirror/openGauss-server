@@ -180,6 +180,8 @@ int main(int argc, char** argv)
             if (fputs(out_line, stdout) == EOF)
                 halt("PERROR:  Error writing output.\n");
         }
+        if (in_file != stdin)
+            fclose(in_file);
     } while (--argc > 0);
     return 0;
 }
