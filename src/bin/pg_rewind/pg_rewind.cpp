@@ -1049,9 +1049,9 @@ BuildErrorCode do_build_check(const char* pgdata, const char* connstr, char* sys
     pg_log(PG_PROGRESS, "find diverge point success\n");
 
     if (chkptrec == ControlFile_target.checkPoint) {
-        pg_log(PG_PROGRESS, "do not need to build\n");
+        pg_log(PG_PROGRESS, "Build check result : needless build\n");
     } else {
-        pg_log(PG_PROGRESS, "need to do incremental build\n");
+        pg_log(PG_PROGRESS, "Build check result : incremental build\n");
     }
     /* Disconnect from remote server */
     if (connstr_source != NULL) {
