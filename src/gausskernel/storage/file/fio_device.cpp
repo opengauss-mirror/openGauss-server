@@ -28,7 +28,7 @@
 #include "c.h"
 #include "storage/file/fio_device.h"
 
-
+g_dss_io_stat g_dss_io_stat_var;
 device_type_t fio_device_type(const char *name)
 {
     if (is_dss_file(name)) {

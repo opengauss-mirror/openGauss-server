@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.dss_io_stat() CASCADE;

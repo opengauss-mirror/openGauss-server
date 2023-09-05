@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <pthread.h> 
 #include "storage/dss/fio_dss.h"
 #include "storage/file/fio_device_com.h"
 
@@ -94,40 +95,117 @@ static inline int close_dev(int fd)
     }
 }
 
+typedef struct g_dss_io_stat {
+    int read_bytes;
+    unsigned long long write_bytes;
+    unsigned long long read_write_count;
+    bool is_ready_for_stat;
+    pthread_mutex_t lock;
+    g_dss_io_stat() {
+        pthread_mutex_init(&lock, NULL);
+        is_ready_for_stat = false;
+        read_bytes = 0;
+        write_bytes = 0;
+        read_write_count = 0;
+    }
+    ~g_dss_io_stat() {
+        pthread_mutex_destroy(&lock);
+    }
+} g_dss_io_stat;
+
+extern g_dss_io_stat g_dss_io_stat_var;
+/*Initialize global variable*/
+static inline void init_dss_io_stat()
+{
+    pthread_mutex_lock(&g_dss_io_stat_var.lock);
+    g_dss_io_stat_var.is_ready_for_stat = true;
+    g_dss_io_stat_var.read_bytes = 0;
+    g_dss_io_stat_var.write_bytes = 0;
+    g_dss_io_stat_var.read_write_count = 0;
+    
+}
+
+#define KB 1024
+/*
+* duration: statistical duration
+* kB_read: total read kilobyte during the time
+* kB_write: total write kilobyte during the time
+* io_count: total read and write count
+*/
+static inline void get_dss_io_stat(int duration, unsigned long long *kB_read, unsigned long long *kB_write, int *io_count)
+{
+    sleep(duration);
+    if (kB_read) {
+        *kB_read = g_dss_io_stat_var.read_bytes / duration / KB;
+    }
+    if (kB_write) {
+        *kB_write = g_dss_io_stat_var.write_bytes / duration / KB;
+    }
+    if (io_count) {
+        *io_count = g_dss_io_stat_var.read_write_count;
+    }
+    g_dss_io_stat_var.is_ready_for_stat = false;
+    pthread_mutex_unlock(&g_dss_io_stat_var.lock);
+}
+
 static inline ssize_t read_dev(int fd, void *buf, size_t count)
 {
+    ssize_t ret = 0;
     if (is_dss_fd(fd)) {
-        return dss_read_file(fd, buf, count);
+        ret = dss_read_file(fd, buf, count);
     } else {
-        return read(fd, buf, count);
+        ret = read(fd, buf, count);
     }
+    if (g_dss_io_stat_var.is_ready_for_stat) {
+        g_dss_io_stat_var.read_bytes += count;
+        g_dss_io_stat_var.read_write_count += 1;
+    }
+    return ret;
 }
 
 static inline ssize_t pread_dev(int fd, void *buf, size_t count, off_t offset)
 {
+    ssize_t ret = 0;
     if (is_dss_fd(fd)) {
-        return dss_pread_file(fd, buf, count, offset);
+        ret = dss_pread_file(fd, buf, count, offset);
     } else {
-        return pread(fd, buf, count, offset);
+        ret = pread(fd, buf, count, offset);
     }
+    if (g_dss_io_stat_var.is_ready_for_stat) {
+        g_dss_io_stat_var.read_bytes += count;
+        g_dss_io_stat_var.read_write_count += 1;
+    }
+    return ret;
 }
 
 static inline ssize_t write_dev(int fd, const void *buf, size_t count)
 {
+    ssize_t ret = 0;
     if (is_dss_fd(fd)) {
-        return dss_write_file(fd, buf, count);
+        ret = dss_write_file(fd, buf, count);
     } else {
-        return write(fd, buf, count);
+        ret = write(fd, buf, count);
     }
+    if (g_dss_io_stat_var.is_ready_for_stat) {
+        g_dss_io_stat_var.write_bytes += count;
+        g_dss_io_stat_var.read_write_count += 1;
+    }
+    return ret;
 }
 
 static inline ssize_t pwrite_dev(int fd, const void *buf, size_t count, off_t offset)
 {
+    ssize_t ret = 0;
     if (is_dss_fd(fd)) {
-        return dss_pwrite_file(fd, buf, count, offset);
+        ret = dss_pwrite_file(fd, buf, count, offset);
     } else {
-        return pwrite(fd, buf, count, offset);
+        ret = pwrite(fd, buf, count, offset);
     }
+    if (g_dss_io_stat_var.is_ready_for_stat) {
+        g_dss_io_stat_var.write_bytes += count;
+        g_dss_io_stat_var.read_write_count += 1;
+    }
+    return ret;
 }
 
 static inline off_t lseek_dev(int fd, off_t offset, int whence)
