@@ -67,7 +67,6 @@ static void* debug_client_split_breakpoints_msg(uint32* num);
 static void* debug_client_split_localvariables_msg(uint32 *num);
 static void* debug_client_split_backtrace_msg(uint32* num);
 static void* debug_client_split_infocode_msg(uint32* num);
-static void debug_client_match_infocode_msg(Datum values[], bool nulls[], FuncCallContext *funcctx);
 static List* collect_breakable_line_oid(Oid funcOid);
 static void init_pldebug_htcl();
 static bool CheckPlpgsqlFunc(Oid funcoid, bool report_error = true);

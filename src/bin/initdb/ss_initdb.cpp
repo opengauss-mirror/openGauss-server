@@ -208,7 +208,6 @@ bool ss_check_nodedatainfo(bool enable_dss)
 int ss_check_existdir(const char *path, int node_id, const char **subdir)
 {
     char *subpath = NULL;
-    errno_t sret = 0; 
     struct stat statbuf;
     int existnum = 0;
     int totalnum = ARRAY_NUM(subdir);
