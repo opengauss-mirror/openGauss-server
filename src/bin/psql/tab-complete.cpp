@@ -3559,9 +3559,32 @@ static PGresult *ExecQuery(const char *query)
  */
 static void GetPreviousWords(int point, char **previousWords, int nwords)
 {
-    const char *buf = rl_line_buffer; /* alias */
+    char *buf = NULL; /* alias */
     int i;
     errno_t rc = EOK;
+
+    /*
+     * If we have anything in tab_completion_query_buf, paste it together with
+     * rl_line_buffer to construct the full query.  Otherwise we can just use
+     * rl_line_buffer as the input string.
+     */
+    if (tab_completion_query_buf && tab_completion_query_buf->len > 0) {
+        i = tab_completion_query_buf->len;
+        const int bufLen = point + i + 2;
+        buf = (char*)pg_malloc(bufLen);
+        rc = memcpy_s(buf, bufLen, tab_completion_query_buf->data, i);
+        securec_check_c(rc, "\0", "\0");
+
+        buf[i++] = '\n';
+        rc = memcpy_s(buf + i, bufLen, rl_line_buffer, point);
+        securec_check_c(rc, "\0", "\0");
+        i += point;
+        buf[i] = '\0';
+        /* Readjust point to reference appropriate offset in buf */
+        point = i;
+    } else {
+        buf = rl_line_buffer;
+    }
 
     /* first we look for a non-word char before the current point */
     for (i = point - 1; i >= 0; i--)
@@ -3624,8 +3647,19 @@ static void GetPreviousWords(int point, char **previousWords, int nwords)
 
         *previousWords++ = s;
     }
+
+    if (buf != rl_line_buffer) {
+        free(buf);
+    }
 }
 #endif /* HAVE_READLINE_READLINE_H */
+
+/*
+ * Since readline doesn't let us pass any state through to the tab completion
+ * callback, we have to use this global variable to let GetPreviousWords()
+ * get at the previous lines of the current command.
+ */
+PQExpBuffer tab_completion_query_buf = NULL;
 
 /*
  * Initialize the readline library for our purposes.
