@@ -11282,6 +11282,14 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, int firstto
                              errmsg("record or row variable cannot be part of multiple-item INTO list"),
                              parser_errposition(yylloc)));
                 }
+                if (tok == '.') {
+                    const char* message = "Improper use of '.*'. The '.*' operator cannot be used with a row type variable.";
+                    InsertErrorMessage(message, plpgsql_yylloc);
+                    ereport(errstate,
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                             errmsg("Improper use of '.*'. The '.*' operator cannot be used with a row type variable."),
+                             parser_errposition(yylloc)));
+                }
                 if (tok == T_DATUM || tok == T_VARRAY_VAR
                     || tok == T_TABLE_VAR || tok == T_PACKAGE_VARIABLE) {
                     const char* message = "syntax error, expected \",\"";
