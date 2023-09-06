@@ -182,6 +182,7 @@ static void ResetStreamStatus()
     /* Add the pg_delete_audit operation to audit log */
     t_thrd.audit.Audit_delete = false;
     t_thrd.postgres_cxt.debug_query_string = NULL;
+    t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
     t_thrd.postgres_cxt.g_NoAnalyzeRelNameList = NIL;
     t_thrd.postgres_cxt.mark_explain_analyze = false;
     t_thrd.postgres_cxt.mark_explain_only = false;

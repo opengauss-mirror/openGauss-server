@@ -1963,7 +1963,7 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
     ErrorContextCallback sqlerrcontext;
     bool haspolyarg = false;
     int i;
-
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     bool replace = false;
     /*
      * 3 means the number of arguments of function fmgr_sql_validator, while 'is_replace' is the third one,
@@ -2049,7 +2049,7 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
             foreach (lc, raw_parsetree_list) {
                 Node* parsetree = (Node*)lfirst(lc);
                 List* querytree_sublist = NIL;
-
+                t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
 #ifdef PGXC
                 /* Block CTAS in SQL functions */
                 if (IsA(parsetree, CreateTableAsStmt))
@@ -2093,6 +2093,7 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
     }
 
     ReleaseSysCache(tuple);
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
     PG_RETURN_VOID();
 }

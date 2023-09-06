@@ -2675,6 +2675,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
          * destination.
          */
         commandTag = CreateCommandTag(parsetree);
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
 
         set_ps_display(commandTag, false);
         if (libpqsw_skip_check_readonly()) {
@@ -3107,6 +3108,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
     TRACE_POSTGRESQL_QUERY_DONE(query_string);
 
     t_thrd.postgres_cxt.debug_query_string = NULL;
+    t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
 
     /*
      * @hdfs
@@ -3694,6 +3696,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
          * Get the command name for possible use in status display.
          */
         commandTag = CreateCommandTag(raw_parse_tree);
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(raw_parse_tree);
 
         /*
          * If we are in an aborted transaction, reject all commands except
@@ -3968,6 +3971,7 @@ pass_parsing:
         ShowUsage("PARSE MESSAGE STATISTICS");
 
     t_thrd.postgres_cxt.debug_query_string = NULL;
+    t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
     gstrace_exit(GS_TRC_ID_exec_parse_message);
 }
 
@@ -4566,6 +4570,7 @@ static void exec_bind_message(StringInfo input_message)
      * Report query to various monitoring facilities.
      */
     t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(psrc->raw_parse_tree);
 
     pgstat_report_activity(STATE_RUNNING, psrc->query_string);
     instr_stmt_report_start_time();
@@ -5143,6 +5148,7 @@ static void exec_bind_message(StringInfo input_message)
         ShowUsage("BIND MESSAGE STATISTICS");
 
     t_thrd.postgres_cxt.debug_query_string = NULL;
+    t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
     gstrace_exit(GS_TRC_ID_exec_bind_message);
 }
 
@@ -5244,6 +5250,16 @@ static void exec_execute_message(const char* portal_name, long max_rows)
      * Report query to various monitoring facilities.
      */
     t_thrd.postgres_cxt.debug_query_string = sourceText;
+    if (strncmp(portal->commandTag, "SELECT", strlen("SELECT")) == 0) {
+        /* SELECT INTO is select stmt too */
+        t_thrd.postgres_cxt.cur_command_tag = T_SelectStmt;
+    } else if (strcmp(portal->commandTag, "SHOW") == 0) {
+        t_thrd.postgres_cxt.cur_command_tag = T_VariableShowStmt;
+    } else if (strcmp(portal->commandTag, "CALL") == 0) {
+        t_thrd.postgres_cxt.cur_command_tag = T_DolphinCallStmt;
+    } else {
+        t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
+    }
 
     pgstat_report_activity(STATE_RUNNING, sourceText);
 
@@ -5435,6 +5451,7 @@ static void exec_execute_message(const char* portal_name, long max_rows)
         ShowUsage("EXECUTE MESSAGE STATISTICS");
 
     t_thrd.postgres_cxt.debug_query_string = NULL;
+    t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
     gstrace_exit(GS_TRC_ID_exec_execute_message);
 }
 
@@ -8400,6 +8417,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          * the storage it points at.
          */
         t_thrd.postgres_cxt.debug_query_string = NULL;
+        t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
 
         if (u_sess->unique_sql_cxt.need_update_calls &&
             is_unique_sql_enabled() && is_local_unique_sql()) {
@@ -8550,6 +8568,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         initStringInfo(&input_message);
         t_thrd.postgres_cxt.debug_query_string = NULL;
+        t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
         t_thrd.postgres_cxt.g_NoAnalyzeRelNameList = NIL;
         u_sess->analyze_cxt.is_under_analyze = false;
         u_sess->exec_cxt.isLockRows = false;
@@ -9561,6 +9580,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     }
                     pfree_ext(completionTag);
                     t_thrd.postgres_cxt.debug_query_string = NULL;
+                    t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
                     if (MEMORY_TRACKING_QUERY_PEAK)
                         ereport(LOG, (errmsg("execute opfusion,  peak memory %ld(kb)",
                                              (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024))));
@@ -10838,6 +10858,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
     }
 #endif
 
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(psrc->raw_parse_tree);
     if (psrc->opFusionObj != NULL) {
         (void)RevalidateCachedQuery(psrc);
         OpFusion *opFusionObj = (OpFusion *)(psrc->opFusionObj);
@@ -11002,6 +11023,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
                     psrc->stmt_name,
                     psrc->query_string)));
     }
+    t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
 }
 
 /*
@@ -11461,6 +11483,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
      * Report query to various monitoring facilities.
      */
     t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(psrc->raw_parse_tree);
     pgstat_report_activity(STATE_RUNNING, psrc->query_string);
 
     set_ps_display(psrc->commandTag, false);
@@ -12101,6 +12124,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
     }
 
     t_thrd.postgres_cxt.debug_query_string = NULL;
+    t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
 }
 
 /* lock function for  g_instance.codegen_IRload_process_count Addition */

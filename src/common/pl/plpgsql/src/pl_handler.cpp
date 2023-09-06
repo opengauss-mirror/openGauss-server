@@ -808,6 +808,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         /* Must save and restore prior value of cur_estate and debug_info */
         save_cur_estate = func->cur_estate;
         save_debug_info = func->debug;
+        NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
         // set the procedure's search_path as the current search_path
         validate_search_path(func);
@@ -879,7 +880,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
             u_sess->plsql_cxt.cur_exception_cxt = NULL;
 
             t_thrd.log_cxt.call_stack = saveplcallstack;
-
+            t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
 #ifndef ENABLE_MULTIPLE_NODES
             /* for restore parent session and automn session package var values */
@@ -957,6 +958,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         DecreasePackageUseCount(func);
         func->cur_estate = save_cur_estate;
         func->debug = save_debug_info;
+        t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
         // resume the search_path when the procedure has executed
         PopOverrideSearchPath();
@@ -1127,6 +1129,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
     int save_compile_status = u_sess->plsql_cxt.compile_status;
     DebugInfo* save_debug_info = func->debug;
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     FormatCallStack* saveplcallstack = t_thrd.log_cxt.call_stack;
     PG_TRY();
     {
@@ -1163,6 +1166,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
 
         dopControl.ResetSmp();
 #endif
+        t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
         ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
             errmsg("%s clear curr_compile_context because of error.", __func__)));
         /* reset nest plpgsql compile */
@@ -1190,6 +1194,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     }
     func->debug = save_debug_info;
 #endif
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
     if (u_sess->SPI_cxt._connected == 0) {
         t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
     }
