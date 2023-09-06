@@ -30,6 +30,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/ondemand_extreme_rto/redo_item.h"
+#include "access/ondemand_extreme_rto/batch_redo.h"
 #include "nodes/pg_list.h"
 #include "storage/proc.h"
 
@@ -248,6 +249,8 @@ void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
 void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
     XLogRecPtr old_lsn, XLogPhyBlock pblk);
 const char *RedoWokerRole2Str(RedoRole role);
+bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
+    bool holdLock);
 
 }  // namespace ondemand_extreme_rto
 #endif

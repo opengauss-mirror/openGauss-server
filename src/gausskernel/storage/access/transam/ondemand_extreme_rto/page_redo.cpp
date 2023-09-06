@@ -1564,6 +1564,100 @@ void RedoPageWorkerRedoBcmBlock(XLogRecParseState *procState)
     }
 }
 
+// if holdLock is false, only lock if need redo; otherwise, lock anyway
+bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
+    bool holdLock)
+{
+    bool hashFound = false;
+    uint32 id = GetSlotId(redoItemTag.rNode, 0, 0, GetBatchCount());
+    HTAB *hashMap = g_instance.comm_cxt.predo_cxt.redoItemHash[id];
+    if (hashMap == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("redo item hash table corrupted, there has invalid hashtable.")));
+    }
+
+    unsigned int new_hash = XlogTrackTableHashCode(&redoItemTag);
+    *lock = XlogTrackMappingPartitionLock(new_hash);
+    (void)LWLockAcquire(*lock, LW_SHARED);
+    RedoItemHashEntry *entry = (RedoItemHashEntry *)hash_search(hashMap, (void *)&redoItemTag, HASH_FIND, &hashFound);
+
+    /* Page is already up-to-date, no need to replay. */
+    if (!hashFound || entry->redoItemNum == 0 || entry->redoDone) {
+        if (!holdLock) {
+            LWLockRelease(*lock);
+            *lock = NULL;
+        }
+        return true;
+    }
+
+    // switch to exclusive lock in replay
+    LWLockRelease(*lock);
+    (void)LWLockAcquire(*lock, LW_EXCLUSIVE);
+    
+    // check again
+    if (entry->redoItemNum == 0 || entry->redoDone) {
+        if (!holdLock) {
+            LWLockRelease(*lock);
+            *lock = NULL;
+        }
+        return true;
+    }
+
+    if (redoItemEntry != NULL) {
+        *redoItemEntry = entry;
+    }
+    return false;
+}
+
+static inline void XLogRecGetRedoItemTag(XLogRecParseState *redoblockstate, RedoItemTag *redoItemTag)
+{
+    XLogBlockParse *blockparse = &(redoblockstate->blockparse);
+
+    redoItemTag->rNode.dbNode = blockparse->blockhead.dbNode;
+    redoItemTag->rNode.relNode = blockparse->blockhead.relNode;
+    redoItemTag->rNode.spcNode = blockparse->blockhead.spcNode;
+    redoItemTag->rNode.bucketNode = blockparse->blockhead.bucketNode;
+    redoItemTag->rNode.opt = blockparse->blockhead.opt;
+
+    redoItemTag->forkNum = blockparse->blockhead.forknum;
+    redoItemTag->blockNum = blockparse->blockhead.blkno;
+}
+
+static inline bool IsXLogRecSameRedoBlock(XLogRecParseState *redoblockstate1, XLogRecParseState *redoblockstate2)
+{
+    RedoItemTag redoItemTag1;
+    RedoItemTag redoItemTag2;
+
+    if (redoblockstate1 == NULL || redoblockstate2 == NULL) {
+        return false;
+    }
+
+    XLogRecGetRedoItemTag(redoblockstate1, &redoItemTag1);
+    XLogRecGetRedoItemTag(redoblockstate2, &redoItemTag2);
+
+    if (memcmp(&redoItemTag1, &redoItemTag2, sizeof(RedoItemTag)) != 0) {
+        return false;
+    }
+    return true;
+}
+
+static inline bool IsProcInHashMap(XLogRecParseState *procState)
+{
+    bool result = false;
+    switch (XLogBlockHeadGetValidInfo(&procState->blockparse.blockhead)) {
+        case BLOCK_DATA_MAIN_DATA_TYPE:
+        case BLOCK_DATA_UNDO_TYPE:
+        case BLOCK_DATA_VM_TYPE:
+        case BLOCK_DATA_FSM_TYPE:
+            result = true;
+            break;
+        default:
+            break;
+    }
+
+    return result;
+}
+
 void RedoPageWorkerMain()
 {
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
@@ -1574,6 +1668,7 @@ void RedoPageWorkerMain()
     }
 
     XLogRecParseState *redoblockstateHead = NULL;
+    LWLock *xlog_partition_lock = NULL;
     GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
     while ((redoblockstateHead = (XLogRecParseState *)SPSCBlockingQueueTop(g_redoWorker->queue)) !=
            (XLogRecParseState *)&g_redoEndMark) {
@@ -1605,6 +1700,7 @@ void RedoPageWorkerMain()
         bool notfound = false;
         bool updateFsm = false;
         bool needRelease = true;
+        bool redoDone = false;
 
         XLogRecParseState *procState = redoblockstateHead;
         Assert(procState->distributeStatus != XLOG_NO_DISTRIBUTE);
@@ -1616,6 +1712,21 @@ void RedoPageWorkerMain()
             // nextrecord will be redo in backwards position
             procState = (procState->distributeStatus == XLOG_TAIL_DISTRIBUTE) ?
                 NULL : (XLogRecParseState *)procState->nextrecord;
+            if (xlog_partition_lock == NULL && SS_ONDEMAND_BUILD_DONE && IsProcInHashMap(redoblockstate)) {
+                RedoItemTag redoItemTag;
+                XLogRecGetRedoItemTag(redoblockstate, &redoItemTag);
+                redoDone = checkBlockRedoDoneFromHashMapAndLock(&xlog_partition_lock, redoItemTag, NULL, true);
+            }
+
+            if (redoDone) {
+                Assert(xlog_partition_lock != NULL);
+                needRelease = false;
+                DereferenceRecParseState(redoblockstate);
+                SetCompletedReadEndPtr(g_redoWorker, redoblockstate->blockparse.blockhead.start_ptr,
+                    redoblockstate->blockparse.blockhead.end_ptr);
+                goto redo_done;
+            }
+
             switch (XLogBlockHeadGetValidInfo(&redoblockstate->blockparse.blockhead)) {
                 case BLOCK_DATA_MAIN_DATA_TYPE:
                 case BLOCK_DATA_UNDO_TYPE:
@@ -1677,6 +1788,13 @@ void RedoPageWorkerMain()
                     break;
                 default:
                     break;
+            }
+
+redo_done:
+            if (xlog_partition_lock != NULL && !IsXLogRecSameRedoBlock(redoblockstate, procState)) {
+                LWLockRelease(xlog_partition_lock);
+                xlog_partition_lock = NULL;
+                redoDone = false;
             }
         }
         (void)MemoryContextSwitchTo(oldCtx);
