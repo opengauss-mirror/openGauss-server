@@ -23,6 +23,7 @@
 
 #include "access/xlogproc.h"
 #include "access/ondemand_extreme_rto/batch_redo.h"
+#include "access/ondemand_extreme_rto/page_redo.h"
 #include "access/ondemand_extreme_rto/dispatcher.h"
 #include "access/ondemand_extreme_rto/redo_utils.h"
 #include "access/ondemand_extreme_rto/xlog_read.h"
@@ -243,10 +244,8 @@ void OndemandXLogParseBufferRelease(XLogRecParseState *recordstate)
 BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersistence,
     ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
 {
-    bool hashFound = false;
     bool needMarkDirty = false;
-    unsigned int new_hash;
-    LWLock *xlog_partition_lock;
+    LWLock *xlog_partition_lock = NULL;
     Buffer buf = BufferDescriptorGetBuffer(bufHdr);
     ondemand_extreme_rto::RedoItemHashEntry *redoItemEntry = NULL;
     ondemand_extreme_rto::RedoItemTag redoItemTag;
@@ -259,27 +258,11 @@ BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersisten
 
     INIT_REDO_ITEM_TAG(redoItemTag, bufHdr->tag.rnode, forkNum, blockNum);
 
-    uint32 id = ondemand_extreme_rto::GetSlotId(bufHdr->tag.rnode, 0, 0, ondemand_extreme_rto::GetBatchCount());
-    HTAB *hashMap = g_instance.comm_cxt.predo_cxt.redoItemHash[id];
-    if (hashMap == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                        errmsg("redo item hash table corrupted, there has invalid hashtable.")));
-    }
-
-    new_hash = ondemand_extreme_rto::XlogTrackTableHashCode(&redoItemTag);
-    xlog_partition_lock = XlogTrackMappingPartitionLock(new_hash);
-    (void)LWLockAcquire(xlog_partition_lock, LW_SHARED);
-    redoItemEntry = (ondemand_extreme_rto::RedoItemHashEntry *)hash_search(hashMap, (void *)&redoItemTag, HASH_FIND, &hashFound);
-
-    /* Page is already up-to-date, no need to replay. */
-    if (!hashFound || redoItemEntry->redoItemNum == 0 || redoItemEntry->redoDone) {
-        LWLockRelease(xlog_partition_lock);
+    if (checkBlockRedoDoneFromHashMapAndLock(&xlog_partition_lock, redoItemTag, &redoItemEntry, false)) {
         return bufHdr;
     }
 
-    // switch to exclusive lock in replay
-    LWLockRelease(xlog_partition_lock);
-    (void)LWLockAcquire(xlog_partition_lock, LW_EXCLUSIVE);
+    Assert(xlog_partition_lock != NULL);
 
     rc = memset_s(&bufferInfo, sizeof(bufferInfo), 0, sizeof(bufferInfo));
     securec_check(rc, "\0", "\0");
