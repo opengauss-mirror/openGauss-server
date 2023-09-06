@@ -5662,7 +5662,7 @@ static void SIGHUP_handler(SIGNAL_ARGS)
          */
         if (get_file_lock(gucconf_lock_file, &filelock) != CODE_OK) {
             ereport(WARNING, (errmsg("the last sigup signal is processing,get file lock failed.")));
-            (void)PG_SETMASK(&t_thrd.libpq_cxt.UnBlockSig);
+            gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
             errno = save_errno;
             return;
         }
@@ -5677,7 +5677,7 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         }
         if (!get_locked) {
             ereport(WARNING, (errmsg("the last sigup signal is processing,get file thread lock failed.")));
-            (void)PG_SETMASK(&t_thrd.libpq_cxt.UnBlockSig);
+            gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
             errno = save_errno;
             return;
         }
