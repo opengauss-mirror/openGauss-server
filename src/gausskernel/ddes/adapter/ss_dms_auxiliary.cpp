@@ -29,7 +29,9 @@
 #include "storage/procarray.h"
 #include "storage/ipc.h"
 
-#define DMS_AUXILIARY_SLEEP_TIME (1000) // 1s 1000ms
+#define DMS_AUXILIARY_PRIMARY_SLEEP_TIME (5000) // 5s 5000ms
+#define DMS_AUXILIARY_STANDBY_SLEEP_TIME (1000) // 1s 1000ms
+
 static void dms_auxiliary_request_shutdown_handler(SIGNAL_ARGS)
 {
     int save_errno = errno;
@@ -74,6 +76,12 @@ void dms_auxiliary_handle_exception()
     /* Prevent interrupts while cleaning up */
     HOLD_INTERRUPTS();
 
+    if (hash_get_seq_num() > 0) {
+        release_all_seq_scan();
+    }
+
+    LWLockReleaseAll();
+
     /* Report the error to the server log */
     EmitErrorReport();
 
@@ -113,8 +121,10 @@ void DmsAuxiliaryMain(void)
     ctl.keysize = sizeof(ss_snap_xmin_key_t);
     ctl.entrysize = sizeof(ss_snap_xmin_item_t);
     ctl.hash = tag_hash;
+    ctl.num_partitions = NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS;
     ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
-    xmin_info->snap_cache = HeapMemInitHash("DMS snap xmin cache", 60, 30000, &ctl, HASH_ELEM | HASH_FUNCTION);
+    xmin_info->snap_cache = HeapMemInitHash("DMS snapshot xmin cache", 60, 30000, &ctl,
+        HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
 
     for (;;) {
         if (t_thrd.dms_aux_cxt.shutdown_requested) {
@@ -129,13 +139,16 @@ void DmsAuxiliaryMain(void)
 
         if (SS_NORMAL_PRIMARY) {
             MaintXminInPrimary();
+            int rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_POSTMASTER_DEATH, DMS_AUXILIARY_PRIMARY_SLEEP_TIME);
+            if (rc & WL_POSTMASTER_DEATH) {
+                gs_thread_exit(1);
+            }
         } else if (SS_NORMAL_STANDBY) {
             MaintXminInStandby();
-        }
-
-        int rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_POSTMASTER_DEATH, DMS_AUXILIARY_SLEEP_TIME);
-        if (rc & WL_POSTMASTER_DEATH) {
-            gs_thread_exit(1);
+            int rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_POSTMASTER_DEATH, DMS_AUXILIARY_STANDBY_SLEEP_TIME);
+            if (rc & WL_POSTMASTER_DEATH) {
+                gs_thread_exit(1);
+            }
         }
     }
 }

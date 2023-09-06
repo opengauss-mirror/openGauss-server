@@ -50,14 +50,20 @@ typedef struct st_ss_xmin_info {
     ss_node_xmin_item_t node_table[DMS_MAX_INSTANCES];
     struct HTAB* snap_cache;
     uint64 snap_oldest_xmin;
-    volatile TimestampTz recent_snap_send_time;
     slock_t global_oldest_xmin_lock;
     uint64 global_oldest_xmin;
+    uint64 prev_global_oldest_xmin;
     bool global_oldest_xmin_active;
     slock_t bitmap_active_nodes_lock;
     uint64 bitmap_active_nodes;
 } ss_xmin_info_t;
 
+#define SSSnapshotXminHashPartition(hashcode) ((hashcode) % NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS)
+#define SSSnapshotXminHashPartitionLock(hashcode) \
+    (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstSSSnapshotXminCacheLock + SSSnapshotXminHashPartition(hashcode)].lock)
+#define SSSnapshotXminHashPartitionLockByIndex(i) \
+    (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstSSSnapshotXminCacheLock + (i)].lock)
+uint32 SSSnapshotXminKeyHashCode(const ss_snap_xmin_key_t *key);
 void MaintXminInPrimary(void);
 void MaintXminInStandby(void);
 bool RecordSnapshotBeforeSend(uint8 inst_id, uint64 xmin);

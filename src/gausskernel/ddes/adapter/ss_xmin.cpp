@@ -33,6 +33,11 @@
 
 extern void CalculateLocalLatestSnapshot(bool forceCalc);
 
+uint32 SSSnapshotXminKeyHashCode(const ss_snap_xmin_key_t *key)
+{
+    return get_hash_value(g_instance.dms_cxt.SSXminInfo.snap_cache, key);
+}
+
 uint64 GetOldestXminInNodeTable()
 {
     ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
@@ -70,14 +75,18 @@ void MaintXminInPrimary(void)
     uint64 snap_xmin = MaxTransactionId;
     TimestampTz cur_time = GetCurrentTimestamp();
 
-    while ((xmin_item = (ss_snap_xmin_item_t*)hash_seq_search(&hash_seq)) != NULL) {
-        if (SS_IN_REFORM) {
-            return;
-        }
+    for (int i = 0; i < NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS; i++) {
+        LWLock* partition_lock = SSSnapshotXminHashPartitionLockByIndex(i);
+        LWLockAcquire(partition_lock, LW_EXCLUSIVE);
+    }
 
+    while ((xmin_item = (ss_snap_xmin_item_t*)hash_seq_search(&hash_seq)) != NULL) {
         if (TimestampDifferenceExceeds(xmin_item->timestamp, cur_time, DMS_MSG_MAX_WAIT_TIME)) {
             ss_snap_xmin_key_t key{.xmin = xmin_item->xmin};
-            hash_search(snap_cache, &key, HASH_REMOVE, NULL);
+            if (hash_search(snap_cache, &key, HASH_REMOVE, NULL) == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("snapshot xmin cache hash table corrupted")));
+            }
             continue;
         }
 
@@ -86,21 +95,24 @@ void MaintXminInPrimary(void)
         }
     }
 
-    if (snap_xmin == MaxTransactionId) {
-        TimestampTz recent_time = pg_atomic_read_u64((volatile uint64*)&xmin_info->recent_snap_send_time);
-        if (TimestampDifferenceExceeds(cur_time, recent_time, 0)) {
-            return;
-        }
+    for (int i = NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS - 1; i >= 0; i--) {
+        LWLock* partition_lock = SSSnapshotXminHashPartitionLockByIndex(i);
+        LWLockRelease(partition_lock);
     }
-
     xmin_info->snap_oldest_xmin = snap_xmin;
     uint64 new_global_xmin = GetOldestXminInNodeTable();
     if (TransactionIdPrecedes(snap_xmin, new_global_xmin)) {
         new_global_xmin = snap_xmin;
     }
 
+    if (new_global_xmin == MaxTransactionId) {
+        return;
+    }
+
     SpinLockAcquire(&xmin_info->global_oldest_xmin_lock);
-    xmin_info->global_oldest_xmin = new_global_xmin;
+    if (xmin_info->global_oldest_xmin_active) {
+        xmin_info->global_oldest_xmin = new_global_xmin;
+    }
     SpinLockRelease(&xmin_info->global_oldest_xmin_lock);
 }
 
@@ -127,35 +139,36 @@ bool RecordSnapshotBeforeSend(uint8 inst_id, uint64 xmin)
     }
 
     ss_snap_xmin_key_t key = {.xmin = xmin};
+    uint32 key_hash = SSSnapshotXminKeyHashCode(&key);
+    LWLock *partition_lock = SSSnapshotXminHashPartitionLock(key_hash);
+    LWLockAcquire(partition_lock, LW_EXCLUSIVE);
     ss_snap_xmin_item_t *xmin_item = (ss_snap_xmin_item_t*)hash_search(snap_cache, &key, HASH_ENTER_NULL, NULL);
     if (xmin_item == NULL) {
+        LWLockRelease(partition_lock);
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("insert snapshot into snap_cache table failed, "
             "capacity is not enough")));
         return false;
     }
     xmin_item->xmin = xmin;
     TimestampTz send_time = GetCurrentTimestamp();
-    bool ret = false;
-    do {
-        uint64 recent_time = pg_atomic_read_u64((volatile uint64*)&xmin_info->recent_snap_send_time);
-        if ((uint64)send_time <= recent_time) {
-            break;
-        }
-        ret = pg_atomic_compare_exchange_u64((volatile uint64*)&xmin_info->recent_snap_send_time, &recent_time, send_time);
-    } while (!ret);
     xmin_item->timestamp = send_time;
+    LWLockRelease(partition_lock);
     return true;
 }
 
 uint64 SSGetGlobalOldestXmin(uint64 globalxmin)
 {
     ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
-    if (!xmin_info->global_oldest_xmin_active) {
-        return globalxmin;
-    }
-
     uint64 ret_globalxmin = globalxmin;
     SpinLockAcquire(&xmin_info->global_oldest_xmin_lock);
+    if (!xmin_info->global_oldest_xmin_active) {
+        if (TransactionIdPrecedes(xmin_info->prev_global_oldest_xmin, globalxmin)) {
+            ret_globalxmin = xmin_info->prev_global_oldest_xmin;
+        }
+        SpinLockRelease(&xmin_info->global_oldest_xmin_lock);
+        return ret_globalxmin;
+    }
+
     if (TransactionIdPrecedes(xmin_info->global_oldest_xmin, globalxmin)) {
         ret_globalxmin = xmin_info->global_oldest_xmin;
     }
@@ -194,7 +207,9 @@ void SSUpdateNodeOldestXmin(uint8 inst_id, unsigned long long oldest_xmin)
 
         SpinLockAcquire(&xmin_info->bitmap_active_nodes_lock);
         if (xmin_info->bitmap_active_nodes == reform_info->bitmap_nodes) {
+            SpinLockAcquire(&xmin_info->global_oldest_xmin_lock);
             xmin_info->global_oldest_xmin_active = true;
+            SpinLockRelease(&xmin_info->global_oldest_xmin_lock);
         }
         SpinLockRelease(&xmin_info->bitmap_active_nodes_lock);
     }

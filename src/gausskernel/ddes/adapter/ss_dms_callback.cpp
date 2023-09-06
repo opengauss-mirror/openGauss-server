@@ -1693,10 +1693,17 @@ static void SSXminInfoPrepare()
 {
     ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
     if (g_instance.dms_cxt.SSReformInfo.dms_role == DMS_ROLE_REFORMER) {
+        SpinLockAcquire(&xmin_info->global_oldest_xmin_lock);
+        xmin_info->prev_global_oldest_xmin = xmin_info->global_oldest_xmin;
         xmin_info->global_oldest_xmin_active = false;
+        xmin_info->global_oldest_xmin = MaxTransactionId;
+        SpinLockRelease(&xmin_info->global_oldest_xmin_lock);
         for (int i = 0; i < DMS_MAX_INSTANCES; i++) {
-            xmin_info->node_table[i].active = false;
-            xmin_info->node_table[i].notify_oldest_xmin = MaxTransactionId;
+            ss_node_xmin_item_t *item = &xmin_info->node_table[i];
+            SpinLockAcquire(&item->item_lock);
+            item->active = false;
+            item->notify_oldest_xmin = MaxTransactionId;
+            SpinLockRelease(&item->item_lock);
         }
     }
     xmin_info->bitmap_active_nodes = 0;
