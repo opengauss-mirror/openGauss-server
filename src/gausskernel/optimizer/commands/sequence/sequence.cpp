@@ -821,6 +821,18 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
     bool isUseLocalSeq = false;
     Oid namespaceOid = InvalidOid;
     ObjectAddress address;
+    Oid existing_relid = InvalidOid;
+    Oid namespaceId = InvalidOid;
+    char rel_kind = large ? RELKIND_LARGE_SEQUENCE : RELKIND_SEQUENCE;
+
+    if (seq->missing_ok) {
+        namespaceId = RangeVarGetAndCheckCreationNamespace(seq->sequence, NoLock, &existing_relid, rel_kind);
+        if (existing_relid != InvalidOid) {
+            char* namespace_of_existing_rel = get_namespace_name(namespaceId);
+            ereport(NOTICE, (errmodule(MOD_COMMAND), errmsg("relation \"%s\" already exists in schema \"%s\", skipping", seq->sequence->relname, namespace_of_existing_rel)));
+            return InvalidObjectAddress;
+        }
+    }
 
 #ifdef PGXC /* PGXC_COORD */
     GTM_Sequence start_value = 1;
@@ -996,7 +1008,6 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
     stmt->tablespacename = NULL;
     stmt->if_not_exists = false;
     stmt->charset = PG_INVALID_ENCODING;
-    char rel_kind = large ? RELKIND_LARGE_SEQUENCE : RELKIND_SEQUENCE;
     address = DefineRelation(stmt, rel_kind, seq->ownerId, NULL);
     seqoid = address.objectId;
     Assert(seqoid != InvalidOid);

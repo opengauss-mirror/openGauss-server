@@ -1893,6 +1893,7 @@ static bool _equalCreateSeqStmt(const CreateSeqStmt* a, const CreateSeqStmt* b)
     COMPARE_SCALAR_FIELD(uuid);
     COMPARE_SCALAR_FIELD(canCreateTempSeq);
     COMPARE_SCALAR_FIELD(is_large);
+    COMPARE_SCALAR_FIELD(missing_ok);
 
     return true;
 }

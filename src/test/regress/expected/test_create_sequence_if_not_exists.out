@@ -1,0 +1,14 @@
+create schema create_sequence_if_not_exists;
+set current_schema = create_sequence_if_not_exists;
+create sequence seq start with 1;
+create sequence seq start with 1;
+ERROR:  relation "seq" already exists in schema "create_sequence_if_not_exists"
+DETAIL:  creating new table with existing name in the same schema
+create sequence if not exists seq start with 1;
+NOTICE:  relation "seq" already exists in schema "create_sequence_if_not_exists", skipping
+drop sequence seq;
+create sequence if not exists seq start with 1;
+create sequence if not exists seq start with 2;
+NOTICE:  relation "seq" already exists in schema "create_sequence_if_not_exists", skipping
+drop sequence seq;
+drop schema create_sequence_if_not_exists;

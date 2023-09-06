@@ -639,7 +639,7 @@ test: copy_new_gram copy_gbk_test copy_gb18030_test
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists
+test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists test_create_sequence_if_not_exists
 #test: constraints
 
 #test: errors subplan_base
