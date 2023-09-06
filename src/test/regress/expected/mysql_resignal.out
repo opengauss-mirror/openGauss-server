@@ -789,10 +789,11 @@ CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |       message        
----------+------+----------------------
- Warning | 1120 | table is not defined
-(1 row)
+  level  | code  |          message          
+---------+-------+---------------------------
+ Error   | 42P01 | table "t1" does not exist
+ Warning | 1120  | table is not defined
+(2 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping

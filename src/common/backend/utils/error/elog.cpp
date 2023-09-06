@@ -5900,85 +5900,6 @@ void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to)
     }
     MemoryContextSwitchTo(oldcontext);
 }
-bool strcompare(char* str1, char* str2)
-{
-    if(str1 != NULL) {
-        if (str2 != NULL) {
-            if (strcmp(str1, str2) != 0) {
-                return false;
-            }
-        } else {
-            return true;
-        }
-    } else {
-        if (str2 != NULL) {
-            return false;
-        }
-    }
-    return true;
-}
-bool compareErrorData(DolphinErrorData* err1, ErrorData* err2)
-{
-    if (err1->elevel != errorLevelToDolphin(err2->elevel))
-        return false;
-    int errcode = MAKE_SQLSTATE(err1->errorcode[0],
-                                err1->errorcode[1],
-                                err1->errorcode[2],
-                                err1->errorcode[3],
-                                err1->errorcode[4]);
-    if((errcode == err2->sqlerrcode) && strcompare(err1->class_origin,err2->class_origin)
-        && strcompare(err1->subclass_origin,err2->subclass_origin) && strcompare(err1->constraint_catalog,err2->cons_catalog)
-        && strcompare(err1->constraint_schema,err2->cons_schema) && strcompare(err1->constraint_name,err2->cons_name)
-        && strcompare(err1->catalog_name,err2->catalog_name) && strcompare(err1->schema_name,err2->schema_name)
-        && strcompare(err1->table_name,err2->table_name) && strcompare(err1->column_name,err2->column_name)
-        && strcompare(err1->cursor_name,err2->cursor_name) && strcompare(err1->message_text,err2->message))
-        return true;
-    else
-        return false;
-}
-
-void copyDiffErrorDataArea(ErrorDataArea *from, ErrorDataArea *to, ErrorData *edata)
-{
-    cleanErrorDataArea(to);
-    bool is_same = false;
-    MemoryContext oldcontext;
-    int count = 0;
-
-    oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
-
-    ListCell *lc = NULL;
-    lc = list_head(from->sqlErrorDataList);
-    foreach (lc, from->sqlErrorDataList) {
-        DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
-        is_same = compareErrorData(eData, edata);
-        if (is_same)
-            continue;
-        DolphinErrorData *newErrData = (DolphinErrorData *)palloc(sizeof(DolphinErrorData));
-        newErrData->elevel = eData->elevel;
-        newErrData->errorcode = pstrdup(eData->errorcode);
-        newErrData->sqlstatestr = pstrdup(eData->sqlstatestr);
-        newErrData->message_text = pstrdup(eData->message_text);
-        newErrData->class_origin = pstrdup(eData->class_origin);
-        newErrData->subclass_origin = pstrdup(eData->subclass_origin);
-        newErrData->constraint_catalog = pstrdup(eData->constraint_catalog);
-        newErrData->constraint_schema = pstrdup(eData->constraint_schema);
-        newErrData->constraint_name = pstrdup(eData->constraint_name);
-        newErrData->catalog_name = pstrdup(eData->catalog_name);
-        newErrData->schema_name = pstrdup(eData->schema_name);
-        newErrData->table_name = pstrdup(eData->table_name);
-        newErrData->column_name = pstrdup(eData->column_name);
-        newErrData->cursor_name = pstrdup(eData->cursor_name);
-        count++;
-        to->sqlErrorDataList = lappend(to->sqlErrorDataList, newErrData);
-    }
-    if (count != 0) {
-        to->current_edata_count = count;
-        for (int i = 0; i <= enum_dolphin_error_level::B_END; i++) {
-            to->current_edata_count_by_level[i] = from->current_edata_count_by_level[i];
-        }
-    }
-    MemoryContextSwitchTo(oldcontext);
-}
 
 void resetErrorDataArea(bool stacked, bool handler_active)
 {
@@ -6014,9 +5935,10 @@ enum_dolphin_error_level errorLevelToDolphin(int elevel)
 void pushErrorData(ErrorData *edata)
 {
     MemoryContext oldcontext;
-    if (edata->is_signal == PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITHOUT_SQLSTATE) {
+    if (edata->is_signal == PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITHOUT_SQLSTATE || edata->is_signal == PLpgSQL_signal_resignal::PLPGSQL_NORMAL) {
         /* resignal without sqlstate */
-        resetErrorDataArea(false, u_sess->dolphin_errdata_ctx.handler_active);
+        if (u_sess->dolphin_errdata_ctx.handler_active)
+            resetErrorDataArea(false, u_sess->dolphin_errdata_ctx.handler_active);
     } else if (edata->is_signal == PLpgSQL_signal_resignal::PLPGSQL_RESIGNAL_WITH_SQLSTATE) {
         /* resignal sqlstate */
         copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);

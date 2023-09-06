@@ -703,7 +703,7 @@ NOTICE:  current DA before mapped insert , error = 23502 , msg = null value in c
 NOTICE:  stacked DA before mapped insert , error = 23502 , msg = null value in column "c1" violates not-null constraint
 NOTICE:  current DA before mapped insert , num = 0 , errcount  = 3
 NOTICE:  stacked DA before mapped insert , error = 23502 , msg = null value in column "c1" violates not-null constraint
-NOTICE:  current DA before mapped insert , num = 2 , errcount  = 3
+NOTICE:  current DA before mapped insert , num = 1 , errcount  = 3
 ERROR:  GET STACKED DIAGNOSTICS cannot be used outside an exception handler
 CONTEXT:  PL/pgSQL function prc() line 30 at GET DIAGNOSTICS
 show errors;
@@ -747,7 +747,7 @@ NOTICE:  current DA before mapped insert , error = 23502 , msg = null value in c
 NOTICE:  stacked DA before mapped insert , error = 23502 , msg = null value in column "c1" violates not-null constraint
 NOTICE:  current DA before mapped insert , num = 0 , errcount  = 3
 NOTICE:  stacked DA before mapped insert , error = 23502 , msg = null value in column "c1" violates not-null constraint
-NOTICE:  current DA before mapped insert , num = 2 , errcount  = -1
+NOTICE:  current DA before mapped insert , num = 1 , errcount  = -1
  prc 
 -----
  
