@@ -4492,6 +4492,7 @@ static Query* transformExplainStmt(ParseState* pstate, ExplainStmt* stmt)
 {
     Query* result = NULL;
 
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(stmt->query);
     /* transform contained query, allowing SELECT INTO */
     stmt->query = (Node*)transformTopLevelStmt(pstate, stmt->query);
 

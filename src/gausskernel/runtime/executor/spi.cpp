@@ -1620,6 +1620,7 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
     AutoDopControl dopControl;
     dopControl.CloseSmp();
 #endif
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
     /*
      * Check that the plan is something the Portal code will special-case as
@@ -1640,6 +1641,7 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
 
     Assert(list_length(plan->plancache_list) == 1);
     plansource = (CachedPlanSource *)linitial(plan->plancache_list);
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(plansource->raw_parse_tree);
 
     SPI_STACK_LOG("begin", NULL, plan);
     /* Push the SPI stack */
@@ -1804,6 +1806,7 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
 
     /* reset flag */
     u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
     _SPI_end_call(true);
 
@@ -2274,6 +2277,7 @@ static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlan
     spi_err_context.arg = (void *)src;
     spi_err_context.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &spi_err_context;
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
     /*
      * Parse the request string into a list of raw parse trees.
@@ -2296,6 +2300,7 @@ static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlan
         Node *parsetree = (Node *)lfirst(list_item);
         List *stmt_list = NIL;
         CachedPlanSource *plansource = NULL;
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
         // get cachedplan if has any
         enable_spi_gpc = false;
         if (ENABLE_CN_GPC && u_sess->SPI_cxt._current->spi_hash_key != INVALID_SPI_KEY
@@ -2387,6 +2392,7 @@ static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlan
     plan->plancache_list = plancache_list;
     plan->oneshot = false;
     u_sess->SPI_cxt._current->plan_id = -1;
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
     /*
      * Pop the error context stack
@@ -2445,6 +2451,7 @@ void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_fun
     ErrorContextCallback spi_err_context;
     List *query_string_locationlist = NIL;
     int stmt_num = 0;
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     /*
      * Setup error traceback support for ereport()
      */
@@ -2467,6 +2474,8 @@ void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_fun
     foreach (list_item, raw_parsetree_list) {
         Node *parsetree = (Node *)lfirst(list_item);
         CachedPlanSource *plansource = NULL;
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
+
 #ifdef ENABLE_MULTIPLE_NODES
         if (IS_PGXC_COORDINATOR && PointerIsValid(query_string_locationlist) &&
             list_length(query_string_locationlist) > 1) {
@@ -2485,6 +2494,7 @@ void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_fun
 
     plan->plancache_list = plancache_list;
     plan->oneshot = true;
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
     /*
      * Pop the error context stack
@@ -2597,6 +2607,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
     CachedPlan *cplan = NULL;
     ListCell *lc1 = NULL;
     bool tmp_enable_light_proxy = u_sess->attr.attr_sql.enable_light_proxy;
+    NodeTag old_command_tag = t_thrd.postgres_cxt.cur_command_tag;
     TransactionId oldTransactionId = SPI_get_top_transaction_id();
     bool need_remember_cplan = false;
 
@@ -2657,6 +2668,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
         List *stmt_list = NIL;
 
         spi_err_context.arg = (void *)plansource->query_string;
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(plansource->raw_parse_tree);
 
         /*
          * If this is a one-shot plan, we still need to do parse analysis.
@@ -2945,6 +2957,7 @@ fail:
     }
 
     u_sess->attr.attr_sql.enable_light_proxy = tmp_enable_light_proxy;
+    t_thrd.postgres_cxt.cur_command_tag = old_command_tag;
 
     return my_res;
 }

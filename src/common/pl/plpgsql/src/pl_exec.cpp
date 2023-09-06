@@ -1208,6 +1208,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
     }
 #endif
 
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     saved_current_stp_with_exception = plpgsql_get_current_value_stp_with_exception();
     /*
      * Setup error traceback support for ereport()
@@ -1437,7 +1438,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
     estate.err_text = gettext_noop("while casting return value to function's return type");
 
     fcinfo->isnull = estate.retisnull;
-
+    t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
     if (estate.retisset) {
         ReturnSetInfo* rsi = estate.rsi;
 
@@ -1648,7 +1649,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
     /* Clean up any leftover temporary memory */
     plpgsql_destroy_econtext(&estate);
     exec_eval_cleanup(&estate);
-
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
     /*
      * Pop the error context stack
      */
@@ -3755,6 +3756,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
 {
     PLpgSQL_stmt* save_estmt = NULL;
     int rc = -1;
+    NodeTag old_command_tag;
 
     save_estmt = estate->err_stmt;
     estate->err_stmt = stmt;
@@ -3777,12 +3779,14 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex = NULL;
     }
 
+    old_command_tag = t_thrd.postgres_cxt.cur_command_tag;
     switch ((enum PLpgSQL_stmt_types)stmt->cmd_type) {
         case PLPGSQL_STMT_BLOCK:
             rc = exec_stmt_block(estate, (PLpgSQL_stmt_block*)stmt);
             break;
 
         case PLPGSQL_STMT_ASSIGN:
+            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
             rc = exec_stmt_assign(estate, (PLpgSQL_stmt_assign*)stmt);
             break;
 
@@ -3835,14 +3839,17 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
             break;
 
         case PLPGSQL_STMT_RETURN:
+            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
             rc = exec_stmt_return(estate, (PLpgSQL_stmt_return*)stmt);
             break;
 
         case PLPGSQL_STMT_RETURN_NEXT:
+            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
             rc = exec_stmt_return_next(estate, (PLpgSQL_stmt_return_next*)stmt);
             break;
 
         case PLPGSQL_STMT_RETURN_QUERY:
+            t_thrd.postgres_cxt.cur_command_tag = T_SelectStmt;
             rc = exec_stmt_return_query(estate, (PLpgSQL_stmt_return_query*)stmt);
             break;
 
@@ -3882,6 +3889,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
         }
 
         case PLPGSQL_STMT_FETCH:
+            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
             rc = exec_stmt_fetch(estate, (PLpgSQL_stmt_fetch*)stmt);
             break;
 
@@ -3908,6 +3916,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
                     errmsg("unrecognized statement type: %d for PLSQL function.", stmt->cmd_type)));
             break;
     }
+    t_thrd.postgres_cxt.cur_command_tag = old_command_tag;
 
     /* Let the plugin know that we have finished executing this statement */
     if (*u_sess->plsql_cxt.plugin_ptr && (*u_sess->plsql_cxt.plugin_ptr)->stmt_end) {
@@ -6131,7 +6140,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     PLpgSQL_expr* expr = stmt->sqlstmt;
     Cursor_Data* saved_cursor_data = NULL;
     bool has_alloc = false;
-
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     TransactionId oldTransactionId = SPI_get_top_transaction_id();
  
     /*
@@ -6161,6 +6170,8 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
             }
         }
     }
+
+    t_thrd.postgres_cxt.cur_command_tag = stmt->mod_stmt ? T_CreateSetStmt : T_SelectStmt;
     if (ENABLE_CN_GPC && g_instance.plan_cache->CheckRecreateSPICachePlan(expr->plan)) {
             g_instance.plan_cache->RecreateSPICachePlan(expr->plan);
     }
@@ -6436,6 +6447,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
 
     estate->cursor_return_data = saved_cursor_data;
     estate->cursor_return_numbers =  saved_cursor_numbers;
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
     return PLPGSQL_RC_OK;
 }
 

@@ -1693,6 +1693,7 @@ typedef struct knl_t_postgres_context {
     bool clear_key_memory;
 
     const char* debug_query_string; /* client-supplied query string */
+    NodeTag cur_command_tag; /* current execute sql nodetag */
     bool isInResetUserName;
 
     /* Note: whereToSendOutput is initialized for the bootstrap/standalone case */

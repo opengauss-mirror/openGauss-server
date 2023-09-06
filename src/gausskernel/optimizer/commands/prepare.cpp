@@ -163,6 +163,7 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
         stmt->name,
 #endif
         CreateCommandTag(stmt->query));
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(stmt->query);
 
     /* Transform list of TypeNames to array of type OIDs */
     nargs = list_length(stmt->argtypes);
@@ -313,6 +314,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     /* Look it up in the hash table */
     entry = FetchPreparedStatement(stmt->name, true, true);
     psrc = entry->plansource;
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(psrc->raw_parse_tree);
 
     /* Shouldn't find a non-fixed-result cached plan */
     if (!entry->plansource->fixed_result)
@@ -1728,6 +1730,7 @@ void RePrepareQuery(ExecuteStmt* stmt)
      */
     foreach (parsetree_item, parseTree_list) {
         Node* parsetree = (Node*)lfirst(parsetree_item);
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
         List* planTree_list = NIL;
 
         queryTree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
