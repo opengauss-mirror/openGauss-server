@@ -43,6 +43,8 @@ void WriteSSDoradoCtlInfoFile()
                 SS_DORADO_CTRL_FILE)));
     }
 
+    ctlInfo->systemIdentifier = GetSystemIdentifier();
+
     pg_crc32c crc = CalShareStorageCtlInfoCrc(ctlInfo);
     ctlInfo->crc = crc;
 
