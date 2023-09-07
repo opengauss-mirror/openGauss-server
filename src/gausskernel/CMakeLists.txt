@@ -52,6 +52,7 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:common_backend_utils_cache>
     $<TARGET_OBJECTS:common_backend_utils_error>
     $<TARGET_OBJECTS:common_backend_utils_fmgr>
+    $<TARGET_OBJECTS:common_backend_utils_gsplsql>
     $<TARGET_OBJECTS:common_backend_utils_hash>
     $<TARGET_OBJECTS:common_backend_utils_init>
     $<TARGET_OBJECTS:common_backend_utils_mb>

@@ -817,9 +817,14 @@ DATA(insert OID = 5729 ( pg_ddl_command   PGNSP PGUID    SIZEOF_POINTER t p P f 
 #define PGDDLCOMMANDOID 5729
 DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in anyset_out - - - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
 #define ANYSETOID		3272
+
+DATA(insert OID = 4408 ( undefined		PGNSP PGUID  -2 f u W f t \054 0 0 0 undefinedin undefinedout undefinedrecv undefinedsend - - - c p f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("undefined objects as PLSQL compilation time");
+#define UNDEFINEDOID		4408
 /*
  * macros
  */
+#define  TYPTYPE_INVALID	'\0'	/* not an allowed type */
 #define  TYPTYPE_BASE		'b' /* base type (ordinary scalar type) */
 #define  TYPTYPE_COMPOSITE	'c' /* composite (e.g., table's rowtype) */
 #define  TYPTYPE_DOMAIN		'd' /* domain over another type */
@@ -828,6 +833,7 @@ DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in 
 #define  TYPTYPE_RANGE		'r' /* range type */
 #define  TYPTYPE_TABLEOF    'o' /* table of type */
 #define  TYPTYPE_SET		's' /* set type */
+#define  TYPTYPE_UNDEFINE   'u' /* undefine type */
 
 #define  TYPCATEGORY_INVALID	'\0'	/* not an allowed category */
 #define  TYPCATEGORY_ARRAY		'A'

@@ -69,6 +69,6 @@ extern void AddEnumLabel(Oid enumTypeOid, const char *newVal,
                          const char *neighbor, bool newValIsAfter,
                          bool skipIfExists);
 extern void RenameEnumLabel(Oid enumTypeOid, const char *oldVal, const char *newVal);
-
+extern char* SerializeEnumAttr(Oid enumTypeOid);
 #endif   /* PG_ENUM_H */
 

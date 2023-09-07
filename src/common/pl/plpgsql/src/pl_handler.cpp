@@ -43,6 +43,8 @@
 #include "executor/spi_priv.h"
 #include "distributelayer/streamMain.h"
 #include "commands/event_trigger.h"
+#include "catalog/pg_object.h"
+#include "catalog/gs_dependencies_fn.h"
 
 #ifdef STREAMPLAN
 #include "optimizer/streamplan.h"
@@ -56,6 +58,8 @@
 PG_MODULE_MAGIC;
 #endif
 #define MAXSTRLEN ((1 << 11) - 1)
+static void init_do_stmt(PLpgSQL_package *pkg, bool isCreate, ListCell *cell, int oldCompileStatus,
+                  PLpgSQL_compile_context *curr_compile, List *temp_tableof_index, MemoryContext oldcxt);
 static void auditExecPLpgSQLFunction(PLpgSQL_function* func, AuditResult result)
 {
     char details[PGAUDIT_MAXLENGTH];
@@ -769,6 +773,8 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 #endif
     int connect = SPI_connectid();
     Oid firstLevelPkgOid = InvalidOid;
+    bool save_need_create_depend = u_sess->plsql_cxt.need_create_depend;
+    bool save_curr_status  = GetCurrCompilePgObjStatus();
     PG_TRY();
     {
         PGSTAT_START_PLSQL_TIME_RECORD();
@@ -779,7 +785,33 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         bool saved_current_stp_with_exception = plpgsql_get_current_value_stp_with_exception();
         /* Find or compile the function */
         if (func == NULL) {
+            u_sess->plsql_cxt.compile_has_warning_info = false;
+            SetCurrCompilePgObjStatus(true);
+            if (enable_plpgsql_gsdependency_guc()) {
+                if (gsplsql_is_undefined_func(func_oid)) {
+                    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                            (errmsg("\"%s\" header is undefined, you can try to recreate", get_func_name(func_oid)))));
+                }
+                if (GetPgObjectValid(func_oid, OBJECT_TYPE_PROC)) {
+                    u_sess->plsql_cxt.need_create_depend = false;
+                } else {
+                    u_sess->plsql_cxt.need_create_depend = true;
+                }
+            }
             func = plpgsql_compile(fcinfo, false);
+            if (func == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_NO_FUNCTION_PROVIDED), errmodule(MOD_PLSQL),
+                    errmsg("compile function error."),
+                    errdetail("It may be because the compilation encountered an error and the exception was caught."),
+                    errcause("compile procedure error."),
+                    erraction("compile function result is null, it has error")));
+            }
+            if (enable_plpgsql_gsdependency_guc()) {
+                if (!OidIsValid(func->pkg_oid)) {
+                    SetPgObjectValid(func_oid, OBJECT_TYPE_PROC, true);
+                }
+            }
+            u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
         }
         if (func->fn_readonly) {
             stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_IMMUTABLE);
@@ -971,6 +1003,8 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
+        u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
+        SetCurrCompilePgObjStatus(save_curr_status);
         /* clean stp save pointer if the outermost function is end. */
         if (u_sess->SPI_cxt._connected == 0) {
             t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
@@ -992,7 +1026,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 
         /* destory all the SPI connect created in this PL function. */
         SPI_disconnect(connect);
-
+        u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
         /* re-throw the original error messages */
         ReThrowError(edata);
     }
@@ -1022,6 +1056,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         u_sess->opt_cxt.is_stream_support = outer_is_stream_support;
     }
 #endif
+    UpdateCurrCompilePgObjStatus(save_curr_status);
     if (has_switch) {
         SetUserIdAndSecContext(old_user, save_sec_context);
         u_sess->exec_cxt.cast_owner = InvalidOid;
@@ -1332,6 +1367,7 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     }
 
     ReleaseSysCache(tuple);
+    bool save_curr_status = GetCurrCompilePgObjStatus();
     /* Postpone body checks if !u_sess->attr.attr_sql.check_function_bodies */
     if (u_sess->attr.attr_sql.check_function_bodies) {
         FunctionCallInfoData fake_fcinfo;
@@ -1369,12 +1405,14 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
         /* Test-compile the function */
         PG_TRY();
         {
+            SetCurrCompilePgObjStatus(true);
             u_sess->parser_cxt.isCreateFuncOrProc = true;
             func = plpgsql_compile(&fake_fcinfo, true);
             u_sess->parser_cxt.isCreateFuncOrProc = false;
         }
         PG_CATCH();
         {
+            SetCurrCompilePgObjStatus(save_curr_status);
 #ifndef ENABLE_MULTIPLE_NODES
             u_sess->parser_cxt.isPerform = false;
             bool insertError = (u_sess->attr.attr_common.plsql_show_all_error ||
@@ -1433,6 +1471,7 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
                 pl_validate_function_sql(func, replace);
                 u_sess->ClientAuthInProgress = saved_client_auth;
         }
+        UpdateCurrCompilePgObjStatus(save_curr_status);
     }
 #ifndef ENABLE_MULTIPLE_NODES
     if (!IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
@@ -1572,7 +1611,7 @@ void FunctionInPackageCompile(PLpgSQL_package* pkg)
  * ----------
  */
 #ifndef ENABLE_MULTIPLE_NODES
-void PackageInit(PLpgSQL_package* pkg, bool isCreate) 
+void PackageInit(PLpgSQL_package* pkg, bool isCreate, bool isSpec, bool isNeedCompileFunc) 
 {
     if (likely(pkg != NULL)) {
         if (likely(pkg->isInit)) {
@@ -1585,23 +1624,23 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
     PushOverrideSearchPath(pkg->pkg_searchpath);
     ListCell* cell = NULL;
     int oldCompileStatus = getCompileStatus();
-    if (isCreate) {
-        CompileStatusSwtichTo(COMPILIE_PKG);
-    }
+    CompileStatusSwtichTo(COMPILIE_PKG);
     
     PLpgSQL_compile_context* curr_compile = createCompileContext("PL/pgSQL package context");
     SPI_NESTCOMPILE_LOG(curr_compile->compile_cxt);
     MemoryContext temp = NULL;
-    if (u_sess->plsql_cxt.curr_compile_context != NULL) {
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt != NULL) {
         temp = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     }
     u_sess->plsql_cxt.curr_compile_context = curr_compile;
     pushCompileContext();
     curr_compile->plpgsql_curr_compile_package = pkg;
     checkCompileMemoryContext(pkg->pkg_cxt);
+    MemoryContext oldcxt = MemoryContextSwitchTo(pkg->pkg_cxt);
     if (isCreate) {
         int exception_num = 0;
-        curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(pkg->pkg_cxt);
+        curr_compile->compile_tmp_cxt = oldcxt;
         processPackageProcList(pkg);
         foreach(cell, pkg->proc_list)
         {
@@ -1616,9 +1655,11 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
                     }
                     PG_CATCH();
                     {
+                        set_create_plsql_type_end();
                         if (u_sess->plsql_cxt.create_func_error) {
                             u_sess->plsql_cxt.create_func_error = false;
                             exception_num += 1;
+                            FlushErrorState();
                         } else {
                             PG_RE_THROW();
                         }
@@ -1638,16 +1679,15 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
                     errcause("compile procedure error."),
                     erraction("check procedure error and redefine procedure")));
         }
-        (void*)MemoryContextSwitchTo(curr_compile->compile_tmp_cxt);
     } else {
-        if (pkg->is_bodycompiled) {
+        if (pkg->is_bodycompiled && !isSpec && isNeedCompileFunc) {
             (void)CompileStatusSwtichTo(COMPILIE_PKG_FUNC);
-            curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(pkg->pkg_cxt);
+            curr_compile->compile_tmp_cxt = oldcxt;
             FunctionInPackageCompile(pkg);
-            (void*)MemoryContextSwitchTo(curr_compile->compile_tmp_cxt);
             (void)CompileStatusSwtichTo(oldCompileStatus);
         }
     }
+    (void*)MemoryContextSwitchTo(oldcxt);
     if (u_sess->attr.attr_common.plsql_show_all_error) {
         PopOverrideSearchPath();
         ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
@@ -1669,71 +1709,43 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
     int save_compile_status = u_sess->plsql_cxt.compile_status;
     List* temp_tableof_index = NULL;
+    bool save_is_package_instantiation = u_sess->plsql_cxt.is_package_instantiation;
+    bool needExecDoStmt = true;
+        if (enable_plpgsql_undefined()) {
+        needExecDoStmt = GetCurrCompilePgObjStatus();
+    }
+    ResourceOwnerData* oldowner = NULL;
+    int64 stackId = 0;
+    if (isCreate && enable_plpgsql_gsdependency_guc() && !IsInitdb) {
+        oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
+        SPI_savepoint_create("PackageInit");
+        stackId = u_sess->plsql_cxt.nextStackEntryId;
+    }
+    bool save_isPerform = u_sess->parser_cxt.isPerform;
     PG_TRY();
     {
         u_sess->plsql_cxt.is_package_instantiation = true;
-        foreach(cell, pkg->proc_list) {
-            if (IsA(lfirst(cell), DoStmt)) {
-                curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(pkg->pkg_cxt);
-                DoStmt* doStmt = (DoStmt*)lfirst(cell);
-                if (!isCreate) {
-                    if (!doStmt->isExecuted) {
-                        (void)CompileStatusSwtichTo(COMPILIE_PKG_ANON_BLOCK);
-                        temp_tableof_index = u_sess->plsql_cxt.func_tableof_index;
-                        u_sess->plsql_cxt.func_tableof_index = NULL;
-                        if (u_sess->SPI_cxt._connected > -1 &&
-                            u_sess->SPI_cxt._connected != u_sess->SPI_cxt._curid) {
-                            SPI_STACK_LOG("begin", NULL, NULL);
-                            _SPI_begin_call(false);
-                            ExecuteDoStmt(doStmt, true);
-                            SPI_STACK_LOG("end", NULL, NULL);
-                            _SPI_end_call(false);
-                        } else {
-                            ExecuteDoStmt(doStmt, true);
-                        }
-                        if (!doStmt->isSpec) {
-                            pkg->isInit = true;
-                            
-                        }
-                        free_func_tableof_index();
-                        u_sess->plsql_cxt.func_tableof_index = temp_tableof_index;
-                        (void)CompileStatusSwtichTo(oldCompileStatus);
-                        doStmt->isExecuted = true;
-                    }
-                } else {
-                    if (doStmt->isSpec && !doStmt->isExecuted) {
-                        (void)CompileStatusSwtichTo(COMPILIE_PKG_ANON_BLOCK);
-                        temp_tableof_index = u_sess->plsql_cxt.func_tableof_index;
-                        u_sess->plsql_cxt.func_tableof_index = NULL;
-                        if (u_sess->SPI_cxt._connected > -1 &&
-                            u_sess->SPI_cxt._connected != u_sess->SPI_cxt._curid) {
-                            SPI_STACK_LOG("begin", NULL, NULL);
-                            _SPI_begin_call(false);
-                            ExecuteDoStmt(doStmt, true);
-                            SPI_STACK_LOG("end", NULL, NULL);
-                            _SPI_end_call(false);
-                        } else if (!doStmt->isExecuted) {
-                            ExecuteDoStmt(doStmt, true);
-                        }
-                        free_func_tableof_index();
-                        u_sess->plsql_cxt.func_tableof_index = temp_tableof_index;
-                        (void)CompileStatusSwtichTo(oldCompileStatus);
-                        doStmt->isExecuted = true;
-                    }
-                }
-                (void*)MemoryContextSwitchTo(curr_compile->compile_tmp_cxt);
-            }
+        if (needExecDoStmt) {
+            init_do_stmt(pkg, isCreate, cell, oldCompileStatus, curr_compile, temp_tableof_index, oldcxt);
+        }
+        if (isCreate && enable_plpgsql_gsdependency_guc() && !IsInitdb) {
+            SPI_savepoint_release("PackageInit");
+            stp_cleanup_subxact_resource(stackId);
+            MemoryContextSwitchTo(oldcxt);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
         }
         stp_reset_xact_state_and_err_msg(oldStatus, needResetErrMsg);
-        u_sess->plsql_cxt.is_package_instantiation = false;
+        u_sess->plsql_cxt.is_package_instantiation = save_is_package_instantiation;
         ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
             errmsg("%s finish compile, level: %d", __func__, list_length(u_sess->plsql_cxt.compile_context_list))));
         u_sess->plsql_cxt.curr_compile_context = popCompileContext();
         CompileStatusSwtichTo(oldCompileStatus);
         clearCompileContext(curr_compile);
+        PopOverrideSearchPath();
     }
     PG_CATCH();
     {
+        u_sess->parser_cxt.isPerform = save_isPerform;
         stp_reset_xact_state_and_err_msg(oldStatus, needResetErrMsg);
         u_sess->plsql_cxt.is_package_instantiation = false;
         free_temp_func_tableof_index(temp_tableof_index);
@@ -1744,10 +1756,35 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
         u_sess->plsql_cxt.curr_compile_context = save_compile_context;
         u_sess->plsql_cxt.compile_status = save_compile_status;
         clearCompileContextList(save_compile_list_length);
-        PG_RE_THROW();
+        u_sess->plsql_cxt.curr_compile_context = popCompileContext();
+        /*avoid memeory leak*/
+        clearCompileContext(curr_compile);
+        if (isCreate && enable_plpgsql_gsdependency_guc() && !IsInitdb) {
+            SPI_savepoint_rollbackAndRelease("PackageInit", InvalidTransactionId);
+            stp_cleanup_subxact_resource(stackId);
+            if (likely(u_sess->SPI_cxt._curid >= 0)) {
+                if (likely(u_sess->SPI_cxt._current == &(u_sess->SPI_cxt._stack[u_sess->SPI_cxt._curid]))) {
+                    _SPI_end_call(true);
+                }
+            }
+            SPI_finish();
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+            MemoryContextSwitchTo(oldcxt);
+            ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+            ereport(WARNING,
+                    (errmodule(MOD_PLSQL),
+                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("%s", edata->message),
+                     errdetail("N/A"),
+                     errcause("compile package or procedure error."),
+                     erraction("check package or procedure error and redefine")));
+            FlushErrorState();
+        } else {
+            PG_RE_THROW();
+        }
     }
     PG_END_TRY();
-    PopOverrideSearchPath();
+    MemoryContextSwitchTo(oldcxt);
     restoreCallFromPkgOid(old_value);
 }
 #endif
@@ -1867,3 +1904,62 @@ void DecreasePackageUseCount(PLpgSQL_function* func)
     }
 }
 
+static void init_do_stmt(PLpgSQL_package *pkg, bool isCreate, ListCell *cell, int oldCompileStatus,
+                  PLpgSQL_compile_context *curr_compile, List *temp_tableof_index, MemoryContext oldcxt)
+{
+    foreach(cell, pkg->proc_list) {
+        if (IsA(lfirst(cell), DoStmt)) {
+            curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(pkg->pkg_cxt);
+            DoStmt* doStmt = (DoStmt*)lfirst(cell);
+            if (!isCreate) {
+                if (!doStmt->isExecuted) {
+                    (void)CompileStatusSwtichTo(COMPILIE_PKG_ANON_BLOCK);
+                    temp_tableof_index = u_sess->plsql_cxt.func_tableof_index;
+                    u_sess->plsql_cxt.func_tableof_index = NULL;
+                    if (u_sess->SPI_cxt._connected > -1 &&
+                        u_sess->SPI_cxt._connected != u_sess->SPI_cxt._curid) {
+                        SPI_STACK_LOG("begin", NULL, NULL);
+                        _SPI_begin_call(false);
+                        ExecuteDoStmt(doStmt, true);
+                        SPI_STACK_LOG("end", NULL, NULL);
+                        _SPI_end_call(false);
+                    } else {
+                        ExecuteDoStmt(doStmt, true);
+                    }
+                    if (!doStmt->isSpec) {
+                        pkg->isInit = true;
+                        
+                    }
+                    free_func_tableof_index();
+                    u_sess->plsql_cxt.func_tableof_index = temp_tableof_index;
+                    (void)CompileStatusSwtichTo(oldCompileStatus);
+                    doStmt->isExecuted = true;
+                }
+            } else {
+                if (isCreate && enable_plpgsql_gsdependency_guc() && !IsInitdb) {
+                    MemoryContextSwitchTo(oldcxt);
+                }
+                if (doStmt->isSpec && !doStmt->isExecuted) {
+                    (void)CompileStatusSwtichTo(COMPILIE_PKG_ANON_BLOCK);
+                    temp_tableof_index = u_sess->plsql_cxt.func_tableof_index;
+                    u_sess->plsql_cxt.func_tableof_index = NULL;
+                    if (u_sess->SPI_cxt._connected > -1 &&
+                        u_sess->SPI_cxt._connected != u_sess->SPI_cxt._curid) {
+                        SPI_STACK_LOG("begin", NULL, NULL);
+                        _SPI_begin_call(false);
+                        ExecuteDoStmt(doStmt, true);
+                        SPI_STACK_LOG("end", NULL, NULL);
+                        _SPI_end_call(false);
+                    } else if (!doStmt->isExecuted) {
+                        ExecuteDoStmt(doStmt, true);
+                    }
+                    free_func_tableof_index();
+                    u_sess->plsql_cxt.func_tableof_index = temp_tableof_index;
+                    (void)CompileStatusSwtichTo(oldCompileStatus);
+                    doStmt->isExecuted = true;
+                }
+            }
+            (void*)MemoryContextSwitchTo(curr_compile->compile_tmp_cxt);
+        }
+    }
+}

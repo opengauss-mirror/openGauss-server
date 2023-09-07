@@ -767,6 +767,8 @@ test: plpgsql_insert_record plpgsql_condition_name
 test: hw_package_variable package_typmod_test
 test: autonomous_cursor
 test: plpgsql_reset_session
+#test: plpgsql_depend
+test: plpgsql_depend/plpgsql_depend_type  plpgsql_depend/plpgsql_pkg_dependency plpgsql_depend/plpgsql_recompile plpgsql_depend/plpgsql_pkg_variable_dependency plpgsql_depend/plpgsql_depend_reftype
 #test: plancache limit rangefuncs prepare
 test: returning largeobject
 test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3

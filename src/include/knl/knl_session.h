@@ -1564,6 +1564,21 @@ typedef struct PLpgSQL_compile_context {
     MemoryContext compile_cxt;
 } PLpgSQL_compile_context;
 
+typedef enum CreatePlsqlType {
+    CREATE_PLSQL_TYPE_START = 0,
+    CREATE_PLSQL_TYPE_NOT_CHECK_NSPOID = 1,
+    CREATE_PLSQL_TYPE_RECORD_DEPENDENCE = 2,
+    CREATE_PLSQL_TYPE_RECOMPILE = 3,
+    CREATE_PLSQL_TYPE_END = 4
+} CreatePlsqlType;
+
+typedef enum FunctionStyleType {
+    FUNCTION_STYLE_TYPE_NONE = 0,
+    FUNCTION_STYLE_TYPE_PG = 1,
+    FUNCTION_STYLE_TYPE_A = 2,
+    FUNCTION_STYLE_TYPE_REFRESH_HEAD = 3
+} FunctionStyleType;
+
 typedef struct knl_u_plpgsql_context {
     bool inited;
 
@@ -1674,6 +1689,33 @@ typedef struct knl_u_plpgsql_context {
     char* debug_query_string;
     bool is_insert_gs_source; /* is doing insert gs_source? */
     List* CursorRecordTypeList;  /*Save the type recorded during the cursor definition*/
+
+    // gs depend
+    bool compile_has_warning_info;
+    bool expr_can_have_out_func;
+    bool currCompilingObjStatus;
+    bool need_create_depend;
+    bool during_compile;
+    bool is_pkg_compile;
+    bool isCreatePkg;
+    bool isCreatePkgFunction;
+    bool has_invalid_pkg;
+    bool has_invalid_func;
+    bool has_error;
+    bool is_exec_autonomous;
+    bool in_package_function_compile;
+    bool is_alter_compile_stmt;
+    CreatePlsqlType createPlsqlType;
+    FunctionStyleType functionStyleType;
+    List* pkg_var_info;
+    List* func_compiled_list;
+    List* needRebuildViews;
+    List* usindDependObjOids;
+    Oid curr_object_nspoid;
+    Oid currRefreshPkgOid;
+    MemoryContext depend_mem_cxt; /* temp context for build_gs_depend*/
+    int compile_check_node_level;
+    int real_func_num;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
@@ -3037,6 +3079,18 @@ extern void free_session_context(knl_session_context* session);
 extern void use_fake_session();
 extern bool stp_set_commit_rollback_err_msg(stp_xact_err_type type);
 extern bool enable_out_param_override();
+extern bool enable_plpgsql_gsdependency_guc();
+extern bool enable_plpgsql_gsdependency();
+extern bool enable_plpgsql_undefined();
+extern bool enable_plpgsql_undefined_not_check_nspoid();
+extern void set_create_plsql_type_not_check_nsp_oid();
+extern void set_create_plsql_type_start();
+extern void set_create_plsql_type_end();
+extern void set_create_plsql_type(CreatePlsqlType type);
+extern void set_function_style_none();
+extern void set_function_style_a();
+extern void set_function_style_pg();
+extern bool set_is_create_plsql_type();
 
 extern THR_LOCAL knl_session_context* u_sess;
 

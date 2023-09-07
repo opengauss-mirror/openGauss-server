@@ -58,6 +58,7 @@ extern void RemoveFunctionById(Oid funcOid);
 extern void remove_encrypted_proc_by_id(Oid funcOid);
 extern void RemovePackageById(Oid pkgOid, bool isBody = false);
 extern void DeleteFunctionByPackageOid(Oid package_oid);
+extern void DeleteFunctionByFuncTuple(HeapTuple func_tup);
 extern void SetFunctionReturnType(Oid funcOid, Oid newRetType);
 extern void SetFunctionArgType(Oid funcOid, int argIndex, Oid newArgType);
 extern ObjectAddress AlterFunctionOwner(List* name, List* argtypes, Oid newOwnerId);
@@ -76,6 +77,7 @@ extern void IsThereOpClassInNamespace(const char *opcname, Oid opcmethod,
                                       Oid opcnamespace);
 extern void IsThereOpFamilyInNamespace(const char *opfname, Oid opfmethod,
                                        Oid opfnamespace);
+extern void RecompileFunction(CompileStmt* stmt);
 
 /* commands/operatorcmds.c */
 extern void CreatePackageCommand(CreatePackageStmt* parsetree, const char* queryString);
@@ -89,6 +91,7 @@ extern ObjectAddress AlterOperatorOwner(List* name, TypeName* typeName1, TypeNam
 extern void AlterOperatorOwner_oid(Oid operOid, Oid newOwnerId);
 extern ObjectAddress AlterOperatorNamespace(List* names, List* argtypes, const char* newschema);
 extern Oid AlterOperatorNamespace_oid(Oid operOid, Oid newNspOid);
+extern void RecompilePackage(CompileStmt* stmt);
 
 /* commands/aggregatecmds.c */
 extern ObjectAddress DefineAggregate(List* name, List* args, bool oldstyle, List* parameters);

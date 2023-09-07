@@ -311,7 +311,7 @@ void record_plsql_action(char* stmt, PLpgSQL_function* func)
     initStringInfo(&plsql_string);
     initStringInfo(&funcname);
     if (OidIsValid(func->pkg_oid)) {
-        char* pkgname = NameStr(*GetPackageName(func->pkg_oid));
+        char* pkgname = GetPackageName(func->pkg_oid);
         appendStringInfo(&funcname, "%s.%s", pkgname, func->fn_signature);
     } else {
         appendStringInfo(&funcname, "%s", func->fn_signature);
@@ -707,9 +707,9 @@ static char* AssembleAutomnousStatement(PLpgSQL_function* func, FunctionCallInfo
         Oid proPackageId = DatumGetObjectId(datum);
 
         if (proPackageId != InvalidOid) {
-            NameData* pkgName = GetPackageName(proPackageId);
+            char* pkgName = GetPackageName(proPackageId);
             if (pkgName != NULL) {
-                appendStringInfo(&buf, "%s", quote_qualified_identifier(NameStr(*pkgName), NULL));
+                appendStringInfo(&buf, "%s", quote_qualified_identifier(pkgName, NULL));
             } else {
                 ReleaseSysCache(procTup);
                 ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
@@ -2569,6 +2569,29 @@ static int check_line_validity_in_foreach_a(PLpgSQL_stmt_foreach_a* stmt, int li
     return check_line_validity(stmt->body, linenum, prevValidLine);
 }
 
+static bool check_rowtype_has_been_changed(TupleDesc row_tupdesc, TupleDesc type_tupdesc)
+{
+    if (row_tupdesc->natts != type_tupdesc->natts) {
+        return true;
+    }
+    for (int i = 0; i < row_tupdesc->natts; i++) {
+        Form_pg_attribute row_attr = &row_tupdesc->attrs[i];
+        Form_pg_attribute type_attr = &type_tupdesc->attrs[i];
+        if (row_attr->attnum != type_attr->attnum || row_attr->atttypid != type_attr->atttypid ||
+            row_attr->attisdropped != type_attr->attisdropped) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static inline void gsplsql_report_row_var_check_err(Oid typ_oid)
+{
+    ereport(ERROR,
+        (errcode(ERRCODE_DATATYPE_MISMATCH), errmodule(MOD_PLSQL),
+            errmsg("type %s has been changed, please switch the session", format_type_be(typ_oid))));
+}
+
 /* ----------
  * check_line_validity_in_for_query
  * ----------
@@ -2626,8 +2649,20 @@ PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum)
 
             result = (PLpgSQL_datum*)newm;
         } break;
+        case PLPGSQL_DTYPE_ROW: {
+            PLpgSQL_row* row = (PLpgSQL_row*)datum;
+            if (row->rowtupdesc && row->rowtupdesc->tdtypeid != RECORDOID) {
+                TupleDesc tup_desc = lookup_rowtype_tupdesc(row->rowtupdesc->tdtypeid, row->rowtupdesc->tdtypmod);
+                if (check_rowtype_has_been_changed(row->rowtupdesc, tup_desc)) {
+                    Oid type_oid = tup_desc->tdtypeid;
+                    ReleaseTupleDesc(tup_desc);
+                    gsplsql_report_row_var_check_err(type_oid);
+                }
+                ReleaseTupleDesc(tup_desc);
+            }
+            result = datum;
+        } break;
         case PLPGSQL_DTYPE_EXPR:
-        case PLPGSQL_DTYPE_ROW:
         case PLPGSQL_DTYPE_RECORD:
         case PLPGSQL_DTYPE_RECFIELD:
         case PLPGSQL_DTYPE_ARRAYELEM:
@@ -14339,6 +14374,62 @@ static bool plpgsql_check_invalid_by_dependency(List* invalItems, int cacheid, u
     return false;
 }
 
+void plpgsql_hashtable_clear_invalid_pkg()
+{
+    if (!u_sess->plsql_cxt.has_invalid_pkg) {
+        return;
+    }
+    if (unlikely(u_sess->plsql_cxt.plpgsql_pkg_HashTable == NULL)) {
+        u_sess->plsql_cxt.has_invalid_pkg = false;
+        return;
+    }
+    HASH_SEQ_STATUS hash_pkgseq;
+    hash_seq_init(&hash_pkgseq, u_sess->plsql_cxt.plpgsql_pkg_HashTable);
+    plpgsql_pkg_HashEnt* pkghentry = NULL;
+    while ((pkghentry = (plpgsql_pkg_HashEnt*)hash_seq_search(&hash_pkgseq)) != NULL) {
+        PLpgSQL_package* pkg = pkghentry->package;
+        if (pkg->pkg_xmin == InvalidTransactionId) {
+            delete_package(pkg);
+        }
+    }
+    u_sess->plsql_cxt.has_invalid_pkg = false;
+}
+
+void plpgsql_hashtable_clear_invalid_func()
+{
+    if (!u_sess->plsql_cxt.has_invalid_func) {
+        return;
+    }
+    if (unlikely(u_sess->plsql_cxt.plpgsql_HashTable == NULL)) {
+        u_sess->plsql_cxt.has_invalid_func = false;
+        return;
+    }
+    HASH_SEQ_STATUS hash_seq;
+    hash_seq_init(&hash_seq, u_sess->plsql_cxt.plpgsql_HashTable);
+    plpgsql_HashEnt* hentry = NULL;
+    while ((hentry = (plpgsql_HashEnt*)hash_seq_search(&hash_seq)) != NULL) {
+        PLpgSQL_function* func = hentry->function;
+        if (func->fn_xmin == InvalidTransactionId) {
+            func->use_count = 0;
+            delete_function(func, false);
+        }
+    }
+    u_sess->plsql_cxt.has_invalid_func = false;
+}
+
+void plpgsql_hashtable_clear_invalid_obj(bool need_clear)
+{
+    if (u_sess->SPI_cxt._connected > 0 || u_sess->plsql_cxt.is_package_instantiation) {
+        return;
+    }
+    if (u_sess->plsql_cxt.during_compile && !need_clear) {
+        return;
+    }
+    AcceptInvalidationMessages();
+    plpgsql_hashtable_clear_invalid_pkg();
+    plpgsql_hashtable_clear_invalid_func();
+}
+
 /*
  * Check dependency for function and package's hash table,
  * and delete the invalid package or functio from session.
@@ -14348,6 +14439,7 @@ static bool plpgsql_check_invalid_by_dependency(List* invalItems, int cacheid, u
 void plpgsql_hashtable_delete_and_check_invalid_item(int classId, Oid objId)
 {
     if (classId == PROCOID) {
+        u_sess->plsql_cxt.has_invalid_func = true;
         if (likely(u_sess->plsql_cxt.plpgsql_HashTable != NULL)) {
             HASH_SEQ_STATUS hash_seq;
             hash_seq_init(&hash_seq, u_sess->plsql_cxt.plpgsql_HashTable);
@@ -15388,6 +15480,29 @@ static bool plsql_convert_expr_value_charset(PLpgSQL_execstate* estate, Datum *v
     }
 
     return plsql_convert_value_charset_internal(estate, val, isnull, val_type, val_collation, target_collation);
+}
+
+void plpgsql_free_override_stack(int depth)
+{
+    int searchpath_len = list_length(u_sess->catalog_cxt.overrideStack);
+    while (searchpath_len > depth) {
+        Assert(u_sess->catalog_cxt.overrideStack != NULL);
+        OverrideStackEntry *entry = (OverrideStackEntry *)linitial(u_sess->catalog_cxt.overrideStack);
+        u_sess->catalog_cxt.overrideStack = list_delete_first(u_sess->catalog_cxt.overrideStack);
+        list_free_ext(entry->searchPath);
+        pfree_ext(entry);
+        searchpath_len--;
+        if (u_sess->catalog_cxt.overrideStack) {
+            OverrideStackEntry *entry = (OverrideStackEntry *)linitial(u_sess->catalog_cxt.overrideStack);
+            u_sess->catalog_cxt.activeSearchPath = entry->searchPath;
+            u_sess->catalog_cxt.activeCreationNamespace = entry->creationNamespace;
+            u_sess->catalog_cxt.activeTempCreationPending = false;
+        } else {
+            u_sess->catalog_cxt.activeSearchPath = u_sess->catalog_cxt.baseSearchPath;
+            u_sess->catalog_cxt.activeCreationNamespace = u_sess->catalog_cxt.baseCreationNamespace;
+            u_sess->catalog_cxt.activeTempCreationPending = u_sess->catalog_cxt.baseTempCreationPending;
+        }
+    }
 }
 
 #endif

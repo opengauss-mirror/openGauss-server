@@ -31,6 +31,11 @@
 #include "utils/rel.h"
 #include "utils/sec_rls_utils.h"
 #include "utils/syscache.h"
+#include "catalog/pg_depend.h"
+#include "utils/fmgroids.h"
+#include "catalog/pg_rlspolicy.h"
+#include "catalog/pg_proc.h"
+#include "catalog/indexing.h"
 
 /*
  * CheckBypassRlsPolicies
@@ -219,4 +224,29 @@ void SupportRlsForRel(const Relation relation)
 
     /* relase sys cache tuple */
     ReleaseSysCache(tuple);
+}
+
+bool IsRlsFunction(Oid funcid)
+{
+    if (!OidIsValid(funcid)) {
+        return false;
+    }
+    ScanKeyData key[2];
+    HeapTuple tup = NULL;
+    Form_pg_depend deprec;
+    Relation relation = heap_open(DependRelationId, AccessShareLock);
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ProcedureRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(funcid));
+    SysScanDesc scan = systable_beginscan(relation, DependReferenceIndexId, true, NULL, 2, key);
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        deprec = (Form_pg_depend)GETSTRUCT(tup);
+        if (deprec->classid == RlsPolicyRelationId) {
+            systable_endscan(scan);
+            heap_close(relation, AccessShareLock);
+            return true;
+        }
+    }
+    systable_endscan(scan);
+    heap_close(relation, AccessShareLock);
+    return false;
 }

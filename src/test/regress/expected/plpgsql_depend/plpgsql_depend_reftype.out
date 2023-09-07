@@ -1,0 +1,988 @@
+drop schema if exists plpgsql_depend_reftype cascade;
+NOTICE:  schema "plpgsql_depend_reftype" does not exist, skipping
+create schema plpgsql_depend_reftype;
+set current_schema = plpgsql_depend_reftype;
+set behavior_compat_options = 'plpgsql_dependency';
+-- prepare data table
+create or replace function create_data_table returns int as $$
+begin
+drop table if exists stu;
+create table stu (sno int, name varchar, sex varchar, cno int);
+insert into stu values(1,'zhang','M',1);
+insert into stu values(1,'zhang','M',1);
+insert into stu values(2,'wangwei','M',2);
+insert into stu values(3,'liu','F',3);
+return 1;
+end;
+$$
+LANGUAGE plpgsql;
+-- drop data table
+create or replace function drop_data_table returns int as $$
+begin
+drop table if exists stu;
+return 1;
+end;
+$$
+LANGUAGE plpgsql;
+-- drop data table cascade
+create or replace function drop_data_table_cascade returns int as $$
+begin
+drop table if exists stu cascade;
+return 1;
+end;
+$$
+LANGUAGE plpgsql;
+-- test 1 ref type
+select create_data_table();
+NOTICE:  table "stu" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists stu"
+PL/pgSQL function create_data_table() line 3 at SQL statement
+referenced column: create_data_table
+ create_data_table 
+-------------------
+                 1
+(1 row)
+
+--- define schema define table ---
+--cur_db.def_schema.def_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c regression.plpgsql_depend_reftype.stu%RowType);
+    procedure proc1();
+end pkg;
+/
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type | name |                                                                                           objnode                                                                                           
+------------------------+-------------+------+------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    3 | stu  | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+(1 row)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename | objectname | refobjpos 
+------------------------+-------------+------------+-----------
+ plpgsql_depend_reftype | pkg         | r1         |         1
+(1 row)
+
+--other_db.def_schema.def_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c undefdb.plpgsql_depend_reftype.stu%RowType);
+    procedure proc1();
+end pkg;
+/
+ERROR:  cross-database references are not implemented: "undefdb.plpgsql_depend_reftype.stu"
+CONTEXT:  compilation of PL/pgSQL package near line 1
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type | name |                                                                                           objnode                                                                                           
+------------------------+-------------+------+------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    3 | stu  | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+(1 row)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename | objectname | refobjpos 
+------------------------+-------------+------------+-----------
+ plpgsql_depend_reftype | pkg         | r1         |         1
+(1 row)
+
+--cur_db.def_schema.def_rowtype_in_prochead
+create or replace procedure proc12(v_1 regression.plpgsql_depend_reftype.stu%RowType)
+as
+begin
+    NULL;
+end;
+/
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |                name                |                                                                                                             objnode                                                                                                             
+------------------------+-------------+------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(plpgsql_depend_reftype.stu) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ regression.plpgsql_depend_reftype.stu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.stu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                                | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |             objectname             | refobjpos 
+------------------------+-------------+------------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(plpgsql_depend_reftype.stu) |         4
+ plpgsql_depend_reftype | pkg         | r1                                 |         1
+(2 rows)
+
+--other_db.def_schema.def_rowtype_in_prochead
+create or replace procedure proc12(v_1 undefdb.plpgsql_depend_reftype.stu%RowType)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  cross-database references are not implemented: "undefdb.plpgsql_depend_reftype.stu"
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |                name                |                                                                                                             objnode                                                                                                             
+------------------------+-------------+------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(plpgsql_depend_reftype.stu) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ regression.plpgsql_depend_reftype.stu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.stu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                                | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |             objectname             | refobjpos 
+------------------------+-------------+------------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(plpgsql_depend_reftype.stu) |         4
+ plpgsql_depend_reftype | pkg         | r1                                 |         1
+(2 rows)
+
+--- define schema undefine table ---
+--cur_db.def_schema.undef_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c regression.plpgsql_depend_reftype.undefstu%RowType);
+    procedure proc1();
+end pkg;
+/
+WARNING:  relation does not exist when parse word.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Type r1 depends on an undefined type.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |                name                |                                                                                                             objnode                                                                                                             
+------------------------+-------------+------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(plpgsql_depend_reftype.stu) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ regression.plpgsql_depend_reftype.stu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.stu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                                | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+ plpgsql_depend_reftype | null        |    3 | undefstu                           | {DependenciesUndefined}
+(3 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |             objectname             | refobjpos 
+------------------------+-------------+------------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(plpgsql_depend_reftype.stu) |         4
+ plpgsql_depend_reftype | pkg         | r1                                 |         1
+(2 rows)
+
+--other_db.def_schema.undef_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c undefdb.plpgsql_depend_reftype.undefstu%RowType);
+    procedure proc1();
+end pkg;
+/
+ERROR:  cross-database references are not implemented: "undefdb.plpgsql_depend_reftype.undefstu"
+CONTEXT:  compilation of PL/pgSQL package near line 1
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |                name                |                                                                                                             objnode                                                                                                             
+------------------------+-------------+------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(plpgsql_depend_reftype.stu) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ regression.plpgsql_depend_reftype.stu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.stu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                                | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+ plpgsql_depend_reftype | null        |    3 | undefstu                           | {DependenciesUndefined}
+(3 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |             objectname             | refobjpos 
+------------------------+-------------+------------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(plpgsql_depend_reftype.stu) |         4
+ plpgsql_depend_reftype | pkg         | r1                                 |         1
+(2 rows)
+
+--cur_db.def_schema.undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 regression.plpgsql_depend_reftype.undefstu%RowType)
+as
+begin
+    NULL;
+end;
+/
+WARNING:  relation does not exist when parse word.
+DETAIL:   relation "regression.plpgsql_depend_reftype.undefstu" referenced by %ROWTYPE does not exist.
+WARNING:  Type proc12(pg_catalog.undefined) depends on an undefined type.
+WARNING:  The header information of function proc12 is not defined.
+CONTEXT:  compilation of PL/pgSQL function "proc12" near line 1
+WARNING:  Procedure created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                                                                 objnode                                                                                                                  
+------------------------+-------------+------+------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ regression.plpgsql_depend_reftype.undefstu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.undefstu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | undefstu                     | {DependenciesUndefined}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+ plpgsql_depend_reftype | pkg         | r1                           |         1
+(2 rows)
+
+--other_db.def_schema.undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 undefdb.plpgsql_depend_reftype.undefstu%RowType)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  cross-database references are not implemented: "undefdb.plpgsql_depend_reftype.undefstu"
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                                                                 objnode                                                                                                                  
+------------------------+-------------+------+------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ regression.plpgsql_depend_reftype.undefstu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.undefstu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | undefstu                     | {DependenciesUndefined}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+ plpgsql_depend_reftype | pkg         | r1                           |         1
+(2 rows)
+
+--- undefine schema ---
+--cur_db.undef_schema.undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 regression.undefplpgsql_depend_reftype.undefstu%RowType)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  relation does not exist when parse word.
+DETAIL:   relation "regression.undefplpgsql_depend_reftype.undefstu" referenced by %ROWTYPE does not exist.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                                                                 objnode                                                                                                                  
+------------------------+-------------+------+------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ regression.plpgsql_depend_reftype.undefstu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.undefstu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | undefstu                     | {DependenciesUndefined}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+ plpgsql_depend_reftype | pkg         | r1                           |         1
+(2 rows)
+
+--- define schema define table ---
+--def_schema.def_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c plpgsql_depend_reftype.stu%RowType);
+    procedure proc1();
+end pkg;
+/
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                                                                 objnode                                                                                                                  
+------------------------+-------------+------+------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ regression.plpgsql_depend_reftype.undefstu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.undefstu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                          | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+ plpgsql_depend_reftype | null        |    3 | undefstu                     | {DependenciesUndefined}
+(3 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+ plpgsql_depend_reftype | pkg         | r1                           |         1
+(2 rows)
+
+--def_schema.def_rowtype_in_prochead
+create or replace procedure proc12(v_1 plpgsql_depend_reftype.stu%RowType)
+as
+begin
+    NULL;
+end;
+/
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |                name                |                                                                                                  objnode                                                                                                  
+------------------------+-------------+------+------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(plpgsql_depend_reftype.stu) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ plpgsql_depend_reftype.stu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ plpgsql_depend_reftype.stu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                                | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |             objectname             | refobjpos 
+------------------------+-------------+------------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(plpgsql_depend_reftype.stu) |         4
+ plpgsql_depend_reftype | pkg         | r1                                 |         1
+(2 rows)
+
+--def_schema.undef_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c plpgsql_depend_reftype.undefstu%RowType);
+    procedure proc1();
+end pkg;
+/
+WARNING:  relation does not exist when parse word.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Type r1 depends on an undefined type.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |                name                |                                                                                                  objnode                                                                                                  
+------------------------+-------------+------+------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(plpgsql_depend_reftype.stu) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ plpgsql_depend_reftype.stu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ plpgsql_depend_reftype.stu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                                | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+ plpgsql_depend_reftype | null        |    3 | undefstu                           | {DependenciesUndefined}
+(3 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |             objectname             | refobjpos 
+------------------------+-------------+------------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(plpgsql_depend_reftype.stu) |         4
+ plpgsql_depend_reftype | pkg         | r1                                 |         1
+(2 rows)
+
+--def_schema.undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 plpgsql_depend_reftype.undefstu%RowType)
+as
+begin
+    NULL;
+end;
+/
+WARNING:  relation does not exist when parse word.
+DETAIL:   relation "plpgsql_depend_reftype.undefstu" referenced by %ROWTYPE does not exist.
+WARNING:  The header information of function proc12 is not defined.
+CONTEXT:  compilation of PL/pgSQL function "proc12" near line 1
+WARNING:  Procedure created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                                                      objnode                                                                                                       
+------------------------+-------------+------+------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ plpgsql_depend_reftype.undefstu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ plpgsql_depend_reftype.undefstu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | undefstu                     | {DependenciesUndefined}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+ plpgsql_depend_reftype | pkg         | r1                           |         1
+(2 rows)
+
+--- define table ---
+--def_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c stu%RowType);
+    procedure proc1();
+end pkg;
+/
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                                                      objnode                                                                                                       
+------------------------+-------------+------+------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ plpgsql_depend_reftype.undefstu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ plpgsql_depend_reftype.undefstu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                          | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+ plpgsql_depend_reftype | null        |    3 | undefstu                     | {DependenciesUndefined}
+(3 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+ plpgsql_depend_reftype | pkg         | r1                           |         1
+(2 rows)
+
+--def_rowtype_in_prochead
+create or replace procedure proc12(v_1 stu%RowType)
+as
+begin
+    NULL;
+end;
+/
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |                name                |                                                                                           objnode                                                                                           
+------------------------+-------------+------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(plpgsql_depend_reftype.stu) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ stu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ stu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                                | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |             objectname             | refobjpos 
+------------------------+-------------+------------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(plpgsql_depend_reftype.stu) |         4
+ plpgsql_depend_reftype | pkg         | r1                                 |         1
+(2 rows)
+
+--undef_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c undefstu%RowType);
+    procedure proc1();
+end pkg;
+/
+WARNING:  relation "undefstu" does not exist when parse word.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Type r1 depends on an undefined type.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |                name                |                                                                                           objnode                                                                                           
+------------------------+-------------+------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(plpgsql_depend_reftype.stu) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ stu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ stu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | stu                                | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+ plpgsql_depend_reftype | null        |    3 | undefstu                           | {DependenciesUndefined}
+(3 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |             objectname             | refobjpos 
+------------------------+-------------+------------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(plpgsql_depend_reftype.stu) |         4
+ plpgsql_depend_reftype | pkg         | r1                                 |         1
+(2 rows)
+
+--undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 undefstu%RowType)
+as
+begin
+    NULL;
+end;
+/
+WARNING:  relation does not exist when parse word.
+DETAIL:   relation "undefstu" referenced by %ROWTYPE does not exist.
+WARNING:  The header information of function proc12 is not defined.
+CONTEXT:  compilation of PL/pgSQL function "proc12" near line 1
+WARNING:  Procedure created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                               objnode                                                                                
+------------------------+-------------+------+------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ undefstu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ undefstu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | undefstu                     | {DependenciesUndefined}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+ plpgsql_depend_reftype | pkg         | r1                           |         1
+(2 rows)
+
+--def_type_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c regression.plpgsql_depend_reftype.stu.sno%Type);
+    procedure proc1();
+end pkg;
+/
+WARNING:  invalid type name "regression.plpgsql_depend_reftype.stu.sno%Type"
+LINE 1:  PACKAGE  DECLARE  type r1 is record(a int, c regression.plp...
+                                                      ^
+QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c regression.plpgsql_depend_reftype.stu.sno%Type);
+    procedure proc1();
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                               objnode                                                                                
+------------------------+-------------+------+------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ undefstu%RowType :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ undefstu%RowType\)}
+ plpgsql_depend_reftype | null        |    3 | undefstu                     | {DependenciesUndefined}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+(1 row)
+
+--def_type_in_prohead
+create or replace procedure proc12(v_1 regression.plpgsql_depend_reftype.stu.sno%Type)
+as
+begin
+    NULL;
+end;
+/
+NOTICE:  type reference regression.plpgsql_depend_reftype.stu.sno%TYPE converted to integer
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |          name           |                                                                                           objnode                                                                                           
+------------------------+-------------+------+-------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.int4) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ integer :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.stu.sno%Type\)}
+ plpgsql_depend_reftype | null        |    3 | stu                     | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |       objectname        | refobjpos 
+------------------------+-------------+-------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.int4) |         4
+(1 row)
+
+--undef_type_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c regression.plpgsql_depend_reftype.stu.undefsno%Type);
+    procedure proc1();
+end pkg;
+/
+WARNING:  invalid type name "regression.plpgsql_depend_reftype.stu.undefsno%Type"
+LINE 1:  PACKAGE  DECLARE  type r1 is record(a int, c regression.plp...
+                                                      ^
+QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c regression.plpgsql_depend_reftype.stu.undefsno%Type);
+    procedure proc1();
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |          name           |                                                                                           objnode                                                                                           
+------------------------+-------------+------+-------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.int4) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ integer :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ regression.plpgsql_depend_reftype.stu.sno%Type\)}
+ plpgsql_depend_reftype | null        |    3 | stu                     | {DependenciesType :typType c :typCategory C :attrInfo sno:pg_catalog.int4,name:pg_catalog.varchar,sex:pg_catalog.varchar,cno:pg_catalog.int4, :isRel true :elemTypName <> :idxByTypName <>}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |       objectname        | refobjpos 
+------------------------+-------------+-------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.int4) |         4
+(1 row)
+
+--undef_type_in_prohead
+create or replace procedure proc12(v_1 regression.plpgsql_depend_reftype.stu.undefsno%Type)
+as
+begin
+    NULL;
+end;
+/
+WARNING:  Procedure created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+select drop_data_table_cascade();
+ drop_data_table_cascade 
+-------------------------
+                       1
+(1 row)
+
+drop schema if exists plpgsql_depend_reftype cascade;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to function create_data_table()
+drop cascades to function drop_data_table()
+drop cascades to function drop_data_table_cascade()
+--?.*
+drop cascades to function plpgsql_depend_reftype.proc1()
+drop cascades to function proc12(undefined)
+reset behavior_compat_options;
+create schema plpgsql_depend_reftype;
+set current_schema = plpgsql_depend_reftype;
+set behavior_compat_options = 'plpgsql_dependency';
+--test 2 ref pkg var type
+create or replace package refpkg as
+type r1 is record(a int, b int);
+procedure proc1();
+end refpkg;
+/
+--- define table ---
+--cur_db.def_schema.def_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c regression.plpgsql_depend_reftype.refpkg.r1.a%Type);
+    procedure proc1();
+end pkg;
+/
+WARNING:  invalid type name "regression.plpgsql_depend_reftype.refpkg.r1.a%Type"
+LINE 1:  PACKAGE  DECLARE  type r1 is record(a int, c regression.plp...
+                                                      ^
+QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c regression.plpgsql_depend_reftype.refpkg.r1.a%Type);
+    procedure proc1();
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--other_db.def_schema.def_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c undefdb.plpgsql_depend_reftype.refpkg.r1.a%Type);
+    procedure proc1();
+end pkg;
+/
+WARNING:  invalid type name "undefdb.plpgsql_depend_reftype.refpkg.r1.a%Type"
+LINE 1:  PACKAGE  DECLARE  type r1 is record(a int, c undefdb.plpgsq...
+                                                      ^
+QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c undefdb.plpgsql_depend_reftype.refpkg.r1.a%Type);
+    procedure proc1();
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--cur_db.def_schema.def_rowtype_in_prochead
+create or replace procedure proc12(v_1 regression.plpgsql_depend_reftype.refpkg.r1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  improper %TYPE reference (too many dotted names): regression.plpgsql_depend_reftype.refpkg.r1.a
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--other_db.def_schema.def_rowtype_in_prochead
+create or replace procedure proc12(v_1 undefdb.plpgsql_depend_reftype.refpkg.r1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  improper %TYPE reference (too many dotted names): undefdb.plpgsql_depend_reftype.refpkg.r1.a
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--- define schema define pkgrec ---
+--cur_db.def_schema.undef_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c regression.plpgsql_depend_reftype.refpkg.undefr1.a%Type);
+    procedure proc1();
+end pkg;
+/
+WARNING:  invalid type name "regression.plpgsql_depend_reftype.refpkg.undefr1.a%Type"
+LINE 1:  PACKAGE  DECLARE  type r1 is record(a int, c regression.plp...
+                                                      ^
+QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c regression.plpgsql_depend_reftype.refpkg.undefr1.a%Type);
+    procedure proc1();
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--other_db.def_schema.undef_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c undefdb.plpgsql_depend_reftype.refpkg.undefr1.a%Type);
+    procedure proc1();
+end pkg;
+/
+WARNING:  invalid type name "undefdb.plpgsql_depend_reftype.refpkg.undefr1.a%Type"
+LINE 1:  PACKAGE  DECLARE  type r1 is record(a int, c undefdb.plpgsq...
+                                                      ^
+QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c undefdb.plpgsql_depend_reftype.refpkg.undefr1.a%Type);
+    procedure proc1();
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--cur_db.def_schema.undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 regression.plpgsql_depend_reftype.refpkg.undefr1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  improper %TYPE reference (too many dotted names): regression.plpgsql_depend_reftype.refpkg.undefr1.a
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--other_db.def_schema.undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 undefdb.plpgsql_depend_reftype.refpkg.undefr1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  improper %TYPE reference (too many dotted names): undefdb.plpgsql_depend_reftype.refpkg.undefr1.a
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--- define schema undefine pkg---
+--cur_db.def_schema.undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 regression.plpgsql_depend_reftype.undefpkg.undefr1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  improper %TYPE reference (too many dotted names): regression.plpgsql_depend_reftype.undefpkg.undefr1.a
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--- undefine schema ---
+--cur_db.undef_schema.undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 regression.undefplpgsql_depend_reftype.refpkg.undefr1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  improper %TYPE reference (too many dotted names): regression.undefplpgsql_depend_reftype.refpkg.undefr1.a
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--- define schema define pkg rec---
+--def_schema.def_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c plpgsql_depend_reftype.refpkg.r1.a%Type);
+    procedure proc1;
+end pkg;
+/
+ERROR:  cross-database references are not implemented: plpgsql_depend_reftype.refpkg.r1.a
+CONTEXT:  compilation of PL/pgSQL package near line 1
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--def_schema.def_rowtype_in_prochead rsy
+create or replace procedure proc12(v_1 plpgsql_depend_reftype.refpkg.r1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  cross-database references are not implemented: plpgsql_depend_reftype.refpkg.r1.a
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--- define schema define pkg rec ---
+--def_schema.undef_rowtype_in_body 
+create or replace package pkg
+is
+    type r1 is record(a int, c plpgsql_depend_reftype.refpkg.undefr1.a%Type);
+    procedure proc1();
+end pkg;
+/
+ERROR:  cross-database references are not implemented: plpgsql_depend_reftype.refpkg.undefr1.a
+CONTEXT:  compilation of PL/pgSQL package near line 1
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--def_schema.undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 plpgsql_depend_reftype.refpkg.undefr1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  cross-database references are not implemented: plpgsql_depend_reftype.refpkg.undefr1.a
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--- undefine schema --- rsy
+create or replace procedure proc12(v_1 undefplpgsql_depend_reftype.refpkg.undefr1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+ERROR:  cross-database references are not implemented: undefplpgsql_depend_reftype.refpkg.undefr1.a
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+ schemaname | packagename | type | name | objnode 
+------------+-------------+------+------+---------
+(0 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+ schemaname | packagename | objectname | refobjpos 
+------------+-------------+------------+-----------
+(0 rows)
+
+--- define pkg rec ---
+--def_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c refpkg.r1.a%Type);
+    procedure proc1;
+end pkg;
+/
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type | name |                                                                  objnode                                                                  
+------------------------+-------------+------+------+-------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | refpkg      |    3 | r1   | {DependenciesType :typType c :typCategory C :attrInfo a:pg_catalog.int4,b:pg_catalog.int4, :isRel false :elemTypName <> :idxByTypName <>}
+(1 row)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename | objectname | refobjpos 
+------------------------+-------------+------------+-----------
+ plpgsql_depend_reftype | pkg         | r1         |         1
+(1 row)
+
+--def_rowtype_in_prochead
+create or replace procedure proc12(v_1 refpkg.r1.a%Type)
+as
+begin
+    NULL;
+end;
+/
+NOTICE:  type reference refpkg.r1.a%TYPE converted to integer
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |          name           |                                                                           objnode                                                                            
+------------------------+-------------+------+-------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.int4) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ integer :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ refpkg.r1.a%Type\)}
+ plpgsql_depend_reftype | refpkg      |    3 | r1                      | {DependenciesType :typType c :typCategory C :attrInfo a:pg_catalog.int4,b:pg_catalog.int4, :isRel false :elemTypName <> :idxByTypName <>}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |       objectname        | refobjpos 
+------------------------+-------------+-------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.int4) |         4
+ plpgsql_depend_reftype | pkg         | r1                      |         1
+(2 rows)
+
+--- define pkg rec ---
+--undef_rowtype_in_body
+create or replace package pkg
+is
+    type r1 is record(a int, c refpkg.undefr1%Type);
+    procedure proc1();
+end pkg;
+/
+WARNING:  Type r1 depends on an undefined type.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |          name           |                                                                           objnode                                                                            
+------------------------+-------------+------+-------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.int4) | {DependenciesProchead :undefined false :proName proc12 :proArgSrc v_1\ integer :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ refpkg.r1.a%Type\)}
+ plpgsql_depend_reftype | refpkg      |    3 | r1                      | {DependenciesType :typType c :typCategory C :attrInfo a:pg_catalog.int4,b:pg_catalog.int4, :isRel false :elemTypName <> :idxByTypName <>}
+ plpgsql_depend_reftype | refpkg      |    2 | undefr1                 | {DependenciesUndefined}
+(3 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |       objectname        | refobjpos 
+------------------------+-------------+-------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.int4) |         4
+ plpgsql_depend_reftype | pkg         | r1                      |         1
+(2 rows)
+
+--undef_rowtype_in_prochead
+create or replace procedure proc12(v_1 refpkg.undefr1%Type)
+as
+begin
+    NULL;
+end;
+/
+WARNING:  The header information of function proc12 is not defined.
+CONTEXT:  compilation of PL/pgSQL function "proc12" near line 1
+WARNING:  Procedure created with compilation erors.
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                             objnode                                                                              
+------------------------+-------------+------+------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ undefined :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ refpkg.undefr1%Type\)}
+ plpgsql_depend_reftype | refpkg      |    2 | undefr1                      | {DependenciesUndefined}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+ plpgsql_depend_reftype | pkg         | r1                           |         1
+(2 rows)
+
+drop package refpkg;
+NOTICE:  drop cascades to function plpgsql_depend_reftype.proc1()
+select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
+       schemaname       | packagename | type |             name             |                                                                             objnode                                                                              
+------------------------+-------------+------+------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ plpgsql_depend_reftype | null        |    5 | proc12(pg_catalog.undefined) | {DependenciesProchead :undefined true :proName proc12 :proArgSrc v_1\ undefined :funcHeadSrc create\ or\ replace\ procedure\ proc12\(v_1\ refpkg.undefr1%Type\)}
+ plpgsql_depend_reftype | refpkg      |    2 | undefr1                      | {DependenciesUndefined}
+(2 rows)
+
+select schemaname, packagename, objectname, refobjpos from gs_dependencies where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, objectname, refobjpos;
+       schemaname       | packagename |          objectname          | refobjpos 
+------------------------+-------------+------------------------------+-----------
+ plpgsql_depend_reftype | null        | proc12(pg_catalog.undefined) |         4
+ plpgsql_depend_reftype | pkg         | r1                           |         1
+(2 rows)
+
+-- clean
+drop schema plpgsql_depend_reftype cascade;
+NOTICE:  drop cascades to 3 other objects
+--?.*
+drop cascades to function plpgsql_depend_reftype.proc1()
+drop cascades to function proc12(undefined)
+reset behavior_compat_options;

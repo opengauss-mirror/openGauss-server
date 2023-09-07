@@ -871,6 +871,13 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->pragma_autonomous = false;
     plsql_cxt->is_insert_gs_source = false;
     plsql_cxt->CursorRecordTypeList = NIL;
+    plsql_cxt->need_create_depend = true;
+    plsql_cxt->createPlsqlType = CREATE_PLSQL_TYPE_END;
+    plsql_cxt->functionStyleType = FUNCTION_STYLE_TYPE_NONE;
+    plsql_cxt->is_pkg_compile = false;
+    plsql_cxt->isCreatePkg = false;
+    plsql_cxt->isCreatePkgFunction = false;
+    plsql_cxt->currCompilingObjStatus = true;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
@@ -1737,4 +1744,107 @@ bool enable_out_param_override()
     }
     return u_sess->attr.attr_sql.sql_compatibility == A_FORMAT
                 && PROC_OUTPARAM_OVERRIDE;
+}
+
+bool enable_plpgsql_undefined_not_check_nspoid()
+{
+    return enable_plpgsql_gsdependency() &&
+           (u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_NOT_CHECK_NSPOID);
+}
+
+bool enable_plpgsql_gsdependency_guc()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    return false;
+#endif
+    if (unlikely(IsInitdb || t_thrd.proc->workingVersionNum < SUPPORT_GS_DEPENDENCY_VERSION_NUM)) {
+        return false;
+    }
+    int save_compile_status = u_sess->plsql_cxt.compile_status;
+    if (save_compile_status != COMPILIE_ANON_BLOCK && PLPGSQL_DEPENDENCY &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+        (!u_sess->is_autonomous_session || u_sess->plsql_cxt.during_compile)) {
+        return true;
+    }
+    return false;
+}
+
+bool enable_plpgsql_gsdependency()
+{
+    if (u_sess->plsql_cxt.is_pkg_compile) {
+        return enable_plpgsql_gsdependency_guc() && u_sess->plsql_cxt.need_create_depend;
+    }
+    if (u_sess->plsql_cxt.functionStyleType == FUNCTION_STYLE_TYPE_A) {
+        return enable_plpgsql_gsdependency_guc();
+    } else if (u_sess->plsql_cxt.functionStyleType == FUNCTION_STYLE_TYPE_PG) {
+        return false;
+    } else {
+        return enable_plpgsql_gsdependency_guc() && u_sess->plsql_cxt.need_create_depend;
+    }
+}
+
+bool enable_plpgsql_undefined()
+{
+    return enable_plpgsql_gsdependency() &&
+           (u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_START ||
+            u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_RECORD_DEPENDENCE ||
+            u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_RECOMPILE ||
+            u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_NOT_CHECK_NSPOID);
+}
+
+void set_create_plsql_type_not_check_nsp_oid()
+{
+    if (enable_plpgsql_undefined()) {
+        u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_NOT_CHECK_NSPOID;
+    }
+}
+
+void set_create_plsql_type_start()
+{
+    if (enable_plpgsql_gsdependency_guc()) {
+        u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_START;
+    }
+}
+
+void set_create_plsql_type_end()
+{
+    if (enable_plpgsql_gsdependency_guc()) {
+        u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_END;
+    }
+}
+
+void set_create_plsql_type(CreatePlsqlType type)
+{
+    if (enable_plpgsql_gsdependency_guc()) {
+        u_sess->plsql_cxt.createPlsqlType = type;
+    }
+}
+
+void set_function_style_none()
+{
+    u_sess->plsql_cxt.functionStyleType = FUNCTION_STYLE_TYPE_NONE;
+}
+
+void set_function_style_a()
+{
+    u_sess->plsql_cxt.functionStyleType = FUNCTION_STYLE_TYPE_A;
+}
+
+void set_function_style_pg()
+{
+    u_sess->plsql_cxt.functionStyleType = FUNCTION_STYLE_TYPE_PG;
+}
+
+bool set_is_create_plsql_type()
+{
+    if (enable_plpgsql_gsdependency_guc()) {
+        if (u_sess->plsql_cxt.isCreatePkgFunction == true &&
+            u_sess->plsql_cxt.isCreatePkgFunction == false) {
+            return false;
+        }
+        if (u_sess->plsql_cxt.functionStyleType == FUNCTION_STYLE_TYPE_REFRESH_HEAD) {
+            return false;
+        }
+    }
+    return true;
 }

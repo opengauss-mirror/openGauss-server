@@ -89,6 +89,7 @@
 #include "utils/syscache.h"
 #include "access/heapam.h"
 #include "datasource/datasource.h"
+#include "catalog/pg_depend.h"
 
 /*
  * ObjectProperty
@@ -3742,4 +3743,51 @@ get_object_address_usermapping(List *objname, List *objargs, bool missing_ok)
     return address;
 }
  
-
+Oid get_object_package(const ObjectAddress* address)
+{
+    const ObjectPropertyType* property = NULL;
+    property = get_object_property_data(address->classId);
+    if (property->attnum_namespace == InvalidAttrNumber) {
+        return InvalidOid;
+    }
+    Relation dependRel;
+    const int nKeys = 3;
+    ScanKeyData key[nKeys];
+    SysScanDesc scan = NULL;
+    HeapTuple tuple = NULL;
+    bool isNull = true;
+    Oid pkgOid = InvalidOid;
+    int keyNum = 0;
+    dependRel = heap_open(DependRelationId, AccessShareLock);
+    ScanKeyInit(&key[keyNum++], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(address->classId));
+    ScanKeyInit(&key[keyNum++], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(address->objectId));
+    ScanKeyInit(&key[keyNum++], Anum_pg_depend_objsubid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(address->objectSubId));
+    scan = systable_beginscan(dependRel, DependDependerIndexId, true, NULL, nKeys, key);
+    ObjectAddress procObjAddr;
+    procObjAddr.classId = InvalidOid;
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        Datum objOidDatum = heap_getattr(tuple, Anum_pg_depend_refobjid,
+                                   RelationGetDescr(dependRel), &isNull);
+        Assert(!isNull);
+        Datum classOidDatum = heap_getattr(tuple, Anum_pg_depend_refclassid,
+                                         RelationGetDescr(dependRel), &isNull);
+        Assert(!isNull);
+        if (classOidDatum == ProcedureRelationId) {
+            procObjAddr.classId = ProcedureRelationId;
+            procObjAddr.objectId = DatumGetObjectId(objOidDatum);
+            procObjAddr.objectSubId = 0;
+            break;
+        }
+        if (classOidDatum != PackageRelationId) {
+            continue;
+        }
+        pkgOid = DatumGetObjectId(objOidDatum);
+        break;
+    }
+    systable_endscan(scan);
+    heap_close(dependRel, AccessShareLock);
+    if (OidIsValid(procObjAddr.classId)) {
+        pkgOid = get_object_package(&procObjAddr);
+    }
+    return pkgOid;
+}

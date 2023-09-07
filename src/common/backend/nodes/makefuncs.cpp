@@ -498,13 +498,14 @@ TypeName* makeTypeNameFromNameList(List* names)
  * makeTypeNameFromOid -
  *	build a TypeName node to represent a type already known by OID/typmod.
  */
-TypeName* makeTypeNameFromOid(Oid typeOid, int32 typmod)
+TypeName* makeTypeNameFromOid(Oid typeOid, int32 typmod, TypeDependExtend* dependExtend)
 {
     TypeName* n = makeNode(TypeName);
 
     n->typeOid = typeOid;
     n->typemod = typmod;
     n->location = -1;
+    n->dependExtend = dependExtend;
     n->charset = PG_INVALID_ENCODING;
     return n;
 }

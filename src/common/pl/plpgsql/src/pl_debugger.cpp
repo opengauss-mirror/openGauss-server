@@ -391,8 +391,7 @@ void server_send_end_msg(DebugInfo* debug)
         char* pkgname = NULL;
         Assert(funcname != NULL);
         if (pkgoid != InvalidOid) {
-            NameData* pkgName = GetPackageName(pkgoid);
-            pkgname = NameStr(*pkgName);
+            pkgname = GetPackageName(pkgoid);
         }
         char* pkgfuncname = quote_qualified_identifier(pkgname, funcname);
         appendStringInfo(&str, "%u:%s:%d:%s", funcoid, pkgfuncname, 0, "[EXECUTION FINISHED]");
@@ -489,8 +488,8 @@ PLDebug_variable* get_debug_variable_var(PLpgSQL_var* node, const char* target)
         var->value = OidOutputFunctionCall(form->typoutput, node->value);
     }
     if (node->ispkg && node->pkg != NULL) {
-        NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
-        var->pkgname = AssignStr(NameStr(*pkgName));
+        char* pkgName = GetPackageName(node->pkg->pkg_oid);
+        var->pkgname = AssignStr(pkgName);
     } else {
         var->pkgname = pstrdup("");
     }
@@ -551,8 +550,8 @@ PLDebug_variable* get_debug_variable_row(PLpgSQL_row* node, PLpgSQL_execstate* e
         pfree(buf);
     }
     if (node->ispkg && node->pkg != NULL) {
-        NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
-        var->pkgname = AssignStr(NameStr(*pkgName));
+        char* pkgName = GetPackageName(node->pkg->pkg_oid);
+        var->pkgname = AssignStr(pkgName);
     } else {
         var->pkgname = pstrdup("");
     }
@@ -585,8 +584,8 @@ PLDebug_variable* get_debug_variable_rec(PLpgSQL_rec* node, const char* target)
         pfree(buf);
     }
     if (node->ispkg && node->pkg != NULL) {
-        NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
-        var->pkgname = AssignStr(NameStr(*pkgName));
+        char* pkgName = GetPackageName(node->pkg->pkg_oid);
+        var->pkgname = AssignStr(pkgName);
     } else {
         var->pkgname = pstrdup("");
     }
@@ -899,8 +898,7 @@ static bool get_cur_info(StringInfo str, PLpgSQL_execstate* estate, DebugInfo* d
     char* pkgname = NULL;
 
     if (pkgoid != InvalidOid) {
-        NameData* pkgName = GetPackageName(pkgoid);
-        pkgname = NameStr(*pkgName);
+        pkgname = GetPackageName(pkgoid);
     }
 
     char* pkgfuncname = quote_qualified_identifier(pkgname, funcname);
@@ -1211,8 +1209,7 @@ PLDebug_frame* get_frame(DebugInfo* debug)
         funcname = pstrdup("anonymous block");
     }
     if (pkgoid != InvalidOid) {
-        NameData* pkgName = GetPackageName(pkgoid);
-        pkgname = NameStr(*pkgName);
+        pkgname = GetPackageName(pkgoid);
     }
     frame->frameno = debug->debugStackIdx;
     frame->funcname = quote_qualified_identifier(pkgname, funcname);

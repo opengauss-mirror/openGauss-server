@@ -4234,6 +4234,24 @@ bool type_is_range(Oid typid)
 }
 
 /*
+ * type_is_relation
+ *
+ *		Convenience function to determine whether a type OID represents
+ *		a ordinaty table type.
+ */
+bool type_is_relation(Oid typid)
+{
+    if (get_typtype(typid) != TYPTYPE_COMPOSITE) {
+        return false;
+    }
+    Oid relid = get_typ_typrelid(typid);
+    if (!OidIsValid(relid)) {
+        return false;
+    }
+    return get_rel_relkind(relid) == RELKIND_RELATION;
+}
+
+/*
  * get_type_category_preferred
  *
  *		Given the type OID, fetch its category and preferred-type status.
@@ -5325,7 +5343,7 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
             char* proname = NULL;
             Datum pkgOiddatum;
             bool isnull = true;
-            NameData* pkgname = NULL;
+            char* pkgname = NULL;
             Oid pkgOid = InvalidOid;
             procform = (Form_pg_proc)GETSTRUCT(proctupl);
             proname = NameStr(procform->proname);
@@ -6434,3 +6452,16 @@ void spq_free_attstatsslot(AttStatsSlot *sslot)
         pfree(sslot->numbers_arr);
 }
 #endif
+
+Oid get_array_internal_depend_type_oid(Oid arrTypOid)
+{
+    Oid elemOid = get_element_type(arrTypOid);
+    if (elemOid == InvalidOid) {
+        return InvalidOid;
+    }
+    Oid arrOid = get_array_type(elemOid);
+    if (arrOid == arrTypOid) {
+        return elemOid;
+    }
+    return InvalidOid;
+}

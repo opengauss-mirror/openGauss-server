@@ -120,6 +120,7 @@ extern bool type_is_rowtype(Oid typid);
 extern bool type_is_enum(Oid typid);
 extern bool type_is_range(Oid typid);
 extern bool type_is_set(Oid typid);
+extern bool type_is_relation(Oid typid);
 extern void get_type_category_preferred(Oid typid, char* typcategory, bool* typispreferred);
 extern Oid get_typ_typrelid(Oid typid);
 extern Oid get_element_type(Oid typid);
@@ -222,6 +223,7 @@ extern Oid get_valid_relname_relid(const char* relnamespace, const char* relname
 extern bool get_func_iswindow(Oid funcid);
 extern char get_func_prokind(Oid funcid);
 extern char get_typecategory(Oid typid);
+extern Oid get_array_internal_depend_type_oid(Oid arrTypOid);
 
 #ifdef USE_SPQ
 /* comparison types */

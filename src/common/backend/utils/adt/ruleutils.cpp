@@ -4564,7 +4564,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     int oldlen;
     char* p = NULL;
     bool isOraFunc = false;
-    NameData* pkgname = NULL;
+    char* pkgname = NULL;
     initStringInfo(&buf);
 
     /* Look up the function */
@@ -4610,7 +4610,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     if (proIsProcedure) {
         if (pkgname != NULL) {
             appendStringInfo(&buf, "CREATE OR REPLACE PROCEDURE %s(",
-                                quote_qualified_identifier(nsp, pkgname->data, name));
+                                quote_qualified_identifier(nsp, pkgname, name));
         } else   if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
             appendStringInfo(&buf, "CREATE DEFINER = %s PROCEDURE %s(", 
                                 GetUserNameFromId(proc->proowner), quote_qualified_identifier(nsp, name));
@@ -4622,7 +4622,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     } else {
         if (pkgname != NULL) {
             appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(", 
-                                quote_qualified_identifier(nsp, pkgname->data, name));
+                                quote_qualified_identifier(nsp, pkgname, name));
         }  else   if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
             appendStringInfo(&buf, "CREATE DEFINER = %s FUNCTION %s(", 
                                 GetUserNameFromId(proc->proowner), quote_qualified_identifier(nsp, name));
@@ -12230,7 +12230,7 @@ static char* generate_function_name(
     int p_nvargs;
     Oid* p_true_typeids = NULL;
     Oid p_vatype;
-    NameData* pkgname = NULL;
+    char* pkgname = NULL;
     Datum pkgOiddatum;
     Oid pkgOid = InvalidOid;
     bool isnull = true;
@@ -12286,7 +12286,7 @@ static char* generate_function_name(
     else
         nspname = get_namespace_name(procform->pronamespace);
     if (OidIsValid(pkgOid)) {
-        result = quote_qualified_identifier(nspname, pkgname->data, proname);
+        result = quote_qualified_identifier(nspname, pkgname, proname);
     } else {
         result = quote_qualified_identifier(nspname, proname);
     }

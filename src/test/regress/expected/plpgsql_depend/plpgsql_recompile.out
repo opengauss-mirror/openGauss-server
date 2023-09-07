@@ -1,0 +1,219 @@
+drop schema if exists plpgsql_recompile cascade;
+NOTICE:  schema "plpgsql_recompile" does not exist, skipping
+create schema plpgsql_recompile;
+set current_schema = plpgsql_recompile;
+set behavior_compat_options = 'plpgsql_dependency';
+---test 1
+create type s_type as (
+    id integer,
+    name varchar,
+    addr text
+);
+create or replace procedure type_alter(a s_type)
+is
+begin    
+    RAISE INFO 'call a: %', a;
+end;
+/
+select valid from pg_object where object_type='P' and object_oid 
+in (select Oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = 
+(select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+ valid 
+-------
+ t
+(1 row)
+
+call type_alter((1,'zhang','shanghai'));
+INFO:  call a: (1,zhang,shanghai)
+ type_alter 
+------------
+ 
+(1 row)
+
+alter function type_alter compile;
+WARNING:  Functions type_alter does not exist, if it is a stored procedure, use ALTER PROCEDURE.
+alter procedure type_alter(s_type) compile;
+alter type s_type ADD attribute a int;
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+ valid 
+-------
+ f
+(1 row)
+
+call type_alter((1,'zhang','shanghai',100));
+INFO:  call a: (1,zhang,shanghai,100)
+ type_alter 
+------------
+ 
+(1 row)
+
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+ valid 
+-------
+ t
+(1 row)
+
+alter type s_type DROP attribute a;
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+ valid 
+-------
+ f
+(1 row)
+
+call type_alter((1,'zhang','shanghai'));
+INFO:  call a: (1,zhang,shanghai)
+ type_alter 
+------------
+ 
+(1 row)
+
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+ valid 
+-------
+ t
+(1 row)
+
+alter type s_type ALTER attribute id type float;
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+ valid 
+-------
+ f
+(1 row)
+
+alter procedure type_alter compile;
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+ valid 
+-------
+ t
+(1 row)
+
+call type_alter((1.0,'zhang','shanghai'));
+INFO:  call a: (1,zhang,shanghai)
+ type_alter 
+------------
+ 
+(1 row)
+
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+ valid 
+-------
+ t
+(1 row)
+
+-- report error
+alter type s_type RENAME to s_type_rename;
+ERROR:  The rename operator of s_type is not allowed, because it is referenced by the other object.
+ALTER type s_type RENAME ATTRIBUTE name TO new_name;
+ERROR:  cannot rename attribute of the type because it is dependent on another object.
+call type_alter((1,'zhang','shanghai'));
+INFO:  call a: (1,zhang,shanghai)
+ type_alter 
+------------
+ 
+(1 row)
+
+-- test 2
+drop table if exists stu;
+NOTICE:  table "stu" does not exist, skipping
+create table stu(sno int, name varchar, sex varchar, cno int);
+create type r1 as (a int, c stu%RowType);
+drop package if exists pkg;
+NOTICE:  package pkg() does not exist, skipping
+create or replace package pkg
+is    
+procedure proc1(p_in r1);
+end pkg;
+/
+create or replace package body pkg
+is
+declare
+v1 r1;
+v2 stu%RowType;
+procedure proc1(p_in r1) as
+begin        
+RAISE INFO 'call p_in: %', p_in;
+end;
+end pkg;
+/
+call pkg.proc1((1,(1,'zhang','M',1)));
+INFO:  call p_in: (1,"(1,zhang,M,1)")
+ proc1 
+-------
+ 
+(1 row)
+
+alter package pkg compile;
+alter package pkg compile specification;
+alter package pkg compile body;
+alter package pkg compile package;
+alter table stu ADD column b int;
+alter package pkg compile;
+call pkg.proc1((1,(1,'zhang','M',1,2)));
+INFO:  call p_in: (1,"(1,zhang,M,1,2)")
+ proc1 
+-------
+ 
+(1 row)
+
+alter table stu DROP column b;
+alter package pkg compile;
+call pkg.proc1((1,(1,'zhang','M',1)));
+INFO:  call p_in: (1,"(1,zhang,M,1)")
+ proc1 
+-------
+ 
+(1 row)
+
+alter table stu RENAME to stu_re;
+ERROR:  The rename operator on stu is not allowed, because it is dependent on another object.
+alter package pkg compile;
+call pkg.proc1((1,(1,'zhang','M',1)));
+INFO:  call p_in: (1,"(1,zhang,M,1)")
+ proc1 
+-------
+ 
+(1 row)
+
+alter type r1 ALTER attribute a type float;
+alter package pkg compile;
+call pkg.proc1((1.0,(1,'zhang','M',1)));
+INFO:  call p_in: (1,"(1,zhang,M,1)")
+ proc1 
+-------
+ 
+(1 row)
+
+--compile error
+create or replace package body pkg
+is
+declare
+v1 r1%RowType;
+procedure proc1(p_in r1) as
+begin
+select into v1 values (1,ROW(1,'zhang','M',1));     
+RAISE INFO 'call p_in: %', p_in;
+end;
+end pkg;
+/
+WARNING:  syntax error at or near "(" when compile function proc1(r1)
+DETAIL:  N/A
+CONTEXT:  compilation of PL/pgSQL package near line 1
+alter package pkg compile;
+ERROR:  syntax error at or near "(" when compile function proc1(r1)
+LINE 2: select into v1 values (1,ROW(1,'zhang','M',1));     
+        ^
+DETAIL:  syntax error
+QUERY:   DECLARE begin
+select into v1 values (1,ROW(1,'zhang','M',1));     
+RAISE INFO 'call p_in: %', p_in;
+end
+-- select oid,* from pg_type where typname='stu';
+drop schema plpgsql_recompile cascade;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to type s_type
+drop cascades to function type_alter(s_type)
+drop cascades to table stu
+drop cascades to type r1
+--?.*
+drop cascades to function plpgsql_recompile.proc1(r1)
+reset behavior_compat_options;

@@ -3354,6 +3354,9 @@ Oid LookupExplicitNamespace(const char* nspname, bool missing_ok)
 
     if (!(u_sess->analyze_cxt.is_under_analyze || (IS_PGXC_DATANODE && IsConnFromCoord())) ||
         u_sess->exec_cxt.is_exec_trigger_func) {
+        if (!OidIsValid(namespaceId) && enable_plpgsql_undefined_not_check_nspoid()) {
+            return namespaceId;
+        }
         aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_USAGE);
         if (aclresult != ACLCHECK_OK)
             aclcheck_error(aclresult, ACL_KIND_NAMESPACE, nspname);
@@ -3543,7 +3546,12 @@ Oid get_namespace_oid(const char* nspname, bool missing_ok)
     Oid oid = InvalidOid;
 
     oid = GetSysCacheOid1(NAMESPACENAME, CStringGetDatum(nspname));
-    if (!OidIsValid(oid) && !missing_ok) {      
+    if (!OidIsValid(oid) && !missing_ok) {     
+        if (enable_plpgsql_undefined_not_check_nspoid()) {
+            ereport(LOG, (errmodule(MOD_PLSQL),
+             (ERRCODE_UNDEFINED_SCHEMA), errmsg("%s does not exist. Ignore it.", nspname)));
+             return oid;
+        }
         char message[MAXSTRLEN]; 
         errno_t rc = sprintf_s(message, MAXSTRLEN, "schema \"%s\" does not exist", nspname);
         if (strlen(nspname) > MAXSTRLEN) {

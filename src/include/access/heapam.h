@@ -357,7 +357,7 @@ extern TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infoma
 
 extern Oid simple_heap_insert(Relation relation, HeapTuple tup);
 extern void simple_heap_delete(Relation relation, ItemPointer tid, int options = 0, bool allow_update_self = false);
-extern void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup);
+extern void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup, bool allow_update_self = false);
 extern MultiXactStatus GetMXactStatusForLock(LockTupleMode mode, bool isUpdate);
 
 extern void heap_markpos(TableScanDesc scan);

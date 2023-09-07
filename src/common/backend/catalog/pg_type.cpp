@@ -37,6 +37,10 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
+#include "catalog/gs_package.h"
+#include "parser/parse_type.h"
+#include "catalog/gs_dependencies_fn.h"
+#include "utils/pl_package.h"
 
 /* ----------------------------------------------------------------
  *		TypeShellMake
@@ -196,7 +200,7 @@ ObjectAddress TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace,
     const char* defaultTypeValue,                                                    /* human readable rep */
     char* defaultTypeBin,                                                            /* cooked rep */
     bool passedByValue, char alignment, char storage, int32 typeMod, int32 typNDims, /* Array dimensions for baseType */
-    bool typeNotNull, Oid typeCollation)
+    bool typeNotNull, Oid typeCollation, TypeDependExtend* dependExtend)
 {
     Relation pg_type_desc;
     Oid typeObjectId;
@@ -296,6 +300,7 @@ ObjectAddress TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace,
         /* So far, we support explicitly assigned pseudo type during inplace upgrade. */
         Assert(u_sess->cmd_cxt.TypeCreateType == TYPTYPE_PSEUDO ||
                u_sess->cmd_cxt.TypeCreateType == TYPTYPE_BASE ||
+               u_sess->cmd_cxt.TypeCreateType == TYPTYPE_UNDEFINE ||
                u_sess->cmd_cxt.TypeCreateType == TYPTYPE_SET);
 
         typeType = u_sess->cmd_cxt.TypeCreateType;
@@ -420,6 +425,11 @@ ObjectAddress TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace,
     /* Update indexes */
     CatalogUpdateIndexes(pg_type_desc, tup);
 
+    if (enable_plpgsql_gsdependency() && NULL != dependExtend) {
+        dependExtend->typType = typeType;
+        dependExtend->typCategory = typeCategory;
+    }
+
     /*
      * Create dependencies.  We can/must skip this in bootstrap mode.
      * During inplace upgrade, we insert pinned dependency for the newly added type.
@@ -452,7 +462,9 @@ ObjectAddress TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace,
                 baseType,
                 typeCollation,
                 (Node*)(defaultTypeBin ? stringToNode(defaultTypeBin) : NULL),
-                rebuildDeps);
+                rebuildDeps,
+                typname,
+                dependExtend);
     }
 
     /* Post creation hook for new type */
@@ -462,7 +474,14 @@ ObjectAddress TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace,
      * finish up
      */
     heap_close(pg_type_desc, RowExclusiveLock);
-
+    CommandCounterIncrement();
+    if (enable_plpgsql_gsdependency_guc() && !isImplicitArray &&
+        ((TYPTYPE_BASE == typeType && TYPCATEGORY_ARRAY == typeCategory) ||
+        TYPTYPE_TABLEOF == typeType || typeType == TYPTYPE_ENUM)) {
+        if (CompileWhich() == PLPGSQL_COMPILE_NULL) {
+            (void)gsplsql_build_ref_type_dependency(typeObjectId);
+        }
+    }
     return address;
 }
 
@@ -481,7 +500,7 @@ void GenerateTypeDependencies(Oid typeNamespace, Oid typeObjectId, Oid relationO
     char relationKind,                                                              /* ditto */
     Oid owner, Oid inputProcedure, Oid outputProcedure, Oid receiveProcedure, Oid sendProcedure, Oid typmodinProcedure,
     Oid typmodoutProcedure, Oid analyzeProcedure, Oid elementType, bool isImplicitArray, Oid baseType,
-    Oid typeCollation, Node* defaultExpr, bool rebuild)
+    Oid typeCollation, Node* defaultExpr, bool rebuild, const char* typname, TypeDependExtend* dependExtend)
 {
     ObjectAddress myself, referenced;
 
@@ -593,7 +612,35 @@ void GenerateTypeDependencies(Oid typeNamespace, Oid typeObjectId, Oid relationO
         referenced.classId = TypeRelationId;
         referenced.objectId = elementType;
         referenced.objectSubId = 0;
-        recordDependencyOn(&myself, &referenced, isImplicitArray ? DEPENDENCY_INTERNAL : DEPENDENCY_NORMAL);
+        int cw = CompileWhich();
+        if (enable_plpgsql_gsdependency() && NULL != dependExtend && cw != PLPGSQL_COMPILE_NULL &&
+            ((TYPTYPE_BASE == dependExtend->typType && TYPCATEGORY_ARRAY == dependExtend->typCategory) ||
+             TYPTYPE_TABLEOF == dependExtend->typType)) {
+            GsDependParamBody gsDependParamBody;
+            gsplsql_init_gs_depend_param_body(&gsDependParamBody);
+            gsDependParamBody.dependNamespaceOid = typeNamespace;
+            if (NULL != u_sess->plsql_cxt.curr_compile_context &&
+                NULL != u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package) {
+                gsDependParamBody.dependPkgOid =
+                    u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+                gsDependParamBody.dependPkgName =
+                    u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_signature;   
+            }
+            char* realTypName = ParseTypeName((char*)typname, gsDependParamBody.dependPkgOid);
+            if (realTypName == NULL) {
+                gsDependParamBody.dependName = (char*)typname;
+            } else {
+                gsDependParamBody.dependName = realTypName;
+            }
+            gsDependParamBody.refPosType = GSDEPEND_REFOBJ_POS_IN_TYPE;
+            gsDependParamBody.type = GSDEPEND_OBJECT_TYPE_TYPE;
+            gsDependParamBody.dependExtend = dependExtend;
+            recordDependencyOn(&myself, &referenced, isImplicitArray ? DEPENDENCY_INTERNAL : DEPENDENCY_NORMAL,
+                &gsDependParamBody);
+            pfree_ext(realTypName);
+        } else {
+            recordDependencyOn(&myself, &referenced, isImplicitArray ? DEPENDENCY_INTERNAL : DEPENDENCY_NORMAL);
+        }
     }
 
     /* Normal dependency from a domain to its base type. */
@@ -774,4 +821,135 @@ bool moveArrayTypeName(Oid typeOid, const char* typname, Oid typeNamespace)
     pfree_ext(newname);
 
     return true;
+}
+
+Oid TypeNameGetOid(const char* schemaName, const char* packageName, const char* typeName)
+{
+    Oid pkgOid = InvalidOid;
+    Oid typOid = InvalidOid;
+    Oid namespaceOid = InvalidOid;
+    if (schemaName != NULL) {
+        namespaceOid = LookupNamespaceNoError(schemaName);
+    }
+    if (packageName != NULL) {
+        pkgOid = PackageNameGetOid(packageName, namespaceOid);
+        if (!OidIsValid(pkgOid)) {
+            return InvalidOid;
+        }
+    }
+    char* castTypeName = CastPackageTypeName(typeName, pkgOid, pkgOid != InvalidOid, true);
+    typOid = TypenameGetTypidExtended(castTypeName, false);
+    pfree_ext(castTypeName);
+    return typOid;
+}
+
+char* MakeTypeNamesStrForTypeOid(Oid typOid, bool* dependUndefined, StringInfo concatName)
+{
+    char* ret = NULL;
+    char* name = NULL;
+    char* pkgName = NULL;
+    char* schemaName = NULL;
+    if (NULL != concatName) {
+        MakeTypeNamesStrForTypeOid(concatName, typOid, &schemaName, &pkgName, &name);
+    } else {
+        StringInfoData curConcatName;
+        initStringInfo(&curConcatName);
+        MakeTypeNamesStrForTypeOid(&curConcatName, typOid, &schemaName, &pkgName, &name);
+        ret = pstrdup(curConcatName.data);
+        FreeStringInfo(&curConcatName);
+    }
+    if (NULL != dependUndefined) {
+        if (UNDEFINEDOID == typOid) { // UNDEFINEDOID
+            *dependUndefined = true;
+        } else if (gsplsql_check_type_depend_undefined(schemaName, pkgName, name)) {
+            *dependUndefined = true;
+        }
+    }
+    pfree_ext(schemaName);
+    pfree_ext(pkgName);
+    pfree_ext(name);
+    return ret;
+}
+
+void MakeTypeNamesStrForTypeOid(StringInfo concatName, Oid typOid,
+                                      char** schemaName, char** pkgName, char** name)
+{
+    char* curTypeName = NULL;
+    char* curPkgName = NULL;
+    char* curSchemaName = NULL;
+
+    curSchemaName = get_typenamespace(typOid);
+    appendStringInfoString(concatName, curSchemaName == NULL ? "" : curSchemaName);
+    if (NULL != schemaName) {
+        *schemaName = curSchemaName;
+    } else {
+        pfree_ext(curSchemaName);
+    }
+
+    Oid pkgOid = GetTypePackageOid(typOid);
+    if (OidIsValid(pkgOid)) {
+        appendStringInfoString(concatName, ".");
+        curPkgName = GetPackageName(pkgOid);
+        appendStringInfoString(concatName, curPkgName == NULL ? "" : curPkgName);
+        if (NULL != pkgName) {
+            *pkgName = curPkgName;
+        } else {
+            pfree_ext(curPkgName);
+        }
+    }
+    appendStringInfoString(concatName, ".");
+    curTypeName = get_typename(typOid);
+    if (NULL != curTypeName && OidIsValid(pkgOid)) {
+        char* realName = ParseTypeName(curTypeName, pkgOid);
+        if (NULL != realName) {
+            pfree_ext(curTypeName);
+            curTypeName = realName;
+        }
+    }
+    appendStringInfoString(concatName, curTypeName == NULL ? "" : curTypeName);
+    if (NULL != name) {
+        *name = curTypeName;
+    } else {
+        pfree_ext(curTypeName);
+    }
+}
+
+Oid GetTypePackageOid(Oid typoid)
+{
+    ObjectAddress objectAddress;
+    objectAddress.classId = TypeRelationId;
+    objectAddress.objectId = typoid;
+    objectAddress.objectSubId = 0;
+    Oid pkgOid = get_object_package(&objectAddress);// debug todo
+    if (InvalidOid == pkgOid && type_is_array(typoid)) {
+        objectAddress.objectId = get_element_type(typoid);
+        pkgOid = get_object_package(&objectAddress);
+    }
+    return pkgOid;
+}
+
+void InstanceTypeNameDependExtend(TypeDependExtend** dependExtend)
+{
+    if (NULL != dependExtend && NULL == (*dependExtend)) {
+        (*dependExtend) = (TypeDependExtend*)palloc(sizeof(TypeDependExtend));
+        (*dependExtend)->typeOid = InvalidOid;
+        (*dependExtend)->undefDependObjOid = InvalidOid;
+        (*dependExtend)->dependUndefined = false;
+        (*dependExtend)->schemaName = NULL;
+        (*dependExtend)->packageName = NULL;
+        (*dependExtend)->objectName = NULL;
+        (*dependExtend)->typType = TYPTYPE_INVALID;
+        (*dependExtend)->typCategory = TYPCATEGORY_INVALID;
+    }
+}
+
+void ReleaseTypeNameDependExtend(TypeDependExtend** dependExtend)
+{
+    if (NULL != dependExtend && NULL != (*dependExtend)) {
+        pfree_ext((*dependExtend)->schemaName);
+        pfree_ext((*dependExtend)->packageName);
+        pfree_ext((*dependExtend)->objectName);
+        pfree_ext(*dependExtend);
+        *dependExtend = NULL;
+    }
 }

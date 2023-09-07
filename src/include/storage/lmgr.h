@@ -115,4 +115,5 @@ extern void DescribeLockTag(StringInfo buf, const LOCKTAG* tag);
 extern bool ConditionalLockCStoreFreeSpace(Relation relation);
 extern void UnlockCStoreFreeSpace(Relation relation);
 extern const char* GetLockNameFromTagType(uint16 locktag_type);
+
 #endif /* LMGR_H */

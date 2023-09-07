@@ -856,6 +856,7 @@ extern char* format_operator(Oid operator_oid);
 extern char *format_procedure_qualified(Oid procedure_oid);
 extern char *format_operator_qualified(Oid operator_oid);
 extern void format_procedure_parts(Oid procedure_oid, List **objnames, List **objargs);
+extern char * format_procedure_no_visible(Oid procedure_oid);
 
 /* rowtypes.c */
 extern Datum record_in(PG_FUNCTION_ARGS);
@@ -1100,6 +1101,11 @@ extern Datum unknownin(PG_FUNCTION_ARGS);
 extern Datum unknownout(PG_FUNCTION_ARGS);
 extern Datum unknownrecv(PG_FUNCTION_ARGS);
 extern Datum unknownsend(PG_FUNCTION_ARGS);
+
+extern Datum undefinedin(PG_FUNCTION_ARGS);
+extern Datum undefinedout(PG_FUNCTION_ARGS);
+extern Datum undefinedrecv(PG_FUNCTION_ARGS);
+extern Datum undefinedsend(PG_FUNCTION_ARGS);
 
 extern Datum pg_column_size(PG_FUNCTION_ARGS);
 extern Datum datalength(PG_FUNCTION_ARGS);

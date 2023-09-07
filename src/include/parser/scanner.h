@@ -117,6 +117,7 @@ typedef struct core_yy_extra_type {
     bool include_ora_comment;        /* dont igore comment when ture */
     int func_param_begin;            /* function and procedure param string start pos,exclude left parenthesis */
     int func_param_end;              /* function and procedure param string end pos,exclude right parenthesis */
+    int return_pos_end;
     bool isPlpgsqlKeyWord;
     const PlpgsqlKeywordValue* plKeywordValue;
     bool is_delimiter_name;

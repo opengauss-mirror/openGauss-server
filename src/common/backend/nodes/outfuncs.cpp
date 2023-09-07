@@ -3589,6 +3589,39 @@ static void _outIndexOptInfo(StringInfo str, IndexOptInfo* node)
     }
 }
 
+static void _outDependenciesProchead(StringInfo str, DependenciesProchead* node)
+{
+    WRITE_NODE_TYPE("DependenciesProchead");
+    WRITE_BOOL_FIELD(undefined);
+    WRITE_STRING_FIELD(proName);
+    WRITE_STRING_FIELD(proArgSrc);
+    WRITE_STRING_FIELD(funcHeadSrc);
+}
+
+static void _outDependenciesType(StringInfo str, DependenciesType* node)
+{
+    WRITE_NODE_TYPE("DependenciesType");
+    WRITE_CHAR_FIELD(typType);
+    WRITE_CHAR_FIELD(typCategory);
+    WRITE_STRING_FIELD(attrInfo);
+    WRITE_BOOL_FIELD(isRel);
+    WRITE_STRING_FIELD(elemTypName);
+    WRITE_STRING_FIELD(idxByTypName);
+}
+
+static void _outDependenciesVariable(StringInfo str, DependenciesVariable* node)
+{
+    WRITE_NODE_TYPE("DependenciesVariable");
+    WRITE_STRING_FIELD(typName);
+    WRITE_INT_FIELD(typMod);
+    WRITE_STRING_FIELD(extraInfo);
+}
+
+static void _outDependenciesUndefined(StringInfo str, DependenciesUndefined* node)
+{
+    WRITE_NODE_TYPE("DependenciesUndefined");
+}
+
 static void _outEquivalenceClass(StringInfo str, EquivalenceClass* node)
 {
     /*
@@ -6584,6 +6617,18 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_IndexOptInfo:
                 _outIndexOptInfo(str, (IndexOptInfo*)obj);
+                break;
+            case T_DependenciesProchead:
+                _outDependenciesProchead(str, (DependenciesProchead*)obj);
+                break;
+            case T_DependenciesUndefined:
+                _outDependenciesUndefined(str, (DependenciesUndefined*)obj);
+                break;
+            case T_DependenciesType:
+                _outDependenciesType(str, (DependenciesType*)obj);
+                break;
+            case T_DependenciesVariable:
+                _outDependenciesVariable(str, (DependenciesVariable*)obj);
                 break;
             case T_EquivalenceClass:
                 _outEquivalenceClass(str, (EquivalenceClass*)obj);
