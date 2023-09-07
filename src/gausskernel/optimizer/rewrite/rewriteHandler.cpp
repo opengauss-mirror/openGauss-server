@@ -4974,7 +4974,7 @@ List *QueryRewriteRefresh(Query *parse_tree)
      */
     matviewOid = RangeVarGetRelidExtended(stmt->relation,
                                          AccessExclusiveLock, false, false, false, false,
-                                         RangeVarCallbackOwnsTable, NULL);
+                                         RangeVarCallbackOwnsMatView, NULL);
     matviewRel = heap_open(matviewOid, NoLock);
 
     /* Make sure it is a materialized view. */

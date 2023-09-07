@@ -72,5 +72,37 @@ drop synonym s_mv_test_syn;
 drop synonym s_imv_test_syn;
 drop table test_syn cascade;
 
+-- test about the privileges of refresh
+create table t (id int);
+insert into t select generate_series(1,10);
+create materialized view mv_t as select * from t;
+create user testuser with password 'Gauss@123';
+grant usage on schema public to testuser;
+grant select on t to testuser;
+grant select on mv_t to testuser;
+
+set role testuser password 'Gauss@123';
+-- failed, permission denied
+refresh materialized view mv_t;
+reset role;
+grant delete,insert on mv_t to testuser;
+set role testuser password 'Gauss@123';
+-- failed, permission denied
+refresh materialized view mv_t;
+reset role;
+grant index on mv_t to testuser;
+set role testuser password 'Gauss@123';
+-- failed, permission denied
+refresh materialized view mv_t;
+
+reset role;
+alter table mv_t owner to testuser;
+set role testuser password 'Gauss@123';
+-- success
+refresh materialized view mv_t;
+
+reset role;
+drop user testuser cascade;
+
 \c regression
 drop database test_imv_db;
