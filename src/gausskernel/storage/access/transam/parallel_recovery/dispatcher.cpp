@@ -651,8 +651,12 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
                                             g_instance.attr.attr_storage.parallel_recovery_batch : 1;
         if (isNeedFullSync)
             ProcessPendingRecords(true);
-        else if (++g_dispatcher->pendingCount >= dispatch_batch || timeoutForDispatch())
+        else if (++g_dispatcher->pendingCount >= dispatch_batch || timeoutForDispatch()) {
             ProcessPendingRecords();
+            if ((g_dispatcher->dispatchEndRecPtr - g_dispatcher->dispatchFix.lastCheckLsn) > DISPATCH_FIX_SIZE) {
+                CheckDispatchCount(g_dispatcher->dispatchEndRecPtr);
+            }
+        }
 
         if (fatalerror == true) {
             /* output panic error info */
@@ -660,10 +664,6 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
             ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                 errmsg("[REDO_LOG_TRACE]DispatchRedoRecord encounter fatal error:rmgrID:%u, info:%u, indexid:%u", rmid,
                     (uint32)XLogRecGetInfo(record), indexid)));
-        }
-
-        if ((g_dispatcher->dispatchEndRecPtr - g_dispatcher->dispatchFix.lastCheckLsn) > DISPATCH_FIX_SIZE) {
-            CheckDispatchCount(g_dispatcher->dispatchEndRecPtr);
         }
     } else {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
