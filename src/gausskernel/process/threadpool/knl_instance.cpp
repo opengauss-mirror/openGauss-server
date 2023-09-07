@@ -212,9 +212,9 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
         }
         xmin_info->snap_cache = NULL;
         xmin_info->snap_oldest_xmin = MaxTransactionId;
-        xmin_info->recent_snap_send_time = 0;
         SpinLockInit(&xmin_info->global_oldest_xmin_lock);
         xmin_info->global_oldest_xmin = MaxTransactionId;
+        xmin_info->prev_global_oldest_xmin = MaxTransactionId;
         xmin_info->global_oldest_xmin_active = false;
         SpinLockInit(&xmin_info->bitmap_active_nodes_lock);
         xmin_info->bitmap_active_nodes = 0;
