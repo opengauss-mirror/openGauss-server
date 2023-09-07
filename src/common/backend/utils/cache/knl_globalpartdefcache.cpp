@@ -50,7 +50,8 @@ void CopyPartitionData(Partition dest_partition, Partition src_partition)
 
     /* We just copy fixed field */
     dest_partition->pd_part = (Form_pg_partition)palloc(PARTITION_TUPLE_SIZE);
-    memcpy_s(dest_partition->pd_part, PARTITION_TUPLE_SIZE, src_partition->pd_part, PARTITION_TUPLE_SIZE);
+    errno_t rc = memcpy_s(dest_partition->pd_part, PARTITION_TUPLE_SIZE, src_partition->pd_part, PARTITION_TUPLE_SIZE);
+    securec_check(rc, "\0", "\0");
 
     dest_partition->pd_smgr = NULL;
     Assert(src_partition->pd_isvalid);
