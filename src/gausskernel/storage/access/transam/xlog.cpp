@@ -9161,6 +9161,13 @@ void StartupXLOG(void)
             SSCLOGShmemClear();
             SSMultiXactShmemClear();
         }
+        ereport(LOG, (errmsg("[SS] Recovery instance %d, my instance %d, checkpoint record loc %X/%X, redo loc %X/%X",
+            g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id,
+            g_instance.attr.attr_storage.dms_attr.instance_id,
+            (uint32)(t_thrd.shemem_ptr_cxt.ControlFile->checkPoint >> 32),
+            (uint32)t_thrd.shemem_ptr_cxt.ControlFile->checkPoint,
+            (uint32)(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo >> 32),
+            (uint32)t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo)));
     } else {
         xlogreader = XLogReaderAllocate(&XLogPageRead, &readprivate);
     }
@@ -9612,6 +9619,8 @@ void StartupXLOG(void)
         t_thrd.xlog_cxt.InRecovery = false;
     }
 
+    g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
+    SetExtremeRtoMode();
     if (SS_PRIMARY_MODE && ENABLE_ONDEMAND_RECOVERY && (SS_STANDBY_FAILOVER || SS_PRIMARY_NORMAL_REFORM) &&
         t_thrd.xlog_cxt.InRecovery == true) {
         if (SSOndemandRecoveryExitNormal) {
@@ -9623,8 +9632,6 @@ void StartupXLOG(void)
             SetOndemandExtremeRtoMode();
             ereport(LOG, (errmsg("[On-demand] replayed in extreme rto ondemand recovery mode")));
         } else {
-            g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
-            SetExtremeRtoMode();
             ereport(LOG, (errmsg("[On-demand] do not allow replay in ondemand recovery if last ondemand recovery "
                 "crash, replayed in extreme rto recovery mode")));
         }
