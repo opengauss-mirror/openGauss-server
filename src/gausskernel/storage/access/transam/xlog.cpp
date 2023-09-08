@@ -8942,6 +8942,8 @@ void StartupXLOG(void)
             ereport(LOG, (errmsg("[On-demand]: Ondemand recovery do not finish in last reform, "
                                  "reading control file of original primary:%d", src_id)));
             SSOndemandRecoveryExitNormal = false;
+        } else if (SS_REPLICATION_DORADO_CLUSTER) {
+            src_id = SSGetPrimaryInstId();
         } else {
             if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
                 src_id = SSGetPrimaryInstId();
@@ -13123,7 +13125,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
      * while dms and dss enable, t_thrd.xlog_cxt.server_mode only is normal_mode, we do additional
      * check for dms and dss enabling.
      */
-    if (!ENABLE_DMS && t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) {
+    if ((!ENABLE_DMS && t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) || SS_REPLICATION_PRIMARY_NODE) {
         if (WalSndInProgress(SNDROLE_PRIMARY_BUILDSTANDBY) ||
             pg_atomic_read_u32(&g_instance.comm_cxt.current_gsrewind_count) > 0) {
             /* segno = 1 show all file should be keep */
