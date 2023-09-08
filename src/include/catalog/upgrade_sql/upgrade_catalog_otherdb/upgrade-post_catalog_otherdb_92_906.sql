@@ -12,7 +12,7 @@ BEGIN
 END$$;
 
 DROP FUNCTION IF EXISTS pg_catalog.ss_txnstatus_cache_stat() CASCADE;
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8888;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8889;
 CREATE FUNCTION pg_catalog.ss_txnstatus_cache_stat(
     OUT vcache_gets bigint,
     OUT hcache_gets bigint,

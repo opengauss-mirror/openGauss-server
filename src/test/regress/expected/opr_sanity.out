@@ -2719,7 +2719,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  7777 | sysdate
  7998 | set_working_grand_version_num_manually
  8050 | datalength
- 8888 | ss_txnstatus_cache_stat
+ 8889 | ss_txnstatus_cache_stat
  9004 | smalldatetime_in
  9006 | smalldatetime_out
  9007 | smalldatetime_recv

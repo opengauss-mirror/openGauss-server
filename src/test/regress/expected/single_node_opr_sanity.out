@@ -1552,7 +1552,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  8703 | array_except
  8704 | array_except_distinct
  8852 | pg_event_trigger_ddl_commands
- 8888 | ss_txnstatus_cache_stat
+ 8889 | ss_txnstatus_cache_stat
  9004 | smalldatetime_in
  9006 | smalldatetime_out
  9007 | smalldatetime_recv
