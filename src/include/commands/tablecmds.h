@@ -181,6 +181,8 @@ extern void DropTableThrowErrorExternal(RangeVar* relation, ObjectType removeTyp
 
 extern void RangeVarCallbackOwnsTable(
     const RangeVar* relation, Oid relId, Oid oldRelId, bool target_is_partition, void* arg);
+extern void RangeVarCallbackOwnsMatView(
+    const RangeVar* relation, Oid relId, Oid oldRelId, bool target_is_partition, void* arg);
 extern void RangeVarCallbackOwnsRelation(
     const RangeVar* relation, Oid relId, Oid oldRelId, bool target_is_partition, void* noCatalogs);
 extern void checkPartNotInUse(Partition part, const char* stmt);

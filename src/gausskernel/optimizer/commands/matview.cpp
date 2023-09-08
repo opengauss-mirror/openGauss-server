@@ -830,7 +830,7 @@ ObjectAddress ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryS
     matviewOid = RangeVarGetRelidExtended(stmt->relation,
                                            ExclusiveLock,
                                            false, false, false, true,
-                                           RangeVarCallbackOwnsTable, NULL);
+                                           RangeVarCallbackOwnsMatView, NULL);
 
     Oid mapid = DatumGetObjectId(get_matview_mapid(matviewOid));
     Datum oldTime = get_matview_refreshtime(matviewOid, &isTimeNULL);
@@ -946,7 +946,7 @@ ObjectAddress ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *que
     matviewOid = RangeVarGetRelidExtended(stmt->relation,
                                            AccessExclusiveLock,
                                            false, false, false, true,
-                                           RangeVarCallbackOwnsTable, NULL);
+                                           RangeVarCallbackOwnsMatView, NULL);
     mapid = DatumGetObjectId(get_matview_mapid(matviewOid));
     matviewRel = heap_open(matviewOid, AccessExclusiveLock);
 
@@ -1055,7 +1055,7 @@ ObjectAddress ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *qu
      */
     matviewOid = RangeVarGetRelidExtended(stmt->relation,
                                           AccessExclusiveLock, false, false, false, true,
-                                          RangeVarCallbackOwnsTable, NULL);
+                                          RangeVarCallbackOwnsMatView, NULL);
     matviewRel = heap_open(matviewOid, NoLock);
 
     /*
@@ -1168,7 +1168,7 @@ bool isIncMatView(RangeVar *rv)
     Oid matviewOid = RangeVarGetRelidExtended(rv,
                                            NoLock,
                                            false, false, false, true,
-                                           RangeVarCallbackOwnsTable, NULL);
+                                           RangeVarCallbackOwnsMatView, NULL);
     Relation matviewRel = heap_open(matviewOid, AccessShareLock);
 
     /* Make sure it is a materialized view. */

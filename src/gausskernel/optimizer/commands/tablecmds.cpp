@@ -21921,6 +21921,51 @@ void RangeVarCallbackOwnsTable(const RangeVar* relation, Oid relId, Oid oldRelId
 }
 
 /*
+ * This is intended as a callback for RangeVarGetRelidExtended().  It allows
+ * the relation to be locked only if (1) it's a materialized view and
+ * (2) the current user is the owner (or the superuser).
+ * This meets the permission-checking needs of and REFRESH MATERIALIZED VIEW;
+ * we expose it here so that it can be used by all.
+ */
+void RangeVarCallbackOwnsMatView(const RangeVar* relation, Oid relId, Oid oldRelId, bool target_is_partition, void* arg)
+{
+    char relkind;
+
+    /* Nothing to do if the relation was not found. */
+    if (!OidIsValid(relId)) {
+        return;
+    }
+
+    /*
+     * If the relation does exist, check whether it's an index.  But note that
+     * the relation might have been dropped between the time we did the name
+     * lookup and now.	In that case, there's nothing to do.
+     */
+    relkind = get_rel_relkind(relId);
+    if (!relkind) {
+        return;
+    }
+    if (relkind != RELKIND_RELATION &&
+        relkind != RELKIND_TOASTVALUE &&
+        relkind != RELKIND_MATVIEW) {
+        ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("\"%s\" is not a table or materialized view", relation->relname)));
+    }
+
+    /* Check permissions */
+    AclResult aclresult = pg_class_aclcheck(relId, GetUserId(), ACL_INSERT | ACL_DELETE);
+    if (aclresult != ACLCHECK_OK) {
+        aclcheck_error(aclresult, ACL_KIND_CLASS, relation->relname);
+    }
+
+    bool is_owner = pg_class_ownercheck(relId, GetUserId());
+    if (!is_owner) {
+        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, relation->relname);
+    }
+}
+
+/*
  * Callback to RangeVarGetRelidExtended(), similar to
  * RangeVarCallbackOwnsTable() but without checks on the type of the relation.
  */
