@@ -80,19 +80,31 @@ bool is_dss_fd(int handle)
     return false;
 }
 
+int parse_errcode_from_errormsg(const char* errormsg) {
+    const char *errcode_str = strstr(errormsg, "errcode:");
+    if (errcode_str) {
+        errcode_str += strlen("errcode:");
+        return atoi(errcode_str);
+    }
+    return ERR_DSS_PROCESS_REMOTE;
+}
+
 void dss_set_errno(int *errcode)
 {
     int errorcode = 0;
     const char *errormsg = NULL;
 
     g_dss_device_op.dss_get_error(&errorcode, &errormsg);
-    errno = errorcode;
+    if (errorcode == ERR_DSS_PROCESS_REMOTE) {
+        errno = parse_errcode_from_errormsg(errormsg);
+    } else {
+        errno = errorcode;
+    }
 
     if (errcode != NULL) {
         *errcode = errorcode;
     }
 }
-
 
 int dss_access_file(const char *file_name, int mode)
 {

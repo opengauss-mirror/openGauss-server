@@ -863,7 +863,6 @@ int errcode_for_file_access(void)
             /* File not found */
         case ENOENT: /* No such file or directory */
         case ERR_DSS_FILE_NOT_EXIST: /*  No such file in dss */
-        case ERR_DSS_DIR_NOT_EXIST: /* No such directory in dss */
             edata->sqlerrcode = ERRCODE_UNDEFINED_FILE;
             break;
 
