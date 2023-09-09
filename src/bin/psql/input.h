@@ -32,7 +32,7 @@
 
 #include "libpq/pqexpbuffer.h"
 
-char* gets_interactive(const char* prompt);
+char* gets_interactive(const char* prompt, PQExpBuffer query_buf);
 char* gets_fromFile(FILE* source);
 
 void pg_append_history(const char* s, PQExpBuffer history_buf);

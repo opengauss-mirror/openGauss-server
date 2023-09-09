@@ -408,7 +408,7 @@ int MainLoop(FILE* source, char* querystring)
             if (query_buf->len == 0) {
                 prompt_status = PROMPT_READY;
             }
-            line = gets_interactive(get_prompt(prompt_status));
+            line = gets_interactive(get_prompt(prompt_status), query_buf);
         } else {
             if (NULL != source) {
                 /* fgets on SUSE12 may raise a buffer currupt of source->_IO_read_base.

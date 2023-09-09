@@ -260,6 +260,8 @@ typedef struct {
 
 #endif /* HAVE_READLINE_READLINE_H */
 
+extern PQExpBuffer tab_completion_query_buf;
+
 void initialize_readline(void);
 
 #endif

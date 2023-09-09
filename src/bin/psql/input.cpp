@@ -43,11 +43,14 @@ bool useReadline = false;
  *
  * Caller *must* have set up sigint_interrupt_jmp before calling.
  */
-char* gets_interactive(const char* prompt)
+char* gets_interactive(const char* prompt, PQExpBuffer query_buf)
 {
 #ifdef USE_READLINE
     if (useReadline) {
         char* result = NULL;
+
+        /* Make current query_buf available to tab completion callback */
+        tab_completion_query_buf = query_buf;
 
         /* Enable SIGINT to longjmp to sigint_interrupt_jmp */
         sigint_interrupt_enabled = true;
@@ -57,6 +60,9 @@ char* gets_interactive(const char* prompt)
 
         /* Disable SIGINT again */
         sigint_interrupt_enabled = false;
+
+        /* Pure neatnik-ism */
+        tab_completion_query_buf = NULL;
 
         return result;
     }
