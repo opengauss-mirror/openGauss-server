@@ -29,7 +29,7 @@ test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_vi
 
 # test multiple statistics
 test: functional_dependency
-test: pg_proc_test test_row_type_in_proc
+test: pg_proc_test test_row_type_in_proc exec_result_test
 
 # test fdw
 # NOTICE: In the "fdw_prepare", we copy the fdw test to be used from contrib into regress sql set.

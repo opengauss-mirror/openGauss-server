@@ -1905,6 +1905,7 @@ static void init_fcache(
    fcache->funcResultSlot = NULL;
    fcache->setArgsValid = false;
    fcache->shutdown_reg = false;
+   fcache->setArgByVal = false;
    if(fcache->xprstate.is_flt_frame){
         fcache->is_plpgsql_func_with_outparam = is_function_with_plpgsql_language_and_outparam(fcache->func.fn_oid);
         fcache->has_refcursor = func_has_refcursor_args(fcache->func.fn_oid, &fcache->fcinfo_data);
@@ -1936,6 +1937,7 @@ extern void ShutdownFuncExpr(Datum arg)
 
    /* Clear any active set-argument state */
    fcache->setArgsValid = false;
+   fcache->setArgByVal = false;
 
    /* execUtils will deregister the callback... */
    fcache->shutdown_reg = false;
@@ -2188,6 +2190,16 @@ void set_result_for_plpgsql_language_function_with_outparam(FuncExprState *fcach
    pfree(nulls);
 }
 
+bool ExecSetArgIsByValue(FunctionCallInfo fcinfo)
+{
+    for (int i = 0; i < fcinfo->nargs; i++) {
+        if (!fcinfo->argnull[i] && !get_typbyval(fcinfo->argTypes[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /*
 *		ExecMakeFunctionResult
 *
@@ -2338,6 +2350,7 @@ restart:
         } else {
             hasSetArg = (argDone != ExprSingleResult);
         }
+        fcache->setArgByVal = ExecSetArgIsByValue(fcinfo);
    } else {
        /* Re-use callinfo from previous evaluation */
        hasSetArg = fcache->setHasSetArg;
@@ -2497,6 +2510,10 @@ restart:
                    if (fcache->func.fn_retset && *isDone == ExprMultipleResult) {
                        fcache->setHasSetArg = hasSetArg;
                        fcache->setArgsValid = true;
+                        /* arg not by value, memory can not be reset */
+                        if (!fcache->setArgByVal) {
+                            econtext->hasSetResultStore = true;
+                        }
                        /* Register cleanup callback if we didn't already */
                        if (!fcache->shutdown_reg) {
                            RegisterExprContextCallback(econtext, ShutdownFuncExpr, PointerGetDatum(fcache));

@@ -964,6 +964,8 @@ typedef struct FuncExprState {
      */
     bool setArgsValid;
 
+    bool setArgByVal; /* all args are by val? */
+
     bool setHasSetArg;
 
     bool is_plpgsql_func_with_outparam;
