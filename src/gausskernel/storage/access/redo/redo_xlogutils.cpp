@@ -1768,7 +1768,7 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
     }
 
     if ((block_valid != BLOCK_DATA_UNDO_TYPE) && g_instance.attr.attr_storage.EnableHotStandby &&
-        XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr)) {
+        IsDefaultExtremeRtoMode() && XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr)) {
         BufferTag buf_tag;
         INIT_BUFFERTAG(buf_tag, bufferinfo->blockinfo.rnode,
             bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno);

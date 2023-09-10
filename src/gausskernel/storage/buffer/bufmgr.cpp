@@ -1673,7 +1673,7 @@ Buffer ReadBuffer(Relation reln, BlockNumber block_num)
 Buffer ReadBufferExtended(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
                           BufferAccessStrategy strategy)
 {
-    if (IsExtremeRtoRunning() && !AmPageRedoWorker()) {
+    if (IsDefaultExtremeRtoMode() && IsExtremeRtoRunning() && !AmPageRedoWorker()) {
         return standby_read_buf(reln, fork_num, block_num, mode, strategy);
     }
 
