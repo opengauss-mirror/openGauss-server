@@ -1871,7 +1871,7 @@ void SendRecoveryEndMarkToWorkersAndWaitForReach(int code)
                     }
                 }
             }
-            ereport(LOG, (errmsg("[SS][REDO_LOG_TRACE] lastReadXact: %lu, trxnComplete: %lu, pageMgrComplele: %lu",
+            ereport(DEBUG1, (errmsg("[SS][REDO_LOG_TRACE] lastReadXact: %lu, trxnComplete: %lu, pageMgrComplele: %lu",
                         lastReadEndPtr, trxnCompletePtr, pageMngrCompletePtr)));
             if (XLByteEQ(trxnCompletePtr, lastReadEndPtr) && XLByteEQ(pageMngrCompletePtr, lastReadEndPtr)) {
                 break;
