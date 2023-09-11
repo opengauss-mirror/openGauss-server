@@ -996,7 +996,7 @@ static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nbl
 
     if (IsSegmentFileNode(rel->rd_node)) {
         Buffer buf;
-        for (int i = firstblock; i <= lastblock; i++) {
+        for (BlockNumber i = firstblock; i <= lastblock; i++) {
             buf = ReadBuffer(rel, P_NEW);
             ReleaseBuffer(buf);
         }
