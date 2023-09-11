@@ -874,7 +874,7 @@ bool check_collation_connection(char** newval, void** extra, GucSource source)
     }
 
     Oid collid = get_collation_oid_with_lower_name(*newval, PG_INVALID_ENCODING);
-    if (!OidIsValid(collid)) {
+    if (!COLLATION_IN_B_FORMAT(collid)) {
         return false;
     }
 
