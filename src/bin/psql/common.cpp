@@ -51,6 +51,8 @@ static void set_searchpath_for_tmptbl(PGconn* conn);
 static bool AcceptResult(const PGresult* result, bool print_error = true);
 bool GetPrintResult(PGresult** results, bool is_explain, bool is_print, const char* query, bool print_error = true);
 
+extern void resetCheckAfterReconn();
+
 /* Mutexes for child processes in parallel mode.
  * When a child gets a result successfully, it try to print the result to "pset.queryFout".
  * All the results should be printed by sequence, so a traffic light is needed.
@@ -402,6 +404,7 @@ static bool CheckConnection(void)
             UnsyncVariables();
         } else {
             fputs(_("Succeeded.\n"), stderr);
+            resetCheckAfterReconn();
         }
     }
 
