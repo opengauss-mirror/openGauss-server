@@ -605,6 +605,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             Assert(buf_id >= 0);
             if ((*buf_ctrl)->been_loaded == false) {
                 *buf_ctrl = NULL;
+                LWLockRelease(buf_desc->content_lock);
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[%u/%u/%u/%d %d-%u] been_loaded marked false, page swapped out and failed to load",
