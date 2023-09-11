@@ -3771,7 +3771,7 @@ static void do_help(void)
     printf(_("  -b,  --mode=MODE	 the mode of building the datanode or coordinator."
              "MODE can be \"full\", \"incremental\", "
              "\"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", "
-             "\"cross_cluster_incremental\", \"cross_cluster_standby_full\"\n"));
+             "\"cross_cluster_incremental\", \"cross_cluster_standby_full\", \"check\"\n"));
     printf(_("  -D, --pgdata=DATADIR   location of the database storage area\n"));
     printf(_("  -s, --silent           only print errors, no informational messages\n"));
     printf(_("  -t, --timeout=SECS     seconds to wait when using -w option\n"));
