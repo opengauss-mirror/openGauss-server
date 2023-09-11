@@ -64,7 +64,7 @@ typedef struct st_ss_dms_func {
     int (*dms_register_ssl_decrypt_pwd)(dms_decrypt_pwd_t cb_func);
     int (*dms_set_ssl_param)(const char *param_name, const char *param_value);
     int (*dms_get_ssl_param)(const char *param_name, char *param_value, unsigned int size);
-    int (*dms_recovery_page_need_skip)(char pageid[DMS_PAGEID_SIZE], unsigned char *skip);
+    int (*dms_recovery_page_need_skip)(char pageid[DMS_PAGEID_SIZE], unsigned char *skip, unsigned int alloc);
     int (*dms_reform_failed)(void);
     int (*dms_switchover)(unsigned int sess_id);
     int (*dms_drc_accessible)(unsigned char res_type);
@@ -114,7 +114,7 @@ int drc_get_page_master_id(char pageid[DMS_PAGEID_SIZE], unsigned char *master_i
 int dms_register_ssl_decrypt_pwd(dms_decrypt_pwd_t cb_func);
 int dms_set_ssl_param(const char *param_name, const char *param_value);
 int dms_get_ssl_param(const char *param_name, char *param_value, unsigned int size);
-int dms_recovery_page_need_skip(char pageid[DMS_PAGEID_SIZE], unsigned char *skip);
+int dms_recovery_page_need_skip(char pageid[DMS_PAGEID_SIZE], unsigned char *skip, unsigned int alloc);
 int dms_reform_failed(void);
 int dms_switchover(unsigned int sess_id);
 int dms_drc_accessible(unsigned char res_type);

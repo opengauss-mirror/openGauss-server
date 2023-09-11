@@ -422,12 +422,6 @@ typedef struct st_dw_recovery_info {
     unsigned long long bitmap_new_join;     // the new-join-inst bitmap in dw_recovery phase
 } dw_recovery_info_t;
 
-typedef struct st_file_orglsn_recovery_info {
-    unsigned long long bitmap_old_join;     // the old-join-inst bitmap in dw_recovery phase
-    unsigned long long bitmap_old_remove;   // the old-remove-inst bitmap in dw_recovery phase
-    unsigned long long bitmap_new_join;     // the new-join-inst bitmap in dw_recovery phase
-} file_orglsn_recovery_info_t;
-
 typedef struct st_inst_list {
     unsigned char inst_id_list[DMS_MAX_INSTANCES];
     unsigned char inst_id_count;
@@ -531,6 +525,39 @@ typedef enum en_dms_inst_behavior {
     DMS_INST_BEHAVIOR_IN_BACKUP,
 } dms_inst_behavior_t;
 
+typedef struct st_stat_buf_info {
+    int                 instance_id;
+    unsigned char       lock_mode;              /* which lock held by instance of this buffer */
+    unsigned long int   mem_lsn;                /* page lsn in memory */
+    unsigned long int   rec_lsn;                /* recovery LSN */
+    unsigned long int   lsn_on_disk;            /* page lsn in dick */
+    unsigned long int   dirty_queue_loc;        /* actual location of dirty page queue */
+    char                aio_in_progress;        /* indicate aio is in progress */
+    char                data[DMS_RESID_SIZE];   /* user defined resource(page) identifier */
+} stat_buf_info_t;
+/*
+* used by openGauss server to get DRC information
+*/
+typedef struct st_stat_drc_info {
+    stat_buf_info_t         buf_info[DMS_MAX_INSTANCES];           /* save buffer related information */
+    dms_context_t           dms_ctx;
+    unsigned char           master_id;
+    unsigned long long      copy_insts;         /* bitmap for owners, for S mode, more than one owner may exist */
+    unsigned char           claimed_owner;      /* owner */
+    unsigned char           lock_mode;          /* current DRC lock mode */
+    unsigned char           last_edp;           /* the newest edp instance id */
+    unsigned char           type;               /* page or lock */
+    unsigned char           in_recovery;        /* in recovery or not */
+    unsigned char           copy_promote;       /* copy promote to owner, can not release, may need flush */
+    unsigned short          part_id;            /* which partition id that current page belongs to */
+    unsigned long long      edp_map;            /* indicate which instance has current page's EDP(Earlier Dirty Page) */
+    unsigned long long      lsn;                /* the newest edp LSN of current page in the cluster */
+    unsigned short          len;                /* the length of data below */
+    unsigned char           recovery_skip;      /* DRC is accessed in recovery and skip because drc has owner */
+    unsigned char           recycling;
+    char                    data[DMS_RESID_SIZE];            /* user defined resource(page) identifier */
+} stat_drc_info_t;
+
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
 typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
     unsigned long long list_in, unsigned int save_ctrl);
@@ -547,7 +574,6 @@ typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *ls
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int is_reformer);
 typedef int(*dms_dw_recovery)(void *db_handle, void *recovery_list, int is_reformer);
 typedef int(*dms_df_recovery)(void *db_handle);
-typedef int(*dms_file_orglsn_recovery)(void *db_handle, void *recovery_list, int is_reformer);
 typedef int(*dms_opengauss_startup)(void *db_handle);
 typedef int(*dms_opengauss_recovery_standby)(void *db_handle, int inst_id);
 typedef int(*dms_opengauss_recovery_primary)(void *db_handle, int inst_id);
@@ -698,6 +724,7 @@ typedef struct st_dms_callback {
     dms_edp_lsn edp_lsn;
     dms_disk_lsn disk_lsn;
     dms_recovery recovery;
+    dms_recovery recovery_analyse;
     dms_dw_recovery dw_recovery;
     dms_df_recovery df_recovery;
     dms_file_orglsn_recovery file_orglsn_recovery;
@@ -896,13 +923,13 @@ typedef enum en_dms_info_id {
     DMS_INFO_REFORM_LAST = 1,
 } dms_info_id_e;
 
-typedef enum st_protocol_version {
-    PROTO_VER_0 = 0,    // invalid version
-    PROTO_VER_1 = 1,    // first version
-} protocol_version_e;
+typedef enum st_dms_protocol_version {
+    DMS_PROTO_VER_0 = 0,    // invalid version
+    DMS_PROTO_VER_1 = 1,    // first version
+} dms_protocol_version_e;
 
-#define INVALID_PROTO_VER PROTO_VER_0
-#define SW_PROTO_VER PROTO_VER_1
+#define DMS_INVALID_PROTO_VER DMS_PROTO_VER_0
+#define DMS_SW_PROTO_VER      DMS_PROTO_VER_1
 
 #define DMS_LOCAL_MAJOR_VER_WEIGHT  1000000
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
