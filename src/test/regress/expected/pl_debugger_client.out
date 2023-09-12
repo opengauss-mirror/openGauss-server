@@ -1559,22 +1559,23 @@ select funcname, lineno, query from dbe_pldebugger.continue();
  "anonymous block" |      8 |     k = test_increment(3);
 (1 row)
 
-select funcname, lineno, query from dbe_pldebugger.step();
-    funcname    | lineno |      query      
-----------------+--------+-----------------
- test_increment |      5 |     x := x + 1;
-(1 row)
-
-select funcname, lineno, query from dbe_pldebugger.next();
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint((select oid from pg_proc where proname='test_increment'), 6); -- ok
+select funcname, lineno, query from dbe_pldebugger.continue();
     funcname    | lineno |      query      
 ----------------+--------+-----------------
  test_increment |      6 |     y := y * 2;
 (1 row)
 
+select funcname, lineno, query from dbe_pldebugger.step();
+    funcname    | lineno |     query     
+----------------+--------+---------------
+ test_increment |      7 |     RETURN y;
+(1 row)
+
 select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |     funcname      | lineno |           query            
 ---------+-------------------+--------+----------------------------
-       0 | test_increment    |      6 |     y := y * 2;
+       0 | test_increment    |      7 |     RETURN y;
        1 | "anonymous block" |      8 |     k = test_increment(3);
 (2 rows)
 
@@ -1614,5 +1615,6 @@ select * from tmp_holder;
  true
  true
  true
-(8 rows)
+ 2
+(9 rows)
 

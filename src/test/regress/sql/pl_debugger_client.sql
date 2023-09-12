@@ -483,8 +483,9 @@ insert into tmp_holder select * from dbe_pldebugger.enable_breakpoint(1); -- ok
 insert into tmp_holder select * from dbe_pldebugger.delete_breakpoint(0);  -- ok
 select funcname, lineno, query from dbe_pldebugger.next();
 select funcname, lineno, query from dbe_pldebugger.continue();
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint((select oid from pg_proc where proname='test_increment'), 6); -- ok
+select funcname, lineno, query from dbe_pldebugger.continue();
 select funcname, lineno, query from dbe_pldebugger.step();
-select funcname, lineno, query from dbe_pldebugger.next();
 select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 select * from dbe_pldebugger.info_locals();
 select funcname, lineno, query from dbe_pldebugger.finish();
