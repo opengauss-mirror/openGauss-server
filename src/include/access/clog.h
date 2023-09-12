@@ -37,6 +37,7 @@
 #define TransactionIdToPgIndex(xid) ((xid) % (TransactionId)CLOG_XACTS_PER_PAGE)
 #define TransactionIdToByte(xid) (TransactionIdToPgIndex(xid) / CLOG_XACTS_PER_BYTE)
 #define TransactionIdToBIndex(xid) ((xid) % (TransactionId)CLOG_XACTS_PER_BYTE)
+#define PAGE_TO_TRANSACTION_ID(pageno) ((pageno) * (TransactionId)CLOG_XACTS_PER_PAGE)
 
 #define CLogPageNoToStartXactId(pageno) ((pageno > 0)?((pageno -1) * CLOG_XACTS_PER_PAGE): 0)
 /* CLog lwlock partition*/

@@ -126,7 +126,7 @@ static XLogRecParseState *GinXlogSplitParseBlock(XLogReaderState *record, uint32
 {
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
-    XLogRecSetBlockDataState(record, GIN_SPLIT_LEFT_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, GIN_SPLIT_LEFT_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     XLogRecParseState *blockstate = NULL;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
@@ -140,7 +140,7 @@ static XLogRecParseState *GinXlogSplitParseBlock(XLogReaderState *record, uint32
 
     if (isRoot) {
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
-        XLogRecSetBlockDataState(record, GIN_SPLIT_ROOT_BLOCK_NUM, blockstate);
+        XLogRecSetBlockDataState(record, GIN_SPLIT_ROOT_BLOCK_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
         ++(*blocknum);
     }
 
@@ -177,14 +177,14 @@ static XLogRecParseState *GinXlogDeleteParseBlock(XLogReaderState *record, uint3
 {
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
-    XLogRecSetBlockDataState(record, GIN_DELETE_D_PAGE_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, GIN_DELETE_D_PAGE_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     XLogRecParseState *blockstate = NULL;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
-    XLogRecSetBlockDataState(record, GIN_DELETE_P_PAGE_BLOCK_NUM, blockstate);
+    XLogRecSetBlockDataState(record, GIN_DELETE_P_PAGE_BLOCK_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
-    XLogRecSetBlockDataState(record, GIN_DELETE_L_PAGE_BLOCK_NUM, blockstate);
+    XLogRecSetBlockDataState(record, GIN_DELETE_L_PAGE_BLOCK_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     *blocknum = 3;
     return recordstatehead;
@@ -194,7 +194,7 @@ static XLogRecParseState *GinXlogUpdateMetaPageParseBlock(XLogReaderState *recor
 {
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
-    XLogRecSetBlockDataState(record, GIN_META_PAGE_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, GIN_META_PAGE_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     *blocknum = 1;
 
     ginxlogUpdateMeta *data = (ginxlogUpdateMeta *)XLogRecGetData(record);
@@ -221,7 +221,8 @@ static XLogRecParseState *GinXlogDeleteListPageParseBlock(XLogReaderState *recor
 {
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
-    XLogRecSetBlockDataState(record, GIN_DELETE_LIST_META_PAGE_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, GIN_DELETE_LIST_META_PAGE_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE,
+                             true);
     *blocknum = 1;
 
     ginxlogDeleteListPages *data = (ginxlogDeleteListPages *)XLogRecGetData(record);
@@ -229,7 +230,7 @@ static XLogRecParseState *GinXlogDeleteListPageParseBlock(XLogReaderState *recor
     for (int32 i = 0; i < data->ndeleted; i++) {
         XLogRecParseState *blockstate = NULL;
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
-        XLogRecSetBlockDataState(record, i + 1, blockstate);
+        XLogRecSetBlockDataState(record, i + 1, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
         ++(*blocknum);
     }
 

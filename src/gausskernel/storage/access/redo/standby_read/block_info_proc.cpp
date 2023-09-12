@@ -127,7 +127,7 @@ void init_block_info(BlockMetaInfo* block_info, XLogRecPtr max_lsn)
 }
 
 void insert_lsn_to_block_info(
-    StandbyReadMetaInfo* meta_info, const BufferTag& buf_tag, const Page base_page, XLogRecPtr next_lsn)
+    StandbyReadMetaInfo *meta_info, const BufferTag &buf_tag, const Page base_page, XLogRecPtr next_lsn)
 {
     Buffer block_info_buf = InvalidBuffer;
     BlockMetaInfo* block_info = get_block_meta_info_by_relfilenode(buf_tag, NULL, RBM_ZERO_ON_ERROR, &block_info_buf);
@@ -151,24 +151,76 @@ void insert_lsn_to_block_info(
 
     if (block_info->record_num == 0 ||
         (block_info->record_num % (uint32)g_instance.attr.attr_storage.base_page_saved_interval) == 0) {
-        insert_base_page_to_lsn_info(meta_info, &block_info->lsn_info_list, &block_info->base_page_info_list, buf_tag,
-            base_page, current_page_lsn, next_lsn);
+        insert_base_page_to_lsn_info(meta_info,
+            &block_info->lsn_info_list,
+            &block_info->base_page_info_list,
+            buf_tag,
+            base_page,
+            current_page_lsn,
+            next_lsn);
     } else {
         insert_lsn_to_lsn_info(meta_info, &block_info->lsn_info_list, next_lsn);
     }
 
+    ++(block_info->record_num);
     Assert(block_info->max_lsn <= next_lsn);
     block_info->max_lsn = next_lsn;
-
-    ++(block_info->record_num);
-
     standby_read_meta_page_set_lsn(page, next_lsn);
     MarkBufferDirty(block_info_buf);
     UnlockReleaseBuffer(block_info_buf);
 }
 
-StandbyReadRecyleState recyle_block_info(
-    const BufferTag& buf_tag, LsnInfoPosition base_page_info_pos, XLogRecPtr next_base_page_lsn, XLogRecPtr recyle_lsn)
+void insert_lsn_to_block_info_for_opt(
+    StandbyReadMetaInfo *meta_info, const BufferTag &buf_tag, const Page base_page, XLogRecPtr next_lsn)
+{
+    Buffer block_info_buf = InvalidBuffer;
+    BlockMetaInfo *block_info = get_block_meta_info_by_relfilenode(buf_tag, NULL, RBM_ZERO_ON_ERROR, &block_info_buf);
+    if (unlikely(block_info == NULL || block_info_buf == InvalidBuffer)) {
+        ereport(PANIC,
+            (errmsg("insert lsn failed,block invalid %u/%u/%u %d %u",
+                buf_tag.rnode.spcNode,
+                buf_tag.rnode.dbNode,
+                buf_tag.rnode.relNode,
+                buf_tag.forkNum,
+                buf_tag.blockNum)));
+    }
+#ifdef ENABLE_UT
+    Page page = get_page_from_buffer(block_info_buf);
+#else
+    Page page = BufferGetPage(block_info_buf);
+#endif
+    XLogRecPtr current_page_lsn = PageGetLSN(base_page);
+    /* if block is invalid or block is valid but all the lsn object of this block has been recycled(no data in lsn info
+     * files belongs to this block), we reset this block
+     */
+    if (!is_block_meta_info_valid(block_info) ||
+        block_info->lsn_info_list.prev < meta_info->lsn_table_recyle_position) {
+        if (!is_block_info_page_valid((BlockInfoPageHeader *)page)) {
+            block_info_page_init(page);
+        }
+
+        init_block_info(block_info, current_page_lsn);
+    }
+
+    insert_base_page_to_lsn_info(meta_info,
+        &block_info->lsn_info_list,
+        &block_info->base_page_info_list,
+        buf_tag,
+        base_page,
+        current_page_lsn,
+        next_lsn);
+
+    ++(block_info->record_num);
+    Assert(block_info->max_lsn <= next_lsn);
+    block_info->max_lsn = next_lsn;
+    standby_read_meta_page_set_lsn(page, next_lsn);
+    MarkBufferDirty(block_info_buf);
+    UnlockReleaseBuffer(block_info_buf);
+}
+
+StandbyReadRecyleState recyle_block_info(const BufferTag &buf_tag, LsnInfoPosition base_page_info_pos,
+                                         XLogRecPtr next_base_page_lsn, XLogRecPtr recyle_lsn,
+                                         XLogRecPtr *block_info_max_lsn)
 {
     Buffer buffer = InvalidBuffer;
     BlockMetaInfo* block_meta_info = get_block_meta_info_by_relfilenode(buf_tag, NULL, RBM_NORMAL, &buffer);
@@ -181,6 +233,7 @@ StandbyReadRecyleState recyle_block_info(
     }
     StandbyReadRecyleState stat = STANDBY_READ_RECLYE_NONE;
     Assert(((block_meta_info->flags & BLOCK_INFO_NODE_VALID_FLAG) == BLOCK_INFO_NODE_VALID_FLAG));
+    *block_info_max_lsn = block_meta_info->max_lsn;
     if (XLByteLT(block_meta_info->max_lsn, recyle_lsn)) {
         ereport(DEBUG1,
                 (errmsg(EXRTOFORMAT("block meta recycle all %u/%u/%u %d %u, max lsn %08X/%08X, recycle lsn %08X/%08X"),
@@ -263,9 +316,26 @@ bool get_page_lsn_info(const BufferTag& buf_tag, BufferAccessStrategy strategy, 
  */
 void remove_one_block_info_file(const RelFileNode rnode)
 {
-    DropRelFileNodeShareBuffers(rnode, MAIN_FORKNUM, 0);
-    DropRelFileNodeShareBuffers(rnode, FSM_FORKNUM, 0);
-    DropRelFileNodeShareBuffers(rnode, VISIBILITYMAP_FORKNUM, 0);
+    HTAB *relfilenode_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+    DelFileTag *entry = NULL;
+    bool found = false;
+ 
+    LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_EXCLUSIVE);
+    entry = (DelFileTag*)hash_search(relfilenode_hashtbl, &rnode, HASH_ENTER, &found);
+    if (!found) {
+        entry->rnode.spcNode = rnode.spcNode;
+        entry->rnode.dbNode = rnode.dbNode;
+        entry->rnode.relNode = rnode.relNode;
+        entry->rnode.bucketNode = rnode.bucketNode;
+        entry->rnode.opt = rnode.opt;
+        entry->maxSegNo = 0; /* no need to forget fsyncs of segment */
+        entry->fileUnlink = false;
+    }
+    LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
+ 
+    if (!found && g_instance.bgwriter_cxt.invalid_buf_proc_latch != NULL) {
+        SetLatch(g_instance.bgwriter_cxt.invalid_buf_proc_latch);
+    }
 
     SMgrRelation srel = smgropen(rnode, InvalidBackendId);
     smgrdounlink(srel, true);

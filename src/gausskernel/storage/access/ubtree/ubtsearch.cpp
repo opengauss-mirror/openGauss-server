@@ -148,7 +148,7 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
         }
         /* drop the read lock on the parent page, acquire one on the child */
-        *bufP = _bt_relandgetbuf(rel, *bufP, blkno, pageAccess);
+        *bufP = _bt_relandgetbuf(rel, *bufP, blkno, pageAccess, par_blkno);
 
         /* okay, all set to move down a level */
         stack_in = new_stack;

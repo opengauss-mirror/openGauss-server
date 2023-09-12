@@ -32,6 +32,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
-OBJS = base_page_proc.o block_info_proc.o lsn_info_double_list.o lsn_info_proc.o standby_read_interface.o standby_read_delay_ddl.o
+OBJS = base_page_proc.o block_info_proc.o lsn_info_double_list.o lsn_info_proc.o standby_read_interface.o standby_read_delay_ddl.o standby_read_proc.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

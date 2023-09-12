@@ -413,7 +413,7 @@ void XLogRecSetBlockDataStateContent(XLogReaderState *record, uint32 blockid, XL
 }
 
 void XLogRecSetBlockDataState(XLogReaderState *record, uint32 blockid, XLogRecParseState *recordblockstate,
-    XLogBlockParseEnum type)
+    XLogBlockParseEnum type, bool is_conflict_type)
 {
     Assert(XLogRecHasBlockRef(record, blockid));
     DecodedBkpBlock *decodebkp = &(record->blocks[blockid]);
@@ -431,6 +431,7 @@ void XLogRecSetBlockDataState(XLogReaderState *record, uint32 blockid, XLogRecPa
     XLogBlockDataParse *blockdatarec = &(recordblockstate->blockparse.extra_rec.blockdatarec);
 
     XLogRecSetBlockDataStateContent(record, blockid, blockdatarec);
+    recordblockstate->blockparse.blockhead.is_conflict_type = is_conflict_type;
 }
 
 void XLogRecSetAuxiBlkNumState(XLogBlockDataParse *blockdatarec, BlockNumber auxilaryblkn1, BlockNumber auxilaryblkn2)
@@ -466,7 +467,7 @@ void XLogRecSetVmBlockState(XLogReaderState *record, uint32 blockid, XLogRecPars
     XLogBlockVmParse *blockvm = &(recordblockstate->blockparse.extra_rec.blockvmrec);
 
     blockvm->heapBlk = heapBlk;
-
+    recordblockstate->blockparse.blockhead.is_conflict_type = true;
 }
 
 void GetXlUndoHeaderExtraData(char **currLogPtr, XlUndoHeaderExtra *xlundohdrextra, uint8 flag)
@@ -805,6 +806,11 @@ void XLogUpdateCopyedBlockState(XLogRecParseState *recordblockstate, XLogBlockPa
     recordblockstate->blockparse.blockhead.blkno = blkno;
     recordblockstate->blockparse.blockhead.forknum = forknum;
     recordblockstate->blockparse.blockhead.bucketNode = (int2)bucketNode;
+}
+
+void wal_rec_set_clean_up_info_state(WalCleanupInfoParse *parse_state, TransactionId removed_xid)
+{
+    parse_state->removed_xid = removed_xid;
 }
 
 void XLogRecSetBlockDdlState(XLogBlockDdlParse *blockddlstate, uint32 blockddltype, char *mainData,
@@ -1500,11 +1506,13 @@ void XLogBlockDdlDoSmgrAction(XLogBlockHead *blockhead, void *blockrecbody, Redo
             smgr_redo_create(rnode, blockhead->forknum, blockddlrec->mainData);
             break;
         case BLOCK_DDL_TRUNCATE_RELNODE: {
-            TransactionId latest_removed_xid = InvalidTransactionId;
-            if (blockddlrec->mainDataLen == TRUNCATE_CONTAIN_XID_SIZE) {
-                latest_removed_xid = ((xl_smgr_truncate_compress*)blockddlrec->mainData)->latest_removed_xid;
-            }
-            xlog_block_smgr_redo_truncate(rnode, blockhead->blkno, blockhead->end_ptr, latest_removed_xid);
+            RelFileNode rel_node;
+            rel_node.spcNode = blockhead->spcNode;
+            rel_node.dbNode = blockhead->dbNode;
+            rel_node.relNode = blockhead->relNode;
+            rel_node.bucketNode = blockhead->bucketNode;
+            rel_node.opt = blockhead->opt;
+            XLogTruncateRelation(rel_node, blockhead->forknum, blockhead->blkno);
             break;
         }
         case BLOCK_DDL_DROP_RELNODE: {
@@ -1729,6 +1737,22 @@ void XLogSynAllBuffer()
     }
 }
 
+bool need_restore_new_page_version(XLogRecParseState *redo_block_state)
+{
+    if (!IsHeap2Clean(&redo_block_state->blockparse.blockhead)) {
+        return true;
+    }
+ 
+    TransactionId recyle_xmin = pg_atomic_read_u64(&g_instance.comm_cxt.predo_cxt.exrto_recyle_xmin);
+    xl_heap_clean *xl_clean_rec =
+        (xl_heap_clean *)XLogBlockDataGetMainData(&redo_block_state->blockparse.extra_rec.blockdatarec, NULL);
+    if (TransactionIdPrecedes(xl_clean_rec->latestRemovedXid, recyle_xmin)) {
+        return false;
+    }
+ 
+    return true;
+}
+
 bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo *bufferinfo,  bool notfound,
     RedoTimeCost &readBufCost, RedoTimeCost &redoCost)
 {
@@ -1768,15 +1792,29 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
     }
 
     if ((block_valid != BLOCK_DATA_UNDO_TYPE) && g_instance.attr.attr_storage.EnableHotStandby &&
-        IsDefaultExtremeRtoMode() && XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr)) {
-        if (bufferinfo->blockinfo.forknum >= EXRTO_FORK_NUM) {
+        IsDefaultExtremeRtoMode() && XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr) &&
+        !IsSegmentFileNode(bufferinfo->blockinfo.rnode)) {
+        if (unlikely(bufferinfo->blockinfo.forknum >= EXRTO_FORK_NUM)) {
             ereport(PANIC, (errmsg("forknum is illegal: %d", bufferinfo->blockinfo.forknum)));
         }
         BufferTag buf_tag;
-        INIT_BUFFERTAG(buf_tag, bufferinfo->blockinfo.rnode,
-            bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno);
-        extreme_rto_standby_read::insert_lsn_to_block_info(&extreme_rto::g_redoWorker->standby_read_meta_info, buf_tag,
-            bufferinfo->pageinfo.page, blockhead->start_ptr);
+        INIT_BUFFERTAG(
+            buf_tag, bufferinfo->blockinfo.rnode, bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno);
+
+        if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+            if (blockhead->is_conflict_type && need_restore_new_page_version(redoblocktate)) {
+                extreme_rto_standby_read::insert_lsn_to_block_info_for_opt(
+                    &extreme_rto::g_redoWorker->standby_read_meta_info,
+                    buf_tag,
+                    bufferinfo->pageinfo.page,
+                    blockhead->start_ptr);
+            }
+        } else {
+            extreme_rto_standby_read::insert_lsn_to_block_info(&extreme_rto::g_redoWorker->standby_read_meta_info,
+                buf_tag,
+                bufferinfo->pageinfo.page,
+                blockhead->start_ptr);
+        }
     }
 
     if (redoaction != BLK_DONE) {

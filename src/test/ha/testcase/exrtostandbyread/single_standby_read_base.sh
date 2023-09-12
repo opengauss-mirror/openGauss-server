@@ -12,11 +12,29 @@ function check_select_result()
   fi
 }
 
+function start_standby_read_cluster()
+{
+  start_primary_as_primary
+  start_standby
+}
+
+function stop_standby_read_cluster()
+{
+  stop_primary
+  stop_standby
+}
+
+function restart_standby_read_cluster()
+{
+  stop_standby_read_cluster
+  start_standby_read_cluster
+}
+
 function test_base_sql_func()
 {
   gsql -d test_standby_read_base -p $dn1_primary_port -c "DROP TABLE if exists test1; CREATE TABLE test1(contentId VARCHAR(128) NOT NULL, commentId VARCHAR(128) NOT NULL, appId VARCHAR(128) NOT NULL, PRIMARY KEY (contentId, commentId)) with(parallel_workers=8,storage_type=aSTORE);"
   gsql -d test_standby_read_base -p $dn1_primary_port -c "DROP TABLE if exists test2; CREATE TABLE test2(contentId VARCHAR(128) NOT NULL, commentId VARCHAR(128) NOT NULL, appId VARCHAR(128) NOT NULL, PRIMARY KEY (contentId, commentId)) with(storage_type=aSTORE,fillfactor=80) partition by hash(contentId);"
-  gsql -d test_standby_read_base -p $dn1_primary_port -c "DROP TABLE if exists test3; CREATE TABLE test3(contentId VARCHAR(128) NOT NULL, commentId VARCHAR(128) NOT NULL, appId VARCHAR(128) NOT NULL, PRIMARY KEY (contentId, commentId)) with(storage_type=uSTORE,fillfactor=40) partition by list(contentId)  (partition p1 values ('1') ,partition p2 values ('2') ,partition p3 values ('3') ,partition p4 values (default));"
+  gsql -d test_standby_read_base -p $dn1_primary_port -c "DROP TABLE if exists test3; CREATE TABLE test3(contentId VARCHAR(128) NOT NULL, commentId VARCHAR(128) NOT NULL, appId VARCHAR(128) NOT NULL, PRIMARY KEY (contentId, commentId)) with(storage_type=aSTORE,fillfactor=40) partition by list(contentId)  (partition p1 values ('1') ,partition p2 values ('2') ,partition p3 values ('3') ,partition p4 values (default));"
   
   gsql -d test_standby_read_base -p $dn1_primary_port -c "insert into test1 select generate_series(1,20), generate_series(1,20), generate_series(1,20);"
   gsql -d test_standby_read_base -p $dn1_primary_port -c "insert into test2 select generate_series(1,300), generate_series(1,300), generate_series(1,300);"
@@ -77,7 +95,7 @@ function test_standby_read_base_func()
   gs_guc set -Z datanode -D $standby_data_dir -c "recovery_redo_workers = 1"
   gs_guc set -Z datanode -D $standby_data_dir -c "hot_standby = on"
 
-  start_cluster
+  start_standby_read_cluster
   echo "start cluster success"
   sleep 2
 
@@ -98,8 +116,7 @@ function test_standby_read_base_func()
   gs_guc set -Z datanode -D $primary_data_dir -c " recovery_max_workers = 4"
   gs_guc set -Z datanode -D $standby_data_dir -c " recovery_max_workers = 4"
 
-  kill_cluster
-  start_cluster
+  restart_standby_read_cluster
 
   test_base_sql_func
   
@@ -113,8 +130,7 @@ function test_standby_read_base_func()
   gs_guc set -Z datanode -D $primary_data_dir -c " recovery_redo_workers = 4"
   gs_guc set -Z datanode -D $standby_data_dir -c " recovery_redo_workers = 4"
 
-  kill_cluster
-  start_cluster
+  restart_standby_read_cluster
 
   test_base_sql_func
 }

@@ -369,6 +369,10 @@ enum {
     BTREE_NEWROOT_META_BLOCK_NUM
 };
 
+enum {
+    BTREE_REUSE_PAGE_BLOCK_NUM = 0,
+};
+
 typedef struct xl_btree_metadata_old {
     BlockNumber root;
     uint32 level;
@@ -1334,9 +1338,10 @@ extern Buffer _bt_getroot(Relation rel, int access);
 extern Buffer _bt_gettrueroot(Relation rel);
 extern int _bt_getrootheight(Relation rel);
 extern void _bt_checkbuffer_valid(Relation rel, Buffer buf);
-extern void _bt_checkpage(Relation rel, Buffer buf);
+extern void _bt_checkpage(Relation rel, Buffer buf, BlockNumber par_blkno = InvalidBlockNumber);
 extern Buffer _bt_getbuf(Relation rel, BlockNumber blkno, int access);
-extern Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access);
+extern Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access,
+                               BlockNumber par_blkno = InvalidBlockNumber);
 extern void _bt_relbuf(Relation rel, Buffer buf);
 extern void _bt_pageinit(Page page, Size size);
 extern bool _bt_page_recyclable(Page page);

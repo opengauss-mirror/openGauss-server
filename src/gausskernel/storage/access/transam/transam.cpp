@@ -464,7 +464,8 @@ bool UHeapTransactionIdDidCommit(TransactionId transactionId)
         return true;
     }
     if (TransactionIdIsNormal(transactionId) &&
-        TransactionIdPrecedes(transactionId, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid))) {
+        TransactionIdPrecedes(transactionId, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid)) &&
+        !RecoveryInProgress()) {
         Assert(TransactionIdDidCommit(transactionId));
         return true;
     }

@@ -41,7 +41,7 @@ extern void CheckRecoveryConflictDeadlock(void);
  * to make hot standby work. That includes logging AccessExclusiveLocks taken
  * by transactions and running-xacts snapshots.
  */
-extern void StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid);
+extern void StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid, uint32 seq);
 extern void StandbyReleaseLockTree(TransactionId xid, int nsubxids, TransactionId* subxids);
 extern void StandbyReleaseAllLocks(void);
 extern void StandbyReleaseOldLocks(TransactionId oldestRunningXid);
@@ -60,12 +60,18 @@ extern bool standbyWillTouchStandbyLocks(XLogReaderState* record);
 #define XLOG_STANDBY_CSN_COMMITTING 0x40
 #define XLOG_STANDBY_CSN_ABORTED 0x50
 
+#define PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_FLAG 0x01
 
 typedef struct xl_standby_locks {
     int nlocks;                                   /* number of entries in locks array */
     xl_standby_lock locks[FLEXIBLE_ARRAY_MEMBER]; /* VARIABLE LENGTH ARRAY */
 } xl_standby_locks;
 
+typedef struct XLogStandbyLocksNew {
+    int nlocks;                                   /* number of entries in locks array */
+    XlStandbyLockNew locks[FLEXIBLE_ARRAY_MEMBER]; /* VARIABLE LENGTH ARRAY */
+} XLogStandbyLocksNew;
+ 
 /*
  * Keep track of all the locks owned by a given transaction.
  */
@@ -77,6 +83,7 @@ typedef struct RecoveryLockListsEntry
 
 
 #define MinSizeOfXactStandbyLocks offsetof(xl_standby_locks, locks)
+#define MIN_SIZE_OF_XACT_STANDBY_LOCKS_NEW offsetof(XLogStandbyLocksNew, locks)
 
 /*
  * When we write running xact data to WAL, we use this structure.
@@ -140,9 +147,8 @@ typedef struct RunningTransactionsData {
 
 typedef RunningTransactionsData* RunningTransactions;
 
-extern void LogAccessExclusiveLock(Oid dbOid, Oid relOid);
+extern void LogAccessExclusiveLock(Oid dbOid, Oid relOid, uint32 seq);
 extern void LogAccessExclusiveLockPrepare(void);
-extern void LogReleaseAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid);
 
 extern XLogRecPtr LogStandbySnapshot(void);
 #endif /* STANDBY_H */

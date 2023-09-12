@@ -44,6 +44,7 @@
 #include "utils/postinit.h"
 #include "utils/gs_bitmap.h"
 #include "pgstat.h"
+#include "access/ustore/knl_uvisibility.h"
 
 #define TRANS_PARTITION_LINEAR_SPARE_TIME(degree) \
     (degree > 3000 ? 3000 : degree)
@@ -561,7 +562,20 @@ void exrto_standby_release_space(UndoZone *zone, TransactionId recycle_xid, Undo
     zone->ReleaseSpace(start_undo_ptr, end_undo_ptr, &g_forceRecycleSize);
     zone->ReleaseSlotSpace(0, recycle_exrto, &g_forceRecycleSize);
 }
- 
+
+bool is_undo_slot_exist(UndoSlotPtr slot_ptr)
+{
+    bool ret = false;
+    RelFileNode rnode;
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, slot_ptr, UNDO_SLOT_DB_OID);
+    SMgrRelation reln = smgropen(rnode, InvalidBackendId);
+    if (smgrexists(reln, UNDO_FORKNUM, (BlockNumber)UNDO_PTR_GET_BLOCK_NUM(slot_ptr))) {
+        ret = true;
+    }
+    smgrclose(reln);
+    return ret;
+}
+
 bool exrto_standby_recycle_space(UndoZone *zone, TransactionId recycle_xmin)
 {
     UndoSlotPtr recycle_exrto = zone->get_recycle_tslot_ptr_exrto();
@@ -578,6 +592,23 @@ bool exrto_standby_recycle_space(UndoZone *zone, TransactionId recycle_xmin)
             zone->GetZoneId(), recycle_xmin, recycle_exrto, recycle_primary)));
  
     while (recycle_exrto < recycle_primary) {
+        uint64 start_segno = (uint)((UNDO_PTR_GET_OFFSET(recycle_exrto)) / UNDO_META_SEGMENT_SIZE);
+        uint64 end_segno = (uint)((UNDO_PTR_GET_OFFSET(recycle_exrto)) / UNDO_META_SEGMENT_SIZE + 1);
+        if (!is_undo_slot_exist(recycle_exrto)) {
+            zone->ForgetUndoBuffer(
+                start_segno * UNDO_META_SEGMENT_SIZE, end_segno * UNDO_META_SEGMENT_SIZE, UNDO_DB_OID);
+            ereport(WARNING,
+                (errmodule(MOD_UNDO),
+                    errmsg(UNDOFORMAT("exrto_standby_recycle_space zone_id:%d, recycle_xmin:%lu, recycle_exrto:%lu, "
+                                      "recycle_primary:%lu, undo slot not exist."),
+                        zone->GetZoneId(),
+                        recycle_xmin,
+                        recycle_exrto,
+                        recycle_primary)));
+            recycle_exrto = GetNextSlotPtr(recycle_exrto);
+            continue;
+        }
+
         UndoSlotBuffer& slot_buf = g_slotBufferCache->FetchTransactionBuffer(recycle_exrto);
         UndoRecPtr start_undo_ptr = INVALID_UNDO_REC_PTR;
         start = recycle_exrto;
@@ -631,7 +662,7 @@ bool exrto_standby_recycle_undo_zone()
     if (g_instance.undo_cxt.uZoneCount == 0 || g_instance.undo_cxt.uZones == NULL) {
         return recycled;
     }
-    TransactionId recycle_xmin = extreme_rto::exrto_calculate_recycle_xmin_for_undo();
+    TransactionId recycle_xmin = exrto_calculate_recycle_xmin_for_undo();
     for (idx = 0; idx < PERSIST_ZONE_COUNT && !t_thrd.undorecycler_cxt.shutdown_requested; idx++) {
         UndoZone *zone = (UndoZone *)g_instance.undo_cxt.uZones[idx];
         if (zone == NULL) {
@@ -809,6 +840,7 @@ void UndoRecycleMain()
     ereport(LOG, (errmodule(MOD_UNDO),
         errmsg(UNDOFORMAT("sleep 10s, ensure  the snapcapturer can give the undorecyclemain a valid recycleXmin."))));
     exrto_recycle_residual_undo_file("recycle_main");
+    t_thrd.undorecycler_cxt.is_recovery_in_progress = RecoveryInProgress();
     while (true) {
         if (t_thrd.undorecycler_cxt.got_SIGHUP) {
             t_thrd.undorecycler_cxt.got_SIGHUP = false;
@@ -817,7 +849,14 @@ void UndoRecycleMain()
         if (t_thrd.undorecycler_cxt.shutdown_requested) {
             ShutDownRecycle(recycleMaxXIDs);
         }
-        if (!RecoveryInProgress()) {
+        bool is_in_progress = RecoveryInProgress();
+        if (is_in_progress != t_thrd.undorecycler_cxt.is_recovery_in_progress) {
+            ereport(LOG, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT("recycle_main: stop undo recycler because recovery_in_progress change "
+                    "from %u to %u."), t_thrd.undorecycler_cxt.is_recovery_in_progress, is_in_progress)));
+            ShutDownRecycle(recycleMaxXIDs);
+        }
+        if (!t_thrd.undorecycler_cxt.is_recovery_in_progress) {
             TransactionId recycleXmin = InvalidTransactionId;
             TransactionId oldestXmin = GetOldestXminForUndo(&recycleXmin);
             if (!TransactionIdIsValid(recycleXmin) ||

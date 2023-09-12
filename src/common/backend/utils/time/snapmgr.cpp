@@ -583,6 +583,7 @@ void StreamTxnContextSetSnapShot(void* snapshotPtr)
     u_sess->utils_cxt.CurrentSnapshot->xmax = snapshot->xmax;
     u_sess->utils_cxt.CurrentSnapshot->timeline = snapshot->timeline;
     u_sess->utils_cxt.CurrentSnapshot->snapshotcsn = snapshot->snapshotcsn;
+    u_sess->utils_cxt.CurrentSnapshot->read_lsn = snapshot->read_lsn;
 
     u_sess->utils_cxt.CurrentSnapshot->curcid = snapshot->curcid;
 

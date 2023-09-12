@@ -163,6 +163,7 @@ const char *g_reserve_param[] = {
 #endif
     "enable_huge_pages",
     "huge_page_size"
+    "exrto_standby_read_opt"
 };
 
 const int g_reserve_param_num = lengthof(g_reserve_param);

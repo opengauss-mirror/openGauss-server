@@ -675,13 +675,19 @@ typedef struct xl_standby_lock {
     Oid relOid;
 } xl_standby_lock;
 
+typedef struct XlStandbyLockNew {
+    TransactionId xid; /* xid of holder of ACCESS_EXCLUSIVE_LOCK */
+    Oid dbOid;
+    Oid relOid;
+    uint32 seq;
+} XlStandbyLockNew;
+
 extern xl_standby_lock* GetRunningTransactionLocks(int* nlocks);
 extern const char* GetLockmodeName(LOCKMETHODID lockmethodid, LOCKMODE mode);
 
 extern void lock_twophase_recover(TransactionId xid, uint16 info, void* recdata, uint32 len);
 extern void lock_twophase_postcommit(TransactionId xid, uint16 info, void* recdata, uint32 len);
 extern void lock_twophase_postabort(TransactionId xid, uint16 info, void* recdata, uint32 len);
-extern void lock_twophase_standby_recover(TransactionId xid, uint16 info, void* recdata, uint32 len);
 
 extern DeadLockState DeadLockCheck(PGPROC* proc);
 extern PGPROC* GetBlockingAutoVacuumPgproc(void);

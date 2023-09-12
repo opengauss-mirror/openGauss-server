@@ -481,6 +481,10 @@ bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId oldest_
     if (!TransactionIdIsValid(oldest_xmin)) {
         oldest_xmin = u_sess->utils_cxt.RecentGlobalDataXmin;
     }
+    /* we can't do bypass in hotstandby read mode, or there will be different between index scan and seq scan */
+    if (RecoveryInProgress()) {
+        oldest_xmin = InvalidTransactionId;
+    }
 
     if (!TransactionIdIsValid(*xmin)) {
         isDead = true;

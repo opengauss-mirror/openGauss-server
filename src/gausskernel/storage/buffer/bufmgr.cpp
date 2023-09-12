@@ -6197,13 +6197,11 @@ bool HoldingBufferPinThatDelaysRecovery(void)
     if (IS_EXRTO_READ) {
         return false;
     }
-    SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     int bufids[MAX_RECOVERY_THREAD_NUM + 1];
     errno_t rc = memset_s(bufids, sizeof(bufids), -1, sizeof(bufids));
     securec_check(rc, "\0", "\0");
     uint32 bufLen = parallel_recovery::GetStartupBufferPinWaitBufLen();
     parallel_recovery::GetStartupBufferPinWaitBufId(bufids, bufLen);
-    SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     for (uint32 i = 0; i < bufLen; i++) {
 
         /*

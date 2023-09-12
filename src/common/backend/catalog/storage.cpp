@@ -1245,7 +1245,7 @@ void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum, char *data)
     }
 }
 
-void smgr_redo_truncate_cancel_conflicting_proc(TransactionId latest_removed_xid)
+void smgr_redo_truncate_cancel_conflicting_proc(TransactionId latest_removed_xid, XLogRecPtr lsn)
 {
     if (IS_EXRTO_READ) {
         const int max_check_times = 1000;
@@ -1256,7 +1256,7 @@ void smgr_redo_truncate_cancel_conflicting_proc(TransactionId latest_removed_xid
             RedoInterruptCallBack();
             check_times++;
             reach_max_check_times = (check_times == max_check_times);
-            conflict = proc_array_cancel_conflicting_proc(latest_removed_xid, reach_max_check_times);
+            conflict = proc_array_cancel_conflicting_proc(latest_removed_xid, lsn, reach_max_check_times);
         }
     }
 }
@@ -1264,7 +1264,7 @@ void smgr_redo_truncate_cancel_conflicting_proc(TransactionId latest_removed_xid
 void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr lsn,
     TransactionId latest_removed_xid)
 {
-    smgr_redo_truncate_cancel_conflicting_proc(latest_removed_xid);
+    smgr_redo_truncate_cancel_conflicting_proc(latest_removed_xid, lsn);
     SMgrRelation reln = smgropen(rnode, InvalidBackendId);
     smgrcreate(reln, MAIN_FORKNUM, true);
     UpdateMinRecoveryPoint(lsn, false);

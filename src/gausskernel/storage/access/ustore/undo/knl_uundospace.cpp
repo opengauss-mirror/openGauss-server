@@ -114,7 +114,7 @@ void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
     RelFileNode rnode;
     UndoLogOffset head;
     UndoLogOffset old_head;
-    if (IS_EXRTO_STANDBY_READ) {
+    if (t_thrd.undorecycler_cxt.is_recovery_in_progress) {
         head = head_exrto;
         old_head = head_exrto;
         set_head_exrto(offset);

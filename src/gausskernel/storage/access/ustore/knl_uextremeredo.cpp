@@ -201,7 +201,7 @@ static XLogRecParseState *UHeapXlogFreezeTDParseBlock(XLogReaderState *record, u
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_FREEZE_TD_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_FREEZE_TD_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -213,7 +213,7 @@ static XLogRecParseState *UHeapXlogInvalidTDParseBlock(XLogReaderState *record, 
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_INVALID_TD_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_INVALID_TD_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -225,7 +225,7 @@ static XLogRecParseState *UHeapXlogCleanParseBlock(XLogReaderState *record, uint
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_CLEAN_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_CLEAN_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -276,7 +276,7 @@ static XLogRecParseState *UHeap2XlogBaseShiftParseBlock(XLogReaderState *record,
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP2_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP2_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -288,7 +288,7 @@ static XLogRecParseState *UHeap2XlogFreezeParseBlock(XLogReaderState *record, ui
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP2_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP2_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -404,7 +404,7 @@ static XLogRecParseState *UHeapXlogUheapUndoResetSlotParseBlock(XLogReaderState 
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -416,7 +416,7 @@ static XLogRecParseState *UHeapXlogUheapUndoPageParseBlock(XLogReaderState *reco
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -428,7 +428,7 @@ static XLogRecParseState *UHeapXlogUheapUndoAbortSpecInsertParseBlock(XLogReader
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 

@@ -35,13 +35,14 @@
 #include "utils/timestamp.h"
 #include "utils/snapmgr.h"
 #include "pgxc/poolutils.h"
+#include "catalog/pg_partition_fn.h"
 #include "replication/walreceiver.h"
 static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlist, TransactionId* xminArray,
                                                    ProcSignalReason reason, TimestampTz waitStart,
                                                    TransactionId limitXmin = InvalidTransactionId);
 static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid);
 static void LogAccessExclusiveLocks(int nlocks, xl_standby_lock* locks);
-static void LogReleaseAccessExclusiveLocks(int nlocks, xl_standby_lock* locks);
+static void log_access_exclusive_locks_new(int nlocks, XlStandbyLockNew* locks);
 static XLogRecPtr LogCurrentRunningXacts(RunningTransactions CurrRunningXacts);
 static void RecordCommittingCsnInfo(TransactionId xid);
 
@@ -198,6 +199,9 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
         /* wait until the virtual xid is gone */
         while (!VirtualXactLock(*waitlist, false)) {
             PGPROC* proc = BackendIdGetProc((*waitlist).backendId);
+            if (proc == NULL) {
+                break;
+            }
             PGXACT* pgxact = &g_instance.proc_base_all_xacts[proc->pgprocno];
             if (xminArray != NULL && pgxact->xmin != *xminArray &&
                 (!TransactionIdIsValid(pgxact->xmin) || TransactionIdFollows(pgxact->xmin, limitXmin))) {
@@ -608,7 +612,7 @@ void CheckRecoveryConflictDeadlock(void)
  * We use session locks rather than normal locks so we don't need
  * ResourceOwners.
  */
-void StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid)
+void StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid, uint32 seq)
 {
     LOCKTAG locktag;
 
@@ -651,13 +655,22 @@ void StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid)
         entry->locks = NIL;
     }
 
-    xl_standby_lock* newlock = (xl_standby_lock*)palloc(sizeof(xl_standby_lock));
+    XlStandbyLockNew* newlock = (XlStandbyLockNew*)palloc(sizeof(XlStandbyLockNew));
     newlock->xid = xid;
     newlock->dbOid = dbOid;
     newlock->relOid = relOid;
+    newlock->seq = seq;
     entry->locks = lappend(entry->locks, newlock);
 
-    SET_LOCKTAG_RELATION(locktag, newlock->dbOid, newlock->relOid);
+    if (seq != InvalidOid) {
+        if (seq == PARTITION_OBJECT_LOCK_SDEQUENCE || seq == INTERVAL_PARTITION_LOCK_SDEQUENCE) {
+            SET_LOCKTAG_OBJECT(locktag, newlock->dbOid, newlock->relOid, newlock->seq, 0);
+        } else {
+            SET_LOCKTAG_PARTITION(locktag, newlock->dbOid, newlock->relOid, newlock->seq);
+        }
+    } else {
+        SET_LOCKTAG_RELATION(locktag, newlock->dbOid, newlock->relOid);
+    }
 
     if (LockAcquireExtended(&locktag, AccessExclusiveLock, true, true, false) == LOCKACQUIRE_NOT_AVAIL)
         ResolveRecoveryConflictWithLock(newlock->dbOid, newlock->relOid);
@@ -666,11 +679,20 @@ void StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid)
 static void StandbyReleaseLockList(List *locks)
 {
     while (locks) {
-        xl_standby_lock *lock = (xl_standby_lock *) linitial(locks);
+        XlStandbyLockNew *lock = (XlStandbyLockNew *) linitial(locks);
         LOCKTAG locktag;
-        ereport(trace_recovery(DEBUG4), (errmsg("releasing recovery lock: xid %lu db %u rel %u", lock->xid,
-            lock->dbOid, lock->relOid)));
-        SET_LOCKTAG_RELATION(locktag, lock->dbOid, lock->relOid);
+        ereport(trace_recovery(DEBUG4), (errmsg("releasing recovery lock: xid %lu db %u rel %u seq %u", lock->xid,
+            lock->dbOid, lock->relOid, lock->seq)));
+        if (lock->seq != InvalidOid) {
+            if (lock->seq == PARTITION_OBJECT_LOCK_SDEQUENCE || lock->seq == INTERVAL_PARTITION_LOCK_SDEQUENCE) {
+                SET_LOCKTAG_OBJECT(locktag, lock->dbOid, lock->relOid, lock->seq, 0);
+            } else {
+                SET_LOCKTAG_PARTITION(locktag, lock->dbOid, lock->relOid, lock->seq);
+            }
+        } else {
+            SET_LOCKTAG_RELATION(locktag, lock->dbOid, lock->relOid);
+        }
+
         if (!LockRelease(&locktag, AccessExclusiveLock, true)) {
             ereport(LOG, (errmsg("RecoveryLockLists contains entry for lock no longer recorded by lock manager: "
                 "xid %lu database %u relation %u", lock->xid, lock->dbOid, lock->relOid)));
@@ -833,11 +855,19 @@ void standby_redo(XLogReaderState* record)
         return;
 
     if (info == XLOG_STANDBY_LOCK) {
-        xl_standby_locks* xlrec = (xl_standby_locks*)XLogRecGetData(record);
-        int i;
-
-        for (i = 0; i < xlrec->nlocks; i++)
-            StandbyAcquireAccessExclusiveLock(xlrec->locks[i].xid, xlrec->locks[i].dbOid, xlrec->locks[i].relOid);
+        if ((XLogRecGetInfo(record) & PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_FLAG) == 0) {
+            xl_standby_locks *xlrec = (xl_standby_locks *)XLogRecGetData(record);
+            for (int i = 0; i < xlrec->nlocks; i++) {
+                StandbyAcquireAccessExclusiveLock(xlrec->locks[i].xid, xlrec->locks[i].dbOid, xlrec->locks[i].relOid,
+                                                  InvalidOid);
+            }
+        } else {
+            XLogStandbyLocksNew *xlrec = (XLogStandbyLocksNew *)XLogRecGetData(record);
+            for (int i = 0; i < xlrec->nlocks; i++) {
+                StandbyAcquireAccessExclusiveLock(xlrec->locks[i].xid, xlrec->locks[i].dbOid, xlrec->locks[i].relOid,
+                                                  xlrec->locks[i].seq);
+            }
+        }
     } else if (info == XLOG_RUNNING_XACTS) {
         RunningTransactionsData running;
 
@@ -1063,28 +1093,50 @@ static void LogAccessExclusiveLocks(int nlocks, xl_standby_lock* locks)
     (void)XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_LOCK);
 }
 
+static void log_access_exclusive_locks_new(int nlocks, XlStandbyLockNew *locks)
+{
+    XLogStandbyLocksNew xlrec;
+
+    xlrec.nlocks = nlocks;
+
+    XLogBeginInsert();
+    XLogRegisterData((char *)&xlrec, MIN_SIZE_OF_XACT_STANDBY_LOCKS_NEW);
+    XLogRegisterData((char *)locks, nlocks * sizeof(XlStandbyLockNew));
+
+    (void)XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_LOCK | PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_FLAG);
+}
+
 /*
  * Individual logging of AccessExclusiveLocks for use during LockAcquire()
  */
-void LogAccessExclusiveLock(Oid dbOid, Oid relOid)
+void LogAccessExclusiveLock(Oid dbOid, Oid relOid, uint32 seq)
 {
-    if (ENABLE_DMS) {
-        return;
+    if (t_thrd.proc->workingVersionNum < PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_VERSION) {
+        xl_standby_lock xlrec;
+        xlrec.xid = GetTopTransactionId();
+        /*
+         * Decode the lock_tag back to the original values, to avoid sending lots
+         * of empty bytes with every message.  See lock.h to check how a lock_tag
+         * is defined for LOCKTAG_RELATION
+         */
+        xlrec.dbOid = dbOid;
+        xlrec.relOid = relOid;
+
+        LogAccessExclusiveLocks(1, &xlrec);
+    } else {
+        XlStandbyLockNew xlrec;
+        xlrec.xid = GetTopTransactionId();
+        /*
+         * Decode the lock_tag back to the original values, to avoid sending lots
+         * of empty bytes with every message.  See lock.h to check how a lock_tag
+         * is defined for LOCKTAG_RELATION
+         */
+        xlrec.dbOid = dbOid;
+        xlrec.relOid = relOid;
+        xlrec.seq = seq;
+
+        log_access_exclusive_locks_new(1, &xlrec);
     }
-
-    xl_standby_lock xlrec;
-
-    xlrec.xid = GetTopTransactionId();
-
-    /*
-     * Decode the locktag back to the original values, to avoid sending lots
-     * of empty bytes with every message.  See lock.h to check how a locktag
-     * is defined for LOCKTAG_RELATION
-     */
-    xlrec.dbOid = dbOid;
-    xlrec.relOid = relOid;
-
-    LogAccessExclusiveLocks(1, &xlrec);
 }
 
 /*
@@ -1110,41 +1162,6 @@ void LogAccessExclusiveLockPrepare(void)
      */
     (void)GetTopTransactionId();
 }
-
-static void LogReleaseAccessExclusiveLocks(int nlocks, xl_standby_lock* locks)
-{
-    xl_standby_locks xlrec;
-
-    xlrec.nlocks = nlocks;
-
-    XLogBeginInsert();
-    XLogRegisterData((char*)&xlrec, MinSizeOfXactStandbyLocks);
-    XLogRegisterData((char*)locks, nlocks * sizeof(xl_standby_lock));
-
-    (void)XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_UNLOCK);
-}
-
-void LogReleaseAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid)
-{
-    if (ENABLE_DMS) {
-        return;
-    }
-
-    xl_standby_lock xlrec;
-
-    xlrec.xid = xid;
-
-    /*
-     * Decode the locktag back to the original values, to avoid sending lots
-     * of empty bytes with every message.  See lock.h to check how a locktag
-     * is defined for LOCKTAG_RELATION
-     */
-    xlrec.dbOid = dbOid;
-    xlrec.relOid = relOid;
-
-    LogReleaseAccessExclusiveLocks(1, &xlrec);
-}
-
 
 void StandbyXlogStartup(void)
 {

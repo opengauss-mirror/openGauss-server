@@ -134,6 +134,7 @@
 #include <sched.h>
 #include <utmpx.h>
 #include <time.h>
+#include "access/slru.h"
 
 #ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
@@ -8834,6 +8835,69 @@ void init_extreme_rto_standby_read_first_snapshot(const XLogRecPtr checkpoint_lo
     }
 }
 
+static bool hex_string_to_int(char* hex_string, uint32* result)
+{
+    uint32 num = 0;
+    char* temp = hex_string;
+    uint32 c = 0;
+    uint32 index = 0;
+ 
+    if (NULL == hex_string) {
+        return false;
+    }
+ 
+    while (*temp++ != '\0') {
+        num++;
+    }
+ 
+    while (num--) {
+        if (hex_string[num] >= 'A' && hex_string[num] <= 'F') {
+            c = (uint32)((hex_string[num] - 'A') + 10);
+        } else if (hex_string[num] >= '0' && hex_string[num] <= '9') {
+            c = (uint32)(hex_string[num] - '0');
+        } else {
+            return false;
+        }
+ 
+        *result += c << (index * 4);
+        index++;
+    }
+ 
+    return true;
+}
+ 
+static inline void set_hot_standby_recycle_xid()
+{
+    DIR *dir = NULL;
+    struct dirent *ptr = NULL;
+    uint32 segnum = 0;
+    char *dir_name = "pg_clog";
+ 
+    if ((dir = opendir(dir_name)) == NULL) {
+        return;
+    }
+    // find the first clog file
+    while ((ptr = readdir(dir)) != NULL) {
+        if (ptr->d_type != DT_REG) {
+            continue;
+        }
+        if (!hex_string_to_int(ptr->d_name, &segnum)) {
+            closedir(dir);
+            return;
+        }
+        /* one segment file has 8k*8bit/2*32 xids */
+        uint32 segnum_xid = BLCKSZ * CLOG_XACTS_PER_BYTE * SLRU_PAGES_PER_SEGMENT;
+        /* the first xid number of current segment file */
+        TransactionId xid = (uint64)segnum * segnum_xid;
+        pg_atomic_write_u64(&g_instance.undo_cxt.hotStandbyRecycleXid, xid);
+        ereport(LOG, (errmsg("Startup: write hotStandbyRecycleXid %lu", xid)));
+
+        closedir(dir);
+        return;
+    }
+    closedir(dir);
+}
+
 /*
  * This must be called ONCE during postmaster or standalone-backend startup
  */
@@ -9520,6 +9584,7 @@ void StartupXLOG(void)
     } else {
         pg_atomic_write_u64(&g_instance.undo_cxt.globalRecycleXid, InvalidTransactionId);
     }
+    set_hot_standby_recycle_xid();
 
     /*
      * Initialize replication slots, before there's a chance to remove
@@ -9732,6 +9797,9 @@ void StartupXLOG(void)
                                             "have to use another backup for recovery.")));
                 }
                 t_thrd.shemem_ptr_cxt.ControlFile->backupEndPoint = t_thrd.shemem_ptr_cxt.ControlFile->minRecoveryPoint;
+                ereport(LOG, (errmsg("backup_from_standby: set backup end point to %X/%X",
+                                     (uint32)(t_thrd.shemem_ptr_cxt.ControlFile->backupEndPoint >> 32),
+                                     (uint32)t_thrd.shemem_ptr_cxt.ControlFile->backupEndPoint)));
             } else if (backupFromRoach) {
                 t_thrd.shemem_ptr_cxt.ControlFile->backupEndPoint = t_thrd.shemem_ptr_cxt.ControlFile->minRecoveryPoint;
                 ereport(LOG, (errmsg("perform roach backup restore and set backup end point to %X/%X",
@@ -9911,13 +9979,14 @@ void StartupXLOG(void)
          * redo LSN and future consistent point.
          */
         ereport(LOG, (errmsg("redo minRecoveryPoint at %X/%X; backupStartPoint at %X/%X; "
-                             "backupEndRequired %s",
+                             "backupEndPoint at %X/%X;backupEndRequired %s",
                              (uint32)(t_thrd.xlog_cxt.minRecoveryPoint >> 32), (uint32)t_thrd.xlog_cxt.minRecoveryPoint,
                              (uint32)(t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint >> 32),
                              (uint32)t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint,
+                             (uint32)(t_thrd.shemem_ptr_cxt.ControlFile->backupEndPoint >> 32),
+                             (uint32)t_thrd.shemem_ptr_cxt.ControlFile->backupEndPoint,
                              t_thrd.shemem_ptr_cxt.ControlFile->backupEndRequired ? "TRUE" : "FALSE")));
 
-         
         init_extreme_rto_standby_read_first_snapshot(checkPoint.redo);
         pg_atomic_write_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage, false);
         // Allow read-only connections immediately if we're consistent already.
@@ -10904,7 +10973,7 @@ void ArchiveXlogForForceFinishRedo(XLogReaderState *xlogreader, TermFileData *te
 void backup_cut_xlog_file(XLogRecPtr lastReplayedEndRecPtr)
 {
     errno_t errorno = EOK;
-    ereport(DEBUG1, (errmsg("end of backup reached")));
+    ereport(LOG, (errmsg("end of backup reached")));
 
     LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
 
@@ -13210,7 +13279,8 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
         }
     }
 
-    if (RecoveryInProgress() && IS_EXRTO_READ) {
+    if (RecoveryInProgress() && IS_EXRTO_READ && !dummyStandbyMode &&
+        !g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
         XLogRecPtr recycle_recptr = pg_atomic_read_u64(&g_instance.comm_cxt.predo_cxt.global_recycle_lsn);
         XLogSegNo recyle_segno;
         XLByteToSeg(recycle_recptr, recyle_segno);
@@ -13723,7 +13793,8 @@ void xlog_redo(XLogReaderState *record)
         rc = memcpy_s(&startpoint, sizeof(startpoint), XLogRecGetData(record), sizeof(startpoint));
         securec_check(rc, "", "");
 
-        if (XLByteEQ(t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint, startpoint)) {
+        if (XLByteEQ(t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint, startpoint) &&
+            t_thrd.shemem_ptr_cxt.ControlFile->backupEndRequired) {
             /*
              * We have reached the end of base backup, the point where
              * pg_stop_backup() was done. The data on disk is now consistent.
@@ -13731,7 +13802,7 @@ void xlog_redo(XLogReaderState *record)
              * sure we don't allow starting up at an earlier point even if
              * recovery is stopped and restarted soon after this.
              */
-            ereport(DEBUG1, (errmsg("end of backup reached")));
+            ereport(LOG, (errmsg("end of backup reached")));
 
             LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
 

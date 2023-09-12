@@ -756,11 +756,16 @@ typedef struct knl_g_parallel_redo_context {
     char* ali_buf;
     XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoCpuBindControl redoCpuBindcontrl;
-    XLogRecPtr global_recycle_lsn; /* extreme-rto standby read */
     HTAB **redoItemHash; /* used in ondemand extreme RTO */
+    /* extreme-rto standby read */
+    TransactionId exrto_recyle_xmin;
+    XLogRecPtr global_recycle_lsn;
     ExrtoSnapshot exrto_snapshot;
+    TimestampTz exrto_send_lsn_forworder_time;
     StandbyReadDelayDdlState standby_read_delay_ddl_stat;
     uint64 max_clog_pageno;
+    int *buffer_pin_wait_buf_ids;
+    int buffer_pin_wait_buf_len;
 } knl_g_parallel_redo_context;
 
 typedef struct knl_g_heartbeat_context {
@@ -931,6 +936,7 @@ typedef struct knl_g_undo_context {
     pg_atomic_uint64         globalFrozenXid;
     /* Oldest transaction id which is having undo. */
     pg_atomic_uint64         globalRecycleXid;
+    pg_atomic_uint64         hotStandbyRecycleXid;
     bool                     is_exrto_residual_undo_file_recycled;
 } knl_g_undo_context;
 

@@ -114,12 +114,18 @@ inline uint64 get_total_block_num(ExRTOFileType type, uint32 high, uint32 low)
 void exrto_clean_dir(void);
 void exrto_recycle_old_dir(void);
 void exrto_standby_read_init();
+void exrto_generate_snapshot(XLogRecPtr trxn_lsn);
+void exrto_read_snapshot(Snapshot snapshot);
+XLogRecPtr exrto_calculate_recycle_position(bool force_recyle);
+TransactionId exrto_calculate_recycle_xmin_for_undo();
 void buffer_drop_exrto_standby_read_buffers(StandbyReadMetaInfo *meta_info = NULL);
 void exrto_unlink_file_with_prefix(char *target_prefix, ExRTOFileType type, uint64 segno = 0);
 extern void XLogDumpDisplayRecord(XLogReaderState *record, char *strOutput);
 extern XLogRecPtr UpdateNextLSN(XLogRecPtr cur_lsn, XLogRecPtr end_lsn, XLogReaderState *xlogreader_state, bool *found);
 namespace extreme_rto_standby_read {
 void dump_error_all_info(const RelFileNode &rnode, ForkNumber forknum, BlockNumber blocknum);
+Buffer standby_read_buf_new(
+    Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode, BufferAccessStrategy strategy);
 }
 #ifdef ENABLE_UT
 extern Page get_page_from_buffer(Buffer buf);

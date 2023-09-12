@@ -204,6 +204,7 @@ void GetThreadNameIfPageRedoWorker(int argc, char *argv[], char **threadNamePtr)
 
 extern bool RedoWorkerIsUndoSpaceWorker();
 uint32 GetMyPageRedoWorkerIdWithLock();
+void redo_worker_release_all_locks();
 PGPROC *GetPageRedoWorkerProc(PageRedoWorker *worker);
 
 /* Worker main function. */
@@ -257,9 +258,6 @@ void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
 void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
     XLogRecPtr old_lsn, XLogPhyBlock pblk);
 void SeqCheckRemoteReadAndRepairPage();
-void exrto_generate_snapshot(XLogRecPtr trxn_lsn);
-void exrto_read_snapshot(Snapshot snapshot);
-XLogRecPtr exrto_calculate_recycle_position(bool force_recyle);
-TransactionId exrto_calculate_recycle_xmin_for_undo();
+bool exceed_send_lsn_forworder_interval();
 }  // namespace extreme_rto
 #endif

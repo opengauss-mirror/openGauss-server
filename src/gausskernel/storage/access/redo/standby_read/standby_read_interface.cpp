@@ -48,11 +48,11 @@ const char* EXRTO_FILE_SUB_DIR[] = {
 const uint32 EXRTO_FILE_PATH_LEN = 1024;
 const uint32 XID_THIRTY_TWO = 32;
 
-void make_standby_read_node(XLogRecPtr read_lsn, RelFileNode &read_node, bool is_start_lsn)
+void make_standby_read_node(XLogRecPtr read_lsn, RelFileNode &read_node, bool is_start_lsn, Oid relnode)
 {
     read_node.spcNode = (Oid)(read_lsn >> 32);
     read_node.dbNode = (Oid)(read_lsn);
-    read_node.relNode = InvalidOid;  // make sure it can be InvalidOid or not
+    read_node.relNode = relnode;
     read_node.opt = 0;
     if (is_start_lsn) {
         /* means read_lsn is the start ptr of xlog */
@@ -67,7 +67,7 @@ BufferDesc *alloc_standby_read_buf(const BufferTag &buf_tag, BufferAccessStrateg
                                    XLogRecPtr read_lsn, bool is_start_lsn)
 {
     RelFileNode read_node;
-    make_standby_read_node(read_lsn, read_node, is_start_lsn);
+    make_standby_read_node(read_lsn, read_node, is_start_lsn, buf_tag.rnode.relNode);
     BufferDesc *buf_desc = BufferAlloc(read_node, 0, buf_tag.forkNum, buf_tag.blockNum, strategy, &found, NULL);
 
     return buf_desc;
@@ -78,8 +78,8 @@ Buffer get_newest_page_for_read(Relation reln, ForkNumber fork_num, BlockNumber 
 {
     bool hit = false;
 
-    Buffer newest_buf = ReadBuffer_common(
-        reln->rd_smgr, reln->rd_rel->relpersistence, fork_num, block_num, mode, strategy, &hit, NULL);
+    Buffer newest_buf =
+        ReadBuffer_common(reln->rd_smgr, reln->rd_rel->relpersistence, fork_num, block_num, mode, strategy, &hit, NULL);
     if (BufferIsInvalid(newest_buf)) {
         return InvalidBuffer;
     }
@@ -97,8 +97,9 @@ Buffer get_newest_page_for_read(Relation reln, ForkNumber fork_num, BlockNumber 
         .forkNum = fork_num,
         .blockNum = block_num,
     };
+
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
-    BufferDesc* buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, page_lsn, false);
+    BufferDesc *buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, page_lsn, false);
 
     if (hit) {
         UnlockReleaseBuffer(newest_buf);
@@ -108,10 +109,54 @@ Buffer get_newest_page_for_read(Relation reln, ForkNumber fork_num, BlockNumber 
 
     errno_t rc = memcpy_s(read_page, BLCKSZ, newest_page, BLCKSZ);
     securec_check(rc, "\0", "\0");
+
     UnlockReleaseBuffer(newest_buf);
     buf_desc->extra->lsn_on_disk = PageGetLSN(read_page);
 #ifdef USE_ASSERT_CHECKING
-        buf_desc->lsn_dirty = InvalidXLogRecPtr;
+    buf_desc->lsn_dirty = InvalidXLogRecPtr;
+#endif
+
+    TerminateBufferIO(buf_desc, false, (BM_VALID | BM_IS_TMP_BUF));
+    return BufferDescriptorGetBuffer(buf_desc);
+}
+
+Buffer get_newest_page_for_read_new(
+    Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode, BufferAccessStrategy strategy)
+{
+    bool hit = false;
+
+    Buffer newest_buf =
+        ReadBuffer_common(reln->rd_smgr, reln->rd_rel->relpersistence, fork_num, block_num, mode, strategy, &hit, NULL);
+    if (BufferIsInvalid(newest_buf)) {
+        return InvalidBuffer;
+    }
+
+    LockBuffer(newest_buf, BUFFER_LOCK_SHARE);
+    Page newest_page = BufferGetPage(newest_buf);
+
+    BufferTag buf_tag = {
+        .rnode = reln->rd_smgr->smgr_rnode.node,
+        .forkNum = fork_num,
+        .blockNum = block_num,
+    };
+
+    ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+    BufferDesc *buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, PageGetLSN(newest_page), false);
+
+    if (hit) {
+        UnlockReleaseBuffer(newest_buf);
+        return BufferDescriptorGetBuffer(buf_desc);
+    }
+    Page read_page = (Page)BufHdrGetBlock(buf_desc);
+
+    errno_t rc = memcpy_s(read_page, BLCKSZ, newest_page, BLCKSZ);
+    securec_check(rc, "\0", "\0");
+
+    UnlockReleaseBuffer(newest_buf);
+
+    buf_desc->extra->lsn_on_disk = PageGetLSN(read_page);
+#ifdef USE_ASSERT_CHECKING
+    buf_desc->lsn_dirty = InvalidXLogRecPtr;
 #endif
 
     TerminateBufferIO(buf_desc, false, (BM_VALID | BM_IS_TMP_BUF));
@@ -121,6 +166,9 @@ Buffer get_newest_page_for_read(Relation reln, ForkNumber fork_num, BlockNumber 
 Buffer standby_read_buf(
     Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode, BufferAccessStrategy strategy)
 {
+    if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+        return extreme_rto_standby_read::standby_read_buf_new(reln, fork_num, block_num, mode, strategy);
+    }
     /* Open it at the smgr level */
     RelationOpenSmgr(reln);  // need or not ?????
     pgstat_count_buffer_read(reln);
@@ -664,6 +712,8 @@ void dump_base_page_info_lsn_info(const BufferTag &buf_tag, LsnInfoPosition head
     uint32 worker_id;
     BasePageInfo base_page_info = NULL;
     Buffer buffer;
+    const int max_dump_item = 10000;
+    int cnt = 0;
 
     extreme_rto::RedoItemTag redo_item_tag;
     INIT_REDO_ITEM_TAG(redo_item_tag, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum);
@@ -672,6 +722,9 @@ void dump_base_page_info_lsn_info(const BufferTag &buf_tag, LsnInfoPosition head
 
     /* find fisrt base page whose lsn less than read lsn form tail to head */
     do {
+        if (cnt > max_dump_item) {
+            break;
+        }
         /* reach the end of the list */
         if (INFO_POSITION_IS_INVALID(head_lsn_base_page_pos)) {
             ereport(LOG, (errmsg("can not find base page, block is %u/%u/%u %d %u, batch_id: %u, redo_worker_id: %u",
@@ -750,9 +803,18 @@ void dump_error_all_info(const RelFileNode &rnode, ForkNumber forknum, BlockNumb
     char *str_output = (char *)palloc0(MAXOUTPUTLEN * sizeof(char));
     char *dump_filename = (char *)palloc0(MAXFILENAME * sizeof(char));
     errno_t rc = snprintf_s(dump_filename + (int)strlen(dump_filename), MAXFILENAME, MAXFILENAME - 1,
-        "%s/%u_%u_%u_%d_%d.lsnblockinfo_dump", t_thrd.proc_cxt.DataDir, rnode.spcNode, rnode.dbNode, rnode.relNode,
-        forknum, blocknum);
+                            "%s/%u_%u_%u_%d_%d.lsnblockinfo_dump", u_sess->attr.attr_common.Log_directory,
+                            rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum);
     securec_check_ss(rc, "\0", "\0");
+    struct stat file_stat;
+    if (stat(dump_filename, &file_stat) == 0) {
+        /* file exists */
+        pfree_ext(str_output);
+        pfree_ext(dump_filename);
+        buffer_in_progress_push();
+        return;
+    }
+
     FILE *dump_file = AllocateFile(dump_filename, PG_BINARY_W);
     if (dump_file == NULL) {
         ereport(LOG, (errmsg("can not alloc file. rnode is %u/%u/%u %d %u", buf_tag.rnode.spcNode,
@@ -772,13 +834,143 @@ void dump_error_all_info(const RelFileNode &rnode, ForkNumber forknum, BlockNumb
     UnlockReleaseBuffer(buf);  // buf was automatically locked by getting block meta info, so we need release
 
     uint result = fwrite(str_output, 1, strlen(str_output), dump_file);
-    if (result != strlen(str_output)) {
-        ereport(ERROR, (errcode(ERRCODE_FILE_WRITE_FAILED), errmsg("Cannot write into file %s!", dump_filename)));
+    if (result == strlen(str_output)) {
+        (void)fsync(fileno(dump_file));
+        exrto_xlog_dump(dump_filename, dump_lsn_info_stru);
+    } else {
+        pfree_ext(str_output);
+        pfree_ext(dump_filename);
+        (void)FreeFile(dump_file);
+        buffer_in_progress_push();
+
+        ereport(ERROR, (errcode(ERRCODE_FILE_WRITE_FAILED),
+                        errmsg("Cannot write into file %s/%u_%u_%u_%d_%u.lsnblockinfo_dump!",
+                               u_sess->attr.attr_common.Log_directory, rnode.spcNode, rnode.dbNode, rnode.relNode,
+                               forknum, blocknum)));
     }
     pfree_ext(str_output);
-    (void)FreeFile(dump_file);
-    exrto_xlog_dump(dump_filename, dump_lsn_info_stru);
     pfree_ext(dump_filename);
+    (void)FreeFile(dump_file);
     buffer_in_progress_push();
 }
+
+Buffer standby_read_buf_new(
+    Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode, BufferAccessStrategy strategy)
+{
+    /* Open it at the smgr level */
+    RelationOpenSmgr(reln);  // need or not ?????
+    pgstat_count_buffer_read(reln);
+    pgstatCountBlocksFetched4SessionLevel();
+
+    if (RelationisEncryptEnable(reln)) {
+        reln->rd_smgr->encrypt = true;
+    }
+
+    XLogRecPtr read_lsn = MAX_XLOG_REC_PTR;
+    if (u_sess->utils_cxt.CurrentSnapshot != NULL && XLogRecPtrIsValid(u_sess->utils_cxt.CurrentSnapshot->read_lsn)) {
+        read_lsn = u_sess->utils_cxt.CurrentSnapshot->read_lsn;
+    } else if (XLogRecPtrIsValid(t_thrd.proc->exrto_read_lsn)) {
+        read_lsn = t_thrd.proc->exrto_read_lsn;
+    }
+
+
+    Buffer read_buf = get_newest_page_for_read_new(reln, fork_num, block_num, mode, strategy);
+    if (unlikely(read_buf == InvalidBuffer)) {
+        ereport(DEBUG1,
+            (errmsg("couldnot get newest page buf %u/%u/%u %d %u read lsn %08X/%08X current_time: %ld "
+                    "gen_snaptime:%ld thread_read_lsn:%08X/%08X",
+                reln->rd_smgr->smgr_rnode.node.spcNode,
+                reln->rd_smgr->smgr_rnode.node.dbNode,
+                reln->rd_smgr->smgr_rnode.node.relNode,
+                fork_num,
+                block_num,
+                (uint32)(read_lsn >> XID_THIRTY_TWO),
+                (uint32)read_lsn,
+                GetCurrentTimestamp(),
+                g_instance.comm_cxt.predo_cxt.exrto_snapshot->gen_snap_time,
+                (uint32)(t_thrd.proc->exrto_read_lsn >> XID_THIRTY_TWO),
+                (uint32)t_thrd.proc->exrto_read_lsn)));
+        return InvalidBuffer;
+    }
+
+    if (XLByteLT(PageGetLSN(BufferGetPage(read_buf)), read_lsn)) {
+        return read_buf;
+    }
+
+    BufferTag buf_tag = {
+        .rnode = reln->rd_smgr->smgr_rnode.node,
+        .forkNum = fork_num,
+        .blockNum = block_num,
+    };
+
+    Buffer block_info_buf;
+    // just lock this buffer ,so that redo worker could not modify this block info
+    BlockMetaInfo *block_info =
+        get_block_meta_info_by_relfilenode(buf_tag, NULL, RBM_ZERO_ON_ERROR, &block_info_buf, true);
+    if (unlikely(block_info == NULL || block_info_buf == InvalidBuffer)) {
+        ereport(PANIC,
+            (errmsg("standby_read_buf_new read block invalid %u/%u/%u/%hd/%hu %d %u",
+                buf_tag.rnode.spcNode,
+                buf_tag.rnode.dbNode,
+                buf_tag.rnode.relNode,
+                buf_tag.rnode.bucketNode,
+                buf_tag.rnode.opt,
+                buf_tag.forkNum,
+                buf_tag.blockNum)));
+    }
+
+    if (!is_block_meta_info_valid(block_info)) {
+        UnlockReleaseBuffer(block_info_buf);
+        return read_buf;
+    }
+
+    if (block_info->max_lsn < read_lsn) {
+        UnlockReleaseBuffer(block_info_buf);
+        return read_buf;
+    }
+
+    // find nearest base page
+    LsnInfoPosition base_page_pos = get_nearest_base_page_pos(buf_tag, block_info->base_page_info_list, read_lsn);
+    if (base_page_pos == LSN_INFO_LIST_HEAD) {
+        UnlockReleaseBuffer(block_info_buf);
+        return read_buf;
+    }
+    UnlockReleaseBuffer(read_buf);
+
+    extreme_rto::RedoItemTag redo_item_tag;
+    INIT_REDO_ITEM_TAG(redo_item_tag, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum);
+    const uint32 worker_num_per_mng = (uint32)extreme_rto::get_page_redo_worker_num_per_manager();
+    /* batch id and worker id start from 1 when reading a page */
+    uint32 batch_id = extreme_rto::GetSlotId(buf_tag.rnode, 0, 0, (uint32)extreme_rto::get_batch_redo_num()) + 1;
+    uint32 redo_worker_id = extreme_rto::GetWorkerId(&redo_item_tag, worker_num_per_mng) + 1;
+
+    Buffer base_page_buffer = buffer_read_base_page(batch_id, redo_worker_id, base_page_pos, RBM_NORMAL);
+    bool hit = false;
+    LockBuffer(base_page_buffer, BUFFER_LOCK_SHARE);
+    ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+
+    Page base_page = BufferGetPage(base_page_buffer);
+    XLogRecPtr base_page_lsn = PageGetLSN(base_page);
+    BufferDesc *buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, base_page_lsn, false);
+
+    if (hit) {
+        UnlockReleaseBuffer(block_info_buf);
+        UnlockReleaseBuffer(base_page_buffer);
+        return BufferDescriptorGetBuffer(buf_desc);
+    }
+
+    Page read_page = (Page)BufHdrGetBlock(buf_desc);
+    errno_t rc = memcpy_s(read_page, BLCKSZ, base_page, BLCKSZ);
+    securec_check(rc, "\0", "\0");
+
+    buf_desc->extra->lsn_on_disk = PageGetLSN(read_page);
+#ifdef USE_ASSERT_CHECKING
+    buf_desc->lsn_dirty = InvalidXLogRecPtr;
+#endif
+
+    TerminateBufferIO(buf_desc, false, (BM_VALID | BM_IS_TMP_BUF));
+    UnlockReleaseBuffer(block_info_buf);
+    UnlockReleaseBuffer(base_page_buffer);
+    return BufferDescriptorGetBuffer(buf_desc);
 }
+}  // namespace extreme_rto_standby_read

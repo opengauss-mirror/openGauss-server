@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "miscadmin.h"
+#include "access/multi_redo_api.h"
 #include "storage/backendid.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
@@ -739,16 +740,18 @@ int SIGetDataEntries(SharedInvalidationMessage* data, int datasize, bool workses
     n = 0;
  
     XLogRecPtr read_lsn = InvalidXLogRecPtr;
-    if (u_sess->utils_cxt.CurrentSnapshot != NULL &&
-        XLogRecPtrIsValid(u_sess->utils_cxt.CurrentSnapshot->read_lsn)) {
-        read_lsn = u_sess->utils_cxt.CurrentSnapshot->read_lsn;
-    } else if (XLogRecPtrIsValid(t_thrd.proc->exrto_read_lsn)) {
-        read_lsn = t_thrd.proc->exrto_read_lsn;
+    if (IS_EXRTO_STANDBY_READ) {
+        if (u_sess->utils_cxt.CurrentSnapshot != NULL &&
+            XLogRecPtrIsValid(u_sess->utils_cxt.CurrentSnapshot->read_lsn)) {
+            read_lsn = u_sess->utils_cxt.CurrentSnapshot->read_lsn;
+        } else if (XLogRecPtrIsValid(t_thrd.proc->exrto_read_lsn)) {
+            read_lsn = t_thrd.proc->exrto_read_lsn;
+        }
     }
 
     while (n < datasize && stateP->nextMsgNum < max) {
         int index = stateP->nextMsgNum % MAXNUMMESSAGES;
-        if (read_lsn != InvalidXLogRecPtr && segP->buffer[index].lsn != InvalidXLogRecPtr) {
+        if (XLogRecPtrIsValid(read_lsn) && XLogRecPtrIsValid(segP->buffer[index].lsn)) {
             if (XLByteLT(read_lsn, segP->buffer[index].lsn)) {
                 break;
             }

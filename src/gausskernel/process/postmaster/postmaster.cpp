@@ -4329,7 +4329,7 @@ static int ServerLoop(void)
 
         if (g_instance.attr.attr_storage.enable_ustore &&
             g_instance.pid_cxt.UndoRecyclerPID == 0 &&
-            pmState == PM_RUN) {
+            (pmState == PM_RUN || IS_EXRTO_STANDBY_READ)) {
             g_instance.pid_cxt.UndoRecyclerPID = initialize_util_thread(UNDO_RECYCLER);
         }
 
@@ -6921,6 +6921,9 @@ static void reaper(SIGNAL_ARGS)
             g_instance.fatal_error = false;
             g_instance.demotion = NoDemote;
             t_thrd.postmaster_cxt.ReachedNormalRunning = true;
+            if ((IS_EXRTO_STANDBY_READ) && (g_instance.pid_cxt.UndoRecyclerPID!= 0)) {
+                signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
+            }
             pmState = PM_RUN;
 
             if (t_thrd.postmaster_cxt.HaShmData && (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||

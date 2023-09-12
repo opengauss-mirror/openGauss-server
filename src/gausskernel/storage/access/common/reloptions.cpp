@@ -1232,7 +1232,7 @@ static void parse_one_reloption(relopt_value *option, const char *text_str, int 
         case RELOPT_TYPE_INT64: {
             relopt_int64 *optint = (relopt_int64 *)option->gen;
 
-            parsed = parse_int64(value, &option->values.int64_val, NULL);
+            parsed = parse_int64(value, &option->values.int64_val, 0, NULL);
             if (validate && !parsed)
                 ereport(ERROR,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

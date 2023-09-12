@@ -280,7 +280,7 @@ void UndoZone::ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRe
     UndoLogOffset end = UNDO_PTR_GET_OFFSET(endurp);
     int startSegno;
     UndoLogOffset head;
-    if (IS_EXRTO_STANDBY_READ) {
+    if (t_thrd.undorecycler_cxt.is_recovery_in_progress) {
         head = undoSpace_.Head_exrto();
     } else {
         head = undoSpace_.Head();
@@ -297,7 +297,7 @@ void UndoZone::ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRe
         UndoRecPtr prevHead = MAKE_UNDO_PTR(zid_, head);
         undoSpace_.UnlinkUndoLog(zid_, endSegno * UNDO_LOG_SEGMENT_SIZE, UNDO_DB_OID);
         Assert(undoSpace_.Head() <= insertURecPtr_);
-        if (pLevel_ == UNDO_PERMANENT && (!IS_EXRTO_STANDBY_READ)) {
+        if (pLevel_ == UNDO_PERMANENT && (!t_thrd.undorecycler_cxt.is_recovery_in_progress)) {
             START_CRIT_SECTION();
             undoSpace_.MarkDirty();
             XlogUndoUnlink undoUnlink;
@@ -340,7 +340,7 @@ void UndoZone::ReleaseSlotSpace(UndoRecPtr startSlotPtr, UndoRecPtr endSlotPtr, 
 {
     UndoLogOffset end = UNDO_PTR_GET_OFFSET(endSlotPtr);
     UndoLogOffset head;
-    if (IS_EXRTO_STANDBY_READ) {
+    if (t_thrd.undorecycler_cxt.is_recovery_in_progress) {
         head = slotSpace_.Head_exrto();
     } else {
         head = slotSpace_.Head();
@@ -357,7 +357,7 @@ void UndoZone::ReleaseSlotSpace(UndoRecPtr startSlotPtr, UndoRecPtr endSlotPtr, 
         UndoRecPtr prevHead = MAKE_UNDO_PTR(zid_, head);
         slotSpace_.UnlinkUndoLog(zid_, endSegno * UNDO_META_SEGMENT_SIZE, UNDO_SLOT_DB_OID);
         Assert(slotSpace_.Head() <= allocateTSlotPtr_);
-        if (pLevel_ == UNDO_PERMANENT && !(IS_EXRTO_STANDBY_READ)) {
+        if (pLevel_ == UNDO_PERMANENT && !(t_thrd.undorecycler_cxt.is_recovery_in_progress)) {
             START_CRIT_SECTION();
             slotSpace_.MarkDirty();
             XlogUndoUnlink undoUnlink;

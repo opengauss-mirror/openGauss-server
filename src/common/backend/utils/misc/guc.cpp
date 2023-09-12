@@ -6668,14 +6668,15 @@ bool parse_int(const char* value, int* result, int flags, const char** hintmsg)
 
 /*
  * Try to parse value as an 64-bit integer.  The accepted format is
- * decimal number.
+ * decimal number, octal, or hexadecimal formats, optionally followed by
+ * a unit name if "flags" indicates a unit is allowed.
  *
  * If the string parses okay, return true, else false.
  * If okay and result is not NULL, return the value in *result.
  * If not okay and hintmsg is not NULL, *hintmsg is set to a suitable
  *	HINT message, or NULL if no hint provided.
  */
-bool parse_int64(const char* value, int64* result, const char** hintmsg)
+bool parse_int64(const char *value, int64 *result, int flags, const char **hintmsg)
 {
     int64 val;
     char* endptr = NULL;
@@ -6698,7 +6699,7 @@ bool parse_int64(const char* value, int64* result, const char** hintmsg)
     val = strtol(value, &endptr, 10);
 #endif
 
-    if (endptr == value || *endptr != '\0') {
+    if (endptr == value) {
         return false; /* no HINT for integer syntax error */
     }
 
@@ -6706,6 +6707,38 @@ bool parse_int64(const char* value, int64* result, const char** hintmsg)
         if (hintmsg != NULL) {
             *hintmsg = gettext_noop("Value exceeds 64-bit integer range.");
         }
+        return false;
+    }
+
+    /* allow whitespace between integer and unit */
+    while (isspace((unsigned char)*endptr))
+        endptr++;
+
+    /* Handle possible unit conversion before check integer overflow */
+    if (*endptr != '\0') {
+        /*
+         * Note: the multiple-switch coding technique here is a bit tedious,
+         * but seems necessary to avoid intermediate-value overflows.
+         */
+        if (flags & GUC_UNIT_MEMORY) {
+            val = (int64)MemoryUnitConvert(&endptr, val, flags, hintmsg);
+        } else if (flags & GUC_UNIT_TIME) {
+            val = (int64)TimeUnitConvert(&endptr, val, flags, hintmsg);
+        }
+
+        /* allow whitespace after unit */
+        while (isspace((unsigned char)*endptr))
+            endptr++;
+
+        if (*endptr != '\0')
+            return false; /* appropriate hint, if any, already set */
+    }
+
+    /* Check for integer overflow */
+    if (val != (int64)val) {
+        if (hintmsg != nullptr)
+            *hintmsg = gettext_noop("Value exceeds integer range.");
+
         return false;
     }
 
@@ -7266,7 +7299,7 @@ static bool validate_conf_int64(struct config_generic *record, const char *name,
     int64* newval = (newvalue == NULL ? &tmpnewval : (int64*)newvalue);
     const char* hintmsg = NULL;
 
-    if (!parse_int64(value, newval, &hintmsg)) {
+    if (!parse_int64(value, newval, conf->gen.flags, &hintmsg)) {
         ereport(elevel,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("parameter \"%s\" requires a numeric value", name)));

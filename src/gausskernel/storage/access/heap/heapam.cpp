@@ -8741,7 +8741,7 @@ static void heap_xlog_cleanup_info(XLogReaderState* record)
         return;
     }
 
-    if (InHotStandby && g_supportHotStandby && !IS_EXRTO_READ) {
+    if (InHotStandby && g_supportHotStandby) {
         XLogRecPtr lsn = record->EndRecPtr;
         ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node, lsn);
     }

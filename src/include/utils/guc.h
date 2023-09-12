@@ -278,7 +278,7 @@ extern char* GetGucName(const char *command, char *target_guc_name);
 extern void BeginReportingGUCOptions(void);
 extern void ParseLongOption(const char* string, char** name, char** value);
 extern bool parse_int(const char* value, int* result, int flags, const char** hintmsg);
-extern bool parse_int64(const char* value, int64* result, const char** hintmsg);
+extern bool parse_int64(const char* value, int64* result, int flags, const char** hintmsg);
 extern bool parse_real(const char* value, double* result, int flags = 0, const char** hintmsg = NULL);
 double TimeUnitConvert(char** endptr, double value, int flags, const char** hintmsg);
 double MemoryUnitConvert(char** endptr, double value, int flags, const char** hintmsg);

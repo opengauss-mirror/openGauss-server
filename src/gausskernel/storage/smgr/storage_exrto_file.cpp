@@ -180,6 +180,18 @@ static ExRTOFileState *exrto_open_file(SMgrRelation reln, ForkNumber forknum, Bl
 
     return state;
 }
+ 
+bool exrto_check_unlink_relfilenode(const RelFileNode rnode)
+{
+    HTAB *relfilenode_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+    bool found = false;
+ 
+    LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_SHARED);
+    (void)hash_search(relfilenode_hashtbl, &(rnode), HASH_FIND, &found);
+    LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
+ 
+    return found;
+}
 
 BlockNumber get_single_file_nblocks(SMgrRelation reln, ForkNumber forknum, const ExRTOFileState *state)
 {
@@ -350,6 +362,7 @@ void exrto_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, c
     int nbytes;
     struct stat file_stat;
     char* filename;
+    ExtensionBehavior behavior;
 
     type = exrto_file_type(reln->smgr_rnode.node.spcNode);
     total_block_num = get_total_block_num(type, reln->smgr_rnode.node.relNode, blocknum);
@@ -359,7 +372,16 @@ void exrto_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, c
     }
     seekpos = (off_t)BLCKSZ * (total_block_num % EXRTO_FILE_BLOCKS[type]);
 
-    state = exrto_open_file(reln, forknum, blocknum, EXTENSION_CREATE);
+    behavior = (type == BLOCK_INFO_META ? EXTENSION_RETURN_NULL : EXTENSION_CREATE);
+    state = exrto_open_file(reln, forknum, blocknum, behavior);
+    if (state == NULL) {
+        Assert(type == BLOCK_INFO_META);
+        if (exrto_check_unlink_relfilenode(reln->smgr_rnode.node)) {
+            return;
+        } else {
+            state = exrto_open_file(reln, forknum, blocknum, EXTENSION_CREATE);
+        }
+    }
     filename = FilePathName(state->file[forknum]);
     if (stat(filename, &file_stat) < 0) {
         char filepath[EXRTO_FILE_PATH_LEN];
@@ -380,12 +402,15 @@ void exrto_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, c
         (int)(EXRTO_FILE_SIZE[type] - file_stat.st_size));
     nbytes = FilePWrite(state->file[forknum], NULL, extend_size, file_stat.st_size);
     if (nbytes != extend_size) {
+        char filepath[EXRTO_FILE_PATH_LEN];
+        errno_t rc = strcpy_s(filepath, EXRTO_FILE_PATH_LEN, filename);
+        securec_check(rc, "\0", "\0");
         exrto_close(reln, forknum, InvalidBlockNumber);
         if (nbytes < 0) {
-            ereport(ERROR, (errmsg("could not extend file \"%s\": %m.", filename)));
+            ereport(ERROR, (errmsg("could not extend file \"%s\": %m.", filepath)));
         }
         ereport(ERROR,
-            (errmsg("could not extend file \"%s\": wrote only %d of %d bytes.", filename, nbytes, extend_size)));
+            (errmsg("could not extend file \"%s\": wrote only %d of %d bytes.", filepath, nbytes, extend_size)));
     }
 
     Assert(get_single_file_nblocks(reln, forknum, state) <= ((BlockNumber)EXRTO_FILE_BLOCKS[type]));
@@ -456,6 +481,7 @@ void exrto_write(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, co
     uint64 total_block_num;
     off_t seekpos;
     int nbytes;
+    ExtensionBehavior behavior;
 
     type = exrto_file_type(reln->smgr_rnode.node.spcNode);
     total_block_num = get_total_block_num(type, reln->smgr_rnode.node.relNode, blocknum);
@@ -467,7 +493,16 @@ void exrto_write(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, co
 
     Assert(seekpos < (off_t)EXRTO_FILE_SIZE[type]);
 
-    state = exrto_open_file(reln, forknum, blocknum, EXTENSION_CREATE);
+    behavior = (type == BLOCK_INFO_META ? EXTENSION_RETURN_NULL : EXTENSION_CREATE);
+    state = exrto_open_file(reln, forknum, blocknum, behavior);
+    if (state == NULL) {
+        Assert(type == BLOCK_INFO_META);
+        if (exrto_check_unlink_relfilenode(reln->smgr_rnode.node)) {
+            return;
+        } else {
+            state = exrto_open_file(reln, forknum, blocknum, EXTENSION_CREATE);
+        }
+    }
     nbytes = FilePWrite(state->file[forknum], buffer, BLCKSZ, seekpos);
     if (nbytes != BLCKSZ) {
         char *filename = FilePathName(state->file[forknum]);
@@ -547,13 +582,23 @@ void exrto_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum
     uint64 total_block_num;
     type = exrto_file_type(reln->smgr_rnode.node.spcNode);
     total_block_num = get_total_block_num(type, reln->smgr_rnode.node.relNode, blocknum);
+    ExtensionBehavior behavior = (type == BLOCK_INFO_META ? EXTENSION_RETURN_NULL : EXTENSION_CREATE);
 
     while (nblocks > 0) {
         BlockNumber nflush = nblocks;
         off_t seekpos;
         ExRTOFileState *state = NULL;
         uint64 segnum_start, segnum_end;
-        state = exrto_open_file(reln, forknum, blocknum, EXTENSION_CREATE);
+        state = exrto_open_file(reln, forknum, blocknum, behavior);
+        if (state == NULL) {
+            Assert(type == BLOCK_INFO_META);
+            /* only check at first time */
+            if (exrto_check_unlink_relfilenode(reln->smgr_rnode.node)) {
+                return;
+            } else {
+                state = exrto_open_file(reln, forknum, blocknum, EXTENSION_CREATE);
+            }
+        }
         segnum_start = total_block_num / EXRTO_FILE_BLOCKS[type];
         segnum_end = (total_block_num + nblocks - 1) / EXRTO_FILE_BLOCKS[type];
  
@@ -572,5 +617,6 @@ void exrto_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum
         Assert(((total_block_num + nflush) >> UINT64_HALF) == (total_block_num >> UINT64_HALF));
         total_block_num += nflush;
         blocknum = (BlockNumber)total_block_num;
+        behavior = EXTENSION_CREATE;
     }
 }

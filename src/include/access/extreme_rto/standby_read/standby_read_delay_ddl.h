@@ -37,4 +37,5 @@ void init_delay_ddl_file();
 void update_delay_ddl_db(Oid db_id, Oid tablespace_id, XLogRecPtr lsn);
 void update_delay_ddl_files(ColFileNode* xnodes, int nrels, XLogRecPtr lsn);
 void delete_by_table_space(Oid tablespace_id);
+void update_delay_ddl_file_truncate_clog(XLogRecPtr lsn, int64 pageno);
 #endif

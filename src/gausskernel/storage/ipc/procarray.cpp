@@ -1341,8 +1341,12 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
     assigned value
      * local must sync with gtm.
      */
-    if (shortcutByRecentXmin &&
-        TransactionIdPrecedes(xid, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid))) {
+    uint64 recycle_xid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+    /* in hotstandby mode, the proc may being runnnig */
+    if (RecoveryInProgress()) {
+        recycle_xid = InvalidTransactionId;
+    }
+    if (shortcutByRecentXmin && TransactionIdPrecedes(xid, recycle_xid)) {
         xc_by_recent_xmin_inc();
 
         /*
@@ -2114,6 +2118,8 @@ RETRY:
     bool retry_get = false;
     uint64 retry_count = 0;
     const static uint64 WAIT_COUNT = 0x7FFFF;
+    /* reset xmin before acquiring lwlock, in case blocking redo */
+    t_thrd.pgxact->xmin = InvalidTransactionId;
 RETRY_GET:
     if (snapshot->takenDuringRecovery && !StreamThreadAmI() && !IS_EXRTO_READ &&
         !u_sess->proc_cxt.clientIsCMAgent) {
@@ -2433,15 +2439,15 @@ GROUP_GET_SNAPSHOT:
     snapshot->copied = false;
 
     if (snapshot->takenDuringRecovery) {
-        (void)pgstat_report_waitstatus(oldStatus);
         if (IsDefaultExtremeRtoMode() && IS_EXRTO_STANDBY_READ) {
-            extreme_rto::exrto_read_snapshot(snapshot);
+            exrto_read_snapshot(snapshot);
             if (t_thrd.proc->exrto_reload_cache) {
                 t_thrd.proc->exrto_reload_cache = false;
                 reset_invalidation_cache();
             }
             AcceptInvalidationMessages();
         }
+        (void)pgstat_report_waitstatus(oldStatus);
     }
 
     return snapshot;
@@ -2724,6 +2730,9 @@ TransactionId GetOldestActiveTransactionId(TransactionId *globalXmin)
         xmin = oldestRunningXid;
     }
     *globalXmin = xmin;
+    if (IS_EXRTO_STANDBY_READ) {
+        ereport(LOG, (errmsg("proc_array_get_oldest_active_transaction_id: global_xmin = %lu", *globalXmin)));
+    }
     return oldestRunningXid;
 }
 
@@ -3236,7 +3245,8 @@ ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalRe
     return pid;
 }
 
-bool proc_array_cancel_conflicting_proc(TransactionId latest_removed_xid, bool reach_max_check_times)
+bool proc_array_cancel_conflicting_proc(
+    TransactionId latest_removed_xid, XLogRecPtr truncate_redo_lsn, bool reach_max_check_times)
 {
     ProcArrayStruct* proc_array = g_instance.proc_array_idx;
     bool conflict = false;
@@ -3262,8 +3272,9 @@ bool proc_array_cancel_conflicting_proc(TransactionId latest_removed_xid, bool r
             continue;
         }
 
-         /* cancel query when its xmin < latest_removed_xid */
-        if (TransactionIdPrecedesOrEquals(pxmin, latest_removed_xid)) {
+        /* cancel query when its xmin < latest_removed_xid */
+        if (TransactionIdPrecedesOrEquals(pxmin, latest_removed_xid) ||
+            (truncate_redo_lsn != InvalidXLogRecPtr && XLByteLT(read_lsn, truncate_redo_lsn))) {
             conflict = true;
             pg_proc->recoveryConflictPending = true;
             if (pg_proc->pid != 0) {
@@ -3277,9 +3288,16 @@ bool proc_array_cancel_conflicting_proc(TransactionId latest_removed_xid, bool r
                  * an unresponsive backend when system is heavily loaded.
                  */
                 ereport(LOG,
-                        (errmsg(EXRTOFORMAT("exrto_gen_snap_time: %ld, current_timestamp: %ld, cancel thread while "
-                                            "redo truncate, thread id = %lu\n"),
-                                pg_proc->exrto_gen_snap_time, GetCurrentTimestamp(), pg_proc->pid)));
+                    (errmsg(EXRTOFORMAT("cancel thread while "
+                                        "redo truncate (lsn: %08X/%08X, latest_removed_xid: %lu), thread id = %lu, "
+                                        "read_lsn: %08X/%08X, xmin: %lu"),
+                        (uint32)(truncate_redo_lsn >> UINT64_HALF),
+                        (uint32)truncate_redo_lsn,
+                        latest_removed_xid,
+                        pg_proc->pid,
+                        (uint32)(read_lsn >> UINT64_HALF),
+                        (uint32)read_lsn,
+                        pxmin)));
                 pg_usleep(5000L);
             }
         }

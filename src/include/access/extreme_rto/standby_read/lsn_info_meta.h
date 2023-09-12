@@ -146,6 +146,8 @@ bool is_base_page_map_bit_set(Page page, uint32 which_bit);
 void recycle_one_lsn_info_list(const BufferTag& buf_tag, LsnInfoPosition page_info_pos,
     XLogRecPtr recycle_lsn, LsnInfoPosition *min_page_info_pos, XLogRecPtr *min_lsn);
 void standby_read_recyle_per_workers(StandbyReadMetaInfo *standby_read_meta_info, XLogRecPtr recycle_lsn);
+LsnInfoPosition get_nearest_base_page_pos(
+    const BufferTag &buf_tag, const LsnInfoDoubleList &lsn_info_list, XLogRecPtr read_lsn);
 
 }  // namespace extreme_rto_standby_read
 #endif
