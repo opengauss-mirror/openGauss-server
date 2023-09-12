@@ -724,7 +724,7 @@ bool CheckPageNeedSkipInRecovery(Buffer buf)
     char pageid[DMS_PAGEID_SIZE];
     errno_t err = memcpy_s(pageid, DMS_PAGEID_SIZE, &(buf_desc->tag), sizeof(BufferTag));
     securec_check(err, "\0", "\0");
-    int ret = dms_recovery_page_need_skip(pageid, (unsigned char *)&skip);
+    int ret = dms_recovery_page_need_skip(pageid, (unsigned char *)&skip, false);
     if (ret != DMS_SUCCESS) {
         ereport(PANIC, (errmsg("DMS Internal error happened during recovery, errno %d", ret)));
     }

@@ -307,9 +307,9 @@ int dms_get_ssl_param(const char *param_name, char *param_value, unsigned int si
     return g_ss_dms_func.dms_get_ssl_param(param_name, param_value, size);
 }
 
-int dms_recovery_page_need_skip(char pageid[DMS_PAGEID_SIZE], unsigned char *skip)
+int dms_recovery_page_need_skip(char pageid[DMS_PAGEID_SIZE], unsigned char *skip, unsigned int alloc)
 {
-    return g_ss_dms_func.dms_recovery_page_need_skip(pageid, skip);
+    return g_ss_dms_func.dms_recovery_page_need_skip(pageid, skip, alloc);
 }
 
 int dms_reform_failed(void)
