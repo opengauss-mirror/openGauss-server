@@ -5283,6 +5283,48 @@ static void transformConstraintAttrs(CreateStmtContext* cxt, List* constraintLis
     }
 }
 
+/**
+ * tableof type is not  supported be a column in a table
+ * @param ctype ctype
+ */
+static void CheckColumnTableOfType(Type ctype)
+{
+    Form_pg_type typTup = (Form_pg_type)GETSTRUCT(ctype);
+    if (typTup->typtype == TYPTYPE_TABLEOF) {
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmodule(MOD_PLSQL),
+            errmsg("type \"%s\" is not supported as column type", NameStr(typTup->typname)),
+            errdetail("\"%s\" is a nest table type", NameStr(typTup->typname)),
+            errcause("feature not supported"), erraction("check type name")));
+    } else if (typTup->typtype == TYPTYPE_COMPOSITE) {
+        TupleDesc tupleDesc = lookup_rowtype_tupdesc_noerror(HeapTupleGetOid(ctype), typTup->typtypmod, true);
+        if (tupleDesc == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("type %u cannot get tupledesc", HeapTupleGetOid(ctype))));
+        }
+        for (int i = 0; i < tupleDesc->natts; i++) {
+            if (tupleDesc->attrs[i].attisdropped) {
+                continue;
+            }
+            HeapTuple typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(tupleDesc->attrs[i].atttypid));
+            if (!HeapTupleIsValid(typeTuple)) {
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                                errmsg("cache lookup failed for type %u", tupleDesc->attrs[i].atttypid)));
+            }
+            CheckColumnTableOfType(typeTuple);
+            ReleaseSysCache(typeTuple);
+        }
+        ReleaseTupleDesc(tupleDesc);
+    } else if (OidIsValid(typTup->typelem) && typTup->typtype == TYPTYPE_BASE) {
+        HeapTuple typTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typTup->typelem));
+        if (!HeapTupleIsValid(typTuple)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typTup->typelem)));
+        }
+        CheckColumnTableOfType(typTuple);
+        ReleaseSysCache(typTuple);
+    }
+}
+
 /*
  * Special handling of type definition for a column
  */
@@ -5324,6 +5366,7 @@ static void transformColumnType(CreateStmtContext* cxt, ColumnDef* column)
                 erraction("check type name")));
     }
 #endif
+    CheckColumnTableOfType(ctype);
     ReleaseSysCache(ctype);
 }
 
