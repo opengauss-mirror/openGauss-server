@@ -155,6 +155,11 @@ bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block)
     }
 
     uint32 flags = O_RDWR | PG_BINARY;
+    /* need palloc segfiles if file_num is 0 */
+    if (sf->vector_capacity == 0) {
+        df_extend_file_vector(sf);
+    }
+
     if (sf->file_num == 0) {
         char *filename = slice_filename(sf->filename, 0);
         int fd = dv_open_file(filename, flags, (int)SEGMENT_FILE_MODE);
