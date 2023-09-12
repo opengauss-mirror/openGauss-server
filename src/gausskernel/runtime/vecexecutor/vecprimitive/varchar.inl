@@ -765,7 +765,7 @@ vtrim1(PG_FUNCTION_ARGS)
 	FunctionCallInfoData finfo;
 
 	finfo.arg = &args[0];
-
+	finfo.flinfo = fcinfo->flinfo;
 
 	if (pselection != NULL)
 	{

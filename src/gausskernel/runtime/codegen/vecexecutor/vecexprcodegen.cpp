@@ -658,8 +658,16 @@ bool VecExprCodeGen::OpJittable(ExprState* state)
         return false;
 
     switch (opexpr->opno) {
+        case TEXTEQOID:
+        case TEXTNEOID:
+        case TEXTLEOID:
+        case TEXTGEOID:
         case TEXTLTOID:
         case TEXTGTOID: {
+            if (DB_IS_CMPT(A_FORMAT) && CHAR_COERCE_COMPAT) {
+                return false;
+            }
+
             /* Only support ASCII and UTF-8 encoding */
             int current_encoding = GetDatabaseEncoding();
             if (current_encoding != PG_SQL_ASCII && current_encoding != PG_UTF8)
