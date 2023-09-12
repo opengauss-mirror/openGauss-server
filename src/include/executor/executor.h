@@ -246,6 +246,7 @@ extern void EvalPlanQualFetchRowMarksUHeap(EPQState* epqstate);
 extern TupleTableSlot* EvalPlanQualNext(EPQState* epqstate);
 extern void EvalPlanQualBegin(EPQState* epqstate, EState* parentestate, bool isUHeap = false);
 extern void EvalPlanQualEnd(EPQState* epqstate);
+extern bool ExecSetArgIsByValue(FunctionCallInfoData* fcinfo);
 
 /*
  * functions in execProcnode.c

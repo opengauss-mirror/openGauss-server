@@ -96,13 +96,6 @@ static TupleTableSlot* ExecResult(PlanState* state)
      * storage allocated in the previous tuple cycle.  Note this can't happen
      * until we're done projecting out tuples from a scan tuple.
      */
-    ResetExprContext(econtext);
-
-    /*
-     * Reset per-tuple memory context to free any expression evaluation
-     * storage allocated in the previous tuple cycle.  Note this can't happen
-     * until we're done projecting out tuples from a scan tuple.
-     */
     if (!econtext->hasSetResultStore) {
         /* return value one by one, just free early one */
         ResetExprContext(econtext);
@@ -124,7 +117,8 @@ static TupleTableSlot* ExecResult(PlanState* state)
 
     if (econtext->hasSetResultStore) {
         /* return values all store in ResultStore, could not free early one */
-        
+        ResetExprContext(econtext);
+        econtext->hasSetResultStore = false;
     }
 
     /*
