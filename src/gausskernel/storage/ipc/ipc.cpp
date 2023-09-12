@@ -280,45 +280,6 @@ void proc_exit(int code)
     StreamNodeGroup::syncQuit(STREAM_ERROR);
     StreamNodeGroup::destroy(STREAM_ERROR);
 
-#ifdef PROFILE_PID_DIR
-    {
-        /*
-         * If we are profiling ourself then gprof's mcleanup() is about to
-         * write out a profile to ./gmon.out.  Since mcleanup() always uses a
-         * fixed file name, each backend will overwrite earlier profiles. To
-         * fix that, we create a separate subdirectory for each backend
-         * (./gprof/pid) and 'cd' to that subdirectory before we exit() - that
-         * forces mcleanup() to write each profile into its own directory.	We
-         * end up with something like: $PGDATA/gprof/8829/gmon.out
-         * $PGDATA/gprof/8845/gmon.out ...
-         *
-         * To avoid undesirable disk space bloat, autovacuum workers are
-         * discriminated against: all their gmon.out files go into the same
-         * subdirectory.  Without this, an installation that is "just sitting
-         * there" nonetheless eats megabytes of disk space every few seconds.
-         *
-         * Note that we do this here instead of in an on_proc_exit() callback
-         * because we want to ensure that this code executes last - we don't
-         * want to interfere with any other on_proc_exit() callback.  For the
-         * same reason, we do not include it in proc_exit_prepare ... so if
-         * you are exiting in the "wrong way" you won't drop your profile in a
-         * nice place.
-         */
-        char gprofDirName[32];
-        errno_t rc = EOK;
-        if (IsAutoVacuumWorkerProcess())
-            rc = snprintf_s(gprofDirName, sizeof(gprofDirName), sizeof(gprofDirName) - 1, "gprof/avworker");
-        else
-            rc =
-                snprintf_s(gprofDirName, sizeof(gprofDirName), sizeof(gprofDirName) - 1, "gprof/%lu", gs_thread_self());
-
-        securec_check_ss(rc, "\0", "\0");
-        (void)mkdir("gprof", S_IRWXU | S_IRWXG | S_IRWXO);
-        (void)mkdir(gprofDirName, S_IRWXU | S_IRWXG | S_IRWXO);
-        (void)chdir(gprofDirName);
-    }
-#endif
-
     /*
      * Thread termination does not release any application visible process resources.
      * So we will take care of them explicitly.
