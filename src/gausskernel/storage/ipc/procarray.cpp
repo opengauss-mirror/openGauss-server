@@ -2435,7 +2435,7 @@ GROUP_GET_SNAPSHOT:
         (void)pgstat_report_waitstatus(oldStatus);
     }
 
-    if (IsExtremeRtoRunning() && pmState == PM_HOT_STANDBY) {
+    if (IsDefaultExtremeRtoMode() && IsExtremeRtoRunning() && pmState == PM_HOT_STANDBY) {
         extreme_rto::exrto_read_snapshot(snapshot);
     }
 

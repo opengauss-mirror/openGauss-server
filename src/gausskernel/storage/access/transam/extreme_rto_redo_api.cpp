@@ -141,16 +141,6 @@ static const f_extreme_rto_redo extreme_rto_redosw[] = {
     },
 };
 
-void SetExtremeRtoMode()
-{
-    g_extreme_rto_type = DEFAULT_EXTREME_RTO;
-}
-
-void SetOndemandExtremeRtoMode()
-{
-    g_extreme_rto_type = ONDEMAND_EXTREME_RTO;
-}
-
 void ExtremeWaitAllReplayWorkerIdle()
 {
     (*(extreme_rto_redosw[g_extreme_rto_type].wait_all_replay_worker_idle))();

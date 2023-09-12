@@ -9622,7 +9622,7 @@ void StartupXLOG(void)
     }
 
     g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
-    SetExtremeRtoMode();
+    SetDefaultExtremeRtoMode();
     if (SS_PRIMARY_MODE && ENABLE_ONDEMAND_RECOVERY && (SS_STANDBY_FAILOVER || SS_PRIMARY_NORMAL_REFORM) &&
         t_thrd.xlog_cxt.InRecovery == true) {
         if (SSOndemandRecoveryExitNormal) {
