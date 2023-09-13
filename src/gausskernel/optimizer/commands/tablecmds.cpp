@@ -38,6 +38,7 @@
 #include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_matview.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
@@ -3477,7 +3478,6 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
         }
 
         delrel = try_relation_open(relOid, NoLock);
-        
         /*Not allow to drop mlog*/
         if (relkind == RELKIND_RELATION && delrel != NULL && ISMLOG(delrel->rd_rel->relname.data)) {
             /*If we can find a base table, it is mlog.*/
