@@ -720,6 +720,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  transaction_pending_time                         | integer |      | -1        | 1073741823
  transaction_read_only                            | bool    |      |           | 
  transform_null_equals                            | bool    |      |           | 
+ transform_to_numeric_operators                   | bool    |      |           | 
  transparent_encrypted_string                     | string  |      |           | 
  transparent_encrypt_kms_region                   | string  |      |           | 
  transparent_encrypt_kms_url                      | string  |      |           | 
