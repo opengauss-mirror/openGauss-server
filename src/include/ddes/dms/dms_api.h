@@ -221,6 +221,7 @@ typedef struct st_dms_context {
     unsigned char is_try;
     unsigned char type;
     unsigned short len;
+    unsigned long long ctx_ruid; /* this ruid indicates one message ack is pending recv */
     union {
         char resid[DMS_RESID_SIZE];
         dms_drid_t lock_id;
@@ -607,6 +608,7 @@ typedef int(*dms_tx_area_load)(void *db_handle, unsigned char inst_id);
 typedef int(*dms_tx_rollback_finish)(void *db_handle, unsigned char inst_id);
 typedef unsigned char(*dms_recovery_in_progress)(void *db_handle);
 typedef unsigned int(*dms_get_page_hash_val)(const char pageid[DMS_PAGEID_SIZE]);
+typedef unsigned int(*dms_inc_and_get_srsn)(unsigned int sess_id);
 typedef unsigned long long(*dms_get_page_lsn)(const dms_buf_ctrl_t *buf_ctrl);
 typedef int(*dms_set_buf_load_status)(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status);
 typedef int(*dms_remove_buf_load_status)(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status);
@@ -691,7 +693,6 @@ typedef void (*dms_check_if_build_complete)(void *db_handle, unsigned int *build
 typedef void (*dms_check_if_restore_recover)(void *db_handle, unsigned int *rst_recover);
 typedef int (*dms_db_is_primary)(void *db_handle);
 typedef void (*dms_set_switchover_result)(void *db_handle, int result);
-typedef void (*dms_set_db_role)(void *db_handle, unsigned char is_primary);
 typedef int (*dms_mount_to_recovery)(void *db_handle, unsigned int *has_offline);
 typedef int(*dms_get_open_status)(void *db_handle);
 typedef void (*dms_reform_set_dms_role)(void *db_handle, unsigned int reformer_id);
@@ -779,6 +780,7 @@ typedef struct st_dms_callback {
     dms_reform_start_notify reform_start_notify;
     dms_reform_set_dms_role reform_set_dms_role;
 
+    dms_inc_and_get_srsn inc_and_get_srsn;
     dms_get_page_hash_val get_page_hash_val;
     dms_get_page_lsn get_page_lsn;
     dms_set_buf_load_status set_buf_load_status;
@@ -862,7 +864,6 @@ typedef struct st_dms_callback {
     dms_switchover_promote_opengauss switchover_promote_opengauss;
     dms_failover_promote_opengauss failover_promote_opengauss;
     dms_set_switchover_result set_switchover_result;
-    dms_set_db_role set_db_role;
     dms_mount_to_recovery mount_to_recovery;
 
     dms_reform_done_notify reform_done_notify;
@@ -887,6 +888,7 @@ typedef struct st_dms_callback {
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
+    unsigned int inst_id;
     char ip[DMS_MAX_IP_LEN];
     unsigned short port;
     unsigned char reserved[2];
@@ -912,9 +914,8 @@ typedef struct st_dms_profile {
     // Indicates whether to connected to other instances during DMS initialization.
     unsigned int conn_created_during_init : 1;
     unsigned int resource_catalog_centralized : 1; // 1: centralized, 0: distributed
-    unsigned int load_balance_mode : 1;            // 1: primary&standby
     unsigned int time_stat_enabled : 1;
-    unsigned int reserved : 28;
+    unsigned int reserved : 29;
     unsigned int elapsed_switch;
     unsigned char rdma_rpc_use_busypoll;    // busy poll need to occupy the cpu core
     unsigned char rdma_rpc_is_bind_core;
@@ -925,7 +926,7 @@ typedef struct st_dms_profile {
     // ock scrlock configs
     unsigned char enable_scrlock;
     unsigned int primary_inst_id;
-    unsigned char enable_ssl;  
+    unsigned char enable_ssl;
     unsigned int scrlock_log_level;
     unsigned char enable_scrlock_worker_bind_core;
     unsigned int scrlock_worker_cnt;
@@ -967,7 +968,7 @@ typedef enum st_dms_protocol_version {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           92
+#define DMS_LOCAL_VERSION           94
 
 #ifdef __cplusplus
 }
