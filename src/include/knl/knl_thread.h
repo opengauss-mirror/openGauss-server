@@ -3356,6 +3356,7 @@ typedef struct knl_t_dms_context {
     int file_size; /* initialized as pg_internal.init file size, will decrease after read */
     char msg_backup[24]; // 24 is sizeof mes_message_head_t
     bool flush_copy_get_page_failed; //used in flush copy
+    uint32 srsn; /* session rsn used for DMS page request ordering */
 } knl_t_dms_context;
 
 typedef struct knl_t_ondemand_xlog_copy_context {
