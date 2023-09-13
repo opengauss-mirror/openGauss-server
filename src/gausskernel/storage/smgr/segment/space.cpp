@@ -582,20 +582,23 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
             PageSetLSN(pagedata, recptr);
 
             /* 2. double write */
-            bool flush_old_file = false;
-            uint32 pos = seg_dw_single_flush_without_buffer(tag, (Block)pagedata, &flush_old_file);
-            t_thrd.proc->dw_pos = pos;
-            t_thrd.proc->flush_new_dw = !flush_old_file;
-
-            /* 3. checksum and write to file */
-            PageSetChecksumInplace((Page)pagedata, to_block);
-            df_pwrite_block(seg->segfile, pagedata, to_block);
-            if (flush_old_file) {
-                g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
+            if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
+                bool flush_old_file = false;
+                uint16 pos = seg_dw_single_flush_without_buffer(tag, (Block)pagedata, &flush_old_file);
+                t_thrd.proc->dw_pos = pos;
+                t_thrd.proc->flush_new_dw = !flush_old_file;
+                PageSetChecksumInplace((Page)pagedata, to_block);
+                df_pwrite_block(seg->segfile, pagedata, to_block);
+                if (flush_old_file) {
+                    g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
+                } else {
+                    g_instance.dw_single_cxt.single_flush_state[pos] = true;
+                }
+                t_thrd.proc->dw_pos = -1;
             } else {
-                g_instance.dw_single_cxt.single_flush_state[pos] = true;
+                PageSetChecksumInplace((Page)pagedata, to_block);
+                df_pwrite_block(seg->segfile, pagedata, to_block);
             }
-            t_thrd.proc->dw_pos = -1;
         }
         END_CRIT_SECTION();
 
