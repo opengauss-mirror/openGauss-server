@@ -390,38 +390,38 @@ typedef enum {
 
 typedef enum {
     NO_REWRITE = 0, /* not allow lazy agg and magic set rewrite*/
-    LAZY_AGG = 1,   /* allow lazy agg */
-    MAGIC_SET = 2,   /* allow query qual push */
-    PARTIAL_PUSH = 4, /* allow partial push */
-    SUBLINK_PULLUP_WITH_UNIQUE_CHECK = 8, /* allow pull sublink with unqiue check */
-    SUBLINK_PULLUP_DISABLE_REPLICATED = 16, /* disable pull up sublink with replicated table */
-    SUBLINK_PULLUP_IN_TARGETLIST = 32, /* allow pull sublink in targetlist */
-    PRED_PUSH = 64, /* push predicate into subquery block */
-    PRED_PUSH_NORMAL = 128,
-    PRED_PUSH_FORCE = 256,
-    SUBLINK_PULLUP_DISABLE_EXPR = 512, /* disable pull sublink in expr clause */
-    SUBLINK_PULLUP_ENHANCED = 1024
+    LAZY_AGG = (1 << 0),   /* allow lazy agg */
+    MAGIC_SET = (1 << 1),   /* allow query qual push */
+    PARTIAL_PUSH = (1 << 2), /* allow partial push */
+    SUBLINK_PULLUP_WITH_UNIQUE_CHECK = (1 << 3), /* allow pull sublink with unqiue check */
+    SUBLINK_PULLUP_DISABLE_REPLICATED = (1 << 4), /* disable pull up sublink with replicated table */
+    SUBLINK_PULLUP_IN_TARGETLIST = (1 << 5), /* allow pull sublink in targetlist */
+    PRED_PUSH = (1 << 6), /* push predicate into subquery block */
+    PRED_PUSH_NORMAL = (1 << 7),
+    PRED_PUSH_FORCE = (1 << 8),
+    SUBLINK_PULLUP_DISABLE_EXPR = (1 << 9), /* disable pull sublink in expr clause */
+    SUBLINK_PULLUP_ENHANCED = (1 << 10)
 } rewrite_param;
 
 typedef enum {
     NO_BETA_FEATURE = 0,
-    SEL_SEMI_POISSON = 1, /* use poisson distribution model to calibrate semi join selectivity */
-    SEL_EXPR_INSTR = 2, /* use pattern sel to calibrate instr() related base rel selectivity */
-    PARAM_PATH_GEN = 4, /* Parametrized Path Generation */
-    RAND_COST_OPT = 8,  /* Optimizing sc_random_page_cost */
-    PARAM_PATH_OPT = 16, /* Parametrized Path Optimization. */
-    PAGE_EST_OPT = 32,   /* More accurate (rowstored) index pages estimation */
-    NO_UNIQUE_INDEX_FIRST = 64, /* use unique index first rule in path generation */
-    JOIN_SEL_WITH_CAST_FUNC = 128, /* support cast function while calculating join selectivity */
-    CANONICAL_PATHKEY = 256, /* Use canonicalize pathkeys directly */
-    INDEX_COST_WITH_LEAF_PAGES_ONLY = 512, /* compute index cost with consideration of leaf-pages-only */
-    PARTITION_OPFUSION = 1024, /* Enable partition opfusion */
-    A_STYLE_COERCE = 2048,
-    PLPGSQL_STREAM_FETCHALL = 4096, /* fetch all tuple when has stream sql under plpgsql's for-loop */
-    PREDPUSH_SAME_LEVEL = 8192, /* predpush same level */
-    PARTITION_FDW_ON = 16384, /* support create foreign table on partitioned table */
-    DISABLE_BITMAP_COST_WITH_LOSSY_PAGES = 32768, /* stop computing bitmap path cost with lossy pages */
-    EXTRACT_PUSHDOWN_OR_CLAUSE = 65536  /* Extract restriction OR clauses. */
+    SEL_SEMI_POISSON = (1 << 0), /* use poisson distribution model to calibrate semi join selectivity */
+    SEL_EXPR_INSTR = (1 << 1), /* use pattern sel to calibrate instr() related base rel selectivity */
+    PARAM_PATH_GEN = (1 << 2), /* Parametrized Path Generation */
+    RAND_COST_OPT = (1 << 3),  /* Optimizing sc_random_page_cost */
+    PARAM_PATH_OPT = (1 << 4), /* Parametrized Path Optimization. */
+    PAGE_EST_OPT = (1 << 5),   /* More accurate (rowstored) index pages estimation */
+    NO_UNIQUE_INDEX_FIRST = (1 << 6), /* use unique index first rule in path generation */
+    JOIN_SEL_WITH_CAST_FUNC = (1 << 7), /* support cast function while calculating join selectivity */
+    CANONICAL_PATHKEY = (1 << 8), /* Use canonicalize pathkeys directly */
+    INDEX_COST_WITH_LEAF_PAGES_ONLY = (1 << 9), /* compute index cost with consideration of leaf-pages-only */
+    PARTITION_OPFUSION = (1 << 10), /* Enable partition opfusion */
+    A_STYLE_COERCE = (1 << 11),
+    PLPGSQL_STREAM_FETCHALL = (1 << 12), /* fetch all tuple when has stream sql under plpgsql's for-loop */
+    PREDPUSH_SAME_LEVEL = (1 << 13), /* predpush same level */
+    PARTITION_FDW_ON = (1 << 14), /* support create foreign table on partitioned table */
+    DISABLE_BITMAP_COST_WITH_LOSSY_PAGES = (1 << 15), /* stop computing bitmap path cost with lossy pages */
+    EXTRACT_PUSHDOWN_OR_CLAUSE = (1 << 16)  /* Extract restriction OR clauses. */
 } sql_beta_param;
 
 typedef enum {
