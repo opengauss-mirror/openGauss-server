@@ -1094,6 +1094,10 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
     libpqsw_set_set_command(false);
     libpqsw_set_redirect(false);
 
+    if (libpqsw_end_command(commandTag)) {
+        libpqsw_set_transaction(false);
+    }
+
     if (get_redirect_manager()->ss_standby_state & SS_STANDBY_REQ_SELECT) {
         need_redirect = false;
     }
