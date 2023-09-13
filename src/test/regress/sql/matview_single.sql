@@ -72,6 +72,39 @@ drop synonym s_mv_test_syn;
 drop synonym s_imv_test_syn;
 drop table test_syn cascade;
 
+-- case 5: drop mlog table.
+create table imv1_t(a int);
+insert into imv1_t values(1);
+create incremental materialized view imv1_v as select * from imv1_t;
+
+declare
+    oid int := (select oid from pg_class where relname = 'imv1_t');
+    table_name varchar(20) := 'mlog_' || oid;
+    sql_stmt text := 'Drop table ' || table_name;
+begin
+    execute sql_stmt;
+END;
+/
+
+-- case 6: drop table that looks like a mlog with valid oid.
+drop materialized view imv1_v;
+declare
+    oid int := (select oid from pg_class where relname = 'imv1_t');
+    table_name varchar(20) := 'mlog_' || oid;
+    create_stmt text := 'Create table ' || table_name || '(a int)' ;
+    drop_stmt text := 'Drop table ' || table_name;
+begin
+    execute create_stmt;
+    execute drop_stmt;
+END;
+/
+
+-- case 7: drop table that looks like a mlog without valid oid.
+create table mlog_99999(a int);
+drop table mlog_99999;
+
+drop table imv1_t cascade;
+
 -- test about the privileges of refresh
 create table t (id int);
 insert into t select generate_series(1,10);

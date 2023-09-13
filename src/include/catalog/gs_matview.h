@@ -86,4 +86,6 @@ extern void acquire_mativew_tables_lock(Query *query, bool incremental);
 extern bool CheckMatviewQuals(Query *query);
 extern Oid FindRoleid(Oid relid);
 
+extern Oid get_matview_mlog_baserelid(Oid mlogOid);
+
 #endif   /* GS_MATVIEW_H */
