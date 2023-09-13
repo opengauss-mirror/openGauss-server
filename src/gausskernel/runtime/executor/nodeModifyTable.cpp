@@ -511,6 +511,7 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     attnum = bms_next_member(updatedCols, temp_id);
     updated_colnum_resno = attnum + FirstLowInvalidHeapAttributeNumber;
     temp_id = attnum;
+    tableam_tslot_getallattrs(slot);
     for (int32 i = 0; i < (int32)natts; i++) {
         if (updated_colnum_resno  == (uint32)(i + 1)) {
             if (slot->tts_isnull[i] && oldnulls[i]) {
