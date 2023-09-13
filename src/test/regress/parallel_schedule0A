@@ -181,7 +181,7 @@ test: single_node_test_null_operator
 # ----------
 # Another group of parallel tests
 # ----------
-test: single_node_create_aggregate 
+test: single_node_create_aggregate test_cast_in_operator
 #test: single_node_create_function_3 single_node_create_cast
 #test: single_node_constraints single_node_triggers single_node_inherit single_node_create_table_like single_node_typed_table
 test: single_node_vacuum

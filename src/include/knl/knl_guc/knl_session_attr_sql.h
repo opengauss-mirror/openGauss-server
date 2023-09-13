@@ -64,6 +64,7 @@ typedef struct knl_session_attr_sql {
     bool enable_bitmapscan;
     bool force_bitmapand;
     bool enable_union_all_subquery_orderby;
+    bool transform_to_numeric_operators;
     bool enable_parallel_ddl;
     bool enable_tidscan;
     bool enable_sort;
