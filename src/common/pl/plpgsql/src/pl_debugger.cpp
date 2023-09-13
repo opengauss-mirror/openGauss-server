@@ -190,7 +190,7 @@ void check_debug(PLpgSQL_function* func, PLpgSQL_execstate* estate)
             /* maintain session's debug server is on base turn on function */
             u_sess->plsql_cxt.cur_debug_server = func->debug;
         }
-        func->debug->stop_next_stmt = need_continue_into ? false : true;
+        func->debug->stop_next_stmt = (need_continue_into && !is_stepinto) ? false : true;
     }
 }
 

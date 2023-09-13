@@ -218,12 +218,6 @@ select * from dbe_pldebugger.info_locals();
 
 select funcname, lineno, query from dbe_pldebugger.continue();
 
-select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
-
-select * from dbe_pldebugger.info_locals();
-
-select funcname, lineno, query from dbe_pldebugger.continue();
-
 select funcname, lineno, query from dbe_pldebugger.continue();
 
 -- test with finish without encountered breakpoint
@@ -269,8 +263,6 @@ select funcname, lineno, query from dbe_pldebugger.finish();
 
 select funcname, lineno, query from dbe_pldebugger.finish();
 
-select funcname, lineno, query from dbe_pldebugger.finish();
-
 -- test recursive debug
 
 select pg_sleep(1);
@@ -302,10 +294,6 @@ select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 select funcname, lineno, query from dbe_pldebugger.step();
 
 select funcname, lineno, query from dbe_pldebugger.step();
-
-select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
-
-select funcname, lineno, query from dbe_pldebugger.continue();
 
 select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 
