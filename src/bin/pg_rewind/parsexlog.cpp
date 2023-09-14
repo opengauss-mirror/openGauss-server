@@ -26,6 +26,7 @@
 #include "replication/slot.h"
 #include "access/xlogreader.h"
 #include "catalog/pg_control.h"
+#include "storage/file/fio_device.h"
 #include <stdlib.h>
 
 #define CONFIG_CASCADE_STANDBY "cascade_standby"
@@ -131,6 +132,50 @@ XLogRecPtr readOneRecord(const char* datadir, XLogRecPtr ptr, TimeLineID tli)
     return endptr;
 }
 
+int SSInitXlogDir(char*** xlogDirs)
+{
+    int xlogDirNum = 0;
+    *xlogDirs = (char**)malloc(SS_MAX_INST * sizeof(char*));
+    if (*xlogDirs == NULL) {
+        return -1;
+    }
+
+    for (int i = 0; i < SS_MAX_INST; i++) {
+        (*xlogDirs)[i] = (char*)malloc(MAXPGPATH * sizeof(char));
+        if ((*xlogDirs)[i] == NULL) {
+            for (int j = 0; j < i; j++) {
+                free((*xlogDirs)[j]);
+            }
+            free(*xlogDirs);
+            return -1;
+        }
+    }
+
+    DIR* dir = opendir(ss_instance_config.dss.vgname);
+    struct dirent* entry = NULL;
+    while (dir != NULL && (entry = readdir(dir)) != NULL) {
+        if (strncmp(entry->d_name, "pg_xlog", strlen("pg_xlog")) == 0) {
+            snprintf((*xlogDirs)[xlogDirNum], MAXPGPATH, "%s/%s", ss_instance_config.dss.vgname, entry->d_name);
+            xlogDirNum++;
+            if (xlogDirNum >= SS_MAX_INST) {
+                break;
+            }
+        }
+    }
+    closedir(dir);
+    return xlogDirNum;
+}
+
+void FreeXlogDir(char** xlogDirs)
+{
+    if (ss_instance_config.dss.enable_dss && xlogDirs != NULL) {
+        for (int i = 0; i < SS_MAX_INST; i++) {
+            free(xlogDirs[i]);
+        }
+        free(xlogDirs);
+    }
+}
+
 BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRecPtr startrec, XLogRecPtr* lastchkptrec,
     TimeLineID* lastchkpttli, XLogRecPtr *lastchkptredo, uint32 term)
 {
@@ -142,7 +187,6 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
 #endif
     XLogRecPtr max_lsn;
     char returnmsg[MAX_ERR_MSG_LENTH] = {0};
-    char dssxlogdir[MAXPGPATH] = {0};
     pg_crc32 maxLsnCrc = 0;
     XLogRecord* record = NULL;
     XLogRecPtr searchptr;
@@ -154,17 +198,26 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
     int ret = 0;
     TimestampTz start_time;
     TimestampTz current_time;
+    /* maybe have some xlog dir in enable_dss mode */
+    char** xlogDirs = NULL;
+    int xlogDirNum = 0;
 
     /*
      * local max lsn must be exists, or change to full build.
      */
     if (ss_instance_config.dss.enable_dss) {
-        max_lsn = SSFindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, ss_instance_config.dss.vgname);
+        xlogDirNum = SSInitXlogDir(&xlogDirs);
+        if (xlogDirNum <= 0) {
+            pg_log(PG_FATAL, "init xlog dirs failed\n");
+            return BUILD_FATAL;
+        }
+        max_lsn = SSFindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, xlogDirs, xlogDirNum);
     } else {
         max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
     }
     if (XLogRecPtrIsInvalid(max_lsn)) {
         pg_fatal("find max lsn fail, errmsg:%s\n", returnmsg);
+        FreeXlogDir(xlogDirs);
         return BUILD_FATAL;
     }
     pg_log(PG_PROGRESS, "find max lsn success, %s", returnmsg);
@@ -174,6 +227,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
     xlogreader = XLogReaderAllocate(&SimpleXLogPageRead, &readprivate);
     if (xlogreader == NULL) {
         pg_log(PG_ERROR, "out of memory\n");
+        FreeXlogDir(xlogDirs);
         return BUILD_ERROR;
     }
 
@@ -181,7 +235,6 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
     ret = snprintf_s(pg_conf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", datadir_target);
     securec_check_ss_c(ret, "\0", "\0");
     get_conninfo(pg_conf_file);
-
 
     searchptr = max_lsn;
     start_time = localGetCurrentTimestamp();
@@ -192,12 +245,13 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
                 "try 300s, could not find any common checkpoint, need to do full build\n");
             XLogReaderFree(xlogreader);
             CloseXlogFile();
+            FreeXlogDir(xlogDirs);
             return BUILD_FATAL;
         }
         uint8 info;
 
         if (ss_instance_config.dss.enable_dss) {
-            record = XLogReadRecordFromAllDir(ss_instance_config.dss.vgname, xlogreader, searchptr, &errormsg);
+            record = XLogReadRecordFromAllDir(xlogDirs, xlogDirNum, xlogreader, searchptr, &errormsg);
         } else {
             record = XLogReadRecord(xlogreader, searchptr, &errormsg);
         }
@@ -212,6 +266,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
             }
             XLogReaderFree(xlogreader);
             CloseXlogFile();
+            FreeXlogDir(xlogDirs);
             return BUILD_FATAL;
         }
 
@@ -226,7 +281,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
         if (xlogreader->ReadRecPtr <= startrec && XLogRecGetRmid(xlogreader) == RM_XLOG_ID &&
             (info == XLOG_CHECKPOINT_SHUTDOWN || info == XLOG_CHECKPOINT_ONLINE)) {
             if (checkCommonAncestorByXlog(xlogreader->ReadRecPtr, record->xl_crc, term) == true) {
-                CheckPoint  checkPoint;
+                CheckPoint checkPoint;
                 errorno = memcpy_s(&checkPoint, sizeof(CheckPoint), XLogRecGetData(xlogreader), sizeof(CheckPoint));
                 securec_check_c(errorno, "", "");
                 *lastchkptrec = searchptr;
@@ -242,6 +297,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
             if (increment_return_code != BUILD_SUCCESS) {
                 XLogReaderFree(xlogreader);
                 CloseXlogFile();
+                FreeXlogDir(xlogDirs);
                 return increment_return_code;
             }
         }
@@ -252,6 +308,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
 
     XLogReaderFree(xlogreader);
     CloseXlogFile();
+    FreeXlogDir(xlogDirs);
     PG_CHECKBUILD_AND_RETURN();
     /* no common checkpoint between target and source, need full build */
     if (XLogRecPtrIsInvalid(searchptr)) {

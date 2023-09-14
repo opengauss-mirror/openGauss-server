@@ -26,6 +26,7 @@
 #include "storage/file/fio_device_com.h"
 
 #define MAXPGPATH 1024
+#define SS_MAX_INST 64
 
 #define T_SS_XLOGDIR \
     (g_enable_dss ? g_datadir.xlogDir : "pg_xlog")
