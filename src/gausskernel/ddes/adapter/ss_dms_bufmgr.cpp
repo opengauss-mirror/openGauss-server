@@ -944,5 +944,59 @@ long SSGetBufSleepTime(int retry_times)
     if (retry_times < ss_buf_retry_threshold) {
         return 5000L * retry_times;
     }
-    return 1000L * 1000 * 20;
+    return SS_BUF_MAX_WAIT_TIME;
+}
+
+bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
+{
+    bool get_lock = false;
+    int wait_tickets = 2000;
+    int cur_tickets = 0;
+
+    do {
+        get_lock = LWLockConditionalAcquire(lock, mode);
+        if (get_lock) {
+            break;
+        }
+
+        pg_usleep(1000L);
+        cur_tickets++;
+        if (cur_tickets >= wait_tickets) {
+            break;
+        }
+    } while (true);
+
+    if (!get_lock) {
+        ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:2s",
+            lock, mode))));
+    }
+    return get_lock;
+}
+
+bool SSWaitIOTimeout(BufferDesc *buf)
+{
+    bool ret = false;
+    for (;;) {
+        uint32 buf_state;
+        buf_state = LockBufHdr(buf);
+        UnlockBufHdr(buf, buf_state);
+
+        if (!(buf_state & BM_IO_IN_PROGRESS)) {
+            ret = true;
+            break;
+        }
+        ret = SSLWLockAcquireTimeout(buf->io_in_progress_lock, LW_SHARED);
+        if (ret) {
+            LWLockRelease(buf->io_in_progress_lock);
+        }
+    }
+
+    if (!ret) {
+        BufferTag *tag = &buf->tag;
+        ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] SSWaitIOTimeout, "
+            "buf_id:%d, io_in_progress_lock:%p",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum, buf->buf_id, buf->io_in_progress_lock))));
+    }
+    return ret;
 }
