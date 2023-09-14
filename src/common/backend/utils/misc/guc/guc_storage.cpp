@@ -943,7 +943,6 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 
-#ifdef USE_ASSERT_CHECKING
         {{"enable_segment",
             PGC_SIGHUP,
             NODE_ALL,
@@ -955,7 +954,7 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-#endif
+
         {{"enable_gtm_free",
             PGC_POSTMASTER,
             NODE_DISTRIBUTE,
