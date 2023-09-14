@@ -165,8 +165,11 @@ typedef FormData_pg_operator *Form_pg_operator;
 #define INT1EQOID 5513
 #define OID_NAME_REGEXEQ_OP        639
 #define OID_TEXT_REGEXEQ_OP        641
+#define TEXTNEOID 531
 #define TEXTLTOID 664
+#define TEXTLEOID 665
 #define TEXTGTOID 666
+#define TEXTGEOID 667
 #define FLOAT8EQOID    670
 #define FLOAT8NEOID    671
 #define FLOAT8LTOID    672

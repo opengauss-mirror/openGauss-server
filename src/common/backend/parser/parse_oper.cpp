@@ -403,6 +403,16 @@ Operator oper(ParseState* pstate, List* opname, Oid ltypeId, Oid rtypeId, bool n
     }
 
     /*
+     * In A_FORMAT compatibility and CHAR_COERCE_COMPAT, we choose TEXT-related
+     * operators for varchar and bpchar.
+     */
+    if (DB_IS_CMPT(A_FORMAT) && CHAR_COERCE_COMPAT && (((ltypeId == VARCHAROID) && (rtypeId == BPCHAROID)) ||
+        ((rtypeId == VARCHAROID) && (ltypeId == BPCHAROID)))) {
+        ltypeId = TEXTOID;
+        rtypeId = TEXTOID;
+    }
+
+    /*
      * Try to find the mapping in the lookaside cache.
      */
     if (pstate != NULL) {
