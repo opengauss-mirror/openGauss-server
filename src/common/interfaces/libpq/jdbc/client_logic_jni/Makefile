@@ -28,7 +28,8 @@ driver_error.cpp \
 jni_string_convertor.cpp \
 jni_util.cpp \
 jni_logger.cpp \
-org_postgresql_jdbc_ClientLogicImpl.cpp
+org_postgresql_jdbc_ClientLogicImpl.cpp\
+org_opengauss_jdbc_ClientLogicImpl.cpp
 
 OBJS = $(CPP_SRCS:.cpp=.o)
 
