@@ -5976,7 +5976,15 @@ retry:
             }
 
             dms_retry_times++;
-            pg_usleep(SSGetBufSleepTime(dms_retry_times));
+            long sleep_time = SSGetBufSleepTime(dms_retry_times);
+            if (sleep_time == SS_BUF_MAX_WAIT_TIME && !SS_IN_REFORM) {
+                volatile BufferTag *tag = &buf->tag;
+                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS buf][%u/%u/%u/%d %d-%u] request buf timeout, "
+                    "buf_id:%d",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, buf->buf_id))));
+            }
+            pg_usleep(sleep_time);
             goto retry;
         }
     }
@@ -6085,7 +6093,15 @@ retry:
             }
 
             dms_retry_times++;
-            pg_usleep(SSGetBufSleepTime(dms_retry_times));
+            long sleep_time = SSGetBufSleepTime(dms_retry_times);
+            if (sleep_time == SS_BUF_MAX_WAIT_TIME && !SS_IN_REFORM) {
+                volatile BufferTag *tag = &buf->tag;
+                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS buf][%u/%u/%u/%d %d-%u] request buf timeout, "
+                    "buf_id:%d",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, buf->buf_id))));
+            }
+            pg_usleep(sleep_time);
             goto retry;
         }
     }
