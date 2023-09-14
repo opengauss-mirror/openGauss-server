@@ -110,6 +110,27 @@ function clear_script_log
     fi
 }
 
+function check_local_dn_disk()
+{
+    test_file=${GSDB_HOME}/disk_readwrite_test
+    timeout 5 touch ${test_file}
+    if [[ $? != 0 ]]
+    then
+        log "could not wrtie on local disk, ERRNO:$?."
+        exit 3
+    fi
+
+    timeout 5 cat ${test_file}
+    if [[ $? != 0 ]]
+    then
+        log "could not read on local disk, ERRNO:$?."
+        rm -f ${test_file}
+        exit 3
+    fi
+
+    rm -f ${test_file}
+}
+
 touch_logfile()
 {
     log_file=$1
@@ -208,6 +229,7 @@ function Check()
         log "check ${GSDB_BIN} in ${GSDB_HOME} fail."
         exit 1
     fi
+    check_local_dn_disk   
 }
 
 # 1st step: kill database
