@@ -662,52 +662,10 @@ select * from tmp_holder;
 (6 rows)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
-  funcname  | lineno |     query     
-------------+--------+---------------
- test_debug |     15 |     cnt := 0;
-(1 row)
-
-select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |           value            | package_name | isconst 
------------+-----------+----------------------------+--------------+---------
- x         | int4      | 1                          |              | f
- sql_stmt  | varchar   | <UNKNOWN>                  |              | f
- test.a    | int4      | 0                          |              | f
- test.b    | varchar   | <UNKNOWN>                  |              | f
- test.c    | timestamp | Sat Jan 01 00:00:00 2000   |              | f
- r         | Row       | [ (null), (null), (null),] |              | f
- rec       | Rec       | <UNKNOWN>                  |              | f
- b_tmp     | text      | <UNKNOWN>                  |              | f
- cnt       | int4      | 0                          |              | f
- a_tmp     | int4      | 0                          |              | f
- cur       | refcursor | {name:                    +|              | f
-           |           | is_open:        f         +|              | 
-           |           | found:  f                 +|              | 
-           |           | not_found:      f         +|              | 
-           |           | row_count:      0}         |              | 
- n_tmp     | numeric   | <UNKNOWN>                  |              | f
- t_tmp     | tsquery   | <UNKNOWN>                  |              | f
- criterion | int4      | 0                          |              | f
- cur_arg   | refcursor | {name:                    +|              | f
-           |           | is_open:        f         +|              | 
-           |           | found:  f                 +|              | 
-           |           | not_found:      f         +|              | 
-           |           | row_count:      0}         |              | 
- index_1   | int4      | 0                          |              | f
-(16 rows)
-
-select funcname, lineno, query from dbe_pldebugger.continue();
   funcname  | lineno |                     query                      
 ------------+--------+------------------------------------------------
  test_debug |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
 (1 row)
-
-select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
- frameno |  funcname   | lineno |                     query                      
----------+-------------+--------+------------------------------------------------
-       0 | test_debug  |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
-       1 | test_debug4 |      7 |             call test_debug(a);
-(2 rows)
 
 select * from dbe_pldebugger.info_locals();
   varname  |  vartype  |                         value                          | package_name | isconst 
@@ -860,12 +818,6 @@ begin
 end;
 $$;
 select funcname, lineno, query from dbe_pldebugger.finish();
-  funcname  | lineno |     query     
-------------+--------+---------------
- test_debug |     15 |     cnt := 0;
-(1 row)
-
-select funcname, lineno, query from dbe_pldebugger.finish();
   funcname  | lineno |                     query                      
 ------------+--------+------------------------------------------------
  test_debug |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
@@ -957,20 +909,6 @@ select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 (2 rows)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
-       funcname       | lineno |              query              
-----------------------+--------+---------------------------------
- test_debug_recursive |      3 |     return query select ct, pr;
-(1 row)
-
-select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
- frameno |       funcname       | lineno |                                     query                                     
----------+----------------------+--------+-------------------------------------------------------------------------------
-       0 | test_debug_recursive |      3 |     return query select ct, pr;
-       1 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
-       2 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
-(3 rows)
-
-select funcname, lineno, query from dbe_pldebugger.continue();
        funcname       | lineno |                                     query                                     
 ----------------------+--------+-------------------------------------------------------------------------------
  test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
@@ -985,15 +923,15 @@ select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 (3 rows)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
-       funcname       | lineno |              query              
-----------------------+--------+---------------------------------
- test_debug_recursive |      3 |     return query select ct, pr;
+       funcname       | lineno |                                     query                                     
+----------------------+--------+-------------------------------------------------------------------------------
+ test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
 (1 row)
 
 select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |       funcname       | lineno |                                     query                                     
 ---------+----------------------+--------+-------------------------------------------------------------------------------
-       0 | test_debug_recursive |      3 |     return query select ct, pr;
+       0 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
        1 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
        2 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
        3 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
