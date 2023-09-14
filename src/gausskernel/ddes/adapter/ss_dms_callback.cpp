@@ -491,6 +491,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     LWLock *partition_lock = NULL;
     BufferDesc *buf_desc = NULL;
     RelFileNode relfilenode = tag->rnode;
+    bool get_lock = false;
 
 #ifdef USE_ASSERT_CHECKING
     if (IsSegmentPhysicalRelNode(relfilenode)) {
@@ -511,7 +512,15 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     PG_TRY();
     {
         do {
-            (void)LWLockAcquire(partition_lock, LW_SHARED);
+            get_lock = SSLWLockAcquireTimeout(partition_lock, LW_SHARED);
+            if (!get_lock) {
+                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+                    "lock:%p",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, partition_lock))));
+                ret = GS_TIMEOUT;
+                break;
+            }
             buf_id = BufTableLookup(tag, hash);
             if (buf_id < 0) {
                 LWLockRelease(partition_lock);
@@ -529,7 +538,12 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             }
             LWLockRelease(partition_lock);
 
-            WaitIO(buf_desc);
+            bool wait_success = SSWaitIOTimeout(buf_desc);
+            if (!wait_success) {
+                DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                ret = GS_TIMEOUT;
+                break;
+            }
 
             if (!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) {
                 ereport(WARNING, (errmodule(MOD_DMS),
@@ -554,7 +568,16 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             }
 
             LWLockMode content_mode = (mode == DMS_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
-            (void)LWLockAcquire(buf_desc->content_lock, content_mode);
+            get_lock = SSLWLockAcquireTimeout(buf_desc->content_lock, content_mode);
+            if (!get_lock) {
+                DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                ret = GS_TIMEOUT;
+                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+                    "buf_id:%d, lwlock:%p",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, buf_id, buf_desc->content_lock))));
+                break;
+            }
             *buf_ctrl = GetDmsBufCtrl(buf_id);
             Assert(buf_id >= 0);
             if ((*buf_ctrl)->been_loaded == false) {
@@ -640,7 +663,15 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
 
     hash = BufTableHashCode(tag);
     partition_lock = BufMappingPartitionLock(hash);
-    (void)LWLockAcquire(partition_lock, LW_SHARED);
+    bool get_lock = SSLWLockAcquireTimeout(partition_lock, LW_SHARED);
+    if (!get_lock) {
+        ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+            "lwlock:%p",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum, partition_lock))));
+        return GS_TIMEOUT;
+    }
+
     buf_id = BufTableLookup(tag, hash);
     if (buf_id < 0) {
         /* not found in shared buffer */
@@ -662,7 +693,12 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
         }
         LWLockRelease(partition_lock);
 
-        WaitIO(buf_desc);
+        bool wait_success = SSWaitIOTimeout(buf_desc);
+        if (!wait_success) {
+            ret = GS_TIMEOUT;
+            break;
+        }
+
         if ((!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) ||
             (pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR)) {
             ereport(LOG, (errmodule(MOD_DMS),
@@ -675,10 +711,18 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
 
         bool can_invld_owner = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED | BM_PERMANENT)) > 0 ? false : true;
         if (!invld_owner || (invld_owner && can_invld_owner)) {
-            (void)LWLockAcquire(buf_desc->content_lock, LW_EXCLUSIVE);
-            buf_ctrl = GetDmsBufCtrl(buf_id);
-            buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
-            LWLockRelease(buf_desc->content_lock);
+            get_lock = SSLWLockAcquireTimeout(buf_desc->content_lock, LW_EXCLUSIVE);
+            if (!get_lock) {
+                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+                    "buf_id:%d, lwlock:%p",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, buf_id, buf_desc->content_lock))));
+                ret = GS_TIMEOUT;
+            } else {
+                buf_ctrl = GetDmsBufCtrl(buf_id);
+                buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
+                LWLockRelease(buf_desc->content_lock);
+            }
         } else { /* invalidate owner which buffer is dirty/permanent */
             ereport(DEBUG1, (errmodule(MOD_DMS),
                 errmsg("[%d/%d/%d/%d %d-%d] invalidate owner rejected, buffer is dirty/permanent, state = 0x%x",
@@ -1217,13 +1261,14 @@ static int32 CBDrcBufValidate(void *db_handle)
 }
 
 // used for find bufferdesc in dms
-static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_desc)
+static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_desc)
 {
     int buf_id;
     uint32 hash;
     LWLock *partition_lock = NULL;
     BufferTag *tag = (BufferTag *)pageid;
     BufferDesc *buf_desc;
+    bool ret = true;
 
     RelFileNode relfilenode = tag->rnode;
 
@@ -1244,7 +1289,16 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
-        (void)LWLockAcquire(partition_lock, LW_SHARED);
+        bool get_lock = SSLWLockAcquireTimeout(partition_lock, LW_SHARED);
+        if (!get_lock) {
+            ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+                    "lwlock:%p",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, partition_lock))));
+            ret = false;
+            break;
+        }
+
         buf_id = BufTableLookup(tag, hash);
         if (buf_id >= 0) {
             buf_desc = GetBufferDescriptor(buf_id);
@@ -1256,7 +1310,13 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
             }
             LWLockRelease(partition_lock);
 
-            WaitIO(buf_desc);
+            bool wait_success = SSWaitIOTimeout(buf_desc);
+            if (!wait_success) {
+                SSUnPinBuffer(buf_desc);
+                ret = false;
+                break;
+            }
+
             Assert(!(pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR));
             *is_valid = (pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0;
             *ret_buf_desc = buf_desc;
@@ -1271,6 +1331,7 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
         ReleaseResource();
     }
     PG_END_TRY();
+    return ret;
 }
 
 void SSUnPinBuffer(BufferDesc* buf_desc)
@@ -1289,7 +1350,13 @@ static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mod
     bool valid;
     dms_buf_ctrl_t *buf_ctrl = NULL;
 
-    SSGetBufferDesc(pageid, &valid, &buf_desc);
+    bool ret = SSGetBufferDesc(pageid, &valid, &buf_desc);
+    if (!ret) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBConfirmOwner, require LWLock timeout")));
+        return GS_TIMEOUT;
+    }
+
     if (buf_desc == NULL) {
         *lock_mode = (uint8)DMS_LOCK_NULL;
         return GS_SUCCESS;
@@ -1322,12 +1389,17 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
     BufferDesc *buf_desc = NULL;
     bool valid;
     dms_buf_ctrl_t *buf_ctrl = NULL;
-    bool timeout = false;
 
     *lsn = 0;
     *edp_map = 0;
     
-    SSGetBufferDesc(pageid, &valid, &buf_desc);
+    bool ret = SSGetBufferDesc(pageid, &valid, &buf_desc);
+    if (!ret) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBConfirmConverting, require LWLock timeout")));
+        return GS_TIMEOUT;
+    }
+
     if (buf_desc == NULL) {
         *lock_mode = (uint8)DMS_LOCK_NULL;
         return GS_SUCCESS;
@@ -1339,38 +1411,23 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
         return GS_SUCCESS;
     }
 
-    struct timeval begin_tv;
-    struct timeval now_tv;
-    (void)gettimeofday(&begin_tv, NULL);
-    long begin = GET_US(begin_tv);
-    long now;
-
-    while (true) {
-        bool is_locked = LWLockConditionalAcquire(buf_desc->io_in_progress_lock, LW_EXCLUSIVE);
-        if (is_locked) {
-            buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-            *lock_mode = buf_ctrl->lock_mode;
-            LWLockRelease(buf_desc->io_in_progress_lock);
-            break;
-        }
-
-        (void)gettimeofday(&now_tv, NULL);
-        now = GET_US(now_tv);
-        if (now - begin > REFORM_CONFIRM_TIMEOUT) {
-            timeout = true;
-            break;
-        }
-        pg_usleep(REFORM_CONFIRM_INTERVAL); /* sleep 5ms */
-    }
-
-    if (!timeout) {
+    bool get_lock = SSLWLockAcquireTimeout(buf_desc->io_in_progress_lock, LW_EXCLUSIVE);
+    if (get_lock) {
+        buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+        *lock_mode = buf_ctrl->lock_mode;
+        LWLockRelease(buf_desc->io_in_progress_lock);
         SSUnPinBuffer(buf_desc);
         return GS_SUCCESS;
     }
 
     if (smon_chk) {
         SSUnPinBuffer(buf_desc);
-        return GS_TIMEDOUT;
+        BufferTag *tag = &buf_desc->tag;
+        ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+            "buf_id:%d, lwlock:%p",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum, buf_desc->buf_id, buf_desc->io_in_progress_lock))));
+        return GS_TIMEOUT;
     }
 
     // without lock
@@ -1777,7 +1834,13 @@ static int CBMarkNeedFlush(void *db_handle, char *pageid)
     dms_buf_ctrl_t *buf_ctrl = NULL;
     BufferTag *tag = (BufferTag *)pageid;
 
-    SSGetBufferDesc(pageid, &valid, &buf_desc);
+    bool ret = SSGetBufferDesc(pageid, &valid, &buf_desc);
+    if (!ret) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBMarkNeedFlush, require LWLock timeout")));
+        return GS_TIMEOUT;
+    }
+
     if (buf_desc == NULL) {
         ereport(WARNING, (errmodule(MOD_DMS),
             errmsg("[SS] CBMarkNeedFlush, buf_desc not found")));

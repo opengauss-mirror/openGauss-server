@@ -29,6 +29,7 @@
 #include "access/xlogproc.h"
 
 #define GetDmsBufCtrl(id) (&t_thrd.storage_cxt.dmsBufCtl[(id)])
+#define SS_BUF_MAX_WAIT_TIME (1000L * 1000 * 20) // 20s
 
 #define DmsInitLatch(drid, _type, _oid, _idx, _parent_part, _part, _uid) \
     do {                                                      \
@@ -84,4 +85,6 @@ SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, Fork
     BlockNumber blockNo, char *blockbuf);
 void SSUnPinBuffer(BufferDesc* buf_desc);
 bool SSOndemandRequestPrimaryRedo(BufferTag tag);
+bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode);
+bool SSWaitIOTimeout(BufferDesc *buf);
 #endif
