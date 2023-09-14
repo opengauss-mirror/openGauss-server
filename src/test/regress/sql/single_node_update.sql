@@ -231,6 +231,45 @@ alter table t6 modify b timestamp on update localtimestamp;
 alter table t6 modify b timestamp;
 \d t6
 
+CREATE TABLE goodscheck (
+goodsid bigint,
+goodscode varchar(20) DEFAULT NULL::varchar,
+status integer,
+isdelete integer,
+introduce varchar(150) DEFAULT NULL::varchar,
+createtime timestamp(0) without time zone DEFAULT NULL::timestamp without time zone,
+createby varchar(20) DEFAULT NULL::varchar,
+updatetime timestamp(0) without time zone DEFAULT NULL::timestamp without time zone ON UPDATE CURRENT_TIMESTAMP,
+updateby varchar(20) DEFAULT NULL::varchar
+);
+ALTER TABLE goodscheck ADD CONSTRAINT goodscheck_pkey PRIMARY KEY (goodsid);
+CREATE FUNCTION update_timestamp()
+RETURNS trigger
+LANGUAGE plpgsql
+AUTHID DEFINER NOT FENCED NOT SHIPPABLE
+AS $function$
+BEGIN
+NEW.updateTime = now();
+RETURN NEW;
+END;
+$function$;
+CREATE TRIGGER goodscheck_updatetime_trriger
+BEFORE UPDATE OF updatetime ON goodscheck
+FOR EACH ROW
+EXECUTE PROCEDURE update_timestamp();
+INSERT INTO goodscheck(goodsid,goodscode,status,isdelete,introduce,createtime,createby,updatetime,updateby)
+VALUES (322,'1673994937684815874',3,0,'fff','2023-07-14 10:24:51',null,'2023-08-23 10:11:30','wangjun');
+update goodscheck
+set goodsId = 888,
+status = 2,
+introduce = 'test',
+updateTime = current_timestamp,
+updateBy = 'zljtest'
+WHERE 1=1
+AND goodsId=322;
+drop table goodscheck;
+drop function update_timestamp();
+
 -- \! @abs_bindir@/gs_dump mysql -p @portstring@ -f @abs_bindir@/dump_type.sql -F p >/dev/null 2>&1;
 
 -- create table test_feature(a int, b timestamp on update current_timestamp);
