@@ -106,6 +106,12 @@ set collation_connection = 'POSIX';
 show character_set_connection;
 show collation_connection;
 
+set collation_connection = "binary";
+set collation_connection = binary;
+show character_set_connection;
+show collation_connection;
+set names utf8;
+
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options=''" >/dev/null 2>&1
 select pg_sleep(1);
 \c
