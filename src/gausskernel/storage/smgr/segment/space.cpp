@@ -413,19 +413,22 @@ static void SSClose_seg_files(SegSpace *spc)
 
 void SSDrop_seg_space(Oid spcNode, Oid dbNode)
 {
-    SegSpace *spc = spc_init_space_node(spcNode, dbNode);
-    AutoMutexLock spc_lock(&spc->lock);
+    SegSpace *entry = NULL;
+    AutoMutexLock spc_lock(&segspace_lock);
+    SegSpcTag tag = {.spcNode = spcNode, .dbNode = dbNode};
+    SegmentCheck(t_thrd.storage_cxt.SegSpcCache != NULL);
     spc_lock.lock();
-
-    SpaceDataFileStatus dataStatus = spc_status(spc);
-    if (dataStatus == SpaceDataFileStatus::EMPTY) {
-        spc_lock.unLock();
-        return;
-    }
-
-    SegDropSpaceMetaBuffers(spcNode, dbNode);
-    SSClose_seg_files(spc);
+    entry = (SegSpace *)hash_search(t_thrd.storage_cxt.SegSpcCache, (void *)&tag, HASH_FIND, NULL);
     spc_lock.unLock();
+
+    if (entry != NULL) {
+        if(entry->status == OPENED) {
+            SSClose_seg_files(entry);
+            SegDropSpaceMetaBuffers(spcNode, dbNode);
+        }
+        spc_lock.lock();
+        (void)hash_search(t_thrd.storage_cxt.SegSpcCache, (void *)&tag, HASH_REMOVE, NULL);
+    }
     return;
 }
 
