@@ -93,8 +93,7 @@ typedef void (*dss_log_output)(dss_log_id_t log_type, dss_log_level_t log_level,
  *  2.ERR_DSS_SUBMODEL_ACTION_DETAIL, _DETAIL is optional which indicates the error cause.
  */
 #define ERR_DSS_FLOOR 2000
-
-// vg error [2000, 2060)
+// vg error [2000, 2050)
 #define ERR_DSS_VG_CREATE 2000
 #define ERR_DSS_VG_LOCK 2010
 #define ERR_DSS_VG_REMOVE 2020
@@ -102,7 +101,8 @@ typedef void (*dss_log_output)(dss_log_id_t log_type, dss_log_level_t log_level,
 #define ERR_DSS_VG_CHECK_NOT_INIT 2031
 #define ERR_DSS_VG_NOT_EXIST 2040
 
-// volumn error [2060, 2130)
+// volumn error [2050, 2130)
+#define ERR_DSS_VOLUME_SYSTEM_IO 2050
 #define ERR_DSS_VOLUME_OPEN 2060
 #define ERR_DSS_VOLUME_READ 2070
 #define ERR_DSS_VOLUME_WRITE 2080
@@ -113,24 +113,31 @@ typedef void (*dss_log_output)(dss_log_id_t log_type, dss_log_level_t log_level,
 #define ERR_DSS_VOLUME_REMOVE_NOEXIST 2111
 #define ERR_DSS_VOLUME_REMOVE_NONEMPTY 2112
 #define ERR_DSS_VOLUME_REMOVE_SUPER_BLOCK 2113
- 
+
 // file error [2130, 2230)
 #define ERR_DSS_FILE_SEEK 2130
 #define ERR_DSS_FILE_REMOVE 2140
 #define ERR_DSS_FILE_REMOVE_OPENING 2141
 #define ERR_DSS_FILE_RENAME 2150
+#define ERR_DSS_FILE_RENAME_DIFF_VG 2151
+#define ERR_DSS_FILE_RENAME_EXIST 2152
+#define ERR_DSS_FILE_RENAME_OPENING_REMOTE 2153
+#define ERR_DSS_FILE_CLOSE 2160
+#define ERR_DSS_FILE_CREATE 2170
+#define ERR_DSS_FILE_RDWR 2180
+#define ERR_DSS_FILE_RDWR_INSUFF_PER 2181
 #define ERR_DSS_FILE_NOT_EXIST 2190
 #define ERR_DSS_FILE_OPENING_REMOTE 2191
 #define ERR_DSS_FILE_TYPE_MISMATCH 2192
 #define ERR_DSS_FILE_PATH_ILL 2193
+#define ERR_DSS_FILE_INVALID_SIZE 2194
+#define ERR_DSS_FILE_INVALID_WRITTEN_SIZE 2195
 
 // dir error [2230, 2280)
 #define ERR_DSS_DIR_REMOVE 2230
 #define ERR_DSS_DIR_REMOVE_NOT_EMPTY 2231
 #define ERR_DSS_DIR_CREATE 2240
 #define ERR_DSS_DIR_CREATE_DUPLICATED 2241
-#define ERR_DSS_DIR_NOT_EXIST 2270
-
 // link error [2280, 2300)
 #define ERR_DSS_LINK_READ 2280
 #define ERR_DSS_LINK_READ_NOT_LINK 2281
@@ -153,7 +160,9 @@ typedef void (*dss_log_output)(dss_log_id_t log_type, dss_log_level_t log_level,
 #define ERR_DSS_SKLIST_EXIST 2363
 #define ERR_DSS_SHM_CREATE 2370
 #define ERR_DSS_SHM_CHECK 2371
+#define ERR_DSS_SHM_LOCK 2372
 #define ERR_DSS_GA_INIT 2380
+#define ERR_DSS_GA_GET_ADDR 2381
 #define ERR_DSS_SESSION_INVALID_ID 2390
 #define ERR_DSS_SESSION_CREATE 2391
 
@@ -171,8 +180,13 @@ typedef void (*dss_log_output)(dss_log_id_t log_type, dss_log_level_t log_level,
 #define ERR_DSS_TCP_TIMEOUT_REMAIN 2410
 #define ERR_DSS_UDS_INVALID_URL 2411
 #define ERR_DSS_RECV_MSG_FAILED 2412
-#define ERR_DSS_LINK_NOT_EXIST 2413
-
+#define ERR_DSS_INIT_LOGGER_FAILED 2414
+#define ERR_DSS_OUT_OF_MEM 2415
+#define ERR_DSS_INVALID_ID 2416
+#define ERR_DSS_PROCESS_REMOTE 2417
+#define ERR_DSS_CONNECT_FAILED 2418
+#define ERR_DSS_VERSION_NOT_MATCH 2419
+#define ERR_DSS_INVALID_BLOCK_TYPE 2420
 #define ERR_DSS_CEIL 2500
 
 #endif  // __DSS_API_DEF_H

@@ -50,5 +50,5 @@ bool is_file_exist(int err)
 
 bool is_file_delete(int err)
 {
-    return (err == ENOENT || err == ERR_DSS_DIR_NOT_EXIST || err == ERR_DSS_FILE_NOT_EXIST);
+    return (err == ENOENT || err == ERR_DSS_FILE_NOT_EXIST);
 }
